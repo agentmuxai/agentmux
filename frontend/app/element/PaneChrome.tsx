@@ -18,187 +18,58 @@
  * §4.1/§4.5.
  */
 
-import { Show, createEffect, createMemo, createSignal, getOwner, on, onCleanup, onMount, runWithOwner, untrack, type JSX } from "solid-js";
+import { Show, createEffect, createMemo, type JSX } from "solid-js";
 import { UnseenTurnsDot } from "@/app/block/UnseenTurnsDot";
-import {
-    computeBlockColorBg,
-    computeBlockIdentityColor,
-    computeBlockTabPillActiveBg,
-    computeBlockTabPillBg,
-    computeBlockTabPillNeutralBg,
-    computeFocusRingBorderColor,
-    computeMixedPaneHeaderBg,
-    showPaneTabMenu,
-} from "@/app/block/blockframe";
-import { getPaneTab, paneTabCapability, resolvePaneTabView } from "@/app/store/pane-tab-registry";
+import { computeFocusRingBorderColor } from "@/app/block/blockframe";
 import { isLightThemeActive } from "@/app/block/pane-identity";
-import { atoms, MOS, pushNotification } from "@/app/store/global";
-import { shouldReduceMotion } from "@/app/motion/motion";
+import { atoms, MOS } from "@/app/store/global";
 import { remoteDisplay } from "@/app/store/remote-display";
-import { readSwarmSummary } from "@/app/store/activitySummary";
-import { readSeatMeta, seatTooltipLine } from "@/app/agent-model/seat-format";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { isBlockClosing } from "@/layout/lib/layoutClosing";
-import {
-    closeBlockInStack,
-    mergeableDocumentPanes,
-    mergeDocumentPanesInStack,
-    moveBlockInStack,
-    moveBlocksInStack,
-    setActiveBlockInStack,
-    type NodeModel,
-} from "@/layout/index";
-import { placePill, type PillZone } from "@/layout/lib/paneBodyDrop";
-import { paneStackIds } from "@/layout/lib/layoutNodeModels";
-import { allBlockIds } from "@/layout/lib/stackOrder";
-import { clampCrossTabDirection } from "@/layout/lib/crossTabDrag";
-import { foreignTabMoves } from "./pane-foreign-tab";
-import { useWindowTabDisplayed } from "@/app/workspace/window-tab-visibility";
-import { clearPaneTabSelection, paneTabSelection, paneTabSelectionApi, prunePaneTabSelection } from "./pane-tab-selection";
+import type { NodeModel } from "@/layout/index";
+import { paneTabSelectionApi } from "./pane-tab-selection";
 import "./PaneChrome.scss";
-import { openPaneTabWidgetPicker } from "./pane-tab-picker";
 import { PaneHeaderTabStrip } from "./PaneHeaderTabStrip";
-import { installPaneInteractionReveal, revealPaneStrips } from "./pane-strip-registry";
-import { createPaneTabMemory, describePaneTab, PaneTabIconView, prunePaneTabMemory, type PaneTabInfo } from "./pane-tab-model";
-import { persistTabInfo } from "./pane-tab-persist";
+import { PaneTabIconView } from "./pane-tab-model";
 import { PaneTabRenameInput } from "./PaneTabRenameInput";
 import { usePaneTabProgress } from "@/app/store/pane-tab-progress";
-import type { PaneTabColors } from "./PaneTabStrip";
 import { DropIndicator } from "@/app/drag/DropIndicator";
-import {
-    emitPaneLocatePlay,
-    LOCATE_READY_TIMEOUT_HIDDEN_MS,
-    LOCATE_READY_TIMEOUT_MS,
-    locateSlotWaitMs,
-    onPaneLocate,
-    recordLocateStart,
-    samplePane,
-    showLocateFlash,
-    whenPaneReady,
-    type ReadyGate,
-} from "@/app/util/pane-locate";
 import { paneDropState } from "@/app/drag/file-drop";
-
-function sameIds(a: string[], b: string[]): boolean {
-    return a.length === b.length && a.every((id, i) => id === b[i]);
-}
-
-/**
- * The header menu for a pill in a pane of several tabs, built for that tab. A pill that is not in
- * front has just been brought there, and the header's handler still belongs to the tab that was, so
- * the menu is shown once the new tab's view model is in place. The pane's tabs as a whole add
- * "Merge document tabs", for two document panes in one pane that no move merged (a saved layout,
- * an agent's move).
- */
-function openPaneTabMenu(e: MouseEvent, layoutModel: NodeModel["layoutModel"], nodeModel: NodeModel, blockId: string, inFront: boolean): void {
-    const extra: ContextMenuItem[] = [];
-    if (mergeableDocumentPanes(layoutModel, nodeModel.nodeId).length >= 2) {
-        extra.push({ label: "Merge document tabs", icon: "object-group", click: () => void mergeDocumentPanesInStack(layoutModel, nodeModel.nodeId) });
-    }
-    const show = () => {
-        const vm = nodeModel.activeViewModel?.() ?? null;
-        showPaneTabMenu(e, nodeModel, blockId, viewModelIsFor(vm, blockId) ? vm : null, extra);
-    };
-    if (inFront) show();
-    else setTimeout(show, 0);
-}
-
-/** Whether `vm` is `blockId`'s own ViewModel. A ViewModel that doesn't
- *  expose its blockId is trusted (it can't be checked). */
-function viewModelIsFor(vm: ViewModel | null, blockId: string): boolean {
-    const owner = (vm as { blockId?: unknown } | null)?.blockId;
-    return typeof owner !== "string" || owner === blockId;
-}
+import {
+    createHeaderTailBg,
+    createPaneChromeModel,
+    createPaneTabDrops,
+    createPaneTabHandlers,
+    createStackIds,
+    createTabColors,
+    createTabIds,
+    createTabInfos,
+    createTabRename,
+    tabSeatOf,
+    tabSummaryOf,
+    usePaneLocateFlash,
+    usePaneStripReveal,
+    usePaneTabSelectionPruning,
+    useProgressBarSlot,
+} from "./pane-chrome-hooks";
 
 export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element): JSX.Element {
-    // `nodeModel.layoutModel`, NOT `getLayoutModelForStaticTab()` — the tab
-    // this pane's own leaf lives in is not necessarily "whichever tab is
-    // globally active right now" at the moment chrome first constructs. See
-    // that field's own doc comment (layout/lib/types.ts) and
-    // SPEC_PANE_CHROME_LAYOUT_MODEL_TAB_BINDING_2026_09_18.md.
+    // `nodeModel.layoutModel`, NOT `getLayoutModelForStaticTab()`: the tab this pane's own leaf lives
+    // in is not necessarily whichever tab is globally active when the chrome first constructs
+    // (SPEC_PANE_CHROME_LAYOUT_MODEL_TAB_BINDING_2026_09_18.md).
     const layoutModel = nodeModel.layoutModel;
     const activeBlockId = () => nodeModel.activeBlockId?.() ?? nodeModel.blockId;
     const activeBlockData = createMemo(() => MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", activeBlockId()))());
-
     const isFocused = () => nodeModel.isFocused();
+    const stackIds = createStackIds(nodeModel);
 
-    // The pane's strips (pane tabs, and document tabs in an Editor or Media view)
-    // scroll their selected tab into view when the pane takes focus and on any
-    // click or input in it (SPEC_PANE_TAB_STRIP_REVEAL_SELECTED_2026_10_15.md §3-§4).
     let paneRoot: HTMLDivElement | undefined;
-    onMount(() => {
-        if (paneRoot) onCleanup(installPaneInteractionReveal(paneRoot));
-    });
-    createEffect(
-        on(
-            isFocused,
-            (focused, wasFocused) => {
-                if (focused && !wasFocused && paneRoot) revealPaneStrips(paneRoot, "focus");
-            },
-            { defer: true }
-        )
-    );
-
-    // The locate flash (pane-locate.ts): a reveal of one of this pane's blocks
-    // flashes the pane once it is on screen. Any other reveal ends the one
-    // running or waiting here, so only the newest pane flashes.
-    let locateGate: ReadyGate | null = null;
-    let locateDelay: ReturnType<typeof setTimeout> | undefined;
-    let stopLocateFlash: (() => void) | null = null;
-    const endLocate = () => {
-        locateGate?.cancel();
-        locateGate = null;
-        clearTimeout(locateDelay);
-        stopLocateFlash?.();
-        stopLocateFlash = null;
-    };
-    onMount(() => {
-        const off = onPaneLocate((blockId) => {
-            endLocate();
-            if (!untrack(stackIds).includes(blockId)) return;
-            const gate = whenPaneReady(
-                () => samplePane(paneRoot, isFocused() && activeBlockId() === blockId),
-                { timeoutMs: document.visibilityState === "visible" ? LOCATE_READY_TIMEOUT_MS : LOCATE_READY_TIMEOUT_HIDDEN_MS }
-            );
-            locateGate = gate;
-            void gate.ready.then((ready) => {
-                if (!ready || locateGate !== gate) return;
-                const begin = () => {
-                    // Still the same target: the user may have switched tab while it waited.
-                    if (locateGate !== gate || !paneRoot || !isFocused() || activeBlockId() !== blockId) return;
-                    recordLocateStart(performance.now());
-                    stopLocateFlash = showLocateFlash(paneRoot, {
-                        light: isLightThemeActive(),
-                        reduced: shouldReduceMotion("feedback"),
-                    });
-                    emitPaneLocatePlay(blockId, nodeModel.nodeId);
-                };
-                // Flashes start at least a gap apart. The newest request waits for
-                // its turn rather than being dropped; a newer one replaces it.
-                const wait = locateSlotWaitMs(performance.now());
-                if (wait <= 0) begin();
-                else locateDelay = setTimeout(begin, wait);
-            });
-        });
-        onCleanup(() => {
-            off();
-            endLocate();
-        });
-    });
-    // Leaving the pane ends its flash: it must not mark a pane the user has left.
-    createEffect(
-        on(
-            isFocused,
-            (focused) => {
-                if (!focused) endLocate();
-            },
-            { defer: true }
-        )
-    );
+    const getPaneRoot = () => paneRoot;
+    usePaneStripReveal(isFocused, getPaneRoot);
+    usePaneLocateFlash(nodeModel, isFocused, activeBlockId, stackIds, getPaneRoot);
 
     const isAlone = () => nodeModel.numLeafs() <= 1;
-    // A stripe in the remote's colour when the active tab is on one
-    // (SPEC_REMOTES_PANE_2026_10_05.md §4.8).
+    // A stripe in the remote's colour when the active tab is on one (SPEC_REMOTES_PANE_2026_10_05.md §4.8).
     const remoteColor = createMemo(
         () => remoteDisplay(atoms.fullConfigAtom()?.connections, activeBlockData()?.meta?.connection)?.color
     );
@@ -213,384 +84,22 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
         return computeFocusRingBorderColor(isFocused(), activeBlockData()?.meta, isLightTheme);
     });
 
-    // What the ACTIVE tab's view type contributes to this chrome (its
-    // manifest's `chrome`, Pane Tab contract Phase 4). It used to be resolved
-    // once, from whichever tab was active when the chrome mounted, and then
-    // applied to every tab for the pane's life (spec §2.4 #2): a terminal-first
-    // pane gave an agent tab the terminal's connection button and background.
-    // Each view type's model is built ONCE per pane — it creates signals of
-    // its own — in the chrome's own reactive scope, the first time one of its
-    // tabs is active; switching tabs only changes which model is read. A view
-    // type without `chrome` gets every default below.
-    const chromeOwner = getOwner();
-    const chromeModels = new Map<string, PaneChromeModel | null>();
-    const activeView = createMemo(() => resolvePaneTabView((activeBlockData()?.meta?.view as string | undefined) ?? ""));
-    const model = createMemo<PaneChromeModel | null>(() => {
-        const view = activeView();
-        if (!chromeModels.has(view)) {
-            const build = getPaneTab(view)?.chrome;
-            const anchor = untrack(activeBlockId);
-            chromeModels.set(view, build ? (runWithOwner(chromeOwner, () => untrack(() => build(anchor, nodeModel))) ?? null) : null);
-        }
-        return chromeModels.get(view) ?? null;
-    });
-
+    const model = createPaneChromeModel(nodeModel, activeBlockId, activeBlockData);
     // Tabs are keyed by blockId strings, so PaneTabStrip's <For> keeps each
     // pill's DOM node across recomputes; label/icon are looked up per id.
-    const stackIds = createMemo<string[]>(() => [...paneStackIds(nodeModel)], undefined, { equals: sameIds });
     const extraTabs = createMemo(() => model()?.extraTabs?.() ?? []);
-    const tabIds = createMemo<string[]>(
-        () => {
-            const stack = stackIds();
-            const inStack = new Set(stack);
-            return [...stack, ...extraTabs().map((t) => t.blockId).filter((id) => !inStack.has(id))];
-        },
-        undefined,
-        { equals: sameIds }
-    );
-    const tabMemory = createPaneTabMemory();
-    const tabInfos = createMemo(() => {
-        const inStack = new Set(stackIds());
-        const extraLabels = new Map(extraTabs().map((t) => [t.blockId, t.label]));
-        const activeId = activeBlockId();
-        const liveVm = nodeModel.activeViewModel?.() ?? null;
-        const ordinals = new Map<string, number>();
-        const infos = new Map<string, PaneTabInfo>();
-        for (const blockId of tabIds()) {
-            // Reactive read: a background tab's own meta changes (rename,
-            // agent launch, frame:icon) must update its pill too.
-            const meta = MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", blockId))()?.meta;
-            const view = meta?.view as string | undefined;
-            let ordinal = 0;
-            if (inStack.has(blockId)) {
-                ordinal = (ordinals.get(view ?? "") ?? 0) + 1;
-                ordinals.set(view ?? "", ordinal);
-            }
-            infos.set(
-                blockId,
-                describePaneTab(
-                    {
-                        blockId,
-                        view,
-                        meta,
-                        ordinal,
-                        // Only this block's OWN ViewModel may name it: a live
-                        // name/favicon read from another tab's ViewModel gets
-                        // remembered under this tab (pills showing another
-                        // tab's title, or a browser's favicon on every pill).
-                        // pane-leaf-chrome keys `activeViewModel` by the active
-                        // block now; this is the belt-and-braces check.
-                        liveViewModel: blockId === activeId && viewModelIsFor(liveVm, blockId) ? liveVm : null,
-                    },
-                    extraLabels.get(blockId),
-                    tabMemory
-                )
-            );
-        }
-        prunePaneTabMemory(tabMemory, infos.keys());
-        return infos;
-    });
-    // A tab's last real name and favicon go to its meta, so no tab changes when it is first clicked.
-    createEffect(() => {
-        const inStack = new Set(stackIds());
-        for (const info of tabInfos().values()) if (inStack.has(info.blockId)) persistTabInfo(info);
-    });
-
-    // Each pill's own pane color (SPEC_AGENT_COLOR_2026_08_08.md's identity
-    // color / the "Pane Color" picker's frame:hue), same source
-    // BlockFrame_Header's own header/border use — every stack member is a
-    // distinct blockId with its own meta, so a fork with its own color must
-    // show it as a pill even while another fork is active. Read here (not
-    // folded into tabInfos above) since it needs the current theme's
-    // polarity, which label/icon description has no reason to depend on.
-    //
-    // computeBlockIdentityColor, one call per pill's own block: a pill's
-    // color must never come from anything tab-wide, or every pill's
-    // underline collapses to one shared color (reagent P1, PR #3484 — back
-    // when a tab-level override tier still existed).
-    const tabColors = createMemo(() => {
-        const isLightTheme = isLightThemeActive();
-        const colors = new Map<string, PaneTabColors>();
-        for (const blockId of tabIds()) {
-            const meta = MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", blockId))()?.meta;
-            // The underline is the identity normalised for the theme, so it
-            // clears 3:1 against the pill under it for every hue
-            // (pane-color-scheme.ts); an uncoloured tab falls back to accent.
-            const underline = computeBlockIdentityColor(meta, isLightTheme);
-            const background = computeBlockTabPillBg(meta, isLightTheme);
-            const activeBackground = computeBlockTabPillActiveBg(meta, isLightTheme);
-            // Always set: the header behind the strip is tinted with the
-            // ACTIVE block's color, so a transparent uncolored pill would
-            // appear to take on whichever tab is selected.
-            const neutralBackground = computeBlockTabPillNeutralBg(meta, isLightTheme);
-            colors.set(blockId, { underline, background, activeBackground, neutralBackground });
-        }
-        return colors;
-    });
-
-    // The header row's background, when the pane's tabs don't agree on a
-    // single color — SPEC_PANE_HEADER_TAIL_COLOR_2026_09_21.md.
-    //
-    // The row is ONE element, painted by BlockFrame_Header with the ACTIVE
-    // block's color, and the tab strip sits on top of it. Everything the
-    // pills don't cover (the "+", the gap after the last pill, the run of
-    // bar out to the end icons — the "tail") is therefore the active tab's
-    // color, and changes on every tab switch. Fine when a pane held one
-    // widget or a stack of same-colored forks; the universal pane-tabs
-    // redesign made a pane of differently-colored widgets the normal case,
-    // where the tail became a large block of color that moved.
-    //
-    // A pane with one color is *about* that color. A pane with several has
-    // no single color to be about, so picking one isn't information.
-    //
-    // Computed here rather than in blockframe.tsx because this is the only
-    // component that has both the pane's whole tab list and the theme;
-    // BlockFrame_Header renders one block and is handed a color, which
-    // keeps every tab-set-aware decision in one place and leaves every
-    // non-PaneChrome BlockFrame consumer untouched by construction.
-    const headerTailBg = createMemo(() => {
-        const isLightTheme = isLightThemeActive();
-        const ids = tabIds();
-        // Compare the RESOLVED background strings, not the meta that
-        // produced them: two blocks that land on the same rendered color
-        // are the same color here even if one got there via frame:hue and
-        // the other via its agent identity color.
-        //
-        // `undefined` (no color of its own) is NOT one member — uncolored
-        // blocks do not all render the same header.
-        //
-        // `BlockFrame_Header`'s own fallback (blockframe.tsx) branches on
-        // `meta.view` when there is no color: a non-agent block gets
-        // `NON_AGENT_DEFAULT_HEADER_BG`, an agent block gets nothing and
-        // stays translucent. So an uncolored block's EFFECTIVE header
-        // background is a function of its view, and keying this set on the
-        // color alone made a pane of two uncolored tabs — one agent, one
-        // not — collapse to `size === 1`, skip the override entirely, and
-        // hand the header straight back to that per-view fallback. The tail
-        // then changed color with the active tab: the exact bug this
-        // component exists to remove, surviving in the one case nothing
-        // tested (reagent P1 on #3492).
-        //
-        // Deliberately not `computeBlockTabPillNeutralBg` as the key: that
-        // helper is theme-conditional (it collapses agent and non-agent to
-        // one value in light theme) while the header fallback above is not,
-        // so it would under-discriminate on a light-theme mixed pane.
-        const headerKeyOf = (meta: Block["meta"] | undefined): string =>
-            computeBlockColorBg(meta, isLightTheme) ??
-            (paneTabCapability(meta?.view, "header") === "surface" ? "\u0000surface-default" : "\u0000fixed-default");
-        // Count IDENTITIES, not tabs (REPORT_PANE_TAB_COLOR_BEST_PRACTICES_2026_10_02.md
-        // §6 P2). An uncoloured tab (Accounts, CPU, a terminal) is not a
-        // competing identity, so a pane with one coloured agent plus utility
-        // tabs is about that agent: its tail keeps that agent's tint whichever
-        // tab is selected. Stable, so it never moves on a tab switch. Two or
-        // more identities have no single colour to be about → neutral.
-        // Only a pick or an agent colour is an identity here: a tab coloured
-        // just by its widget type counts as uncoloured, or every utility tab
-        // would now compete with the agent
-        // (SPEC_WIDGET_DEFAULT_PANE_COLORS_2026_10_05.md §3.8).
-        const identities = new Set<string>();
-        let anyUncoloured = false;
-        for (const blockId of ids) {
-            const meta = MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", blockId))()?.meta;
-            const bg = computeBlockColorBg(meta, isLightTheme, { widget: false });
-            if (bg) identities.add(bg);
-            else anyUncoloured = true;
-        }
-        // Every tab shares the one identity: no override, BlockFrame_Header
-        // already paints that colour for whichever tab is active.
-        if (identities.size === 1 && !anyUncoloured) return undefined;
-        if (identities.size === 1) return [...identities][0];
-        if (identities.size > 1) return computeMixedPaneHeaderBg(isLightTheme);
-        // No identity at all: the earlier rule below still decides, so a pane
-        // of uncoloured agent + non-agent tabs keeps a fixed tail.
-        const distinct = new Set<string>();
-        for (const blockId of ids) {
-            const meta = MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", blockId))()?.meta;
-            distinct.add(headerKeyOf(meta));
-            if (distinct.size > 1) break;
-        }
-        // The tabs agree — hand back NOTHING and let BlockFrame_Header do
-        // exactly what it always did (the active block's own color, else
-        // its agent/non-agent default). That covers both "they all share a
-        // color" (the active block resolves to that same color anyway) and
-        // "none of them has one", so an uncolored single-agent pane keeps
-        // its untouched default instead of being forced to a value this
-        // memo picked. Only a genuinely mixed pane needs an override.
-        if (distinct.size <= 1) return undefined;
-        // One value per theme, independent of every block's meta — see
-        // computeMixedPaneHeaderBg for why the pill's own neutral (which
-        // varies by meta.view) is the wrong thing here (reagent P1).
-        return computeMixedPaneHeaderBg(isLightTheme);
-    });
-
-    // Rename (double-click a pill). The override shows the new name at once,
-    // before the write round-trips back through the block's meta.
-    const [renamingId, setRenamingId] = createSignal<string | null>(null);
-    const [titleOverrides, setTitleOverrides] = createSignal<Record<string, string>>({});
-    const labelOf = (id: string) => titleOverrides()[id] ?? tabInfos().get(id)?.label ?? "";
-    // An agent tab's pill shows the agent's summary, the same line the Swarm row shows
-    // (`readSwarmSummary` is the one function behind both), immediately on hover.
-    // Agents only: a terminal's OSC title is not an agent summary.
-    const summaryOf = (id: string): string | undefined => {
-        // A tab whose icon carries a badge (a browser identity) says what it marks.
-        const badge = tabInfos().get(id)?.badge;
-        if (badge) return `Browsing as ${badge.label}`;
-        const meta = MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", id))()?.meta;
-        if (meta?.view !== "agent") return undefined;
-        return readSwarmSummary(meta) ?? undefined;
-    };
-    // And its seat, from the `agent:seat` srv seeds at agent.open and refreshes
-    // when the seat changes (SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §4).
-    const seatOf = (id: string): string | undefined => {
-        const meta = MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", id))()?.meta;
-        if (meta?.view !== "agent") return undefined;
-        const seat = readSeatMeta(meta);
-        return seat ? seatTooltipLine(seat) : undefined;
-    };
-    const confirmRename = async (id: string, title: string) => {
-        setRenamingId(null);
-        const rename = tabInfos().get(id)?.rename;
-        if (!rename) return;
-        const prev = titleOverrides()[id];
-        setTitleOverrides((o) => ({ ...o, [id]: title }));
-        try {
-            await rename(title);
-        } catch (e: unknown) {
-            setTitleOverrides((o) => {
-                const next = { ...o };
-                if (prev === undefined) delete next[id];
-                else next[id] = prev;
-                return next;
-            });
-            pushNotification({
-                icon: "fa-triangle-exclamation",
-                title: "Rename failed",
-                message: e instanceof Error ? e.message : String(e),
-                timestamp: new Date().toISOString(),
-                type: "error",
-                expiration: Date.now() + 8000,
-            });
-        }
-    };
-
-    // A click on a pill of a collapsed pane expands it, the active pill included
-    // (handleActivate never sees that click) and an agent pane's own onActivate
-    // included (it returns before the ordinary path). Restore first, then the
-    // activation, the order showBlockInPane uses.
-    // docs/specs/SPEC_PANE_TAB_MULTI_SELECT_MOVE_AND_COLLAPSED_EXPAND_2026_10_24.md §6.
-    // A fork pill (extraTabs) belongs to another pane, and its click reveals that
-    // pane (agent onActivate): the pane whose strip it sits in is not expanded for it.
-    const handleSelect = (blockId: string) => {
-        if (nodeModel.isMinimized?.() && stackIds().includes(blockId)) layoutModel.minimizeNodeToggle(nodeModel.nodeId);
-    };
-    const handleActivate = (blockId: string) => {
-        // A view type whose tabs can live in OTHER panes (agent's cross-pane
-        // forks) handles activation itself and returns true; anything else
-        // falls through to the ordinary same-pane stack switch.
-        if (model()?.onActivate?.(blockId) === true) return;
-        if (blockId === activeBlockId()) return;
-        setActiveBlockInStack(layoutModel, nodeModel.nodeId, blockId);
-    };
-    const handleClose = (blockId: string) => {
-        if (model()?.onClose?.(blockId) === true) return;
-        void closeBlockInStack(layoutModel, nodeModel.nodeId, blockId);
-    };
-    // A pill's menu is the header menu for that tab (openPaneTabMenu). A single-tab pane's pill, and a fork pill of another pane
-    // (its Close Pane and magnify are not this pane's), leave the event to the header's own handler.
-    const handleTabContextMenu = (blockId: string, e: MouseEvent) => {
-        if (stackIds().length < 2 || !stackIds().includes(blockId)) return;
-        e.preventDefault();
-        e.stopPropagation();
-        const inFront = blockId === activeBlockId();
-        if (!inFront) handleActivate(blockId);
-        openPaneTabMenu(e, layoutModel, nodeModel, blockId, inFront);
-    };
-    const handleAdd = (e?: MouseEvent) => {
-        if (!e) return;
-        openPaneTabWidgetPicker(layoutModel, nodeModel.nodeId, e, model()?.newTabMeta);
-    };
-    // Same-pane drag-reorder (SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.2). No `model()?.onReorder`
-    // hook like activate/close have: reordering changes no membership and needs no view-type side effect.
-    const handleReorder = (blockId: string, targetId: string, position: "before" | "after") =>
-        moveBlockInStack(layoutModel, blockId, targetId, position);
-    const foreign = foreignTabMoves(layoutModel, activeBlockId); // a pill from another window tab goes through the one cross-tab move
-    // Cross-pane drop-to-append (Phase 4, SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md
-    // §3.4): a pill dragged from a DIFFERENT pane was dropped on this
-    // Pane's header — append it, active, at the end of THIS pane's stack.
-    // `target` is any current member of THIS pane (its active tab), which is
-    // all `moveBlockInStack` needs to resolve the destination; the dragged
-    // block's own pane is resolved from `blockId`, NOT assumed to be this
-    // one (ReAgent P0 on PR #3447 — passing this pane's node id here is
-    // exactly what made the first version a silent no-op).
-    const handleReceiveForeignTab = (blockId: string, opts?: { keepSeparate?: boolean }) => {
-        const target = activeBlockId();
-        if (!target) return false;
-        if (foreign.isForeign(blockId)) return foreign.move([blockId], blockId, { asTab: true });
-        const moved = opts ? moveBlockInStack(layoutModel, blockId, target, "end", true, opts) : moveBlockInStack(layoutModel, blockId, target, "end", true);
-        // A lone picked tab that was dragged and dropped is done with: it is no longer picked.
-        if (moved && paneTabSelection().has(blockId)) clearPaneTabSelection();
-        // A collapsed pane stays collapsed: only a plain click on a pill expands a pane
-        // (the operator, 2026-10-27; pane-tab-gesture.ts), never a drop.
-        return moved;
-    };
-    // Several tabs (a Ctrl/Cmd+click selection) dropped on this pane, in one move. The anchor
-    // is this pane's visible tab, which is never one of the moved tabs (blocks already here
-    // are left alone). SPEC_PANE_TAB_MULTI_SELECT_MOVE_AND_COLLAPSED_EXPAND_2026_10_24.md §4.3.
-    const handleReceiveForeignTabs = (blockIds: readonly string[], grabbed: string, opts?: { keepSeparate?: boolean }) => {
-        const target = activeBlockId();
-        if (!target) return false;
-        if (blockIds.length > 0 && foreign.isForeign(blockIds[0])) return foreign.move(blockIds, grabbed, { asTab: true });
-        const moved = opts ? moveBlocksInStack(layoutModel, blockIds, target, grabbed, opts) : moveBlocksInStack(layoutModel, blockIds, target, grabbed);
-        if (moved === false) return false;
-        clearPaneTabSelection();
-        return moved;
-    };
-    // A single pill dropped on this pane's body, outside its middle, becomes a pane of its own on that
-    // side; the new pane's key is where the pill bounces. SPEC_PANE_TAB_DRAG_BODY_PLACEMENT_AND_EDGE_GLOW_2026_10_29.md.
-    const bodyDrop = {
-        model: layoutModel,
-        // No body zones while a pane is maximized: the layout keeps every pane's tiled rectangle, which is
-        // not where the displayed pane is, so the pointer could not be placed against it.
-        hasBody: () => !(nodeModel.isMinimized?.() ?? false) && !layoutModel.treeState.magnifiedNodeId,
-        place: (blockId: string, zone: Extract<PillZone, { kind: "place" }>): string | false => {
-            if (foreign.isForeign(blockId)) return foreign.move([blockId], blockId, { direction: clampCrossTabDirection(zone.direction)! });
-            const landedIn = placePill(layoutModel, blockId, nodeModel.nodeId, zone);
-            if (landedIn !== false && paneTabSelection().has(blockId)) clearPaneTabSelection();
-            return landedIn;
-        },
-    };
-    const acceptsForeignTabs = (blockIds: readonly string[]) => {
-        const here = new Set(stackIds());
-        return blockIds.some((id) => !here.has(id));
-    };
-
-    // The selection belongs to the Window Tab on screen: a tab that was closed, or that
-    // lives in another Window Tab's layout, is dropped from it.
-    const windowTabDisplayed = useWindowTabDisplayed();
-    createEffect(() => {
-        layoutModel.localTreeStateAtom();
-        if (!windowTabDisplayed()) return;
-        prunePaneTabSelection(allBlockIds(layoutModel.treeState.rootNode));
-    });
+    const tabIds = createTabIds(stackIds, extraTabs);
+    const tabInfos = createTabInfos(nodeModel, stackIds, tabIds, extraTabs, activeBlockId);
+    const tabColors = createTabColors(tabIds);
+    const headerTailBg = createHeaderTailBg(tabIds);
+    const { renamingId, setRenamingId, labelOf, confirmRename } = createTabRename(tabInfos);
+    const summaryOf = (id: string) => tabSummaryOf(id, tabInfos);
+    const handlers = createPaneTabHandlers(nodeModel, model, stackIds, activeBlockId);
+    const drops = createPaneTabDrops(nodeModel, stackIds, activeBlockId);
+    usePaneTabSelectionPruning(layoutModel);
 
     const activeViewModelOrUndefined = () => nodeModel.activeViewModel?.() ?? undefined;
-
-    // The busy-indicator slot is the chrome's own, on every pane, not a
-    // `model` capability: `model` belongs to whichever view was active when
-    // this pane first hoisted (pane-leaf-chrome.tsx latches it), so an agent
-    // added as a tab to a pane that started as Swarm or a terminal got no
-    // slot and its busy ring never rendered
-    // (RETRO_AGENT_PANE_BUSY_RING_MISSING_IN_NON_AGENT_FIRST_STACK_2026_09_25.md).
-    // The handoff follows the ACTIVE view model instead, re-pointing on
-    // every switch; a view model without `setProgressBarMount` just leaves
-    // the slot empty.
-    const [progressSlotEl, setProgressSlotEl] = createSignal<HTMLDivElement | null>(null);
-    createEffect(() => {
-        const vm = nodeModel.activeViewModel?.() ?? null;
-        const el = progressSlotEl();
-        vm?.setProgressBarMount?.(el);
-        onCleanup(() => vm?.setProgressBarMount?.(null));
-    });
+    const setProgressSlotEl = useProgressBarSlot(nodeModel);
 
     let bodyEl: HTMLDivElement | undefined;
     createEffect(() => {
@@ -605,22 +114,22 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
             getId={(id) => id}
             getLabel={labelOf}
             getTooltipDetail={summaryOf}
-            getTooltipSeat={seatOf}
+            getTooltipSeat={tabSeatOf}
             getIcon={(id) => <PaneTabIconView icon={() => tabInfos().get(id)?.icon} badge={() => tabInfos().get(id)?.badge} />}
             getColor={(id) => tabColors().get(id)}
             useProgress={usePaneTabProgress}
             collapsed={() => nodeModel.isMinimized?.() ?? false}
             isClosing={(id) => (nodeModel.isClosing?.() ?? false) || isBlockClosing(layoutModel, id)}
-            onTabContextMenu={handleTabContextMenu}
+            onTabContextMenu={handlers.handleTabContextMenu}
             headerBgOverride={headerTailBg()}
-            onActivate={handleActivate}
-            onSelect={handleSelect}
-            onClose={handleClose}
-            onReorder={handleReorder}
-            onReceiveForeignTab={handleReceiveForeignTab}
-            onReceiveForeignTabs={handleReceiveForeignTabs}
-            acceptsForeignTabs={acceptsForeignTabs}
-            bodyDrop={bodyDrop}
+            onActivate={handlers.handleActivate}
+            onSelect={handlers.handleSelect}
+            onClose={handlers.handleClose}
+            onReorder={handlers.handleReorder}
+            onReceiveForeignTab={drops.handleReceiveForeignTab}
+            onReceiveForeignTabs={drops.handleReceiveForeignTabs}
+            acceptsForeignTabs={drops.acceptsForeignTabs}
+            bodyDrop={drops.bodyDrop}
             selection={paneTabSelectionApi}
             onTabDoubleClick={(id) => tabInfos().get(id)?.rename && setRenamingId(id)}
             renderLabel={(id) =>
@@ -644,7 +153,7 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
             }
             connBtnRef={model()?.connBtnRef}
             changeConnModalAtom={model()?.changeConnModalAtom}
-            onAdd={handleAdd}
+            onAdd={handlers.handleAdd}
             addTitle={model()?.addTitle ?? "Add tab"}
             nodeModel={nodeModel}
             viewModel={viewModel}

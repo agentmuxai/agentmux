@@ -373,7 +373,7 @@
 219 frontend/app/drag/CrossWindowDragMonitor.win32.tsx::performTearOff
 119 frontend/app/drag/CrossWindowDropOverlay.tsx::CrossWindowDropOverlay
 132 frontend/app/element/ModalLayer.tsx::ModalLayer
-590 frontend/app/element/PaneChrome.tsx::renderPaneChromeShell
+156 frontend/app/element/PaneChrome.tsx::renderPaneChromeShell
 157 frontend/app/element/PaneTabStrip.tsx::PaneTabStrip
 403 frontend/app/element/PaneTabStrip.tsx::PaneTabStripItem
 122 frontend/app/element/ProviderLogo.tsx::ProviderLogo
