@@ -37,6 +37,90 @@ pub fn build_routers(state: AppState) -> SrvRouters {
 /// [`build_routers`], with the frontend directory passed in (headless
 /// `--frontend-dir`, or `None`).
 pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::path::Path>) -> SrvRouters {
+    let cors = cors_layer();
+
+    super::remote_ops::receive::mark_started();
+    let lan_forward_routes = lan_forward_routes(&state);
+    let authed_routes = authed_routes(&state);
+
+    // Health endpoint (no auth). `/health` always; `/` too, except on the
+    // full router when headless `--frontend-dir` serves the frontend there
+    // (`with_frontend`). The LAN router's health never changes.
+    let health = Router::new()
+        .route("/", get(health_handler))
+        .route("/health", get(health_handler));
+    let full_health = if frontend_dir.is_some() {
+        Router::new().route("/health", get(health_handler))
+    } else {
+        health.clone()
+    };
+
+    // WhatsApp Cloud API webhook receiver (no auth). Meta's servers call
+    // these directly and cannot supply the X-AuthKey header auth_middleware
+    // requires, so — like `health` — these must be merged at the top level,
+    // outside `authed_routes`'s `route_layer(auth_middleware)`, not added to
+    // that router. The GET handshake and POST delivery are authenticated by
+    // a different mechanism suited to a third party AgentMux doesn't
+    // control the request format of: hub.verify_token comparison on GET,
+    // and HMAC-SHA256(app_secret, raw_body) signature validation on every
+    // POST (see messaging/whatsapp/webhook.rs). See
+    // docs/specs/SPEC_MESSAGING_INTEGRATION_WHATSAPP_2026_07_07.md §8.2.
+    let whatsapp_webhooks = whatsapp_webhooks();
+
+    // Ext 5 of docs/reports/REPORT_MUXSPECT_MUXLOG_CROSS_CHANNEL_INSPECTION_2026_08_22.md:
+    // stamp every response with this instance's own version, so a stale-
+    // build 404 (this session hit exactly this: `muxspect conversations`
+    // 404ing because the running srv predated that route, with nothing
+    // saying so) is self-diagnosing instead of a bare, unexplained 404.
+    // Captured by value (not via AppState extraction) so this applies to
+    // EVERY route uniformly, including the unauthenticated health/webhook
+    // ones, without needing `AppState: Clone`.
+    let version_for_header = state.version.clone();
+    let version_header = axum::middleware::from_fn(move |req: axum::extract::Request, next: axum::middleware::Next| {
+        let version = version_for_header.clone();
+        async move {
+            let mut response = next.run(req).await;
+            if let Ok(value) = axum::http::HeaderValue::from_str(&version) {
+                response.headers_mut().insert("x-agentmux-srv-version", value);
+            }
+            response
+        }
+    });
+
+    let lan = Router::new()
+        .merge(health.clone())
+        .merge(whatsapp_webhooks.clone())
+        .merge(lan_forward_routes.clone())
+        .layer(version_header.clone())
+        .layer(cors.clone())
+        .with_state(state.clone());
+
+    // An approved widget's files (SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md
+    // §5.2). No auth key: a widget's iframe loads them, and the URL's key
+    // segment is what keeps other pages out. Full router only, never the LAN.
+    let widget_files = widget_files_routes();
+
+    let full = Router::new()
+        .merge(full_health)
+        .merge(widget_files)
+        .merge(whatsapp_webhooks)
+        .merge(lan_forward_routes)
+        .merge(authed_routes);
+    // Before the layers: `Router::layer` wraps only the routes and fallback
+    // that exist when it's called, so a fallback added afterwards would skip
+    // CORS and the version header (ReAgent P1 on #3900).
+    let full = match frontend_dir {
+        Some(dir) => with_frontend(full, dir),
+        None => full,
+    };
+    let full = full.layer(version_header).layer(cors).with_state(state);
+    let container = crate::backend::container_listener::layer(full.clone(), crate::backend::container_listener::current_subnet);
+
+    SrvRouters { full, lan, container }
+}
+
+/// CORS for both routers: loopback origins only (plus any headless `--allowed-origin`).
+fn cors_layer() -> CorsLayer {
     // CORS: reflect only loopback origins, plus any headless `--allowed-origin`.
     //
     // Before the 2026-05-11 security audit (C3) this allowed any origin
@@ -54,7 +138,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
     // page in the user's browser can't drive the sidecar even if it
     // discovers the port.
     use tower_http::cors::AllowOrigin;
-    let cors = CorsLayer::new()
+    CorsLayer::new()
         .allow_origin(AllowOrigin::predicate(|origin, _req| {
             origin.to_str().is_ok_and(is_allowed_origin)
         }))
@@ -93,20 +177,21 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // `X-ZoneFileOffset` says where that response's body starts in the
         // file (later than asked once a terminal's output was trimmed);
         // `fetchMuxFile` reads it to resume at the file's absolute end.
-        .expose_headers(vec!["X-ZoneFileInfo".parse().unwrap(), "X-ZoneFileOffset".parse().unwrap(), header::CONTENT_RANGE]);
+        .expose_headers(vec!["X-ZoneFileInfo".parse().unwrap(), "X-ZoneFileOffset".parse().unwrap(), header::CONTENT_RANGE])
+}
 
-    // The routes an LAN peer actually calls when forwarding a jekt or
-    // looking up which agents this instance hosts
-    // (`LanDiscoveryController::find_agent`, `server/reactive.rs`'s Tier-3
-    // forward). Kept OUT of `reactive_routes`/`authed_routes` deliberately
-    // — merged at the top level with their own `lan_or_full_auth_middleware`
-    // instead, so a LAN peer's scoped `lan_key` (see `Config::lan_key`) is
-    // accepted here without also being accepted by `authed_routes`'s much
-    // broader surface (the general `auth_middleware` there requires the
-    // full `auth_key` only). See `lan_or_full_auth_middleware`'s doc
-    // comment for why this can't just be nested inside `authed_routes`.
-    super::remote_ops::receive::mark_started();
-    let lan_forward_routes = Router::new()
+/// The routes an LAN peer actually calls when forwarding a jekt or
+/// looking up which agents this instance hosts
+/// (`LanDiscoveryController::find_agent`, `server/reactive.rs`'s Tier-3
+/// forward). Kept OUT of `reactive_routes`/`authed_routes` deliberately
+/// — merged at the top level with their own `lan_or_full_auth_middleware`
+/// instead, so a LAN peer's scoped `lan_key` (see `Config::lan_key`) is
+/// accepted here without also being accepted by `authed_routes`'s much
+/// broader surface (the general `auth_middleware` there requires the
+/// full `auth_key` only). See `lan_or_full_auth_middleware`'s doc
+/// comment for why this can't just be nested inside `authed_routes`.
+fn lan_forward_routes(state: &AppState) -> Router<AppState> {
+    Router::new()
         .route("/agentmux/reactive/inject", post(reactive::handle_reactive_inject))
         // A typed request from an agent on another machine, which this srv carries out itself
         // (SPEC_AGENTS_OPERATE_OTHER_MACHINES_2026_10_30.md). The signature authorizes it, never the key.
@@ -139,17 +224,19 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             lan_or_full_auth_middleware,
-        ));
+        ))
+}
 
-    // Reactive routes. Previously registered without auth on the
-    // assumption that localhost is a trust boundary; the 2026-05-11
-    // security audit (C1 + C2) showed that any local process — or a
-    // web page driving 127.0.0.1 via the permissive CORS layer — could
-    // drive `/agentmux/reactive/inject` and reconfigure the cloud
-    // muxbus poller. These routes are now merged into `authed_routes`
-    // below and gated by `auth_middleware`. (`/inject` and `/agent` are
-    // NOT here — see `lan_forward_routes` above.)
-    let reactive_routes = Router::new()
+/// Reactive routes. Previously registered without auth on the
+/// assumption that localhost is a trust boundary; the 2026-05-11
+/// security audit (C1 + C2) showed that any local process — or a
+/// web page driving 127.0.0.1 via the permissive CORS layer — could
+/// drive `/agentmux/reactive/inject` and reconfigure the cloud
+/// muxbus poller. These routes are now merged into `authed_routes`
+/// below and gated by `auth_middleware`. (`/inject` and `/agent` are
+/// NOT here — see `lan_forward_routes` above.)
+fn reactive_routes() -> Router<AppState> {
+    Router::new()
         .route("/agentmux/reactive/agents", get(reactive::handle_reactive_agents))
         .route("/agentmux/reactive/audit", get(reactive::handle_reactive_audit))
         .route("/agentmux/reactive/register", post(reactive::handle_reactive_register))
@@ -193,16 +280,18 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route(
             "/agentmux/reactive/history/search",
             get(reactive::handle_reactive_history_search),
-        );
+        )
+}
 
-    // Routes that act for an agent: each needs the agent's token (`agent_only`).
-    // Jobs (SPEC_JOBS_AND_TEMPLATES_2026_10_24.md §5.1) and the cron scheduler
-    // under them (`/agentmux/cron` is kept as an alias for one release), and
-    // Muxqueue, the universal agent work queue
-    // (docs/reports/REPORT_UNIVERSAL_AGENT_WORK_QUEUE_2026_09_01.md), with the
-    // Kanban's holder routes (SPEC_WARDEN_KANBAN_2026_10_20.md) and an agent's
-    // hold and unhold (SPEC_KANBAN_AGENTS_HOLD_AND_UNHOLD_2026_10_22.md).
-    let agent_routes = Router::new()
+/// Routes that act for an agent: each needs the agent's token (`agent_only`).
+/// Jobs (SPEC_JOBS_AND_TEMPLATES_2026_10_24.md §5.1) and the cron scheduler
+/// under them (`/agentmux/cron` is kept as an alias for one release), and
+/// Muxqueue, the universal agent work queue
+/// (docs/reports/REPORT_UNIVERSAL_AGENT_WORK_QUEUE_2026_09_01.md), with the
+/// Kanban's holder routes (SPEC_WARDEN_KANBAN_2026_10_20.md) and an agent's
+/// hold and unhold (SPEC_KANBAN_AGENTS_HOLD_AND_UNHOLD_2026_10_22.md).
+fn agent_routes(state: &AppState) -> Router<AppState> {
+    Router::new()
         .route("/agentmux/jobs", post(cron::handle_cron_create))
         .route("/agentmux/jobs/:id", delete(cron::handle_cron_delete))
         .route("/agentmux/jobs/:id", patch(cron::handle_cron_patch))
@@ -236,19 +325,49 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/coord/posts", post(coord_channel_handlers::handle_post_to_channel))
         .route("/api/v1/bulletin", post(bulletin_handlers::handle_post_bulletin).get(bulletin_handlers::handle_read_bulletin))
         .route("/api/v1/quota-mode", post(quota_mode_handler::handle_set_quota_mode).get(quota_mode_handler::handle_get_quota_mode))
-        .route_layer(middleware::from_fn_with_state(state.clone(), agent_only::require_agent_token));
+        .route_layer(middleware::from_fn_with_state(state.clone(), agent_only::require_agent_token))
+}
 
-    // MessageBus routes (authed, localhost-only)
-    let bus_routes = Router::new()
+/// MessageBus routes (authed, localhost-only).
+fn bus_routes() -> Router<AppState> {
+    Router::new()
         .route("/api/bus/register", post(messagebus::handle_register))
         .route("/api/bus/send", post(messagebus::handle_send))
         .route("/api/bus/inject", post(messagebus::handle_inject))
         .route("/api/bus/broadcast", post(messagebus::handle_broadcast))
         .route("/api/bus/messages", get(messagebus::handle_read_messages))
         .route("/api/bus/messages/delete", post(messagebus::handle_delete_messages))
-        .route("/api/bus/agents", get(messagebus::handle_list_agents));
+        .route("/api/bus/agents", get(messagebus::handle_list_agents))
+}
 
-    let authed_routes = Router::new()
+/// Everything behind the full key: the groups below, then the layers that attribute and authenticate.
+fn authed_routes(state: &AppState) -> Router<AppState> {
+    Router::new()
+        .merge(service_shell_and_vault_routes())
+        .merge(agent_api_routes())
+        .merge(muxspect_routes())
+        .merge(memory_and_identity_routes())
+        .merge(ui_and_host_routes())
+        .merge(agent_self_and_fleet_routes())
+        .merge(forward_messaging_and_work_routes())
+        .merge(bus_routes())
+        .merge(agent_routes(state))
+        .merge(reactive_routes())
+        .route_layer(middleware::from_fn_with_state(state.clone(), super::http_action::record_action))
+        // Identity M4a: attribute the (already authenticated) request.
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            caller::caller_middleware,
+        ))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth_middleware,
+        ))
+}
+
+/// The websocket and service calls, files, shells, widgets, the Vault and Google.
+fn service_shell_and_vault_routes() -> Router<AppState> {
+    Router::new()
         .route(
             "/ws",
             get(websocket::handle_ws).route_layer(middleware::from_fn(ws_origin_guard)),
@@ -332,6 +451,11 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/ui/browser/signin", post(super::browser_signin::handle_signin))
         .route("/api/v1/ui/browser/capture", post(super::browser_capture::handle_browser_capture))
         .merge(google_agent_routes())
+}
+
+/// Open, spawn, start, stop and name agents; windows, tabs and layout.
+fn agent_api_routes() -> Router<AppState> {
+    Router::new()
         // Open (launch) an agent into a pane from an agent tool call —
         // agentmux-mcp's OpenAgent tool POSTs `{agent_id, tab_id?, …}` here.
         // Shares the exact agent.open logic (incl. its AGENT_OPEN_LOCKS
@@ -412,6 +536,11 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/tab/activate", post(handle_tab_activate))
         .route("/api/v1/tab/new", post(handle_tab_new))
         .route("/api/v1/window/focus", post(handle_window_focus))
+}
+
+/// `muxspect`, work facts and the coordination channel.
+fn muxspect_routes() -> Router<AppState> {
+    Router::new()
         // Live-state introspection for the `muxspect` CLI (Phase 1 of
         // docs/specs/SPEC_MUXSPECT_LIVE_INTROSPECTION_TOOL_2026_08_01.md) —
         // read-only, diagnostic-only, reached the same way agentmux-mcp
@@ -471,6 +600,11 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // PostToChannel / ReadChannel: a repository's coordination channel
         // (SPEC_AGENT_COORDINATION_CHANNEL_2026_10_15.md).
         .route("/api/v1/coord/posts", get(coord_channel_handlers::handle_read_channel))
+}
+
+/// MuxAPI memory, Global Memory, presets, identity and skills.
+fn memory_and_identity_routes() -> Router<AppState> {
+    Router::new()
         // MuxAPI — identity / preset / memory namespaces, the MCP-facing
         // slice of the app-API RPC surface (SPEC_AGENT_APP_API_MCP_BINDINGS_2026_06_28).
         // The agent identity (`agent_id`) is supplied by agentmux-mcp from its
@@ -526,6 +660,11 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/agent/identity/switch", post(handle_agent_identity_switch))
         .route("/api/v1/agent/identity/signin/notice", post(signin_notice::handle_agent_signin_notice))
         .route("/api/v1/agent/skill", post(handle_agent_skill))
+}
+
+/// UI automation, the browser pane and the host relays.
+fn ui_and_host_routes() -> Router<AppState> {
+    Router::new()
         // Agent UI automation (SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md)
         // — proxies to the paired CEF host's browser_api CDP routes. `block_id`
         // is stamped by agentmux-mcp from AGENTMUX_BLOCKID, same trust model as
@@ -607,6 +746,11 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/app/connectivity", get(app_api::connectivity::handle_status))
         .route("/api/v1/app/health", get(super::remote_ops::app_ops::handle_health))
         .route("/api/v1/agent/self/upgrade", post(app_api::app_update::handle_request_upgrade))
+}
+
+/// An agent acting on itself, and fleet control.
+fn agent_self_and_fleet_routes() -> Router<AppState> {
+    Router::new()
         // The Desktop tool: the gate in front of looking at and controlling a
         // native app (SPEC_DESKTOP_DRIVING_2026_10_20.md §6).
         .route("/api/v1/agent/desktop/policy", post(app_api::desktop::handle_policy))
@@ -667,6 +811,11 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // shared registry). Loopback-only by construction: the caller only
         // ever forwards to a `local_url` it already verified is loopback.
         .route("/agentmux/agent/stop", post(handle_agent_stop_forward))
+}
+
+/// The forwards other instances call, messaging, job reads and the Kanban.
+fn forward_messaging_and_work_routes() -> Router<AppState> {
+    Router::new()
         // A Job run's timeout or cancel, forwarded to the AgentMux that follows it
         // (same trust model as the stop forward above).
         .route(super::jobs_remote_stop::STOP_RUN_PATH, post(super::jobs_remote_stop::handle_jobs_stop_run))
@@ -700,100 +849,23 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // Kanban: an agent's decision on a task in review (signed, not a token).
         .route("/agentmux/work/:id/accept", post(work_delegate::handle_work_accept))
         .route("/agentmux/work/:id/send_back", post(work_delegate::handle_work_send_back))
-        .merge(bus_routes)
-        .merge(agent_routes)
-        .merge(reactive_routes)
-        .route_layer(middleware::from_fn_with_state(state.clone(), super::http_action::record_action))
-        // Identity M4a: attribute the (already authenticated) request.
-        .route_layer(middleware::from_fn_with_state(
-            state.clone(),
-            caller::caller_middleware,
-        ))
-        .route_layer(middleware::from_fn_with_state(
-            state.clone(),
-            auth_middleware,
-        ));
+}
 
-    // Health endpoint (no auth). `/health` always; `/` too, except on the
-    // full router when headless `--frontend-dir` serves the frontend there
-    // (`with_frontend`). The LAN router's health never changes.
-    let health = Router::new()
-        .route("/", get(health_handler))
-        .route("/health", get(health_handler));
-    let full_health = if frontend_dir.is_some() {
-        Router::new().route("/health", get(health_handler))
-    } else {
-        health.clone()
-    };
-
-    // WhatsApp Cloud API webhook receiver (no auth). Meta's servers call
-    // these directly and cannot supply the X-AuthKey header auth_middleware
-    // requires, so — like `health` — these must be merged at the top level,
-    // outside `authed_routes`'s `route_layer(auth_middleware)`, not added to
-    // that router. The GET handshake and POST delivery are authenticated by
-    // a different mechanism suited to a third party AgentMux doesn't
-    // control the request format of: hub.verify_token comparison on GET,
-    // and HMAC-SHA256(app_secret, raw_body) signature validation on every
-    // POST (see messaging/whatsapp/webhook.rs). See
-    // docs/specs/SPEC_MESSAGING_INTEGRATION_WHATSAPP_2026_07_07.md §8.2.
-    let whatsapp_webhooks = Router::new().route(
+/// WhatsApp Cloud API webhook receiver (no auth). Meta's servers call it directly and cannot supply the
+/// X-AuthKey header `auth_middleware` requires, so it is merged outside `authed_routes`.
+fn whatsapp_webhooks() -> Router<AppState> {
+    Router::new().route(
         "/webhook/whatsapp",
         get(crate::messaging::whatsapp::handle_verify)
             .post(crate::messaging::whatsapp::handle_inbound),
-    );
+    )
+}
 
-    // Ext 5 of docs/reports/REPORT_MUXSPECT_MUXLOG_CROSS_CHANNEL_INSPECTION_2026_08_22.md:
-    // stamp every response with this instance's own version, so a stale-
-    // build 404 (this session hit exactly this: `muxspect conversations`
-    // 404ing because the running srv predated that route, with nothing
-    // saying so) is self-diagnosing instead of a bare, unexplained 404.
-    // Captured by value (not via AppState extraction) so this applies to
-    // EVERY route uniformly, including the unauthenticated health/webhook
-    // ones, without needing `AppState: Clone`.
-    let version_for_header = state.version.clone();
-    let version_header = axum::middleware::from_fn(move |req: axum::extract::Request, next: axum::middleware::Next| {
-        let version = version_for_header.clone();
-        async move {
-            let mut response = next.run(req).await;
-            if let Ok(value) = axum::http::HeaderValue::from_str(&version) {
-                response.headers_mut().insert("x-agentmux-srv-version", value);
-            }
-            response
-        }
-    });
-
-    let lan = Router::new()
-        .merge(health.clone())
-        .merge(whatsapp_webhooks.clone())
-        .merge(lan_forward_routes.clone())
-        .layer(version_header.clone())
-        .layer(cors.clone())
-        .with_state(state.clone());
-
-    // An approved widget's files (SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md
-    // §5.2). No auth key: a widget's iframe loads them, and the URL's key
-    // segment is what keeps other pages out. Full router only, never the LAN.
-    let widget_files = Router::new()
+/// An approved widget's files and the SDK. Full router only, never the LAN.
+fn widget_files_routes() -> Router<AppState> {
+    Router::new()
         .route("/agentmux/widget-files/:id/:hash/:key/*path", get(super::widget_handlers::handle_widget_file))
-        .route("/agentmux/widget-sdk/:file", get(super::widget_handlers::handle_widget_sdk));
-
-    let full = Router::new()
-        .merge(full_health)
-        .merge(widget_files)
-        .merge(whatsapp_webhooks)
-        .merge(lan_forward_routes)
-        .merge(authed_routes);
-    // Before the layers: `Router::layer` wraps only the routes and fallback
-    // that exist when it's called, so a fallback added afterwards would skip
-    // CORS and the version header (ReAgent P1 on #3900).
-    let full = match frontend_dir {
-        Some(dir) => with_frontend(full, dir),
-        None => full,
-    };
-    let full = full.layer(version_header).layer(cors).with_state(state);
-    let container = crate::backend::container_listener::layer(full.clone(), crate::backend::container_listener::current_subnet);
-
-    SrvRouters { full, lan, container }
+        .route("/agentmux/widget-sdk/:file", get(super::widget_handlers::handle_widget_sdk))
 }
 
 /// What an agent changes about the agents themselves: their seats and names. Each acts as the agent its token
@@ -828,3 +900,7 @@ pub(super) fn with_frontend(router: Router<AppState>, dir: &std::path::Path) -> 
     let index = ServeFile::new(dir.join("index.html"));
     router.fallback_service(ServeDir::new(dir).fallback(index))
 }
+
+#[cfg(test)]
+#[path = "tests/routes_shape_tests.rs"]
+mod routes_shape_tests;
