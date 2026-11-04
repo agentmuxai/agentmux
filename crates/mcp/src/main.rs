@@ -120,13 +120,14 @@ async fn run() {
 
     let health = serve::Health::new();
     start_pulse(&health, &local_url, &auth_key);
-    let granted = granted_services_kept_fresh(&client, &local_url, &auth_key).await;
+    let (granted, tools_changed) = granted_services_kept_fresh(&client, &local_url, &auth_key).await;
     let runner = tool_runner(client, local_url, auth_key, block_id, loops, loop_counter);
     serve::serve(
         BufReader::new(tokio::io::stdin()),
         tokio::io::stdout(),
         runner,
         Arc::new(move || json!(tools_for(&granted.read().unwrap_or_else(|e| e.into_inner())))),
+        tools_changed,
         health,
         serve::call_deadline,
     )
@@ -186,26 +187,34 @@ fn start_pulse(health: &Arc<serve::Health>, local_url: &str, auth_key: &str) {
     heartbeat::start(Arc::clone(health), local_url.to_string(), auth_key.to_string());
 }
 
-/// Which Google services this agent has a grant on, for `tools/list`: asked of srv now and again every
-/// minute, because `tools/list` is answered at once and never waits on srv.
+/// Which Google services this agent has a grant on, for `tools/list`: asked of srv now, again every
+/// minute and right after the agent changes a grant, because `tools/list` is answered at once and
+/// never waits on srv. The `Notify` is woken when the set changes, so the client is told to list
+/// the tools again (it does not on its own).
 async fn granted_services_kept_fresh(
     client: &reqwest::Client,
     local_url: &str,
     auth_key: &str,
-) -> Arc<std::sync::RwLock<Vec<String>>> {
-    let granted = Arc::new(std::sync::RwLock::new(
-        tools::google_tool::granted_services(client, local_url, auth_key).await,
-    ));
-    let (granted_again, client, local_url, auth_key) =
-        (Arc::clone(&granted), client.clone(), local_url.to_string(), auth_key.to_string());
+) -> (Arc<std::sync::RwLock<Vec<String>>>, Arc<tokio::sync::Notify>) {
+    let mut first = tools::google_tool::granted_services(client, local_url, auth_key).await;
+    first.sort();
+    let granted = Arc::new(std::sync::RwLock::new(first));
+    let changed = Arc::new(tokio::sync::Notify::new());
+    let (granted_again, changed_again, client, local_url, auth_key) =
+        (Arc::clone(&granted), Arc::clone(&changed), client.clone(), local_url.to_string(), auth_key.to_string());
     tokio::spawn(async move {
         loop {
-            tokio::time::sleep(Duration::from_secs(60)).await;
-            let services = tools::google_tool::granted_services(&client, &local_url, &auth_key).await;
-            *granted_again.write().unwrap_or_else(|e| e.into_inner()) = services;
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_secs(60)) => {}
+                _ = tools::google_tool::GRANTS_CHANGED.notified() => {}
+            }
+            let fetched = tools::google_tool::fetch_granted(&client, &local_url, &auth_key).await;
+            if tools::google_tool::adopt_granted(&granted_again, fetched) {
+                changed_again.notify_one();
+            }
         }
     });
-    granted
+    (granted, changed)
 }
 
 /// Runs each tool call against srv at `local_url`, scoped to `block_id`.

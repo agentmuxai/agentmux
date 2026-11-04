@@ -197,11 +197,14 @@ type Running = Arc<Mutex<HashMap<String, tokio::task::AbortHandle>>>;
 /// `deadline_of` says how long each call may run ([`call_deadline`] in production).
 /// `initialize` and `tools/list` are answered at once; `tools/call` runs
 /// through `runner` as a task. `notifications/cancelled` stops the call it names.
+/// Each `tools_changed` wake-up tells the client the tool list changed, so it asks for it
+/// again: a client lists the tools once, when it connects, and never again unless told.
 pub(crate) async fn serve<R, W>(
     mut input: R,
     output: W,
     runner: Arc<dyn ToolRunner>,
     tools: Arc<dyn Fn() -> Value + Send + Sync>,
+    tools_changed: Arc<tokio::sync::Notify>,
     health: Arc<Health>,
     deadline_of: fn(&str, &Value) -> Duration,
 ) where
@@ -210,6 +213,7 @@ pub(crate) async fn serve<R, W>(
 {
     let (out_tx, writer) = spawn_writer(output);
     let session = Session { runner, health, out_tx, queues: Arc::default(), running: Arc::default() };
+    let tells_client = tokio::spawn(tell_tools_changed(tools_changed, session.out_tx.clone()));
     let mut line = String::new();
     loop {
         line.clear();
@@ -253,9 +257,21 @@ pub(crate) async fn serve<R, W>(
             }
         }
     }
+    tells_client.abort();
     drop(session);
     // Answers already queued still go out.
     let _ = tokio::time::timeout(Duration::from_secs(2), writer).await;
+}
+
+/// Sends `notifications/tools/list_changed` each time `changed` is woken (MCP's way to say the
+/// tools differ now; announced as `listChanged` in `initialize`).
+async fn tell_tools_changed(changed: Arc<tokio::sync::Notify>, out_tx: mpsc::UnboundedSender<Value>) {
+    loop {
+        changed.notified().await;
+        if out_tx.send(json!({ "jsonrpc": "2.0", "method": "notifications/tools/list_changed" })).is_err() {
+            return;
+        }
+    }
 }
 
 /// One writer, so two answers never interleave on the pipe.
@@ -284,7 +300,7 @@ fn initialize_answer(id: &Value) -> Value {
         "jsonrpc": "2.0", "id": id,
         "result": {
             "protocolVersion": "2024-11-05",
-            "capabilities": { "tools": {} },
+            "capabilities": { "tools": { "listChanged": true } },
             "serverInfo": { "name": "agentmux-mcp", "version": env!("CARGO_PKG_VERSION") }
         }
     })
