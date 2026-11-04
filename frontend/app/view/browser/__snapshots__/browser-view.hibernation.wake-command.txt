@@ -1,0 +1,7 @@
+diag view-mount window_label=main initial-urlAtom="https://example.com/page"
+register pane
+diag [hibernate] wake-start why=intent visible=false
+-- command
+diag [hibernate] wake-upgraded why=command
+-- agent after command: nothing
+probe end: rect.asleep=false drag.unavailable=true pane.visible=false pane.asleep=true pane.frozen=false hiddenSince=1793707200000

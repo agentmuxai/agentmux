@@ -1,0 +1,28 @@
+diag view-mount window_label=main initial-urlAtom="https://example.com/page"
+register pane
+host.discard is_discarded
+host.hibernationCheck skip
+host.setFrozen true
+diag [hibernate] frozen
+tryFreeze -> null
+-- tab pressed
+diag [hibernate] thaw why=intent
+host.setFrozen false
+-- shown with the thaw failing
+diag [hibernate] thaw why=show
+host.setFrozen false
+diag [hibernate] thaw why=retry
+host.setFrozen false
+diag [hibernate] thaw why=retry
+host.setFrozen false
+diag [hibernate] thaw why=retry
+host.setFrozen false
+diag [hibernate] thaw why=retry
+host.setFrozen false
+diag [hibernate] thaw why=retry
+host.setFrozen false
+probe gave up: rect.asleep=false drag.unavailable=true pane.visible=true pane.asleep=false pane.frozen=true hiddenSince=null
+-- hidden, then shown with the thaw working
+diag [hibernate] thaw why=show
+host.setFrozen false
+probe thawed: rect.asleep=false drag.unavailable=false pane.visible=true pane.asleep=false pane.frozen=false hiddenSince=null

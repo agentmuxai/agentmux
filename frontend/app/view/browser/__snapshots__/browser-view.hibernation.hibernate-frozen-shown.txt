@@ -1,0 +1,13 @@
+diag view-mount window_label=main initial-urlAtom="https://example.com/page"
+register pane
+host.discard is_discarded
+host.hibernationCheck skip
+host.setFrozen true
+diag [hibernate] frozen
+host.setFrozen false
+host.setFrozen true
+diag [hibernate] thaw why=show
+host.setFrozen false
+diag [hibernate] stays awake reason="something typed into it" asked=hidden
+tryHibernate -> "something typed into it"
+probe end: rect.asleep=false drag.unavailable=false pane.visible=true pane.asleep=false pane.frozen=false hiddenSince=null

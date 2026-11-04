@@ -1,0 +1,4 @@
+diag view-mount window_label=main initial-urlAtom="https://example.com/page"
+register pane
+host.discard is_discarded
+tryFreeze -> "this browser engine can't show a frozen page again"

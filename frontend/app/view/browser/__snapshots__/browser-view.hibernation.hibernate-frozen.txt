@@ -1,0 +1,29 @@
+diag view-mount window_label=main initial-urlAtom="https://example.com/page"
+register pane
+host.hibernationCheck unless_decided
+diag [hibernate] stays awake reason="something typed into it" asked=hidden
+tryHibernate -> "something typed into it"
+host.hibernationCheck unless_decided
+tryHibernate -> "something typed into it"
+-- freeze it first
+host.discard is_discarded
+host.setFrozen true
+diag [hibernate] frozen
+tryFreeze -> null
+probe frozen: rect.asleep=false drag.unavailable=true pane.visible=false pane.asleep=false pane.frozen=true hiddenSince=1793707200000
+-- hibernate a frozen page that has since typed text
+host.setFrozen false
+host.hibernationCheck unless_decided
+host.setFrozen true
+tryHibernate -> "something typed into it"
+probe frozen again: rect.asleep=false drag.unavailable=true pane.visible=false pane.asleep=false pane.frozen=true hiddenSince=1793707200000
+-- asked again: the remembered reason answers without a thaw
+tryHibernate -> "something typed into it"
+-- shown and hidden again: the thaw clears the remembered reason, and the page sleeps
+diag [hibernate] thaw why=show
+host.setFrozen false
+host.hibernationCheck unless_decided
+host.paneMemory
+model.hibernate hidden memory=4096
+tryHibernate -> null
+probe end: rect.asleep=true drag.unavailable=true pane.visible=false pane.asleep=true pane.frozen=false hiddenSince=1793707200000

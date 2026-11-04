@@ -1,0 +1,67 @@
+## empty
+<div class="browser-view">
+<div class="stub-nav" data-window-label="main">
+</div>
+<div class="stub-pending">
+</div>
+<div class="stub-offer" data-covered="false">
+</div>
+<div class="stub-popups">
+</div>
+<div class="stub-no-driver">
+</div>
+<div class="stub-downloads">
+</div>
+<div class="browser-placeholder">
+<div class="browser-empty">
+<div class="browser-empty-icon">🌐</div>
+<div class="browser-empty-text">Enter a URL above to browse</div>
+</div>
+</div>
+</div>
+## error, snapshot
+<div class="browser-view">
+<div class="stub-nav" data-window-label="main">
+</div>
+<div class="stub-pending">
+</div>
+<div class="stub-offer" data-covered="false">
+</div>
+<div class="stub-popups">
+</div>
+<div class="stub-no-driver">
+</div>
+<div class="stub-downloads">
+</div>
+<div class="browser-error">net::ERR_NAME_NOT_RESOLVED</div>
+<div class="browser-placeholder">
+<img class="browser-freeze-snapshot" alt="" src="data:image/png;base64,AAAA" style="top: 1px;">
+<div class="browser-drag-catcher">
+<div class="browser-drag-hole">
+</div>
+</div>
+</div>
+</div>
+## after the cap
+<div class="browser-view">
+<div class="stub-nav" data-window-label="main">
+</div>
+<div class="stub-pending">
+</div>
+<div class="stub-offer" data-covered="false">
+</div>
+<div class="stub-popups">
+</div>
+<div class="stub-no-driver">
+</div>
+<div class="stub-downloads">
+</div>
+<div class="browser-error">net::ERR_NAME_NOT_RESOLVED</div>
+<div class="browser-placeholder">
+<img class="browser-freeze-snapshot" alt="" src="data:image/png;base64,AAAA" style="top: 1px;">
+<div class="browser-drag-catcher">
+<div class="browser-drag-hole">
+</div>
+</div>
+</div>
+</div>
