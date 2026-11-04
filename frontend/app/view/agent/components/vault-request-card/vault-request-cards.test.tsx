@@ -207,6 +207,22 @@ describe("an agent's Vault requests as cards in its pane", () => {
         await waitFor(() => expect(calls("answer_use")).toEqual([{ id: "use-1", decision: "deny" }]));
     });
 
+    it("keeps what the person typed in the Vault pane's list when srv's lists refresh", async () => {
+        const typed = () => use({ block_id: "", needs_value: true, goes_ahead: false, command: "", origin: "https://irs.gov", field: "SSN", kind: "ssn" });
+        uses = [typed()];
+        await refreshVault();
+        render(() => <VaultRequestsList onFill={vi.fn()} />);
+        const item = await screen.findByRole("group");
+        const field = item.querySelector('input[type="password"]') as HTMLInputElement;
+        fireEvent.input(field, { target: { value: "987-65-4321" } });
+        // Another agent asks: srv sends both lists again, as fresh objects.
+        uses = [typed(), use({ id: "use-2", agent: "Other", block_id: "" })];
+        await refreshVault();
+        await waitFor(() => expect(screen.getAllByRole("group")).toHaveLength(2));
+        expect(screen.getAllByRole("group")[0], "the same item, not a new one").toBe(item);
+        expect((item.querySelector('input[type="password"]') as HTMLInputElement).value).toBe("987-65-4321");
+    });
+
     it("shows a parked agent's request on its My agents row and counts it in the status bar", async () => {
         uses = [use({ block_id: "", entry_label: "Parked token" }), use({ id: "use-2" })];
         await refreshVault();

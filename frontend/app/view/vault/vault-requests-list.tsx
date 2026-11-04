@@ -94,11 +94,25 @@ function VaultRequestItem(props: {
     );
 }
 
+/** `list` keyed by id: each item keeps its first object, so its component (and what the
+ *  person typed into it) lives across srv's refreshes, which send fresh objects. */
+function byId<T extends { id: string }>(list: () => T[]): () => T[] {
+    const kept = new Map<string, T>();
+    return createMemo(() => {
+        const items = list();
+        const live = new Set(items.map((x) => x.id));
+        for (const id of [...kept.keys()]) if (!live.has(id)) kept.delete(id);
+        return items.map((x) => kept.get(x.id) ?? (kept.set(x.id, x), x));
+    });
+}
+
 /** Every pending request, with "Deny all from <agent>" for an agent waiting on more than one.
  *  `focused` is the one the person was sent to (a parked agent's row, the status bar). */
 export function VaultRequestsList(props: { onFill: (r: VaultRequest) => void; focused?: Accessor<string> }): JSX.Element {
     const [error, setError] = createSignal<string | null>(null);
     const isFocused = (id: string) => !!id && props.focused?.() === id;
+    const uses = byId(vaultUses);
+    const requests = byId(vaultRequests);
     const several = createMemo(() => {
         const agents = new Map<string, string>();
         for (const a of [...vaultUses().map((u) => u.agent), ...vaultRequests().map((r) => r.agent)]) {
@@ -109,8 +123,8 @@ export function VaultRequestsList(props: { onFill: (r: VaultRequest) => void; fo
     return (
         <Show when={vaultUses().length + vaultRequests().length > 0}>
             <div class="vault-requests" role="region" aria-label="Agents' requests">
-                <For each={vaultUses()}>{(u) => <VaultUseItem use={u} focused={isFocused(u.id)} />}</For>
-                <For each={vaultRequests()}>
+                <For each={uses()}>{(u) => <VaultUseItem use={u} focused={isFocused(u.id)} />}</For>
+                <For each={requests()}>
                     {(r) => <VaultRequestItem request={r} onFill={props.onFill} onError={setError} focused={isFocused(r.id)} />}
                 </For>
                 <Show when={several().length > 0}>
