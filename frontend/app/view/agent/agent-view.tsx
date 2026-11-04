@@ -2,8 +2,6 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createSignInNotice } from "./sign-in-notice";
-import { createSystemNotifier } from "./system-notification";
 import { isAuthFailure, isStopping } from "@/app/store/agent-pane-state/types";
 import { AgentPaneProviders } from "./agent-media";
 import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
@@ -27,14 +25,9 @@ import { AgentBottomPanels } from "./components/AgentBottomPanels";
 import { AgentPreparingRow } from "./components/AgentPreparingRow";
 import { AgentComposerStrip } from "./components/AgentComposerStrip";
 import { AgentShellDrawer } from "./components/AgentShellDrawer";
-import { AgentDocumentView } from "./components/AgentDocumentView";
-import { HistoryLoadingRow } from "./components/HistoryLoadingRow";
-import { NewActivityPill } from "./components/NewActivityPill";
-import { AgentFooter } from "./components/AgentFooter";
+import { AgentComposerRegion, AgentTranscriptRegion, AgentViewPopoverHost } from "./components/AgentPaneRegions";
 import { AgentSearchBar } from "./components/AgentSearchBar";
 import { BtwOverlay } from "./components/BtwOverlay";
-import { SlashCommandPicker } from "./components/SlashCommandPicker";
-import { SlashHelpPanel } from "./components/SlashHelpPanel";
 import { usePaneReveal } from "./hooks/usePaneReveal";
 import { useLiveFeedRollOff } from "./hooks/useLiveFeedRollOff";
 import { useRenderDormant } from "./render-dormant";
@@ -47,7 +40,7 @@ import { useAmbientNarration } from "./hooks/useAmbientNarration";
 import { useBackgroundHandoffNarration } from "./hooks/useBackgroundHandoffNarration";
 import { useAgentActivitySummary } from "./hooks/useAgentActivitySummary";
 import { useAgentCommands } from "./hooks/useAgentCommands";
-import { useAgentControllerStatus } from "./hooks/useAgentControllerStatus";
+import { useAgentLaunchStatus } from "./hooks/useAgentLaunchStatus";
 import { useAgentDecisions } from "./hooks/useAgentDecisions";
 import { useAgentDropAttach } from "./hooks/useAgentDropAttach";
 import { lastUserMessage, useOfflineInput } from "./offline/useOfflineInput";
@@ -62,7 +55,7 @@ import { useHistoryPagination } from "./hooks/useHistoryPagination";
 import { createTranscriptSettleLatch } from "./transcript-cursor";
 import { useInSessionSearch } from "./hooks/useInSessionSearch";
 import { useNextPromptSuggestion } from "./hooks/useNextPromptSuggestion";
-import { computeTermSizeFromEl, usePtyWidth } from "./hooks/usePtyWidth";
+import { usePtyWidth } from "./hooks/usePtyWidth";
 import type { AgentDefinition } from "@/app/store/rpc-api";
 import { useScrollToNode } from "./hooks/useScrollToNode";
 import { useSnapshotPersistence } from "./hooks/useSnapshotPersistence";
@@ -75,14 +68,11 @@ import { createAgentAtoms } from "../../agent-model/state";
 import type { DocumentNode } from "../../agent-model/types";
 import { ShutdownOverlay } from "./shutdown/ShutdownOverlay";
 import { useAgentStream } from "./useAgentStream";
-import { clearFailure } from "./failure/failure-writer";
 import { markResolvedAuthErrors } from "./failure/resolved-auth-errors";
 import { registerAgentViewCommands } from "./agent-view-commands";
 import { createAgentViewControls, registerAgentViewControls, viewChipLabel } from "./agent-view-controls";
-import { AgentViewPopover } from "./components/AgentViewPopover";
 import { deriveDisplayNodes } from "./virtualization/verbosity";
 import { paneMeta } from "./pane-meta";
-import { startupOnReady } from "./startup/startupOnReady";
 import { useFailureRow } from "./failure/useFailureRow";
 import { usePaneRegistration } from "./hooks/usePaneRegistration";
 import { useShellDrawerLifecycle } from "./hooks/useShellDrawerLifecycle";
@@ -268,49 +258,20 @@ export const AgentPresentationView = ({
 
     useTurnEndSweep({ turnEnded: turnJustEndedAtom, paneModel, onTurnEnded: liveFeed.scheduleRollOff });
 
-    const postSystemNotification = createSystemNotifier(paneModel.document, (action) => paneModel.dispatchDoc(action));
-
-    const signIn = createSignInNotice(postSystemNotification);
-    // On a first connect (no existing session) the startup sequence is the opening turn.
-    const startup = startupOnReady({
+    const status = useAgentLaunchStatus({
         blockId: model.blockId,
         agentId,
         block,
         currentAgent,
-        peerAgents: agentDefinitions,
-        providerDisplayName: () => provider()?.displayName ?? providerKey(),
-        send: (payload) => commands.sendWithState(payload, [], true),
-        log,
-    });
-    const status = useAgentControllerStatus({
-        blockId: model.blockId,
+        agentDefinitions,
         provider,
+        providerKey,
+        paneModel,
         log,
-        onLoginSuccess: (email) => {
-            signIn.answered(email ? `Logged in as **${email}**` : "Login successful");
-        },
-        onNotify: (text, style, kind) => (kind === "sign-in" ? signIn.needed(text, style) : postSystemNotification(text, style)),
-        onAccountBound: signIn.bound,
-        onReady: startup,
-        // A relogin or terminal login refreshed the credential: retry the failed turn, so the agent recovers in one click.
-        onRecovered: () => {
-            // Another recovery flow is still running: leave the failure row and `loginWaiting` alone. This
-            // flow's credential is good, but a retry now could start a turn the other flow's restart would
-            // kill, and if that flow fails nothing retries, so the row is the user's only way back. If it
-            // succeeds, its own onRecovered runs this check with `loginWaiting()` false and does the retry.
-            if (status.loginWaiting()) return;
-            // Clear the failure first: a send reads the failure showing before TurnStart, so a stale auth
-            // failure would reject the very resend recovery enabled. Every caller that gets here wants a
-            // retry; loginViaTerminal's no-retry path calls onReady() instead.
-            clearFailure(paneModel, { reason: "recovered", system: true });
-            retryLastTurn();
-        },
-        getInitialTermSize: () => computeTermSizeFromEl(rootRef),
-        // Mount-time turn-phase reconciliation (REPORT_AGENT_PANE_STATE_RECONCILIATION_2026_07_07.md Finding 1).
-        // Through paneModel, which never throws: this can resolve before registerPane runs for a pane mid-mount.
-        onControllerStatus: (rts) => {
-            reconcileTurnActive(!!rts.turn_active);
-        },
+        sendOpeningTurn: (payload) => commands.sendWithState(payload, [], true),
+        retryLastTurn: () => retryLastTurn(),
+        rootEl: () => rootRef,
+        reconcileTurnActive,
     });
 
     // Hold the reveal until the launch flow is past the phases that can pop the auth panel in (hooks/usePaneReveal.ts).
@@ -618,39 +579,38 @@ export const AgentPresentationView = ({
             {/* The scroll region: `.agent-document` inside AgentDocumentView is absolutely positioned to fill it. The
                 working row is a sibling below the dock, not an overlay on this box
                 (SPEC_AGENT_WORKING_ROW_ABOVE_COMPOSER_2026_09_01.md). */}
-            <div class="agent-document-scroll-region">
-                <HistoryLoadingRow readiness={readiness} />
-                <AgentDocumentView
-                    documentNodes={shownDocument}
-                    documentStateAtom={agentAtoms().documentStateAtom}
-                    onOpenHistory={() => void openOrFocusHistoryTab({ currentBlockId: model.blockId, agentId })}
-                    onAgentErrorLogin={() => {
-                        // The button says "Login Again", so it forces a fresh OAuth for every provider, like the failure
-                        // row's. Seeding from the personal credential here would reuse a possibly equally stale token
-                        // (retro-agent-auth-relogin-noop-2026-07-01).
-                        log("auth", "Login Again (inline error node) — forcing a fresh provider login");
-                        void status.relogin();
-                    }}
-                    onLoadOlder={history.loadOlder}
-                    loadingOlder={history.loadingOlder}
-                    // The one paging gate: the list pages only while this is true.
-                    hasOlderHistory={() => liveFeed.canPageOlder() && history.historyOffset() > 0}
-                    followingRef={(f) => liveFeed.setFollowingBottom(f)}
-                    newActivityRef={(a) => setNewActivitySource(() => a)}
-                    scrollCommand={scroll.command}
-                    scrollToBottomRef={(fn) => {
-                        scrollToBottomFn = fn;
-                    }}
-                    highlightNodeId={search.highlightId}
-                    registerHistoryReadyCallback={(fn) => {
-                        historyReadyFn = fn;
-                    }}
-                    zoomFactor={zoomFactor}
-                    blockId={model.blockId}
-                    layoutView={layoutView}
-                />
-                <NewActivityPill visible={() => newActivitySource()()} onJump={() => scrollToBottomFn?.("new-activity-pill")} />
-            </div>
+            <AgentTranscriptRegion
+                readiness={readiness}
+                documentNodes={shownDocument}
+                documentStateAtom={agentAtoms().documentStateAtom}
+                onOpenHistory={() => void openOrFocusHistoryTab({ currentBlockId: model.blockId, agentId })}
+                onAgentErrorLogin={() => {
+                    // The button says "Login Again", so it forces a fresh OAuth for every provider, like the failure
+                    // row's. Seeding from the personal credential here would reuse a possibly equally stale token
+                    // (retro-agent-auth-relogin-noop-2026-07-01).
+                    log("auth", "Login Again (inline error node) — forcing a fresh provider login");
+                    void status.relogin();
+                }}
+                onLoadOlder={history.loadOlder}
+                loadingOlder={history.loadingOlder}
+                // The one paging gate: the list pages only while this is true.
+                hasOlderHistory={() => liveFeed.canPageOlder() && history.historyOffset() > 0}
+                followingRef={(f) => liveFeed.setFollowingBottom(f)}
+                newActivityRef={(a) => setNewActivitySource(() => a)}
+                scrollCommand={scroll.command}
+                scrollToBottomRef={(fn) => {
+                    scrollToBottomFn = fn;
+                }}
+                highlightNodeId={search.highlightId}
+                registerHistoryReadyCallback={(fn) => {
+                    historyReadyFn = fn;
+                }}
+                zoomFactor={zoomFactor}
+                blockId={model.blockId}
+                layoutView={layoutView}
+                newActivityVisible={() => newActivitySource()()}
+                onJumpToNewActivity={() => scrollToBottomFn?.("new-activity-pill")}
+            />
 
             {/* Login, decisions, questions, queue, recovery banners, activity dock,
                 working row and session notices (components/AgentBottomPanels.tsx). */}
@@ -712,48 +672,16 @@ export const AgentPresentationView = ({
             />
             {/* Hangs from the chip, or from the strip while there is none (opened from the menu or the palette). Keyed by
                 which: the panel reads its anchor once, and a change of view can remove the chip under it. */}
-            <Show when={viewControls.popoverOpen() ? (viewChipLabel(viewControls.resolved()) ? "chip" : "strip") : undefined} keyed>
-                {(anchor) => (
-                    <AgentViewPopover
-                        controls={viewControls}
-                        anchor={rootRef?.querySelector(anchor === "chip" ? "[data-agent-view-chip]" : ".agent-composer-strip") ?? undefined}
-                    />
-                )}
-            </Show>
+            <AgentViewPopoverHost controls={viewControls} rootEl={() => rootRef} />
 
-            <div class="agent-composer-region" data-toast-avoid>
-                <Show when={commands.helpVisible()}>
-                    <SlashHelpPanel
-                        commands={commands.availableCommands()}
-                        onInvoke={(cmd) => {
-                            commands.closeHelp();
-                            // Through sendWithState, not sendMessage: a bare sendMessage assumes no turn is running, so
-                            // /login from this panel mid-turn would restart, and kill, that turn.
-                            void commands.sendWithState(`/${cmd.name}`);
-                        }}
-                        onClose={commands.closeHelp}
-                    />
-                </Show>
-                <Show when={commands.pickerSpec()}>
-                    {(spec) => (
-                        <SlashCommandPicker
-                            spec={spec()}
-                            onSelect={commands.resolvePicker}
-                            onDismiss={commands.dismissPicker}
-                        />
-                    )}
-                </Show>
-                <AgentFooter
-                    agentName={agentName()}
-                    onSendMessage={offline.submit}
-                    onTyping={() => scrollToBottomFn?.("typing")}
-                    onStopAgent={commands.escapeOnEmptyComposer}
-                    onRecallLatestQueued={commands.recallLatestHeld}
-                    getCompletions={commands.completions}
-                    viewModel={model}
-                    isComposerEmptyRef={(fn) => (composerIsEmptyFn = fn)}
-                />
-            </div>
+            <AgentComposerRegion
+                commands={commands}
+                offline={offline}
+                model={model}
+                agentName={agentName}
+                onTyping={() => scrollToBottomFn?.("typing")}
+                isComposerEmptyRef={(fn) => (composerIsEmptyFn = fn)}
+            />
             </div>
             {/* The shell drawer: outside `.agent-view-zoomed`, a flex child of `.agent-view`. */}
             <AgentShellDrawer
