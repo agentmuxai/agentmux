@@ -376,8 +376,8 @@
 119 frontend/app/drag/CrossWindowDropOverlay.tsx::CrossWindowDropOverlay
 132 frontend/app/element/ModalLayer.tsx::ModalLayer
 590 frontend/app/element/PaneChrome.tsx::renderPaneChromeShell
-462 frontend/app/element/PaneTabStrip.tsx::PaneTabStrip
-412 frontend/app/element/PaneTabStrip.tsx::PaneTabStripItem
+459 frontend/app/element/PaneTabStrip.tsx::PaneTabStrip
+403 frontend/app/element/PaneTabStrip.tsx::PaneTabStripItem
 122 frontend/app/element/ProviderLogo.tsx::ProviderLogo
 114 frontend/app/element/anchored-popover.tsx::AnchoredPopover
 196 frontend/app/element/flyoutmenu.tsx::FlyoutMenu
