@@ -303,28 +303,12 @@ async fn run_wait_for(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
     require_agent_env(local_url, auth_key, block_id)?;
     let auth = sign_ui_automation_auth()?;
-    let text = arguments.get("text").and_then(|v| v.as_str()).map(str::to_string);
-    let url_contains = arguments.get("url_contains").and_then(|v| v.as_str()).map(str::to_string);
-    let gone = arguments.get("gone").and_then(|v| v.as_str()).map(str::to_string);
-    let timeout_ms = arguments
-        .get("timeout_seconds")
-        .and_then(|v| v.as_f64())
-        .map(|s| (s * 1000.0).round() as u64);
-    if [text.is_some(), url_contains.is_some(), gone.is_some()].iter().filter(|b| **b).count() != 1 {
-        anyhow::bail!("give exactly one of until_text, until_url or until_gone");
-    }
+    let wait = wait_request(arguments, auth)?;
     let req_url = format!("{}/api/v1/ui/browser/wait_for", local_url.trim_end_matches('/'));
     let resp = client
         .post(&req_url)
         .header(AUTH_KEY_HEADER, auth_key)
-        .json(&agentmux_common::api_types::UiBrowserWaitForRequest {
-            auth,
-            pane: pane_arg(arguments),
-            text,
-            url_contains,
-            gone,
-            timeout_ms,
-        })
+        .json(&wait)
         .timeout(std::time::Duration::from_secs(90))
         .send()
         .await
@@ -954,6 +938,21 @@ fn granted_text(d: &Value) -> String {
     )
 }
 
+/// The request for a `wait`: at most one condition (`until_text`, `until_url`, `until_gone` or
+/// `until_state`), and none means the page settling.
+fn wait_request(arguments: &Value, auth: agentmux_common::api_types::UiAutomationAuth) -> Result<agentmux_common::api_types::UiBrowserWaitForRequest> {
+    let text_of = |k: &str| arguments.get(k).and_then(|v| v.as_str()).map(str::to_string);
+    let (text, url_contains, gone, state) = (text_of("text"), text_of("url_contains"), text_of("gone"), text_of("state"));
+    let timeout_ms = arguments.get("timeout_seconds").and_then(|v| v.as_f64()).map(|s| (s * 1000.0).round() as u64);
+    if [text.is_some(), url_contains.is_some(), gone.is_some(), state.is_some()].iter().filter(|b| **b).count() > 1 {
+        anyhow::bail!("give at most one of until_text, until_url, until_gone or until_state (none waits for the page to settle)");
+    }
+    if state.as_deref().is_some_and(|s| s != "load" && s != "idle") {
+        anyhow::bail!("until_state is \"load\" or \"idle\"");
+    }
+    Ok(agentmux_common::api_types::UiBrowserWaitForRequest { auth, pane: pane_arg(arguments), text, url_contains, gone, state, timeout_ms })
+}
+
 /// What a click, fill, select or check tells the agent: the element after it,
 /// and for a committing click who let it through. The agent sees neither the
 /// approval banner nor a clock (form-filling fixes plan §2.5).
@@ -968,14 +967,29 @@ fn act_result_text(name: &str, r: &str, body: &serde_json::Value) -> String {
         };
         return format!(
             "{name} {r}: done without asking (auto-approve on, {how_long}; nobody checked this one, so check \
-             every committing click yourself). The element now: {after}"
+             every committing click yourself). The element now: {after}{}",
+            page_now_text(body)
         );
     }
     if body.pointer("/data/approved_by_user").and_then(|v| v.as_bool()) == Some(true) {
         let secs = body.pointer("/data/waited_ms").and_then(|v| v.as_u64()).unwrap_or(0) as f64 / 1000.0;
-        return format!("{name} {r}: done; the user approved this click in the pane after {secs:.0} s. The element now: {after}");
+        return format!("{name} {r}: done; the user approved this click in the pane after {secs:.0} s. The element now: {after}{}", page_now_text(body));
     }
-    format!("{name} {r}: done. The element now: {after}")
+    format!("{name} {r}: done. The element now: {after}{}", page_now_text(body))
+}
+
+/// Where the page is after an action: its address and title, and that the
+/// address is not the one the agent last read when it navigated.
+fn page_now_text(body: &serde_json::Value) -> String {
+    let Some(url) = body.pointer("/data/page/url").and_then(|v| v.as_str()) else { return String::new() };
+    let title = body.pointer("/data/page/title").and_then(|v| v.as_str()).unwrap_or("");
+    let changed = body.pointer("/data/page/changed").and_then(|v| v.as_bool()) == Some(true);
+    let title = if title.is_empty() { String::new() } else { format!(", titled {title:?}") };
+    if changed {
+        format!("\nThe page moved: it is now {url}{title}. Take a snapshot (or wait) before acting on it.")
+    } else {
+        format!("\nThe page is still {url}{title}.")
+    }
 }
 
 /// `fill` with `vault`: srv asks the person where the entry may go, then the host
@@ -1339,6 +1353,20 @@ mod tests {
                 act_result_text("Browser click", "e3", &body),
                 r#"Browser click e3: done; the user approved this click in the pane after 12 s. The element now: {"tag":"button"}"#
             );
+        }
+
+        #[test]
+        fn an_action_says_where_the_page_is_and_when_its_address_moved() {
+            let stayed = json!({ "data": { "after": null, "page": { "url": "http://a.test/form", "title": "Form", "changed": false } } });
+            let said = act_result_text("Browser fill", "e1", &stayed);
+            assert!(said.ends_with("\nThe page is still http://a.test/form, titled \"Form\"."), "{said}");
+            let moved = json!({ "data": { "after": null, "page": { "url": "http://a.test/next", "title": "", "changed": true } } });
+            let said = act_result_text("Browser click", "e2", &moved);
+            assert!(said.contains("The page moved: it is now http://a.test/next. Take a snapshot"), "{said}");
+            assert!(!said.contains("titled"), "{said}");
+            // A page that didn't answer in time adds nothing.
+            let silent = json!({ "data": { "after": null } });
+            assert!(!act_result_text("Browser click", "e2", &silent).contains("page"));
         }
 
         #[test]

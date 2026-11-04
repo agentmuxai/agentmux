@@ -63,4 +63,9 @@ pub struct AgentRuntime {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub color: Option<String>,
+    /// Why a start would be refused now, for an agent that is stopped and wanted running (a message waits
+    /// for it, or its block says running): a limit it is over, as `agent_lifecycle::start_blocked` words it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub blocked: Option<String>,
 }

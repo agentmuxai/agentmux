@@ -104,7 +104,13 @@
     K.elementAt = (x, y) => {
         const el = document.elementFromPoint(x, y);
         const frame = el?.closest?.("[data-blockid]");
-        return { blockId: frame?.getAttribute("data-blockid") ?? null, cls: (el?.className ?? "").toString().slice(0, 50), tag: el?.tagName ?? null };
+        return {
+            blockId: frame?.getAttribute("data-blockid") ?? null,
+            cls: (el?.className ?? "").toString().slice(0, 50),
+            tag: el?.tagName ?? null,
+            // The point may be on a line or span inside a tool's scroll box, not on the box itself.
+            inHandoffBox: !!el?.closest?.(".scroll-handoff-box"),
+        };
     };
 
     /** A point inside the transcript to send input to, or null. kind: "text" | "expander" | "scroller". */

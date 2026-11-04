@@ -58,6 +58,11 @@ export interface AnchoredPopoverProps {
     onDismiss?: (reason: "outside" | "escape") => void;
     /** A press on this target counts as inside (a submenu, mounted apart from its parent). */
     keepOpenOn?: (target: Node) => boolean;
+    /** Keep the panel inside this element (a browser pane) when it fits; with `alignToAnchorSide`, open it from the side its anchor is on. */
+    containWithin?: () => HTMLElement | null | undefined;
+    alignToAnchorSide?: boolean;
+    /** Cap the body at the room the window leaves and scroll inside it, instead of running off the window. */
+    fitHeight?: boolean;
     /** Classes for the body: the panel's own styling. */
     class?: string;
     /** Inline style for the body (e.g. a fixed width, which then scales too). */
@@ -88,6 +93,33 @@ function isEditable(el: EventTarget | null): boolean {
     return el.isContentEditable || el.matches("input, textarea, select");
 }
 
+/** Dismiss on a press outside the panel (its anchor and what `keepOpenOn` names count as inside) or on Esc. */
+function listenForDismiss(props: AnchoredPopoverProps, shell: () => HTMLElement | undefined): void {
+    if (!props.onDismiss) return;
+    const anchorEl = (): Element | null => {
+        const a = untrack(() => props.anchor);
+        return a instanceof Element ? a : null;
+    };
+    const onMouseDown = (e: MouseEvent) => {
+        const t = e.target as Node;
+        if (shell()?.contains(t) || anchorEl()?.contains(t) || props.keepOpenOn?.(t)) return;
+        props.onDismiss?.("outside");
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+        if (e.key !== "Escape") return;
+        // Esc in a field inside the panel belongs to the field (e.g. cancel a rename).
+        if (isEditable(e.target) && shell()?.contains(e.target as Node)) return;
+        e.stopPropagation();
+        props.onDismiss?.("escape");
+    };
+    document.addEventListener("mousedown", onMouseDown, true);
+    window.addEventListener("keydown", onKeyDown, true);
+    onCleanup(() => {
+        document.removeEventListener("mousedown", onMouseDown, true);
+        window.removeEventListener("keydown", onKeyDown, true);
+    });
+}
+
 export const AnchoredPopover = (props: AnchoredPopoverProps): JSX.Element => {
     // Portal-mounted: drop its pane hole while its window tab is hidden (pane-overlay.ts).
     const hiddenTab = useHiddenTabMarker();
@@ -95,6 +127,7 @@ export const AnchoredPopover = (props: AnchoredPopoverProps): JSX.Element => {
     let shell: HTMLDivElement | undefined;
     let body: HTMLDivElement | undefined;
     let entered = false;
+    const [roomHeight, setRoomHeight] = createSignal<number | undefined>();
     const [shellStyle, setShellStyle] = createSignal<JSX.CSSProperties>(
         untrack(() => props.motion) ? WAITING_STYLE : IDLE_STYLE,
     );
@@ -127,45 +160,36 @@ export const AnchoredPopover = (props: AnchoredPopoverProps): JSX.Element => {
             }
             const reference = referenceFor(anchor);
             const placement = untrack(() => props.placement) ?? "top-start";
+            const container = untrack(() => props.containWithin)?.() ?? undefined;
             const update = async () => {
                 const pos = await computeMenuPosition(
-                    { anchor: reference.getBoundingClientRect(), placement, avoidNativePanes: false },
+                    {
+                        anchor: reference.getBoundingClientRect(),
+                        placement,
+                        avoidNativePanes: false,
+                        containWithin: container,
+                        alignToAnchorSide: untrack(() => props.alignToAnchorSide),
+                    },
                     el,
                 );
                 if (disposed) return;
                 setShellStyle(pos.style);
+                if (untrack(() => props.fitHeight) && Number.isFinite(pos.maxHeight)) setRoomHeight(pos.maxHeight);
                 shown();
             };
             stopAutoUpdate?.();
-            stopAutoUpdate = autoUpdate(reference, el, update);
+            const stopFloating = autoUpdate(reference, el, update);
+            // autoUpdate watches the anchor and the panel, not the container: a pane resized under an open panel moves it.
+            const observer = container && typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => void update()) : undefined;
+            if (container) observer?.observe(container);
+            stopAutoUpdate = () => {
+                stopFloating();
+                observer?.disconnect();
+            };
         });
     };
 
-    onMount(() => {
-        if (!props.onDismiss) return;
-        const anchorEl = (): Element | null => {
-            const a = untrack(() => props.anchor);
-            return a instanceof Element ? a : null;
-        };
-        const onMouseDown = (e: MouseEvent) => {
-            const t = e.target as Node;
-            if (shell?.contains(t) || anchorEl()?.contains(t) || props.keepOpenOn?.(t)) return;
-            props.onDismiss?.("outside");
-        };
-        const onKeyDown = (e: KeyboardEvent) => {
-            if (e.key !== "Escape") return;
-            // Esc in a field inside the panel belongs to the field (e.g. cancel a rename).
-            if (isEditable(e.target) && shell?.contains(e.target as Node)) return;
-            e.stopPropagation();
-            props.onDismiss?.("escape");
-        };
-        document.addEventListener("mousedown", onMouseDown, true);
-        window.addEventListener("keydown", onKeyDown, true);
-        onCleanup(() => {
-            document.removeEventListener("mousedown", onMouseDown, true);
-            window.removeEventListener("keydown", onKeyDown, true);
-        });
-    });
+    onMount(() => listenForDismiss(props, () => shell));
 
     onCleanup(() => {
         disposed = true;
@@ -199,7 +223,8 @@ export const AnchoredPopover = (props: AnchoredPopoverProps): JSX.Element => {
                         (props.zoom ?? "chrome") === "chrome" ? "anchored-popover-body--chrome-zoom" : "",
                         props.class ?? "",
                     ].filter(Boolean).join(" ")}
-                    style={props.style}
+                    // The room is in screen pixels and the body is zoomed, so its own max-height is the room over the zoom.
+                    style={roomHeight() === undefined ? props.style : { ...props.style, "max-height": `calc(${roomHeight()}px / var(--zoomfactor, 1))`, "overflow-y": "auto" }}
                     role={props.role}
                     aria-label={props["aria-label"]}
                 >

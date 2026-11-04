@@ -290,7 +290,10 @@ pub(super) fn register_bundle_import(engine: &Arc<WshRpcEngine>, state: &AppStat
     let s = state.clone();
     engine.register_typed(COMMAND_BUNDLE_IMPORT, move |req: BundleImportReq, _ctx| {
         let s = s.clone();
-        async move { bundle_import(&s, req) }
+        async move {
+            crate::backend::bundle_use::note("import");
+            bundle_import(&s, req)
+        }
     });
 }
 
@@ -940,6 +943,7 @@ pub(super) fn register_bundle_import_commit(engine: &Arc<WshRpcEngine>, state: &
             let broker = broker.clone();
             let app = app.clone();
             async move {
+                crate::backend::bundle_use::note("import_commit");
                 let widgets_input = (!req.include_widgets.is_empty())
                     .then(|| (req.file_path.clone(), req.zip_base64.clone(), req.expected_content_digest.clone(), req.include_widgets.clone()));
                 let mut resp = bundle_import_commit_impl(&id_store, &identity_store, &mstore, &broker, req).await?;

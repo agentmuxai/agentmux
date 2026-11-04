@@ -202,6 +202,29 @@ async fn stop(state: &AppState, live: &Live, why: &str) -> bool {
     }
 }
 
+/// The words of a note to the lead of an agent that was stopped to make room for another's start: who, why,
+/// what it was working on (its goal, cut short), and how to get it back.
+fn stop_note(victim: &str, started: &str, why: &str, goal: Option<&str>) -> String {
+    let mut note = format!("Your agent {victim} was stopped to make room for starting {started} ({why}).");
+    if let Some(goal) = goal.map(str::trim).filter(|g| !g.is_empty()) {
+        let short: String = goal.chars().take(160).collect();
+        note.push_str(&format!(" It was working on: {short}{}.", if short.len() < goal.len() { "…" } else { "" }));
+    }
+    note.push_str(" Start it again with Agents start once there is room.");
+    note
+}
+
+/// Tell the stopped agent's lead (see `worker_notes::tell_leader`) that admission stopped it: losing an agent
+/// in silence is what this exists to prevent.
+fn tell_leader_of_stop(state: &AppState, victim: &Live, started: &str, why: &str) {
+    let name_of = |id: &str| state.mstore.agent_def_get(id).ok().flatten().map(|d| d.name).unwrap_or_else(|| id.to_string());
+    let goal = state.mstore.get::<obj::Block>(&victim.block_id).ok().flatten().and_then(|b| crate::backend::work_facts::goal_of(&b.meta));
+    let note = stop_note(&name_of(&victim.uid), &name_of(started), why, goal.as_deref());
+    if !crate::backend::worker_notes::tell_leader(&state.mstore, &victim.uid, &note) {
+        tracing::info!(agent = %victim.agent_id, "agent lifecycle: no leader to tell that it was stopped to make room");
+    }
+}
+
 /// One idle sweep: stop each agent with no view that has been idle past its window and that nothing
 /// keeps running. Returns how many were stopped.
 pub(crate) async fn sweep_once(state: &AppState) -> usize {
@@ -499,6 +522,7 @@ async fn admit(state: &AppState, agent_id: &str, commit_pct: impl Fn() -> Option
             return Err(format!("capacity: {}, and no agent with no view is idle enough to stop for it", over.why()));
         };
         if stop(state, &victim, &format!("to make room: {}", over.why())).await {
+            tell_leader_of_stop(state, &victim, agent_id, over.why());
             if commit_over.is_some() {
                 stopped_for_commit = Some(victim.agent_id.clone());
             }
