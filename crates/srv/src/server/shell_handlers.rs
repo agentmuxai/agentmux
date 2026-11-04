@@ -37,7 +37,8 @@ fn format_output(bytes: Vec<u8>, cap: u64) -> String {
 /// by the UI stop button on a running PersistentShellBlock. The runner then
 /// publishes a `stopped` exit event.
 pub(crate) fn shell_stop(state: &AppState, req: CommandShellStopData) -> Result<ShellStopResult, String> {
-    let stopped = state.shell_sessions.stop(&req.shell_id);
+    let registry = &state.shell_sessions;
+    let stopped = registry.stop(&req.shell_id);
     tracing::info!(shell_id = %req.shell_id, stopped, "shellstop");
     Ok(ShellStopResult { stopped })
 }
