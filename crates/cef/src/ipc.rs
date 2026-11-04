@@ -980,6 +980,7 @@ async fn route_command(
             relayed?;
             Ok(serde_json::json!(true))
         }
+        "browser_pane_set_badge" => Ok(crate::browser_pane::size_badge::handle(state, args)),
         "browser_pane_focus" => {
             let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
             tracing::info!("[ipc] browser_pane_focus block_id={}", block_id);

@@ -1459,7 +1459,7 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
                 badge's strip (use-pane-rect-sync.ts, SIZE_BADGE_STRIP_CSS).
                 SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md. */}
             <Show when={!props.preview && nodeModel.isSplitterDragging()}>
-                <PaneSizeBadge target={frameEl} />
+                <PaneSizeBadge target={frameEl} blockId={nodeModel.blockId} />
             </Show>
             {/* BlockMask is last in DOM so it paints above all block content,
                 including hardware-accelerated WebGL surfaces */}

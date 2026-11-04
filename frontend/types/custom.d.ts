@@ -346,6 +346,8 @@ declare global {
         }): Promise<void>;
         /** Regions of this window where app UI overlaps native panes, so the host clips them. */
         setOverlayClip(rects: { x: number; y: number; w: number; h: number }[], windowLabel: string): Promise<void>;
+        /** Show (an object) or remove (null) the pane's size badge, drawn inside its page (Views panes on Windows). */
+        setBadge?(blockId: string, badge: { text: string; color: string; background: string; border: string } | null): Promise<void>;
         /** Answer a camera/microphone request (`pane-media-permission-request`). */
         respondMediaPermission(requestId: number, allow: boolean): Promise<void>;
         /** Stop a pane's camera/microphone capture. */

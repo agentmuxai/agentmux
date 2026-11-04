@@ -14,6 +14,7 @@ pub mod leaving;
 pub mod page_close;
 pub mod identity;
 pub mod profile_carry;
+pub mod size_badge;
 pub mod trace;
 #[cfg(target_os = "windows")]
 pub mod hwnd;

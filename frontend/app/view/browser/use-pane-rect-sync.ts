@@ -1,6 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { isViewsPanesOnWindows } from "@/app/platform/pane-backend";
 import { createEffect, createMemo, createSignal, on, onCleanup, onMount, type Accessor } from "solid-js";
 import { getApi } from "@/util/app-api";
 import { FLOATER_BROWSER_EDGE_INSET } from "@/app/workspace/floater-resize";
@@ -157,7 +158,7 @@ export function usePaneRectSync(params: {
             height = Math.max(1, height - b);
         }
         const rect = { x, y, width, height };
-        return model.splitterDragging?.() ? insetForSizeBadge(rect, dpr) : rect;
+        return model.splitterDragging?.() && !isViewsPanesOnWindows() ? insetForSizeBadge(rect, dpr) : rect;
     };
 
     /** CSS-pixel rect (same coordinate space as `getBoundingClientRect`
@@ -170,7 +171,7 @@ export function usePaneRectSync(params: {
             x: Math.round(r.x),
             y: Math.round(r.y),
             w: Math.round(r.width),
-            h: model.splitterDragging?.() ? Math.max(1, h - SIZE_BADGE_STRIP_CSS) : h,
+            h: model.splitterDragging?.() && !isViewsPanesOnWindows() ? Math.max(1, h - SIZE_BADGE_STRIP_CSS) : h,
         };
     };
 
