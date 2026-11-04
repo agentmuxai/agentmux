@@ -328,7 +328,7 @@ fn agent_routes(state: &AppState) -> Router<AppState> {
         .route_layer(middleware::from_fn_with_state(state.clone(), agent_only::require_agent_token))
 }
 
-    // MessageBus routes (authed, localhost-only)
+/// MessageBus routes (authed, localhost-only).
 fn bus_routes() -> Router<AppState> {
     Router::new()
         .route("/api/bus/register", post(messagebus::handle_register))
@@ -867,7 +867,6 @@ fn widget_files_routes() -> Router<AppState> {
         .route("/agentmux/widget-files/:id/:hash/:key/*path", get(super::widget_handlers::handle_widget_file))
         .route("/agentmux/widget-sdk/:file", get(super::widget_handlers::handle_widget_sdk))
 }
-
 
 /// What an agent changes about the agents themselves: their seats and names. Each acts as the agent its token
 /// names and is recorded under it.
