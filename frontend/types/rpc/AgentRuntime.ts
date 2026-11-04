@@ -26,4 +26,9 @@ block_id?: string, desired: AgentDesiredState, name: string, provider: string, i
 /**
  * The colour its pane shows, once it has had one.
  */
-color?: string, };
+color?: string, 
+/**
+ * Why a start would be refused now, for an agent that is stopped and wanted running (a message waits
+ * for it, or its block says running): a limit it is over, as `agent_lifecycle::start_blocked` words it.
+ */
+blocked?: string, };

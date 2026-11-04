@@ -234,6 +234,21 @@ fn one_stop_is_enough_only_when_the_shortfall_is_within_what_it_frees() {
     assert!(err.contains("about 3.6 GB has to be freed") && err.contains("no agent was stopped"), "{err}");
 }
 
+/// The note a lead gets when an agent of theirs is stopped to make room: who, why, what it was doing.
+#[test]
+fn the_note_to_a_leader_names_the_agent_why_and_what_it_was_doing() {
+    let note = stop_note("Loap", "QTest", "memory commit is at 89% (the limit is 85%)", Some("  fix the viewer feed  "));
+    assert_eq!(
+        note,
+        "Your agent Loap was stopped to make room for starting QTest (memory commit is at 89% (the limit is 85%)). It was working on: fix the viewer feed. Start it again with Agents start once there is room."
+    );
+    let long = "x".repeat(200);
+    let cut = stop_note("Loap", "QTest", "why", Some(&long));
+    assert!(cut.contains(&format!("{}…", "x".repeat(160))) && !cut.contains(&"x".repeat(161)), "{cut}");
+    assert!(!stop_note("Loap", "QTest", "why", None).contains("working on"), "no goal, no claim about its work");
+    assert!(!stop_note("Loap", "QTest", "why", Some("   ")).contains("working on"));
+}
+
 /// The operator's case on narko (commit 86-89% against 85%): an idle agent was stopped for a start that
 /// still did not happen. With the shortfall past what one stop frees, nobody is stopped.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

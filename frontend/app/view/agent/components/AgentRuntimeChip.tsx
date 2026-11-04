@@ -32,18 +32,25 @@ const DETAIL_TEXT: Record<string, string> = {
     starts_on_first_message: "Runs on its first message",
 };
 
-export function runtimeChip(state: AgentRuntime["state"]): RuntimeChip {
-    return CHIPS[state];
+/** A stopped agent that is wanted running but cannot start: not the same as one stopped on purpose. */
+const BLOCKED_CHIP: RuntimeChip = { label: "can't start", tone: "warn", icon: "triangle-exclamation" };
+
+export function runtimeChip(state: AgentRuntime["state"], blocked?: string): RuntimeChip {
+    return blocked && state === "stopped" ? BLOCKED_CHIP : CHIPS[state];
 }
 
 /** Reads `props.state`, not a destructured `state`: the chip follows the agent from working to idle. */
-export function AgentRuntimeChip(props: { state: AgentRuntime["state"]; detail?: string }): JSX.Element {
-    const chip = () => runtimeChip(props.state);
+export function AgentRuntimeChip(props: { state: AgentRuntime["state"]; detail?: string; blocked?: string }): JSX.Element {
+    const chip = () => runtimeChip(props.state, props.blocked);
+    const title = () => {
+        if (props.blocked && props.state === "stopped") return `Wanted running, but it cannot start: ${props.blocked}`;
+        return props.detail ? (DETAIL_TEXT[props.detail] ?? props.detail) : undefined;
+    };
     return (
         <Pill
             tone={chip().tone}
             icon={chip().icon}
-            title={props.detail ? (DETAIL_TEXT[props.detail] ?? props.detail) : undefined}
+            title={title()}
             class={`agent-runtime-chip agent-runtime-chip--${props.state}`}
         >
             {chip().label}
