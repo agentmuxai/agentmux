@@ -1,4 +1,7 @@
-# Spec: every agent browses with its own named, persistent profile (2026-11-04)
+# SPEC: every agent browses with its own named, persistent profile (2026-11-04)
+
+**Status:** active — approved by the operator (2026-11-04, via AgentY); built in #17136
+**Author:** Camper-2@narko, 2026-11-04, at the operator's direction
 
 Task #17135; the build is #17136. Author: Camper-2. Browser lane: AgentX is told.
 The operator's words (2026-11-01, relayed by AgentY): "lets add guidence that agents should always open their browser with a profile sharing their own name, and they would always use that. that way logins are always present."
