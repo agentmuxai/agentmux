@@ -97,6 +97,17 @@ export function judgeSample(s) {
     return null;
 }
 
+/**
+ * What a re-follow check found. A wheel over a tool's own scroll box ("scroll-handoff-box") is held by
+ * the box's edge skid for as long as its events keep coming less than a quarter second apart, by design,
+ * so a pane that never moved while the point sat over one says nothing about follow: "misaimed".
+ */
+export function judgeRefollow(s, overHandoffBox) {
+    if (s.state === "following") return "pass";
+    if (overHandoffBox && s.gap > BOTTOM_EPSILON_PX) return "misaimed";
+    return "fail";
+}
+
 export function summarize(report) {
     const lines = [];
     const byKind = {};
@@ -253,7 +264,8 @@ async function main() {
                 if (!before.found || !before.visible || before.state !== "following" || before.scrollHeight <= before.clientHeight + 300) return;
                 // On the transcript itself: a wheel over a tool preview's own scroll box scrolls that box
                 // (and rightly does not detach the pane).
-                const p = await page.evaluate(`window.__fsk.wheelPoint(${JSON.stringify(id)}, ${Math.floor(rnd() * 27)})`);
+                const pick = Math.floor(rnd() * 27);
+                const p = await page.evaluate(`window.__fsk.wheelPoint(${JSON.stringify(id)}, ${pick})`);
                 if (!p) return;
                 note("wheel-up");
                 gesture(id);
@@ -294,17 +306,22 @@ async function main() {
                 // Back to the bottom: wheel down until it is there.
                 report.refollowChecks.total++;
                 let s = await sampleOf(id);
+                // Aimed afresh each time: content moves under the pointer, and a tool's scroll box holds the wheel.
+                let aim = p;
                 for (let i = 0; i < 120 && s.state === "detached" && s.gap > BOTTOM_EPSILON_PX; i++) {
                     gesture(id);
-                    await wheel(p, 1500);
+                    aim = (await page.evaluate(`window.__fsk.wheelPoint(${JSON.stringify(id)}, ${pick})`)) ?? aim;
+                    await wheel(aim, 1500);
                     await sleep(100);
                     s = await sampleOf(id);
                 }
                 await sleep(500);
                 s = await sampleOf(id);
-                if (s.state === "following") report.refollowChecks.pass++;
+                const at = s.state === "following" ? null : await page.evaluate(`window.__fsk.elementAt(${aim.x}, ${aim.y})`);
+                const verdict = judgeRefollow(s, /scroll-handoff-box/.test(at?.cls ?? ""));
+                if (verdict === "pass") report.refollowChecks.pass++;
+                else if (verdict === "misaimed") report.refollowChecks.total--;
                 else {
-                    const at = await page.evaluate(`window.__fsk.elementAt(${p.x}, ${p.y})`);
                     fail(
                         "refollow",
                         `${tag(id)} did not follow again after scrolling to the bottom (state=${s.state}, gap=${s.gap?.toFixed(1)}); the last wheel point is over ${at.blockId?.slice(0, 7)} ${at.tag}.${at.cls}; last actions: ${recent.join(", ")}; the pane's transitions in the last 20 s: ${transitionsOf(id, 20000)}`,
