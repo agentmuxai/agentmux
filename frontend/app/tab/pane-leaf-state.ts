@@ -28,7 +28,7 @@ import { createEffect, createMemo, createSignal, onCleanup, untrack, type Access
  * missing from it (toolchain, settings, launcher, identity, memory) got no
  * tab strip when a pane started with them, and a DOUBLE header when added to
  * a pane that already had chrome. Now the host decides for all of them:
- * chrome is `vm.renderPaneChrome ?? renderPaneChromeShell` (below), and
+ * chrome is `vm.renderPaneChrome ?? renderPaneChromeShell` (in `PaneLeafChrome`, pane-leaf-chrome.tsx), and
  * BlockFrame hides its inline header off `paneChromeHoisted` itself
  * (blockframe.tsx). SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md §4, Phase 1.
  *
@@ -168,7 +168,7 @@ export interface ViewModelScopes {
  *   tab X's ViewModel while tab Y was active, and saved X's title/favicon
  *   under Y: pills showing another tab's name, icon, or a browser's
  *   favicon (confirmed live with a diagnostic, 2026-09-24).
- * - Under keep-alive (below), every member mounts once, so the shared slot
+ * - Under keep-alive (see `usePaneKinds`), every member mounts once, so the shared slot
  *   holds whichever mounted last.
  * So every <Block> writes its ViewModel into a slot keyed by its OWN
  * blockId, and chrome reads the slot of `activeBlockId()`. During a switch

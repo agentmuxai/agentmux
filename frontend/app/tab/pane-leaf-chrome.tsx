@@ -37,7 +37,7 @@ import {
  * `renderPaneChrome` — a stable outer shell (header, tab strip,
  * progress-bar slot) that survives every subsequent switch, instead of
  * `BlockFrame`'s own per-switch-remounting header. Every agent pane, not
- * just already-stacked ones; see the `hoisted` memo below for why gating
+ * just already-stacked ones; see `usePaneKinds` (pane-leaf-state.ts) for why gating
  * that on stack size was a catch-22. Any other view type falls through to
  * the bare `content` below — zero behavior change for those, matching what
  * `<Block>` alone already did.

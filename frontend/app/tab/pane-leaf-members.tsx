@@ -68,7 +68,7 @@ function renderKeepAliveSlot(id: string, input: PaneMembersInput): JSX.Element {
                 // over the newly selected tab. Nothing escapes a
                 // container's opacity, and it keeps the slot's real size
                 // (unlike display:none / content-visibility:hidden, which
-                // the keep-alive guarantee above rules out).
+                // the keep-alive guarantee in `usePaneKinds`, pane-leaf-state.ts, rules out).
                 // SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md §1.
                 opacity: id === activeBlockId() ? "1" : "0",
                 "pointer-events": id === activeBlockId() ? "auto" : "none",
