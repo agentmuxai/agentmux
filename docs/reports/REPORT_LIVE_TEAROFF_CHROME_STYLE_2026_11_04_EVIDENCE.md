@@ -1,5 +1,7 @@
 # #22174 tear-off runs on Area54 (Posa), dev instance built from origin/main 27505b54c
 
+**Status:** analysis. The raw runs behind `REPORT_LIVE_TEAROFF_CHROME_STYLE_2026_11_04.md`.
+
 Host: Windows 10 19045, ONE 900x1600 monitor at 100% DPI, taskbar 60 px (work area 900x1540), host at 80-100% CPU from other agents' builds the whole time.
 Dev window 630x1077 at (135,231). Own `task dev` instance, isolated home, never the operator's.
 Driving: PowerShell + mouse_event/keybd_event (real OS input), screenshots, ffmpeg gdigrab. All raw results: `tearoff/results-*.jsonl`, screenshots `tearoff/shots/`.
@@ -52,5 +54,5 @@ First attempt did nothing because my path stayed inside the 630x1077 source wind
 - Mouse-up: no `[dnd:tearoff]` finalize line (hook already gone); nothing else ran. Not verified: the cursor shape (I could only read the log), nor the visual smoothness: `video-spike-escmove.mp4`.
 
 ## Files
-- `tearoff/REPORT_22174.md` (this), `results-*.jsonl`, `shots/`, `video-tab-tearoff.mp4` (v1 tab tear-off, default content), `video-spike-async.mp4`, `video-spike-escmove.mp4`. Harness: `lib.ps1`, `run-kind.ps1`, `spike-run.ps1` in `C:\Users\area54\.agentmux\agents\posa-08030\tearoff\`.
+- `tearoff/REPORT_22174.md` (this), `results-*.jsonl`, `shots/`, `video-tab-tearoff.mp4` (v1 tab tear-off, default content), `video-spike-async.mp4`, `video-spike-escmove.mp4`. Harness: `lib.ps1`, `run-kind.ps1`, `spike-run.ps1` (kept on the test host).
 - The spike patch stays only uncommitted on branch posa/spike-22174-scratch in my clone; I am reverting it now.

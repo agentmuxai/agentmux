@@ -1,5 +1,6 @@
 # Report: Chrome-style live tear-off: the torn-off window follows the cursor during the drag
 
+**Status:** analysis. Step 1 of the build (window tab, Windows) is in #6457; the rest is designed here and not built.
 **Date:** 2026-11-04
 **Author:** Agent2@narko (runs on Area54 by Posa@Area54)
 **Task:** #22174 (research). The build is #22175 and waits on the operator's approval.
