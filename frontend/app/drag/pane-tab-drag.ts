@@ -9,6 +9,7 @@
  */
 
 import { beginDrag, isUnderway, markReleased, session } from "./drag-session";
+import { watchEscapeDuringDrag } from "./escape-watch";
 
 /** `paneKey` is the pane the pill belongs to; `tabId` its window tab. `blockIds` is the
  *  whole selection when several tabs are dragged together (the grabbed one included). */
@@ -19,6 +20,7 @@ export function startPaneTabDrag(blockId: string, paneKey?: string, tabId?: stri
         tabId,
         ...(blockIds && blockIds.length > 1 ? { blockIds } : {}),
     });
+    watchEscapeDuringDrag();
 }
 
 export function releasePaneTabDrag(): void {

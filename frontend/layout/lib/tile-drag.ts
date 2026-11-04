@@ -9,6 +9,7 @@
 
 import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
 import { beginDrag, endDrag, markReleased, onSessionEnded, session, type DragEndReason } from "@/app/drag/drag-session";
+import { watchEscapeDuringDrag } from "@/app/drag/escape-watch";
 import { clearCrossTabDrop } from "./crossTabDrag";
 import { layoutDragEnded } from "./layoutIntents";
 import type { LayoutModel } from "./layoutModel";
@@ -21,6 +22,7 @@ export function startTileDrag(node: LayoutNode, model: LayoutModel): void {
     dragState.layoutModel = model;
     dragState.node = node;
     beginDrag("tile", { nodeId: node.id, tabId });
+    watchEscapeDuringDrag();
     clearCrossTabDrop();
     model.activeDrag._set(true);
     setCurrentDragPayload({ kind: "tile", node, sourceTabId: tabId });
