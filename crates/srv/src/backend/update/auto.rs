@@ -156,13 +156,12 @@ pub(crate) fn after_failure(failures: u32) -> Duration {
     BACKOFF_START.saturating_mul(1u32 << doublings).min(BACKOFF_MAX)
 }
 
-/// A random number in 0..1, from the clock: nothing here needs better.
+/// A number in 0..1 from the clock and the process id: installs started together
+/// still spread out, and nothing here needs better.
 fn fraction() -> f64 {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.subsec_nanos())
-        .unwrap_or(0);
-    f64::from(nanos % 1_000_000) / 1_000_000.0
+    let ms = agentmux_common::time::now_ms_u64();
+    let mixed = ms.wrapping_mul(2_654_435_761).wrapping_add(u64::from(std::process::id()));
+    (mixed % 1_000_000) as f64 / 1_000_000.0
 }
 
 #[cfg(test)]
