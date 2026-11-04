@@ -318,7 +318,7 @@ async function main() {
                 await sleep(500);
                 s = await sampleOf(id);
                 const at = s.state === "following" ? null : await page.evaluate(`window.__fsk.elementAt(${aim.x}, ${aim.y})`);
-                const verdict = judgeRefollow(s, /scroll-handoff-box/.test(at?.cls ?? ""));
+                const verdict = judgeRefollow(s, at?.inHandoffBox === true);
                 if (verdict === "pass") report.refollowChecks.pass++;
                 else if (verdict === "misaimed") report.refollowChecks.total--;
                 else {
