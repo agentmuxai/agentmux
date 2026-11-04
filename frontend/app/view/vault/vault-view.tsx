@@ -5,7 +5,7 @@
 // seeing them (docs/specs/SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md §5).
 // A rail of sections; agents' requests for new entries on top.
 
-import { createEffect, createSignal, For, on, onCleanup, Show, type JSX } from "solid-js";
+import { createEffect, createSignal, For, on, onCleanup, Show, type Accessor, type JSX } from "solid-js";
 
 import { Button, TabbedPane, type TabItem } from "@/app/element/ui";
 import type { VaultActivity } from "@/types/rpc/VaultActivity";
@@ -178,6 +178,20 @@ function VaultActivityLog(props: { visible: boolean }): JSX.Element {
     );
 }
 
+/** The request the Vault was opened on (a parked agent's row, the status bar), to mark in the
+ *  list; the meta is cleared so a later reopen doesn't scroll back to it. */
+function focusedRequest(model: VaultViewModel): Accessor<string> {
+    const [focused, setFocused] = createSignal("");
+    createEffect(
+        on(model.focusAtom, (id) => {
+            if (!id) return;
+            setFocused(id);
+            model.setMeta({ "vault:focus": null });
+        })
+    );
+    return focused;
+}
+
 export function VaultView(props: { model: VaultViewModel }): JSX.Element {
     const model = props.model;
     const section = model.sectionAtom;
@@ -217,6 +231,8 @@ export function VaultView(props: { model: VaultViewModel }): JSX.Element {
         });
     });
 
+    const focused = focusedRequest(model);
+
     // Opened from an agent's request prompt: open its form once the request is known.
     createEffect(
         on([model.requestAtom, vaultRequests], ([id, list]) => {
@@ -241,7 +257,7 @@ export function VaultView(props: { model: VaultViewModel }): JSX.Element {
                     <Show when={model.promptsOpen()}>
                         <VaultPromptsNote onClose={() => model.setMeta({ "vault:prompts-read": true })} />
                     </Show>
-                    <VaultRequestsList onFill={fill} />
+                    <VaultRequestsList onFill={fill} focused={focused} />
                     <Show when={vaultError() ?? vaultProblem()}>
                         <div class="warden-manager-error vault-problem" role="alert">
                             ⚠ {vaultError() ?? vaultProblem()}

@@ -15,6 +15,8 @@ import type { VaultRequest } from "@/types/rpc/VaultRequest";
 vi.mock("@/app/store/mps", () => ({ onMuxEvent: () => () => {} }));
 vi.mock("@/app/notification/waiting-for-you", () => ({ startWaitingForYou: vi.fn(), endWaitingForYou: vi.fn() }));
 vi.mock("@/app/store/global", async (orig) => ({ ...(await orig<object>()), MOS: { getMuxObjectAtom: () => () => ({ oid: "pane" }) } }));
+const openedAt = vi.hoisted(() => vi.fn(async (_id?: string) => {}));
+vi.mock("@/app/view/vault/open-vault", () => ({ openVault: vi.fn(async () => {}), openVaultAt: openedAt }));
 
 let uses: UseRequest[] = [];
 let requests: VaultRequest[] = [];
@@ -181,12 +183,12 @@ describe("an agent's Vault requests as cards in its pane", () => {
         expect(deny.nextElementSibling).toBe(yeses);
     });
 
-    it("denies all from an agent waiting on more than one, uses and asks for entries alike", async () => {
+    it("denies all from an agent waiting on more than one, uses and asks for entries alike, whatever the agent's case", async () => {
         uses = [use(), use({ id: "use-2", entry_label: "Stripe key" })];
-        requests = [request()];
+        requests = [request({ agent: "builder" })];
         await refreshVault();
         render(() => <PaneRequestDock blockId={PANE} />);
-        fireEvent.click(await screen.findByRole("button", { name: "Deny all 3 from Builder" }));
+        fireEvent.click(await screen.findByRole("button", { name: /^Deny all 3 from builder$/i }));
         await waitFor(() => expect(calls("answer_use")).toEqual(expect.arrayContaining([{ id: "use-1", decision: "deny" }, { id: "use-2", decision: "deny" }])));
         await waitFor(() => expect(calls("decline_request")).toEqual([{ request_id: "req-1" }]));
     });
@@ -196,10 +198,11 @@ describe("an agent's Vault requests as cards in its pane", () => {
         requests = [request({ block_id: "", label: "Parked URL" })];
         await refreshVault();
         expect(paneRequests.of("")).toHaveLength(0);
-        render(() => <VaultRequestsList onFill={vi.fn()} />);
+        render(() => <VaultRequestsList onFill={vi.fn()} focused={() => "req-1"} />);
         const list = await screen.findByRole("region", { name: "Agents' requests" });
         expect(list.textContent).toContain("Builder wants to run a command with your value");
         expect(list.textContent).toContain("Parked URL");
+        expect([...list.querySelectorAll(".is-focused")].map((e) => (e as HTMLElement).dataset.request), "the one Answer sent the person to").toEqual(["req-1"]);
         fireEvent.click(within(list).getByRole("button", { name: "Deny" }));
         await waitFor(() => expect(calls("answer_use")).toEqual([{ id: "use-1", decision: "deny" }]));
     });
@@ -217,7 +220,11 @@ describe("an agent's Vault requests as cards in its pane", () => {
         expect(line.hasAttribute("data-operator-only")).toBe(true);
         expect(line.textContent).toMatch(/Waiting for you in the Vault: Parked token · goes ahead in 0:(29|30)/);
         expect(line.textContent, "the one in its pane is asked there").not.toContain("1 more");
-        expect(screen.getByRole("button", { name: /1 Vault request waits/ }).textContent).toContain("1 Vault request");
+        const status = screen.getByRole("button", { name: /1 Vault request waits/ });
+        expect(status.textContent).toContain("1 Vault request");
+        fireEvent.click(within(line).getByRole("button", { name: "Answer" }));
+        fireEvent.click(status);
+        expect(openedAt.mock.calls, "both open the Vault on the parked request").toEqual([["use-1"], ["use-1"]]);
         fireEvent.click(within(line).getByRole("button", { name: "Deny" }));
         await waitFor(() => expect(calls("answer_use")).toEqual([{ id: "use-1", decision: "deny" }]));
     });

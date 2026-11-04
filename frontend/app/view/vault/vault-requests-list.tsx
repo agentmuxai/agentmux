@@ -6,7 +6,7 @@
 // the asking agent's pane. The one place to answer a request whose agent has no
 // pane on screen (docs/specs/SPEC_VAULT_REQUESTS_AS_CARDS_IN_THE_AGENT_PANE_2026_11_01.md §6, §7).
 
-import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, Show, type Accessor, type JSX } from "solid-js";
 
 import { tip } from "@/app/element/tip";
 import { Button } from "@/app/element/ui";
@@ -24,14 +24,26 @@ function ItemActions(props: { children: JSX.Element }): JSX.Element {
     return <div class="vault-use-item-actions">{props.children}</div>;
 }
 
+/** A ref that scrolls its element into view while `when` holds (opened by openVaultAt). */
+function scrollWhen(when: () => boolean): (el: HTMLElement) => void {
+    return (el) => createEffect(() => when() && el.scrollIntoView?.({ block: "nearest" }));
+}
+
 /** An agent's use of an entry, asked here as in its pane. `close` runs once it
  *  is answered; the item itself goes when srv's list drops it. */
-export function VaultUseItem(props: { use: UseRequest; close?: () => void }): JSX.Element {
+export function VaultUseItem(props: { use: UseRequest; close?: () => void; focused?: boolean }): JSX.Element {
     const answer = createUseAnswer(props.use, () => props.close?.());
     const title = promptTitle(props.use);
     const shown = promptTitle(props.use, true);
     return (
-        <section class="vault-use-item" role="group" aria-label={title} data-use={props.use.id}>
+        <section
+            class="vault-use-item"
+            classList={{ "is-focused": !!props.focused }}
+            ref={scrollWhen(() => !!props.focused)}
+            role="group"
+            aria-label={title}
+            data-use={props.use.id}
+        >
             <h4 class="vault-use-item-title" {...tip(shown === title ? undefined : title)}>
                 {shown}
             </h4>
@@ -41,7 +53,12 @@ export function VaultUseItem(props: { use: UseRequest; close?: () => void }): JS
 }
 
 /** An agent's ask for a new entry: Fill in opens the form, Dismiss declines it. */
-function VaultRequestItem(props: { request: VaultRequest; onFill: (r: VaultRequest) => void; onError: (e: string | null) => void }): JSX.Element {
+function VaultRequestItem(props: {
+    request: VaultRequest;
+    onFill: (r: VaultRequest) => void;
+    onError: (e: string | null) => void;
+    focused: boolean;
+}): JSX.Element {
     const r = props.request;
     const dismiss = async () => {
         try {
@@ -52,7 +69,7 @@ function VaultRequestItem(props: { request: VaultRequest; onFill: (r: VaultReque
         }
     };
     return (
-        <div class="vault-request" data-request={r.id}>
+        <div class="vault-request" classList={{ "is-focused": props.focused }} ref={scrollWhen(() => props.focused)} data-request={r.id}>
             <div class="vault-request-text">
                 <strong>
                     <Clipped text={r.agent} max={CLIP.name} />
@@ -77,15 +94,25 @@ function VaultRequestItem(props: { request: VaultRequest; onFill: (r: VaultReque
     );
 }
 
-/** Every pending request, with "Deny all from <agent>" for an agent waiting on more than one. */
-export function VaultRequestsList(props: { onFill: (r: VaultRequest) => void }): JSX.Element {
+/** Every pending request, with "Deny all from <agent>" for an agent waiting on more than one.
+ *  `focused` is the one the person was sent to (a parked agent's row, the status bar). */
+export function VaultRequestsList(props: { onFill: (r: VaultRequest) => void; focused?: Accessor<string> }): JSX.Element {
     const [error, setError] = createSignal<string | null>(null);
-    const several = createMemo(() => [...new Set([...vaultUses().map((u) => u.agent), ...vaultRequests().map((r) => r.agent)])].filter((a) => pendingFrom(a) > 1));
+    const isFocused = (id: string) => !!id && props.focused?.() === id;
+    const several = createMemo(() => {
+        const agents = new Map<string, string>();
+        for (const a of [...vaultUses().map((u) => u.agent), ...vaultRequests().map((r) => r.agent)]) {
+            if (!agents.has(a.toLowerCase())) agents.set(a.toLowerCase(), a);
+        }
+        return [...agents.values()].filter((a) => pendingFrom(a) > 1);
+    });
     return (
         <Show when={vaultUses().length + vaultRequests().length > 0}>
             <div class="vault-requests" role="region" aria-label="Agents' requests">
-                <For each={vaultUses()}>{(u) => <VaultUseItem use={u} />}</For>
-                <For each={vaultRequests()}>{(r) => <VaultRequestItem request={r} onFill={props.onFill} onError={setError} />}</For>
+                <For each={vaultUses()}>{(u) => <VaultUseItem use={u} focused={isFocused(u.id)} />}</For>
+                <For each={vaultRequests()}>
+                    {(r) => <VaultRequestItem request={r} onFill={props.onFill} onError={setError} focused={isFocused(r.id)} />}
+                </For>
                 <Show when={several().length > 0}>
                     <div class="vault-requests-deny-all">
                         <For each={several()}>

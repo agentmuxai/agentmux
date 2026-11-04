@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { openVault } from "@/app/view/vault/open-vault";
+import { openVaultAt } from "@/app/view/vault/open-vault";
 import { vaultRequests, vaultUses } from "@/app/view/vault/vault-store";
 import { Show, type JSX } from "solid-js";
 
@@ -18,12 +18,13 @@ export function vaultRequestsTip(n: number): string {
  * (docs/specs/SPEC_VAULT_REQUESTS_AS_CARDS_IN_THE_AGENT_PANE_2026_11_01.md §6).
  */
 export function VaultRequestsStatus(): JSX.Element {
-    const count = () => vaultUses().filter((u) => !u.block_id).length + vaultRequests().filter((r) => !r.block_id).length;
+    const unasked = () => [...vaultUses().filter((u) => !u.block_id), ...vaultRequests().filter((r) => !r.block_id)];
+    const count = () => unasked().length;
     return (
         <Show when={count() > 0}>
             <div
                 class="status-bar-item clickable status-vault-requests"
-                onClick={() => void openVault()}
+                onClick={() => void openVaultAt(unasked()[0]?.id)}
                 data-tip={vaultRequestsTip(count())}
                 aria-label={vaultRequestsTip(count())}
                 role="button"
