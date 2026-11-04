@@ -1,0 +1,9 @@
+scrollTop set 1000 -> 800
+bash: top=800 bottom=800
+scrollTop set 0 -> 0
+swapped to a Read: top=0
+Read grows: top=0
+scrollTop set 1200 -> 1000
+swapped back to Bash: top=1000 bottom=1000
+scrollTop set 1400 -> 1200
+Bash grows: top=1200 bottom=1200
