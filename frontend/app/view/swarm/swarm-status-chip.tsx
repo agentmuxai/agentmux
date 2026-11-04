@@ -2,11 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /** The status chip on a Swarm row (moved out of swarm-view.tsx, which is near the size limit). */
+import { ActivityAnimation } from "@/app/element/ActivityAnimation";
+import { activityBucket, type Bucket } from "@/app/element/activity-bucket";
 import { AsciiSpinner } from "@/app/element/AsciiSpinner";
+import { useTick } from "@/app/hook/useTick";
 import { isActiveStatus, rankAgentStatus } from "@/app/store/agent-status";
 import { questionCountdown } from "@/app/store/question-timer";
-import { Show, type JSX } from "solid-js";
+import { Show, createMemo, type JSX } from "solid-js";
 import type { AgentDisplayStatus } from "./swarm-display-status";
+import { longRunningToolRows } from "./swarm-longrunning";
 
 /**
  * The chip collapses the finer AgentDisplayStatus to three states:
@@ -32,6 +36,12 @@ export function chipStatus(status: AgentDisplayStatus, awaitingUser = false): Ch
     return isActiveStatus(ranked) ? "working" : "idle";
 }
 
+/** A working agent's longest-running tool call (30 s or more), as its kind of work: the chip shows it in place of the slash. */
+function currentOperation(blockId: string | undefined): { bucket: Bucket; since: number } | null {
+    const oldest = longRunningToolRows(blockId ?? null, Date.now()).at(-1);
+    return oldest ? { bucket: activityBucket({ command: oldest.command }), since: oldest.startedAt } : null;
+}
+
 // Reads `props.status`, not a destructured `status`: in Solid a destructured
 // prop is read once at creation, so the chip would never follow the agent from
 // working to idle.
@@ -47,12 +57,17 @@ export function AgentStatusChip(props: {
 }): JSX.Element {
     const chip = () => chipStatus(props.status, props.awaitingUser);
     const countdown = () => (chip() === "question" && props.blockId ? questionCountdown(props.blockId) : null);
+    const tick = useTick(1000);
+    const operation = createMemo(() => (chip() === "working" ? (tick(), currentOperation(props.blockId)) : null));
     return (
         <span class={`swarm-status-chip swarm-status-chip--${chip()}`}>
             {/* The two animated states carry the ASCII spinner (the composer's
-                mark, one shared timer); the resting state keeps a still dot. */}
+                mark, one shared timer); a working agent whose current tool call has run long shows that
+                kind of work instead (ActivityAnimation); the resting state keeps a still dot. */}
             <Show when={chip() !== "idle"} fallback={<span class="swarm-status-dot" />}>
-                <AsciiSpinner class="swarm-status-spinner" />
+                <Show when={operation()} fallback={<AsciiSpinner class="swarm-status-spinner" />}>
+                    {(op) => <ActivityAnimation bucket={op().bucket} since={op().since} />}
+                </Show>
             </Show>
             <span class="swarm-status-label">{chip()}</span>
             <Show when={countdown()}>

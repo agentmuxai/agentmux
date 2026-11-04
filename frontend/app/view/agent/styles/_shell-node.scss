@@ -244,11 +244,10 @@
     .stopped &  { color: var(--secondary-text-color); }
 }
 
-// The rotating slash of a running call: one character wide, in the sigil's place.
-.agent-activity-spinner {
-    display: inline-block;
-    width: 1ch;
-    font-weight: 600;
+// A running row's mark is its kind of work's 3-cell animation (ActivitySigil), so its slot is 3 cells
+// wide from the start: the title doesn't shift when the animation takes over from the glyph.
+.running > .agent-activity-summary > .agent-activity-sigil {
+    width: 3ch;
 }
 
 .agent-activity-title {

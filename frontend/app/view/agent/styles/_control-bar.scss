@@ -285,6 +285,18 @@
                 color: var(--block-identity-color, var(--accent-color));
             }
 
+            // The kind of work the turn is waiting on, beside the slash (WorkingRowOperation).
+            .agent-working-row-operation {
+                display: inline-flex;
+                align-items: baseline;
+                gap: var(--space-1-5);
+                flex-shrink: 0;
+                margin-left: var(--space-2);
+                color: var(--secondary-text-color);
+                font-size: var(--text-sm);
+                white-space: nowrap;
+            }
+
             // Reduced treatment (status), dormant under the motion policy.
             @include mixins.when-motion-reduced(status) {
                 .agent-working-row-progress-fill {
