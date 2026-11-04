@@ -323,7 +323,6 @@
 238 crates/srv/src/server/mux_obj_bridge.rs::dispatch_event
 124 crates/srv/src/server/muxspect_handlers.rs::handle_muxspect_conversations
 118 crates/srv/src/server/muxspect_handlers.rs::handle_muxspect_find
-723 crates/srv/src/server/native_memory_handlers.rs::register_native_memory_handlers
 355 crates/srv/src/server/reactive.rs::deliver
 101 crates/srv/src/server/reactive.rs::handle_reactive_history_search
 203 crates/srv/src/server/reactive.rs::handle_reactive_register
