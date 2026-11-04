@@ -13,6 +13,10 @@
  *       anchoring adjustment or pagination step can.
  *   I2. LoadOlder is emitted only for a user scroll, only while DETACHED, and
  *       never changes the follow state.
+ *   I5. FillOlder is emitted only for a FillCheck, only while FOLLOWING, only when
+ *       the content is shorter than FILL_SCREENS viewports and older history is
+ *       there, and never changes the follow state. It is what keeps a pane whose
+ *       first page doesn't overflow from waiting on a scroll nobody can make.
  *   I4. Every state change emits exactly one Transition effect with its cause.
  */
 
@@ -22,6 +26,17 @@ export const REATTACH_PX = 24;
 export const NEAR_TOP_PX = 50;
 /** Moves smaller than this are fractional-zoom noise, not a scroll. */
 const EPSILON_PX = 1;
+/**
+ * A pane that follows the bottom keeps loading older history until its content
+ * is this many viewports tall (the viewport plus one screen to scroll into), or
+ * the history runs out.
+ */
+export const FILL_SCREENS = 2;
+
+/** Whether content of this geometry is too short to scroll into, with older history to load. */
+export function needsOlderFill(geo: ScrollGeometry, hasOlderHistory: boolean, loadingOlder: boolean): boolean {
+    return hasOlderHistory && !loadingOlder && geo.clientHeight > 0 && geo.scrollHeight < geo.clientHeight * FILL_SCREENS;
+}
 
 export type FollowMode = "FOLLOWING" | "DETACHED";
 
@@ -45,6 +60,11 @@ export interface ScrollGeometry {
 export type EscapeCause = "wheel-up" | "key" | "selection";
 
 export type FollowEvent =
+    /**
+     * Is there enough to scroll into? Sent after each size observation and each
+     * page of older history. `geo` is the last observed geometry.
+     */
+    | { type: "FillCheck"; geo: ScrollGeometry; hasOlderHistory: boolean; loadingOlder: boolean }
     /** A ResizeObserver saw the content (or the scroller's viewport) change size. */
     | { type: "ContentResized"; geo: ScrollGeometry }
     | { type: "ViewportResized"; geo: ScrollGeometry }
@@ -89,6 +109,8 @@ export type FollowEffect =
     | { type: "Pin"; cause: string }
     /** Page in older history (capture the anchor, fetch, restore it). */
     | { type: "LoadOlder" }
+    /** Page in older history because the content is too short to scroll, not because the user did. */
+    | { type: "FillOlder" }
     /** I4: one telemetry line. */
     | { type: "Transition"; from: FollowState; to: FollowState; cause: string; detail?: string };
 
@@ -135,6 +157,13 @@ function withIntent(state: FollowState, mode: FollowMode): FollowState {
 
 export function followReducer(state: FollowState, event: FollowEvent): FollowResult {
     switch (event.type) {
+        case "FillCheck": {
+            if (state.kind !== "FOLLOWING" || !needsOlderFill(event.geo, event.hasOlderHistory, event.loadingOlder)) {
+                return stay(state);
+            }
+            return { state, effects: [{ type: "FillOlder" }] };
+        }
+
         case "ContentResized":
         case "ViewportResized": {
             const cause = event.type === "ContentResized" ? "content" : "viewport";
