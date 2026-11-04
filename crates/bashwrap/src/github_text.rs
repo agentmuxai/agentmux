@@ -57,7 +57,7 @@ fn command_words(args: &[String]) -> (Option<&str>, Option<&str>) {
 /// message, release notes or an API call?
 pub fn sends_text(args: &[String]) -> bool {
     match command_words(args) {
-        (Some("pr"), Some("create" | "new" | "edit" | "comment" | "review" | "merge" | "close" | "reopen")) => true,
+        (Some("pr"), Some("create" | "new" | "edit" | "comment" | "review" | "merge" | "close" | "reopen" | "revert")) => true,
         (Some("issue"), Some("create" | "new" | "edit" | "comment" | "close" | "reopen")) => true,
         (Some("release"), Some("create" | "new" | "edit")) => true,
         (Some("api"), _) => true,
@@ -195,36 +195,37 @@ pub struct Scan {
     /// Every file the command reads (`-` for stdin) with the text scanned. `gh` is given a copy of
     /// each, so it reads exactly what was scanned: stdin and pipes can't be read twice, and a
     /// file could change between the scan and `gh` opening it.
-    pub copies: Vec<(String, String)>,
+    pub copies: Vec<(String, Vec<u8>)>,
 }
 
 impl Scan {
-    fn keep_copy(&mut self, original: &str, text: String) {
+    fn keep_copy(&mut self, original: &str, bytes: Vec<u8>) {
         if !self.copies.iter().any(|(o, _)| o == original) {
-            self.copies.push((original.to_string(), text));
+            self.copies.push((original.to_string(), bytes));
         }
     }
 }
 
 /// Scan `gh <args>`. `read_file` gives a file's text, whatever kind of file it is (a pipe, a
 /// device): `Ok(None)` when it isn't there (gh will say so itself), `Err` when it is too large to
-/// scan. `stdin` gives what stdin holds, read at most once.
-pub fn scan(args: &[String], read_file: impl Fn(&str) -> Result<Option<String>, ()>, mut stdin: impl FnMut() -> Result<String, ()>) -> Scan {
+/// scan. `stdin` gives what stdin holds, read at most once. The bytes are kept as they are for the
+/// copy `gh` is given (a binary upload must arrive unchanged); only the scan reads them as text.
+pub fn scan(args: &[String], read_file: impl Fn(&str) -> Result<Option<Vec<u8>>, ()>, mut stdin: impl FnMut() -> Result<Vec<u8>, ()>) -> Scan {
     let mut result = Scan::default();
     for (place, source) in sources(args) {
         match source {
             Source::Inline(text) => scan_text(&place, &text, &mut result.hits),
             Source::File(path) if path == "-" => match stdin() {
-                Ok(text) => {
-                    scan_text(&place, &text, &mut result.hits);
-                    result.keep_copy(&path, text);
+                Ok(bytes) => {
+                    scan_text(&place, &String::from_utf8_lossy(&bytes), &mut result.hits);
+                    result.keep_copy(&path, bytes);
                 }
                 Err(()) => result.too_large.push(format!("{place} (stdin)")),
             },
             Source::File(path) => match read_file(&path) {
-                Ok(Some(text)) => {
-                    scan_text(&format!("{place} {path}"), &text, &mut result.hits);
-                    result.keep_copy(&path, text);
+                Ok(Some(bytes)) => {
+                    scan_text(&format!("{place} {path}"), &String::from_utf8_lossy(&bytes), &mut result.hits);
+                    result.keep_copy(&path, bytes);
                 }
                 Ok(None) => {}
                 Err(()) => result.too_large.push(format!("{place} {path}")),
@@ -302,7 +303,7 @@ pub fn refusal_text(args: &[String], scan: &Scan) -> String {
 /// A file's text, whatever it is: a regular file, a named pipe, `/dev/stdin`, a process
 /// substitution. `gh` reads those too, so the scan must. `Ok(None)` for a path that isn't there or
 /// is a directory (gh says so itself); `Err` when there is more than the scan reads.
-fn read_file_limited(path: &str) -> Result<Option<String>, ()> {
+fn read_file_limited(path: &str) -> Result<Option<Vec<u8>>, ()> {
     if std::fs::metadata(path).map(|m| m.is_dir()).unwrap_or(false) {
         return Ok(None);
     }
@@ -312,16 +313,16 @@ fn read_file_limited(path: &str) -> Result<Option<String>, ()> {
     if buf.len() as u64 > MAX_TEXT_BYTES {
         return Err(());
     }
-    Ok(Some(String::from_utf8_lossy(&buf).into_owned()))
+    Ok(Some(buf))
 }
 
-fn read_stdin_limited() -> Result<String, ()> {
+fn read_stdin_limited() -> Result<Vec<u8>, ()> {
     let mut buf = Vec::new();
     let _ = std::io::stdin().lock().take(MAX_TEXT_BYTES + 1).read_to_end(&mut buf);
     if buf.len() as u64 > MAX_TEXT_BYTES {
         return Err(());
     }
-    Ok(String::from_utf8_lossy(&buf).into_owned())
+    Ok(buf)
 }
 
 /// The folder the copies go in: the user's own (mode 0700 on Unix; a folder that is someone
@@ -353,7 +354,7 @@ fn copies_dir() -> Option<std::path::PathBuf> {
 }
 
 /// Write `text` where `gh` can read it as a file.
-fn write_copy(dir: &std::path::Path, text: &str) -> Option<String> {
+fn write_copy(dir: &std::path::Path, bytes: &[u8]) -> Option<String> {
     static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let path = dir.join(format!("{}-{}-{n}.txt", std::process::id(), agentmux_common::time::now_ms()));
@@ -364,7 +365,7 @@ fn write_copy(dir: &std::path::Path, text: &str) -> Option<String> {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600);
     }
-    options.open(&path).ok()?.write_all(text.as_bytes()).ok()?;
+    options.open(&path).ok()?.write_all(bytes).ok()?;
     Some(path.to_string_lossy().into_owned())
 }
 
@@ -387,10 +388,10 @@ pub fn run_github_text_guard(gh_args: &[String]) -> i32 {
         return 0;
     }
     // Stdin is read once, whichever flags name it.
-    let mut stdin_text: Option<String> = None;
+    let mut stdin_text: Option<Vec<u8>> = None;
     let result = scan(gh_args, read_file_limited, || {
         if let Some(text) = &stdin_text {
-            return Ok::<String, ()>(text.clone());
+            return Ok::<Vec<u8>, ()>(text.clone());
         }
         let text = read_stdin_limited()?;
         stdin_text = Some(text.clone());
@@ -404,8 +405,8 @@ pub fn run_github_text_guard(gh_args: &[String]) -> i32 {
     let mut files = std::collections::HashMap::new();
     if !result.copies.is_empty() {
         let dir = copies_dir();
-        for (original, text) in &result.copies {
-            match dir.as_deref().and_then(|d| write_copy(d, text)) {
+        for (original, bytes) in &result.copies {
+            match dir.as_deref().and_then(|d| write_copy(d, bytes)) {
                 Some(path) => {
                     files.insert(original.clone(), path);
                 }
@@ -433,11 +434,11 @@ mod tests {
     fn token() -> String {
         format!("{}{}", "ghp_", "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8")
     }
-    fn no_files(_: &str) -> Result<Option<String>, ()> {
+    fn no_files(_: &str) -> Result<Option<Vec<u8>>, ()> {
         Ok(None)
     }
-    fn no_stdin() -> Result<String, ()> {
-        Ok(String::new())
+    fn no_stdin() -> Result<Vec<u8>, ()> {
+        Ok(Vec::new())
     }
 
     #[test]
@@ -487,7 +488,7 @@ mod tests {
 
     #[test]
     fn a_body_file_is_read_and_a_missing_one_is_left_to_gh() {
-        let read = |p: &str| -> Result<Option<String>, ()> { Ok((p == "body.md").then(|| format!("# Notes\n{}\n", token()))) };
+        let read = |p: &str| -> Result<Option<Vec<u8>>, ()> { Ok((p == "body.md").then(|| format!("# Notes\n{}\n", token()).into_bytes())) };
         let s = scan(&args(&["pr", "create", "--body-file", "body.md"]), read, no_stdin);
         assert_eq!(s.hits, vec![Hit { place: "--body-file body.md".into(), line: 2, category: "GitHub token" }]);
         let s = scan(&args(&["pr", "comment", "1", "-F", "body.md"]), read, no_stdin);
@@ -497,7 +498,7 @@ mod tests {
         let s = scan(&args(&["pr", "create", "--body-file", "nope.md"]), read, no_stdin);
         assert!(s.hits.is_empty() && s.too_large.is_empty());
         // Too large to scan is refused, not waved through.
-        let big = |_: &str| -> Result<Option<String>, ()> { Err(()) };
+        let big = |_: &str| -> Result<Option<Vec<u8>>, ()> { Err(()) };
         assert_eq!(scan(&args(&["pr", "create", "--body-file", "huge.md"]), big, no_stdin).too_large.len(), 1);
     }
 
@@ -509,9 +510,7 @@ mod tests {
     fn what_gh_reads_is_handed_on_as_a_copy_of_what_was_scanned() {
         // stdin
         let a = args(&["pr", "create", "--title", "t", "--body-file", "-"]);
-        let s = scan(&a, no_files, || Ok(format!("x
-{}
-", token())));
+        let s = scan(&a, no_files, || Ok(format!("x\n{}\n", token()).into_bytes()));
         assert_eq!(s.hits[0].place, "--body-file");
         assert_eq!(s.copies.len(), 1);
         assert_eq!(s.copies[0].0, "-");
@@ -522,7 +521,7 @@ mod tests {
         assert_eq!(replace_files(&args(&["pr", "create", "--title", "-"]), &files(&[("-", "P")])), args(&["pr", "create", "--title", "-"]));
         // A regular file, a pipe or `/dev/stdin` the same: gh reads the copy, not the original, which
         // can't be read twice (a pipe) or could change after the scan (a file).
-        let read = |p: &str| -> Result<Option<String>, ()> { Ok((p == "/dev/stdin" || p == "body.md").then(|| "clean".to_string())) };
+        let read = |p: &str| -> Result<Option<Vec<u8>>, ()> { Ok((p == "/dev/stdin" || p == "body.md").then(|| b"clean".to_vec())) };
         let s = scan(&args(&["pr", "create", "--body-file", "/dev/stdin", "-F", "body.md", "-F", "body.md"]), read, no_stdin);
         assert_eq!(s.copies.iter().map(|(o, _)| o.as_str()).collect::<Vec<_>>(), vec!["/dev/stdin", "body.md"]);
         assert_eq!(
@@ -531,6 +530,19 @@ mod tests {
         );
         // A path that isn't there is left alone: gh says so itself.
         assert!(scan(&args(&["pr", "create", "--body-file", "nope"]), no_files, no_stdin).copies.is_empty());
+    }
+
+    #[test]
+    fn a_binary_file_reaches_gh_byte_for_byte() {
+        // Not valid UTF-8 (a binary upload, or a legacy encoding): the scan reads it as text, the copy is the bytes.
+        let bytes: Vec<u8> = vec![0x00, 0xff, 0xfe, b'a', 0x80, 0xc3, 0x28];
+        let expected = bytes.clone();
+        let read = move |p: &str| -> Result<Option<Vec<u8>>, ()> { Ok((p == "asset.bin").then(|| bytes.clone())) };
+        let s = scan(&args(&["api", "x", "--input", "asset.bin"]), read, no_stdin);
+        assert!(s.hits.is_empty());
+        assert_eq!(s.copies, vec![("asset.bin".to_string(), expected)]);
+        // `gh pr revert` sends a title and a body too.
+        assert!(sends_text(&args(&["pr", "revert", "3"])));
     }
 
     #[test]
@@ -547,7 +559,7 @@ mod tests {
             assert!(!scan(&a, no_files, no_stdin).hits.is_empty(), "{a:?}");
         }
         // The file flags with the path glued on name a file to read and copy.
-        let read = |p: &str| -> Result<Option<String>, ()> { Ok((p == "b.md").then(|| aws.clone())) };
+        let read = |p: &str| -> Result<Option<Vec<u8>>, ()> { Ok((p == "b.md").then(|| aws.clone().into_bytes())) };
         let a = args(&["pr", "create", "-Fb.md"]);
         let s = scan(&a, read, no_stdin);
         assert_eq!((s.hits.len(), s.copies.len()), (1, 1));
@@ -566,22 +578,22 @@ mod tests {
         let file = dir.join("b.md");
         std::fs::write(&file, format!("{}
 ", token())).unwrap();
-        let text = read_file_limited(file.to_str().unwrap()).unwrap().unwrap();
-        assert!(credential_in(&text).is_some());
+        let bytes = read_file_limited(file.to_str().unwrap()).unwrap().unwrap();
+        assert!(credential_in(&String::from_utf8_lossy(&bytes)).is_some());
         // A directory and a missing path are gh's to report.
         assert_eq!(read_file_limited(dir.to_str().unwrap()), Ok(None));
         assert_eq!(read_file_limited(dir.join("nope").to_str().unwrap()), Ok(None));
         #[cfg(unix)]
         {
             // A device, which is not a regular file, is read too (and `/dev/null` is empty).
-            assert_eq!(read_file_limited("/dev/null"), Ok(Some(String::new())));
+            assert_eq!(read_file_limited("/dev/null"), Ok(Some(Vec::new())));
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn gh_api_fields_and_input_are_text_too() {
-        let read = |p: &str| -> Result<Option<String>, ()> { Ok((p == "c.txt").then(|| token())) };
+        let read = |p: &str| -> Result<Option<Vec<u8>>, ()> { Ok((p == "c.txt").then(|| token().into_bytes())) };
         let s = scan(&args(&["api", "repos/o/r/issues/1/comments", "-f", &format!("body={}", token())]), read, no_stdin);
         assert_eq!(s.hits, vec![Hit { place: "-f body".into(), line: 1, category: "GitHub token" }]);
         let s = scan(&args(&["api", "x", "-F", "body=@c.txt"]), read, no_stdin);
