@@ -1,6 +1,8 @@
 # Spec: Multi-language AgentMux, for an international audience
 
-**Date:** 2026-11-03 · **Task:** #21623 · **Author:** Clamk@narko · **Status:** approved 2026-11-04 (build #21624); progress in section 13
+**Date:** 2026-11-03 · **Task:** #21623 (spec), #21624 (build) · **Author:** Clamk@narko
+
+**Status:** active: approved by the operator 2026-11-04, build #21624 under way; progress in section 13
 **Builds on:** `docs/analysis/ANALYSIS_I18N_INTERNATIONALIZATION_SCOPING_AND_COST_2026_09_07.md` (AgentX), re-checked against `origin/main` at `623bf54b2` (2026-11-03).
 **Reads:** AgentX owns product direction and should read this before approval.
 
