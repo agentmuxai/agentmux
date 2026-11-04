@@ -269,7 +269,9 @@
     font-size: var(--text-xs);
     white-space: nowrap;
 
-    > * + *::before {
+    // The separator follows the stat before it, so a stat hidden in a narrow pane leaves none behind.
+    .agent-activity-tail::after,
+    .agent-activity-remaining::after {
         content: "\00b7";
         padding: 0 0.6ch;
         opacity: 0.6;
