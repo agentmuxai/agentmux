@@ -36,6 +36,7 @@ mod post_spawn;
 mod pty;
 mod pty_tasks;
 mod spawn_command;
+mod start_steps;
 mod spawn_cwd;
 mod ssh_pane;
 pub(crate) mod stamps;
