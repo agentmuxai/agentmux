@@ -24,13 +24,16 @@
  * Panes are native surfaces; drawing over one means the airspace-clip
  * machinery, and anything rendered *inside* the pane could be obscured or
  * imitated by the page. Chrome-level placement also satisfies §4's "visible
- * without focusing the pane".
+ * without focusing the pane". Only the "Stop?" question is asked in the pane
+ * itself, as a pane modal over the one pane being stopped.
  */
 
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import type { JSX } from "solid-js";
 import { ConfirmModal } from "@/element/confirm-modal";
+import { openPaneModal, type PaneRequestHandle, type PaneRequestProps } from "@/app/store/pane-requests";
 import { Button } from "@/element/ui";
+import { revealBlock } from "@/app/util/reveal-block";
 import { getApi } from "@/util/app-api";
 import { Z_CAPTURE_INDICATOR } from "@/app/zindex";
 
@@ -54,9 +57,30 @@ export function describeCapture(hasVideo: boolean, hasAudio: boolean): string {
     return "";
 }
 
+/** "Stop and reload?", drawn over the pane whose capture would stop. */
+function StopCaptureConfirm(props: { onStop: () => void; onCancel: () => void } & PaneRequestProps): JSX.Element {
+    return (
+        <ConfirmModal
+            open={true}
+            scope="pane"
+            title="Stop camera and microphone access?"
+            // The reload is not an implementation detail to hide.
+            // CEF cannot terminate a live capture any other way
+            // (§3.7), so stopping it genuinely costs the page's
+            // state, and the user should know before clicking.
+            description="The page will be reloaded to stop any capture already in progress. Anything unsaved on that page will be lost."
+            confirmLabel="Stop and reload"
+            destructive={true}
+            onConfirm={props.onStop}
+            onCancel={props.onCancel}
+        />
+    );
+}
+
 export function PaneMediaCaptureIndicator(): JSX.Element {
     const [capturing, setCapturing] = createSignal<CapturingPane[]>([]);
-    const [confirmRevoke, setConfirmRevoke] = createSignal<string | null>(null);
+    // The open "Stop?" question of each pane: a second click on Stop doesn't stack another.
+    const asking = new Map<string, PaneRequestHandle>();
 
     onMount(() => {
         let dispose: (() => void) | undefined;
@@ -76,7 +100,6 @@ export function PaneMediaCaptureIndicator(): JSX.Element {
     });
 
     const doRevoke = async (blockId: string) => {
-        setConfirmRevoke(null);
         try {
             await getApi().browserPanes.revokeMedia(blockId);
         } catch (e) {
@@ -86,6 +109,22 @@ export function PaneMediaCaptureIndicator(): JSX.Element {
         // next OnMediaAccessChange. Clearing here would show "not capturing"
         // even if the revoke failed — precisely the lie this indicator exists
         // to prevent.
+    };
+
+    const askRevoke = (blockId: string) => {
+        if (asking.has(blockId)) return;
+        const done = () => {
+            asking.get(blockId)?.close();
+            asking.delete(blockId);
+        };
+        const onStop = () => {
+            done();
+            void doRevoke(blockId);
+        };
+        // The person asked by clicking Stop, so nothing else waits on them.
+        asking.set(blockId, openPaneModal(blockId, StopCaptureConfirm, { onStop, onCancel: done }, { source: "media-stop", waits: false, onGone: done }));
+        // The pane may be in another tab: show it, so the question has somewhere to appear.
+        void revealBlock(blockId, { source: "media-stop", focusCaret: false, localOnly: true });
     };
 
     return (
@@ -124,7 +163,7 @@ export function PaneMediaCaptureIndicator(): JSX.Element {
                                 <span>{describeCapture(pane.hasVideo, pane.hasAudio)}</span>
                                 <Button
                                     density="compact"
-                                    onClick={() => setConfirmRevoke(pane.blockId)}
+                                    onClick={() => askRevoke(pane.blockId)}
                                     style={{
                                         "--ui-fg": "#fff",
                                         "--ui-fg-hover": "#fff",
@@ -141,25 +180,6 @@ export function PaneMediaCaptureIndicator(): JSX.Element {
                         )}
                     </For>
                 </div>
-            </Show>
-
-            <Show when={confirmRevoke()}>
-                {(blockId) => (
-                    <ConfirmModal
-                        open={true}
-                        scope="window"
-                        title="Stop camera and microphone access?"
-                        // The reload is not an implementation detail to hide.
-                        // CEF cannot terminate a live capture any other way
-                        // (§3.7), so stopping it genuinely costs the page's
-                        // state, and the user should know before clicking.
-                        description="The page will be reloaded to stop any capture already in progress. Anything unsaved on that page will be lost."
-                        confirmLabel="Stop and reload"
-                        destructive={true}
-                        onConfirm={() => void doRevoke(blockId())}
-                        onCancel={() => setConfirmRevoke(null)}
-                    />
-                )}
             </Show>
         </>
     );
