@@ -15,45 +15,23 @@
  */
 
 import { catchError, onMount, Show, createMemo, untrack, type Accessor, type JSX } from "solid-js";
-import { Button } from "@/app/element/ui";
 import type { AgentDispatch } from "../../swarm/swarm-model";
 import { AgentMessageBlock } from "../components/AgentMessageBlock";
 import { OriginContainer } from "../components/OriginContainer";
 import { HiddenRunBlock } from "../components/HiddenRunBlock";
 import { AmbientNarrationBlock } from "../components/AmbientNarrationBlock";
 import { MarkdownBlock } from "../components/MarkdownBlock";
-import { PeekOverlay } from "../components/PeekOverlay";
 import { PersistentShellBlock } from "../components/PersistentShellBlock";
 import { ToolBlock } from "../components/ToolBlock";
 import { rowDisclosureIn } from "./disclosure";
+import { AgentErrorRow, CliNoticeRow, CompactionStartedRow, ContextCompactedRow, DayDividerRow, HistoryLinkRow, MemoryReinjectionRow, ResumePreflightRow, SessionOutcomeRow, type RowPeek } from "./InlineNodeRows";
 import { ContextDeliveryCard } from "../components/ContextDeliveryCard";
 import { SetupNote } from "../components/SetupNote";
 import { UserMessageBlock } from "../components/UserMessageBlock";
 import { useNodePeek } from "../hooks/useNodePeek";
-import { historyLinkLabel } from "../../../agent-model/live-feed";
-import { cliNoticeText } from "../cli-notice";
-import { ContainerLimitButton } from "../components/ContainerLimitButton";
-import { ContainerUpdateButton } from "../components/ContainerUpdateButton";
-import type { ContextDeliveryNode, DocumentNode, DocumentState, HistoryLinkNode, ShellNode, UserMessageNode } from "../../../agent-model/types";
+import type { ContextDeliveryNode, DocumentNode, DocumentState, ShellNode, UserMessageNode } from "../../../agent-model/types";
 import { markRowMount } from "../../../agent-model/perf-probe";
-import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
-import { compactionCardTokens } from "../compact-boundary";
-import { formatExactTime, formatTimeAgo } from "@/util/format-time";
 import { useTick } from "@/app/hook/useTick";
-import { showCopyContextMenu } from "@/app/store/contextmenu";
-import { getApi } from "@/app/store/global";
-import { CopyErrorButton } from "@/app/errors/CopyErrorButton";
-import { formatErrorReport } from "@/app/errors/error-report";
-import { tip } from "@/app/element/tip";
-
-/** The version of the AgentMux showing the conversation; a persisted row may name an older one. */
-function runningAppVersion(): string | undefined {
-    try {
-        return getApi().getAboutModalDetails().version;
-    } catch {
-        return undefined;
-    }
-}
 
 export interface DocumentRowProps {
     /**
@@ -265,6 +243,8 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
     const peekTick = useTick(1000);
     const { isPeeking, panelVisible: peekPanelVisible, rowEl: peekRowEl, setRowEl: setPeekRowEl, handlePeekEnter, handlePeekLeave } = useNodePeek();
 
+    const peek: RowPeek = { isPeeking, peekPanelVisible, peekRowEl, setPeekRowEl, handlePeekEnter, handlePeekLeave, peekTick };
+
     // This row's dispatch match, equality-gated. `dispatchMatches` is a memo
     // over the WHOLE document array (AgentDocumentView.tsx), so it produces a
     // new Map identity on every stream flush. Passing `.get(id)` as an inline
@@ -356,258 +336,19 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                 />
             </Show>
             <Show when={props.node() && props.node().type === "agent_error"}>
-                <div
-                    class="agent-error-block"
-                    classList={{ "agent-error-block--resolved": !!(props.node() as Extract<DocumentNode, { type: "agent_error" }>).resolved }}
-                    ref={setPeekRowEl}
-                    onMouseEnter={handlePeekEnter}
-                    onMouseLeave={handlePeekLeave}
-                    // SPEC_ERROR_COPY_EVERYWHERE_2026_09_24.md surface 3 —
-                    // this row is the only thing with something to copy;
-                    // the pane's own generic selection-copy menu never fires
-                    // here since nothing is selected on right-click.
-                    onContextMenu={(e) => {
-                        const n = props.node() as Extract<DocumentNode, { type: "agent_error" }>;
-                        showCopyContextMenu(
-                            [{ label: "Copy error", value: formatErrorReport({ title: n.code > 0 ? `HTTP ${n.code}` : "Error", message: n.message }) }],
-                            e
-                        );
-                    }}
-                >
-                    <span class="agent-error-code">
-                        {(() => {
-                            const n = props.node() as Extract<DocumentNode, { type: "agent_error" }>;
-                            // code=0 is a sentinel for non-HTTP errors (network/CLI); don't show "HTTP 0"
-                            return n.code > 0 ? `HTTP ${n.code}` : "Error";
-                        })()}
-                    </span>
-                    <span class="agent-error-message">
-                        {(props.node() as Extract<DocumentNode, { type: "agent_error" }>).message}
-                    </span>
-                    <Show when={(props.node() as Extract<DocumentNode, { type: "agent_error" }>).resolved}>
-                        <span class="agent-error-resolved">signed in since</span>
-                    </Show>
-                    {/* Auth errors (401 Unauthorized / 403 Forbidden) are recoverable
-                        by re-running the provider login — surface an inline CTA that
-                        drives the same flow as the failure banner. Other codes have no
-                        in-place fix, so no button. SPEC_REAUTH_FROM_AUTH_ERROR §7.
-
-                        DELIBERATELY KEPT when the blue "Log in" bar was folded
-                        into the shared failure row
-                        (PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02 §4
-                        Phase 3). This is NOT a third redundant CTA: an
-                        `agent_error` node is a persistent DOCUMENT node that
-                        stays in the transcript forever, whereas the failure row
-                        is transient pane state cleared by the next TurnStart.
-                        Scrolling back to an old 401 long after its row is gone
-                        is exactly the case this serves, so it can't be replaced
-                        by a scroll-to. It always means a turn DID run and was
-                        rejected, so its handler correctly takes relogin()'s
-                        default `retryAfterLogin: true` — unlike the pre-launch
-                        case, which has no turn to retry. */}
-                    <Show when={
-                        props.onAgentErrorLogin
-                        && !(props.node() as Extract<DocumentNode, { type: "agent_error" }>).resolved
-                        && [401, 403].includes((props.node() as Extract<DocumentNode, { type: "agent_error" }>).code)
-                    }>
-                        <Button tone="danger" density="compact" class="agent-error-login-btn" onClick={() => props.onAgentErrorLogin?.()}>
-                            Login Again →
-                        </Button>
-                    </Show>
-                    {/* SPEC_ERROR_COPY_EVERYWHERE_2026_09_24.md surface 3 —
-                        icon at the row's end, shown on hover/focus. */}
-                    <CopyErrorButton
-                        variant="icon"
-                        className="agent-error-copy"
-                        report={() => {
-                            const n = props.node() as Extract<DocumentNode, { type: "agent_error" }>;
-                            return formatErrorReport({ title: n.code > 0 ? `HTTP ${n.code}` : "Error", message: n.message });
-                        }}
-                    />
-                    {(() => {
-                        // No timestamp field exists on AgentErrorNode — estimate only,
-                        // same "no time line" shape ToolBlock/MarkdownBlock use for an
-                        // untimed node.
-                        const n = props.node() as Extract<DocumentNode, { type: "agent_error" }>;
-                        const estimateText = createMemo(() => {
-                            const count = estimateTokenCount(n.message);
-                            return count > 0 ? `~${formatCompactNumber(count)} tok (est.)` : null;
-                        });
-                        return (
-                            <PeekOverlay show={isPeeking() && estimateText() != null} rowEl={peekRowEl}>
-                                <Show when={estimateText()}>
-                                    <div class="agent-node-peek-tooltip-meta">{estimateText()}</div>
-                                </Show>
-                            </PeekOverlay>
-                        );
-                    })()}
-                </div>
+                <AgentErrorRow node={props.node} peek={peek} onAgentErrorLogin={props.onAgentErrorLogin} />
             </Show>
             <Show when={props.node() && props.node().type === "context_compacted"}>
-                {(() => {
-                    const n = props.node() as Extract<DocumentNode, { type: "context_compacted" }>;
-                    const fmt = formatCompactNumber;
-                    // Real events (backend `CompactionBoundary`) carry a real
-                    // trigger + duration; the heuristic fallback (other
-                    // providers, or a missed real event) has neither. See
-                    // docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md §4.3.
-                    const triggerLabel = n.trigger === "manual"
-                        ? "you ran /compact"
-                        : n.trigger === "auto"
-                            ? "auto-compacted"
-                            : null;
-                    const durationLabel = n.durationMs != null
-                        ? ` · took ${(n.durationMs / 1000).toFixed(1)}s`
-                        : "";
-                    // Only a time line — tokensBefore/After/duration are already
-                    // visible in the row itself, and there's no free-text body to
-                    // estimate a token count from.
-                    const timeText = createMemo(() => {
-                        if (!peekPanelVisible()) return null;
-                        peekTick();
-                        return `${formatExactTime(n.timestamp)} · ${formatTimeAgo(n.timestamp)}`;
-                    });
-                    return (
-                        <div
-                            ref={setPeekRowEl}
-                            class="agent-context-compacted"
-                            onMouseEnter={handlePeekEnter}
-                            onMouseLeave={handlePeekLeave}
-                        >
-                            <div class="agent-context-compacted-rule">
-                                <span class="agent-context-compacted-label">
-                                    context compacted{triggerLabel ? ` — ${triggerLabel}` : ""}
-                                </span>
-                            </div>
-                            <div class="agent-context-compacted-detail">
-                                Earlier history summarized · {compactionCardTokens(n, fmt)}{durationLabel}
-                            </div>
-                            <PeekOverlay show={isPeeking() && timeText() != null} rowEl={peekRowEl}>
-                                <div class="agent-node-peek-tooltip-meta">{timeText()}</div>
-                            </PeekOverlay>
-                        </div>
-                    );
-                })()}
+                <ContextCompactedRow node={props.node} peek={peek} />
             </Show>
             <Show when={props.node() && props.node().type === "compaction_started"}>
-                {(() => {
-                    const n = props.node() as Extract<DocumentNode, { type: "compaction_started" }>;
-                    const triggerLabel = n.trigger === "manual" ? "you ran /compact" : "context filled up";
-                    // Node uses `startedAt`, not `timestamp` — same time-only peek
-                    // shape as context_compacted above.
-                    const timeText = createMemo(() => {
-                        if (!peekPanelVisible()) return null;
-                        peekTick();
-                        return `${formatExactTime(n.startedAt)} · ${formatTimeAgo(n.startedAt)}`;
-                    });
-                    return (
-                        <div
-                            ref={setPeekRowEl}
-                            class="agent-compaction-started"
-                            onMouseEnter={handlePeekEnter}
-                            onMouseLeave={handlePeekLeave}
-                        >
-                            <div class="agent-compaction-started-label">
-                                Compacting conversation…
-                            </div>
-                            <div class="agent-compaction-started-detail">
-                                {triggerLabel}
-                            </div>
-                            <PeekOverlay show={isPeeking() && timeText() != null} rowEl={peekRowEl}>
-                                <div class="agent-node-peek-tooltip-meta">{timeText()}</div>
-                            </PeekOverlay>
-                        </div>
-                    );
-                })()}
+                <CompactionStartedRow node={props.node} peek={peek} />
             </Show>
             <Show when={props.node() && props.node().type === "memory_reinjection"}>
-                {(() => {
-                    // Label-only row — deliberately never carries the actual
-                    // memory body text; that content only ever exists in the
-                    // real message already sent to the CLI, never in this
-                    // node's own data. See
-                    // docs/specs/SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_COMPACTION_2026_09_22.md
-                    // §3.2.
-                    const n = props.node() as Extract<DocumentNode, { type: "memory_reinjection" }>;
-                    const fmt = formatCompactNumber;
-                    const countLabel = `${n.globalMemoryCount} global, ${n.personalMemoryCount} personal`;
-                    // Per-entry breakdown + real byte totals — "the token
-                    // count of each" (§4) surfaced on hover, same PeekOverlay
-                    // pattern the other compaction-family nodes already use
-                    // above rather than a second, different disclosure UI.
-                    const breakdownText = createMemo(() => {
-                        if (!peekPanelVisible()) return null;
-                        peekTick();
-                        const lines = n.perEntryTokens.map(
-                            (e) => `${e.source === "global" ? "🌐" : "👤"} ${e.label} — ~${fmt(e.tokens)} tok (est.), ${fmt(e.sizeBytes)} B`,
-                        );
-                        const totalsLine = `Total: ${fmt(n.totalSizeBytes.global)} B global, ${fmt(n.totalSizeBytes.personal)} B personal`;
-                        // Informational suggestion text only, §3.4.3 — no
-                        // action affordance (compress button / "create a
-                        // WorkItem" click) is wired here. §3.4.4 leaves
-                        // whether that action ever auto-fires (vs. requires
-                        // explicit confirmation) as an open product
-                        // decision; building an interactive trigger for an
-                        // unresolved interaction would mean guessing at it.
-                        // Text-only guidance carries none of that risk.
-                        const suggestionLines =
-                            n.sizeBand === "high" || n.sizeBand === "critical"
-                                ? [
-                                      "",
-                                      "Personal memory has grown large. Consider:",
-                                      "• Compress: Memory list → consolidate with Memory write (check its history and diff first)",
-                                      "• Delegate: hand the next segment of work to another agent via Tasks enqueue",
-                                  ]
-                                : [];
-                        return [...lines, totalsLine, ...suggestionLines].join("\n");
-                    });
-                    return (
-                        <div
-                            ref={setPeekRowEl}
-                            class={`agent-memory-reinjection agent-memory-reinjection--${n.sizeBand}`}
-                            onMouseEnter={handlePeekEnter}
-                            onMouseLeave={handlePeekLeave}
-                        >
-                            <div class="agent-memory-reinjection-label">
-                                🧠 Memory reinjected — {countLabel} (~{fmt(n.estimatedTokens)} tok, est.)
-                            </div>
-                            <PeekOverlay show={isPeeking() && breakdownText() != null} rowEl={peekRowEl}>
-                                {/* white-space: pre-line (see scss) renders the \n-joined
-                                    per-entry lines without needing Solid's <For>, which
-                                    this file doesn't otherwise import. */}
-                                <div class="agent-node-peek-tooltip-meta agent-memory-reinjection-tooltip">
-                                    {breakdownText()}
-                                </div>
-                            </PeekOverlay>
-                        </div>
-                    );
-                })()}
+                <MemoryReinjectionRow node={props.node} peek={peek} />
             </Show>
             <Show when={props.node() && props.node().type === "day_divider"}>
-                {(() => {
-                    const n = props.node() as Extract<DocumentNode, { type: "day_divider" }>;
-                    // Exact local-midnight instant — the visible label is already a
-                    // human day name, so this just adds precision, no estimate line
-                    // (a day label has no free-text body worth estimating).
-                    const timeText = createMemo(() => {
-                        if (!peekPanelVisible()) return null;
-                        peekTick();
-                        return `${formatExactTime(n.timestamp)} · ${formatTimeAgo(n.timestamp)}`;
-                    });
-                    return (
-                        <div
-                            ref={setPeekRowEl}
-                            class="agent-day-divider"
-                            onMouseEnter={handlePeekEnter}
-                            onMouseLeave={handlePeekLeave}
-                        >
-                            <div class="agent-day-divider-label">{n.dayLabel}</div>
-                            <PeekOverlay show={isPeeking() && timeText() != null} rowEl={peekRowEl}>
-                                <div class="agent-node-peek-tooltip-meta">{timeText()}</div>
-                            </PeekOverlay>
-                        </div>
-                    );
-                })()}
+                <DayDividerRow node={props.node} peek={peek} />
             </Show>
             {/* history_link intentionally has no peek — a render-time synthetic
                 CTA row (id "history-link" at the top of the feed, or
@@ -618,162 +359,19 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                 treats this as the one deliberate exception to "always fires":
                 there is no data here a peek could add. */}
             <Show when={props.node() && props.node().type === "history_link"}>
-                <div
-                    class="agent-history-link-row"
-                    role="button"
-                    tabindex="0"
-                    onClick={() => props.onOpenHistory?.()}
-                    onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            props.onOpenHistory?.();
-                        }
-                    }}
-                >
-                    <span class="agent-history-link-sigil">⌛</span>
-                    <span class="agent-history-link-label">{historyLinkLabel(props.node() as HistoryLinkNode)}</span>
-                    <span class="agent-history-link-cta">Open Agent History →</span>
-                </div>
+                <HistoryLinkRow node={props.node} onOpenHistory={props.onOpenHistory} />
             </Show>
             {/* resume_preflight — like history_link, a render-time synthetic
                 with a fixed id, no timestamp and no hidden content, so it has
                 no peek either (same deliberate exception). */}
             <Show when={props.node() && props.node().type === "resume_preflight"}>
-                {(() => {
-                    const n = props.node() as Extract<DocumentNode, { type: "resume_preflight" }>;
-                    return (
-                        <Show
-                            when={!n.pending}
-                            fallback={
-                                // Only ever rendered when the check has already
-                                // run longer than its reveal delay — see
-                                // `useResumePreflight`'s STEPS_VISIBLE_AFTER_MS.
-                                <div class="agent-resume-preflight agent-resume-preflight-pending">
-                                    <span class="agent-resume-preflight-sigil">⟳</span>
-                                    <span class="agent-resume-preflight-label">
-                                        Checking whether this conversation can resume…
-                                    </span>
-                                </div>
-                            }
-                        >
-                            <div
-                                class={
-                                    n.verdict === "recover"
-                                        ? "agent-resume-preflight agent-resume-preflight-recover"
-                                        : "agent-resume-preflight agent-resume-preflight-fresh"
-                                }
-                            >
-                                <span class="agent-resume-preflight-sigil">
-                                    {n.verdict === "recover" ? "⟲" : "⚠"}
-                                </span>
-                                <span class="agent-resume-preflight-label">
-                                    {n.verdict === "recover"
-                                        ? "This agent will reconnect to its conversation — it may pause briefly on your first message."
-                                        : "This agent will start a new conversation — the history below isn't available to it."}
-                                </span>
-                                <Show when={n.verdict === "fresh" && props.onOpenHistory}>
-                                    <span
-                                        class="agent-resume-preflight-cta"
-                                        role="button"
-                                        tabindex="0"
-                                        onClick={() => props.onOpenHistory?.()}
-                                        onKeyDown={(e) => {
-                                            if (e.key === "Enter" || e.key === " ") {
-                                                e.preventDefault();
-                                                props.onOpenHistory?.();
-                                            }
-                                        }}
-                                    >
-                                        Open Agent History →
-                                    </span>
-                                </Show>
-                            </div>
-                        </Show>
-                    );
-                })()}
+                <ResumePreflightRow node={props.node} onOpenHistory={props.onOpenHistory} />
             </Show>
             <Show when={props.node() && props.node().type === "session_outcome"}>
-                {(() => {
-                    const n = props.node() as Extract<DocumentNode, { type: "session_outcome" }>;
-                    // `resumed` nodes are no longer materialized in the
-                    // working document (§3.5 of the session-scoped-scrollback
-                    // spec — both parse paths skip them), so this branch only
-                    // sees `fresh` today. The resumed rendering is kept for
-                    // the P2 Agent History view, which materializes both.
-                    const resumed = n.outcome === "resumed";
-                    // Body shows the attempted vs. actual session id — real
-                    // debug info this node's own visible label doesn't surface
-                    // anywhere else.
-                    const timeText = createMemo(() => {
-                        if (!peekPanelVisible()) return null;
-                        peekTick();
-                        return `${formatExactTime(n.timestamp)} · ${formatTimeAgo(n.timestamp)}`;
-                    });
-                    // An empty `attemptedSid` is meaningful, not missing: the
-                    // spawn had no session id to resume at all (srv's
-                    // `fresh_start_needs_disclosure` path), as opposed to
-                    // having attempted one that was rejected. Render it as "—"
-                    // so the peek body doesn't read as a truncated id.
-                    const bodyText = `attempted: ${n.attemptedSid || "—"} · actual: ${n.actualSid ?? "—"}`;
-                    return (
-                        <div
-                            ref={setPeekRowEl}
-                            class={resumed ? "agent-session-outcome" : "agent-session-outcome agent-session-outcome-fresh"}
-                            onMouseEnter={handlePeekEnter}
-                            onMouseLeave={handlePeekLeave}
-                        >
-                            <div class="agent-session-outcome-rule">
-                                <span class="agent-session-outcome-label">
-                                    {resumed
-                                        ? "Session continued"
-                                        : n.continued
-                                          ? "Session continued · reconstructed context"
-                                          : "New session started"}
-                                </span>
-                            </div>
-                            <Show when={!resumed}>
-                                <div class="agent-session-outcome-detail">
-                                    {n.continued
-                                        ? "The provider couldn't resume the previous session, so this new one was given AgentMux's record of the conversation: a running summary and the recent exchange"
-                                        : "The agent doesn't have the conversation above this line"}
-                                </div>
-                            </Show>
-                            <PeekOverlay show={isPeeking()} rowEl={peekRowEl}>
-                                <Show when={timeText()}>
-                                    <div class="agent-node-peek-tooltip-meta">{timeText()}</div>
-                                </Show>
-                                <div class="agent-node-peek-tooltip-body">{bodyText}</div>
-                            </PeekOverlay>
-                        </div>
-                    );
-                })()}
+                <SessionOutcomeRow node={props.node} peek={peek} />
             </Show>
             <Show when={props.node() && props.node().type === "cli_notice"}>
-                {(() => {
-                    // Read through the accessor, not captured once: an
-                    // install row is updated in place (installing → installed).
-                    const node = () => props.node() as Extract<DocumentNode, { type: "cli_notice" }>;
-                    const text = createMemo(() => cliNoticeText(node(), runningAppVersion()));
-                    return (
-                        <div class={`agent-cli-notice agent-cli-notice-${text().tone}`} {...tip(formatExactTime(node().timestamp))}>
-                            <div class="agent-cli-notice-rule">
-                                <span class="agent-cli-notice-label">{text().label}</span>
-                            </div>
-                            <Show when={text().detail}>
-                                <div class="agent-cli-notice-detail">{text().detail}</div>
-                            </Show>
-                            <Show when={node().kind === "container_image" && node().imageState === "outdated" && node().blockId}>
-                                <ContainerUpdateButton blockId={node().blockId!} />
-                            </Show>
-                            <Show when={node().kind === "container_limit" && node().limitState === "oom" && node().agentId}>
-                                <ContainerLimitButton agentId={node().agentId!} agentName={node().agentName || "this agent"} />
-                            </Show>
-                            <Show when={node().kind === "container_caches" && node().agentId}>
-                                <ContainerLimitButton agentId={node().agentId!} agentName={node().agentName || "this agent"} label="Container settings" />
-                            </Show>
-                        </div>
-                    );
-                })()}
+                <CliNoticeRow node={props.node} />
             </Show>
         </>
     );

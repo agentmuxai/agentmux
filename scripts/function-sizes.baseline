@@ -524,7 +524,7 @@
 116 frontend/app/view/agent/stream-parser.ts::ClaudeCodeStreamParser::eventToNode
 316 frontend/app/view/agent/useAgentStream.ts::parseRecords
 809 frontend/app/view/agent/useAgentStream.ts::useAgentStream
-546 frontend/app/view/agent/virtualization/DocumentRow.tsx::DocumentNodeBody
+166 frontend/app/view/agent/virtualization/DocumentRow.tsx::DocumentNodeBody
 116 frontend/app/view/agent/virtualization/held-release.ts::useScrolledOffRelease
 195 frontend/app/view/audit/audit-manager.tsx::AuditManager
 424 frontend/app/view/browser/browser-model.ts::BrowserViewModel::constructor
