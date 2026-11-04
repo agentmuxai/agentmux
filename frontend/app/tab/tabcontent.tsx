@@ -7,7 +7,7 @@ import { PaneLeafChrome } from "@/app/tab/pane-leaf-chrome";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { ModalLayer } from "@/element/ModalLayer";
 import { CenteredDiv } from "@/element/quickelems";
-import logoUrl from "@/app/asset/logo-brain.svg?url";
+import logoUrl from "@/app/asset/logo-mark.svg?url";
 import { ContentRenderer, NodeModel, PreviewRenderer } from "@/layout/index";
 import { TileLayout } from "@/layout/lib/TileLayout.platform";
 import type { BeforeDeleteHooks } from "@/layout/lib/types";

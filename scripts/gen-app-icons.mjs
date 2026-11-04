@@ -16,8 +16,9 @@
 //
 // Written: Linux hicolor PNGs, the Windows .ico, the frontend's 256 px icon, the tray and notification
 // PNGs, the MSIX logos (plus the unplated / light-unplated taskbar sets), the macOS 1024 px icon (the
-// blocks on Apple's rounded template) and the macOS menu-bar glyph, and assets/icon/web/ (the favicon
-// set for the landing and docs sites). See assets/icon/README.md.
+// blocks on Apple's rounded template) and the macOS menu-bar glyph, assets/icon/web/ (the favicon
+// set for the landing and docs sites), and the mark the app draws for itself: the four blocks alone, on
+// no tile (the splash, the loading spinner, the empty-pane logo). See assets/icon/README.md.
 
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -235,6 +236,18 @@ function faviconSvg(dark, light) {
     );
 }
 
+const hex = (rgb) => `#${rgb.map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+
+/** The rectangles of the mark inside the app: the dark icon's four blocks, without the tile. */
+export const markRects = (dark) => dark.slice(1);
+
+/** The mark as an SVG (also inlined by hand in index.html's pre-splash; a test keeps the two equal). */
+export function markSvg(dark) {
+    const rects = markRects(dark).map((r) => `<rect x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" fill="${hex(r.fill)}"/>`);
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" shape-rendering="crispEdges">${rects.join("")}</svg>
+`;
+}
+
 /** Every output: `{ path (from the repo root), bytes }`. */
 export function outputs(root = ROOT) {
     const dark = readRects(readFileSync(join(root, "assets/icon/agentmux-dark.svg"), "utf8"));
@@ -259,6 +272,13 @@ export function outputs(root = ROOT) {
 
     png("assets/macos/agentmux-1024.png", drawMacIcon(dark, 1024));
     png("crates/launcher/resources/menubar-template.png", drawMenubarGlyph());
+
+    // The mark the app draws for itself, blocks only: the web views' SVG, and the launcher's splash PNG
+    // (256 x 256, RGBA, the size build.rs reads; the file keeps its old name, brain.png, so no Rust changes).
+    out.push({ path: "frontend/app/asset/logo-mark.svg", bytes: Buffer.from(markSvg(dark)) });
+    const mark = canvas(256, 256);
+    for (const r of markRects(dark)) fillRect(mark, r.x / 2, r.y / 2, r.w / 2, r.h / 2, r.fill);
+    png("crates/launcher/resources/brain.png", mark);
 
     // The favicon set for the landing and docs sites (their repos take these files).
     const web = "assets/icon/web";
