@@ -773,7 +773,8 @@ pub(crate) async fn handle_ui_browser_open(
     // (the shared folder is given up to an older srv), a fresh Incognito jar, never the user's Personal.
     let mut profile = req.profile.clone();
     if crate::server::browser_identity::asks_for_own(&req.auth.agent_id, profile.as_deref()) {
-        if let Err(e) = crate::server::app_api::browser_ensure_agent_profile(&state, &req.auth.agent_id).await {
+        let owner = crate::server::browser_identity::profile_owner(&state, &req.auth.agent_id);
+        if let Err(e) = crate::server::app_api::browser_ensure_agent_profile(&state, &owner, &req.auth.agent_id).await {
             tracing::warn!(agent_id = %req.auth.agent_id, error = %e, "[ui-automation] browser open: no own profile; Incognito instead");
             profile = Some("incognito".to_string());
         }

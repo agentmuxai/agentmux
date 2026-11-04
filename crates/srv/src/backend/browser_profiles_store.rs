@@ -131,24 +131,32 @@ pub fn add(
     Ok(profile)
 }
 
-/// The id of agent `agent_id`'s own profile: `agent-` and its id, in the characters a profile id has.
-pub fn agent_profile_id(agent_id: &str) -> String {
-    let slug: String = agent_id.to_lowercase().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
-    format!("agent-{slug}").chars().take(64).collect()
+/// The id of the own profile of the agent `owner` (its uid, which a rename keeps): `agent-`, a readable part of
+/// it, and a hash of all of it, so two owners never share an id however alike their names, in the characters a
+/// profile id has.
+pub fn agent_profile_id(owner: &str) -> String {
+    let readable: String = owner.to_lowercase().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).take(40).collect();
+    // FNV-1a, 32 bits: fixed for good, unlike the standard hasher.
+    let hash = owner.bytes().fold(0x811c_9dc5_u32, |h, b| (h ^ u32::from(b)).wrapping_mul(0x0100_0193));
+    format!("agent-{readable}-{hash:08x}")
 }
 
-/// Agent `agent_id`'s own profile in `profiles`, made if it has none, its name kept
-/// to the agent's. Whether the list changed is the second part.
-pub fn ensure_agent_profile(profiles: &mut Vec<BrowserProfile>, agent_id: &str, now_ms: i64) -> (BrowserProfile, bool) {
-    let name: String = agent_id.trim().chars().take(MAX_NAME_CHARS).collect();
-    if let Some(p) = profiles.iter_mut().find(|p| p.owner_agent.as_deref() == Some(agent_id)) {
+/// Agent `owner`'s own profile in `profiles`, made if it has none, its name kept to the
+/// agent's current `name` (so a rename shows and the data stays). Whether the list
+/// changed is the second part.
+pub fn ensure_agent_profile(profiles: &mut Vec<BrowserProfile>, owner: &str, name: &str, now_ms: i64) -> (BrowserProfile, bool) {
+    let name: String = name.trim().chars().take(MAX_NAME_CHARS).collect();
+    if let Some(p) = profiles.iter_mut().find(|p| p.owner_agent.as_deref() == Some(owner)) {
         let changed = p.name != name;
         p.name = name;
         return (p.clone(), changed);
     }
     let color = farthest_free_slot(profiles.iter().map(|p| p.color.as_str())).hex.clone();
-    let profile =
-        BrowserProfile { id: agent_profile_id(agent_id), name, color, created_at: now_ms, agents_allowed: false, owner_agent: Some(agent_id.to_string()) };
+    let mut id = agent_profile_id(owner);
+    while profiles.iter().any(|p| p.id == id) {
+        id.push('x');
+    }
+    let profile = BrowserProfile { id, name, color, created_at: now_ms, agents_allowed: false, owner_agent: Some(owner.to_string()) };
     profiles.push(profile.clone());
     (profile, true)
 }
@@ -271,16 +279,20 @@ mod tests {
         for i in 0..MAX_PROFILES {
             add(&mut ps, &format!("P{i}"), None, 1).unwrap();
         }
-        let (first, made) = ensure_agent_profile(&mut ps, "camper-2", 7);
+        let (first, made) = ensure_agent_profile(&mut ps, "uid-1", "camper-2", 7);
         assert!(made && is_profile_id(&first.id), "{first:?}");
-        assert_eq!((first.id.as_str(), first.name.as_str(), first.owner_agent.as_deref()), ("agent-camper-2", "camper-2", Some("camper-2")));
+        assert_eq!((first.id.clone(), first.name.as_str(), first.owner_agent.as_deref()), (agent_profile_id("uid-1"), "camper-2", Some("uid-1")));
         assert!(!first.agents_allowed);
-        let (again, made) = ensure_agent_profile(&mut ps, "camper-2", 9);
+        let (again, made) = ensure_agent_profile(&mut ps, "uid-1", "camper-2", 9);
         assert!(!made && again == first, "a second open reuses it");
+        // A rename keeps the data (the same row, the same id) and shows the new name.
+        let (renamed, changed) = ensure_agent_profile(&mut ps, "uid-1", "camper-9", 9);
+        assert!(changed && renamed.id == first.id && renamed.name == "camper-9");
+        assert_eq!(ps.len(), MAX_PROFILES + 1);
         assert_eq!(ps.len(), MAX_PROFILES + 1);
         // The user's cap counts only the user's profiles, and an agent's name doesn't take theirs.
         assert!(add(&mut ps, "One more", None, 1).is_err());
-        ensure_agent_profile(&mut ps, "Work", 1);
+        ensure_agent_profile(&mut ps, "uid-2", "Work", 1);
         remove(&mut ps, "p-none").unwrap_err();
         let id = ps[0].id.clone();
         remove(&mut ps, &id).unwrap();
@@ -289,10 +301,11 @@ mod tests {
 
     #[test]
     fn an_agent_profile_id_keeps_to_the_characters_and_length_of_a_profile_id() {
-        assert_eq!(agent_profile_id("Naki_2"), "agent-naki-2");
-        let long = agent_profile_id(&"x".repeat(200));
-        assert!(is_profile_id(&long), "{long}");
-        assert_ne!(agent_profile_id("a"), agent_profile_id("b"));
+        let (a, b) = (agent_profile_id("Naki_2"), agent_profile_id("naki-2"));
+        assert!(a.starts_with("agent-naki-2-") && b.starts_with("agent-naki-2-") && a != b, "{a} {b}");
+        let (long, longer) = (agent_profile_id(&"x".repeat(200)), agent_profile_id(&format!("{}y", "x".repeat(200))));
+        assert!(is_profile_id(&long) && is_profile_id(&longer) && long != longer, "{long}");
+        assert_eq!(agent_profile_id("uid-1"), agent_profile_id("uid-1"));
     }
 
     #[test]

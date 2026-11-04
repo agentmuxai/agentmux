@@ -22,7 +22,8 @@ fn register_pane_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 crate::server::browser_identity::check_new_tab(&state, meta)?;
                 // An agent browses as a named profile only if the user lets it.
                 if !ctx.agent_id.is_empty() {
-                    crate::server::browser_identity::check_agent_may_use(meta, &ctx.agent_id)?;
+                    let owner = crate::server::browser_identity::profile_owner(&state, &ctx.agent_id);
+                    crate::server::browser_identity::check_agent_may_use(meta, &owner)?;
                 }
             }
             open_pane(&state, cmd).await
