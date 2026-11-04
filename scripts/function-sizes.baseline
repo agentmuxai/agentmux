@@ -604,7 +604,6 @@
 180 frontend/app/view/warden-jobs/job-update-diff.tsx::JobUpdateDiff
 253 frontend/app/view/warden-jobs/jobs-history.tsx::JobHistory
 137 frontend/app/view/warden-jobs/warden-jobs-manager.tsx::WardenJobsManager
-579 frontend/app/window/action-widgets.tsx::ActionWidgets
 223 frontend/app/window/hamburger-menu.tsx::HamburgerMenu
 157 frontend/app/window/hamburger-menu.tsx::menuItems
 233 frontend/app/window/more-dropdown.tsx::MoreDropdown
