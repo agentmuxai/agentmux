@@ -479,7 +479,6 @@
 147 frontend/app/view/agent/components/PersistentShellBlock.tsx::PersistentShellBlock
 130 frontend/app/view/agent/components/SeatRosterImport.tsx::SeatRosterImport
 108 frontend/app/view/agent/components/SlashCommandPicker.tsx::SlashCommandPicker
-529 frontend/app/view/agent/components/ToolBlock.tsx::ToolBlock
 377 frontend/app/view/agent/components/ToolOverlayLog.tsx::ToolOverlayLog
 250 frontend/app/view/agent/components/agent-picker-launch.ts::createPickerLaunch
 130 frontend/app/view/agent/components/agent-picker-templates.ts::createTemplates

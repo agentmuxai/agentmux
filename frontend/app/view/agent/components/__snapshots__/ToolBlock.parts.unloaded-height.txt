@@ -1,0 +1,5 @@
+no loader: <div class="agent-tool-result-unloaded">Loading result…</div>
+height from the batched pass: <div class="agent-tool-result-unloaded" style="min-height: 321px;">Loading result…</div>
+height read from the body: <div class="agent-tool-result-unloaded" style="min-height: 321px;">Loading result…</div>
+result back: (no placeholder) / body
+row removed: no placeholder, no error

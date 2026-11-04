@@ -1,0 +1,37 @@
+Agent + solo dispatch running: agent-tool-result-pill pill-agent-running | running
+Agent + workflow dispatch running: agent-tool-result-pill pill-agent-running | 2/5
+Agent + dispatch completed: agent-tool-result-pill pill-agent | done
+Agent + dispatch abandoned: agent-tool-result-pill pill-agent | done
+Agent no match, running: none
+Agent no match, pending approval: none
+Agent no match, success without result: none
+Agent no match, success with result: agent-tool-result-pill pill-agent | done
+Agent no match, failed with result: none
+Task + solo dispatch running: agent-tool-result-pill pill-agent-running | running
+Task + workflow dispatch running: agent-tool-result-pill pill-agent-running | 2/5
+Task + dispatch completed: agent-tool-result-pill pill-agent | done
+Task + dispatch abandoned: agent-tool-result-pill pill-agent | done
+Task no match, running: none
+Task no match, pending approval: none
+Task no match, success without result: none
+Task no match, success with result: agent-tool-result-pill pill-agent | done
+Task no match, failed with result: none
+Workflow + solo dispatch running: agent-tool-result-pill pill-agent-running | running
+Workflow + workflow dispatch running: agent-tool-result-pill pill-agent-running | 2/5
+Workflow + dispatch completed: agent-tool-result-pill pill-agent | done
+Workflow + dispatch abandoned: agent-tool-result-pill pill-agent | done
+Workflow no match, running: none
+Workflow no match, pending approval: none
+Workflow no match, success without result: none
+Workflow no match, success with result: agent-tool-result-pill pill-agent | done
+Workflow no match, failed with result: none
+Grep success: agent-tool-result-pill pill-matches | 2 matches
+Grep running: none
+Grep success, no result: none
+WebSearch success: agent-tool-result-pill pill-sources | 1 source
+Bash running: none
+Bash success, no result: none
+Bash success with result: none
+Bash failed with result: none
+unloaded keeps its pill: agent-tool-result-pill pill-ok | 12 lines
+unloaded without a pill: none
