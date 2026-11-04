@@ -42,7 +42,11 @@ mod tests {
         };
         script("gh", "echo \"gh GH_TOKEN=[$GH_TOKEN] GITHUB_TOKEN=[$GITHUB_TOKEN] args=$*\"");
         let run = |broker: &str, bashwrap_prints: &str, inherited: &str| {
-            script("agentmux-bashwrap", &format!("[ \"$1\" = github-token ] && printf '%s' '{bashwrap_prints}'"));
+            // The text guard passes the arguments through and says ok; the token helper prints `bashwrap_prints`.
+            script(
+                "agentmux-bashwrap",
+                &format!("case \"$1\" in github-text-guard) shift; shift; for a in \"$@\"; do printf '%s\\0' \"$a\"; done; printf 'ok\\0';; github-token) printf '%s' '{bashwrap_prints}';; esac"),
+            );
             let path = std::env::join_paths(std::iter::once(dir.clone()).chain(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()))).unwrap();
             let mut cmd = std::process::Command::new(&bash);
             cmd.args(["-c", "gh pr list"])
@@ -94,6 +98,17 @@ github-owner-tag)
   shift; shift
   for a in "$@"; do printf '%s\0' "$a"; done
   printf '%s\0' --tagged;;
+github-text-guard)
+  shift; shift
+  # The real helper decides which commands send text; this one refuses those with a body or `api`.
+  case "$*" in
+  *--body*|api\ *)
+    if [ "$FAKE_TEXT" = refuse ]; then echo 'agentmux: text refused' >&2; printf 'refused\0'; exit 1; fi
+    if [ "$FAKE_TEXT" = silent ]; then exit 0; fi;;
+  esac
+  for a in "$@"; do printf '%s\0' "$a"; done
+  if [ "$FAKE_TEXT" = rewrite ]; then printf '%s\0' --rewritten; fi
+  printf 'ok\0';;
 github-token) printf 'ghs_X';;
 esac"#,
         );
@@ -137,6 +152,24 @@ esac"#,
         // `gh pr create` runs with the arguments the owner-tag helper gave; `gh pr list` with its own.
         assert_eq!(run("gh pr create --body x", "1", "", "").0, "gh args=pr create --body x --tagged");
         assert_eq!(run("gh pr list", "1", "", "").0, "gh args=pr list");
+        // What a gh command sends goes through the text guard first: a refusal stops gh (nothing
+        // runs, its status is the command's), arguments the guard rewrote (a stdin body handed on as
+        // a file) are the ones gh gets, and a guard that says nothing means the text was not checked.
+        assert_eq!(run("FAKE_TEXT=refuse gh pr comment 3 --body x", "1", "", ""), (String::new(), Some(1)));
+        assert_eq!(run("FAKE_TEXT=refuse gh api repos/o/r/issues", "1", "", ""), (String::new(), Some(1)));
+        assert_eq!(run("FAKE_TEXT=rewrite gh issue comment 3 --body x", "1", "", "").0, "gh args=issue comment 3 --body x --rewritten");
+        // pr create gets the rewritten arguments and then the owner tag.
+        assert_eq!(run("FAKE_TEXT=rewrite gh pr create --body x", "1", "", "").0, "gh args=pr create --body x --rewritten --tagged");
+        let (said, code) = run("FAKE_TEXT=silent gh pr comment 3 --body x", "1", "", "");
+        assert_eq!((said.as_str(), code), ("", Some(1)));
+        // An empty argument and one with a newline arrive whole.
+        assert_eq!(run("gh issue comment 3 --body '' --title $'a
+b'", "1", "", "").0, "gh args=issue comment 3 --body  --title a
+b");
+        // Commands that send no text, and every command without the switch, skip the guard.
+        assert_eq!(run("FAKE_TEXT=refuse gh pr view 3", "1", "", "").0, "gh args=pr view 3");
+        assert_eq!(run("FAKE_TEXT=refuse gh repo view", "1", "", "").0, "gh args=repo view");
+        assert_eq!(run("FAKE_TEXT=refuse gh pr comment 3 --body x", "", "", "").0, "gh args=pr comment 3 --body x");
         // `gh auth status` says how gh is signed in, not "not logged in"; without the switch it is plain gh.
         let (said, code) = run("gh auth status", "1", "", "");
         assert!(said.starts_with("github.com") && said.contains("per repository") && !said.contains("gh args="), "{said}");
