@@ -548,8 +548,8 @@ describe("AgentPresentationView callbacks", () => {
         same("document", N.document, F.paneModel.document);
 
         step("narration");
-        h.argsOf.useAmbientNarration[1]({ id: "amb" });
-        h.argsOf.useBackgroundHandoffNarration[1]([{ id: "bg" }]);
+        (h.argsOf.useAmbientNarration[1] as any)({ id: "amb" });
+        (h.argsOf.useBackgroundHandoffNarration[1] as any)([{ id: "bg" }]);
         same("handoff document", h.argsOf.useBackgroundHandoffNarration[0], F.paneModel.document);
 
         step("the stream, before and after the list registers its scroller");
@@ -733,7 +733,7 @@ describe("AgentPresentationView callbacks", () => {
         step("hidden follows the tab's visibility");
         for (const v of ["active", "hidden", "window-hidden"]) {
             corner.visibility = v;
-            note(v, h.argsOf.useRenderDormant[0]());
+            note(v, (h.argsOf.useRenderDormant[0] as any)());
         }
         const VC = opts("createAgentViewControls");
         step("the view controls read the document and write its state");
