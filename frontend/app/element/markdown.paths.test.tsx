@@ -256,6 +256,11 @@ describe("Markdown — tables", () => {
         expect(q(container, "tbody").textContent).toBe("123");
     });
 
+    it("left-aligns a header cell whose column has no alignment", () => {
+        const { container } = render(() => <Markdown text={"| a | b |\n|---|---|\n| 1 | 2 |\n"} />);
+        for (const th of qa(container, "th")) expect(th.classList.contains("text-left")).toBe(true);
+    });
+
     it("keeps the spans of a raw HTML table", () => {
         const html =
             '<table><thead><tr><th colspan="2" scope="col">H</th></tr></thead><tbody><tr><td rowspan="2" colspan="1">x</td><td>y</td></tr></tbody></table>';

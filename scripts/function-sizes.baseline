@@ -382,8 +382,6 @@
 118 frontend/app/element/markdown-incremental.ts::findSafeSplitPoint
 176 frontend/app/element/markdown-media.tsx::LocalAV
 113 frontend/app/element/markdown-util.ts::transformBlocks
-599 frontend/app/element/markdown.tsx::Markdown
-116 frontend/app/element/markdown.tsx::renderedMarkdown
 257 frontend/app/element/modal.tsx::Modal
 217 frontend/app/element/quicktips.tsx::QuickTips
 180 frontend/app/element/search.tsx::SearchComponent
