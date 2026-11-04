@@ -76,9 +76,7 @@ pub(crate) async fn handle_tear_off_block(state: &AppState, call: &WebCallType) 
         }
         Err(reason) => return WebReturnType::error(reason),
     };
-    if let Some(rec) = &origin {
-        redock_origin::store(state, &order, rec).await;
-    }
+    redock_origin::remember(state, &order, origin.as_ref()).await;
 
     // Layout setup for the new tab — make the moved block its
     // single root node so the frontend renders it. Best-effort;
@@ -319,8 +317,8 @@ pub(crate) async fn handle_redock_floating_pane(state: &AppState, call: &WebCall
         }
     }
 
-    // The docked pane is home: the origin has done its job.
-    redock_origin::clear(state, &block_id).await;
+    // The docked pane is home: the origin has done its job, on every tab of the pane.
+    redock_origin::clear(state, &[vec![block_id.clone()], members.clone()].concat()).await;
     let updates = redock_updates(state, &source_tab_id, &target_tab_id);
     // CRITICAL: MuxObjUpdates in the response only reach the
     // CALLING renderer (the floater that's about to close). The

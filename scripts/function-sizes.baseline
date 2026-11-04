@@ -337,7 +337,7 @@
 118 crates/srv/src/server/service/tab_move.rs::handle_move_block_to_tab
 122 crates/srv/src/server/service/tab_move.rs::handle_promote_block_to_tab
 174 crates/srv/src/server/service/tear_off.rs::handle_redock_floating_pane
-112 crates/srv/src/server/service/tear_off.rs::handle_tear_off_block
+110 crates/srv/src/server/service/tear_off.rs::handle_tear_off_block
 124 crates/srv/src/server/service/window_close.rs::handle_close_window
 224 crates/srv/src/server/service/window_create.rs::create_default_contents
 301 crates/srv/src/server/service/window_create.rs::handle_create_window

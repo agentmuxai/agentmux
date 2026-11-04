@@ -227,14 +227,25 @@ pub(crate) async fn store(state: &AppState, blocks: &[String], rec: &OriginRecor
     }
 }
 
-/// Drop the record: the pane is docked again, by whatever path.
-pub(crate) async fn clear(state: &AppState, block_id: &str) {
-    if state
-        .mstore
-        .must_get::<crate::backend::obj::Block>(block_id)
-        .is_ok_and(|b| b.meta.contains_key(META_KEY))
-    {
-        patch_block_meta(state, block_id, serde_json::json!({ META_KEY: null })).await;
+/// Keep `rec` on the blocks that just left, or, when there is none to keep, drop any older one they carry.
+pub(crate) async fn remember(state: &AppState, blocks: &[String], rec: Option<&OriginRecord>) {
+    match rec {
+        Some(rec) => store(state, blocks, rec).await,
+        None => clear(state, blocks).await,
+    }
+}
+
+/// Drop the record from each of these blocks: the pane is docked again, by whatever path, or a new tear-off has
+/// nothing to remember and must not leave an older record to be found later.
+pub(crate) async fn clear(state: &AppState, blocks: &[String]) {
+    for block_id in blocks {
+        let has_record = state
+            .mstore
+            .must_get::<crate::backend::obj::Block>(block_id)
+            .is_ok_and(|b| b.meta.contains_key(META_KEY));
+        if has_record {
+            patch_block_meta(state, block_id, serde_json::json!({ META_KEY: null })).await;
+        }
     }
 }
 
