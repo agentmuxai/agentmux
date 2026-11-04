@@ -24,28 +24,24 @@ import { childKey, touched, touchesUnder, type Touch } from "@/app/store/touched
 import { isMacOS } from "@/util/platformutil";
 import { createEffect, createMemo, createSignal, For, Match, on, onCleanup, onMount, Show, Switch, type JSX } from "solid-js";
 import { errorText, type FilesModel, windowsNames } from "./files-model";
-import { closeOwnTab, openEntryWithOs, openFolderInNewTab, openInEditor, openInPane, openTargetOf, openTerminalHere, openWithOs, revealInOs } from "./files-open";
+import { closeOwnTab, openEntryWithOs, openFolderInNewTab, openInEditor, openInPane, openTargetOf, openWithOs } from "./files-open";
 import { FilesPreview } from "./files-preview";
-import { paneWorkdir } from "@/app/drag/file-drop-actions";
-import { isContainerPane, spliceComposerTokens } from "../agent/hooks/useAgentDropAttach";
 import { cachedThumbnail, hasThumbnail, thumbnail } from "./files-thumbs";
 import { TypeIcon } from "./files-type-icon";
-import { clipboard } from "./files-ops";
-import { beginPathDrag, dropPathsOnto, endPathDrag, pathDragPaths, pathDragSource, registerFileDropTarget, visibleDropTargets } from "@/app/drag/file-drop";
-import { getObjectValue, makeORef } from "@/app/store/mos";
-import { isWithin, nameProblem, samePath, stemLength } from "./files-path";
+import { beginPathDrag, endPathDrag, pathDragPaths, pathDragSource, registerFileDropTarget } from "@/app/drag/file-drop";
+import { nameProblem, samePath, stemLength } from "./files-path";
 import { clickRow, folderAt, moveFocus, selectAll, toggleFocused } from "./files-selection";
 import { extensionOf, type SortKey } from "./files-sort";
-import { CONFINED_MENU } from "./files-view-text";
 import { FilesFooter } from "./FilesFooter";
 import { FilesPlaces } from "./FilesPlaces";
 import { FilesToolbar } from "./FilesToolbar";
 import { TypeAhead } from "./typeahead";
+import { buildFolderMenu, buildRowMenu } from "./files-menus";
+import { mentionInAgent, trackAgentFocus } from "./files-agent-mention";
 import "./files.scss";
-import { isGlobalKey, paneCommandFor, registerPaneCommandRunner, shortcutFor } from "@/app/keybindings";
+import { isGlobalKey, paneCommandFor, registerPaneCommandRunner } from "@/app/keybindings";
 import { isEditableTarget } from "@/util/focusutil";
 import { Button } from "@/app/element/ui";
-import { MENU_ICON } from "@/app/util/menu-icons";
 import { tip } from "@/app/element/tip";
 
 const ROW_HEIGHT = 24;
@@ -82,35 +78,9 @@ function kindOf(e: FsEntry): string {
     return e.is_symlink ? `${base} link` : base;
 }
 
-/** The agent pane the user last worked in, for Alt+K: Files has the focus
- *  when the key is pressed, so it is remembered as focus moves. */
-let lastAgentBlock: string | null = null;
-let focusTracking = false;
-function trackAgentFocus(): void {
-    if (focusTracking || typeof window === "undefined") return;
-    focusTracking = true;
-    window.addEventListener(
-        "focusin",
-        (e) => {
-            const pane = e.target instanceof Element ? e.target.closest('[data-role="pane"][data-blockid]') : null;
-            const id = pane?.getAttribute("data-blockid");
-            if (id && getObjectValue<Block>(makeORef("block", id))?.meta?.view === "agent") lastAgentBlock = id;
-        },
-        true
-    );
-}
-
-/** `@path` for an agent's composer: relative to its working folder when
- *  inside it, quoted when it has a space. */
-export function mentionToken(path: string, workdir: string | undefined): string {
-    let p = path;
-    if (workdir && isWithin(path, workdir) && !samePath(path, workdir)) {
-        p = path.slice(workdir.replace(/[\\/]+$/, "").length + 1);
-    }
-    return /\s/.test(p) ? `@"${p}"` : `@${p}`;
-}
-
 type Confirm = { title: string; message: string; confirmLabel: string; onConfirm: () => void };
+
+export { mentionToken } from "./files-agent-mention";
 
 export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext }): JSX.Element {
     const model = props.model;
@@ -562,160 +532,9 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
         model.setSelection(clickRow(model.selection(), order(), entry.name, { toggle: isMod(e), range: e.shiftKey }));
     };
 
-    /** On a host, only what works there: nothing that hands its paths to
-     *  this computer (an app, the file manager, an agent) or needs a Trash. */
-    const forHost = (items: ContextMenuItem[]): ContextMenuItem[] => {
-        if (model.root()) return items.filter((i) => i.type !== "action" || CONFINED_MENU.test(i.label));
-        if (!model.connection()) return items;
-        const local = /^(Open with default app|Reveal in |Mention in agent|Attach to |Move .*to Trash)/;
-        return items.filter((i) => i.type !== "action" || !local.test(i.label));
-    };
-
-    const rowMenu = (entry: FsEntry): ContextMenuItem[] => {
-        const list = model.selectedEntries();
-        const many = list.length > 1;
-        const path = model.pathOf(entry.name);
-        const fail = (err: unknown) => model.setStatus({ text: errorText(err), tone: "error" });
-        const items: ContextMenuItem[] = [{ type: "action", label: "Open", icon: entry.is_dir ? MENU_ICON.openFolder : MENU_ICON.open, shortcut: "Enter", onSelect: () => openEntry(entry) }];
-        if (entry.is_dir) {
-            items.push({ type: "action", label: "Open in new tab", icon: MENU_ICON.open, shortcut: shortcutFor("files:openInNewTab"), onSelect: () => openInNewTab(path) });
-        }
-        if (!entry.is_dir) {
-            items.push(
-                { type: "action", label: "Open in Editor", icon: MENU_ICON.openInEditor, onSelect: () => void openInEditor(model, path).catch(fail) },
-                { type: "action", label: "Open with default app", icon: MENU_ICON.open, onSelect: () => void openWithOs(path, model.blockId).catch(fail) }
-            );
-        } else {
-            items.push({ type: "action", label: "Open terminal here", icon: MENU_ICON.openTerminal, onSelect: () => void openTerminalHere(path, model.blockId, model.connection() || undefined).catch(fail) });
-        }
-        items.push(
-            { type: "action", label: isMacOS() ? "Reveal in Finder" : "Reveal in file manager", icon: MENU_ICON.reveal, onSelect: () => void revealInOs(path, model.blockId).catch(fail) },
-            // One item per agent pane on screen (the DOM menu has no submenus).
-            {
-                type: "action",
-                label: "Mention in agent", icon: MENU_ICON.mention,
-                shortcut: shortcutFor("files:mention"),
-                disabled: agentTargets().length === 0,
-                onSelect: () => mentionIn(many ? list : [entry]),
-            },
-            ...agentTargets().map((t): ContextMenuItem => ({
-                type: "action", label: `Attach to ${t.name}`, icon: MENU_ICON.attach, onSelect: () => attachTo(t, many ? list : [entry]),
-            })),
-            { type: "separator" },
-            { type: "action", label: "Cut", icon: MENU_ICON.cut, shortcut: shortcutFor("files:cut"), onSelect: () => model.copyToClipboard("cut", many ? list : [entry]) },
-            { type: "action", label: "Copy", icon: MENU_ICON.copy, shortcut: shortcutFor("files:copy"), onSelect: () => model.copyToClipboard("copy", many ? list : [entry]) },
-            { type: "action", label: many ? `Copy ${list.length} paths` : "Copy path", icon: MENU_ICON.copy, onSelect: () => copyPaths(many ? list : [entry]) },
-            { type: "separator" },
-            { type: "action", label: "Rename", icon: MENU_ICON.rename, shortcut: shortcutFor("files:rename"), disabled: many, onSelect: () => model.setRenaming(entry.name) },
-            { type: "action", label: many ? `Move ${list.length} items to Trash` : "Move to Trash", icon: MENU_ICON.delete, shortcut: shortcutFor("files:trash"), onSelect: () => void model.trash(many ? list : [entry]) },
-            {
-                type: "action",
-                label: "Delete permanently…", icon: MENU_ICON.deletePermanently,
-                shortcut: shortcutFor("files:deletePermanently"),
-                danger: true,
-                onSelect: () => askDeletePermanently(many ? list : [entry]),
-            }
-        );
-        return forHost(items);
-    };
-
-    /** The agent panes on screen, by name: "Attach to <agent>" targets. */
-    const agentTargets = (): { blockId: string; name: string }[] =>
-        visibleDropTargets()
-            .map((blockId) => ({ blockId, meta: getObjectValue<Block>(makeORef("block", blockId))?.meta }))
-            .filter((t) => t.meta?.view === "agent")
-            .map((t) => ({ blockId: t.blockId, name: (t.meta?.["agentName"] as string | undefined)?.trim() || "agent" }));
-
-    /**
-     * Alt+K (spec §8.2, route 3): an `@path` mention of each selected entry
-     * in the composer of the agent the user was last working with, as
-     * Claude Code's own editor integrations do. Relative to the agent's
-     * working folder when inside it.
-     */
-    const mentionIn = (list: FsEntry[]): void => {
-        if (model.refuseInRoot("Mentioning files")) return;
-        if (list.length === 0) return;
-        // A host's paths mean nothing to an agent on this computer.
-        if (model.connection()) {
-            model.notOnHost("Mentioning files in an agent");
-            return;
-        }
-        const agents = agentTargets();
-        const target = agents.find((t) => t.blockId === lastAgentBlock) ?? (agents.length === 1 ? agents[0] : undefined);
-        if (!target) {
-            model.setStatus(
-                {
-                    text: agents.length === 0 ? "No agent pane is open to mention these in." : `Click into the agent you mean first, then ${shortcutFor("files:mention")} here.`,
-                    tone: "info",
-                },
-                4000
-            );
-            return;
-        }
-        const workdir = paneWorkdir(target.blockId);
-        // A container agent sees only its working folder (bind-mounted), so a
-        // host path outside it means nothing to it (ReAgent on #4225).
-        if (isContainerPane(target.blockId)) {
-            const outside = list.filter((e) => !workdir || !isWithin(model.pathOf(e.name), workdir));
-            if (outside.length > 0) {
-                model.setStatus(
-                    {
-                        text: `${target.name} runs in a container and sees only its working folder. Drop ${outside.length === 1 ? outside[0].name : "those files"} on it to copy ${outside.length === 1 ? "it" : "them"} in.`,
-                        tone: "info",
-                    },
-                    6000
-                );
-                return;
-            }
-        }
-        const tokens = list.map((e) => mentionToken(model.pathOf(e.name), workdir));
-        const root = document.querySelector<HTMLElement>(`[data-role="pane"][data-blockid="${CSS.escape(target.blockId)}"]`);
-        if (!root || !spliceComposerTokens(root, tokens)) {
-            model.setStatus({ text: `${target.name}'s message box isn't open.`, tone: "error" }, 4000);
-        }
-    };
-
-    const attachTo = (target: { blockId: string; name: string }, list: FsEntry[]): void => {
-        if (model.connection()) {
-            model.notOnHost("Attaching files to an agent");
-            return;
-        }
-        const paths = list.map((e) => model.pathOf(e.name));
-        void dropPathsOnto(target.blockId, paths).then(
-            (ok) =>
-                model.setStatus(
-                    ok
-                        ? { text: `Attached ${list.length === 1 ? list[0].name : `${list.length} items`} to ${target.name}`, tone: "info" }
-                        : { text: `${target.name} can't take files right now`, tone: "error" },
-                    4000
-                ),
-            (err) => model.setStatus({ text: `Couldn't attach: ${errorText(err)}`, tone: "error" })
-        );
-    };
-
-    const folderMenu = (): ContextMenuItem[] => {
-        const fail = (err: unknown) => model.setStatus({ text: errorText(err), tone: "error" });
-        return forHost([
-            { type: "action", label: "New folder", icon: MENU_ICON.newFolder, shortcut: shortcutFor("files:newFolder"), onSelect: () => void model.createNew("dir") },
-            { type: "action", label: "New file", icon: MENU_ICON.newFile, onSelect: () => void model.createNew("file") },
-            { type: "action", label: "New tab here", icon: MENU_ICON.add, shortcut: shortcutFor("files:newTabHere"), onSelect: () => openInNewTab(model.path()) },
-            {
-                type: "action",
-                label: clipboard()?.kind === "cut" ? `Paste (move ${clipboard()!.paths.length})` : clipboard() ? `Paste (copy ${clipboard()!.paths.length})` : "Paste",
-                icon: MENU_ICON.paste, shortcut: shortcutFor("files:paste"),
-                disabled: !clipboard(),
-                onSelect: () => void model.paste(),
-            },
-            { type: "separator" },
-            { type: "action", label: "Open terminal here", icon: MENU_ICON.openTerminal, onSelect: () => void openTerminalHere(model.path(), model.blockId, model.connection() || undefined).catch(fail) },
-            { type: "action", label: isMacOS() ? "Reveal in Finder" : "Reveal in file manager", icon: MENU_ICON.reveal, onSelect: () => void revealInOs(model.path(), model.blockId).catch(fail) },
-            { type: "action", label: "Copy folder path", icon: MENU_ICON.copy, onSelect: () => void navigator.clipboard?.writeText(model.path()) },
-            { type: "separator" },
-            { type: "action", label: model.showHidden() ? "Hide hidden files" : "Show hidden files", icon: model.showHidden() ? MENU_ICON.hide : MENU_ICON.show, onSelect: () => model.toggleHidden() },
-            { type: "action", label: "Refresh", icon: MENU_ICON.refresh, shortcut: shortcutFor("files:refresh"), onSelect: () => model.refresh() },
-            { type: "action", label: "Undo", icon: MENU_ICON.undo, shortcut: shortcutFor("files:undo"), onSelect: () => void model.undo() },
-        ]);
-    };
+    const mentionIn = (list: FsEntry[]): void => mentionInAgent(model, list);
+    const rowMenu = (entry: FsEntry): ContextMenuItem[] => buildRowMenu(model, entry, { openEntry, openInNewTab, copyPaths, askDeletePermanently });
+    const folderMenu = (): ContextMenuItem[] => buildFolderMenu(model, { openInNewTab });
 
     const onRowContextMenu = (e: MouseEvent, entry: FsEntry): void => {
         e.preventDefault();

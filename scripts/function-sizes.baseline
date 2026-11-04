@@ -168,7 +168,7 @@
 292 crates/srv/src/backend/blockcontroller/persistent_resume.rs::update
 151 crates/srv/src/backend/blockcontroller/shell/file_ops.rs::handle_append_block_file
 162 crates/srv/src/backend/blockcontroller/shell/indexing.rs::build_output_idx_from
-328 crates/srv/src/backend/blockcontroller/shell/lifecycle.rs::ShellController::start
+145 crates/srv/src/backend/blockcontroller/shell/lifecycle.rs::ShellController::start
 147 crates/srv/src/backend/blockcontroller/shell/lifecycle.rs::run_pty_output_flusher
 579 crates/srv/src/backend/blockcontroller/subprocess/container_spawn.rs::SubprocessController::spawn_container_turn
 211 crates/srv/src/backend/blockcontroller/subprocess/host_spawn.rs::SubprocessController::spawn_turn
@@ -328,7 +328,6 @@
 203 crates/srv/src/server/reactive.rs::handle_reactive_register
 125 crates/srv/src/server/reactive.rs::try_cloud_relay
 110 crates/srv/src/server/remote_ops/receive.rs::receive
-759 crates/srv/src/server/routes.rs::build_routers_with
 130 crates/srv/src/server/service/host_ipc.rs::handle_register
 277 crates/srv/src/server/service/misc.rs::handle_misc_service
 431 crates/srv/src/server/service/object.rs::handle_object_service
@@ -359,7 +358,7 @@
 217 frontend/app-init.ts::initMux
 366 frontend/app/block/block.tsx::Block
 142 frontend/app/block/block.tsx::BlockFull
-356 frontend/app/block/blockframe.tsx::BlockFrame_Default_Component
+243 frontend/app/block/blockframe.tsx::BlockFrame_Default_Component
 280 frontend/app/block/blockframe.tsx::BlockFrame_Header
 117 frontend/app/block/blockframe.tsx::EndIcons
 114 frontend/app/block/blockutil.tsx::ConnectionButton
@@ -446,7 +445,7 @@
 130 frontend/app/view/accounts/accounts-manager.tsx::AccountsManager
 553 frontend/app/view/agent/agent-model.ts::AgentViewModel::launchAgentDefinition
 132 frontend/app/view/agent/agent-pane-chrome-model.ts::buildAgentPaneChromeModel
-678 frontend/app/view/agent/agent-view.tsx::AgentPresentationView
+616 frontend/app/view/agent/agent-view.tsx::AgentPresentationView
 179 frontend/app/view/agent/attachments/AttachmentLightbox.tsx::AttachmentLightbox
 101 frontend/app/view/agent/attachments/AttachmentTile.tsx::AttachmentTile
 296 frontend/app/view/agent/attachments/AttachmentTray.tsx::AttachmentTray
@@ -454,12 +453,9 @@
 140 frontend/app/view/agent/cli-notice.ts::parseCliNoticeFrame
 111 frontend/app/view/agent/commands/global/login.ts::runLogin
 213 frontend/app/view/agent/components/ActivityDock.tsx::ActivityDock
-254 frontend/app/view/agent/components/ActivityRow.tsx::ActivityRow
+251 frontend/app/view/agent/components/ActivityRow.tsx::ActivityRow
 270 frontend/app/view/agent/components/AgentBottomPanels.tsx::AgentBottomPanels
 200 frontend/app/view/agent/components/AgentCard.tsx::AgentCard
-777 frontend/app/view/agent/components/AgentComposerStrip.tsx::AgentComposerStrip
-103 frontend/app/view/agent/components/AgentComposerStrip.tsx::layout
-255 frontend/app/view/agent/components/AgentComposerStrip.tsx::slots
 160 frontend/app/view/agent/components/AgentContainerLimitsPanel.tsx::AgentContainerLimitsPanel
 327 frontend/app/view/agent/components/AgentCreateForm.tsx::AgentCreateForm
 345 frontend/app/view/agent/components/AgentCreatePanel.tsx::AgentCreatePanel
@@ -498,7 +494,7 @@
 257 frontend/app/view/agent/components/my-agents-list-data.ts::useMyAgentsData
 478 frontend/app/view/agent/components/my-agents-list-panels.ts::createRowPanels
 326 frontend/app/view/agent/components/shell-highlight/tokenize.ts::Scanner::scanListInner
-331 frontend/app/view/agent/components/working-row.tsx::AgentWorkingRow
+329 frontend/app/view/agent/components/working-row.tsx::AgentWorkingRow
 189 frontend/app/view/agent/failure/failure-accessory.ts::failureToRow
 168 frontend/app/view/agent/failure/useAccountBinding.ts::useAccountBinding
 238 frontend/app/view/agent/flows/launch-flow.ts::runLaunchFlow
@@ -559,7 +555,7 @@
 354 frontend/app/view/editor/viewers/pdf/pdf-viewer.tsx::PdfViewer
 101 frontend/app/view/editor/viewers/viewer-host.tsx::ViewerFor
 152 frontend/app/view/files/files-preview.tsx::FilesPreview
-890 frontend/app/view/files/files-view.tsx::FilesView
+739 frontend/app/view/files/files-view.tsx::FilesView
 118 frontend/app/view/global-bundle/GlobalMemoryFullView.tsx::EntryView
 253 frontend/app/view/global-bundle/global-bundle-manager.tsx::GlobalBundleManager
 153 frontend/app/view/history/history-agents.tsx::HistoryAgents
@@ -600,7 +596,7 @@
 163 frontend/app/view/swarm/swarm-fleet-toolbar.tsx::FleetToolbar
 104 frontend/app/view/swarm/swarm-model.ts::SwarmViewModel::buildTree
 153 frontend/app/view/swarm/swarm-model.ts::SwarmViewModel::constructor
-372 frontend/app/view/swarm/swarm-view.tsx::AgentRow
+165 frontend/app/view/swarm/swarm-view.tsx::AgentRow
 129 frontend/app/view/swarm/swarm-view.tsx::SubagentRow
 166 frontend/app/view/sysinfo/sysinfo-focus.tsx::FocusView
 127 frontend/app/view/sysinfo/sysinfo-model.ts::sampleReducer

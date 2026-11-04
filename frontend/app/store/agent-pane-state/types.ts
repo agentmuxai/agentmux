@@ -50,6 +50,9 @@ export interface ActivityState {
     tools: Array<{
         id: string | null;
         activity: ToolActivity;
+        /** The tool's name and, for a shell call, its command: what sorts it into a kind of long-running work. */
+        name?: string;
+        command?: string;
         startedAt: number;
         parentId?: string;
         progress?: string;

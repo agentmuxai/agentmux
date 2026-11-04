@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * BrainSpinner — the pulsating AgentMux brain mark as a reusable loading
+ * BrainSpinner — the pulsating AgentMux mark (the four blocks of the app icon; it was a brain until the icon
+ * changed, hence the name) as a reusable loading
  * indicator. The same asset/animation as the startup splash
  * (index.html's #startup-loading, frontend/app/init/startup-splash.ts), but
  * that one is a single-shot, non-reusable singleton overlay tied to one DOM
@@ -13,7 +14,7 @@
  */
 
 import type { JSX } from "solid-js";
-import brainSvg from "@/app/asset/logo-brain.svg?raw";
+import markSvg from "@/app/asset/logo-mark.svg?raw";
 import "./BrainSpinner.scss";
 
 interface BrainSpinnerProps {
@@ -29,7 +30,7 @@ export const BrainSpinner = (props: BrainSpinnerProps): JSX.Element => {
         <div
             class={`brain-spinner${props.fading ? " is-fading" : ""}${props.class ? ` ${props.class}` : ""}`}
             aria-hidden="true"
-            innerHTML={brainSvg}
+            innerHTML={markSvg}
         />
     );
 };
