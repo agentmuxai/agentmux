@@ -13,15 +13,12 @@
 #   - fpm on PATH (`gem install fpm`).
 #   - Same build artifacts stage-linux-runtime.sh requires (dist/, target/release/).
 #
-# Dependency policy (spec OQ4, unresolved as an open question at the time of
-# writing — this script's default): bundle everything statically, the same
-# way the AppImage does, rather than declaring `Depends:` against system GTK/
-# Wayland/X11 libraries. This keeps `apt install ./agentmux.deb` from failing
-# on a minimal system that's missing one of those, at the cost of a larger
-# package than a "thin" .deb that relies on the system's own copies. If OQ4
-# is later resolved the other way, add `--deb-no-default-config-files` /
-# `--depends <pkg>` flags to the fpm invocation below — no staging changes
-# needed, since the staged tree already bundles every runtime lib either way.
+# Dependencies: the CEF runtime links against system libraries the package does not carry
+# (NSS, GTK's ATK, X11 and XKB, ALSA, libdrm's gbm, cups, Wayland, ...). On a minimal system
+# `agentmux --version` failed for want of them, so the package declares them in `Depends:`.
+# scripts/linux-package-deps.list is the one list, scripts/linux-package-deps.sh turns it
+# into the fpm flags below, and refuses to build when the staged tree needs a library that is
+# neither bundled nor listed.
 #
 # Install layout (distinct from the AppImage's self-contained AppDir/AppRun
 # scheme — this is what actually installing a .deb puts on the filesystem):
@@ -140,11 +137,18 @@ for size in 16 32 48 64 128 256 512; do
 done
 
 # --- 4. Package with fpm — turns $PKGROOT (already laid out exactly as it
-#        should land on the target filesystem) into a .deb. No Depends: per
-#        this script's header comment; revisit per spec OQ4 if needed. ---
+#        should land on the target filesystem) into a .deb. Depends: comes from
+#        scripts/linux-package-deps.list; the check fails the build when the staged
+#        runtime needs a system library the list lacks. ---
+bash "$REPO_ROOT/scripts/linux-package-deps.sh" check "$PKGROOT"
+DEPENDS_ARGS=()
+while IFS= read -r dep; do
+    DEPENDS_ARGS+=(--depends "$dep")
+done < <(bash "$REPO_ROOT/scripts/linux-package-deps.sh" deb "$PKGROOT")
 mkdir -p "$OUTDIR"
 rm -f "$OUTPUT"
 fpm -s dir -t deb \
+    "${DEPENDS_ARGS[@]}" \
     --name agentmux \
     --version "$VERSION" \
     --architecture amd64 \

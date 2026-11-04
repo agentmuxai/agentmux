@@ -347,7 +347,6 @@
 133 crates/srv/src/server/vault_rotate.rs::handle_vault_rotate
 210 crates/srv/src/server/websocket.rs::handle_incoming_text
 227 crates/srv/src/server/websocket.rs::handle_ws_connection
-1011 crates/srv/src/server/websocket.rs::register_handlers
 111 crates/srv/src/server/widget_agent_handlers.rs::handle_widgets_install
 129 crates/srv/src/server/work_queue.rs::enqueue_core
 120 crates/srv/src/server/work_queue.rs::handle_work_claim
@@ -358,7 +357,7 @@
 217 frontend/app-init.ts::initMux
 366 frontend/app/block/block.tsx::Block
 142 frontend/app/block/block.tsx::BlockFull
-356 frontend/app/block/blockframe.tsx::BlockFrame_Default_Component
+243 frontend/app/block/blockframe.tsx::BlockFrame_Default_Component
 280 frontend/app/block/blockframe.tsx::BlockFrame_Header
 117 frontend/app/block/blockframe.tsx::EndIcons
 114 frontend/app/block/blockutil.tsx::ConnectionButton
@@ -375,7 +374,7 @@
 119 frontend/app/drag/CrossWindowDropOverlay.tsx::CrossWindowDropOverlay
 132 frontend/app/element/ModalLayer.tsx::ModalLayer
 590 frontend/app/element/PaneChrome.tsx::renderPaneChromeShell
-459 frontend/app/element/PaneTabStrip.tsx::PaneTabStrip
+157 frontend/app/element/PaneTabStrip.tsx::PaneTabStrip
 403 frontend/app/element/PaneTabStrip.tsx::PaneTabStripItem
 122 frontend/app/element/ProviderLogo.tsx::ProviderLogo
 114 frontend/app/element/anchored-popover.tsx::AnchoredPopover
@@ -456,9 +455,6 @@
 251 frontend/app/view/agent/components/ActivityRow.tsx::ActivityRow
 270 frontend/app/view/agent/components/AgentBottomPanels.tsx::AgentBottomPanels
 200 frontend/app/view/agent/components/AgentCard.tsx::AgentCard
-777 frontend/app/view/agent/components/AgentComposerStrip.tsx::AgentComposerStrip
-103 frontend/app/view/agent/components/AgentComposerStrip.tsx::layout
-255 frontend/app/view/agent/components/AgentComposerStrip.tsx::slots
 160 frontend/app/view/agent/components/AgentContainerLimitsPanel.tsx::AgentContainerLimitsPanel
 327 frontend/app/view/agent/components/AgentCreateForm.tsx::AgentCreateForm
 345 frontend/app/view/agent/components/AgentCreatePanel.tsx::AgentCreatePanel
