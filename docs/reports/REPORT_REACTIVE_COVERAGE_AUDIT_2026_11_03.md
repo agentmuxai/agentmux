@@ -1,5 +1,6 @@
 # Report: reactive coverage, which views go stale and one cheap way to fix them
 
+**Status:** active — approved by the operator 2026-11-03; the helper and the gate ship in PR #6407, the Settings panels and the remaining views follow (task #21824).
 **Task:** #21823 (research). **Author:** Loap@narko, 2026-11-03. **Code read:** `origin/main` at `ef8ebc8ac`. No live check was run.
 **Asked by the operator (2026-11-03):** "i notice connectors did not update as accounts were connected ... instead I switch pane tabs and switched back and I saw the accounts. this leads to a greater audit to make sure we have good reactive coverage. ... connectors is definitly a nueral center (same with settings) that we need high-signaling"
 
