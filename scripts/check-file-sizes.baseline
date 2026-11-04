@@ -33,5 +33,4 @@
 2107 crates/srv/src/server/muxspect_handlers.rs
 2311 crates/srv/src/server/reactive.rs
 2224 crates/srv/src/server/websocket.rs
-1528 frontend/app/view/files/files-view.tsx
 2050 frontend/app/view/swarm/swarm-model.ts

@@ -409,6 +409,7 @@
 121 frontend/app/notification/notificationitem.tsx::NotificationItem
 148 frontend/app/notification/sound/sound-service.ts::installSoundService
 111 frontend/app/platform/pane-overlay.ts::flushClip
+159 frontend/app/scroll/follow-scroll.ts::createFollowScroll
 175 frontend/app/selection/selection-effects.ts::createSelectionRunner
 104 frontend/app/selection/selection-machine.ts::transition
 139 frontend/app/statusbar/BackendStatus.tsx::BackendStatus
@@ -527,7 +528,6 @@
 229 frontend/app/view/agent/parseHistoryLines.ts::HistoryParser::feed
 127 frontend/app/view/agent/providers/claude-translator.ts::ClaudeTranslator::translate
 176 frontend/app/view/agent/quick-fork.ts::quickForkAgent
-159 frontend/app/scroll/follow-scroll.ts::createFollowScroll
 118 frontend/app/view/agent/shutdown/ShutdownPendingBanner.tsx::ShutdownPendingBanner
 138 frontend/app/view/agent/stream-flush-queue.ts::createStreamFlushQueue
 116 frontend/app/view/agent/stream-parser.ts::ClaudeCodeStreamParser::eventToNode
@@ -559,7 +559,7 @@
 354 frontend/app/view/editor/viewers/pdf/pdf-viewer.tsx::PdfViewer
 101 frontend/app/view/editor/viewers/viewer-host.tsx::ViewerFor
 152 frontend/app/view/files/files-preview.tsx::FilesPreview
-1068 frontend/app/view/files/files-view.tsx::FilesView
+890 frontend/app/view/files/files-view.tsx::FilesView
 118 frontend/app/view/global-bundle/GlobalMemoryFullView.tsx::EntryView
 253 frontend/app/view/global-bundle/global-bundle-manager.tsx::GlobalBundleManager
 153 frontend/app/view/history/history-agents.tsx::HistoryAgents
