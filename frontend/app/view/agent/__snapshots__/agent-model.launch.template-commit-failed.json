@@ -1,0 +1,74 @@
+{
+  "ok": false,
+  "nodejsError": null,
+  "launchError": "Could not record this launch, so it was not started: db down",
+  "calls": [
+    {
+      "cmd": "ResolvePrereqs",
+      "data": {
+        "tools": [
+          "node",
+          "npm"
+        ]
+      }
+    },
+    {
+      "cmd": "ResolveCli",
+      "data": {
+        "provider_id": "claude",
+        "cli_command": "claude",
+        "npm_package": "@anthropic-ai/claude-code",
+        "pinned_version": "2.1.288",
+        "windows_install_command": "irm https://claude.ai/install.ps1 | iex",
+        "unix_install_command": "curl -fsSL https://claude.ai/install.sh | bash",
+        "block_id": "block-1",
+        "notice_block_id": "block-1",
+        "agent_id": "agent-1"
+      },
+      "opts": {
+        "timeout": 300000
+      }
+    },
+    {
+      "cmd": "GetAllAgentContent",
+      "data": {
+        "agent_id": "agent-1"
+      }
+    },
+    {
+      "cmd": "EnsureProviderAuthDir",
+      "data": {
+        "provider_id": "claude"
+      }
+    },
+    {
+      "cmd": "WriteAgentConfig",
+      "data": {
+        "working_dir": "/srv/home/agents/korp",
+        "files": [],
+        "render_from_agent": true,
+        "instance_name": "Korp",
+        "auto_allocate": false,
+        "agent_type": "host",
+        "agent_id": "agent-1"
+      }
+    },
+    {
+      "cmd": "CreateAgentInstance",
+      "data": {
+        "definition_id": "agent-1",
+        "block_id": "block-1",
+        "instance_name": "Korp",
+        "working_directory": "/srv/home/agents/korp"
+      }
+    }
+  ],
+  "logs": [
+    "trace: cli",
+    "info: Launching agent definition Korp (claude)",
+    "trace: config",
+    "focus requested: block-1",
+    "warn: agent instance row create failed: db down",
+    "focus cancelled: block-1"
+  ]
+}

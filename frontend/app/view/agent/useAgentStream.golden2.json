@@ -1,0 +1,99 @@
+{
+ "log": [
+  "pane {\"type\":\"StreamSubscribe\",\"at\":1793700000000}",
+  "doc {\"type\":\"SessionStart\",\"at\":1793700000000}",
+  "-- after step: phase=Idle",
+  "-- after step: phase=Idle",
+  "doc {\"type\":\"StreamFlush\",\"newNodes\":[{\"type\":\"context_delivery\",\"id\":\"mi-1\",\"reason\":\"startup\",\"items\":[{\"kind\":\"personal_memory\",\"name\":\"notes\",\"sizeBytes\":0,\"tokens\":300},{\"kind\":\"global_memory\",\"name\":\"rules\",\"sizeBytes\":0,\"tokens\":120}],\"timestamp\":1793700001000,\"sizeBand\":\"low\"}],\"updatedNodes\":[]}",
+  "pane {\"type\":\"StreamFlushObserved\",\"addedCount\":1,\"at\":\"<frame clock>\",\"turnRelevant\":true}",
+  "-- after step: phase=Streaming",
+  "doc {\"type\":\"StreamFlush\",\"newNodes\":[],\"updatedNodes\":[{\"type\":\"context_delivery\",\"id\":\"mi-1\",\"reason\":\"startup\",\"items\":[{\"kind\":\"personal_memory\",\"name\":\"notes\",\"sizeBytes\":0,\"tokens\":310}],\"timestamp\":1793700002000,\"sizeBand\":\"low\"}]}",
+  "pane {\"type\":\"StreamFlushObserved\",\"addedCount\":0,\"at\":\"<frame clock>\",\"turnRelevant\":true}",
+  "-- after step: phase=Streaming",
+  "pane {\"type\":\"ModelMessageStarted\"}",
+  "pane {\"type\":\"TokensIn\",\"input\":2020,\"model\":\"claude-test\",\"freshInput\":20,\"cacheCreation\":0,\"cacheRead\":2000}",
+  "-- after step: phase=Streaming",
+  "pane {\"type\":\"ToolStart\",\"name\":\"Grep\",\"arg\":\"needle\",\"id\":\"t2\",\"params\":{\"pattern\":\"needle\"},\"parentId\":\"tA\"}",
+  "doc {\"type\":\"StreamFlush\",\"newNodes\":[{\"type\":\"tool\",\"id\":\"t2\",\"tool\":\"Grep\",\"toolName\":\"Grep\",\"params\":{\"pattern\":\"needle\"},\"status\":\"running\",\"collapsed\":false,\"summary\":\"🔍 Grep needle\",\"timestamp\":1793700000250}],\"updatedNodes\":[]}",
+  "pane {\"type\":\"StreamFlushObserved\",\"addedCount\":1,\"at\":\"<frame clock>\",\"turnRelevant\":true}",
+  "-- after step: phase=Streaming",
+  "pane {\"type\":\"ToolEnd\",\"id\":\"t2\"}",
+  "doc {\"type\":\"StreamFlush\",\"newNodes\":[],\"updatedNodes\":[{\"type\":\"tool\",\"id\":\"t2\",\"tool\":\"Grep\",\"toolName\":\"Grep\",\"params\":{\"pattern\":\"needle\"},\"status\":\"success\",\"result\":{\"content\":\"found\"},\"collapsed\":true,\"summary\":\"🔍 Grep needle\",\"timestamp\":1793700000250}]}",
+  "pane {\"type\":\"StreamFlushObserved\",\"addedCount\":0,\"at\":\"<frame clock>\",\"turnRelevant\":true}",
+  "-- after step: phase=Streaming",
+  "-- after step: phase=Streaming",
+  "pane {\"type\":\"ProviderWaiting\",\"reason\":\"rate_limited\",\"retryAfterMs\":5000,\"at\":1793700000400}",
+  "-- after step: phase=Streaming",
+  "doc {\"type\":\"StreamFlush\",\"newNodes\":[{\"id\":\"stderr-1793700000450-4fzz\",\"type\":\"markdown\",\"content\":\"**stderr:** ordinary warning from the CLI that is shown\",\"timestamp\":1793700000450}],\"updatedNodes\":[]}",
+  "pane {\"type\":\"StreamFlushObserved\",\"addedCount\":1,\"at\":\"<frame clock>\",\"turnRelevant\":true}",
+  "-- after step: phase=Streaming",
+  "pane {\"type\":\"ContextWindowsReported\",\"windows\":{\"claude-test\":200000,\"claude-test-canon\":200000}}",
+  "pane {\"type\":\"TurnEnd\",\"stats\":{\"duration_ms\":2000,\"num_turns\":1}}",
+  "-- after step: phase=Done",
+  "pane {\"type\":\"ContextInvalidated\",\"reason\":\"transcript_replaced\"}",
+  "-- after step: phase=Done",
+  "pane {\"type\":\"ModelMessageStarted\"}",
+  "pane {\"type\":\"TokensIn\",\"input\":2700,\"model\":\"claude-test\",\"freshInput\":700,\"cacheCreation\":0,\"cacheRead\":2000}",
+  "-- after step: phase=Streaming",
+  "pane {\"type\":\"ContextInvalidated\",\"reason\":\"transcript_replaced\"}",
+  "-- after step: phase=Streaming",
+  "-- after step: phase=Streaming",
+  "pane {\"type\":\"ModelMessageStarted\"}",
+  "pane {\"type\":\"TokensIn\",\"input\":6000,\"model\":\"claude-test\",\"freshInput\":4000,\"cacheCreation\":0,\"cacheRead\":2000}",
+  "-- after step: phase=Streaming",
+  "pane {\"type\":\"TurnEnd\",\"stats\":{\"duration_ms\":500,\"num_turns\":1}}",
+  "-- after step: phase=Done",
+  "pane {\"type\":\"StreamWatchdogTick\",\"nowMs\":1793700005000}",
+  "pane {\"type\":\"StreamWatchdogTick\",\"nowMs\":1793700010000}",
+  "pane {\"type\":\"StreamUnsubscribe\",\"at\":1793700010850}"
+ ],
+ "rpc": [
+  "EventReadHistoryCommand {\"event\":\"agent-resume-retry\",\"scope\":\"block:stream-golden\",\"maxitems\":1}",
+  "ListBackgroundTasksCommand {\"blockid\":\"stream-golden\"}",
+  "DockNodeStatusCommand {\"blockid\":\"stream-golden\",\"node_id\":\"t2\",\"tool_name\":\"Grep\",\"status\":\"running\",\"timestamp\":1793700000250}",
+  "DockNodeStatusCommand {\"blockid\":\"stream-golden\",\"node_id\":\"t2\",\"tool_name\":\"Grep\",\"status\":\"success\",\"timestamp\":1793700000250}"
+ ],
+ "document": [
+  {
+   "type": "context_delivery",
+   "id": "mi-1",
+   "reason": "startup",
+   "items": [
+    {
+     "kind": "personal_memory",
+     "name": "notes",
+     "sizeBytes": 0,
+     "tokens": 310
+    }
+   ],
+   "timestamp": 1793700002000,
+   "sizeBand": "low"
+  },
+  {
+   "type": "tool",
+   "id": "t2",
+   "tool": "Grep",
+   "toolName": "Grep",
+   "params": {
+    "pattern": "needle"
+   },
+   "status": "success",
+   "result": {
+    "content": "found"
+   },
+   "collapsed": true,
+   "summary": "🔍 Grep needle",
+   "timestamp": 1793700000250
+  },
+  {
+   "id": "stderr-1793700000450-4fzz",
+   "type": "markdown",
+   "content": "**stderr:** ordinary warning from the CLI that is shown",
+   "timestamp": 1793700000450
+  }
+ ],
+ "registryTasks": 0,
+ "afterUnmount": {
+  "phase": "Done"
+ }
+}
