@@ -1,0 +1,3 @@
+following bash: frames=2
+Read swapped in: frames=2
+Read updated (not following): frames=1
