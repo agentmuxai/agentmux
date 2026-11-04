@@ -7,7 +7,7 @@
 
 import { getApi } from "@/store/global";
 import { fireAndForget } from "@/util/util";
-import { getTabGrabOffset } from "./tab-grab-offset";
+import { tabAnchorOffset } from "./tab-grab-offset";
 import { WorkspaceService } from "../store/services";
 import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
 import { Logger } from "@/util/logger";
@@ -266,28 +266,12 @@ export function createTearOffTabAtRelease(
         const screenY = window.screenY + input.clientY;
         // Tab anchor: place the new window's outer top-left so its first tab
         // lands at the same screen pixel as the grabbed source tab (identical
-        // chrome + CSS ⇒ identical first-tab rect). See the removed mid-drag
-        // path for the full derivation.
-        const grabOffset = getTabGrabOffset();
-        const chromeBorderX = Math.max(0, window.outerWidth - window.innerWidth) / 2;
-        const chromeBorderY = Math.max(
-            0,
-            window.outerHeight - window.innerHeight - chromeBorderX,
-        );
-        // First TAB, not firstElementChild — the leading .tab-separator is a
-        // centered sliver whose rect would skew the anchor.
-        const firstTabEl = tabBarScrollRef()?.querySelector(
-            ".tab-drop-wrapper",
-        ) as HTMLElement | null;
-        const firstTabRect = firstTabEl?.getBoundingClientRect();
-        const tabAnchorX =
-            grabOffset && firstTabRect
-                ? Math.round(screenX - grabOffset.x - firstTabRect.left - chromeBorderX)
-                : undefined;
-        const tabAnchorY =
-            grabOffset && firstTabRect
-                ? Math.round(screenY - grabOffset.y - firstTabRect.top - chromeBorderY)
-                : undefined;
+        // chrome + CSS ⇒ identical first-tab rect). First TAB, not
+        // firstElementChild — the leading .tab-separator is a centered sliver
+        // whose rect would skew the anchor.
+        const anchorOffset = tabAnchorOffset(tabBarScrollRef());
+        const tabAnchorX = anchorOffset ? Math.round(screenX - anchorOffset.x) : undefined;
+        const tabAnchorY = anchorOffset ? Math.round(screenY - anchorOffset.y) : undefined;
         Logger.info("dnd", "tab tear-off on release", {
             draggedTabId, screenX, screenY, tabAnchorX, tabAnchorY,
         });

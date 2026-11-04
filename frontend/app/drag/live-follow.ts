@@ -1,0 +1,45 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * The window-sized picture that follows the cursor during a window-tab drag, on Windows
+ * (crates/cef/src/commands/live_follow.rs; docs/reports/REPORT_LIVE_TEAROFF_CHROME_STYLE_2026_11_04.md §5).
+ * The drag is unchanged and nothing is torn off until release; the host's mouse hook moves the picture once
+ * the cursor is below the tab strip, and the real window opens where it was last seen. The host drops the
+ * picture by itself when the drag ends; `endLiveFollow` drops it as soon as the real window is up.
+ */
+
+import { Logger } from "@/util/logger";
+import { isWindows } from "@/util/platformutil";
+
+type Api = Pick<AppApi, "liveFollowBegin" | "liveFollowEnd">;
+
+export interface LiveFollowSpec {
+    sourceWindowLabel: string;
+    /** Base64 JPEG of the window. */
+    picture: string;
+    /** The window's outer size, DIP. */
+    windowWidth: number;
+    windowHeight: number;
+    /** Cursor to the window's top-left, DIP. */
+    offsetX: number;
+    offsetY: number;
+    /** The viewport y below which the picture shows, DIP. */
+    tearLineY: number;
+}
+
+/** Hand the host the picture and where it goes. A failure only means no picture: the tear-off is unchanged. */
+export async function beginLiveFollow(api: Api, spec: LiveFollowSpec): Promise<void> {
+    if (!isWindows()) return;
+    try {
+        await api.liveFollowBegin(spec);
+    } catch (e) {
+        Logger.warn("dnd", "live follow begin failed", { error: String(e) });
+    }
+}
+
+/** The real window is up (or the tear-off failed): drop the picture now. */
+export function endLiveFollow(api: Api): void {
+    if (!isWindows()) return;
+    api.liveFollowEnd().catch((e) => Logger.debug("dnd", "live follow end failed", { error: String(e) }));
+}

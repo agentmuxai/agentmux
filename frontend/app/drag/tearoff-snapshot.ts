@@ -218,6 +218,22 @@ export function takeWindowTabSnapshot(tabId: string): Promise<string | undefined
     return takeTearOffSnapshot(windowTabKey(tabId));
 }
 
+/**
+ * The picture held for window tab `tabId`, without taking it: the live follow shows it during the drag, and
+ * the tear-off at release takes it for the new window. Waits for a capture still in flight, up to `waitMs`.
+ */
+export async function peekWindowTabSnapshot(tabId: string, waitMs: number): Promise<string | undefined> {
+    const h = held;
+    if (!h || h.blockId !== windowTabKey(tabId) || Date.now() - h.at > MAX_AGE_MS) return undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const budget = new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), waitMs);
+    });
+    const picture = await Promise.race([h.picture, budget]);
+    clearTimeout(timer);
+    return picture && picture.length <= MAX_SNAPSHOT_CHARS ? picture : undefined;
+}
+
 /** Start capturing `blockId` (a base64 JPEG), replacing any earlier picture. */
 export function prewarmTearOffSnapshot(blockId: string): void {
     const at = Date.now();

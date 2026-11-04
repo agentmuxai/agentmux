@@ -711,6 +711,22 @@ declare global {
          *  degrades every mouse event on the system, so dragend calls
          *  this unconditionally. Idempotent. */
         stopTabDragTracking: () => Promise<void>;
+        /** Windows: the picture of the source window that follows the cursor once a window-tab drag is
+         *  below the tab strip (live_follow.rs). The sizes and offsets are DIP. */
+        liveFollowBegin: (args: {
+            sourceWindowLabel: string;
+            /** Base64 JPEG of the window. */
+            picture: string;
+            windowWidth: number;
+            windowHeight: number;
+            /** Cursor to the window's top-left. */
+            offsetX: number;
+            offsetY: number;
+            /** The viewport y below which the picture shows. */
+            tearLineY: number;
+        }) => Promise<void>;
+        /** Drop the picture now. Idempotent. */
+        liveFollowEnd: () => Promise<void>;
         setDragCursor: () => Promise<void>;
         restoreDragCursor: () => Promise<void>;
         releaseDragCapture: () => Promise<void>;
