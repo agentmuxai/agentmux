@@ -370,7 +370,7 @@ export const TIPS: TipRow[] = [
         gesture: "key:Escape",
         where: "in the agent's message box",
         label: "Clear it ({key:mod+z} brings it back); in an empty box, interrupt the agent",
-        source: { file: "frontend/app/view/agent/components/AgentFooter.tsx", anchor: "textarea is empty → send SIGINT" },
+        source: { file: "frontend/app/view/agent/components/composer-keys.ts", anchor: "empty, send SIGINT" },
     },
     {
         id: "agent:up",
@@ -386,7 +386,7 @@ export const TIPS: TipRow[] = [
         gesture: "key:Tab / key:→",
         where: "in an empty message box",
         label: "Accept the suggested next prompt",
-        source: { file: "frontend/app/view/agent/components/AgentFooter.tsx", anchor: "Ghost-text next-prompt suggestion" },
+        source: { file: "frontend/app/view/agent/components/composer-keys.ts", anchor: "Ghost-text next-prompt suggestion" },
     },
     {
         id: "agent:slash",
