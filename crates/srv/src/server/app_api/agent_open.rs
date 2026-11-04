@@ -1,4 +1,5 @@
 use super::*;
+use super::agent_open_steps as steps;
 
 /// Per-agent-definition async lock serializing `agent.open`'s "check for a
 /// live block / seed resume session / create block / register controller"
@@ -33,7 +34,7 @@ fn agent_open_lock(agent_id: &str) -> Arc<tokio::sync::Mutex<()>> {
 
 /// How long `agent.open` waits for a missing pinned CLI to install before telling
 /// the caller to retry. The install is not cancelled when this elapses.
-const AGENT_OPEN_INSTALL_WAIT_SECS: u64 = 150;
+pub(super) const AGENT_OPEN_INSTALL_WAIT_SECS: u64 = 150;
 
 /// Resolve the `(env_var, value)` pair to inject for this agent's model
 /// vendor override, if any — redirects the harness at a non-default
@@ -57,7 +58,7 @@ const AGENT_OPEN_INSTALL_WAIT_SECS: u64 = 150;
 /// `--listen stdio://` args. The spawned child would never complete the App
 /// Server handshake once the provider registry flips a provider's controller
 /// type to `AppServer`.
-fn resolve_cli_args(provider: &providers::ProviderConfig, controller_type: &str) -> Vec<String> {
+pub(super) fn resolve_cli_args(provider: &providers::ProviderConfig, controller_type: &str) -> Vec<String> {
     let args: &[&str] = match controller_type {
         "persistent" => provider.persistent_launch_args.unwrap_or(provider.launch_args),
         "app-server" => provider
@@ -70,7 +71,7 @@ fn resolve_cli_args(provider: &providers::ProviderConfig, controller_type: &str)
     args.iter().map(|s| s.to_string()).collect()
 }
 
-fn resolve_vendor_env_override(
+pub(super) fn resolve_vendor_env_override(
     provider: &providers::ProviderConfig,
     agent: &AgentDefinition,
 ) -> Option<(&'static str, String)> {
@@ -219,7 +220,7 @@ mod resolve_cli_args_tests {
 /// agent is created from a template in the picker. A template's id is its
 /// lowercase name (`claude`), which a user agent created from it shares
 /// case-insensitively, so templates must never be matched first.
-fn select_openable_agent<'a>(
+pub(super) fn select_openable_agent<'a>(
     agents: &'a [AgentDefinition],
     wanted: &str,
 ) -> Result<&'a AgentDefinition, String> {
@@ -245,7 +246,7 @@ fn select_openable_agent<'a>(
 /// no UID/token and no credential gate, exactly the process M4b closes (Codex
 /// P1 on #3584). `agent_def_list` listed the agent, so a missing row here is a
 /// failed backfill, not a missing agent.
-fn require_local_agent_row(mstore: &Store, agent_id: &str) -> Result<(), String> {
+pub(super) fn require_local_agent_row(mstore: &Store, agent_id: &str) -> Result<(), String> {
     match mstore.agent_row_ensure_local(agent_id) {
         Ok(true) => Ok(()),
         Ok(false) => Err(format!(
@@ -362,608 +363,82 @@ pub(super) async fn open_agent_inner(
     let mut extra_meta = extra_meta;
     let headless = extra_meta.remove(super::agent_attach::START_PARKED).is_some(); // a start: no pane
     let mstore = state.mstore.clone();
-    let broker = state.broker.clone();
-    let event_bus = state.event_bus.clone();
-    let filestore = state.filestore.clone();
-    // Owned handle so the reducer-dispatch sites below read exactly as they
-    // did inside the RPC closure (which captured an owned clone).
-    let app_state = state.clone();
 
     tracing::info!(agent_id = %cmd.agent_id, "agent.open");
 
-                // 1. Load the agent definition (by id or name)
-                let agents = mstore.agent_def_list()
-                    .map_err(|e| format!("agent.open: {e}"))?;
-                let mut agent = select_openable_agent(&agents, &cmd.agent_id)?.clone();
+    // 1. Load the agent definition (by id or name)
+    let agent = steps::pick_openable_agent(state, &cmd.agent_id)?;
 
-                // Settle `agent.provider` once through the shared resolver
-                // (the agent's own, or its bundle's when it has none; see
-                // Store::resolve_effective_provider_id) instead of at every
-                // downstream read in this handler. MUST be
-                // app_state.id_store, never mstore.
-                agent.provider = app_state.id_store.resolve_effective_provider_id(&agent);
+    // Serialize the rest of this handler per agent definition —
+    // held until the function returns (guard drops at every exit
+    // path, success or error). See AGENT_OPEN_LOCKS' doc comment.
+    let open_lock = agent_open_lock(&agent.id);
+    let _open_guard = open_lock.lock().await;
 
-                // Serialize the rest of this handler per agent definition —
-                // held until the function returns (guard drops at every exit
-                // path, success or error). See AGENT_OPEN_LOCKS' doc comment.
-                let open_lock = agent_open_lock(&agent.id);
-                let _open_guard = open_lock.lock().await;
+    steps::admit_open(state, &agent).await?;
 
-                // One live instance per agent across every AgentMux instance
-                // on this host (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24
-                // Phase 1, I9) — checked before this handler writes anything
-                // on the agent's behalf. The in-process checks below only see
-                // this srv; this sees the others.
-                crate::backend::agent_admission::check_before_spawn(
-                    crate::backend::agent_admission::lease_store_for(mstore.shared_agent_registry()),
-                    &agent.id,
-                    &agent.name,
-                    &app_state.boot_id,
-                )
-                .await
-                .map_err(|refusal| format!("AGENT_LIVE_ELSEWHERE: {refusal}"))?;
+    // 2. Resolve provider
+    let provider = providers::get_provider(&agent.provider)
+        .ok_or_else(|| format!("INVALID_PROVIDER: unknown provider '{}'", agent.provider))?;
 
-                // Identity M4b-4 (spec §6.5.8): a user agent known only from
-                // the shared registry (another channel's) gets its local row
-                // before any spawn, so its block resolves to it. Templates
-                // were refused above.
-                require_local_agent_row(&mstore, &agent.id)?;
+    // 3-4. The tab, and the agent's own block when it has one: its pane in this tab, a
+    //      parked block attached here, or the pane that shows it elsewhere (`agent_attach`).
+    let tab_id = match super::agent_attach::tab_or_reuse(state, &agent, provider, &cmd, headless, into_block).await? {
+        Ok(tab_id) => tab_id,
+        Err(done) => return Ok(done),
+    };
 
-                // 2. Resolve provider
-                let provider = providers::get_provider(&agent.provider)
-                    .ok_or_else(|| format!("INVALID_PROVIDER: unknown provider '{}'", agent.provider))?;
+    // 5. Resolve the CLI path (see `resolve_cli_path`).
+    let resolved_cli_path = steps::resolve_cli_path(provider).await?;
 
-                // 3-4. The tab, and the agent's own block when it has one: its pane in this tab, a
-                //      parked block attached here, or the pane that shows it elsewhere (`agent_attach`).
-                let tab_id = match super::agent_attach::tab_or_reuse(&app_state, &agent, provider, &cmd, headless, into_block).await? {
-                    Ok(tab_id) => tab_id,
-                    Err(done) => return Ok(done),
-                };
+    // 6. Build metadata
+    let controller_type = steps::open_controller_type(&agent, provider)?;
+    let (seeded, pane_flags) = steps::seed_runtime_args(&mstore, &agent, provider, controller_type);
 
-                // 5. Resolve CLI path.
-                //
-                // The SAME lookup as `resolvecli` / `install.start` /
-                // `install.check`: the shared pinned-version dir, then the
-                // legacy per-AgentMux-version one (`backend::cli_install`).
-                //
-                // History worth keeping: this once hand-rolled
-                // `$HOME/.agentmux/<version>/cli/...` — a path that never
-                // existed — so `agent.open` failed with `CLI_NOT_AVAILABLE`
-                // for every agent even with the CLI installed (verified live
-                // 2026-09-01). One shared resolver is what keeps the launch
-                // paths from drifting apart again.
-                let paths = agentmux_common::DataPaths::from_env()
-                    .ok_or_else(|| "DataPaths::from_env() failed".to_string())?;
-                let npm_bin = crate::backend::cli_install::npm_bin(
-                    &crate::backend::cli_install::install_dir(&paths, &provider.id, provider.pinned_version),
-                    provider.cli_command,
-                )
-                .to_string_lossy()
-                .to_string();
-                // The one lookup the picker and the Toolchain pane use too:
-                // AgentMux's install, else the user's own copy for a provider
-                // AgentMux doesn't install (Kimi, Goose, …).
-                let mut resolved_cli_path = crate::server::cli_handlers::locate_provider_cli(provider.id)
-                    .await
-                    .map(|l| l.path)
-                    .unwrap_or_else(|| npm_bin.clone());
-                if !std::path::Path::new(&resolved_cli_path).exists() {
-                    // An npm-backed provider whose pinned CLI isn't there yet
-                    // (a fresh install, or the minute or two after an upgrade
-                    // moved the pin): install it, as the UI's launch flow does,
-                    // instead of making the caller go and do that first.
-                    if provider.npm_package.is_empty() || provider.pinned_version.is_empty() {
-                        return Err(format!(
-                            "CLI_NOT_AVAILABLE: {} not found at {}. Install it, then try again.",
-                            provider.cli_command, npm_bin
-                        ));
-                    }
-                    let req = crate::backend::cli_install::NpmInstallRequest {
-                        provider_id: provider.id.to_string(),
-                        npm_package: provider.npm_package.to_string(),
-                        pinned_version: provider.pinned_version.to_string(),
-                        cli_command: provider.cli_command.to_string(),
-                        background: false,
-                    };
-                    match crate::backend::cli_install::ensure_installed(
-                        paths.clone(),
-                        req,
-                        std::time::Duration::from_secs(AGENT_OPEN_INSTALL_WAIT_SECS),
-                    )
-                    .await
-                    {
-                        Ok(bin) => resolved_cli_path = bin.to_string_lossy().to_string(),
-                        Err(crate::backend::cli_install::EnsureError::StillInstalling) => {
-                            return Err(format!(
-                                "CLI_INSTALLING: {} {} is still being installed. Try again in a minute; \
-                                 the install carries on in the background.",
-                                provider.cli_command, provider.pinned_version
-                            ));
-                        }
-                        Err(crate::backend::cli_install::EnsureError::Failed(why)) => {
-                            return Err(format!(
-                                "CLI_NOT_AVAILABLE: {} {} could not be installed: {why}",
-                                provider.cli_command, provider.pinned_version
-                            ));
-                        }
-                    }
-                }
+    let work_dir = steps::agent_work_dir(&agent);
+    let routing_id = steps::routing_id(&agent);
+    let auth_dir = steps::prepare_auth_dir(provider)?;
+    let env_vars = steps::launch_env(&mstore, &agent, provider, &auth_dir, &routing_id, controller_type)?;
 
-                // 6. Build metadata
-                let runtime = crate::backend::runtime_adapter::RuntimeKind::of_agent_type(&agent.agent_type).adapter();
-                if !runtime.can_host(provider.controller_type) { return Err(format!("{} runs on the host, not in a container", provider.id)); }
-                let controller_type = provider.controller_type_str();
-                // Container agents use per-turn docker exec; the subprocess controller
-                // is required regardless of what the provider defaults to (claude returns
-                // "persistent", which causes AgentInput to skip the container exec path).
-                let controller_type = runtime.controller_type_for_open(controller_type);
-                // Catalog args, the runtime the menu will show applied on top, then the
-                // definition's own flags. Without the middle step a pane opened here
-                // ran on the CLI's default model while its menu read Sonnet — see
-                // backend/agent_runtime.rs.
-                //
-                // What the user last picked in the menu for this agent sits above the
-                // definition's flags (and replaces them in this pane's copy), so
-                // reopening an agent starts where it was left. A read failure only
-                // means "nothing remembered".
-                let remembered = crate::backend::agent_runtime::Remembered::parse(
-                    provider.id,
-                    &mstore.agent_last_runtime_get(&agent.id).unwrap_or_default(),
-                );
-                let (base_args, pane_flags, remembered_mode) = crate::backend::agent_runtime::apply_remembered(
-                    provider.id,
-                    resolve_cli_args(&provider, controller_type),
-                    &agent.provider_flags,
-                    &remembered,
-                );
-                let mut seeded =
-                    crate::backend::agent_runtime::seed_launch(provider.id, base_args, &pane_flags);
-                if let (Some(mode), Some(rt)) = (remembered_mode, seeded.runtime.as_mut()) {
-                    rt["permissionMode"] = json!(mode);
-                }
+    let resume_session_id = steps::resume_session_for(&mstore, &agent).await;
+    let mut meta = steps::pane_identity_meta(&mstore, &agent, provider);
+    let launch = steps::LaunchMeta { controller_type, cli_path: &resolved_cli_path, seeded, pane_flags: &pane_flags, work_dir: &work_dir, env_vars, resume_session_id: resume_session_id.as_deref(), extra_meta };
+    steps::add_launch_meta(&mut meta, provider, launch);
 
-                let agent_slug = agentmux_common::slug::path_slug(&agent.name);
-                // Shared with native-memory resolution so the two can never
-                // disagree about where a blank-working_directory agent
-                // actually runs — they did, and Personal Bundle broke for the
-                // common case as a result (ReAgent/Codex P1, PR #2901; see
-                // SPEC_FIX_PERSONAL_MEMORY_EMPTY_WORKDIR_2026_09_01.md).
-                let work_dir = if agent.working_directory.is_empty() {
-                    crate::backend::storage::agents::default_agent_working_dir(&agent.name)
-                } else {
-                    agent.working_directory.clone()
-                };
+    // 7. Create the block (see `create_agent_block`).
+    let meta_val = serde_json::to_value(&meta)
+        .map_err(|e| format!("agent.open: meta serialize: {e}"))?;
+    let block_id = match into_block {
+        Some(target) => steps::fill_existing_pane(state, target, meta_val).await?,
+        None => steps::create_agent_block(state, &tab_id, meta_val, headless, &cmd).await?,
+    };
 
-                // Build env vars
-                let mut env_vars = serde_json::Map::new();
-                for key in provider.unset_env {
-                    env_vars.insert(key.to_string(), json!(""));
-                }
-                // Auth dir — the DEFAULT provider auth lives in the shared,
-                // instance/channel/version-independent providers area so a single
-                // login is shared everywhere (the structural fix for the per-channel
-                // validate-spin regression). The per-account auth dir
-                // (identity_handlers) still wins for explicit multi-account.
-                let auth_dir = providers::default_auth_dir(provider)?;
-                // Create the dir AND apply its isolation guarantees in one
-                // inseparable step. Claude Code CLI's own user-level CLAUDE.md
-                // discovery falls through to the real $HOME/.claude/CLAUDE.md
-                // when this isolated dir has none of its own — CLAUDE_CONFIG_DIR
-                // relocates credential/session/project storage but NOT that
-                // lookup (proven live, three-arm experiment:
-                // docs/reports/REPORT_CLAUDE_CONFIG_DIR_ISOLATION_EVIDENCE_2026_09_01.md).
-                //
-                // Fail closed (block the spawn) rather than warn-and-continue:
-                // continuing would launch the agent with exactly the
-                // unprotected condition this exists to close (Codex P1 +
-                // ReAgent P1, PR #2854). Non-claude providers get the dir
-                // created and nothing else, so this never blocks their spawns.
-                // See SPEC_ISOLATE_HOST_CLAUDE_MD_2026_08_31.md.
-                providers::prepare_provider_auth_dir(provider, &auth_dir).map_err(|e| {
-                    format!(
-                        "failed to isolate this agent's Claude Code config ({auth_dir}): {e}. \
-                         Refusing to launch with an unprotected config dir."
-                    )
-                })?;
-                if !provider.auth_config_dir_env_var.is_empty() { env_vars.insert(provider.auth_config_dir_env_var.to_string(), json!(auth_dir)); }
-                for (k, v) in provider.auth_extra_env {
-                    env_vars.insert(k.to_string(), json!(v));
-                }
-                // Model vendor override (harness vs. model-vendor decoupling)
-                // — e.g. ANTHROPIC_BASE_URL for a claude-provider agent
-                // pointed at a proxy/Bedrock/OpenRouter instead of
-                // Anthropic's default endpoint. Inserted before the
-                // free-form env blob below so it wins if a definition-level
-                // KEY=VALUE line collides with it (structured field over
-                // free-form blob, same precedence as the auth entries above).
-                if let Some((var, value)) = resolve_vendor_env_override(provider, &agent) {
-                    env_vars.insert(var.to_string(), json!(value));
-                }
-                // Merge env vars from the definition's persisted env content blob (KEY=VALUE lines).
-                // Provider/auth entries inserted above take precedence; definition-level vars
-                // are merged after so they can extend (but not override) the auth env.
-                if let Ok(Some(env_blob)) = mstore.agent_content_get(&agent.id, "env") {
-                    // Read the way the My Agents editor shows it (`backend::agent_env`): comments
-                    // and lines without a valid `NAME=` are skipped, and a repeated name takes its last value.
-                    for (k, v) in crate::backend::agent_env::effective(&env_blob.content) {
-                        if !env_vars.contains_key(&k) {
-                            env_vars.insert(k, json!(v));
-                        }
-                    }
-                }
-                // Agent identity. `GH_CONFIG_DIR` is not persisted here: it is
-                // a reserved variable set on every spawn by `backend::gh_guard`,
-                // which this env reaches through `build_persistent_spawn_env`.
-                // Use stored slug (stable across renames) for muxbus routing;
-                // fall back to the computed slug derived from the display name.
-                let routing_id = if !agent.slug.is_empty() { &agent.slug } else { &agent_slug };
-                env_vars.insert("AGENTMUX_AGENT_ID".to_string(), json!(routing_id));
-                // Mirror under MUXBUS_AGENT_ID too, matching the same
-                // additive fix in agent_handlers/input.rs (ARCH-002) --
-                // this MuxAPI path (agent.open -> agent.send, via
-                // agent_io.rs reading this back from persisted cmd:env)
-                // builds its own env_vars independently of input.rs's spawn
-                // path, so it needs the same mirror applied here rather than
-                // inheriting it (codex P2 on PR #2345).
-                env_vars.insert("MUXBUS_AGENT_ID".to_string(), json!(routing_id));
-                // Exit delay only for subprocess
-                if controller_type != "persistent" {
-                    env_vars.insert("CLAUDE_CODE_EXIT_AFTER_STOP_DELAY".to_string(), json!("30000"));
-                }
+    tracing::info!(
+        block_id = %block_id,
+        agent_id = %cmd.agent_id,
+        provider = %agent.provider,
+        controller_type = %controller_type,
+        "agent.open: block created + layout updated"
+    );
 
-                // Cross-tab/cross-restart continuity: this agent may already have
-                // a captured provider session sitting in the shared registry
-                // (backfilled from its provider transcript, or captured live by a
-                // prior block) even though no block for it exists in THIS tab —
-                // e.g. after a full app restart lands on a different/rehydrated
-                // tab. Seed the new block's agent:sessionid meta so its FIRST
-                // turn resumes that conversation instead of silently starting
-                // fresh and orphaning the original — the same thing the
-                // picker's explicit "Continue" flow already does via
-                // continueOfInstanceId (RecentSessionRow.session_id), extended
-                // here to the default open path.
-                // See docs/retro/retro-cross-channel-conversation-continuity-regression-2026-06-16.md
-                // ("Mechanism 2 — continuity"), action item 4.
-                //
-                // Concurrency guard (reagent P1 on PR #2059): only seed
-                // agent:sessionid when no OTHER block for this same agent
-                // definition currently has a LIVE controller registered
-                // anywhere in this process — not just this tab (find_agent_block
-                // above only scoped the "reuse" check to the target tab).
-                // Without this, opening the same named agent in a second tab
-                // while the first is still live would seed the new block with
-                // the SAME session_id, letting two controllers concurrently
-                // `--resume` one provider session — risking transcript
-                // corruption or exactly the orphaning bug this fix exists to
-                // prevent. A block with no registered controller (e.g. right
-                // after an app restart, before anything has resynced) is not
-                // "live" and doesn't block seeding.
-                // A block of this agent that is mid-close has already left
-                // CONTROLLER_REGISTRY but its process may still be exiting
-                // (up to the close's grace period). Wait for it, so the check
-                // below sees it gone AND no second `--resume` starts on the
-                // session while the old process still holds it
-                // (SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md §9.6).
-                let closing_blocks: Vec<String> = mstore
-                    .get_all::<Block>()
-                    .map(|blocks| {
-                        blocks
-                            .into_iter()
-                            .filter(|b| {
-                                obj::meta_get_string(&b.meta, "agentId", "") == agent.id
-                                    && blockcontroller::is_closing(&b.oid)
-                            })
-                            .map(|b| b.oid)
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                for closing in &closing_blocks {
-                    blockcontroller::wait_closing_stopped(
-                        closing,
-                        blockcontroller::SHUTDOWN_GRACE + std::time::Duration::from_secs(2),
-                    )
-                    .await;
-                }
-                let agent_live_elsewhere = mstore.get_all::<Block>()
-                    .map(|blocks| {
-                        blocks.iter().any(|b| {
-                            obj::meta_get_string(&b.meta, "agentId", "") == agent.id
-                                && blockcontroller::get_controller(&b.oid).is_some()
-                        })
-                    })
-                    .unwrap_or(false);
-                let resume_session_id: Option<String> = if agent_live_elsewhere {
-                    None
-                } else {
-                    mstore.shared_agent_registry()
-                        .and_then(|reg| reg.list_active().ok())
-                        .and_then(|records| {
-                            records.into_iter()
-                                .filter(|r| r.data.definition_id == agent.id)
-                                .filter(|r| r.data.session_id.as_deref().map_or(false, |s| !s.is_empty()))
-                                .max_by_key(|r| r.data.last_launched_at_ms)
-                        })
-                        .and_then(|r| r.data.session_id)
-                };
+    // 8. Write the config files and record the launch (see `write_files_and_record_launch`).
+    steps::write_files_and_record_launch(state, &agent, &routing_id, &work_dir, &block_id)?;
 
-                let mut meta = MetaMapType::new();
-                meta.insert("view".to_string(), json!("agent"));
-                meta.insert("agentId".to_string(), json!(&agent.id));
-                // Per-agent zoom persistence (SPEC_AGENT_ZOOM_PERSISTENCE): seed
-                // the new block's `term:zoom` from the agent's saved `ui:zoom`
-                // (per-agent content store, global cross-channel) so reopening
-                // the same agent restores its zoom instead of resetting to 1.0.
-                // Stored only for non-default zooms; clamp to the frontend's
-                // [0.5, 2.0] range so a corrupt value can't escape it.
-                if let Ok(Some(c)) = mstore.agent_content_get(&agent.id, "ui:zoom") {
-                    if let Some(z) = parse_seed_zoom(&c.content) {
-                        meta.insert("term:zoom".to_string(), json!(z));
-                    }
-                }
-                // Per-agent color (SPEC_AGENT_COLOR_2026_08_08.md): seed the new block's frame border
-                // colors from the agent's stored ui:color so the existing pane-frame rendering shows
-                // it (frame:activebordercolor; the unfocused border is the same hue's own tone, drawn
-                // by pane-color-scheme.ts, so nothing dimmed is stored). Assign-if-missing write-through covers defs
-                // created by paths the createagent handler doesn't own (forks, imports) and any def
-                // that predates migration m0020 on this channel. Strict #rrggbb validation so a
-                // corrupt row can't inject arbitrary CSS.
-                {
-                    use crate::backend::agent_color::{color_for_new_agent, is_valid_agent_color};
-                    let stored = mstore
-                        .agent_content_get(&agent.id, "ui:color")
-                        .ok()
-                        .flatten()
-                        .map(|c| c.content.trim().to_string())
-                        .filter(|c| is_valid_agent_color(c));
-                    let color = match stored {
-                        Some(c) => c,
-                        None => {
-                            let picked = color_for_new_agent(&mstore, &agent.id);
-                            let now_ms = agentmux_common::time::now_ms();
-                            // Best-effort: a store error here shouldn't block
-                            // opening the agent — the pane just stays uncolored
-                            // this session and we retry next open.
-                            let _ = mstore.agent_content_set(&crate::backend::storage::store::AgentContent {
-                                agent_id: agent.id.clone(),
-                                content_type: "ui:color".to_string(),
-                                content: picked.clone(),
-                                updated_at: now_ms,
-                            });
-                            picked
-                        }
-                    };
-                    meta.insert("frame:activebordercolor".to_string(), json!(&color));
-                }
-                meta.insert("agentProvider".to_string(), json!(&agent.provider));
-                meta.insert("agentName".to_string(), json!(&agent.name));
-                // Its seat, for the header tooltip; agent.setSeat refreshes it (SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §4).
-                crate::backend::agent_seat::seed_meta(&mstore, &agent.id, &mut meta);
-                meta.insert("agentIcon".to_string(), json!(if agent.icon.is_empty() { "wand-magic-sparkles" } else { &agent.icon }));
-                meta.insert("agentMode".to_string(), json!(if agent.agent_type.is_empty() { "host" } else { &agent.agent_type }));
-                if !agent.container_image.is_empty() {
-                    meta.insert("agent:container_image".to_string(), json!(&agent.container_image));
-                }
-                if agent.container_volumes != "[]" && !agent.container_volumes.is_empty() {
-                    meta.insert("agent:container_volumes".to_string(), json!(&agent.container_volumes));
-                }
-                // Container-local CLI command: the provider's CLI as it resolves
-                // INSIDE the image (on the image's PATH, e.g. `claude`). Distinct
-                // from `cmd` below, which is the host-resolved absolute npm path
-                // (`<config_home>/.../node_modules/.bin/claude`) and does NOT exist
-                // in the container — passing it as docker-exec argv[0] would fail
-                // with "no such file or directory". Container turns use this.
-                meta.insert("agent:container_command".to_string(), json!(provider.cli_command));
-                // The provider's own format, as the UI launch writes it
-                // (`agent-model.ts`). A hard-coded map here stamped every
-                // provider it didn't list (Antigravity, the ACP ones) as Claude.
-                meta.insert("agentOutputFormat".to_string(), json!(provider.styled_output_format));
-                meta.insert("controller".to_string(), json!(controller_type));
-                meta.insert("cmd".to_string(), json!(&resolved_cli_path));
-                // cmd:args + agent:runtime + agent:provider_flags, written together.
-                crate::backend::agent_runtime::apply_to_meta(&mut meta, seeded, &pane_flags);
-                meta.insert("cmd:cwd".to_string(), json!(&work_dir));
-                meta.insert("cmd:env".to_string(), serde_json::Value::Object(env_vars));
-                meta.insert("agent:resume_flag".to_string(), json!(provider.resume_flag.unwrap_or("")));
-                meta.insert("agent:resume_strategy".to_string(), json!(provider.resume_strategy_str()));
-                meta.insert("agent:session_id_field".to_string(), json!(provider.session_id_field));
-                meta.insert("agent:prompt_arg_flag".to_string(), json!(provider.prompt_arg_flag().unwrap_or("")));
-                if let Some(sid) = &resume_session_id {
-                    meta.insert("agent:sessionid".to_string(), json!(sid));
-                }
+    steps::start_controller(state, provider, &tab_id, &block_id, headless)?;
 
-                providers::apply_terminal_pane_meta(provider, &mut meta);
-                meta.extend(extra_meta);
+    // 10. Broadcast block + tab + layout updates to frontend
+    steps::broadcast_open_updates(state, &block_id, &tab_id);
 
-                // 7. Create block + insert into layout tree.
-                // Through the reducer (#1681), not wcore-direct: a store-only
-                // block is invisible to the reducer-canonical `state.blocks`
-                // (only hydrated from SQLite at bootstrap), so tearing this agent
-                // pane off later was rejected "block not found". BlockCreated
-                // carries meta → apply_block_created writes the mstore Block,
-                // which the controller resync below reloads by id.
-                let meta_val = serde_json::to_value(&meta)
-                    .map_err(|e| format!("agent.open: meta serialize: {e}"))?;
-                let block_id = if let Some(target) = into_block {
-                    // `layout.open` and Import…: the pane already exists and sits
-                    // in the rebuilt tree — give it the agent's meta through
-                    // the reducer (like `pane.open`'s editor reuse) and skip
-                    // the layout insert below.
-                    let target_block = mstore
-                        .get::<Block>(target)
-                        .map_err(|e| format!("agent.open: read target pane: {e}"))?
-                        .ok_or_else(|| format!("agent.open: no such pane: {target}"))?;
-                    if obj::meta_get_string(&target_block.meta, "view", "") != "agent"
-                        || !obj::meta_get_string(&target_block.meta, "agentId", "").is_empty()
-                    {
-                        return Err("agent.open: the target pane is not an empty agent pane".to_string());
-                    }
-                    let mut patch = meta_val.clone();
-                    if let Some(p) = patch.as_object_mut() {
-                        // The layout's "which agent goes here" hint is spent.
-                        p.insert(crate::backend::layout_file::META_LAYOUT_AGENT.to_string(), serde_json::Value::Null);
-                    }
-                    let meta_events = crate::server::service::dispatch_to_reducer(
-                        &app_state,
-                        agentmux_common::ipc::Command::UpdateBlockMeta { block_id: target.to_string(), meta_patch: patch },
-                    )
-                    .await;
-                    if let Some(msg) = meta_events.iter().find_map(|e| match e {
-                        agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
-                        _ => None,
-                    }) {
-                        return Err(format!("agent.open: UpdateBlockMeta: {msg}"));
-                    }
-                    for ev in &meta_events {
-                        if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, &mstore) {
-                            tracing::warn!("agent.open: UpdateBlockMeta mstore apply failed: {e}");
-                        }
-                    }
-                    crate::server::service::publish_events(&app_state, &meta_events);
-                    target.to_string()
-                } else {
-                let create_events = crate::server::service::dispatch_to_reducer(
-                    &app_state,
-                    agentmux_common::ipc::Command::CreateBlock {
-                        tab_id: tab_id.clone(),
-                        meta: meta_val,
-                    },
-                )
-                .await;
-                if let Some(msg) = create_events.iter().find_map(|e| match e {
-                    agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
-                    _ => None,
-                }) {
-                    return Err(format!("agent.open: CreateBlock: {msg}"));
-                }
-                let block_id = create_events
-                    .iter()
-                    .find_map(|e| match e {
-                        agentmux_common::ipc::Event::BlockCreated { block_id, .. } => {
-                            Some(block_id.clone())
-                        }
-                        _ => None,
-                    })
-                    .ok_or_else(|| "agent.open: CreateBlock emitted no BlockCreated".to_string())?;
-                for ev in &create_events {
-                    if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, &mstore) {
-                        tracing::warn!("agent.open: CreateBlock mstore apply failed: {e}");
-                    }
-                }
-                crate::server::service::publish_events(&app_state, &create_events);
-
-                // Place it: srv's tree, then the queued `insert` for the
-                // window. Best-effort: a failure leaves the block unplaced,
-                // for the orphan reaper. `focus` defaults to true, as the UI
-                // flow does (#3032). A split of a named pane, as `pane.open`.
-                if headless {
-                    super::agent_attach::park_new(&app_state, &tab_id, &block_id).await?; // a start: parked, no pane
-                } else {
-                    let placement = super::pane::resolve_placement(cmd.split_direction.as_deref(), cmd.split_reference_block_id.as_deref(), cmd.focus.unwrap_or(true));
-                    if let Err(e) = crate::server::service::layout_intents::place_block(&app_state, &tab_id, &block_id, placement).await {
-                        tracing::warn!("agent.open: placing the pane failed: {e}");
-                    }
-                }
-                block_id
-                };
-
-                tracing::info!(
-                    block_id = %block_id,
-                    agent_id = %cmd.agent_id,
-                    provider = %agent.provider,
-                    controller_type = %controller_type,
-                    "agent.open: block created + layout updated"
-                );
-
-                // 8. Write agent config files. No collision resolution
-                //    in this path — the function creates the dir if
-                //    missing and overwrites whatever's there. Same-
-                //    name same-hour launches will share a workdir;
-                //    proper allocation is tracked as a follow-up.
-                write_agent_config_files(&mstore, &app_state.id_store, &app_state.identity_store, &agent, routing_id, &work_dir)?;
-
-                // Identity M4b-4: record the launch and stamp the block before
-                // the resync — a controller can report its session id during
-                // it, and that capture finds the row by block (Codex P2 on
-                // #3584).
-                record_agent_open_launch(&mstore, &agent.id, &block_id)?;
-
-                // 9. Register controller (resync). Not for a terminal-tier CLI: its term view starts it once attached.
-                let block_for_resync = mstore.must_get::<Block>(&block_id)
-                    .map_err(|e| format!("agent.open: reload block: {e}"))?;
-                super::agent_attach::set_desired(&mstore, &block_id, super::agent_attach::DESIRED_RUNNING);
-                if provider.controller_type != providers::ControllerType::Terminal { blockcontroller::resync_controller(
-                    &block_for_resync,
-                    if headless { "" } else { &tab_id },
-                    None,
-                    true,
-                    true,
-                    Some(broker.clone()),
-                    Some(event_bus.clone()),
-                    Some(mstore.clone()),
-                    Some(filestore.clone()),
-                    Some(app_state.id_store.clone()),
-                    Some(app_state.identity_store.clone()),
-                    mstore.shared_agent_registry(),
-                    app_state.boot_id.clone(),
-                    &app_state.auth_key,
-                    Some(app_state.config_watcher.clone()),
-                )?; }
-
-                // 10. Broadcast block + tab + layout updates to frontend
-                {
-                    let mut updates = Vec::new();
-                    if let Ok(updated_block) = mstore.must_get::<Block>(&block_id) {
-                        updates.push(obj::MuxObjUpdate {
-                            updatetype: "update".into(),
-                            otype: "block".into(),
-                            oid: block_id.clone(),
-                            obj: Some(obj::mux_obj_to_value(&updated_block)),
-                        });
-                    }
-                    if let Ok(updated_tab) = mstore.must_get::<Tab>(&tab_id) {
-                        updates.push(obj::MuxObjUpdate {
-                            updatetype: "update".into(),
-                            otype: "tab".into(),
-                            oid: tab_id.clone(),
-                            obj: Some(obj::mux_obj_to_value(&updated_tab)),
-                        });
-                        if let Ok(updated_layout) = mstore.must_get::<obj::LayoutState>(&updated_tab.layoutstate) {
-                            updates.push(obj::MuxObjUpdate {
-                                updatetype: "update".into(),
-                                otype: "layout".into(),
-                                oid: updated_tab.layoutstate.clone(),
-                                obj: Some(obj::mux_obj_to_value(&updated_layout)),
-                            });
-                        }
-                    }
-                    // One batched frame so the renderer applies all of them in
-                    // a single reactive flush — see
-                    // EventBus::broadcast_mux_obj_updates.
-                    event_bus.broadcast_mux_obj_updates(&updates);
-                }
-
-                // codex P2 on PR #3513: this used to be safe to hardcode --
-                // before eager resume existed, a freshly created pane could
-                // only ever be `STATUS_INIT` at this point. Now that
-                // `resync_controller` above is handed real identity stores,
-                // a pane seeded with a registry-derived `agent:sessionid`
-                // (picker reattach, an agent definition with prior history)
-                // can come back already `running`. Read the real status
-                // the same way the existing-pane branch above does, rather
-                // than tell the caller "init" for a pane that's actually
-                // live.
-                let status = blockcontroller::get_block_controller_status(&block_id)
-                    .map(|s| s.shellprocstatus)
-                    .unwrap_or_else(|| "init".to_string());
-                Ok(AgentOpenResult {
-                    block_id,
-                    tab_id,
-                    agent_id: cmd.agent_id,
-                    provider: agent.provider,
-                    controller_type: controller_type.to_string(),
-                    status,
-                    created: true,
-                })
+    let status = steps::launch_status(&block_id);
+    Ok(AgentOpenResult {
+        block_id,
+        tab_id,
+        agent_id: cmd.agent_id,
+        provider: agent.provider,
+        controller_type: controller_type.to_string(),
+        status,
+        created: true,
+    })
 }
 
 /// Write agent config files (CLAUDE.md, .mcp.json, etc.) to the working directory.

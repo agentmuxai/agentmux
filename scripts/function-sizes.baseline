@@ -285,7 +285,6 @@
 153 crates/srv/src/server/agent_handlers/template_create.rs::create_from_template
 103 crates/srv/src/server/agent_takeover.rs::handle_agent_release
 243 crates/srv/src/server/app_api/agent_define.rs::agent_define_core
-612 crates/srv/src/server/app_api/agent_open.rs::open_agent_inner
 112 crates/srv/src/server/app_api/agent_spawn/many.rs::spawn_many
 308 crates/srv/src/server/app_api/blockfile.rs::read_range_once
 103 crates/srv/src/server/app_api/bundle/export_for_agent.rs::build_export_for_agent
