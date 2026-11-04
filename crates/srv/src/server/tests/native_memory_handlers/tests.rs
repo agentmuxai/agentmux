@@ -108,7 +108,7 @@ use crate::backend::storage::store::Store;
 use crate::backend::storage::AgentDefinition;
 use crate::backend::rpc_types::{RpcMessage};
 
-fn agent_def(id: &str, working_directory: &str) -> AgentDefinition {
+pub(super) fn agent_def(id: &str, working_directory: &str) -> AgentDefinition {
     AgentDefinition {
         seat: None,
         conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
