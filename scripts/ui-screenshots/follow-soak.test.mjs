@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { GESTURE_WINDOW_MS, judgeSample, judgeTransition, parseArgs, parseTransition, summarize } from "./follow-soak.mjs";
+import { GESTURE_WINDOW_MS, judgeRefollow, judgeSample, judgeTransition, parseArgs, parseTransition, summarize } from "./follow-soak.mjs";
 
 const line = (text) => ["[scroll-follow]", ...text.split(" ")];
 
@@ -52,6 +52,22 @@ describe("judgeTransition", () => {
     });
     it("lets a pane start following again", () => {
         expect(judgeTransition({ pane: "p", from: "detached", to: "following", cause: "reached-bottom" }, 1, undefined)).toBeNull();
+    });
+});
+
+describe("judgeRefollow", () => {
+    it("passes a pane that follows again", () => {
+        expect(judgeRefollow({ state: "following", gap: 0 }, false)).toBe("pass");
+    });
+
+    it("fails a detached pane at the bottom, however it got there", () => {
+        expect(judgeRefollow({ state: "detached", gap: 0.4 }, false)).toBe("fail");
+        expect(judgeRefollow({ state: "detached", gap: 0.4 }, true)).toBe("fail");
+    });
+
+    it("does not judge a pane that never reached the bottom because the wheel sat over a tool's scroll box", () => {
+        expect(judgeRefollow({ state: "detached", gap: 3069 }, true)).toBe("misaimed");
+        expect(judgeRefollow({ state: "detached", gap: 3069 }, false)).toBe("fail");
     });
 });
 
