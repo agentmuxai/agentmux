@@ -104,7 +104,7 @@ describe("the default container image", () => {
         const claude = seed.agents.find((a: { id: string }) => a.id === "claude");
         expect(claude.container_image).toBe(base);
 
-        const rust = readFileSync(resolve(repoRoot, "crates/srv/src/backend/container_image.rs"), "utf8");
+        const rust = readFileSync(resolve(repoRoot, "crates/srv/src/backend/container/image.rs"), "utf8");
         expect(rust).toContain(`pub const DEFAULT_AGENT_IMAGE: &str = "${base}";`);
     });
 

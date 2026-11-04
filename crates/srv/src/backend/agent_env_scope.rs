@@ -140,7 +140,7 @@ mod tests {
         crate::backend::gh_guard::apply_gh_guard(&mut env);
         crate::backend::account_login_guard::strip_account_login(&mut env);
         // What the container side adds to or does with the same map.
-        let out: HashMap<String, String> = crate::backend::container_credential::container_exec_env("scope-block", &env)
+        let out: HashMap<String, String> = crate::backend::container::credential::container_exec_env("scope-block", &env)
             .into_iter()
             .collect();
         let mut names: BTreeSet<String> = env.keys().chain(out.keys()).filter(|k| !base.contains_key(*k)).cloned().collect();
@@ -161,7 +161,7 @@ mod tests {
     fn a_host_only_name_is_not_given_to_a_container() {
         let env: HashMap<String, String> =
             AGENT_ENV.iter().filter(|s| s.scope == HostOnly).map(|s| (s.name.to_string(), "host".to_string())).collect();
-        let out: HashMap<String, String> = crate::backend::container_credential::container_exec_env("scope-block", &env)
+        let out: HashMap<String, String> = crate::backend::container::credential::container_exec_env("scope-block", &env)
             .into_iter()
             .collect();
         let leaked: Vec<_> = env.keys().filter(|k| out.contains_key(*k)).collect();

@@ -720,7 +720,7 @@ const BROWSER_DEFAULT_SPLIT: &str = "up:half";
 pub(crate) async fn handle_ui_browser_open(
     State(state): State<AppState>,
     caller: Option<axum::Extension<crate::server::caller::Caller>>,
-    grant: Option<axum::Extension<crate::backend::container_credential::ContainerGrant>>,
+    grant: Option<axum::Extension<crate::backend::container::credential::ContainerGrant>>,
     Json(req): Json<UiBrowserOpenRequest>,
 ) -> impl IntoResponse {
     let own = match crate::server::browser_pause_all::open_block_id(&state, caller.as_deref(), &req.auth) {

@@ -25,7 +25,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use super::agent_open::write_agent_config_files;
-use crate::backend::container_credential::container_exec_env;
+use crate::backend::container::credential::container_exec_env;
 use crate::backend::rpc_types::AgentConfigFile;
 use crate::backend::storage::agents::test_agent_def;
 use crate::backend::storage::store::{AgentContent, AgentDefinition, Store};

@@ -232,7 +232,7 @@ Per-agent isolation (from PR #154) already creates separate config dirs — moun
 
 The rule (operator, 2026-10-28): a sandbox agent can do everything a native agent can do except
 directly update and run files on the machine. A container's scoped token (`amxc_…`) is accepted on
-every srv route except the ones in `backend/container_routes.rs`; a route added later is open to
+every srv route except the ones in `backend/container/routes.rs`; a route added later is open to
 containers unless it is added there. A refusal answers `403` with `this route is not available to
 container agents: <why, and what to do instead>`.
 

@@ -15,12 +15,12 @@
 //! 2. **Only container tokens.** The router is the full router behind [`layer`], which admits a
 //!    request only with a live container token (`amxc_…`): the instance key, the LAN key and no
 //!    key at all are refused, and so is every route on the denylist
-//!    ([`container_routes`](crate::backend::container_routes)): the operator RPCs, `/ws` and what runs
+//!    ([`routes`](crate::backend::container::routes)): the operator RPCs, `/ws` and what runs
 //!    or writes on the host.
 //! 3. **Only from the agents subnet.** The peer address must be inside the network's subnet.
 //!
 //! The container's `AGENTMUX_LOCAL_URL` becomes `http://<gateway>:<port>`
-//! ([`url`], applied in `container_credential::container_exec_env`).
+//! ([`url`], applied in `credential::container_exec_env`).
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::{Mutex, OnceLock};
@@ -32,7 +32,7 @@ use axum::response::IntoResponse;
 use axum::{Json, Router};
 use serde_json::json;
 
-use crate::backend::container_credential::grant_for;
+use crate::backend::container::credential::grant_for;
 
 /// An IPv4 network.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,7 +73,7 @@ pub fn check(peer: IpAddr, subnet: Option<&Subnet>, token: Option<&str>, path: &
     if token.map_or(true, |t| grant_for(t).is_none()) {
         return Err((StatusCode::UNAUTHORIZED, "unauthorized".to_string()));
     }
-    if let Some(why) = crate::backend::container_routes::refusal_message(path) {
+    if let Some(why) = crate::backend::container::routes::refusal_message(path) {
         return Err((StatusCode::FORBIDDEN, why));
     }
     Ok(())
@@ -290,7 +290,7 @@ mod tests {
 
     #[test]
     fn a_request_needs_the_subnet_a_live_container_token_and_an_allowed_route() {
-        let token = crate::backend::container_credential::token_for_block("cl-block-check", Some("agent-tok"));
+        let token = crate::backend::container::credential::token_for_block("cl-block-check", Some("agent-tok"));
         let s = subnet();
         let ok = |peer: &str, token: Option<&str>, path: &str| check(ip(peer), Some(&s), token, path);
         assert!(ok(&d("172_30_0_7"), Some(&token), "/agentmux/discovery").is_ok());
@@ -326,7 +326,7 @@ mod tests {
         let state = crate::server::tests::test_state();
         let instance_key = state.auth_key.clone();
         let router = layer(crate::server::build_routers(state).full, || Some(subnet()));
-        let token = crate::backend::container_credential::token_for_block("cl-block-real", Some("agent-tok"));
+        let token = crate::backend::container::credential::token_for_block("cl-block-real", Some("agent-tok"));
 
         // The instance key is not a container token, from the right network too.
         assert_eq!(call(&router, &d("172_30_0_7"), Some(&instance_key), "/agentmux/discovery").await, StatusCode::UNAUTHORIZED);
@@ -368,7 +368,7 @@ mod tests {
         tokio::spawn(async move {
             axum::serve(listener, router.into_make_service_with_connect_info::<SocketAddr>()).await.unwrap();
         });
-        let token = crate::backend::container_credential::token_for_block("cl-block-paths", Some("agent-tok"));
+        let token = crate::backend::container::credential::token_for_block("cl-block-paths", Some("agent-tok"));
 
         let tricks = [
             "//agentmux/service",
@@ -428,7 +428,7 @@ mod tests {
     #[tokio::test]
     async fn the_layer_reads_the_subnet_at_each_request() {
         let inner = Router::new().route("/agentmux/discovery", get(|| async { "ok" }));
-        let token = crate::backend::container_credential::token_for_block("cl-block-live", None);
+        let token = crate::backend::container::credential::token_for_block("cl-block-live", None);
         let up = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let flag = up.clone();
         let router = layer(inner, move || flag.load(std::sync::atomic::Ordering::SeqCst).then(subnet));

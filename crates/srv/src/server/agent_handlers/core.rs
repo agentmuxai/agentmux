@@ -370,7 +370,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             async move {
                 let image = cmd.unwrap_or_default().image;
                 let manager = cm.get().await;
-                let status = crate::backend::container_image::check_image_access(manager.as_ref(), &image).await;
+                let status = crate::backend::container::image::check_image_access(manager.as_ref(), &image).await;
                 Ok(ContainerImageCheckResult { status })
             }
         },

@@ -10,7 +10,7 @@ use axum::http::StatusCode;
 
 use crate::backend::cli_notice;
 use crate::backend::container::ContainerManager;
-use crate::backend::container_image::{current_image_for, is_agent_base_image, resolve_container_image};
+use crate::backend::container::image::{current_image_for, is_agent_base_image, resolve_container_image};
 use crate::server::AppState;
 
 /// The version this AgentMux ships the agent image for.
@@ -398,7 +398,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_agents_image_becomes_one_of_the_two_shipped_images_and_nothing_else() {
-        use crate::backend::container_image::{DEFAULT_AGENT_IMAGE, DEFAULT_DEVELOPER_IMAGE};
+        use crate::backend::container::image::{DEFAULT_AGENT_IMAGE, DEFAULT_DEVELOPER_IMAGE};
         let state = crate::server::tests::test_state();
         let def = container_agent_def(&state, "cimg-1", "container");
 
@@ -434,35 +434,35 @@ mod tests {
         let def = container_agent_def(&state, "cimg-2", "container");
         let name = crate::backend::container::container_name_for_slug(&def.id);
         let turn = crate::backend::container::drift::update_gate(&name).try_read_owned().expect("a turn takes the gate shared");
-        let (status, why) = set_image(&state, &def.id, &def, crate::backend::container_image::DEFAULT_DEVELOPER_IMAGE, "tester").await.unwrap_err();
+        let (status, why) = set_image(&state, &def.id, &def, crate::backend::container::image::DEFAULT_DEVELOPER_IMAGE, "tester").await.unwrap_err();
         assert_eq!(status, StatusCode::CONFLICT);
         assert!(why.contains("a turn is running"), "{why}");
         assert_eq!(stored_image(&state, &def.id), "");
         drop(turn);
-        assert!(set_image(&state, &def.id, &def, crate::backend::container_image::DEFAULT_DEVELOPER_IMAGE, "tester").await.is_ok());
+        assert!(set_image(&state, &def.id, &def, crate::backend::container::image::DEFAULT_DEVELOPER_IMAGE, "tester").await.is_ok());
     }
 
     #[tokio::test]
     async fn only_a_container_agent_has_an_image_and_a_container_agent_cannot_change_one() {
         let state = crate::server::tests::test_state();
         let native = container_agent_def(&state, "cimg-native", "host");
-        let (status, why) = change_image(&state, None, &native.id, crate::backend::container_image::DEFAULT_DEVELOPER_IMAGE).await.unwrap_err();
+        let (status, why) = change_image(&state, None, &native.id, crate::backend::container::image::DEFAULT_DEVELOPER_IMAGE).await.unwrap_err();
         assert_eq!(status, StatusCode::CONFLICT);
         assert!(why.contains("does not run in a container"), "{why}");
 
         let target = container_agent_def(&state, "cimg-target", "container");
         let container_caller = container_agent_def(&state, "cimg-caller-c", "container");
         let as_container = crate::server::caller::Caller::Agent { uid: container_caller.id.clone() };
-        let (status, why) = change_image(&state, Some(&as_container), &target.id, crate::backend::container_image::DEFAULT_DEVELOPER_IMAGE).await.unwrap_err();
+        let (status, why) = change_image(&state, Some(&as_container), &target.id, crate::backend::container::image::DEFAULT_DEVELOPER_IMAGE).await.unwrap_err();
         assert_eq!(status, StatusCode::FORBIDDEN);
         assert!(why.starts_with("CONTAINER_AGENT"), "{why}");
         assert_eq!(stored_image(&state, &target.id), "");
 
         let host_caller = container_agent_def(&state, "cimg-caller-h", "host");
         let as_host = crate::server::caller::Caller::Agent { uid: host_caller.id.clone() };
-        let out = change_image(&state, Some(&as_host), &target.id, crate::backend::container_image::DEFAULT_DEVELOPER_IMAGE).await.unwrap();
-        assert_eq!(out["container_image"], crate::backend::container_image::DEFAULT_DEVELOPER_IMAGE);
-        assert_eq!(stored_image(&state, &target.id), crate::backend::container_image::DEFAULT_DEVELOPER_IMAGE);
+        let out = change_image(&state, Some(&as_host), &target.id, crate::backend::container::image::DEFAULT_DEVELOPER_IMAGE).await.unwrap();
+        assert_eq!(out["container_image"], crate::backend::container::image::DEFAULT_DEVELOPER_IMAGE);
+        assert_eq!(stored_image(&state, &target.id), crate::backend::container::image::DEFAULT_DEVELOPER_IMAGE);
     }
 
     #[test]
@@ -502,11 +502,11 @@ mod tests {
     #[test]
     fn the_developer_variant_follows_its_own_version_and_is_pinned_like_the_base() {
         assert!(image_blocks_update("ghcr.io/agentmuxai/agent-base:developer").is_none(), ":developer follows the version, like :latest");
-        assert!(image_blocks_update(&crate::backend::container_image::versioned_developer_image()).is_none());
+        assert!(image_blocks_update(&crate::backend::container::image::versioned_developer_image()).is_none());
         assert!(image_blocks_update("ghcr.io/agentmuxai/agent-base:0.59.41-developer").unwrap().contains("pinned to"), "another version's developer image");
         // The base image's current tag is not the developer image's: an agent set to one is not on the other.
-        assert_eq!(current_image_for("ghcr.io/agentmuxai/agent-base:developer"), crate::backend::container_image::versioned_developer_image());
-        assert_eq!(current_image_for("ghcr.io/agentmuxai/agent-base:latest"), crate::backend::container_image::versioned_agent_image());
+        assert_eq!(current_image_for("ghcr.io/agentmuxai/agent-base:developer"), crate::backend::container::image::versioned_developer_image());
+        assert_eq!(current_image_for("ghcr.io/agentmuxai/agent-base:latest"), crate::backend::container::image::versioned_agent_image());
     }
 
     #[test]

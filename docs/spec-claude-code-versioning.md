@@ -13,7 +13,7 @@ then pinned in the image build.
 As of 2026-10-07 the published container image (`ghcr.io/agentmuxai/agent-base`) no
 longer contains Claude Code at all (proprietary license; redistribution is not
 cleared). AgentMux installs the pinned version from npm into the agent's container the
-first time it starts ([`crates/srv/src/backend/container_cli.rs`](../crates/srv/src/backend/container_cli.rs)), so the pin that
+first time it starts ([`crates/srv/src/backend/container/cli.rs`](../crates/srv/src/backend/container/cli.rs)), so the pin that
 matters for containers is the same one host installs use. See
 [`docs/specs/SPEC_CONTAINER_AGENTS_WORK_FOR_EVERYONE_2026_10_07.md`](specs/SPEC_CONTAINER_AGENTS_WORK_FOR_EVERYONE_2026_10_07.md).
 

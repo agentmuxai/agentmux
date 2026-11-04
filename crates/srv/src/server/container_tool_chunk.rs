@@ -5,7 +5,7 @@
 //! call's output into its own pane.
 //!
 //! `/agentmux/wps/publish` is a generic relay: it republishes an undeclared event to any scope,
-//! so a container token is refused there (`container_credential`). This route takes one event,
+//! so a container token is refused there (`container::credential`). This route takes one event,
 //! `tool_chunk`, for one scope, the container's own `block:<id>`, and only as the typed
 //! [`ToolChunk`]. A request that is not a container's, names another event or scope, or is not a
 //! `ToolChunk` never reaches the broker.
@@ -25,7 +25,7 @@ use serde_json::json;
 use agentmux_common::api_types::WpsPublishRequest;
 use agentmux_common::client_events::ToolChunk;
 
-use crate::backend::container_credential::ContainerGrant;
+use crate::backend::container::credential::ContainerGrant;
 use crate::server::AppState;
 
 /// The largest request body: a line of output, with its envelope.
@@ -105,7 +105,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_container_streams_into_its_own_pane_only() {
-        let mine = crate::backend::container_credential::token_for_block("tc-block-a", None);
+        let mine = crate::backend::container::credential::token_for_block("tc-block-a", None);
         let own = ["block:tc-block-a"];
         let (status, _) = post(&mine, body("tool_chunk", &own, chunk("hello")).to_string()).await;
         assert_eq!(status, StatusCode::OK);
@@ -127,7 +127,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_request_over_the_cap_is_413() {
-        let mine = crate::backend::container_credential::token_for_block("tc-block-big", None);
+        let mine = crate::backend::container::credential::token_for_block("tc-block-big", None);
         let huge = "x".repeat(MAX_BODY_BYTES);
         let (status, _) = post(&mine, body("tool_chunk", &["block:tc-block-big"], chunk(&huge)).to_string()).await;
         assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
@@ -141,8 +141,8 @@ mod tests {
         // The instance key is not a container: this route is theirs alone.
         let (status, _) = post("test-secret-key", body("tool_chunk", &["block:b"], chunk("x")).to_string()).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
-        assert!(!crate::backend::container_credential::container_route_allowed("/agentmux/wps/publish"));
-        assert!(crate::backend::container_credential::container_route_allowed("/api/v1/agent/tool-chunk"));
+        assert!(!crate::backend::container::credential::container_route_allowed("/agentmux/wps/publish"));
+        assert!(crate::backend::container::credential::container_route_allowed("/api/v1/agent/tool-chunk"));
     }
 
     #[test]
@@ -159,7 +159,7 @@ mod tests {
     #[tokio::test]
     async fn a_chunk_reaches_the_panes_subscribers_and_a_pid_does_not() {
         let state = crate::server::tests::test_state();
-        let token = crate::backend::container_credential::token_for_block("tc-block-live", None);
+        let token = crate::backend::container::credential::token_for_block("tc-block-live", None);
         let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let sink = seen.clone();
         state.broker.add_observer(std::sync::Arc::new(move |e: &crate::backend::mps::MuxEvent| {

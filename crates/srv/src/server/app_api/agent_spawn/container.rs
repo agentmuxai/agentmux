@@ -103,7 +103,7 @@ pub(crate) fn decide(
     }
     let image = crate::server::agent_handlers::chosen_container_image(ask.container_image.as_deref(), "container", source_image)
         .map_err(|e| refuse(StatusCode::BAD_REQUEST, format!("INVALID_ARG: {e}")))?;
-    let image = if image.trim().is_empty() { crate::backend::container_image::DEFAULT_AGENT_IMAGE.to_string() } else { image };
+    let image = if image.trim().is_empty() { crate::backend::container::image::DEFAULT_AGENT_IMAGE.to_string() } else { image };
     let memory_mb = ask.memory_mb.as_ref().map(|v| normalize(v, "memory_mb")).transpose().map_err(|e| refuse(StatusCode::BAD_REQUEST, format!("INVALID_ARG: {e}")))?;
     let cpus = ask.cpus.as_ref().map(|v| normalize(v, "cpus")).transpose().map_err(|e| refuse(StatusCode::BAD_REQUEST, format!("INVALID_ARG: {e}")))?;
     docker.map_err(|why| refuse(StatusCode::SERVICE_UNAVAILABLE, format!("DOCKER_UNAVAILABLE: a container agent needs Docker, and {why}. Use runtime: native, or ask the user to start Docker")))?;
