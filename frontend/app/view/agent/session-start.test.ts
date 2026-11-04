@@ -38,7 +38,7 @@ describe("createSessionStartDetector", () => {
 
 describe("the stream ends a turn's live tokens on a new session", () => {
     it("useAgentStream dispatches StreamSessionStarted from the detector", () => {
-        const src = readFileSync(join(process.cwd(), "frontend/app/view/agent/useAgentStream.ts"), "utf8");
-        expect(src).toMatch(/if \(isNewSession\(rawEvent\)\) model\.dispatchPane\(\{ type: "StreamSessionStarted" \}\)/);
+        const src = readFileSync(join(process.cwd(), "frontend/app/view/agent/stream-pipeline.ts"), "utf8");
+        expect(src).toMatch(/if \(deps\.isNewSession\(rawEvent\)\) deps\.model\.dispatchPane\(\{ type: "StreamSessionStarted" \}\)/);
     });
 });

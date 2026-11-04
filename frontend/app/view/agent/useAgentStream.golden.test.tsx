@@ -39,6 +39,8 @@ import { useAgentStream } from "./useAgentStream";
 
 const BLOCK = "stream-golden";
 const GOLDEN = join(process.cwd(), "frontend/app/view/agent/useAgentStream.golden.json");
+const GOLDEN_SECOND = join(process.cwd(), "frontend/app/view/agent/useAgentStream.golden2.json");
+const GOLDEN_CODEX = join(process.cwd(), "frontend/app/view/agent/useAgentStream.golden-codex.json");
 
 /** One transcript append: `text` as srv writes it, a line each. */
 function feedText(text: string): void {
@@ -96,8 +98,46 @@ const SESSION: Array<() => void> = [
     () => feed({ type: "result", subtype: "success", duration_ms: 1_000, num_turns: 1 }),
 ];
 
+/**
+ * The frames the first session leaves out: a line split across two appends, a Personal Memory delivery
+ * (twice, the second superseding the first), a subagent's tool call, a held-back rate limit, a result
+ * that reports context windows, a retried tool end, and the transcript replaced and deleted under the pane.
+ */
+const SESSION_SECOND: Array<() => void> = [
+    () => feedText('{"type":"system","subtype":"init","sess'),
+    () => feedText('ion_id":"s-9","model":"claude-test"}'),
+    () => feed({ type: "system", subtype: "agentmux_memory_injected", id: "mi-1", reason: "startup", timestamp: "2026-11-03T10:00:01Z", entries: [{ kind: "personal_memory", label: "notes", tokens: 300 }, { kind: "global_memory", label: "rules", tokens: 120 }] }),
+    () => feed({ type: "system", subtype: "agentmux_memory_injected", id: "mi-2", reason: "startup", timestamp: "2026-11-03T10:00:02Z", entries: [{ kind: "personal_memory", label: "notes", tokens: 310 }] }),
+    () => feed(messageStart("n1", 20)),
+    () => feed({ type: "assistant", parent_tool_use_id: "tA", message: { id: "sub1", model: "claude-test", usage: { input_tokens: 5 }, content: [{ type: "tool_use", id: "t2", name: "Grep", input: { pattern: "needle" } }] } }),
+    () => feed({ type: "user", parent_tool_use_id: "tA", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t2", content: "found" }] } }),
+    () => feed({ type: "rate_limit_event", rate_limit_info: { status: "allowed" } }),
+    () => feed({ type: "rate_limit_event", rate_limit_info: { status: "rejected" }, retry_after_ms: 5_000 }),
+    () => feed({ type: "stderr", text: "ordinary warning from the CLI that is shown" }),
+    () => feed({ type: "result", subtype: "success", duration_ms: 2_000, num_turns: 1, modelUsage: { "claude-test": { contextWindow: 200_000, canonicalModel: "claude-test-canon" } } }),
+    () => { for (const fn of [...listeners]) fn({ fileop: "replace" }); },
+    () => feed(messageStart("n2", 700)),
+    () => { for (const fn of [...listeners]) fn({ fileop: "delete" }); },
+    () => feed({ type: "system", subtype: "compact_boundary", uuid: "u-3", compact_metadata: { trigger: "auto", pre_tokens: 50_000, post_tokens: 3_000 } }),
+    () => feed(messageStart("n3", 4_000)),
+    () => feed({ type: "result", subtype: "success", duration_ms: 500, num_turns: 1 }),
+];
+
+/** A Codex session: a shell command whose output streams in chunks, a context report, and the turn's end. */
+const SESSION_CODEX: Array<() => void> = [
+    () => feed({ type: "thread.started", thread_id: "th-1" }),
+    () => feed({ type: "turn.started" }),
+    () => feed({ type: "agentmux_context", tokens: 12_000, window: 200_000, model: "codex-test" }),
+    () => feed({ type: "item.started", item: { id: "c1", type: "command_execution", command: "ls", aggregated_output: "", status: "in_progress" } }),
+    () => feed({ type: "item.updated", item: { id: "c1", type: "command_execution", command: "ls", aggregated_output: "a.ts\n", status: "in_progress" } }),
+    () => feed({ type: "item.updated", item: { id: "c1", type: "command_execution", command: "ls", aggregated_output: "a.ts\nb.ts\n", status: "in_progress" } }),
+    () => feed({ type: "item.completed", item: { id: "c1", type: "command_execution", command: "ls", aggregated_output: "a.ts\nb.ts\n", status: "completed", exit_code: 0 } }),
+    () => feed({ type: "item.completed", item: { id: "m1", type: "agent_message", text: "Two files." } }),
+    () => feed({ type: "turn.completed", usage: { input_tokens: 1_200, output_tokens: 40, cached_input_tokens: 300 } }),
+];
+
 /** Run the whole session through the hook and return the ordered log. */
-function run(): unknown {
+function run(session: Array<() => void> = SESSION, format: { outputFormat: string; provider: string } = { outputFormat: "claude-stream-json", provider: "claude" }): unknown {
     const log: string[] = [];
     const model = registerPane(BLOCK, { agentId: "golden" });
     for (const name of ["dispatchPane", "dispatchDoc"] as const) {
@@ -114,17 +154,17 @@ function run(): unknown {
         stream = useAgentStream({
             blockId: BLOCK,
             model,
-            outputFormat: "claude-stream-json",
+            outputFormat: format.outputFormat,
             documentNodes: model.document,
             turnPhase: () => model.state.turnPhase,
             compacting: () => model.state.compacting,
             enabled: true,
-            provider: "claude",
+            provider: format.provider,
             agentName: "golden",
         });
         return <div />;
     });
-    for (const step of SESSION) {
+    for (const step of session) {
         step();
         vi.advanceTimersByTime(50); // a frame: the flush queue lands what the step brought
         log.push(`-- after step: phase=${model.state.turnPhase.kind}`);
@@ -158,6 +198,28 @@ describe("useAgentStream, pinned", () => {
             writeFileSync(GOLDEN, JSON.stringify(got, null, 1) + "\n");
         }
         expect(got).toEqual(JSON.parse(readFileSync(GOLDEN, "utf8")));
+    });
+
+    it("does with the frames the first session leaves out exactly what the second committed log says", () => {
+        const got = JSON.parse(JSON.stringify(run(SESSION_SECOND)));
+        if (process.env.UPDATE_GOLDEN === "1" || !existsSync(GOLDEN_SECOND)) {
+            writeFileSync(GOLDEN_SECOND, JSON.stringify(got, null, 1) + "\n");
+        }
+        expect(got).toEqual(JSON.parse(readFileSync(GOLDEN_SECOND, "utf8")));
+        const text = (got as { log: string[] }).log.join("\n");
+        for (const wanted of ["\"type\":\"ProviderWaiting\"", "\"parentId\":\"tA\"", "ContextWindowsReported", "\"type\":\"context_delivery\"", "ContextInvalidated"]) {
+            expect(text).toContain(wanted);
+        }
+    });
+
+    it("does with a Codex session exactly what the third committed log says", () => {
+        const got = JSON.parse(JSON.stringify(run(SESSION_CODEX, { outputFormat: "codex-json", provider: "codex" })));
+        if (process.env.UPDATE_GOLDEN === "1" || !existsSync(GOLDEN_CODEX)) {
+            writeFileSync(GOLDEN_CODEX, JSON.stringify(got, null, 1) + "\n");
+        }
+        expect(got).toEqual(JSON.parse(readFileSync(GOLDEN_CODEX, "utf8")));
+        const text = (got as { log: string[] }).log.join("\n");
+        for (const wanted of ["ContextReported", "ToolStart", "\"type\":\"tool\""]) expect(text).toContain(wanted);
     });
 
     it("sees the frames the session is made of (so the log is not empty by accident)", () => {
