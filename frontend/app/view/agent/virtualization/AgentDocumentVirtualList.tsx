@@ -237,6 +237,8 @@ interface ListState {
     dispatchScrollMargin: () => void;
     loadOlderFrom: (scrollTop: number) => void;
     fillOlder: () => void;
+    // Set when the list unmounts: a frame still pending from a fill must not ask for another page.
+    disposed: boolean;
     // A fill pass gave up with the content still short: the reader is offered "Load earlier messages".
     fillStalled: Accessor<boolean>;
     setFillStalled: Setter<boolean>;
@@ -258,6 +260,7 @@ function createListState(props: AgentDocumentVirtualListProps): ListState {
     const s = {
         fillStalled,
         setFillStalled,
+        disposed: false,
         scrollRef: undefined as unknown as HTMLDivElement,
         virtualContainerRef: undefined,
         streamingBufferRef: undefined,
@@ -329,7 +332,10 @@ function useFollowController(props: AgentDocumentVirtualListProps, s: ListState)
                 released: () => s.oneWayFlow.recheckSoon(),
             },
         );
-        onCleanup(() => s.follow?.dispose());
+        onCleanup(() => {
+            s.disposed = true;
+            s.follow?.dispose();
+        });
     });
     // Older history becoming available (the first screen has painted) or a page landing changes what a short
     // pane can do with no size change to say so: ask again.
@@ -955,11 +961,17 @@ function defineFillOlder(props: AgentDocumentVirtualListProps, s: ListState): vo
             requestAnimationFrame(() =>
                 requestAnimationFrame(() => {
                     s.loadingOlderInFlight = false;
-                    s.follow?.checkFill();
+                    if (!s.disposed) s.follow?.checkFill();
                 })
             );
         };
-        props.onLoadOlder?.().then(landed, landed);
+        let page: Promise<void> | undefined;
+        try {
+            page = props.onLoadOlder?.();
+        } catch {
+            // The flag is cleared below all the same; the pass's page count bounds the retries.
+        }
+        (page ?? Promise.resolve()).then(landed, landed);
     };
 }
 
@@ -1404,7 +1416,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             data-follow-state={props.viewState.stickToBottom() ? "following" : "detached"}
             data-show-cover={rows.showCovered() || undefined}
         >
-            <Show when={s.fillStalled()}>
+            <Show when={s.fillStalled() && props.viewState.stickToBottom()}>
                 <div class="agent-load-earlier">
                     <Button
                         tone="accent"

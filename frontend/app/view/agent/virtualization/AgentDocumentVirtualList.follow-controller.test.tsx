@@ -505,6 +505,41 @@ describe("a pane too short to scroll fills itself from older history", () => {
         expect(button()).toBeNull();
     });
 
+    it("offers the button only while the pane follows the bottom", async () => {
+        const s = setup({ geo: { ...short, scrollHeight: 500 }, hasOlder: true, loadOlder: async () => {} });
+        await settle(60);
+        const button = () => s.scrollRef.querySelector(".agent-load-earlier button");
+        expect(button()).not.toBeNull();
+        s.wheel(-300);
+        s.g.set({ scrollTop: 100 });
+        s.scrollRef.dispatchEvent(new Event("scroll"));
+        flushRaf();
+        expect(s.following()).toBe(false);
+        expect(button()).toBeNull();
+    });
+
+    it("asks for no page after the list is gone", async () => {
+        let release: () => void = () => {};
+        const s = setup({ geo: short, hasOlder: true, loadOlder: () => new Promise<void>((r) => (release = r)) });
+        expect(s.onLoadOlder).toHaveBeenCalledTimes(1);
+        cleanup();
+        release();
+        await settle(60);
+        expect(s.onLoadOlder).toHaveBeenCalledTimes(1);
+    });
+
+    it("a page request that throws doesn't block the pane's paging", async () => {
+        const s = setup({
+            geo: short,
+            hasOlder: true,
+            loadOlder: () => {
+                throw new Error("boom");
+            },
+        });
+        await settle(60);
+        expect(s.onLoadOlder).toHaveBeenCalledTimes(8); // each failure clears the flag; the pass's cap ends it
+    });
+
     it("never pages a pane the reader has scrolled away from", () => {
         const s = setup({ geo: { scrollTop: 0, scrollHeight: 1000, clientHeight: 300 }, hasOlder: true });
         s.wheel(-700);
