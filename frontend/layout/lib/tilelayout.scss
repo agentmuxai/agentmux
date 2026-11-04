@@ -255,7 +255,7 @@
         box-sizing: border-box;
         border: 1px dashed var(--drop-zone-armed-border);
         opacity: 0.55;
-        transition: opacity var(--duration-quick, 120ms);
+        transition: opacity var(--duration-quick);
 
         &.exiting {
             opacity: 0;
