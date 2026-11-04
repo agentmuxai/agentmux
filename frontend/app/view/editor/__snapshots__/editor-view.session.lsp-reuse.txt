@@ -5,11 +5,7 @@ lsp#1 start
 lsp#1 didOpen /home/u/a.ts typescript "export const a = 1;\n"
 diagnostics wired to lsp#1
 -- two edits close together
-lsp#1 didClose /home/u/a.ts
-lsp#1 didOpen /home/u/a.ts typescript "export const a = 1;\n"
-diagnostics of lsp#1 unwired
-diagnostics wired to lsp#1
-lsp#1 didChange /home/u/a.ts "e12xport const a = 1;\n"
+lsp#1 didChange /home/u/a.ts "012export const a = 1;\n"
 -- next file, same language
 rpc ReadEditorFile {"path":"/home/u/b.ts"}
 rpc WatchEditorFile {"path":"/home/u/b.ts","block_id":"session<n>"}

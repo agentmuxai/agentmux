@@ -44,6 +44,9 @@
 //! - `git-hook <name>`, `git-env -- <git args>` and `github-owner-tag -- <gh args>` — the guards
 //!   and attribution on an agent's pushes and commits. See `git_hooks.rs`, `secret_scan.rs`.
 //!
+//! - `github-text-guard -- <gh args>` — the scan of the text an agent's `gh` sends (PR, issue and
+//!   comment text) for credentials. See `github_text.rs`.
+//!
 //! - `sessionstart --part N` — registered as Claude Code's `SessionStart`
 //!   hook, once per part. Delivers part N of the agent's memory as the
 //!   hook's `additionalContext`. See `sessionstart.rs` and
@@ -65,6 +68,7 @@ mod aws;
 mod git_hooks;
 mod bash_timeout;
 mod github;
+mod github_text;
 mod idle_gate;
 mod hook;
 mod precompact;
@@ -121,6 +125,14 @@ enum Command {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         gh_args: Vec<String>,
     },
+    /// Scan the text a `gh` command sends (a PR, issue or comment body, release notes, an API field)
+    /// for credentials: print the arguments to run, each followed by a NUL, then `ok`; or `refused`
+    /// and the reason on stderr. The `gh` function this wrapper exports calls it.
+    GithubTextGuard {
+        /// The arguments `gh` was given.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        gh_args: Vec<String>,
+    },
     /// One of the git hooks srv installs for an agent (`pre-push`, `prepare-commit-msg`): the
     /// repository's own hook, then AgentMux's part (the push scan, the commit trailers).
     GitHook {
@@ -173,6 +185,7 @@ fn main() -> Result<()> {
         Command::GitCredential { op } => std::process::exit(github::run_git_credential(op)),
         Command::GithubToken { gh_args } => std::process::exit(github::run_github_token(gh_args)),
         Command::GithubOwnerTag { gh_args } => std::process::exit(github::run_github_owner_tag(gh_args)),
+        Command::GithubTextGuard { gh_args } => std::process::exit(github_text::run_github_text_guard(gh_args)),
         Command::GitHook { name, args } => std::process::exit(git_hooks::run_git_hook(name, args)),
         Command::AwsCredentials { profile } => std::process::exit(aws::run_aws_credentials(profile)),
         Command::GitEnv { git_args } => std::process::exit(git_hooks::run_git_env(git_args)),
@@ -193,7 +206,7 @@ fn main() -> Result<()> {
         Command::Precompact(args) => rt.block_on(precompact::run(args)),
         Command::Sessionstart(args) => rt.block_on(sessionstart::run(args)),
         // Handled above.
-        Command::GitCredential { .. } | Command::AwsCredentials { .. } | Command::GithubToken { .. } | Command::GithubOwnerTag { .. } | Command::GitHook { .. } | Command::GitEnv { .. } => Ok(()),
+        Command::GitCredential { .. } | Command::AwsCredentials { .. } | Command::GithubToken { .. } | Command::GithubOwnerTag { .. } | Command::GithubTextGuard { .. } | Command::GitHook { .. } | Command::GitEnv { .. } => Ok(()),
     }
 }
 

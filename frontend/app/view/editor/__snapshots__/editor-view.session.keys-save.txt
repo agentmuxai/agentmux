@@ -4,18 +4,7 @@ lsp#1 new typescript /home/u/a.ts
 lsp#1 start
 lsp#1 didOpen /home/u/a.ts typescript "export const a = 1;\n"
 diagnostics wired to lsp#1
-lsp#1 didClose /home/u/a.ts
-lsp#1 didOpen /home/u/a.ts typescript "export const a = 1;\n"
-diagnostics of lsp#1 unwired
-diagnostics wired to lsp#1
+lsp#1 didChange /home/u/a.ts "// edit\nexport const a = 1;\n"
 resolved editor:save editor
 rpc WriteEditorFile {"path":"/home/u/a.ts","content":"// edit\nexport const a = 1;\n","encoding":"UTF-8","bom":"none","line_ending":"lf"}
 resolved editor:save editor
-lsp#1 didClose /home/u/a.ts
-lsp#1 didOpen /home/u/a.ts typescript "export const a = 1;\n"
-diagnostics of lsp#1 unwired
-diagnostics wired to lsp#1
-lsp#1 didClose /home/u/a.ts
-lsp#1 didOpen /home/u/a.ts typescript "export const a = 1;\n"
-diagnostics of lsp#1 unwired
-diagnostics wired to lsp#1

@@ -13,18 +13,33 @@ pub const GH_FUNCTION_NAME: &str = "BASH_FUNC_gh%%";
 /// `gh`, for an agent whose person connected GitHub through AgentMux Cloud (srv sets
 /// `AGENTMUX_GITHUB_BROKER` for those): the command runs with the GitHub App's token for the
 /// repository it is about, or with no token at all, never with one the environment happened to
-/// carry. `gh pr create` and `gh pr edit` carry the owner tag in the PR's body. `gh auth status`
+/// carry. What a `gh pr`, `gh issue`, `gh release` or `gh api` command sends is scanned for
+/// credentials first (`github-text-guard`: a hit refuses the command, a stdin body reaches `gh` as a
+/// file), and `gh pr create` and `gh pr edit` carry the owner tag in the PR's body. `gh auth status`
 /// says so, instead of "not logged into any GitHub hosts" (the bare command only: with flags such as
 /// `--json` it is gh's own output a caller parses). Without the variable it is plain `gh`.
 pub const GH_FUNCTION_BODY: &str = r#"() {  if [ -n "${AGENTMUX_GITHUB_BROKER:-}" ]; then
-    local _amx_t _amx_x _amx_a=();
+    local _amx_t _amx_x _amx_n _amx_a=();
     if [ "$1" = auth ] && [ "$2" = status ] && [ "$#" -eq 2 ]; then
       printf '%s
 ' 'github.com' '  AgentMux signs gh in per repository: each gh command in a repository gets a short-lived token for it' '  (the AgentMux GitHub App, acting for your user). There is no stored login, so gh auth does not list one.';
       return 0;
     fi;
+    if [ "$1" = pr ] || [ "$1" = issue ] || [ "$1" = release ] || [ "$1" = api ]; then
+      while IFS= read -r -d '' _amx_x; do _amx_a+=("$_amx_x"); done < <(agentmux-bashwrap github-text-guard -- "$@");
+      _amx_n=${#_amx_a[@]};
+      if [ "$_amx_n" -eq 0 ]; then
+        echo 'agentmux: this gh command was not run: the text it sends could not be checked.' >&2;
+        return 1;
+      fi;
+      _amx_x="${_amx_a[$((_amx_n - 1))]}";
+      [ "$_amx_x" = ok ] || return 1;
+      unset "_amx_a[$((_amx_n - 1))]";
+      set -- "${_amx_a[@]}";
+      _amx_a=();
+    fi;
     _amx_t="$(agentmux-bashwrap github-token -- "$@")";
-    if [ "$1" = pr ] && { [ "$2" = create ] || [ "$2" = edit ]; }; then
+    if [ "$1" = pr ] && { [ "$2" = create ] || [ "$2" = new ] || [ "$2" = edit ]; }; then
       while IFS= read -r -d '' _amx_x; do _amx_a+=("$_amx_x"); done < <(agentmux-bashwrap github-owner-tag -- "$@" 2>/dev/null);
       if [ "${#_amx_a[@]}" -gt 0 ]; then set -- "${_amx_a[@]}"; fi;
     fi;
