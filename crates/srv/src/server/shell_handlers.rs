@@ -232,9 +232,9 @@ fn host_working_dir(working_dir: &str) -> Result<Option<std::path::PathBuf>, Str
 
 /// The `sh -c <command>` process for a host `!cmd`, with its stdio, kill and
 /// process-group settings.
-fn host_command(shell: &std::path::Path, command: &str, cwd: Option<&std::path::Path>) -> tokio::process::Command {
+fn host_command(shell: std::path::PathBuf, command: &str, cwd: Option<&std::path::Path>) -> tokio::process::Command {
     let mut proc = {
-        let mut c = tokio::process::Command::new(shell);
+        let mut c = tokio::process::Command::new(&shell);
         c.args(["-c", command]);
         // shellexec runs arbitrary agent-supplied commands and, per
         // the note below, fires on every MCP Shell tool call — so a
@@ -354,7 +354,7 @@ async fn shell_exec_host(cmd: &CommandShellExecData) -> Result<ShellExecResult, 
     // no sh.exe. See backend::posix_shell.
     let shell = crate::backend::posix_shell::resolve_posix_shell()
         .map_err(|e| format!("shellexec: {e}"))?;
-    let mut proc = host_command(&shell, &cmd.command, cwd.as_deref());
+    let mut proc = host_command(shell.clone(), &cmd.command, cwd.as_deref());
 
     // Joins the agent's tracker before it runs: a `!cmd` that
     // backgrounds a child ends with the agent (agent_teardown spec §6.5).
