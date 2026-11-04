@@ -95,6 +95,25 @@ describe("drawing", () => {
     });
 });
 
+describe("the mark the app draws for itself", () => {
+    it("the splash PNG is the four blocks alone on a transparent 256 px canvas (the size build.rs reads)", () => {
+        const img = decode(out("crates/launcher/resources/brain.png"));
+        expect([img.w, img.h]).toEqual([256, 256]);
+        expect(img.at(0, 0)[3]).toBe(0); // no tile
+        expect(img.at(128, 48)).toEqual([107, 130, 222, 255]); // the bar
+        expect(img.at(128, 160)[3]).toBe(0); // the gap between the two columns
+        expect(img.at(60, 160)).toEqual([107, 130, 222, 255]); // the tall block
+    });
+
+    it("the SVG is the dark icon's four blocks, and index.html's pre-splash inlines the same rectangles", () => {
+        const svg = out("frontend/app/asset/logo-mark.svg").toString();
+        expect(readRects(svg)).toEqual(readRects(read("assets/icon/agentmux-dark.svg")).slice(1));
+        const html = read("index.html");
+        const splash = html.slice(html.indexOf('<div id="startup-loading">'), html.indexOf('id="startup-loading-headline"'));
+        expect(readRects(splash)).toEqual(readRects(svg));
+    });
+});
+
 describe("encoding", () => {
     it("an ICO lists each image with its size, PNG inside", () => {
         const ico = out("crates/cef/resources/win/agentmux.ico");
