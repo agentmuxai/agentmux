@@ -1,7 +1,5 @@
 rpc ReadEditorFile {"path":"/home/u/a.ts"}
 rpc ReadEditorFile {"path":"/home/u/b.ts"}
-rpc WatchEditorFile {"path":"/home/u/a.ts","block_id":"session<n>"}
-rpc WatchEditorFile {"path":"/home/u/b.ts","block_id":"session<n>"}
 lsp#1 new typescript /home/u/b.ts
 lsp#1 start
 lsp#1 didOpen /home/u/b.ts typescript "export const b = 2;\n"
