@@ -80,6 +80,10 @@ pub(crate) fn log_call<G: GoogleHttp, O: OAuthHttp, S: TokenSecrets>(
         Ok(_) => "ok".to_string(),
         Err(e) => format!("error: {}", super::clip(e, 200)),
     };
+    // An account disconnected while the call ran took its log with it: a line now would outlive it.
+    if !matches!(crate::identity::resolver::resolve_account(deps.id_store, deps.identity_store, &access.account.id), Ok(Some(_))) {
+        return;
+    }
     let line = GoogleCall {
         at: now.timestamp_millis(),
         agent_id: def.id.clone(),

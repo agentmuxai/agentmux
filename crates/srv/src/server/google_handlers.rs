@@ -534,19 +534,30 @@ async fn disconnect_by_agent(state: &AppState, actor: &AgentDefinition, body: &D
     let defs = state.mstore.agent_def_list().map_err(|e| e.to_string())?;
     let mut lost_access: Vec<String> = Vec::new();
     let mut revoked = true;
+    let mut gone: Vec<String> = Vec::new();
     for account in &targets {
         let email = access::email_of(account);
+        let mut holders: Vec<String> = Vec::new();
         for grant in state.identity_store.google_grants_for_account(&account.id).map_err(|e| e.to_string())? {
-            let name = defs.iter().find(|d| d.id == grant.agent_id).map_or(grant.agent_id.clone(), |d| d.name.clone());
-            if !lost_access.contains(&name) {
-                lost_access.push(name);
-            }
+            holders.push(defs.iter().find(|d| d.id == grant.agent_id).map_or(grant.agent_id.clone(), |d| d.name.clone()));
         }
         // Google's revoke comes first and must work: otherwise the connection stays, to try again.
         let done = super::agent_handlers::delete_identity_account(&state.id_store, &state.identity_store, &state.broker, &account.id, true).await?;
         if !done.deleted {
             let why = done.revoke.get("detail").and_then(serde_json::Value::as_str).unwrap_or("Google did not answer");
-            return Err(format!("Google didn't end the connection to {email} ({why}), so it was kept: try again, or the person removes it in Connectors"));
+            let mut said = format!("Google didn't end the connection to {email} ({why}), so it was kept: try again, or the person removes it in Connectors");
+            // The same email connected twice: the ones before this were already ended, and the windows hear of them.
+            if !gone.is_empty() {
+                said.push_str(&format!(". Already disconnected: {} (agents who lost access: {})", gone.join(", "), lost_access.join(", ")));
+                crate::identity::accounts_changed::tell_windows(format!("{} disconnected a connection of {}", actor.name, gone[0]));
+            }
+            return Err(said);
+        }
+        gone.push(email);
+        for name in holders {
+            if !lost_access.contains(&name) {
+                lost_access.push(name);
+            }
         }
         revoked &= done.revoke.get("outcome").and_then(serde_json::Value::as_str) != Some("failed");
         tracing::info!(target: "google", account_id = %account.id, by = %actor.name, "google: account disconnected by an agent");

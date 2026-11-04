@@ -117,6 +117,7 @@ async fn a_disconnect_while_google_answers_drops_what_came_back() {
     let e = call(&w, &google, "list_events", CalendarArgs::default(), None).await.unwrap_err();
     assert!(e.contains("me@example.com was disconnected while this call ran"), "{e}");
     assert!(!e.contains("Secret meeting"), "{e}");
+    assert!(w.store.google_calls("acc-1", 10).unwrap().is_empty(), "no log line is left behind for an account that is gone");
 }
 
 #[tokio::test]
