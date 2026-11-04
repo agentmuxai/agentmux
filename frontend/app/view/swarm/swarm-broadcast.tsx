@@ -68,28 +68,19 @@ function ago(at: number, now: number): string {
     return `${Math.floor(s / 3600)} h ago`;
 }
 
-export function BroadcastDock(props: { model: SwarmViewModel; agents: Pick<SwarmAgents, "tree"> }): JSX.Element {
-    const model = props.model;
-    const state = broadcastStateOf(model);
-    // From the list the pane already keeps (which rebuilds only while the pane is visible), not
-    // `model.fleetTargets()`, which would rebuild the agent tree on every agent event.
-    const known = createMemo(
-        () => new Map([...localFleetTargets(props.agents.tree()), ...remoteFleetTargets(remoteSections(model.otherInstancesAtom()))])
-    );
-    // The selected agents the filter shows: one it hides stays selected but is not sent to.
-    const split = createMemo(() => partitionTargets(actionableKeys(model, model.selectedBlockIdsAtom()), "broadcast", known()));
-    const recipients = () => split().reachable.length;
-    const selected = () => actionableKeys(model, model.selectedBlockIdsAtom()).length;
-    const hidden = () => model.selectedBlockIdsAtom().size - selected();
-    const gap = () => gapSummary(split().unreachable, selected(), "broadcast");
-    const canSend = () => state.draft().trim().length > 0 && recipients() > 0 && !model.fleetActionInFlightAtom();
-    // The ages in the recent list tick; the list itself changes only on a send.
+/** The current time, refreshed every `ms` while the caller lives: the ages in the recent list tick, the list itself changes only on a send. */
+function useNow(ms: number): Accessor<number> {
     const [now, setNow] = createSignal(Date.now());
-    const ticker = setInterval(() => setNow(Date.now()), 30_000);
+    const ticker = setInterval(() => setNow(Date.now()), ms);
     onCleanup(() => clearInterval(ticker));
+    return now;
+}
 
-    // The box is one line and grows with its text. A height the person drags it to stays until the
-    // draft is empty again (after a send, or when they clear it).
+/**
+ * The box is one line and grows with its text. A height the person drags it to stays until the
+ * draft is empty again (after a send, or when they clear it). Returns the box's `ref`.
+ */
+function useAutoGrow(draft: Accessor<string>): (el: HTMLTextAreaElement) => void {
     let input: HTMLTextAreaElement | undefined;
     let fitted = 0;
     let dragged = false;
@@ -107,7 +98,7 @@ export function BroadcastDock(props: { model: SwarmViewModel; agents: Pick<Swarm
         input.style.height = `${h}px`;
     };
     createEffect(() => {
-        if (state.draft() === "") {
+        if (draft() === "") {
             dragged = false;
             input?.style.removeProperty("height");
             fitted = 0;
@@ -115,7 +106,7 @@ export function BroadcastDock(props: { model: SwarmViewModel; agents: Pick<Swarm
     });
     // The resize handle writes its own inline height, so one that is not the one we set is the person's.
     // (The box's rendered height is not the test: a short pane can squeeze it without a drag.) A new width re-wraps the text.
-    const watch = (el: HTMLTextAreaElement) => {
+    return (el) => {
         input = el;
         if (typeof ResizeObserver === "undefined") return;
         const observer = new ResizeObserver(() => {
@@ -129,6 +120,43 @@ export function BroadcastDock(props: { model: SwarmViewModel; agents: Pick<Swarm
         observer.observe(el);
         onCleanup(() => observer.disconnect());
     };
+}
+
+function RecentBroadcasts(props: { list: BroadcastRecord[]; now: number }): JSX.Element {
+    return (
+        <div class="swarm-broadcast-recent" aria-label="Recent broadcasts">
+            <For each={props.list}>
+                {(r) => (
+                    <div class="swarm-broadcast-recent-row" {...tip(r.text)}>
+                        <span class="swarm-broadcast-recent-text">{r.text}</span>
+                        <span class="swarm-broadcast-recent-meta">
+                            {ago(r.at, props.now)} · {r.recipients} sent · {r.delivered} delivered
+                            <Show when={r.failed > 0}> · {r.failed} failed</Show>
+                        </span>
+                    </div>
+                )}
+            </For>
+        </div>
+    );
+}
+
+export function BroadcastDock(props: { model: SwarmViewModel; agents: Pick<SwarmAgents, "tree"> }): JSX.Element {
+    const model = props.model;
+    const state = broadcastStateOf(model);
+    // From the list the pane already keeps (which rebuilds only while the pane is visible), not
+    // `model.fleetTargets()`, which would rebuild the agent tree on every agent event.
+    const known = createMemo(
+        () => new Map([...localFleetTargets(props.agents.tree()), ...remoteFleetTargets(remoteSections(model.otherInstancesAtom()))])
+    );
+    // The selected agents the filter shows: one it hides stays selected but is not sent to.
+    const split = createMemo(() => partitionTargets(actionableKeys(model, model.selectedBlockIdsAtom()), "broadcast", known()));
+    const recipients = () => split().reachable.length;
+    const selected = () => actionableKeys(model, model.selectedBlockIdsAtom()).length;
+    const hidden = () => model.selectedBlockIdsAtom().size - selected();
+    const gap = () => gapSummary(split().unreachable, selected(), "broadcast");
+    const canSend = () => state.draft().trim().length > 0 && recipients() > 0 && !model.fleetActionInFlightAtom();
+    const now = useNow(30_000);
+    const watch = useAutoGrow(state.draft);
 
     const send = async (): Promise<void> => {
         if (!canSend()) return;
@@ -185,19 +213,7 @@ export function BroadcastDock(props: { model: SwarmViewModel; agents: Pick<Swarm
                 </Show>
             </div>
             <Show when={state.recent().length > 0}>
-                <div class="swarm-broadcast-recent" aria-label="Recent broadcasts">
-                    <For each={state.recent()}>
-                        {(r) => (
-                            <div class="swarm-broadcast-recent-row" {...tip(r.text)}>
-                                <span class="swarm-broadcast-recent-text">{r.text}</span>
-                                <span class="swarm-broadcast-recent-meta">
-                                    {ago(r.at, now())} · {r.recipients} sent · {r.delivered} delivered
-                                    <Show when={r.failed > 0}> · {r.failed} failed</Show>
-                                </span>
-                            </div>
-                        )}
-                    </For>
-                </div>
+                <RecentBroadcasts list={state.recent()} now={now()} />
             </Show>
         </div>
     );
