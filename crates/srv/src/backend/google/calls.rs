@@ -47,8 +47,21 @@ pub async fn calendar_read<G: GoogleHttp, O: OAuthHttp, S: TokenSecrets>(
     let access = access_for(deps.mstore, deps.id_store, deps.identity_store, def, Service::Calendar, account)?;
     let ids = calendar::logged_ids(action, args);
     let result = calendar_read_with(deps, &access, action, args, now).await;
+    let result = still_held(deps, &access, result);
     log_call(deps, &access, def, Service::Calendar, action, ids, &result, now);
     result.map(|r| json!({ "account": access.email(), "result": r }))
+}
+
+/// A read that came back after the grant was turned off, or the account disconnected, returns the
+/// sentence saying so instead of Google's content.
+fn still_held<G: GoogleHttp, O: OAuthHttp, S: TokenSecrets>(
+    deps: &CallDeps<'_, G, O, S>,
+    access: &Access,
+    result: Result<Value, String>,
+) -> Result<Value, String> {
+    let kept = result?;
+    access.still_held(deps.id_store, deps.identity_store, GrantLevel::Read)?;
+    Ok(kept)
 }
 
 /// A line in the account's log (D7) for one call, however it ended.
@@ -120,6 +133,7 @@ pub async fn drive_read<G: GoogleHttp, O: OAuthHttp, S: TokenSecrets>(
     let access = access_for(deps.mstore, deps.id_store, deps.identity_store, def, Service::Drive, account)?;
     let ids = drive::logged_ids(action, args);
     let result = drive_read_with(deps, &access, action, args).await;
+    let result = still_held(deps, &access, result);
     log_call(deps, &access, def, Service::Drive, action, ids, &result, now);
     result.map(|r| json!({ "account": access.email(), "result": r }))
 }
@@ -170,6 +184,7 @@ pub async fn gmail_read<G: GoogleHttp, O: OAuthHttp, S: TokenSecrets>(
     let access = access_for(deps.mstore, deps.id_store, deps.identity_store, def, Service::Gmail, account)?;
     let ids = gmail::logged_ids(action, args);
     let result = gmail_read_with(deps, &access, action, args).await;
+    let result = still_held(deps, &access, result);
     log_call(deps, &access, def, Service::Gmail, action, ids, &result, now);
     result.map(|r| json!({ "account": access.email(), "result": r }))
 }

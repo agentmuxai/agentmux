@@ -891,6 +891,7 @@ fn google_agent_routes() -> Router<AppState> {
         .route("/api/v1/google/self/services", get(super::google_handlers::handle_google_self_services))
         .route("/api/v1/google/status", get(super::google_handlers::handle_google_status))
         .route("/api/v1/google/grant", post(super::google_handlers::handle_google_grant))
+        .route("/api/v1/google/disconnect", post(super::google_handlers::handle_google_disconnect))
         .route("/api/v1/google/connect", post(super::google_handlers::connect::handle_google_connect))
         .route("/api/v1/google/connect/status", post(super::google_handlers::connect::handle_google_connect_status))
         .route("/api/v1/google/connect/cancel", post(super::google_handlers::connect::handle_google_connect_cancel))

@@ -246,7 +246,7 @@ fn oauth_status_wire(s: &crate::identity::oauth_client::OAuthStatus) -> serde_js
 
 /// Whether a delete stops, keeping the account, because revoking its grant
 /// failed and the caller asked for the revoke to succeed first.
-fn revoke_keeps_account(revoke_report: &serde_json::Value, require_revoke: bool) -> bool {
+pub(super) fn revoke_keeps_account(revoke_report: &serde_json::Value, require_revoke: bool) -> bool {
     require_revoke && revoke_report.get("outcome").and_then(|v| v.as_str()) == Some("failed")
 }
 
@@ -264,19 +264,19 @@ fn merge_json_object(base: &mut serde_json::Value, overlay: &serde_json::Value) 
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "camelCase")]
 pub struct DeleteIdentityAccountResult {
-    deleted: bool,
+    pub(crate) deleted: bool,
     /// Agents whose link to the account was removed (delete-time disclosure).
-    affected_agents: Vec<String>,
+    pub(crate) affected_agents: Vec<String>,
     /// What removing the saved login did; null when there was no account row.
     #[ts(type = "{ outcome: \"removed\" | \"absent\" | \"skipped\" | \"failed\" | \"none\"; path?: string; detail?: string; historyKept?: boolean; historyPath?: string } | null")]
-    cleanup: serde_json::Value,
+    pub(crate) cleanup: serde_json::Value,
     /// Revoking an OAuth account's grant at the provider (Google) before the
     /// delete; null when there was nothing to revoke. `failed` means the grant
     /// may live on at the provider. With `require_revoke` the account was then
     /// kept (`deleted: false`) so the delete can be retried; without it the
     /// account is gone and the grant is left to the provider's account page.
     #[ts(type = "{ outcome: \"revoked\" | \"failed\"; detail?: string } | null")]
-    revoke: serde_json::Value,
+    pub(crate) revoke: serde_json::Value,
 }
 
 /// What `account.key.verify` answers: `{ valid: false, error }` when validation
@@ -754,163 +754,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let identity_store = state.identity_store.clone();
     let broker = state.broker.clone();
     engine.register_typed(COMMAND_DELETE_IDENTITY_ACCOUNT, move |cmd: CommandDeleteIdentityAccountData, _ctx| {
-        let mstore = mstore.clone();
-        let identity_store = identity_store.clone();
-        let broker = broker.clone();
-        async move {
-                // Drop the credential material behind the row BEFORE the row
-                // itself: keychain entry for `SecretRef::Keychain`, on-disk
-                // OAuth token dir for `SecretRef::OAuthConfigDir` (layer 1 of
-                // ANALYSIS_ACCOUNT_DELETE_AUTH_LIFECYCLE_GAP_2026_07_14.md §4).
-                // Best-effort — cleanup trouble never blocks the delete; the
-                // cleanup fn logs every outcome under "identity.delete:".
-                // keyring + fs are blocking, so run via spawn_blocking.
-                // Capture provider before the row is deleted so the logout-
-                // side log lines can carry it.
-                let acct = mstore.identity_get(&cmd.id).ok().flatten();
-                let provider = acct.as_ref().map(|a| a.provider.clone()).unwrap_or_default();
-                // An OAuth grant is revoked at the provider first, while the
-                // token is still in the keychain; otherwise it would live on
-                // there (spec §7 "Disconnect"). Null when there's none.
-                let mut revoke_report = serde_json::Value::Null;
-                if let Some(acct) = acct.as_ref() {
-                    use crate::identity::oauth_tokens::{revoke_before_delete, KeychainSecrets, LiveHttp};
-                    // A GitHub grant made through the broker is ended there.
-                    let report = match crate::identity::github_connect::revoke_before_delete(&mstore, &KeychainSecrets, acct).await {
-                        Some(report) => Some(report),
-                        None => revoke_before_delete(&LiveHttp, &KeychainSecrets, acct).await,
-                    };
-                    if let Some(report) = report {
-                        revoke_report = report;
-                    }
-                }
-                if revoke_keeps_account(&revoke_report, cmd.require_revoke) {
-                    return Ok(DeleteIdentityAccountResult {
-                        deleted: false,
-                        affected_agents: Vec::new(),
-                        cleanup: serde_json::Value::Null,
-                        revoke: revoke_report,
-                    });
-                }
-                // What the cleanup did, returned to Connectors so a login that
-                // couldn't be removed is reported, not hidden
-                // (SPEC_ARMORY_ACCOUNTS_DELETE_AND_INLINE_DETAIL_2026_10_04.md H3).
-                let mut cleanup_report = serde_json::Value::Null;
-                if let Some(acct) = acct {
-                    // Containment root for OAuth dirs: only paths inside
-                    // ~/.agentmux/shared/identities/ are ever removed (the
-                    // legacy ~/.claude migration dir is the user's global
-                    // CLI login — never ours to delete).
-                    let identities_root = agentmux_common::DataPaths::from_env()
-                        .map(|p| p.identities_dir());
-                    cleanup_report = match tokio::task::spawn_blocking(move || {
-                        crate::identity::cleanup::cleanup_account_secrets(
-                            &acct,
-                            identities_root.as_deref(),
-                        )
-                    })
-                    .await
-                    {
-                        Ok(outcome) => outcome.report(),
-                        Err(e) => json!({ "outcome": "failed", "detail": e.to_string() }),
-                    };
-                }
-                let outcome = mstore
-                    .identity_delete(&cmd.id)
-                    .map_err(|e| format!("deleteidentityaccount: {e}"))?;
-                let deleted = outcome.deleted;
-                // Links now live in identity_store, a different physical
-                // store than the account row (id_store) —
-                // identity_delete's own cascade above only ever reaches
-                // rows in the SAME store it's called on, so it no longer
-                // finds anything to cascade (SPEC_IDENTITY_STORE_SPLIT_
-                // 2026_08_17.md). Clean up the real link rows here
-                // explicitly and merge the two outcomes for the existing
-                // notification logic below, so this doesn't regress into
-                // silently orphaning links on every account delete.
-                let (links_cascaded_from_identity_store, mut affected_agents) = identity_store
-                    .agent_identity_unlink_by_account(&cmd.id)
-                    .map_err(|e| format!("deleteidentityaccount: identity_store cleanup: {e}"))?;
-                let links_cascaded = outcome.links_cascaded + links_cascaded_from_identity_store;
-                affected_agents.extend(outcome.affected_agents);
-                affected_agents.sort();
-                affected_agents.dedup();
-                // Also remove the account's MIRROR row (identity_upsert_with_mirror's
-                // counterpart on delete) — without this, a stale copy of a
-                // deleted account survives in identity_store, and
-                // resolve_account's fallback would incorrectly resolve it
-                // again on the next spawn once id_store's own row is gone.
-                // Best-effort: a mirror cleanup failure must not block the
-                // real delete, which already succeeded above.
-                if let Err(e) = identity_store.identity_delete(&cmd.id) {
-                    tracing::warn!(
-                        account_id = %cmd.id,
-                        error = %e,
-                        "deleteidentityaccount: identity_store mirror row cleanup failed (non-fatal)"
-                    );
-                }
-                // A Google account's grants and call log go with it (connectors spec D4, D7).
-                if let Err(e) = identity_store.google_account_forget(&cmd.id) {
-                    tracing::warn!(account_id = %cmd.id, error = %e, "deleteidentityaccount: Google grants cleanup failed (non-fatal)");
-                }
-                if links_cascaded > 0 {
-                    // info!, not debug!: the production filter is
-                    // "agentmuxsrv=info,info" (reagent P1, PR #2143).
-                    // "identity.delete:" is `muxlog auth` vocabulary.
-                    tracing::info!(
-                        account_id = %cmd.id,
-                        provider = %provider,
-                        links = links_cascaded,
-                        "identity.delete: links cascaded"
-                    );
-                }
-                tracing::info!(
-                    account_id = %cmd.id,
-                    provider = %provider,
-                    deleted,
-                    "identity.delete: account removed (deleteidentityaccount)"
-                );
-                if deleted {
-                    broker.publish_event::<crate::backend::mps_events::IdentityAccountsChanged>(&(), vec![], 0);
-                    // Layer 2 — running-agent reconciliation (spec
-                    // SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md §3):
-                    // the cascaded links name agents that may have a LIVE
-                    // process still holding this account's tokens. We
-                    // surface, not hard-kill — a per-agent revocation event
-                    // drives the pane chip; enforcement lands at the next
-                    // spawn (layer 3). Also poke the per-agent link-changed
-                    // event so link tables refresh.
-                    if !affected_agents.is_empty() {
-                        // info!, not debug!: the production filter is
-                        // "agentmuxsrv=info,info". "identity.delete:" is
-                        // `muxlog auth` vocabulary.
-                        tracing::info!(
-                            account_id = %cmd.id,
-                            provider = %provider,
-                            count = affected_agents.len(),
-                            agent_ids = %affected_agents.join(","),
-                            "identity.delete: running agent(s) affected"
-                        );
-                        for agent_id in &affected_agents {
-                            broker.publish_event_for::<crate::backend::mps_events::AgentIdentitiesChanged>(&agent_id, &(), vec![], 0);
-                            let revoked = crate::backend::mps_events::CredentialsRevokedEvent {
-                                credentials_revoked: true,
-                                provider: provider.to_string(),
-                                account_id: Some(cmd.id.clone()),
-                            };
-                            broker.publish_event_for::<crate::backend::mps_events::AgentCredentialsRevoked>(&agent_id, &revoked, vec![], 0);
-                        }
-                    }
-                }
-                Ok(DeleteIdentityAccountResult {
-                    deleted,
-                    // Layer 4: delete-time disclosure (spec §4).
-                    affected_agents,
-                    // Null when there was no account row to clean up after.
-                    cleanup: cleanup_report,
-                    revoke: revoke_report,
-                })
-        }
+        let (mstore, identity_store, broker) = (mstore.clone(), identity_store.clone(), broker.clone());
+        async move { super::identity_delete::delete_identity_account(&mstore, &identity_store, &broker, &cmd.id, cmd.require_revoke).await }
     });
 
     // ---- Agent ↔ Identity junction ----

@@ -20,11 +20,34 @@ use super::Service;
 pub struct Access {
     pub account: IdentityAccount,
     pub level: GrantLevel,
+    /// Whose grant this is, and for which service: [`Access::still_held`] asks about both.
+    pub agent_id: String,
+    pub service: Service,
 }
 
 impl Access {
     pub fn email(&self) -> String {
         email_of(&self.account)
+    }
+
+    /// Asked again once Google has answered, or just before a request goes out: the account may have been
+    /// disconnected, or the grant turned off (or lowered below `needed`), while the call ran. The
+    /// call then returns this sentence and none of Google's content.
+    pub fn still_held(&self, id_store: &Arc<Store>, identity_store: &Arc<Store>, needed: GrantLevel) -> Result<(), String> {
+        let email = self.email();
+        match crate::identity::resolver::resolve_account(id_store, identity_store, &self.account.id) {
+            Ok(Some(_)) => {}
+            Ok(None) => return Err(format!("{email} was disconnected while this call ran, so nothing from it is returned")),
+            Err(e) => return Err(format!("store: {e}")),
+        }
+        match identity_store.google_grant_get(&self.agent_id, &self.account.id, self.service.as_str()) {
+            Ok(Some(level)) if level >= needed => Ok(()),
+            Ok(_) => Err(format!(
+                "your {} access to {email} was removed while this call ran, so nothing from it is returned",
+                service_name(self.service)
+            )),
+            Err(e) => Err(format!("store: {e}")),
+        }
     }
 
     /// The scopes the account's token was granted.
@@ -79,7 +102,7 @@ pub fn granted_accounts(
     for g in grants.into_iter().filter(|g| g.service == service.as_str()) {
         if let Ok(Some((account, _))) = crate::identity::resolver::resolve_account(id_store, identity_store, &g.account_id) {
             if account.provider == "google" {
-                held.push(Access { account, level: g.level });
+                held.push(Access { account, level: g.level, agent_id: def.id.clone(), service });
             }
         }
     }

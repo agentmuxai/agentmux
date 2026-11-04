@@ -10,7 +10,7 @@
 use std::sync::{Arc, OnceLock};
 
 use crate::backend::mps::Broker;
-use crate::backend::mps_events::{Event, IdentityAccountsChanged};
+use crate::backend::mps_events::{Event, GoogleNotice, IdentityAccountsChanged};
 
 static BROKER: OnceLock<Arc<Broker>> = OnceLock::new();
 
@@ -27,9 +27,25 @@ pub fn announce() {
     }
 }
 
+/// The `google:notice` event: one line for the windows' notices, asking nothing ("Naki-2 gave
+/// Agent5 Calendar read"). Never mail, event or file content.
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct GoogleNoticeEvent {
+    pub text: String,
+}
+
+/// Tells the windows what an agent did to a Google account, so the person sees it as it happens.
+pub fn tell_windows(text: String) {
+    if let Some(broker) = BROKER.get() {
+        broker.publish_event::<GoogleNotice>(&GoogleNoticeEvent { text }, vec![], 0);
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Mutex;
 
     use super::*;
 
@@ -44,6 +60,12 @@ pub(crate) mod tests {
         counter();
     }
 
+    /// The `google:notice` payloads the test broker has seen.
+    fn notices() -> &'static Mutex<Vec<String>> {
+        static SEEN: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
+        SEEN.get_or_init(Default::default)
+    }
+
     fn counter() -> &'static AtomicUsize {
         static COUNT: OnceLock<Arc<AtomicUsize>> = OnceLock::new();
         COUNT
@@ -55,11 +77,21 @@ pub(crate) mod tests {
                     if e.event == IdentityAccountsChanged::NAME {
                         seen.fetch_add(1, Ordering::SeqCst);
                     }
+                    if e.event == GoogleNotice::NAME {
+                        notices().lock().unwrap().push(format!("{:?}", e.data));
+                    }
                 }));
                 install_broker(broker);
                 count
             })
             .as_ref()
+    }
+
+    #[test]
+    fn telling_the_windows_publishes_one_line_for_their_notices() {
+        watch();
+        tell_windows("Naki-2 gave Agent5 Calendar read on me@example.com".to_string());
+        assert!(notices().lock().unwrap().iter().any(|n| n.contains("Naki-2 gave Agent5 Calendar read")));
     }
 
     #[test]

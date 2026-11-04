@@ -502,6 +502,15 @@
     }
   },
   {
+    "event": "google:notice",
+    "payloadTs": {
+      "imports": [
+        "GoogleNoticeEvent"
+      ],
+      "name": "GoogleNoticeEvent"
+    }
+  },
+  {
     "event": "identity:no-direct-links",
     "payloadTs": {
       "imports": [

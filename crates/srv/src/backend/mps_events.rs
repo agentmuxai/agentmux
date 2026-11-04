@@ -264,6 +264,8 @@ events! {
     McpChanged: "mcp:changed" => (),
     /// The provider accounts changed.
     IdentityAccountsChanged: "identityaccounts:changed" => (),
+    /// An agent changed a Google account (a grant, a disconnect): a notice naming it, asking nothing.
+    GoogleNotice: "google:notice" => crate::identity::accounts_changed::GoogleNoticeEvent,
     /// Scheduled jobs changed.
     CronChanged: super::mps::EVENT_CRON_CHANGED => (),
     /// The run ledger, or Pause all, changed (the Warden Jobs tab).
