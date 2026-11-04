@@ -152,7 +152,7 @@ function recordSent(c: ComposerCtx, message: string): void {
     }
 }
 
-/** Why a send must wait, or null. The pane can show before its conversation has loaded, and a send then is refused after this handler has cleared the draft, so the message is kept (#4374). */
+/** Why a send must wait for attachments, or null: some are still being processed. */
 function sendBlockedHint(c: ComposerCtx): string | null {
     const processing = c.attachmentDraft?.processingCount() ?? 0;
     if (processing > 0) {
@@ -176,6 +176,8 @@ export function handleSend(c: ComposerCtx): void {
     }
     const attachments = c.attachmentDraft?.refs() ?? [];
     if (!message.trim() && attachments.length === 0) return;
+    // The pane can show before its conversation has loaded. A send then is refused by the init guard
+    // after this handler has cleared the draft, so the message would be lost: keep it and say why (#4374).
     if (c.draftBlockId && paneSnapshot(c.draftBlockId)?.initPhase.kind === "InitPending") {
         c.showSendHint("Waiting for the conversation to load");
         return;

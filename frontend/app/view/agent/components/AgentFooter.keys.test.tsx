@@ -47,10 +47,10 @@ import { resetReloadPersistenceForTests } from "../reload-persistence";
 
 const COMMANDS = [{ name: "help" }, { name: "history" }, { name: "hooks" }] as unknown as SlashCommand[];
 
-let seq = 0;
-function viewModel(meta: Record<string, unknown> = {}, voice = false): AgentViewModel {
+/** A view model with a block id of the test's own: drafts and sent history are kept per block, so tests must not share one. */
+function viewModel(blockId: string, meta: Record<string, unknown> = {}, voice = false): AgentViewModel {
     return {
-        blockId: `keys-block-${seq++}`,
+        blockId,
         blockAtom: () => ({ meta }) as any,
         voiceTargetRef: { current: null },
         focusTargetRef: { current: null },
@@ -196,7 +196,7 @@ describe("AgentFooter typing callback", () => {
 
 describe("AgentFooter with an agent of its own history", () => {
     it("Ctrl+R opens the history search, and a pick lands in the composer", () => {
-        render(() => <AgentFooter agentName="Test" viewModel={viewModel({ agentId: "uid-1" })} />);
+        render(() => <AgentFooter agentName="Test" viewModel={viewModel("keys-ctrlr-pick", { agentId: "uid-1" })} />);
         const ta = composer();
         expect(screen.queryByTestId("history-search")).toBeNull();
         expect(key(ta, "r", { ctrlKey: true }).defaultPrevented).toBe(true);
@@ -208,7 +208,7 @@ describe("AgentFooter with an agent of its own history", () => {
     });
 
     it("cancelling the search keeps the text and returns focus to the composer", () => {
-        render(() => <AgentFooter agentName="Test" viewModel={viewModel({ agentId: "uid-1" })} />);
+        render(() => <AgentFooter agentName="Test" viewModel={viewModel("keys-ctrlr-cancel", { agentId: "uid-1" })} />);
         const ta = composer();
         typeInto(ta, "keep me");
         key(ta, "r", { ctrlKey: true });
@@ -218,11 +218,11 @@ describe("AgentFooter with an agent of its own history", () => {
     });
 
     it("Ctrl+R does nothing for a pane without an agent of its own, and with Shift or Alt held", () => {
-        const { unmount } = render(() => <AgentFooter agentName="Test" viewModel={viewModel({})} />);
+        const { unmount } = render(() => <AgentFooter agentName="Test" viewModel={viewModel("keys-ctrlr-none")} />);
         expect(key(composer(), "r", { ctrlKey: true }).defaultPrevented).toBe(false);
         expect(screen.queryByTestId("history-search")).toBeNull();
         unmount();
-        render(() => <AgentFooter agentName="Test" viewModel={viewModel({ agentId: "uid-1" })} />);
+        render(() => <AgentFooter agentName="Test" viewModel={viewModel("keys-ctrlr-keys", { agentId: "uid-1" })} />);
         expect(key(composer(), "r", { ctrlKey: true, shiftKey: true }).defaultPrevented).toBe(false);
         expect(key(composer(), "r", { ctrlKey: true, altKey: true }).defaultPrevented).toBe(false);
     });
@@ -230,7 +230,7 @@ describe("AgentFooter with an agent of its own history", () => {
     it("records a send in the agent's history, saves each edit as its draft, and ArrowUp near the oldest entry reads the page before", () => {
         hub.history = ["old one", "old two"];
         const onSendMessage = vi.fn();
-        render(() => <AgentFooter agentName="Test" viewModel={viewModel({ agentId: "uid-1" })} onSendMessage={onSendMessage} />);
+        render(() => <AgentFooter agentName="Test" viewModel={viewModel("keys-history-send", { agentId: "uid-1" })} onSendMessage={onSendMessage} />);
         const ta = composer();
         typeInto(ta, "hello");
         expect(hub.saveAgentDraft).toHaveBeenLastCalledWith("uid-1", "hello");
@@ -245,7 +245,7 @@ describe("AgentFooter with an agent of its own history", () => {
 
     it("restores the agent's own draft into an empty composer, but not over text already typed", async () => {
         hub.storedDraft = "draft from before";
-        render(() => <AgentFooter agentName="Test" viewModel={viewModel({ agentId: "uid-1" })} />);
+        render(() => <AgentFooter agentName="Test" viewModel={viewModel("keys-draft-restore", { agentId: "uid-1" })} />);
         await Promise.resolve();
         await Promise.resolve();
         expect(composer().value).toBe("draft from before");
@@ -308,7 +308,7 @@ describe("AgentFooter markup", () => {
 
     it("with a voice-enabled pane, a !command in the box, and the slash dropdown open", async () => {
         const { container } = render(() => (
-            <AgentFooter agentName="Korp" viewModel={viewModel({}, true)} getCompletions={() => COMMANDS} />
+            <AgentFooter agentName="Korp" viewModel={viewModel("keys-markup", {}, true)} getCompletions={() => COMMANDS} />
         ));
         typeInto(composer(), "/h");
         await expect(markup(container.querySelector(".agent-footer"))).toMatchFileSnapshot(snap("voice-dropdown"));
