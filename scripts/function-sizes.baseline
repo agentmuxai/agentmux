@@ -457,9 +457,6 @@
 251 frontend/app/view/agent/components/ActivityRow.tsx::ActivityRow
 270 frontend/app/view/agent/components/AgentBottomPanels.tsx::AgentBottomPanels
 200 frontend/app/view/agent/components/AgentCard.tsx::AgentCard
-777 frontend/app/view/agent/components/AgentComposerStrip.tsx::AgentComposerStrip
-103 frontend/app/view/agent/components/AgentComposerStrip.tsx::layout
-255 frontend/app/view/agent/components/AgentComposerStrip.tsx::slots
 160 frontend/app/view/agent/components/AgentContainerLimitsPanel.tsx::AgentContainerLimitsPanel
 327 frontend/app/view/agent/components/AgentCreateForm.tsx::AgentCreateForm
 345 frontend/app/view/agent/components/AgentCreatePanel.tsx::AgentCreatePanel
