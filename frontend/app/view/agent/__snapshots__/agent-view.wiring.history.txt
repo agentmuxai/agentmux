@@ -1,0 +1,49 @@
+> feed off, following
+restoreTurns = undefined
+restoreBytes = undefined
+fillPaused = false
+> feed on, 3 turns
+restoreTurns = 4
+restoreBytes = 1000
+fillPaused = false
+> feed on, no turn cap
+restoreTurns = undefined
+restoreBytes = 1000
+fillPaused = false
+> feed on, no cap, reader scrolled up
+restoreTurns = undefined
+restoreBytes = 1000
+fillPaused = true
+> fixed options
+agentName = "Korp"
+outputFormat = "claude-stream-json"
+definitionId = "korp"
+blockId = "blk-12345678"
+model is the pane model = true
+log is the bridge's = true
+settle latch is the stream's = true
+> onHistoryReady before the list registers
+liveFeed.scheduleRollOff()
+reveal.startPaintWait()
+> the list registers, onHistoryReady again
+historyReady()
+liveFeed.scheduleRollOff()
+reveal.startPaintWait()
+> onSnapshotOverlay
+setDocState -> {"keep":1,"a":1}
+dispatchPane({"type":"DetailsExpand"}, "system")
+setDocState -> {"keep":1,"a":0,"b":2}
+dispatchPane({"type":"DetailsCollapse"}, "system")
+setDocState -> {"keep":1,"a":0,"c":3}
+injectGapRows([{"id":"n1"}], ["gap"])
+injectHistoryLink([{"id":"n1"}], false, {"earlierTurns":0})
+buildResumePreflightNode([{"id":"n1"}], null, false)
+injectResumePreflight([{"id":"n1"}], null)
+markResolvedAuthErrors([{"id":"n1"}])
+deriveDisplayNodes([{"id":"n1"}], "full", {})
+reveal.connectLaunchStatus(status is the launch flow: true)
+log("agent", "Korp selected (provider: Claude)")
+log("env", "working directory: /work")
+launch.startLaunchFlow()
+> another output format, feed on, 3 turns
+restoreTurns = undefined
