@@ -25,7 +25,7 @@ import { openMenuAt } from "@/app/element/ui";
 import { MENU_ICON } from "@/app/util/menu-icons";
 import { redactSecrets } from "@/app/errors/redact";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
-import { createFollowScroll, type FollowScroll } from "@/app/view/agent/scroll/follow-scroll";
+import { createFollowScroll, type FollowScroll } from "@/app/scroll/follow-scroll";
 
 import { parseAnsi } from "./ansi";
 import type { LogLine } from "./install-session";
