@@ -370,7 +370,7 @@ async fn initialize_says_which_protocol_and_server_this_is() {
     assert_eq!(init["jsonrpc"], "2.0");
     assert_eq!(init["id"], "init-1");
     assert_eq!(init["result"]["protocolVersion"], "2024-11-05");
-    assert_eq!(init["result"]["capabilities"], json!({ "tools": {} }));
+    assert_eq!(init["result"]["capabilities"], json!({ "tools": { "listChanged": true } }));
     assert_eq!(
         init["result"]["serverInfo"],
         json!({ "name": "agentmux-mcp", "version": env!("CARGO_PKG_VERSION") })
