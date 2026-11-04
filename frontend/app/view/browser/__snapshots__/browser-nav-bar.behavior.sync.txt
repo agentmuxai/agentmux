@@ -1,0 +1,13 @@
+diag sync urlAtom="https://example.com/" addressBar="https://example.com/" focused=false willUpdate=false
+listen browser-pane-shortcut
+start value=https://example.com/
+diag sync urlAtom="https://example.com/next" addressBar="https://example.com/" focused=false willUpdate=true
+diag sync urlAtom="https://example.com/next" addressBar="https://example.com/next" focused=false willUpdate=false
+after nav value=https://example.com/next
+diag input-focus value="https://example.com/next" relatedTarget=null
+reclaimWindowFocus main
+diag sync urlAtom="https://example.com/while-focused" addressBar="https://example.com/next" focused=true willUpdate=false
+while focused value=https://example.com/next
+diag sync urlAtom="https://example.com/after-blur" addressBar="https://example.com/next" focused=false willUpdate=true
+diag sync urlAtom="https://example.com/after-blur" addressBar="https://example.com/after-blur" focused=false willUpdate=false
+after blur value=https://example.com/after-blur

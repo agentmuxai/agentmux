@@ -1,0 +1,22 @@
+diag sync urlAtom="https://example.com/" addressBar="https://example.com/" focused=false willUpdate=false
+listen browser-pane-shortcut
+diag input-focus value="https://example.com/" relatedTarget=null
+reclaimWindowFocus main
+diag sync urlAtom="https://example.com/" addressBar="git" focused=true willUpdate=false
+autocomplete block-1 "git" suggest=true
+state value="git" sel=3-3 rows=["github.com","gitlab.com"]
+diag sync urlAtom="https://example.com/" addressBar="github.com" focused=true willUpdate=false
+key ArrowDown
+state value="github.com" sel=10-10 rows=["*github.com","gitlab.com"]
+diag sync urlAtom="https://example.com/" addressBar="gitlab.com" focused=true willUpdate=false
+key ArrowDown
+state value="gitlab.com" sel=10-10 rows=["github.com","*gitlab.com"]
+diag sync urlAtom="https://example.com/" addressBar="git" focused=true willUpdate=false
+key ArrowDown
+state value="git" sel=3-3 rows=["github.com","gitlab.com"]
+diag sync urlAtom="https://example.com/" addressBar="gitlab.com" focused=true willUpdate=false
+key ArrowUp
+state value="gitlab.com" sel=10-10 rows=["github.com","*gitlab.com"]
+diag sync urlAtom="https://example.com/" addressBar="git" focused=true willUpdate=false
+key Escape
+state value="git" sel=3-3 rows=[]
