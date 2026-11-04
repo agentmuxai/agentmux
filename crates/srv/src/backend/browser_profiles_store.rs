@@ -289,7 +289,6 @@ mod tests {
         let (renamed, changed) = ensure_agent_profile(&mut ps, "uid-1", "camper-9", 9);
         assert!(changed && renamed.id == first.id && renamed.name == "camper-9");
         assert_eq!(ps.len(), MAX_PROFILES + 1);
-        assert_eq!(ps.len(), MAX_PROFILES + 1);
         // The user's cap counts only the user's profiles, and an agent's name doesn't take theirs.
         assert!(add(&mut ps, "One more", None, 1).is_err());
         ensure_agent_profile(&mut ps, "uid-2", "Work", 1);
