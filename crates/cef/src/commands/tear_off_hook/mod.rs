@@ -53,7 +53,7 @@ mod windows;
 mod macos;
 
 #[cfg(target_os = "windows")]
-pub use windows::{start_tab_drag_tracking, start_tear_off_tracking, stop_active_hook_session};
+pub use windows::{start_escape_watch, start_tab_drag_tracking, start_tear_off_tracking, stop_active_hook_session};
 
 #[cfg(target_os = "macos")]
 pub use macos::stop_active_hook_session;
@@ -73,6 +73,13 @@ pub(crate) use macos::register_window_number as macos_register_window_number;
 pub(crate) use macos::unregister_window_label as macos_unregister_window_label;
 #[cfg(target_os = "macos")]
 pub(crate) use macos::replace_window_numbers as macos_replace_window_numbers;
+
+/// Pane and pane-tab drags have no Escape hook off Windows: macOS reports it
+/// through its tab-drag tap, and elsewhere the page decides from the button.
+#[cfg(not(target_os = "windows"))]
+pub fn start_escape_watch(_state: std::sync::Arc<crate::state::AppState>, _source_label: String) -> Result<(), String> {
+    Ok(())
+}
 
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
 pub fn start_tab_drag_tracking(

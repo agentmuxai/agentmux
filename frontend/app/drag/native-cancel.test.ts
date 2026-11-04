@@ -8,6 +8,7 @@ const buttonState = vi.fn<() => Promise<boolean>>();
 vi.mock("@/store/global", () => ({ getApi: () => ({ getMouseButtonState: buttonState }) }));
 vi.mock("@/util/logger", () => ({ Logger: { info: vi.fn(), warn: vi.fn() } }));
 
+import { noteHostEscape, resetHostEscape } from "./host-escape";
 import { ESCAPE_KEY_WAIT_MS, endedByEscape, forgetEscapeForTest, isCancelledDragEnd } from "./native-cancel";
 
 const escape = (type: "keydown" | "keyup") => window.dispatchEvent(new KeyboardEvent(type, { key: "Escape" }));
@@ -16,6 +17,7 @@ const unreadable = () => buttonState.mockRejectedValue(new Error("native Wayland
 beforeEach(() => {
     vi.useFakeTimers();
     forgetEscapeForTest();
+    resetHostEscape();
 });
 
 afterEach(() => {
@@ -42,6 +44,20 @@ describe("endedByEscape, where the host reads the button", () => {
     it("is a release at once when the button is up, whatever the keys do", async () => {
         buttonState.mockResolvedValue(false);
         escape("keyup");
+        expect(await endedByEscape("none")).toBe(false);
+    });
+
+    it("is a cancel when the host's hook saw Escape, though the button read says released", async () => {
+        // A busy host answers the button read after the user let go.
+        buttonState.mockResolvedValue(false);
+        noteHostEscape();
+        expect(await endedByEscape("none")).toBe(true);
+    });
+
+    it("forgets the host's Escape when the next drag begins", async () => {
+        noteHostEscape();
+        resetHostEscape();
+        buttonState.mockResolvedValue(false);
         expect(await endedByEscape("none")).toBe(false);
     });
 

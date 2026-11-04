@@ -428,7 +428,7 @@
 424 frontend/app/tab/pane-leaf-chrome.tsx::PaneLeafChrome
 111 frontend/app/tab/tab-reorder.ts::onDrop
 335 frontend/app/tab/tab-reorder.ts::useTabDragAndDrop
-353 frontend/app/tab/tab-tearoff-events.ts::useTabTearOffEvents
+351 frontend/app/tab/tab-tearoff-events.ts::useTabTearOffEvents
 179 frontend/app/tab/tab-tearoff-rpc.ts::requestTearOff
 228 frontend/app/tab/tab.tsx::Tab
 414 frontend/app/tab/tabbar.tsx::TabBar
@@ -459,8 +459,7 @@
 364 frontend/app/view/agent/components/AgentDecisionPanel.tsx::AgentDecisionPanel
 116 frontend/app/view/agent/components/AgentDocumentView.tsx::AgentDocumentView
 116 frontend/app/view/agent/components/AgentEnvPanel.tsx::AgentEnvPanel
-696 frontend/app/view/agent/components/AgentFooter.tsx::AgentFooter
-257 frontend/app/view/agent/components/AgentFooter.tsx::handleKeyDown
+167 frontend/app/view/agent/components/AgentFooter.tsx::AgentFooter
 255 frontend/app/view/agent/components/AgentPicker.tsx::AgentPicker
 427 frontend/app/view/agent/components/AgentQuestionPanel.tsx::AgentQuestionPanel
 527 frontend/app/view/agent/components/AgentRuntimeDropup.tsx::AgentRuntimeDropup

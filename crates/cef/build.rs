@@ -107,6 +107,12 @@ fn main() {
         if icon_path.exists() {
             res.set_icon(icon_path.to_str().unwrap());
         }
+        // The light icon as resource 2: the host swaps the window icon to it while Windows is in light
+        // mode (client/window_icon.rs). Resource 1, above, stays the dark one the exe itself shows.
+        let light_icon_path = std::path::Path::new("resources/win/agentmux-light.ico");
+        if light_icon_path.exists() {
+            res.set_icon_with_id(light_icon_path.to_str().unwrap(), "2");
+        }
         // Embed an application manifest declaring supportedOS for Win7→Win10/11.
         // Without it the exe is "unmanifested": Windows lies about its version and
         // reports 6.2 (Windows 8) via GetVersionEx — which sends Chromium's GPU

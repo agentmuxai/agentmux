@@ -780,6 +780,11 @@ pub fn start_tab_drag_tracking(
         .and_then(|v| v.as_str())
         .ok_or_else(|| "missing sourceWindowLabel".to_string())?
         .to_string();
+    // A pane or pane-tab drag: only its Escape is watched.
+    if args.get("escapeOnly").and_then(|v| v.as_bool()).unwrap_or(false) {
+        crate::commands::tear_off_hook::start_escape_watch(state.clone(), source_label)?;
+        return Ok(serde_json::Value::Null);
+    }
     let tab_id = args
         .get("tabId")
         .and_then(|v| v.as_str())

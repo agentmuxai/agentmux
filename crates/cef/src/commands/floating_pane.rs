@@ -94,6 +94,19 @@ pub struct OpenFloatingPaneArgs {
     pub snapshot: Option<String>,
 }
 
+/// Keep a floater on the monitor its release point is on: its rect (physical pixels) is pulled inside that
+/// monitor's work area, so a drop near an edge (or past it) can't leave the floater mostly off-screen.
+/// Torn-off window tabs get the same clamp in `promote_pool_window`.
+#[cfg(target_os = "windows")]
+fn clamp_to_work_area(args: OpenFloatingPaneArgs) -> OpenFloatingPaneArgs {
+    let Some((wa_x, wa_y, wa_w, wa_h)) = crate::app::get_monitor_work_area_physical(args.x, args.y) else {
+        return args;
+    };
+    let (x, y, width, height) =
+        crate::commands::window_pool::clamp_rect_within(args.x, args.y, args.width, args.height, wa_x, wa_y, wa_w, wa_h);
+    OpenFloatingPaneArgs { x, y, width, height, ..args }
+}
+
 #[derive(Debug, serde::Serialize)]
 pub struct OpenFloatingPaneResponse {
     /// The window label assigned to the floating window. Stable for
@@ -154,11 +167,11 @@ pub fn open_floating_pane_window(
                 dpi_x as f32 / 96.0
             }
         };
-        OpenFloatingPaneArgs {
+        clamp_to_work_area(OpenFloatingPaneArgs {
             width: (parsed.width as f32 * dpi_scale).round() as i32,
             height: (parsed.height as f32 * dpi_scale).round() as i32,
             ..parsed
-        }
+        })
     };
 
     tracing::info!(

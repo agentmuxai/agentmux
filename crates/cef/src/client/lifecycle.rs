@@ -14,7 +14,7 @@ use super::{dlog, AgentMuxHandler};
 #[cfg(target_os = "windows")]
 use super::install_main_window_floater_cascade_hook;
 #[cfg(target_os = "windows")]
-use super::wndproc::{install_top_level_focus_restore_hook, set_window_icon, skip_taskbar};
+use super::{window_icon::set_window_icon, wndproc::{install_top_level_focus_restore_hook, skip_taskbar}};
 
 /// Bounded retry window for the `backend_window_id` shadow-map lookup in
 /// `on_before_close` — see docs/specs/SPEC_WINDOW_LIFECYCLE_CLOSE_RELIABILITY_2026_07_04.md.
