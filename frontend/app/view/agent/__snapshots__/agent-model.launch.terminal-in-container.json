@@ -1,0 +1,16 @@
+{
+  "ok": false,
+  "nodejsError": null,
+  "launchError": "Aider runs on this computer, not in a container.",
+  "calls": [
+    {
+      "cmd": "GetAllAgentContent",
+      "data": {
+        "agent_id": "agent-1"
+      }
+    }
+  ],
+  "logs": [
+    "info: Launching agent definition Korp (aider)"
+  ]
+}
