@@ -13,7 +13,7 @@ import { localTarget, partitionTargets, remoteFleetTargets, unavailableReason, t
 import type { FleetResultEntry, SwarmViewModel } from "./swarm-model";
 import { remoteSections } from "./swarm-remote";
 import type { SwarmSection } from "./swarm-section";
-import { Button, IconButton, openMenuAt, TextInput } from "@/app/element/ui";
+import { Button, IconButton, openMenuAt, Tag, TextInput } from "@/app/element/ui";
 
 // Staged rollout only offered once a selection is large enough that
 // blast-radius capping is actually meaningful (spec §5.3) — for a
@@ -225,10 +225,10 @@ export function StopTargetRows(props: { model: SwarmViewModel }): JSX.Element {
                         <span class="swarm-fleet-target-where">{row.where}</span>
                     </Show>
                     <Show when={row.platform}>
-                        <span class="swarm-fleet-tag">{row.platform}</span>
+                        <Tag size="xs">{row.platform}</Tag>
                     </Show>
                     <Show when={row.badge}>
-                        <span class="swarm-fleet-tag">{row.badge}</span>
+                        <Tag size="xs">{row.badge}</Tag>
                     </Show>
                     <Show when={row.reason}>
                         <span class="swarm-fleet-target-reason">{row.reason}</span>
