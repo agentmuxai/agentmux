@@ -336,8 +336,8 @@
 132 crates/srv/src/server/service/tab_lifecycle.rs::handle_create_tab
 118 crates/srv/src/server/service/tab_move.rs::handle_move_block_to_tab
 122 crates/srv/src/server/service/tab_move.rs::handle_promote_block_to_tab
-201 crates/srv/src/server/service/tear_off.rs::handle_redock_floating_pane
-131 crates/srv/src/server/service/tear_off.rs::handle_tear_off_block
+174 crates/srv/src/server/service/tear_off.rs::handle_redock_floating_pane
+110 crates/srv/src/server/service/tear_off.rs::handle_tear_off_block
 124 crates/srv/src/server/service/window_close.rs::handle_close_window
 224 crates/srv/src/server/service/window_create.rs::create_default_contents
 301 crates/srv/src/server/service/window_create.rs::handle_create_window
@@ -409,6 +409,7 @@
 121 frontend/app/notification/notificationitem.tsx::NotificationItem
 148 frontend/app/notification/sound/sound-service.ts::installSoundService
 111 frontend/app/platform/pane-overlay.ts::flushClip
+159 frontend/app/scroll/follow-scroll.ts::createFollowScroll
 175 frontend/app/selection/selection-effects.ts::createSelectionRunner
 104 frontend/app/selection/selection-machine.ts::transition
 139 frontend/app/statusbar/BackendStatus.tsx::BackendStatus
@@ -527,7 +528,6 @@
 229 frontend/app/view/agent/parseHistoryLines.ts::HistoryParser::feed
 127 frontend/app/view/agent/providers/claude-translator.ts::ClaudeTranslator::translate
 176 frontend/app/view/agent/quick-fork.ts::quickForkAgent
-159 frontend/app/scroll/follow-scroll.ts::createFollowScroll
 118 frontend/app/view/agent/shutdown/ShutdownPendingBanner.tsx::ShutdownPendingBanner
 138 frontend/app/view/agent/stream-flush-queue.ts::createStreamFlushQueue
 116 frontend/app/view/agent/stream-parser.ts::ClaudeCodeStreamParser::eventToNode
