@@ -1,0 +1,18 @@
+createTearOffTabAtRelease
+useTabDragAndDrop tearOff=function
+createScrollEdges
+useTabTearOffEvents
+registerTabCloseRequestHandler
+revealInStrip wrap-t1 last=false
+-- mounted
+cancelAnimationFrame 7
+revealInStrip wrap-t3 last=true
+-- active t3
+cancelAnimationFrame 7
+revealInStrip wrap-t2 last=false
+-- active t2
+cancelAnimationFrame 7
+-- active t1 (no wrapper)
+-- unmount
+cancelAnimationFrame 7
+unregisterTabCloseRequestHandler

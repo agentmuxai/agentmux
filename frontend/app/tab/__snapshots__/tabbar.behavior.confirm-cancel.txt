@@ -1,0 +1,14 @@
+createTearOffTabAtRelease
+useTabDragAndDrop tearOff=function
+createScrollEdges
+useTabTearOffEvents
+registerTabCloseRequestHandler
+-- asked
+dom root=yes hamburger=1 separators=4 fill=1 scroll="tab-bar-scroll" drag=false modal=t2
+tabs ["t1[active=true activeId=t1 first=true beforeActive=false count=3 index=0 ids=t1,t2,t3]","t2[active=false activeId=t1 first=false beforeActive=false count=3 index=1 ids=t1,t2,t3]","t3[active=false activeId=t1 first=false beforeActive=false count=3 index=2 ids=t1,t2,t3]"]
+-- asked again for the same tab
+dom root=yes hamburger=1 separators=4 fill=1 scroll="tab-bar-scroll" drag=false modal=t2
+tabs ["t1[active=true activeId=t1 first=true beforeActive=false count=3 index=0 ids=t1,t2,t3]","t2[active=false activeId=t1 first=false beforeActive=false count=3 index=1 ids=t1,t2,t3]","t3[active=false activeId=t1 first=false beforeActive=false count=3 index=2 ids=t1,t2,t3]"]
+-- cancelled
+dom root=yes hamburger=1 separators=4 fill=1 scroll="tab-bar-scroll" drag=false modal=none
+tabs ["t1[active=true activeId=t1 first=true beforeActive=false count=3 index=0 ids=t1,t2,t3]","t2[active=false activeId=t1 first=false beforeActive=false count=3 index=1 ids=t1,t2,t3]","t3[active=false activeId=t1 first=false beforeActive=false count=3 index=2 ids=t1,t2,t3]"]
