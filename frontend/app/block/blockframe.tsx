@@ -9,12 +9,10 @@ import { Button } from "@/app/element/button";
 import { PaneRestoreGlyph } from "@/app/element/pane-control-glyphs";
 import { redactSecrets } from "@/app/errors/redact";
 import { ChangeConnectionBlockModal } from "@/app/modals/conntypeahead";
-import { getApi } from "@/util/app-api";
 import { connBarShows } from "@/app/store/conn-status-rules";
 import { openMenuAt } from "@/app/element/ui";
 import { devModeOn } from "@/app/store/dev-mode";
 import { atoms, getConnStatusAtom, getSettingsKeyAtom, MOS, useBlockAtom } from "@/app/store/global";
-import { getBlockComponentModel } from "@/app/store/block-component-registry";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { computeMenuPosition } from "@/app/util/menu-position";
@@ -22,6 +20,7 @@ import { remoteSettingsMenuItems } from "@/app/view/remotes/open-remotes";
 import { BlockStatsBadge, statsBadgeShown } from "@/element/blockstats";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { ClosingLabel } from "./closing-label";
+import { minimizeToHeader, useBlockConnection, useBodyContextMenu } from "./blockframe-hooks";
 import { DeclIconButton } from "@/app/element/ui/DeclIconButton";
 import { NodeModel } from "@/layout/index";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
@@ -36,13 +35,12 @@ import { Portal } from "solid-js/web";
 import { CopyButton } from "../element/copybutton";
 import { getEffectiveTitle, isUsableFocusRingColor, pickReadableTextColor } from "./autotitle";
 import { BlockFrameProps } from "./blocktypes";
-import { resolveContextMenuRegion } from "./context-menu-region";
 import { floaterPaneBlockId } from "@/app/workspace/floater-panes";
 import { FloatingMaximizeButton } from "./floating-maximize";
 import { canTackFloatingPane, FloatingAlwaysOnTopButton } from "./floating-ontop";
 import { FloatingRedockButton } from "./floating-redock";
 import { partitionHeaderElems } from "./header-elems";
-import { buildPaneContextMenu, joinMenuGroups, type PaneMenuSection } from "./pane-actions";
+import { buildPaneContextMenu, type PaneMenuSection } from "./pane-actions";
 import { sectionPinMenuItems } from "@/app/window/section-pins";
 import { applyColorToAllPanes, setPaneColor } from "./pane-color-menu";
 import { blockRoleColor, isLightThemeActive, widgetColorView, type PaneIdentityOptions } from "./pane-identity";
@@ -204,14 +202,6 @@ export function buildPaneColorSubmenu(blockData: Block): ContextMenuItem[] {
     // collide with it and render two consecutive dividers for views that
     // implement getSettingsMenuItems (sysinfo).
     return [{ type: "separator" as const }, { label: "Pane Color", icon: MENU_ICON.paneColor, type: "submenu" as const, submenu: colorItems }];
-}
-
-/** The menu's "Minimize to Header" for an expanded pane that can minimize, else none. */
-function minimizeToHeader(nodeModel: NodeModel): (() => void) | undefined {
-    if (nodeModel.isEphemeral() || nodeModel.isMinimized() || !(nodeModel.canMinimize?.() ?? true) || nodeModel.numLeafs() <= 1) {
-        return undefined;
-    }
-    return () => nodeModel.toggleMinimize({ chip: true });
 }
 
 function handleHeaderContextMenu(
@@ -1219,41 +1209,7 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
         props.preview ? undefined : computeBlockIdentityColor(blockData()?.meta, isLightThemeActive())
     );
 
-    createEffect(() => {
-        if (!manageConnection) {
-            return;
-        }
-        const bcm = getBlockComponentModel(nodeModel.blockId);
-        if (bcm != null) {
-            bcm.openSwitchConnection = () => {
-                changeConnModalAtom._set(true);
-            };
-        }
-        onCleanup(() => {
-            const bcm = getBlockComponentModel(nodeModel.blockId);
-            if (bcm != null) {
-                bcm.openSwitchConnection = null;
-            }
-        });
-    });
-
-    createEffect(() => {
-        // on mount, if manageConnection, call ConnEnsure
-        if (!manageConnection || blockData() == null || props.preview) {
-            return;
-        }
-        const connName = blockData()?.meta?.connection;
-        if (!util.isBlank(connName)) {
-            console.log("ensure conn", nodeModel.blockId, connName);
-            RpcApi.ConnEnsureCommand(
-                TabRpcClient,
-                { connname: connName, logblockid: nodeModel.blockId },
-                { timeout: 60000 }
-            ).catch((e) => {
-                console.log("error ensuring connection", nodeModel.blockId, connName, e);
-            });
-        }
-    });
+    useBlockConnection({ nodeModel, manageConnection, changeConnModalAtom, blockData, preview: props.preview });
 
     const viewIconUnion = util.useAtomValueSafe(props.viewModel?.viewIcon) ?? blockViewToIcon(blockData()?.meta?.view);
     const viewIconElem = getViewIconElem(viewIconUnion, blockData());
@@ -1284,91 +1240,12 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
         />
     );
 
-    // Body right-click handler. `browserCtx` is only ever passed by the
-    // synthetic browser-pane path below (real DOM contextmenu events never
-    // carry it) — see getBodyContextMenuItems's doc comment in custom.d.ts.
-    const onBodyContextMenu = (
-        e: MouseEvent,
-        browserCtx?: Parameters<NonNullable<ViewModel["getBodyContextMenuItems"]>>[0]
-    ) => {
-        if (!blockData() || props.preview) return;
-        e.preventDefault();
-        e.stopPropagation();
-        // A registered region (context-menu-region.ts) under the click — e.g.
-        // the agent shell drawer — can add its own items and drop pane
-        // sections that make no sense there. No region (every other click,
-        // and the synthetic browser path, which has no DOM target): unchanged.
-        const region = resolveContextMenuRegion(e.target, frameEl());
-        const omit = new Set<PaneMenuSection>(region?.omit);
-        const menu = joinMenuGroups([
-            region?.items?.() ?? [],
-            omit.has("viewItems") ? [] : (props.viewModel?.getBodyContextMenuItems?.(browserCtx) ?? []),
-            buildPaneContextMenu(
-                blockData(),
-                {
-                    magnified: isMagnified(),
-                    onMagnifyToggle: nodeModel.toggleMagnify,
-                    onClose: nodeModel.onClose,
-                    onMinimizeToHeader: minimizeToHeader(nodeModel),
-                    inspectAt: { x: e.clientX, y: e.clientY },
-                    omit,
-                },
-                props.viewModel
-            ),
-        ]);
-        if (menu.length === 0) return;
-        openMenuAt(menu, e);
-    };
-
-    // Browser panes: CEF's native context menu is suppressed at the host
-    // level (client::context_menu::run_context_menu) because a pane's
-    // content is a native overlay, not DOM — a real `contextmenu` DOM event
-    // never fires there, so `onBodyContextMenu` above is never reached by a
-    // right-click landing on the pane's actual content. The host instead
-    // emits `browser-pane-context-menu` with the click point in the PANE's
-    // own coordinate space; translate it into window-client coordinates and
-    // drive the exact same `onBodyContextMenu` path via a synthetic event,
-    // so composition/ordering matches every other pane type exactly. See
-    // docs/specs/SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15.md.
-    onMount(() => {
-        const unsubPromise = getApi().listen<{
-            block_id: string;
-            x: number;
-            y: number;
-            link_url: string;
-            selection_text: string;
-            is_editable: boolean;
-            can_go_back: boolean;
-            can_go_forward: boolean;
-        }>("browser-pane-context-menu", (payload) => {
-            if (payload.block_id !== nodeModel.blockId) return;
-            // CEF's xcoord/ycoord are relative to the browser render view,
-            // which browser-view.tsx positions against the INNER
-            // `.browser-placeholder` div — not `frameEl` (the outer wrapper,
-            // which also contains the header/title bar/nav bar above the
-            // content). Using frameEl's rect offset the menu downward by
-            // that header chrome's height (reagentx P1 on PR #2599).
-            const rect = frameEl()?.querySelector<HTMLElement>(".browser-placeholder")?.getBoundingClientRect();
-            if (!rect) return;
-            const synthetic = {
-                clientX: rect.left + payload.x,
-                clientY: rect.top + payload.y,
-                preventDefault: () => {},
-                stopPropagation: () => {},
-            } as unknown as MouseEvent;
-            onBodyContextMenu(synthetic, {
-                x: payload.x,
-                y: payload.y,
-                linkUrl: payload.link_url || undefined,
-                selectionText: payload.selection_text || undefined,
-                isEditable: payload.is_editable,
-                canGoBack: payload.can_go_back,
-                canGoForward: payload.can_go_forward,
-            });
-        });
-        onCleanup(() => {
-            void unsubPromise.then((unsub) => unsub());
-        });
+    const onBodyContextMenu = useBodyContextMenu({
+        nodeModel,
+        viewModel: props.viewModel,
+        blockData,
+        preview: props.preview,
+        frameEl,
     });
 
     return (

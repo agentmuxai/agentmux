@@ -357,7 +357,7 @@
 217 frontend/app-init.ts::initMux
 366 frontend/app/block/block.tsx::Block
 142 frontend/app/block/block.tsx::BlockFull
-356 frontend/app/block/blockframe.tsx::BlockFrame_Default_Component
+243 frontend/app/block/blockframe.tsx::BlockFrame_Default_Component
 280 frontend/app/block/blockframe.tsx::BlockFrame_Header
 117 frontend/app/block/blockframe.tsx::EndIcons
 114 frontend/app/block/blockutil.tsx::ConnectionButton
@@ -455,9 +455,6 @@
 251 frontend/app/view/agent/components/ActivityRow.tsx::ActivityRow
 270 frontend/app/view/agent/components/AgentBottomPanels.tsx::AgentBottomPanels
 200 frontend/app/view/agent/components/AgentCard.tsx::AgentCard
-777 frontend/app/view/agent/components/AgentComposerStrip.tsx::AgentComposerStrip
-103 frontend/app/view/agent/components/AgentComposerStrip.tsx::layout
-255 frontend/app/view/agent/components/AgentComposerStrip.tsx::slots
 160 frontend/app/view/agent/components/AgentContainerLimitsPanel.tsx::AgentContainerLimitsPanel
 327 frontend/app/view/agent/components/AgentCreateForm.tsx::AgentCreateForm
 345 frontend/app/view/agent/components/AgentCreatePanel.tsx::AgentCreatePanel
@@ -598,7 +595,7 @@
 163 frontend/app/view/swarm/swarm-fleet-toolbar.tsx::FleetToolbar
 104 frontend/app/view/swarm/swarm-model.ts::SwarmViewModel::buildTree
 153 frontend/app/view/swarm/swarm-model.ts::SwarmViewModel::constructor
-372 frontend/app/view/swarm/swarm-view.tsx::AgentRow
+165 frontend/app/view/swarm/swarm-view.tsx::AgentRow
 129 frontend/app/view/swarm/swarm-view.tsx::SubagentRow
 166 frontend/app/view/sysinfo/sysinfo-focus.tsx::FocusView
 127 frontend/app/view/sysinfo/sysinfo-model.ts::sampleReducer
