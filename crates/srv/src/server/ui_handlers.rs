@@ -769,7 +769,16 @@ pub(crate) async fn handle_ui_browser_open(
         Ok(m) => m,
         Err(e) => return err_response(StatusCode::BAD_REQUEST, e),
     };
-    let opened = (req.auth.agent_id.as_str(), allowed.as_deref(), req.profile.as_deref(), grant.is_some() || crate::server::browser_identity::in_container(&state, &own));
+    // With no profile asked for, the agent browses as its own: made here, the first time. If it can't be made
+    // (the shared folder is given up to an older srv), a fresh Incognito jar, never the user's Personal.
+    let mut profile = req.profile.clone();
+    if crate::server::browser_identity::asks_for_own(&req.auth.agent_id, profile.as_deref()) {
+        if let Err(e) = crate::server::app_api::browser_ensure_agent_profile(&state, &req.auth.agent_id).await {
+            tracing::warn!(agent_id = %req.auth.agent_id, error = %e, "[ui-automation] browser open: no own profile; Incognito instead");
+            profile = Some("incognito".to_string());
+        }
+    }
+    let opened = (req.auth.agent_id.as_str(), allowed.as_deref(), profile.as_deref(), grant.is_some() || crate::server::browser_identity::in_container(&state, &own));
     let browsing_as = match crate::server::browser_identity::for_agent_pane(&state, &mut meta, opened) {
         Ok(b) => b,
         Err(e) => return err_response(StatusCode::BAD_REQUEST, e),

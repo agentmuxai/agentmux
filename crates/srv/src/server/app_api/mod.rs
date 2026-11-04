@@ -113,6 +113,7 @@ mod bookmarks;
 mod browser_profiles;
 mod browser_grants;
 mod pins;
+pub(crate) use browser_profiles::ensure_agent_profile as browser_ensure_agent_profile;
 pub(crate) use browser_profiles::list as browser_profiles_list;
 mod layout;
 mod other_build_layouts;

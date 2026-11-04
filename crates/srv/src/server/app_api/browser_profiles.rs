@@ -114,6 +114,28 @@ fn path() -> Result<std::path::PathBuf, String> {
     store::profiles_file_path().ok_or_else(|| "browser profiles: could not resolve the shared data directory".to_string())
 }
 
+/// Agent `agent_id`'s own profile, made the first time it is needed and named as the agent is. This is the one
+/// place an agent makes a profile, and only its own: the calls above stay the user's
+/// (docs/specs/SPEC_AGENT_OWN_BROWSER_PROFILE_2026_11_04.md). The host makes its jar on first use.
+pub(crate) async fn ensure_agent_profile(state: &AppState, agent_id: &str) -> Result<store::BrowserProfile, String> {
+    let (own, changed) = ensure_agent_profile_at(&path()?, agent_id).await?;
+    if changed {
+        crate::server::browser_host_sync::push(state).await;
+    }
+    Ok(own)
+}
+
+/// [`ensure_agent_profile`] on the profiles file at `path`; whether the file changed is the second part.
+async fn ensure_agent_profile_at(path: &std::path::Path, agent_id: &str) -> Result<(store::BrowserProfile, bool), String> {
+    let _writing = WRITING.lock().await;
+    let mut profiles = store::read_profiles(path)?;
+    let (own, changed) = store::ensure_agent_profile(&mut profiles, agent_id, agentmux_common::time::now_ms());
+    if changed {
+        store::write_profiles(path, &profiles)?;
+    }
+    Ok((own, changed))
+}
+
 /// The profiles, or none when the shared folder can't be resolved.
 pub(crate) fn list() -> Result<Vec<store::BrowserProfile>, String> {
     match store::profiles_file_path() {
@@ -176,5 +198,22 @@ mod tests {
             let err = call_with(command, data, RpcContext::default()).await;
             assert!(err.contains("FORBIDDEN") && err.contains("isn't the AgentMux window"), "{command}: {err}");
         }
+    }
+
+    /// The one profile an agent makes is its own, made once however many panes ask at the same moment, and it is not
+    /// the user's to create from this call (the test above): the RPC still refuses an agent.
+    #[tokio::test]
+    async fn an_agent_makes_its_own_profile_once_even_when_two_panes_ask_together() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("browser-profiles.json");
+        let (a, b) = tokio::join!(ensure_agent_profile_at(&path, "camper-2"), ensure_agent_profile_at(&path, "camper-2"));
+        let (a, b) = (a.unwrap(), b.unwrap());
+        assert_eq!(a.0, b.0);
+        assert_eq!([a.1, b.1].iter().filter(|c| **c).count(), 1, "only one of them wrote it");
+        let profiles = store::read_profiles(&path).unwrap();
+        assert_eq!(profiles.len(), 1);
+        assert_eq!((profiles[0].id.as_str(), profiles[0].owner_agent.as_deref()), ("agent-camper-2", Some("camper-2")));
+        ensure_agent_profile_at(&path, "kcont").await.unwrap();
+        assert_eq!(store::read_profiles(&path).unwrap().len(), 2);
     }
 }

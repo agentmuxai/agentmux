@@ -36,8 +36,9 @@ pub(super) async fn handle_pane_open(
     if let Some(meta) = req.meta.as_mut() {
         crate::server::browser_owner::strip_srv_only_keys(meta);
         // Agents call this route: a named profile only if the user lets them.
+        let who = caller.as_ref().and_then(|c| c.0.uid()).map(|u| u.to_string()).unwrap_or_default();
         let checked = crate::server::browser_identity::check_new_tab(&state, meta)
-            .and_then(|()| crate::server::browser_identity::check_agent_may_use(meta));
+            .and_then(|()| crate::server::browser_identity::check_agent_may_use(meta, &who));
         if let Err(e) = checked {
             return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response();
         }

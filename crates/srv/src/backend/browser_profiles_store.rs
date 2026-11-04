@@ -31,6 +31,11 @@ pub struct BrowserProfile {
     /// it. Off until the user switches it on.
     #[serde(default)]
     pub agents_allowed: bool,
+    /// The agent (its id) this profile is the own browsing profile of: made by srv the first
+    /// time that agent opens a browser, never by the user. `None` for the user's profiles.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub owner_agent: Option<String>,
 }
 
 const PROFILES_FILE_NAME: &str = "browser-profiles.json";
@@ -86,7 +91,7 @@ fn check_name(profiles: &[BrowserProfile], name: &str, except: Option<&str>) -> 
     if ["personal", "incognito"].contains(&name.to_lowercase().as_str()) {
         return Err(format!("{name:?} is taken: pick another name"));
     }
-    if profiles.iter().any(|p| Some(p.id.as_str()) != except && p.name.eq_ignore_ascii_case(name)) {
+    if profiles.iter().any(|p| p.owner_agent.is_none() && Some(p.id.as_str()) != except && p.name.eq_ignore_ascii_case(name)) {
         return Err(format!("there is already a profile called {name:?}"));
     }
     Ok(name.to_string())
@@ -112,7 +117,7 @@ pub fn add(
     color: Option<&str>,
     now_ms: i64,
 ) -> Result<BrowserProfile, String> {
-    if profiles.len() >= MAX_PROFILES {
+    if profiles.iter().filter(|p| p.owner_agent.is_none()).count() >= MAX_PROFILES {
         return Err(format!("at most {MAX_PROFILES} profiles"));
     }
     let name = check_name(profiles, name, None)?;
@@ -121,9 +126,31 @@ pub fn add(
         None => farthest_free_slot(profiles.iter().map(|p| p.color.as_str())).hex.clone(),
     };
     let id = format!("p-{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
-    let profile = BrowserProfile { id, name, color, created_at: now_ms, agents_allowed: false };
+    let profile = BrowserProfile { id, name, color, created_at: now_ms, agents_allowed: false, owner_agent: None };
     profiles.push(profile.clone());
     Ok(profile)
+}
+
+/// The id of agent `agent_id`'s own profile: `agent-` and its id, in the characters a profile id has.
+pub fn agent_profile_id(agent_id: &str) -> String {
+    let slug: String = agent_id.to_lowercase().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
+    format!("agent-{slug}").chars().take(64).collect()
+}
+
+/// Agent `agent_id`'s own profile in `profiles`, made if it has none, its name kept
+/// to the agent's. Whether the list changed is the second part.
+pub fn ensure_agent_profile(profiles: &mut Vec<BrowserProfile>, agent_id: &str, now_ms: i64) -> (BrowserProfile, bool) {
+    let name: String = agent_id.trim().chars().take(MAX_NAME_CHARS).collect();
+    if let Some(p) = profiles.iter_mut().find(|p| p.owner_agent.as_deref() == Some(agent_id)) {
+        let changed = p.name != name;
+        p.name = name;
+        return (p.clone(), changed);
+    }
+    let color = farthest_free_slot(profiles.iter().map(|p| p.color.as_str())).hex.clone();
+    let profile =
+        BrowserProfile { id: agent_profile_id(agent_id), name, color, created_at: now_ms, agents_allowed: false, owner_agent: Some(agent_id.to_string()) };
+    profiles.push(profile.clone());
+    (profile, true)
 }
 
 /// Rename or recolour profile `id`.
@@ -236,5 +263,43 @@ mod tests {
         assert_eq!(read_profiles(&path).unwrap(), ps);
         std::fs::write(&path, "{not json").unwrap();
         assert!(read_profiles(&path).is_err());
+    }
+
+    #[test]
+    fn an_agents_own_profile_is_made_once_keyed_by_its_id_and_outside_the_users_cap() {
+        let mut ps = Vec::new();
+        for i in 0..MAX_PROFILES {
+            add(&mut ps, &format!("P{i}"), None, 1).unwrap();
+        }
+        let (first, made) = ensure_agent_profile(&mut ps, "camper-2", 7);
+        assert!(made && is_profile_id(&first.id), "{first:?}");
+        assert_eq!((first.id.as_str(), first.name.as_str(), first.owner_agent.as_deref()), ("agent-camper-2", "camper-2", Some("camper-2")));
+        assert!(!first.agents_allowed);
+        let (again, made) = ensure_agent_profile(&mut ps, "camper-2", 9);
+        assert!(!made && again == first, "a second open reuses it");
+        assert_eq!(ps.len(), MAX_PROFILES + 1);
+        // The user's cap counts only the user's profiles, and an agent's name doesn't take theirs.
+        assert!(add(&mut ps, "One more", None, 1).is_err());
+        ensure_agent_profile(&mut ps, "Work", 1);
+        remove(&mut ps, "p-none").unwrap_err();
+        let id = ps[0].id.clone();
+        remove(&mut ps, &id).unwrap();
+        add(&mut ps, "Work", None, 1).unwrap();
+    }
+
+    #[test]
+    fn an_agent_profile_id_keeps_to_the_characters_and_length_of_a_profile_id() {
+        assert_eq!(agent_profile_id("Naki_2"), "agent-naki-2");
+        let long = agent_profile_id(&"x".repeat(200));
+        assert!(is_profile_id(&long), "{long}");
+        assert_ne!(agent_profile_id("a"), agent_profile_id("b"));
+    }
+
+    #[test]
+    fn a_profiles_file_from_before_agent_profiles_still_loads() {
+        let old = r##"[{"id":"p-1","name":"Work","color":"#3b82f6","created_at":1,"agents_allowed":true}]"##;
+        let ps: Vec<BrowserProfile> = serde_json::from_str(old).unwrap();
+        assert_eq!(ps[0].owner_agent, None);
+        assert!(!serde_json::to_string(&ps).unwrap().contains("owner_agent"));
     }
 }

@@ -14,4 +14,9 @@ color: string, created_at: number,
  * "Agents may use it" (Settings → Browser): an agent's `OpenBrowser` may browse as
  * it. Off until the user switches it on.
  */
-agents_allowed: boolean, };
+agents_allowed: boolean,
+/**
+ * The agent (its id) this profile is the own browsing profile of: made by srv the first
+ * time that agent opens a browser, never by the user. `None` for the user's profiles.
+ */
+owner_agent?: string, };
