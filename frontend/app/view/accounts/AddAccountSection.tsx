@@ -28,10 +28,12 @@ export function AddAccountSection(props: {
     const [mode, setMode] = createSignal<AuthMode | null>(null);
     const claudeSignIn = () => tile.id === "anthropic" && mode() === "oauth";
 
+    let openedForm = false;
     const pick = (picked: AuthMode) => {
         if (!(tile.id === "anthropic" && picked === "oauth")) {
             const kind: AccountKind = picked === "oauth" ? "oauth" : tile.keyKind;
             model.openAddFormFor(tile.id, kind);
+            openedForm = true;
         }
         setMode(picked);
     };
@@ -40,7 +42,9 @@ export function AddAccountSection(props: {
 
     // The form closing (saved or cancelled) collapses the section; collapsing it closes the form.
     createEffect(on(model.formOpenAtom, (open, wasOpen) => wasOpen && !open && props.onClose(), { defer: true }));
-    onCleanup(() => model.formOpenAtom() && model.cancelForm());
+    // Only the form this section opened: when the person picks another tile, the new section may
+    // have opened its own form before this one is torn down.
+    onCleanup(() => openedForm && model.formOpenAtom() && model.addPresetAtom()?.provider === tile.id && model.cancelForm());
 
     return (
         <div class="accounts-add-section" role="group" aria-label={`Connect ${tile.displayName}`}>
@@ -74,7 +78,7 @@ export function AddAccountSection(props: {
             <Show when={claudeSignIn()}>
                 <ClaudeLoginPanel inline onClose={() => props.onClose()} />
             </Show>
-            <Show when={mode() !== null && !claudeSignIn() && model.formOpenAtom()}>
+            <Show when={mode() !== null && !claudeSignIn() && model.formOpenAtom() && !model.editingAccountAtom()}>
                 <AccountForm model={model} inline />
             </Show>
         </div>
