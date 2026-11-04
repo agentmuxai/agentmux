@@ -310,7 +310,7 @@ describe("Markdown — links", () => {
         expect(hrefs.some((x) => x?.startsWith("javascript"))).toBe(false);
     });
 
-    it("keeps a data: image src and a file: one", () => {
+    it("keeps a data: image src", () => {
         const { container } = render(() => (
             <Markdown text={"![d](data:image/png;base64,AAAA)"} media={{} as MarkdownMediaOpts} />
         ));
