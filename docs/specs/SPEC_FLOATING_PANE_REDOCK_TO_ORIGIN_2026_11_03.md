@@ -3,7 +3,7 @@
 **Date:** 2026-11-03
 **Author:** Agent2@narko
 **Type:** Spec (task #21884; the build starts after the operator approves it)
-**Status:** implemented, 2026-11-04, in the build task #21885 (see §7 for what the build did differently)
+**Status:** implemented, 2026-11-04, in #6397 (see §7 for what the build did differently)
 **Requested by:** the operator, 2026-11-03: *"we want to make best effort to remember what the pane's restore position was. this may have already been speced out. essentially in simple cases where the user didnt change anything in the layout, we can simply restore a pane back to its place, in cases where minor changes like resizes, that should be possible too. in compleicated cases like a closed tab and an entirely differently arranged layout from where the pane was original torn off of, that then simply gets the pane reappended to the rightside of the window, just like now"*
 **Builds on:** `SPEC_FLOATING_PANE_REDOCK_BUTTON_2026_10_15.md`, whose decision D5 ("remember the tab a floater was torn from") is this spec. Not specced before: that spec §2 says "Nothing remembers which window or tab a floater was torn from".
 **Coordinate with:** Camper (layout and drag owner, #21881).
