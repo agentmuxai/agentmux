@@ -409,6 +409,7 @@
 121 frontend/app/notification/notificationitem.tsx::NotificationItem
 148 frontend/app/notification/sound/sound-service.ts::installSoundService
 111 frontend/app/platform/pane-overlay.ts::flushClip
+159 frontend/app/scroll/follow-scroll.ts::createFollowScroll
 175 frontend/app/selection/selection-effects.ts::createSelectionRunner
 104 frontend/app/selection/selection-machine.ts::transition
 139 frontend/app/statusbar/BackendStatus.tsx::BackendStatus
@@ -502,7 +503,7 @@
 168 frontend/app/view/agent/failure/useAccountBinding.ts::useAccountBinding
 238 frontend/app/view/agent/flows/launch-flow.ts::runLaunchFlow
 220 frontend/app/view/agent/flows/run-provider-login.ts::runProviderLogin
-687 frontend/app/view/agent/history/AgentHistoryView.tsx::AgentHistoryView
+627 frontend/app/view/agent/history/AgentHistoryView.tsx::AgentHistoryView
 136 frontend/app/view/agent/history/HistoryNavigator.tsx::HistoryNavigator
 167 frontend/app/view/agent/hooks/useAgentCommands.ts::deliverToBackend
 236 frontend/app/view/agent/hooks/useAgentCommands.ts::sendMessage
@@ -527,7 +528,6 @@
 229 frontend/app/view/agent/parseHistoryLines.ts::HistoryParser::feed
 127 frontend/app/view/agent/providers/claude-translator.ts::ClaudeTranslator::translate
 176 frontend/app/view/agent/quick-fork.ts::quickForkAgent
-159 frontend/app/scroll/follow-scroll.ts::createFollowScroll
 118 frontend/app/view/agent/shutdown/ShutdownPendingBanner.tsx::ShutdownPendingBanner
 138 frontend/app/view/agent/stream-flush-queue.ts::createStreamFlushQueue
 116 frontend/app/view/agent/stream-parser.ts::ClaudeCodeStreamParser::eventToNode
