@@ -25,6 +25,7 @@ import { CollapsibleMessage } from "./CollapsibleMessage";
 import { PreviewLines } from "./PreviewLines";
 import { previewBox } from "./scroll-handoff";
 import { tip } from "@/app/element/tip";
+import { Tag } from "@/app/element/ui";
 
 interface ContextDeliveryCardProps {
     node: ContextDeliveryNode;
@@ -92,27 +93,19 @@ const ItemHead = (props: { item: ContextItem; globalSentTwice: boolean }): JSX.E
             {props.item.name}
         </span>
         <Show when={chip(props.item)}>
-            <span
-                class="agent-context-delivery-item-chip"
-                {...tip(props.item.owner ? OWNER_CHIP[props.item.owner].title : undefined)}
-            >
-                {chip(props.item)}
-            </span>
+            <Tag detail={props.item.owner ? OWNER_CHIP[props.item.owner].title : undefined}>{chip(props.item)}</Tag>
         </Show>
         <Show when={props.item.contains?.includes("global_memory")}>
-            <span
-                class={clsx(
-                    "agent-context-delivery-item-chip",
-                    props.globalSentTwice && "agent-context-delivery-item-dup"
-                )}
-                {...tip(
+            <Tag
+                class={props.globalSentTwice ? "agent-context-delivery-item-dup" : undefined}
+                detail={
                     props.globalSentTwice
                         ? "This file also carries the Global Memory, so a new session gets it twice"
                         : "The Global Memory reached the agent through this file"
-                )}
+                }
             >
                 + Global Memory
-            </span>
+            </Tag>
         </Show>
         <Show when={props.item.delivered === "partial" || props.item.delivered === "omitted"}>
             <span
