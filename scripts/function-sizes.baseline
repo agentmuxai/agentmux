@@ -413,7 +413,6 @@
 197 frontend/app/statusbar/CpuCoresPopover.tsx::CpuCoresPopover
 140 frontend/app/statusbar/HostPopover.tsx::HostPopover
 277 frontend/app/statusbar/HostPopover.tsx::HostPopoverPanel
-521 frontend/app/statusbar/InstancePanel.tsx::InstancePanel
 318 frontend/app/statusbar/MaintenanceSection.tsx::MaintenanceSection
 169 frontend/app/statusbar/PairDevicePanel.tsx::PairDevicePanel
 171 frontend/app/statusbar/SystemStats.tsx::SystemStats
@@ -520,7 +519,6 @@
 116 frontend/app/view/agent/virtualization/held-release.ts::useScrolledOffRelease
 195 frontend/app/view/audit/audit-manager.tsx::AuditManager
 103 frontend/app/view/browser/browser-model.ts::BrowserViewModel::getBodyContextMenuItems
-603 frontend/app/view/browser/browser-nav-bar.tsx::BrowserNavBar
 101 frontend/app/view/browser/browser-profile-menu.tsx::BrowserProfileButton
 267 frontend/app/view/browser/driven-by-strip.tsx::DrivenByStrip
 141 frontend/app/view/browser/use-browser-auth.ts::useBrowserAuth

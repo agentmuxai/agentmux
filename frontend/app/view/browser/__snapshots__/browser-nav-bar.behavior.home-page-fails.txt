@@ -1,0 +1,8 @@
+diag sync urlAtom="https://example.com/" addressBar="https://example.com/" focused=false willUpdate=false
+listen browser-pane-shortcut
+rpc ListBookmarks
+rpc SetBrowserStartPage {"url":"https://example.com/"}
+bookmarks button title="Home page: Failed to save the Home page: not allowed" error=true
+rpc ListBookmarks
+rpc SetBrowserStartPage {"url":"https://example.com/"}
+bookmarks button title="Bookmarks" error=false

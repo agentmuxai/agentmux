@@ -264,6 +264,9 @@ pub const COMMAND_ACCOUNT_OAUTH_CLIENT_CLEAR: &str = "account.oauth.client.clear
 /// What the GitHub broker says about this AgentMux account's GitHub connection. A grant it
 /// says is gone marks the brokered GitHub account as needing to be connected again.
 pub const COMMAND_GITHUB_CONNECTION: &str = "github.connection";
+/// The installations of the AgentMux GitHub App this account is linked to: list them, install on
+/// repositories, check GitHub for new ones, refresh what the account can see, unlink one.
+pub const COMMAND_GITHUB_INSTALLATIONS: &str = "github.installations";
 
 // Agent ↔ Identity junction
 pub const COMMAND_LINK_AGENT_IDENTITY: &str = "linkagentidentity";

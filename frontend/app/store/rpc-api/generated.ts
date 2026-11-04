@@ -330,6 +330,8 @@ import type { GetEditorRootsResult } from "@/types/rpc/GetEditorRootsResult";
 import type { GetToolStatusResult } from "@/types/rpc/GetToolStatusResult";
 import type { GithubConnection } from "@/types/rpc/GithubConnection";
 import type { GithubConnectionReq } from "@/types/rpc/GithubConnectionReq";
+import type { GithubInstallations } from "@/types/rpc/GithubInstallations";
+import type { GithubInstallationsReq } from "@/types/rpc/GithubInstallationsReq";
 import type { GlobalMemoryDiffResult } from "@/types/rpc/GlobalMemoryDiffResult";
 import type { GlobalMemoryHistoryResult } from "@/types/rpc/GlobalMemoryHistoryResult";
 import type { GlobalMemoryImportReport } from "@/types/rpc/GlobalMemoryImportReport";
@@ -1537,6 +1539,14 @@ export const GeneratedApi = {
   // command "github.connection"
   GithubConnectionCommand(client: RpcClient, data: GithubConnectionReq, opts?: RpcOpts): Promise<GithubConnection> {
     return client.rpcCall("github.connection", data, opts);
+  },
+  // command "github.installations"
+  GithubInstallationsCommand(
+    client: RpcClient,
+    data: GithubInstallationsReq,
+    opts?: RpcOpts
+  ): Promise<GithubInstallations> {
+    return client.rpcCall("github.installations", data, opts);
   },
   // command "globalmemory:diff"
   GlobalMemoryDiffCommand(

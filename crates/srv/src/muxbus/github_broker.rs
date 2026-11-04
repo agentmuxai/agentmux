@@ -113,6 +113,12 @@ pub enum BrokerError {
     PermissionNotGranted(String),
     /// GitHub refused the broker's request for the token.
     GithubRejected,
+    /// The installation isn't one this person's own GitHub sign-in can see (it may be another person's, or access was lost).
+    InstallationNotVisible,
+    /// The install state was used, expired or unknown: start the install again.
+    StateInvalid,
+    /// The installation shows more repositories than AgentMux Cloud takes.
+    InstallationTooLarge,
     /// Anything else: the status and the broker's error code.
     Other { status: u16, error: String },
 }
@@ -146,6 +152,9 @@ impl std::fmt::Display for BrokerError {
                 "that installation hasn't accepted the {permission} permission yet: its owner accepts it in GitHub's settings for the AgentMux App"
             ),
             Self::GithubRejected => write!(f, "GitHub refused to give a token for that repository"),
+            Self::InstallationNotVisible => write!(f, "that installation isn't one your GitHub sign-in can see: check you have access to it on GitHub"),
+            Self::StateInvalid => write!(f, "that install was started too long ago or already used: start it again"),
+            Self::InstallationTooLarge => write!(f, "that installation shows more repositories than AgentMux can link: install the App on fewer repositories"),
             Self::Other { status, error } => write!(f, "AgentMux Cloud refused the GitHub request ({status} {error})"),
         }
     }
@@ -279,6 +288,11 @@ pub struct LinkedInstallation {
     pub link_status: String,
     #[serde(default)]
     pub verified_at_ms: i64,
+    /// How many of the installation's repositories this account can see.
+    #[serde(default)]
+    pub visible_count: u64,
+    #[serde(default)]
+    pub linked_at_ms: i64,
 }
 
 impl LinkedInstallation {
@@ -286,6 +300,16 @@ impl LinkedInstallation {
     pub fn is_usable(&self) -> bool {
         self.installation_status == "active" && self.link_status == "active"
     }
+}
+
+/// A state for an install trip (`POST /github/v1/installations/state`): single use, bound to the account,
+/// valid for a few minutes. `install_url` is GitHub's install page for the App, carrying it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct InstallState {
+    pub state: String,
+    pub install_url: String,
+    #[serde(default)]
+    pub expires_at_ms: i64,
 }
 
 /// What a revalidation did.
@@ -329,6 +353,9 @@ pub fn error_for(status: u16, body: &Value) -> BrokerError {
         (403, "install_suspended") => BrokerError::InstallSuspended,
         (403, "permission_not_granted") => BrokerError::PermissionNotGranted(text("permission")),
         (502, "github_rejected") => BrokerError::GithubRejected,
+        (403, "installation_not_visible") => BrokerError::InstallationNotVisible,
+        (400, "state_invalid") => BrokerError::StateInvalid,
+        (422, "installation_too_large") => BrokerError::InstallationTooLarge,
         (403, "blocked") => BrokerError::Blocked,
         (403, "not_connected") | (404, "not_connected") => BrokerError::NotConnected,
         (403, "revoked") => BrokerError::NotLive("revoked".to_string()),
@@ -433,6 +460,31 @@ pub async fn installations(http: &reqwest::Client, who: &Caller) -> Result<Vec<L
     let answer = call(http, who, reqwest::Method::GET, "/github/v1/installations", None).await?;
     let list = answer.get("installations").cloned().unwrap_or(Value::Array(Vec::new()));
     serde_json::from_value(list).map_err(|_| BrokerError::Other { status: 200, error: "unreadable_answer".to_string() })
+}
+
+/// A state for an install trip.
+pub async fn installation_state(http: &reqwest::Client, who: &Caller) -> Result<InstallState, BrokerError> {
+    let answer = call(http, who, reqwest::Method::POST, "/github/v1/installations/state", None).await?;
+    serde_json::from_value(answer).map_err(|_| BrokerError::Other { status: 200, error: "unreadable_answer".to_string() })
+}
+
+/// Link the account to an installation. The broker checks, with the person's own GitHub token, that
+/// the installation is one that person can see, and records which of its repositories they can.
+pub async fn link_installation(
+    http: &reqwest::Client,
+    who: &Caller,
+    installation_id: u64,
+    state: &str,
+    user_token: &str,
+) -> Result<LinkedInstallation, BrokerError> {
+    let body = json!({ "installation_id": installation_id, "state": state, "access_token": user_token });
+    let answer = call(http, who, reqwest::Method::POST, "/github/v1/installations/link", Some(&body)).await?;
+    serde_json::from_value(answer).map_err(|_| BrokerError::Other { status: 200, error: "unreadable_answer".to_string() })
+}
+
+/// End the account's link to an installation. The installation stays on GitHub.
+pub async fn unlink_installation(http: &reqwest::Client, who: &Caller, installation_id: u64) -> Result<(), BrokerError> {
+    call(http, who, reqwest::Method::DELETE, &format!("/github/v1/installations/{installation_id}/link"), None).await.map(|_| ())
 }
 
 /// Present a fresh user token so the broker re-reads what this account can see; it keeps nothing of the token.
