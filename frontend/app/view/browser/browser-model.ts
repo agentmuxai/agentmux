@@ -128,6 +128,11 @@ function trimmedString(v: unknown): string | undefined {
     return typeof v === "string" && v.trim() ? v.trim() : undefined;
 }
 
+/** The agent the person took a pane from and hasn't given it back to, from the pane's meta. */
+function takenFrom(meta: MetaType | undefined): string | undefined {
+    return meta?.["browser:given_back"] ? undefined : trimmedString(meta?.["browser:last_driver"]);
+}
+
 /** The browser's state behind its native pane tab (`browserPaneTab`, browser.tsx). */
 export class BrowserViewModel {
     viewType = "browser";
@@ -225,8 +230,8 @@ export class BrowserViewModel {
     /** The agent driving this pane, when an agent opened it with `OpenBrowser`
      *  (`browser:owner_agent`, written by srv; SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §5.5). */
     driverAgentAtom: Accessor<string | undefined>;
-    /** The agent that drove this pane last (`browser:last_driver`, written by srv). With no driver now, it is the agent
-     *  the person took the pane from, which Give back names. */
+    /** The agent the person took this pane from and has not given it back to: the agent that drove it last
+     *  (`browser:last_driver`, written by srv) unless srv recorded a Give back (`browser:given_back`). */
     lastDriverAtom: Accessor<string | undefined>;
     /** The site of the page that opened this pane as a popup
      *  (`browser:popup_from`, written by srv; SPEC_BROWSER_PANE_POPUPS_ADOPTED_2026_10_08.md §5). */
@@ -515,7 +520,7 @@ export class BrowserViewModel {
             });
             this.pausedAtom = createMemo(() => this.meta()?.["browser:paused"] === true);
             this.driverAgentAtom = createMemo(() => trimmedString(this.meta()?.["browser:owner_agent"]));
-            this.lastDriverAtom = createMemo(() => trimmedString(this.meta()?.["browser:last_driver"]));
+            this.lastDriverAtom = createMemo(() => takenFrom(this.meta()));
             this.identityAtom = createMemo(() => {
                 const v = this.meta()?.["browser:identity"];
                 return typeof v === "string" && v ? v : undefined;
@@ -1089,10 +1094,11 @@ export class BrowserViewModel {
         return this.ctx.setMeta({ "browser:owner_agent": null });
     }
 
-    /** The human gives the pane back to the agent they took it from: clearing `browser:last_driver` lets that agent
-     *  retake it (`Browser retake`); srv remembers who it was and writes the key itself whenever an agent drives. */
+    /** The human gives the pane back to the agent they took it from, which lets that agent retake it (`Browser retake`).
+     *  Through the host like every answer to a pane's banner: srv takes it from the host only, so no agent can give
+     *  itself the pane. srv knows who drove it (`browser:last_driver`). */
     giveBack(): Promise<void> {
-        return this.ctx.setMeta({ "browser:last_driver": null });
+        return getApi().approvals.decideBrowserAttention(this.blockId, "", "give_back");
     }
 
     /** Put the pane to sleep: record what it needs to come back; the view

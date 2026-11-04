@@ -5,7 +5,8 @@
 //! gave it back, and asks what became of a hand-off whose call it lost
 //! (docs/specs/SPEC_BROWSER_RETAKE_AND_COMMANDEER_2026_11_04.md §1). Neither goes through `target_block_id`: a retake is
 //! asked for a pane the agent no longer owns, so the rule is `browser_owner::may_retake`, and the caller's identity is
-//! checked the same way every agent browser call checks it.
+//! checked the same way every agent browser call checks it. The person's Give back arrives from the host
+//! (`give_back`, called by `handle_host_browser_attention`), never from a client.
 
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -53,16 +54,50 @@ pub(crate) async fn handle_ui_browser_retake(
         }
         None => {}
     }
-    if let Err(e) = browser_owner::may_retake(pane, agent) {
+    if let Err(e) = browser_owner::may_retake(&block, pane, agent) {
         return err_response(StatusCode::CONFLICT, e);
     }
+    // The person's Take over ended the pane's site limit; the pane's header still names it, so the limit comes back
+    // with the agent, before it drives.
+    if let Some(list) = limit_of(&block) {
+        crate::server::browser_allowlist::limit_new_pane(&state, pane, Some(list)).await;
+    }
     // The header reads these keys: written before the agent drives, so the person never sees an agent driving unlabelled.
-    if let Err(e) = crate::server::http_shell::broadcast_meta_update(&state, pane, &browser_owner::driver_meta(agent)) {
+    if let Err(e) = crate::server::http_shell::broadcast_meta_update(&state, pane, &browser_owner::retaken_meta(agent)) {
         return err_response(StatusCode::INTERNAL_SERVER_ERROR, format!("couldn't show you as the pane's driver: {e}"));
     }
     browser_owner::record(pane, agent);
     tracing::info!(agent_id = %agent, pane = %pane, "[browser-owner] agent retook the pane");
     (StatusCode::OK, Json(json!({ "ok": true, "data": { "pane": pane, "already": false } }))).into_response()
+}
+
+/// The sites the pane was limited to, as its header recorded them (`browser:allowed_origins`).
+fn limit_of(block: &crate::backend::obj::Block) -> Option<Vec<String>> {
+    let list = block.meta.get(crate::server::browser_allowlist::ALLOWED_META_KEY)?.as_array()?;
+    Some(list.iter().filter_map(|o| o.as_str().map(str::to_string)).collect())
+}
+
+/// The person's Give back on `block_id`, relayed by the host: the agent that drove the pane last may retake it. Written
+/// to the block's meta too, so it holds after an srv restart.
+pub(crate) fn give_back(state: &AppState, block_id: &str) -> axum::response::Response {
+    let block = match state.mstore.get::<crate::backend::obj::Block>(block_id) {
+        Ok(Some(b)) => b,
+        _ => return err_response(StatusCode::NOT_FOUND, format!("no pane {block_id:?}")),
+    };
+    let Some(agent) = block.meta.get(browser_owner::LAST_DRIVER_META_KEY).and_then(|v| v.as_str()) else {
+        return err_response(StatusCode::NOT_FOUND, "no agent drove that pane".to_string());
+    };
+    if browser_owner::owner_of(block_id).is_some() {
+        return err_response(StatusCode::CONFLICT, "an agent drives that pane: Take over comes first".to_string());
+    }
+    let mut meta = crate::backend::obj::MetaMapType::new();
+    meta.insert(browser_owner::GIVEN_BACK_META_KEY.to_string(), json!(agent));
+    if let Err(e) = crate::server::http_shell::broadcast_meta_update(state, block_id, &meta) {
+        return err_response(StatusCode::INTERNAL_SERVER_ERROR, format!("couldn't give the pane back: {e}"));
+    }
+    browser_owner::mark_given_back(block_id);
+    tracing::info!(pane = %block_id, agent_id = %agent, "[browser-owner] the person gave the pane back");
+    (StatusCode::OK, Json(json!({ "ok": true }))).into_response()
 }
 
 pub(crate) async fn handle_ui_browser_handoff_status(
@@ -140,7 +175,11 @@ mod tests {
         assert_eq!(retake_status(&state, &agent, &pane).await, StatusCode::CONFLICT, "the person is still using it");
         assert!(browser_owner::owner_of(&pane).is_none());
 
-        browser_owner::guard_client_meta_write(&oref, &clear(browser_owner::LAST_DRIVER_META_KEY)).unwrap();
+        // The person's Give back arrives from the host (not a client write): it needs an agent that drove the pane.
+        let mut driver = MetaMapType::new();
+        driver.insert(browser_owner::LAST_DRIVER_META_KEY.to_string(), json!(agent));
+        crate::server::http_shell::broadcast_meta_update(&state, &pane, &driver).unwrap();
+        assert_eq!(give_back(&state, &pane).status(), StatusCode::OK);
         assert_eq!(retake_status(&state, &agent, &pane).await, StatusCode::OK);
         assert_eq!(browser_owner::owner_of(&pane).as_deref(), Some(agent.as_str()));
         let block = state.mstore.must_get::<crate::backend::obj::Block>(&pane).unwrap();
@@ -168,15 +207,41 @@ mod tests {
         assert_eq!(retake_status(&state, &b, &pane).await, StatusCode::FORBIDDEN, "a pane another agent drives");
         let oref = format!("block:{pane}");
         browser_owner::guard_client_meta_write(&oref, &clear(browser_owner::OWNER_META_KEY)).unwrap();
-        browser_owner::guard_client_meta_write(&oref, &clear(browser_owner::LAST_DRIVER_META_KEY)).unwrap();
+        let mut driver = MetaMapType::new();
+        driver.insert(browser_owner::LAST_DRIVER_META_KEY.to_string(), json!(a));
+        crate::server::http_shell::broadcast_meta_update(&state, &pane, &driver).unwrap();
+        assert_eq!(give_back(&state, &pane).status(), StatusCode::OK);
         assert_eq!(retake_status(&state, &b, &pane).await, StatusCode::CONFLICT, "given back to a, not to b");
         assert_eq!(retake_status(&state, &a, "no-such-pane").await, StatusCode::NOT_FOUND);
     }
 
-    #[test]
-    fn a_client_cannot_set_the_last_driver() {
-        let mut m = MetaMapType::new();
-        m.insert(browser_owner::LAST_DRIVER_META_KEY.to_string(), json!("someone"));
-        assert!(browser_owner::guard_client_meta_write("block:b1", &m).is_err());
+    #[tokio::test]
+    async fn a_retake_brings_the_sites_limit_back_and_a_give_back_needs_a_last_driver() {
+        let state = test_state();
+        let own = format!("own-{}", uuid::Uuid::new_v4());
+        let pane = format!("pane-{}", uuid::Uuid::new_v4());
+        crate::server::browser_attention::tests::browser_block(&state, &own);
+        crate::server::browser_attention::tests::browser_block(&state, &pane);
+        let agent = format!("retake-{}", uuid::Uuid::new_v4());
+        state.reactive_handler.register_agent(&agent, &own, None).unwrap();
+        assert_eq!(give_back(&state, &pane).status(), StatusCode::NOT_FOUND, "no agent drove it");
+
+        let sites = vec!["https://example.com".to_string()];
+        let mut meta = browser_owner::driver_meta(&agent);
+        meta.insert(crate::server::browser_allowlist::ALLOWED_META_KEY.to_string(), json!(sites));
+        crate::server::http_shell::broadcast_meta_update(&state, &pane, &meta).unwrap();
+        crate::server::browser_allowlist::set(&pane, sites.clone());
+        browser_owner::record(&pane, &agent);
+        assert_eq!(give_back(&state, &pane).status(), StatusCode::CONFLICT, "an agent drives it");
+
+        browser_owner::guard_client_meta_write(&format!("block:{pane}"), &clear(browser_owner::OWNER_META_KEY)).unwrap();
+        assert_eq!(crate::server::browser_allowlist::list_for(&pane), None, "the Take over ended the limit");
+        assert_eq!(give_back(&state, &pane).status(), StatusCode::OK);
+        assert_eq!(retake_status(&state, &agent, &pane).await, StatusCode::OK);
+        assert_eq!(crate::server::browser_allowlist::list_for(&pane), Some(sites), "the limit came back with the agent");
+        let block = state.mstore.must_get::<crate::backend::obj::Block>(&pane).unwrap();
+        assert!(block.meta.get(browser_owner::GIVEN_BACK_META_KEY).is_none_or(|v| v.is_null()), "the Give back is spent");
+        crate::server::browser_allowlist::drop_pane(&pane);
+        browser_owner::forget(&pane);
     }
 }

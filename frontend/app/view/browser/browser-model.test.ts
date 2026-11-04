@@ -479,13 +479,26 @@ describe("BrowserViewModel agent driver", () => {
         expect(new BrowserViewModel(fakeCtx()).popupWindowsAtom()).toEqual([]);
     });
 
-    it("names the agent that drove the pane last, and Give back clears that key", async () => {
+    it("names the agent the person took the pane from, until they give it back", async () => {
         const vm = new BrowserViewModel({ ...fakeCtx(), meta: () => ({ "browser:last_driver": " lark " }) });
         expect(vm.lastDriverAtom()).toBe("lark");
         expect(new BrowserViewModel(fakeCtx()).lastDriverAtom()).toBeUndefined();
-        const made = makeVM();
-        await made.giveBack();
-        expect(ctxSetMeta).toHaveBeenCalledWith({ "browser:last_driver": null });
+        const given = new BrowserViewModel({
+            ...fakeCtx(),
+            meta: () => ({ "browser:last_driver": "lark", "browser:given_back": "lark" }),
+        });
+        expect(given.lastDriverAtom()).toBeUndefined();
+    });
+
+    it("Give back goes through the host, not a meta write", async () => {
+        const vm = makeVM();
+        await vm.giveBack();
+        expect(invokeCommand).toHaveBeenCalledWith("browser_attention_resolve", {
+            block_id: "test-block-id",
+            id: "",
+            decision: "give_back",
+        });
+        expect(ctxSetMeta).not.toHaveBeenCalled();
     });
 
     it("reports no driver for an ordinary pane or an empty key", () => {

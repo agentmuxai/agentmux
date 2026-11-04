@@ -1173,6 +1173,9 @@ pub(crate) async fn handle_host_browser_attention(
     }
     let s = |k: &str| body.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
     let (block_id, id, decision) = (s("block_id"), s("id"), s("decision"));
+    if decision == "give_back" {
+        return crate::server::browser_retake::give_back(&state, &block_id);
+    }
     let Some(answer) = crate::server::browser_attention::Answer::parse(&decision) else {
         return err_response(StatusCode::BAD_REQUEST, format!("unknown decision {decision:?}"));
     };
