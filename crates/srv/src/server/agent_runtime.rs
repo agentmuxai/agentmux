@@ -129,6 +129,12 @@ pub fn runtime_of(status: &AgentStatus) -> (AgentRuntimeState, Option<String>, O
     (state, detail, resets_at, desired)
 }
 
+/// Why a start would be refused, for an agent that is stopped and wanted running: its block says running,
+/// or a message waits for it. `why` is asked only then, because it reads every live agent.
+fn blocked_start(state: AgentRuntimeState, desired: AgentDesiredState, message_waits: bool, why: impl FnOnce() -> Option<String>) -> Option<String> {
+    (state == AgentRuntimeState::Stopped && (desired == AgentDesiredState::Running || message_waits)).then(why).flatten()
+}
+
 /// The runtime state of every created agent, as of `now_ms`. Blocking: reads the store.
 pub(crate) fn list(state: &AppState, now_ms: u64) -> Vec<AgentRuntime> {
     let mstore = &state.mstore;
@@ -138,6 +144,7 @@ pub(crate) fn list(state: &AppState, now_ms: u64) -> Vec<AgentRuntime> {
     let defs = mstore.agent_def_list().unwrap_or_default();
     let panes = pane_blocks_by_agent(mstore);
     let net = crate::connectivity::status();
+    let waiting_for: std::collections::HashSet<String> = mstore.jekt_held_targets().unwrap_or_default().into_iter().collect();
     defs.into_iter()
         .filter(|d| d.is_seeded != 1 && d.user_hidden == 0)
         .map(|d| {
@@ -150,7 +157,9 @@ pub(crate) fn list(state: &AppState, now_ms: u64) -> Vec<AgentRuntime> {
             let block = block_id.as_deref().and_then(|b| mstore.get::<Block>(b).ok().flatten());
             let color = block.as_ref().and_then(block_color);
             let (runtime_state, detail, resets_at, desired) = runtime_of(&status_of(mstore, live.as_deref(), block.as_ref(), &net, now_ms));
+            let blocked = blocked_start(runtime_state, desired, waiting_for.contains(&d.id), || super::agent_lifecycle::start_blocked(state, &d.id));
             AgentRuntime {
+                blocked,
                 color,
                 agent_id: d.id,
                 state: runtime_state,
@@ -310,6 +319,24 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_stopped_agent_something_wants_running_says_why_it_cannot_start_and_no_other_is_asked() {
+        use AgentDesiredState::{Running, Stopped};
+        use AgentRuntimeState::{Idle, Stopped as Down};
+        let why = || Some("capacity: memory commit is at 89%".to_string());
+        assert_eq!(blocked_start(Down, Stopped, true, why).as_deref(), Some("capacity: memory commit is at 89%"), "a message waits for it");
+        assert_eq!(blocked_start(Down, Running, false, why).as_deref(), Some("capacity: memory commit is at 89%"), "its block says running");
+        let asked = std::cell::Cell::new(0);
+        let counted = || {
+            asked.set(asked.get() + 1);
+            Some("x".to_string())
+        };
+        assert_eq!(blocked_start(Down, Stopped, false, counted), None, "stopped on purpose, nothing waits");
+        assert_eq!(blocked_start(Idle, Running, true, counted), None, "it runs");
+        assert_eq!(asked.get(), 0, "the check reads every live agent: only a wanted, stopped one asks");
+        assert_eq!(blocked_start(Down, Running, false, || None), None, "nothing refuses the start");
+    }
+
     fn row(id: &str, state: AgentRuntimeState) -> AgentRuntime {
         AgentRuntime {
             agent_id: id.into(),
@@ -322,6 +349,7 @@ mod tests {
             provider: "claude".into(),
             icon: String::new(),
             color: None,
+            blocked: None,
         }
     }
 

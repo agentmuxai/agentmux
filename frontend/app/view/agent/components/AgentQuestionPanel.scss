@@ -145,17 +145,6 @@
     color: var(--main-text-color);
 }
 
-.agent-question-panel-q-chip {
-    flex: 0 0 auto;
-    padding: 1px var(--space-1-5);
-    background: rgba(var(--accent-color-rgb), 0.18);
-    color: var(--accent-color);
-    border-radius: var(--radius-sm);
-    font-size: var(--text-xs);
-    font-weight: var(--font-weight-medium);
-    white-space: nowrap;
-}
-
 .agent-question-panel-options {
     display: flex;
     flex-direction: column;

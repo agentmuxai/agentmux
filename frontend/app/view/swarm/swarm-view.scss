@@ -457,25 +457,6 @@
     flex-shrink: 0;
 }
 
-.swarm-workflow-status-badge {
-    font-size: var(--text-2xs);
-    font-weight: 600;
-    @include mixins.label-caps;
-    letter-spacing: 0.02em;
-    padding: 1px 6px;
-    border-radius: var(--radius-sm);
-    flex-shrink: 0;
-
-    &--active {
-        color: var(--warning-text-color);
-        background: var(--warning-bg-strong);
-    }
-    &--retired {
-        color: var(--secondary-text-color);
-        background: var(--highlight-bg-color);
-    }
-}
-
 // ── Dispatch concatenated activity feed (SPEC_AGENT_DISPATCH_SUBAGENT_HIERARCHY_2026_07_17 §7) ──
 // A Workflow-kind dispatch expands into this instead of nested member rows —
 // never one row per member, however many the dispatch has.
@@ -689,25 +670,6 @@
     color: var(--warning-text-color);
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
-}
-
-.swarm-cron-status-badge {
-    flex-shrink: 0;
-    font-size: var(--text-2xs);
-    font-weight: 600;
-    @include mixins.label-caps;
-    letter-spacing: 0.02em;
-    padding: 1px 6px;
-    border-radius: var(--radius-sm);
-
-    &--active {
-        color: var(--info-color);
-        background: color-mix(in srgb, var(--info-color) 15%, transparent);
-    }
-    &--paused {
-        color: var(--secondary-text-color);
-        background: var(--highlight-bg-color);
-    }
 }
 
 // ── Subagent detail event rendering (shared by the concatenated dispatch
@@ -1065,13 +1027,6 @@
     color: var(--main-text-color);
 }
 
-.swarm-fleet-tag {
-    padding: 0 5px;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-full);
-    font-size: var(--text-2xs);
-}
-
 .swarm-fleet-target-reason {
     color: var(--warning-text-color);
 }
@@ -1207,16 +1162,6 @@
     font-size: var(--text-2xs);
     color: var(--secondary-text-color);
     @include mixins.truncate;
-}
-
-.swarm-remote-badge,
-.swarm-remote-platform {
-    flex-shrink: 0;
-    padding: 0 6px;
-    border-radius: var(--radius-full);
-    border: 1px solid var(--border-color);
-    font-size: var(--text-2xs);
-    color: var(--secondary-text-color);
 }
 
 .swarm-remote-seen {

@@ -2,6 +2,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+// tag: fixed - the terminal's CPU and memory readout, a faint hard-cornered overlay with a hover tooltip, not a label on a card
 .block-stats-badge {
     position: absolute;
     top: calc(var(--header-height) + 4px);

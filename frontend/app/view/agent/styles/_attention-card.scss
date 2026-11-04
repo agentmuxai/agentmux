@@ -1,0 +1,15 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// The chrome of a card the agent waits on above the composer: the attention
+// colour with a heavy left line (REPORT_AGENT_ATTENTION_CTA_CONTRAST_AND_TONE_2026_10_10.md §1).
+// The Vault request card uses it. The question card (AgentQuestionPanel.scss)
+// has the same values written out: change both together until it uses it too.
+
+@mixin attention-card {
+    background: var(--modal-bg-color);
+    border: 1px solid var(--attention-color);
+    border-left-width: 3px;
+    border-radius: var(--radius-md);
+    color: var(--main-text-color);
+}

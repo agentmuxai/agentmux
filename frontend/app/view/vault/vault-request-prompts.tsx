@@ -5,7 +5,9 @@
 // (docs/specs/SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md §5.4).
 // "Fill it in" opens the Vault on the entry's form; the value is typed there,
 // never here. "Not now" leaves the request in the Vault for later. The prompt
-// shows only what the agent sent: its name, the kind, the label and why.
+// shows only what the agent sent: its name, the kind, the label and why. A
+// request from an agent with a pane is asked there instead, as a card
+// (agent/components/vault-request-card).
 
 import { createEffect, createRoot, on, type JSX } from "solid-js";
 
@@ -14,7 +16,8 @@ import { modalsModel, type ModalCloseProps } from "@/app/store/modalmodel";
 import type { VaultRequest } from "@/types/rpc/VaultRequest";
 import { vaultKind } from "./vault-kinds";
 import { openVault } from "./open-vault";
-import { startVaultUsePrompts } from "./vault-use-prompts";
+import { startVaultRequestCards } from "@/app/view/agent/components/vault-request-card/vault-request-cards";
+import { askedInPane, startVaultUsePrompts } from "./vault-use-prompts";
 import { followVault, refreshVaultRequests, vaultAvailable, vaultRequests } from "./vault-store";
 
 function RequestPrompt(props: { request: VaultRequest } & ModalCloseProps): JSX.Element {
@@ -50,11 +53,12 @@ function RequestPrompt(props: { request: VaultRequest } & ModalCloseProps): JSX.
 let started = false;
 
 /** Follow srv's Vault requests and prompt for each new one; the same for agents'
- *  uses of an entry. Call once. */
+ *  uses of an entry. One from an agent with a pane is a card there. Call once. */
 export function startVaultRequestPrompts(): void {
     if (started || !vaultAvailable()) return;
     started = true;
     startVaultUsePrompts();
+    startVaultRequestCards();
     followVault();
     const shown = new Set<string>();
     createRoot(() =>
@@ -63,7 +67,7 @@ export function startVaultRequestPrompts(): void {
                 const live = new Set(list.map((r) => r.id));
                 for (const id of [...shown]) if (!live.has(id)) shown.delete(id);
                 for (const r of list) {
-                    if (shown.has(r.id)) continue;
+                    if (shown.has(r.id) || askedInPane(r)) continue;
                     shown.add(r.id);
                     modalsModel.openModal(RequestPrompt, { request: r });
                 }

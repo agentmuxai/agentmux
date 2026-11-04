@@ -152,7 +152,6 @@ async fn updateagent_and_agent_define_keep_the_seat() {
 
     crate::server::app_api::agent_define_core(
         h.state.mstore.clone(),
-        h.state.id_store.clone(),
         h.state.broker.clone(),
         serde_json::from_value(serde_json::json!({ "name": "seat-keeper", "if_exists": "update", "description": "touched" })).unwrap(),
     )
@@ -247,7 +246,6 @@ async fn agents_list_carries_seats() {
 async fn define(h: &Harness, name: &str) -> String {
     crate::server::app_api::agent_define_core(
         h.state.mstore.clone(),
-        h.state.id_store.clone(),
         h.state.broker.clone(),
         serde_json::from_value(serde_json::json!({ "name": name, "provider": "claude" })).unwrap(),
     )

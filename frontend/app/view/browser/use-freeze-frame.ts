@@ -113,7 +113,7 @@ export function useFreezeFrame(params: {
         !!placeholderRef() &&
         paneCreated() &&
         !model.closed;
-    // Pre-warm: fired on pointer-down of menu anchors (see FlyoutMenu),
+    // Pre-warm: fired on pointer-down of menu anchors (see MenuTrigger and FlyoutMenu),
     // ~100ms before the click completes and the menu opens. By the time the
     // clip hit arrives the frame is usually already held (or at least in
     // flight), so the hide releases within a frame or two and the menu

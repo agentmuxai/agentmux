@@ -20,8 +20,9 @@ import "./menu.scss";
 
 export interface MenuEntry {
     label: string;
-    /** A Font Awesome name, drawn in the leading slot (`"regular@window-maximize"` for the regular set). */
-    icon?: string;
+    /** A Font Awesome name, drawn in the leading slot (`"regular@window-maximize"` for the regular set), or an element
+     *  drawn there as it is (a site's favicon or badge; it brings its own `menu-item-icon` slot). */
+    icon?: string | JSX.Element;
     /** A choice the row toggles (`checkbox`) or one of a group (`radio`): the leading slot shows a check while `checked`. */
     type?: "checkbox" | "radio";
     checked?: boolean;
@@ -37,6 +38,12 @@ export interface MenuEntry {
     sublabel?: string;
     /** An exact-hue square before the label (a palette colour), in place of the icon. */
     swatchColor?: string;
+    /** More inside the label (a second line under it); the row's `class` styles it. */
+    detail?: JSX.Element;
+    /** After the label: a mark at the row's end (the tab's own identity). */
+    trailing?: JSX.Element;
+    /** Extra classes for the row. */
+    class?: string;
     /** A submenu: the row opens it (hovering, Right or Enter) and has no pick of its own. */
     submenu?: MenuEntry[];
 }
@@ -53,6 +60,9 @@ export interface MenuProps {
     placement?: Placement;
     /** Keep the leading slot on every row when any row has an icon, so the labels line up. */
     alignIcons?: boolean;
+    /** Keep the menu inside this element (a browser pane) when it fits; with `alignToAnchorSide`, open it from the side its anchor is on. */
+    containWithin?: () => HTMLElement | null | undefined;
+    alignToAnchorSide?: boolean;
     /** A pick, an outside press or Esc. The owner unmounts the menu. */
     onClose: () => void;
     "aria-label"?: string;
@@ -77,6 +87,8 @@ interface MenuPanelProps {
     placement: Placement;
     header?: JSX.Element;
     alignIcons?: boolean;
+    containWithin?: () => HTMLElement | null | undefined;
+    alignToAnchorSide?: boolean;
     /** A pick: closes the whole menu, then runs the pick. */
     onPick: () => void;
     /** An outside press or Esc on this level (the root closes the menu; a submenu closes itself). */
@@ -97,6 +109,12 @@ interface MenuPanelProps {
     testId?: string;
     operatorOnly?: boolean;
 }
+
+/** The Font Awesome class of a named icon; an element icon brings its own slot. */
+const namedIcon = (e: MenuEntry): string | null => (typeof e.icon === "string" ? menuIconClass(e.icon) : null);
+
+/** Whether a row draws an icon in the leading slot (a named one, or an element). */
+const hasLeadIcon = (e: MenuEntry): boolean => !e.divider && !e.swatchColor && (typeof e.icon === "string" ? !!menuIconClass(e.icon) : !!e.icon);
 
 const roleOf = (e: MenuEntry) => (e.type === "checkbox" ? "menuitemcheckbox" : e.type === "radio" ? "menuitemradio" : "menuitem");
 
@@ -167,7 +185,7 @@ function MenuRow(props: MenuRowProps): JSX.Element {
                 active: props.active,
                 "ui-menu-item--danger": e().tone === "danger",
                 "ui-menu-item--disabled": e().disabled,
-            })}
+            }, e().class)}
             aria-checked={e().type ? !!e().checked : undefined}
             aria-disabled={e().disabled || undefined}
             aria-haspopup={e().submenu ? "menu" : undefined}
@@ -178,7 +196,11 @@ function MenuRow(props: MenuRowProps): JSX.Element {
             onClick={props.onPick}
         >
             <MenuRowLead entry={e()} reserve={props.reserve} />
-            <span class="label">{e().label}</span>
+            <span class="label">
+                {e().label}
+                {e().detail}
+            </span>
+            {e().trailing}
             <Show when={e().sublabel}>
                 <span class="menu-item-sublabel">{e().sublabel}</span>
             </Show>
@@ -245,7 +267,7 @@ function MenuPanel(props: MenuPanelProps): JSX.Element {
     let subKeep: ((target: Node) => boolean) | undefined;
     const nav = useMenuNav(props, sub, () => body);
     const rows: (HTMLElement | undefined)[] = [];
-    const reserveIcons = () => !!props.alignIcons && props.items.some((e) => !e.divider && !e.swatchColor && !!menuIconClass(e.icon));
+    const reserveIcons = () => !!props.alignIcons && props.items.some(hasLeadIcon);
     // A submenu that had the keys hands them back to this level when it closes, by any path (Left, Esc, an outside
     // press, the pointer entering another row); otherwise focus falls to <body> and the arrows stop working.
     let subFocused = false;
@@ -269,6 +291,7 @@ function MenuPanel(props: MenuPanelProps): JSX.Element {
                 placement={props.placement}
                 motion="fadeScale"
                 onShown={nav.focusBody}
+                containWithin={props.containWithin} alignToAnchorSide={props.alignToAnchorSide} fitHeight
                 shellClass="anchored-popover--menu"
                 class={clsx("menu ui-menu", props.onBack && "sub-menu", props.class)}
                 role="menu"
@@ -349,8 +372,12 @@ function MenuRowLead(props: { entry: MenuEntry; reserve: boolean }): JSX.Element
             >
                 <Show when={!props.entry.swatchColor}>
                     <Show
-                        when={menuIconClass(props.entry.icon)}
-                        fallback={<Show when={props.reserve}><span class="menu-item-icon" aria-hidden="true" /></Show>}
+                        when={namedIcon(props.entry)}
+                        fallback={
+                            <Show when={props.entry.icon} fallback={<Show when={props.reserve}><span class="menu-item-icon" aria-hidden="true" /></Show>}>
+                                {props.entry.icon as JSX.Element}
+                            </Show>
+                        }
                     >
                         {(cls) => <i class={cls()} aria-hidden="true" />}
                     </Show>
@@ -370,6 +397,8 @@ export const Menu = (props: MenuProps): JSX.Element => (
         placement={props.placement ?? "top-start"}
         header={props.header}
         alignIcons={props.alignIcons}
+        containWithin={props.containWithin}
+        alignToAnchorSide={props.alignToAnchorSide}
         onPick={props.onClose}
         onDismiss={() => props.onClose()}
         aria-label={props["aria-label"]}

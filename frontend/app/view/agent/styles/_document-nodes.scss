@@ -751,6 +751,7 @@ $tool-name-colors: (
 
     // Result pill — inline summary in the collapsed row at medium+ widths.
     // Hidden by default; shown by the 600px container query in _responsive.scss.
+    // tag: fixed - a tool-result summary in the terminal's palette (cyan, magenta) and mono face, shown by a container query with a one-shot fade-in ref; Tag has neither those tones nor a ref
     .agent-tool-result-pill {
         display: none; // shown via container query at ≥600px
         font-size: var(--text-2xs);
@@ -1065,14 +1066,6 @@ $tool-name-colors: (
         .agent-context-delivery-rows {
             flex-basis: 100%;
             padding-left: var(--space-4);
-        }
-
-        .agent-context-delivery-item-chip {
-            font-size: var(--text-xs);
-            padding: 0 var(--space-1);
-            border: 1px solid var(--border-color);
-            border-radius: var(--radius-sm);
-            white-space: nowrap;
         }
 
         // A startup file that also carries the Global Memory (it reaches the

@@ -170,6 +170,36 @@ describe("the Home and Bookmarks icons", () => {
     });
 });
 
+describe("the Profile and Bookmarks menus", () => {
+    const menuRows = () => [...document.querySelectorAll('[role="menu"] [role="menuitem"]')] as HTMLElement[];
+
+    it("open the kit Menu: the Profile menu names who this tab is, marks Personal as the current one and keeps its shortcut", () => {
+        const bar = renderBar();
+        fireEvent.click(bar.querySelector(".browser-profile-btn")!);
+        const rows = menuRows();
+        expect(rows[0].classList.contains("browser-profile-header")).toBe(true);
+        expect(rows[0].querySelector(".label")?.textContent).toBe("PersonalYour saved sign-ins");
+        expect(rows.map((r) => r.querySelector(".label")?.firstChild?.textContent)).toEqual([
+            "Personal",
+            "Open new Incognito tab",
+            "Personal",
+            "New profile…",
+            "Manage profiles…",
+        ]);
+        expect(rows[2].querySelector(".browser-profile-current")?.getAttribute("aria-label")).toBe("this tab");
+        expect(rows[0].querySelector(".browser-profile-current")).toBeNull();
+        expect(rows[1].querySelector(".menu-item-shortcut")).not.toBeNull();
+    });
+
+    it("open the kit Menu: the Bookmarks menu offers to bookmark the page, and says there are none yet", () => {
+        const bar = renderBar();
+        fireEvent.click(bar.querySelector('.browser-nav-group--bookmarks button[title="Bookmarks"]')!);
+        expect(menuRows().map((r) => r.querySelector(".label")?.textContent)).toEqual(
+            expect.arrayContaining(["Set as Home Page", "Bookmark This Page"]),
+        );
+    });
+});
+
 describe("the toolbar's grid areas", () => {
     const scss = readFileSync(resolve(process.cwd(), "frontend/app/view/browser/browser-view.scss"), "utf8");
 

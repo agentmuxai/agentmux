@@ -439,7 +439,7 @@ pub(crate) async fn handle_vault_request(State(state): State<AppState>, Json(bod
         label: label.clone(),
         why: body.why.trim().chars().take(500).collect(),
         requested_ms: agentmux_common::time::now_ms_u64(),
-        block_id: pane.clone().unwrap_or_default(),
+        block_id: super::vault_ask::shown_pane(&state, pane.as_deref().unwrap_or("")),
     };
     let (request_id, answer) = match requests::requests().ask(req, pane.is_some()) {
         // The person already answered this agent's ask for this entry.

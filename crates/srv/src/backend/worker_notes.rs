@@ -370,13 +370,35 @@ impl Gaps {
 
 static GAPS: LazyLock<parking_lot::Mutex<Gaps>> = LazyLock::new(Default::default);
 
-fn deliver(mstore: &Store, config: &crate::backend::wconfig::ConfigState, leader_block: &str, text: &str, wait_key: Option<&str>) {
-    let handler = crate::backend::reactive::get_global_handler();
-    let target = handler
+/// What a note to the pane `block_id` is addressed to: its agent's uid, else its id.
+fn note_target(block_id: &str) -> Option<String> {
+    crate::backend::reactive::get_global_handler()
         .list_agents()
         .into_iter()
-        .find(|r| r.block_id == leader_block)
-        .map(|r| r.uid.clone().filter(|u| !u.is_empty()).unwrap_or(r.agent_id.clone()));
+        .find(|r| r.block_id == block_id)
+        .map(|r| r.uid.clone().filter(|u| !u.is_empty()).unwrap_or(r.agent_id.clone()))
+}
+
+/// Tell the lead of the agent `def_id` something about it, as an `[AgentMux]` note: its seat's lead (a
+/// spawned worker's is its leader) when that agent is on this machine and has a pane open. `false` when
+/// nobody was told: it reports to the operator, its lead is on another machine, or its pane is not open.
+pub(crate) fn tell_leader(mstore: &Store, def_id: &str, body: &str) -> bool {
+    let lead = crate::backend::agent_seat::effective_seat_by_id(mstore, def_id)
+        .and_then(|seat| seat.lead)
+        .filter(|lead| !crate::backend::agent_seat::is_remote_lead(lead));
+    let Some(leader_block) = lead.and_then(|lead| live_panes_of(mstore, &lead).into_iter().next()) else {
+        return false;
+    };
+    let Some(target) = note_target(&leader_block) else {
+        return false;
+    };
+    let text = format!("[AgentMux] {}", crate::backend::reactive::sanitize::quote_in_system_note(body));
+    crate::backend::reactive::get_global_handler().deliver_system_note(&target, &text).is_ok()
+}
+
+fn deliver(mstore: &Store, config: &crate::backend::wconfig::ConfigState, leader_block: &str, text: &str, wait_key: Option<&str>) {
+    let handler = crate::backend::reactive::get_global_handler();
+    let target = note_target(leader_block);
     let Some(target) = target else {
         tracing::debug!(leader_block, "worker note: the leader's pane isn't registered");
         return;
