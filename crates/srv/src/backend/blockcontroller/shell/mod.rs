@@ -39,6 +39,7 @@ mod spawn_command;
 mod spawn_cwd;
 mod ssh_pane;
 pub(crate) mod stamps;
+mod start_steps;
 pub(crate) mod term_cap;
 mod translation;
 mod wait_task;

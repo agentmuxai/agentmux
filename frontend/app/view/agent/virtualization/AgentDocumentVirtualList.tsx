@@ -781,6 +781,7 @@ function useScrollObservers(props: AgentDocumentVirtualListProps, s: ListState):
             s.syncOverflowState(geo);
             // The follow controller sees the content too. OneWayFlow pins, from its own observer.
             if (s.follow && geo) s.follow.observed("content", geo);
+            if (geo) props.viewState.noteContentHeight(geo.scrollHeight); // perf:allow-layout-read — the value observedGeometry() read just above, not a second read
         });
         if (s.virtualContainerRef) ro.observe(s.virtualContainerRef);
         if (s.streamingBufferRef) ro.observe(s.streamingBufferRef);
