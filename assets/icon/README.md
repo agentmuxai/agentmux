@@ -33,3 +33,8 @@ No image tools needed: the script reads the rectangles from the SVGs and draws t
 <link rel="icon" href="/favicon.ico" sizes="48x48">  <!-- Safari and others without SVG favicons -->
 <link rel="apple-touch-icon" href="/apple-touch-icon-180.png">
 ```
+
+## Record
+
+- 2026-11-03, Agent1@narko: the operator picked variant 1 (mono, dark tile) as the app icon everywhere and variant 5 (mono, light, with an edge) only where a platform switches on the theme by itself (the SVG favicon, the Store's light-taskbar assets). Sources and every raster landed in #6358.
+- 2026-11-04, Agent1@narko: the app's own marks (pre-splash, native splash, loading spinner, empty-pane logo, empty tab) draw the four blocks instead of the old brain. Still open: the Windows window and taskbar icon following the theme (a Rust host change, needs a Windows agent), and a check of the MSIX light-taskbar assets on a real package (Area54).
