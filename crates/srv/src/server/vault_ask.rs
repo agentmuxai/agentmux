@@ -22,16 +22,19 @@ const GRACE: Duration = Duration::from_secs(5);
 const ASKED: &str = "asked to use it";
 
 /// Asks the person to allow `request` and waits at most `wait`: srv decides on
-/// silence then. `attention_block` is the pane whose tone and badges say it
-/// waits. A use that went ahead with no answer is recorded as such at once;
-/// every other outcome is recorded by the caller, with what it did.
-pub(super) async fn ask(state: &AppState, attention_block: &str, request: UseRequest, wait: Duration, headline: &str) -> (Ended, Option<UseAnswer>) {
+/// silence then. The tone and badges that say it waits are the asking agent's
+/// pane's, where its card is, else `attention_block`'s. A use that went ahead
+/// with no answer is recorded as such at once; every other outcome is recorded
+/// by the caller, with what it did.
+pub(super) async fn ask(state: &AppState, attention_block: &str, mut request: UseRequest, wait: Duration, headline: &str) -> (Ended, Option<UseAnswer>) {
+    request.block_id = shown_pane(state, &request.block_id);
     let (id, entry, label, agent) = (request.id.clone(), request.entry_id.clone(), request.entry_label.clone(), request.agent.clone());
     let target = target_of(&request);
+    let attention_block = if request.block_id.is_empty() { attention_block.to_string() } else { request.block_id.clone() };
     let answer = uses::uses().ask(request, wait);
     let _waiting = Waiting::new(id, state.clone());
     super::vault_handlers::publish(state);
-    let _asking = crate::backend::user_attention::Asking::start(&state.broker, &state.mstore, attention_block, "vault", headline);
+    let _asking = crate::backend::user_attention::Asking::start(&state.broker, &state.mstore, &attention_block, "vault", headline);
     let answer = match tokio::time::timeout(wait + GRACE, answer).await {
         Ok(Ok(a)) => Some(a),
         // The request was taken down without an answer: as a no.
@@ -68,6 +71,18 @@ fn target_of(r: &UseRequest) -> String {
         r.origin.clone()
     } else {
         format!("{} ({})", r.origin, r.field)
+    }
+}
+
+/// `block_id` while a window shows that pane, else none: a request from an agent
+/// whose pane no window holds (a parked agent, a closed window) is asked in
+/// every window, where it can be answered, not as a card nobody sees.
+pub(super) fn shown_pane(state: &AppState, block_id: &str) -> String {
+    let shown = !block_id.is_empty() && crate::backend::notify::router::resolve_click_target(&state.mstore, block_id).is_some_and(|t| !t.window_ids.is_empty());
+    if shown {
+        block_id.to_string()
+    } else {
+        String::new()
     }
 }
 

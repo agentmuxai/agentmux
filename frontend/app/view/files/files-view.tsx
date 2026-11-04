@@ -23,27 +23,28 @@ import type { FsGitState } from "@/types/rpc/FsGitState";
 import { childKey, touched, touchesUnder, type Touch } from "@/app/store/touched-files";
 import { isMacOS } from "@/util/platformutil";
 import { createEffect, createMemo, createSignal, For, Match, on, onCleanup, onMount, Show, Switch, type JSX } from "solid-js";
-import { errorText, type FilesModel, readableAgentColor, windowsNames } from "./files-model";
+import { errorText, type FilesModel, windowsNames } from "./files-model";
 import { closeOwnTab, openEntryWithOs, openFolderInNewTab, openInEditor, openInPane, openTargetOf, openTerminalHere, openWithOs, revealInOs } from "./files-open";
 import { FilesPreview } from "./files-preview";
 import { paneWorkdir } from "@/app/drag/file-drop-actions";
 import { isContainerPane, spliceComposerTokens } from "../agent/hooks/useAgentDropAttach";
 import { cachedThumbnail, hasThumbnail, thumbnail } from "./files-thumbs";
 import { TypeIcon } from "./files-type-icon";
-import { clipboard, opProgressText } from "./files-ops";
+import { clipboard } from "./files-ops";
 import { beginPathDrag, dropPathsOnto, endPathDrag, pathDragPaths, pathDragSource, registerFileDropTarget, visibleDropTargets } from "@/app/drag/file-drop";
 import { getObjectValue, makeORef } from "@/app/store/mos";
-import { Portal } from "solid-js/web";
-import { crumbsOf, isWithin, nameProblem, samePath, stemLength } from "./files-path";
+import { isWithin, nameProblem, samePath, stemLength } from "./files-path";
 import { clickRow, folderAt, moveFocus, selectAll, toggleFocused } from "./files-selection";
 import { extensionOf, type SortKey } from "./files-sort";
-import { CONFINED_MENU, gitSummary } from "./files-view-text";
+import { CONFINED_MENU } from "./files-view-text";
+import { FilesFooter } from "./FilesFooter";
+import { FilesPlaces } from "./FilesPlaces";
+import { FilesToolbar } from "./FilesToolbar";
 import { TypeAhead } from "./typeahead";
 import "./files.scss";
-import { openRemotesInPane } from "@/app/view/remotes/open-remotes";
 import { isGlobalKey, paneCommandFor, registerPaneCommandRunner, shortcutFor } from "@/app/keybindings";
 import { isEditableTarget } from "@/util/focusutil";
-import { Button, IconButton } from "@/app/element/ui";
+import { Button } from "@/app/element/ui";
 import { MENU_ICON } from "@/app/util/menu-icons";
 import { tip } from "@/app/element/tip";
 
@@ -765,6 +766,12 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
         return `${sel.length} selected${size} · ${count}`;
     });
 
+    const toggleViewMode = (): void => {
+        model.toggleViewMode();
+        if (listEl) listEl.scrollTop = 0;
+        setScrollTop(0);
+    };
+
     const placeLabel = (path: string): string => model.protectedPlace(path)?.label ?? path;
 
     return (
@@ -779,163 +786,25 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
             onContextMenu={(e) => e.preventDefault()}
             onKeyDown={onPaneKeyDown}
         >
-            <div class="files-toolbar">
-                <IconButton icon="arrow-left" label={`Back (${shortcutFor("files:back")})`} class="files-tool" disabled={!model.canBack()} onClick={() => model.goBack()} />
-                <IconButton icon="arrow-right" label={`Forward (${shortcutFor("files:forward")})`} class="files-tool" disabled={!model.canForward()} onClick={() => model.goForward()} />
-                <IconButton icon="arrow-up" label={`Up (${shortcutFor("files:up")})`} class="files-tool" disabled={crumbsOf(model.path()).length < 2} onClick={() => model.goUp()} />
-                <Show
-                    when={!editingPath()}
-                    fallback={
-                        <input
-                            ref={pathInput}
-                            class="files-path-input" data-raw-text-field="the breadcrumb row's inline path editor: it replaces the crumbs in place and ends on Enter, Escape or blur, not a form field"
-                            value={model.path()}
-                            spellcheck={false}
-                            aria-label="Folder path"
-                            onKeyDown={(e) => {
-                                e.stopPropagation();
-                                if (e.key === "Enter") commitPath(e.currentTarget.value);
-                                else if (e.key === "Escape") {
-                                    setEditingPath(false);
-                                    listEl?.focus();
-                                }
-                            }}
-                            onBlur={() => setEditingPath(false)}
-                        />
-                    }
-                >
-                    <nav ref={crumbsEl} class="files-breadcrumb" aria-label="Folder path" onDblClick={startEditingPath} {...tip(`Double-click or ${shortcutFor("files:editPath")} to type a path`)}>
-                        <Show when={model.connection()}>
-                            <span class="files-crumb-host" {...tip(`On ${model.connection()}, over SSH`)}>
-                                <i class="fa fa-server" aria-hidden="true" />
-                                {model.connection()}
-                            </span>
-                        </Show>
-                        <For each={crumbsOf(model.path())}>
-                            {(crumb, i) => (
-                                <>
-                                    <Show when={i() > 0}>
-                                        <i class="fa fa-chevron-right files-crumb-sep" aria-hidden="true" />
-                                    </Show>
-                                    <Button tone="quiet" density="compact" class="files-crumb" onClick={() => void model.navigate(crumb.path)}>
-                                        {crumb.label}
-                                    </Button>
-                                </>
-                            )}
-                        </For>
-                    </nav>
-                </Show>
-                <Show when={filterOpen() || model.filter() !== ""}>
-                    <input
-                        ref={filterInput}
-                        class="files-filter-input" data-raw-text-field="the folder filter in the pane's toolbar row: it owns Escape, Enter and ArrowDown to hand the focus to the list, not a form field"
-                        placeholder="Filter"
-                        aria-label="Filter this folder"
-                        value={model.filter()}
-                        spellcheck={false}
-                        onInput={(e) => model.setFilter(e.currentTarget.value)}
-                        onKeyDown={(e) => {
-                            e.stopPropagation();
-                            if (e.key === "Escape") closeFilter();
-                            else if (e.key === "Enter" || e.key === "ArrowDown") {
-                                e.preventDefault();
-                                const first = model.order()[0];
-                                if (first) model.setSelection({ names: new Set([first]), focus: first, anchor: first });
-                                listEl?.focus();
-                            }
-                        }}
-                    />
-                </Show>
-                <IconButton icon="filter" label={`Filter (${shortcutFor("files:filter")})`} class="files-tool" onClick={openFilter} />
-                <IconButton icon="folder-plus" label="New folder" class="files-tool" onClick={() => void model.createNew("dir")} />
-                <IconButton icon={model.showHidden() ? "eye" : "eye-slash"} label={model.showHidden() ? "Hide hidden files" : "Show hidden files"} pressed={model.showHidden()} class="files-tool" onClick={() => model.toggleHidden()} />
-                <IconButton icon="arrows-rotate" label="Refresh (F5)" class="files-tool" onClick={() => model.refresh()} />
-                <IconButton icon="table-columns" label={model.showSidebar() ? "Hide Places" : "Show Places"} pressed={model.showSidebar()} class="files-tool" onClick={() => model.toggleSidebar()} />
-                <IconButton icon={grid() ? "list" : "table-cells-large"} label={grid() ? "Show as a list" : "Show as thumbnails"} pressed={grid()} class="files-tool" onClick={() => {
-                        model.toggleViewMode();
-                        if (listEl) listEl.scrollTop = 0;
-                        setScrollTop(0);
-                    }} />
-                <IconButton icon="eye" label={model.showPreview() ? "Hide preview (Space)" : "Show preview (Space)"} pressed={model.showPreview()} class="files-tool" onClick={() => model.togglePreview()} />
-            </div>
+            <FilesToolbar
+                model={model}
+                grid={grid}
+                editingPath={editingPath}
+                filterOpen={filterOpen}
+                startEditingPath={startEditingPath}
+                commitPath={commitPath}
+                onStopEditing={() => setEditingPath(false)}
+                openFilter={openFilter}
+                closeFilter={closeFilter}
+                onToggleViewMode={toggleViewMode}
+                focusList={() => listEl?.focus()}
+                pathInputRef={(el) => (pathInput = el)}
+                crumbsRef={(el) => (crumbsEl = el)}
+                filterRef={(el) => (filterInput = el)}
+            />
 
             <div class="files-body">
-                <Show when={model.showSidebar()}>
-                    <nav class="files-places" aria-label="Places">
-                        <div class="files-places-heading">Places</div>
-                        <For each={model.places().filter((p) => p.kind !== "drive" && p.kind !== "wsl")}>
-                            {(p) => (
-                                <Button variant="row" density="compact" class="files-place" title={p.path} onClick={() => void model.openOn("", p.path)}>
-                                    <i class={`fa fa-${p.kind === "home" ? "house" : "folder"}`} />
-                                    <span>{p.label}</span>
-                                </Button>
-                            )}
-                        </For>
-                        <Show when={model.places().some((p) => p.kind === "drive")}>
-                            <div class="files-places-heading">Drives</div>
-                            <For each={model.places().filter((p) => p.kind === "drive")}>
-                                {(p) => (
-                                    <Button variant="row" density="compact" class="files-place" title={p.path} onClick={() => void model.openOn("", p.path)}>
-                                        <i class="fa fa-hard-drive" />
-                                        <span>{p.label}</span>
-                                    </Button>
-                                )}
-                            </For>
-                        </Show>
-                        <Show when={model.places().some((p) => p.kind === "wsl")}>
-                            <div class="files-places-heading">WSL</div>
-                            <For each={model.places().filter((p) => p.kind === "wsl")}>
-                                {(p) => (
-                                    <Button variant="row" density="compact" class="files-place" title={p.path} onClick={() => void model.openOn("", p.path)}>
-                                        <i class="fa-brands fa-linux" />
-                                        <span>{p.label}</span>
-                                    </Button>
-                                )}
-                            </For>
-                        </Show>
-                        <Show when={model.remotes().length > 0}>
-                            <div class="files-places-heading files-places-heading-with-action">
-                                <span>Remote</span>
-                                <IconButton
-                                    icon="gear"
-                                    label="Manage remotes…"
-                                    density="compact"
-                                    class="files-places-heading-action"
-                                    onClick={() =>
-                                        void openRemotesInPane(model.blockId, model.connection() || undefined).catch(
-                                            (e) => console.log("could not open Remotes", e)
-                                        )
-                                    }
-                                />
-                            </div>
-                            <For each={model.remotes()}>
-                                {(host) => (
-                                    <Button
-                                        variant="row"
-                                        density="compact"
-                                        class={model.connection() === host.name ? "files-place files-place-active" : "files-place"}
-                                        title={`Your home folder on ${host.name}, over SSH`}
-                                        onClick={() => void model.openOn(host.name, "~")}
-                                    >
-                                        <i class="fa fa-server" style={host.color ? { color: host.color } : undefined} />
-                                        <span>{host.label}</span>
-                                    </Button>
-                                )}
-                            </For>
-                        </Show>
-                        <Show when={model.agents().length > 0}>
-                            <div class="files-places-heading">Agents</div>
-                            <For each={model.agents()}>
-                                {(a) => (
-                                    <Button variant="row" density="compact" class="files-place" title={a.path} onClick={() => void model.openOn("", a.path)}>
-                                        <i class="fa fa-robot" />
-                                        <span style={a.color ? { color: readableAgentColor(a.color) } : undefined}>{a.name}</span>
-                                    </Button>
-                                )}
-                            </For>
-                        </Show>
-                    </nav>
-                </Show>
+                <FilesPlaces model={model} />
 
                 <div
                     ref={listEl}
@@ -1107,53 +976,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                 </Show>
             </div>
 
-            <For each={model.ops.ops().filter((o) => o.state === "running" || o.state === "conflict")}>
-                {(op) => (
-                    <div class="files-op" role="status">
-                        <span class="files-op-text">{opProgressText(op)}</span>
-                        <span class="files-op-bar" aria-hidden="true">
-                            <span
-                                class="files-op-fill"
-                                style={{ width: `${op.total_bytes > 0 ? Math.floor((op.done_bytes / op.total_bytes) * 100) : op.total_items > 0 ? Math.floor((op.done_items / op.total_items) * 100) : 0}%` }}
-                            />
-                        </span>
-                        <Button tone="quiet" class="files-status-undo" onClick={() => void model.ops.cancel(op.op_id)}>
-                            Cancel
-                        </Button>
-                    </div>
-                )}
-            </For>
-            <Show when={model.ops.ops().find((o) => o.state === "conflict" && o.conflict)}>
-                {(op) => <ConflictDialog op={op()} onResolve={(choice, all) => void model.ops.resolve(op().op_id, choice, all)} onCancel={() => void model.ops.cancel(op().op_id)} />}
-            </Show>
-            <div class="files-status" role="status">
-                <Show
-                    when={model.status()}
-                    fallback={
-                        <span>
-                            {summary()}
-                            <Show when={model.git()}>
-                                {(g) => (
-                                    <span class="files-git-summary" {...tip("git branch, commits ahead/behind its upstream, and changes under this folder")}>
-                                        <i class="fa fa-code-branch" aria-hidden="true" /> {gitSummary(g())}
-                                    </span>
-                                )}
-                            </Show>
-                        </span>
-                    }
-                >
-                    {(msg) => (
-                        <span classList={{ "files-status-error": msg().tone === "error" }}>
-                            {msg().text}
-                            <Show when={msg().undo}>
-                                <Button tone="quiet" class="files-status-undo" onClick={() => void model.undo()}>
-                                    Undo
-                                </Button>
-                            </Show>
-                        </span>
-                    )}
-                </Show>
-            </div>
+            <FilesFooter model={model} summary={summary} />
 
             <Show when={menu()}>
                 {(m) => <ContextMenu items={m().items} x={m().x} y={m().y} onClose={() => setMenu(null)} />}
@@ -1461,68 +1284,5 @@ function RenameInput(props: { model: FilesModel; entry: FsEntry; onDone: () => v
                 </span>
             </Show>
         </span>
-    );
-}
-
-/** A copy or move found something already at the destination (§7.2). */
-function ConflictDialog(props: {
-    op: import("./files-ops").OpView;
-    onResolve: (choice: "replace" | "skip" | "keep_both", applyToAll: boolean) => void;
-    onCancel: () => void;
-}): JSX.Element {
-    const [all, setAll] = createSignal(false);
-    const c = () => props.op.conflict!;
-    const name = () => c().dest.split(/[\\/]/).pop() ?? c().dest;
-    const side = (size?: number, mtime?: number) =>
-        [size != null ? formatBytes(size) : null, mtime != null ? new Date(mtime).toLocaleString() : null].filter(Boolean).join(", ");
-    let first: HTMLButtonElement | undefined;
-    onMount(() => first?.focus());
-    return (
-        <Portal>
-            <div
-                class="files-conflict-overlay"
-                onKeyDown={(e) => {
-                    if (e.key === "Escape") {
-                        e.preventDefault();
-                        props.onCancel();
-                    }
-                }}
-            >
-                <div class="files-conflict" role="alertdialog" aria-labelledby="files-conflict-title">
-                    <div id="files-conflict-title" class="files-conflict-title">
-                        “{name()}” already exists here
-                    </div>
-                    <div class="files-conflict-body">
-                        <div>
-                            {c().dest_is_dir ? "A folder" : "A file"} with that name is already in the destination
-                            {c().source_is_dir && c().dest_is_dir ? "." : `${c().dest_is_dir !== c().source_is_dir ? `, and the one being ${props.op.kind === "move" ? "moved" : "copied"} is a ${c().source_is_dir ? "folder" : "file"}.` : "."}`}
-                        </div>
-                        <Show when={!c().source_is_dir && !c().dest_is_dir}>
-                            <div class="files-conflict-sides">
-                                <div>Existing: {side(c().dest_size ?? undefined, c().dest_mtime ?? undefined)}</div>
-                                <div>Incoming: {side(c().source_size ?? undefined, c().source_mtime ?? undefined)}</div>
-                            </div>
-                        </Show>
-                        <label class="files-conflict-all">
-                            <input type="checkbox" checked={all()} onChange={(e) => setAll(e.currentTarget.checked)} /> Do this for every conflict
-                        </label>
-                    </div>
-                    <div class="files-conflict-actions">
-                        <Button ref={first} class="files-button" onClick={() => props.onResolve("keep_both", all())}>
-                            Keep both
-                        </Button>
-                        <Button class="files-button" onClick={() => props.onResolve("skip", all())}>
-                            Skip
-                        </Button>
-                        <Button tone="danger" class="files-button files-button-danger" onClick={() => props.onResolve("replace", all())}>
-                            Replace
-                        </Button>
-                        <Button class="files-button" onClick={props.onCancel}>
-                            Stop
-                        </Button>
-                    </div>
-                </div>
-            </div>
-        </Portal>
     );
 }

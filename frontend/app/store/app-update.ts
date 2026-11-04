@@ -14,6 +14,7 @@ import { createSignal } from "solid-js";
 
 import { WpsEvent } from "@/app/store/mps-events";
 import { getApi } from "@/util/app-api";
+import { formatTimeOrDate } from "@/util/format-time";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { AppUpdateStatus } from "@/types/rpc/AppUpdateStatus";
@@ -73,10 +74,7 @@ export function upgradeUnderWay(s: AppUpdateStatus | null = appUpdate()): boolea
 
 /** When the last check answered, for "Checked 14:05" (a date when not today). */
 export function checkedAt(ms: number, now: Date = new Date()): string {
-    const at = new Date(ms);
-    return at.toDateString() === now.toDateString()
-        ? at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-        : at.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    return formatTimeOrDate(ms, now);
 }
 
 /** srv's download of the newer release, or null before one was asked for. */

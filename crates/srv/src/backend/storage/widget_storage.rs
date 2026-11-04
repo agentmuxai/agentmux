@@ -4,7 +4,7 @@
 //! A widget package's own key-value store, the `storage` permission
 //! (docs/specs/SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §6.3): per
 //! package, not per pane, values as JSON text. The limits are the caller's
-//! (`backend/widget_access.rs`); this module only counts bytes.
+//! (`backend/widget/access.rs`); this module only counts bytes.
 
 use rusqlite::{params, OptionalExtension};
 

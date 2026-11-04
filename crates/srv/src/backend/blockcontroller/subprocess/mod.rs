@@ -59,6 +59,7 @@ mod codex_compact;
 mod codex_context;
 mod codex_mcp;
 mod codex_fresh;
+mod gemini_mcp;
 mod container_spawn;
 mod host_spawn;
 mod session;

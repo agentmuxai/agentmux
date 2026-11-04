@@ -128,3 +128,42 @@
 .account-card .account-card-tag {
     vertical-align: middle;
 }
+
+// The add section under a tile (AddAccountSection): the chooser's modes and the panels it
+// hosts, laid out in the section instead of in a dialog box.
+.accounts-chooser.accounts-chooser--inline {
+    width: auto;
+    max-width: none;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+}
+
+.accounts-add-section {
+    display: flex;
+    flex-direction: column;
+    max-width: 480px;
+
+    .accounts-add-header {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        padding: var(--space-2) var(--space-3);
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .accounts-add-header .accounts-chooser-title {
+        flex: 1;
+        font-weight: 600;
+        font-size: var(--text-base);
+    }
+
+    // The sections that were dialogs need their rows, not a box.
+    .accounts-chooser-modes {
+        display: flex;
+        flex-direction: column;
+        padding: var(--space-2);
+        gap: var(--space-2);
+    }
+}

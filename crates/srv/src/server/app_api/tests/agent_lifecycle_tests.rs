@@ -177,6 +177,7 @@ fn row_in(state: AgentRuntimeState, desired: agent_runtime::AgentDesiredState) -
         provider: "claude".into(),
         icon: String::new(),
         color: None,
+        blocked: None,
     }
 }
 

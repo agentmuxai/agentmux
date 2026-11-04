@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Widget packages (docs/specs/SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §8).
-// Their types are generated from crates/srv/src/backend/widget_packages.rs and
+// Their types are generated from crates/srv/src/backend/widget/packages.rs and
 // crates/srv/src/server/widget_handlers.rs. Approving a widget isn't here: only
 // the host can carry that answer (AppApi `approvals.decideWidget`).
 

@@ -152,4 +152,54 @@ describe("AgentViewState", () => {
             });
         });
     });
+
+    describe("newActivity (the New activity pill)", () => {
+        const open = () => {
+            const doc = createSignal<DocumentNode[]>([md("a")]);
+            return createAgentViewState(doc[0]);
+        };
+
+        it("is off while following, however much the content grows", () => {
+            withRoot((dispose) => {
+                const state = open();
+                state.noteContentHeight(1000);
+                state.noteContentHeight(2000);
+                expect(state.newActivity()).toBe(false);
+                dispose();
+            });
+        });
+
+        it("comes on when the content grows below a reader who scrolled up, and goes when they follow again", () => {
+            withRoot((dispose) => {
+                const state = open();
+                state.noteContentHeight(1000);
+                state.disengageStickToBottom();
+                expect(state.newActivity()).toBe(false); // nothing new yet
+                state.noteContentHeight(1003); // a re-measured row, not activity
+                expect(state.newActivity()).toBe(false);
+                state.noteContentHeight(1400);
+                expect(state.newActivity()).toBe(true);
+                state.engageStickToBottom();
+                expect(state.newActivity()).toBe(false);
+                dispose();
+            });
+        });
+
+        it("counts only the growth since the reader left, not growth from before", () => {
+            withRoot((dispose) => {
+                const state = open();
+                state.noteContentHeight(1000);
+                state.disengageStickToBottom();
+                state.noteContentHeight(1400);
+                expect(state.newActivity()).toBe(true);
+                state.engageStickToBottom(); // the pill's click: no content change follows
+                expect(state.newActivity()).toBe(false);
+                state.disengageStickToBottom(); // leaves again at 1400
+                expect(state.newActivity()).toBe(false);
+                state.noteContentHeight(1500);
+                expect(state.newActivity()).toBe(true);
+                dispose();
+            });
+        });
+    });
 });

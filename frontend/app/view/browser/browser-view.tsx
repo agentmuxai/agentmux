@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createEffect, createSignal, For, Match, on, onCleanup, Show, Switch, type JSX } from "solid-js";
+import { createEffect, createSignal, on, onCleanup, Show, type JSX } from "solid-js";
 import { isAnyUnderway } from "@/app/drag/drag-session";
 import { hostHas } from "@/util/host-caps";
 import { getApi } from "@/util/app-api";
@@ -17,11 +17,11 @@ import { useFreezeFrame } from "./use-freeze-frame";
 import { useBrowserAuth } from "./use-browser-auth";
 import { Button } from "@/app/element/ui";
 import { BrowserSigninOffer, BrowserSigninPending } from "./browser-signin-offer";
+import { BrowserAttentionBanner } from "./browser-attention";
 import { BrowserNavBar } from "./browser-nav-bar";
+import { BrowserPopupNotes } from "./browser-popups";
 import { DownloadStrip } from "./download-strip";
 import { ActionLogStrip, DrivenByStrip } from "./driven-by-strip";
-import { hasTerminalPower, LATE_PROMPT_LIMIT, minutesLabel, siteLabel } from "./bypass";
-import { attentionLook, dialogMessage } from "./attention-kinds";
 import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
 import { useWindowTabId } from "@/app/workspace/window-tab-visibility";
 import { getSettingsKeyAtom } from "@/store/global";
@@ -634,202 +634,11 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
             />
 
             <Show when={model.attentionAtom()}>
-                {(a) => (
-                    <div
-                        class="browser-attention"
-                        classList={{ "browser-attention--agent": attentionLook(a()).agent }}
-                        data-kind={a().kind}
-                        role="alertdialog"
-                        aria-live="assertive"
-                    >
-                        <div class="browser-attention-head">
-                            <i class={`fa-solid ${attentionLook(a()).icon}`} aria-hidden="true" />
-                            <Switch
-                                fallback={
-                                    <span>
-                                        <b>{a().agent || "An agent"}</b>{" "}
-                                        {a().kind === "handoff"
-                                            ? "needs you: "
-                                            : a().kind === "bypass"
-                                              ? "asks you to auto-approve its clicks: "
-                                              : "wants to: "}
-                                        {a().kind === "handoff" || a().kind === "bypass" ? a().reason : a().what}
-                                    </span>
-                                }
-                            >
-                                <Match when={attentionLook(a()).text}>{(text) => <span>{text()}</span>}</Match>
-                                <Match when={a().kind === "navigation"}>
-                                    <span>
-                                        This pane is limited to the sites it was opened for. The page wants to{" "}
-                                        {a().popup ? "open a window at " : "go to "}
-                                        <b>{a().origin}</b>.
-                                    </span>
-                                </Match>
-                                <Match when={a().kind === "dialog"}>
-                                    <span>
-                                        {a().dialogKind === "beforeunload" ? (
-                                            <>
-                                                The page at <b>{a().origin || "this site"}</b> asks whether to leave it
-                                            </>
-                                        ) : (
-                                            <>
-                                                The page at <b>{a().origin || "this site"}</b> asks
-                                            </>
-                                        )}
-                                        {a().agent ? (
-                                            <>
-                                                {" "}
-                                                (after <b>{a().agent}</b>'s action)
-                                            </>
-                                        ) : null}
-                                        :
-                                    </span>
-                                </Match>
-                            </Switch>
-                        </div>
-                        <Show when={a().kind === "approval" && a().description}>
-                            <div class="browser-attention-target browser-attention-description">
-                                {(a().description ?? "").length > 200
-                                    ? `${(a().description ?? "").slice(0, 200)}…`
-                                    : a().description}
-                            </div>
-                        </Show>
-                        <Show when={a().kind === "approval" && a().why}>
-                            <div class="browser-attention-target">Asked because {a().why}.</div>
-                        </Show>
-                        {/* The page's own words, as text in a box of their own, so
-                            they can't pass for AgentMux's (dialogs spec §8.1). */}
-                        <Show when={a().kind === "dialog" && dialogMessage(a().message)}>
-                            <blockquote class="browser-attention-page-text">{dialogMessage(a().message)}</blockquote>
-                        </Show>
-                        <Show when={attentionLook(a()).showUrl && a().url}>
-                            <div class="browser-attention-target" {...tip(a().url)}>
-                                {a().url}
-                            </div>
-                        </Show>
-                        <Show when={a().kind === "navigation"}>
-                            <div class="browser-attention-target">
-                                {a().popup
-                                    ? "Allow adds this site to the pane's list; then click again to open the window."
-                                    : "Allow adds this site to the pane's list and goes there. A form's data isn't sent again."}
-                            </div>
-                        </Show>
-                        <Show when={a().kind === "bypass"}>
-                            <div class="browser-attention-target">
-                                On <b>{(a().origins ?? []).map(siteLabel).join(", ")}</b>, for{" "}
-                                <b>{minutesLabel(a().minutes ?? 60)}</b>: its clicks that submit, delete or send go
-                                through without asking you, and so does the page's own "Are you sure?" that follows one. It still can't type passwords or codes or run scripts, and
-                                payments still ask. Stop it any time from the red strip.
-                            </div>
-                        </Show>
-                        <Show when={a().kind === "bypass" && hasTerminalPower(a().powers)}>
-                            <div class="browser-attention-target">
-                                It also asks to <b>run commands in the terminal</b> on {(a().origins ?? []).map(siteLabel).join(", ")}:
-                                it types real keys and presses Enter with no question per line. You can read every line in the
-                                pane's Log, and Stop or Pause end it at once. Passwords and codes stay yours to type.{" "}
-                                One limit: {LATE_PROMPT_LIMIT}
-                            </div>
-                        </Show>
-                        <Show when={a().window}>
-                            <div class="browser-attention-target">In its popup window: {a().window}</div>
-                        </Show>
-                        <Show when={a().kind === "approval" && (a().fields?.length ?? 0) > 0}>
-                            <table class="browser-attention-fields">
-                                <tbody>
-                                    <For each={a().fields}>
-                                        {(f) => (
-                                            <tr>
-                                                <td>{f[0]}</td>
-                                                <td>{f[1]}</td>
-                                            </tr>
-                                        )}
-                                    </For>
-                                </tbody>
-                            </table>
-                        </Show>
-                        <Show when={a().kind === "approval" && a().action}>
-                            <div class="browser-attention-target">Sends to {a().action}</div>
-                        </Show>
-                        <div class="browser-attention-actions">
-                            <Show when={attentionLook(a()).back}>
-                                <Button
-                                    density={attentionLook(a()).density}
-                                    disabled={!model.canGoBackAtom()}
-                                    onClick={() => model.resolveAttention("back").catch(() => {})}
-                                >
-                                    Back
-                                </Button>
-                            </Show>
-                            <Show when={attentionLook(a()).yes}>
-                                {(yes) => (
-                                    <Button
-                                        tone={attentionLook(a()).tone}
-                                        density={attentionLook(a()).density}
-                                        onClick={() => model.resolveAttention(attentionLook(a()).answer).catch(() => {})}
-                                    >
-                                        {yes()}
-                                    </Button>
-                                )}
-                            </Show>
-                            <Show when={a().kind === "bypass" && !a().local}>
-                                <Button
-                                    density={attentionLook(a()).density}
-                                    title="Keep this: it is added to Settings, Agents on sites, where you can revoke it"
-                                    onClick={() => model.resolveAttention("approve_always").catch(() => {})}
-                                >
-                                    Always for {a().agent ?? "this agent"} on this site
-                                </Button>
-                            </Show>
-                            <Button
-                                density={attentionLook(a()).density}
-                                onClick={() => model.resolveAttention("cancel").catch(() => {})}
-                            >
-                                {attentionLook(a()).no}
-                            </Button>
-                        </div>
-                    </div>
-                )}
+                {(a) => <BrowserAttentionBanner model={model} attention={a} />}
             </Show>
             <BrowserSigninPending blockId={model.blockId} meta={() => model.meta()} />
             <BrowserSigninOffer blockId={model.blockId} meta={() => model.meta()} covered={() => model.attentionAtom() != null} />
-            <Show when={model.popupWindowsAtom().length > 0}>
-                <div class="browser-popup-windows" role="list" aria-label="Popup windows">
-                    <For each={model.popupWindowsAtom()}>
-                        {(w) => (
-                            <div class="browser-popup-window" role="listitem">
-                                <i class="fa-solid fa-window-restore" aria-hidden="true" />
-                                <span class="browser-popup-window-url" {...tip(w.url)}>
-                                    Popup window: {w.url}
-                                </span>
-                                <Button
-                                    density="compact"
-                                    title="Bring this popup window to the front"
-                                    onClick={() => model.showPopup(w.id).catch(() => {})}
-                                >
-                                    Show
-                                </Button>
-                                <Button
-                                    density="compact"
-                                    title="Close this popup window"
-                                    onClick={() => model.closePopup(w.id).catch(() => {})}
-                                >
-                                    Close
-                                </Button>
-                            </div>
-                        )}
-                    </For>
-                </div>
-            </Show>
-            <Show when={model.popupFromAtom()}>
-                {(from) => (
-                    <div class="browser-popup-from" role="note">
-                        <i class="fa-solid fa-window-restore" aria-hidden="true" />
-                        <span>
-                            Popup from <b>{from()}</b>
-                        </span>
-                    </div>
-                )}
-            </Show>
+            <BrowserPopupNotes model={model} />
             <Show
                 when={model.driverAgentAtom()}
                 fallback={

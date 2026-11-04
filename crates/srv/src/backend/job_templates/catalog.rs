@@ -19,9 +19,9 @@ use sha2::{Digest, Sha256};
 
 use super::package::{self, MAX_BYTES, TEMPLATE_FILE};
 use super::BUILTIN_PUBLISHER;
-use crate::backend::widget_catalog as wc;
-use crate::backend::widget_packages as wp;
-use crate::backend::widget_signature as sig;
+use crate::backend::widget::catalog as wc;
+use crate::backend::widget::packages as wp;
+use crate::backend::widget::signature as sig;
 
 const MAX_INDEX_BYTES: usize = 1024 * 1024;
 const CATALOG_VERSION: u32 = 1;

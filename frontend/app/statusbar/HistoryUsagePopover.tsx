@@ -13,6 +13,7 @@ import { Button } from "@/app/element/ui";
 import { openOrFocusPaneByView } from "@/app/store/block-component-registry";
 import type { HistoryUsage } from "@/types/rpc/HistoryUsage";
 import { formatBytes } from "@/util/format-bytes";
+import { formatRelativeTime } from "@/util/format-time";
 
 interface HistoryUsagePopoverProps {
     anchor: PopoverAnchor;
@@ -25,12 +26,9 @@ interface HistoryUsagePopoverProps {
 /** The per-version copies: listed, but not in the total, so no share of it. */
 const OLD_COPIES = "channel-copies";
 
-/** "5 min ago", "just now": when the numbers were measured. */
-export function measuredAgo(computedAtMs: number, nowMs: number): string {
-    const min = Math.floor(Math.max(0, nowMs - computedAtMs) / 60_000);
-    if (min < 1) return "just now";
-    if (min < 60) return `${min} min ago`;
-    return `${Math.floor(min / 60)} h ago`;
+/** "5 min. ago", "now": when the numbers were measured. */
+export function measuredAgo(computedAtMs: number, nowMs: number, locale?: string): string {
+    return formatRelativeTime(computedAtMs, nowMs, { locale, nowBelowSecs: 60 });
 }
 
 export const HistoryUsagePopover = (props: HistoryUsagePopoverProps): JSX.Element => {

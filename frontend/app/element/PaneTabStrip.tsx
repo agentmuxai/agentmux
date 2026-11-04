@@ -24,7 +24,7 @@
 
 import { landedTab, markLanded } from "./pane-tab-landing";
 export { LANDING_BOUNCE_MS } from "./pane-tab-landing";
-import { batch, createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show, type Accessor, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show, type Accessor, type JSX } from "solid-js";
 import { draggable, dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import { preventUnhandled } from "@atlaskit/pragmatic-drag-and-drop/prevent-unhandled";
 import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
@@ -54,7 +54,8 @@ import { asDocTabDragData, docTabItemType, paneTabItemType, type DocTabDragData 
 import { createScrollEdges } from "./scroll-edges";
 import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
 import { useWindowTabDisplayed } from "@/app/workspace/window-tab-visibility";
-import { beginHover, edgeFlashArea, type Hover, type HoverFlash } from "./drop-blink-clock";
+import { edgeFlashArea } from "./drop-blink-clock";
+import { createForeignHover } from "./pane-tab-foreign-hover";
 import type { LayoutModel } from "@/layout/lib/layoutModel";
 import { clearPillGhost, pillZone, showPillGhost, type PillZone } from "@/layout/lib/paneBodyDrop";
 import type { DropDirection } from "@/layout/lib/types";
@@ -68,6 +69,39 @@ import type { PaneTabProgress } from "@/app/store/pane-tab-progress";
 const WIDTH_TRANSITION_MS = DURATION_BASE_MS;
 
 
+
+/**
+ * The ghost pill's text for a pane-tab drag over a strip that holds `here`: the grabbed tab's title, or the
+ * count of the picked tabs this strip lacks. None when nothing would be added (the drag is not a pane tab, or
+ * every tab is already here).
+ */
+export function incomingTabLabel(data: Record<string | symbol, unknown>, here: ReadonlySet<string>): string | null {
+    if (data.type !== paneTabItemType) return null;
+    const many = multiIdsOf(data);
+    if (many) {
+        const added = many.filter((blockId) => !here.has(blockId)).length;
+        return added === 0 ? null : added === 1 ? "1 tab" : `${added} tabs`;
+    }
+    const blockId = data.blockId;
+    if (typeof blockId !== "string" || here.has(blockId)) return null;
+    return typeof data.label === "string" && data.label ? data.label : "Tab";
+}
+
+/**
+ * What a pane tab's pill carries when dragged: its block, the pane and window tab it comes from, the picked set
+ * when it is dragged with several, and its title (the ghost pill's text over another pane's strip).
+ */
+function paneTabDragData(blockId: string, label: string, paneKey?: string, sourceTabId?: string, many?: readonly string[]) {
+    return {
+        kind: "pane-tab",
+        blockId,
+        label,
+        type: paneTabItemType,
+        sourceNodeId: paneKey,
+        sourceTabId,
+        ...(many && many.length > 1 ? { blockIds: many } : {}),
+    };
+}
 
 /** The block ids a pane-tab drag carries when it carries several (a Ctrl/Cmd+click selection), else undefined. */
 function multiIdsOf(data: Record<string | symbol, unknown>): readonly string[] | undefined {
@@ -428,12 +462,6 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
     // content here is already visible the whole time, so there's nothing
     // to reveal before committing; see the spec's own reasoning for
     // skipping that dwell timer.
-    const [foreignHover, setForeignHover] = createSignal(false);
-    // What this hover entry got from the window's flash budget (drop-blink-clock.ts):
-    // the blink, the held negative alone, or the outline alone. Set before
-    // `foreignHover`, so the class toggles are applied in the same frame.
-    const [flash, setFlash] = createSignal<HoverFlash>("blink");
-    let hover: Hover | null = null;
     // The element that flashes, to size the hover against the flash rule (drop-blink-clock.ts).
     let flashEl: HTMLElement | undefined;
     const flashArea = (): number | undefined => {
@@ -442,20 +470,17 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
         // A pane header flashes its two edge strips only; a strip used as its own drop zone, all of it.
         return flashEl?.matches(PANE_HEADER_SELECTOR) ? edgeFlashArea(r.width, r.height) : r.width * r.height;
     };
-    const beginForeignHover = () => {
-        hover?.end();
-        hover = beginHover(performance.now(), flashArea());
-        batch(() => {
-            setFlash(hover!.kind);
-            setForeignHover(true);
-        });
-    };
-    const endForeignHover = () => {
-        hover?.end();
-        hover = null;
-        setForeignHover(false);
-    };
-    onCleanup(() => hover?.end());
+    const {
+        foreignHover,
+        flash,
+        incoming,
+        begin: beginForeignHover,
+        end: endForeignHover,
+        hovering,
+    } = createForeignHover({
+        flashArea,
+        incomingOf: (data) => incomingTabLabel(data, new Set(props.tabs.map((tab) => props.getId(tab)))),
+    });
     // Whether the hover highlight belongs on the strip box itself. False
     // once the drop zone resolves to the enclosing header row, so the
     // feedback outlines exactly the area that actually accepts the drop
@@ -517,8 +542,8 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
             zone = pillZone(input);
             // The header glows where the pill would join, and nowhere else.
             if (zone.kind === "join") {
-                if (!hover) beginForeignHover();
-            } else if (hover) {
+                if (!hovering()) beginForeignHover(args.source);
+            } else if (hovering()) {
                 endForeignHover();
             }
             if (zone.kind === "place") {
@@ -556,8 +581,8 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
             // A drag that starts inside this pane (gathering tabs into the pane the grabbed one came
             // from) is over this drop zone from the first moment: pragmatic-dnd calls onDragStart for
             // that, not onDragEnter.
-            onDragStart: (args) => (singlePill(args) ? followPill(args, true) : beginForeignHover()),
-            onDragEnter: (args) => (singlePill(args) ? followPill(args, true) : beginForeignHover()),
+            onDragStart: (args) => (singlePill(args) ? followPill(args, true) : beginForeignHover(args?.source)),
+            onDragEnter: (args) => (singlePill(args) ? followPill(args, true) : beginForeignHover(args?.source)),
             onDrag: (args) => {
                 if (singlePill(args)) followPill(args);
             },
@@ -817,6 +842,12 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                         />
                     )}
                 </For>
+                <Show when={foreignHover() && incoming()}>
+                    {/* Where the tab(s) being dragged here land: after the last tab, as the drop appends them. */}
+                    <div class="pane-tab pane-tab--incoming" aria-hidden="true">
+                        <span class="pane-tab-label">{incoming()}</span>
+                    </div>
+                </Show>
                 <Show when={props.onAdd}>
                     {/* Tooltip (Portal-based), same reason as the per-tab one
                         above: native `title` is slow/inconsistent in CEF.
@@ -990,17 +1021,8 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
         const onReorder = props.onReorder;
         if (!onReorder) return null;
         return {
-            data: () => {
-                const many = props.selection?.dragIds(id());
-                return {
-                    kind: "pane-tab",
-                    blockId: id(),
-                    type: paneTabItemType,
-                    sourceNodeId: props.paneKey,
-                    sourceTabId: props.sourceTabId,
-                    ...(many && many.length > 1 ? { blockIds: many } : {}),
-                };
-            },
+            data: () =>
+                paneTabDragData(id(), props.getLabel(props.tab), props.paneKey, props.sourceTabId, props.selection?.dragIds(id())),
             canDrag: () => true,
             start: () => {
                 const many = props.selection?.dragIds(id());

@@ -13,6 +13,8 @@ const hub = vi.hoisted(() => ({
     reloads: [] as string[],
     redocks: [] as unknown[][],
     redockFails: false,
+    // What srv answers a redock with; a plain `{ redocked: true }` when unset.
+    answer: undefined as unknown,
     guard: (() => false) as () => boolean,
     focused: [] as string[],
     // What the guard read at each step (the saga calls and the focus call).
@@ -50,7 +52,7 @@ vi.mock("@/app/store/services", () => ({
             hub.redocks.push(args);
             hub.guardAt.push("saga:" + hub.guard());
             if (hub.redockFails) throw new Error("saga");
-            return { redocked: true };
+            return hub.answer ?? { redocked: true };
         },
     },
 }));
@@ -73,6 +75,7 @@ beforeEach(() => {
     hub.reloads = [];
     hub.redocks = [];
     hub.redockFails = false;
+    hub.answer = undefined;
     hub.focused = [];
     hub.guardAt = [];
     hub.guard = redockInProgress;
@@ -147,6 +150,26 @@ describe("redockThisFloater", () => {
     it("redocks, then brings the target window forward", async () => {
         expect(await redockThisFloater()).toBe(true);
         expect(hub.redocks).toHaveLength(1);
+        expect(hub.focused).toEqual(["main"]);
+    });
+    it("asks srv to go back to where the pane was torn from, with the main window's active tab as the fallback", async () => {
+        expect(await redockThisFloater()).toBe(true);
+        expect(hub.redocks).toEqual([["b1", "ftab", "fws", "mtab", "mws", null, null, false, ["b1"], "b1", true]]);
+    });
+    it("brings forward the window that shows where the pane went, not always the main one", async () => {
+        hub.instances = [
+            { label: "main", windowId: "w-main" },
+            { label: "window-2", windowId: "w-2" },
+            { label: "floating-1", windowId: "w-f" },
+        ];
+        hub.objects.set("window:w-2", { workspaceid: "ows" });
+        hub.answer = { redocked: true, placed: "neighbour", target_workspace_id: "ows" };
+        expect(await redockThisFloater()).toBe(true);
+        expect(hub.focused).toEqual(["window-2"]);
+    });
+    it("brings the main window forward when no origin was found", async () => {
+        hub.answer = { redocked: true, placed: "fallback", target_workspace_id: "mws" };
+        expect(await redockThisFloater()).toBe(true);
         expect(hub.focused).toEqual(["main"]);
     });
     it("holds the redock guard across the saga AND the focus call, and releases it after", async () => {

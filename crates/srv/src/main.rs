@@ -160,7 +160,7 @@ async fn app_main() {
     // approvals, merge their widget-bar entries, watch the folder
     // (SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §8.1). After the user's
     // widgets.json loaded above, whose v1 module entries it lists too.
-    backend::widget_packages::start(
+    backend::widget::packages::start(
         &config.data_home,
         config.auth_key.clone(),
         bg.fs_watch_pool.clone(),
@@ -436,6 +436,7 @@ async fn app_main() {
     backend::supervisor::settings::install_config(Arc::clone(&state.config_watcher));
     backend::transcript::framer::install_config(Arc::clone(&state.config_watcher));
     backend::transcript::damage::install_broker(Arc::clone(&state.broker));
+    identity::accounts_changed::install_broker(Arc::clone(&state.broker));
     // The open workspace saves itself as it changes (SPEC_WORKSPACES_2026_10_23.md §4.1).
     server::service::user_workspace::spawn_saver(Arc::clone(&state.mstore));
     // One notice per account its agents are out of quota or signed out on

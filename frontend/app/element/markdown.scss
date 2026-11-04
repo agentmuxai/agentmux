@@ -259,6 +259,7 @@
 
     // A pill label. Alone it's neutral; combined with a colour class below
     // (declared later, so its `color` wins), the pill takes that colour.
+    // tag: fixed - raw HTML class an agent writes into rendered markdown (am-badge); it cannot be a component, and its colour is the writer's am-ok/am-warn/am-error
     .am-badge {
         display: inline-block;
         padding: 0 0.45em;

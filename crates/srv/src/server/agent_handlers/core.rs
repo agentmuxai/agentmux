@@ -95,13 +95,11 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     // createagent → insert new agent, broadcast agents:changed
     let mstore_cfa = state.mstore.clone();
-    let id_store_cfa = state.id_store.clone();
     let broker_cfa = state.broker.clone();
     engine.register_typed(
         COMMAND_CREATE_AGENT,
         move |cmd: CommandCreateAgentDefinitionData, _ctx| {
             let mstore = mstore_cfa.clone();
-            let id_store = id_store_cfa.clone();
             let broker = broker_cfa.clone();
             async move {
                 let now = agentmux_common::time::now_ms();
@@ -145,13 +143,6 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
                 };
                 mstore.agent_def_insert(&mut agent).map_err(|e| format!("createagent: {e}"))?;
-                // Every agent gets its own dedicated ABF bundle
-                // (ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §3.2).
-                // Best-effort, same posture as the color assignment below.
-                // Bundle goes into id_store (the effective identity/memory
-                // store), not mstore — see agent_def_provision_and_bind_
-                // bundle's own doc comment for why they must differ.
-                mstore.agent_def_provision_and_bind_bundle(&id_store, &mut agent, now);
                 // Assign the agent its display color at creation
                 // (SPEC_AGENT_COLOR_2026_08_08.md). Best-effort: a failure
                 // here shouldn't fail the create — agent.open assigns a
@@ -447,13 +438,11 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     // importagentfromclaw → read claw workspace, create agent + content
     let mstore_ifc = state.mstore.clone();
-    let id_store_ifc = state.id_store.clone();
     let broker_ifc = state.broker.clone();
     engine.register_typed(
         COMMAND_IMPORT_AGENT_FROM_CLAW,
         move |cmd: CommandImportAgentFromClawData, _ctx| {
             let mstore = mstore_ifc.clone();
-            let id_store = id_store_ifc.clone();
             let broker = broker_ifc.clone();
             async move {
 
@@ -513,7 +502,6 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
                 };
                 mstore.agent_def_insert(&mut agent).map_err(|e| format!("importagentfromclaw: {e}"))?;
-                mstore.agent_def_provision_and_bind_bundle(&id_store, &mut agent, now);
 
                 // Read CLAUDE.md → agentmd content
                 let claude_md_path = workspace_path.join("CLAUDE.md");
@@ -578,13 +566,11 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     // importagents — bulk import from JSON export format
     let mstore_ifa = state.mstore.clone();
-    let id_store_ifa = state.id_store.clone();
     let broker_ifa = state.broker.clone();
     engine.register_typed(
         COMMAND_IMPORT_AGENTS,
         move |cmd: CommandImportAgentDefinitionsData, _ctx| {
             let mstore = mstore_ifa.clone();
-            let id_store = id_store_ifa.clone();
             let broker = broker_ifa.clone();
             async move {
 
@@ -643,7 +629,6 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         failed.push(format!("{}: {e}", agent_import.name));
                         continue;
                     }
-                    mstore.agent_def_provision_and_bind_bundle(&id_store, &mut agent, now);
 
                     // Insert content types
                     let mut content_ok = true;

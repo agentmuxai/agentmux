@@ -63,6 +63,9 @@ import {
     type TranscriptFileEvent,
 } from "../transcript-cursor";
 import { injectDayDividers } from "./day-dividers";
+import { createHistoryCursor } from "./history-cursor";
+import { historyMetaText } from "./history-meta-text";
+import { startHistoryPoll } from "./history-poll";
 import { HistoryNavigator, shortWhen, type HistoryMode } from "./HistoryNavigator";
 import { parseHistoryAt, type HistoryAt } from "./history-start-at";
 import type { DocumentNode, DocumentState, FilterState } from "../../../agent-model/types";
@@ -77,10 +80,6 @@ const FILL_MAX_PAGES = 8;
 
 /** Appended records are shown at most this often (spec §6.9). */
 export const HISTORY_PUBLISH_MIN_INTERVAL_MS = 1_000;
-
-/** Line-count poll for lines no event brings (another block or srv instance
- *  appending to the agent's shared zone) — same cadence as the live pane. */
-const SHARED_ZONE_POLL_MS = 5_000;
 
 const HISTORY_FILTER: FilterState = {
     // The reader shows the honest full record — thinking included is a
@@ -327,36 +326,12 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
         cursor?.dispose();
         skippedSeen = 0;
         genChangesSeen = 0;
-        const c = new TranscriptCursor({
+        const c = createHistoryCursor({
+            readBlockId,
             deliver: appendRecords,
-            echo: appendRecords,
-            isOwnEcho: () => false,
-            // The stream was truncated, replaced or deleted: what this
-            // reader holds no longer describes it. Start over.
             reset: () => void load(),
-            readRange: async (offset, limit, expectGen) => {
-                const resp = await RpcApi.BlockfileReadRangeCommand(
-                    TabRpcClient,
-                    { block_id: readBlockId, filename: "output", offset, limit, expect_gen: expectGen },
-                    { timeout: 15_000 }
-                );
-                return {
-                    lines: resp?.lines ?? [],
-                    stream: resp?.stream,
-                    gen: resp?.gen,
-                    genMismatch: resp?.gen_mismatch,
-                };
-            },
-            log: (message, level) => {
-                if (level === "warn") {
-                    console.warn(`[AgentHistoryView] ${message}`);
-                    // Skips are logged as warnings; check once the log
-                    // call's own bookkeeping has run.
-                    queueMicrotask(reloadIfSkipped);
-                } else {
-                    console.debug(`[AgentHistoryView] ${message}`);
-                }
-            },
+            // Skips are logged as warnings; check once the log call's own bookkeeping has run.
+            onSkipWarning: () => queueMicrotask(reloadIfSkipped),
         });
         cursor = c;
         return c;
@@ -649,43 +624,11 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
             cursor?.push(ev);
         });
 
-        // Lines no event brings: another block or srv instance appending to
-        // the agent's shared zone (same poll as the live pane's). Only while
-        // shown; a hidden reader catches up from the first poll after reveal.
-        let lastCount: { count: number; stream: string; gen: string } | null = null;
-        let polling = false;
-        const pollTimer = setInterval(async () => {
-            reloadIfSkipped();
-            const pin = cursor?.position();
-            if (!pin || !pin.stream.startsWith("g:") || polling || hidden() || document.hidden) return;
-            polling = true;
-            try {
-                const resp = await RpcApi.BlockfileLineCountCommand(
-                    TabRpcClient,
-                    { block_id: readBlockId, filename: "output" },
-                    { timeout: 5_000 }
-                );
-                if (!resp?.stream || !resp.gen) return;
-                if (resp.stream !== pin.stream || resp.gen !== pin.gen) {
-                    // Recreated under us (see appendRecords): start over.
-                    lastCount = null;
-                    recover();
-                    return;
-                }
-                if (lastCount && lastCount.stream === resp.stream && lastCount.gen === resp.gen) {
-                    cursor?.observeCount(lastCount.count, resp.stream, resp.gen);
-                }
-                lastCount = { count: resp.count, stream: resp.stream, gen: resp.gen };
-            } catch {
-                // Soft: the next tick or event catches up.
-            } finally {
-                polling = false;
-            }
-        }, SHARED_ZONE_POLL_MS);
+        const stopPoll = startHistoryPoll({ readBlockId, cursor: () => cursor, hidden, reloadIfSkipped, recover });
 
         onCleanup(() => {
             disposed = true;
-            clearInterval(pollTimer);
+            stopPoll();
             subscription.unsubscribe();
             fileSubject.release();
             cursor?.dispose();
@@ -793,19 +736,15 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
                         async window renders "no recorded history", which is
                         indistinguishable from a genuinely empty agent
                         (reagent P2 on PR #2509). */}
-                    {loading()
-                        ? "loading history…"
-                        : loadError()
-                            ? `couldn't load history: ${loadError()}`
-                            : mode() !== "live" && totalLines() > 0
-                              ? endLine() <= historyOffset()
-                                  ? "nothing before this point"
-                                  : withSpan(`${mode() === "archive" ? "archived conversation · " : ""}lines ${historyOffset() + 1}–${endLine()} of ${totalLines()}`)
-                              : historyOffset() === 0 && totalLines() > 0
-                                ? "full history loaded"
-                                : totalLines() > 0
-                                    ? withSpan(`${totalLines()} lines · scroll up for earlier`)
-                                    : "no recorded history"}
+                    {historyMetaText({
+                        loading: loading(),
+                        loadError: loadError(),
+                        mode: mode(),
+                        totalLines: totalLines(),
+                        historyOffset: historyOffset(),
+                        endLine: endLine(),
+                        withSpan,
+                    })}
                 </div>
             </div>
             <div class="agent-history-body" onWheel={onWheel}>

@@ -68,20 +68,20 @@ async fn disk_cleanup(state: AppState, request: Request) -> Result<(), String> {
 /// still exactly that version and signer. The person's countdown was the check.
 async fn widget_install(state: AppState, request: Request) -> Result<(), String> {
     let target = crate::server::widget_agent_handlers::take_target(&request.id).ok_or("the package this request was for is no longer known; ask again")?;
-    let service = crate::backend::widget_packages::service().ok_or("widget packages aren't available on this AgentMux")?;
+    let service = crate::backend::widget::packages::service().ok_or("widget packages aren't available on this AgentMux")?;
     // The person may have answered meanwhile, in Settings: approved it themselves (nothing left to
     // do) or turned it off (a later approval must not turn it back on).
     match service.list().into_iter().find(|p| p.id == target.id).map(|p| p.state) {
-        Some(crate::backend::widget_packages::WidgetState::Disabled) => return Err("the person turned this widget off in the meantime; it stays off".to_string()),
-        Some(crate::backend::widget_packages::WidgetState::Approved) => return Ok(()),
+        Some(crate::backend::widget::packages::WidgetState::Disabled) => return Err("the person turned this widget off in the meantime; it stays off".to_string()),
+        Some(crate::backend::widget::packages::WidgetState::Approved) => return Ok(()),
         _ => {}
     }
     let svc = service.clone();
     let t = target.clone();
     tokio::task::spawn_blocking(move || svc.approve(&t.id, &t.hash, &t.signer)).await.map_err(|e| e.to_string())??;
     tracing::info!(id = %target.id, requester = %request.requester_slug, approver = ?request.decided_by, "widget package approved through a sensitive request");
-    crate::backend::widget_packages::refresh_off_thread(&state.config_watcher, &state.event_bus, &state.broker).await;
-    if crate::backend::widget_requests::requests().answer(&target.id, &target.hash, crate::backend::widget_requests::Answer::Approved) {
+    crate::backend::widget::packages::refresh_off_thread(&state.config_watcher, &state.event_bus, &state.broker).await;
+    if crate::backend::widget::requests::requests().answer(&target.id, &target.hash, crate::backend::widget::requests::Answer::Approved) {
         crate::server::widget_agent_handlers::publish_requests(&state);
     }
     Ok(())
@@ -94,8 +94,8 @@ mod tests {
     use serde_json::json;
 
     /// A package copied in and listed, as `WidgetInstall` leaves it.
-    async fn installed(state: &AppState, id: &str, kind: &str, permissions: serde_json::Value) -> crate::backend::widget_packages::WidgetPackageInfo {
-        crate::backend::widget_packages::WidgetPackages::for_tests();
+    async fn installed(state: &AppState, id: &str, kind: &str, permissions: serde_json::Value) -> crate::backend::widget::packages::WidgetPackageInfo {
+        crate::backend::widget::packages::WidgetPackages::for_tests();
         let tmp = tempfile::tempdir().unwrap();
         let src = tmp.path().join(id);
         std::fs::create_dir_all(&src).unwrap();
@@ -107,16 +107,16 @@ mod tests {
         )
         .unwrap();
         std::fs::write(src.join("index.html"), "<p>hi</p>").unwrap();
-        let svc = crate::backend::widget_packages::service().unwrap();
-        crate::backend::widget_packages::install(&svc.widgets_dir, &src, true).unwrap();
-        crate::backend::widget_packages::refresh_off_thread(&state.config_watcher, &state.event_bus, &state.broker)
+        let svc = crate::backend::widget::packages::service().unwrap();
+        crate::backend::widget::packages::install(&svc.widgets_dir, &src, true).unwrap();
+        crate::backend::widget::packages::refresh_off_thread(&state.config_watcher, &state.event_bus, &state.broker)
             .await
             .into_iter()
             .find(|p| p.id == id)
             .unwrap()
     }
 
-    fn filed(pkg: &crate::backend::widget_packages::WidgetPackageInfo) -> Request {
+    fn filed(pkg: &crate::backend::widget::packages::WidgetPackageInfo) -> Request {
         let reg = crate::backend::sensitive_requests::registry();
         let mut facts = crate::server::widget_agent_handlers::install_facts(pkg);
         facts.insert("widget".into(), format!("{} {}", facts["widget"], uuid::Uuid::new_v4().simple()));
@@ -128,15 +128,15 @@ mod tests {
     async fn the_countdown_ending_approves_exactly_the_package_that_was_asked_for() {
         let state = crate::server::tests::test_state();
         let pkg = installed(&state, "acme.runner-ok", "sandboxed", json!(["storage"])).await;
-        assert_eq!(pkg.state, crate::backend::widget_packages::WidgetState::NeedsApproval);
+        assert_eq!(pkg.state, crate::backend::widget::packages::WidgetState::NeedsApproval);
         let request = filed(&pkg);
         crate::server::widget_agent_handlers::remember_target(
             &request.id,
             crate::server::widget_agent_handlers::InstallTarget { id: pkg.id.clone(), hash: pkg.hash.clone(), signer: String::new() },
         );
         widget_install(state.clone(), request.clone()).await.unwrap();
-        let after = crate::backend::widget_packages::service().unwrap().list().into_iter().find(|p| p.id == pkg.id).unwrap();
-        assert_eq!(after.state, crate::backend::widget_packages::WidgetState::Approved);
+        let after = crate::backend::widget::packages::service().unwrap().list().into_iter().find(|p| p.id == pkg.id).unwrap();
+        assert_eq!(after.state, crate::backend::widget::packages::WidgetState::Approved);
         // The target is used once: running it again finds nothing to approve.
         assert!(widget_install(state, request).await.unwrap_err().contains("no longer known"));
     }
@@ -161,11 +161,11 @@ mod tests {
     async fn a_widget_the_person_turned_off_or_approved_meanwhile_is_left_as_they_left_it() {
         let state = crate::server::tests::test_state();
         let off = installed(&state, "acme.runner-off", "sandboxed", json!([])).await;
-        let service = crate::backend::widget_packages::service().unwrap();
+        let service = crate::backend::widget::packages::service().unwrap();
         // The person approves it in Settings, then turns it off.
         service.approve(&off.id, &off.hash, "").unwrap();
         service.set_enabled(&off.id, false).unwrap();
-        crate::backend::widget_packages::refresh_off_thread(&state.config_watcher, &state.event_bus, &state.broker).await;
+        crate::backend::widget::packages::refresh_off_thread(&state.config_watcher, &state.event_bus, &state.broker).await;
         let request = filed(&off);
         crate::server::widget_agent_handlers::remember_target(
             &request.id,
@@ -174,11 +174,11 @@ mod tests {
         let err = widget_install(state.clone(), request).await.unwrap_err();
         assert!(err.contains("turned this widget off"), "{err}");
         let after = service.list().into_iter().find(|p| p.id == off.id).unwrap();
-        assert_eq!(after.state, crate::backend::widget_packages::WidgetState::Disabled, "still off");
+        assert_eq!(after.state, crate::backend::widget::packages::WidgetState::Disabled, "still off");
         // One the person approved themselves needs nothing more.
         let done = installed(&state, "acme.runner-done", "sandboxed", json!([])).await;
         service.approve(&done.id, &done.hash, "").unwrap();
-        crate::backend::widget_packages::refresh_off_thread(&state.config_watcher, &state.event_bus, &state.broker).await;
+        crate::backend::widget::packages::refresh_off_thread(&state.config_watcher, &state.event_bus, &state.broker).await;
         let request = filed(&done);
         crate::server::widget_agent_handlers::remember_target(
             &request.id,
@@ -198,8 +198,8 @@ mod tests {
         );
         let err = widget_install(state, request).await.unwrap_err();
         assert!(err.contains("changed since"), "{err}");
-        let after = crate::backend::widget_packages::service().unwrap().list().into_iter().find(|p| p.id == pkg.id).unwrap();
-        assert_ne!(after.state, crate::backend::widget_packages::WidgetState::Approved);
+        let after = crate::backend::widget::packages::service().unwrap().list().into_iter().find(|p| p.id == pkg.id).unwrap();
+        assert_ne!(after.state, crate::backend::widget::packages::WidgetState::Approved);
     }
 
     #[tokio::test]

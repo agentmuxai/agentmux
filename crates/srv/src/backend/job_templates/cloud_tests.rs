@@ -9,7 +9,7 @@ use super::cloud::CloudExpect;
 use super::tests::{manifest_json, write_template, BRIEF};
 use super::*;
 use crate::backend::jobs::cloud_events::{CloudJob, CloudJobs};
-use crate::backend::widget_signature::test_keys;
+use crate::backend::widget::signature::test_keys;
 
 const ID: &str = "acme.nightly";
 
@@ -194,7 +194,7 @@ fn the_prompt_is_told_what_approving_does_to_the_pins() {
     let key = test_keys::public_key(1);
 
     let n = note(&svc);
-    assert_eq!((n.name.as_str(), n.fingerprint.as_str(), n.state), ("acme-ci", crate::backend::widget_signature::fingerprint(&key).as_str(), ReporterState::New));
+    assert_eq!((n.name.as_str(), n.fingerprint.as_str(), n.state), ("acme-ci", crate::backend::widget::signature::fingerprint(&key).as_str(), ReporterState::New));
 
     // The name is pinned to another key, or the key to another name: approving would be refused.
     svc.reporters().add("acme-ci", &test_keys::public_key(2)).unwrap();

@@ -101,12 +101,19 @@ export function anyAgentWaitingForYou(): boolean {
     return false;
 }
 
-/** Whether the agent itself waits in this pane (a question or a tool
- *  permission), which the pane's `term:awaiting_user` meta reports. */
+/** Whether the agent itself waits in this pane (a question, a tool
+ *  permission, or one of srv's [`AGENT_WAITS`]), which the pane's
+ *  `term:awaiting_user` meta reports. */
 export function isAgentWaitingForYou(blockId: string): boolean {
     const s = waiting.get(blockId);
-    return !!s && (s.has("question") || s.has("permission"));
+    return !!s && (s.has("question") || s.has("permission") || [...s.keys()].some((k) => k.startsWith(AGENT_SOURCE)));
 }
+
+/** srv's calls to action that are the agent's own wait, as a question is: its
+ *  tool call waits on the answer. They set the pane's "Waiting for you" too, in
+ *  its tab and the Swarm, so a pane in a tab not in front still shows it. */
+const AGENT_WAITS = new Set(["vault"]);
+const AGENT_SOURCE = "srv:agent:";
 
 /** srv's announcement of a call to action it holds open (`userattention`,
  *  crates/srv/src/backend/user_attention.rs), as its Rust type. */
@@ -121,8 +128,14 @@ export function applyUserAttention(a: UserAttention, thisWindow: string): void {
     // Browser hand-offs and approvals can be left out (Settings → Sounds);
     // an end is always applied.
     if (a.active && a.kind === "browser" && getSettingsKeyAtom("notify:waiting:browser")() === false) return;
-    if (a.active) startWaitingForYou(blockId, `srv:${a.key}`, a.text);
-    else endWaitingForYou(blockId, `srv:${a.key}`, "submitted");
+    const agentWaits = AGENT_WAITS.has(a.kind);
+    const source = agentWaits ? `${AGENT_SOURCE}${a.key}` : `srv:${a.key}`;
+    if (a.active) startWaitingForYou(blockId, source, a.text);
+    else endWaitingForYou(blockId, source, "submitted");
+    if (agentWaits && a.block_id) {
+        // Loaded when used: the pane hooks that keep the meta import this registry.
+        void import("@/app/view/agent/hooks/awaiting-user").then((m) => m.syncAwaitingUser(blockId)).catch(() => {});
+    }
 }
 
 let installed = false;

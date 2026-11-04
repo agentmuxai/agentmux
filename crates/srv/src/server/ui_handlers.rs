@@ -931,6 +931,7 @@ pub(crate) async fn handle_ui_browser_wait_for(
             "text": req.text,
             "url_contains": req.url_contains,
             "gone": req.gone,
+            "state": req.state,
             "timeout_ms": timeout_ms,
         }),
         std::time::Duration::from_millis(timeout_ms + 10_000),

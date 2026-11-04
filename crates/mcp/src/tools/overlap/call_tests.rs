@@ -64,6 +64,14 @@ fn cases() -> Vec<Case> {
             &["\"released\": 1"],
         ),
         c("ReleaseWork", json!({}), json!({ "released": 3 }), "/api/v1/work-claims/release", json!({ "id": null, "agent": "tester" }), &["\"released\": 3"]),
+        c(
+            "SetStatus",
+            json!({ "line": " Fixing the login race ", "state": "working", "other": 1, "note": null }),
+            json!({ "ok": true, "line": "Fixing the login race" }),
+            "/api/v1/agent/status",
+            json!({ "line": " Fixing the login race ", "state": "working", "agent": "tester", "block": "blk" }),
+            &["\"ok\": true", "Fixing the login race"],
+        ),
         c("QuotaMode", json!({}), json!({ "mode": "off" }), "/api/v1/quota-mode", Value::Null, &["\"mode\": \"off\""]),
         c(
             "QuotaMode",
@@ -137,13 +145,15 @@ async fn a_tool_that_cannot_be_sent_refuses_before_it_asks_srv() {
     let mut refusals = vec![
         ("WhoIsWorkingOn", json!({ "pr": "nope" }), fx.cx(), bad_pr),
         ("WhoIsWorkingOn", json!({ "pr": "https://github.com/o/r/pull/12", "repo": "o/other" }), fx.cx(), clash),
+        ("SetStatus", json!({}), fx.cx(), "SetStatus: line is required"),
+        ("SetStatus", json!({ "line": "  " }), fx.cx(), "SetStatus: line is required"),
         ("QuotaMode", json!({ "min_priority": "high" }), fx.cx(), "quota_mode: min_priority only applies together with mode (off or tight)"),
         ("QuotaMode", json!({ "min_priority": "high", "mode": null }), fx.cx(), "min_priority only applies together with mode"),
         ("PostToChannel", json!({ "message": "x", "pr": "nope" }), fx.cx(), bad_pr),
         ("PostToChannel", json!({ "message": "x", "repo": "o/other", "pr": "https://github.com/o/r/pull/12" }), fx.cx(), clash),
         ("ReadChannel", json!({ "pr": "nope" }), fx.cx(), bad_pr),
     ];
-    for tool in ["WhoIsWorkingOn", "ClaimWork", "ReleaseWork", "QuotaMode", "PostBulletin", "ReadBulletin", "PostToChannel", "ReadChannel"] {
+    for tool in ["WhoIsWorkingOn", "ClaimWork", "ReleaseWork", "SetStatus", "QuotaMode", "PostBulletin", "ReadBulletin", "PostToChannel", "ReadChannel"] {
         refusals.push((tool, json!({ "message": "x" }), no_url, unset));
         refusals.push((tool, json!({ "message": "x" }), no_key, unset));
     }
@@ -160,6 +170,7 @@ async fn a_refusal_from_srv_names_the_tool_and_the_status() {
         ("WhoIsWorkingOn", json!({}), "Presence who"),
         ("ClaimWork", json!({}), "ClaimWork"),
         ("ReleaseWork", json!({}), "ReleaseWork"),
+        ("SetStatus", json!({ "line": "x" }), "SetStatus"),
         ("QuotaMode", json!({}), "QuotaMode"),
         ("QuotaMode", json!({ "mode": "off" }), "QuotaMode"),
         ("PostBulletin", json!({ "message": "m" }), "PostBulletin"),

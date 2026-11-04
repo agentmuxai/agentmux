@@ -408,6 +408,19 @@
         box-shadow: inset -2px 0 0 0 var(--drop-target-border);
     }
 
+    // The slot a tab dragged from another pane lands in: a dashed ghost pill after the last tab, where the
+    // drop appends it (PaneTabStrip.tsx `incoming`). Not a real tab: nothing here takes the pointer.
+    &--incoming {
+        flex: 0 0 auto;
+        max-width: 12rem;
+        padding-right: var(--space-2);
+        color: var(--main-text-color);
+        outline: 1px dashed var(--drop-target-border);
+        outline-offset: -2px;
+        opacity: 0.85;
+        pointer-events: none;
+    }
+
     // Picked with Ctrl/Cmd+click, to be dragged into one pane together
     // (docs/specs/SPEC_PANE_TAB_MULTI_SELECT_MOVE_AND_COLLAPSED_EXPAND_2026_10_24.md §4.2).
     // A channel no other pill state uses: the active tab's underline is an inset

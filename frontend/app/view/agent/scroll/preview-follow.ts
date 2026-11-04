@@ -18,8 +18,8 @@
  * Every change logs one `[scroll-follow] tool=<id> …` line.
  */
 
-import { DETACHED, FOLLOWING, intentOf, type ScrollGeometry } from "./follow-controller";
-import { createFollowScroll, type FollowScroll } from "./follow-scroll";
+import { DETACHED, FOLLOWING, intentOf, type ScrollGeometry } from "../../../scroll/follow-controller";
+import { createFollowScroll, type FollowScroll } from "../../../scroll/follow-scroll";
 
 export interface PreviewFollow {
     /** Bind to the scroller once mounted; returns the cleanup. */

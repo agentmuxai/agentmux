@@ -10,7 +10,7 @@ use serde_json::{json, Map, Value};
 
 use super::manifest::{self, JobTemplateManifest};
 use super::*;
-use crate::backend::widget_signature::{test_keys, SignatureState};
+use crate::backend::widget::signature::{test_keys, SignatureState};
 
 pub(super) fn manifest_json(id: &str, extra: Value) -> Value {
     let mut m = json!({

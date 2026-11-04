@@ -8,6 +8,10 @@ import { createEffect, createRoot, createSignal, untrack } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
 import { toastDebugText, type ToastDebugEnv } from "./toast-debug";
 import { windowId } from "@/app/store/window-identity";
+import { formatRelativeTime } from "@/util/format-time";
+
+/** A notification older than this shows its date, not "N days ago". */
+const NOTIFICATION_AGO_DAYS = 7;
 
 /** The real version, channel, window and tab, read when the button is pressed. */
 export function liveToastDebugEnv(): ToastDebugEnv {
@@ -159,22 +163,9 @@ export function useNotification() {
     const formatTimestamp = (timestamp: string): string => {
         const notificationTime = new Date(timestamp).getTime();
         const now = Date.now();
-        const diffInSeconds = Math.floor((now - notificationTime) / 1000);
-        const diffInMinutes = Math.floor(diffInSeconds / 60);
-        const diffInHours = Math.floor(diffInMinutes / 60);
-        const diffInDays = Math.floor(diffInHours / 24);
-
-        if (diffInMinutes === 0) {
-            return `Just now`;
-        } else if (diffInMinutes < 60) {
-            return `${diffInMinutes} mins ago`;
-        } else if (diffInHours < 24) {
-            return `${diffInHours} hrs ago`;
-        } else if (diffInDays < 7) {
-            return `${diffInDays} days ago`;
-        } else {
-            return new Date(timestamp).toLocaleString();
-        }
+        return now - notificationTime < NOTIFICATION_AGO_DAYS * 86_400_000
+            ? formatRelativeTime(notificationTime, now, { nowBelowSecs: 60 })
+            : new Date(timestamp).toLocaleString();
     };
 
     return {
