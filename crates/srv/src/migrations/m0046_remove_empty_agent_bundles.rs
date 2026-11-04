@@ -12,13 +12,14 @@
 //!   or seeded;
 //! - it holds nothing: no description, instructions, per-provider instructions, context files,
 //!   skills or MCP servers, and no version of it ever held instructions;
-//! - nothing in this channel points at it (an agent's `memory_id` or `default_memory_id`, an
-//!   agent's picked bundles, a skill binding) and no agent's recorded bundle
-//!   (`agent_bundle_sidecar`) is it.
+//! - nothing points at it in any channel's store on this machine (an agent's `memory_id` or
+//!   `default_memory_id`, an agent's picked bundles, a skill binding), and no agent's recorded
+//!   bundle (`agent_bundle_sidecar`) is it.
 //!
-//! The recorded bundle of every agent is kept, so what another channel holds is kept too. A
-//! bundle that only another channel's agent row still named is empty, and an agent whose bundle is
-//! missing is read as having none, so removing it loses nothing.
+//! The bundles live in the one shared store but the bindings live in each channel's store, so the
+//! check reads every channel's and version's `objects.db` read-only (`<home>/channels/*/versions/*/data/db`
+//! and the old `<home>/db`). If any of them can't be read, nothing is removed. A bundle nothing
+//! names is empty, and an agent whose bundle is missing is read as having none.
 //!
 //! The removed bundles, with their version and scope rows, are listed in
 //! `removed-empty-agent-bundles-<time>.json` in the channel's data folder, and in the log.
@@ -27,7 +28,7 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OpenFlags};
 
 use crate::backend::storage::store::{Bundle, Store};
 use crate::registry::{resolve_shared_definitions_dir, DefinitionStore};
@@ -71,17 +72,51 @@ fn column(conn: &Connection, sql: &str) -> Result<Vec<String>, String> {
     rows.collect::<Result<_, _>>().map_err(|e| format!("{sql}: {e}"))
 }
 
-/// The bundle ids this channel's agent rows, picks and skill bindings name.
-fn referenced_in_channel(mstore: &Store) -> Result<BTreeSet<String>, String> {
-    let conn = mstore.conn().lock().unwrap();
+/// The bundle ids the agent rows, picks and skill bindings in one channel store name.
+fn references_in(conn: &Connection) -> Result<BTreeSet<String>, String> {
+    // A file that is not a database fails here; without this every table would read as missing.
+    conn.query_row("SELECT COUNT(*) FROM sqlite_master", [], |r| r.get::<_, i64>(0)).map_err(|e| format!("not readable: {e}"))?;
     let mut ids: Vec<String> = Vec::new();
-    ids.extend(column(&conn, "SELECT memory_id FROM db_agents WHERE memory_id != ''")?);
-    ids.extend(column(&conn, "SELECT default_memory_id FROM db_agents WHERE default_memory_id != ''")?);
-    ids.extend(column(&conn, "SELECT bundle_id FROM db_agent_bundles")?);
-    if table_exists(&conn, "db_bundle_skills_ref") {
-        ids.extend(column(&conn, "SELECT bundle_id FROM db_bundle_skills_ref")?);
+    if table_exists(conn, "db_agents") {
+        ids.extend(column(conn, "SELECT memory_id FROM db_agents WHERE memory_id != ''")?);
+        ids.extend(column(conn, "SELECT default_memory_id FROM db_agents WHERE default_memory_id != ''")?);
+    }
+    for table in ["db_agent_bundles", "db_bundle_skills_ref"] {
+        if table_exists(conn, table) {
+            ids.extend(column(conn, &format!("SELECT bundle_id FROM {table}"))?);
+        }
     }
     Ok(ids.into_iter().collect())
+}
+
+/// Every channel and version store under `home`, and the old root store.
+fn channel_stores(home: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut stores = Vec::new();
+    let old = home.join("db").join("objects.db");
+    if old.is_file() {
+        stores.push(old);
+    }
+    let dirs = |p: std::path::PathBuf| std::fs::read_dir(p).into_iter().flatten().flatten().map(|e| e.path()).collect::<Vec<_>>();
+    for channel in dirs(home.join("channels")) {
+        for version in dirs(channel.join("versions")) {
+            let db = version.join("data").join("db").join("objects.db");
+            if db.is_file() {
+                stores.push(db);
+            }
+        }
+    }
+    stores
+}
+
+/// The bundle ids named in this channel's store and in every other store under `home`.
+fn referenced_anywhere(mstore: &Store, home: &std::path::Path) -> Result<BTreeSet<String>, String> {
+    let mut ids = references_in(&mstore.conn().lock().unwrap())?;
+    for path in channel_stores(home) {
+        let conn = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)
+            .map_err(|e| format!("open {}: {e}", path.display()))?;
+        ids.extend(references_in(&conn).map_err(|e| format!("{}: {e}", path.display()))?);
+    }
+    Ok(ids)
 }
 
 /// What one run removed, for the record file.
@@ -116,7 +151,14 @@ impl Migration for M0046RemoveEmptyAgentBundles {
                 Err(e) => tracing::warn!(error = %e, "remove_empty_agent_bundles: global def registry unavailable"),
             }
         }
-        let mut keep = referenced_in_channel(&mstore).map_err(|e| MigrationError(format!("remove_empty_agent_bundles: {e}")))?;
+        // A store that can't be read could hold a binding, so nothing is removed this time.
+        let mut keep = match referenced_anywhere(&mstore, &ctx.home) {
+            Ok(keep) => keep,
+            Err(e) => {
+                tracing::warn!(error = %e, "remove_empty_agent_bundles: a channel store could not be read; nothing removed");
+                return Ok(());
+            }
+        };
         // Without the recorded-bundle store there is no telling which bundle an agent in another
         // channel still uses, so nothing is removed. Not an error: a start without the shared
         // folder must still go on.

@@ -42,15 +42,16 @@ struct Fixture {
     shared: tempfile::NamedTempFile,
     channel: tempfile::NamedTempFile,
     data: tempfile::TempDir,
+    home: tempfile::TempDir,
 }
 
 impl Fixture {
     fn new() -> Self {
-        Fixture { shared: tempfile::NamedTempFile::new().unwrap(), channel: tempfile::NamedTempFile::new().unwrap(), data: tempfile::tempdir().unwrap() }
+        Fixture { shared: tempfile::NamedTempFile::new().unwrap(), channel: tempfile::NamedTempFile::new().unwrap(), data: tempfile::tempdir().unwrap(), home: tempfile::tempdir().unwrap() }
     }
     fn ctx(&self) -> MigrationContext {
         MigrationContext {
-            home: std::env::temp_dir(),
+            home: self.home.path().to_path_buf(),
             data_dir: self.data.path().to_path_buf(),
             shared_store_path: self.shared.path().to_path_buf(),
             channel_store_path: self.channel.path().to_path_buf(),
@@ -171,5 +172,47 @@ fn a_missing_store_is_a_noop() {
         let mut ctx = f.ctx();
         ctx.channel_store_path = std::path::PathBuf::from("Z:/does/not/exist/objects.db");
         M0046RemoveEmptyAgentBundles.up(&ctx).unwrap();
+    });
+}
+
+/// A binding in another channel's store keeps the bundle, whether it is an agent row or a skill.
+#[test]
+fn a_bundle_another_channels_store_names_is_kept() {
+    with_isolated_home(|_home| {
+        let f = Fixture::new();
+        let shared = f.shared();
+        for id in ["orphan", "other-agent", "other-skill"] {
+            shared.bundle_upsert(&bundle(id, &format!("{id} — ABF"))).unwrap();
+        }
+        let other_db = f.home.path().join("channels").join("other").join("versions").join("0.1.0").join("data").join("db");
+        std::fs::create_dir_all(&other_db).unwrap();
+        let other = Store::open(&other_db.join("objects.db")).unwrap();
+        agent(&other, "test-elsewhere");
+        other.agent_def_set_memory_id_if_empty("test-elsewhere", "other-agent").unwrap();
+        other.conn().lock().unwrap().execute("INSERT INTO db_bundle_skills_ref (bundle_id, skill_id) VALUES ('other-skill', 's1')", []).unwrap();
+        drop(other);
+
+        M0046RemoveEmptyAgentBundles.up(&f.ctx()).unwrap();
+
+        let ids = f.ids();
+        assert!(!ids.contains("orphan"));
+        assert!(ids.contains("other-agent"), "an agent row in another channel keeps it");
+        assert!(ids.contains("other-skill"), "a skill binding in another channel keeps it");
+    });
+}
+
+/// A store that can't be read could hold a binding: nothing is removed.
+#[test]
+fn an_unreadable_channel_store_stops_the_cleanup() {
+    with_isolated_home(|_home| {
+        let f = Fixture::new();
+        f.shared().bundle_upsert(&bundle("orphan", "Ghost — ABF")).unwrap();
+        let bad = f.home.path().join("channels").join("other").join("versions").join("0.1.0").join("data").join("db");
+        std::fs::create_dir_all(&bad).unwrap();
+        std::fs::write(bad.join("objects.db"), b"this is not a database, and is long enough to be read as one").unwrap();
+
+        M0046RemoveEmptyAgentBundles.up(&f.ctx()).unwrap();
+
+        assert!(f.ids().contains("orphan"));
     });
 }
