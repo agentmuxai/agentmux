@@ -13,6 +13,8 @@ import { DocTabStrip } from "@/app/doc-tabs/DocTabStrip";
 import type { DocTabsModel } from "@/app/doc-tabs/doc-tabs-controller";
 import type { EditorBuffer } from "@/app/store/editor-pane-state-store";
 import { IconButton } from "@/app/element/ui";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import { TextViewerSwitch, ViewerHost } from "./viewers/viewer-host";
 import { SaveAsInput } from "./editor-save-as-input";
 import { editorDocTabs } from "./editor-doc-tabs";
@@ -54,6 +56,18 @@ function editorEmptyShortcuts(): { keys: string[]; label: string }[] {
     ];
 }
 
+/**
+ * Load file-tree roots from the backend: $HOME (auto-expanded) plus every
+ * reachable drive/mount (sibling roots, collapsed).
+ */
+function loadTreeRoots(model: EditorViewModel): void {
+    void RpcApi.GetEditorRootsCommand(TabRpcClient, {}).then((res) => {
+        if (res?.home) {
+            void model.treeModel.setRootsAndLoad(res.home, res.drives ?? []);
+        }
+    });
+}
+
 export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Element {
     const model = props.model;
     // Reactive ref: the markdown preview seeds `liveDoc` from the tab-change
@@ -92,6 +106,7 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
     const session = new CodeMirrorSession({ model, cm, root, container: containerRef, setLiveDoc, runEditorCommand });
     session.watchPolarity();
     session.provideStates();
+    onMount(() => loadTreeRoots(model));
     session.mountInitial();
     session.useLiveEffects();
 
@@ -289,37 +304,37 @@ function EditorTabBar(props: {
 }): JSX.Element {
     const { model, docTabs, saveAs } = props;
     return (
-            <DocTabStrip
-                ctl={docTabs}
-                docType="editor"
-                blockId={model.blockId}
-                show={() => props.showTreeButton() || docTabs.tabs().length > 0}
-                leading={
-                    // While the tree is hidden, the button that shows it
-                    // leads the document bar (the tree's own toolbar hides
-                    // it). An editor on a remote host has no tree.
-                    <Show when={props.showTreeButton()}>
-                        <IconButton
-                            icon="folder-tree"
-                            label="Show file tree"
-                            density="compact"
-                            class="editor-tree-toggle"
-                            onClick={() => void model.toggleTreeExpanded()}
-                        />
-                    </Show>
-                }
-                tooltipOf={(t) => t.payload.filePath}
-                addTitle={`New scratch buffer (${keyLabel("ctrl+t")})`}
-                // Not while its Save As box is open: the drag would take
-                // the box's text selection.
-                canDrag={(t) => saveAs.saveAsTabId() !== t.id}
-                tabClass={(t) => ({ "editor-tab--saveas": saveAs.saveAsTabId() === t.id })}
-                renderLabel={(t) =>
-                    saveAs.saveAsTabId() === t.id ? (
-                        <SaveAsInput onConfirm={(path) => void saveAs.handleSaveAsConfirm(path)} onCancel={() => saveAs.setSaveAsTabId(null)} />
-                    ) : undefined
-                }
-            />
+        <DocTabStrip
+            ctl={docTabs}
+            docType="editor"
+            blockId={model.blockId}
+            show={() => props.showTreeButton() || docTabs.tabs().length > 0}
+            leading={
+                // While the tree is hidden, the button that shows it
+                // leads the document bar (the tree's own toolbar hides
+                // it). An editor on a remote host has no tree.
+                <Show when={props.showTreeButton()}>
+                    <IconButton
+                        icon="folder-tree"
+                        label="Show file tree"
+                        density="compact"
+                        class="editor-tree-toggle"
+                        onClick={() => void model.toggleTreeExpanded()}
+                    />
+                </Show>
+            }
+            tooltipOf={(t) => t.payload.filePath}
+            addTitle={`New scratch buffer (${keyLabel("ctrl+t")})`}
+            // Not while its Save As box is open: the drag would take
+            // the box's text selection.
+            canDrag={(t) => saveAs.saveAsTabId() !== t.id}
+            tabClass={(t) => ({ "editor-tab--saveas": saveAs.saveAsTabId() === t.id })}
+            renderLabel={(t) =>
+                saveAs.saveAsTabId() === t.id ? (
+                    <SaveAsInput onConfirm={(path) => void saveAs.handleSaveAsConfirm(path)} onCancel={() => saveAs.setSaveAsTabId(null)} />
+                ) : undefined
+            }
+        />
     );
 }
 
@@ -336,39 +351,39 @@ function EditorBody(props: {
     const { model } = props;
     const { showsText, isMarkdown } = props.shows;
     return (
-            <Show
-                when={
-                    model.filePathAtom() &&
-                    !model.loadingAtom() &&
-                    // Don't render CodeMirror when the active tab failed
-                    // to load — the centered error panel takes the body.
-                    !(model.errorAtom() && model.activeTabAtom() && !model.activeTabAtom()?.contentLoaded)
-                }
-                fallback={<EditorEmptyState shortcuts={props.emptyShortcuts} onOpenFromRemote={() => model.setOpenFromRemote(true)} showTreeHint={props.showTreeButton} />}
-            >
-                <div class="editor-body-wrap">
-                    <Show when={!showsText()} fallback={<TextViewerSwitch model={model} />}>
-                        <ViewerHost model={model} />
-                    </Show>
+        <Show
+            when={
+                model.filePathAtom() &&
+                !model.loadingAtom() &&
+                // Don't render CodeMirror when the active tab failed
+                // to load — the centered error panel takes the body.
+                !(model.errorAtom() && model.activeTabAtom() && !model.activeTabAtom()?.contentLoaded)
+            }
+            fallback={<EditorEmptyState shortcuts={props.emptyShortcuts} onOpenFromRemote={() => model.setOpenFromRemote(true)} showTreeHint={props.showTreeButton} />}
+        >
+            <div class="editor-body-wrap">
+                <Show when={!showsText()} fallback={<TextViewerSwitch model={model} />}>
+                    <ViewerHost model={model} />
+                </Show>
+                <div
+                    class="editor-codemirror"
+                    ref={props.setContainerRef}
+                    style={{
+                        display: !showsText() || (isMarkdown() && model.editorMode() === "preview") ? "none" : undefined,
+                    }}
+                />
+                <Show when={isMarkdown() && model.editorMode() === "split"}>
                     <div
-                        class="editor-codemirror"
-                        ref={props.setContainerRef}
-                        style={{
-                            display: !showsText() || (isMarkdown() && model.editorMode() === "preview") ? "none" : undefined,
-                        }}
+                        class="editor-preview-divider"
+                        onMouseDown={props.onPreviewResize}
+                        {...tip("Drag to resize preview", { label: true })}
                     />
-                    <Show when={isMarkdown() && model.editorMode() === "split"}>
-                        <div
-                            class="editor-preview-divider"
-                            onMouseDown={props.onPreviewResize}
-                            {...tip("Drag to resize preview", { label: true })}
-                        />
-                    </Show>
-                    <Show when={isMarkdown() && model.editorMode() !== "source"}>
-                        <EditorMarkdownPreview model={model} text={props.liveDoc} />
-                    </Show>
-                </div>
-            </Show>
+                </Show>
+                <Show when={isMarkdown() && model.editorMode() !== "source"}>
+                    <EditorMarkdownPreview model={model} text={props.liveDoc} />
+                </Show>
+            </div>
+        </Show>
     );
 }
 

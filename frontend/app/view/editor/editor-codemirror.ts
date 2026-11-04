@@ -7,8 +7,6 @@ import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import { keymap } from "@codemirror/view";
 import { search } from "@codemirror/search";
 import { lintGutter } from "@codemirror/lint";
-import { RpcApi } from "@/app/store/rpc-api";
-import { TabRpcClient } from "@/app/store/rpc-util";
 import { focusManager } from "@/app/store/focusManager";
 import { codeMirrorKeys } from "@/app/keybindings";
 import { keybindingsVersion } from "@/app/keybindings/registry";
@@ -236,18 +234,10 @@ export class CodeMirrorSession {
         }
     }
 
-    /** Loads the tree's roots and builds the first view when the pane mounts with a file already open. */
+    /** Builds the first view when the pane mounts with a file already open. */
     mountInitial(): void {
         const { model, setLiveDoc } = this.d;
         onMount(() => {
-            // Load file-tree roots from backend: $HOME (auto-expanded) +
-            // every reachable drive/mount (sibling roots, collapsed).
-            void RpcApi.GetEditorRootsCommand(TabRpcClient, {}).then((res) => {
-                if (res?.home) {
-                    void model.treeModel.setRootsAndLoad(res.home, res.drives ?? []);
-                }
-            });
-
             const content = model.contentAtom();
             const lang = model.languageAtom();
             const readOnly = model.readOnlyAtom();
