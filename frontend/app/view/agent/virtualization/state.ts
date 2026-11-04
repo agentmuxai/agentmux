@@ -13,9 +13,12 @@
  * subscribe to these signals and project them into the virtualizer.
  */
 
-import { batch, createMemo, createSignal, type Accessor, type Setter } from "solid-js";
+import { batch, createMemo, createSignal, untrack, type Accessor, type Setter } from "solid-js";
 import type { DocumentNode } from "../../../agent-model/types";
 import type { ScrollAnchor } from "./anchor";
+
+/** Growth smaller than this is layout noise (a re-measured row), not new activity. */
+const NEW_ACTIVITY_MIN_PX = 8;
 
 export interface AgentViewState {
     /** Current document — pass-through from the store-owned nodes accessor (`model.document`). */
@@ -35,6 +38,15 @@ export interface AgentViewState {
      * user scrolls back near the bottom.
      */
     stickToBottom: Accessor<boolean>;
+
+    /**
+     * True while the reader is away from the bottom and the content has grown since they left: the
+     * "New activity" pill shows (SPEC_AGENT_PANE_SCROLL_FOLLOW_STATE_MACHINE_2026_09_24.md §5.7).
+     */
+    newActivity: Accessor<boolean>;
+
+    /** The scroll height of the content as last observed, from the list's content observer. */
+    noteContentHeight: (scrollHeight: number) => void;
 
     /**
      * Engage stick-to-bottom AND clear any captured head anchor.
@@ -142,6 +154,16 @@ export function createAgentViewState(docSignal: Accessor<DocumentNode[]>): Agent
     });
 
     const [stickToBottom, setStickToBottom] = createSignal(true);
+    // The content height as last seen while following is where the reader left off; growth past it, while they
+    // are away, is new activity. The list's content observer reports every growth, so while following the
+    // baseline is always the latest height.
+    const [contentHeight, setContentHeight] = createSignal(0);
+    let heightWhenLeft = 0;
+    const noteContentHeight = (scrollHeight: number): void => {
+        if (untrack(stickToBottom)) heightWhenLeft = scrollHeight;
+        setContentHeight(scrollHeight);
+    };
+    const newActivity = createMemo(() => !stickToBottom() && contentHeight() > heightWhenLeft + NEW_ACTIVITY_MIN_PX);
     const [isOverflowing, setIsOverflowing] = createSignal(false);
     const markOverflowing = () => setIsOverflowing(true);
     const markNotOverflowing = () => setIsOverflowing(false);
@@ -186,6 +208,8 @@ export function createAgentViewState(docSignal: Accessor<DocumentNode[]>): Agent
         nodes: docSignal,
         nodeIndex,
         stickToBottom,
+        newActivity,
+        noteContentHeight,
         engageStickToBottom,
         disengageStickToBottom,
         isOverflowing,
