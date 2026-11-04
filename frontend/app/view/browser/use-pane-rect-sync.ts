@@ -32,6 +32,27 @@ export function insetForSizeBadge(rect: PaneRect, dpr: number): PaneRect {
     return { ...rect, height: Math.max(1, rect.height - Math.round(SIZE_BADGE_STRIP_CSS * dpr)) };
 }
 
+/** After a splitter drag ends, ask for every pane's final rect to be sent again, a few times.
+ *  The sync below sends a rect once and then skips it as unchanged; the host can miss an update
+ *  that lands while a pane is mid-resize, and the pane then stays at its old size until another
+ *  drag moves it ("it takes another drag to snap into place"). `resend` clears that memory and
+ *  syncs. */
+function resendAfterSplitterDrag(dragging: () => boolean, resend: () => void): void {
+    createEffect(
+        on(
+            dragging,
+            (now, was) => {
+                if (now || !was) return;
+                for (const ms of [0, 150, 600]) {
+                    const timer = setTimeout(resend, ms);
+                    onCleanup(() => clearTimeout(timer));
+                }
+            },
+            { defer: true },
+        ),
+    );
+}
+
 export interface PaneRect {
     x: number;
     y: number;
@@ -396,6 +417,7 @@ export function usePaneRectSync(params: {
                 return;
         }
     };
+    resendAfterSplitterDrag(() => model.splitterDragging?.() ?? false, () => { lastSentRect = null; syncPosition(); });
     createEffect(
         on(
             asleep,
