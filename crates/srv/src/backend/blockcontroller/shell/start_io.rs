@@ -13,6 +13,12 @@ use super::controller::ShellController;
 use super::lifecycle::{run_pty_output_flusher, PtyReadChunk};
 use super::pty::PTY_CHANNEL_CAPACITY;
 
+/// The PTY's reader and writer.
+pub(super) type PtyIo = (
+    Box<dyn std::io::Read + Send>,
+    Box<dyn std::io::Write + Send>,
+);
+
 impl ShellController {
     /// Marks the pane running, creates its input channel and publishes the status. Returns the
     /// receiving end for the input task.
@@ -103,13 +109,7 @@ impl ShellController {
         &self,
         pair: &PtyPair,
         child: &mut Box<dyn portable_pty::Child + Send + Sync>,
-    ) -> Result<
-        (
-            Box<dyn std::io::Read + Send>,
-            Box<dyn std::io::Write + Send>,
-        ),
-        String,
-    > {
+    ) -> Result<PtyIo, String> {
         // Get reader/writer from master
         let reader = pair.master.try_clone_reader().map_err(|e| {
             let _ = child.kill();

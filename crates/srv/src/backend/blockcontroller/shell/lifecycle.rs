@@ -23,7 +23,8 @@ use super::controller::{ShellController, SHELL_INPUT_CH_SIZE};
 use super::file_ops::handle_append_block_file;
 use super::pty::{PTY_CHANNEL_CAPACITY, PTY_COALESCE_MAX_BYTES};
 use super::spawn_command::SpawnPlan;
-use super::start_steps::RemotePlan;
+use super::start_steps::{is_agent_pane, program_name, RemotePlan};
+use super::wait_task::ExitParts;
 use super::translation::accumulate_and_translate;
 use crate::backend::obj::{self, MetaMapType};
 use crate::backend::mps;
@@ -447,14 +448,7 @@ impl Controller for ShellController {
         let close_on_exit = self.closes_on_exit(&block_meta);
         let close_on_exit_delay_ms = Self::close_on_exit_delay_ms(&block_meta);
 
-        // Detect agent pane: cmd contains a known agent CLI or has AGENTMUX_AGENT_ID set.
-        // Computed here (before spawn) rather than after so the commit-aware admission
-        // gate below can use it; also reused post-spawn to set `inner.is_agent_pane`.
-        let is_agent = agent_id_for_jekt.is_some()
-            || cmd_str.to_lowercase().contains("claude")
-            || cmd_str.to_lowercase().contains("codex")
-            || cmd_str.to_lowercase().contains("gemini")
-            || cmd_str.to_lowercase().contains("qwen");
+        let is_agent = is_agent_pane(&cmd_str, agent_id_for_jekt.is_some());
 
         if is_agent {
             if let Some(refusal) = self.agent_spawn_refusal(&cmd_str) {
@@ -492,20 +486,7 @@ impl Controller for ShellController {
             cmd.cwd(&cwd);
         }
 
-        // Program name for the UI, captured before `cmd` is consumed by the
-        // spawn. The process tracker can't supply it: it deliberately omits
-        // each block's root process (#3430), and for this sub-block the root
-        // IS the shell.
-        let prog_name = cmd
-            .get_argv()
-            .first()
-            .map(|p| {
-                std::path::Path::new(p)
-                    .file_stem()
-                    .map(|s| s.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| p.to_string_lossy().into_owned())
-            })
-            .unwrap_or_default();
+        let prog_name = program_name(&cmd);
 
         let mut child = self.spawn_child(&pair, cmd, &cmd_str, is_agent)?;
 
@@ -536,49 +517,22 @@ impl Controller for ShellController {
         let master = pair.master;
         super::pty_tasks::spawn_input_task(writer, master, input_rx);
 
-        // Spawn wait task (monitors process exit)
-        let inner_wait = Arc::clone(&self.inner);
-        let block_id_wait = self.block_id.clone();
-        let tab_id_wait = self.tab_id.clone();
-        let agent_id_wait = agent_id_for_jekt.clone();
-        let broker_wait = self.broker.clone();
-        // An SSH pane holds its connection open from here to the wait task's
-        // pane_ended (ssh_pane). Counted only now, after every step that can
-        // still fail and return, so each start has exactly one end.
+        // The exit watcher reaps the child and tears the pane down (`wait_task`).
+        // An SSH pane holds its connection open from here to its end (ssh_pane); counted only
+        // now, after every step that can still fail and return, so each start has exactly one end.
         if ssh_plan.is_some() {
             crate::backend::remote::link::pane_started(&conn_name, false);
         }
-        let filestore_note = self.filestore.clone();
-        let ssh_wait = ssh_plan
-            .as_ref()
-            .map(|(_, dest)| (conn_name.clone(), dest.destination.clone()));
-        // Moved into the wait task: the secret lives exactly as long as the shell.
-        let askpass_guard_wait = askpass_guard;
-        // For the agent-lease release below: clearing the `term:agentlockuntil`
-        // meta copy (not just the in-memory registry) needs both, since that
-        // is what the frontend's own gate reads.
-        let mstore_wait = self.mstore.clone();
-        let event_bus_wait = self.event_bus.clone();
-        let run_lock = Arc::clone(&self.run_lock);
-        // Reaps the child and tears the pane down; see `wait_task`.
-        super::wait_task::ExitWatch {
+        self.exit_watch(ExitParts {
             child,
-            askpass_guard: askpass_guard_wait,
-            ssh: ssh_wait,
-            inner: inner_wait,
+            askpass_guard,
+            ssh: ssh_plan.as_ref().map(|(_, dest)| (conn_name.clone(), dest.destination.clone())),
+            agent_id: agent_id_for_jekt.clone(),
             close_on_exit,
             close_on_exit_delay_ms,
-            block_id: block_id_wait,
-            tab_id: tab_id_wait,
-            agent_id: agent_id_wait,
-            broker: broker_wait,
-            filestore: filestore_note,
-            mstore: mstore_wait,
-            event_bus: event_bus_wait,
-            run_lock,
             flusher_handle,
             barrier_tx,
-        }
+        })
         .spawn();
 
         // Return immediately — PTY tasks run in background

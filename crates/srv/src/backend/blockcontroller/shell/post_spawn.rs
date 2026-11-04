@@ -40,7 +40,7 @@ impl ShellController {
 
     /// Maps `agent_id` to this pane in the jekt handler (and the cross-instance registry), so
     /// jekt can deliver to this PTY without a separate register call.
-    pub(super) fn register_agent_with_jekt(&self, agent_id: &String) {
+    pub(super) fn register_agent_with_jekt(&self, agent_id: &str) {
         // Identity M2: a PTY pane has no `db_agents` row, so no UID —
         // registered by name only, counted (spec §4.4.1 row 4).
         match crate::backend::reactive::get_global_handler().register_agent_full(
@@ -88,7 +88,7 @@ impl ShellController {
 
     /// Seeds `cmd:cwd` in the block meta right after spawn so drag-and-drop works before the shell
     /// emits its first OSC 7 (or for shells without integration).
-    pub(super) fn seed_cmd_cwd(&self, cwd: &String, remote: bool) {
+    pub(super) fn seed_cmd_cwd(&self, cwd: &str, remote: bool) {
         tracing::info!(
             block_id = %self.block_id,
             mstore_present = self.mstore.is_some(),
@@ -101,7 +101,7 @@ impl ShellController {
         // Not for an SSH, WSL or container pane: its cwd is a path on the other side, and
         // this machine's directory would be sent there on the next launch.
         if let Some(store) = self.mstore.as_ref().filter(|_| !remote) {
-            let effective_cwd = cwd.clone(); // spawn_cwd: never empty for a local shell
+            let effective_cwd = cwd.to_string(); // spawn_cwd: never empty for a local shell
             tracing::debug!(block_id = %self.block_id, cwd = %effective_cwd, "seeding cmd:cwd");
             if !effective_cwd.is_empty() {
                 let oref_str = format!("block:{}", self.block_id);
