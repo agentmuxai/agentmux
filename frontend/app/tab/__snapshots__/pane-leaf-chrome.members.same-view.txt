@@ -1,0 +1,9 @@
+Block mount b1 wrapper#1 hoisted=true preview=false
+expectAgentMount b1 :: view=agent active=true mounted=true minimized=false stack=1
+setBlockMinimized b1 false
+setKeepAliveBlockDormant b1 false
+Block b1 memberActive=true
+Block b1 set its vm
+renderPaneChrome by vm of b1
+-- same view, new object
+-- done

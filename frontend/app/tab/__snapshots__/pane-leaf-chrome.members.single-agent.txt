@@ -1,0 +1,14 @@
+Block mount b1 wrapper#1 hoisted=true preview=false
+expectAgentMount b1 :: view=agent active=true mounted=true minimized=false stack=1
+setBlockMinimized b1 false
+setKeepAliveBlockDormant b1 false
+Block b1 memberActive=true
+Block b1 set its vm
+renderPaneChrome by vm of b1
+dom chrome=1 shell=0 blocks=["b1"] slots=["b1[dormant=null vis=inherit op=1 pe=auto]"]
+chrome sees vm of b1
+-- unmount
+Block unmount b1
+setKeepAliveBlockDormant b1 false
+setBlockMinimized b1 false
+agentMountForgotten b1

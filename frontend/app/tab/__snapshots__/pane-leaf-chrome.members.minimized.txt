@@ -1,0 +1,31 @@
+Block mount a1 wrapper#1 hoisted=true preview=false
+expectAgentMount a1 :: view=agent active=true mounted=true minimized=false stack=2
+agentMountSettled h1
+setBlockMinimized a1 false
+setBlockMinimized h1 false
+setKeepAliveBlockDormant a1 false
+Block a1 memberActive=true
+Block a1 set its vm
+renderPaneChrome by vm of a1
+-- minimize
+setBlockMinimized a1 true
+setBlockMinimized h1 true
+-- maximize
+setBlockMinimized a1 false
+setBlockMinimized h1 false
+-- restore the size
+setBlockMinimized a1 true
+setBlockMinimized h1 true
+-- restore
+setBlockMinimized a1 false
+setBlockMinimized h1 false
+-- minimize again
+setBlockMinimized a1 true
+setBlockMinimized h1 true
+-- unmount
+Block unmount a1
+setKeepAliveBlockDormant a1 false
+setBlockMinimized a1 false
+setBlockMinimized h1 false
+agentMountForgotten a1
+agentMountForgotten h1

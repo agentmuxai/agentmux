@@ -1,0 +1,25 @@
+Block mount b1 wrapper#1 hoisted=false preview=false
+expectAgentMount b1 :: view=not loaded active=true mounted=true minimized=false stack=1
+setBlockMinimized b1 false
+Block b1 memberActive=true
+leaf setActiveViewModel b1
+Block b1 set its vm
+-- unresolved
+dom chrome=0 shell=0 blocks=["b1"] slots=[]
+renderPaneChrome by vm of b1
+Block unmount b1
+leaf setActiveViewModel null
+Block mount b1 wrapper#2 hoisted=true preview=false
+expectAgentMount b1 :: view=agent active=true mounted=true minimized=false stack=1
+setKeepAliveBlockDormant b1 false
+Block b1 memberActive=true
+Block b1 set its vm
+-- agent
+dom chrome=1 shell=0 blocks=["b1"] slots=["b1[dormant=null vis=inherit op=1 pe=auto]"]
+chrome sees vm of b1
+agentMountSettled b1
+-- mystery (latched)
+dom chrome=1 shell=0 blocks=["b1"] slots=["b1[dormant=null vis=inherit op=1 pe=auto]"]
+agentMountSettled b1
+-- help (keep-alive latched)
+dom chrome=1 shell=0 blocks=["b1"] slots=["b1[dormant=null vis=inherit op=1 pe=auto]"]
