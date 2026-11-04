@@ -6,10 +6,9 @@ import type { BrowserBookmark } from "@/types/rpc/BrowserBookmark";
 import clsx from "clsx";
 import { getApi } from "@/util/app-api";
 import { paneCommandFor } from "@/app/keybindings";
-import { ContextMenuModel, showTextInputContextMenu } from "@/app/store/contextmenu";
+import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { browserStartPageAtom, settingsAtom } from "@/store/config-signals";
-import { FlyoutMenu } from "@/app/element/flyoutmenu";
-import { Button } from "@/app/element/ui";
+import { Button, type MenuEntry, MenuTrigger, openMenuAt } from "@/app/element/ui";
 import { ToolbarBookmarkIcon, ToolbarHomeIcon } from "./browser-toolbar-icons";
 import { reloadButtonState } from "./browser-reload-button";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -29,10 +28,9 @@ import { MENU_ICON } from "@/app/util/menu-icons";
  * favicon" convention (a plain globe icon, matching
  * `BrowserViewModel.viewIcon`/faviconUrlAtom's own empty-string fallback)
  * when there's no favicon_url, or the image fails to load. A real `<img>`
- * — not a FontAwesome name — since `MenuItem.icon` is typed
- * `string | JSX.Element` specifically to allow this; FlyoutMenu's default
- * item renderer only handles the string case, so this is paired with a
- * `renderMenuItem` override below that renders a JSX.Element icon as-is.
+ * — not a FontAwesome name — since `MenuEntry.icon` is typed
+ * `string | JSX.Element` specifically to allow this: the kit Menu draws an
+ * element icon as it is, so this brings its own icon slot.
  */
 function BookmarkFavicon(props: { faviconUrl: string }): JSX.Element {
     const [failed, setFailed] = createSignal(false);
@@ -308,8 +306,8 @@ export function BrowserNavBar(props: {
         // fresh fetch resolves in the background — flipping
         // bookmarksLoading on every open (as this used to, unconditionally)
         // forced bookmarkMenuItems' createMemo to rebuild a fresh
-        // MenuItem[] (fresh <BookmarkFavicon> elements) TWICE per open, and
-        // since Solid's <For> (inside FlyoutMenu) diffs by reference, that
+        // MenuEntry[] (fresh <BookmarkFavicon> elements) TWICE per open, and
+        // since Solid's <For> (inside the Menu) diffs by reference, that
         // tore down and remounted every saved bookmark's <img> — reloading
         // every favicon over the network on every single menu open, not
         // just the first (ReAgent P1, PR #2733).
@@ -336,7 +334,7 @@ export function BrowserNavBar(props: {
     };
 
     // Optimistic write with rollback — the menu already closed by the time
-    // this resolves (FlyoutMenu closes on any item click), so a failure
+    // this resolves (the Menu closes on any item pick), so a failure
     // needs its own visible surface rather than silently reopening the
     // menu. `bookmarksError` surfaces via the bookmark button itself (title
     // tooltip + a red icon tint, below) rather than the page-load error
@@ -406,57 +404,41 @@ export function BrowserNavBar(props: {
         );
     };
 
-    // FlyoutMenu — the same primitive behind the hamburger menu, the widget
-    // bar's "More" dropdown, and right-click context menus. Reusing it
-    // means the "grows to the bottom of the window, then scrolls
-    // internally" behavior (computeMenuPosition's size() middleware,
-    // frontend/app/util/menu-position.ts) and edge-flip/click-outside-close
-    // come for free — nothing bookmark-specific to build there. Saved-
-    // bookmark rows use a real per-site favicon (`BookmarkFavicon`, a
-    // JSX.Element) rather than a FontAwesome name — FlyoutMenu's default
-    // item renderer only handles the string-icon case, so the `<FlyoutMenu>`
-    // below carries a `renderMenuItem` override that renders a JSX.Element
-    // icon as-is and falls back to the default fa-${icon} rendering for the
-    // pinned toggle row / placeholder rows, which still use string icons.
-    const bookmarkMenuItems = createMemo<MenuItem[]>(() => {
+    // The kit Menu (`MenuTrigger`): it grows to the bottom of the window, then scrolls internally
+    // (computeMenuPosition's size() middleware, frontend/app/util/menu-position.ts), flips at an edge and
+    // closes on an outside press. Saved-bookmark rows use a real per-site favicon (`BookmarkFavicon`, an
+    // element that brings its own icon slot) rather than a Font Awesome name; the pinned rows and the
+    // placeholder rows use names.
+    const bookmarkMenuItems = createMemo<MenuEntry[]>(() => {
         // Only true before the first-ever successful loadBookmarks() call
         // (see its own comment) — every later menu open keeps rendering
         // the previous list below instead of bouncing through this branch,
         // so saved bookmarks' <img> favicons are never torn down and
         // remounted just because the menu was reopened.
         if (bookmarksLoading()) {
-            // No icon here (deliberately): FlyoutMenu's default item
-            // renderer only ever applies `fa-solid fa-fw fa-${item.icon}` —
-            // there's no way to also pair in `fa-spin` through that field,
-            // so a `fa-spinner` icon would render static/non-animating and
-            // look broken next to every other spinner in this codebase
-            // (which is always fa-spinner + fa-spin together, e.g.
-            // swarm-view.tsx's `DispatchActivityFeedEntry`, toolchain-view.tsx's
-            // "Check latest versions" button). A label-only row for this brief, local-file-read loading state is honest
-            // rather than a fake, non-spinning spinner (ReAgent re-review,
-            // PR #2730).
+            // No icon here (deliberately): a spinner needs `fa-spin` beside its name, which an icon name
+            // cannot carry, and a static one would look broken next to every other spinner in this
+            // codebase. A label-only row for this brief, local-file-read loading state is honest rather
+            // than a fake, non-spinning spinner (#2730).
             return [{ label: "Loading…" }];
         }
-        const items: MenuItem[] = [];
+        const items: MenuEntry[] = [];
         if (model.urlAtom()) {
             // First entry, above the bookmark toggle — see
             // docs/specs/SPEC_BROWSER_PANE_START_PAGE_2026_09_16.md §3.3.
-            // Label flips to reflect current state, same convention as the
-            // bookmark-toggle row right below (label changes, icon doesn't)
-            // — NOT `MenuItem.checked`: that field replaces the icon slot
-            // entirely with a check-or-blank glyph (this nav bar's own
-            // `renderMenuItem` override mirrors FlyoutMenu's default markup
-            // for it), which would make the house icon never render at all
-            // for this always-boolean row (ReAgent P2, PR #3288).
+            // Label flips to reflect current state, same convention as the bookmark-toggle row right
+            // below (label changes, icon doesn't) — NOT `checked`: that replaces the icon slot with a
+            // check-or-blank glyph, which would make the house icon never render at all for this
+            // always-boolean row (#3288).
             items.push({
                 label: model.urlAtom() === browserStartPageAtom() ? "This Is Your Home Page" : "Set as Home Page",
                 icon: "house",
-                onClick: setCurrentAsStartPage,
+                onSelect: setCurrentAsStartPage,
             });
             items.push({
                 label: currentBookmark() ? "Remove Bookmark" : "Bookmark This Page",
                 icon: "star",
-                onClick: toggleCurrentBookmark,
+                onSelect: toggleCurrentBookmark,
             });
         }
         const saved = bookmarks();
@@ -466,7 +448,7 @@ export function BrowserNavBar(props: {
                 items.push({
                     label: b.title || b.url,
                     icon: <BookmarkFavicon faviconUrl={b.favicon_url ?? ""} />,
-                    onClick: () => navigateTo(b.url),
+                    onSelect: () => navigateTo(b.url),
                 });
             }
         } else if (items.length > 0) {
@@ -539,7 +521,7 @@ export function BrowserNavBar(props: {
                             onClick={goHome}
                             onContextMenu={(e) => {
                                 e.preventDefault();
-                                ContextMenuModel.showContextMenu(
+                                openMenuAt(
                                     [
                                         {
                                             label: "Set this page as Home",
@@ -556,7 +538,7 @@ export function BrowserNavBar(props: {
                         </Button>
                     </div>
                     <div class="browser-nav-group browser-nav-group--bookmarks">
-                        <FlyoutMenu
+                        <MenuTrigger
                             items={bookmarkMenuItems()}
                             placement="bottom-start"
                             containWithin={pane}
@@ -564,29 +546,6 @@ export function BrowserNavBar(props: {
                             onOpenChange={(open) => {
                                 if (open) void loadBookmarks();
                             }}
-                            // Only the icon slot is customized here — label/onClick/
-                            // divider behavior is identical to FlyoutMenu's default
-                            // rendering. `checked`/`shortcut`/`subItems` are
-                            // deliberately not replicated since this menu never uses
-                            // them (both pinned rows reflect state via their LABEL,
-                            // not `checked` — see the "Set as Start Page" row's own
-                            // comment for why) — not a general-purpose replacement
-                            // for the default renderer.
-                            renderMenuItem={(item, menuItemProps) => (
-                                <div {...menuItemProps}>
-                                    <Show
-                                        when={typeof item.icon !== "string"}
-                                        fallback={
-                                            <Show when={item.icon}>
-                                                <i class={clsx("fa-solid fa-fw", `fa-${item.icon}`, "menu-item-icon")} />
-                                            </Show>
-                                        }
-                                    >
-                                        {item.icon as JSX.Element}
-                                    </Show>
-                                    <span class="label">{item.label}</span>
-                                </div>
-                            )}
                         >
                             <Button
                                 tone="quiet"
@@ -603,7 +562,7 @@ export function BrowserNavBar(props: {
                                     class={clsx((!!bookmarksError() || !!startPageError()) && "browser-bookmark-btn-error")}
                                 />
                             </Button>
-                        </FlyoutMenu>
+                        </MenuTrigger>
                     </div>
                     <div class="browser-nav-break" aria-hidden="true" />
                     <div class="browser-address-wrap">

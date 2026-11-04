@@ -30,8 +30,8 @@ pub use manifest::{JobTemplateManifest, RenderedBrief};
 use package::Package;
 
 use crate::backend::jobs::reporters::{Reporters, REPORTERS_FILE};
-use crate::backend::widget_packages as wp;
-use crate::backend::widget_signature::{self as sig, Pins, WidgetPublisherPin, WidgetSignatureInfo};
+use crate::backend::widget::packages as wp;
+use crate::backend::widget::signature::{self as sig, Pins, WidgetPublisherPin, WidgetSignatureInfo};
 
 const APPROVALS_FILE: &str = "job-template-approvals.json";
 const PUBLISHERS_FILE: &str = "job-template-publishers.json";

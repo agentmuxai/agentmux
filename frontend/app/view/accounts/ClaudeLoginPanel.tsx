@@ -34,6 +34,30 @@ import { Button } from "@/app/element/ui";
 
 const CLAUDE_PROVIDER = PROVIDERS["claude"];
 
+/** The sign-in's frame: a dialog, or, `inline`, the section it is already in (Connectors' add section). */
+function LoginShell(p: {
+    inline?: boolean;
+    scope?: ModalScope;
+    busy: boolean;
+    onClose: () => void;
+    children: JSX.Element;
+}): JSX.Element {
+    if (p.inline) return <div class="accounts-chooser accounts-chooser--inline">{p.children}</div>;
+    return (
+        <Modal
+            open={true}
+            onClose={() => !p.busy && p.onClose()}
+            scope={p.scope ?? "window"}
+            closeOnBackdropClick={!p.busy}
+            size="md"
+            ariaLabel="Connect Anthropic"
+            panelClass="accounts-chooser"
+        >
+            {p.children}
+        </Modal>
+    );
+}
+
 export function ClaudeLoginPanel(props: {
     onClose: () => void;
     /** Set for a per-binding re-login: refreshes THIS account's
@@ -67,6 +91,8 @@ export function ClaudeLoginPanel(props: {
      *  correctly over that modal instead of both competing for the same
      *  window-level backdrop. */
     scope?: ModalScope;
+    /** Show the sign-in in the section it is in, not in a dialog. */
+    inline?: boolean;
 }): JSX.Element {
     const [phase, setPhase] = createSignal<InAppLoginPhase>("starting");
     const [authUrl, setAuthUrl] = createSignal<string | undefined>(undefined);
@@ -317,15 +343,7 @@ export function ClaudeLoginPanel(props: {
     void start();
 
     return (
-        <Modal
-            open={true}
-            onClose={() => !inFlight() && props.onClose()}
-            scope={props.scope ?? "window"}
-            closeOnBackdropClick={!inFlight()}
-            size="md"
-            ariaLabel="Connect Anthropic"
-            panelClass="accounts-chooser"
-        >
+        <LoginShell inline={props.inline} scope={props.scope} busy={inFlight()} onClose={props.onClose}>
             <Show
                 when={!done()}
                 fallback={
@@ -378,7 +396,7 @@ export function ClaudeLoginPanel(props: {
                     />
                 </Show>
             </Show>
-        </Modal>
+        </LoginShell>
     );
 }
 

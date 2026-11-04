@@ -16,8 +16,8 @@ use std::path::{Component, Path};
 
 use serde::{Deserialize, Serialize};
 
-use super::widget_packages::{self as wp, Manifest, WidgetKind, WidgetPackageInfo, WidgetState};
-use super::widget_signature::{self as sig, WidgetSignatureInfo};
+use super::widget::packages::{self as wp, Manifest, WidgetKind, WidgetPackageInfo, WidgetState};
+use super::widget::signature::{self as sig, WidgetSignatureInfo};
 
 /// Where a bundle keeps its widgets, relative to the bundle's root.
 pub const WIDGETS_DIR: &str = "widgets";

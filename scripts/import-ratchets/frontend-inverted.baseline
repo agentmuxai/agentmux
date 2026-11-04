@@ -2,9 +2,3 @@
 # (scripts/check-import-ratchets.mjs). An import not listed may not be added.
 # Run `node scripts/check-import-ratchets.mjs --update` after fixing some; adding
 # an entry is a hand edit that the PR has to justify.
-frontend/app/element/install/LogView.tsx -> frontend/app/view/agent/scroll/follow-scroll.ts
-frontend/app/store/agent-pane-registration.ts -> frontend/app/view/agent/activity/task-outcomes.ts
-frontend/app/store/recycle.ts -> frontend/app/view/agent/attachments/attachment-draft.ts
-frontend/app/store/recycle.ts -> frontend/app/view/agent/hooks/useSnapshotPersistence.ts
-frontend/app/store/recycle.ts -> frontend/app/view/agent/reload-persistence.ts
-frontend/app/store/recycle.ts -> frontend/app/view/agent/virtualization/scroll-memo.ts

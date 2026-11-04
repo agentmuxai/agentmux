@@ -692,7 +692,7 @@ async fn a_bundle_exported_with_a_widget_previews_it() {
         ]),
     };
     let (_tmp, root) = bw::stage(&widget).unwrap();
-    let hash = crate::backend::widget_packages::package_hash(&crate::backend::widget_packages::hash_files(&root).unwrap());
+    let hash = crate::backend::widget::packages::package_hash(&crate::backend::widget::packages::hash_files(&root).unwrap());
     let export = BundleExport {
         root_slug: "with-widget".into(),
         files: vec![

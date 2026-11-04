@@ -4,12 +4,19 @@
 import { describe, expect, it } from "vitest";
 import {
     FALLBACK_TOOLTIP,
+    formatLineAge,
     heuristicTitle,
     isAwaitingUser,
     lastPromptToStore,
+    isMutedLine,
+    lineAt,
     LAST_PROMPT_MAX_CHARS,
+    LIVE_PHRASE_STALE_MS,
     META_AWAITING_USER,
     META_LAST_PROMPT,
+    META_LIVE_PHRASE,
+    META_LIVE_PHRASE_AT,
+    META_LIVE_PHRASE_SRC,
     META_RESTORED,
     resolveSwarmLine,
     RESTORED_TOOLTIP,
@@ -219,5 +226,116 @@ describe("swarmLineTooltip", () => {
         expect(swarmLineTooltip({ text: "x", source: "restored" })).toBe(RESTORED_TOOLTIP);
         expect(swarmLineTooltip({ text: "x", source: "heuristic" })).toBe(FALLBACK_TOOLTIP);
         expect(swarmLineTooltip({ text: "x", source: "status" })).toBe(FALLBACK_TOOLTIP);
+    });
+});
+
+describe("the line the agent set itself", () => {
+    const NOW = 1_800_000_000_000;
+    const minutes = (n: number) => n * 60_000;
+    const own = (ageMin: number, extra: Record<string, unknown> = {}) => ({
+        [META_LIVE_PHRASE]: "Fixing the stale-site restore loop",
+        [META_LIVE_PHRASE_AT]: NOW - minutes(ageMin),
+        "term:ambient_summary": "Implement card tags and filter chips",
+        [META_LAST_PROMPT]: "Please review something else entirely",
+        ...extra,
+    });
+
+    it("comes before the generated title, the last prompt and every status", () => {
+        expect(line({ meta: own(2), status: "running", currentTool: "Bash", now: NOW })).toEqual({
+            text: "Fixing the stale-site restore loop",
+            source: "declared",
+            setAt: NOW - minutes(2),
+            ageMs: minutes(2),
+            stale: false,
+        });
+    });
+
+    it("goes stale with the row's clock, not only when the tree was built", () => {
+        const fresh = line({ meta: own(2), now: NOW });
+        expect(fresh.stale).toBe(false);
+        const later = NOW + LIVE_PHRASE_STALE_MS;
+        expect(isMutedLine(fresh, later)).toBe(true);
+        expect(isMutedLine(fresh, NOW)).toBe(false);
+        expect(lineAt(fresh, later)).toMatchObject({ stale: true, ageMs: minutes(2) + LIVE_PHRASE_STALE_MS });
+        expect(swarmLineTooltip(fresh, later)).toBe("Set by the agent 32m ago");
+    });
+
+    it("shows a blocked or waiting line in the first person, which a generated title would be refused for", () => {
+        for (const text of ["Blocked: I cannot reach the API", "Waiting: I need more info on the account"]) {
+            expect(line({ meta: own(2, { [META_LIVE_PHRASE]: text }), now: NOW })).toMatchObject({ text, source: "declared" });
+        }
+    });
+
+    it("says the agent is waiting on you ahead of its own line, as it does ahead of every title", () => {
+        const meta = own(2, { [META_AWAITING_USER]: true });
+        expect(line({ meta, status: "running", now: NOW }).source).toBe("status");
+    });
+
+    it("is stale once it is older than the limit, and keeps its text and age", () => {
+        const fresh = line({ meta: own(LIVE_PHRASE_STALE_MS / 60_000 - 1), now: NOW });
+        const old = line({ meta: own(LIVE_PHRASE_STALE_MS / 60_000 + 1), now: NOW });
+        expect(fresh.stale).toBe(false);
+        expect(old).toMatchObject({ text: "Fixing the stale-site restore loop", source: "declared", stale: true });
+        expect(old.ageMs).toBe(LIVE_PHRASE_STALE_MS + minutes(1));
+    });
+
+    it("is the task's title, from the claim, until the agent says it better", () => {
+        const task = line({ meta: own(1, { [META_LIVE_PHRASE]: "#20816 Build: the Swarm phrase", [META_LIVE_PHRASE_SRC]: "task" }), now: NOW });
+        expect(task).toMatchObject({ text: "#20816 Build: the Swarm phrase", source: "task", stale: false });
+    });
+
+    it("is ignored when it is empty or cleared", () => {
+        for (const text of ["", "   "]) {
+            const got = line({ meta: own(1, { [META_LIVE_PHRASE]: text }), now: NOW });
+            expect(got).toEqual({ text: "Implement card tags and filter chips", source: "generated" });
+        }
+    });
+
+    it("has no age when it carries no time, and then counts as stale", () => {
+        const got = line({ meta: { [META_LIVE_PHRASE]: "Reviewing PR 6190" }, now: NOW });
+        expect(got).toMatchObject({ text: "Reviewing PR 6190", source: "declared", stale: true });
+        expect(got.ageMs).toBeUndefined();
+    });
+
+    it("never goes backwards when the clock of the writer is ahead", () => {
+        const got = line({ meta: own(-5), now: NOW });
+        expect(got.ageMs).toBe(0);
+        expect(got.stale).toBe(false);
+    });
+});
+
+describe("formatLineAge", () => {
+    it.each([
+        [0, "just now"],
+        [59_000, "just now"],
+        [60_000, "1m ago"],
+        [59 * 60_000, "59m ago"],
+        [60 * 60_000, "1h ago"],
+        [5 * 3_600_000 + 1_000, "5h ago"],
+        [24 * 3_600_000, "1d ago"],
+        [3 * 24 * 3_600_000, "3d ago"],
+    ])("writes %i ms as %j", (ms, expected) => {
+        expect(formatLineAge(ms)).toBe(expected);
+    });
+});
+
+describe("how a Swarm row shows the line", () => {
+    it("mutes everything but the agent's own fresh account of its work", () => {
+        expect(isMutedLine({ text: "x", source: "generated" })).toBe(false);
+        expect(isMutedLine({ text: "x", source: "declared", ageMs: 1, stale: false })).toBe(false);
+        expect(isMutedLine({ text: "x", source: "task", ageMs: 1, stale: false })).toBe(false);
+        expect(isMutedLine({ text: "x", source: "declared", ageMs: 1, stale: true })).toBe(true);
+        expect(isMutedLine({ text: "x", source: "task", ageMs: 1, stale: true })).toBe(true);
+        for (const source of ["restored", "heuristic", "status"] as const) {
+            expect(isMutedLine({ text: "x", source })).toBe(true);
+        }
+    });
+
+    it("names the age of a stale line in its tooltip and says where a task's line came from", () => {
+        expect(swarmLineTooltip({ text: "x", source: "declared", ageMs: 2 * 3_600_000, stale: true })).toBe("Set by the agent 2h ago");
+        expect(swarmLineTooltip({ text: "x", source: "declared", ageMs: 1000, stale: false })).toBeUndefined();
+        expect(swarmLineTooltip({ text: "x", source: "task", ageMs: 1000, stale: false })).toBe("The task it claimed; the agent has not said more yet");
+        expect(swarmLineTooltip({ text: "x", source: "task", ageMs: 3 * 3_600_000, stale: true })).toBe("The task it claimed 3h ago");
+        expect(swarmLineTooltip({ text: "x", source: "declared", stale: true })).toBe("Set by the agent, a while ago");
     });
 });

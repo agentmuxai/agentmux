@@ -515,3 +515,46 @@ describe("PaneTabStrip — tear-off payload", () => {
         }
     });
 });
+
+describe("PaneTabStrip — the slot a tab from another pane lands in", () => {
+    const pill = (data: Record<string, unknown>) => ({ source: { data: { type: paneTabItemType, sourceNodeId: "pane-other", ...data } } });
+    const ghost = (strip: HTMLElement) => strip.querySelector<HTMLElement>(".pane-tab--incoming");
+
+    it("shows a ghost pill with the grabbed tab's title after the last tab, and removes it on leave", async () => {
+        const { config, strip } = renderInHeader();
+        config.onDragEnter(pill({ blockId: "x", label: "gamma" }));
+        await Promise.resolve();
+        expect(ghost(strip)?.textContent).toBe("gamma");
+        // After the last real tab: the drop appends.
+        expect(ghost(strip)!.previousElementSibling).not.toBeNull();
+        config.onDragLeave();
+        await Promise.resolve();
+        expect(ghost(strip)).toBeNull();
+    });
+
+    it("says how many tabs a picked set adds, leaving out the ones already here", async () => {
+        const { config, strip } = renderInHeader();
+        config.onDragEnter(pill({ blockId: "x", blockIds: ["x", "y", "a"] }));
+        await Promise.resolve();
+        expect(ghost(strip)?.textContent).toBe("2 tabs");
+    });
+
+    it("shows none when the drag adds nothing here, and removes it on drop", async () => {
+        const { config, strip } = renderInHeader();
+        config.onDragEnter(pill({ blockId: "a", sourceNodeId: "pane-other", label: "alpha" }));
+        await Promise.resolve();
+        expect(ghost(strip)).toBeNull();
+        config.onDragEnter(pill({ blockId: "x", label: "gamma" }));
+        await Promise.resolve();
+        expect(ghost(strip)).not.toBeNull();
+        vi.useFakeTimers();
+        try {
+            config.onDrop(pill({ blockId: "x", label: "gamma" }));
+            await Promise.resolve();
+            expect(ghost(strip)).toBeNull();
+            vi.runOnlyPendingTimers();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+});

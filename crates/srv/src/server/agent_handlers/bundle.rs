@@ -31,231 +31,277 @@ use crate::backend::storage::{BundleVersion, BundleVersionSummary};
 
 use super::super::AppState;
 
+// ---- Bundle CRUD ----
+
+/// `listmemories`.
+pub(crate) fn list_memories(state: &AppState) -> Result<Vec<Bundle>, String> {
+    let memories = state
+        .id_store
+        .bundle_list()
+        .map_err(|e| format!("listmemories: {e}"))?;
+    Ok(memories)
+}
+
+/// `getmemory`.
+pub(crate) fn get_memory(state: &AppState, cmd: CommandGetBundleData) -> Result<Bundle, String> {
+    match state
+        .id_store
+        .bundle_get(&cmd.id)
+        .map_err(|e| format!("getmemory: {e}"))?
+    {
+        Some(m) => Ok(m),
+        None => Err(format!("getmemory: not found id={}", cmd.id)),
+    }
+}
+
+/// `upsertmemory`.
+pub(crate) fn upsert_memory(state: &AppState, ctx: &RpcContext, req: CommandUpsertBundleData) -> Result<Bundle, String> {
+    let CommandUpsertBundleData { bundle: mut memory, base_sha256 } = req;
+    // Guard on BOTH client-supplied is_blank AND id == "blank".
+    // Without the id check a caller could send
+    // {id:"blank", is_blank:false, name:"evil"} and the
+    // ON CONFLICT(id) DO UPDATE path would rename/re-describe
+    // the seeded singleton. (reagent P1, 2026-05-08).
+    if memory.is_blank || memory.id == "blank" {
+        return Err("upsertmemory: cannot mutate the blank singleton".to_string());
+    }
+    if memory.id.is_empty() {
+        memory.id = uuid::Uuid::new_v4().to_string();
+    }
+    let now = agentmux_common::time::now_ms();
+    if memory.created_at == 0 {
+        memory.created_at = now;
+    }
+    memory.updated_at = now;
+    // bundle_upsert_with_version, not bundle_upsert — this is
+    // the actual Memory → Global save path (frontend's
+    // UpsertBundleCommand -> "upsertmemory"; also used by the
+    // per-agent Bundle editor, which is fine: versioning only
+    // fires when memory.is_global is true either way). Without
+    // this, a human edit in Memory → Global was invisible to
+    // db_bundle_versions entirely — only agent-originated
+    // writes through GlobalMemoryWrite recorded a version, so a
+    // future history/diff view would present a false sequence
+    // with operator edits silently missing from it (codex P2,
+    // PR #3237). "armory-ui" as written_by: a connection that did
+    // not register as an agent is the window, which has no
+    // per-request trusted AGENT identity the way the REST/MCP
+    // path does (see BundleVersion::written_by's own doc
+    // comment). No writer UID either (identity M4c-1): the
+    // WebSocket is always Unattributed.
+    // `base_sha256` (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md
+    // §2.4): the Memory editor says which content its draft
+    // started from, so a concurrent write (an agent's
+    // GlobalMemoryWrite, another window) becomes a `conflict:`
+    // refusal instead of being silently overwritten. Absent =
+    // the unconditional save every other caller still gets.
+    // A write made by a registered agent is recorded as that agent,
+    // never as the person at the window.
+    let (written_by, source) = writer_of(ctx, "human");
+    state
+        .id_store
+        .bundle_upsert_with_version_based(&memory, written_by, "", source, "{}", base_sha256.as_deref())
+        .map_err(|e| format!("upsertmemory: {e}"))?;
+    state.broker.publish_event::<crate::backend::mps_events::MemoriesChanged>(&(), vec![], 0);
+    Ok(memory)
+}
+
+/// `deletememory`.
+pub(crate) fn delete_memory(state: &AppState, cmd: CommandDeleteBundleData) -> Result<DeleteBundleResult, String> {
+    let deleted = state
+        .id_store
+        .bundle_delete(&cmd.id)
+        .map_err(|e| format!("deletememory: {e}"))?;
+    if deleted {
+        // This is the delete Memory actually calls
+        // (`rpc-api/bundle.ts`), so the ref purge has to live here
+        // too — fixing only `bundle.delete` left the product path
+        // orphaning refs (Codex, PR #3153). Shared helper, not a
+        // second copy of the logic.
+        crate::server::app_api::bundle::purge_bundle_component_refs(
+            &state.mstore,
+            &cmd.id,
+        );
+        state.broker.publish_event::<crate::backend::mps_events::MemoriesChanged>(&(), vec![], 0);
+    }
+    Ok(DeleteBundleResult { deleted })
+}
+
+/// `reorderglobalbrain`.
+pub(crate) fn reorder_global_bundles(
+    state: &AppState,
+    cmd: CommandReorderGlobalBundlesData,
+) -> Result<ReorderGlobalBundlesResult, String> {
+    let updated = state
+        .id_store
+        .bundle_reorder(&cmd.ids)
+        .map_err(|e| format!("reorderglobalbrain: {e}"))?;
+    state.broker.publish_event::<crate::backend::mps_events::MemoriesChanged>(&(), vec![], 0);
+    Ok(ReorderGlobalBundlesResult { updated })
+}
+
+// ---- System-tier Global Bundle — see
+// docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md. Deliberately
+// separate commands from the four above (never wired to any MCP tool)
+// so the ordinary Global Bundle editor and every other generic
+// bundle-writing surface can never reach an is_system row.
+
+/// `upsertsystemmemory`.
+pub(crate) fn upsert_system_memory(state: &AppState, ctx: &RpcContext, req: CommandUpsertBundleData) -> Result<Bundle, String> {
+    let mstore = &state.id_store;
+    let CommandUpsertBundleData { bundle: mut memory, base_sha256 } = req;
+    if memory.id.is_empty() {
+        memory.id = uuid::Uuid::new_v4().to_string();
+    }
+    let now = agentmux_common::time::now_ms();
+    if memory.created_at == 0 {
+        memory.created_at = now;
+    }
+    memory.updated_at = now;
+    // bundle_upsert_system_if_changed atomically compares against
+    // the current row and skips recording a version
+    // for a byte-identical save (operator opens a seeded entry
+    // and hits Save without changing anything — the UI does not
+    // suppress this request) — recording one would permanently
+    // mark the row as human-owned even though nothing actually
+    // changed, so a future Operator Config manifest update would
+    // be skipped forever instead of just once. A REAL edit is
+    // stamped with its writer ("armory-ui" for the window, the
+    // agent's id for a registered agent), so the next startup's
+    // reseed correctly leaves it alone. The
+    // read-decide-write happens in one transaction, not as a
+    // separate bundle_get + conditional call here — an earlier
+    // revision raced a concurrent writer (e.g. another AgentMux
+    // instance's own reseed) between the read and the write.
+    // Codex P1/P2, ReAgent P2, PR #3244.
+    // Same optional base check as `upsertmemory` above.
+    // A registered agent's save is recorded as that agent, never as the person's.
+    let (written_by, source) = writer_of(ctx, "human");
+    mstore
+        .bundle_upsert_system_if_changed_based(&memory, written_by, source, "{}", base_sha256.as_deref())
+        .map_err(|e| format!("upsertsystemmemory: {e}"))?;
+    state.broker.publish_event::<crate::backend::mps_events::MemoriesChanged>(&(), vec![], 0);
+    // Return the row actually persisted, not the client-supplied
+    // struct — bundle_upsert_system hardcodes
+    // is_blank/is_global/is_system server-side regardless of
+    // what `memory` carried (e.g. the frontend's saveSystemEdit
+    // sends only id/name/instructions, so `memory.is_global`/
+    // `is_system` deserialize to false via #[serde(default)]).
+    // Echoing `memory` back would misreport both to any caller
+    // that trusts the response instead of refetching. reagent
+    // P2, PR #2782.
+    let saved = mstore
+        .bundle_get(&memory.id)
+        .map_err(|e| format!("upsertsystemmemory: {e}"))?
+        .ok_or_else(|| format!("upsertsystemmemory: row {} vanished after upsert", memory.id))?;
+    Ok(saved)
+}
+
+/// `deletesystemmemory`.
+pub(crate) fn delete_system_memory(state: &AppState, cmd: CommandDeleteBundleData) -> Result<DeleteBundleResult, String> {
+    let deleted = state
+        .id_store
+        .bundle_delete_system(&cmd.id)
+        .map_err(|e| format!("deletesystemmemory: {e}"))?;
+    if deleted {
+        state.broker.publish_event::<crate::backend::mps_events::MemoriesChanged>(&(), vec![], 0);
+    }
+    Ok(DeleteBundleResult { deleted })
+}
+
+/// `globalmemory:revert`.
+pub(crate) fn global_memory_revert(
+    state: &AppState,
+    ctx: &RpcContext,
+    cmd: CommandGlobalMemoryRevertData,
+) -> Result<GlobalMemoryRevertResult, String> {
+    let result = global_memory_ui_revert(&state.id_store, &cmd, writer_of(ctx, "revert").0)?;
+    state.broker.publish_event::<crate::backend::mps_events::MemoriesChanged>(&(), vec![], 0);
+    Ok(result)
+}
+
+/// `globalmemory:removed`: the entries taken out of Global Memory, so the pane
+/// can offer to restore them: a restore is `globalmemory:revert` to the
+/// version listed here.
+pub(crate) fn global_memory_removed(state: &AppState) -> Result<GlobalMemoryRemovedResult, String> {
+    crate::server::app_api::removed_global_entries(&state.id_store)
+        .map(|entries| GlobalMemoryRemovedResult { entries })
+        .map_err(|e| format!("globalmemory:removed: {e}"))
+}
+
+/// `globalmemory:reach_list`: where each entry goes, for the pane's switch.
+pub(crate) fn global_memory_reach_list(state: &AppState) -> Result<GlobalMemoryReachListResult, String> {
+    crate::server::app_api::global_memory_reaches(&state.id_store)
+        .map(|entries| GlobalMemoryReachListResult { entries })
+        .map_err(|e| format!("globalmemory:reach_list: {e}"))
+}
+
+/// `globalmemory:set_reach`: the pane's switch. The change is the MCP tool's
+/// (`global_memory_reach_impl`: same guards, same event), made by the window;
+/// the entry's text is not touched.
+pub(crate) fn global_memory_set_reach(
+    state: &AppState,
+    ctx: &RpcContext,
+    cmd: CommandGlobalMemorySetReachData,
+) -> Result<crate::backend::rpc_types::GlobalMemoryReachEntry, String> {
+    let by = writer_of(ctx, "set_reach").0.to_string();
+    let answer = crate::server::app_api::global_memory_reach_impl(state, &by, &cmd.id, &cmd.reach)?;
+    Ok(crate::backend::rpc_types::GlobalMemoryReachEntry {
+        id: cmd.id,
+        reach: answer["reach"].as_str().unwrap_or_default().to_string(),
+    })
+}
+
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_global_memory_import(engine, state);
     register_global_memory_sections(engine, state);
     register_agent_bundles(engine, state);
-    // ---- Bundle CRUD ----
+    register_bundle_crud(engine, state);
+    register_global_memory_ui(engine, state);
+}
 
-    let mstore = state.id_store.clone();
-    engine.register_typed(
-        COMMAND_LIST_MEMORIES,
-        move |_req: CommandListBundlesData, _ctx| {
-            let mstore = mstore.clone();
-            async move {
-                let memories = mstore
-                    .bundle_list()
-                    .map_err(|e| format!("listmemories: {e}"))?;
-                Ok(memories)
-            }
-        },
-    );
+fn register_bundle_crud(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let s = state.clone();
+    engine.register_typed(COMMAND_LIST_MEMORIES, move |_req: CommandListBundlesData, _ctx| {
+        let s = s.clone();
+        async move { list_memories(&s) }
+    });
 
-    let mstore = state.id_store.clone();
-    engine.register_typed(
-        COMMAND_GET_MEMORY,
-        move |cmd: CommandGetBundleData, _ctx| {
-            let mstore = mstore.clone();
-            async move {
-                match mstore
-                    .bundle_get(&cmd.id)
-                    .map_err(|e| format!("getmemory: {e}"))?
-                {
-                    Some(m) => Ok(m),
-                    None => Err(format!("getmemory: not found id={}", cmd.id)),
-                }
-            }
-        },
-    );
+    let s = state.clone();
+    engine.register_typed(COMMAND_GET_MEMORY, move |cmd: CommandGetBundleData, _ctx| {
+        let s = s.clone();
+        async move { get_memory(&s, cmd) }
+    });
 
-    let mstore = state.id_store.clone();
-    let broker = state.broker.clone();
-    engine.register_typed(
-        COMMAND_UPSERT_MEMORY,
-        move |req: CommandUpsertBundleData, ctx| {
-            let mstore = mstore.clone();
-            let broker = broker.clone();
-            async move {
-                let CommandUpsertBundleData { bundle: mut memory, base_sha256 } = req;
-                // Guard on BOTH client-supplied is_blank AND id == "blank".
-                // Without the id check a caller could send
-                // {id:"blank", is_blank:false, name:"evil"} and the
-                // ON CONFLICT(id) DO UPDATE path would rename/re-describe
-                // the seeded singleton. (reagent P1, 2026-05-08).
-                if memory.is_blank || memory.id == "blank" {
-                    return Err("upsertmemory: cannot mutate the blank singleton".to_string());
-                }
-                if memory.id.is_empty() {
-                    memory.id = uuid::Uuid::new_v4().to_string();
-                }
-                let now = agentmux_common::time::now_ms();
-                if memory.created_at == 0 {
-                    memory.created_at = now;
-                }
-                memory.updated_at = now;
-                // bundle_upsert_with_version, not bundle_upsert — this is
-                // the actual Memory → Global save path (frontend's
-                // UpsertBundleCommand -> "upsertmemory"; also used by the
-                // per-agent Bundle editor, which is fine: versioning only
-                // fires when memory.is_global is true either way). Without
-                // this, a human edit in Memory → Global was invisible to
-                // db_bundle_versions entirely — only agent-originated
-                // writes through GlobalMemoryWrite recorded a version, so a
-                // future history/diff view would present a false sequence
-                // with operator edits silently missing from it (codex P2,
-                // PR #3237). "armory-ui" as written_by: a connection that did
-                // not register as an agent is the window, which has no
-                // per-request trusted AGENT identity the way the REST/MCP
-                // path does (see BundleVersion::written_by's own doc
-                // comment). No writer UID either (identity M4c-1): the
-                // WebSocket is always Unattributed.
-                // `base_sha256` (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md
-                // §2.4): the Memory editor says which content its draft
-                // started from, so a concurrent write (an agent's
-                // GlobalMemoryWrite, another window) becomes a `conflict:`
-                // refusal instead of being silently overwritten. Absent =
-                // the unconditional save every other caller still gets.
-                // A write made by a registered agent is recorded as that agent,
-                // never as the person at the window.
-                let (written_by, source) = writer_of(&ctx, "human");
-                mstore
-                    .bundle_upsert_with_version_based(&memory, written_by, "", source, "{}", base_sha256.as_deref())
-                    .map_err(|e| format!("upsertmemory: {e}"))?;
-                broker.publish_event::<crate::backend::mps_events::MemoriesChanged>(&(), vec![], 0);
-                Ok(memory)
-            }
-        },
-    );
+    let s = state.clone();
+    engine.register_typed(COMMAND_UPSERT_MEMORY, move |req: CommandUpsertBundleData, ctx| {
+        let s = s.clone();
+        async move { upsert_memory(&s, &ctx, req) }
+    });
 
-    let id_store = state.id_store.clone();
-    let component_store = state.mstore.clone();
-    let broker = state.broker.clone();
-    engine.register_typed(
-        COMMAND_DELETE_MEMORY,
-        move |cmd: CommandDeleteBundleData, _ctx| {
-            let id_store = id_store.clone();
-            let component_store = component_store.clone();
-            let broker = broker.clone();
-            async move {
-                let deleted = id_store
-                    .bundle_delete(&cmd.id)
-                    .map_err(|e| format!("deletememory: {e}"))?;
-                if deleted {
-                    // This is the delete Memory actually calls
-                    // (`rpc-api/bundle.ts`), so the ref purge has to live here
-                    // too — fixing only `bundle.delete` left the product path
-                    // orphaning refs (Codex, PR #3153). Shared helper, not a
-                    // second copy of the logic.
-                    crate::server::app_api::bundle::purge_bundle_component_refs(
-                        &component_store,
-                        &cmd.id,
-                    );
-                    broker.publish_event::<crate::backend::mps_events::MemoriesChanged>(&(), vec![], 0);
-                }
-                Ok(DeleteBundleResult { deleted })
-            }
-        },
-    );
+    let s = state.clone();
+    engine.register_typed(COMMAND_DELETE_MEMORY, move |cmd: CommandDeleteBundleData, _ctx| {
+        let s = s.clone();
+        async move { delete_memory(&s, cmd) }
+    });
 
-    let mstore = state.id_store.clone();
-    let broker = state.broker.clone();
-    engine.register_typed(
-        COMMAND_REORDER_GLOBAL_BRAIN,
-        move |cmd: CommandReorderGlobalBundlesData, _ctx| {
-            let mstore = mstore.clone();
-            let broker = broker.clone();
-            async move {
-                let updated = mstore
-                    .bundle_reorder(&cmd.ids)
-                    .map_err(|e| format!("reorderglobalbrain: {e}"))?;
-                broker.publish_event::<crate::backend::mps_events::MemoriesChanged>(&(), vec![], 0);
-                Ok(ReorderGlobalBundlesResult { updated })
-            }
-        },
-    );
+    let s = state.clone();
+    engine.register_typed(COMMAND_REORDER_GLOBAL_BRAIN, move |cmd: CommandReorderGlobalBundlesData, _ctx| {
+        let s = s.clone();
+        async move { reorder_global_bundles(&s, cmd) }
+    });
 
-    // ---- System-tier Global Bundle — see
-    // docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md. Deliberately
-    // separate commands from the four above (never wired to any MCP tool)
-    // so the ordinary Global Bundle editor and every other generic
-    // bundle-writing surface can never reach an is_system row.
+    let s = state.clone();
+    engine.register_typed(COMMAND_UPSERT_SYSTEM_MEMORY, move |req: CommandUpsertBundleData, ctx| {
+        let s = s.clone();
+        async move { upsert_system_memory(&s, &ctx, req) }
+    });
 
-    let mstore = state.id_store.clone();
-    let broker = state.broker.clone();
-    engine.register_typed(
-        COMMAND_UPSERT_SYSTEM_MEMORY,
-        move |req: CommandUpsertBundleData, ctx| {
-            let mstore = mstore.clone();
-            let broker = broker.clone();
-            async move {
-                let CommandUpsertBundleData { bundle: mut memory, base_sha256 } = req;
-                if memory.id.is_empty() {
-                    memory.id = uuid::Uuid::new_v4().to_string();
-                }
-                let now = agentmux_common::time::now_ms();
-                if memory.created_at == 0 {
-                    memory.created_at = now;
-                }
-                memory.updated_at = now;
-                // bundle_upsert_system_if_changed atomically compares against
-                // the current row and skips recording a version
-                // for a byte-identical save (operator opens a seeded entry
-                // and hits Save without changing anything — the UI does not
-                // suppress this request) — recording one would permanently
-                // mark the row as human-owned even though nothing actually
-                // changed, so a future Operator Config manifest update would
-                // be skipped forever instead of just once. A REAL edit is
-                // stamped with its writer ("armory-ui" for the window, the
-                // agent's id for a registered agent), so the next startup's
-                // reseed correctly leaves it alone. The
-                // read-decide-write happens in one transaction, not as a
-                // separate bundle_get + conditional call here — an earlier
-                // revision raced a concurrent writer (e.g. another AgentMux
-                // instance's own reseed) between the read and the write.
-                // Codex P1/P2, ReAgent P2, PR #3244.
-                // Same optional base check as `upsertmemory` above.
-                // A registered agent's save is recorded as that agent, never as the person's.
-                let (written_by, source) = writer_of(&ctx, "human");
-                mstore
-                    .bundle_upsert_system_if_changed_based(&memory, written_by, source, "{}", base_sha256.as_deref())
-                    .map_err(|e| format!("upsertsystemmemory: {e}"))?;
-                broker.publish_event::<crate::backend::mps_events::MemoriesChanged>(&(), vec![], 0);
-                // Return the row actually persisted, not the client-supplied
-                // struct — bundle_upsert_system hardcodes
-                // is_blank/is_global/is_system server-side regardless of
-                // what `memory` carried (e.g. the frontend's saveSystemEdit
-                // sends only id/name/instructions, so `memory.is_global`/
-                // `is_system` deserialize to false via #[serde(default)]).
-                // Echoing `memory` back would misreport both to any caller
-                // that trusts the response instead of refetching. reagent
-                // P2, PR #2782.
-                let saved = mstore
-                    .bundle_get(&memory.id)
-                    .map_err(|e| format!("upsertsystemmemory: {e}"))?
-                    .ok_or_else(|| format!("upsertsystemmemory: row {} vanished after upsert", memory.id))?;
-                Ok(saved)
-            }
-        },
-    );
-
-    let mstore = state.id_store.clone();
-    let broker = state.broker.clone();
-    engine.register_typed(
-        COMMAND_DELETE_SYSTEM_MEMORY,
-        move |cmd: CommandDeleteBundleData, _ctx| {
-            let mstore = mstore.clone();
-            let broker = broker.clone();
-            async move {
-                let deleted = mstore
-                    .bundle_delete_system(&cmd.id)
-                    .map_err(|e| format!("deletesystemmemory: {e}"))?;
-                if deleted {
-                    broker.publish_event::<crate::backend::mps_events::MemoriesChanged>(&(), vec![], 0);
-                }
-                Ok(DeleteBundleResult { deleted })
-            }
-        },
-    );
+    let s = state.clone();
+    engine.register_typed(COMMAND_DELETE_SYSTEM_MEMORY, move |cmd: CommandDeleteBundleData, _ctx| {
+        let s = s.clone();
+        async move { delete_system_memory(&s, cmd) }
+    });
 
     // ---- Read-only: the CLAUDE.md at AgentMux's shared Claude provider
     // config dir — see docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md
@@ -269,15 +315,16 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 .map_err(|e| format!("getclaudeglobalconfig: {e}"))
         },
     );
+}
 
-    // ---- Global Memory version history for Memory → Global
-    // (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.3). Same rows, same
-    // diff, same "revert records a new version" rule as the MCP tools in
-    // app_api/mod.rs (global_memory_{history,diff,revert}_impl) — the
-    // difference is the guard: Memory → Global can already edit and delete
-    // system-tier entries through upsertsystemmemory/deletesystemmemory, so
-    // their history is not hidden from it the way it is from agents.
-
+// ---- Global Memory version history for Memory → Global
+// (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.3). Same rows, same
+// diff, same "revert records a new version" rule as the MCP tools in
+// app_api/mod.rs (global_memory_{history,diff,revert}_impl) — the
+// difference is the guard: Memory → Global can already edit and delete
+// system-tier entries through upsertsystemmemory/deletesystemmemory, so
+// their history is not hidden from it the way it is from agents.
+fn register_global_memory_ui(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let mstore = state.id_store.clone();
     engine.register_typed(
         COMMAND_GLOBAL_MEMORY_HISTORY,
@@ -296,66 +343,28 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         },
     );
 
-    let mstore = state.id_store.clone();
-    let broker = state.broker.clone();
-    engine.register_typed(
-        COMMAND_GLOBAL_MEMORY_REVERT,
-        move |cmd: CommandGlobalMemoryRevertData, ctx| {
-            let mstore = mstore.clone();
-            let broker = broker.clone();
-            async move {
-                let result = global_memory_ui_revert(&mstore, &cmd, writer_of(&ctx, "revert").0)?;
-                broker.publish_event::<crate::backend::mps_events::MemoriesChanged>(&(), vec![], 0);
-                Ok(result)
-            }
-        },
-    );
+    let s = state.clone();
+    engine.register_typed(COMMAND_GLOBAL_MEMORY_REVERT, move |cmd: CommandGlobalMemoryRevertData, ctx| {
+        let s = s.clone();
+        async move { global_memory_revert(&s, &ctx, cmd) }
+    });
 
-    // The entries taken out of Global Memory, so the pane can offer to restore
-    // them: a restore is `globalmemory:revert` to the version listed here.
-    let mstore = state.id_store.clone();
-    engine.register_typed(
-        COMMAND_GLOBAL_MEMORY_REMOVED,
-        move |_cmd: CommandGlobalMemoryRemovedData, _ctx| {
-            let mstore = mstore.clone();
-            async move {
-                crate::server::app_api::removed_global_entries(&mstore)
-                    .map(|entries| GlobalMemoryRemovedResult { entries })
-                    .map_err(|e| format!("globalmemory:removed: {e}"))
-            }
-        },
-    );
+    let s = state.clone();
+    engine.register_typed(COMMAND_GLOBAL_MEMORY_REMOVED, move |_cmd: CommandGlobalMemoryRemovedData, _ctx| {
+        let s = s.clone();
+        async move { global_memory_removed(&s) }
+    });
 
-    // Where each entry goes, and the pane's switch for it. The change is the
-    // MCP tool's (`global_memory_reach_impl`: same guards, same event), made
-    // by the window; the entry's text is not touched.
-    let mstore = state.id_store.clone();
-    engine.register_typed(
-        COMMAND_GLOBAL_MEMORY_REACH_LIST,
-        move |_cmd: CommandGlobalMemoryReachListData, _ctx| {
-            let mstore = mstore.clone();
-            async move {
-                crate::server::app_api::global_memory_reaches(&mstore)
-                    .map(|entries| GlobalMemoryReachListResult { entries })
-                    .map_err(|e| format!("globalmemory:reach_list: {e}"))
-            }
-        },
-    );
-    let state = state.clone();
-    engine.register_typed(
-        COMMAND_GLOBAL_MEMORY_SET_REACH,
-        move |cmd: CommandGlobalMemorySetReachData, ctx| {
-            let state = state.clone();
-            async move {
-                let by = writer_of(&ctx, "set_reach").0.to_string();
-                let answer = crate::server::app_api::global_memory_reach_impl(&state, &by, &cmd.id, &cmd.reach)?;
-                Ok(crate::backend::rpc_types::GlobalMemoryReachEntry {
-                    id: cmd.id,
-                    reach: answer["reach"].as_str().unwrap_or_default().to_string(),
-                })
-            }
-        },
-    );
+    let s = state.clone();
+    engine.register_typed(COMMAND_GLOBAL_MEMORY_REACH_LIST, move |_cmd: CommandGlobalMemoryReachListData, _ctx| {
+        let s = s.clone();
+        async move { global_memory_reach_list(&s) }
+    });
+    let s = state.clone();
+    engine.register_typed(COMMAND_GLOBAL_MEMORY_SET_REACH, move |cmd: CommandGlobalMemorySetReachData, ctx| {
+        let s = s.clone();
+        async move { global_memory_set_reach(&s, &ctx, cmd) }
+    });
 }
 
 /// `getagentbundles` / `setagentbundles`: an agent's Bundles list, the
@@ -1289,3 +1298,7 @@ mod global_memory_ui_tests {
         assert_eq!(state.id_store.bundle_get("sys-own").unwrap().unwrap().instructions, "seeded v2");
     }
 }
+
+#[cfg(test)]
+#[path = "bundle_handler_tests.rs"]
+mod bundle_handler_tests;

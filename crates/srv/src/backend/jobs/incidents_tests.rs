@@ -509,7 +509,7 @@ fn an_approved_cloud_jobs_misses_open_one_incident_for_its_owner() {
 /// A cloud template `id` for owner "Owner", written and ready to be approved by calling the returned function.
 fn cloud_job_template(id: &'static str, key_seed: u8) -> impl Fn() {
     use crate::backend::job_templates::JobTemplates;
-    use crate::backend::widget_signature::test_keys;
+    use crate::backend::widget::signature::test_keys;
     let manifest = serde_json::json!({
         "templateVersion": 1, "id": id, "name": "Cloud nightly", "version": "1.0.0", "kind": "cloud", "description": "A test.",
         "owner": "uid-owner", "reporter": { "name": format!("reporter-{key_seed}"), "key": test_keys::public_key(key_seed) },

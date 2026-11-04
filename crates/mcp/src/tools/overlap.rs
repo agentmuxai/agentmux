@@ -29,6 +29,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
     match name {
         "WhoIsWorkingOn" => run_who_is_working_on(arguments, cx).await,
         "ClaimWork" | "ReleaseWork" => run_claim_work(name, arguments, cx).await,
+        "SetStatus" => run_set_status(arguments, cx).await,
         "QuotaMode" => run_quota_mode(arguments, cx).await,
         "PostBulletin" | "ReadBulletin" => run_post_bulletin(name, arguments, cx).await,
         "PostToChannel" | "ReadChannel" => run_post_to_channel(name, arguments, cx).await,
@@ -101,6 +102,32 @@ async fn run_claim_work(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Resu
         (format!("{base}/api/v1/work-claims/release"), release_body(arguments, &agent, block_id))
     };
     let answer = srv_post_json(client, &url, auth_key, &body, name).await?;
+    Ok(serde_json::to_string_pretty(&answer).unwrap_or_else(|_| answer.to_string()))
+}
+
+/// `Presence status`: the agent says what it is doing now. srv keeps the line (cleaned, with the
+/// time) in the agent's pane meta, where the Swarm row and `work.goal` read it.
+async fn run_set_status(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
+    if local_url.is_empty() || auth_key.is_empty() {
+        anyhow::bail!(
+            "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
+             Is this agent pane opened via AgentMux?"
+        );
+    }
+    let line = arguments.get("line").and_then(|v| v.as_str()).unwrap_or("");
+    if line.trim().is_empty() {
+        anyhow::bail!("SetStatus: line is required: say what you are doing in 5 to 10 words, verb first");
+    }
+    let mut body = serde_json::Map::new();
+    body.insert("line".into(), json!(line));
+    if let Some(state) = arguments.get("state").filter(|v| !v.is_null()) {
+        body.insert("state".into(), state.clone());
+    }
+    body.insert("agent".into(), json!(std::env::var("AGENTMUX_AGENT_ID").unwrap_or_default().trim()));
+    body.insert("block".into(), json!(block_id.trim()));
+    let url = format!("{}/api/v1/agent/status", local_url.trim_end_matches('/'));
+    let answer = srv_post_json(client, &url, auth_key, &Value::Object(body), "SetStatus").await?;
     Ok(serde_json::to_string_pretty(&answer).unwrap_or_else(|_| answer.to_string()))
 }
 

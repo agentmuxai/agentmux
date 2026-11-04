@@ -75,7 +75,7 @@ pub fn last_v1_entries() -> HashMap<String, WidgetConfigType> {
 fn apply(config_watcher: &ConfigState, user: HashMap<String, WidgetConfigType>) {
     wconfig::validate_widget_configs(&user);
     *LAST_USER.lock().unwrap_or_else(|p| p.into_inner()) = Some(user);
-    if let Some(svc) = super::widget_packages::service() {
+    if let Some(svc) = super::widget::packages::service() {
         svc.rescan(&last_v1_entries());
     }
     recompute(config_watcher);
@@ -87,8 +87,8 @@ fn apply(config_watcher: &ConfigState, user: HashMap<String, WidgetConfigType>) 
 pub fn recompute(config_watcher: &ConfigState) {
     let user = LAST_USER.lock().unwrap_or_else(|p| p.into_inner()).clone().unwrap_or_default();
     let mut base = builtin_widgets().clone();
-    if let Some(svc) = super::widget_packages::service() {
-        base.extend(super::widget_packages::widget_entries(&svc.list()));
+    if let Some(svc) = super::widget::packages::service() {
+        base.extend(super::widget::packages::widget_entries(&svc.list()));
     }
     config_watcher.update_widgets(merge_widgets(&base, user));
 }
@@ -180,8 +180,8 @@ fn is_user_widgets_event(event: &FsWatchEvent) -> bool {
 fn on_changed(config_watcher: &Arc<ConfigState>, event_bus: &Arc<EventBus>, broker: &Broker, user: HashMap<String, WidgetConfigType>) {
     apply(config_watcher, user);
     broadcast_full_config(config_watcher, event_bus);
-    let packages = super::widget_packages::service().map(|s| s.list()).unwrap_or_default();
-    super::widget_packages::publish(broker, &packages);
+    let packages = super::widget::packages::service().map(|s| s.list()).unwrap_or_default();
+    super::widget::packages::publish(broker, &packages);
 }
 
 pub fn spawn_user_widgets_watcher(

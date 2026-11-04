@@ -479,9 +479,6 @@ pub(crate) fn copy_definition(
     if as_fork {
         inherit_source_account_links(mstore, identity_store, &source, &fork);
     }
-    // Own dedicated ABF bundle, not the source's — same "every
-    // agent has its own" rule as the template-clone path above.
-    mstore.agent_def_provision_and_bind_bundle(id_store, &mut fork, now);
 
     // Deep-copy content blobs + skills from source. Cascade foreign
     // keys on the source are unaffected — we're copying out, not

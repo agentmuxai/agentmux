@@ -16,6 +16,7 @@
 import { getApi } from "@/app/store/global";
 import { pushFlashError } from "@/app/store/flash-notifications";
 import { recycleBlockers } from "@/app/store/recycle-blockers";
+import { saveForReload } from "@/app/store/recycle-savers";
 
 function ownWindowLabel(): string {
     return new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
@@ -58,19 +59,9 @@ export async function recycleWindow(
         return false;
     }
     recycling = true;
-    const unsaved: string[] = [];
+    let unsaved: string[];
     try {
-        const [{ flushPaneSnapshots }, { saveScrollMemos }, { saveAllComposerDrafts }, { saveAllAttachmentDrafts }] =
-            await Promise.all([
-                import("@/app/view/agent/hooks/useSnapshotPersistence"),
-                import("@/app/view/agent/virtualization/scroll-memo"),
-                import("@/app/view/agent/reload-persistence"),
-                import("@/app/view/agent/attachments/attachment-draft"),
-            ]);
-        if (!(await flushPaneSnapshots())) unsaved.push("a pane's collapsed rows, pins or filter couldn't be saved");
-        saveScrollMemos();
-        if (!saveAllComposerDrafts()) unsaved.push("a draft couldn't be saved (the browser storage is full or off)");
-        if (!saveAllAttachmentDrafts()) unsaved.push("an attachment couldn't be kept (the browser storage is full or off)");
+        unsaved = await saveForReload();
     } catch (e) {
         recycling = false;
         throw e;

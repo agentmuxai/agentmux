@@ -4,7 +4,7 @@
 /**
  * The SDK's `agentmux-widget` signer (sdk/widget-sdk/cli/widget-sign.mjs, run
  * by the `agentmux-widget.mjs` command)
- * against the fixture srv verifies in `widget_signature.rs`
+ * against the fixture srv verifies in `backend/widget/signature.rs`
  * (`the_sdk_signed_fixture_verifies_here`): both must compute the same hash,
  * signature and fingerprint (docs/specs/SPEC_WIDGET_SHARING_2026_10_10.md §2.4).
  */

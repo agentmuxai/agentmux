@@ -261,7 +261,7 @@ fn jobs_sort_by_next_run_then_name() {
 #[tokio::test(flavor = "multi_thread")]
 async fn an_approved_cloud_job_is_listed_with_its_reporter_and_its_missed_slots() {
     use crate::backend::job_templates::JobTemplates;
-    use crate::backend::widget_signature::test_keys;
+    use crate::backend::widget::signature::test_keys;
     let (state, _) = state();
     let (id, key) = ("acme.cloudlist", test_keys::public_key(31));
     let svc = JobTemplates::for_tests();
@@ -307,7 +307,7 @@ async fn an_approved_cloud_job_is_listed_with_its_reporter_and_its_missed_slots(
 #[tokio::test(flavor = "multi_thread")]
 async fn a_cloud_job_finds_its_owner_by_name_or_by_uid() {
     use crate::backend::job_templates::JobTemplates;
-    use crate::backend::widget_signature::test_keys;
+    use crate::backend::widget::signature::test_keys;
     let (state, _) = state();
     state.reactive_handler.register_agent("Cloudy-Owner", "b-cloudy", None).unwrap();
     let uid = state.reactive_handler.list_agents().into_iter().find(|r| r.agent_id == "Cloudy-Owner").and_then(|r| r.uid);

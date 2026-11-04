@@ -355,6 +355,7 @@ partial list.
 | [`SPEC_FLEET_BULK_STOP_CROSS_CHANNEL_2026_08_22`](SPEC_FLEET_BULK_STOP_CROSS_CHANNEL_2026_08_22.md) | SPEC: `FleetBulkStop` reaches cross-channel targets; LAN/WAN deliberately deferred |
 | [`SPEC_FLOATING_PANE_EDGE_RESIZE_2026_05_29`](SPEC_FLOATING_PANE_EDGE_RESIZE_2026_05_29.md) | SPEC: Floating-pane edge-resize (Win32) |
 | [`SPEC_FLOATING_PANE_REDOCK_BUTTON_2026_10_15`](SPEC_FLOATING_PANE_REDOCK_BUTTON_2026_10_15.md) | Spec: A Redock button in the floating pane's header |
+| [`SPEC_FLOATING_PANE_REDOCK_TO_ORIGIN_2026_11_03`](SPEC_FLOATING_PANE_REDOCK_TO_ORIGIN_2026_11_03.md) | Spec: Redock puts a floating pane back where it was torn from (best effort), else to the right as today |
 | [`SPEC_GLOBAL_MEMORY_LIST_SYSTEM_ROWS_2026_10_02`](SPEC_GLOBAL_MEMORY_LIST_SYSTEM_ROWS_2026_10_02.md) | SPEC: `GlobalMemoryList` lists the system rows too, flagged and read-only |
 | [`SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24`](SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md) | SPEC: Global Memory "system" tier — an AgentMux-controlled, highest-priority entry |
 | [`SPEC_GLOBAL_MEMORY_UNIFY_SYSTEM_AND_ORDINARY_2026_09_15`](SPEC_GLOBAL_MEMORY_UNIFY_SYSTEM_AND_ORDINARY_2026_09_15.md) | Spec: Global Memory — unify "system" and "ordinary" into one Memory list (postmortem + refactor plan) |
@@ -416,6 +417,7 @@ partial list.
 | [`SPEC_NATIVE_CONTAINER_DEV_PROXY_2026_09_19`](SPEC_NATIVE_CONTAINER_DEV_PROXY_2026_09_19.md) | SPEC: a native reverse proxy in agentmux-srv for friendly dev-server hostnames — not Traefik, not a sidecar |
 | [`SPEC_NATIVE_MEMORY_DURABLE_SYNC_2026_08_07`](SPEC_NATIVE_MEMORY_DURABLE_SYNC_2026_08_07.md) | SPEC: Durable, location-consistent, transparent native memory |
 | [`SPEC_NEXT_PROMPT_SUGGESTION_RESTORE_ON_CLEAR_2026_08_10`](SPEC_NEXT_PROMPT_SUGGESTION_RESTORE_ON_CLEAR_2026_08_10.md) | SPEC: Restore the ghost-text suggestion when the composer is cleared back to empty |
+| [`SPEC_ONE_AUDIENCE_TAG_2026_11_02`](SPEC_ONE_AUDIENCE_TAG_2026_11_02.md) | SPEC: One audience tag for routes, MCP servers and Operator Config entries (one config, step 5, #13666) |
 | [`SPEC_ORPHAN_RECONCILER_CROSS_PLATFORM_LIVENESS_2026_09_20`](SPEC_ORPHAN_RECONCILER_CROSS_PLATFORM_LIVENESS_2026_09_20.md) | SPEC: Real crash-orphan liveness check on macOS/Linux (closes #1569) |
 | [`SPEC_OS_NOTIFICATIONS_RICH_CONTENT_AND_CLICK_TO_PANE_2026_09_25`](SPEC_OS_NOTIFICATIONS_RICH_CONTENT_AND_CLICK_TO_PANE_2026_09_25.md) | SPEC: OS notifications — agent summary line, "has a question", and reliable click-to-pane |
 | [`SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22`](SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md) | Pane block-stack mount flicker — root causes + reveal-gate generalization |

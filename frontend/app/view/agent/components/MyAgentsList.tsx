@@ -58,6 +58,8 @@ import { MyAgentsRowPanel } from "./MyAgentsRowPanel";
 export { EMPTY_FILTERED, EMPTY_GLOBAL, FETCH_ERROR, noMatchText };
 
 export interface MyAgentsListProps {
+    /** The pane this list is drawn in: a question about a row (shut down) is asked there, not in the row's own pane. */
+    paneBlockId?: string;
     /** Optional reactive accessor for the identity filter. `null` /
      *  undefined / empty string = no filter (show every identity). */
     identityId?: Accessor<string | null | undefined>;

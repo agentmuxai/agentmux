@@ -67,6 +67,39 @@ function click(img: HTMLElement, mods: { ctrlKey?: boolean; altKey?: boolean } =
     fireEvent.pointerUp(img, { button: 0, buttons: 0, pointerId: 1, clientX: 400 + move, clientY: 300, ...mods });
 }
 
+describe("the image viewer's image is never dragged natively", () => {
+    beforeAll(() => {
+        Element.prototype.setPointerCapture ??= () => {};
+    });
+    beforeEach(() => setPlatform("win32"));
+    afterEach(() => cleanup());
+
+    it("is not draggable at fit or zoomed in, and a native drag start is cancelled", () => {
+        const img = mount();
+        expect(img.draggable).toBe(false);
+        const start = new Event("dragstart", { bubbles: true, cancelable: true });
+        img.dispatchEvent(start);
+        expect(start.defaultPrevented).toBe(true);
+        click(img); // zoomed in a step
+        expect(scaleOf(img)).toBeGreaterThan(1);
+        expect(img.draggable).toBe(false);
+    });
+
+    it("a press on the image focuses the viewer, so its keys work", () => {
+        const img = mount();
+        const content = img.closest<HTMLElement>(".image-viewer-content")!;
+        expect(document.activeElement).not.toBe(content);
+        fireEvent.pointerDown(img, { button: 0, buttons: 1, pointerId: 1, clientX: 400, clientY: 300 });
+        expect(document.activeElement).toBe(content);
+    });
+
+    it("a press that drags at fit does nothing: no zoom, and the press is not left down", () => {
+        const img = mount();
+        click(img, {}, 40);
+        expect(scaleOf(img)).toBe(1);
+    });
+});
+
 describe("the image viewer's click zoom", () => {
     beforeAll(() => {
         Element.prototype.setPointerCapture ??= () => {};

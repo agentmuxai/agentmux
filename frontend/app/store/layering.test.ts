@@ -16,7 +16,6 @@ const storeDir = resolve(repoRoot, "frontend/app/store");
 
 /** store file → the view module it imports, as `file -> module`. */
 const REMAINING = [
-    "frontend/app/store/agent-pane-registration.ts -> frontend/app/view/agent/activity/task-outcomes",
 ];
 
 function walk(dir: string, out: string[] = []): string[] {

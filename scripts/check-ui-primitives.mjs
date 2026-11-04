@@ -79,6 +79,8 @@
 //                   background): a tag drawn by hand, where `Tag` belongs. A rule marked
 //                   `// tag: fixed` (on its selector line, above it or inside it) doesn't count:
 //                   a control that is not a tag but is named like one, a third party's markup.
+//                   A hard zero everywhere: a new rule of this kind fails until it uses `Tag`
+//                   or carries the marker with its reason.
 //
 //  14. nativeTitles `title=` on a lowercase JSX element (a button, span, div ...) in .tsx
 //                   outside element/ui/, a hard zero everywhere apart from
@@ -108,7 +110,8 @@
 //  16. menus        a menu drawn or opened outside the kit's `Menu` (element/ui/Menu.tsx), per file in
 //                   .tsx outside element/ui/: `role="menu"`, `<FlyoutMenu`, `<PopoverMenu`, `<MenuButton` and
 //                   `showContextMenu(`. The app grew four menu systems; the kit's Menu is the one (anchored,
-//                   upward, keyboard-driven), so the count only goes down as each is converted.
+//                   upward, keyboard-driven), so the count only goes down as each is converted. A hard zero
+//                   everywhere: MENUS_ALLOWLIST names the three window-chrome menus left, each with why.
 //
 // A count above the base's fails: use the element/ui/ components instead. A
 // count below it is reported and passes. There is no checked-in baseline:
@@ -346,8 +349,28 @@ export const TS_COLOURS_ALLOWLIST = {
     },
 };
 
+/**
+ * The only menus left outside the kit's `Menu`: the file, how many, and why. All three are window chrome that opens by the
+ * drag region and must draw above a native browser pane; the kit Menu has not been tried in a running window for either (the
+ * checks are one batch on a machine that can run `task dev`). Flip an entry off when that check passes and the menu moves.
+ */
+export const MENUS_ALLOWLIST = {
+    "frontend/app/window/hamburger-menu.tsx": {
+        max: 1,
+        reason: "the window-chrome menu opened from the hamburger inside the drag region: it must take clicks there and draw above a native browser pane, unverified for the kit Menu",
+    },
+    "frontend/app/window/titlebar-context-menu.tsx": {
+        max: 1,
+        reason: "the right-click menu on the title bar's drag region: it must not be clipped by the drag region, take clicks and draw above a native browser pane, unverified for the kit Menu",
+    },
+    "frontend/app/window/action-widgets.tsx": {
+        max: 1,
+        reason: "the widget bar's More dropdown beside the drag region: it needs PopoverMenu's sections and keep-open rows and must draw above a native browser pane, unverified for the kit Menu",
+    },
+};
+
 /** Per rule: the hard-zero allowlist (file → { max, reason }). Anything not allowlisted must be 0. */
-export const HARD_ZERO = { buttons: BUTTON_ALLOWLIST, radius: {}, zIndex: Z_INDEX_ALLOWLIST, durations: DURATIONS_ALLOWLIST, fontSizes: FONT_SIZES_ALLOWLIST, focusRings: {}, controlTitles: CONTROL_TITLES_ALLOWLIST, nativeTitles: CONTROL_TITLES_ALLOWLIST, disabledTips: {}, rawFieldProblems: {}, tsColours: TS_COLOURS_ALLOWLIST };
+export const HARD_ZERO = { buttons: BUTTON_ALLOWLIST, radius: {}, zIndex: Z_INDEX_ALLOWLIST, durations: DURATIONS_ALLOWLIST, fontSizes: FONT_SIZES_ALLOWLIST, focusRings: {}, controlTitles: CONTROL_TITLES_ALLOWLIST, nativeTitles: CONTROL_TITLES_ALLOWLIST, disabledTips: {}, rawFieldProblems: {}, tsColours: TS_COLOURS_ALLOWLIST, menus: MENUS_ALLOWLIST, tags: {} };
 
 /**
  * Lines for every count the hard zero refuses in `counts` (file → n) for rule `key`: any file

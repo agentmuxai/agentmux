@@ -181,288 +181,291 @@ fn cloud_config(discovered: Option<crate::muxbus::discovery::CloudSettings>, res
     }
 }
 
+/// What a successful PKCE login does next: save the credentials, wake the
+/// cloud subscriber, and tell the WAN layers the sign-in changed.
+async fn finish_login(
+    state: &AppState,
+    result: crate::muxbus::pkce::PkceResult,
+) -> Result<MuxBusLoginResp, String> {
+    let mstore = &state.id_store;
+    // reagent P1: previously this only logged a warning on a
+    // save failure and still reported success — now that
+    // MuxBus tokens live in the OS keychain (which can
+    // genuinely fail: locked, no Secret Service daemon on
+    // headless Linux, permission denied), that meant the UI
+    // could show "logged in" for a credential that was never
+    // actually persisted anywhere. Report the real outcome.
+    // spawn_blocking — reagent P1 on #2260: muxbus_save
+    // does a synchronous OS-keychain write, which can
+    // hang on a slow/unresponsive Secret Service D-Bus
+    // daemon (headless Linux) and must not stall this
+    // tokio worker thread.
+    let email = result.credentials.user_email.clone();
+    let save_store = mstore.clone();
+    let save_result = tokio::task::spawn_blocking(move || {
+        save_store.muxbus_save(&result.credentials)
+    })
+    .await
+    .map_err(|e| format!("muxbus.login: save task: {e}"))?;
+    if let Err(e) = save_result {
+        tracing::warn!(error = %e, "muxbus.login: failed to save credentials");
+        let resp = MuxBusLoginResp {
+            success: false,
+            email: String::new(),
+            error: Some(format!("login succeeded but credentials couldn't be saved: {e}")),
+        };
+        return Ok(resp);
+    }
+    // Kick the cloud subscriber to open a WS with the new
+    // token. On an isolated local-package channel
+    // (reagentx P1 on PR #3248, round 2), boot skipped
+    // `CloudSubscriber::init_global` entirely, so there is
+    // no subscriber to reload yet — an explicit, successful
+    // login is exactly the signal that should lazily bring
+    // one up now, rather than leaving `muxbus.login` report
+    // "success" while no WebSocket ever opens and agents
+    // silently never receive WAN injections. `init_global`
+    // itself is idempotent (`OnceLock::set`, no-ops if
+    // already initialized), so this is safe to call
+    // unconditionally rather than re-deriving "was this
+    // isolated at boot" here.
+    match crate::muxbus::cloud_subscriber::get_global_subscriber() {
+        Some(sub) => sub.reload_token(),
+        None => {
+            crate::muxbus::cloud_subscriber::CloudSubscriber::init_global(
+                mstore.clone(),
+            );
+        }
+    }
+    // W3-S: a login may be an account switch — forget
+    // peer records fetched under the old account (§2.3),
+    // and publish any keys that were waiting on a login.
+    // A login to another relay or account is a directory
+    // that has never seen this install's keys; publications
+    // are recorded per directory, so the pass this nudge
+    // starts finds them all pending there.
+    crate::muxbus::delivery_status::fresh_sign_in(Some(email.clone()));
+    clear_wan_peer_cache();
+    crate::muxbus::wan_publish::nudge();
+    // And publish this install's presence now, whatever
+    // the presence publisher was waiting out.
+    crate::muxbus::wan_presence::sign_in_changed();
+    let resp = MuxBusLoginResp {
+        success: true,
+        email,
+        error: None,
+    };
+    Ok(resp)
+}
+
+/// `muxbus.login` — PKCE browser flow, returns when browser login completes.
+pub(crate) async fn muxbus_login(state: &AppState, req: MuxBusLoginReq) -> Result<MuxBusLoginResp, String> {
+    let http = &state.http_client;
+    // The cloud's published sign-in settings win over the build's
+    // compiled ones in the request, so a new user pool reaches
+    // installed builds (SPEC_CLOUD_SETTINGS_DISCOVERY_2026_09_27.md §3.2).
+    let discovered = crate::muxbus::discovery::cloud_settings(http).await;
+    let (cognito_domain, client_id) = match crate::muxbus::discovery::resolve_login(
+        discovered.as_ref(),
+        &req.cognito_domain,
+        &req.client_id,
+    ) {
+        Ok(pair) => pair,
+        // Same shape as a failed PKCE flow, so the UI shows it the same way.
+        Err(e) => {
+            return Ok(MuxBusLoginResp { success: false, email: String::new(), error: Some(e) });
+        }
+    };
+    let identity_provider = match crate::muxbus::discovery::check_identity_provider(
+        discovered.as_ref(),
+        req.identity_provider.as_deref(),
+    ) {
+        Ok(provider) => provider,
+        Err(e) => {
+            return Ok(MuxBusLoginResp { success: false, email: String::new(), error: Some(e) });
+        }
+    };
+
+    match crate::muxbus::pkce::run_pkce_login(
+        &cognito_domain,
+        &client_id,
+        identity_provider,
+        http,
+    )
+    .await
+    {
+        Ok(result) => finish_login(state, result).await,
+        Err(e) => {
+            tracing::warn!(error = %e, "muxbus.login: PKCE flow failed");
+            let resp = MuxBusLoginResp {
+                success: false,
+                email: String::new(),
+                error: Some(e),
+            };
+            Ok(resp)
+        }
+    }
+}
+
+/// `muxbus.login.cancel` — abort an in-flight muxbus.login. The aborted
+/// flow's own task.await (in run_pkce_login) is what actually resolves
+/// the original muxbus.login RPC call with a "sign-in cancelled" error —
+/// this handler just fires the abort and returns immediately, it does
+/// not wait for that resolution.
+pub(crate) fn muxbus_login_cancel() -> Result<MuxBusLoginCancelResp, String> {
+    let cancelled = crate::muxbus::pkce::cancel_active_login();
+    let resp = MuxBusLoginCancelResp { cancelled };
+    Ok(resp)
+}
+
+/// `muxbus.status` — return current credential state.
+pub(crate) async fn muxbus_status(state: &AppState) -> Result<MuxBusStatusResp, String> {
+    let mstore = &state.id_store;
+    let http = &state.http_client;
+    // reagentx P0 on PR #3248, round 2: `frontend/app/statusbar/
+    // HostPopover.tsx` mounts globally and polls this handler on
+    // mount + every 60s, unconditionally — so an unguarded
+    // `muxbus_load()` here hit Keychain within a minute of launch
+    // on a fresh local build regardless of the boot-time and
+    // agent-spawn fixes elsewhere in this PR, defeating the whole
+    // point of it. Gated on subscriber presence, not the static
+    // channel flag: on an isolated channel the subscriber only
+    // starts at an explicit `muxbus.login`, so presence is what
+    // says a session exists. Before any MuxBus session has ever been
+    // established on this process, report "not connected"
+    // without touching the keychain at all — identical to the
+    // real Ok(None) response below, just without the read.
+    if crate::muxbus::cloud_subscriber::get_global_subscriber().is_none() {
+        let resp = MuxBusStatusResp {
+            connected: false,
+            email: String::new(),
+            cognito_domain: String::new(),
+            expires_at: 0,
+            valid: false,
+            needs_reauth: false,
+            delivery: Some(crate::muxbus::delivery_status::status()),
+        };
+        return Ok(resp);
+    }
+    // spawn_blocking — reagent P1 on #2260: same
+    // synchronous-keychain-read concern as muxbus.login's save.
+    let load_store = mstore.clone();
+    let load_result = tokio::task::spawn_blocking(move || load_store.muxbus_load())
+        .await
+        .map_err(|e| format!("muxbus.status: load task: {e}"))?;
+    match load_result {
+        Ok(Some(creds)) => {
+            let valid = creds.is_valid();
+            let needs_reauth = crate::muxbus::stale_sign_in(&creds, http).await.is_some();
+            let resp = MuxBusStatusResp {
+                connected: !creds.access_token.is_empty(),
+                email: creds.user_email,
+                cognito_domain: creds.cognito_domain,
+                expires_at: creds.expires_at,
+                valid,
+                needs_reauth,
+                delivery: Some(crate::muxbus::delivery_status::status()),
+            };
+            Ok(resp)
+        }
+        Ok(None) => {
+            let resp = MuxBusStatusResp {
+                connected: false,
+                email: String::new(),
+                cognito_domain: String::new(),
+                expires_at: 0,
+                valid: false,
+                needs_reauth: false,
+                delivery: Some(crate::muxbus::delivery_status::status()),
+            };
+            Ok(resp)
+        }
+        // The UI already reads a failed status as disconnected;
+        // answering that shape keeps it so, and still carries
+        // `delivery`, which is what says the sign-in is unreadable.
+        Err(e) => {
+            tracing::warn!(error = %e, "muxbus.status: stored sign-in unreadable");
+            Ok(MuxBusStatusResp {
+                connected: false,
+                email: String::new(),
+                cognito_domain: String::new(),
+                expires_at: 0,
+                valid: false,
+                needs_reauth: false,
+                delivery: Some(crate::muxbus::delivery_status::status()),
+            })
+        }
+    }
+}
+
+/// `muxbus.disconnect` — clear credentials.
+pub(crate) async fn muxbus_disconnect(state: &AppState) -> Result<MuxBusDisconnectResp, String> {
+    let mstore = state.id_store.clone();
+    // The only path that deletes the stored sign-in: say so, and in
+    // what state delivery was when it happened.
+    tracing::info!(
+        delivery = ?crate::muxbus::delivery_status::status().state,
+        "muxbus.disconnect: signing out, clearing the stored sign-in"
+    );
+    // The presence goodbye goes first: it needs the sign-in
+    // being cleared. At most 2 s; nothing is published after it
+    // until `signed_out`, which runs whether or not the clear
+    // below works.
+    let said_goodbye = crate::muxbus::wan_presence::goodbye_before_sign_out().await;
+    // spawn_blocking — reagent P1 on #2260: muxbus_clear does a
+    // synchronous OS-keychain delete, same concern as every
+    // other muxbus call site in this module.
+    let cleared = tokio::task::spawn_blocking(move || mstore.muxbus_clear()).await;
+    crate::muxbus::wan_presence::signed_out(said_goodbye);
+    cleared
+        .map_err(|e| format!("muxbus.disconnect: task: {e}"))?
+        .map_err(|e| format!("muxbus.disconnect: {e}"))?;
+    clear_wan_peer_cache();
+    // A deliberate sign-out, not a lost sign-in: no notification,
+    // no agent notes. And close the relay connection, which would
+    // otherwise keep delivering on the old token until it ends.
+    crate::muxbus::delivery_status::signed_out();
+    if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
+        sub.reload_token();
+    }
+    Ok(MuxBusDisconnectResp {})
+}
+
+/// `muxbus.cloudconfig` — the resolved cloud settings. No credential or
+/// keychain access; discovery itself is cached (`discovery::cloud_settings`).
+pub(crate) async fn muxbus_cloudconfig(state: &AppState) -> Result<MuxBusCloudConfigResp, String> {
+    let discovered = crate::muxbus::discovery::cloud_settings(&state.http_client).await;
+    Ok(cloud_config(discovered, crate::muxbus::relay::rest_base_url()))
+}
+
 pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    // muxbus.login — PKCE browser flow, returns when browser login completes
-    let mstore_login = state.id_store.clone();
-    let http_client_login = state.http_client.clone();
-    engine.register_typed(
-        COMMAND_MUXBUS_LOGIN,
-        move |req: MuxBusLoginReq, _ctx| {
-            let mstore = mstore_login.clone();
-            let http = http_client_login.clone();
-            async move {
-                // The cloud's published sign-in settings win over the build's
-                // compiled ones in the request, so a new user pool reaches
-                // installed builds (SPEC_CLOUD_SETTINGS_DISCOVERY_2026_09_27.md §3.2).
-                let discovered = crate::muxbus::discovery::cloud_settings(&http).await;
-                let (cognito_domain, client_id) = match crate::muxbus::discovery::resolve_login(
-                    discovered.as_ref(),
-                    &req.cognito_domain,
-                    &req.client_id,
-                ) {
-                    Ok(pair) => pair,
-                    // Same shape as a failed PKCE flow, so the UI shows it the same way.
-                    Err(e) => {
-                        return Ok(MuxBusLoginResp { success: false, email: String::new(), error: Some(e) });
-                    }
-                };
-                let identity_provider = match crate::muxbus::discovery::check_identity_provider(
-                    discovered.as_ref(),
-                    req.identity_provider.as_deref(),
-                ) {
-                    Ok(provider) => provider,
-                    Err(e) => {
-                        return Ok(MuxBusLoginResp { success: false, email: String::new(), error: Some(e) });
-                    }
-                };
+    let s = state.clone();
+    engine.register_typed(COMMAND_MUXBUS_LOGIN, move |req: MuxBusLoginReq, _ctx| {
+        let s = s.clone();
+        async move { muxbus_login(&s, req).await }
+    });
 
-                match crate::muxbus::pkce::run_pkce_login(
-                    &cognito_domain,
-                    &client_id,
-                    identity_provider,
-                    &http,
-                )
-                .await
-                {
-                    Ok(result) => {
-                        // reagent P1: previously this only logged a warning on a
-                        // save failure and still reported success — now that
-                        // MuxBus tokens live in the OS keychain (which can
-                        // genuinely fail: locked, no Secret Service daemon on
-                        // headless Linux, permission denied), that meant the UI
-                        // could show "logged in" for a credential that was never
-                        // actually persisted anywhere. Report the real outcome.
-                        // spawn_blocking — reagent P1 on #2260: muxbus_save
-                        // does a synchronous OS-keychain write, which can
-                        // hang on a slow/unresponsive Secret Service D-Bus
-                        // daemon (headless Linux) and must not stall this
-                        // tokio worker thread.
-                        let email = result.credentials.user_email.clone();
-                        let save_store = mstore.clone();
-                        let save_result = tokio::task::spawn_blocking(move || {
-                            save_store.muxbus_save(&result.credentials)
-                        })
-                        .await
-                        .map_err(|e| format!("muxbus.login: save task: {e}"))?;
-                        if let Err(e) = save_result {
-                            tracing::warn!(error = %e, "muxbus.login: failed to save credentials");
-                            let resp = MuxBusLoginResp {
-                                success: false,
-                                email: String::new(),
-                                error: Some(format!("login succeeded but credentials couldn't be saved: {e}")),
-                            };
-                            return Ok(resp);
-                        }
-                        // Kick the cloud subscriber to open a WS with the new
-                        // token. On an isolated local-package channel
-                        // (reagentx P1 on PR #3248, round 2), boot skipped
-                        // `CloudSubscriber::init_global` entirely, so there is
-                        // no subscriber to reload yet — an explicit, successful
-                        // login is exactly the signal that should lazily bring
-                        // one up now, rather than leaving `muxbus.login` report
-                        // "success" while no WebSocket ever opens and agents
-                        // silently never receive WAN injections. `init_global`
-                        // itself is idempotent (`OnceLock::set`, no-ops if
-                        // already initialized), so this is safe to call
-                        // unconditionally rather than re-deriving "was this
-                        // isolated at boot" here.
-                        match crate::muxbus::cloud_subscriber::get_global_subscriber() {
-                            Some(sub) => sub.reload_token(),
-                            None => {
-                                crate::muxbus::cloud_subscriber::CloudSubscriber::init_global(
-                                    mstore.clone(),
-                                );
-                            }
-                        }
-                        // W3-S: a login may be an account switch — forget
-                        // peer records fetched under the old account (§2.3),
-                        // and publish any keys that were waiting on a login.
-                        // A login to another relay or account is a directory
-                        // that has never seen this install's keys; publications
-                        // are recorded per directory, so the pass this nudge
-                        // starts finds them all pending there.
-                        crate::muxbus::delivery_status::fresh_sign_in(Some(email.clone()));
-                        clear_wan_peer_cache();
-                        crate::muxbus::wan_publish::nudge();
-                        // And publish this install's presence now, whatever
-                        // the presence publisher was waiting out.
-                        crate::muxbus::wan_presence::sign_in_changed();
-                        let resp = MuxBusLoginResp {
-                            success: true,
-                            email,
-                            error: None,
-                        };
-                        Ok(resp)
-                    }
-                    Err(e) => {
-                        tracing::warn!(error = %e, "muxbus.login: PKCE flow failed");
-                        let resp = MuxBusLoginResp {
-                            success: false,
-                            email: String::new(),
-                            error: Some(e),
-                        };
-                        Ok(resp)
-                    }
-                }
-            }
-        },
-    );
+    engine.register_typed(COMMAND_MUXBUS_LOGIN_CANCEL, move |_req: MuxBusLoginCancelReq, _ctx| async move {
+        muxbus_login_cancel()
+    });
 
-    // muxbus.login.cancel — abort an in-flight muxbus.login. The aborted
-    // flow's own task.await (in run_pkce_login) is what actually resolves
-    // the original muxbus.login RPC call with a "sign-in cancelled" error —
-    // this handler just fires the abort and returns immediately, it does
-    // not wait for that resolution.
-    engine.register_typed(
-        COMMAND_MUXBUS_LOGIN_CANCEL,
-        move |_req: MuxBusLoginCancelReq, _ctx| {
-            async move {
-                let cancelled = crate::muxbus::pkce::cancel_active_login();
-                let resp = MuxBusLoginCancelResp { cancelled };
-                Ok(resp)
-            }
-        },
-    );
+    let s = state.clone();
+    engine.register_typed(COMMAND_MUXBUS_STATUS, move |_req: MuxBusStatusReq, _ctx| {
+        let s = s.clone();
+        async move { muxbus_status(&s).await }
+    });
 
-    // muxbus.status — return current credential state
-    let mstore_status = state.id_store.clone();
-    let http_client_status = state.http_client.clone();
-    engine.register_typed(
-        COMMAND_MUXBUS_STATUS,
-        move |_req: MuxBusStatusReq, _ctx| {
-            let mstore = mstore_status.clone();
-            let http = http_client_status.clone();
-            async move {
-                // reagentx P0 on PR #3248, round 2: `frontend/app/statusbar/
-                // HostPopover.tsx` mounts globally and polls this handler on
-                // mount + every 60s, unconditionally — so an unguarded
-                // `muxbus_load()` here hit Keychain within a minute of launch
-                // on a fresh local build regardless of the boot-time and
-                // agent-spawn fixes elsewhere in this PR, defeating the whole
-                // point of it. Gated on subscriber presence, not the static
-                // channel flag: on an isolated channel the subscriber only
-                // starts at an explicit `muxbus.login`, so presence is what
-                // says a session exists. Before any MuxBus session has ever been
-                // established on this process, report "not connected"
-                // without touching the keychain at all — identical to the
-                // real Ok(None) response below, just without the read.
-                if crate::muxbus::cloud_subscriber::get_global_subscriber().is_none() {
-                    let resp = MuxBusStatusResp {
-                        connected: false,
-                        email: String::new(),
-                        cognito_domain: String::new(),
-                        expires_at: 0,
-                        valid: false,
-                        needs_reauth: false,
-                        delivery: Some(crate::muxbus::delivery_status::status()),
-                    };
-                    return Ok(resp);
-                }
-                // spawn_blocking — reagent P1 on #2260: same
-                // synchronous-keychain-read concern as muxbus.login's save.
-                let load_store = mstore.clone();
-                let load_result = tokio::task::spawn_blocking(move || load_store.muxbus_load())
-                    .await
-                    .map_err(|e| format!("muxbus.status: load task: {e}"))?;
-                match load_result {
-                    Ok(Some(creds)) => {
-                        let valid = creds.is_valid();
-                        let needs_reauth = crate::muxbus::stale_sign_in(&creds, &http).await.is_some();
-                        let resp = MuxBusStatusResp {
-                            connected: !creds.access_token.is_empty(),
-                            email: creds.user_email,
-                            cognito_domain: creds.cognito_domain,
-                            expires_at: creds.expires_at,
-                            valid,
-                            needs_reauth,
-                            delivery: Some(crate::muxbus::delivery_status::status()),
-                        };
-                        Ok(resp)
-                    }
-                    Ok(None) => {
-                        let resp = MuxBusStatusResp {
-                            connected: false,
-                            email: String::new(),
-                            cognito_domain: String::new(),
-                            expires_at: 0,
-                            valid: false,
-                            needs_reauth: false,
-                            delivery: Some(crate::muxbus::delivery_status::status()),
-                        };
-                        Ok(resp)
-                    }
-                    // The UI already reads a failed status as disconnected;
-                    // answering that shape keeps it so, and still carries
-                    // `delivery`, which is what says the sign-in is unreadable.
-                    Err(e) => {
-                        tracing::warn!(error = %e, "muxbus.status: stored sign-in unreadable");
-                        Ok(MuxBusStatusResp {
-                            connected: false,
-                            email: String::new(),
-                            cognito_domain: String::new(),
-                            expires_at: 0,
-                            valid: false,
-                            needs_reauth: false,
-                            delivery: Some(crate::muxbus::delivery_status::status()),
-                        })
-                    }
-                }
-            }
-        },
-    );
+    let s = state.clone();
+    engine.register_typed(COMMAND_MUXBUS_DISCONNECT, move |_req: MuxBusDisconnectReq, _ctx| {
+        let s = s.clone();
+        async move { muxbus_disconnect(&s).await }
+    });
 
-    // muxbus.disconnect — clear credentials
-    let mstore_disconnect = state.id_store.clone();
-    engine.register_typed(
-        COMMAND_MUXBUS_DISCONNECT,
-        move |_req: MuxBusDisconnectReq, _ctx| {
-            let mstore = mstore_disconnect.clone();
-            async move {
-                // The only path that deletes the stored sign-in: say so, and in
-                // what state delivery was when it happened.
-                tracing::info!(
-                    delivery = ?crate::muxbus::delivery_status::status().state,
-                    "muxbus.disconnect: signing out, clearing the stored sign-in"
-                );
-                // The presence goodbye goes first: it needs the sign-in
-                // being cleared. At most 2 s; nothing is published after it
-                // until `signed_out`, which runs whether or not the clear
-                // below works.
-                let said_goodbye = crate::muxbus::wan_presence::goodbye_before_sign_out().await;
-                // spawn_blocking — reagent P1 on #2260: muxbus_clear does a
-                // synchronous OS-keychain delete, same concern as every
-                // other muxbus call site in this module.
-                let cleared = tokio::task::spawn_blocking(move || mstore.muxbus_clear()).await;
-                crate::muxbus::wan_presence::signed_out(said_goodbye);
-                cleared
-                    .map_err(|e| format!("muxbus.disconnect: task: {e}"))?
-                    .map_err(|e| format!("muxbus.disconnect: {e}"))?;
-                clear_wan_peer_cache();
-                // A deliberate sign-out, not a lost sign-in: no notification,
-                // no agent notes. And close the relay connection, which would
-                // otherwise keep delivering on the old token until it ends.
-                crate::muxbus::delivery_status::signed_out();
-                if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
-                    sub.reload_token();
-                }
-                Ok(MuxBusDisconnectResp {})
-            }
-        },
-    );
-
-    // muxbus.cloudconfig — the resolved cloud settings. No credential or
-    // keychain access; discovery itself is cached (`discovery::cloud_settings`).
-    let http_client_cloudconfig = state.http_client.clone();
-    engine.register_typed(
-        COMMAND_MUXBUS_CLOUDCONFIG,
-        move |_req: MuxBusCloudConfigReq, _ctx| {
-            let http = http_client_cloudconfig.clone();
-            async move {
-                let discovered = crate::muxbus::discovery::cloud_settings(&http).await;
-                Ok(cloud_config(discovered, crate::muxbus::relay::rest_base_url()))
-            }
-        },
-    );
+    let s = state.clone();
+    engine.register_typed(COMMAND_MUXBUS_CLOUDCONFIG, move |_req: MuxBusCloudConfigReq, _ctx| {
+        let s = s.clone();
+        async move { muxbus_cloudconfig(&s).await }
+    });
 }
 
 /// W3-S (`SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md` §2.3): cached peer
@@ -591,5 +594,26 @@ mod req_shape_tests {
         assert_eq!(v["identityProviders"], json!(["Google", "SignInWithApple"]));
         let v = serde_json::to_value(cloud_config(None, String::new())).unwrap();
         assert_eq!(v["source"], "default");
+    }
+
+    // The handlers run without the engine. `muxbus.login`, `.disconnect` and
+    // `.cloudconfig` are not called here: they reach the network, the OS
+    // keychain or the presence publisher, which a unit test must not touch.
+    // Before any sign-in has started a cloud subscriber on this process,
+    // `muxbus.status` answers "not connected" without reading the keychain.
+    #[tokio::test]
+    async fn status_before_any_sign_in_is_not_connected_and_skips_the_keychain() {
+        let state = crate::server::tests::test_state();
+        let status = muxbus_status(&state).await.unwrap();
+        assert!(!status.connected && !status.valid && !status.needs_reauth);
+        assert!(status.email.is_empty() && status.cognito_domain.is_empty());
+        assert_eq!(status.expires_at, 0);
+        assert!(status.delivery.is_some(), "delivery is always present from this srv");
+    }
+
+    // With no login in flight there is nothing to cancel, and that is not an error.
+    #[test]
+    fn cancel_with_no_login_in_flight_reports_nothing_cancelled() {
+        assert!(!muxbus_login_cancel().unwrap().cancelled);
     }
 }

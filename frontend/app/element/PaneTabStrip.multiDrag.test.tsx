@@ -194,6 +194,7 @@ describe("what a pill drags", () => {
         expect(drag(0).getInitialData()).toEqual({
             kind: "pane-tab",
             blockId: "a",
+            label: expect.any(String),
             type: paneTabItemType,
             sourceNodeId: "pane-self",
             sourceTabId: "tab-1",

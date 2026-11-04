@@ -141,15 +141,6 @@
         flex: 1 1 auto;
         @include mixins.truncate;
     }
-    .instance-panel-window-badge {
-        flex: 0 0 auto;
-        font-size: var(--text-2xs);
-        padding: 1px 6px;
-        border-radius: var(--radius-full);
-        background: var(--accent-color);
-        color: var(--button-text-color);
-        @include mixins.label-caps;
-    }
 }
 
 // A closed window of the workspace: greyed, with when it closed.

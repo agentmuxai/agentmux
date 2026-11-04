@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // On the widget-bar icon's top right corner (the icon is the positioned parent).
+// tag: fixed - the 14px count dot on the widget bar's Kanban button, a polite live region; Tag's count is taller and cannot carry the status role
 .kanban-needs-badge {
     position: absolute;
     top: -5px;

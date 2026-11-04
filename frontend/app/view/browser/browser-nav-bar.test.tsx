@@ -15,12 +15,18 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const menu = vi.hoisted(() => ({ show: vi.fn() }));
+vi.mock("@/app/element/ui/open-menu-at", async (original) => ({ ...(await original<typeof import("@/app/element/ui/open-menu-at")>()), openMenuAt: menu.show }));
+
 import { isOverChrome } from "@/app/store/chrome-zoom-target";
 import { makeTestHostApi } from "@/app/host/test-host";
 import { BrowserNavBar } from "./browser-nav-bar";
 import type { BrowserViewModel } from "./browser-model";
 
-afterEach(() => cleanup());
+afterEach(() => {
+    cleanup();
+    menu.show.mockClear();
+});
 
 function renderBar(opts: { loading?: () => boolean; reload?: () => Promise<void>; stop?: () => Promise<void> } = {}) {
     window.api = makeTestHostApi({
@@ -149,10 +155,48 @@ describe("the Home and Bookmarks icons", () => {
         }
     });
 
+    it("open a right-click menu on Home that offers to make this page the Home page", () => {
+        const home = renderBar().querySelector('[data-testid="browser-home"]')!;
+        fireEvent.contextMenu(home);
+        expect(menu.show).toHaveBeenCalledTimes(1);
+        const items = menu.show.mock.calls[0][0] as ContextMenuItem[];
+        expect(items.map((i) => i.label)).toEqual(["Set this page as Home"]);
+    });
+
     it("keep Home's tooltip and accessible name", () => {
         const home = renderBar().querySelector('[data-testid="browser-home"]')!;
         expect(home.getAttribute("title")).toMatch(/^Home: /);
         expect(home.getAttribute("aria-label")).toMatch(/^Home: /);
+    });
+});
+
+describe("the Profile and Bookmarks menus", () => {
+    const menuRows = () => [...document.querySelectorAll('[role="menu"] [role="menuitem"]')] as HTMLElement[];
+
+    it("open the kit Menu: the Profile menu names who this tab is, marks Personal as the current one and keeps its shortcut", () => {
+        const bar = renderBar();
+        fireEvent.click(bar.querySelector(".browser-profile-btn")!);
+        const rows = menuRows();
+        expect(rows[0].classList.contains("browser-profile-header")).toBe(true);
+        expect(rows[0].querySelector(".label")?.textContent).toBe("PersonalYour saved sign-ins");
+        expect(rows.map((r) => r.querySelector(".label")?.firstChild?.textContent)).toEqual([
+            "Personal",
+            "Open new Incognito tab",
+            "Personal",
+            "New profile…",
+            "Manage profiles…",
+        ]);
+        expect(rows[2].querySelector(".browser-profile-current")?.getAttribute("aria-label")).toBe("this tab");
+        expect(rows[0].querySelector(".browser-profile-current")).toBeNull();
+        expect(rows[1].querySelector(".menu-item-shortcut")).not.toBeNull();
+    });
+
+    it("open the kit Menu: the Bookmarks menu offers to bookmark the page, and says there are none yet", () => {
+        const bar = renderBar();
+        fireEvent.click(bar.querySelector('.browser-nav-group--bookmarks button[title="Bookmarks"]')!);
+        expect(menuRows().map((r) => r.querySelector(".label")?.textContent)).toEqual(
+            expect.arrayContaining(["Set as Home Page", "Bookmark This Page"]),
+        );
     });
 });
 

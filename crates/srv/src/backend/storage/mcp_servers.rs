@@ -13,6 +13,7 @@ use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
 use super::error::StoreError;
+use crate::backend::audience::{Audience, HostCap, RuntimeCaps};
 use super::managed::{ManagedResource, Owner};
 use super::store::Store;
 
@@ -145,6 +146,18 @@ pub struct McpServerReach {
     pub in_containers: bool,
 }
 
+impl McpServerReach {
+    /// Which runtimes get the server: a catalog server is usually a host command, so unless it is
+    /// switched on for containers it is for agents that can run one.
+    pub fn audience(&self) -> Audience {
+        if self.in_containers {
+            Audience::Everyone
+        } else {
+            Audience::NativeOnly(HostCap::Exec, "a catalog server is usually a host command; switch it on for container agents in Connectors")
+        }
+    }
+}
+
 impl Store {
     /// List all MCP servers visible to an agent: own (referenced) + global,
     /// each annotated with whether this specific agent holds the bind ref.
@@ -175,7 +188,7 @@ impl Store {
                     return true;
                 }
                 let r = reach.get(&item.server.id).copied().unwrap_or_default();
-                (item.bound_to_agent || r.all_agents) && (!container || r.in_containers)
+                (item.bound_to_agent || r.all_agents) && r.audience().permits(RuntimeCaps::of(container))
             })
             .map(|item| item.server)
             .collect()

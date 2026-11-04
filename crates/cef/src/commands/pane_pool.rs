@@ -487,6 +487,24 @@ fn cleanup_failed_pane_promote_orphan(state: &Arc<AppState>, label: &str) {
     );
 }
 
+/// Show a promoted floater and make it the foreground window. `SetWindowPos` activated it while it was
+/// still hidden, and activating a hidden window does not take the foreground: the window the drag started
+/// in kept it, so the new floating pane opened behind the window it was torn from. The process is the
+/// foreground one at this point (the drag ran in its window), so the call is allowed. The hand-back from
+/// the pool refill's invisible window then returns activation to this floater, not to the window the
+/// user left.
+#[cfg(target_os = "windows")]
+fn show_floater_in_front(outer_hwnd: usize, label: &str) {
+    use windows_sys::Win32::Foundation::HWND;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{SetForegroundWindow, ShowWindow, SW_SHOWNORMAL};
+    // SAFETY: both calls on a stale HWND fail harmlessly.
+    let ok = unsafe {
+        ShowWindow(outer_hwnd as HWND, SW_SHOWNORMAL);
+        SetForegroundWindow(outer_hwnd as HWND) != 0
+    };
+    tracing::info!(target: "pool:pane", label = %label, ok, "[pane-pool] floater shown in front after the tear-off");
+}
+
 /// Pop a pane pool window and show it as a floating pane at the drop target.
 ///
 /// `parent_hwnd`: the FullInstance HWND that triggered the tear-off (for cascade
@@ -510,7 +528,7 @@ pub fn promote_pane_pool_window(
     {
         use windows_sys::Win32::Foundation::HWND;
         use windows_sys::Win32::UI::WindowsAndMessaging::{
-            IsWindow, SetWindowPos, ShowWindow, HWND_TOP, SW_SHOWNORMAL,
+            IsWindow, SetWindowPos, HWND_TOP,
         };
 
         let dispatch = state.host_dispatch(
@@ -575,7 +593,7 @@ pub fn promote_pane_pool_window(
             // With a snapshot to show, stay hidden until the renderer has put
             // it up (below): otherwise the first visible frame is the splash.
             if snapshot.is_none() {
-                let _ = ShowWindow(outer_hwnd as HWND, SW_SHOWNORMAL);
+                show_floater_in_front(outer_hwnd, &label);
             }
         }
 
@@ -657,9 +675,7 @@ pub fn promote_pane_pool_window(
         if let Some(shown) = snapshot_shown {
             let acked = wait_snapshot_shown(&new_label, shown);
             tracing::info!(target: "pool:pane", label = %new_label, acked, "[pane-pool] showing floater after its snapshot");
-            unsafe {
-                let _ = ShowWindow(outer_hwnd as HWND, SW_SHOWNORMAL);
-            }
+            show_floater_in_front(outer_hwnd, &new_label);
         }
 
         defer_pane_pool_refill(state, &new_label);
@@ -707,5 +723,20 @@ pub fn promote_pane_pool_window(
         defer_pane_pool_refill(state, &label);
 
         Some(label)
+    }
+}
+
+#[cfg(all(test, target_os = "windows"))]
+mod tests {
+    /// The Windows promote shows the floater only through `show_floater_in_front`: a plain show does not take
+    /// the foreground, and the floater opens behind the window it was torn from.
+    #[test]
+    fn the_promote_shows_the_floater_only_in_front() {
+        let whole = include_str!("pane_pool.rs");
+        // The code above this module only: the strings below would count themselves.
+        let src = whole.split("#[cfg(all(test, target_os").next().unwrap_or(whole);
+        let promote = &src[src.find("pub fn promote_pane_pool_window").expect("promote fn")..];
+        assert_eq!(promote.matches("show_floater_in_front(outer_hwnd").count(), 2, "with and without a snapshot");
+        assert!(!promote.contains("ShowWindow("), "a plain ShowWindow leaves the floater behind the source window");
     }
 }

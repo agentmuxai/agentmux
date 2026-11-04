@@ -411,7 +411,7 @@ pub struct AgentProgressEvent {
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct WidgetPackagesEvent {
-    pub packages: Vec<crate::backend::widget_packages::WidgetPackageInfo>,
+    pub packages: Vec<crate::backend::widget::packages::WidgetPackageInfo>,
 }
 
 /// `widgetstorage`: the keys of a widget package's storage that changed.
@@ -426,7 +426,7 @@ pub struct WidgetStorageEvent {
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct WidgetRequestsEvent {
-    pub requests: Vec<crate::backend::widget_requests::WidgetInstallRequest>,
+    pub requests: Vec<crate::backend::widget::requests::WidgetInstallRequest>,
 }
 
 /// `vault`: the Vault changed (`changed_ms`), or its requests did. Any

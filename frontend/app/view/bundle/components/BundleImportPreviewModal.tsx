@@ -13,7 +13,7 @@
 import { createSignal, For, onMount, Show, type JSX } from "solid-js";
 
 import { Button } from "@/element/button";
-import { Button as UiButton, IconButton, TextInput } from "@/app/element/ui";
+import { Button as UiButton, IconButton, Tag, TextInput } from "@/app/element/ui";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { formatBytes } from "@/util/format-bytes";
@@ -215,11 +215,11 @@ export const BundleImportPreviewModalPanel = (
                                                 when={!colliding}
                                                 fallback={
                                                     <span class="bundle-import-skill-collision">
-                                                        <span class="bundle-import-collision-badge">
+                                                        <Tag size="xs" tone="warn">
                                                             {skill.collision === "name_conflict"
                                                                 ? "already exists in your library"
                                                                 : "another skill in this import uses this name"}
-                                                        </span>
+                                                        </Tag>
                                                         <span class="bundle-import-item-name-readonly">{skill.slug}</span>
                                                         <TextInput variant="plain"
                                                             class="bundle-import-rename-input"

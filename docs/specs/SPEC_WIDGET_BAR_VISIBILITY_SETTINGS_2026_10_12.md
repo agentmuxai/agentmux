@@ -257,7 +257,7 @@ Separate follow-ups:
    `widget:order` (`MetaType`, template tests), the `widget:hidden@defwidget@…` example in a comment
    (`types.rs:518`, it would be confused with the new key), `FullConfigType.defaultwidgets` (never filled,
    `types.rs:846`), `ConfigState::set_config` (`#[allow(dead_code)]`, `state.rs:55`), `let _ = view;`
-   (`widget_packages.rs:594`).
+   (`widget/packages.rs:594`).
 8. ~~**Out-of-date schemas:**~~ Resolved 2026-10-13: `schema/widgets.json` has `display:pinned` and `module`; `schema/settings.json` already had `widget:pinned`. The original finding: `schema/widgets.json` lacks `display:pinned` and `module` and sets
    `additionalProperties: false`, so it rejects valid files. `schema/settings.json` lacks `widget:pinned`.
 9. ~~**`display:hidden` naming:**~~ Resolved 2026-10-13: widgets now use `display:grouponly`; `display:hidden` is still read (a serde alias) and is written back under the new name. Connections keep their own `display:hidden`, which is a different thing. The original finding: it means "only inside its group", and the Launcher also uses it. Rename to

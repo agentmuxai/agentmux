@@ -9,9 +9,10 @@
 //! ran in — "Name — ABF", "Name — ABF (2)", … in the one shared store. The
 //! id belongs with the agent, but not in `DefinitionRecordV1`: that would
 //! need a schema bump older builds reject. So it goes in a sidecar zone in
-//! the global store, `agent-uid:<uid>:bundle`, holding `{memory_id}`: the
-//! first channel to provision the agent records it, and m0021 reads it
-//! before minting.
+//! the global store, `agent-uid:<uid>:bundle`, holding `{memory_id}`. It was
+//! written when the agent's bundle was provisioned; a new agent has no bundle
+//! now, so this is only read: m0021 binds a recorded bundle, and m0046 keeps
+//! every recorded bundle when it removes the empty ones nothing points at.
 
 use serde::{Deserialize, Serialize};
 
@@ -40,53 +41,22 @@ pub(crate) fn get(fs: &FileStore, uid: &str) -> Result<Option<String>, StoreErro
     Ok(Some(s.memory_id).filter(|m| !m.is_empty()))
 }
 
-/// Record `memory_id` as the agent's bundle unless one is recorded already.
-/// Returns the id now recorded — the caller's, or the one another channel
-/// recorded first.
+/// Record `memory_id` as the agent's bundle unless one is recorded already, and return the id now
+/// recorded. Nothing records a bundle any more (a new agent has none); the tests use this to set one up.
+#[cfg(test)]
 pub(crate) fn claim(fs: &FileStore, uid: &str, memory_id: &str) -> Result<String, StoreError> {
-    claim_unless_live(fs, uid, memory_id, &|_| true)
-}
-
-/// [`claim`], but a recorded bundle `is_live` says doesn't exist (for the
-/// caller) is replaced by `memory_id`. A channel whose bundles live in a store
-/// others can't see (an isolated dev channel) could record an id first; with
-/// plain first-wins every other channel then failed to find it, minted its
-/// own bundle, lost the claim to the invisible one, and couldn't bind its
-/// own — 17 orphaned bundles per fresh channel on one host
-/// (AgentA had 11).
-pub(crate) fn claim_unless_live(
-    fs: &FileStore,
-    uid: &str,
-    memory_id: &str,
-    is_live: &dyn Fn(&str) -> bool,
-) -> Result<String, StoreError> {
     let Some(zone) = zone(uid) else { return Ok(memory_id.to_string()) };
     fs.zone_txn(&zone, |z| {
         let mut s: Sidecar = match z.read(FILE)? {
             Some(b) => serde_json::from_slice(&b).map_err(|e| StoreError::Other(format!("bundle sidecar unreadable: {e}")))?,
             None => Sidecar::default(),
         };
-        if !s.memory_id.is_empty() && is_live(&s.memory_id) {
-            return Ok(s.memory_id);
+        if s.memory_id.is_empty() {
+            s.memory_id = memory_id.to_string();
+            z.put(FILE, &serde_json::to_vec(&s).map_err(|e| StoreError::Other(e.to_string()))?)?;
         }
-        s.memory_id = memory_id.to_string();
-        z.put(FILE, &serde_json::to_vec(&s).map_err(|e| StoreError::Other(e.to_string()))?)?;
         Ok(s.memory_id)
     })
-}
-
-/// Record a freshly provisioned bundle at runtime, best-effort (the global
-/// store may be off).
-pub(crate) fn record(uid: &str, memory_id: &str) {
-    use crate::backend::transcript::damage;
-    // A memory record found corrupt is not written to again in this process.
-    let zone = damage::memory_zone(uid);
-    let Some(fs) = damage::global_for(&zone) else { return };
-    if let Err(e) = claim(&fs, uid, memory_id) {
-        if !damage::note_corrupt(&zone, "bundle record", &e) {
-            tracing::warn!(uid, error = %e, "agent bundle sidecar not recorded");
-        }
-    }
 }
 
 /// The global store, opened directly — for migrations, which run before
@@ -109,42 +79,5 @@ mod tests {
         assert_eq!(claim(&fs, "agent-a", "b2").unwrap(), "b1", "another channel's later bundle doesn't replace it");
         assert_eq!(get(&fs, "agent-a").unwrap().as_deref(), Some("b1"));
         assert_eq!(get(&fs, "agent-b").unwrap(), None);
-    }
-
-    #[test]
-    fn a_recorded_bundle_the_caller_cant_find_is_replaced() {
-        let fs = FileStore::open_in_memory().unwrap();
-        assert_eq!(claim(&fs, "agent-a", "invisible").unwrap(), "invisible");
-        let live = |id: &str| id != "invisible";
-        assert_eq!(claim_unless_live(&fs, "agent-a", "b2", &live).unwrap(), "b2");
-        assert_eq!(get(&fs, "agent-a").unwrap().as_deref(), Some("b2"));
-        // A live record still wins.
-        assert_eq!(claim_unless_live(&fs, "agent-a", "b3", &live).unwrap(), "b2");
-    }
-}
-
-#[cfg(test)]
-mod damage_tests {
-    use super::*;
-    use crate::backend::transcript::damage::{self, test_support};
-    use std::sync::Arc;
-
-    #[test]
-    fn a_corrupt_shared_store_marks_the_agents_memory_record_and_it_is_not_written_again() {
-        let uid = "uid-sidecar-damage-1";
-        let fs = Arc::new(FileStore::open_in_memory().unwrap());
-        let _g = test_support::use_global(&fs);
-        record(uid, "mem-1");
-        assert_eq!(claim(&fs, uid, "mem-2").unwrap(), "mem-1", "healthy: the first bundle is the record");
-        test_support::corrupt(&fs);
-        let other = "uid-sidecar-damage-2";
-        record(other, "mem-9");
-        assert!(damage::is_damaged(&damage::memory_zone(other)), "the failed write is the incident");
-        assert!(!damage::is_damaged(&damage::memory_zone(uid)), "another agent's record is untouched");
-        // Marked: a repaired store is not written to either, in this process.
-        let fixed = Arc::new(FileStore::open_in_memory().unwrap());
-        let _g2 = test_support::use_global(&fixed);
-        record(other, "mem-10");
-        assert!(claim(&fixed, other, "mem-11").unwrap() == "mem-11", "nothing was recorded for the marked agent");
     }
 }

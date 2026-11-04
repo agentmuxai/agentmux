@@ -55,9 +55,8 @@ import { contextReaderFor, type ContextReader } from "./context-reader";
 import type { PendingMessage } from "../../agent-model/state";
 import { ClaudeCodeStreamParser } from "./stream-parser";
 import type { ContextCompactedNode, DocumentNode, SessionOutcomeNode } from "../../agent-model/types";
-import { noteTaskFrame } from "./activity/task-outcomes";
+import { noteTaskFrame } from "../../agent-model/task-outcomes";
 import { contextCompactedNodeId, contextCompactedLiveTimestamp } from "./compact-boundary";
-import { createTestProgressTracker } from "./status/test-progress";
 import { createThinkingHeadlineTracker } from "./status/thinking-headline";
 import { compactionModelKey, parseCompactionSample, recordCompactionSample } from "./compaction-estimate";
 import { CompactionSummaryTracker } from "./context-delivery";
@@ -70,12 +69,12 @@ import { createHidingStreamFlushQueue } from "./hiding-stream-flush-queue";
 import { getBlockMetaKeyAtom } from "@/app/store/global";
 import { restoreTitleOnContinue } from "./hooks/useBlockActivity";
 import { CATCH_UP_META_KEY, clearCatchUpRequest, parseCatchUpRequest } from "./catch-up-request";
-import { createMemoryReinjectionController } from "./memory-reinjection-controller";
+import { createStreamMemoryReinjection } from "./stream-memory-reinjection";
+import { createToolOutputNoter, startSharedZonePoll } from "./stream-side-channels";
 import { FALLBACK_CONTEXT_WINDOW } from "./memory-reinjection";
 import { buildMemoryInjectedNode, supersededCard } from "./memory-injected";
 import { interceptFrame, type FrameInterceptState, type FrameSink } from "./frame-intercepts";
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
-import { fetchMemoryReinjectionEntries } from "./memory-reinjection-fetch";
 import { contextWindowForModel } from "@/app/store/agent-pane-state/context-window";
 import { reportedContextWindowsFromResult } from "@/app/store/agent-pane-state/context-reading";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -97,8 +96,6 @@ import { EchoLedger, TranscriptCursor, type TranscriptFileEvent, type Transcript
 const OutputFileName = "output";
 /** Longest live records wait for the history load before being placed anyway. */
 const HISTORY_HOLD_MAX_MS = 15_000;
-/** How often a pane on an agent's shared zone checks for lines no event brought. */
-const SHARED_ZONE_POLL_MS = 5_000;
 
 /**
  * Shared node-construction for the reducer's `context-compacted` event —
@@ -346,96 +343,8 @@ export function useAgentStream({
         pendingStreamedKind = undefined;
     };
 
-    const memoryReinjectionController = createMemoryReinjectionController({
-        contextWindow: currentContextWindow,
-        now: () => Date.now(),
-        // reagentx P0, PR #3502: a real turn is genuinely in flight for the
-        // common auto-compaction case (compact_boundary lands mid an
-        // ongoing turn) — dispatching TurnStart on top of it regresses
-        // turnPhase from Streaming back to Submitting. Same read
-        // agent-view.tsx's own handleSendMessage captures as
-        // wasAlreadyWorking before deciding whether to dispatch TurnStart
-        // at all. See memory-reinjection-controller.ts's module doc
-        // comment, "fix 1".
-        isPaneWorking: () => workingFromPhase(paneSnapshot(blockId)?.turnPhase ?? { kind: "Idle" }),
-        fetchEntries: () => fetchMemoryReinjectionEntries(TabRpcClient, agentName ?? "", blockId),
-        // Deliberately the raw send RPC, not the full sendMessage/pending-
-        // zone path (§3.3 — that path is what creates the visible
-        // UserMessageNode this feature must never produce). This DOES skip
-        // sendMessage's own auth-guard/cmd:args-reapply preamble
-        // (useAgentCommands.ts) — acceptable here because a reinjection
-        // only ever fires immediately after a real compact_boundary, i.e.
-        // strictly mid-session on an already-authenticated, already-running
-        // process, not a cold user-initiated send where that preamble
-        // matters. Flagged, not silently assumed.
-        // `hidden: true` — reagentx P0, PR #3502, seventh review round:
-        // extract_digest_text's marker-text suppression can only see inside
-        // its own 32 KB / ~30-line tail window, which large Personal memory
-        // content (measured up to 76 KB in this PR's own §3.4.1 numbers)
-        // routinely scrolls past. This flag is the authoritative gate
-        // (session::set_hidden_reinjection_active) — set here, not
-        // reconstructed from transcript bytes later.
-        sendRpc: (message, deliveryId) =>
-            RpcApi.AgentInputCommand(TabRpcClient, {
-                blockid: blockId,
-                message,
-                message_id: `memreinject_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-                hidden: true,
-                // srv writes this delivery's card to the pane (CD2b).
-                ...(deliveryId ? { delivery_id: deliveryId } : {}),
-            }).then(() => undefined),
-        // srv composes the message and the card (CD2b); an older srv rejects
-        // and the controller composes here instead.
-        compose: async (reason) => {
-            const r = await RpcApi.ComposeCommand(TabRpcClient, { block_id: blockId, reason });
-            if (!r.text || !r.delivery_id || !r.frame) return null;
-            const node = buildMemoryInjectedNode(r.frame, {
-                contextWindow: currentContextWindow(),
-                now: Date.now(),
-            });
-            return node ? { deliveryId: r.delivery_id, text: r.text, node } : null;
-        },
-        // The catch-up turn's message (SPEC_RESUME_PHASE_CATCH_UP_TURN_
-        // 2026_10_13.md): memory when asked for, then the block telling the
-        // agent to say where it is picking up. A catch-up with no memory has no
-        // card, so no delivery id and no node.
-        composeCatchUp: async (reason, memory) => {
-            const r = await RpcApi.ComposeCommand(TabRpcClient, { block_id: blockId, reason, catch_up: true, memory });
-            if (!r.text) return null;
-            const node = r.frame
-                ? buildMemoryInjectedNode(r.frame, { contextWindow: currentContextWindow(), now: Date.now() })
-                : null;
-            return {
-                text: r.text,
-                ...(r.delivery_id ? { deliveryId: r.delivery_id } : {}),
-                ...(node ? { node } : {}),
-            };
-        },
-        // Claude Code's SessionStart hook now delivers the same memory at a
-        // session start and after a compaction; this fallback fires only when
-        // the hook didn't (SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §7 P2).
-        claimFallback: (reason, boundaryUuid, eventAtMs) =>
-            RpcApi.ClaimFallbackCommand(TabRpcClient, {
-                block_id: blockId,
-                reason,
-                ...(boundaryUuid ? { boundary_uuid: boundaryUuid } : {}),
-                ...(eventAtMs !== undefined ? { event_at_ms: eventAtMs } : {}),
-            }).then((r) => ({ deliver: r.deliver, ...(r.foreign ? { foreign: true } : {}) })),
-        // Reuses the REAL TurnStart/TurnStartFailed commands unmodified — a hidden
-        // reinjection is a completely genuine turn state-machine-wise; only
-        // its rendering differs. See memory-reinjection-controller.ts's
-        // module doc comment. `content`/`hidden` are always exactly what the
-        // controller itself passes (HIDDEN_TURN_PLACEHOLDER_CONTENT, true) —
-        // this callback forwards verbatim rather than deciding anything, per
-        // "fix 2" in that module's doc comment: the REAL memory content must
-        // never enter reducer state, only sendRpc's own argument above.
-        dispatchTurnStart: (content, hidden) => {
-            model.dispatchPane({ type: "TurnStart", at: Date.now(), content, hidden }, "system");
-        },
-        dispatchTurnStartFailed: () => {
-            model.dispatchPane({ type: "TurnStartFailed" }, "system");
-        },
-    });
+    const memoryReinjectionController = createStreamMemoryReinjection({ blockId, agentName, model, contextWindow: currentContextWindow });
+
 
     const queue = createHidingStreamFlushQueue(rawQueue, memoryReinjectionController.isHiding);
 
@@ -462,32 +371,7 @@ export function useAgentStream({
     // body scope (not inside onMount) so they tear down even if onMount
     // below early-returns (e.g. enabled:false). Both push into `queue`
     // rather than scheduling their own flush.
-    // A known test runner's progress, from a call's live output.
-    const testProgress = new Map<string, ReturnType<typeof createTestProgressTracker>>();
-    // When each call last reported output to the reducer: at most every
-    // OUTPUT_NOTE_MS, enough for "no output for 1m".
-    const outputNoted = new Map<string, number>();
-    const OUTPUT_NOTE_MS = 5_000;
-    useToolChunkStream({
-        blockId,
-        queue,
-        onOutput: (toolId, content) => {
-            const now = Date.now();
-            if (now - (outputNoted.get(toolId) ?? 0) >= OUTPUT_NOTE_MS) {
-                if (outputNoted.size > 64) outputNoted.clear();
-                outputNoted.set(toolId, now);
-                model.dispatchPane({ type: "ToolOutput", id: toolId, at: now });
-            }
-            let track = testProgress.get(toolId);
-            if (!track) {
-                if (testProgress.size > 64) testProgress.clear();
-                track = createTestProgressTracker();
-                testProgress.set(toolId, track);
-            }
-            const text = track(content);
-            if (text) model.dispatchPane({ type: "ToolProgress", id: toolId, text });
-        },
-    });
+    useToolChunkStream({ blockId, queue, onOutput: createToolOutputNoter(model) });
     useShellNodeStream({ blockId, queue });
     useCompactionStream({ blockId, model, queue, hasNodeId, addNodeId, compacting });
     // dock:clear doesn't push into `queue` — it's a rare, out-of-band
@@ -859,7 +743,7 @@ export function useAgentStream({
                 // Observe only — the frame keeps flowing below. A background
                 // task's end is on this stream (`system/task_notification`);
                 // the dock reads it from here so it never depends on srv's
-                // live registry having watched the task (activity/task-outcomes.ts).
+                // live registry having watched the task (agent-model/task-outcomes.ts).
                 if (rawEvent.type === "system") noteTaskFrame(blockId, rawEvent, Date.now());
 
                 // A new CLI session, not a compaction's own `init`
@@ -1146,37 +1030,11 @@ export function useAgentStream({
             cursor.settle(null);
         }, HISTORY_HOLD_MAX_MS);
 
-        // Lines no event brings: another block or srv instance appending to
-        // the agent's shared zone. Filled one poll late, so lines this pane's
-        // own events are still bringing (and its own echoes) arrive by event
-        // first.
-        let lastCount: { count: number; stream: string; gen: string } | null = null;
-        let polling = false;
-        const pollTimer = setInterval(async () => {
-            const pin = cursor.position();
-            if (!pin || !pin.stream.startsWith("g:") || polling || document.hidden) return;
-            polling = true;
-            try {
-                const resp = await RpcApi.BlockfileLineCountCommand(
-                    TabRpcClient,
-                    { block_id: blockId, filename: OutputFileName },
-                    { timeout: 5_000 },
-                );
-                if (!resp?.stream || !resp.gen) return;
-                if (lastCount && lastCount.stream === resp.stream && lastCount.gen === resp.gen) {
-                    cursor.observeCount(lastCount.count, resp.stream, resp.gen);
-                }
-                lastCount = { count: resp.count, stream: resp.stream, gen: resp.gen };
-            } catch {
-                // Soft: the next tick or event catches up.
-            } finally {
-                polling = false;
-            }
-        }, SHARED_ZONE_POLL_MS);
+        const stopPoll = startSharedZonePoll(blockId, OutputFileName, cursor);
 
         onCleanup(() => {
             clearTimeout(holdTimer);
-            clearInterval(pollTimer);
+            stopPoll();
             stopWaiting();
             cursor.dispose();
             unregisterCursorStats();

@@ -39,10 +39,10 @@ const usage = {
 
 describe("measuredAgo", () => {
     it("says when the numbers were measured", () => {
-        expect(measuredAgo(1_000_000, 1_000_000 + 10_000)).toBe("just now");
-        expect(measuredAgo(1_000_000, 1_000_000 + 3 * 60_000)).toBe("3 min ago");
-        expect(measuredAgo(1_000_000, 1_000_000 + 125 * 60_000)).toBe("2 h ago");
-        expect(measuredAgo(5_000, 1_000), "a clock a little behind is not negative").toBe("just now");
+        expect(measuredAgo(1_000_000, 1_000_000 + 10_000, "en")).toBe("now");
+        expect(measuredAgo(1_000_000, 1_000_000 + 3 * 60_000, "en")).toBe("3 min. ago");
+        expect(measuredAgo(1_000_000, 1_000_000 + 125 * 60_000, "en")).toBe("2 hr. ago");
+        expect(measuredAgo(5_000, 1_000, "en"), "a clock a little behind is not negative").toBe("now");
     });
 });
 
@@ -70,7 +70,7 @@ describe("HistoryUsageIndicator", () => {
         expect(dialog.querySelector('[data-store="provider-files"]')).toHaveTextContent("2.0 GB");
         expect(dialog.querySelector('[data-store="pane-history"]')).toHaveTextContent("1.0 GB");
         expect(dialog.querySelector('[data-agent="d1"]')).toHaveTextContent("Lark");
-        expect(dialog).toHaveTextContent("Measured 3 min ago");
+        expect(dialog).toHaveTextContent(/Measured 3 min. ago/);
         expect(screen.queryByText(/delete|clear|remove/i)).toBeNull();
     });
 

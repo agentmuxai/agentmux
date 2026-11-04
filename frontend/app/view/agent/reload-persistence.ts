@@ -14,6 +14,8 @@
  * reload fires) flushes whatever is pending.
  */
 
+import { registerReloadSaver } from "@/app/store/recycle-savers";
+
 const DRAFT_KEY = "agentmux:composer-draft:";
 const HISTORY_KEY = "agentmux:sent-history:";
 /** The ArrowUp history kept per block (in memory and stored). */
@@ -69,6 +71,10 @@ export function saveAllComposerDrafts(): boolean {
     for (const [blockId, text] of drafts) saved = writeSession(DRAFT_KEY + blockId, text || undefined) && saved;
     return saved;
 }
+
+registerReloadSaver(() =>
+    saveAllComposerDrafts() ? null : "a draft couldn't be saved (the browser storage is full or off)"
+);
 
 export function getComposerDraft(blockId: string): string | undefined {
     if (!drafts.has(blockId)) {

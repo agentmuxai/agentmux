@@ -16,8 +16,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::backend::rpc::engine::WshRpcEngine;
-use crate::backend::widget_packages::{self, FileError, WidgetKind, WidgetPackageInfo};
-use crate::backend::widget_requests;
+use crate::backend::widget::packages::{self, FileError, WidgetKind, WidgetPackageInfo};
+use crate::backend::widget::requests;
 
 use super::AppState;
 
@@ -27,7 +27,7 @@ pub struct WidgetPackagesResult {
     pub packages: Vec<WidgetPackageInfo>,
     /// Publishers pinned to a key here (SPEC_WIDGET_SHARING_2026_10_10.md §2.2).
     #[serde(default)]
-    pub publishers: Vec<crate::backend::widget_signature::WidgetPublisherPin>,
+    pub publishers: Vec<crate::backend::widget::signature::WidgetPublisherPin>,
 }
 
 /// The widget catalog, checked, with what is installed here
@@ -36,7 +36,7 @@ pub struct WidgetPackagesResult {
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct WidgetCatalogResult {
     pub url: String,
-    pub items: Vec<crate::backend::widget_catalog::WidgetCatalogItem>,
+    pub items: Vec<crate::backend::widget::catalog::WidgetCatalogItem>,
 }
 
 /// The list, with the publishers this instance has pinned.
@@ -131,8 +131,8 @@ pub struct WidgetReadFileResult {
     pub content: String,
 }
 
-fn svc() -> Result<&'static Arc<widget_packages::WidgetPackages>, String> {
-    widget_packages::service().ok_or_else(|| "widget packages aren't available on this AgentMux".to_string())
+fn svc() -> Result<&'static Arc<packages::WidgetPackages>, String> {
+    packages::service().ok_or_else(|| "widget packages aren't available on this AgentMux".to_string())
 }
 
 pub fn register_widget_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -193,13 +193,13 @@ pub(crate) fn widgets_list() -> Result<WidgetPackagesResult, String> {
 /// widgets.rescan.
 pub(crate) async fn widgets_rescan(st: &AppState) -> Result<WidgetPackagesResult, String> {
     svc()?;
-    Ok(packages_result(widget_packages::refresh_off_thread(&st.config_watcher, &st.event_bus, &st.broker).await))
+    Ok(packages_result(packages::refresh_off_thread(&st.config_watcher, &st.event_bus, &st.broker).await))
 }
 
 /// widgets.setenabled.
 pub(crate) async fn widgets_set_enabled(st: &AppState, req: WidgetSetEnabledReq) -> Result<WidgetPackagesResult, String> {
     svc()?.set_enabled(&req.id, req.enabled)?;
-    Ok(packages_result(widget_packages::refresh_off_thread(&st.config_watcher, &st.event_bus, &st.broker).await))
+    Ok(packages_result(packages::refresh_off_thread(&st.config_watcher, &st.event_bus, &st.broker).await))
 }
 
 /// widgets.install: copy a package in. It doesn't run until the user
@@ -207,32 +207,32 @@ pub(crate) async fn widgets_set_enabled(st: &AppState, req: WidgetSetEnabledReq)
 pub(crate) async fn widgets_install(st: &AppState, req: WidgetInstallReq) -> Result<WidgetInstallResult, String> {
     let dir = svc()?.widgets_dir.clone();
     let source = std::path::PathBuf::from(req.path.trim());
-    let id = tokio::task::spawn_blocking(move || widget_packages::install(&dir, &source, req.replace))
+    let id = tokio::task::spawn_blocking(move || packages::install(&dir, &source, req.replace))
         .await
         .map_err(|e| e.to_string())??;
     tracing::info!(id = %id, "widget package installed (awaiting approval)");
-    let packages = widget_packages::refresh_off_thread(&st.config_watcher, &st.event_bus, &st.broker).await;
+    let packages = packages::refresh_off_thread(&st.config_watcher, &st.event_bus, &st.broker).await;
     Ok(WidgetInstallResult { id, packages })
 }
 
 /// widgets.catalog: the catalog's widgets, its signature checked against
 /// the key pinned in this AgentMux, each with what is installed here.
 pub(crate) async fn widgets_catalog() -> Result<WidgetCatalogResult, String> {
-    let url = crate::backend::widget_catalog::DEFAULT_CATALOG_URL.to_string();
-    let entries = crate::backend::widget_catalog::fetch(&url).await?;
-    Ok(WidgetCatalogResult { items: crate::backend::widget_catalog::items(entries, &svc()?.list()), url })
+    let url = crate::backend::widget::catalog::DEFAULT_CATALOG_URL.to_string();
+    let entries = crate::backend::widget::catalog::fetch(&url).await?;
+    Ok(WidgetCatalogResult { items: crate::backend::widget::catalog::items(entries, &svc()?.list()), url })
 }
 
 /// widgets.catalog.install: download a catalog widget, check it against
 /// the (freshly fetched and checked) index, and copy it in. Like any
 /// install, it doesn't run until the user approves it.
 pub(crate) async fn widgets_catalog_install(st: &AppState, req: WidgetIdReq) -> Result<WidgetInstallResult, String> {
-    use crate::backend::widget_catalog as wc;
+    use crate::backend::widget::catalog as wc;
     let entries = wc::fetch(wc::DEFAULT_CATALOG_URL).await?;
     let entry = entries.iter().find(|e| e.id == req.id).ok_or(format!("the catalog doesn't list {}", req.id))?;
     let id = wc::install(&svc()?.widgets_dir, entry).await?;
     tracing::info!(id = %id, version = %entry.version, "catalog widget installed (awaiting approval)");
-    let packages = widget_packages::refresh_off_thread(&st.config_watcher, &st.event_bus, &st.broker).await;
+    let packages = packages::refresh_off_thread(&st.config_watcher, &st.event_bus, &st.broker).await;
     Ok(WidgetInstallResult { id, packages })
 }
 
@@ -250,7 +250,7 @@ pub(crate) async fn widgets_uninstall(st: &AppState, req: WidgetIdReq) -> Result
     // Its open panes stop first, so none can write its data back;
     // then what it stored goes (Settings asked the user): if that
     // fails, nothing is removed, so a reinstall can't find it again.
-    let sessions = crate::backend::widget_access::sessions();
+    let sessions = crate::backend::widget::access::sessions();
     sessions.begin_removal(&req.id);
     let removed = async {
         st.mstore.widget_storage_purge(&req.id).map_err(|e| format!("can't delete its data: {e}"))?;
@@ -271,11 +271,11 @@ pub(crate) async fn widgets_uninstall(st: &AppState, req: WidgetIdReq) -> Result
     }
     tracing::info!(id = %req.id, "widget package uninstalled");
     // Sessions stay refused until the list no longer has it.
-    let packages = widget_packages::refresh_off_thread(&st.config_watcher, &st.event_bus, &st.broker).await;
+    let packages = packages::refresh_off_thread(&st.config_watcher, &st.event_bus, &st.broker).await;
     sessions.end_removal(&req.id);
     // An agent waiting to have it installed hears it won't be, and
     // its prompt closes.
-    if widget_requests::requests().decline_all(&req.id) {
+    if requests::requests().decline_all(&req.id) {
         super::widget_agent_handlers::publish_requests(st);
     }
     Ok(packages_result(packages))
@@ -338,8 +338,8 @@ pub(crate) async fn handle_widget_file(UrlPath((id, hash, key, path)): UrlPath<(
     };
     let mut resp = bytes.into_response();
     let h = resp.headers_mut();
-    h.insert(header::CONTENT_TYPE, HeaderValue::from_static(widget_packages::content_type(&path)));
-    h.insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static(widget_packages::WIDGET_CSP));
+    h.insert(header::CONTENT_TYPE, HeaderValue::from_static(packages::content_type(&path)));
+    h.insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static(packages::WIDGET_CSP));
     h.insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
     h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
     h.insert(header::REFERRER_POLICY, HeaderValue::from_static("no-referrer"));
@@ -407,7 +407,7 @@ pub(crate) async fn handle_host_widget_approval(
             if decision == "approve" {
                 tracing::info!(id = %id, "widget package approved by the user");
             }
-            let packages = widget_packages::refresh_off_thread(&state.config_watcher, &state.event_bus, &state.broker).await;
+            let packages = packages::refresh_off_thread(&state.config_watcher, &state.event_bus, &state.broker).await;
             if decision == "forget_key" {
                 tracing::info!(publisher = %id, "widget publisher key forgotten by the user");
                 return (StatusCode::OK, Json(json!({ "ok": true, "packages": packages }))).into_response();
@@ -416,13 +416,13 @@ pub(crate) async fn handle_host_widget_approval(
             // package list says so too: its next step is often OpenWidget.
             // "Installed" only if the list, rescanned just now, still has that
             // version approved: a reinstall in the meantime replaced it.
-            let approved_now = packages.iter().any(|p| p.id == id && p.hash == hash && p.state == widget_packages::WidgetState::Approved);
+            let approved_now = packages.iter().any(|p| p.id == id && p.hash == hash && p.state == packages::WidgetState::Approved);
             let answer = if decision == "approve" && approved_now {
-                widget_requests::Answer::Approved
+                requests::Answer::Approved
             } else {
-                widget_requests::Answer::Declined
+                requests::Answer::Declined
             };
-            if widget_requests::requests().answer(&id, &hash, answer) {
+            if requests::requests().answer(&id, &hash, answer) {
                 super::widget_agent_handlers::publish_requests(&state);
             }
             (StatusCode::OK, Json(json!({ "ok": true, "packages": packages }))).into_response()
@@ -489,7 +489,7 @@ mod tests {
     // approval is never served.
     #[tokio::test]
     async fn only_the_host_can_approve_and_only_approved_bytes_are_served() {
-        let svc = widget_packages::WidgetPackages::for_tests();
+        let svc = packages::WidgetPackages::for_tests();
         let pkg = svc.widgets_dir.join("acme.test");
         std::fs::create_dir_all(&pkg).unwrap();
         std::fs::write(
@@ -500,7 +500,7 @@ mod tests {
         .unwrap();
         std::fs::write(pkg.join("index.html"), "<p>approved</p>").unwrap();
         let hash = svc.rescan(&Default::default()).into_iter().find(|p| p.id == "acme.test").unwrap().hash;
-        let key = widget_packages::files_key("test-secret-key", "acme.test", &hash);
+        let key = packages::files_key("test-secret-key", "acme.test", &hash);
         let file_uri = format!("/agentmux/widget-files/acme.test/{hash}/{key}/index.html");
 
         let state = crate::server::tests::test_state();
@@ -545,7 +545,7 @@ mod tests {
         assert!(!String::from_utf8_lossy(&body).contains("edited"));
     }
 
-    fn write_widget(svc: &widget_packages::WidgetPackages, id: &str, kind: &str) {
+    fn write_widget(svc: &packages::WidgetPackages, id: &str, kind: &str) {
         let pkg = svc.widgets_dir.join(id);
         std::fs::create_dir_all(&pkg).unwrap();
         std::fs::write(
@@ -558,7 +558,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_list_has_a_package_that_was_put_in_the_widgets_folder() {
-        let svc = widget_packages::WidgetPackages::for_tests();
+        let svc = packages::WidgetPackages::for_tests();
         write_widget(svc, "acme.listed", "sandboxed");
         svc.rescan(&Default::default());
         let listed = widgets_list().unwrap();
@@ -567,7 +567,7 @@ mod tests {
 
     #[tokio::test]
     async fn only_a_trusted_widgets_module_is_read_through_the_loader_route() {
-        let svc = widget_packages::WidgetPackages::for_tests();
+        let svc = packages::WidgetPackages::for_tests();
         write_widget(svc, "acme.sandboxed", "sandboxed");
         svc.rescan(&Default::default());
         let req = |id: &str| WidgetReadFileReq { id: id.into(), hash: "h".into(), path: "index.html".into() };
@@ -577,7 +577,7 @@ mod tests {
 
     #[tokio::test]
     async fn uninstalling_a_widget_that_is_not_there_says_so() {
-        widget_packages::WidgetPackages::for_tests();
+        packages::WidgetPackages::for_tests();
         let state = crate::server::tests::test_state();
         let err = widgets_uninstall(&state, WidgetIdReq { id: "acme.never-installed".into() }).await.err().unwrap();
         assert_eq!(err, "no such widget");
@@ -585,7 +585,7 @@ mod tests {
 
     #[tokio::test]
     async fn enabling_a_widget_the_user_never_approved_is_refused() {
-        widget_packages::WidgetPackages::for_tests();
+        packages::WidgetPackages::for_tests();
         let state = crate::server::tests::test_state();
         let err = widgets_set_enabled(&state, WidgetSetEnabledReq { id: "acme.unapproved".into(), enabled: true }).await.err().unwrap();
         assert_eq!(err, "that widget isn't approved");
@@ -593,7 +593,7 @@ mod tests {
 
     #[tokio::test]
     async fn installing_from_a_folder_that_is_not_there_is_an_error() {
-        widget_packages::WidgetPackages::for_tests();
+        packages::WidgetPackages::for_tests();
         let state = crate::server::tests::test_state();
         let req = WidgetInstallReq { path: "/nonexistent/agentmux-widget-folder".into(), replace: false };
         assert!(widgets_install(&state, req).await.is_err());

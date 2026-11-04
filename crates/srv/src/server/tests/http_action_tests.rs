@@ -17,46 +17,13 @@ use crate::server::tests::test_state;
 
 /// Every `(METHOD, path)` that `routes.rs` registers with a method that can change state.
 fn registered_writes() -> BTreeSet<String> {
-    let source: String = include_str!("../routes.rs")
-        .lines()
-        .filter(|l| !l.trim_start().starts_with("//"))
-        .collect::<Vec<_>>()
-        .join("\n");
     let mut found = BTreeSet::new();
-    let mut rest = source.as_str();
-    while let Some(at) = rest.find(".route(") {
-        let body_start = at + ".route(".len();
-        let mut depth = 1;
-        let mut end = body_start;
-        for (i, c) in rest[body_start..].char_indices() {
-            match c {
-                '(' => depth += 1,
-                ')' => depth -= 1,
-                _ => {}
-            }
-            if depth == 0 {
-                end = body_start + i;
-                break;
-            }
-        }
-        let body = &rest[body_start..end];
-        let (path, after) = match body.trim_start().strip_prefix('"') {
-            Some(quoted) => {
-                let close = quoted.find('"').expect("a closing quote");
-                (quoted[..close].to_string(), &quoted[close..])
-            }
-            None => {
-                // The one route whose path is a named constant.
-                assert!(body.contains("STOP_RUN_PATH"), "a route path that is neither a literal nor STOP_RUN_PATH: {body}");
-                (crate::server::jobs_remote_stop::STOP_RUN_PATH.to_string(), body)
-            }
-        };
+    for route in crate::server::route_scan::registered_routes() {
         for method in ["post", "put", "patch", "delete"] {
-            if after.contains(&format!("{method}(")) || after.contains(&format!(".{method}(")) {
-                found.insert(format!("{} {path}", method.to_uppercase()));
+            if route.methods.contains(&format!("{method}(")) || route.methods.contains(&format!(".{method}(")) {
+                found.insert(format!("{} {}", method.to_uppercase(), route.path));
             }
         }
-        rest = &rest[end..];
     }
     found
 }
