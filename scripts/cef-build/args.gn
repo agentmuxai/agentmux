@@ -52,7 +52,14 @@ optimize_webui=true
 target_cpu="x64"
 use_qt5=false
 use_qt6=false
-use_sysroot=false
+# use_sysroot=true (changed 2026-11-03; it was false from r1 to r4): build against
+# Chromium's own Debian sysroot (build/linux/sysroot_scripts, glibc 2.31) instead of the
+# build host's libraries. With false, libcef.so, libGLESv2.so, libvk_swiftshader.so and
+# libvulkan.so.1 needed whatever glibc the build host had (GLIBC_2.43 on a 26.04 host), so
+# 0.60.14 would not start on Ubuntu 24.04, Debian 13 or Fedora 42. The floor is checked by
+# scripts/cef-build/verify-glibc-floor.sh. The sysroot must be installed in the tree first
+# (configure-cef-build.sh does it).
+use_sysroot=true
 
 # --- proprietary codec support (added 2026-07-26): wide file-type coverage ---
 # See docs/specs/SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md and

@@ -223,6 +223,8 @@ jobs:
             --pattern "*.tar.gz" \
             --dir /tmp/cef-extract \
             --clobber
+          # The pinned tag's archive must be the one the pin's hash names.
+          bash scripts/cef-build/verify-runtime-archive.sh /tmp/cef-extract/*.tar.gz "${{ steps.cef.outputs.tag }}"
           tar -xzf /tmp/cef-extract/*.tar.gz -C /tmp/cef-extract
           # Find libcef.so regardless of whether the tarball has a top-level dir
           LIBCEF=$(find /tmp/cef-extract -name "libcef.so" | head -1)
