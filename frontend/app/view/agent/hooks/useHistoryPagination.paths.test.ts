@@ -57,8 +57,8 @@ vi.mock("../parseHistoryLines", async (original) => {
     return { ...actual, parseHistoryLines: (...args: unknown[]) => hub.parse(...args) };
 });
 
-import { setLastInputForTests } from "@/app/store/last-input";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
+import { setLastInputForTests } from "@/app/store/last-input";
 import { sleep } from "@/util/util";
 import { __resetOpenTailForTests } from "./open-tail";
 import { isRetriableHistoryError, MAX_SAVED_HELD, useHistoryPagination } from "./useHistoryPagination";
@@ -114,13 +114,21 @@ const count = (n: number, over: Record<string, unknown> = {}) =>
     vi.mocked(RpcApi.BlockfileLineCountCommand).mockResolvedValue({ count: n, ...over } as never);
 /** Serve a range of `user` lines for whatever offset and limit is asked. */
 const range = (over: Record<string, unknown> = {}) =>
-    vi.mocked(RpcApi.BlockfileReadRangeCommand).mockImplementation((async (_c: unknown, req: { offset: number; limit: number }) => ({
+    vi.mocked(RpcApi.BlockfileReadRangeCommand).mockImplementation((async (
+        _c: unknown,
+        req: { offset: number; limit: number }
+    ) => ({
         lines: Array.from({ length: req.limit }, (_, i) => user(`m${req.offset + i}`)),
         stream: "b:blk-1",
         gen: "g1",
         ...over,
     })) as never);
-const rangeCalls = () => vi.mocked(RpcApi.BlockfileReadRangeCommand).mock.calls as unknown as [unknown, Record<string, unknown>, Record<string, unknown>][];
+const rangeCalls = () =>
+    vi.mocked(RpcApi.BlockfileReadRangeCommand).mock.calls as unknown as [
+        unknown,
+        Record<string, unknown>,
+        Record<string, unknown>,
+    ][];
 const snapshot = (content: unknown) =>
     vi.mocked(RpcApi.AgentSessionReadCommand).mockResolvedValue({ content: JSON.stringify(content) } as never);
 const parseWith = (over: Record<string, unknown>) =>
@@ -170,6 +178,25 @@ describe("the usual open", () => {
         expect(m.paneEvents.at(-1)).toMatchObject({ type: "InitReady", historyDamaged: true });
         expect(m.onHistoryReady).toHaveBeenCalledOnce();
         expect(m.settled).toEqual([{ stream: "b:blk-1", gen: "g1", next: 1000 }]);
+    });
+
+    it("holds the load back until the pane has mounted, not while the hook is still being set up", async () => {
+        const events: string[] = [];
+        const model = {
+            blockId: "blk-1",
+            disposed: false,
+            dispatchPane: (cmd: Event) => (events.push(cmd.type), []),
+            dispatchDoc: () => [],
+        } as unknown as AgentPaneModel;
+        let duringSetup = -1;
+        createRoot((d) => {
+            dispose = d;
+            useHistoryPagination({ blockId: "blk-1", model, outputFormat: () => "claude-stream-json", log: vi.fn() });
+            duringSetup = events.length;
+        });
+        expect(duringSetup).toBe(0);
+        expect(events[0]).toBe("InitStart");
+        await flush();
     });
 
     it("takes the total from the count when the range does not say", async () => {
@@ -226,7 +253,11 @@ describe("the usual open", () => {
         const m = mount();
         await flush();
         expect(m.docEvents).toEqual([]);
-        expect(m.paneEvents.find((e) => e.type === "ReconcileContextFromHistory")).toMatchObject({ tokens: 321, model: "m", at: 5 });
+        expect(m.paneEvents.find((e) => e.type === "ReconcileContextFromHistory")).toMatchObject({
+            tokens: 321,
+            model: "m",
+            at: 5,
+        });
     });
 
     it("asks parse for each line's position and the agent's name, and tells the dock of ended tasks", async () => {
@@ -239,7 +270,11 @@ describe("the usual open", () => {
         expect(format).toBe("claude-stream-json");
         expect(name).toBe("Maop");
         expect(stamps).toHaveLength(100);
-        expect(parseOpts).toMatchObject({ idFirstLine: 0, idGen: "g1", source: { stream: "b:blk-1", gen: "g1", firstLine: 0 } });
+        expect(parseOpts).toMatchObject({
+            idFirstLine: 0,
+            idGen: "g1",
+            source: { stream: "b:blk-1", gen: "g1", firstLine: 0 },
+        });
         parseOpts.onTaskFrame({ kind: "task" }, 7);
         expect(hub.noteTask).toHaveBeenCalledWith("blk-1", { kind: "task" }, 7);
         m.unmount();
@@ -429,7 +464,12 @@ describe("a snapshot read for the agent", () => {
         expect(m.paneEvents.at(-1)).toMatchObject({ type: "InitReady", historyDamaged: true });
         expect(m.onHistoryReady).toHaveBeenCalledOnce();
         expect(m.settled).toEqual([{ stream: "b:blk-1", gen: "g1", next: 35_000 }]);
-        expect(logged(m, /^v2 restore: \d+ nodes from lines \[25000, 25000\) \(25000 older lines available via load-older\), 2 collapsed$/)).toBe(true);
+        expect(
+            logged(
+                m,
+                /^v2 restore: \d+ nodes from lines \[25000, 25000\) \(25000 older lines available via load-older\), 2 collapsed$/
+            )
+        ).toBe(true);
     });
 
     it("totals by the stored mark when the range gives no total, and seeds the context meter", async () => {
@@ -456,7 +496,7 @@ describe("a snapshot read for the agent", () => {
                     filter: { showThinking: true },
                 },
                 paneState: { detailsOpen: true },
-            }),
+            })
         );
         range();
         const m = open();
@@ -614,7 +654,9 @@ describe("a snapshot read for the agent", () => {
         const own = open();
         await flush();
         expect(own.hook.snapshotIsForeignBlock()).toBe(false);
-        const own2 = own.log.mock.calls.find((c) => c[1] === "v2 snapshot has no usable highWaterMark; falling back to NDJSON replay");
+        const own2 = own.log.mock.calls.find(
+            (c) => c[1] === "v2 snapshot has no usable highWaterMark; falling back to NDJSON replay"
+        );
         expect(own2?.[2]).toBe("warn");
     });
 
@@ -651,7 +693,9 @@ describe("a snapshot read for the agent", () => {
         expect(m.paneEvents).toEqual([{ type: "InitStart" }]);
 
         let fail!: (e: Error) => void;
-        vi.mocked(RpcApi.AgentSessionReadCommand).mockReset().mockReturnValue(new Promise((_, rej) => (fail = rej)) as never);
+        vi.mocked(RpcApi.AgentSessionReadCommand)
+            .mockReset()
+            .mockReturnValue(new Promise((_, rej) => (fail = rej)) as never);
         const failing = open();
         await flush();
         failing.unmount();
@@ -790,16 +834,33 @@ describe("the first screen's account of itself", () => {
             m.unmount();
             return { kind, foreign: m.hook.snapshotIsForeignBlock(), overlay: m.onSnapshotOverlay.mock.calls.length };
         };
-        expect(await open({ schemaVersion: 2, highWaterMark: 10, sourceBlockId: "blk-1", documentState: {} })).toEqual({ kind: "HistoryRestored", foreign: false, overlay: 1 });
-        expect(await open({ schemaVersion: 2, highWaterMark: 10, sourceBlockId: "" })).toMatchObject({ kind: "HistoryRestored" });
-        expect(await open({ schemaVersion: 2, highWaterMark: 10, sourceBlockId: "other" })).toMatchObject({ kind: "HistoryRestored", foreign: false });
-        expect(await open({ schemaVersion: 2, highWaterMark: 0, sourceBlockId: "blk-1" })).toEqual({ kind: "HistoryLoaded", foreign: false, overlay: 0 });
-        expect(await open({ schemaVersion: 2, highWaterMark: 10, sourceBlockId: "other" }, { definitionId: undefined })).toEqual({
+        expect(await open({ schemaVersion: 2, highWaterMark: 10, sourceBlockId: "blk-1", documentState: {} })).toEqual({
+            kind: "HistoryRestored",
+            foreign: false,
+            overlay: 1,
+        });
+        expect(await open({ schemaVersion: 2, highWaterMark: 10, sourceBlockId: "" })).toMatchObject({
+            kind: "HistoryRestored",
+        });
+        expect(await open({ schemaVersion: 2, highWaterMark: 10, sourceBlockId: "other" })).toMatchObject({
+            kind: "HistoryRestored",
+            foreign: false,
+        });
+        expect(await open({ schemaVersion: 2, highWaterMark: 0, sourceBlockId: "blk-1" })).toEqual({
+            kind: "HistoryLoaded",
+            foreign: false,
+            overlay: 0,
+        });
+        expect(
+            await open({ schemaVersion: 2, highWaterMark: 10, sourceBlockId: "other" }, { definitionId: undefined })
+        ).toEqual({
             kind: "HistoryLoaded",
             foreign: true,
             overlay: 0,
         });
-        expect(await open({ schemaVersion: 1, highWaterMark: 10, sourceBlockId: "other" }, { definitionId: undefined })).toMatchObject({ foreign: false });
+        expect(
+            await open({ schemaVersion: 1, highWaterMark: 10, sourceBlockId: "other" }, { definitionId: undefined })
+        ).toMatchObject({ foreign: false });
     });
 
     it("fails open after painting: logs why, tells the cursor, and the pane is ready", async () => {
@@ -875,12 +936,18 @@ describe("the first screen's account of itself", () => {
         expect(format).toBe("claude-stream-json");
         expect(name).toBe("Maop");
         expect(stamps).toEqual([1, 2, 3]);
-        expect(opts).toMatchObject({ idFirstLine: 22, idGen: "g1", source: { stream: "b:blk-1", gen: "g1", firstLine: 22 } });
+        expect(opts).toMatchObject({
+            idFirstLine: 22,
+            idGen: "g1",
+            source: { stream: "b:blk-1", gen: "g1", firstLine: 22 },
+        });
     });
 
     it("counts a snapshot with no block of its own as this block's, when there is no agent to resolve it", async () => {
         hub.openTail.mockResolvedValue(
-            tailOf({ snapshot: JSON.stringify({ schemaVersion: 2, highWaterMark: 10, sourceBlockId: "", documentState: {} }) }),
+            tailOf({
+                snapshot: JSON.stringify({ schemaVersion: 2, highWaterMark: 10, sourceBlockId: "", documentState: {} }),
+            })
         );
         const m = first({ definitionId: undefined });
         await flush();
@@ -899,7 +966,14 @@ describe("the first screen's account of itself", () => {
 });
 
 describe("the background fill's account of itself", () => {
-    const tail = { lines: [user("a")], stream: "b:blk-1", gen: "g1", start_line: 5_000, end_line: 5_001, total_lines: 5_001 };
+    const tail = {
+        lines: [user("a")],
+        stream: "b:blk-1",
+        gen: "g1",
+        start_line: 5_000,
+        end_line: 5_001,
+        total_lines: 5_001,
+    };
     const fill = () => {
         hub.scrolledUp.value = false;
         hub.openTail.mockResolvedValue(tail);
@@ -912,8 +986,16 @@ describe("the background fill's account of itself", () => {
         const m = fill();
         await vi.waitFor(() => expect(hub.endLoad).toHaveBeenCalled(), { timeout: 6000 });
         expect(logged(m, /^background fill done: \d+ pages, \d+ lines, \d+ bytes in \d+ ms$/)).toBe(true);
-        expect(hub.rest).toHaveBeenCalledWith("blk-1", "done", { pages: expect.any(Number), lines: expect.any(Number), bytes: expect.any(Number), ms: expect.any(Number) });
-        expect(hub.mark).toHaveBeenCalledWith("blk-1", "rest_loaded", { rest_pages: expect.any(Number), rest_lines: expect.any(Number) });
+        expect(hub.rest).toHaveBeenCalledWith("blk-1", "done", {
+            pages: expect.any(Number),
+            lines: expect.any(Number),
+            bytes: expect.any(Number),
+            ms: expect.any(Number),
+        });
+        expect(hub.mark).toHaveBeenCalledWith("blk-1", "rest_loaded", {
+            rest_pages: expect.any(Number),
+            rest_lines: expect.any(Number),
+        });
     });
 
     it("hands its pages over unloaded, and a scroll-up's page loaded", async () => {
@@ -950,7 +1032,10 @@ describe("the background fill's account of itself", () => {
 
     it("cuts a page's leading lines to its first turn start, and positions the rest by it", async () => {
         const stamps = Array.from({ length: 2_000 }, (_, i) => 100_000 + i);
-        vi.mocked(RpcApi.BlockfileReadRangeCommand).mockImplementation((async (_c: unknown, req: { offset: number; limit: number }) => ({
+        vi.mocked(RpcApi.BlockfileReadRangeCommand).mockImplementation((async (
+            _c: unknown,
+            req: { offset: number; limit: number }
+        ) => ({
             lines: Array.from({ length: req.limit }, (_, i) => (i === 3 ? user("start") : delta(i))),
             stamps: stamps.slice(0, req.limit),
             stream: "b:blk-1",
@@ -966,8 +1051,13 @@ describe("the background fill's account of itself", () => {
     });
 
     it("reads back for a turn start, and keeps the lines and stamps in order", async () => {
-        vi.mocked(RpcApi.BlockfileReadRangeCommand).mockImplementation((async (_c: unknown, req: { offset: number; limit: number }) => ({
-            lines: Array.from({ length: req.limit }, (_, i) => (req.offset + i === 2_900 ? user("start") : delta(req.offset + i))),
+        vi.mocked(RpcApi.BlockfileReadRangeCommand).mockImplementation((async (
+            _c: unknown,
+            req: { offset: number; limit: number }
+        ) => ({
+            lines: Array.from({ length: req.limit }, (_, i) =>
+                req.offset + i === 2_900 ? user("start") : delta(req.offset + i)
+            ),
             stamps: Array.from({ length: req.limit }, (_, i) => req.offset + i),
             stream: "b:blk-1",
             gen: "g1",
@@ -982,7 +1072,10 @@ describe("the background fill's account of itself", () => {
 
     it("ends when reading back finds the file is another generation", async () => {
         let n = 0;
-        vi.mocked(RpcApi.BlockfileReadRangeCommand).mockImplementation((async (_c: unknown, req: { offset: number; limit: number }) =>
+        vi.mocked(RpcApi.BlockfileReadRangeCommand).mockImplementation((async (
+            _c: unknown,
+            req: { offset: number; limit: number }
+        ) =>
             ++n === 1
                 ? { lines: Array.from({ length: req.limit }, (_, i) => delta(i)), stream: "b:blk-1", gen: "g1" }
                 : { lines: [], gen_mismatch: true }) as never);
@@ -1093,6 +1186,10 @@ describe("loadOlder", () => {
         const [, , name, stamps, opts] = hub.parse.mock.calls[0];
         expect(name).toBe("Maop");
         expect(stamps).toEqual([9]);
-        expect(opts).toMatchObject({ idFirstLine: 3_100, idGen: "g2", source: { stream: "b:blk-1", gen: "g2", firstLine: 3_100 } });
+        expect(opts).toMatchObject({
+            idFirstLine: 3_100,
+            idGen: "g2",
+            source: { stream: "b:blk-1", gen: "g2", firstLine: 3_100 },
+        });
     });
 });
