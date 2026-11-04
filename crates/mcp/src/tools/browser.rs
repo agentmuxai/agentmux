@@ -348,10 +348,14 @@ async fn run_handoff(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
         anyhow::bail!("Browser handoff failed: HTTP {status} — {text}");
     }
     let body: Value = resp.json().await.map_err(|e| anyhow::anyhow!("Browser handoff: bad response: {e}"))?;
-    Ok(match body.pointer("/data/answer").and_then(|v| v.as_str()).unwrap_or("") {
-        "done" => "The user clicked Done. Take a new snapshot: don't assume what they changed.".to_string(),
-        "cancelled" => "The user clicked Cancel. Ask them in chat how to proceed; don't retry the hand-off unasked.".to_string(),
-        _ => "The user didn't answer in time. Ask them in chat.".to_string(),
+    let answer = match body.pointer("/data/answer").and_then(|v| v.as_str()).unwrap_or("") {
+        "done" => "The user clicked Done. Take a new snapshot: don't assume what they changed.",
+        "cancelled" => "The user clicked Cancel. Ask them in chat how to proceed; don't retry the hand-off unasked.",
+        _ => "The user didn't answer in time. Ask them in chat.",
+    };
+    Ok(match body.pointer("/data/handoff_id").and_then(|v| v.as_str()) {
+        Some(id) => format!("{answer} (handoff_id: {id})"),
+        None => answer.to_string(),
     })
 }
 

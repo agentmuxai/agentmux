@@ -1133,26 +1133,29 @@ pub(crate) async fn handle_ui_browser_handoff(
     }
     let minutes = req.timeout_minutes.unwrap_or(15).clamp(1, 60);
     tracing::info!(agent_id = %req.auth.agent_id, block_id = %block_id, "[ui-automation] browser hand-off");
-    let answer = match crate::server::browser_attention::ask(
+    let raised = match crate::server::browser_attention::raise(
         &state,
         &banner_at,
         &req.auth.agent_id,
         crate::server::browser_attention::Kind::Handoff,
         json!({ "reason": reason, "window": in_window }),
-        std::time::Duration::from_secs(minutes * 60),
-    )
-    .await
-    {
-        Ok((a, _waiting)) => a,
+    ) {
+        Ok(r) => r,
         Err(e) => return err_response(e.status(), e.to_string()),
     };
+    let handoff_id = raised.id().to_string();
+    // If this call ends before the person answers, the hand-off reads as abandoned.
+    let tracked = crate::server::browser_handoffs::Tracked::start(&handoff_id, &block_id, &req.auth.agent_id);
+    let (answer, waiting) = raised.answer(Some(std::time::Duration::from_secs(minutes * 60))).await;
+    drop(waiting);
+    tracked.finish(crate::server::browser_handoffs::State::of_answer(answer));
     note(&block_id, &req.auth.agent_id, Kind::Handoff).target(&reason).how(How::from_answer(answer)).record(&state);
     let answer = match answer {
         crate::server::browser_attention::Answer::Yes | crate::server::browser_attention::Answer::YesAlways => "done",
         crate::server::browser_attention::Answer::Cancelled => "cancelled",
         crate::server::browser_attention::Answer::TimedOut => "timed_out",
     };
-    (StatusCode::OK, Json(json!({ "ok": true, "data": { "answer": answer } }))).into_response()
+    (StatusCode::OK, Json(json!({ "ok": true, "data": { "answer": answer, "handoff_id": handoff_id } }))).into_response()
 }
 
 /// `POST /api/v1/host/browser_attention` — the user's answer to a hand-off
@@ -1170,6 +1173,9 @@ pub(crate) async fn handle_host_browser_attention(
     }
     let s = |k: &str| body.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
     let (block_id, id, decision) = (s("block_id"), s("id"), s("decision"));
+    if decision == "give_back" {
+        return crate::server::browser_retake::give_back(&state, &block_id);
+    }
     let Some(answer) = crate::server::browser_attention::Answer::parse(&decision) else {
         return err_response(StatusCode::BAD_REQUEST, format!("unknown decision {decision:?}"));
     };
@@ -1315,7 +1321,7 @@ pub(crate) async fn handle_host_browser_popup(
     let chain = crate::server::browser_allowlist::list_for(&opener).filter(|_| !by_person);
     crate::server::browser_allowlist::mirror(&mut meta, chain.as_deref());
     if let Some(agent) = &drive {
-        meta.insert(crate::server::browser_owner::OWNER_META_KEY.to_string(), json!(agent));
+        meta.extend(crate::server::browser_owner::driver_meta(agent));
     }
     cmd.meta = Some(meta);
     let result = match crate::server::app_api::open_pane(&state, cmd).await {

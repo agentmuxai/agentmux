@@ -58,7 +58,7 @@ pub(super) const ALWAYS: &[&str] = &[
     "POST /api/v1/ui/browser/close", "POST /api/v1/ui/browser/dispatch_key", "POST /api/v1/ui/browser/end_bypass", "POST /api/v1/ui/browser/eval",
     "POST /api/v1/ui/browser/focus_element", "POST /api/v1/ui/browser/forward", "POST /api/v1/ui/browser/handoff",
     "POST /api/v1/ui/browser/navigate", "POST /api/v1/ui/browser/open", "POST /api/v1/ui/browser/reload",
-    "POST /api/v1/ui/browser/request_bypass", "POST /api/v1/ui/browser/set_files", "POST /api/v1/ui/browser/signin",
+    "POST /api/v1/ui/browser/request_bypass", "POST /api/v1/ui/browser/retake", "POST /api/v1/ui/browser/set_files", "POST /api/v1/ui/browser/signin",
     "POST /api/v1/ui/browser/capture", "POST /api/v1/ui/browser/terminal", "POST /api/v1/ui/browser/vault_fill",
     "POST /api/v1/ui/click", "POST /api/v1/ui/shortcuts/press", "POST /api/v1/ui/shortcuts/run", "POST /api/v1/vault/generate",
     "POST /api/v1/vault/request", "POST /api/v1/vault/rotate", "POST /api/v1/widgets/install",
@@ -96,7 +96,7 @@ pub(super) const NEVER: &[&str] = &[
     "POST /api/v1/aws/credentials",
     "POST /api/v1/ptyshell/read", "POST /api/v1/ptyshell/status", "POST /api/v1/shell/output",
     "POST /api/v1/shell/status", "POST /api/v1/ui/browser/actions", "POST /api/v1/ui/browser/dialogs",
-    "POST /api/v1/ui/browser/find", "POST /api/v1/ui/browser/focus_info", "POST /api/v1/ui/browser/snapshot",
+    "POST /api/v1/ui/browser/find", "POST /api/v1/ui/browser/focus_info", "POST /api/v1/ui/browser/handoff_status", "POST /api/v1/ui/browser/snapshot",
     "POST /api/v1/ui/browser/wait_for", "POST /api/v1/ui/query", "POST /api/v1/ui/record", "POST /api/v1/ui/screenshot",
     "POST /api/v1/ui/shortcuts/list", "POST /webhook/whatsapp",
 ];

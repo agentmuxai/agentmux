@@ -660,6 +660,12 @@ declare global {
          *  Written by srv only; the human's Take over clears it
          *  (SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §3, §5.5). */
         "browser:owner_agent"?: string | null;
+        /** The agent that drove this pane last. Written by srv whenever an agent drives the pane and kept through the
+         *  person's Take over, so the header can offer Give back (SPEC_BROWSER_RETAKE_AND_COMMANDEER_2026_11_04.md §1.3). */
+        "browser:last_driver"?: string | null;
+        /** The agent the person gave the pane back to (their Give back, relayed by the host): it may retake the pane.
+         *  Written by srv; cleared when an agent drives the pane again. */
+        "browser:given_back"?: string | null;
         /** A request from the agent driving this pane, shown as a banner: a
          *  hand-off or an approval. Written by srv; the user's answer goes back
          *  through the host (SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §5.2, §5.4). */

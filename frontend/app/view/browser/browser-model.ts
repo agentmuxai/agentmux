@@ -123,6 +123,16 @@ function installEventSinkOnce(): void {
  */
 export const DEFAULT_BROWSER_URL = "https://agentmux.ai";
 
+/** A meta value that names someone: a non-blank string, trimmed. */
+function trimmedString(v: unknown): string | undefined {
+    return typeof v === "string" && v.trim() ? v.trim() : undefined;
+}
+
+/** The agent the person took a pane from and hasn't given it back to, from the pane's meta. */
+function takenFrom(meta: MetaType | undefined): string | undefined {
+    return meta?.["browser:given_back"] ? undefined : trimmedString(meta?.["browser:last_driver"]);
+}
+
 /** The browser's state behind its native pane tab (`browserPaneTab`, browser.tsx). */
 export class BrowserViewModel {
     viewType = "browser";
@@ -220,6 +230,9 @@ export class BrowserViewModel {
     /** The agent driving this pane, when an agent opened it with `OpenBrowser`
      *  (`browser:owner_agent`, written by srv; SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §5.5). */
     driverAgentAtom: Accessor<string | undefined>;
+    /** The agent the person took this pane from and has not given it back to: the agent that drove it last
+     *  (`browser:last_driver`, written by srv) unless srv recorded a Give back (`browser:given_back`). */
+    lastDriverAtom: Accessor<string | undefined>;
     /** The site of the page that opened this pane as a popup
      *  (`browser:popup_from`, written by srv; SPEC_BROWSER_PANE_POPUPS_ADOPTED_2026_10_08.md §5). */
     popupFromAtom: Accessor<string | undefined>;
@@ -506,10 +519,8 @@ export class BrowserViewModel {
                 return { count: typeof v?.count === "number" ? v.count : entries.length, entries };
             });
             this.pausedAtom = createMemo(() => this.meta()?.["browser:paused"] === true);
-            this.driverAgentAtom = createMemo(() => {
-                const v = this.meta()?.["browser:owner_agent"];
-                return typeof v === "string" && v.trim() ? v.trim() : undefined;
-            });
+            this.driverAgentAtom = createMemo(() => trimmedString(this.meta()?.["browser:owner_agent"]));
+            this.lastDriverAtom = createMemo(() => takenFrom(this.meta()));
             this.identityAtom = createMemo(() => {
                 const v = this.meta()?.["browser:identity"];
                 return typeof v === "string" && v ? v : undefined;
@@ -1081,6 +1092,13 @@ export class BrowserViewModel {
      *  (SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §5.5). */
     takeOver(): Promise<void> {
         return this.ctx.setMeta({ "browser:owner_agent": null });
+    }
+
+    /** The human gives the pane back to the agent they took it from, which lets that agent retake it (`Browser retake`).
+     *  Through the host like every answer to a pane's banner: srv takes it from the host only, so no agent can give
+     *  itself the pane. srv knows who drove it (`browser:last_driver`). */
+    giveBack(): Promise<void> {
+        return getApi().approvals.decideBrowserAttention(this.blockId, "", "give_back");
     }
 
     /** Put the pane to sleep: record what it needs to come back; the view

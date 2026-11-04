@@ -8,6 +8,7 @@
 
 use serde::{Deserialize, Serialize};
 pub use crate::agent_create_types::{ContainerAsk, CreateAgentRequest};
+pub use crate::browser_control_types::{UiBrowserHandoffStatusRequest, UiBrowserRetakeRequest};
 use std::collections::HashMap;
 
 fn is_zero(n: &usize) -> bool {
