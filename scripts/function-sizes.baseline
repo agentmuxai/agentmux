@@ -251,7 +251,6 @@
 207 crates/srv/src/messaging/discord/gateway.rs::run_session
 130 crates/srv/src/messaging/slack/socket.rs::run_session
 142 crates/srv/src/migrations/m0000_bootstrap.rs::M0000Bootstrap::up
-140 crates/srv/src/migrations/m0021_backfill_agent_bundles.rs::M0021BackfillAgentBundles::up
 148 crates/srv/src/migrations/m0022_identity_store_links_backfill.rs::M0022IdentityStoreLinksBackfill::up
 110 crates/srv/src/migrations/m0025_agents_launch_state_backfill.rs::backfill_launch_state
 102 crates/srv/src/migrations/m0028_agent_child_tables_repoint_fk.rs::frozen_repair_def_gaps
@@ -279,14 +278,14 @@
 102 crates/srv/src/sagas/redock_floating_pane.rs::run
 326 crates/srv/src/server/agent_handlers/bundle.rs::register
 108 crates/srv/src/server/agent_handlers/container_turn.rs::ContainerStartup::run_reporting
-732 crates/srv/src/server/agent_handlers/core.rs::register
+717 crates/srv/src/server/agent_handlers/core.rs::register
 985 crates/srv/src/server/agent_handlers/identity.rs::register
 469 crates/srv/src/server/agent_handlers/input.rs::run_agent_turn_joining
 775 crates/srv/src/server/agent_handlers/session.rs::register
-146 crates/srv/src/server/agent_handlers/template.rs::copy_definition
-158 crates/srv/src/server/agent_handlers/template_create.rs::create_from_template
+143 crates/srv/src/server/agent_handlers/template.rs::copy_definition
+153 crates/srv/src/server/agent_handlers/template_create.rs::create_from_template
 103 crates/srv/src/server/agent_takeover.rs::handle_agent_release
-251 crates/srv/src/server/app_api/agent_define.rs::agent_define_core
+243 crates/srv/src/server/app_api/agent_define.rs::agent_define_core
 612 crates/srv/src/server/app_api/agent_open.rs::open_agent_inner
 112 crates/srv/src/server/app_api/agent_spawn/many.rs::spawn_many
 308 crates/srv/src/server/app_api/blockfile.rs::read_range_once

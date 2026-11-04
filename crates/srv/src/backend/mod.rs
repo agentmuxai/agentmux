@@ -44,6 +44,7 @@ pub mod old_versions_service;
 pub mod bundle_export;
 pub mod bundle_import;
 pub mod bundle_import_skill_text;
+pub mod bundle_use;
 pub mod bundle_widgets;
 pub mod bundle_validate;
 pub mod background_task_feed;
