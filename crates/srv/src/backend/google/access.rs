@@ -52,13 +52,18 @@ impl Access {
 
     /// The scopes the account's token was granted.
     pub fn granted_scopes(&self) -> Vec<String> {
-        self.account
-            .context
-            .get("granted_scopes")
-            .and_then(serde_json::Value::as_array)
-            .map(|a| a.iter().filter_map(|s| s.as_str().map(str::to_string)).collect())
-            .unwrap_or_default()
+        granted_scopes_of(&self.account)
     }
+}
+
+/// The scopes `account`'s token was granted, as Google named them.
+pub fn granted_scopes_of(account: &IdentityAccount) -> Vec<String> {
+    account
+        .context
+        .get("granted_scopes")
+        .and_then(serde_json::Value::as_array)
+        .map(|a| a.iter().filter_map(|s| s.as_str().map(str::to_string)).collect())
+        .unwrap_or_default()
 }
 
 /// The account's email, else its name.

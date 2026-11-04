@@ -408,8 +408,7 @@ fn grant_is_backed(level: crate::backend::storage::google_grants::GrantLevel, su
 /// The highest level the account's token supports for `service`, from the scopes it was
 /// granted: `write`, `read` or `none`.
 fn supported_level(account: &crate::backend::storage::store::IdentityAccount, service: Service) -> &'static str {
-    let granted = access::Access { account: account.clone(), level: crate::backend::storage::google_grants::GrantLevel::Read }
-        .granted_scopes();
+    let granted = access::granted_scopes_of(account);
     let has_all = |level| service.scopes(level).iter().all(|s| granted.contains(s));
     if has_all(crate::backend::storage::google_grants::GrantLevel::Write) {
         "write"

@@ -192,7 +192,7 @@ async fn start_connect(state: &AppState, agent_id: &str, agent_name: &str, body:
                 .into_iter()
                 .find(|a| access::email_of(a).eq_ignore_ascii_case(email))
                 .ok_or_else(|| format!("no connected Google account {email}: leave account out to connect a new one"))?;
-            let held = access::Access { account: account.clone(), level: GrantLevel::Read }.granted_scopes();
+            let held = access::granted_scopes_of(&account);
             (FlowTarget::Existing(account), held)
         }
     };
