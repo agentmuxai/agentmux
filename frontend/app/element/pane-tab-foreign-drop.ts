@@ -95,7 +95,7 @@ const PANE_SELECTOR = '[data-role="pane"]';
  * that sits above pane bodies only takes pointer events during a whole-PANE
  * drag (`layoutModel.activeDrag`), never during a pane-TAB drag.
  *
- * Pure and exported for the same reason as `dropPositionForPointerX` above:
+ * Pure and exported for the same reason as `dropPositionForPointerX` in PaneTabStrip.tsx:
  * the gesture itself can't be unit-tested (no real drag pipeline in jsdom),
  * but *which element gets the registration* can — and getting that wrong is
  * silent, since pragmatic-dnd simply never fires a handler for an element
