@@ -2274,6 +2274,11 @@ mod is_self_registration_tests;
 #[path = "tests/reactive/forward_inject_tests.rs"]
 mod forward_inject_tests;
 
+/// `deliver`'s forwarding tiers, end to end, against stub peers.
+#[cfg(test)]
+#[path = "tests/reactive/deliver_tiers_tests.rs"]
+mod deliver_tiers_tests;
+
 /// PLAN_JEKT_LOCAL_FIRST_ROUTING_2026_10_02.md §5-§6: the relay's lease
 /// answer as a route. Holding here is the default; only "another install
 /// runs it" or an answer the relay cannot give plainly sends it to the relay.
