@@ -207,7 +207,7 @@ const probe = (v: { model: EditorViewModel; container: HTMLElement }, label: str
 /** The log with the generated ids (block counter, tab ids) blanked, so it does not depend on test order or time. */
 const out = () => h.log.join("\n").replace(/session\d+/g, "session<n>").replace(/dt-[a-z0-9]+-[a-z0-9]+/g, "dt-<id>") + "\n";
 const snap = (name: string) => `./__snapshots__/editor-view.session.${name}.txt`;
-/** An edit; the view is rebuilt after the first one flips the tab dirty, so wait for that. */
+/** An edit; wait for it and its debounced language-server change to settle. */
 const type = async (model: EditorViewModel, at: number, text: string) => {
     cm(model)!.dispatch({ changes: { from: at, insert: text }, selection: { anchor: at + text.length } });
     await settle();
