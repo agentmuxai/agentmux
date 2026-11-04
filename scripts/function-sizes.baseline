@@ -502,8 +502,6 @@
 420 frontend/app/view/agent/hooks/useAgentFailure.ts::useAgentFailure
 137 frontend/app/view/agent/hooks/useAgentQuestions.ts::handleAnswer
 271 frontend/app/view/agent/hooks/useAgentQuestions.ts::useAgentQuestions
-113 frontend/app/view/agent/hooks/useHistoryPagination.ts::openFirstScreen
-678 frontend/app/view/agent/hooks/useHistoryPagination.ts::useHistoryPagination
 266 frontend/app/view/agent/hooks/useLiveFeedRollOff.ts::useLiveFeedRollOff
 172 frontend/app/view/agent/hooks/usePaneReveal.ts::usePaneReveal
 121 frontend/app/view/agent/hooks/usePtyWidth.ts::usePtyWidth
