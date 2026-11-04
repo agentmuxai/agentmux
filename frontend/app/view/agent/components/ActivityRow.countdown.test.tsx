@@ -115,7 +115,7 @@ describe("ActivityRow — sleep countdown", () => {
         vi.useFakeTimers();
         vi.setSystemTime(START + 40_000);
         const { container } = renderRow(sleepActivity());
-        expect(container.querySelector(".agent-activity-elapsed")?.textContent).toBe("[0:40]");
+        expect(container.querySelector(".agent-activity-elapsed")?.textContent).toBe("40s");
         expect(countdownText(container)).toBe("~260s left");
         vi.useRealTimers();
     });
