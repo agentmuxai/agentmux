@@ -1,0 +1,13 @@
+api getAboutModalDetails
+api getWindowLabel
+popover class=instance-panel role=dialog label=AgentMux instance panel placement=top-end width=320px
+ListClosedWindows
+PlaceWindowSlots ["w2"]
+console.debug [wave-panel] windowId=<null> label=main idx=0 displayName=<none> workspaceName=<none> → name="Window 1"
+PlaceWindowSlots ["w2"]
+console.debug [wave-panel] windowId=<null> label=main idx=0 displayName=<none> workspaceName=<none> → name="Window 1"
+PlaceWindowSlots ["w2"]
+names: Reviews | Window 1
+console.debug [wave-panel] windowId=<null> label=main idx=0 displayName=<none> workspaceName=<none> → name="Window 1"
+rename opens: false
+removed this one

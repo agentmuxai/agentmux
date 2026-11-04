@@ -22,41 +22,26 @@
  * Per-window token totals deferred until token-usage is per-window.
  */
 
-import { atoms, getApi, isDev, openFloatingPaneEntriesAtom, openWindowEntriesAtom, type WindowEntry } from "@/store/global";
+import { getApi, openFloatingPaneEntriesAtom, openWindowEntriesAtom, type WindowEntry } from "@/store/global";
 import { MaintenanceSection } from "./MaintenanceSection";
 import { hostHas } from "@/util/host-caps";
 import { liveWindowOpacity, setWindowOpacityFor } from "@/app/store/window-opacity-store";
-import { reconcileKnownEntriesFromSnapshot } from "@/app/store/launcher-event-store";
-import { launcherEventsActive } from "@/util/launcher-events";
 import { AnchoredPopover, type PopoverAnchor } from "@/app/element/anchored-popover";
-import { writeText as clipboardWriteText } from "@/util/clipboard";
-import { formatUtcTimestamp } from "@/util/format-time";
-import { ObjectService, type ClosedWindow } from "@/store/services";
-import { MENU_ICON } from "@/app/util/menu-icons";
+import { type ClosedWindow } from "@/store/services";
 import { removeClosedWindow, reopenClosedWindow, requestRemoveWindow } from "@/app/window/window-close";
-import { getObjectValue, makeORef } from "@/store/mos";
-import { opacityFor, openNewWindowFromHere } from "@/app/store/window-appearance";
-import { settingsAtom } from "@/app/store/config-signals";
-import { createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
-import {
-    DISPLAY_NAME_MAX_LEN,
-    DISPLAY_NAME_META_KEY,
-    resolveWindowName,
-} from "@/util/window-title";
-import { Button, IconButton, openMenuAt } from "@/app/element/ui";
-import { closedWindowLabel } from "./window-slots";
+import { onCleanup, Show, type JSX } from "solid-js";
 import { isHeldWindow, useSlotKeys } from "./window-slot-keys";
-import {
-    closedAtLabel,
-    renameWorkspace,
-    WORKSPACE_NAME_MAX_LEN,
-    workspaceHeading,
-    workspaceName,
-} from "@/app/store/user-workspace";
-import { tip } from "@/app/element/tip";
-import { OpenWindowRow } from "./OpenWindowRow";
-import { resolveFloatingName } from "./instance-floating-name";
 import { useClosedWindows } from "./useClosedWindows";
+import {
+    reconcileWhenLauncherSilent,
+    useAboutDetails,
+    useWindowIdentity,
+    useWindowLabel,
+    useWindowRename,
+    useWorkspaceRename,
+} from "./instance-panel-state";
+import { WindowSlotList } from "./InstancePanelRows";
+import { AboutSection, FloatingPanesSection, PanelFooter, WorkspaceTitle } from "./InstancePanelSections";
 
 interface InstancePanelProps {
     /** The status bar's version chip. */
@@ -66,57 +51,6 @@ interface InstancePanelProps {
 
 const POPOVER_WIDTH = 320;
 
-// A closed window's row: its name and how many of its agents run without it. That it is closed shows in
-// the row (greyed, a reopen button), so the row does not say so; the tooltip has the time. A row held
-// until srv lists the close has nothing to reopen or remove yet: it only keeps its place.
-const ClosedRow = (props: { w: ClosedWindow; reopen: (w: ClosedWindow) => void; remove: (w: ClosedWindow) => void }): JSX.Element => (
-    <Show
-        when={!isHeldWindow(props.w)}
-        fallback={
-            <div class="instance-panel-window-row instance-panel-window-row-closed" {...tip("Closed")}>
-                <span class="instance-panel-window-dot">◌</span>
-                <span class="instance-panel-window-name">{closedWindowLabel(props.w.name, props.w.running)}</span>
-            </div>
-        }
-    >
-        <div
-            class="instance-panel-window-row instance-panel-window-row-closed"
-            {...tip(`${closedAtLabel(props.w.closed_at_ms)}. Click to reopen, right-click to remove`)}
-            role="button"
-            tabIndex={0}
-            onClick={() => props.reopen(props.w)}
-            onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    props.reopen(props.w);
-                }
-            }}
-            onContextMenu={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                openMenuAt(
-                    [{ label: "Remove from workspace", icon: MENU_ICON.close, click: () => props.remove(props.w) }],
-                    e
-                );
-            }}
-        >
-            <span class="instance-panel-window-dot">◌</span>
-            <span class="instance-panel-window-name">{closedWindowLabel(props.w.name, props.w.running)}</span>
-            <IconButton
-                icon="rotate-left"
-                density="compact"
-                class="instance-panel-row-action"
-                label="Reopen"
-                onClick={(e) => {
-                    e.stopPropagation();
-                    props.reopen(props.w);
-                }}
-                onKeyDown={(e) => e.stopPropagation()}
-            />
-        </div>
-    </Show>
-);
-
 // Inline opacity control — shares one row with the window/pane name
 // (docs/specs/instance-panel-floating-panes.md §3.3). `persistWindowId`
 // present → window rows persist to `window:opacity` meta on release;
@@ -124,7 +58,7 @@ const ClosedRow = (props: { w: ClosedWindow; reopen: (w: ClosedWindow) => void; 
 // object to persist to, and doesn't survive an app restart anyway).
 // stopPropagation on all three event kinds so a slider drag/keypress
 // never triggers the row's focus or rename handlers.
-const OpacityControl = (p: {
+export const OpacityControl = (p: {
     label: string;
     persistWindowId: string | null;
     currentOpacity: () => number;
@@ -174,52 +108,12 @@ const OpacityControl = (p: {
 );
 
 export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
-    const about = createMemo(() => {
-        const d = getApi().getAboutModalDetails();
-        return {
-            version: d?.version ?? "unknown",
-            channel: d?.channel ?? null,
-            buildLabel: (d as any)?.buildLabel ?? null,
-            gitHash: d?.gitHash ?? null,
-            buildTime: typeof d?.buildTime === "number" && d.buildTime > 0 ? d.buildTime : null,
-            cefVersion: d?.cefVersion ?? null,
-            platform: (d as any)?.platform ?? null,
-            arch: (d as any)?.arch ?? null,
-        };
-    });
-
+    const about = useAboutDetails();
     const entries = openWindowEntriesAtom;
-    const floatingEntries = openFloatingPaneEntriesAtom;
-    const [myLabel, setMyLabel] = createSignal<string | null>(null);
-    getApi().getWindowLabel().then((l) => setMyLabel(l)).catch(() => setMyLabel(null));
+    const myLabel = useWindowLabel();
+    reconcileWhenLauncherSilent();
 
-    // Refresh window-instance state ONLY when the launcher is silent
-    // (`task dev` mode — no launcher process, no typed events). In
-    // production the launcher pushes WindowOpened/Closed events and
-    // `openWindowEntriesAtom` stays in sync; reconciling against a
-    // stale `listWindowInstances()` snapshot would clobber a newer
-    // launcher event the renderer just applied — same race protection
-    // that motivates ApplySeed at boot (codex P2 PR #733).
-    //
-    // `launcherEventsActive` flips true on the first typed event the
-    // renderer receives; if false here, we're in dev mode and the
-    // reconcile is the only way windows opened/closed since boot will
-    // appear/disappear in the panel.
-    if (!launcherEventsActive()) {
-        getApi()
-            .listWindowInstances()
-            .then((snapshot) => {
-                // Re-check at resolution time. Between the sync gate
-                // above and the snapshot arriving (~ms RPC round-trip),
-                // a launcher event may have flipped launcherEventsActive
-                // true — applying the now-stale snapshot would clobber
-                // that newer state (codex P1 PR #733 round 2).
-                if (launcherEventsActive()) return;
-                reconcileKnownEntriesFromSnapshot(snapshot);
-            })
-            .catch(() => {});
-    }
-
+    const { resolveEntryWindowId, resolveName } = useWindowIdentity(myLabel);
     const { closed, refreshClosed } = useClosedWindows(() => entries().length, () => placeSlots());
     const onlyOpenWindow = () => entries().length <= 1;
     const reopen = (w: ClosedWindow) => {
@@ -235,60 +129,10 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
         void requestRemoveWindow({ windowId, label: entry.label }, () => discard(entry)).then(refreshClosed);
     };
 
-    // Rename mode state — keyed by host label so the row's identity
-    // survives entries() reordering. Single rename at a time.
-    const [editingLabel, setEditingLabel] = createSignal<string | null>(null);
-    const [editValue, setEditValue] = createSignal("");
+    const windowRename = useWindowRename(entries, resolveEntryWindowId);
+    const workspaceRename = useWorkspaceRename();
 
-    // The workspace heading's rename: one at a time, like a window's.
-    const currentWorkspaceName = () => workspaceName(atoms.client());
-    const [editingWorkspace, setEditingWorkspace] = createSignal(false);
-    const [workspaceEditValue, setWorkspaceEditValue] = createSignal("");
-    const enterWorkspaceRename = () => {
-        setWorkspaceEditValue(currentWorkspaceName());
-        setEditingWorkspace(true);
-    };
-    const cancelWorkspaceRename = () => {
-        setEditingWorkspace(false);
-        setWorkspaceEditValue("");
-    };
-    // Enter or blur. Blank is no change (as for a window's name).
-    const commitWorkspaceRename = () => {
-        if (!editingWorkspace()) return;
-        const value = workspaceEditValue();
-        cancelWorkspaceRename();
-        if (value.trim() === currentWorkspaceName()) return;
-        renameWorkspace(value).catch((e) => console.error("[InstancePanel] workspace rename failed:", e));
-    };
-
-    // Defer single-click focus past the dblclick threshold so
-    // double-clicking a row enters rename mode WITHOUT first
-    // bringing the other window forward (which would close /
-    // hide this panel and abort the rename). Tracks the pending
-    // focus by row label so a click on row B while a focus is
-    // pending for row A still treats B as a fresh single click.
-    // (reagent / codex / gemini PR #569 P1)
-    //
-    // Threshold queried from the OS (Win32 GetDoubleClickTime,
-    // user-configurable, default 500ms) so slow double-clickers
-    // are accommodated. Defaults to 500ms while the query is
-    // in flight, plus a 50ms buffer to absorb event-dispatch jitter.
-    // (codex PR #569 round-2 P2)
-    const [dblclickDelayMs, setDblclickDelayMs] = createSignal(550);
-    getApi()
-        .getDoubleClickTime()
-        .then((ms) => setDblclickDelayMs(Math.max(120, ms + 50)))
-        .catch(() => {/* keep default */});
-
-    let pendingFocus: { label: string; timer: number } | null = null;
-    const cancelPendingFocus = () => {
-        if (pendingFocus) {
-            clearTimeout(pendingFocus.timer);
-            pendingFocus = null;
-        }
-    };
-
-    const handleFocusWindow = async (label: string) => {
+    const focusWindow = async (label: string) => {
         if (label === myLabel()) return; // already focused
         try {
             await getApi().focusWindow(label);
@@ -297,176 +141,15 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
         }
     };
 
-    const handleFocusPane = async (label: string) => {
-        try {
-            await getApi().focusWindow(label);
-        } catch (e) {
-            console.error("[InstancePanel] focusPane failed:", e);
-        }
-    };
-
-    // For THIS window's row, fall back to atoms.muxWindow()?.oid when
-    // the entry's windowId is still null. WindowEntry.windowId is null
-    // for the first ~100ms after a window opens — until the
-    // registerBackendWindow IPC round-trip completes (see the `WindowEntry`
-    // comment in global.ts). Without this fallback, the panel shows "Window N"
-    // for the current window during early-startup while the OS title
-    // (which uses initOpts.windowId directly) correctly shows the
-    // workspace name — visible inconsistency the user reported.
-    const resolveEntryWindowId = (entry: WindowEntry): string | null => {
-        if (entry.windowId) return entry.windowId;
-        if (entry.label === myLabel()) return atoms.muxWindow()?.oid ?? null;
-        return null;
-    };
-
-    // Resolve a row's display name via the shared helper so the panel and
-    // the OS window title (driven from app-init.ts) agree by construction.
-    // Reactive via AgentMux's object subscriptions because getObjectValue reads
-    // through atoms — when meta or workspace.name changes, this re-runs.
-    const resolveName = (entry: WindowEntry, idx: number): string => {
-        let displayName: string | undefined;
-        let workspaceName: string | undefined;
-        const windowId = resolveEntryWindowId(entry);
-        if (windowId) {
-            const win = getObjectValue<MuxWindow>(makeORef("window", windowId));
-            displayName = win?.meta?.[DISPLAY_NAME_META_KEY] as string | undefined;
-            if (win?.workspaceid) {
-                const ws = getObjectValue<Workspace>(makeORef("workspace", win.workspaceid));
-                workspaceName = ws?.name;
-            }
-        }
-        const name = resolveWindowName({ displayName, workspaceName, indexInOpenWindows: idx });
-
-        // Diagnostic — for this window's row only, log the same shape as
-        // [wave-title] in app-init.ts. If both surfaces resolve the same
-        // window with different `name` values, the inputs disagree and
-        // the bug is the inputs (typically: idx mismatch from the
-        // registerBackendWindow race). Tail with:
-        //   muxlog host '\[fe\] \[wave-(title|panel)\]'
-        if (entry.label === myLabel()) {
-            console.debug(
-                "[wave-panel]",
-                "windowId=" + (windowId ?? "<null>"),
-                "label=" + entry.label,
-                "idx=" + idx,
-                "displayName=" + (displayName ?? "<none>"),
-                "workspaceName=" + (workspaceName ?? "<none>"),
-                "→ name=" + JSON.stringify(name),
-            );
-        }
-        return name;
-    };
-
-    const enterRename = (entry: WindowEntry, currentName: string) => {
-        // Same fallback as resolveName: for this window's row we can use
-        // atoms.muxWindow()?.oid when the entry's windowId hasn't been
-        // populated yet via the registerBackendWindow round-trip.
-        if (!resolveEntryWindowId(entry)) return;
-        setEditingLabel(entry.label);
-        setEditValue(currentName);
-    };
-
-    const cancelRename = () => {
-        setEditingLabel(null);
-        setEditValue("");
-    };
-
-    // Single shared persistence path used by both commitRename
-    // (Enter / blur) and the onCleanup unmount-flush. Keeps the
-    // trim + cap + RPC + error-log shape consistent. (gemini
-    // PR #569 round-3 MEDIUM @ L176)
-    const performRename = (windowId: string, name: string) => {
-        ObjectService.UpdateObjectMeta(
-            makeORef("window", windowId),
-            { [DISPLAY_NAME_META_KEY]: name } as MetaType,
-        ).catch((e) => console.error("[InstancePanel] rename failed:", e));
-    };
-
-    const commitRename = (entry: WindowEntry) => {
-        const editing = editingLabel();
-        if (editing !== entry.label) return; // stale
-        const windowId = resolveEntryWindowId(entry);
-        if (!windowId) {
-            cancelRename();
-            return;
-        }
-        const trimmed = editValue().trim().slice(0, DISPLAY_NAME_MAX_LEN);
-        // Empty after trim → silent revert per spec §2.2.2.
-        setEditingLabel(null);
-        setEditValue("");
-        if (!trimmed) return;
-        performRename(windowId, trimmed);
-    };
-
-    // Panel-unmount cleanup:
-    //   1. Cancel any pending focus timer so it doesn't fire after
-    //      the panel is gone (focus call would still hit a real
-    //      window, but it's a wasted call + a small leak).
-    //      (gemini PR #569 round-3 MEDIUM @ L77)
-    //   2. Flush any in-flight rename. StatusBar's outside-click
-    //      dismiss can unmount the input before its onBlur fires,
-    //      which would otherwise silently lose the typed value.
-    //      (codex PR #569 round-2 P1)
+    // On unmount, flush any rename still open: StatusBar's outside-click dismiss can unmount the
+    // input before its onBlur fires (#569).
     onCleanup(() => {
-        cancelPendingFocus();
-        commitWorkspaceRename();
-        const editing = editingLabel();
-        if (!editing) return;
-        const entry = entries().find((e) => e.label === editing);
-        if (!entry) return;
-        const windowId = resolveEntryWindowId(entry);
-        if (!windowId) return;
-        const trimmed = editValue().trim().slice(0, DISPLAY_NAME_MAX_LEN);
-        if (!trimmed) return;
-        performRename(windowId, trimmed);
+        workspaceRename.commit();
+        windowRename.flush();
     });
 
-    const handleOpenNewWindow = async () => {
-        try {
-            await openNewWindowFromHere();
-        } catch (e) {
-            console.error("[InstancePanel] openNewWindow failed:", e);
-        }
-        props.onClose();
-    };
-
-    const handleCopy = (label: string, value: string) => {
-        clipboardWriteText(`${label}: ${value}`);
-    };
-
-
     const { openByKey, closedByKey, slotKeys, placeSlots, discard } = useSlotKeys(entries, closed, resolveEntryWindowId, resolveName);
-
-    // An open window's row.
-    const renderOpenRow = (entry: WindowEntry): JSX.Element => {
-        const i = () => entries().findIndex((e) => e.label === entry.label);
-        const isCurrent = () => entry.label === myLabel();
-        const isEditing = () => editingLabel() === entry.label;
-        const currentName = () => resolveName(entry, i());
-        const currentOpacity = () => {
-            if (!entry.windowId) return 1.0;
-            const win = getObjectValue<MuxWindow>(makeORef("window", entry.windowId));
-            return opacityFor(win?.meta, settingsAtom());
-        };
-        return (
-            <OpenWindowRow
-                entry={entry}
-                isCurrent={isCurrent}
-                isEditing={isEditing}
-                name={currentName}
-                opacityControl={() => <OpacityControl label={entry.label} persistWindowId={entry.windowId} currentOpacity={currentOpacity} />}
-                editValue={editValue}
-                onlyOpenWindow={onlyOpenWindow}
-                setEditValue={setEditValue}
-                focus={() => void handleFocusWindow(entry.label)}
-                cancelPendingFocus={cancelPendingFocus}
-                enterRename={() => enterRename(entry, currentName())}
-                commitRename={() => commitRename(entry)}
-                cancelRename={cancelRename}
-                remove={() => removeOpen(entry)}
-            />
-        );
-    };
+    const rowContext = { OpacityControl, entries, myLabel, rename: windowRename, resolveName, onlyOpenWindow, focusWindow, remove: removeOpen };
 
     return (
         // Portaled through AnchoredPopover like every other status bar panel.
@@ -482,215 +165,27 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
             aria-label="AgentMux instance panel"
             style={{ width: `${POPOVER_WIDTH}px` }}
         >
-            <div class="instance-panel-header">
-                <div class="instance-panel-row instance-panel-row-meta">
-                    <span class="instance-panel-label">Version</span>
-                    <span class="instance-panel-value">
-                        v{about().version}
-                        <Show when={isDev()}>
-                            <span class="status-version-dev">DEV</span>
-                        </Show>
-                    </span>
-                    <IconButton
-                        icon="copy"
-                        label="Copy version"
-                        density="compact"
-                        class="instance-panel-copy"
-                        onClick={() => handleCopy("version", `v${about().version}`)}
-                    />
-                </div>
-                <Show when={about().channel}>
-                    <div class="instance-panel-row instance-panel-row-meta">
-                        <span class="instance-panel-label">Channel</span>
-                        <span class="instance-panel-value instance-panel-mono">{about().channel}</span>
-                        <IconButton
-                            icon="copy"
-                            label="Copy channel"
-                            density="compact"
-                            class="instance-panel-copy"
-                            onClick={() => clipboardWriteText(about().channel!)}
-                        />
-                    </div>
-                </Show>
-                <Show when={about().gitHash}>
-                    <div class="instance-panel-row instance-panel-row-meta">
-                        <span class="instance-panel-label">Commit</span>
-                        <span class="instance-panel-value instance-panel-mono">{about().gitHash}</span>
-                        <IconButton
-                            icon="copy"
-                            label="Copy commit hash"
-                            density="compact"
-                            class="instance-panel-copy"
-                            onClick={() => clipboardWriteText(about().gitHash!)}
-                        />
-                    </div>
-                </Show>
-                <Show when={about().cefVersion}>
-                    <div class="instance-panel-row instance-panel-row-meta">
-                        <span class="instance-panel-label">CEF</span>
-                        <span class="instance-panel-value instance-panel-mono">{about().cefVersion}</span>
-                        <IconButton
-                            icon="copy"
-                            label="Copy CEF version"
-                            density="compact"
-                            class="instance-panel-copy"
-                            onClick={() => clipboardWriteText(about().cefVersion!)}
-                        />
-                    </div>
-                </Show>
-                <Show when={about().platform || about().arch}>
-                    <div class="instance-panel-row instance-panel-row-meta">
-                        <span class="instance-panel-label">Runtime</span>
-                        <span class="instance-panel-value instance-panel-mono">
-                            {[about().platform, about().arch].filter(Boolean).join(" · ")}
-                        </span>
-                    </div>
-                </Show>
-                <Show when={about().buildTime}>
-                    <div class="instance-panel-row instance-panel-row-meta">
-                        <span class="instance-panel-label">Build Time</span>
-                        <span class="instance-panel-value instance-panel-mono">
-                            {formatUtcTimestamp(about().buildTime!)}
-                        </span>
-                    </div>
-                </Show>
-            </div>
+            <AboutSection about={about} />
             <div class="instance-panel-divider" />
             <div class="instance-panel-section">
-                <div
-                    class="instance-panel-section-title instance-panel-workspace-title"
-                    classList={{ "instance-panel-workspace-title-editing": editingWorkspace() }}
-                    {...tip("The open workspace — double-click to rename (F2)")}
-                    role="button"
-                    tabIndex={0}
-                    onDblClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        if (!editingWorkspace()) enterWorkspaceRename();
-                    }}
-                    onKeyDown={(e) => {
-                        if (editingWorkspace()) return; // the input owns its keys
-                        if (e.key === "F2") {
-                            e.preventDefault();
-                            enterWorkspaceRename();
-                        }
-                    }}
-                >
-                    <Show
-                        when={editingWorkspace()}
-                        fallback={workspaceHeading(currentWorkspaceName(), entries().length + closed().length)}
-                    >
-                        <input
-                            ref={(el) => {
-                                if (el) {
-                                    queueMicrotask(() => {
-                                        el.focus();
-                                        el.select();
-                                    });
-                                }
-                            }}
-                            class="instance-panel-window-name-input instance-panel-workspace-name-input" size={1} data-raw-text-field="the workspace title's inline rename: it takes the name's place and ends on Enter, Escape or blur, not a form field"
-                            aria-label="Workspace name"
-                            value={workspaceEditValue()}
-                            maxLength={WORKSPACE_NAME_MAX_LEN}
-                            onInput={(e) => setWorkspaceEditValue(e.currentTarget.value)}
-                            onKeyDown={(e) => {
-                                e.stopPropagation();
-                                if (e.key === "Enter") {
-                                    e.preventDefault();
-                                    commitWorkspaceRename();
-                                } else if (e.key === "Escape") {
-                                    e.preventDefault();
-                                    cancelWorkspaceRename();
-                                }
-                            }}
-                            onBlur={() => commitWorkspaceRename()}
-                            onClick={(e) => e.stopPropagation()}
-                            onDblClick={(e) => e.stopPropagation()}
-                        />
-                    </Show>
-                </div>
-                {/* One list: a window keeps its slot whether it is open or closed (window-slots.ts). */}
-                <For each={slotKeys()}>
-                    {(key) => (
-                        <>
-                            <Show when={openByKey().get(key)} keyed>
-                                {(entry) => renderOpenRow(entry)}
-                            </Show>
-                            <Show when={closedByKey().get(key)} keyed>
-                                {(w) => <ClosedRow w={w} reopen={reopen} remove={removeClosed} />}
-                            </Show>
-                        </>
-                    )}
-                </For>
+                <WorkspaceTitle rename={workspaceRename} windowCount={() => entries().length + closed().length} />
+                <WindowSlotList
+                    slotKeys={slotKeys}
+                    openByKey={openByKey}
+                    closedByKey={closedByKey}
+                    context={rowContext}
+                    reopen={reopen}
+                    removeClosed={removeClosed}
+                />
             </div>
             <div class="instance-panel-divider" />
-            <div class="instance-panel-section">
-                <div class="instance-panel-section-title">
-                    Floating panes — {floatingEntries().length}
-                </div>
-                <Show
-                    when={floatingEntries().length > 0}
-                    fallback={
-                        <div class="instance-panel-pane-empty">No floating panes</div>
-                    }
-                >
-                    <For each={floatingEntries()}>
-                        {(entry, i) => (
-                            <div
-                                class="instance-panel-pane-row"
-                                onClick={() => handleFocusPane(entry.label)}
-                                onKeyDown={(e) => {
-                                    if (e.key === "Enter" || e.key === " ") {
-                                        e.preventDefault();
-                                        handleFocusPane(entry.label);
-                                    }
-                                }}
-                                {...tip("Click to focus")}
-                                role="button"
-                                tabIndex={0}
-                            >
-                                <span class="instance-panel-pane-icon">◈</span>
-                                <span class="instance-panel-pane-name">
-                                    {resolveFloatingName(entry, i())}
-                                </span>
-                                {/* Floaters get the same inline opacity control
-                                    as windows (instance-panel-floating-panes.md
-                                    §3.2). Session-only: no backing window object
-                                    to persist to, so persistWindowId is null and
-                                    the resolved value comes from the live store. */}
-                                <OpacityControl
-                                    label={entry.label}
-                                    persistWindowId={null}
-                                    currentOpacity={() => liveWindowOpacity(entry.label) ?? 1.0}
-                                />
-                            </div>
-                        )}
-                    </For>
-                </Show>
-            </div>
+            <FloatingPanesSection entries={openFloatingPaneEntriesAtom} OpacityControl={OpacityControl} />
             <div class="instance-panel-divider" />
             <div class="instance-panel-section">
                 <MaintenanceSection />
             </div>
             <div class="instance-panel-divider" />
-            <div class="instance-panel-footer">
-                <Show when={hostHas("multiWindow")}>
-                    <Button
-                        tone="accent"
-                        class="instance-panel-btn instance-panel-btn-primary"
-                        onClick={handleOpenNewWindow}
-                    >
-                        + Open another window
-                    </Button>
-                </Show>
-                <Button
-                    class="instance-panel-btn"
-                    onClick={props.onClose}
-                >
-                    Close
-                </Button>
-            </div>
+            <PanelFooter onClose={props.onClose} />
         </AnchoredPopover>
     );
 };
