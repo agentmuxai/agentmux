@@ -651,6 +651,7 @@ partial list.
 | [`SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02`](SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02.md) | Spec: an orthogonal "attached task" status axis, sibling to `TurnPhase` |
 | [`SPEC_AUDIT_LIVE_LOG_OF_EVERY_AGENT_ACTION_2026_11_03`](SPEC_AUDIT_LIVE_LOG_OF_EVERY_AGENT_ACTION_2026_11_03.md) | Spec: the Audit as a live log of every agent action |
 | [`SPEC_BACKGROUND_TASK_STRUCTURED_FEED_AND_SWARM_OWNERSHIP_2026_09_27`](SPEC_BACKGROUND_TASK_STRUCTURED_FEED_AND_SWARM_OWNERSHIP_2026_09_27.md) | Spec: Background tasks from the CLI's structured task feed, owned in Swarm |
+| [`SPEC_BACKGROUND_UPDATES_ONE_CLICK_RESTART_2026_11_03`](SPEC_BACKGROUND_UPDATES_ONE_CLICK_RESTART_2026_11_03.md) | Spec: background updates, one "Restart to update" click |
 | [`SPEC_BASHWRAP_PER_AGENT_CWD_2026_10_18`](SPEC_BASHWRAP_PER_AGENT_CWD_2026_10_18.md) | SPEC: each agent's Bash calls keep their own working directory |
 | [`SPEC_BROWSER_AND_EDITOR_PANES_2026_04_16`](SPEC_BROWSER_AND_EDITOR_PANES_2026_04_16.md) | SPEC: Browser and Editor Panes |
 | [`SPEC_BROWSER_PANE_BYPASS_2026_10_16`](SPEC_BROWSER_PANE_BYPASS_2026_10_16.md) | SPEC: Bypass: the person lets the agent act without asking in one browser pane |
