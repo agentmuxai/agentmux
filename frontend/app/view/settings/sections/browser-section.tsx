@@ -174,7 +174,7 @@ function ProfileRow(props: { profile: BrowserProfile }): JSX.Element {
             <Show
                 when={!props.profile.owner_agent}
                 fallback={
-                    <span class="browser-profile-fixed" title={`${props.profile.name}'s own profile`}>
+                    <span class="browser-profile-fixed">
                         {props.profile.name} <span class="browser-profile-agent-tag">agent</span>
                     </span>
                 }
