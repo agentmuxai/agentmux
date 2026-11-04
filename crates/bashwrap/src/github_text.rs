@@ -8,9 +8,6 @@
 //! with the same formats and the same rule: say where and what kind, never the text itself.
 //! Spec: `SPEC_CONNECT_WITH_GITHUB` §5.6, phase G3b.
 //!
-//! A local check: a process that runs `gh` another way (or `command gh`) skips it, as it skips
-//! every guard of the agent's shell (§9 item 8). It stops an agent's mistake, not a hostile process.
-//!
 //! The `gh` function the wrapper exports calls `github-text-guard -- <gh args>` before it runs
 //! `gh`. The reply is the arguments to run, each followed by a NUL, then `ok`; or `refused` (the
 //! reason is on stderr). A body given on stdin (`--body-file -`, `-F -`, `--input -`) is read here,
