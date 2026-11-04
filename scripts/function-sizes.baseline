@@ -443,12 +443,11 @@
 215 frontend/app/tab/tabcontent.tsx::TabContent
 134 frontend/app/util/select-trace.ts::createSelectTrace
 119 frontend/app/util/submenu-hover.ts::createSubmenuHover
-118 frontend/app/view/accounts/AccountsGallery.tsx::AccountsGallery
-347 frontend/app/view/accounts/ClaudeLoginPanel.tsx::ClaudeLoginPanel
+341 frontend/app/view/accounts/ClaudeLoginPanel.tsx::ClaudeLoginPanel
 156 frontend/app/view/accounts/ClaudeLoginPanel.tsx::startFlow
 104 frontend/app/view/accounts/GoogleServicesSection.tsx::GoogleServicesSection
 292 frontend/app/view/accounts/OAuthConnectPanel.tsx::OAuthConnectPanel
-137 frontend/app/view/accounts/accounts-manager.tsx::AccountsManager
+130 frontend/app/view/accounts/accounts-manager.tsx::AccountsManager
 553 frontend/app/view/agent/agent-model.ts::AgentViewModel::launchAgentDefinition
 132 frontend/app/view/agent/agent-pane-chrome-model.ts::buildAgentPaneChromeModel
 674 frontend/app/view/agent/agent-view.tsx::AgentPresentationView

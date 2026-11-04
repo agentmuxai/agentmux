@@ -13,7 +13,11 @@
 //
 // AgentMux Cloud is a "virtual first-class account": a single app-wide
 // session (the `muxbus.*` singleton), NOT a stored IdentityAccount. It gets a
-// card of its own that opens the connect panel, where Disconnect lives.
+// card of its own that opens the connect section, where Disconnect lives.
+//
+// Adding an account, signing in to AgentMux and a card's details all open in the same
+// caret-topped section under their card or tile (accounts-open-section.ts); Connectors has no
+// dialog over the pane.
 
 import { createMemo, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 import type { BlockNodeModel } from "@/app/block/blocktypes";
@@ -31,14 +35,13 @@ import { IdentityViewModel, type Account } from "@/app/view/identity/identity-mo
 import { matchesEveryWord } from "@/app/util/fuzzysearch";
 import { AccountCard, accountSearchText, AgentMuxCard, sortAccounts, useAccountUseCounts } from "./account-card";
 import { AccountsGallery } from "./AccountsGallery";
-import { AgentMuxConnectPanel, useMuxBusStatus } from "./AgentMuxConnectPanel";
-import { ClaudeLoginPanel } from "./ClaudeLoginPanel";
+import { AddAccountSection } from "./AddAccountSection";
+import { AgentMuxConnectBody, useMuxBusStatus } from "./AgentMuxConnectPanel";
+import { AGENTMUX_KEY, useOpenSection } from "./accounts-open-section";
 import { requestReconnect } from "./oauth-account-state";
 import "@/app/view/identity/identity-view.scss";
 
 type ConnectedItem = { kind: "agentmux" } | { kind: "account"; account: Account };
-
-const AGENTMUX_KEY = "agentmux-cloud";
 
 export function AccountsManager(): JSX.Element {
     // Block-free instance: a synthetic id and a stub nodeModel are safe, since
@@ -53,8 +56,7 @@ export function AccountsManager(): JSX.Element {
     const [agents] = useAgentDefinitions();
     const usedBy = useAccountUseCounts(() => agents());
 
-    const [muxPanelOpen, setMuxPanelOpen] = createSignal(false);
-    const [claudePanelOpen, setClaudePanelOpen] = createSignal(false);
+    const open = useOpenSection(model);
     const [filter, setFilter] = createSignal("");
 
     const connected = createMemo<ConnectedItem[]>(() => {
@@ -77,9 +79,6 @@ export function AccountsManager(): JSX.Element {
         openMenuAt(buildAccountRowMenu(account, () => model.requestDelete(account), failoverToggle(account)), e);
     };
 
-    const toggle = (account: Account) =>
-        model.setSelectedAccount(model.selectedAccountAtom()?.id === account.id ? null : account);
-
     // A card's Reconnect runs in its details, which show the browser prompt.
     const reconnect = (account: Account) => {
         requestReconnect(account.id);
@@ -97,17 +96,20 @@ export function AccountsManager(): JSX.Element {
                             value={filter()}
                             onInput={setFilter}
                         />
-                        <Button tone="accent" icon="plus" onClick={() => model.openAddForm()}>
+                        <Button tone="accent" icon="plus" onClick={() => open.setAddTile("custom")}>
                             Add account
                         </Button>
                     </SectionHeader>
 
-                    {/* Brand chips: pick a service → OAuth / Key, or AgentMux. */}
+                    {/* Brand chips: pick a service and its section opens below: OAuth / Key, or AgentMux. */}
                     <AccountsGallery
                         model={model}
                         agentMuxConnected={agentMuxConnected}
-                        onAgentMux={() => setMuxPanelOpen(true)}
-                        onClaudeConnect={() => setClaudePanelOpen(true)}
+                        selected={open.addTile}
+                        onSelect={open.setAddTile}
+                        renderDetail={(tile) => (
+                            <AddAccountSection tile={tile} model={model} muxbus={muxbus} onClose={() => open.setAddTile(null)} />
+                        )}
                     />
 
                     <AccountDeleteNotice model={model} />
@@ -127,25 +129,27 @@ export function AccountsManager(): JSX.Element {
                             items={connected()}
                             ariaLabel="Connected accounts"
                             keyOf={(item) => (item.kind === "agentmux" ? AGENTMUX_KEY : item.account.id)}
-                            selectedKey={model.selectedAccountAtom()?.id ?? null}
-                            onClose={() => model.setSelectedAccount(null)}
+                            selectedKey={open.connectedKey()}
+                            onClose={open.closeConnected}
                             renderCard={(item) =>
                                 item.kind === "agentmux" ? (
-                                    <AgentMuxCard status={muxbus.status()} onSelect={() => setMuxPanelOpen(true)} />
+                                    <AgentMuxCard status={muxbus.status()} onSelect={open.toggleMux} />
                                 ) : (
                                     <AccountCard
                                         account={item.account}
                                         all={model.accountsAtom()}
                                         usedBy={usedBy().get(item.account.id) ?? 0}
                                         selected={model.selectedAccountAtom()?.id === item.account.id}
-                                        onSelect={() => toggle(item.account)}
+                                        onSelect={() => open.toggleAccount(item.account)}
                                         onContextMenu={(e) => openMenu(item.account, e)}
                                         onReconnect={() => reconnect(item.account)}
                                     />
                                 )
                             }
                             renderDetail={(item) =>
-                                item.kind === "account" ? (
+                                item.kind === "agentmux" ? (
+                                    <AgentMuxConnectBody muxbus={muxbus} />
+                                ) : item.kind === "account" ? (
                                     // The selected account, not the grid's copy: an
                                     // update from elsewhere shows in place.
                                     <Show when={model.selectedAccountAtom()} keyed>
@@ -162,17 +166,9 @@ export function AccountsManager(): JSX.Element {
                 {(account) => <DeleteAccountConfirm model={model} account={account} />}
             </Show>
 
-            <Show when={model.formOpenAtom()}>
+            {/* Editing an account is the pane's form; adding one opens in the add section. */}
+            <Show when={model.formOpenAtom() && model.editingAccountAtom()}>
                 <AccountForm model={model} />
-            </Show>
-
-            <Show when={muxPanelOpen()}>
-                <AgentMuxConnectPanel muxbus={muxbus} onClose={() => setMuxPanelOpen(false)} />
-            </Show>
-
-            <Show when={claudePanelOpen()}>
-                {/* "pane" resolves to the block frame's pane layer: only the Connectors pane is locked. */}
-                <ClaudeLoginPanel onClose={() => setClaudePanelOpen(false)} scope="pane" />
             </Show>
         </div>
     );

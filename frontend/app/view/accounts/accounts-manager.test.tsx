@@ -4,7 +4,7 @@
 // The Accounts section of Connectors as cards
 // (docs/specs/SPEC_CONNECTORS_CARDS_2026_10_13.md §3.5, §5).
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const rpc = vi.hoisted(() => ({
@@ -97,6 +97,29 @@ describe("Accounts as cards", () => {
         // The filter finds a card by its number too.
         fireEvent.input(screen.getByPlaceholderText("Filter accounts"), { target: { value: "·2" } });
         await waitFor(() => expect(cards()).toEqual(["me@example.com ·2"]));
+    });
+
+    it("opens adding an account under its tile, in the caret-topped section, with no dialog over the pane", async () => {
+        render(() => <AccountsManager />);
+        await waitFor(() => expect(cards()).toHaveLength(4));
+        fireEvent.click(screen.getByRole("button", { name: /^AWS/ }));
+        const section = await screen.findByRole("group", { name: "Connect AWS" });
+        expect(section.closest(".ui-card-detail")).toBeTruthy();
+        // AWS has one way to connect (a key), so the account form is already in the section.
+        expect(section.querySelector(".identity-form--inline")).toBeTruthy();
+        expect(document.querySelector(".identity-form-overlay, .accounts-chooser-overlay")).toBeNull();
+        expect(screen.queryByRole("dialog")).toBeNull();
+        // Close collapses it.
+        fireEvent.click(within(section).getAllByRole("button", { name: "Close" })[0]);
+        await waitFor(() => expect(screen.queryByRole("group", { name: "Connect AWS" })).toBeNull());
+    });
+
+    it("signs in to AgentMux in the section under its card, not in a dialog", async () => {
+        render(() => <AccountsManager />);
+        await waitFor(() => expect(cards()).toHaveLength(4));
+        fireEvent.click(document.querySelector('[aria-label="Connected accounts"] .ui-card')!);
+        expect(await screen.findByText(/Connected as/)).toBeTruthy();
+        expect(screen.queryByRole("dialog")).toBeNull();
     });
 
     it("filters by every word of the title and subtitle", async () => {
