@@ -57,11 +57,12 @@ export function activityWithTool(
     nowMs: number,
 ): ActivityState {
     const activity = toolActivity(c.name, c.params);
+    const command = typeof c.params?.command === "string" && c.params.command ? { command: c.params.command } : {};
     const i = c.id != null ? a.tools.findIndex((t) => t.id === c.id) : -1;
     const tools =
         i >= 0
-            ? a.tools.map((t, j) => (j === i ? { ...t, activity, ...(c.parentId ? { parentId: c.parentId } : {}) } : t))
-            : [...a.tools, { id: c.id ?? null, activity, startedAt: nowMs, ...(c.parentId ? { parentId: c.parentId } : {}) }];
+            ? a.tools.map((t, j) => (j === i ? { ...t, activity, name: c.name, ...command, ...(c.parentId ? { parentId: c.parentId } : {}) } : t))
+            : [...a.tools, { id: c.id ?? null, activity, name: c.name, ...command, startedAt: nowMs, ...(c.parentId ? { parentId: c.parentId } : {}) }];
     // Only a call that carries its list sets the plan: the empty placeholder
     // must not wipe the plan already there.
     if (c.name === "TodoWrite" && Array.isArray(c.params?.todos)) {

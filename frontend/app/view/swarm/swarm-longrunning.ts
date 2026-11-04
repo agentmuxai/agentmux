@@ -50,6 +50,8 @@ export interface LongRunningToolRow {
     id: string;
     /** The command text (dock row title), e.g. `sleep 300`. */
     title: string;
+    /** The shell command, which says what kind of work it is. */
+    command?: string;
     startedAt: number;
     /** Set only for a whole-command sleep — enables a real countdown. */
     sleepMs?: number;
@@ -80,8 +82,15 @@ export function longRunningToolRows(blockId: string | null, now: number): LongRu
         .map((a) => ({
             id: a.id,
             title: a.fullTitle ?? a.title,
+            ...commandOf(a),
             startedAt: a.startedAt,
             ...(a.sleepMs != null ? { sleepMs: a.sleepMs } : {}),
         }))
         .sort((a, b) => b.startedAt - a.startedAt);
+}
+
+/** The command of a Bash call, as a spread-able field. */
+function commandOf(a: PinnedActivity): { command?: string } {
+    const command = (a.tool?.params as { command?: string } | undefined)?.command;
+    return command ? { command } : {};
 }

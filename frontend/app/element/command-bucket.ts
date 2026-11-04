@@ -25,9 +25,7 @@ const PROGRAMS: Record<string, BucketId> = {
     // sending
     scp: "send", rsync: "send", sftp: "send", ftp: "send",
     // deploy and release
-    deploy: "deploy", terraform: "deploy", tofu: "deploy", pulumi: "deploy", serverless: "deploy", sls: "deploy",
-    wrangler: "deploy", vercel: "deploy", netlify: "deploy", flyctl: "deploy", fly: "deploy", fastlane: "deploy",
-    helm: "deploy", kubectl: "deploy",
+    deploy: "deploy", vercel: "deploy", fastlane: "deploy",
     // asleep
     sleep: "hold", "start-sleep": "hold",
 };
@@ -48,6 +46,17 @@ const SUBCOMMANDS: Record<string, Record<string, BucketId>> = {
     task: { build: "build", test: "test", check: "test", lint: "test" },
     just: { build: "build", test: "test", check: "test", lint: "test" },
     cdk: { deploy: "deploy", destroy: "deploy", synth: "build" },
+    terraform: { apply: "deploy", destroy: "deploy" },
+    tofu: { apply: "deploy", destroy: "deploy" },
+    pulumi: { up: "deploy", destroy: "deploy" },
+    serverless: { deploy: "deploy" },
+    sls: { deploy: "deploy" },
+    wrangler: { deploy: "deploy", publish: "deploy" },
+    netlify: { deploy: "deploy" },
+    flyctl: { deploy: "deploy" },
+    fly: { deploy: "deploy" },
+    helm: { install: "deploy", upgrade: "deploy", rollback: "deploy" },
+    kubectl: { apply: "deploy", rollout: "deploy" },
     docker: { pull: "install", run: "install", start: "install", create: "install", up: "install", load: "install", build: "build", push: "send" },
     podman: { pull: "install", run: "install", start: "install", create: "install", up: "install", load: "install", build: "build", push: "send" },
     compose: { up: "install", pull: "install", build: "build" },
@@ -102,7 +111,7 @@ function workTokens(command: string): string[] {
         while (tokens.length) {
             const head = programName(tokens[0]);
             if (/^[A-Za-z_]\w*=/.test(tokens[0])) tokens = tokens.slice(1);
-            else if (head === "timeout") tokens = tokens.slice(1).filter((t, i, all) => !isFlag(t) && all.slice(0, i).every(isFlag)).length ? dropFirstOperand(tokens.slice(1)) : tokens.slice(1);
+            else if (head === "timeout") tokens = dropFirstOperand(tokens.slice(1));
             else if (head === "secrets" && tokens.includes("--")) tokens = tokens.slice(tokens.indexOf("--") + 1);
             else if (WRAPPERS.has(head)) tokens = tokens.slice(1);
             else break;
@@ -112,10 +121,11 @@ function workTokens(command: string): string[] {
     return [];
 }
 
-/** `timeout 30 cmd`: drop the flags and the duration that follow `timeout`. */
+/** `timeout -k 5 30 cmd`: drop the flags (and the values of `-k` and `-s`) and the duration that follow `timeout`. */
 function dropFirstOperand(rest: string[]): string[] {
-    const flagsEnd = rest.findIndex((t) => !isFlag(t));
-    return flagsEnd < 0 ? [] : rest.slice(flagsEnd + 1);
+    let i = 0;
+    while (i < rest.length && isFlag(rest[i])) i += /^(-k|-s|--kill-after|--signal)$/.test(rest[i]) ? 2 : 1;
+    return rest.slice(i + 1);
 }
 
 /** The tool word a script's `node_modules/<tool>/...` path names, for `node node_modules/vitest/vitest.mjs`. */
@@ -123,13 +133,13 @@ function toolInPath(path: string): string | undefined {
     return path.replace(/\\/g, "/").match(/node_modules\/(?:@[^/]+\/)?([^/]+)\//)?.[1];
 }
 
-function interpreted(program: string, args: string[]): BucketId | undefined {
+function interpreted(args: string[]): BucketId | undefined {
     const moduleIdx = args.indexOf("-m");
     if (moduleIdx >= 0 && args[moduleIdx + 1]) return classify([args[moduleIdx + 1], ...args.slice(moduleIdx + 2)]);
     const script = args.find((t) => !isFlag(t));
     if (!script) return undefined;
     const tool = toolInPath(script);
-    return (tool && classify([tool, ...args.slice(args.indexOf(script) + 1)])) || byScriptName(baseName(script)) || (program === "node" ? undefined : undefined);
+    return (tool && classify([tool, ...args.slice(args.indexOf(script) + 1)])) || byScriptName(baseName(script));
 }
 
 /** `gh` and `gh-agent`: sending is a write, watching is waiting. */
@@ -158,27 +168,40 @@ function viaHttp(args: string[]): BucketId {
     return writes ? "send" : "receive";
 }
 
+/** The bucket of `program`'s first non-flag argument in SUBCOMMANDS. */
+function fromTable(program: string, args: string[]): BucketId | undefined {
+    const sub = args.find((t) => !isFlag(t));
+    return sub ? SUBCOMMANDS[program][sub] : undefined;
+}
+
+/** `git -C dir push`: the options that take a value, dropped with it. */
+function withoutGitOptions(args: string[]): string[] {
+    return args.filter((_, i) => !(args[i] === "-C" || args[i] === "-c" || args[i - 1] === "-C" || args[i - 1] === "-c"));
+}
+
 function classify(tokens: string[]): BucketId | undefined {
     if (tokens.length === 0) return undefined;
     const program = programName(tokens[0]);
     const args = tokens.slice(1);
-    if (RUNNERS.has(program)) return classify(args.filter((t, i) => !isFlag(t) || args.slice(0, i).every(isFlag)).filter((t) => !isFlag(t)));
-    if (INTERPRETERS.has(program)) return interpreted(program, args);
+    if (RUNNERS.has(program)) return classify(args.filter((t) => !isFlag(t)));
+    if (INTERPRETERS.has(program)) return interpreted(args);
+    if (program === "git") return fromTable("git", withoutGitOptions(args));
     if (program === "gh" || program === "gh-agent") return viaGitHub(args);
     if (["curl", "wget", "iwr", "invoke-webrequest", "http", "https"].includes(program)) return viaHttp(args);
     const sub = args.find((t) => !isFlag(t));
     if (SCRIPT_RUNNERS.has(program) && sub) {
         if (SCRIPT_VERBS.has(sub)) {
-            const rest = args.slice(args.indexOf(sub) + 1);
-            const name = rest.find((t) => !isFlag(t));
-            if (sub === "run" || sub === "run-script") return name ? byScriptName(name) : undefined;
-            return name ? classify(rest.filter((t) => !isFlag(t) || rest.indexOf(t) > rest.indexOf(name))) : undefined;
+            const rest = args.slice(args.indexOf(sub) + 1).filter((t) => !isFlag(t));
+            if (sub === "run" || sub === "run-script") return rest[0] ? byScriptName(rest[0]) : undefined;
+            return classify(rest);
         }
         return SUBCOMMANDS[program][sub] ?? byScriptName(sub);
     }
     if (program === "docker" && sub === "compose") return classify(["compose", ...args.slice(args.indexOf(sub) + 1)]);
-    if (sub && SUBCOMMANDS[program]) return SUBCOMMANDS[program][sub];
-    if (program === "make" || program === "task" || program === "just") return (sub && byScriptName(sub)) || PROGRAMS[program];
+    if (program === "make" || program === "task" || program === "just") {
+        return (sub ? (SUBCOMMANDS[program]?.[sub] ?? byScriptName(sub)) : undefined) ?? PROGRAMS[program];
+    }
+    if (SUBCOMMANDS[program]) return fromTable(program, args);
     return PROGRAMS[program] ?? byScriptName(baseName(tokens[0]));
 }
 
