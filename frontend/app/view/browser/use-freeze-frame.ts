@@ -3,6 +3,7 @@
 
 import { createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import { getApi } from "@/util/app-api";
+import { isViewsPanesOnWindows } from "@/app/platform/pane-backend";
 import type { BrowserViewModel } from "./browser-model";
 import type { PaneRect } from "./use-pane-rect-sync";
 
@@ -36,7 +37,21 @@ export interface FreezeFrame {
 // Views panes still whole-pane-hide and need the freeze-frame compensation.
 function hidesWholePane(): boolean {
     const ua = navigator.userAgent;
-    return (ua.includes("Linux") && !ua.includes("Windows")) || (ua.includes("Windows") && getApi().getAboutModalDetails?.()?.paneBackend === "views");
+    return (ua.includes("Linux") && !ua.includes("Windows")) || isViewsPanesOnWindows();
+}
+
+// Offsets from the placeholder's edges, not a fixed size: the frame then
+// follows the placeholder while a splitter is dragged, stretched in step with
+// the chrome around it. Aligned to the native pane's DPR-rounded rect.
+function freezeGeometry(box: DOMRect, pr: PaneRect, dpr: number): JSX.CSSProperties {
+    const left = pr.x / dpr - box.x;
+    const top = pr.y / dpr - box.y;
+    return {
+        left: `${left}px`,
+        top: `${top}px`,
+        width: `calc(100% - ${box.width - pr.width / dpr}px)`,
+        height: `calc(100% - ${box.height - pr.height / dpr}px)`,
+    };
 }
 
 export function useFreezeFrame(params: {
@@ -93,12 +108,7 @@ export function useFreezeFrame(params: {
                         const pr = paneRect();
                         const dpr = window.devicePixelRatio || 1;
                         const box = placeholderRef()!.getBoundingClientRect();
-                        setFreezeStyle({
-                            left: `${pr.x / dpr - box.x}px`,
-                            top: `${pr.y / dpr - box.y}px`,
-                            width: `${pr.width / dpr}px`,
-                            height: `${pr.height / dpr}px`,
-                        });
+                        setFreezeStyle(freezeGeometry(box, pr, dpr));
                         setFreezeSnapshot(`data:image/jpeg;base64,${data.png_base64}`);
                         // Resolve one frame later so the <img> has actually
                         // painted before flushClip releases the hide IPC —

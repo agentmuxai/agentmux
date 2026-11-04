@@ -22,7 +22,7 @@
 163 crates/cef/src/browser_api/routes.rs::screenshot
 210 crates/cef/src/browser_pane/creation.rs::CreateBrowserPaneTask::Task::execute
 397 crates/cef/src/browser_pane/creation_views.rs::create_browser_pane_view
-132 crates/cef/src/browser_pane/creation_views.rs::resize_browser_pane_view_inner
+131 crates/cef/src/browser_pane/creation_views.rs::resize_browser_pane_view_inner
 240 crates/cef/src/browser_pane/hwnd.rs::install_browser_pane_subclass
 168 crates/cef/src/browser_pane/hwnd.rs::install_browser_pane_subclass::wndproc_hook
 293 crates/cef/src/browser_panes/clip.rs::BrowserPaneManager::set_pane_overlay_clip_hwnd
@@ -547,7 +547,7 @@
 741 frontend/app/view/browser/browser-view.tsx::BrowserViewInner
 267 frontend/app/view/browser/driven-by-strip.tsx::DrivenByStrip
 141 frontend/app/view/browser/use-browser-auth.ts::useBrowserAuth
-153 frontend/app/view/browser/use-freeze-frame.ts::useFreezeFrame
+148 frontend/app/view/browser/use-freeze-frame.ts::useFreezeFrame
 393 frontend/app/view/browser/use-pane-rect-sync.ts::usePaneRectSync
 155 frontend/app/view/bundle/BundleProviderInstructionsSection.tsx::BundleProviderInstructionsSection
 414 frontend/app/view/bundle/bundle-manager.tsx::BundleManagerBody

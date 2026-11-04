@@ -609,7 +609,6 @@ pub(crate) fn resize_browser_pane_view_inner(
         // window (`LayoutBase`): after the host has already followed a resize,
         // a late batch for the old size must not pull the pane back.
         let rect = match (crate::browser_panes::bounds::layout_base(label), window.as_ref()) {
-            #[cfg(not(target_os = "windows"))]
             (Some(base), Some(w)) => {
                 let (width, height) = crate::browser_panes::bounds::window_client_px(w);
                 base.predict(&rect, width, height)
