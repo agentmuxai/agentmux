@@ -379,47 +379,6 @@ impl ShellController {
         cmd_env_overrides(&self.live_settings(), &self.with_agent_identity(block_meta)).apply_to(c);
     }
 
-    /// The process a `cmd` pane runs: `cmd` itself when it has `cmd:args` or
-    /// `cmd:interactive`, otherwise `cmd` through the platform shell. Either
-    /// way with the pane's `cmd:env`, as an interactive shell gets it: a pane
-    /// running a provider CLI's login needs the account's config directory.
-    ///
-    /// Spawned directly, an npm `.cmd` shim on Windows is resolved to what it
-    /// runs: the shim itself hangs under ConPTY (`resolve_cli_spawn_target`).
-    /// One that can't be read is refused, rather than started into a pane
-    /// that would never respond.
-    pub(super) fn command_process(
-        &self,
-        cmd_str: &str,
-        cmd_args: &[String],
-        interactive: bool,
-        block_meta: &MetaMapType,
-    ) -> Result<CommandBuilder, String> {
-        let mut c = if !cmd_args.is_empty() || interactive {
-            // Spawned directly (no shell wrapper), so args pass through intact.
-            let (program, prefix) = agentmux_common::resolve_cli_spawn_target(cmd_str).ok_or_else(|| {
-                format!(
-                    "can't run {cmd_str}: it's a command wrapper AgentMux can't read, and run as it is it would hang; \
-                     reinstall the tool, or run its own executable"
-                )
-            })?;
-            let mut c = CommandBuilder::new(&program);
-            c.args(&prefix);
-            c.args(cmd_args);
-            c
-        } else if cfg!(windows) {
-            let mut c = CommandBuilder::new("cmd.exe");
-            c.args(["/C", cmd_str]);
-            c
-        } else {
-            let mut c = CommandBuilder::new("/bin/sh");
-            c.args(["-c", cmd_str]);
-            c
-        };
-        self.apply_cmd_env(&mut c, block_meta);
-        Ok(c)
-    }
-
     /// Ends a start that was refused before anything ran: the pane is done,
     /// with no exit code, and the controller can be started again.
     fn refuse_start(&self, message: String) -> Result<(), String> {
