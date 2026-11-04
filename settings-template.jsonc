@@ -122,6 +122,16 @@
     // -- App --
 
     // "app:showoverlayblocknums": true,
+    // Check for a newer AgentMux release in the background (a minute after start, then every
+    // few hours). Set false and AgentMux asks GitHub only when you or an agent does (Check for
+    // update).
+    // "update:auto": true,
+
+    // Download and verify a newer release in the background once one is found, so the status
+    // bar offers Restart to update. Nothing is installed until you restart. Set false to
+    // download only when you click Download.
+    // "update:autodownload": true,
+
     // Show an AgentMux icon in the system tray / menu bar while AgentMux is running. On by
     // default. Always shown while app:runinbackground is on (a process that keeps running must
     // show an icon). Read by agentmux-launcher at startup, so a change applies at the NEXT
