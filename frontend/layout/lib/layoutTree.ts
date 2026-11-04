@@ -265,7 +265,6 @@ export function computeMoveNode(layoutState: LayoutTreeState, computeInsertActio
 }
 
 export function moveNode(layoutState: LayoutTreeState, action: LayoutTreeMoveNodeAction) {
-    console.log("moveNode", layoutState, action);
     const rootNode = layoutState.rootNode;
     if (!action) {
         console.error("no move node action provided");

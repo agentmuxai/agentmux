@@ -278,6 +278,31 @@ export function updateTree(model: LayoutModel, balanceTree = true) {
     }
 }
 
+/**
+ * Where every pane of `rootNode` would sit in `model`'s container: the layout pass of `updateTree`, run on
+ * the given tree alone (a copy; it is balanced in place) and returning the rects instead of publishing
+ * them. The model's container, gap and chrome zoom are used as they are, so this is the geometry the tree
+ * gets once it is the model's tree. Used to show where a drop will leave every pane.
+ */
+export function computeNodeRects(model: LayoutModel, rootNode: LayoutNode): Record<string, Dimensions> {
+    const props: Record<string, LayoutNodeAdditionalProps> = {};
+    const leafs: LayoutNode[] = [];
+    const boundingRect = model.getBoundingRect();
+    // The layout pass reads the tree, the gap and the last magnified/ephemeral ids from the model; nothing it
+    // reads is written, so a view over the model with this tree is all it needs.
+    const shadow = Object.create(model, {
+        treeState: { value: { ...model.treeState, rootNode } },
+    }) as LayoutModel;
+    const resizeHandleSizePx = model.getter(model.resizeHandleSizePx);
+    const magnifiedNodeSize = model.getter(model.magnifiedNodeSizeAtom) ?? 0.8;
+    balanceNode(rootNode, (node) =>
+        updateTreeHelper(shadow, node, props, leafs, resizeHandleSizePx, magnifiedNodeSize, boundingRect, undefined)
+    );
+    const rects: Record<string, Dimensions> = {};
+    for (const [id, p] of Object.entries(props)) if (p.rect) rects[id] = p.rect;
+    return rects;
+}
+
 /** Lay out a leaf: record it, and give a lone root leaf the whole container. */
 function placeLeaf(
     model: LayoutModel,

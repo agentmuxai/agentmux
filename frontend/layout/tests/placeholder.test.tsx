@@ -25,7 +25,7 @@ describe("Placeholder (the drag drop-target ghost)", () => {
     it("takes part in pane-overlay clipping on the element that moves", () => {
         const [xf, setXf] = createSignal<Record<string, string> | null>(null);
         const { container } = render(() => (
-            <Placeholder layoutModel={{ placeholderTransform: xf } as any} style={{}} />
+            <Placeholder layoutModel={{ placeholderTransform: xf, placementWireframe: () => [] } as any} style={{}} />
         ));
         expect(container.querySelector(".placeholder-sizer")).toBeNull();
 
