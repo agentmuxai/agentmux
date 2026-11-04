@@ -8,6 +8,11 @@ name: Linux package upgrade check
 # "after the release is out" signal: workflow_run has not fired reliably in this repo, and a release made with the
 # default token starts no workflow). It can also be run by hand for any pair of published releases.
 #
+# Distros: ubuntu26 and tumbleweed only. The .deb and .rpm declare the glibc floor of the CEF libraries they carry
+# (2.43 at 0.60.14), and Ubuntu 24.04, Debian 13 and Fedora 42 ship an older glibc, so they refuse the install by
+# design. Put them back in the default list below and in `distros` once the CEF runtime is built against an older
+# glibc and a release no longer declares that floor.
+#
 # A pull request that changes the harness or this file runs it too, on the latest published release against the one
 # before it, so neither can rot unseen.
 #
@@ -41,7 +46,7 @@ on:
         required: false
         default: ''
       distros:
-        description: 'Distros to run (blank: ubuntu24 ubuntu26 fedora42 debian13 tumbleweed)'
+        description: 'Distros to run (blank: ubuntu26 tumbleweed; the others have a glibc older than the packages declare)'
         required: false
         default: ''
 
@@ -114,7 +119,7 @@ jobs:
           set -o pipefail
           [ -z "$HELPER_UNDER_TEST" ] || export HELPER="$HELPER_UNDER_TEST"
           # shellcheck disable=SC2086
-          scripts/linux-upgrade-harness/run.sh ${DISTROS:-ubuntu24 ubuntu26 fedora42 debian13 tumbleweed} 2>&1 | tee "$RUNNER_TEMP/upgrade-check.log"
+          scripts/linux-upgrade-harness/run.sh ${DISTROS:-ubuntu26 tumbleweed} 2>&1 | tee "$RUNNER_TEMP/upgrade-check.log"
 
       - name: Summary
         if: ${{ always() && steps.pick.outputs.run == 'true' }}
