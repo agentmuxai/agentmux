@@ -9,7 +9,7 @@
  */
 
 import clsx from "clsx";
-import { Button, IconButton } from "@/app/element/ui";
+import { Button, IconButton, Tag } from "@/app/element/ui";
 import { Show, type JSX } from "solid-js";
 import { formatBytes } from "@/util/format-bytes";
 import { useAttachmentText, useAttachmentUrl } from "./attachment-url";
@@ -156,9 +156,7 @@ export function AttachmentTile(props: Props) {
                         </svg>
                     </span>
                 </Show>
-                <span class="agent-attachment-tile__badge" aria-hidden="true">
-                    {props.tile.number}
-                </span>
+                <span class="agent-attachment-tile__badge-wrap" aria-hidden="true"><Tag kind="count" corner="top-left" class="agent-attachment-tile__badge">{props.tile.number}</Tag></span>
                 <Show when={props.tile.pageCount && !hasThumbnail(props.tile.kind)}>
                     <span class="agent-attachment-tile__pages" aria-hidden="true">
                         {props.tile.pageCount} p

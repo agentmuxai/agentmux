@@ -153,14 +153,12 @@ pub(super) fn persist_define_content(
 
 fn register_agent_define(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let mstore = state.mstore.clone();
-    let id_store = state.id_store.clone();
     let broker = state.broker.clone();
 
     engine.register_typed(COMMAND_AGENT_DEFINE, move |cmd: CommandAgentDefineData, _ctx| {
         let mstore = mstore.clone();
-        let id_store = id_store.clone();
         let broker = broker.clone();
-        async move { agent_define_core(mstore, id_store, broker, cmd).await }
+        async move { agent_define_core(mstore, broker, cmd).await }
     });
 }
 
@@ -216,7 +214,7 @@ mod agent_define_core_vendor_tests {
     async fn omitting_the_field_on_update_does_not_clear_a_previously_set_override() {
         let state = test_state();
 
-        let created = agent_define_core(state.mstore.clone(), state.id_store.clone(), state.broker.clone(), cmd(json!({
+        let created = agent_define_core(state.mstore.clone(), state.broker.clone(), cmd(json!({
             "name": "vendor-test-agent",
             "provider": "claude",
             "model_vendor_base_url": "https://my-proxy.example.com",
@@ -225,7 +223,7 @@ mod agent_define_core_vendor_tests {
         assert_eq!(def.model_vendor_base_url, "https://my-proxy.example.com");
 
         // Update that touches an unrelated field and omits model_vendor_base_url.
-        agent_define_core(state.mstore.clone(), state.id_store.clone(), state.broker.clone(), cmd(json!({
+        agent_define_core(state.mstore.clone(), state.broker.clone(), cmd(json!({
             "name": "vendor-test-agent",
             "if_exists": "update",
             "description": "just touching something else",
@@ -241,13 +239,13 @@ mod agent_define_core_vendor_tests {
     async fn explicit_empty_string_clears_a_previously_set_override() {
         let state = test_state();
 
-        let created = agent_define_core(state.mstore.clone(), state.id_store.clone(), state.broker.clone(), cmd(json!({
+        let created = agent_define_core(state.mstore.clone(), state.broker.clone(), cmd(json!({
             "name": "vendor-clear-test",
             "provider": "claude",
             "model_vendor_base_url": "https://my-proxy.example.com",
         }))).await.unwrap();
 
-        agent_define_core(state.mstore.clone(), state.id_store.clone(), state.broker.clone(), cmd(json!({
+        agent_define_core(state.mstore.clone(), state.broker.clone(), cmd(json!({
             "name": "vendor-clear-test",
             "if_exists": "update",
             "model_vendor_base_url": "",
@@ -263,7 +261,7 @@ mod agent_define_core_vendor_tests {
     async fn an_update_cannot_change_the_provider_but_can_change_the_rest() {
         let state = test_state();
 
-        let created = agent_define_core(state.mstore.clone(), state.id_store.clone(), state.broker.clone(), cmd(json!({
+        let created = agent_define_core(state.mstore.clone(), state.broker.clone(), cmd(json!({
             "name": "provider-lock-test",
             "provider": "claude",
             "model_vendor_base_url": "https://my-proxy.example.com",
@@ -272,13 +270,13 @@ mod agent_define_core_vendor_tests {
         for change in [json!({ "provider": "codex" }), json!({ "model": "gemini-2.5-pro" })] {
             let mut req = json!({ "name": "provider-lock-test", "if_exists": "update" });
             req.as_object_mut().unwrap().extend(change.as_object().unwrap().clone());
-            let err = agent_define_core(state.mstore.clone(), state.id_store.clone(), state.broker.clone(), cmd(req))
+            let err = agent_define_core(state.mstore.clone(), state.broker.clone(), cmd(req))
                 .await
                 .unwrap_err();
             assert!(err.contains("readonly once set"), "{err}");
         }
 
-        agent_define_core(state.mstore.clone(), state.id_store.clone(), state.broker.clone(), cmd(json!({
+        agent_define_core(state.mstore.clone(), state.broker.clone(), cmd(json!({
             "name": "provider-lock-test",
             "if_exists": "update",
             "provider": "claude",
@@ -311,27 +309,26 @@ mod agent_define_core_bundle_provisioning_tests {
     }
 
     #[tokio::test]
-    async fn fresh_insert_provisions_its_own_bundle_and_the_agent_keeps_the_provider() {
+    async fn fresh_insert_creates_no_bundle_and_the_agent_keeps_the_provider() {
         let state = test_state();
+        let bundles_before = state.mstore.bundle_list().unwrap().len();
 
-        let created = agent_define_core(state.mstore.clone(), state.id_store.clone(), state.broker.clone(), cmd(json!({
+        let created = agent_define_core(state.mstore.clone(), state.broker.clone(), cmd(json!({
             "name": "define-bundle-test",
             "provider": "gemini",
         }))).await.unwrap();
 
         let def = state.mstore.agent_def_get(&created.definition_id).unwrap().unwrap();
-        assert!(!def.memory_id.is_empty(), "fresh agent.define insert must bind a bundle");
-        let bundle = state.mstore.bundle_get(&def.memory_id).unwrap().unwrap();
-        assert!(!bundle.is_blank);
+        assert!(def.memory_id.is_empty(), "a fresh agent.define insert has no bundle of its own");
+        assert_eq!(state.mstore.bundle_list().unwrap().len(), bundles_before, "no bundle is created");
         assert_eq!(def.provider, "gemini");
-        assert_eq!((bundle.provider.as_str(), bundle.model.as_str()), ("", ""), "the bundle carries no harness");
     }
 
     #[tokio::test]
     async fn skip_of_an_existing_definition_does_not_leak_a_stray_bundle() {
         let state = test_state();
 
-        let first = agent_define_core(state.mstore.clone(), state.id_store.clone(), state.broker.clone(), cmd(json!({
+        let first = agent_define_core(state.mstore.clone(), state.broker.clone(), cmd(json!({
             "name": "skip-no-leak-test",
             "provider": "claude",
             "if_exists": "skip",
@@ -345,7 +342,7 @@ mod agent_define_core_bundle_provisioning_tests {
         // genuinely-fresh-insert path, not the atomic find-or-insert's
         // own lookup, precisely so idempotent callers don't leak one
         // unbound bundle per repeated call.
-        let second = agent_define_core(state.mstore.clone(), state.id_store.clone(), state.broker.clone(), cmd(json!({
+        let second = agent_define_core(state.mstore.clone(), state.broker.clone(), cmd(json!({
             "name": "skip-no-leak-test",
             "provider": "claude",
             "if_exists": "skip",
@@ -399,7 +396,6 @@ pub fn allocate_agent_workdir(desired: &str) -> Result<String, String> {
 
 pub(crate) async fn agent_define_core(
     mstore: Arc<Store>,
-    id_store: Arc<Store>,
     broker: Arc<crate::backend::mps::Broker>,
     cmd: CommandAgentDefineData,
 ) -> Result<AgentDefineResult, String> {
@@ -609,13 +605,6 @@ pub(crate) async fn agent_define_core(
     }
 
     // Fresh insert — def.slug is now set by agent_def_find_or_insert.
-    // Every agent gets its own dedicated ABF bundle
-    // (ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §3.2). Done here,
-    // after the atomic find-or-insert has confirmed this is a genuinely
-    // NEW definition — not before, or every idempotent `if_exists=skip`/
-    // `update` call against an existing name would leak an unbound bundle
-    // (see `agent_def_provision_and_bind_bundle`'s own doc comment).
-    mstore.agent_def_provision_and_bind_bundle(&id_store, &mut def, now);
     // Create the stub first so that listeners handling agents:changed can
     // immediately find the new agent via ListRecentSessionsCommand. The
     // definition is already committed; a stub failure is non-fatal (log +

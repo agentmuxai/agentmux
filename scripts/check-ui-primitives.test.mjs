@@ -9,6 +9,7 @@ import {
     badRadii,
     buttonViolations,
     hardZeroViolations,
+    MENUS_ALLOWLIST,
     zeroViolations,
     collect,
     colourLiterals,
@@ -654,6 +655,21 @@ describe("rule 15: hand-written text fields", () => {
 });
 
 describe("menus (rule 16)", () => {
+    it("is a hard zero except for the window-chrome menus named, each with a reason", () => {
+        expect(Object.keys(MENUS_ALLOWLIST).sort()).toEqual([
+            "frontend/app/window/action-widgets.tsx",
+            "frontend/app/window/hamburger-menu.tsx",
+            "frontend/app/window/titlebar-context-menu.tsx",
+        ]);
+        for (const entry of Object.values(MENUS_ALLOWLIST)) expect(entry.reason.length).toBeGreaterThan(40);
+        expect(hardZeroViolations({ menus: { "frontend/app/window/hamburger-menu.tsx": 1 } }, { menus: MENUS_ALLOWLIST })).toEqual([
+            "menus: frontend/app/window/action-widgets.tsx has none; remove it from the menus allowlist",
+            "menus: frontend/app/window/titlebar-context-menu.tsx has none; remove it from the menus allowlist",
+        ]);
+        expect(hardZeroViolations({ menus: { "frontend/app/view/x/x.tsx": 1 } }, { menus: {} })).toEqual(["menus: frontend/app/view/x/x.tsx has 1, allowed 0"]);
+    });
+
+
     it("counts the older menu systems and a hand-made role=menu, not the kit Menu or a comment", () => {
         const source = [
             "<FlyoutMenu items={a}><i/></FlyoutMenu>",

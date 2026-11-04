@@ -110,6 +110,29 @@ pub struct ActReq {
 pub struct ActData {
     /// The element's state after acting: value, checked, validation message.
     pub after: Value,
+    /// Where the page is now (`url`, `title`) and whether its address differs
+    /// from the one the agent last read (`changed`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub page: Option<Value>,
+}
+
+/// Where the page is after an action, so the agent needs no snapshot to learn
+/// that a click navigated. `before` is the address its last snapshot was of.
+/// `None` when the page doesn't answer in two seconds (a dialog it opened).
+async fn page_now(cdp: &mut CdpSession, before: &str) -> Option<Value> {
+    let (url, title) = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        let url = page_url(cdp).await;
+        let title = cdp
+            .call("Runtime.evaluate", json!({ "expression": "document.title", "returnByValue": true }))
+            .await
+            .ok()
+            .and_then(|v| v.pointer("/result/value").and_then(|t| t.as_str()).map(str::to_string))
+            .unwrap_or_default();
+        (url, title)
+    })
+    .await
+    .ok()?;
+    (!url.is_empty()).then(|| json!({ "url": url, "title": title, "changed": !before.is_empty() && url != before }))
 }
 
 // ── Functions run on the element (`this`) in the isolated world ────────────
@@ -922,9 +945,13 @@ pub async fn act_route(
         }
     }
     let result = act(&mut cdp, &table, backend, frame.as_ref(), allowed.as_deref(), &req).await;
+    let page = match &result {
+        Ok(after) if after.get("needs_approval").is_none() => page_now(&mut cdp, &table.url).await,
+        _ => None,
+    };
     let _ = cdp.close().await;
     match result {
-        Ok(after) => (StatusCode::OK, Json(ApiResponse::ok(ActData { after }))),
+        Ok(after) => (StatusCode::OK, Json(ApiResponse::ok(ActData { after, page }))),
         Err(e) => fail(e),
     }
 }
@@ -1405,7 +1432,7 @@ pub async fn set_files_route(
     let result = set_files(&mut cdp, &table, backend, frame.as_ref(), &req).await;
     let _ = cdp.close().await;
     match result {
-        Ok(after) => (StatusCode::OK, Json(ApiResponse::ok(ActData { after }))),
+        Ok(after) => (StatusCode::OK, Json(ApiResponse::ok(ActData { after, page: None }))),
         Err(e) => fail(e),
     }
 }

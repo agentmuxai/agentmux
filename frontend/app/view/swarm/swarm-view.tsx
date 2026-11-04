@@ -123,9 +123,9 @@ export function RemoteAgentRow(props: { model: SwarmViewModel; row: RemoteRow })
                 <SwarmSeatPill seat={remoteSeatInfo(props.row).seat} />
                 <span class="swarm-remote-where">
                     <span class="swarm-remote-title">{section().title}</span>
-                    <span class="swarm-remote-badge">{section().badge}</span>
+                    <Tag size="xs">{section().badge}</Tag>
                     <Show when={section().platform}>
-                        <span class="swarm-remote-platform">{section().platform}</span>
+                        <Tag size="xs">{section().platform}</Tag>
                     </Show>
                     <Show when={section().stale}>
                         <span class="swarm-remote-seen">{seenAgo(section().seenAtMs, Date.now())}</span>
@@ -975,9 +975,9 @@ function CronRow({ cron }: { cron: ActiveCron }): JSX.Element {
             <Show when={missedLabel()}>
                 <span class="swarm-cron-missed" {...tip(cron.last_miss_reason)}>{missedLabel()}</span>
             </Show>
-            <span class={`swarm-cron-status-badge swarm-cron-status-badge--${cron.enabled ? "active" : "paused"}`}>
+            <Tag size="xs" tone={cron.enabled ? "accent" : "neutral"}>
                 {cron.enabled ? "Active" : "Paused"}
-            </span>
+            </Tag>
         </div>
     );
 }
@@ -1053,9 +1053,9 @@ function WorkflowDispatchRow({
                         ? `${activeCount()}/${group.memberCount} active`
                         : `${group.memberCount} retired`}
                 </span>
-                <span class={`swarm-workflow-status-badge swarm-workflow-status-badge--${group.status}`}>
+                <Tag size="xs" tone={group.status === "active" ? "warn" : "neutral"}>
                     {group.status === "active" ? "Active" : "Retired"}
-                </span>
+                </Tag>
                 <Show when={countdownSeconds() != null}>
                     <span class="swarm-subagent-countdown">disappearing in {countdownSeconds()}s</span>
                 </Show>

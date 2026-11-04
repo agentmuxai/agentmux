@@ -980,19 +980,16 @@ mod recent_sessions_tests {
         }
     }
 
-    // ---- Mandatory ABF: definition-time bundle provisioning ----
+    // ---- A new agent definition has no bundle of its own ----
     //
-    // ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §3.2 — every
-    // freshly-created agent definition gets its own dedicated bundle
-    // (not a shared/inherited one), with provider/model derived from the
-    // agent's own harness. m0021 (crates/srv/src/migrations/
-    // m0021_backfill_agent_bundles.rs) covers the backfill half for
-    // agents that already existed before this shipped; these tests cover
-    // the forward-going creation paths.
+    // REPORT_AGENT_BUNDLES_REFINE_OR_DROP_2026_11_03.md: the empty
+    // "<Name> — ABF" bundle every new agent used to get is no longer
+    // created.
 
     #[tokio::test]
-    async fn create_from_template_provisions_its_own_bundle() {
+    async fn create_from_template_creates_no_bundle() {
         let (state, engine, mut rx) = build_state_with_template_seed();
+        let bundles_before = state.id_store.bundle_list().unwrap().len();
         let resp: crate::backend::rpc_types::AgentDefCreateFromTemplateResult = call_rpc(
             &engine,
             &mut rx,
@@ -1008,25 +1005,14 @@ mod recent_sessions_tests {
             .agent_def_get(&resp.definition_id)
             .unwrap()
             .expect("new definition should exist");
-        assert!(!new_def.memory_id.is_empty(), "new definition must have a bundle bound");
-        let bundle = state
-            .mstore
-            .bundle_get(&new_def.memory_id)
-            .unwrap()
-            .expect("bound bundle should exist");
-        assert!(!bundle.is_blank, "must be a real bundle, not the shared blank singleton");
-        assert_eq!((bundle.provider.as_str(), bundle.model.as_str()), ("", ""), "the bundle carries no harness");
-        assert!(bundle.name.contains("Asaf"));
-
-        // "Own" bundle — not the template's own (empty, since tpl-claude
-        // was seeded directly via agent_def_insert, bypassing this path).
-        let tpl = state.mstore.agent_def_get("tpl-claude").unwrap().unwrap();
-        assert_ne!(new_def.memory_id, tpl.memory_id);
+        assert!(new_def.memory_id.is_empty(), "a new definition has no bundle of its own");
+        assert_eq!(state.id_store.bundle_list().unwrap().len(), bundles_before, "no bundle is created");
     }
 
     #[tokio::test]
-    async fn fork_agent_definition_provisions_its_own_bundle_distinct_from_source() {
+    async fn fork_agent_definition_creates_no_bundle() {
         let (state, engine, mut rx) = build_state_with_template_seed();
+        let bundles_before = state.id_store.bundle_list().unwrap().len();
         // forkagentdefinition returns the full new AgentDefinition directly.
         let fork_resp: AgentDefinition = call_rpc(
             &engine,
@@ -1040,18 +1026,15 @@ mod recent_sessions_tests {
             .agent_def_get(&fork_resp.id)
             .unwrap()
             .expect("fork should exist");
-        assert!(!fork.memory_id.is_empty(), "fork must have its own bundle bound");
-        assert_eq!(fork.memory_id, fork_resp.memory_id, "response should already reflect the bound bundle");
-
-        // "user-a" was seeded directly via agent_def_insert (empty memory_id),
-        // so this also proves the fork didn't just inherit a shared/parent id.
-        let source = state.mstore.agent_def_get("user-a").unwrap().unwrap();
-        assert_ne!(fork.memory_id, source.memory_id);
+        assert!(fork.memory_id.is_empty(), "a fork has no bundle of its own");
+        assert_eq!(fork.memory_id, fork_resp.memory_id);
+        assert_eq!(state.id_store.bundle_list().unwrap().len(), bundles_before, "no bundle is created");
     }
 
     #[tokio::test]
-    async fn createagent_provisions_own_bundle_and_response_reflects_it() {
+    async fn createagent_creates_no_bundle() {
         let (state, engine, mut rx) = build_state_with_template_seed();
+        let bundles_before = state.id_store.bundle_list().unwrap().len();
         let created: AgentDefinition = call_rpc(
             &engine,
             &mut rx,
@@ -1059,16 +1042,10 @@ mod recent_sessions_tests {
             serde_json::json!({ "name": "Codex Agent", "provider": "codex" }),
         )
         .await;
-        // The RPC response itself must reflect the bound bundle, not the
-        // empty placeholder the struct started with — createagent
-        // serializes the same in-memory struct that
-        // agent_def_provision_and_bind_bundle mutates.
-        assert!(!created.memory_id.is_empty(), "response should already reflect the bound bundle");
-
+        assert!(created.memory_id.is_empty(), "a new agent has no bundle of its own");
         let stored = state.mstore.agent_def_get(&created.id).unwrap().unwrap();
-        assert_eq!(stored.memory_id, created.memory_id);
-        let bundle = state.mstore.bundle_get(&created.memory_id).unwrap().unwrap();
-        assert_eq!((bundle.provider.as_str(), bundle.model.as_str()), ("", ""), "the bundle carries no harness");
+        assert_eq!(stored.memory_id, "");
+        assert_eq!(state.id_store.bundle_list().unwrap().len(), bundles_before, "no bundle is created");
         assert_eq!(stored.provider, "codex");
     }
 
