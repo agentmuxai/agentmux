@@ -39,7 +39,7 @@ pub const GH_FUNCTION_BODY: &str = r#"() {  if [ -n "${AGENTMUX_GITHUB_BROKER:-}
       _amx_a=();
     fi;
     _amx_t="$(agentmux-bashwrap github-token -- "$@")";
-    if [ "$1" = pr ] && { [ "$2" = create ] || [ "$2" = edit ]; }; then
+    if [ "$1" = pr ] && { [ "$2" = create ] || [ "$2" = new ] || [ "$2" = edit ]; }; then
       while IFS= read -r -d '' _amx_x; do _amx_a+=("$_amx_x"); done < <(agentmux-bashwrap github-owner-tag -- "$@" 2>/dev/null);
       if [ "${#_amx_a[@]}" -gt 0 ]; then set -- "${_amx_a[@]}"; fi;
     fi;

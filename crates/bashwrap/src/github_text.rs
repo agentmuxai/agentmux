@@ -24,9 +24,10 @@ const MAX_HITS: usize = 20;
 /// The largest text read for the scan (a PR body is at most 65,536 characters; a `gh api --input`
 /// file can be bigger). A larger one is refused: it can't be scanned.
 const MAX_TEXT_BYTES: u64 = 8 * 1024 * 1024;
-/// A stdin body goes to `gh` as a file in this directory of the temp folder, and files older than a day are removed.
-const STDIN_DIR: &str = "agentmux-gh-text";
-const STDIN_KEEP: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+/// What `gh` reads (a body file, stdin) goes to it as a copy in this folder of the temp directory,
+/// and copies older than a day are removed.
+const COPIES_DIR: &str = "agentmux-gh-text";
+const COPIES_KEEP: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
 
 /// Where a credential-shaped string is in the command, and what kind.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,9 +57,9 @@ fn command_words(args: &[String]) -> (Option<&str>, Option<&str>) {
 /// message, release notes or an API call?
 pub fn sends_text(args: &[String]) -> bool {
     match command_words(args) {
-        (Some("pr"), Some("create" | "edit" | "comment" | "review" | "merge" | "close" | "reopen")) => true,
-        (Some("issue"), Some("create" | "edit" | "comment" | "close" | "reopen")) => true,
-        (Some("release"), Some("create" | "edit")) => true,
+        (Some("pr"), Some("create" | "new" | "edit" | "comment" | "review" | "merge" | "close" | "reopen")) => true,
+        (Some("issue"), Some("create" | "new" | "edit" | "comment" | "close" | "reopen")) => true,
+        (Some("release"), Some("create" | "new" | "edit")) => true,
         (Some("api"), _) => true,
         _ => false,
     }
@@ -92,6 +93,15 @@ fn long_flag_value(arg: &str) -> Option<(&str, &str)> {
     (name.starts_with(|c: char| c.is_ascii_alphabetic()) && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')).then_some((flag, value))
 }
 
+/// `-X<value>`: a short flag with its value attached (`-bTEXT`, `-Fpath`, `-fkey=value`), as `-X` and `<value>`.
+fn short_attached(arg: &str) -> Option<(&str, &str)> {
+    let rest = arg.strip_prefix('-')?;
+    let mut chars = rest.chars();
+    let letter = chars.next().filter(char::is_ascii_alphabetic)?;
+    let value = chars.as_str();
+    (!value.is_empty() && !value.starts_with('-')).then(|| (&arg[..1 + letter.len_utf8()], value))
+}
+
 /// One piece of text the command sends: given on the command line, or in a file (`-` for stdin).
 #[derive(Debug, PartialEq, Eq)]
 enum Source {
@@ -117,7 +127,24 @@ fn sources(args: &[String]) -> Vec<(String, Source)> {
             }
             continue;
         }
-        if is_flag(arg) {
+        // A flag-like argument is scanned whole too: a credential can be glued to it (`-bTEXT`), or be
+        // an argument that merely begins with a dash. A short flag's attached value is its own source.
+        if arg.starts_with('-') && arg.len() > 1 {
+            if let Some((flag, value)) = short_attached(arg) {
+                if takes_file(flag, api) {
+                    out.push((flag.to_string(), Source::File(value.to_string())));
+                } else if api && matches!(flag, "-F") {
+                    push_field(&mut out, flag, value);
+                } else if api && matches!(flag, "-f") {
+                    let key = value.split_once('=').map(|(k, _)| k).unwrap_or("");
+                    out.push((format!("{flag} {key}"), Source::Inline(value.to_string())));
+                } else {
+                    out.push((flag.to_string(), Source::Inline(value.to_string())));
+                }
+            }
+            if !is_flag(arg) || short_attached(arg).is_some() {
+                out.push((prev.map(str::to_string).unwrap_or_else(|| format!("argument {}", i + 1)), Source::Inline(arg.clone())));
+            }
             continue;
         }
         let place = prev.map(str::to_string).unwrap_or_else(|| format!("argument {}", i + 1));
@@ -165,26 +192,40 @@ pub struct Scan {
     pub hits: Vec<Hit>,
     /// A file too large to scan: the command is refused.
     pub too_large: Vec<String>,
-    /// The command reads a body from stdin.
-    pub uses_stdin: bool,
+    /// Every file the command reads (`-` for stdin) with the text scanned. `gh` is given a copy of
+    /// each, so it reads exactly what was scanned: stdin and pipes can't be read twice, and a
+    /// file could change between the scan and `gh` opening it.
+    pub copies: Vec<(String, String)>,
 }
 
-/// Scan `gh <args>`. `read_file` gives a file's text: `Ok(None)` when it isn't there (gh will say
-/// so itself), `Err` when it is too large to scan. `stdin` gives what stdin holds, read at most once.
+impl Scan {
+    fn keep_copy(&mut self, original: &str, text: String) {
+        if !self.copies.iter().any(|(o, _)| o == original) {
+            self.copies.push((original.to_string(), text));
+        }
+    }
+}
+
+/// Scan `gh <args>`. `read_file` gives a file's text, whatever kind of file it is (a pipe, a
+/// device): `Ok(None)` when it isn't there (gh will say so itself), `Err` when it is too large to
+/// scan. `stdin` gives what stdin holds, read at most once.
 pub fn scan(args: &[String], read_file: impl Fn(&str) -> Result<Option<String>, ()>, mut stdin: impl FnMut() -> Result<String, ()>) -> Scan {
     let mut result = Scan::default();
     for (place, source) in sources(args) {
         match source {
             Source::Inline(text) => scan_text(&place, &text, &mut result.hits),
-            Source::File(path) if path == "-" => {
-                result.uses_stdin = true;
-                match stdin() {
-                    Ok(text) => scan_text(&place, &text, &mut result.hits),
-                    Err(()) => result.too_large.push(format!("{place} (stdin)")),
+            Source::File(path) if path == "-" => match stdin() {
+                Ok(text) => {
+                    scan_text(&place, &text, &mut result.hits);
+                    result.keep_copy(&path, text);
                 }
-            }
+                Err(()) => result.too_large.push(format!("{place} (stdin)")),
+            },
             Source::File(path) => match read_file(&path) {
-                Ok(Some(text)) => scan_text(&format!("{place} {path}"), &text, &mut result.hits),
+                Ok(Some(text)) => {
+                    scan_text(&format!("{place} {path}"), &text, &mut result.hits);
+                    result.keep_copy(&path, text);
+                }
                 Ok(None) => {}
                 Err(()) => result.too_large.push(format!("{place} {path}")),
             },
@@ -193,23 +234,37 @@ pub fn scan(args: &[String], read_file: impl Fn(&str) -> Result<Option<String>, 
     result
 }
 
-/// `args` with every stdin source (`-`, `@-`) replaced by `path`.
-pub fn replace_stdin(args: &[String], path: &str) -> Vec<String> {
+/// `args` with every file the command reads replaced by its copy: `files` maps the value the
+/// command gave (`-` for stdin, or a path) to where the copy is.
+pub fn replace_files(args: &[String], files: &std::collections::HashMap<String, String>) -> Vec<String> {
     let api = is_api(args);
+    // `key=@file` of a `gh api` field.
+    let field = |kv: &str| kv.split_once('=').and_then(|(k, v)| files.get(v.strip_prefix('@')?).map(|p| format!("{k}=@{p}")));
     let mut out = Vec::with_capacity(args.len());
     for (i, arg) in args.iter().enumerate() {
         let prev = i.checked_sub(1).map(|p| args[p].as_str()).filter(|p| is_flag(p));
         let after_file_flag = prev.is_some_and(|p| takes_file(p, api));
         let after_field_flag = api && prev.is_some_and(|p| matches!(p, "-F" | "--field"));
-        let replaced = if arg == "-" && after_file_flag {
-            Some(path.to_string())
-        } else if after_field_flag && arg.split_once('=').is_some_and(|(_, v)| v == "@-") {
-            arg.split_once('=').map(|(k, _)| format!("{k}=@{path}"))
+        let attached = short_attached(arg).and_then(|(flag, value)| {
+            if takes_file(flag, api) {
+                files.get(value).map(|p| format!("{flag}{p}"))
+            } else if api && flag == "-F" {
+                field(value).map(|v| format!("{flag}{v}"))
+            } else {
+                None
+            }
+        });
+        let replaced = if attached.is_some() {
+            attached
+        } else if after_file_flag {
+            files.get(arg.as_str()).cloned()
+        } else if after_field_flag {
+            field(arg)
         } else if let Some((flag, value)) = long_flag_value(arg) {
-            if value == "-" && takes_file(flag, api) {
-                Some(format!("{flag}={path}"))
-            } else if api && flag == "--field" && value.split_once('=').is_some_and(|(_, v)| v == "@-") {
-                value.split_once('=').map(|(k, _)| format!("{flag}={k}=@{path}"))
+            if takes_file(flag, api) {
+                files.get(value).map(|p| format!("{flag}={p}"))
+            } else if api && flag == "--field" {
+                field(value).map(|v| format!("{flag}={v}"))
             } else {
                 None
             }
@@ -244,15 +299,20 @@ pub fn refusal_text(args: &[String], scan: &Scan) -> String {
     out
 }
 
+/// A file's text, whatever it is: a regular file, a named pipe, `/dev/stdin`, a process
+/// substitution. `gh` reads those too, so the scan must. `Ok(None)` for a path that isn't there or
+/// is a directory (gh says so itself); `Err` when there is more than the scan reads.
 fn read_file_limited(path: &str) -> Result<Option<String>, ()> {
-    let Ok(meta) = std::fs::metadata(path) else { return Ok(None) };
-    if !meta.is_file() {
+    if std::fs::metadata(path).map(|m| m.is_dir()).unwrap_or(false) {
         return Ok(None);
     }
-    if meta.len() > MAX_TEXT_BYTES {
+    let Ok(file) = std::fs::File::open(path) else { return Ok(None) };
+    let mut buf = Vec::new();
+    let _ = file.take(MAX_TEXT_BYTES + 1).read_to_end(&mut buf);
+    if buf.len() as u64 > MAX_TEXT_BYTES {
         return Err(());
     }
-    Ok(std::fs::read(path).ok().map(|b| String::from_utf8_lossy(&b).into_owned()))
+    Ok(Some(String::from_utf8_lossy(&buf).into_owned()))
 }
 
 fn read_stdin_limited() -> Result<String, ()> {
@@ -264,19 +324,39 @@ fn read_stdin_limited() -> Result<String, ()> {
     Ok(String::from_utf8_lossy(&buf).into_owned())
 }
 
-/// Write `text` where `gh` can read it as a file, and remove the folder's files older than a day.
-fn write_stdin_file(text: &str) -> Option<String> {
-    let dir = std::env::temp_dir().join(STDIN_DIR);
+/// The folder the copies go in: the user's own (mode 0700 on Unix; a folder that is someone
+/// else's, or open to others, is not used), with the files older than a day removed.
+fn copies_dir() -> Option<std::path::PathBuf> {
+    let dir = std::env::temp_dir().join(COPIES_DIR);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir).ok()?;
+        let meta = std::fs::symlink_metadata(&dir).ok()?;
+        // SAFETY: geteuid has no preconditions and cannot fail.
+        let me = unsafe { libc::geteuid() };
+        if !meta.is_dir() || meta.uid() != me || meta.permissions().mode() & 0o077 != 0 {
+            return None;
+        }
+    }
+    #[cfg(not(unix))]
     std::fs::create_dir_all(&dir).ok()?;
     if let Ok(entries) = std::fs::read_dir(&dir) {
         for e in entries.flatten() {
-            let old = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age > STDIN_KEEP);
+            let old = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age > COPIES_KEEP);
             if old {
                 let _ = std::fs::remove_file(e.path());
             }
         }
     }
-    let path = dir.join(format!("{}-{}.txt", std::process::id(), agentmux_common::time::now_ms()));
+    Some(dir)
+}
+
+/// Write `text` where `gh` can read it as a file.
+fn write_copy(dir: &std::path::Path, text: &str) -> Option<String> {
+    static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let path = dir.join(format!("{}-{}-{n}.txt", std::process::id(), agentmux_common::time::now_ms()));
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
@@ -306,11 +386,11 @@ pub fn run_github_text_guard(gh_args: &[String]) -> i32 {
         finish(gh_args, "ok");
         return 0;
     }
-    let mut stdin_text = None;
     // Stdin is read once, whichever flags name it.
+    let mut stdin_text: Option<String> = None;
     let result = scan(gh_args, read_file_limited, || {
         if let Some(text) = &stdin_text {
-            return Ok::<String, ()>(String::clone(text));
+            return Ok::<String, ()>(text.clone());
         }
         let text = read_stdin_limited()?;
         stdin_text = Some(text.clone());
@@ -321,17 +401,23 @@ pub fn run_github_text_guard(gh_args: &[String]) -> i32 {
         finish(&[], "refused");
         return 1;
     }
-    let args = match (result.uses_stdin, stdin_text) {
-        (true, Some(text)) => match write_stdin_file(&text) {
-            Some(path) => replace_stdin(gh_args, &path),
-            None => {
-                eprintln!("agentmux: this gh command is refused: its text was read from stdin and couldn't be handed on after the check.");
-                finish(&[], "refused");
-                return 1;
+    let mut files = std::collections::HashMap::new();
+    if !result.copies.is_empty() {
+        let dir = copies_dir();
+        for (original, text) in &result.copies {
+            match dir.as_deref().and_then(|d| write_copy(d, text)) {
+                Some(path) => {
+                    files.insert(original.clone(), path);
+                }
+                None => {
+                    eprintln!("agentmux: this gh command is refused: the text it reads was checked but couldn't be handed on after the check.");
+                    finish(&[], "refused");
+                    return 1;
+                }
             }
-        },
-        _ => gh_args.to_vec(),
-    };
+        }
+    }
+    let args = replace_files(gh_args, &files);
     finish(&args, "ok");
     0
 }
@@ -364,6 +450,10 @@ mod tests {
             &["pr", "review", "4", "--approve"],
             &["pr", "merge", "4", "--body", "x"],
             &["release", "create", "v1"],
+            // gh's `new` aliases send the same text.
+            &["issue", "new"],
+            &["pr", "new", "--body", "x"],
+            &["release", "new", "v1"],
             &["api", "repos/o/r/issues/1/comments"],
             &["pr", "-R", "o/r", "edit", "3"],
         ] {
@@ -411,17 +501,82 @@ mod tests {
         assert_eq!(scan(&args(&["pr", "create", "--body-file", "huge.md"]), big, no_stdin).too_large.len(), 1);
     }
 
+    fn files(pairs: &[(&str, &str)]) -> std::collections::HashMap<String, String> {
+        pairs.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect()
+    }
+
     #[test]
-    fn a_body_on_stdin_is_scanned_once_and_handed_on_as_a_file() {
+    fn what_gh_reads_is_handed_on_as_a_copy_of_what_was_scanned() {
+        // stdin
         let a = args(&["pr", "create", "--title", "t", "--body-file", "-"]);
-        let s = scan(&a, no_files, || Ok(format!("x\n{}\n", token())));
-        assert!(s.uses_stdin);
+        let s = scan(&a, no_files, || Ok(format!("x
+{}
+", token())));
         assert_eq!(s.hits[0].place, "--body-file");
-        assert_eq!(replace_stdin(&a, "/tmp/b.txt"), args(&["pr", "create", "--title", "t", "--body-file", "/tmp/b.txt"]));
-        assert_eq!(replace_stdin(&args(&["issue", "comment", "1", "-F", "-"]), "P"), args(&["issue", "comment", "1", "-F", "P"]));
-        assert_eq!(replace_stdin(&args(&["pr", "create", "--body-file=-"]), "P"), args(&["pr", "create", "--body-file=P"]));
+        assert_eq!(s.copies.len(), 1);
+        assert_eq!(s.copies[0].0, "-");
+        assert_eq!(replace_files(&a, &files(&[("-", "/tmp/b.txt")])), args(&["pr", "create", "--title", "t", "--body-file", "/tmp/b.txt"]));
+        assert_eq!(replace_files(&args(&["issue", "comment", "1", "-F", "-"]), &files(&[("-", "P")])), args(&["issue", "comment", "1", "-F", "P"]));
+        assert_eq!(replace_files(&args(&["pr", "create", "--body-file=-"]), &files(&[("-", "P")])), args(&["pr", "create", "--body-file=P"]));
         // A lone `-` that is not a file flag's value is left alone.
-        assert_eq!(replace_stdin(&args(&["pr", "create", "--title", "-"]), "P"), args(&["pr", "create", "--title", "-"]));
+        assert_eq!(replace_files(&args(&["pr", "create", "--title", "-"]), &files(&[("-", "P")])), args(&["pr", "create", "--title", "-"]));
+        // A regular file, a pipe or `/dev/stdin` the same: gh reads the copy, not the original, which
+        // can't be read twice (a pipe) or could change after the scan (a file).
+        let read = |p: &str| -> Result<Option<String>, ()> { Ok((p == "/dev/stdin" || p == "body.md").then(|| "clean".to_string())) };
+        let s = scan(&args(&["pr", "create", "--body-file", "/dev/stdin", "-F", "body.md", "-F", "body.md"]), read, no_stdin);
+        assert_eq!(s.copies.iter().map(|(o, _)| o.as_str()).collect::<Vec<_>>(), vec!["/dev/stdin", "body.md"]);
+        assert_eq!(
+            replace_files(&args(&["pr", "create", "--body-file", "/dev/stdin", "-F", "body.md"]), &files(&[("/dev/stdin", "C1"), ("body.md", "C2")])),
+            args(&["pr", "create", "--body-file", "C1", "-F", "C2"])
+        );
+        // A path that isn't there is left alone: gh says so itself.
+        assert!(scan(&args(&["pr", "create", "--body-file", "nope"]), no_files, no_stdin).copies.is_empty());
+    }
+
+    #[test]
+    fn a_short_flag_with_its_value_glued_on_is_scanned_too() {
+        let aws = format!("{}{}", "AKIA", "ABCDEFGHIJKLMNOP");
+        for a in [
+            args(&["pr", "create", &format!("-t{aws}")]),
+            args(&["pr", "create", &format!("-b{aws}")]),
+            args(&["pr", "create", &format!("-b{}", token())]),
+            args(&["issue", "comment", "1", &format!("-sk-ant-{}", "api03-abcdefghijklmnopqrstuvwxyz0123456789")]),
+            args(&["api", "x", &format!("-fbody={aws}")]),
+            args(&["api", "x", &format!("--raw-field=body={aws}")]),
+        ] {
+            assert!(!scan(&a, no_files, no_stdin).hits.is_empty(), "{a:?}");
+        }
+        // The file flags with the path glued on name a file to read and copy.
+        let read = |p: &str| -> Result<Option<String>, ()> { Ok((p == "b.md").then(|| aws.clone())) };
+        let a = args(&["pr", "create", "-Fb.md"]);
+        let s = scan(&a, read, no_stdin);
+        assert_eq!((s.hits.len(), s.copies.len()), (1, 1));
+        assert_eq!(replace_files(&a, &files(&[("b.md", "C")])), args(&["pr", "create", "-FC"]));
+        let a = args(&["api", "x", "-Fbody=@b.md"]);
+        assert_eq!(scan(&a, read, no_stdin).hits.len(), 1);
+        assert_eq!(replace_files(&a, &files(&[("b.md", "C")])), args(&["api", "x", "-Fbody=@C"]));
+        // Plain flags are not text.
+        assert!(scan(&args(&["pr", "create", "--draft", "--fill", "-d", "-R", "o/r"]), no_files, no_stdin).hits.is_empty());
+    }
+
+    #[test]
+    fn a_file_of_any_kind_is_read_for_the_scan() {
+        let dir = std::env::temp_dir().join(format!("amx-gh-text-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("b.md");
+        std::fs::write(&file, format!("{}
+", token())).unwrap();
+        let text = read_file_limited(file.to_str().unwrap()).unwrap().unwrap();
+        assert!(credential_in(&text).is_some());
+        // A directory and a missing path are gh's to report.
+        assert_eq!(read_file_limited(dir.to_str().unwrap()), Ok(None));
+        assert_eq!(read_file_limited(dir.join("nope").to_str().unwrap()), Ok(None));
+        #[cfg(unix)]
+        {
+            // A device, which is not a regular file, is read too (and `/dev/null` is empty).
+            assert_eq!(read_file_limited("/dev/null"), Ok(Some(String::new())));
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -437,9 +592,11 @@ mod tests {
         assert!(!takes_file("-F", true) && takes_file("-F", false));
         // `-F key=@-` reads stdin.
         let a = args(&["api", "x", "-F", "body=@-"]);
-        assert!(scan(&a, no_files, no_stdin).uses_stdin);
-        assert_eq!(replace_stdin(&a, "P"), args(&["api", "x", "-F", "body=@P"]));
-        assert_eq!(replace_stdin(&args(&["api", "x", "--input", "-"]), "P"), args(&["api", "x", "--input", "P"]));
+        assert_eq!(scan(&a, no_files, no_stdin).copies.len(), 1);
+        assert_eq!(replace_files(&a, &files(&[("-", "P")])), args(&["api", "x", "-F", "body=@P"]));
+        assert_eq!(replace_files(&args(&["api", "x", "--field", "b=@c.txt"]), &files(&[("c.txt", "P")])), args(&["api", "x", "--field", "b=@P"]));
+        assert_eq!(replace_files(&args(&["api", "x", "--field=b=@c.txt"]), &files(&[("c.txt", "P")])), args(&["api", "x", "--field=b=@P"]));
+        assert_eq!(replace_files(&args(&["api", "x", "--input", "-"]), &files(&[("-", "P")])), args(&["api", "x", "--input", "P"]));
     }
 
     #[test]
