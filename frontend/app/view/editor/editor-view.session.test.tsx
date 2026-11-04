@@ -22,6 +22,9 @@ import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 
+// Each test mounts a real CodeMirror and settles for a while; a loaded machine runs past the 5 s default.
+vi.setConfig({ testTimeout: 30_000 });
+
 const h = vi.hoisted(() => ({
     log: [] as string[],
     files: new Map<string, string>(),

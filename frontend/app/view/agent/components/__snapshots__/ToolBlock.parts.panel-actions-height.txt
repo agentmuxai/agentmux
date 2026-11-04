@@ -1,0 +1,26 @@
+fits: (no actions)
+scrolls: <div class="agent-tool-panel-actions">
+<div class="ui-tooltip-anchor">
+<button aria-label="Taller preview" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button agent-tool-panel-height">
+<i aria-hidden="true" class="fa-solid fa-expand">
+</i>
+</button>
+</div>
+</div>
+
+taller (the click stops there: false): agent-tool-panel agent-tool-panel--flow agent-tool-panel--tall
+<div class="agent-tool-panel-actions">
+<div class="ui-tooltip-anchor">
+<button aria-label="Shorter preview" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button agent-tool-panel-height">
+<i aria-hidden="true" class="fa-solid fa-compress">
+</i>
+</button>
+</div>
+</div>
+
+fits again but tall: toggle stays
+shorter: agent-tool-panel agent-tool-panel--flow / (no actions)
+closed while tall: agent-tool-panel agent-tool-panel--hidden
+after the linger: body gone, agent-tool-panel agent-tool-panel--hidden
+reopened: <div class="agent-tool-panel-actions"><div class="ui-tooltip-anchor"><button aria-label="Shorter preview" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button agent-tool-panel-height"><i aria-hidden="true" class="fa-solid fa-compress"></i></button></div></div>
+reports again: agent-tool-panel agent-tool-panel--flow agent-tool-panel--tall / toggle

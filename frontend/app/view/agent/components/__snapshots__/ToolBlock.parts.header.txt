@@ -1,0 +1,135 @@
+Bash command:
+<div class="agent-tool-block collapsed success" data-tool="bash">
+<div class="agent-tool-summary">
+<span class="agent-tool-status-icon">✓</span>
+<span class="agent-tool-name-peek-anchor">
+<span class="agent-tool-name agent-tool-name--cut-start">
+<span class="agent-tool-icon">🔧</span> <span class="agent-tool-label">Bash</span> <span class="agent-tool-detail agent-shell-inline agent-tool-detail--cut-start">
+<bdi>
+<span class="sh-program">ls</span> <span class="sh-flag">-la</span>
+</bdi>
+</span>
+</span>
+</span>
+</div>
+<div class="agent-tool-panel agent-tool-panel--hidden" aria-hidden="true">
+</div>
+</div>
+
+Bash with a note and a duration:
+<div class="agent-tool-block collapsed success" data-tool="bash">
+<div class="agent-tool-summary">
+<span class="agent-tool-status-icon">✓</span>
+<span class="agent-tool-name-peek-anchor">
+<span class="agent-tool-name agent-tool-name--cut-start">
+<span class="agent-tool-icon">🔧</span> <span class="agent-tool-label">Bash</span> <span class="agent-tool-detail agent-shell-inline agent-tool-detail--cut-start">
+<bdi>
+<span class="sh-program">ls</span> <span class="sh-flag">-la</span>
+</bdi>
+</span>
+</span>
+</span>
+<span class="agent-tool-status-note">cleared by muxspect</span>
+<span class="agent-tool-duration">(1.3<!---->s)</span>
+</div>
+<div class="agent-tool-panel agent-tool-panel--hidden" aria-hidden="true">
+</div>
+</div>
+
+Read a path with lines:
+<div class="agent-tool-block collapsed success" data-tool="read">
+<div class="agent-tool-summary">
+<span class="agent-tool-status-icon">✓</span>
+<span class="agent-tool-name-peek-anchor">
+<span class="agent-tool-name agent-tool-name--cut-start">
+<span class="agent-tool-icon">📖</span> <span class="agent-tool-label">Read</span> <span class="agent-tool-range">3:12</span> <span class="agent-tool-detail agent-tool-detail--cut-start">
+<bdi>/a/b.ts</bdi>
+</span>
+</span>
+</span>
+</div>
+<div class="agent-tool-panel agent-tool-panel--hidden" aria-hidden="true">
+</div>
+</div>
+
+Grep pattern:
+<div class="agent-tool-block collapsed success" data-tool="grep">
+<div class="agent-tool-summary">
+<span class="agent-tool-status-icon">✓</span>
+<span class="agent-tool-name-peek-anchor">
+<span class="agent-tool-name">
+<span class="agent-tool-icon">🔍</span> <span class="agent-tool-label">Grep</span> <span class="agent-tool-detail">needle</span>
+</span>
+</span>
+</div>
+<div class="agent-tool-panel agent-tool-panel--hidden" aria-hidden="true">
+</div>
+</div>
+
+running:
+<div class="agent-tool-block expanded running" data-tool="bash">
+<div class="agent-tool-summary">
+<span class="agent-tool-status-icon">⏳</span>
+<span class="agent-tool-name-peek-anchor">
+<span class="agent-tool-name agent-tool-name--cut-start">
+<span class="agent-tool-icon">🔧</span> <span class="agent-tool-label">Bash</span> <span class="agent-tool-detail agent-shell-inline agent-tool-detail--cut-start">
+<bdi>
+<span class="sh-program">ls</span> <span class="sh-flag">-la</span>
+</bdi>
+</span>
+</span>
+</span>
+</div>
+<div class="agent-tool-panel agent-tool-panel--flow" aria-hidden="false">
+<div class="agent-tool-overlay" data-open="true" data-dormant="false">body of tc-1</div>
+</div>
+</div>
+
+pending approval, pinned:
+<div class="agent-tool-block expanded pinned pending_approval" data-tool="bash">
+<div class="agent-tool-summary">
+<span class="agent-tool-status-icon">⚠</span>
+<span class="agent-tool-name-peek-anchor">
+<span class="agent-tool-name agent-tool-name--cut-start">
+<span class="agent-tool-icon">🔧</span> <span class="agent-tool-label">Bash</span> <span class="agent-tool-detail agent-shell-inline agent-tool-detail--cut-start">
+<bdi>
+<span class="sh-program">ls</span> <span class="sh-flag">-la</span>
+</bdi>
+</span>
+</span>
+</span>
+</div>
+<div class="agent-tool-panel agent-tool-panel--flow" aria-hidden="false">
+<div class="agent-tool-overlay" data-open="true" data-dormant="false">body of tc-1</div>
+</div>
+</div>
+
+failed:
+<div class="agent-tool-block collapsed failed" data-tool="bash">
+<div class="agent-tool-summary">
+<span class="agent-tool-status-icon">✗</span>
+<span class="agent-tool-name-peek-anchor">
+<span class="agent-tool-name agent-tool-name--cut-start">
+<span class="agent-tool-icon">🔧</span> <span class="agent-tool-label">Bash</span> <span class="agent-tool-detail agent-shell-inline agent-tool-detail--cut-start">
+<bdi>
+<span class="sh-program">ls</span> <span class="sh-flag">-la</span>
+</bdi>
+</span>
+</span>
+</span>
+</div>
+<div class="agent-tool-panel agent-tool-panel--hidden" aria-hidden="true">
+</div>
+</div>
+
+awaiting an answer:
+<div class="agent-tool-block collapsed awaiting_answer" data-tool="other" data-tool-name="askuserquestion">
+<div class="agent-tool-summary">
+<span class="agent-tool-status-icon">❓</span>
+<span class="agent-tool-name-peek-anchor">
+<span class="agent-tool-name">Waiting for your answer</span>
+</span>
+</div>
+<div class="agent-tool-panel agent-tool-panel--hidden" aria-hidden="true">
+</div>
+</div>
