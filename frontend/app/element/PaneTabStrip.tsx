@@ -1009,8 +1009,7 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
                 const many = props.selection?.dragIds(id());
                 return {
                     kind: "pane-tab",
-                    blockId: id(),
-                    label: props.getLabel(props.tab),
+                    blockId: id(), label: props.getLabel(props.tab), // the ghost pill's text over another pane's strip
                     type: paneTabItemType,
                     sourceNodeId: props.paneKey,
                     sourceTabId: props.sourceTabId,
