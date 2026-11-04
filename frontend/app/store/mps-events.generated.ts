@@ -39,6 +39,7 @@ import type { DockClearEvent } from "@/types/rpc/DockClearEvent";
 import type { EventsDroppedEvent } from "@/types/rpc/EventsDroppedEvent";
 import type { FilesChangedEvent } from "@/types/rpc/FilesChangedEvent";
 import type { FsOpEvent } from "@/types/rpc/FsOpEvent";
+import type { GoogleNoticeEvent } from "@/types/rpc/GoogleNoticeEvent";
 import type { IncidentEvent } from "@/types/rpc/IncidentEvent";
 import type { InputHistoryChangedEvent } from "@/types/rpc/InputHistoryChangedEvent";
 import type { InstallChunkEvent } from "@/types/rpc/InstallChunkEvent";
@@ -149,6 +150,7 @@ export type MuxEventPayloads = {
   "editor:file_changed": PathChangedEvent;
   "files:changed": FilesChangedEvent;
   "files:op": FsOpEvent;
+  "google:notice": GoogleNoticeEvent;
   "identity:no-direct-links": NoDirectLinksEvent;
   "identity:signinlink": SigninLinkEvent;
   "identityaccounts:changed": null;
@@ -265,6 +267,7 @@ export const TYPED_MUX_EVENTS = [
   "editor:file_changed",
   "files:changed",
   "files:op",
+  "google:notice",
   "identity:no-direct-links",
   "identity:signinlink",
   "identityaccounts:changed",

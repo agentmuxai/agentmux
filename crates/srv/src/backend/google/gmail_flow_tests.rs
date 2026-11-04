@@ -170,6 +170,39 @@ async fn an_approved_send_shows_the_draft_asks_once_checks_it_again_and_sends() 
     assert_eq!(log(&w)[0].ids, "r-1");
 }
 
+/// A person who says yes, but the grant is turned off (or the account disconnected) while they decide.
+struct ChangesMind<'a> {
+    store: &'a Store,
+    disconnect: bool,
+}
+
+impl Approver for ChangesMind<'_> {
+    async fn ask(&self, _def: &AgentDefinition, _title: String, _message: String, _yes: &str, _no: &str) -> Result<Answer, String> {
+        if self.disconnect {
+            self.store.identity_delete("acc-1").unwrap();
+            self.store.google_account_forget("acc-1").unwrap();
+        } else {
+            self.store.google_grant_set("def-1", "acc-1", "gmail", None, 2).unwrap();
+        }
+        Ok(Answer::Yes)
+    }
+}
+
+#[tokio::test]
+async fn an_ungrant_or_a_disconnect_while_the_window_waits_stops_the_send() {
+    for (disconnect, words) in [(false, "was removed while this call ran"), (true, "was disconnected while this call ran")] {
+        let w = world(WRITE_SCOPES, Some(GrantLevel::Write));
+        let google = StubGoogle::new(vec![(200, stored_draft("bob@example.com", "See you at noon"))]);
+        let oauth = StubHttp::default();
+        let deps = CallDeps { google: &google, oauth: &oauth, secrets: &w.secrets, mstore: &w.store, id_store: &w.store, identity_store: &w.store };
+        let args: GmailArgs = serde_json::from_value(json!({ "draft_id": "r-1" })).unwrap();
+        let person = ChangesMind { store: &w.store, disconnect };
+        let e = gmail_write(&deps, &person, &w.def, "send_draft", &args, None, chrono::Utc::now()).await.unwrap_err();
+        assert!(e.contains(words), "{e}");
+        assert_eq!(google.seen().len(), 1, "only the read before the question: nothing was sent");
+    }
+}
+
 #[tokio::test]
 async fn a_no_or_no_answer_sends_nothing() {
     for (answer, words) in [(Answer::No, "said no"), (Answer::Unanswered, "didn't answer")] {

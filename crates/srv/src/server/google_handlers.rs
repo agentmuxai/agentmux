@@ -408,8 +408,7 @@ fn grant_is_backed(level: crate::backend::storage::google_grants::GrantLevel, su
 /// The highest level the account's token supports for `service`, from the scopes it was
 /// granted: `write`, `read` or `none`.
 fn supported_level(account: &crate::backend::storage::store::IdentityAccount, service: Service) -> &'static str {
-    let granted = access::Access { account: account.clone(), level: crate::backend::storage::google_grants::GrantLevel::Read }
-        .granted_scopes();
+    let granted = access::granted_scopes_of(account);
     let has_all = |level| service.scopes(level).iter().all(|s| granted.contains(s));
     if has_all(crate::backend::storage::google_grants::GrantLevel::Write) {
         "write"
@@ -493,6 +492,79 @@ pub(crate) async fn handle_google_grant(
         Ok(v) => Json(v).into_response(),
         Err(e) => error(StatusCode::UNPROCESSABLE_ENTITY, e),
     }
+}
+
+#[derive(Deserialize)]
+pub(crate) struct DisconnectBody {
+    /// The account's email (or its id).
+    account: String,
+}
+
+/// `POST /api/v1/google/disconnect`: end the connection to a Google account: Google's grant is
+/// revoked first, then the saved token, the account's grants and its log go. The same code as the
+/// window's delete. Any agent may ask (the person only signs in); it is noticed in the windows.
+pub(crate) async fn handle_google_disconnect(
+    State(state): State<AppState>,
+    caller: Option<Extension<Caller>>,
+    Json(body): Json<DisconnectBody>,
+) -> Response {
+    let actor = match calling_agent(&state, caller.as_deref()) {
+        Ok(d) => d,
+        Err(e) => return error(StatusCode::FORBIDDEN, e),
+    };
+    match disconnect_by_agent(&state, &actor, &body).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => error(StatusCode::UNPROCESSABLE_ENTITY, e),
+    }
+}
+
+async fn disconnect_by_agent(state: &AppState, actor: &AgentDefinition, body: &DisconnectBody) -> Result<serde_json::Value, String> {
+    let asked = body.account.trim();
+    let accounts = google_accounts(state)?;
+    // The same email can be connected twice (each connection has its own consent): both end.
+    let targets: Vec<_> = accounts.iter().filter(|a| a.id == asked || access::email_of(a).eq_ignore_ascii_case(asked)).collect();
+    if targets.is_empty() {
+        let have: Vec<_> = accounts.iter().map(access::email_of).collect();
+        return Err(if have.is_empty() {
+            "no Google account is connected".to_string()
+        } else {
+            format!("no connected Google account {asked}. Connected: {}", have.join(", "))
+        });
+    }
+    let defs = state.mstore.agent_def_list().map_err(|e| e.to_string())?;
+    let mut lost_access: Vec<String> = Vec::new();
+    let mut revoked = true;
+    let mut gone: Vec<String> = Vec::new();
+    for account in &targets {
+        let email = access::email_of(account);
+        let mut holders: Vec<String> = Vec::new();
+        for grant in state.identity_store.google_grants_for_account(&account.id).map_err(|e| e.to_string())? {
+            holders.push(defs.iter().find(|d| d.id == grant.agent_id).map_or(grant.agent_id.clone(), |d| d.name.clone()));
+        }
+        // Google's revoke comes first and must work: otherwise the connection stays, to try again.
+        let done = super::agent_handlers::delete_identity_account(&state.id_store, &state.identity_store, &state.broker, &account.id, true).await?;
+        if !done.deleted {
+            let why = done.revoke.get("detail").and_then(serde_json::Value::as_str).unwrap_or("Google did not answer");
+            let mut said = format!("Google didn't end the connection to {email} ({why}), so it was kept: try again, or the person removes it in Connectors");
+            // The same email connected twice: the ones before this were already ended, and the windows hear of them.
+            if !gone.is_empty() {
+                said.push_str(&format!(". Already disconnected: {} (agents who lost access: {})", gone.join(", "), lost_access.join(", ")));
+                crate::identity::accounts_changed::tell_windows(format!("{} disconnected a connection of {}", actor.name, gone[0]));
+            }
+            return Err(said);
+        }
+        gone.push(email);
+        for name in holders {
+            if !lost_access.contains(&name) {
+                lost_access.push(name);
+            }
+        }
+        revoked &= done.revoke.get("outcome").and_then(serde_json::Value::as_str) != Some("failed");
+        tracing::info!(target: "google", account_id = %account.id, by = %actor.name, "google: account disconnected by an agent");
+    }
+    let email = access::email_of(targets[0]);
+    crate::identity::accounts_changed::tell_windows(format!("{} disconnected the Google account {email}", actor.name));
+    Ok(json!({ "disconnected": email, "agents_who_lost_access": lost_access, "revoked_at_google": revoked }))
 }
 
 fn grant_by_agent(state: &AppState, actor: &AgentDefinition, body: &GrantBody) -> Result<serde_json::Value, String> {
@@ -587,7 +659,18 @@ fn grant_by_agent(state: &AppState, actor: &AgentDefinition, body: &GrantBody) -
         level = level_name,
         "google: grant set by an agent"
     );
+    crate::identity::accounts_changed::tell_windows(grant_notice(&actor.name, &target_def.name, service, level, &email));
     Ok(json!({ "account": email, "agent": target_def.name, "service": service.as_str(), "level": level_name }))
+}
+
+/// "Naki-2 gave Agent5 Calendar read on me@example.com", or "Naki-2 turned off Calendar for Agent5 on ...".
+fn grant_notice(by: &str, agent: &str, service: Service, level: Option<crate::backend::storage::google_grants::GrantLevel>, email: &str) -> String {
+    let name = service.as_str();
+    let name = format!("{}{}", name[..1].to_ascii_uppercase(), &name[1..]);
+    match level {
+        Some(l) => format!("{by} gave {agent} {name} {} on {email}", l.as_str()),
+        None => format!("{by} turned off {name} for {agent} on {email}"),
+    }
 }
 
 #[path = "google_connect.rs"]

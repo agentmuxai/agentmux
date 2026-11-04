@@ -16,6 +16,8 @@ use super::super::GoogleRequest;
 struct StubGoogle {
     replies: Mutex<Vec<HttpReply>>,
     seen: Mutex<Vec<(GoogleRequest, String)>>,
+    /// Runs while Google "answers": the person or an agent changes something mid-call.
+    meanwhile: Mutex<Option<Box<dyn Fn() + Send>>>,
 }
 
 impl StubGoogle {
@@ -30,6 +32,9 @@ impl StubGoogle {
 impl GoogleHttp for StubGoogle {
     async fn send(&self, req: &GoogleRequest, token: &str) -> Result<HttpReply, String> {
         self.seen.lock().unwrap().push((req.clone(), token.to_string()));
+        if let Some(change) = self.meanwhile.lock().unwrap().as_ref() {
+            change();
+        }
         let mut r = self.replies.lock().unwrap();
         assert!(!r.is_empty(), "an unexpected Google call");
         Ok(r.remove(0))
@@ -85,6 +90,43 @@ async fn a_granted_read_calls_google_with_the_accounts_token_and_is_logged() {
     assert_eq!(log.len(), 1);
     assert_eq!((log[0].agent_id.as_str(), log[0].action.as_str(), log[0].ids.as_str(), log[0].outcome.as_str()), ("def-1", "list_events", "primary", "ok"));
     assert_eq!(log[0].agent_name, "Naki");
+}
+
+#[tokio::test]
+async fn an_ungrant_while_google_answers_drops_what_came_back() {
+    let w = world(READ, Some(GrantLevel::Read), true);
+    let google = StubGoogle::answering(200, json!({ "items": [{ "id": "e1", "summary": "Secret meeting" }] }));
+    let store = w.store.clone();
+    *google.meanwhile.lock().unwrap() = Some(Box::new(move || store.google_grant_set("def-1", "acc-1", "calendar", None, 2).unwrap()));
+    let e = call(&w, &google, "list_events", CalendarArgs::default(), None).await.unwrap_err();
+    assert!(e.contains("access to me@example.com was removed"), "{e}");
+    assert!(!e.contains("Secret meeting"), "no content comes back: {e}");
+    let log = w.store.google_calls("acc-1", 10).unwrap();
+    assert!(log[0].outcome.starts_with("error: "), "the log says it did not return: {:?}", log[0]);
+}
+
+#[tokio::test]
+async fn a_disconnect_while_google_answers_drops_what_came_back() {
+    let w = world(READ, Some(GrantLevel::Read), true);
+    let google = StubGoogle::answering(200, json!({ "items": [{ "id": "e1", "summary": "Secret meeting" }] }));
+    let store = w.store.clone();
+    *google.meanwhile.lock().unwrap() = Some(Box::new(move || {
+        store.identity_delete("acc-1").unwrap();
+        store.google_account_forget("acc-1").unwrap();
+    }));
+    let e = call(&w, &google, "list_events", CalendarArgs::default(), None).await.unwrap_err();
+    assert!(e.contains("me@example.com was disconnected while this call ran"), "{e}");
+    assert!(!e.contains("Secret meeting"), "{e}");
+    assert!(w.store.google_calls("acc-1", 10).unwrap().is_empty(), "no log line is left behind for an account that is gone");
+}
+
+#[tokio::test]
+async fn a_lowered_grant_still_lets_a_read_finish() {
+    let w = world(READ, Some(GrantLevel::Write), true);
+    let google = StubGoogle::answering(200, json!({ "items": [] }));
+    let store = w.store.clone();
+    *google.meanwhile.lock().unwrap() = Some(Box::new(move || store.google_grant_set("def-1", "acc-1", "calendar", Some(GrantLevel::Read), 2).unwrap()));
+    call(&w, &google, "list_events", CalendarArgs::default(), None).await.unwrap();
 }
 
 #[tokio::test]

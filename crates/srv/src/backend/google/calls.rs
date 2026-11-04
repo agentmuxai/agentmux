@@ -47,8 +47,21 @@ pub async fn calendar_read<G: GoogleHttp, O: OAuthHttp, S: TokenSecrets>(
     let access = access_for(deps.mstore, deps.id_store, deps.identity_store, def, Service::Calendar, account)?;
     let ids = calendar::logged_ids(action, args);
     let result = calendar_read_with(deps, &access, action, args, now).await;
+    let result = still_held(deps, &access, result);
     log_call(deps, &access, def, Service::Calendar, action, ids, &result, now);
     result.map(|r| json!({ "account": access.email(), "result": r }))
+}
+
+/// A read that came back after the grant was turned off, or the account disconnected, returns the
+/// sentence saying so instead of Google's content.
+fn still_held<G: GoogleHttp, O: OAuthHttp, S: TokenSecrets>(
+    deps: &CallDeps<'_, G, O, S>,
+    access: &Access,
+    result: Result<Value, String>,
+) -> Result<Value, String> {
+    let kept = result?;
+    access.still_held(deps.id_store, deps.identity_store, GrantLevel::Read)?;
+    Ok(kept)
 }
 
 /// A line in the account's log (D7) for one call, however it ended.
@@ -67,6 +80,10 @@ pub(crate) fn log_call<G: GoogleHttp, O: OAuthHttp, S: TokenSecrets>(
         Ok(_) => "ok".to_string(),
         Err(e) => format!("error: {}", super::clip(e, 200)),
     };
+    // An account disconnected while the call ran took its log with it: a line now would outlive it.
+    if !matches!(crate::identity::resolver::resolve_account(deps.id_store, deps.identity_store, &access.account.id), Ok(Some(_))) {
+        return;
+    }
     let line = GoogleCall {
         at: now.timestamp_millis(),
         agent_id: def.id.clone(),
@@ -120,6 +137,7 @@ pub async fn drive_read<G: GoogleHttp, O: OAuthHttp, S: TokenSecrets>(
     let access = access_for(deps.mstore, deps.id_store, deps.identity_store, def, Service::Drive, account)?;
     let ids = drive::logged_ids(action, args);
     let result = drive_read_with(deps, &access, action, args).await;
+    let result = still_held(deps, &access, result);
     log_call(deps, &access, def, Service::Drive, action, ids, &result, now);
     result.map(|r| json!({ "account": access.email(), "result": r }))
 }
@@ -170,6 +188,7 @@ pub async fn gmail_read<G: GoogleHttp, O: OAuthHttp, S: TokenSecrets>(
     let access = access_for(deps.mstore, deps.id_store, deps.identity_store, def, Service::Gmail, account)?;
     let ids = gmail::logged_ids(action, args);
     let result = gmail_read_with(deps, &access, action, args).await;
+    let result = still_held(deps, &access, result);
     log_call(deps, &access, def, Service::Gmail, action, ids, &result, now);
     result.map(|r| json!({ "account": access.email(), "result": r }))
 }
