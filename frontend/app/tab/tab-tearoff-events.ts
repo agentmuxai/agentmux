@@ -19,6 +19,7 @@ import {
 } from "./tabbar-dnd";
 import { Logger } from "@/util/logger";
 import { markEscaped } from "@/app/drag/drag-session";
+import { noteHostEscape } from "@/app/drag/host-escape";
 import { acceptWindowTabsFromOtherWindows, type WindowTabDragData } from "@/app/drag/foreign-drop";
 
 /**
@@ -273,9 +274,7 @@ export function useTabTearOffEvents(
             // runs. No-op on Windows/Linux today (their hooks don't emit
             // this event), which is fine — the flag just stays false.
             trackOrDispose(
-                await listenEvent<{ tabId: string }>("tabdrag:escape-pressed", () => {
-                    markEscaped();
-                }),
+                await listenEvent<{ tabId: string }>("tabdrag:escape-pressed", onHostEscape),
             );
 
             trackOrDispose(
@@ -394,4 +393,10 @@ export function useTabTearOffEvents(
             unsubs = [];
         });
     });
+}
+
+/** The host's hook saw Escape during a drag: mark the session, and keep it for the drag's end. */
+function onHostEscape(): void {
+    markEscaped();
+    noteHostEscape();
 }

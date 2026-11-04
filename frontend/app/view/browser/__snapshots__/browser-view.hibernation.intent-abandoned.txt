@@ -1,0 +1,11 @@
+diag view-mount window_label=main initial-urlAtom="https://example.com/page"
+register pane
+probe asleep: rect.asleep=true drag.unavailable=true pane.visible=false pane.asleep=true pane.frozen=false hiddenSince=1793707200000
+diag [hibernate] wake-start why=intent visible=false
+probe intent wake: rect.asleep=false drag.unavailable=true pane.visible=false pane.asleep=true pane.frozen=false hiddenSince=1793707200000
+-- load finishes while hidden
+diag [hibernate] wake-loaded ms=300 why=intent visible=false
+probe loaded hidden: rect.asleep=false drag.unavailable=true pane.visible=false pane.asleep=true pane.frozen=false hiddenSince=1793707200000
+-- ten seconds, no switch
+diag [hibernate] wake-abandoned loaded=true
+probe abandoned: rect.asleep=true drag.unavailable=true pane.visible=false pane.asleep=true pane.frozen=false hiddenSince=1793707200000

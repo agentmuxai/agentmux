@@ -700,9 +700,11 @@ declare global {
          *  `tabdrag:merge-direct`. No-op on non-Windows. */
         startTabDragTracking: (args: {
             sourceWindowLabel: string;
-            tabId: string;
-            sourceWsId: string;
-            isLastTab: boolean;
+            tabId?: string;
+            sourceWsId?: string;
+            isLastTab?: boolean;
+            /** A pane or pane-tab drag: the hook only reports Escape (`tabdrag:escape-pressed`). */
+            escapeOnly?: boolean;
         }) => Promise<void>;
         /** Belt-and-suspenders hook teardown at dragend — the hook
          *  self-uninstalls on mouseup/ESC, but a leaked WH_MOUSE_LL hook

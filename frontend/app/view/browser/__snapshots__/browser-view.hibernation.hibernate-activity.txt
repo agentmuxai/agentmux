@@ -1,0 +1,16 @@
+diag view-mount window_label=main initial-urlAtom="https://example.com/page"
+register pane
+-- title changes right after the load: settling
+host.hibernationCheck unless_decided
+host.paneMemory
+model.hibernate hidden memory=4096
+tryHibernate -> null
+-- title changes later: the page is doing something
+tryHibernate -> "already asleep"
+-- icon changes
+tryHibernate -> "already asleep"
+-- shown: the baseline is reset
+diag [hibernate] card-shown
+diag [hibernate] wake-start why=show visible=true
+diag [hibernate] card-hidden after=0
+tryHibernate -> "already asleep"

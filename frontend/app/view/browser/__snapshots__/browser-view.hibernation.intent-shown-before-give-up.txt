@@ -1,0 +1,5 @@
+diag view-mount window_label=main initial-urlAtom="https://example.com/page"
+register pane
+diag [hibernate] wake-start why=intent visible=false
+diag [hibernate] card-shown
+probe end: rect.asleep=false drag.unavailable=true pane.visible=true pane.asleep=true pane.frozen=false hiddenSince=null

@@ -1,0 +1,7 @@
+diag view-mount window_label=main initial-urlAtom="https://example.com/page"
+model.clearSleepKept
+register pane
+diag [hibernate] wake-start why=show visible=true
+diag view-mount window_label=main initial-urlAtom="https://example.com/page"
+register pane
+diag [hibernate] wake-start why=show visible=true

@@ -1,0 +1,5 @@
+diag view-mount window_label=main initial-urlAtom="https://example.com/page"
+register pane
+tryFreeze -> "this browser engine can't show a frozen page again"
+diag [hibernate] stays awake reason="page not checked" asked=hidden
+tryHibernate -> "page not checked"

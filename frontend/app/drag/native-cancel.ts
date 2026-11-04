@@ -29,6 +29,7 @@
 
 import { getApi } from "@/store/global";
 import { Logger } from "@/util/logger";
+import { hostEscapeSeen } from "./host-escape";
 
 /** Where the button can't be read: how long after a bare `dragend` the
  *  Escape that ended it may still be let go (its `keyup`), and so how long a
@@ -86,8 +87,12 @@ export async function endedByEscape(dropEffect: string | undefined): Promise<boo
         Logger.info("dnd:cross", "button state can't be read after dragend", { error: String(e) });
     }
     const escapeSeen = buttonStillDown == null ? await escapeKeyNear(endedAt) : null;
-    const cancelled = buttonStillDown != null ? isCancelledDragEnd(dropEffect, buttonStillDown) : escapeSeen === true;
-    Logger.info("dnd:cross", "dragend with no drop effect", { buttonStillDown, escapeSeen, cancelled });
+    // The host's hook saw the key itself (Windows). The button read above comes after the cancel, and a slow
+    // host or a quick release makes it say "released".
+    const hostEscape = hostEscapeSeen();
+    const cancelled =
+        hostEscape || (buttonStillDown != null ? isCancelledDragEnd(dropEffect, buttonStillDown) : escapeSeen === true);
+    Logger.info("dnd:cross", "dragend with no drop effect", { buttonStillDown, escapeSeen, hostEscape, cancelled });
     return cancelled;
 }
 

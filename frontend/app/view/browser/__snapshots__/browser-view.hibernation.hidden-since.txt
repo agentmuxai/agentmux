@@ -1,0 +1,8 @@
+diag view-mount window_label=main initial-urlAtom="https://example.com/page"
+register pane
+probe visible: rect.asleep=false drag.unavailable=false pane.visible=true pane.asleep=false pane.frozen=false hiddenSince=null
+probe hidden: rect.asleep=false drag.unavailable=true pane.visible=false pane.asleep=false pane.frozen=false hiddenSince=1793707205000
+probe shown: rect.asleep=false drag.unavailable=false pane.visible=true pane.asleep=false pane.frozen=false hiddenSince=null
+diag view-mount window_label=main initial-urlAtom="https://example.com/page"
+register pane
+probe mounted hidden: rect.asleep=false drag.unavailable=true pane.visible=false pane.asleep=false pane.frozen=false hiddenSince=1793707212000

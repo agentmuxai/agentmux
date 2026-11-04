@@ -1790,7 +1790,7 @@ pub fn promote_pool_window(
     unsafe {
         use windows_sys::Win32::Foundation::RECT;
         use windows_sys::Win32::UI::WindowsAndMessaging::{
-            GetWindowRect, SetWindowPos, ShowWindow, HWND_TOP, SW_SHOW, SWP_NOACTIVATE,
+            GetWindowRect, SetWindowPos, HWND_TOP, SWP_NOACTIVATE,
         };
 
         // 1. Position to the final on-screen rect WHILE HIDDEN (no show yet).
@@ -1815,7 +1815,7 @@ pub fn promote_pool_window(
         set_taskbar_hidden(raw_hwnd, false);
 
         // 3. Ensure shown + activated (SW_SHOWNA above does not activate).
-        let _ = ShowWindow(raw_hwnd, SW_SHOW);
+        super::promote_front::show_in_front(raw_hwnd, &label);
 
         // 4. Re-assert the rect after show + off-screen telemetry (#1652).
         //    SWP_NOACTIVATE so we don't steal focus again; HWND_TOP keeps it frontmost.

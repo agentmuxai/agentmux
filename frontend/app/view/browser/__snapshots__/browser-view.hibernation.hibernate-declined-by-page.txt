@@ -1,0 +1,24 @@
+diag view-mount window_label=main initial-urlAtom="https://example.com/page"
+register pane
+tryHibernate -> "visible"
+tryHibernate -> "already asleep"
+-- check {"live":true,"edited":true}
+host.hibernationCheck unless_decided
+diag [hibernate] stays awake reason="something typed into it" asked=hidden
+tryHibernate -> "something typed into it"
+-- check {"live":true,"beforeunload":true}
+host.hibernationCheck unless_decided
+diag [hibernate] stays awake reason="the page asks before leaving" asked=hidden
+tryHibernate -> "the page asks before leaving"
+-- check {"live":true,"media":true}
+host.hibernationCheck skip
+diag [hibernate] stays awake reason="playing media" asked=hidden
+tryHibernate -> "playing media"
+-- check {"live":false}
+host.hibernationCheck skip
+diag [hibernate] stays awake reason="no live page" asked=hidden
+tryHibernate -> "no live page"
+-- check null
+host.hibernationCheck skip
+diag [hibernate] stays awake reason="page not checked" asked=hidden
+tryHibernate -> "page not checked"

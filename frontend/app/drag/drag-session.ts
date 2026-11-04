@@ -17,6 +17,7 @@
  */
 
 import { createSignal } from "solid-js";
+import { resetHostEscape } from "./host-escape";
 
 export type DragKind = "files" | "tile" | "window-tab" | "pane-tab" | "doc-tab" | "drone-kind" | "list-item";
 /** Every kind, for "is any drag underway at all". */
@@ -75,6 +76,7 @@ function mintId(): string {
 
 export function beginDrag(kind: DragKind, source?: DragSource, payload?: DragPayload): DragSession {
     installSafetyNet();
+    resetHostEscape();
     // A new drag means any session still here was stranded (its end was lost).
     endDrag("cancel");
     const s: DragSession = {

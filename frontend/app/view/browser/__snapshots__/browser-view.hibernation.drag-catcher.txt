@@ -1,0 +1,12 @@
+## snapshot loading
+<div class="browser-drag-catcher">
+<img class="browser-freeze-snapshot" alt="" src="data:image/png;base64,BBBB" style="top: 2px; width: 10px;">
+</div>
+## painted
+<div class="browser-drag-catcher">
+<img class="browser-freeze-snapshot" alt="" src="data:image/png;base64,BBBB" style="top: 2px; width: 10px;">
+<div class="browser-drag-hole">
+</div>
+</div>
+## drag over
+(absent)
