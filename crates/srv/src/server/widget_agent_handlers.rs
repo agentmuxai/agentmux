@@ -149,7 +149,7 @@ pub(super) struct InstallBody {
 /// runs out, with the request left for them to answer later in Settings → Widgets).
 pub(super) async fn handle_widgets_install(
     State(state): State<AppState>,
-    grant: Option<axum::Extension<crate::backend::container_credential::ContainerGrant>>,
+    grant: Option<axum::Extension<crate::backend::container::credential::ContainerGrant>>,
     Json(mut body): Json<InstallBody>,
 ) -> Response {
     let Some(svc) = packages::service() else {
@@ -351,7 +351,7 @@ mod tests {
         meta.insert("cmd:cwd".to_string(), json!(ws.to_string_lossy()));
         let mut block = crate::backend::obj::Block { oid: uuid::Uuid::new_v4().to_string(), meta, ..Default::default() };
         state.mstore.insert(&mut block).unwrap();
-        let token = crate::backend::container_credential::token_for_block(&block.oid, Some("agent-tok"));
+        let token = crate::backend::container::credential::token_for_block(&block.oid, Some("agent-tok"));
         let app = crate::server::build_router(state);
         let install = |path: String| {
             let app = app.clone();

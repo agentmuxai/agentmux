@@ -37,6 +37,8 @@ pub(super) const ACTS: &[Act] = &[
     },
     Act { action: "eval", tool: "BrowserEval", rename: &[] },
     Act { action: "handoff", tool: "BrowserHandoff", rename: &[] },
+    Act { action: "handoff_status", tool: "BrowserHandoffStatus", rename: &[] },
+    Act { action: "retake", tool: "BrowserRetake", rename: &[] },
     Act { action: "request_auto_approve", tool: "BrowserRequestBypass", rename: &[] },
     Act { action: "stop_auto_approve", tool: "BrowserEndBypass", rename: &[] },
     Act { action: "log", tool: "BrowserLog", rename: &[] },
@@ -68,8 +70,11 @@ fn masked(result: Result<String>) -> Result<String> {
 /// One Browser call: the action, then any follow-up it asked for.
 async fn run(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     let (act, args) = pick("Browser", ACTS, arguments)?;
-    if act.action == "close" {
-        return close(arguments, cx).await;
+    match act.action {
+        "close" => return close(arguments, cx).await,
+        "retake" => return retake(arguments, cx).await,
+        "handoff_status" => return handoff_status(arguments, cx).await,
+        _ => {}
     }
     // `wait`'s own conditions are the until_* parameters (pick renamed
     // them for its handler): for wait they are not a follow-up.
@@ -145,6 +150,73 @@ async fn close(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
         anyhow::bail!("Browser close failed: HTTP {status} — {text}");
     }
     Ok(format!("Closed pane {pane:?}"))
+}
+
+/// `retake`: drive again a pane the user took over and gave back. The pane is required (it is not the caller's own), and
+/// a snapshot comes with the answer: the user has been using the page, so what the agent last saw is out of date.
+async fn retake(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let pane = arguments.get("pane").and_then(|v| v.as_str()).map(str::trim).filter(|p| !p.is_empty());
+    let Some(pane) = pane else {
+        anyhow::bail!("Browser retake needs pane: the id of the pane the user took over");
+    };
+    let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
+    require_agent_env(local_url, auth_key, block_id)?;
+    let req = agentmux_common::api_types::UiBrowserRetakeRequest { auth: sign_ui_automation_auth()?, pane: Some(pane.to_string()) };
+    let url = format!("{}/api/v1/ui/browser/retake", local_url.trim_end_matches('/'));
+    let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&req).send().await.map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    let status = resp.status();
+    if !status.is_success() {
+        let text = resp.text().await.unwrap_or_default();
+        anyhow::bail!("Browser retake failed: HTTP {status} — {text}");
+    }
+    let body: Value = resp.json().await.unwrap_or(Value::Null);
+    let lead = if body.pointer("/data/already").and_then(|v| v.as_bool()) == Some(true) {
+        format!("You already drive pane {pane:?}.")
+    } else {
+        format!("You drive pane {pane:?} again. The user used the page meanwhile, so read it before you act; an auto-approve you had is not back (ask again if you need it).")
+    };
+    match browser::call("BrowserSnapshot", &json!({ "pane": pane }), cx).await {
+        Ok(snap) => Ok(format!("{lead}\n\nsnapshot:\n{snap}")),
+        Err(e) => Ok(format!("{lead}\n\nsnapshot failed (the retake itself was done): {e}")),
+    }
+}
+
+/// `handoff_status`: what became of a hand-off, by its id or the newest on a pane.
+async fn handoff_status(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let text_arg = |k: &str| arguments.get(k).and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
+    let (handoff_id, pane) = (text_arg("handoff_id"), text_arg("pane"));
+    if handoff_id.is_none() && pane.is_none() {
+        anyhow::bail!("Browser handoff_status needs handoff_id (the hand-off's answer gave it) or pane");
+    }
+    let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
+    require_agent_env(local_url, auth_key, block_id)?;
+    let req = agentmux_common::api_types::UiBrowserHandoffStatusRequest { auth: sign_ui_automation_auth()?, pane, handoff_id };
+    let url = format!("{}/api/v1/ui/browser/handoff_status", local_url.trim_end_matches('/'));
+    let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&req).send().await.map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    let status = resp.status();
+    if !status.is_success() {
+        let text = resp.text().await.unwrap_or_default();
+        anyhow::bail!("Browser handoff_status failed: HTTP {status} — {text}");
+    }
+    let body: Value = resp.json().await.map_err(|e| anyhow::anyhow!("Browser handoff_status: bad response: {e}"))?;
+    Ok(handoff_status_text(body.get("data").unwrap_or(&Value::Null)))
+}
+
+/// What the agent reads for a hand-off's status.
+fn handoff_status_text(d: &Value) -> String {
+    let id = d["handoff_id"].as_str().unwrap_or("?");
+    let pane = d["pane"].as_str().unwrap_or("?");
+    let ago = |k: &str| d[k].as_u64().map(|s| if s < 90 { format!("{s} s ago") } else { format!("{} min ago", s / 60) });
+    match d["status"].as_str().unwrap_or("") {
+        "pending" => format!("Hand-off {id} on pane {pane:?} is still waiting for the user (asked {}).", ago("started_secs_ago").unwrap_or_default()),
+        "done" => format!("Hand-off {id}: the user clicked Done ({}). Take a new snapshot: don't assume what they changed.", ago("ended_secs_ago").unwrap_or_default()),
+        "cancelled" => format!("Hand-off {id}: the user clicked Cancel ({}). Ask them in chat how to proceed.", ago("ended_secs_ago").unwrap_or_default()),
+        "timed_out" => format!("Hand-off {id}: the user didn't answer in time ({}). Ask them in chat.", ago("ended_secs_ago").unwrap_or_default()),
+        _ => format!(
+            "Hand-off {id}: abandoned ({}): your call ended before the user answered, so its request went down with it and nobody can answer it. Make a new hand-off if you still need the user.",
+            ago("ended_secs_ago").unwrap_or_default()
+        ),
+    }
 }
 
 /// The wait that follows an action, from its `until_*` parameters only: the
@@ -253,6 +325,33 @@ mod tests {
         // With a pane it reaches ClosePane (which, with no srv here, fails on the missing environment).
         let e = call("Browser", &json!({ "action": "close", "pane": "p1" }), &cx).await.unwrap_err().to_string();
         assert!(!e.contains("needs pane"), "{e}");
+    }
+
+    /// A retake names the pane it takes back and a status names the hand-off or the pane: neither defaults to the caller's own.
+    #[tokio::test]
+    async fn retake_and_handoff_status_need_something_to_name() {
+        let (client, loops, counter) = cx_parts();
+        let cx = ToolCtx { local_url: "", auth_key: "", block_id: "my-block", client: &client, loops: &loops, loop_counter: &counter };
+        let e = call("Browser", &json!({ "action": "retake", "pane": "  " }), &cx).await.unwrap_err().to_string();
+        assert!(e.contains("retake needs pane"), "{e}");
+        let e = call("Browser", &json!({ "action": "handoff_status" }), &cx).await.unwrap_err().to_string();
+        assert!(e.contains("needs handoff_id"), "{e}");
+        // With one they reach srv (which, with none here, fails on the missing environment).
+        let e = call("Browser", &json!({ "action": "retake", "pane": "p1" }), &cx).await.unwrap_err().to_string();
+        assert!(!e.contains("needs pane"), "{e}");
+        let e = call("Browser", &json!({ "action": "handoff_status", "pane": "p1" }), &cx).await.unwrap_err().to_string();
+        assert!(!e.contains("needs handoff_id"), "{e}");
+    }
+
+    #[test]
+    fn a_hand_off_status_says_what_to_do_next() {
+        let d = |status: &str| json!({ "handoff_id": "h1", "pane": "p1", "status": status, "started_secs_ago": 30, "ended_secs_ago": 200 });
+        assert!(handoff_status_text(&d("pending")).contains("still waiting for the user (asked 30 s ago)"));
+        assert!(handoff_status_text(&d("done")).contains("clicked Done (3 min ago)") && handoff_status_text(&d("done")).contains("snapshot"));
+        assert!(handoff_status_text(&d("cancelled")).contains("clicked Cancel"));
+        assert!(handoff_status_text(&d("timed_out")).contains("didn't answer in time"));
+        let abandoned = handoff_status_text(&d("abandoned"));
+        assert!(abandoned.contains("abandoned") && abandoned.contains("nobody can answer it") && abandoned.contains("new hand-off"), "{abandoned}");
     }
 
     #[tokio::test]

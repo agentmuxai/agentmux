@@ -56,7 +56,7 @@ pub(super) fn command(container: &str, block_id: &str, env: &std::collections::H
     for (name, value) in carried {
         c.env(name, value);
     }
-    if let Some(host) = crate::backend::container_runtime::docker_host_in_use() {
+    if let Some(host) = crate::backend::container::runtime::docker_host_in_use() {
         // A set context beats DOCKER_HOST, so it goes.
         c.env_remove("DOCKER_CONTEXT");
         c.env("DOCKER_HOST", host);

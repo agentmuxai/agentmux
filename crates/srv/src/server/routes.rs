@@ -17,7 +17,7 @@ use agentmux_common::AUTH_KEY_HEADER;
 pub struct SrvRouters {
     pub full: Router,
     pub lan: Router,
-    /// What the Linux container listener serves (`backend::container_listener`): the full
+    /// What the Linux container listener serves (`backend::container::listener`): the full
     /// router behind a guard that admits only container tokens, on container routes, from the
     /// agents subnet.
     pub container: Router,
@@ -114,7 +114,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         None => full,
     };
     let full = full.layer(version_header).layer(cors).with_state(state);
-    let container = crate::backend::container_listener::layer(full.clone(), crate::backend::container_listener::current_subnet);
+    let container = crate::backend::container::listener::layer(full.clone(), crate::backend::container::listener::current_subnet);
 
     SrvRouters { full, lan, container }
 }
@@ -611,7 +611,7 @@ fn memory_and_identity_routes() -> Router<AppState> {
         // AGENTMUX_AGENT_ID env. Host agents do hold the instance key, so the
         // owner comes from the caller's token where there is one
         // (`SelfOwner::of`); a container token is always pinned to its own
-        // agent (backend::container_credential). Each handler calls the
+        // agent (backend::container::credential). Each handler calls the
         // same `app_api::*_impl` the WebSocket RPC handlers use.
         .route("/api/v1/agent/memory/list", get(handle_agent_memory_list))
         .route("/api/v1/agent/memory/read", get(handle_agent_memory_read))
@@ -689,7 +689,7 @@ fn ui_and_host_routes() -> Router<AppState> {
         .route("/api/v1/ui/browser/act", post(ui_handlers::handle_ui_browser_act))
         .route("/api/v1/ui/browser/set_files", post(ui_handlers::handle_ui_browser_set_files))
         .route("/api/v1/ui/browser/wait_for", post(ui_handlers::handle_ui_browser_wait_for))
-        .route("/api/v1/ui/browser/handoff", post(ui_handlers::handle_ui_browser_handoff))
+        .merge(browser_control_routes())
         .route("/api/v1/host/browser_attention", post(ui_handlers::handle_host_browser_attention))
         .route("/api/v1/ui/browser/request_bypass", post(crate::server::browser_bypass_routes::handle_ui_browser_request_bypass))
         .route("/api/v1/ui/browser/end_bypass", post(crate::server::browser_bypass_routes::handle_ui_browser_end_bypass))
@@ -866,6 +866,14 @@ fn widget_files_routes() -> Router<AppState> {
     Router::new()
         .route("/agentmux/widget-files/:id/:hash/:key/*path", get(super::widget_handlers::handle_widget_file))
         .route("/agentmux/widget-sdk/:file", get(super::widget_handlers::handle_widget_sdk))
+}
+
+/// Who drives a browser pane: the hand-off to the person, what became of it, and taking back a pane the person took over.
+fn browser_control_routes() -> Router<AppState> {
+    Router::new()
+        .route("/api/v1/ui/browser/handoff", post(ui_handlers::handle_ui_browser_handoff))
+        .route("/api/v1/ui/browser/handoff_status", post(crate::server::browser_retake::handle_ui_browser_handoff_status))
+        .route("/api/v1/ui/browser/retake", post(crate::server::browser_retake::handle_ui_browser_retake))
 }
 
 /// What an agent changes about the agents themselves: their seats and names. Each acts as the agent its token

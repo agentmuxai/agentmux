@@ -279,7 +279,6 @@
 108 crates/srv/src/server/agent_handlers/container_turn.rs::ContainerStartup::run_reporting
 717 crates/srv/src/server/agent_handlers/core.rs::register
 985 crates/srv/src/server/agent_handlers/identity.rs::register
-469 crates/srv/src/server/agent_handlers/input.rs::run_agent_turn_joining
 775 crates/srv/src/server/agent_handlers/session.rs::register
 143 crates/srv/src/server/agent_handlers/template.rs::copy_definition
 153 crates/srv/src/server/agent_handlers/template_create.rs::create_from_template
@@ -346,7 +345,6 @@
 133 crates/srv/src/server/vault_rotate.rs::handle_vault_rotate
 210 crates/srv/src/server/websocket.rs::handle_incoming_text
 227 crates/srv/src/server/websocket.rs::handle_ws_connection
-1011 crates/srv/src/server/websocket.rs::register_handlers
 111 crates/srv/src/server/widget_agent_handlers.rs::handle_widgets_install
 129 crates/srv/src/server/work_queue.rs::enqueue_core
 120 crates/srv/src/server/work_queue.rs::handle_work_claim
@@ -374,7 +372,7 @@
 119 frontend/app/drag/CrossWindowDropOverlay.tsx::CrossWindowDropOverlay
 132 frontend/app/element/ModalLayer.tsx::ModalLayer
 590 frontend/app/element/PaneChrome.tsx::renderPaneChromeShell
-459 frontend/app/element/PaneTabStrip.tsx::PaneTabStrip
+157 frontend/app/element/PaneTabStrip.tsx::PaneTabStrip
 403 frontend/app/element/PaneTabStrip.tsx::PaneTabStripItem
 122 frontend/app/element/ProviderLogo.tsx::ProviderLogo
 114 frontend/app/element/anchored-popover.tsx::AnchoredPopover
@@ -452,7 +450,7 @@
 140 frontend/app/view/agent/cli-notice.ts::parseCliNoticeFrame
 111 frontend/app/view/agent/commands/global/login.ts::runLogin
 213 frontend/app/view/agent/components/ActivityDock.tsx::ActivityDock
-251 frontend/app/view/agent/components/ActivityRow.tsx::ActivityRow
+223 frontend/app/view/agent/components/ActivityRow.tsx::ActivityRow
 270 frontend/app/view/agent/components/AgentBottomPanels.tsx::AgentBottomPanels
 200 frontend/app/view/agent/components/AgentCard.tsx::AgentCard
 160 frontend/app/view/agent/components/AgentContainerLimitsPanel.tsx::AgentContainerLimitsPanel
@@ -500,9 +498,6 @@
 220 frontend/app/view/agent/flows/run-provider-login.ts::runProviderLogin
 627 frontend/app/view/agent/history/AgentHistoryView.tsx::AgentHistoryView
 136 frontend/app/view/agent/history/HistoryNavigator.tsx::HistoryNavigator
-167 frontend/app/view/agent/hooks/useAgentCommands.ts::deliverToBackend
-236 frontend/app/view/agent/hooks/useAgentCommands.ts::sendMessage
-910 frontend/app/view/agent/hooks/useAgentCommands.ts::useAgentCommands
 386 frontend/app/view/agent/hooks/useAgentControllerStatus.ts::useAgentControllerStatus
 106 frontend/app/view/agent/hooks/useAgentDecisions.ts::useAgentDecisions
 420 frontend/app/view/agent/hooks/useAgentFailure.ts::useAgentFailure
@@ -531,11 +526,11 @@
 546 frontend/app/view/agent/virtualization/DocumentRow.tsx::DocumentNodeBody
 116 frontend/app/view/agent/virtualization/held-release.ts::useScrolledOffRelease
 195 frontend/app/view/audit/audit-manager.tsx::AuditManager
-426 frontend/app/view/browser/browser-model.ts::BrowserViewModel::constructor
+424 frontend/app/view/browser/browser-model.ts::BrowserViewModel::constructor
 103 frontend/app/view/browser/browser-model.ts::BrowserViewModel::getBodyContextMenuItems
 603 frontend/app/view/browser/browser-nav-bar.tsx::BrowserNavBar
 101 frontend/app/view/browser/browser-profile-menu.tsx::BrowserProfileButton
-550 frontend/app/view/browser/browser-view.tsx::BrowserViewInner
+546 frontend/app/view/browser/browser-view.tsx::BrowserViewInner
 267 frontend/app/view/browser/driven-by-strip.tsx::DrivenByStrip
 141 frontend/app/view/browser/use-browser-auth.ts::useBrowserAuth
 159 frontend/app/view/browser/use-freeze-frame.ts::useFreezeFrame

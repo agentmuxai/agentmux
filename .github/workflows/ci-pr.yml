@@ -957,6 +957,12 @@ jobs:
       - name: vite-port self-test
         run: bash scripts/vite-port.test.sh
 
+      # The .deb's Depends and the .rpm's Requires come from scripts/linux-package-deps.list,
+      # and the build refuses a staged tree that needs a system library the list lacks. A
+      # minimal install without one cannot start; this is the script that guards it.
+      - name: linux-package-deps self-test
+        run: bash scripts/linux-package-deps.test.sh
+
       # `task dev` on Windows deletes its old dist/cef-dev-<epoch> builds, but
       # only ones no process runs from (rm -rf on a live one deletes the helper
       # tools the running app still needs).

@@ -8,7 +8,7 @@
 /// (`requested`), else the template's own. Any other image is refused (an agent's own image is set by editing its
 /// definition), and a native agent has none to choose.
 pub(crate) fn chosen_container_image(requested: Option<&str>, agent_type: &str, template_image: &str) -> Result<String, String> {
-    use crate::backend::container_image::{DEFAULT_AGENT_IMAGE, DEFAULT_DEVELOPER_IMAGE};
+    use crate::backend::container::image::{DEFAULT_AGENT_IMAGE, DEFAULT_DEVELOPER_IMAGE};
     match requested.map(str::trim) {
         Some(image) if crate::backend::runtime_adapter::RuntimeKind::of_agent_type(agent_type).is_container() => {
             if image == DEFAULT_AGENT_IMAGE || image == DEFAULT_DEVELOPER_IMAGE {
@@ -24,7 +24,7 @@ pub(crate) fn chosen_container_image(requested: Option<&str>, agent_type: &str, 
 #[cfg(test)]
 mod tests {
     use super::chosen_container_image;
-    use crate::backend::container_image::{DEFAULT_AGENT_IMAGE, DEFAULT_DEVELOPER_IMAGE};
+    use crate::backend::container::image::{DEFAULT_AGENT_IMAGE, DEFAULT_DEVELOPER_IMAGE};
 
     #[test]
     fn a_container_agent_gets_the_image_the_picker_chose_and_nothing_else_is_accepted() {

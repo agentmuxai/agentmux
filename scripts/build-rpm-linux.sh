@@ -20,14 +20,10 @@
 #     backend shells out to it; unlike `-t deb`, this is NOT pure Ruby).
 #   - Same build artifacts stage-linux-runtime.sh requires (dist/, target/release/).
 #
-# Dependency policy: same as build-deb-linux.sh (spec OQ4, still open) —
-# bundle everything statically, no `Requires:` declared. Fedora/openSUSE
-# package names for the same runtime libs differ from Debian's, so if OQ4
-# is later resolved toward declaring real dependencies, this script and
-# build-deb-linux.sh need that pass done together, not one at a time — a
-# `.deb` with `Depends:` and a `.rpm` still bundling everything (or vice
-# versa) would be an inconsistent policy across the two formats for no
-# reason a user could see.
+# Dependencies: the same libraries as build-deb-linux.sh, from the same list
+# (scripts/linux-package-deps.list), but required by soname (`libasound.so.2()(64bit)`)
+# instead of by package name. Fedora and openSUSE name their packages differently, and a
+# soname requirement is resolved by whichever package provides it on either one.
 #
 # Install layout (identical to build-deb-linux.sh's — see that script's
 # header for the full rationale):
@@ -128,11 +124,18 @@ done
 
 # --- 4. Package with fpm -t rpm. --iteration sets the release number (the
 #        "-1" in the filename); --rpm-os linux keeps fpm from trying to
-#        infer a target from the build host. No Requires: — see this
-#        script's header comment. ---
+#        infer a target from the build host. Requires: comes from
+#        scripts/linux-package-deps.list; the check fails the build when the staged
+#        runtime needs a system library the list lacks. ---
+bash "$REPO_ROOT/scripts/linux-package-deps.sh" check "$PKGROOT"
+DEPENDS_ARGS=()
+while IFS= read -r dep; do
+    DEPENDS_ARGS+=(--depends "$dep")
+done < <(bash "$REPO_ROOT/scripts/linux-package-deps.sh" rpm "$PKGROOT")
 mkdir -p "$OUTDIR"
 rm -f "$OUTPUT"
 fpm -s dir -t rpm \
+    "${DEPENDS_ARGS[@]}" \
     --name agentmux \
     --version "$VERSION" \
     --iteration 1 \

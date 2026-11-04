@@ -9,8 +9,8 @@ use std::sync::OnceLock;
 use futures_util::StreamExt as _;
 
 use crate::backend::container::{ContainerManager, ContainerMountSpec};
-use crate::backend::container_credential::token_for_block;
-use crate::backend::container_listener;
+use crate::backend::container::credential::token_for_block;
+use crate::backend::container::listener;
 
 /// What the Docker tests share: they use the process-wide router and listener, whose server task
 /// lives on the runtime that bound it. So they run one at a time on one state, and each starts
@@ -29,10 +29,10 @@ pub(super) async fn begin() -> (tokio::sync::MutexGuard<'static, ()>, &'static S
         let instance_key = state.auth_key.clone();
         let tab = state.mstore.get_all::<crate::backend::obj::Tab>().unwrap().into_iter().next().expect("seeded tab");
         let block_id = tab.blockids.first().expect("seeded agent block").clone();
-        container_listener::set_router(crate::server::build_routers(state).container);
+        listener::set_router(crate::server::build_routers(state).container);
         Shared { instance_key, block_id }
     });
-    container_listener::unbind();
+    listener::unbind();
     (guard, shared)
 }
 
@@ -67,17 +67,17 @@ async fn itest_container_listener_serves_the_agents_network_only() {
     cm.ensure_running_observed(name, "nginx:alpine", &[], &[], &ContainerMountSpec::default(), &|_| {}).await.expect("ensure_running");
 
     // A second start with the same network reuses the listener (it once deadlocked here).
-    let first = container_listener::url();
+    let first = listener::url();
     tokio::time::timeout(std::time::Duration::from_secs(30), cm.ensure_running_observed(name, "nginx:alpine", &[], &[], &ContainerMountSpec::default(), &|_| {}))
         .await
         .expect("a second ensure_running must not hang")
         .expect("ensure_running (reuse)");
-    assert_eq!(container_listener::url(), first, "the listener is reused, not rebound");
+    assert_eq!(listener::url(), first, "the listener is reused, not rebound");
 
-    let base = container_listener::url().expect("the listener binds the agents network's gateway on a Linux Docker host");
+    let base = listener::url().expect("the listener binds the agents network's gateway on a Linux Docker host");
     // An environment built before the container started is repointed once it has.
     let mut stale = vec![("AGENTMUX_LOCAL_URL".to_string(), "http://host.docker.internal:1".to_string())];
-    container_listener::point_env_at_listener(&mut stale);
+    listener::point_env_at_listener(&mut stale);
     assert_eq!(stale[0].1, base);
     let token = token_for_block(name, None);
     let got = [
@@ -94,7 +94,7 @@ async fn itest_container_listener_serves_the_agents_network_only() {
     let loopback = tokio::net::TcpStream::connect(format!("127.0.0.1:{port}")).await;
     println!("loopback: {loopback:?}");
     let _ = cm.remove(name, true).await;
-    container_listener::unbind();
+    listener::unbind();
 
     assert_eq!(got[0].1, "200", "{}", got[0].0);
     assert_eq!(got[1].1, "403", "{}", got[1].0);

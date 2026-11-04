@@ -96,7 +96,7 @@ pub(super) async fn auth_middleware(
             req.extensions_mut().insert(ReactiveAuthVia::FullAuthKey);
             next.run(req).await
         }
-        Some(key) => match crate::backend::container_credential::grant_for(&key) {
+        Some(key) => match crate::backend::container::credential::grant_for(&key) {
             Some(grant) => admit_container_agent(grant, req, next).await,
             None => unauthorized(),
         },
@@ -114,13 +114,13 @@ pub(super) fn unauthorized() -> Response {
 /// behave as for any agent), with the caller pinned to the grant's agent by
 /// `caller_middleware`.
 pub(super) async fn admit_container_agent(
-    grant: crate::backend::container_credential::ContainerGrant,
+    grant: crate::backend::container::credential::ContainerGrant,
     mut req: Request<Body>,
     next: Next,
 ) -> Response {
-    use crate::backend::container_credential::route_needs_identity;
+    use crate::backend::container::credential::route_needs_identity;
     let path = req.uri().path().to_string();
-    let refused = if let Some(why) = crate::backend::container_routes::refusal_message(&path) {
+    let refused = if let Some(why) = crate::backend::container::routes::refusal_message(&path) {
         Some(why)
     } else if route_needs_identity(&path) && grant.agent_token.is_none() {
         Some("this container agent has no identity token".to_string())
@@ -198,7 +198,7 @@ pub(super) async fn lan_or_full_auth_middleware(
             req.extensions_mut().insert(ReactiveAuthVia::LanKey);
             next.run(req).await
         }
-        Some(key) => match crate::backend::container_credential::grant_for(key) {
+        Some(key) => match crate::backend::container::credential::grant_for(key) {
             Some(grant) => admit_container_agent(grant, req, next).await,
             None => unauthorized(),
         },

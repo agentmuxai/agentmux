@@ -13,7 +13,7 @@ use futures_util::StreamExt as _;
 
 use crate::backend::blockcontroller::subprocess::{SubprocessController, SubprocessSpawnConfig};
 use crate::backend::container::{ContainerManager, ContainerMountSpec};
-use crate::backend::container_listener;
+use crate::backend::container::listener;
 
 /// What the stub CLI does with its turn.
 const STUB: &str = r#"
@@ -46,7 +46,7 @@ async fn in_container(cm: &ContainerManager, name: &str, script: &str) -> String
 #[tokio::test]
 #[ignore]
 async fn itest_container_turn_answers_and_calls_a_muxapi_tool() {
-    let (_serial, shared) = super::container_listener_itest::begin().await;
+    let (_serial, shared) = super::listener_itest::begin().await;
     let instance_key = shared.instance_key.clone();
     let block_id = shared.block_id.clone();
 
@@ -54,7 +54,7 @@ async fn itest_container_turn_answers_and_calls_a_muxapi_tool() {
     cm.check_available().await.expect("docker daemon must be reachable");
     let name = "agentmux-itest-turn";
     let _ = cm.remove(name, true).await;
-    assert!(container_listener::url().is_none(), "nothing is listening before the first container starts");
+    assert!(listener::url().is_none(), "nothing is listening before the first container starts");
 
     // What a host agent's launch hands the container turn: srv's loopback address and the instance
     // key, which the turn swaps for a container token and a reachable address.
@@ -99,9 +99,9 @@ async fn itest_container_turn_answers_and_calls_a_muxapi_tool() {
     let self_json = in_container(&cm, name, "cat /tmp/stub-self.json").await;
     println!("{result}\n{self_json}");
     let session = controller.session_id();
-    let listener_url = container_listener::url().expect("the listener binds the agents network's gateway on a Linux Docker host");
+    let listener_url = listener::url().expect("the listener binds the agents network's gateway on a Linux Docker host");
     let _ = cm.remove(name, true).await;
-    container_listener::unbind();
+    listener::unbind();
 
     assert!(done, "the stub CLI finished its turn");
     assert!(result.contains("wget=0"), "the MuxAPI call succeeded: {result}");

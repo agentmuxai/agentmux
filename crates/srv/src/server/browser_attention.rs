@@ -326,6 +326,11 @@ pub(crate) struct Raised {
 }
 
 impl Raised {
+    /// The request's id: what its banner carries, and what `Browser handoff_status` asks about.
+    pub(crate) fn id(&self) -> &str {
+        &self.waiting.id
+    }
+
     /// The human's answer, after up to `timeout` (`None`: no limit). A
     /// request taken down without one (replaced, or its pane closed) reads
     /// as Cancelled. The pane stays as it is until the returned [`Waiting`]

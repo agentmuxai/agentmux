@@ -23,7 +23,7 @@ use std::time::{Duration, Instant};
 
 use agentmux_common::update_manifest::{verify_release, UpdateKey, MAX_ENVELOPE_BYTES, MAX_MANIFEST_BYTES, UPDATE_KEYS};
 
-use crate::backend::container_image::AGENT_BASE_REPO;
+use crate::backend::container::image::AGENT_BASE_REPO;
 use crate::backend::update::download::RELEASE_DOWNLOAD_PREFIX;
 use crate::backend::update::signature::{fetch_small, file_names, FetchError};
 
