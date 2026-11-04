@@ -665,15 +665,15 @@ async function sendMessage(
     attachments: AttachmentRef[] = [],
     system = false,
 ): Promise<void> {
-        // Crash trace for "user pressed send": BlockErrorBoundary dumps the
-        // trail on a renderer fault (frontend/log/render-trail.ts).
-        trail("agent:send-message:enter", {
-            blockId: opts.blockId,
-            len: message.length,
-        });
-        // Intercept `!` and slash commands FIRST — client-side ones must not
-        // touch the backend queue. Unknown `/foo` falls through to a turn.
-        const trimmed = message.trim();
+    // Crash trace for "user pressed send": BlockErrorBoundary dumps the
+    // trail on a renderer fault (frontend/log/render-trail.ts).
+    trail("agent:send-message:enter", {
+        blockId: opts.blockId,
+        len: message.length,
+    });
+    // Intercept `!` and slash commands FIRST — client-side ones must not
+    // touch the backend queue. Unknown `/foo` falls through to a turn.
+    const trimmed = message.trim();
     const call: SendCall = { message, wasAlreadyWorking, authFailureToPreserve, attachments, system };
 
     const bangCommand = attachments.length > 0 ? null : parseBangCommand(trimmed);
@@ -686,22 +686,22 @@ async function sendMessage(
         if (await runSlashCommand(opts, s, call, trimmed)) return;
     }
 
-        // Init guard (#728, #742): TurnStart's Submitting is suppressed while
-        // InitPending, but the message would still be queued and sent; if the
-        // backend accepted before InitReady, the UI would show no turn while
-        // the agent works.
-        const ps = paneSnapshot(opts.blockId);
-        if (ps?.initPhase.kind === "InitPending") {
-            opts.log("send", "send blocked: history still loading", "warn");
-            return;
-        }
+    // Init guard (#728, #742): TurnStart's Submitting is suppressed while
+    // InitPending, but the message would still be queued and sent; if the
+    // backend accepted before InitReady, the UI would show no turn while
+    // the agent works.
+    const ps = paneSnapshot(opts.blockId);
+    if (ps?.initPhase.kind === "InitPending") {
+        opts.log("send", "send blocked: history still loading", "warn");
+        return;
+    }
 
-        // Shared by the pending entry and AgentInputCommand's `message_id`;
-        // the backend echoes it in `agent-message-accepted`, and
-        // `useAgentStream` then promotes the entry into a `user_message` node.
-        const messageId = `user_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-        if (attachments.length > 0) s.attachmentsByMessage.set(messageId, attachments);
-        if (system) s.systemMessages.add(messageId);
+    // Shared by the pending entry and AgentInputCommand's `message_id`;
+    // the backend echoes it in `agent-message-accepted`, and
+    // `useAgentStream` then promotes the entry into a `user_message` node.
+    const messageId = `user_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    if (attachments.length > 0) s.attachmentsByMessage.set(messageId, attachments);
+    if (system) s.systemMessages.add(messageId);
 
     queuePendingMessage(opts, call, messageId);
 
@@ -1195,50 +1195,50 @@ async function drainHeldQueue(opts: UseAgentCommandsOptions, s: CommandsState): 
 
 /** Refuse a held item: its auth was bad, or turned bad, so it is never sent. */
 function rejectHeldItem(opts: UseAgentCommandsOptions, s: CommandsState, item: HeldMessage, liveAuthFailure: boolean): void {
-        opts.log("auth", "held message not sent — not logged in", "warn");
-        // Roll back the idle-send hold's optimistic TurnStart, before
-        // FailureObserved (as in checkAuthGuard), or the pane stays
-        // "Working…": deliverToBackend's TurnStartFailed never runs.
-        if (item.initiatedTurnOptimistically) {
-            opts.model.dispatchPane({ type: "TurnStartFailed" }, "system");
-        }
-        // Restore the login banner TurnStart cleared, when this
-        // item's snapshot caused the rejection and no live failure
-        // covers it (as in restoreAuthFailureIfUnresolved).
-        if (item.authFailureToPreserve && !liveAuthFailure) {
-            raiseFailure(opts.model, {
-                source: "command",
-                failure: item.authFailureToPreserve.data,
-                at: Date.now(),
-                turnAttempted: item.authFailureToPreserve.turnAttempted, // see PaneFailure.turnAttempted
-                system: true,
-            });
-        }
-        s.attachmentsByMessage.delete(item.id);
-        s.systemMessages.delete(item.id);
-        opts.model.dispatchPane({ type: "PendingMessageRejected", id: item.id });
+    opts.log("auth", "held message not sent — not logged in", "warn");
+    // Roll back the idle-send hold's optimistic TurnStart, before
+    // FailureObserved (as in checkAuthGuard), or the pane stays
+    // "Working…": deliverToBackend's TurnStartFailed never runs.
+    if (item.initiatedTurnOptimistically) {
+        opts.model.dispatchPane({ type: "TurnStartFailed" }, "system");
+    }
+    // Restore the login banner TurnStart cleared, when this
+    // item's snapshot caused the rejection and no live failure
+    // covers it (as in restoreAuthFailureIfUnresolved).
+    if (item.authFailureToPreserve && !liveAuthFailure) {
+        raiseFailure(opts.model, {
+            source: "command",
+            failure: item.authFailureToPreserve.data,
+            at: Date.now(),
+            turnAttempted: item.authFailureToPreserve.turnAttempted, // see PaneFailure.turnAttempted
+            system: true,
+        });
+    }
+    s.attachmentsByMessage.delete(item.id);
+    s.systemMessages.delete(item.id);
+    opts.model.dispatchPane({ type: "PendingMessageRejected", id: item.id });
 }
 
 function deliverHeldItem(opts: UseAgentCommandsOptions, s: CommandsState, item: HeldMessage): Promise<void> {
-        // initiatesTurn from the item, not false: if an idle-send
-        // hold's RPC fails, its optimistic TurnStart must be rolled
-        // back, and with no expiry timer nothing else would (#2338).
-        // Mark the entry `flushing` only now, when delivery starts
-        // (not at TurnEnd, possibly long before if the branch above
-        // bailed), so PendingMessagesPanel's "Sending…" is true
-        // (SPEC_AGENT_WORKING_STATE_UNIFICATION_2026_09_04.md
-        // Phase 1, #2970).
-        opts.model.dispatchPane({ type: "PendingMessageFlushStarted", id: item.id });
-        // A message held while a turn ran joins that turn: the agent
-        // never returned to the user in between
-        // (SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md §4.3, J3).
-        // Read now, not when it was queued: a send right after an idle
-        // send is held before srv has reported that turn at all (#4492).
-        // A stop ends the turn, so what was held during it starts a new one.
-        const snap = paneSnapshot(opts.blockId);
-        const phase = snap?.turnPhase;
-        const stopped = phase?.kind === "Interrupting" || (phase?.kind === "Done" && phase.outcome !== "completed");
-        const joinsTurn = item.initiatedTurnOptimistically || stopped ? undefined : turnToJoin(snap?.turnLedger);
+    // initiatesTurn from the item, not false: if an idle-send
+    // hold's RPC fails, its optimistic TurnStart must be rolled
+    // back, and with no expiry timer nothing else would (#2338).
+    // Mark the entry `flushing` only now, when delivery starts
+    // (not at TurnEnd, possibly long before if the branch above
+    // bailed), so PendingMessagesPanel's "Sending…" is true
+    // (SPEC_AGENT_WORKING_STATE_UNIFICATION_2026_09_04.md
+    // Phase 1, #2970).
+    opts.model.dispatchPane({ type: "PendingMessageFlushStarted", id: item.id });
+    // A message held while a turn ran joins that turn: the agent
+    // never returned to the user in between
+    // (SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md §4.3, J3).
+    // Read now, not when it was queued: a send right after an idle
+    // send is held before srv has reported that turn at all (#4492).
+    // A stop ends the turn, so what was held during it starts a new one.
+    const snap = paneSnapshot(opts.blockId);
+    const phase = snap?.turnPhase;
+    const stopped = phase?.kind === "Interrupting" || (phase?.kind === "Done" && phase.outcome !== "completed");
+    const joinsTurn = item.initiatedTurnOptimistically || stopped ? undefined : turnToJoin(snap?.turnLedger);
     return deliverToBackend(
         opts,
         s,
