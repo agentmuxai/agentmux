@@ -80,8 +80,8 @@ pub(super) async fn gated_spawn_env(
     // Before all of that — the env build writes shared identity state — a
     // persistent pane about to spawn checks that no other AgentMux instance
     // on this host runs this agent (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24
-    // Phase 1, I9). A refusal takes the gate's error path below, so it is
-    // persisted and shown in the pane like any other spawn refusal.
+    // Phase 1, I9). A refusal is returned as a `TurnGate`, which the caller
+    // persists and shows in the pane like any other spawn refusal.
     let admission = match ctrl
         .as_any()
         .downcast_ref::<blockcontroller::persistent::PersistentSubprocessController>()
@@ -438,9 +438,9 @@ pub(super) fn register_turn_agent(block: &Block, block_id: &str, local_web_url: 
 /// App Server owns a persistent thread/turn process and has its own typed
 /// protocol path. Keep it ahead of the legacy stream-json branches.
 ///
-/// KNOWN GAP (ReAgent P1, PR #3215, tracked for a follow-up PR, not fixed
-/// here): env_vars above (including this turn's freshly-resolved identity
-/// bindings from inject_identity_env_async) is computed but never reaches
+/// KNOWN GAP (#3215, tracked for a follow-up, not fixed here): the turn's
+/// env vars (including this turn's freshly-resolved identity
+/// bindings from inject_identity_env_async) are computed but never reach
 /// this branch — send_message carries no env, and the App Server child was
 /// already spawned earlier using only command_from_meta's cmd:env snapshot.
 /// Unlike the subprocess/persistent controllers, this isn't a missing
@@ -450,6 +450,7 @@ pub(super) fn register_turn_agent(block: &Block, block_id: &str, local_web_url: 
 /// force that respawn (e.g. on every identity-binding change vs. only
 /// between turns) is a real design question, not a mechanical fix, so it's
 /// deliberately left for a follow-up PR rather than rushed in here.
+///
 /// A message the pane held during a turn joins that turn (turn-model spec §4.3, J3). The persistent controller carries
 /// it on the input itself; the others start passes with no labelled input, so their tracker is told just before the
 /// dispatch, never earlier: a failure in the preparation must not leave the hint armed for a later message (#4492).
