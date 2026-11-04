@@ -328,7 +328,6 @@
 203 crates/srv/src/server/reactive.rs::handle_reactive_register
 125 crates/srv/src/server/reactive.rs::try_cloud_relay
 110 crates/srv/src/server/remote_ops/receive.rs::receive
-759 crates/srv/src/server/routes.rs::build_routers_with
 130 crates/srv/src/server/service/host_ipc.rs::handle_register
 277 crates/srv/src/server/service/misc.rs::handle_misc_service
 431 crates/srv/src/server/service/object.rs::handle_object_service
@@ -600,7 +599,7 @@
 163 frontend/app/view/swarm/swarm-fleet-toolbar.tsx::FleetToolbar
 104 frontend/app/view/swarm/swarm-model.ts::SwarmViewModel::buildTree
 153 frontend/app/view/swarm/swarm-model.ts::SwarmViewModel::constructor
-372 frontend/app/view/swarm/swarm-view.tsx::AgentRow
+165 frontend/app/view/swarm/swarm-view.tsx::AgentRow
 129 frontend/app/view/swarm/swarm-view.tsx::SubagentRow
 166 frontend/app/view/sysinfo/sysinfo-focus.tsx::FocusView
 127 frontend/app/view/sysinfo/sysinfo-model.ts::sampleReducer
