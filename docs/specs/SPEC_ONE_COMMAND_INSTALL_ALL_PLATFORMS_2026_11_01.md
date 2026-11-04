@@ -1,6 +1,6 @@
 # Spec: install AgentMux with one copyable command on Windows, macOS and Linux
 
-**Status:** draft for build. The operator green-lit this spec's recommendations ("best recommendations", relayed by AgentY, 2026-11-04). Task #17299; build #17300.
+**Status:** active — Phase 1 (`install.sh`, its tests and the release asset) ships in PR #6412; `install.ps1`, the landing page section, the `AgentMux.AI` winget submission, the Homebrew tap and the README/docs commands are not built. The recommendations are approved (2026-11-04). Verified 2026-11-04.
 **Date:** 2026-11-04
 **Author:** Winny (winget)
 **Verified against:** `agentmux` `main` @ `9a21a01` and release `v0.60.14` (2026-11-03). Everything under "Today" was read from the repository or fetched from the live endpoints on 2026-11-04, from a Linux container. Nothing Windows- or macOS-specific could be run from there; those claims are marked **verify** and are the first items of the build.
@@ -22,12 +22,12 @@ So: one command per platform that installs AgentMux and keeps it updated, a scri
 | Windows | now: `winget install --id 9P9QCXNNCRK3 --source msstore --accept-package-agreements --accept-source-agreements`; after the first `AgentMux.AI` submission merges: `winget install --id AgentMux.AI -e` | The Store listing is live. **verify** the command on a clean Windows machine. `AgentMux.AI` was never submitted | The first winget-pkgs submission, then the release job |
 | Anywhere | `curl -fsSL https://agentmux.ai/install.sh \| sh` (macOS, Linux) and `irm https://agentmux.ai/install.ps1 \| iex` (Windows) | No | Both scripts |
 
-Recommendations, each answering a question the task left open (§10 lists them as decisions):
+Recommendations, each answering an open question (§10 lists them as decisions):
 
 1. **The script is a front end for the package managers, not a second installer.** It picks the platform's own package manager, so updates always come from that manager (§6). Only when none exists does it download a release file.
 2. **Scripts ship as release assets, so the signed manifest covers them,** and agentmux.ai serves copies of the latest release's (§5.3).
 3. **Windows leads with the Store command today and switches to `AgentMux.AI` once it exists,** for the reasons in §4.1.
-4. **No cost and no new external account** is needed (§9). The pieces that touch an account the operator already has are listed there.
+4. **No cost and no new external account** is needed (§9).
 
 ## 3. Today (verified 2026-11-04)
 
@@ -53,11 +53,11 @@ Recommendations, each answering a question the task left open (§10 lists them a
 | New version reaches users | after Store certification of each release (hours to days) | a bump PR per release, merged within about a day; the in-app updater also works |
 | Updater kind | `WindowsStore`: the Store updates it; the panel does not download | `WindowsSetup`: the in-app updater and `winget upgrade` both work |
 
-Recommendation: show the **Store command first until `AgentMux.AI` is merged and has survived one release bump, then switch the page to `winget install --id AgentMux.AI -e`** and keep the Store command as the second tab. Reasons: the Store command is signed and works now; `AgentMux.AI` gives the same bytes as the direct download, so the in-app updater and everything the app does for `WindowsSetup` apply, and it tracks releases faster than certification. Both keep the page honest about the unsigned installer. The msstore form needs `--source msstore` and the two `--accept-*` flags so it runs unattended (agentic tools can't answer the prompts); the id may be passed as `9P9QCXNNCRK3`. **verify** on a clean Windows 11 machine (Area54) that it installs and launches.
+Recommendation: show the **Store command first until `AgentMux.AI` is merged and has survived one release bump, then switch the page to `winget install --id AgentMux.AI -e`** and keep the Store command as the second tab. Reasons: the Store command is signed and works now; `AgentMux.AI` gives the same bytes as the direct download, so the in-app updater and everything the app does for `WindowsSetup` apply, and it tracks releases faster than certification. Both keep the page honest about the unsigned installer. The msstore form needs `--source msstore` and the two `--accept-*` flags so it runs unattended (agentic tools can't answer the prompts); the id may be passed as `9P9QCXNNCRK3`. **verify** on a clean Windows 11 machine that it installs and launches.
 
-**The first `AgentMux.AI` submission** (Winny does it, through the existing flow in [SPEC_WINGET_PACKAGE_BOOTSTRAP_2026_09_10.md](SPEC_WINGET_PACKAGE_BOOTSTRAP_2026_09_10.md) §4, as the project's bot account): `wingetcreate new` against `AgentMux-<v>-x64-setup.exe` of the then-latest release, with `InstallerType: inno`, `Scope: user` or `machine` as the installer does, a stable `AppsAndFeaturesEntries` (`DisplayName`, `Publisher`, `ProductCode` or the Inno `AppId`) so that an in-app update and a `winget upgrade` don't end up as two entries. The Inno `AppId` is fixed (`{{8654EA96-8EAA-4845-ADE9-352ADA712BC0}}`, read from `packaging/windows/agentmux.iss` by Posa, 2026-11-04), so the uninstall key `{8654EA96-8EAA-4845-ADE9-352ADA712BC0}_is1` is the same in every version. But `UninstallDisplayName` is `AgentMux <version>`, so the manifest must match on `ProductCode` and not on `DisplayName` (a `DisplayName` match breaks at every release). The installer is per-user (`PrivilegesRequired=lowest`, under `%LOCALAPPDATA%\Programs\AgentMux`, key in HKCU), so `Scope: user`. An older installer wrote a different key (`AgentMux`, publisher `a5af`, 0.25.0), which the manifest must not assume. Dry-run first (`--out`), then submit. This is public (microsoft/winget-pkgs), and nothing in the manifest or PR text mentions anything private.
+**The first `AgentMux.AI` submission** (through the flow in [SPEC_WINGET_PACKAGE_BOOTSTRAP_2026_09_10.md](SPEC_WINGET_PACKAGE_BOOTSTRAP_2026_09_10.md) §4): `wingetcreate new` against `AgentMux-<v>-x64-setup.exe` of the then-latest release, with `InstallerType: inno`, `Scope: user` or `machine` as the installer does, a stable `AppsAndFeaturesEntries` (`DisplayName`, `Publisher`, `ProductCode` or the Inno `AppId`) so that an in-app update and a `winget upgrade` don't end up as two entries. The Inno `AppId` is fixed (`{{8654EA96-8EAA-4845-ADE9-352ADA712BC0}}`, from `packaging/windows/agentmux.iss`), so the uninstall key `{8654EA96-8EAA-4845-ADE9-352ADA712BC0}_is1` is the same in every version. But `UninstallDisplayName` is `AgentMux <version>`, so the manifest must match on `ProductCode` and not on `DisplayName` (a `DisplayName` match breaks at every release). The installer is per-user (`PrivilegesRequired=lowest`, under `%LOCALAPPDATA%\Programs\AgentMux`, key in HKCU), so `Scope: user`. An older installer wrote a different uninstall key, which the manifest must not assume. Dry-run first (`--out`), then submit. This is public (microsoft/winget-pkgs), and nothing in the manifest or PR text mentions anything private.
 
-**After the merge,** re-enable the `winget` job in `release-core.yml` (`wingetcreate update AgentMux.AI --urls <setup.exe> --version <v> --submit`). It runs after the release is published so the URL is live. Its failure never blocks a release (it is `continue-on-error`), and Winny watches the resulting PRs, which is how the manual part of the moderation queue is absorbed.
+**After the merge,** re-enable the `winget` job in `release-core.yml` (`wingetcreate update AgentMux.AI --urls <setup.exe> --version <v> --submit`). It runs after the release is published so the URL is live. Its failure never blocks a release (it is `continue-on-error`), and the resulting submissions are watched until each merges.
 
 **Command line without winget** (Windows 10 before App Installer, or winget blocked): `irm https://agentmux.ai/install.ps1 | iex` (§5).
 
@@ -119,7 +119,7 @@ sudo zypper --gpg-auto-import-keys install -y agentmux
 
 The build checks each block verbatim in the matching container (Ubuntu 24.04 and 26.04, Debian 13, Fedora 42, openSUSE Tumbleweed), which `linux-repo-check.yml` already does for the repository itself. The key's fingerprint is shown beside the commands on the page, so someone who wants to check it can.
 
-Two package gaps the page doesn't hide: no declared dependencies, and Ubuntu 24.04+'s AppArmor profile for the sandbox is shipped as a script but not installed (both in the upgrade spec §5). The script runs `scripts/install-userns-apparmor-fix.sh` after an apt install on a system that needs it, or says what to run; the build decides which once Parlo/Maricon confirm the state of the packages.
+Two package gaps the page doesn't hide: no declared dependencies, and Ubuntu 24.04+'s AppArmor profile for the sandbox is shipped as a script but not installed (both in the upgrade spec §5). The script runs `scripts/install-userns-apparmor-fix.sh` after an apt install on a system that needs it, or says what to run; the build decides which once the package owners confirm the state of the packages.
 
 ## 5. The scripts
 
@@ -145,7 +145,7 @@ For a downloaded release file:
 
 1. Fetch `AgentMux-<v>-manifest.json`, `-envelope.json` and `-envelope.json.sig` from `https://github.com/agentmuxai/agentmux/releases/download/v<v>/`, over HTTPS only, the exact URL (never a redirect to elsewhere: `curl --proto '=https'`, PowerShell `-MaximumRedirection 0` on non-GitHub hosts).
 2. Check the envelope's signature against the **public key embedded in the script** (the same Ed25519 key the app pins; the script is regenerated when the key changes), check the manifest's SHA-256 equals `manifest_sha256`, and check the file's name, size and SHA-256 equal the manifest's. Any mismatch deletes the file and exits.
-3. Where the platform tool can't verify Ed25519 itself (Windows PowerShell 5.1 has none; macOS's LibreSSL may lack `pkeyutl -rawin`; **verify** both), the script still checks the hashes of step 2, says in its output that the signature was not checked ("signature not checked: this system's openssl cannot ..."), and goes on. `--require-signature` turns that into a refusal, for an agent or a person who wants it strict. Asking an already-installed AgentMux to do the check (`agentmux-launcher --verify-update`) was considered and dropped: the script exits early when AgentMux is already installed, so there is nothing to ask on a machine that needs the script, and the case it would help (`--force` over an old install) is rare. A small verifier shipped beside the scripts is the way to close the gap on Windows and macOS if the hash-only result proves too weak; QTest decides that with the updater.
+3. Where the platform tool can't verify Ed25519 itself (Windows PowerShell 5.1 has none; macOS's LibreSSL may lack `pkeyutl -rawin`; **verify** both), the script still checks the hashes of step 2, says in its output that the signature was not checked ("signature not checked: this system's openssl cannot ..."), and goes on. `--require-signature` turns that into a refusal, for an agent or a person who wants it strict. Asking an already-installed AgentMux to do the check (`agentmux-launcher --verify-update`) was considered and dropped: the script exits early when AgentMux is already installed, so there is nothing to ask on a machine that needs the script, and the case it would help (`--force` over an old install) is rare. A small verifier shipped beside the scripts is the way to close the gap on Windows and macOS if the hash-only result proves too weak; the updater's owner decides that.
 
 ### 5.3 Where they are hosted, and how they're trusted
 
@@ -170,7 +170,7 @@ Because the Store build and the `setup.exe` build are different products to Wind
 
 ## 7. The landing page section
 
-The landing site lives in a separate, private repository; this section states behaviour only, and its PR is made there. It merges on muxreview approval and **does not deploy until the operator says "ship"**.
+The landing site lives in a separate, private repository; this section states behaviour only, and its PR is made there. Its change merges on review, and **it does not deploy until the site is explicitly released**.
 
 - **A "Get AgentMux" block** that replaces the first screen of the current download section, not a new page. It detects the visitor's OS on the client (the site already does) and shows that platform's primary command (§2) in a code box with a **Copy** button. The block is server-rendered with the Linux command so that the page works without JavaScript and for crawlers and agentic tools that read the HTML (they see the text, not a canvas).
 - **Tabs:** `macOS`, `Windows`, `Linux`, plus (under Windows) `Store`, `winget`, `script`, and (under Linux) `Script`, `apt`, `dnf`, `zypper`. The tab for the detected OS is selected; the others are one click away.
@@ -183,13 +183,13 @@ The landing site lives in a separate, private repository; this section states be
 
 ## 8. "The full AgentMux experience through a command line": what it is today
 
-**I have not seen AgentY's earlier answer, so this is written from the repository; where it differs from theirs, take theirs as the question to settle.**
+This section is written from the repository as of the date above.
 
 - **What a command line gives today:** install (this spec), launch (`agentmux` on Linux; `open -a AgentMux` on macOS; the Start menu entry or `AgentMux` on Windows: `setup.exe` puts nothing on PATH (no `[Registry]` PATH entry and no `ChangesEnvironment` in the `.iss`, read statically, not yet run), so `install.ps1` or the winget manifest has to add a command, or the page says "start it from the Start menu"), update (§6), and uninstall (each manager's own). The result is the desktop app, the whole product: it is a windowed app (Chromium-based), and its panes, agents and browser are the experience. A command line doesn't change what it is.
 - **What works without the window, today:** on SSH hosts, `agentmux-remote` (`crates/remote`) gives the desktop app durable terminal sessions and file browsing there, with no root, installed by the app itself, not by a package. Agents inside the app drive it through its MCP tools (`agentmux-mcp`: Pane, Tasks, Browser, Terminal, Vault and the rest). Neither is a standalone, headless AgentMux a person starts from a terminal.
-- **What is missing for "full experience from a terminal":** (1) a supported headless mode (the backend, `agentmux-srv`, runs without a window internally, but I found no supported way to start, sign in, configure and use it without the desktop app; **verify** with Camper and AgentY before the page says anything), (2) a command-line client for the things the MCP tools do, so a person or a script outside an agent can open a pane, file a task or send a message, (3) a `agentmux` command on PATH on macOS and Windows with the same verbs everywhere (`agentmux open <path>`, `agentmux upgrade`, `agentmux doctor`), and (4) an unattended first run (accept the terms, sign in, pick a provider) for the case where the install command is run by an agent on a fresh machine. None of them blocks this spec's build; the page words its promise as "install and launch from your terminal", not "use AgentMux from your terminal". (2) and (3) are proposed as follow-up specs, for the product owner (AgentX) to rank.
+- **What is missing for "full experience from a terminal":** (1) a supported headless mode (the backend, `agentmux-srv`, runs without a window internally, but I found no supported way to start, sign in, configure and use it without the desktop app; **verify** with the owners of the backend before the page says anything), (2) a command-line client for the things the MCP tools do, so a person or a script outside an agent can open a pane, file a task or send a message, (3) a `agentmux` command on PATH on macOS and Windows with the same verbs everywhere (`agentmux open <path>`, `agentmux upgrade`, `agentmux doctor`), and (4) an unattended first run (accept the terms, sign in, pick a provider) for the case where the install command is run by an agent on a fresh machine. None of them blocks this spec's build; the page words its promise as "install and launch from your terminal", not "use AgentMux from your terminal". (2) and (3) are proposed as follow-up specs, for the product owner to rank.
 
-## 9. What each piece needs from the operator
+## 9. What each piece needs
 
 No cost beyond what already exists, and **no new external account.** Specifically:
 
@@ -197,17 +197,15 @@ No cost beyond what already exists, and **no new external account.** Specificall
 |---|---|---|---|
 | Linux commands and `install.sh` | Nothing. The repository is live; the scripts live in this repository | none | no |
 | `install.ps1` | Nothing | none | no |
-| Landing page section | muxreview approval of the PR to the landing repository; the operator's "ship" to deploy | none | no |
+| Landing page section | Review of the change to the landing site's repository, and its release | none | no |
 | Store command | Nothing. The listing is live; nothing is changed in Partner Center | none | no |
-| `AgentMux.AI` on winget | A PR to `microsoft/winget-pkgs` from the project's existing bot account (Winny's seat). The credential for that PR is the one already described in the credentials record; this spec adds none. Moderation is Microsoft's, with no fee | none | no |
-| Homebrew tap | A new public repository `agentmuxai/homebrew-tap` in the existing organisation, created by whoever can create organisation repositories (an agent, with `gh-agent sudo` if creation needs admin), and the existing GitHub App installed on it | none | no |
+| `AgentMux.AI` on winget | A pull request to `microsoft/winget-pkgs` from the project's existing account for package submissions. Moderation is Microsoft's, with no fee | none | no |
+| Homebrew tap | A new public repository `agentmuxai/homebrew-tap` in the existing organisation, with the existing GitHub App installed on it | none | no |
 | homebrew/cask later | Notability; nothing to buy | none | no |
 
-If creating the tap repository or installing the App on it turns out to need something not listed here, the build stops and asks AgentY before doing it.
+The submission, the tap and anything else that touches an account are recorded in the project's tracked records when they happen.
 
-Records (workspace rule): when the winget submission opens and when it merges, and when the tap is created, each goes into the tracked record the same day: the submission PR link and the date in the project's corp record for Microsoft, and the tap in the infrastructure record, by Winny, in small PRs of their own.
-
-## 10. Decisions (all taken as recommended; the operator's "best recommendations")
+## 10. Decisions (all taken as recommended)
 
 1. **The scripts front the package managers** (§5.1) rather than being a separate installer. Alternative: scripts that always download the release file. Rejected: it duplicates what apt/dnf/winget/brew do and bypasses their updates.
 2. **Windows primary: Store now, `AgentMux.AI` once merged and proven by one bump** (§4.1). Alternative: wait for `AgentMux.AI` before showing any Windows command. Rejected: the Store command exists and is signed.
@@ -217,17 +215,17 @@ Records (workspace rule): when the winget submission opens and when it merges, a
 6. **One install per machine** (§5.1, §6): the scripts refuse to add a second kind.
 7. **The page promises "install and launch", not "use from a terminal"** (§8).
 
-## 11. Phases (the build, #17300)
+## 11. Phases
 
 1. **`install.sh` and its tests (PR 1, built).** `scripts/install/install.sh` and `install.test.sh` (dry runs per platform, the refusals, and the download checks against a release signed in the test with a throwaway key; the pinned key is checked against `crates/common/update-keys.json`), the `install-script-check.yml` workflow (the tests, dry runs through a pipe, and a real download of the latest release checked with `--require-signature`), and the script as a release asset in `release-core.yml`. The same PR carries this spec. Container installs from the live repository on Debian, Ubuntu, Fedora and openSUSE are phase 2's check, since the commands come from the same files the script uses.
-1b. **`install.ps1` (PR 2).** Written and tested on a Windows machine (Area54: Posa or Lazo), since it cannot be run from a Linux container; its CI job runs on `windows-latest`. It joins the release assets by the same loop as `install.sh`.
+1b. **`install.ps1` (PR 2).** Written and tested on a Windows machine, since it cannot be run from a Linux container; its CI job runs on `windows-latest`. It joins the release assets by the same loop as `install.sh`.
 2. **Linux commands on the page** (§4.3, §7): live as soon as the landing site ships, since the repository is live.
 3. **Windows Store tab** (§4.1): after the **verify** on a clean Windows machine.
 4. **`AgentMux.AI` bootstrap submission,** then the release job re-enabled (§4.1); the page switches after one bump has merged.
 5. **Tap and cask** (§4.2), with the bump job; then the macOS block on the page.
 6. **README and docs site** (§7), once 2 to 5 are true.
 
-Each phase is its own PR with its own changeset; the first PR carries this spec (it is not committed before then). Consult before phase 1: QTest (the updater, §6), Clamk (the Linux repository), and Parlo or Maricon (the packages' dependency gaps, §4.3).
+Each phase is its own PR with its own changeset; the first PR carries this spec (it is not committed before then). Agree with the owners of the updater (§6), the Linux repository and the Linux packages (the dependency gaps, §4.3) before changing what touches theirs.
 
 ## 12. Tests
 

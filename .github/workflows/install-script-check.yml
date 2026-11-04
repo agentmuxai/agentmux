@@ -2,7 +2,8 @@ name: Install script check
 
 # scripts/install/install.sh is what `curl -fsSL https://agentmux.ai/install.sh | sh` runs, and each release ships it as an asset
 # under the signed manifest. This runs its tests (dry runs for each platform, the refusals, and the download checks against a
-# release signed here with a throwaway key), and, on a push to the script, a real dry run against the live release.
+# release signed here with a throwaway key), dry runs through a pipe as users run it, and a real download of the latest release
+# checked against its signed manifest with --require-signature. It runs on pull requests that touch the script or the pinned key.
 # docs/specs/SPEC_ONE_COMMAND_INSTALL_ALL_PLATFORMS_2026_11_01.md
 
 on:

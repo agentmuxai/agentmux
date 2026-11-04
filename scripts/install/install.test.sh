@@ -99,16 +99,16 @@ else
     openssl pkey -in "$W/priv.pem" -pubout -outform DER 2> /dev/null | tail -c 32 | openssl base64 -A > "$W/pub.b64"
     TESTKEYS="t1:$(cat "$W/pub.b64")"
 
-    # make_release <dir> <tag> : a tar.xz with an AgentMux/agentmux.sh, its manifest, the envelope and the signature
+    # make_release <dir> <tag> [name to list in the manifest] : a tar.xz with an AgentMux/agentmux.sh, its manifest, the envelope and the signature
     make_release() {
-        d="$1"; tag="$2"
+        d="$1"; tag="$2"; listed="${3:-$NAME}"
         mkdir -p "$d" "$W/pkg/AgentMux"
         printf '#!/bin/sh\necho hello\n' > "$W/pkg/AgentMux/agentmux.sh"; chmod +x "$W/pkg/AgentMux/agentmux.sh"
         tar -cJf "$d/$NAME" -C "$W/pkg" AgentMux
         size="$(wc -c < "$d/$NAME" | tr -d ' ')"
         sha="$(sha256sum < "$d/$NAME" | cut -d ' ' -f 1)"
         # The same shape release-manifest.mjs writes: indented JSON, each file as name, size, sha256.
-        printf '{\n  "format": 1,\n  "version": "%s",\n  "tag": "%s",\n  "files": [\n    {\n      "name": "%s",\n      "size": %s,\n      "sha256": "%s"\n    }\n  ]\n}\n' "$VER" "$tag" "$NAME" "$size" "$sha" > "$d/AgentMux-$VER-manifest.json"
+        printf '{\n  "format": 1,\n  "version": "%s",\n  "tag": "%s",\n  "files": [\n    {\n      "name": "%s",\n      "size": %s,\n      "sha256": "%s"\n    }\n  ]\n}\n' "$VER" "$tag" "$listed" "$size" "$sha" > "$d/AgentMux-$VER-manifest.json"
         msha="$(sha256sum < "$d/AgentMux-$VER-manifest.json" | cut -d ' ' -f 1)"
         printf '{\n  "format": 1,\n  "tag": "%s",\n  "manifest_sha256": "%s",\n  "created_at": "2026-11-04T00:00:00Z"\n}\n' "$tag" "$msha" > "$d/AgentMux-$VER-envelope.json"
         printf 't1 %s\n' "$(openssl pkeyutl -sign -inkey "$W/priv.pem" -rawin -in "$d/AgentMux-$VER-envelope.json" | openssl base64 -A)" > "$d/AgentMux-$VER-envelope.json.sig"
@@ -130,7 +130,8 @@ else
     cp -r "$W/good" "$W/badhash"; size="$(wc -c < "$W/good/$NAME")"; head -c "$size" /dev/urandom > "$W/badhash/$NAME"
     expect "a same-size different file is refused" 1 "does not match the manifest's SHA-256" run_install "$W/badhash"
 
-    cp -r "$W/good" "$W/badsig"; sed -i 's/^t1 ./t1 A/' "$W/badsig/AgentMux-$VER-envelope.json.sig"
+    cp -r "$W/good" "$W/badsig"; first="$(cut -c4 "$W/badsig/AgentMux-$VER-envelope.json.sig" | head -n 1)"; swap=A; [ "$first" = A ] && swap=B
+    sed -i "s/^t1 ./t1 $swap/" "$W/badsig/AgentMux-$VER-envelope.json.sig"
     expect "a wrong signature is refused" 1 "signature does not match" run_install "$W/badsig"
 
     cp -r "$W/good" "$W/badmanifest"; sed -i 's/"format": 1/"format":  1/' "$W/badmanifest/AgentMux-$VER-manifest.json"
@@ -139,8 +140,8 @@ else
     make_release "$W/othertag" "v1.2.3"
     expect "an envelope for another release is refused" 1 "another release" run_install "$W/othertag"
 
-    cp -r "$W/good" "$W/unlisted"; sed -i "s/$NAME/Other.tar.xz/" "$W/unlisted/AgentMux-$VER-manifest.json"
-    expect "a file the manifest does not list is refused" 1 "not the one the envelope names" run_install "$W/unlisted"
+    make_release "$W/unlisted" "v$VER" "Other.tar.xz"
+    expect "a file the signed manifest does not list is refused" 1 "does not list $NAME" run_install "$W/unlisted"
 
     # With the app's real key the test signature must not verify.
     expect "another key's signature is refused" 1 "signature does not match" env AGENTMUX_INSTALL_TEST_KEYS="k1:m9HRZ4UOiBU2vyrjlHXj1D0CjfhAazI2DGdII9JSJLE=" HOME="$W/h" AGENTMUX_INSTALL_ROOT="$W/none" AGENTMUX_INSTALL_OS=Linux AGENTMUX_INSTALL_ARCH=x86_64 AGENTMUX_INSTALL_PM=none AGENTMUX_INSTALL_RELEASE_BASE="$W/good" sh "$SCRIPT" --no-launch --method download --version "$VER"
