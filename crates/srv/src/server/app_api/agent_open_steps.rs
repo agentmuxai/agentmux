@@ -17,7 +17,7 @@ pub(super) fn pick_openable_agent(state: &AppState, agent_ref: &str) -> Result<A
     // (the agent's own, or its bundle's when it has none; see
     // Store::resolve_effective_provider_id) instead of at every
     // downstream read in this handler. MUST be
-    // app_state.id_store, never mstore.
+    // the `id_store`, never `mstore`.
     agent.provider = state.id_store.resolve_effective_provider_id(&agent);
     Ok(agent)
 }
@@ -253,8 +253,8 @@ pub(super) async fn resume_session_for(mstore: &Store, agent: &AgentDefinition) 
     // Concurrency guard (reagent P1 on PR #2059): only seed
     // agent:sessionid when no OTHER block for this same agent
     // definition currently has a LIVE controller registered
-    // anywhere in this process — not just this tab (find_agent_block
-    // above only scoped the "reuse" check to the target tab).
+    // anywhere in this process — not just this tab (the reuse check
+    // in `agent_attach::tab_or_reuse` only scoped to the target tab).
     // Without this, opening the same named agent in a second tab
     // while the first is still live would seed the new block with
     // the SAME session_id, letting two controllers concurrently
@@ -377,7 +377,7 @@ pub(super) fn pane_identity_meta(mstore: &Store, agent: &AgentDefinition, provid
     }
     // Container-local CLI command: the provider's CLI as it resolves
     // INSIDE the image (on the image's PATH, e.g. `claude`). Distinct
-    // from `cmd` below, which is the host-resolved absolute npm path
+    // from `cmd` (set in `add_launch_meta`), which is the host-resolved absolute npm path
     // (`<config_home>/.../node_modules/.bin/claude`) and does NOT exist
     // in the container — passing it as docker-exec argv[0] would fail
     // with "no such file or directory". Container turns use this.
@@ -428,7 +428,7 @@ pub(super) async fn fill_existing_pane(state: &AppState, target: &str, meta_val:
     // `layout.open` and Import…: the pane already exists and sits
     // in the rebuilt tree — give it the agent's meta through
     // the reducer (like `pane.open`'s editor reuse) and skip
-    // the layout insert below.
+    // the layout insert (`create_agent_block`'s job).
     let target_block = mstore
         .get::<Block>(target)
         .map_err(|e| format!("agent.open: read target pane: {e}"))?

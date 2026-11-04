@@ -72,7 +72,6 @@ fn pane_identity_meta_names_the_agent_and_keeps_one_colour_across_opens() {
 
 #[test]
 fn add_launch_meta_sets_the_command_and_lets_the_callers_keys_win() {
-    let def = test_agent_def("agent-launch-1", "Launch One", "claude", "host", 1, "");
     let mut meta = MetaMapType::new();
     meta.insert("view".to_string(), json!("agent"));
     let mut extra = MetaMapType::new();
@@ -92,7 +91,6 @@ fn add_launch_meta_sets_the_command_and_lets_the_callers_keys_win() {
     assert_eq!(meta["cmd"], "/bin/claude");
     assert_eq!(meta["agent:sessionid"], "sess-9");
     assert_eq!(meta["cmd:cwd"], "/from/the/caller");
-    let _ = def;
 }
 
 #[test]
