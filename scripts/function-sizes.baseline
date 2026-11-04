@@ -348,7 +348,6 @@
 133 crates/srv/src/server/vault_rotate.rs::handle_vault_rotate
 210 crates/srv/src/server/websocket.rs::handle_incoming_text
 227 crates/srv/src/server/websocket.rs::handle_ws_connection
-1011 crates/srv/src/server/websocket.rs::register_handlers
 111 crates/srv/src/server/widget_agent_handlers.rs::handle_widgets_install
 129 crates/srv/src/server/work_queue.rs::enqueue_core
 120 crates/srv/src/server/work_queue.rs::handle_work_claim
