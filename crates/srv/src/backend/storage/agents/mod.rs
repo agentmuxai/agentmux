@@ -832,10 +832,6 @@ mod tests {
 }
 
 // P1/P2 fixes (Codex + ReAgent review on PR #2587):
-// - bundle_provision_for_new_agent/agent_def_provision_and_bind_bundle must
-//   write the bundle into an explicitly-passed store, never assume the
-//   caller's own definition store IS the bundle store — the two are
-//   different databases whenever a shared store is configured.
 // - resolve_effective_vendor must respect model_vendor_base_url ("custom"),
 //   not just the provider's bare default.
 #[cfg(test)]
@@ -871,44 +867,6 @@ mod bundle_provisioning_store_separation_tests {
         assert_eq!(Store::resolve_effective_vendor("not-a-real-provider", ""), "not-a-real-provider");
     }
 
-    #[test]
-    fn bundle_provision_for_new_agent_writes_into_whichever_store_its_called_on() {
-        let bundle_store = Store::open_in_memory().unwrap();
-        let agent = base_agent("a1", "Agent One", "claude", "");
-        let bundle_id = bundle_store.bundle_provision_for_new_agent(&agent, 0).unwrap();
-        assert!(bundle_store.bundle_get(&bundle_id).unwrap().is_some());
-    }
-
-    // The core P1 regression test: definition_store (self) and bundle_store
-    // are two GENUINELY SEPARATE Store instances — proves
-    // agent_def_provision_and_bind_bundle writes the bundle into
-    // bundle_store specifically, never into whichever store the method
-    // happens to be called on for the definition side.
-    #[test]
-    fn agent_def_provision_and_bind_bundle_writes_the_bundle_into_the_explicit_bundle_store_not_self() {
-        let definition_store = Store::open_in_memory().unwrap();
-        let bundle_store = Store::open_in_memory().unwrap();
-        let mut agent = base_agent("a1", "Agent One", "claude", "");
-        definition_store.agent_def_insert(&mut agent).unwrap();
-
-        definition_store.agent_def_provision_and_bind_bundle(&bundle_store, &mut agent, 0);
-
-        assert!(!agent.memory_id.is_empty(), "caller's struct must reflect the bound bundle id");
-        let def = definition_store.agent_def_get(&agent.id).unwrap().unwrap();
-        assert_eq!(def.memory_id, agent.memory_id, "binding must land in the definition store (self)");
-
-        // The bundle itself must be absent from definition_store and
-        // present only in bundle_store.
-        assert!(
-            definition_store.bundle_get(&agent.memory_id).unwrap().is_none(),
-            "bundle must NOT be written into the definition store"
-        );
-        assert!(
-            bundle_store.bundle_get(&agent.memory_id).unwrap().is_some(),
-            "bundle must be reachable via the explicit bundle_store"
-        );
-    }
-
     // P1 regression tests (ReAgent review on PR #2587 round 4):
     // db_bundles.name is UNIQUE but only AgentDefinition.slug is
     // guaranteed unique, not the display name two agents can share — a
@@ -935,6 +893,30 @@ mod bundle_provisioning_store_separation_tests {
         assert!(second.slug.ends_with("-2"));
     }
 
+    /// A bundle row with `name`, as a name collision needs.
+    fn named_bundle(store: &Store, name: &str) {
+        store
+            .bundle_upsert(&super::super::bundles::Bundle {
+                id: name.to_string(),
+                name: name.to_string(),
+                description: String::new(),
+                is_blank: false,
+                is_global: false,
+                provider: String::new(),
+                model: String::new(),
+                instructions: String::new(),
+                instructions_by_provider: "{}".to_string(),
+                context_files: "[]".to_string(),
+                mcp_servers: "[]".to_string(),
+                skills: "[]".to_string(),
+                sort_order: 0,
+                created_at: 0,
+                updated_at: 0,
+                is_system: false,
+            })
+            .unwrap();
+    }
+
     #[test]
     fn resolve_unique_bundle_name_returns_the_base_name_when_no_collision() {
         let store = Store::open_in_memory().unwrap();
@@ -944,8 +926,7 @@ mod bundle_provisioning_store_separation_tests {
     #[test]
     fn resolve_unique_bundle_name_disambiguates_on_collision() {
         let store = Store::open_in_memory().unwrap();
-        let agent_a = base_agent("a1", "Same Name", "claude", "");
-        store.bundle_provision_for_new_agent(&agent_a, 0).unwrap();
+        named_bundle(&store, "Same Name — ABF");
 
         let unique = store.resolve_unique_bundle_name("Same Name — ABF").unwrap();
         assert_eq!(unique, "Same Name — ABF (2)");
@@ -954,7 +935,7 @@ mod bundle_provisioning_store_separation_tests {
     #[test]
     fn resolve_unique_bundle_name_walks_past_multiple_collisions() {
         let store = Store::open_in_memory().unwrap();
-        store.bundle_provision_for_new_agent(&base_agent("a1", "Dup", "claude", ""), 0).unwrap();
+        named_bundle(&store, "Dup — ABF");
         // Directly seed the "(2)" slot too, so the resolver must walk to "(3)".
         let taken = super::super::bundles::Bundle {
             id: "taken-2".to_string(),
@@ -978,23 +959,6 @@ mod bundle_provisioning_store_separation_tests {
 
         let unique = store.resolve_unique_bundle_name("Dup — ABF").unwrap();
         assert_eq!(unique, "Dup — ABF (3)");
-    }
-
-    #[test]
-    fn two_agents_with_the_same_display_name_both_get_bound_not_left_unbound_on_collision() {
-        let definition_store = Store::open_in_memory().unwrap();
-        let bundle_store = Store::open_in_memory().unwrap();
-        let mut agent_a = base_agent("a1", "Twin", "claude", "");
-        let mut agent_b = base_agent("a2", "Twin", "claude", "");
-        definition_store.agent_def_insert(&mut agent_a).unwrap();
-        definition_store.agent_def_insert(&mut agent_b).unwrap();
-
-        definition_store.agent_def_provision_and_bind_bundle(&bundle_store, &mut agent_a, 0);
-        definition_store.agent_def_provision_and_bind_bundle(&bundle_store, &mut agent_b, 0);
-
-        assert!(!agent_a.memory_id.is_empty(), "first same-named agent must still get bound");
-        assert!(!agent_b.memory_id.is_empty(), "second same-named agent must NOT be silently left unbound");
-        assert_ne!(agent_a.memory_id, agent_b.memory_id, "each agent still gets its own distinct bundle");
     }
 
     // resolve_effective_provider_id — consolidated shared implementation
@@ -1047,16 +1011,6 @@ mod bundle_provisioning_store_separation_tests {
         bundle_with_provider(&store, "b1", "gemini");
         agent.memory_id = "b1".to_string();
         assert_eq!(store.resolve_effective_provider_id(&agent), "gemini");
-    }
-
-    #[test]
-    fn a_new_agents_bundle_carries_no_harness() {
-        let store = Store::open_in_memory().unwrap();
-        let mut agent = base_agent("a1", "Agent One", "gemini", "");
-        agent.model_vendor_base_url = "https://proxy.example.com".to_string();
-        let bundle_id = store.bundle_provision_for_new_agent(&agent, 0).unwrap();
-        let bundle = store.bundle_get(&bundle_id).unwrap().unwrap();
-        assert_eq!((bundle.provider.as_str(), bundle.model.as_str()), ("", ""));
     }
 
     #[test]
