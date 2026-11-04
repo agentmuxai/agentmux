@@ -1,0 +1,14 @@
+diag sync urlAtom="https://example.com/" addressBar="https://example.com/" focused=false willUpdate=false
+listen browser-pane-shortcut
+diag input-focus value="https://example.com/" relatedTarget=null
+reclaimWindowFocus main
+diag sync urlAtom="https://example.com/" addressBar="git" focused=true willUpdate=false
+autocomplete block-1 "git" suggest=true
+diag sync urlAtom="https://example.com/" addressBar="github.com" focused=true willUpdate=false
+diag sync urlAtom="https://example.com/" addressBar="gitlab.com" focused=true willUpdate=false
+diag input-submit value="gitlab.com"
+diag input-submit chosen=history-url url="https://gitlab.com/"
+model navigate https://gitlab.com/
+diag sync urlAtom="https://example.com/" addressBar="https://gitlab.com/" focused=true willUpdate=false
+pane navigate block-1 https://gitlab.com/
+state value="https://gitlab.com/" sel=19-19 rows=[]

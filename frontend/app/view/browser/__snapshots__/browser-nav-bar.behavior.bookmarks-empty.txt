@@ -1,0 +1,7 @@
+diag sync urlAtom="" addressBar="" focused=false willUpdate=false
+listen browser-pane-shortcut
+rpc ListBookmarks
+no page rows=["No bookmarks yet"]
+diag sync urlAtom="https://example.com/" addressBar="" focused=false willUpdate=true
+diag sync urlAtom="https://example.com/" addressBar="https://example.com/" focused=false willUpdate=false
+page rows=["Set as Home Page","Bookmark This Page","No bookmarks yet"]

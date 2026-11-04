@@ -1,0 +1,5 @@
+diag sync urlAtom="https://example.com/" addressBar="https://example.com/" focused=false willUpdate=false
+listen browser-pane-shortcut
+unsubscribed=0
+unlisten
+unsubscribed=1

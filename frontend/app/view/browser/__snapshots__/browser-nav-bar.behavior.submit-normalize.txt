@@ -1,0 +1,53 @@
+diag sync urlAtom="https://example.com/" addressBar="https://example.com/" focused=false willUpdate=false
+listen browser-pane-shortcut
+-- "example.org"
+diag input-focus value="https://example.com/" relatedTarget=body
+reclaimWindowFocus main
+diag sync urlAtom="https://example.com/" addressBar="example.org" focused=true willUpdate=false
+autocomplete block-1 "example.org" suggest=true
+diag input-submit value="example.org"
+model navigate https://example.org
+diag sync urlAtom="https://example.com/" addressBar="https://example.org" focused=true willUpdate=false
+pane navigate block-1 https://example.org
+-- "  localhost  "
+diag sync urlAtom="https://example.com/" addressBar="  localhost  " focused=true willUpdate=false
+autocomplete block-1 "  localhost  " suggest=true
+diag input-submit value="localhost"
+model navigate https://www.google.com/search?q=localhost
+diag sync urlAtom="https://example.com/" addressBar="https://www.google.com/search?q=localhost" focused=true willUpdate=false
+pane navigate block-1 https://www.google.com/search?q=localhost
+-- "two words"
+diag sync urlAtom="https://example.com/" addressBar="two words" focused=true willUpdate=false
+autocomplete block-1 "two words" suggest=true
+diag input-submit value="two words"
+model navigate https://www.google.com/search?q=two%20words
+diag sync urlAtom="https://example.com/" addressBar="https://www.google.com/search?q=two%20words" focused=true willUpdate=false
+pane navigate block-1 https://www.google.com/search?q=two%20words
+-- "http://plain.example/x"
+diag sync urlAtom="https://example.com/" addressBar="http://plain.example/x" focused=true willUpdate=false
+autocomplete block-1 "http://plain.example/x" suggest=true
+diag input-submit value="http://plain.example/x"
+model navigate http://plain.example/x
+pane navigate block-1 http://plain.example/x
+-- "HTTPS://Up.Example"
+diag sync urlAtom="https://example.com/" addressBar="HTTPS://Up.Example" focused=true willUpdate=false
+autocomplete block-1 "HTTPS://Up.Example" suggest=true
+diag input-submit value="HTTPS://Up.Example"
+model navigate HTTPS://Up.Example
+pane navigate block-1 HTTPS://Up.Example
+-- "about:blank"
+diag sync urlAtom="https://example.com/" addressBar="about:blank" focused=true willUpdate=false
+autocomplete block-1 "about:blank" suggest=true
+diag input-submit value="about:blank"
+model navigate about:blank
+pane navigate block-1 about:blank
+-- "a.b c"
+diag sync urlAtom="https://example.com/" addressBar="a.b c" focused=true willUpdate=false
+autocomplete block-1 "a.b c" suggest=true
+diag input-submit value="a.b c"
+model navigate https://www.google.com/search?q=a.b%20c
+diag sync urlAtom="https://example.com/" addressBar="https://www.google.com/search?q=a.b%20c" focused=true willUpdate=false
+pane navigate block-1 https://www.google.com/search?q=a.b%20c
+-- "   "
+diag sync urlAtom="https://example.com/" addressBar="   " focused=true willUpdate=false
+diag input-submit value=""
