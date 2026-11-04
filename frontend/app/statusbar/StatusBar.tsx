@@ -11,6 +11,7 @@ import { GpuStatus } from "./GpuStatus";
 import { HostPopover } from "./HostPopover";
 import { InstancePanel } from "./InstancePanel";
 import { AgentCountsStatus } from "./AgentCountsStatus";
+import { VaultRequestsStatus } from "./VaultRequestsStatus";
 import { MultiInputStatus } from "./MultiInputStatus";
 import { MuxBusIndicator } from "./MuxBusIndicator";
 import { registerStatusBarItem, statusBarItems } from "./status-bar-registry";
@@ -99,6 +100,7 @@ function registerBuiltinStatusBarItems(): void {
         ["system-stats", "left", () => <SystemStats />],
         ["gpu", "left", () => <GpuStatus />],
         ["agent-counts", "right", () => <AgentCountsStatus />],
+        ["vault-requests", "right", () => <VaultRequestsStatus />],
         ["browser-pause-all", "right", () => <BrowserPauseAllStatus />],
         ["multi-input", "right", () => <MultiInputStatus />],
         ["history-usage", "right", () => <HistoryUsageIndicator />],

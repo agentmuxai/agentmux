@@ -6,7 +6,7 @@
  *  drawn from srv's record in the pane that asked, answered through the host,
  *  gone when srv's list drops them, never taking the composer's focus. */
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { UseRequest } from "@/types/rpc/UseRequest";
@@ -27,7 +27,9 @@ vi.mock("@/util/app-api", () => ({ getApi: () => ({ approvals: { vault } }) }));
 import { __resetPaneRequests, paneRequests } from "@/app/store/pane-requests";
 import { PaneRequestDock } from "@/app/view/agent/pane-requests/PaneRequestDock";
 import { refreshVault } from "@/app/view/vault/vault-store";
-import { askedInPane } from "@/app/view/vault/vault-use-prompts";
+import { VaultRequestsList } from "@/app/view/vault/vault-requests-list";
+import { VaultRequestsStatus } from "@/app/statusbar/VaultRequestsStatus";
+import { VaultRowAsks } from "./vault-row-asks";
 import { startVaultRequestCards } from "./vault-request-cards";
 
 const PANE = "agent-pane-1";
@@ -179,9 +181,44 @@ describe("an agent's Vault requests as cards in its pane", () => {
         expect(deny.nextElementSibling).toBe(yeses);
     });
 
-    it("leaves a request with no pane to the window's prompt", () => {
-        expect(askedInPane(use())).toBe(true);
-        expect(askedInPane(use({ block_id: "" }))).toBe(false);
-        expect(askedInPane(request({ block_id: "" }))).toBe(false);
+    it("denies all from an agent waiting on more than one, uses and asks for entries alike", async () => {
+        uses = [use(), use({ id: "use-2", entry_label: "Stripe key" })];
+        requests = [request()];
+        await refreshVault();
+        render(() => <PaneRequestDock blockId={PANE} />);
+        fireEvent.click(await screen.findByRole("button", { name: "Deny all 3 from Builder" }));
+        await waitFor(() => expect(calls("answer_use")).toEqual(expect.arrayContaining([{ id: "use-1", decision: "deny" }, { id: "use-2", decision: "deny" }])));
+        await waitFor(() => expect(calls("decline_request")).toEqual([{ request_id: "req-1" }]));
+    });
+
+    it("asks a request with no pane on screen in the Vault pane's list, not in any pane", async () => {
+        uses = [use({ block_id: "", entry_label: "Parked token" })];
+        requests = [request({ block_id: "", label: "Parked URL" })];
+        await refreshVault();
+        expect(paneRequests.of("")).toHaveLength(0);
+        render(() => <VaultRequestsList onFill={vi.fn()} />);
+        const list = await screen.findByRole("region", { name: "Agents' requests" });
+        expect(list.textContent).toContain("Builder wants to run a command with your value");
+        expect(list.textContent).toContain("Parked URL");
+        fireEvent.click(within(list).getByRole("button", { name: "Deny" }));
+        await waitFor(() => expect(calls("answer_use")).toEqual([{ id: "use-1", decision: "deny" }]));
+    });
+
+    it("shows a parked agent's request on its My agents row and counts it in the status bar", async () => {
+        uses = [use({ block_id: "", entry_label: "Parked token" }), use({ id: "use-2" })];
+        await refreshVault();
+        render(() => (
+            <>
+                <VaultRowAsks agent="builder" />
+                <VaultRequestsStatus />
+            </>
+        ));
+        const line = await screen.findByTestId("vault-row-asks");
+        expect(line.hasAttribute("data-operator-only")).toBe(true);
+        expect(line.textContent).toMatch(/Waiting for you in the Vault: Parked token · goes ahead in 0:(29|30)/);
+        expect(line.textContent, "the one in its pane is asked there").not.toContain("1 more");
+        expect(screen.getByRole("button", { name: /1 Vault request waits/ }).textContent).toContain("1 Vault request");
+        fireEvent.click(within(line).getByRole("button", { name: "Deny" }));
+        await waitFor(() => expect(calls("answer_use")).toEqual([{ id: "use-1", decision: "deny" }]));
     });
 });

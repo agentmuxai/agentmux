@@ -12,6 +12,7 @@ import type { VaultActivity } from "@/types/rpc/VaultActivity";
 import type { VaultRequest } from "@/types/rpc/VaultRequest";
 import type { VaultSection } from "@/types/rpc/VaultSection";
 import { VaultEntries } from "./vault-entries";
+import { VaultRequestsList } from "./vault-requests-list";
 import { VaultShown } from "./vault-reveal";
 import { VaultExportDialog } from "./vault-export";
 import { VaultImportDialog } from "./vault-import";
@@ -23,7 +24,6 @@ import { openOrFocusPaneByView } from "@/app/store/block-component-registry";
 import { getPlatform } from "@/util/platformutil";
 import type { VaultViewModel } from "./vault-model";
 import {
-    declineRequest,
     followVault,
     holdVaultShown,
     loadActivity,
@@ -50,45 +50,6 @@ const MANAGED_IN: Record<string, string> = {
     tower: "Tower",
     browser: "The browser pane that asked for it",
 };
-
-function VaultRequests(props: { onFill: (r: VaultRequest) => void }): JSX.Element {
-    const [error, setError] = createSignal<string | null>(null);
-    const dismiss = async (r: VaultRequest) => {
-        try {
-            await declineRequest(r.id);
-            setError(null);
-        } catch (e) {
-            setError(e instanceof Error ? e.message : String(e));
-        }
-    };
-    return (
-        <Show when={vaultRequests().length > 0}>
-            <div class="vault-requests" role="region" aria-label="Agents' requests">
-                <For each={vaultRequests()}>
-                    {(r) => (
-                        <div class="vault-request" data-request={r.id}>
-                            <div class="vault-request-text">
-                                <strong>{r.agent}</strong> asks for a {vaultKind(r.kind)?.label.toLowerCase() ?? r.kind}: <strong>{r.label}</strong>
-                                <Show when={r.why}>
-                                    <div class="warden-manager-dim">{r.why}</div>
-                                </Show>
-                            </div>
-                            <Button tone="attention" density="compact" onClick={() => props.onFill(r)}>
-                                Fill in
-                            </Button>
-                            <Button tone="quiet" density="compact" onClick={() => void dismiss(r)}>
-                                Dismiss
-                            </Button>
-                        </div>
-                    )}
-                </For>
-                <Show when={error()}>
-                    <div class="warden-manager-error">⚠ {error()}</div>
-                </Show>
-            </div>
-        </Show>
-    );
-}
 
 /** What may ask the person while they use the Vault, said before it does. */
 function VaultPromptsNote(props: { onClose: () => void }): JSX.Element {
@@ -280,7 +241,7 @@ export function VaultView(props: { model: VaultViewModel }): JSX.Element {
                     <Show when={model.promptsOpen()}>
                         <VaultPromptsNote onClose={() => model.setMeta({ "vault:prompts-read": true })} />
                     </Show>
-                    <VaultRequests onFill={fill} />
+                    <VaultRequestsList onFill={fill} />
                     <Show when={vaultError() ?? vaultProblem()}>
                         <div class="warden-manager-error vault-problem" role="alert">
                             ⚠ {vaultError() ?? vaultProblem()}

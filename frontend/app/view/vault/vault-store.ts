@@ -281,6 +281,21 @@ export const loadVersions = (id: string) => call<{ versions: VaultVersionInfo[] 
 /** Puts an earlier value back; the current one is kept in its place. */
 export const restoreVersion = (id: string, seq: number) => call<unknown>("restore", { id, seq });
 export const declineRequest = (requestId: string) => call<unknown>("decline_request", { request_id: requestId });
+
+/** How many of `agent`'s requests wait: its uses of entries and its asks for new ones. */
+export const pendingFrom = (agent: string) => vaultUses().filter((u) => u.agent === agent).length + vaultRequests().filter((r) => r.agent === agent).length;
+
+/** Denies every use `agent` waits on and declines every entry it asked for
+ *  (docs/specs/SPEC_VAULT_REQUESTS_AS_CARDS_IN_THE_AGENT_PANE_2026_11_01.md §7). One
+ *  already answered elsewhere is skipped. */
+export async function denyAllFrom(agent: string): Promise<void> {
+    const uses = vaultUses().filter((u) => u.agent === agent);
+    const requests = vaultRequests().filter((r) => r.agent === agent);
+    await Promise.all([
+        ...uses.map((u) => answerUse(u.id, "deny").catch(() => {})),
+        ...requests.map((r) => declineRequest(r.id).catch(() => {})),
+    ]);
+}
 export const loadActivity = (limit = 200) => call<{ activity: VaultActivity[] }>("activity", { limit }).then((r) => r.activity);
 /** An entry with standing permissions, from a read that needs no key (Warden's view). */
 export interface GrantedEntry {
