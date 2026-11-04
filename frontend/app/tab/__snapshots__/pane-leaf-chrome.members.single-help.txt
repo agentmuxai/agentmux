@@ -1,0 +1,14 @@
+Block mount b1 wrapper#1 hoisted=true preview=false
+agentMountSettled b1
+setBlockMinimized b1 false
+Block b1 memberActive=true
+leaf setActiveViewModel b1
+Block b1 set its vm
+renderPaneChrome by vm of b1
+dom chrome=1 shell=0 blocks=["b1"] slots=[]
+chrome sees vm of b1
+-- unmount
+Block unmount b1
+leaf setActiveViewModel null
+setBlockMinimized b1 false
+agentMountForgotten b1
