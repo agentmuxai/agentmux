@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Real-install harness for scripts/agentmux-install-update.sh on .deb and .rpm distros.
 #
-#   ./run.sh [distro...]          run every case on each distro (default: ubuntu24 ubuntu26 fedora42)
+#   ./run.sh [distro...]          run every case on each distro (default: ubuntu26 tumbleweed)
 #   ./run.sh -c <case> [distro]   one case
 #   ./run.sh shell <distro>       a root shell in a container with AgentMux $FROM installed, on the mirror network
 #   ./run.sh mirror-up | mirror-down
@@ -157,7 +157,7 @@ main() {
         shell) shell_in "${2:-ubuntu24}"; return;;
         -c) only=$2; shift 2;;
     esac
-    distros=("$@"); [ ${#distros[@]} -gt 0 ] || distros=(ubuntu24 ubuntu26 fedora42)
+    distros=("$@"); [ ${#distros[@]} -gt 0 ] || distros=(ubuntu26 tumbleweed)
     fetch_packages || return 1
     mirror_up || return 1
     local d c failed=0 total=0 cases=()

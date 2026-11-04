@@ -1,0 +1,43 @@
+# The system libraries the .deb and .rpm need that they do not bundle.
+#
+# One line per shared library the staged runtime links against (a NEEDED entry of any
+# ELF file under /opt/agentmux) that the package does not carry itself:
+#
+#   <soname> | <Debian/Ubuntu package, with the alternative name from before the 64-bit time_t
+#               rename after a "|" where one exists>
+#
+# The .rpm needs no package names: it requires the soname itself (`<soname>()(64bit)`), which
+# Fedora and openSUSE each resolve to their own package. The .deb has no such mechanism, so it
+# names packages. `bash scripts/linux-package-deps.sh check <root>` fails a build when the
+# staged tree needs a library that is neither bundled nor listed here, so this list cannot
+# fall behind the runtime. `bash scripts/linux-package-deps.test.sh` covers the script itself.
+#
+# glibc (libc.so.6, libm.so.6, ld-linux-x86-64.so.2) and libgcc_s.so.1 come with every
+# system that can run a .deb or .rpm and are not listed.
+libasound.so.2        | libasound2t64 | libasound2
+libatk-1.0.so.0       | libatk1.0-0t64 | libatk1.0-0
+libatk-bridge-2.0.so.0| libatk-bridge2.0-0t64 | libatk-bridge2.0-0
+libatspi.so.0         | libatspi2.0-0t64 | libatspi2.0-0
+libcairo.so.2         | libcairo2
+libcups.so.2          | libcups2t64 | libcups2
+libdbus-1.so.3        | libdbus-1-3
+libexpat.so.1         | libexpat1
+libgbm.so.1           | libgbm1
+libgio-2.0.so.0       | libglib2.0-0t64 | libglib2.0-0
+libglib-2.0.so.0      | libglib2.0-0t64 | libglib2.0-0
+libgobject-2.0.so.0   | libglib2.0-0t64 | libglib2.0-0
+libnspr4.so           | libnspr4
+libnss3.so            | libnss3
+libnssutil3.so        | libnss3
+libpango-1.0.so.0     | libpango-1.0-0
+libsmime3.so          | libnss3
+libudev.so.1          | libudev1
+libwayland-client.so.0| libwayland-client0
+libX11.so.6           | libx11-6
+libxcb.so.1           | libxcb1
+libXcomposite.so.1    | libxcomposite1
+libXdamage.so.1       | libxdamage1
+libXext.so.6          | libxext6
+libXfixes.so.3        | libxfixes3
+libxkbcommon.so.0     | libxkbcommon0
+libXrandr.so.2        | libxrandr2
