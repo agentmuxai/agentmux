@@ -41,7 +41,6 @@ import {
 import { cancelFlashPattern, flashElement, onActivityFlash } from "@/app/notification/activity-flash";
 import { LOCATE_PILL_FLASH, onPaneLocate, onPaneLocatePlay } from "@/app/util/pane-locate";
 import { shouldReduceMotion } from "@/app/motion/motion";
-import { DURATION_BASE_MS, EASE_OUT } from "@/app/motion/tokens";
 import { usePulseWhen } from "@/app/motion/solid";
 import { isModKey, isWindows } from "@/util/platformutil";
 import { Tooltip } from "./tooltip";
@@ -54,38 +53,16 @@ import { asDocTabDragData, docTabItemType, paneTabItemType, type DocTabDragData 
 import { createScrollEdges } from "./scroll-edges";
 import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
 import { useWindowTabDisplayed } from "@/app/workspace/window-tab-visibility";
-import { edgeFlashArea } from "./drop-blink-clock";
-import { createForeignHover } from "./pane-tab-foreign-hover";
-import type { LayoutModel } from "@/layout/lib/layoutModel";
-import { clearPillGhost, pillZone, showPillGhost, type PillZone } from "@/layout/lib/paneBodyDrop";
-import type { DropDirection } from "@/layout/lib/types";
 import type { PaneTabSelectionApi } from "./pane-tab-selection";
 import { createStripReveal, registerStripWithPane } from "./strip-reveal-controller";
-import { stripWheelDelta } from "./strip-wheel";
+import { foreignDropHighlightFor, foreignDropRootFor, incomingTabLabel, multiIdsOf, useForeignTabDrop, type PaneTabBodyDrop } from "./pane-tab-foreign-drop";
+import { useStripScrollInput, useStripWidthAnimation } from "./pane-tab-strip-hooks";
+
+export { foreignDropHighlightFor, foreignDropRootFor, incomingTabLabel };
 import type { PaneTabProgress } from "@/app/store/pane-tab-progress";
 
-// Matches the other reveal-gate/cross-fade durations added alongside this
-// one in SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md §2.4.
-const WIDTH_TRANSITION_MS = DURATION_BASE_MS;
 
 
-
-/**
- * The ghost pill's text for a pane-tab drag over a strip that holds `here`: the grabbed tab's title, or the
- * count of the picked tabs this strip lacks. None when nothing would be added (the drag is not a pane tab, or
- * every tab is already here).
- */
-export function incomingTabLabel(data: Record<string | symbol, unknown>, here: ReadonlySet<string>): string | null {
-    if (data.type !== paneTabItemType) return null;
-    const many = multiIdsOf(data);
-    if (many) {
-        const added = many.filter((blockId) => !here.has(blockId)).length;
-        return added === 0 ? null : added === 1 ? "1 tab" : `${added} tabs`;
-    }
-    const blockId = data.blockId;
-    if (typeof blockId !== "string" || here.has(blockId)) return null;
-    return typeof data.label === "string" && data.label ? data.label : "Tab";
-}
 
 /**
  * What a pane tab's pill carries when dragged: its block, the pane and window tab it comes from, the picked set
@@ -101,12 +78,6 @@ function paneTabDragData(blockId: string, label: string, paneKey?: string, sourc
         sourceTabId,
         ...(many && many.length > 1 ? { blockIds: many } : {}),
     };
-}
-
-/** The block ids a pane-tab drag carries when it carries several (a Ctrl/Cmd+click selection), else undefined. */
-function multiIdsOf(data: Record<string | symbol, unknown>): readonly string[] | undefined {
-    const ids = data.blockIds;
-    return Array.isArray(ids) && ids.length > 1 && ids.every((x) => typeof x === "string") ? (ids as string[]) : undefined;
 }
 
 /** A tab's own pane color, split into the two treatments PaneChrome's
@@ -168,65 +139,6 @@ export interface DocTabDrag {
  */
 export function dropPositionForPointerX(rect: Pick<DOMRect, "left" | "width">, clientX: number): "before" | "after" {
     return clientX < rect.left + rect.width / 2 ? "before" : "after";
-}
-
-/** Selector for the Pane header row that a header-hosted strip lives in —
- *  `BlockFrame_Header`'s own `data-role`, which is also what TileLayout
- *  already uses as the whole-pane drag handle. Matched by attribute rather
- *  than by class (`.block-frame-default-header`) deliberately: `data-role`
- *  is the stable contract blockframe.tsx exposes for exactly this kind of
- *  outside-in lookup, while the class name is styling. */
-const PANE_HEADER_SELECTOR = '[data-role="block-header"]';
-
-/** Selector for a whole Pane — PaneChrome's root (`.pane-stack`), header
- *  and body together. Matched by `data-role` for the same reason as the
- *  header selector above: it's the stable contract, the class is styling. */
-const PANE_SELECTOR = '[data-role="pane"]';
-
-/**
- * Which element is the cross-pane drop zone for a strip: the WHOLE Pane
- * (PaneChrome's root, header and body together) when the strip is that
- * pane's header strip, else the header row (a header outside PaneChrome),
- * else the strip box itself (a strip that isn't in a header at all).
- *
- * Dropping a Pane Tab anywhere on another pane, header or body, does the same
- * thing: the tab joins that pane (repo owner, 2026-09-24,
- * SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.3). It was the header row alone
- * before, and before that just the pills: aiming at a thin strip to move a tab
- * there is fussy, and the whole pane is what reads as "into this pane" mid-drag.
- * Widening it is free: every drop target inside the pane either accepts the
- * drag itself (the per-pill same-pane reorder targets) or declines and lets it
- * bubble here (pragmatic-dnd walks up the DOM on a false `canDrop`). Nothing
- * else inside a pane registers an element drop target, and the tile overlay
- * that sits above pane bodies only takes pointer events during a whole-PANE
- * drag (`layoutModel.activeDrag`), never during a pane-TAB drag.
- *
- * Pure and exported for the same reason as `dropPositionForPointerX` above:
- * the gesture itself can't be unit-tested (no real drag pipeline in jsdom),
- * but *which element gets the registration* can — and getting that wrong is
- * silent, since pragmatic-dnd simply never fires a handler for an element
- * the pointer never reaches (cf. ReAgent's P0 on PR #3447, a cross-pane
- * move that was dead in the UI while its own unit tests passed).
- */
-export function foreignDropRootFor(strip: HTMLElement): HTMLElement {
-    // Widen to the pane only from a strip that IS the pane's header strip. A
-    // strip rendered inside a pane's content (editor file tabs, the agent
-    // History strip) must never resolve to the pane around it.
-    const header = strip.closest<HTMLElement>(PANE_HEADER_SELECTOR);
-    if (!header) return strip;
-    return header.closest<HTMLElement>(PANE_SELECTOR) ?? header;
-}
-
-/**
- * Which element shows the "valid drop target" flash while a foreign tab
- * hovers the drop zone: the header row, wherever over the pane the pointer
- * is. The header is where the tab will appear, and the flash is the Window
- * Tab look, which is sized for a strip, not a whole pane body
- * (SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md §3).
- * Falls back to the strip box for a strip not hosted in a header.
- */
-export function foreignDropHighlightFor(strip: HTMLElement): HTMLElement {
-    return strip.closest<HTMLElement>(PANE_HEADER_SELECTOR) ?? strip;
 }
 
 export interface PaneTabStripProps<T> {
@@ -392,12 +304,7 @@ export interface PaneTabStripProps<T> {
      *  there), or `false` when it was refused. Without it a drop anywhere on the pane joins, as
      *  before. A multi-tab drag always joins.
      *  SPEC_PANE_TAB_DRAG_BODY_PLACEMENT_AND_EDGE_GLOW_2026_10_29.md §3.1. */
-    bodyDrop?: {
-        model: LayoutModel;
-        /** False for a header-only pane (minimized, collapsed): no body zone. */
-        hasBody: () => boolean;
-        place: (blockId: string, zone: Extract<PillZone, { kind: "place" }>) => string | false;
-    };
+    bodyDrop?: PaneTabBodyDrop;
     /** Ctrl/Cmd+click multi-select for a Pane's own header strip. Omitted by document
      *  tabs and the agent History strip, which have no selection. */
     selection?: PaneTabSelectionApi;
@@ -419,9 +326,6 @@ export interface PaneTabStripProps<T> {
 
 export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
     let stripRef: HTMLDivElement | undefined;
-    let lastMeasuredWidth: number | undefined;
-    let widthResetTimeout: ReturnType<typeof setTimeout> | undefined;
-    onCleanup(() => clearTimeout(widthResetTimeout));
 
     // Edge fades while the tabs overflow (scroll-edge-fade, PaneTabStrip.scss).
     // The selected tab sitting flush at the left edge drops the left fade, so it is not dimmed.
@@ -456,272 +360,14 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
         }, { defer: true })
     );
 
-    // Cross-pane drop-to-append (Phase 4, §3.4). A dwell-free hover flash —
-    // unlike the outer Window Tab bar's spring-loaded switch (which needs a
-    // dwell because committing reveals a HIDDEN tab), a target Pane's
-    // content here is already visible the whole time, so there's nothing
-    // to reveal before committing; see the spec's own reasoning for
-    // skipping that dwell timer.
-    // The element that flashes, to size the hover against the flash rule (drop-blink-clock.ts).
-    let flashEl: HTMLElement | undefined;
-    const flashArea = (): number | undefined => {
-        const r = flashEl?.getBoundingClientRect();
-        if (!r) return undefined;
-        // A pane header flashes its two edge strips only; a strip used as its own drop zone, all of it.
-        return flashEl?.matches(PANE_HEADER_SELECTOR) ? edgeFlashArea(r.width, r.height) : r.width * r.height;
-    };
-    const {
-        foreignHover,
-        flash,
-        incoming,
-        begin: beginForeignHover,
-        end: endForeignHover,
-        hovering,
-    } = createForeignHover({
-        flashArea,
-        incomingOf: (data) => incomingTabLabel(data, new Set(props.tabs.map((tab) => props.getId(tab)))),
-    });
-    // Whether the hover highlight belongs on the strip box itself. False
-    // once the drop zone resolves to the enclosing header row, so the
-    // feedback outlines exactly the area that actually accepts the drop
-    // rather than a sub-region of it. Only ever flips during onMount, i.e.
-    // strictly before `foreignHover` can become true, so the JSX binding
-    // below always reads a settled value.
-    const [highlightStrip, setHighlightStrip] = createSignal(true);
-    onMount(() => {
-        const strip = stripRef;
-        if (!strip || !props.onReceiveForeignTab || !props.paneKey) return;
-        const paneKey = props.paneKey;
-        // The whole pane, header and body — see `foreignDropRootFor`'s own
-        // doc comment for why, and why the widening is free.
-        const el = foreignDropRootFor(strip);
-        // The flash goes on the header either way (`foreignDropHighlightFor`).
-        const highlightEl = foreignDropHighlightFor(strip);
-        flashEl = highlightEl;
-        if (highlightEl !== strip) {
-            setHighlightStrip(false);
-            // `highlightEl` is blockframe.tsx's element, outside this
-            // component's own JSX, so the class goes on imperatively. Removed
-            // on cleanup: the header's lifetime isn't tied to this strip's,
-            // and a stale accent outline left on a header that outlives it
-            // would be permanent.
-            createEffect(() => {
-                highlightEl.classList.toggle("pane-header--foreign-hover", foreignHover());
-                highlightEl.classList.toggle("pane-header--no-blink", foreignHover() && flash() !== "blink");
-            });
-            onCleanup(() => highlightEl.classList.remove("pane-header--foreign-hover", "pane-header--no-blink"));
-        }
-        // A single pill over this pane, with `bodyDrop`: what the pointer is over decides the
-        // feedback (the header glow, or the placement ghost), read again as it moves.
-        const body = props.bodyDrop;
-        let zone: PillZone = { kind: "none" };
-        let ghost: DropDirection | undefined;
-        let lastFollow = -Infinity;
-        type PillArgs = {
-            source: { data: Record<string | symbol, unknown> };
-            location: { current: { input: { clientX: number; clientY: number } } };
-        };
-        const singlePill = (args?: PillArgs) => !!body && !!args?.source && !multiIdsOf(args.source.data);
-        const zoneInput = (args: PillArgs) => {
-            const { clientX, clientY } = args.location.current.input;
-            return {
-                model: body!.model,
-                nodeId: paneKey,
-                blockId: args.source.data.blockId as string,
-                pointer: { x: clientX, y: clientY },
-                headerRect: highlightEl.getBoundingClientRect(),
-                ownPane: args.source.data.sourceNodeId === paneKey,
-                hasBody: body!.hasBody(),
-            };
-        };
-        const followPill = (args: PillArgs, force = false) => {
-            const now = performance.now();
-            if (!force && now - lastFollow < 30) return;
-            lastFollow = now;
-            const input = zoneInput(args);
-            zone = pillZone(input);
-            // The header glows where the pill would join, and nowhere else.
-            if (zone.kind === "join") {
-                if (!hovering()) beginForeignHover(args.source);
-            } else if (hovering()) {
-                endForeignHover();
-            }
-            if (zone.kind === "place") {
-                body!.model.showOverlay._set(true);
-                if (zone.direction !== ghost) {
-                    ghost = zone.direction;
-                    showPillGhost(body!.model, input, zone);
-                }
-            } else if (ghost !== undefined) {
-                ghost = undefined;
-                clearPillGhost(body!.model);
-            }
-        };
-        const endPillFeedback = () => {
-            zone = { kind: "none" };
-            if (!body) return;
-            if (ghost !== undefined) clearPillGhost(body.model);
-            ghost = undefined;
-            body.model.showOverlay._set(false);
-        };
-        onCleanup(endPillFeedback);
-        const cleanup = dropTargetForElements({
-            element: el,
-            canDrop: ({ source }) => {
-                if (source.data.type !== paneTabItemType) return false;
-                // Several tabs: accepted when this pane lacks at least one of them, even
-                // the pane the grabbed tab came from (gathering into where you started).
-                const many = multiIdsOf(source.data);
-                if (many && props.acceptsForeignTabs) return props.acceptsForeignTabs(many);
-                // A single pill from this very pane can only be placed (it is already a tab here),
-                // which needs another tab to stay behind.
-                if (props.bodyDrop && !many && source.data.sourceNodeId === paneKey) return props.tabs.length >= 2;
-                return source.data.sourceNodeId !== paneKey;
-            },
-            // A drag that starts inside this pane (gathering tabs into the pane the grabbed one came
-            // from) is over this drop zone from the first moment: pragmatic-dnd calls onDragStart for
-            // that, not onDragEnter.
-            onDragStart: (args) => (singlePill(args) ? followPill(args, true) : beginForeignHover(args?.source)),
-            onDragEnter: (args) => (singlePill(args) ? followPill(args, true) : beginForeignHover(args?.source)),
-            onDrag: (args) => {
-                if (singlePill(args)) followPill(args);
-            },
-            onDragLeave: () => {
-                endForeignHover();
-                endPillFeedback();
-            },
-            onDrop: (args) => {
-                const { source } = args;
-                endForeignHover();
-                // Read again where the pointer was released, not where the throttled drag last looked.
-                const dropZone = singlePill(args) ? pillZone(zoneInput(args)) : zone;
-                endPillFeedback();
-                const blockId = source.data.blockId as string | undefined;
-                if (body && blockId && !multiIdsOf(source.data)) {
-                    // Over this pane's header, or the pill's own pane where it cannot be placed.
-                    if (dropZone.kind === "none") return;
-                    if (dropZone.kind === "place") {
-                        setCurrentDragPayload(null);
-                        // Next task, like a join: the move unmounts the dragged pill (see below).
-                        setTimeout(() => {
-                            const landedIn = body.place(blockId, dropZone);
-                            if (landedIn !== false) markLanded(blockId, landedIn);
-                        }, 0);
-                        return;
-                    }
-                }
-                // Handled in-window: the cross-window monitor must not also
-                // tear this tab off on dragend (pane-tab-tearoff.ts).
-                setCurrentDragPayload(null);
-                if (!blockId) return;
-                const many = multiIdsOf(source.data);
-                // Commit on the next task, after pragmatic-dnd has finished
-                // dispatching this drop. The move unmounts the dragged pill —
-                // the live drag SOURCE — from its old strip (and, once moving
-                // a pane's last tab closes that pane, its whole header, which
-                // is itself a registered whole-pane draggable). Unmounting a
-                // registered source mid-dispatch is the teardown hazard
-                // SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR_2026_07_11.md
-                // catalogs; one task of delay costs nothing visible.
-                // The hover styling above clears synchronously.
-                // SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md §4.2.
-                // Alt held on the drop keeps two document panes as two pane tabs (the layout merges them
-                // otherwise). Passed only when held, so a plain drop is the call it always was.
-                const keepSeparate = args.location?.current?.input?.altKey === true;
-                if (many && props.onReceiveForeignTabs) {
-                    const receiveMany = props.onReceiveForeignTabs;
-                    setTimeout(() => {
-                        const moved = keepSeparate ? receiveMany(many, blockId, { keepSeparate }) : receiveMany(many, blockId);
-                        if (moved !== false) markLanded(moved, paneKey);
-                    }, 0);
-                    return;
-                }
-                const receive = props.onReceiveForeignTab!;
-                setTimeout(() => {
-                    const moved = keepSeparate ? receive(blockId, { keepSeparate }) : receive(blockId);
-                    if (moved !== false) markLanded(blockId, paneKey);
-                }, 0);
-            },
-        });
-        onCleanup(cleanup);
-    });
+    const { foreignHover, flash, incoming, highlightStrip } = useForeignTabDrop(props, () => stripRef);
 
-    // FLIP-style width transition, opt-in via `animateWidth` (see that
-    // prop's own doc comment for why it's opt-in, and PaneTabStrip.scss's
-    // comment for why a plain CSS transition can't do this at all). Tracks
-    // `tabs.length` specifically — a tab added or removed is what makes the
-    // strip suddenly appear or grow, matching §2.4's actual complaint, not
-    // a general "animate on every possible width change" feature.
-    //
-    // Measure AFTER each change (Solid's effects run after the DOM patch,
-    // so `getBoundingClientRect()` here already reflects the NEW tab
-    // count) and compare against whatever was measured on the PREVIOUS
-    // run — that previous measurement naturally serves as "before" for
-    // this change without needing to read the DOM pre-update at all. Then:
-    // hold the box at the old width, force a synchronous reflow, and
-    // transition to the new width — the standard FLIP technique. The
-    // inline `width`/`transition` are cleared back to the CSS-driven
-    // shrink-to-fit `auto` once the transition ends, so a later window
-    // resize/zoom change isn't fighting a stale explicit pixel width.
-    //
-    // Deliberately NOT `{ defer: true }`: this effect must also run once
-    // at mount, to record the initial width into `lastMeasuredWidth` with
-    // no animation (nothing to animate FROM before mount). Deferring would
-    // skip that first run, leaving `lastMeasuredWidth` unset going into the
-    // very FIRST real tab-count change — exactly the 0-tabs-to-1-tab
-    // transition §2.4 is about — silently skipping the one change this
-    // feature exists to smooth, and only animating the second-and-later
-    // ones. `lastMeasuredWidth !== undefined` below is what actually
-    // distinguishes "first run, no prior measurement" from "no-op, sizes
-    // matched" — not `on`'s own defer option.
-    //
-    // reagent's review of PR #2768: a second tabs.length change arriving
-    // before the FIRST transition's cleanup timeout fires used to measure
-    // `newWidth` while `el.style.width` was still pinned to the first
-    // transition's in-flight interpolated value — reading garbage instead
-    // of the true natural width for the current tab count, then holding at
-    // a width unrelated to either state until the trailing timeout finally
-    // cleared it. Fixed by clearing any still-pinned width/transition
-    // FIRST (`wasAnimating` below) before measuring `newWidth`, and using
-    // the box's actual current visual position (not the stale
-    // `lastMeasuredWidth` target) as the hold point when interrupting an
-    // in-flight transition — `lastMeasuredWidth` itself is only a valid
-    // "before" reference for the SETTLED case, where layout is already
-    // lazily dirty from Solid's DOM patch by the time this effect runs and
-    // there's no other way to recover the pre-change size at all.
-    createEffect(
-        on(
-            () => props.tabs.length,
-            () => {
-                if (!props.animateWidth) return;
-                const el = stripRef;
-                if (!el) return;
-                const wasAnimating = widthResetTimeout !== undefined;
-                const holdWidth = wasAnimating ? el.getBoundingClientRect().width : lastMeasuredWidth;
-                clearTimeout(widthResetTimeout);
-                reveal.setWidthAnimating(false);
-                el.style.transition = "none";
-                el.style.width = "";
-                // Forces the reflow that reveals the TRUE natural width for
-                // the current tab count — only trustworthy once the line
-                // above has cleared any lingering override.
-                const newWidth = el.getBoundingClientRect().width;
-                if (holdWidth !== undefined && holdWidth !== newWidth && !shouldReduceMotion("transition")) {
-                    el.style.width = `${holdWidth}px`;
-                    el.getBoundingClientRect(); // force reflow before the transition kicks in
-                    el.style.transition = `width ${WIDTH_TRANSITION_MS}ms ${EASE_OUT}`;
-                    el.style.width = `${newWidth}px`;
-                    reveal.setWidthAnimating(true);
-                    widthResetTimeout = setTimeout(() => {
-                        el.style.width = "";
-                        el.style.transition = "";
-                        reveal.setWidthAnimating(false);
-                    }, WIDTH_TRANSITION_MS + 20);
-                }
-                lastMeasuredWidth = newWidth;
-            }
-        )
-    );
+    useStripWidthAnimation({
+        stripEl: () => stripRef,
+        tabCount: () => props.tabs.length,
+        animateWidth: () => props.animateWidth,
+        reveal,
+    });
 
     // A document tab in front closed (×, Ctrl+W, a menu, moved away): the
     // tab that takes its place plays the landing cue, so the change shows even
@@ -738,48 +384,7 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
         )
     );
 
-    // A plain vertical mouse wheel over a horizontally-scrolling region isn't
-    // reliably redirected to horizontal scroll by the engine on its own —
-    // explicit handling needed so "scroll the wheel over an overflowing tab
-    // strip" actually works, the same affordance browsers' own native tab
-    // bars give you. Only takes over when there's real horizontal overflow
-    // AND the gesture is vertical (deltaY dominant) — a trackpad's own
-    // horizontal swipe (deltaX dominant) is left to the browser's native
-    // handling untouched, and a strip that isn't overflowing at all lets the
-    // event bubble normally instead of silently swallowing every scroll.
-    //
-    // A real `addEventListener("wheel", ..., { passive: false })`, NOT the
-    // JSX `onWheel` prop — Solid (like React) delegates common events
-    // through a single top-level listener for perf, and delegated `wheel`
-    // listeners are registered passive by default, which silently no-ops
-    // `preventDefault()` (confirmed live: the JSX-prop version ran but
-    // never actually scrolled). `{ passive: false }` here is what makes
-    // `preventDefault()` real, so the browser's own default vertical-scroll
-    // response to the wheel doesn't fight the manual `scrollLeft` write.
-    onMount(() => {
-        const el = stripRef;
-        if (!el) return;
-        const handleWheel = (e: WheelEvent) => {
-            if (el.scrollWidth <= el.clientWidth) return; // nothing to scroll: not the user scrolling it
-            // The user's scroll: it stands until the next reveal, and stops one in flight.
-            reveal.noteUserScroll();
-            if (Math.abs(e.deltaX) >= Math.abs(e.deltaY)) return;
-            e.preventDefault();
-            el.scrollLeft += stripWheelDelta(e.deltaY, e.deltaMode);
-        };
-        const handleTouch = () => {
-            if (el.scrollWidth > el.clientWidth) reveal.noteUserScroll();
-        };
-        const handlePointerDown = () => reveal.notePointerDown();
-        el.addEventListener("wheel", handleWheel, { passive: false });
-        el.addEventListener("touchmove", handleTouch, { passive: true });
-        el.addEventListener("pointerdown", handlePointerDown, { passive: true });
-        onCleanup(() => {
-            el.removeEventListener("wheel", handleWheel);
-            el.removeEventListener("touchmove", handleTouch);
-            el.removeEventListener("pointerdown", handlePointerDown);
-        });
-    });
+    useStripScrollInput(() => stripRef, reveal);
 
     return (
         <div
