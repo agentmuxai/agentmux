@@ -109,7 +109,7 @@ pub(super) fn gemini_settings(mcp_json: &str, agent_env: &HashMap<String, String
 /// folder or an extension (`gemini.cmd` on Windows).
 pub(super) fn is_gemini(cli_command: &str) -> bool {
     // Both separators: a Windows path is not split by `Path` on another system.
-    let base = cli_command.rsplit(['/', '']).next().unwrap_or(cli_command);
+    let base = cli_command.rsplit(['/', '\\']).next().unwrap_or(cli_command);
     Path::new(base).file_stem().and_then(|s| s.to_str()).is_some_and(|s| s.eq_ignore_ascii_case("gemini"))
 }
 
