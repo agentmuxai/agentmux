@@ -462,7 +462,6 @@ pub async fn installations(http: &reqwest::Client, who: &Caller) -> Result<Vec<L
     serde_json::from_value(list).map_err(|_| BrokerError::Other { status: 200, error: "unreadable_answer".to_string() })
 }
 
-/// Present a fresh user token so the broker re-reads what this account can see; it keeps nothing of the token.
 /// A state for an install trip.
 pub async fn installation_state(http: &reqwest::Client, who: &Caller) -> Result<InstallState, BrokerError> {
     let answer = call(http, who, reqwest::Method::POST, "/github/v1/installations/state", None).await?;
@@ -488,6 +487,7 @@ pub async fn unlink_installation(http: &reqwest::Client, who: &Caller, installat
     call(http, who, reqwest::Method::DELETE, &format!("/github/v1/installations/{installation_id}/link"), None).await.map(|_| ())
 }
 
+/// Present a fresh user token so the broker re-reads what this account can see; it keeps nothing of the token.
 pub async fn revalidate(http: &reqwest::Client, who: &Caller, user_token: &str) -> Result<Revalidated, BrokerError> {
     let body = json!({ "access_token": user_token });
     let answer = call(http, who, reqwest::Method::POST, "/github/v1/links/revalidate", Some(&body)).await?;

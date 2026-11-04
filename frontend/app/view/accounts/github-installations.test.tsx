@@ -101,6 +101,19 @@ describe("the installations section", () => {
         expect(rpc.call.mock.calls.length).toBe(calls);
     });
 
+    it("asks once per round, not twice, when Install is clicked again while waiting", async () => {
+        rpc.call.mockResolvedValue(answer([]));
+        render(() => <GithubInstallationsSection />);
+        await screen.findByText(NO_INSTALLATIONS_HINT);
+        fireEvent.click(screen.getByText("Install on repositories…"));
+        await screen.findByText(/Waiting for you to finish on GitHub/);
+        fireEvent.click(screen.getByText("Install on repositories…"));
+        await waitFor(() => expect(rpc.call.mock.calls.filter((c) => c[1].action === "start").length).toBe(2));
+        const syncs = () => rpc.call.mock.calls.filter((c) => c[1].action === "sync").length;
+        await vi.advanceTimersByTimeAsync(SYNC_EVERY_MS * 3);
+        expect(syncs()).toBe(3);
+    });
+
     it("gives up after ten minutes without an installation", async () => {
         rpc.call.mockResolvedValue(answer([]));
         render(() => <GithubInstallationsSection />);

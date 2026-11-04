@@ -61,6 +61,8 @@ export function GithubInstallationsSection(): JSX.Element {
         setNote(null);
         await call("start");
         if (error()) return;
+        // A second click while waiting replaces the first timer rather than leaving it running.
+        stopWaiting();
         const started = Date.now();
         setWaitingSince(started);
         timer = setInterval(() => {
