@@ -13,7 +13,7 @@ import clsx from "clsx";
 import { IconButton } from "@/app/element/ui/Button";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
-import { formatElapsedClock, formatTimeLeft } from "@/util/format-time";
+import { formatElapsedCompact, formatTimeLeft } from "@/util/format-time";
 import { ChunkPreview } from "./ChunkPreview";
 import {
     createDispatchDetail,
@@ -103,7 +103,7 @@ export const ActivityRow = (props: ActivityRowProps): JSX.Element => {
         const a = props.activity();
         if (!a) return "";
         const end = a.endedAt ?? (tick(), Date.now());
-        return formatElapsedClock(end - a.startedAt);
+        return formatElapsedCompact(end - a.startedAt);
     });
 
     // Terminal statuses override the kind sigil with a result glyph.
@@ -121,31 +121,7 @@ export const ActivityRow = (props: ActivityRowProps): JSX.Element => {
     const tail = createMemo((): string | undefined => {
         const a = props.activity();
         if (!a) return undefined;
-        if (a.shell) {
-            const chunks = a.shell.log.chunks;
-            for (let i = chunks.length - 1; i >= 0; i--) {
-                const c = chunks[i];
-                if ((c.kind === "stdout" || c.kind === "stderr") && c.content.trim()) {
-                    return c.content.trim();
-                }
-            }
-            return undefined;
-        }
-        if (a.tool) {
-            // The live log's last chunk, or, once a finished tool's log was
-            // freed (toolOutputChunks), the last line of its result's output.
-            const fromResult = (a.tool.log?.chunks.length ?? 0) === 0;
-            const chunks = toolOutputChunks(a.tool);
-            for (let i = chunks.length - 1; i >= 0; i--) {
-                const c = chunks[i];
-                if ((c.kind === "stdout" || c.kind === "stderr") && c.content.trim()) {
-                    if (!fromResult) return c.content.trim();
-                    const lines = c.content.trim().split("\n");
-                    return lines[lines.length - 1].trim();
-                }
-            }
-            return undefined;
-        }
+        // A shell's or a tool's last output line is not shown on the row: the expanded log has it.
         if (a.subagent) {
             // Cheap tail from data already on ActiveSubagent — no extra
             // fetch/subscribe just to render a collapsed row's tail (that
@@ -218,20 +194,16 @@ export const ActivityRow = (props: ActivityRowProps): JSX.Element => {
                             <ActivitySigil activity={a()} glyph={sigil()} tick={tick} />
                         </span>
                         <Tooltip content={a().fullTitle} disable={!a().fullTitle} divClassName="agent-activity-title">{a().title}</Tooltip>
-                        <span class="agent-activity-elapsed">[{elapsed()}]</span>
-                        <Show when={remaining()}>
-                            <span class="agent-activity-remaining">{remaining()}</span>
-                        </Show>
-                        <Show when={tail()}>
-                            {/* U+2192 (→), not U+21B3 (↳) — the latter has weak
-                                glyph coverage in the fixed-font stack (Hack +
-                                a short fallback list) and renders as a
-                                mismatched/garbled character; → is already used
-                                safely in this same file/font context, see
-                                subagentEventLine's tool_use case above.
-                                SPEC_ACTIVITY_DOCK_TITLE_WIDTH_AND_TAIL_GLYPH_2026_09_05.md §3. */}
-                            <span class="agent-activity-tail">→ {tail()}</span>
-                        </Show>
+                        {/* The stats, on the right like the working row's: what it counted, a known wait's time left, how long it has run. */}
+                        <span class="agent-activity-stats">
+                            <Show when={tail()}>
+                                <span class="agent-activity-tail">{tail()}</span>
+                            </Show>
+                            <Show when={remaining()}>
+                                <span class="agent-activity-remaining">{remaining()}</span>
+                            </Show>
+                            <span class="agent-activity-elapsed">{elapsed()}</span>
+                        </span>
                         <Show when={a().canStop}>
                             <IconButton
                                 icon="stop"

@@ -1,0 +1,115 @@
+{
+  "ok": true,
+  "nodejsError": null,
+  "launchError": null,
+  "calls": [
+    {
+      "cmd": "ResolveCli",
+      "data": {
+        "provider_id": "aider",
+        "cli_command": "aider",
+        "npm_package": "",
+        "pinned_version": "0.86.2",
+        "windows_install_command": "irm https://aider.chat/install.ps1 | iex",
+        "unix_install_command": "curl -LsSf https://aider.chat/install.sh | sh",
+        "block_id": "block-1",
+        "notice_block_id": "block-1",
+        "agent_id": "agent-1"
+      },
+      "opts": {
+        "timeout": 300000
+      }
+    },
+    {
+      "cmd": "GetAllAgentContent",
+      "data": {
+        "agent_id": "agent-1"
+      }
+    },
+    {
+      "cmd": "WriteAgentConfig",
+      "data": {
+        "working_dir": "/srv/home/agents/korp",
+        "files": [],
+        "render_from_agent": true,
+        "instance_name": "Ada",
+        "auto_allocate": false,
+        "agent_type": "host",
+        "agent_id": "agent-1"
+      }
+    },
+    {
+      "cmd": "CreateAgentInstance",
+      "data": {
+        "definition_id": "agent-1",
+        "block_id": "block-1",
+        "instance_name": "Ada",
+        "working_directory": "/srv/home/agents/korp"
+      }
+    },
+    {
+      "cmd": "SetMeta",
+      "data": {
+        "oref": "block:block-1",
+        "meta": {
+          "agentId": "agent-1",
+          "agentProvider": "aider",
+          "agentOutputFormat": "raw",
+          "agentName": "Ada",
+          "agentIcon": "robot",
+          "agentMode": "host",
+          "agent:provider_flags": "",
+          "agent:container_image": null,
+          "agent:container_volumes": null,
+          "agent:container_command": null,
+          "controller": "cmd",
+          "cmd": "/cli/claude",
+          "cmd:args": [
+            "--read",
+            "AGENTS.md",
+            "--analytics-disable",
+            "--no-check-update",
+            "--no-show-release-notes",
+            "--no-gitignore"
+          ],
+          "cmd:cwd": "/srv/home/agents/korp",
+          "cmd:env": {
+            "GH_CONFIG_DIR": "/srv/home/config/gh-ada",
+            "AGENTMUX_AGENT_ID": "ada",
+            "AGENTMUX_AGENT_SLUG": "ada",
+            "AGENTMUX_INSTANCE_SLUG": "ada",
+            "AGENTMUX_AGENT_DISPLAY": "Ada",
+            "GIT_AUTHOR_NAME": "Ada",
+            "GIT_AUTHOR_EMAIL": "ada@agents.local",
+            "GIT_COMMITTER_NAME": "Ada",
+            "GIT_COMMITTER_EMAIL": "ada@agents.local",
+            "CLAUDE_CODE_EXIT_AFTER_STOP_DELAY": "30000"
+          },
+          "agent:resume_flag": "",
+          "agent:resume_strategy": "none",
+          "agent:session_id_field": "",
+          "agent:prompt_arg_flag": "",
+          "agent:sessionid": "",
+          "agent:runtime": {
+            "permissionMode": "bypass",
+            "model": "sonnet",
+            "effort": "high"
+          },
+          "term:zoom": 1.25,
+          "frame:activebordercolor": "#336699",
+          "view": "term",
+          "cmd:interactive": true,
+          "cmd:runonstart": true,
+          "frame:title": "Ada",
+          "agentInstanceId": "inst-1"
+        }
+      }
+    }
+  ],
+  "logs": [
+    "trace: cli",
+    "info: Launching agent definition Ada (aider)",
+    "trace: config",
+    "trace: committed"
+  ]
+}

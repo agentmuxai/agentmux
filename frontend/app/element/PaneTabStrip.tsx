@@ -24,61 +24,27 @@
 
 import { landedTab, markLanded } from "./pane-tab-landing";
 export { LANDING_BOUNCE_MS } from "./pane-tab-landing";
-import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show, type Accessor, type JSX } from "solid-js";
-import { draggable, dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
-import { preventUnhandled } from "@atlaskit/pragmatic-drag-and-drop/prevent-unhandled";
-import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
-import { markEscaped } from "@/app/drag/drag-session";
-import { hideDragImageOnNativeWayland } from "@/app/drag/wayland-drag-image";
-import {
-    isDraggedDocTab,
-    isDraggedPaneTab,
-    releaseDocTabDrag,
-    releasePaneTabDrag,
-    startDocTabDrag,
-    startPaneTabDrag,
-} from "@/app/drag/pane-tab-drag";
-import { cancelFlashPattern, flashElement, onActivityFlash } from "@/app/notification/activity-flash";
-import { LOCATE_PILL_FLASH, onPaneLocate, onPaneLocatePlay } from "@/app/util/pane-locate";
+import { createEffect, For, on, Show, type Accessor, type JSX } from "solid-js";
+import { isDraggedDocTab, isDraggedPaneTab } from "@/app/drag/pane-tab-drag";
 import { shouldReduceMotion } from "@/app/motion/motion";
 import { usePulseWhen } from "@/app/motion/solid";
-import { isModKey, isWindows } from "@/util/platformutil";
 import { Tooltip } from "./tooltip";
-import { classifyPillClick, markPillDragEnded, msSinceLastPillDrag } from "./pane-tab-gesture";
 import "./PaneTabStrip.scss";
-// The Pane Tab pill's drag tag (drag-types.ts): distinct from the tile and
-// window-tab tags, so no existing target mistakes a pill for either.
-// SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.1.
-import { asDocTabDragData, docTabItemType, paneTabItemType, type DocTabDragData } from "@/app/drag/drag-types";
 import { createScrollEdges } from "./scroll-edges";
 import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
 import { useWindowTabDisplayed } from "@/app/workspace/window-tab-visibility";
 import type { PaneTabSelectionApi } from "./pane-tab-selection";
 import { createStripReveal, registerStripWithPane } from "./strip-reveal-controller";
-import { foreignDropHighlightFor, foreignDropRootFor, incomingTabLabel, multiIdsOf, useForeignTabDrop, type PaneTabBodyDrop } from "./pane-tab-foreign-drop";
+import { foreignDropHighlightFor, foreignDropRootFor, incomingTabLabel, useForeignTabDrop, type PaneTabBodyDrop } from "./pane-tab-foreign-drop";
 import { useStripScrollInput, useStripWidthAnimation } from "./pane-tab-strip-hooks";
+import { dropPositionForPointerX, pillTooltipContent, usePillDrag, usePillFlash, usePillGestures, usePillProgress, type DocTabDrag } from "./pane-tab-pill";
 
-export { foreignDropHighlightFor, foreignDropRootFor, incomingTabLabel };
+export { dropPositionForPointerX, foreignDropHighlightFor, foreignDropRootFor, incomingTabLabel };
+export type { DocTabDrag };
 import type { PaneTabProgress } from "@/app/store/pane-tab-progress";
 
 
 
-
-/**
- * What a pane tab's pill carries when dragged: its block, the pane and window tab it comes from, the picked set
- * when it is dragged with several, and its title (the ghost pill's text over another pane's strip).
- */
-function paneTabDragData(blockId: string, label: string, paneKey?: string, sourceTabId?: string, many?: readonly string[]) {
-    return {
-        kind: "pane-tab",
-        blockId,
-        label,
-        type: paneTabItemType,
-        sourceNodeId: paneKey,
-        sourceTabId,
-        ...(many && many.length > 1 ? { blockIds: many } : {}),
-    };
-}
 
 /** A tab's own pane color, split into the two treatments PaneChrome's
  *  hue/identity-color system already gives a block (blockframe.tsx):
@@ -102,43 +68,6 @@ export interface PaneTabColors {
      *  falls back to `background` when absent. */
     activeBackground?: string;
     neutralBackground?: string;
-}
-
-/**
- * Document-tab drag for a strip of a pane's documents (an Editor's files, a
- * Media pane's files): the same pills, drop marks and landing bounce as pane
- * tabs, but its own drag kind. A document tab moves only within its strip or
- * to another pane of the same `docType`, and never tears off into a window.
- * docs/reports/REPORT_DOC_TAB_DRAG_AND_DROP_2026_10_09.md section 3.1.
- */
-export interface DocTabDrag {
-    /** The pane type ("editor", "media"): tabs move only between panes of one type. */
-    docType: string;
-    /** The block whose tabs these are. */
-    blockId: string;
-    /** Whether a tab can be dragged at all (an empty Media tab can not). */
-    canDrag?: (tabId: string) => boolean;
-    /** A tab of this strip dropped before or after another of its tabs.
-     *  `false`: refused (no landing bounce). */
-    onReorder: (tabId: string, targetId: string, position: "before" | "after") => boolean | void;
-    /** A tab of another pane of this type dropped on one of these tabs. Runs
-     *  one task after the drop: the move unmounts the dragged pill, the live
-     *  source of the drag. Omitted: such a drop is not accepted here. */
-    onReceive?: (sourceBlockId: string, tabId: string, at: { targetId: string; position: "before" | "after" }) => boolean | void;
-}
-
-/**
- * Which side of a hovered pill's rect a dragged pill should land on, given
- * the pointer's clientX. Pure and exported so it's unit-testable in
- * isolation — the actual drag gesture (pragmatic-dnd, real pointer events)
- * has no unit-test coverage anywhere in this codebase (jsdom has no real
- * HTML5 drag/pointer pipeline; see droppable-tab.tsx/TileLayout.core.tsx,
- * both untested at that layer for the same reason). This is the one piece
- * of the interaction's logic pure enough to verify directly.
- * SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.2.
- */
-export function dropPositionForPointerX(rect: Pick<DOMRect, "left" | "width">, clientX: number): "before" | "after" {
-    return clientX < rect.left + rect.width / 2 ? "before" : "after";
 }
 
 export interface PaneTabStripProps<T> {
@@ -511,18 +440,6 @@ interface PaneTabStripItemProps<T> {
     docDrag?: DocTabDrag;
 }
 
-/** How one pill drags, for either kind of tab: what it carries, what it
- *  accepts, and what a drop on it does. One registration (below) serves both. */
-interface PillDrag {
-    data: () => Record<string, unknown>;
-    canDrag: () => boolean;
-    start: () => void;
-    release: () => void;
-    accepts: (data: Record<string | symbol, unknown>) => boolean;
-    /** Act on a drop at `position`; returns the id of the tab to bounce, or null. */
-    drop: (data: Record<string | symbol, unknown>, position: "before" | "after") => string | null;
-}
-
 function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
     const id = () => props.getId(props.tab);
     const attention = () => props.getAttention?.(props.tab) ?? false;
@@ -538,7 +455,6 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
     const landingKey = () => props.docDrag?.blockId ?? props.paneKey;
     const isDragging = () =>
         props.docDrag ? isDraggedDocTab(props.docDrag.blockId, id()) : isDraggedPaneTab(id(), props.paneKey);
-    const [dropSide, setDropSide] = createSignal<"before" | "after" | null>(null);
 
     // Activity flash: click this pill on every tone from its own block. Not while its window
     // tab is hidden: nobody sees it, and each flash is a Web Animation of ~65 keyframes (the
@@ -546,253 +462,17 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
     // pill's own `--pane-tab-underline` in the stylesheet, so no base
     // color is passed here.
     const windowDisplayed = useWindowTabDisplayed();
-
-    // The progress line (SPEC_PANE_TAB_PROGRESS_LINE_2026_10_24.md §3). The state is read for
-    // the words and `aria-busy` whatever the pane shows; the line itself is not drawn on the
-    // selected pill of an expanded pane, whose border and transcript already say it. A line
-    // that ends fades out in its last look rather than cutting.
-    const progress = props.useProgress?.(props.tab);
-    const progressInfo = (): PaneTabProgress | null => progress?.() ?? null;
-    const lineState = (): PaneTabProgress["state"] | null => {
-        const info = progressInfo();
-        if (!info) return null;
-        return props.active && !(props.collapsed?.() ?? false) ? null : info.state;
-    };
-    const lineLook = createMemo<PaneTabProgress["state"] | null>((prev) => lineState() ?? prev ?? null);
-    const descriptionId = () => `pane-tab-state-${id()}`;
-    onMount(() => {
-        if (!props.flashOnActivity) return;
-        const unsubscribe = onActivityFlash((target) => {
-            if (target.blockId === id() && pillRef && windowDisplayed()) flashElement(pillRef, target);
-        });
-        // The pane is flashing to show it was just selected: its pill does too.
-        const unsubscribeLocate = onPaneLocatePlay((blockId, paneKey) => {
-            if (blockId === id() && paneKey === props.paneKey && pillRef) flashElement(pillRef, LOCATE_PILL_FLASH);
-        });
-        // A newer reveal replaces the earlier one's pill, so two never show at once.
-        const unsubscribeRequest = onPaneLocate(() => {
-            if (pillRef) cancelFlashPattern(pillRef, LOCATE_PILL_FLASH.pattern);
-        });
-        onCleanup(() => {
-            unsubscribe();
-            unsubscribeLocate();
-            unsubscribeRequest();
-        });
+    const { progressInfo, lineState, lineLook, descriptionId } = usePillProgress(props, id);
+    usePillFlash({
+        enabled: () => props.flashOnActivity,
+        id,
+        paneKey: () => props.paneKey,
+        pill: () => pillRef,
+        windowDisplayed,
     });
-
-    // Tear-off to a floating pane (SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md
-    // §3.5). On drag start, hand the cross-window monitors a "pane-tab"
-    // payload; they tear the tab off on dragend only if no drop target inside
-    // the window claimed it (both pill drop targets clear it) and it landed on
-    // no AgentMux window. The payload is deliberately NOT cleared in the
-    // draggable's own onDrop: dragend, which the monitors read it on, comes
-    // after — same as whole-pane (tile) drags.
-    const onEscape = (e: KeyboardEvent) => {
-        // keydown still reaches the page during an HTML5 drag; an escaped
-        // drag never tears off (the monitors read it off the session).
-        if (e.key === "Escape") markEscaped();
-    };
-    let tracking = false;
-    const startTearOffTracking = () => {
-        if (!props.paneKey || !props.sourceTabId || !pillRef) return;
-        const paneRect = pillRef.closest<HTMLElement>('[data-role="pane"]')?.getBoundingClientRect();
-        setCurrentDragPayload({
-            kind: "pane-tab",
-            blockId: id(),
-            sourceNodeId: props.paneKey,
-            sourceTabId: props.sourceTabId,
-            paneSize: paneRect ? { width: paneRect.width, height: paneRect.height } : undefined,
-        });
-        // macOS/Linux: without this, a drop outside every drop target (i.e. a
-        // tear-off) animates the drag image back into the window first, the
-        // same snapback whole-pane drags suppress (TileLayout.darwin.tsx).
-        if (!isWindows()) preventUnhandled.start();
-        window.addEventListener("keydown", onEscape, true);
-        tracking = true;
-    };
-    const stopTearOffTracking = () => {
-        if (!tracking) return;
-        tracking = false;
-        if (!isWindows()) preventUnhandled.stop();
-        window.removeEventListener("keydown", onEscape, true);
-    };
-    onCleanup(stopTearOffTracking);
-
-    // A pane tab: same-pane reorder (SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md sections 3.1 and 3.2),
-    // gated on `onReorder`, with tear-off when the strip names its window tab (3.5). A pill from a
-    // DIFFERENT pane (another `sourceNodeId`) is rejected here rather than accepted and then silently
-    // ignored on drop: cross-pane is the whole-pane target's job (#3444).
-    const paneTabDrag = (): PillDrag | null => {
-        const onReorder = props.onReorder;
-        if (!onReorder) return null;
-        return {
-            data: () =>
-                paneTabDragData(id(), props.getLabel(props.tab), props.paneKey, props.sourceTabId, props.selection?.dragIds(id())),
-            canDrag: () => true,
-            start: () => {
-                const many = props.selection?.dragIds(id());
-                const several = !!many && many.length > 1;
-                startPaneTabDrag(id(), props.paneKey, props.sourceTabId, several ? many : undefined);
-                // Dropping several tabs outside every window does nothing (no partial tear-off):
-                // without the tear-off payload the monitors treat the release as a cancel.
-                if (!several) startTearOffTracking();
-            },
-            release: () => {
-                releasePaneTabDrag();
-                stopTearOffTracking();
-            },
-            // A multi-tab drag is not a reorder: the pane's own drop zone takes it.
-            accepts: (data) =>
-                data.type === paneTabItemType &&
-                data.blockId !== id() &&
-                data.sourceNodeId === props.paneKey &&
-                !multiIdsOf(data),
-            drop: (data, position) => {
-                // Handled in-window: never also a tear-off.
-                setCurrentDragPayload(null);
-                const blockId = data.blockId as string | undefined;
-                if (!blockId) return null;
-                return onReorder(blockId, id(), position) !== false ? blockId : null;
-            },
-        };
-    };
-
-    // A document tab (`docDrag`): reorder within the strip, or a tab of
-    // another pane of the same type dropped onto this one. Never a tear-off.
-    const docTabDrag = (): PillDrag | null => {
-        const doc = props.docDrag;
-        if (!doc) return null;
-        return {
-            data: () => ({ type: docTabItemType, tabId: id(), docType: doc.docType, sourceBlockId: doc.blockId }) satisfies DocTabDragData,
-            canDrag: () => doc.canDrag?.(id()) ?? true,
-            start: () => startDocTabDrag(doc.blockId, id()),
-            release: releaseDocTabDrag,
-            accepts: (raw) => {
-                const data = asDocTabDragData(raw);
-                if (!data || data.docType !== doc.docType) return false;
-                return data.sourceBlockId === doc.blockId ? data.tabId !== id() : !!doc.onReceive;
-            },
-            drop: (raw, position) => {
-                const data = asDocTabDragData(raw);
-                if (!data) return null;
-                if (data.sourceBlockId === doc.blockId) {
-                    return doc.onReorder(data.tabId, id(), position) !== false ? data.tabId : null;
-                }
-                // From another pane: commit on the next task, after
-                // pragmatic-dnd has finished dispatching this drop, because
-                // the move unmounts the dragged pill, the live source of the
-                // drag (SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md 4.2).
-                const receive = doc.onReceive!;
-                const at = { targetId: id(), position };
-                setTimeout(() => {
-                    if (receive(data.sourceBlockId, data.tabId, at) !== false) markLanded(data.tabId, doc.blockId);
-                }, 0);
-                return null;
-            },
-        };
-    };
-
-    // A pill is both a drag source (itself) and a drop target (for another
-    // pill dragged onto it), the same dual role droppable-tab.tsx's tab
-    // buttons have in the window tab bar. A strip with neither `onReorder`
-    // nor `docDrag` registers nothing.
-    onMount(() => {
-        const drag = docTabDrag() ?? paneTabDrag();
-        const el = pillRef;
-        if (!drag || !el) return;
-        const cleanupDraggable = draggable({
-            element: el,
-            canDrag: () => drag.canDrag(),
-            getInitialData: () => drag.data(),
-            // A release outside every window (a tear-off) would slide the
-            // picture back on native Wayland (wayland-drag-image.ts).
-            onGenerateDragPreview: ({ nativeSetDragImage }) => {
-                hideDragImageOnNativeWayland(nativeSetDragImage);
-            },
-            onDragStart: () => {
-                dragStartedSincePress = true;
-                drag.start();
-            },
-            onDrop: () => {
-                markPillDragEnded();
-                drag.release();
-            },
-        });
-        const cleanupDropTarget = dropTargetForElements({
-            element: el,
-            canDrop: ({ source }) => drag.accepts(source.data),
-            onDrag: ({ location }) => {
-                setDropSide(dropPositionForPointerX(el.getBoundingClientRect(), location.current.input.clientX));
-            },
-            onDragLeave: () => setDropSide(null),
-            onDrop: ({ source, location }) => {
-                setDropSide(null);
-                // Computed fresh here, not reused from the `onDrag`-updated
-                // signal above: that value may not be current at the drop.
-                const position = dropPositionForPointerX(el.getBoundingClientRect(), location.current.input.clientX);
-                // The moved pill (not the one it was dropped on) bounces,
-                // same as a reordered Window Tab.
-                const landed = drag.drop(source.data, position);
-                if (landed) markLanded(landed, landingKey());
-            },
-        });
-        onCleanup(() => {
-            cleanupDraggable();
-            cleanupDropTarget();
-        });
-    });
-
-    // What the pointer did since it went down on this pill: where, and whether a drag started
-    // (pane-tab-gesture.ts). A drag or a slip past the drag threshold is not a click.
-    let pressedAt: { x: number; y: number } | null = null;
-    let dragStartedSincePress = false;
-    const onMouseDown = (e: MouseEvent) => {
-        if (e.button === 0) {
-            pressedAt = { x: e.clientX, y: e.clientY };
-            dragStartedSincePress = false;
-        }
-        // Middle-click → close (matches VS Code / Chrome convention).
-        if (e.button === 1) {
-            e.preventDefault();
-            props.onClose?.(id());
-        }
-    };
-
-    const onClick = (e: MouseEvent) => {
-        const intent = classifyPillClick({
-            button: e.button,
-            mod: isModKey(e),
-            shift: e.shiftKey,
-            alt: e.altKey,
-            pressedAt,
-            clickedAt: { x: e.clientX, y: e.clientY },
-            dragStartedSincePress,
-            msSinceLastPillDrag: msSinceLastPillDrag(),
-        });
-        pressedAt = null;
-        dragStartedSincePress = false;
-        // Another button (a middle-click closes in onMouseDown), or the end of a drag: nothing.
-        if (intent === "ignore") return;
-        // Ctrl (Cmd on macOS) + click picks or unpicks this tab for a multi-tab drag. It
-        // does not activate, focus or expand anything, and the click goes no further, so
-        // the pane's own click handler (focus) does not run either.
-        if (intent === "toggle-selection" && props.selection) {
-            e.stopPropagation();
-            props.selection.toggle(id());
-            return;
-        }
-        props.selection?.clear();
-        // Only a plain click expands a collapsed pane: a modifier makes it a selection gesture.
-        if (intent === "expand") props.onSelect?.(id());
-        if (!props.active) props.onActivate(id());
-    };
-
-    const onDblClick = (e: MouseEvent) => {
-        e.stopPropagation();
-        // Two quick Ctrl/Cmd+clicks toggle the pick twice; they are not a rename.
-        if (props.selection && isModKey(e)) return;
-        props.onDoubleClick?.(props.tab);
-    };
+    const gestures = usePillGestures(props, id);
+    const dropSide = usePillDrag({ props, id, landingKey, pill: () => pillRef, onDragStarted: gestures.noteDragStarted });
+    const { onMouseDown, onClick, onDblClick } = gestures;
 
     const closing = () => props.isClosing?.(props.tab) ?? false;
     const onCloseClick = (e: MouseEvent) => {
@@ -830,24 +510,7 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
             placement="bottom"
             divClassName="pane-tab-tip"
             immediate={!!(props.getTooltipDetail?.(props.tab) || props.getTooltipSeat?.(props.tab) || progressInfo())}
-            content={
-                props.getTooltipDetail?.(props.tab) || props.getTooltipSeat?.(props.tab) || progressInfo() ? (
-                    <div class="pane-tab-tip-body" data-testid="pane-tab-tip-body">
-                        <div class="pane-tab-tip-label">{props.getTooltip?.(props.tab) ?? props.getLabel(props.tab)}</div>
-                        <Show when={progressInfo()}>
-                            {(info) => <div class="pane-tab-tip-state">{info().text}</div>}
-                        </Show>
-                        <Show when={props.getTooltipSeat?.(props.tab)}>
-                            {(seat) => <div class="pane-tab-tip-seat">{seat()}</div>}
-                        </Show>
-                        <Show when={props.getTooltipDetail?.(props.tab)}>
-                            {(detail) => <div class="pane-tab-tip-summary">{detail()}</div>}
-                        </Show>
-                    </div>
-                ) : (
-                    (props.getTooltip?.(props.tab) ?? props.getLabel(props.tab))
-                )
-            }
+            content={pillTooltipContent(props, progressInfo)}
         >
             <div
                 class="pane-tab"

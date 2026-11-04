@@ -25,6 +25,7 @@ vi.mock("@/app/drag/CrossWindowDragMonitor", () => ({ setCurrentDragPayload: () 
 
 import { paneTabItemType } from "@/app/drag/drag-types";
 import { endDrag } from "@/app/drag/drag-session";
+import type { PaneTabProgress } from "@/app/store/pane-tab-progress";
 import { PaneTabStrip } from "./PaneTabStrip";
 
 interface T {
@@ -90,6 +91,27 @@ describe("PaneTabStrip markup", () => {
             />
         ));
         await expect(markup(strip(v.container))).toMatchFileSnapshot(snap("custom-label"));
+    });
+
+    it("pills that show their work: a progress line in each state, the selected mark, and the hidden line on an expanded active pill", async () => {
+        const progress: Record<string, PaneTabProgress | null> = {
+            a: { state: "working", text: "Working" },
+            b: { state: "waiting", text: "Waiting for you" },
+            c: { state: "signed_out", text: "Signed out" },
+        };
+        const v = render(() => (
+            <PaneTabStrip
+                tabs={TABS}
+                activeId="a"
+                getId={(t: T) => t.id}
+                getLabel={(t: T) => t.label}
+                onActivate={vi.fn()}
+                useProgress={(t: T) => () => progress[t.id]}
+                collapsed={() => false}
+                selection={{ isSelected: (id) => id === "b", toggle: vi.fn(), clear: vi.fn(), dragIds: (id) => [id] }}
+            />
+        ));
+        await expect(markup(strip(v.container))).toMatchFileSnapshot(snap("progress-selection"));
     });
 
     it("a document strip", async () => {

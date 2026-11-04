@@ -29,7 +29,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde::{Deserialize, Serialize};
 
-use crate::backend::container_credential::ContainerGrant;
+use crate::backend::container::credential::ContainerGrant;
 use crate::backend::memory::delivery::{self, Entry, Reason, Tier};
 use crate::backend::memory::fit;
 use crate::backend::memory::delivery_state::{

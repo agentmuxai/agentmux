@@ -27,6 +27,8 @@ pub(crate) use template_image::chosen_container_image;
 pub(crate) use core::delete_agent_definition;
 mod build_slot;
 mod identity;
+mod identity_delete;
+pub(crate) use identity_delete::delete_identity_account;
 mod instance;
 mod session;
 pub(crate) mod seat;
@@ -38,6 +40,7 @@ pub(crate) mod bundle;
 pub(crate) mod container_turn;
 mod composer_origin;
 pub(crate) mod input;
+mod turn_steps;
 pub(crate) use crate::backend::spawn_env::identity as identity_env;
 mod side_question;
 

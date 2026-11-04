@@ -4,7 +4,7 @@
 //! Where a new agent runs: `Agents spawn` and `Agents create` with `runtime`, `container_image`, `memory_mb` and `cpus`.
 
 use super::*;
-use crate::backend::container_image::{DEFAULT_AGENT_IMAGE, DEFAULT_DEVELOPER_IMAGE};
+use crate::backend::container::image::{DEFAULT_AGENT_IMAGE, DEFAULT_DEVELOPER_IMAGE};
 use crate::backend::storage::agents::test_agent_def;
 use crate::server::tests::test_state;
 

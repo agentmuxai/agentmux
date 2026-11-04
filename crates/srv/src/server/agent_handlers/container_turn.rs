@@ -21,8 +21,8 @@ use serde_json::{json, Value};
 
 use crate::backend::cli_notice::{self, ContainerStartState, InstallState};
 use crate::backend::container::{CliProvision, ContainerError, ContainerManager, ContainerMountSpec, StartEvent};
-use crate::backend::container_cli::CliInstall;
-use crate::backend::container_image::resolve_container_image;
+use crate::backend::container::cli::CliInstall;
+use crate::backend::container::image::resolve_container_image;
 use crate::backend::runtime_adapter::{ContainerAdapter, ContainerLaunch, RuntimeAdapter, RuntimeKind};
 
 /// Everything needed to get a container agent's container ready, owned, so it

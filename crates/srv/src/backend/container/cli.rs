@@ -10,7 +10,7 @@
 //!
 //! Spec: docs/specs/SPEC_CONTAINER_AGENTS_WORK_FOR_EVERYONE_2026_10_07.md section 3.2.
 
-use crate::backend::container_image::CONTAINER_CLI_DIR;
+use crate::backend::container::image::CONTAINER_CLI_DIR;
 use crate::backend::providers;
 
 /// What to install for one container agent.

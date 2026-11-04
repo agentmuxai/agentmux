@@ -1075,8 +1075,9 @@ describe("line-based history ids (idFirstLine)", () => {
 
     it("the live loop sets the line for ids where it sets it for tool results", () => {
         const src = readFileSync(join(process.cwd(), "frontend/app/view/agent/useAgentStream.ts"), "utf8");
-        expect(src).toMatch(/parser\.setIdLine\(sourceLine != null && from \? sourceLine : null, from\?\.gen\)/);
-        expect(src).toMatch(/parser\.setSourceLine\(null\);\s*parser\.setIdLine\(null\);/);
+        const pipeline = readFileSync(join(process.cwd(), "frontend/app/view/agent/stream-pipeline.ts"), "utf8");
+        expect(pipeline).toMatch(/parser\.setIdLine\(sourceLine != null && from \? sourceLine : null, from\?\.gen\)/);
+        expect(pipeline).toMatch(/parser\.setSourceLine\(null\);\s*st\.parser\.setIdLine\(null\);/);
         // A sent message's row is re-keyed when its record is placed.
         expect(src).toMatch(/new EchoLedger\(rekeyAccepted\)/);
         expect(src).toMatch(/echo: \(text, from\) => echoLedger\.echoed\(text, from\)/);

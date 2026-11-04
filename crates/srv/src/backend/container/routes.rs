@@ -5,7 +5,7 @@
 //! are in `route_audience` (every route has an audience; one that has none is refused), so there is
 //! one list to read. This module is the container listener's view of it.
 
-use super::route_audience::{self, UNCLASSIFIED};
+use crate::backend::route_audience::{self, UNCLASSIFIED};
 
 /// Why a container agent may not call `path`, or `None` when it may.
 pub fn refusal(path: &str) -> Option<&'static str> {

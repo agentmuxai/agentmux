@@ -401,17 +401,17 @@ pub struct LanDiscovery {
     started_at: std::time::Instant,
 }
 
-/// Normalize an OS hostname into a valid mDNS host name by appending the
-/// `.local.` suffix that mdns-sd's `ServiceInfo::new` requires. Idempotent
-/// — already-normalized inputs pass through unchanged. We also strip any
-/// trailing dot first so `"foo.local"` doesn't end up as `"foo.local..local."`.
-fn mdns_hostname(os_hostname: &str) -> String {
-    let trimmed = os_hostname.trim_end_matches('.');
-    if trimmed.ends_with(".local") {
-        format!("{trimmed}.")
-    } else {
-        format!("{trimmed}.local.")
-    }
+/// The mDNS *host record* (the A/AAAA name) this instance announces its addresses under: the instance label plus
+/// the `.local.` suffix mdns-sd's `ServiceInfo::new` requires.
+///
+/// It must be unique per instance, like the service name. It used to be the bare OS hostname, so two instances on
+/// one host (a Store copy next to a portable one) both claimed `<host>.local.`. mdns-sd then probed, saw the other
+/// instance's record as a conflict, and renamed the host (`<host>-2.local.`) over and over; the IPv6 link-local
+/// interfaces announced at once but the IPv4 ones only after ~30 s, past the watchdog's grace, which rebuilt the
+/// daemon without ever finishing ("mDNS announced on none of this host's IPv4 addresses"). A record named by
+/// `mdns_instance_label` has nothing to conflict with on the same host.
+fn mdns_host_record(hostname: &str, port: u16) -> String {
+    format!("{}.local.", mdns_instance_label(hostname, port))
 }
 
 /// Build this instance's DNS-SD *instance name* — the first label of the
@@ -497,14 +497,14 @@ impl LanDiscovery {
         let announced_v4: Arc<Mutex<BTreeSet<Ipv4Addr>>> = Arc::new(Mutex::new(BTreeSet::new()));
 
         // Register this instance. mdns-sd requires the host name passed to
-        // `ServiceInfo::new` to end with `.local.` — we always normalize so
-        // a raw OS hostname like "narko" becomes "narko.local.".
+        // `ServiceInfo::new` to end with `.local.`; see `mdns_host_record` for why
+        // it is per instance and not the OS hostname.
         // Unique per INSTANCE and dot-free — see `mdns_instance_label`. The
         // version still travels in the TXT record (`instance_id` below), which
         // is where peers actually read it from; it just must not be the
         // identity key.
         let service_name = mdns_instance_label(&hostname, port);
-        let host_name_mdns = mdns_hostname(&hostname);
+        let host_name_mdns = mdns_host_record(&hostname, port);
         let channel = crate::backend::reactive::registry::local_channel_id();
         let os = crate::backend::host_os::local_os();
         // Not `channels_running`: it changes, and a TXT update is costly; a
@@ -2066,7 +2066,7 @@ impl LanDiscoveryController {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_lan_source, is_valid_probe, mdns_hostname, probe_response_json, record_daemon_event,
+        is_lan_source, is_valid_probe, mdns_host_record, probe_response_json, record_daemon_event,
         LanDiscovery, SERVICE_TYPE, UDP_PROBE_TYPE, UDP_PROTOCOL_VERSION, UDP_RESPONSE_TYPE,
     };
     use crate::backend::lan::mdns_health;
@@ -2126,32 +2126,27 @@ mod tests {
     }
 
     #[test]
-    fn appends_local_dot_to_bare_hostname() {
-        assert_eq!(mdns_hostname("narko"), "narko.local.");
+    fn the_host_record_is_one_local_label_per_instance() {
+        let record = mdns_host_record("narko", 29700);
+        assert_eq!(record, "agentmux-narko-29700.local.");
+        // One label under `.local.`, so mdns-sd does not read it as a sub-domain.
+        assert_eq!(record.trim_end_matches(".local.").matches('.').count(), 0);
     }
 
     #[test]
-    fn preserves_already_fully_qualified_name() {
-        assert_eq!(mdns_hostname("narko.local."), "narko.local.");
+    fn two_instances_on_one_host_get_different_host_records() {
+        // The Store copy (29703) next to the portable (29700) used to share `<host>.local.`.
+        assert_ne!(mdns_host_record("Area54", 29700), mdns_host_record("Area54", 29703));
     }
 
     #[test]
-    fn appends_trailing_dot_to_local_suffix() {
-        // mdns-sd needs the trailing dot; we add it without doubling .local.
-        assert_eq!(mdns_hostname("narko.local"), "narko.local.");
-    }
-
-    #[test]
-    fn handles_trailing_dot_on_bare_hostname() {
-        assert_eq!(mdns_hostname("narko."), "narko.local.");
-    }
-
-    #[test]
-    fn does_not_double_suffix() {
-        // Two passes through the normalizer produce the same result.
-        let once = mdns_hostname("narko");
-        let twice = mdns_hostname(&once);
-        assert_eq!(twice, once);
+    fn the_host_record_label_fits_a_dns_label_for_any_hostname() {
+        for host in ["", ".", "box.corp.example", &"h".repeat(200)] {
+            let record = mdns_host_record(host, 65535);
+            let label = record.strip_suffix(".local.").expect("ends in .local.");
+            assert!(label.len() <= 63, "{record}");
+            assert!(!label.contains('.'), "{record}");
+        }
     }
 
     // -- UDP broadcast-probe wire protocol (Layer 2 discovery fallback) --

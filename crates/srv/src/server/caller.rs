@@ -116,7 +116,7 @@ pub(crate) async fn caller_middleware(
     // A container token names its agent itself; a header can't re-point it.
     let pinned = req
         .extensions()
-        .get::<crate::backend::container_credential::ContainerGrant>()
+        .get::<crate::backend::container::credential::ContainerGrant>()
         .map(|g| g.agent_token.clone());
     let header = if req.uri().path() == "/ws" || req.method() == axum::http::Method::OPTIONS {
         None

@@ -19,9 +19,13 @@
 //!   for good, and no client can set the key at all;
 //! - deleting the block drops its entry (`wcore::delete_block`);
 //! - after srv restarts the map is empty, so agents reopen their panes.
-//! - a Take over is remembered for a while, so the agent that lost the pane is told
+//! - a Take over is remembered for a day, so the agent that lost the pane is told
 //!   what happened instead of guessing (`lost_message`); a pane that closed is only logged,
 //!   since a deleted block is already answered as "no such pane".
+//! - the agent gets such a pane back with `retake` once the person pressed Give back in the pane
+//!   header (relayed by the host, like every answer to a pane's banner, so no agent can give itself
+//!   the pane) or took the pane over during the agent's own hand-off; otherwise the person is still
+//!   using it and the agent is told to wait.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -30,6 +34,14 @@ use crate::backend::obj::{Block, MetaMapType};
 
 /// Block meta key mirroring the owner, for the frontend.
 pub(crate) const OWNER_META_KEY: &str = "browser:owner_agent";
+
+/// Block meta key naming the agent that drove the pane last, written by srv whenever an agent becomes
+/// its driver and kept through the person's Take over, so the pane header can offer "Give back to X".
+pub(crate) const LAST_DRIVER_META_KEY: &str = "browser:last_driver";
+
+/// Block meta key naming the agent the person gave the pane back to (their Give back click, relayed by the
+/// host), so the retake still works after an srv restart. Cleared when an agent drives the pane again.
+pub(crate) const GIVEN_BACK_META_KEY: &str = "browser:given_back";
 
 fn owners() -> &'static Mutex<HashMap<String, String>> {
     static OWNERS: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
@@ -63,8 +75,17 @@ pub(crate) enum Lost {
     Closed,
 }
 
-/// What srv remembers about a pane an agent lost to a Take over: when, and who drove it.
-type LostEntry = (std::time::Instant, String);
+/// What srv remembers about a pane an agent lost to a Take over.
+struct LostEntry {
+    at: std::time::Instant,
+    /// Who drove it.
+    agent: String,
+    /// The person pressed Give back in the pane header.
+    given_back: bool,
+    /// A hand-off of this agent's was up when the person took the pane over: the person was
+    /// working in the pane at the agent's own request, and that request ended with the Take over.
+    during_handoff: bool,
+}
 
 /// Panes the person took over, newest few hundred. In memory like the
 /// owner map, so after an srv restart there is nothing here and the plain
@@ -75,6 +96,9 @@ fn lost() -> &'static Mutex<HashMap<String, LostEntry>> {
 }
 
 const LOST_KEPT: usize = 256;
+
+/// How long a lost pane is remembered, so an agent that comes back the next day is still told what happened.
+const LOST_KEPT_FOR: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
 
 /// Drop `block_id`'s owner and remember why. Its bypass, if any, ends with the
 /// ownership, and so does a pause (the action log stays, for the person to
@@ -92,13 +116,15 @@ pub(crate) fn forget_because(block_id: &str, why: Lost) {
         // Only a Take over is worth telling the agent about: a closed pane's block is
         // already gone, so its next call is answered "no such pane" before this is read.
         if why == Lost::TookOver {
+            let during_handoff = crate::server::browser_attention::waiting_on_user(block_id) == Some(crate::server::browser_attention::Kind::Handoff);
             let mut map = lost().lock().unwrap_or_else(|p| p.into_inner());
+            map.retain(|_, e| e.at.elapsed() < LOST_KEPT_FOR);
             if map.len() >= LOST_KEPT {
-                if let Some(oldest) = map.iter().min_by_key(|(_, (at, _))| *at).map(|(k, _)| k.clone()) {
+                if let Some(oldest) = map.iter().min_by_key(|(_, e)| e.at).map(|(k, _)| k.clone()) {
                     map.remove(&oldest);
                 }
             }
-            map.insert(block_id.to_string(), (std::time::Instant::now(), agent));
+            map.insert(block_id.to_string(), LostEntry { at: std::time::Instant::now(), agent, given_back: false, during_handoff });
         }
         changed().notify_one();
     }
@@ -120,15 +146,63 @@ fn ago(d: std::time::Duration) -> String {
 /// agent never opened.
 pub(crate) fn lost_message(pane: &str, agent_id: &str) -> Option<String> {
     let map = lost().lock().unwrap_or_else(|p| p.into_inner());
-    let (at, agent) = map.get(pane)?;
-    if !agent.eq_ignore_ascii_case(agent_id) {
-        return None;
-    }
+    let e = map.get(pane).filter(|e| e.agent.eq_ignore_ascii_case(agent_id) && e.at.elapsed() < LOST_KEPT_FOR)?;
+    let how = if e.given_back || e.during_handoff {
+        "The user is done with it: take it back with Browser's retake action"
+    } else {
+        "When the user presses Give back, take it back with Browser's retake action"
+    };
     Some(format!(
-        "the user took over pane {pane:?} ({}); an agent can't get a pane back once the person takes it over. \
-         Open a new one with Browser's open action: it starts signed in wherever the user is",
-        ago(at.elapsed())
+        "the user took over pane {pane:?} ({}). {how} (same page: snapshot it first), or open a new pane with Browser's open action",
+        ago(e.at.elapsed())
     ))
+}
+
+/// The person pressed Give back on `block_id`: the agent that lost it may retake it.
+pub(crate) fn mark_given_back(block_id: &str) {
+    if let Some(e) = lost().lock().unwrap_or_else(|p| p.into_inner()).get_mut(block_id) {
+        e.given_back = true;
+    }
+}
+
+/// May `agent_id` drive `block` (`block_id`) again, the pane it lost to the person's Take over? Yes once the person
+/// gave the pane back (remembered in memory and in the block's meta, which outlives an srv restart), or took it over
+/// during the agent's own hand-off; a pane the person is still using is refused with what to do. The caller then
+/// writes the owner meta (`retaken_meta`) and records the agent (`record`).
+pub(crate) fn may_retake(block: &Block, block_id: &str, agent_id: &str) -> Result<(), String> {
+    let given_back_to = block.meta.get(GIVEN_BACK_META_KEY).and_then(|v| v.as_str());
+    if given_back_to.is_some_and(|a| a.eq_ignore_ascii_case(agent_id)) {
+        return Ok(());
+    }
+    let map = lost().lock().unwrap_or_else(|p| p.into_inner());
+    let Some(e) = map.get(block_id).filter(|e| e.agent.eq_ignore_ascii_case(agent_id) && e.at.elapsed() < LOST_KEPT_FOR) else {
+        return Err(format!(
+            "pane {block_id:?} is not one you lost to the user in the last 24 hours: retake gets back a pane you drove and the \
+             user took over. Open a new one with Browser's open action"
+        ));
+    };
+    if e.given_back || e.during_handoff {
+        return Ok(());
+    }
+    Err(format!(
+        "the user took over pane {block_id:?} ({}) and is using it. Wait until they press Give back, or ask them in chat",
+        ago(e.at.elapsed())
+    ))
+}
+
+/// The meta that shows `agent` driving a pane: the owner the header reads, and the last driver Give back names.
+pub(crate) fn driver_meta(agent: &str) -> MetaMapType {
+    let mut m = MetaMapType::new();
+    m.insert(OWNER_META_KEY.to_string(), serde_json::json!(agent));
+    m.insert(LAST_DRIVER_META_KEY.to_string(), serde_json::json!(agent));
+    m
+}
+
+/// [`driver_meta`] for an agent that drives a pane again: the Give back it used is spent.
+pub(crate) fn retaken_meta(agent: &str) -> MetaMapType {
+    let mut m = driver_meta(agent);
+    m.insert(GIVEN_BACK_META_KEY.to_string(), serde_json::Value::Null);
+    m
 }
 
 /// Every pane an agent owns. The host keeps a copy, to decide inside
@@ -219,9 +293,11 @@ pub(crate) fn check(
 /// banner that asks the person something, the bypass the person granted,
 /// what the agent did and whether the person paused it, what opened a
 /// popup, the sites a pane is limited to, and which agent coaches a worker.
-pub(crate) fn srv_only_keys() -> [&'static str; 10] {
+pub(crate) fn srv_only_keys() -> [&'static str; 12] {
     [
         OWNER_META_KEY,
+        LAST_DRIVER_META_KEY,
+        GIVEN_BACK_META_KEY,
         crate::server::browser_allowlist::ALLOWED_META_KEY,
         crate::server::browser_attention::ATTENTION_META_KEY,
         crate::server::browser_bypass::BYPASS_META_KEY,
@@ -266,7 +342,11 @@ pub(crate) fn guard_client_meta_write(oref: &str, meta: &MetaMapType) -> Result<
     // write it could show a grant that doesn't exist, or hide one that does.
     // The action log is the person's record of what the agent did, and the
     // pause flag what they decided: a client could rewrite or hide either.
+    // Who drove the pane last and who it was given back to are what Give back and a retake rest on: a client that
+    // could write them could give a pane to an agent the person never gave it to.
     for key in [
+        LAST_DRIVER_META_KEY,
+        GIVEN_BACK_META_KEY,
         crate::server::browser_attention::ATTENTION_META_KEY,
         crate::server::browser_bypass::BYPASS_META_KEY,
         crate::server::browser_actions::ACTIONS_META_KEY,
@@ -549,6 +629,69 @@ mod tests {
         record(&pane, "korp");
         assert!(lost_message(&pane, "lark").is_none());
         forget(&pane);
+    }
+
+    #[test]
+    fn a_taken_over_pane_is_retaken_only_after_give_back() {
+        let pane = uuid::Uuid::new_v4().to_string();
+        let oref = format!("block:{pane}");
+        let b = block("browser", None);
+        assert!(may_retake(&b, &pane, "lark").is_err(), "a pane never driven");
+        record(&pane, "lark");
+        guard_client_meta_write(&oref, &null_owner()).unwrap();
+        let e = may_retake(&b, &pane, "lark").unwrap_err();
+        assert!(e.contains("is using it") && e.contains("Give back"), "{e}");
+        assert!(may_retake(&b, &pane, "korp").is_err(), "another agent never lost it");
+        mark_given_back(&pane);
+        assert!(may_retake(&b, &pane, "lark").is_ok());
+        assert!(may_retake(&b, &pane, "LARK").is_ok(), "agent ids compare without case");
+        assert!(may_retake(&b, &pane, "korp").is_err(), "given back to lark, not to korp");
+        record(&pane, "lark");
+        assert!(may_retake(&b, &pane, "lark").is_err(), "retaken: nothing left to retake");
+        forget(&pane);
+    }
+
+    /// The person's Give back is in the block's meta, so an srv restart (which forgets the lost record) does not undo it.
+    #[test]
+    fn a_give_back_in_the_blocks_meta_survives_a_restart() {
+        let pane = uuid::Uuid::new_v4().to_string();
+        let mut b = block("browser", None);
+        b.meta.insert(GIVEN_BACK_META_KEY.to_string(), json!("lark"));
+        assert!(may_retake(&b, &pane, "lark").is_ok());
+        assert!(may_retake(&b, &pane, "korp").is_err(), "given back to lark only");
+        assert!(retaken_meta("lark").get(GIVEN_BACK_META_KEY).is_some_and(|v| v.is_null()), "driving again spends it");
+    }
+
+    #[test]
+    fn the_agent_is_told_how_to_get_the_pane_back() {
+        let pane = uuid::Uuid::new_v4().to_string();
+        record(&pane, "lark");
+        guard_client_meta_write(&format!("block:{pane}"), &null_owner()).unwrap();
+        let waiting = lost_message(&pane, "lark").unwrap();
+        assert!(waiting.contains("When the user presses Give back") && waiting.contains("retake"), "{waiting}");
+        mark_given_back(&pane);
+        let given = lost_message(&pane, "lark").unwrap();
+        assert!(given.contains("The user is done with it") && given.contains("retake"), "{given}");
+        record(&pane, "lark");
+        forget(&pane);
+    }
+
+    #[test]
+    fn a_client_cannot_write_the_last_driver_or_the_give_back() {
+        for key in [LAST_DRIVER_META_KEY, GIVEN_BACK_META_KEY] {
+            assert!(guard_client_meta_write("block:test-guard-last", &meta(key, json!("lark"))).is_err(), "{key}");
+            assert!(guard_client_meta_write("block:test-guard-last", &meta(key, serde_json::Value::Null)).is_err(), "{key}");
+            let mut m = MetaMapType::new();
+            m.insert(key.into(), json!("lark"));
+            assert_eq!(strip_srv_only_keys(&mut m), vec![key], "a new pane from a client has neither");
+        }
+    }
+
+    #[test]
+    fn an_agent_driving_shows_as_owner_and_last_driver() {
+        let m = driver_meta("lark");
+        assert_eq!(m.get(OWNER_META_KEY), Some(&json!("lark")));
+        assert_eq!(m.get(LAST_DRIVER_META_KEY), Some(&json!("lark")));
     }
 
     #[test]

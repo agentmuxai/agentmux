@@ -1,0 +1,73 @@
+{
+ "log": [
+  "pane {\"type\":\"StreamSubscribe\",\"at\":1793700000000}",
+  "doc {\"type\":\"SessionStart\",\"at\":1793700000000}",
+  "-- after step: phase=Idle",
+  "-- after step: phase=Idle",
+  "pane {\"type\":\"ContextReported\",\"tokens\":12000,\"model\":\"codex-test\",\"window\":200000}",
+  "-- after step: phase=Idle",
+  "pane {\"type\":\"ToolStart\",\"name\":\"Shell\",\"arg\":\"ls\",\"id\":\"c1\",\"params\":{\"command\":\"ls\"}}",
+  "doc {\"type\":\"StreamFlush\",\"newNodes\":[{\"type\":\"tool\",\"id\":\"c1\",\"tool\":\"Other\",\"toolName\":\"Shell\",\"params\":{\"command\":\"ls\"},\"status\":\"running\",\"collapsed\":false,\"summary\":\"🛠️ Shell\",\"timestamp\":1793700000150}],\"updatedNodes\":[]}",
+  "pane {\"type\":\"StreamFlushObserved\",\"addedCount\":1,\"at\":\"<frame clock>\",\"turnRelevant\":true}",
+  "-- after step: phase=Streaming",
+  "doc {\"type\":\"StreamFlush\",\"newNodes\":[],\"updatedNodes\":[]}",
+  "doc {\"type\":\"ToolChunkAppend\",\"toolId\":\"c1\",\"chunk\":{\"kind\":\"stdout\",\"content\":\"a.ts\\n\",\"timestamp\":1793700000200}}",
+  "pane {\"type\":\"StreamFlushObserved\",\"addedCount\":0,\"at\":\"<frame clock>\",\"turnRelevant\":true}",
+  "-- after step: phase=Streaming",
+  "doc {\"type\":\"StreamFlush\",\"newNodes\":[],\"updatedNodes\":[]}",
+  "doc {\"type\":\"ToolChunkAppend\",\"toolId\":\"c1\",\"chunk\":{\"kind\":\"stdout\",\"content\":\"b.ts\\n\",\"timestamp\":1793700000250}}",
+  "pane {\"type\":\"StreamFlushObserved\",\"addedCount\":0,\"at\":\"<frame clock>\",\"turnRelevant\":true}",
+  "-- after step: phase=Streaming",
+  "pane {\"type\":\"ToolEnd\",\"id\":\"c1\"}",
+  "doc {\"type\":\"StreamFlush\",\"newNodes\":[],\"updatedNodes\":[{\"type\":\"tool\",\"id\":\"c1\",\"tool\":\"Other\",\"toolName\":\"Shell\",\"params\":{\"command\":\"ls\"},\"status\":\"success\",\"result\":{\"output\":\"a.ts\\nb.ts\\n\",\"status\":\"completed\"},\"collapsed\":true,\"summary\":\"🛠️ Shell\",\"timestamp\":1793700000150}]}",
+  "pane {\"type\":\"StreamFlushObserved\",\"addedCount\":0,\"at\":\"<frame clock>\",\"turnRelevant\":true}",
+  "-- after step: phase=Streaming",
+  "doc {\"type\":\"StreamFlush\",\"newNodes\":[{\"type\":\"markdown\",\"id\":\"node_0\",\"content\":\"Two files.\",\"timestamp\":1793700000350}],\"updatedNodes\":[]}",
+  "pane {\"type\":\"StreamFlushObserved\",\"addedCount\":1,\"at\":\"<frame clock>\",\"turnRelevant\":true}",
+  "-- after step: phase=Streaming",
+  "pane {\"type\":\"TurnEnd\",\"stats\":{\"input_tokens\":1200,\"output_tokens\":40}}",
+  "-- after step: phase=Done",
+  "pane {\"type\":\"StreamWatchdogTick\",\"nowMs\":1793700005000}",
+  "pane {\"type\":\"StreamWatchdogTick\",\"nowMs\":1793700010000}",
+  "pane {\"type\":\"StreamUnsubscribe\",\"at\":1793700010450}"
+ ],
+ "rpc": [
+  "EventReadHistoryCommand {\"event\":\"agent-resume-retry\",\"scope\":\"block:stream-golden\",\"maxitems\":1}",
+  "ListBackgroundTasksCommand {\"blockid\":\"stream-golden\"}",
+  "DockNodeStatusCommand {\"blockid\":\"stream-golden\",\"node_id\":\"c1\",\"tool_name\":\"Shell\",\"status\":\"running\",\"timestamp\":1793700000150}",
+  "DockNodeStatusCommand {\"blockid\":\"stream-golden\",\"node_id\":\"c1\",\"tool_name\":\"Shell\",\"status\":\"success\",\"timestamp\":1793700000150}"
+ ],
+ "document": [
+  {
+   "type": "tool",
+   "id": "c1",
+   "tool": "Other",
+   "toolName": "Shell",
+   "params": {
+    "command": "ls"
+   },
+   "status": "success",
+   "result": {
+    "output": "a.ts\nb.ts\n",
+    "status": "completed"
+   },
+   "collapsed": true,
+   "summary": "🛠️ Shell",
+   "timestamp": 1793700000150,
+   "log": {
+    "chunks": [],
+    "open": false
+   }
+  },
+  {
+   "type": "markdown",
+   "id": "node_0",
+   "content": "Two files.",
+   "timestamp": 1793700000350
+  }
+ ],
+ "registryTasks": 0,
+ "afterUnmount": {
+  "phase": "Done"
+ }
+}

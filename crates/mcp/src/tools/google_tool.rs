@@ -85,9 +85,9 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
     }
 }
 
-/// `Google`: which Google accounts are connected and who holds what (`status`), and turning a
-/// service of an account on or off for an agent (`grant`, `ungrant`). The person only signs in
-/// and consents; this is everything else (spec D7).
+/// `Google`: which Google accounts are connected and who holds what (`status`), turning a
+/// service of an account on or off for an agent (`grant`, `ungrant`), and ending a connection
+/// (`disconnect`). The person only signs in and consents; this is everything else (spec D7).
 async fn google_call(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     if cx.local_url.is_empty() || cx.auth_key.is_empty() {
         anyhow::bail!("Google: AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. Is this agent pane opened via AgentMux?");
@@ -110,6 +110,22 @@ async fn google_call(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
             GRANTS_CHANGED.notify_one();
             done
         }
+        Some("disconnect") => {
+            let account = text("account").ok_or_else(|| anyhow::anyhow!("Google disconnect: account (the Google account's email) is required; Google status lists them"))?;
+            let done = crate::srv_http::srv_post_json_within(
+                cx.client,
+                &format!("{base}/api/v1/google/disconnect"),
+                cx.auth_key,
+                &json!({ "account": account }),
+                "Google",
+                // Google's revoke is a request of its own, after which srv removes the account.
+                Some(std::time::Duration::from_secs(45)),
+            )
+            .await?;
+            // The grants this agent held on the account are gone with it.
+            GRANTS_CHANGED.notify_one();
+            done
+        }
         Some("connect") => return connect(arguments, cx).await,
         Some(action @ ("connect_status" | "cancel")) => {
             let session = text("session").ok_or_else(|| anyhow::anyhow!("Google {action}: session (the one connect answered) is required"))?;
@@ -124,11 +140,14 @@ async fn google_call(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
             let path = if action == "cancel" { "connect/cancel" } else { "connect/status" };
             crate::srv_http::srv_post_json_within(cx.client, &format!("{base}/api/v1/google/{path}"), cx.auth_key, &req, "Google", wait).await?
         }
-        Some(other) => anyhow::bail!("Google: no action \"{other}\": status, connect, connect_status, cancel, grant or ungrant"),
-        None => anyhow::bail!("Google: action is required: status, connect, connect_status, cancel, grant or ungrant"),
+        Some(other) => anyhow::bail!("Google: no action \"{other}\": {ACTIONS}"),
+        None => anyhow::bail!("Google: action is required: {ACTIONS}"),
     };
     Ok(serde_json::to_string_pretty(&body).unwrap_or_default())
 }
+
+/// The actions, as the errors list them.
+const ACTIONS: &str = "status, connect, connect_status, cancel, grant, ungrant or disconnect";
 
 /// The most a `connect_status` call waits for the sign-in to change (srv's own cap).
 const MAX_STATUS_WAIT_SECS: u64 = 25;
@@ -199,6 +218,16 @@ mod tests {
         assert_eq!(*held.read().unwrap(), ["calendar", "gmail"]);
         assert!(!adopt_granted(&held, Some(vec!["calendar".into(), "gmail".into()])), "order is not a change");
         assert!(adopt_granted(&held, Some(vec![])), "an ungrant is a change");
+    }
+
+    #[test]
+    fn every_action_the_tool_offers_is_named_in_its_errors() {
+        let tool: Value = serde_json::from_str(crate::tool_schemas::GOOGLE_TOOL).unwrap();
+        let offered = tool["inputSchema"]["properties"]["action"]["enum"].as_array().unwrap();
+        assert!(offered.iter().any(|a| a == "disconnect"), "the schema offers disconnect");
+        for action in offered.iter().filter_map(Value::as_str) {
+            assert!(ACTIONS.contains(action), "{action} is missing from the error text");
+        }
     }
 
     #[test]

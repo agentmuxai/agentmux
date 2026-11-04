@@ -172,7 +172,7 @@ export const TIPS: TipRow[] = [
         gesture: "middleclick",
         where: "on a pane, document or editor tab",
         label: "Close the tab",
-        source: { file: "frontend/app/element/PaneTabStrip.tsx", anchor: "e.button === 1" },
+        source: { file: "frontend/app/element/pane-tab-pill.tsx", anchor: "e.button === 1" },
     },
     {
         id: "tab:preview:dblclick",

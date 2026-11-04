@@ -140,6 +140,8 @@ async fn send<G: GoogleHttp, O: OAuthHttp, S: TokenSecrets>(
     access: &Access,
     req: &super::GoogleRequest,
 ) -> Result<HttpReply, String> {
+    // Asked just before each request: a grant turned off while the person was deciding stops a send.
+    access.still_held(deps.id_store, deps.identity_store, GrantLevel::Write)?;
     let token = access_token_for(deps.oauth, deps.secrets, deps.id_store, deps.identity_store, &access.account, None).await?;
     let reply = deps.google.send(req, &token).await?;
     if (200..300).contains(&reply.status) {

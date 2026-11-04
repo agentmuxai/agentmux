@@ -159,7 +159,7 @@
         "crates/srv/src/backend/memory/native_files.rs",
         "crates/srv/src/backend/continuity_relocate.rs",
         "crates/srv/src/server/agent_handlers/bundle.rs",
-        "crates/srv/src/server/agent_handlers/identity.rs",
+        "crates/srv/src/server/agent_handlers/identity_delete.rs",
         "crates/srv/src/server/identity_auth_dirs.rs",
         "crates/srv/src/server/providers_handlers.rs",
         "crates/srv/src/backend/providers.rs",

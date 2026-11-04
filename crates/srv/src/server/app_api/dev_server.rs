@@ -21,7 +21,6 @@ use serde_json::json;
 use agentmux_common::api_types::{RegisterDevServerRequest, RegisterDevServerResponse};
 
 use crate::backend::dev_keepalive::{self, clean_command, clean_dir, route_target, route_when_listening, start, wait_listening, RouteError, Spec};
-use crate::backend::dev_proxy::DEV_PROXY_PORT;
 
 use super::AppState;
 
@@ -164,14 +163,15 @@ pub(crate) async fn handle_register_dev_server(
             return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response();
         }
     }
-    // Lowercased to match the actual routing key (`DevProxyRegistry::routing_key`
-    // lowercases both halves) — this is what a browser should actually be
-    // pointed at, not necessarily `agent_id`'s on-disk casing.
-    let url = format!(
-        "http://{project}-{}.localhost:{DEV_PROXY_PORT}",
-        agent_id.to_lowercase()
-    );
+    let url = browse_url(&project, &agent_id);
     (StatusCode::OK, Json(RegisterDevServerResponse { url, starting })).into_response()
+}
+
+/// What a browser should be pointed at. Lowercased to match the actual routing key
+/// (`DevProxyRegistry::routing_key` lowercases both halves), not necessarily `agent_id`'s on-disk casing. The
+/// port is the one the proxy bound, which is not 8090 when another instance on this host holds it.
+fn browse_url(project: &str, agent_id: &str) -> String {
+    format!("http://{project}-{}.localhost:{}", agent_id.to_lowercase(), crate::backend::dev_proxy::port())
 }
 
 /// What is kept up for `project` in `container` after this registration: the spec if there is a command; registered

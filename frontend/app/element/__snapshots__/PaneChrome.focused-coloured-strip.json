@@ -1,0 +1,73 @@
+{
+  "keys": [
+    "acceptsForeignTabs",
+    "activeBlockId",
+    "activeId",
+    "addTitle",
+    "bodyDrop",
+    "changeConnModalAtom",
+    "collapsed",
+    "connBtnRef",
+    "getColor",
+    "getIcon",
+    "getId",
+    "getLabel",
+    "getTooltipDetail",
+    "getTooltipSeat",
+    "headerBgOverride",
+    "isClosing",
+    "nodeModel",
+    "onActivate",
+    "onAdd",
+    "onClose",
+    "onReceiveForeignTab",
+    "onReceiveForeignTabs",
+    "onReorder",
+    "onSelect",
+    "onTabContextMenu",
+    "onTabDoubleClick",
+    "renderLabel",
+    "selection",
+    "tabs",
+    "useProgress",
+    "viewModel"
+  ],
+  "tabs": [
+    "b1",
+    "b2",
+    "b3"
+  ],
+  "activeId": "b1",
+  "collapsed": false,
+  "headerBgOverride": "mixed-default",
+  "addTitle": "New terminal",
+  "perTab": {
+    "b1": {
+      "label": "View:term",
+      "color": {
+        "underline": "underline-200",
+        "background": "bg-200",
+        "activeBackground": "bg-active-200",
+        "neutralBackground": "neutral-term"
+      },
+      "closing": false
+    },
+    "b2": {
+      "label": "Korp",
+      "color": {
+        "underline": "underline-30",
+        "background": "bg-30",
+        "activeBackground": "bg-active-30",
+        "neutralBackground": "neutral-agent"
+      },
+      "closing": false
+    },
+    "b3": {
+      "label": "View:browser",
+      "color": {
+        "neutralBackground": "neutral-browser"
+      },
+      "closing": false
+    }
+  }
+}
