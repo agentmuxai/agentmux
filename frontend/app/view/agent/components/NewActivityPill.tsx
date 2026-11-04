@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Show, type Accessor, type JSX } from "solid-js";
+import { Button } from "@/app/element/ui";
 
 /**
  * "↓ New activity" over the bottom of the transcript while the reader is scrolled up and the content has
@@ -10,8 +11,8 @@ import { Show, type Accessor, type JSX } from "solid-js";
  */
 export const NewActivityPill = (props: { visible: Accessor<boolean>; onJump: () => void }): JSX.Element => (
     <Show when={props.visible()}>
-        <button type="button" class="agent-new-activity-pill" onClick={() => props.onJump()}>
-            <span aria-hidden="true">↓</span> New activity
-        </button>
+        <Button tone="accent" icon="arrow-down" class="agent-new-activity-pill" onClick={() => props.onJump()}>
+            New activity
+        </Button>
     </Show>
 );

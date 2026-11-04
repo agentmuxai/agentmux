@@ -163,7 +163,15 @@ export function createAgentViewState(docSignal: Accessor<DocumentNode[]>): Agent
         if (untrack(stickToBottom)) heightWhenLeft = scrollHeight;
         setContentHeight(scrollHeight);
     };
-    const newActivity = createMemo(() => !stickToBottom() && contentHeight() > heightWhenLeft + NEW_ACTIVITY_MIN_PX);
+    const newActivity = createMemo(() => {
+        // Following (again): whatever has arrived is seen, so the baseline is the height now, even when no
+        // content change follows to report it.
+        if (stickToBottom()) {
+            heightWhenLeft = untrack(contentHeight);
+            return false;
+        }
+        return contentHeight() > heightWhenLeft + NEW_ACTIVITY_MIN_PX;
+    });
     const [isOverflowing, setIsOverflowing] = createSignal(false);
     const markOverflowing = () => setIsOverflowing(true);
     const markNotOverflowing = () => setIsOverflowing(false);

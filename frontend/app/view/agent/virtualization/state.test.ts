@@ -191,8 +191,9 @@ describe("AgentViewState", () => {
                 state.noteContentHeight(1000);
                 state.disengageStickToBottom();
                 state.noteContentHeight(1400);
-                state.engageStickToBottom();
-                state.noteContentHeight(1400);
+                expect(state.newActivity()).toBe(true);
+                state.engageStickToBottom(); // the pill's click: no content change follows
+                expect(state.newActivity()).toBe(false);
                 state.disengageStickToBottom(); // leaves again at 1400
                 expect(state.newActivity()).toBe(false);
                 state.noteContentHeight(1500);

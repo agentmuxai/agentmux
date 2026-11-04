@@ -64,26 +64,16 @@
         pointer-events: none;
     }
 
-    // NewActivityPill: over the transcript's bottom while the reader is scrolled up and content has arrived
-    // below them. Out of flow, so nothing moves when it comes and goes.
+    // NewActivityPill (a kit Button): over the transcript's bottom while the reader is scrolled up and content has
+    // arrived below them. Out of flow, so nothing moves when it comes and goes; the fill keeps the text under it
+    // from showing through.
     .agent-new-activity-pill {
         position: absolute;
         bottom: var(--space-3);
         left: 50%;
         transform: translateX(-50%);
         z-index: var(--z-over-content);
-        padding: var(--space-1) var(--space-3);
-        border: 1px solid var(--accent-color);
-        border-radius: var(--radius-full);
         background: var(--main-bg-color);
-        color: var(--accent-color);
-        font-size: var(--text-sm);
-        cursor: pointer;
-        transition: background var(--duration-decorative-fast);
-
-        &:hover {
-            background: color-mix(in srgb, var(--accent-color) 12%, var(--main-bg-color));
-        }
     }
 
     // A `.agent-view--working-row-visible` rule used to live here, zeroing
