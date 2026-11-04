@@ -341,7 +341,6 @@
 124 crates/srv/src/server/service/window_close.rs::handle_close_window
 224 crates/srv/src/server/service/window_create.rs::create_default_contents
 301 crates/srv/src/server/service/window_create.rs::handle_create_window
-392 crates/srv/src/server/shell_handlers.rs::register_shell_handlers
 140 crates/srv/src/server/shell_secrets.rs::inject
 135 crates/srv/src/server/system_install_handlers.rs::spawn_system_install_task
 107 crates/srv/src/server/ui_handlers.rs::handle_host_browser_popup
