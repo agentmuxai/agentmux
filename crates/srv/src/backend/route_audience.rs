@@ -227,6 +227,7 @@ pub const ROUTES: &[(Match, Audience)] = &[
     (Match::Route("/api/v1/agent/spawn"), Audience::Everyone),
     (Match::Route("/api/v1/agent/spawn_many"), Audience::Everyone),
     (Match::Route("/api/v1/agent/start"), Audience::Everyone),
+    (Match::Route("/api/v1/agent/status"), Audience::Everyone),
     (Match::Route("/api/v1/agent/stop"), Audience::Everyone),
     (Match::Route("/api/v1/agent/takeover"), Audience::Everyone),
     (Match::Route("/api/v1/agent/tool-chunk"), Audience::Everyone),

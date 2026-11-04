@@ -33,7 +33,7 @@ pub(super) const ACTS: &[Act] = &[
     Act {
         action: "wait",
         tool: "BrowserWaitFor",
-        rename: &[("until_text", "text"), ("until_url", "url_contains"), ("until_gone", "gone")],
+        rename: &[("until_text", "text"), ("until_url", "url_contains"), ("until_gone", "gone"), ("until_state", "state")],
     },
     Act { action: "eval", tool: "BrowserEval", rename: &[] },
     Act { action: "handoff", tool: "BrowserHandoff", rename: &[] },
@@ -76,11 +76,11 @@ async fn run(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     // `terminal` waits for its own output (until_text, timeout_seconds), so its until_* is no follow-up either.
     let is_wait = act.action == "wait" || act.action == "terminal";
     let follow_wait =
-        !is_wait && ["until_text", "until_url", "until_gone"].iter().any(|k| arguments.get(*k).is_some());
+        !is_wait && ["until_text", "until_url", "until_gone", "until_state"].iter().any(|k| arguments.get(*k).is_some());
     let follow_snapshot = arguments.get("snapshot").and_then(|v| v.as_bool()).unwrap_or(false);
     if (follow_wait || follow_snapshot) && !CHANGES_THE_PAGE.contains(&act.action) {
         anyhow::bail!(
-            "until_text/until_url/until_gone and snapshot follow an action that changes the page ({}); \
+            "until_text/until_url/until_gone/until_state and snapshot follow an action that changes the page ({}); \
              for action {:?}, call wait or snapshot on its own",
             CHANGES_THE_PAGE.join(", "),
             act.action
@@ -105,6 +105,13 @@ async fn run(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
         };
     }
     if follow_snapshot {
+        // An action that navigates leaves the page loading: read it once it has
+        // settled, not the empty page of a moment ago. A page that never settles (3 seconds at most)
+        // is read as it is.
+        if !follow_wait {
+            let settle = json!({ "state": "idle", "timeout_seconds": 3, "pane": arguments.get("pane") });
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(4), browser::call("BrowserWaitFor", &settle, cx)).await;
+        }
         out = match browser::call("BrowserSnapshot", &only(arguments, &["pane", "scope", "max_text", "include_hidden"]), cx).await {
             Ok(snap) => format!("{out}\n\nsnapshot:\n{snap}"),
             Err(e) => format!("{out}\n\nsnapshot failed (the {} itself was done): {e}", act.action),
@@ -149,6 +156,7 @@ fn follow_wait_args(arguments: &Value) -> Value {
         ("until_text", "text"),
         ("until_url", "url_contains"),
         ("until_gone", "gone"),
+        ("until_state", "state"),
         ("timeout_seconds", "timeout_seconds"),
     ] {
         if let Some(v) = arguments.get(ours) {
@@ -198,6 +206,14 @@ mod tests {
         assert_eq!(act.tool, "BrowserWaitFor");
         assert_eq!(args, json!({ "url_contains": "/done", "pane": "p" }));
         assert_eq!(only(&json!({ "a": 1, "b": 2 }), &["b", "c"]), json!({ "b": 2 }));
+    }
+
+    #[test]
+    fn wait_takes_until_state_and_a_follow_up_wait_passes_it_on() {
+        let (_, args) = pick("Browser", ACTS, &json!({ "action": "wait", "until_state": "idle", "pane": "p" })).unwrap();
+        assert_eq!(args, json!({ "state": "idle", "pane": "p" }));
+        let args = json!({ "action": "click", "pane": "p", "ref": "e2", "until_state": "load" });
+        assert_eq!(follow_wait_args(&args), json!({ "pane": "p", "state": "load" }));
     }
 
     #[test]
