@@ -14,7 +14,7 @@ import { paneZoom } from "@/app/store/pane-zoom-local";
 import { PaneLoadingCover } from "@/app/element/PaneLoadingCover";
 import { ModalLayerContext } from "@/app/element/modal-layer";
 import { makeWindowFocusSignal } from "@/app/window/window-focus";
-import { createMemo, onCleanup, onMount, Show, useContext, type Accessor, type JSX } from "solid-js";
+import { createMemo, createSignal, onCleanup, onMount, Show, useContext, type Accessor, type JSX } from "solid-js";
 import { createPromotionClock } from "./activity/promotion-clock";
 import { useAttachedTaskAxis } from "./activity/useAttachedTaskAxis";
 import { AgentProgressBar } from "./components/AgentProgressBar";
@@ -29,6 +29,7 @@ import { AgentComposerStrip } from "./components/AgentComposerStrip";
 import { AgentShellDrawer } from "./components/AgentShellDrawer";
 import { AgentDocumentView } from "./components/AgentDocumentView";
 import { HistoryLoadingRow } from "./components/HistoryLoadingRow";
+import { NewActivityPill } from "./components/NewActivityPill";
 import { AgentFooter } from "./components/AgentFooter";
 import { AgentSearchBar } from "./components/AgentSearchBar";
 import { BtwOverlay } from "./components/BtwOverlay";
@@ -416,6 +417,8 @@ export const AgentPresentationView = ({
     // The list's scrollToBottom, assigned once AgentDocumentView mounts: the composer's onTyping and
     // useAgentCommands' onSent call it.
     let scrollToBottomFn: ((reason?: string) => void) | null = null;
+    // The list's "content grew while the reader is scrolled up" state, for the New activity pill.
+    const [newActivitySource, setNewActivitySource] = createSignal<Accessor<boolean>>(() => false);
 
     // The wall-clock instant a running Bash call is promoted to the dock, for
     // everything that depends on promotion (activity/promotion-clock.ts).
@@ -633,6 +636,7 @@ export const AgentPresentationView = ({
                     // The one paging gate: the list pages only while this is true.
                     hasOlderHistory={() => liveFeed.canPageOlder() && history.historyOffset() > 0}
                     followingRef={(f) => liveFeed.setFollowingBottom(f)}
+                    newActivityRef={(a) => setNewActivitySource(() => a)}
                     scrollCommand={scroll.command}
                     scrollToBottomRef={(fn) => {
                         scrollToBottomFn = fn;
@@ -645,6 +649,7 @@ export const AgentPresentationView = ({
                     blockId={model.blockId}
                     layoutView={layoutView}
                 />
+                <NewActivityPill visible={() => newActivitySource()()} onJump={() => scrollToBottomFn?.("new-activity-pill")} />
             </div>
 
             {/* Login, decisions, questions, queue, recovery banners, activity dock,

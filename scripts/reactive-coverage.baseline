@@ -1,0 +1,29 @@
+# View files that fetch over RPC on mount with no live source in the file
+# (scripts/check-reactive-coverage.mjs). A file here may only leave: give it a live source
+# (a domain store, an srv event, a poll) and run `node scripts/check-reactive-coverage.mjs --update`.
+# Adding a file is a hand edit that the PR has to justify.
+frontend/app/view/agent/attachments/AttachmentLightbox.tsx
+frontend/app/view/agent/components/AgentBundlesTab.tsx
+frontend/app/view/agent/components/AgentContainerCaches.tsx
+frontend/app/view/agent/components/AgentContainerLimitsPanel.tsx
+frontend/app/view/agent/components/AgentCreateForm.tsx
+frontend/app/view/agent/components/AgentCreatePanel.tsx
+frontend/app/view/agent/components/InputHistorySearch.tsx
+frontend/app/view/agent/components/use-runtime-choice.ts
+frontend/app/view/agent/hooks/useHistoryPagination.ts
+frontend/app/view/browser/browser-nav-bar.tsx
+frontend/app/view/bundle-summary.tsx
+frontend/app/view/bundle/components/BundleImportPreviewModal.tsx
+frontend/app/view/bundle/components/BundleImportSelectModal.tsx
+frontend/app/view/drone/drone-view.tsx
+frontend/app/view/editor/editor-view.tsx
+frontend/app/view/global-bundle/GlobalMemoryImportBanner.tsx
+frontend/app/view/settings/sections/agent-site-grants.tsx
+frontend/app/view/settings/sections/devices-section.tsx
+frontend/app/view/settings/sections/fork-slug-migration.tsx
+frontend/app/view/settings/sections/hidden-agents.tsx
+frontend/app/view/settings/sections/notifications-section.tsx
+frontend/app/view/settings/sections/pinned-senders.tsx
+frontend/app/view/settings/sections/recording-section.tsx
+frontend/app/view/toolchain/SystemToolInstallInline.tsx
+frontend/app/view/toolchain/toolchain-view.tsx

@@ -894,6 +894,11 @@ jobs:
       # (SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md).
       - name: File size ratchet
         run: node scripts/check-file-sizes.mjs
+      # A view that fetches over RPC on mount needs a live source (a domain store, an srv event, a
+      # poll) so it updates when the data changes; the list of views that don't yet only shrinks
+      # (docs/reports/REPORT_REACTIVE_COVERAGE_AUDIT_2026_11_03.md).
+      - name: Reactive coverage ratchet
+        run: node scripts/check-reactive-coverage.mjs
       # Every source file that reaches the account-wide shared/ folder is declared in
       # docs/shared-paths.json, with what it shares, its gate and its lock.
       - name: Shared paths are declared

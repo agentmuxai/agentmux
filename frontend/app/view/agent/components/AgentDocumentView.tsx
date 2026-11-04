@@ -77,6 +77,8 @@ interface AgentDocumentViewProps {
      * gap without yanking someone reading older turns.
      */
     followingRef?: (following: Accessor<boolean>) => void;
+    /** Hands the parent whether the content grew below a reader who scrolled up (the "New activity" pill). */
+    newActivityRef?: (newActivity: Accessor<boolean>) => void;
     /** The node id of the currently highlighted search match (if any). */
     highlightNodeId?: Accessor<string | null>;
     /**
@@ -127,6 +129,7 @@ export const AgentDocumentView = (props: AgentDocumentViewProps): JSX.Element =>
     // any async history work starts. See PR #1212.
     props.registerHistoryReadyCallback?.(viewState.markHistoryReady);
     props.followingRef?.(viewState.stickToBottom);
+    props.newActivityRef?.(viewState.newActivity);
 
     // Auto-collapse-on-size for user messages was retired in PR #1020
     // — `SetupNote` (the start-up document, `node.isStartup`) opens off
