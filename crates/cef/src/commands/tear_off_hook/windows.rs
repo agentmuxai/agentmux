@@ -26,6 +26,10 @@ enum HookMode {
     /// `tabdrag:merge-direct` to a candidate window; every other
     /// outcome is owned by the source window's existing paths.
     TabDrag { is_last_tab: bool },
+    /// A pane or pane-tab drag: no tear-off or merge to track, only Escape,
+    /// which the page can't see during the OS drag. Reported as
+    /// `tabdrag:escape-pressed`, like `TabDrag`.
+    EscapeWatch,
 }
 
 #[cfg(target_os = "windows")]
@@ -156,6 +160,24 @@ pub fn start_tab_drag_tracking(
     })
 }
 
+
+/// Install the hook for a pane or pane-tab drag, for its Escape only: the
+/// page can't see the key during the OS drag. Nothing else is tracked; the
+/// session ends on mouse-up or Escape.
+#[cfg(target_os = "windows")]
+pub fn start_escape_watch(state: Arc<AppState>, source_label: String) -> Result<(), String> {
+    start_hook_session(HookContextSeed {
+        state,
+        mode: HookMode::EscapeWatch,
+        source_label,
+        dragged_label: String::new(),
+        tab_id: String::new(),
+        source_ws_id: String::new(),
+        dest_ws_id: String::new(),
+        original_tab_index: 0,
+        was_pinned: false,
+    })
+}
 
 /// Owned bag of HookContext fields — lets the two public entry points
 /// share one spawn path without threading nine parameters around.
@@ -351,8 +373,17 @@ unsafe extern "system" fn low_level_keyboard_proc(
                     *ctx.finalized.borrow_mut() = true;
                     // TabDrag mode: ESC cancels the native OLE drag on
                     // its own; there is no torn-off window to cancel
-                    // back. Just retire the session silently.
-                    if matches!(ctx.mode, HookMode::TabDrag { .. }) {
+                    // back. Retire the session, and tell the source window:
+                    // after the cancel its `dragend` can only guess from the
+                    // mouse button, which a slow host or a quick release
+                    // turns into a tear-off.
+                    if matches!(ctx.mode, HookMode::TabDrag { .. } | HookMode::EscapeWatch) {
+                        crate::events::emit_event_to_window(
+                            &ctx.state,
+                            &ctx.source_label,
+                            "tabdrag:escape-pressed",
+                            &serde_json::json!({ "tabId": ctx.tab_id }),
+                        );
                         tracing::info!(
                             target: "dnd:tearoff",
                             tab_id = %ctx.tab_id,
@@ -409,11 +440,13 @@ unsafe extern "system" fn low_level_mouse_proc(
     let cursor_y = hook_struct.pt.y;
 
     match msg_id {
-        WM_MOUSEMOVE => {
+        WM_MOUSEMOVE if !escape_watch_only() => {
             handle_mouse_move(cursor_x, cursor_y);
         }
         WM_LBUTTONUP => {
-            handle_button_up(cursor_x, cursor_y);
+            if !escape_watch_only() {
+                handle_button_up(cursor_x, cursor_y);
+            }
             // Tell our message loop to exit — the move-loop is over.
             use windows_sys::Win32::UI::WindowsAndMessaging::PostQuitMessage;
             PostQuitMessage(0);
@@ -422,6 +455,12 @@ unsafe extern "system" fn low_level_mouse_proc(
     }
 
     CallNextHookEx(std::ptr::null_mut(), n_code, w_param, l_param)
+}
+
+/// This session only watches Escape (a pane or pane-tab drag): no hover events, no merge on release.
+#[cfg(target_os = "windows")]
+fn escape_watch_only() -> bool {
+    HOOK_CTX.with(|cell| cell.borrow().as_ref().is_some_and(|ctx| ctx.mode == HookMode::EscapeWatch))
 }
 
 #[cfg(target_os = "windows")]
