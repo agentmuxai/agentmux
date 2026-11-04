@@ -258,19 +258,19 @@ function createStripDerived(props: AgentComposerStripProps): StripDerived {
 }
 
 function runtimeSlot(props: AgentComposerStripProps): Slot {
-        return {
-            key: "runtime",
-            side: "left",
-            interactive: true,
-            render: () => (
-                <AgentRuntimeDropup
-                    blockId={props.blockId ?? ""}
-                    blockAtom={props.blockAtom ?? (() => undefined)}
-                    providerId={props.providerId ?? ""}
-                    lastReplyModel={props.lastReplyModel}
-                />
-            ),
-        };
+    return {
+        key: "runtime",
+        side: "left",
+        interactive: true,
+        render: () => (
+            <AgentRuntimeDropup
+                blockId={props.blockId ?? ""}
+                blockAtom={props.blockAtom ?? (() => undefined)}
+                providerId={props.providerId ?? ""}
+                lastReplyModel={props.lastReplyModel}
+            />
+        ),
+    };
 }
 
 /** A container agent that is signed in elsewhere still shows its account, when it is known and switchable. */
@@ -278,180 +278,180 @@ const accountKnown = (props: AgentComposerStripProps): boolean =>
     props.authStatus === "unknown" && !!props.signInCheckedLater && !!props.canSwitchAccount && !!props.onSwitchAccount;
 
 function authSlot(props: AgentComposerStripProps): Slot {
-        return {
-            key: "auth",
-            // "right" until Rev 9 (2026-09-16); flipped to match the
-            // pinned auth=left/ctx=right invariant `pinnedPairs`
-            // establishes in the measured path — this `side` field is
-            // the UNMEASURED fallback (first paint, JSDOM, or a shed
-            // zero-width slot's fallback row), and leaving it at the
-            // old value would have reintroduced exactly the swap this
-            // revision fixes, just at the mount-time boundary instead
-            // of the resize one (reagent P2, PR #3282). See
-            // docs/specs/SPEC_COMPOSER_STRIP_AUTH_COMPACT_SIDE_STABILITY_2026_09_16.md.
-            side: "left",
-            // Interactive whenever the chip CAN be a "switch account"
-            // link. Static, not tied to whether it is one right now (idle,
-            // has candidates): the flag feeds edge-priority ordering, and
-            // flipping it with every turn would reorder the strip.
-            interactive: true,
-            render: () => {
-                const authed = () => props.authStatus === "authenticated";
-                const hasOthers = () => !!props.canSwitchAccount && !!props.onSwitchAccount;
-                // srv holds a switch asked for in a turn until it ends (agent.account.switch).
-                const busy = () => !!props.loading || props.compacting != null;
-                const canSwitch = () => hasOthers();
-                const label = () => {
-                    const base = accountKnown(props) ? (props.authEmail ? shortenEmail(props.authEmail) : "Account") : !authed() ? "Not logged in" : props.authEmail ? shortenEmail(props.authEmail) : "Logged in";
-                    return props.pendingAccountLabel ? `${base} → ${shortenEmail(props.pendingAccountLabel)}` : base;
-                };
-                const title = () => {
-                    if (!authed() && !accountKnown(props)) return hasOthers() ? "Not signed in — click to log in or switch account" : "Not signed in — click Log in to continue";
-                    const base = accountKnown(props)
-                        ? (props.authEmail ? `Account ${props.authEmail}` : "No account linked yet")
-                        : props.authEmail
-                        ? `Signed in as ${props.authEmail}`
-                        : "Signed in to this agent's provider";
-                    if (props.pendingAccountLabel) return `${base}. Switching to ${props.pendingAccountLabel} when this turn ends.`;
-                    if (!hasOthers()) return base;
-                    return busy()
-                        ? `${base}. Click to switch account; it takes effect when the current turn ends.`
-                        : `${base}. Click to switch account.`;
-                };
-                return (
-                    <span
-                        class="agent-composer-strip-auth"
-                        classList={{
-                            "agent-composer-strip-auth--ok": authed(),
-                            "agent-composer-strip-auth--bad": props.authStatus === "unauthenticated",
-                        }}
-                        {...tip(title())}
-                    >
-                        <span class="agent-composer-strip-auth-dot" aria-hidden="true" />
-                        <Show when={canSwitch()} fallback={label()}>
-                            <Button
-                                variant="link"
-                                class="agent-composer-strip-auth-link"
-                                aria-haspopup="menu"
-                                onClick={(e) => props.onSwitchAccount?.(e)}
-                            >
-                                {label()}
-                            </Button>
-                        </Show>
-                    </span>
-                );
-            },
-        };
+    return {
+        key: "auth",
+        // "right" until Rev 9 (2026-09-16); flipped to match the
+        // pinned auth=left/ctx=right invariant `pinnedPairs`
+        // establishes in the measured path — this `side` field is
+        // the UNMEASURED fallback (first paint, JSDOM, or a shed
+        // zero-width slot's fallback row), and leaving it at the
+        // old value would have reintroduced exactly the swap this
+        // revision fixes, just at the mount-time boundary instead
+        // of the resize one (reagent P2, PR #3282). See
+        // docs/specs/SPEC_COMPOSER_STRIP_AUTH_COMPACT_SIDE_STABILITY_2026_09_16.md.
+        side: "left",
+        // Interactive whenever the chip CAN be a "switch account"
+        // link. Static, not tied to whether it is one right now (idle,
+        // has candidates): the flag feeds edge-priority ordering, and
+        // flipping it with every turn would reorder the strip.
+        interactive: true,
+        render: () => {
+            const authed = () => props.authStatus === "authenticated";
+            const hasOthers = () => !!props.canSwitchAccount && !!props.onSwitchAccount;
+            // srv holds a switch asked for in a turn until it ends (agent.account.switch).
+            const busy = () => !!props.loading || props.compacting != null;
+            const canSwitch = () => hasOthers();
+            const label = () => {
+                const base = accountKnown(props) ? (props.authEmail ? shortenEmail(props.authEmail) : "Account") : !authed() ? "Not logged in" : props.authEmail ? shortenEmail(props.authEmail) : "Logged in";
+                return props.pendingAccountLabel ? `${base} → ${shortenEmail(props.pendingAccountLabel)}` : base;
+            };
+            const title = () => {
+                if (!authed() && !accountKnown(props)) return hasOthers() ? "Not signed in — click to log in or switch account" : "Not signed in — click Log in to continue";
+                const base = accountKnown(props)
+                    ? (props.authEmail ? `Account ${props.authEmail}` : "No account linked yet")
+                    : props.authEmail
+                    ? `Signed in as ${props.authEmail}`
+                    : "Signed in to this agent's provider";
+                if (props.pendingAccountLabel) return `${base}. Switching to ${props.pendingAccountLabel} when this turn ends.`;
+                if (!hasOthers()) return base;
+                return busy()
+                    ? `${base}. Click to switch account; it takes effect when the current turn ends.`
+                    : `${base}. Click to switch account.`;
+            };
+            return (
+                <span
+                    class="agent-composer-strip-auth"
+                    classList={{
+                        "agent-composer-strip-auth--ok": authed(),
+                        "agent-composer-strip-auth--bad": props.authStatus === "unauthenticated",
+                    }}
+                    {...tip(title())}
+                >
+                    <span class="agent-composer-strip-auth-dot" aria-hidden="true" />
+                    <Show when={canSwitch()} fallback={label()}>
+                        <Button
+                            variant="link"
+                            class="agent-composer-strip-auth-link"
+                            aria-haspopup="menu"
+                            onClick={(e) => props.onSwitchAccount?.(e)}
+                        >
+                            {label()}
+                        </Button>
+                    </Show>
+                </span>
+            );
+        },
+    };
 }
 
 function ctxSlot(props: AgentComposerStripProps, d: StripDerived): Slot {
-        return {
-            key: "ctx",
-            // ctx text + countdown (conditional) + Compact button
-            // (conditional) render together as one unit — this slot
-            // can't be split across zones, since Compact must stay
-            // immediately adjacent to the context text (on the OUTER
-            // side of it — see render(rowSide) below). Grouped with the
-            // runtime trigger on the LEFT (2026-08-25, Rev 5) — this
-            // slot alone can render 3 sub-elements, more than
-            // everything else in the pool combined in the common
-            // case, so pairing it with badge/auth/hostShell on the
-            // right (as Rev 4 first shipped) put most of the strip's
-            // visual weight on one side every time a Claude agent had
-            // context tracking active. "Mode + context awareness"
-            // (left) / "status indicators + the action button"
-            // (right) is the resulting split — see
-            // docs/specs/SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24.md
-            // Rev 5. Flipped to "right" as of Rev 9 (2026-09-16) — see
-            // the `auth` slot's own comment above; this is the
-            // matching other half of the same fallback-side fix.
-            side: "right",
-            // Always interactive: the context reading itself is a button
-            // that opens the session-stats popover (AgentSessionStats),
-            // so this slot has something clickable even when the Compact
-            // button doesn't render. It was gated on Compact back when
-            // the reading was inert text.
-            interactive: true,
-            // Compact sits on the OUTER end of whichever side this
-            // slot renders on (edge priority): first on the left,
-            // last on the right. The text + countdown stay adjacent
-            // in reading order either way.
-            render: (rowSide) => {
-                const compactBtn = () => (
-                    <Show when={d.offersCompact()}>
-                        <Button
-                            density="compact"
-                            class="agent-composer-strip-compact-btn"
-                            data-strip-button
-                            disabled={!d.canCompact()}
-                            title={
-                                d.canCompact()
-                                    ? "Summarize and trim this session's history now, instead of waiting for the CLI's own auto-compact threshold."
-                                    : props.compacting
-                                        ? "Already compacting…"
-                                        : "Wait for the current turn to finish before compacting."
-                            }
-                            onClick={() => props.onCompact?.()}
+    return {
+        key: "ctx",
+        // ctx text + countdown (conditional) + Compact button
+        // (conditional) render together as one unit — this slot
+        // can't be split across zones, since Compact must stay
+        // immediately adjacent to the context text (on the OUTER
+        // side of it — see render(rowSide) below). Grouped with the
+        // runtime trigger on the LEFT (2026-08-25, Rev 5) — this
+        // slot alone can render 3 sub-elements, more than
+        // everything else in the pool combined in the common
+        // case, so pairing it with badge/auth/hostShell on the
+        // right (as Rev 4 first shipped) put most of the strip's
+        // visual weight on one side every time a Claude agent had
+        // context tracking active. "Mode + context awareness"
+        // (left) / "status indicators + the action button"
+        // (right) is the resulting split — see
+        // docs/specs/SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24.md
+        // Rev 5. Flipped to "right" as of Rev 9 (2026-09-16) — see
+        // the `auth` slot's own comment above; this is the
+        // matching other half of the same fallback-side fix.
+        side: "right",
+        // Always interactive: the context reading itself is a button
+        // that opens the session-stats popover (AgentSessionStats),
+        // so this slot has something clickable even when the Compact
+        // button doesn't render. It was gated on Compact back when
+        // the reading was inert text.
+        interactive: true,
+        // Compact sits on the OUTER end of whichever side this
+        // slot renders on (edge priority): first on the left,
+        // last on the right. The text + countdown stay adjacent
+        // in reading order either way.
+        render: (rowSide) => {
+            const compactBtn = () => (
+                <Show when={d.offersCompact()}>
+                    <Button
+                        density="compact"
+                        class="agent-composer-strip-compact-btn"
+                        data-strip-button
+                        disabled={!d.canCompact()}
+                        title={
+                            d.canCompact()
+                                ? "Summarize and trim this session's history now, instead of waiting for the CLI's own auto-compact threshold."
+                                : props.compacting
+                                    ? "Already compacting…"
+                                    : "Wait for the current turn to finish before compacting."
+                        }
+                        onClick={() => props.onCompact?.()}
+                    >
+                        Compact
+                    </Button>
+                </Show>
+            );
+            return (
+                <>
+                    {rowSide === "left" && compactBtn()}
+                    <AgentSessionStats
+                        blockId={props.blockId ?? ""}
+                        blockAtom={props.blockAtom ?? (() => undefined)}
+                        providerId={props.providerId ?? ""}
+                        contextTokens={props.contextTokens}
+                        contextWindow={props.contextWindow}
+                        contextNote={props.contextNote}
+                        sessionTotals={props.sessionTotals}
+                        ctxClass={d.ctxClass()}
+                        title={
+                            props.contextTokens != null
+                                ? contextTitle(props.contextTokens, props.contextWindow, props.contextNote, props.autoCompact)
+                                : undefined
+                        }
+                        label={d.ctxText() ?? "session"}
+                    />
+                    <Show when={d.ctxCountdownText()}>
+                        <span
+                            class={`agent-composer-strip-ctx-countdown ${d.ctxClass()}`}
+                            classList={{ "agent-composer-strip-ctx-countdown--critical": d.ctxClass().endsWith("critical") }}
+                            {...tip("Applies to auto-compaction only — a manual /compact can happen at any fill level.")}
                         >
-                            Compact
-                        </Button>
+                            {d.ctxCountdownText()}
+                        </span>
                     </Show>
-                );
-                return (
-                    <>
-                        {rowSide === "left" && compactBtn()}
-                        <AgentSessionStats
-                            blockId={props.blockId ?? ""}
-                            blockAtom={props.blockAtom ?? (() => undefined)}
-                            providerId={props.providerId ?? ""}
-                            contextTokens={props.contextTokens}
-                            contextWindow={props.contextWindow}
-                            contextNote={props.contextNote}
-                            sessionTotals={props.sessionTotals}
-                            ctxClass={d.ctxClass()}
-                            title={
-                                props.contextTokens != null
-                                    ? contextTitle(props.contextTokens, props.contextWindow, props.contextNote, props.autoCompact)
-                                    : undefined
-                            }
-                            label={d.ctxText() ?? "session"}
-                        />
-                        <Show when={d.ctxCountdownText()}>
-                            <span
-                                class={`agent-composer-strip-ctx-countdown ${d.ctxClass()}`}
-                                classList={{ "agent-composer-strip-ctx-countdown--critical": d.ctxClass().endsWith("critical") }}
-                                {...tip("Applies to auto-compaction only — a manual /compact can happen at any fill level.")}
-                            >
-                                {d.ctxCountdownText()}
-                            </span>
-                        </Show>
-                        {rowSide === "right" && compactBtn()}
-                    </>
-                );
-            },
-        };
+                    {rowSide === "right" && compactBtn()}
+                </>
+            );
+        },
+    };
 }
 
 function viewSlot(props: AgentComposerStripProps): Slot {
-        return {
-            key: "view",
-            side: "right",
-            interactive: true,
-            render: () => (
-                <Button
-                    variant="link"
-                    class="agent-composer-strip-view"
-                    data-strip-button
-                    data-agent-view-chip
-                    aria-haspopup="dialog"
-                    aria-expanded={props.viewOpen ? "true" : "false"}
-                    title="What this pane shows: click to change"
-                    onClick={() => props.onOpenView?.()}
-                >
-                    {props.viewChip}
-                </Button>
-            ),
-        };
+    return {
+        key: "view",
+        side: "right",
+        interactive: true,
+        render: () => (
+            <Button
+                variant="link"
+                class="agent-composer-strip-view"
+                data-strip-button
+                data-agent-view-chip
+                aria-haspopup="dialog"
+                aria-expanded={props.viewOpen ? "true" : "false"}
+                title="What this pane shows: click to change"
+                onClick={() => props.onOpenView?.()}
+            >
+                {props.viewChip}
+            </Button>
+        ),
+    };
 }
 
 function hostShellSlot(props: AgentComposerStripProps): Slot {
@@ -504,7 +504,7 @@ function hostShellSlot(props: AgentComposerStripProps): Slot {
 }
 
 // Rev 7 — the strip's own real available width, needed to decide
-// single-row vs. multi-row (see `rows` below and
+// single-row vs. multi-row (see `createLayout` below and
 // docs/specs/SPEC_COMPOSER_STRIP_ROW_BASED_LAYOUT_2026_08_26.md §3.3).
 // A genuinely new capability this file didn't need before Rev 7 —
 // every prior revision relied purely on CSS `@container` queries.
@@ -516,7 +516,7 @@ function hostShellSlot(props: AgentComposerStripProps): Slot {
 // entirely in that environment is correct, not just tolerated.
 //
 // Observes `.agent-composer-strip-rows` — NOT the outer
-// `.agent-composer-strip` (see `stripRef` below) — for two reasons,
+// `.agent-composer-strip` (see `refs.stripRef` below) — for two reasons,
 // both found via real dev-build screenshot verification at the narrow
 // tier (task #48), not by inspection alone:
 //
@@ -574,9 +574,9 @@ function useStripWidth(refs: StripRefs): Accessor<number> {
 // a `getComputedStyle` length read anywhere else in that same
 // subtree — multiply by this wherever the two measurement styles mix.
 const zoomRatio = (refs: StripRefs): number => {
-        if (!refs.stripRef || !refs.stripRef.clientWidth) return 1;
-        return refs.stripRef.getBoundingClientRect().width / refs.stripRef.clientWidth;
-    };
+    if (!refs.stripRef || !refs.stripRef.clientWidth) return 1;
+    return refs.stripRef.getBoundingClientRect().width / refs.stripRef.clientWidth;
+};
 
 // Re-measures every current slot whenever the pool changes shape OR
 // any slot's own content changes width (both flow through `slots()`
@@ -955,7 +955,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
     // zone (same classes/handlers/titles) — only WHICH zone renders it,
     // computed fresh here every time, changed. `side` is a fixed semantic
     // preference (left = state/config, right = counters + the one real
-    // action) — see `zones` below for how the "left must never be
+    // action) — see `createLayout` for how the "left must never be
     // completely empty" override works, and
     // docs/specs/SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24.md Rev 4
     // for why this replaced two earlier attempts at balancing by a
@@ -991,7 +991,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         if (props.viewChip && props.onOpenView) out.push(viewSlot(props));
 
         // Always present (Shell has no visibility gate) and always last
-        // in pool order — see `zones` below for why that keeps it on the
+        // in pool order — see `createLayout` for why that keeps it on the
         // right except in the fully degenerate one-slot-total case.
         out.push(hostShellSlot(props));
 
