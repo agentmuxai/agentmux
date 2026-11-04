@@ -8,15 +8,11 @@
 
 
 import { Show, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
-import { getVoiceSession, type PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import { markEnd, markStart } from "@/perf";
-import { getSettingsKeyAtom, pushNotification } from "@/app/store/global";
-import { focusManager } from "@/app/store/focusManager";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { MicButton } from "@/app/element/MicButton";
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
 import type { AgentViewModel } from "../agent-model";
-import { focusComposerWhenReady, takeComposerFocusRequest } from "../../../agent-model/composer-focus";
 import type { SlashCommand } from "../commands/types";
 import { SlashAutocomplete } from "./SlashAutocomplete";
 import { isBangCommand } from "../bang-command";
@@ -28,12 +24,12 @@ import { useComposerRestore } from "../composer-restore";
 import { getComposerDraft, getSentHistory, saveSentHistory, SENT_HISTORY_MAX, setComposerDraft } from "../reload-persistence";
 import { agentDraft, agentHistory, historyAgentId, loadOlderAgentHistory, movedCursor, rememberSent, saveAgentDraft, watchAgentHistory } from "../agent-input-history";
 import { attachmentNoun, fileKind } from "../attachments/file-kind";
-import { isContainerPane, spliceComposerTokens } from "../hooks/useAgentDropAttach";
-import { copyIntoWorkdir, type CopySource } from "@/app/drag/file-drop-actions";
 import type { AttachmentRef } from "@/types/rpc/AttachmentRef";
 import { shortcutFor } from "@/app/keybindings";
-import { META_SUGGESTION, META_SUGGESTION_GEN } from "@/app/store/meta-keys";
 import { MENU_ICON } from "@/app/util/menu-icons";
+import { useComposerPaste } from "../hooks/useComposerPaste";
+import { useComposerFocusHandle, useComposerVoiceHandle } from "../hooks/useComposerHandles";
+import { useComposerPlaceholder } from "../hooks/useComposerPlaceholder";
 
 
 // \u2500\u2500 Composer draft persistence \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
@@ -160,61 +156,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     };
     onCleanup(() => clearTimeout(sendHintTimer));
 
-    // Ctrl/Cmd+V with files (a screenshot, or files copied in Explorer or
-    // Finder): attach them. Never preventDefault — a textarea's default paste
-    // only ever inserts text, so the browser still pastes any text part
-    // natively (selection handling and undo intact). Spec §6.2.
-    // Right-click Paste has no paste event: the native clipboard reader
-    // hands over paths (copied files, or a temp file for image data), and
-    // they go through the same pipeline as a drop. Spec §5.6.
-    // Container panes' agents can't see the attachment store: their pasted
-    // files are copied into the working folder and mentioned as `@name`, as
-    // a drop does there (SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md §7).
-    const pasteFailed = (err: unknown) => {
-        // Same notice as a failed drop (useAgentDropAttach.ts).
-        pushNotification({
-            icon: "fa-triangle-exclamation",
-            title: "Couldn't attach the files",
-            message: String((err as Error)?.message ?? err),
-            timestamp: new Date().toISOString(),
-            type: "warning",
-            expiration: Date.now() + 8000,
-        });
-    };
-    const inContainer = () => !!draftBlockId && isContainerPane(draftBlockId);
-    // `attachments:enabled` off means files go to the working folder instead
-    // of the tray, for a paste exactly as for a drop (useAgentDropAttach).
-    const attachmentsSetting = getSettingsKeyAtom("attachments:enabled");
-    const pasteToWorkdir = () => inContainer() || attachmentsSetting() === false;
-    // The same copy a drop makes, notices and @mentions included. Paste
-    // ignores `dnd:*`.
-    const pasteIntoWorkdir = (source: CopySource) =>
-        copyIntoWorkdir(draftBlockId!, source, {
-            paneKind: "agent pane",
-            // Any ancestor holding the composer's textarea will do.
-            mentionIn: textareaRef?.parentElement ?? null,
-            splice: spliceComposerTokens,
-        });
-
-    const pasteAttachmentsFromMenu = (paths: string[]) => {
-        if (!attachmentDraft) return;
-        if (pasteToWorkdir()) {
-            void pasteIntoWorkdir({ paths });
-            return;
-        }
-        void attachmentDraft.ingestPaths(paths).catch(pasteFailed);
-    };
-
-    const handlePaste = (e: ClipboardEvent) => {
-        if (!attachmentDraft) return;
-        const files = Array.from(e.clipboardData?.files ?? []);
-        if (files.length === 0) return;
-        if (pasteToWorkdir()) {
-            void pasteIntoWorkdir({ files });
-            return;
-        }
-        attachmentDraft.uploadFiles(files);
-    };
+    const { handlePaste, pasteAttachmentsFromMenu } = useComposerPaste({ blockId: draftBlockId, draft: attachmentDraft, textarea: () => textareaRef });
 
     // ── Sent-message history (shell-style ArrowUp / ArrowDown recall) ──
     // Per block, capped, kept like the draft (reload-persistence.ts): it
@@ -260,68 +202,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         return props.getCompletions(p);
     });
 
-    // Composer placeholder text, in precedence order:
-    //   1. Ghost-text next-prompt suggestion (term:next_prompt_suggestion) —
-    //      Haiku-predicted next message, accept with Tab (see handleKeyDown
-    //      below). Only meaningful while the box is empty, which is exactly
-    //      when a native `placeholder` attribute renders anyway.
-    //   2. "Speak to <agent>…" while voice is listening AND this pane owns
-    //      the session, so it's obvious transcription is live and routed here.
-    //   3. The default "Send message to <agent>…" prompt.
-    // Reactive: reads the block meta atom + the voice singleton's SignalAtoms
-    // so it flips the instant either changes. term:next_prompt_suggestion is
-    // NOT cleared by editing the composer (handleInput/handleKeyDown below
-    // deliberately leave it alone) — typing over it and deleting back to
-    // empty shows the same suggestion again, rather than falling through to
-    // band 3. It's cleared only by an actual new turn starting or the
-    // session ending (useNextPromptSuggestion.ts's own guards). See
-    // docs/specs/SPEC_NEXT_PROMPT_SUGGESTION_RESTORE_ON_CLEAR_2026_08_10.md.
-    const voice = getVoiceSession();
-    // Masks a specific stale WRITE (not a text value) from band 1 — set by
-    // handleSend right as it synchronously empties the composer. Without
-    // this, every send has a real window where the box is empty (so the
-    // native placeholder wants to render) but the PREVIOUS turn's
-    // suggestion is still sitting in meta, since useNextPromptSuggestion.ts
-    // guard 1 clears it via an async fire-and-forget RPC, not synchronously
-    // with the send — the old suggestion would briefly flash as placeholder
-    // text before that RPC round-trips.
-    //
-    // Compares term:next_prompt_suggestion_gen, a monotonic counter
-    // useNextPromptSuggestion.ts bumps on every write to
-    // term:next_prompt_suggestion (fresh or cleared) — NOT the suggestion
-    // text itself. An earlier version of this compared text values
-    // directly: if a later turn's genuinely fresh suggestion happened to be
-    // the exact same string masked at the previous send (a plausible
-    // repeat, e.g. Haiku predicting "Run the tests" twice), value-equality
-    // would suppress a legitimate current suggestion until the next send —
-    // reagentx P1 on #2515, caught on re-review. The generation counter
-    // can't collide that way: any real write (same text or not) bumps it.
-    //
-    // A signal, not a plain variable: the placeholder memo below must
-    // actually re-run the instant this is set, and mutating a bare closure
-    // variable doesn't trigger Solid's reactivity at all (a still-earlier
-    // version of this fix did exactly that and silently never worked —
-    // caught by its own regression test, not by inspection).
-    const [suggestionGenMaskedAtSend, setSuggestionGenMaskedAtSend] = createSignal<number | undefined>(undefined);
-    // The suggestion as the composer shows it: absent while masked. Tab/→ accept
-    // reads this too, so a suggestion hidden at send time can't be inserted
-    // while its clear is still on its way.
-    const visibleSuggestion = createMemo((): string | undefined => {
-        const meta = props.viewModel?.blockAtom()?.meta;
-        const suggestion = meta?.[META_SUGGESTION] as string | undefined;
-        const suggestionGen = meta?.[META_SUGGESTION_GEN] as number | undefined;
-        return suggestion && suggestionGen !== suggestionGenMaskedAtSend() ? suggestion : undefined;
-    });
-    const placeholder = createMemo(() => {
-        const vm = props.viewModel;
-        const suggestion = visibleSuggestion();
-        if (suggestion) return suggestion;
-        const listeningHere =
-            !!vm && voice.isListening() && voice.currentTargetId() === vm.blockId;
-        return listeningHere
-            ? `Speak to ${props.agentName}...`
-            : `Send message to ${props.agentName}...`;
-    });
+    const { visibleSuggestion, placeholder, maskCurrentSuggestion } = useComposerPlaceholder({ viewModel: props.viewModel, agentName: () => props.agentName });
 
     // IME composition state — true between compositionstart and compositionend.
     // CJK / Vietnamese / any IME user types into a composition buffer; intermediate
@@ -487,94 +368,8 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         else if (historyAgent) void agentDraft(historyAgent).then(restore);
     });
 
-    // ── Voice input handle ───────────────────────────────────────────
-    // Registers a textarea-backed PaneVoiceHandle on the AgentViewModel
-    // so the frame-header mic button can write voice transcripts into
-    // the composer. `baseValue` is the prefix the user typed (or the
-    // last appended-final state) — interim updates render *after* it
-    // without committing, final updates fold in and become the new
-    // base. Cleared on unmount.
-    onMount(() => {
-        const vm = props.viewModel;
-        if (!vm) return;
-        // Two pieces of state interleave with the user's manual typing:
-        //   * baseValue — the textarea content as of the last user-or-
-        //     final-voice event. Interim updates render AFTER it but
-        //     don't promote into it.
-        //   * lastVoiceWrite — the exact string we last wrote to the
-        //     textarea. If ta.value diverges from this between events,
-        //     the user typed something manually and we re-snapshot
-        //     baseValue from ta.value so the next voice event preserves
-        //     what they added.
-        //
-        // Earlier guard (`!startsWith(baseValue)`) never fired for the
-        // common case where the user APPENDED to existing content —
-        // their additions were silently clobbered by the next voice
-        // append. (reagent P1 on PR #930.)
-        let baseValue = textareaRef?.value ?? "";
-        let lastVoiceWrite = baseValue;
-        const handle: PaneVoiceHandle = {
-            appendFinal: (text) => {
-                const ta = textareaRef;
-                if (!ta) return;
-                if (ta.value !== lastVoiceWrite) baseValue = ta.value;
-                const next = baseValue + text + " ";
-                ta.value = next;
-                ta.dispatchEvent(new Event("input", { bubbles: true }));
-                baseValue = next;
-                lastVoiceWrite = next;
-            },
-            setInterim: (text) => {
-                const ta = textareaRef;
-                if (!ta) return;
-                if (ta.value !== lastVoiceWrite) baseValue = ta.value;
-                const next = baseValue + text;
-                ta.value = next;
-                ta.dispatchEvent(new Event("input", { bubbles: true }));
-                lastVoiceWrite = next;
-            },
-        };
-        vm.voiceTargetRef.current = handle;
-        onCleanup(() => {
-            if (vm.voiceTargetRef.current === handle) {
-                vm.voiceTargetRef.current = null;
-            }
-        });
-    });
-
-    // ── Focus handle ──────────────────────────────────────────────────
-    // Registers the live textarea on the AgentViewModel so giveFocus() (the
-    // shared pane-selection focus contract — see focusManager.ts) can
-    // actually focus it instead of the `return false` stub it used to be.
-    // SPEC_PANE_SELECT_AUTOFOCUS_2026_09_22.md §3a: same ref-handoff shape
-    // as the voice handle above, which is the precedent this follows.
-    //
-    // Also claims focus immediately if this pane is ALREADY the active
-    // tab's selected pane at the moment the textarea becomes available —
-    // covers a freshly created agent pane (mounts after already being
-    // marked focused) and switching into a tab whose agent pane wasn't
-    // mounted yet, neither of which `focusManager.refocusNode()`'s own
-    // one-shot attempt can reach.
-    //
-    // Right after a launch (a one-shot request from the launch path) the
-    // claim is replaced by a retrying one: a launch started from a modal
-    // mounts this footer while the modal is still open, which
-    // claimFocusOnMount deliberately skips, so it would never land.
-    // SPEC_AGENT_PANE_HOVER_CLOSE_FOCUS_REFINEMENTS_2026_09_23.md §3.
-    onMount(() => {
-        const vm = props.viewModel;
-        const ta = textareaRef;
-        if (!vm || !ta) return;
-        vm.focusTargetRef.current = ta;
-        const cancelLaunchFocus = takeComposerFocusRequest(vm.blockId) ? focusComposerWhenReady(ta, vm.blockId) : null;
-        onCleanup(() => {
-            cancelLaunchFocus?.();
-            if (vm.focusTargetRef.current === ta) {
-                vm.focusTargetRef.current = null;
-            }
-        });
-        if (!cancelLaunchFocus) focusManager.claimFocusOnMount(vm.blockId, () => vm.giveFocus());
-    });
+    useComposerVoiceHandle(props.viewModel, () => textareaRef);
+    useComposerFocusHandle(props.viewModel, () => textareaRef);
 
     // Draft cleared by Esc, held for Undo. Plain (non-reactive) — read
     // fresh at Ctrl/Cmd+Z time and at context-menu-build time, never
@@ -658,16 +453,8 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
             }
             histPos = sentHistory.length;
             histDraft = "";
-            // Mask whatever write is current in meta right now — see the
-            // doc comment on suggestionGenMaskedAtSend above `placeholder`.
-            // Order doesn't matter relative to writeComposerValue below
-            // (that call doesn't touch any signal `placeholder` reads
-            // either), but setting the signal is what actually makes
-            // `placeholder` recompute — a plain variable write here would
-            // silently do nothing.
-            setSuggestionGenMaskedAtSend(
-                props.viewModel?.blockAtom()?.meta?.[META_SUGGESTION_GEN] as number | undefined
-            );
+            // Hide the suggestion that is current in meta right now (useComposerPlaceholder).
+            maskCurrentSuggestion();
             writeComposerValue("");
             // A sent message supersedes any pending Esc-cleared snapshot —
             // the now-empty box must not resurrect old text via Ctrl/Cmd+Z.
