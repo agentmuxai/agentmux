@@ -131,9 +131,11 @@ pub fn new_since(before: &HashSet<u64>, on_github: &[u64]) -> Vec<u64> {
     on_github.iter().copied().filter(|id| !before.contains(id)).collect()
 }
 
-/// The install page is only opened if it is the App's page on GitHub.
+/// The install page is only opened if it is the App's page on GitHub: a short list of characters a
+/// page address needs after the prefix, so nothing in it means anything to the shell that opens it.
 pub fn is_install_page(url: &str) -> bool {
-    url.strip_prefix("https://github.com/apps/").is_some_and(|rest| !rest.is_empty() && !rest.contains(['@', '\\', ' ']))
+    url.strip_prefix("https://github.com/apps/")
+        .is_some_and(|rest| !rest.is_empty() && rest.chars().all(|c| c.is_ascii_alphanumeric() || "-._~/?=&".contains(c)))
 }
 
 /// The installation ids in a page of `GET /user/installations`.
@@ -329,7 +331,7 @@ mod tests {
     #[test]
     fn only_githubs_page_for_the_app_is_opened() {
         assert!(is_install_page("https://github.com/apps/muxagent/installations/new?state=abc"));
-        for bad in ["http://github.com/apps/muxagent", "https://evil.example/apps/x", "https://github.com/apps/", "https://github.com.evil.example/apps/x", "https://github.com/apps/a@b"] {
+        for bad in ["http://github.com/apps/muxagent", "https://evil.example/apps/x", "https://github.com/apps/", "https://github.com.evil.example/apps/x", "https://github.com/apps/a@b", "https://github.com/apps/x\" & calc", "https://github.com/apps/x%20y", "https://github.com/apps/x^y", "https://github.com/apps/x\ny", "https://github.com/apps/x'y", "https://github.com/apps/x;y", "https://github.com/apps/x|y"] {
             assert!(!is_install_page(bad), "{bad}");
         }
     }
