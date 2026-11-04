@@ -1,0 +1,7 @@
+diag view-mount window_label=main initial-urlAtom="https://example.com/page"
+register pane
+host.discard is_discarded
+host.hibernationCheck during
+tryFreeze -> "visible"
+-- asleep while the check was out
+tryFreeze -> "asleep"

@@ -1,0 +1,15 @@
+diag view-mount window_label=main initial-urlAtom="https://example.com/page"
+register pane
+host.hibernationCheck unless_decided
+host.paneMemory
+model.hibernate pressure memory=4096
+tryHibernate -> null
+probe asleep: rect.asleep=true drag.unavailable=true pane.visible=false pane.asleep=true pane.frozen=false hiddenSince=1793707200000
+-- shown during the check
+host.hibernationCheck during
+tryHibernate -> "visible"
+-- shown during the memory read
+host.paneMemory during
+tryHibernate -> "visible"
+-- fell asleep during the check
+tryHibernate -> "already asleep"

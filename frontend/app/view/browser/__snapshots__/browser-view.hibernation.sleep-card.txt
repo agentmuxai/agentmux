@@ -1,0 +1,26 @@
+<div class="browser-sleep-card" role="status" data-pane-overlay="">
+<div class="browser-sleep-card-body">
+<div class="browser-sleep-card-head">
+<img class="browser-sleep-card-icon" alt="" src="https://example.com/f.ico">
+<span class="browser-sleep-card-title" data-hover-tip="https://example.com/page" aria-description="https://example.com/page">Restoring Inbox</span>
+</div>
+<div class="browser-sleep-card-eta">
+<i class="stub-brain browser-sleep-card-spinner">
+</i>
+<span>A few seconds</span>
+</div>
+<p class="browser-sleep-card-why">Your computer was low on memory, so AgentMux put this browser pane to sleep. A sleeping pane frees its page's memory, about 150 MB, and reloads when you come back to it.</p>
+<p class="browser-sleep-card-lost">Back and forward history, scroll position and anything typed into the page aren't kept.</p>
+<div class="browser-sleep-card-actions">
+<button type="button" class="ui-button ui-tone-neutral ui-density-compact">Keep this pane awake</button>
+<button type="button" class="ui-button ui-tone-neutral ui-density-compact">Settings</button>
+</div>
+</div>
+</div>
+diag view-mount window_label=main initial-urlAtom="https://example.com/page"
+register pane
+diag [hibernate] wake-start why=show visible=true
+model.keepAwake
+open pane settings
+## much later
+Still loading…

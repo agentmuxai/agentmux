@@ -1,0 +1,44 @@
+## idle
+<div class="browser-placeholder">
+</div>
+## first load
+<div class="browser-placeholder">
+<div class="browser-loading-overlay" data-pane-overlay="">
+<i class="stub-brain ">
+</i>
+</div>
+</div>
+## fading
+<div class="browser-placeholder">
+<div class="browser-loading-badge is-fading" data-pane-overlay="">
+<i class="stub-brain browser-loading-badge-spinner">
+</i>
+</div>
+</div>
+## gone
+<div class="browser-placeholder">
+</div>
+## second load
+<div class="browser-placeholder">
+<div class="browser-loading-badge" data-pane-overlay="">
+<i class="stub-brain browser-loading-badge-spinner">
+</i>
+</div>
+</div>
+## badge fading
+<div class="browser-placeholder">
+<div class="browser-loading-badge is-fading" data-pane-overlay="">
+<i class="stub-brain browser-loading-badge-spinner">
+</i>
+</div>
+</div>
+## loads again mid-fade
+<div class="browser-placeholder">
+<div class="browser-loading-badge" data-pane-overlay="">
+<i class="stub-brain browser-loading-badge-spinner">
+</i>
+</div>
+</div>
+## done
+<div class="browser-placeholder">
+</div>

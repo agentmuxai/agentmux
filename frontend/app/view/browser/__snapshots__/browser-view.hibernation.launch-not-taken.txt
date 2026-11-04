@@ -1,0 +1,22 @@
+diag view-mount window_label=main initial-urlAtom="https://example.com/page"
+register pane
+unregister pane
+diag view-mount window_label=main initial-urlAtom="https://example.com/page"
+register pane
+-- setting off
+unregister pane
+diag view-mount window_label=main initial-urlAtom="https://example.com/page"
+register pane
+-- site kept awake
+unregister pane
+diag view-mount window_label=main initial-urlAtom=""
+register pane
+-- blank
+unregister pane
+diag view-mount window_label=main initial-urlAtom="https://example.com/page"
+register pane
+-- already asleep
+diag view-mount window_label=main initial-urlAtom="https://example.com/page"
+register pane
+probe last: rect.asleep=false drag.unavailable=true pane.visible=false pane.asleep=false pane.frozen=false hiddenSince=1793707200000
+probe last settled: rect.asleep=false drag.unavailable=true pane.visible=false pane.asleep=false pane.frozen=false hiddenSince=1793707200000

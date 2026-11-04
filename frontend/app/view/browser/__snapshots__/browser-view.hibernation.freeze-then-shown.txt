@@ -1,0 +1,9 @@
+diag view-mount window_label=main initial-urlAtom="https://example.com/page"
+register pane
+host.discard is_discarded
+host.hibernationCheck skip
+host.setFrozen true
+diag [hibernate] thaw why=show
+host.setFrozen false
+tryFreeze -> null
+probe end: rect.asleep=false drag.unavailable=false pane.visible=true pane.asleep=false pane.frozen=false hiddenSince=null

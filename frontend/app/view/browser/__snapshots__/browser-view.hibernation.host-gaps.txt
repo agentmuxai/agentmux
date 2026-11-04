@@ -1,0 +1,16 @@
+diag view-mount window_label=main initial-urlAtom="https://example.com/page"
+register pane
+host.discard is_discarded
+host.hibernationCheck skip
+host.setFrozen true
+diag [hibernate] frozen
+tryFreeze -> null
+diag [hibernate] thaw why=show
+probe shown: rect.asleep=false drag.unavailable=false pane.visible=true pane.asleep=false pane.frozen=false hiddenSince=null
+unregister pane
+diag view-mount window_label=main initial-urlAtom="https://example.com/page"
+register pane
+host.hibernationCheck unless_decided
+host.paneMemory
+model.hibernate manual memory=undefined
+tryHibernate -> null

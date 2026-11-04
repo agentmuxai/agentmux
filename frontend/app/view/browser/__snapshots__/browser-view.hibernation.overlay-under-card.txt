@@ -1,0 +1,22 @@
+<div class="browser-placeholder">
+<div class="browser-sleep-card" role="status" data-pane-overlay="">
+<div class="browser-sleep-card-body">
+<div class="browser-sleep-card-head">
+<i class="fa-solid fa-moon" aria-hidden="true">
+</i>
+<span class="browser-sleep-card-title" data-hover-tip="https://example.com/page" aria-description="https://example.com/page">Restoring Example</span>
+</div>
+<div class="browser-sleep-card-eta">
+<i class="stub-brain browser-sleep-card-spinner">
+</i>
+<span>About 2 seconds</span>
+</div>
+<p class="browser-sleep-card-why">AgentMux put this browser pane to sleep to save memory. A sleeping pane frees its page's memory, usually 100 to 200 MB, and reloads when you come back to it.</p>
+<p class="browser-sleep-card-lost">Back and forward history, scroll position and anything typed into the page aren't kept.</p>
+<div class="browser-sleep-card-actions">
+<button type="button" class="ui-button ui-tone-neutral ui-density-compact">Keep this pane awake</button>
+<button type="button" class="ui-button ui-tone-neutral ui-density-compact">Settings</button>
+</div>
+</div>
+</div>
+</div>

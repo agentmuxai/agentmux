@@ -1,0 +1,15 @@
+<div class="browser-placeholder">
+<div class="browser-loading-overlay" data-pane-overlay="">
+<i class="stub-brain ">
+</i>
+</div>
+</div>
+<div class="browser-placeholder">
+</div>
+<div class="browser-placeholder">
+<div class="browser-loading-badge is-fading" data-pane-overlay="">
+<i class="stub-brain browser-loading-badge-spinner">
+</i>
+</div>
+</div>
+timers pending: 0
