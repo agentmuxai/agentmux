@@ -111,7 +111,7 @@ const BASE_FONT_SIZE = 13;
 
 /**
  * Waits for an already-in-flight MOS fetch for `oref` to settle (succeed or
- * fail), WITHOUT triggering a new one — see the onMount IIFE below for why a
+ * fail), WITHOUT triggering a new one — see `attachShell` for why a
  * second fetch must be avoided (reagentx P1 on #2522: `subBlockAtom`'s
  * `createMemo` already eagerly fetches this exact oref at component
  * construction). `getMuxObjectLoadingAtom` returns `null` while loading and
@@ -271,7 +271,6 @@ function createShellState(props: AgentShellSubblockProps): ShellState {
     return state;
 }
 
-
 function createAgentLocked(subBlockAtom: SubBlockAtom): Accessor<boolean> {
     // Agent-lock gating (SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md):
     // while an agent is actively driving THIS shell via PtyShellInput/
@@ -396,7 +395,7 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
 // second delete against a fresh shell the human may have opened since.
 //
 // Subscribed from an effect, not `onMount`: a freshly created shell has
-// no id at mount (the async IIFE below assigns it), so a one-shot mount
+// no id at mount (`attachShell` assigns it), so a one-shot mount
 // subscription would bind to an empty scope and never fire — the common
 // case of opening the drawer for the first time. The effect re-subscribes
 // when the id arrives, and its `onCleanup` unsubscribes the previous one.
@@ -469,7 +468,7 @@ function createExitHandler(s: ShellState, id: string): (data: BlockControllerRun
 // mirrors `TerminalView`'s font effect in term.tsx. Only for LIVE updates
 // (Ctrl+Wheel while the shell is already open, or a meta push from
 // elsewhere); the initial mount's font size is seeded correctly before TermWrap is even
-// constructed (see the onMount IIFE below), so this effect's first
+// constructed (see `attachShell`), so this effect's first
 // real-work firing is normally a no-op re-application of the same value.
 function watchLiveFont(s: ShellState): void {
     createEffect(() => {
@@ -653,11 +652,11 @@ async function attachShell(s: ShellState, candidateId: string | undefined) {
         // reused-existing-block path needs to wait for anything.
         //
         // Deliberately does NOT call MOS.reloadMuxObject here: the
-        // `subBlockAtom` memo above already triggered a fetch for
+        // `subBlockAtom` memo in `createShellState` already triggered a fetch for
         // this exact oref as a side effect of being constructed
         // (MOS.getMuxObjectAtom → getMuxObjectValue eagerly fetches
         // on first read, and that memo runs synchronously at
-        // component construction, before this async IIFE even
+        // component construction, before `attachShell` even
         // starts). Calling reloadMuxObject here would force a
         // SECOND, redundant GetObject round-trip for the same object
         // on every reused-sub-block drawer open (reagentx P1 on
@@ -667,7 +666,7 @@ async function attachShell(s: ShellState, candidateId: string | undefined) {
         // mos.ts's own comment on GetObject rejections) can't hang
         // shell startup indefinitely — falls back to whatever
         // termFontSize() currently computes (default zoom) if it
-        // times out; the live-update effect below corrects it later
+        // times out; the live-update effect (`watchLiveFont`) corrects it later
         // if a subsequent fetch/push succeeds.
         if (isExistingBlock) {
             await waitForMuxObjectSettled(MOS.makeORef("block", id));
@@ -709,7 +708,7 @@ async function attachShell(s: ShellState, candidateId: string | undefined) {
 // `norespawn` covers the OTHER way this id can be dead: the
 // shell exited while the drawer was closed (the human
 // `exit`ed and reopened, or an agent sharing this shell
-// exited it), so the live exit subscription above — which
+// exited it), so the live exit subscription (`watchShellExit`) — which
 // only exists while mounted — never saw it. Without the
 // flag, resync's default is to silently REVIVE a
 // STATUS_DONE controller in place, appending a fresh
@@ -738,7 +737,7 @@ function dropDeadBlock(s: ShellState, id: string): void {
     // resync failure destroys the block's persisted `term`
     // file — and for a shell that CRASHED while the drawer
     // was closed, that file is the only record of what went
-    // wrong. The live-exit listener above already refuses to
+    // wrong. The live-exit listener (`watchShellExit`) already refuses to
     // collapse on a non-zero exit for exactly this reason
     // (spec §5); doing it here anyway would reproduce the
     // same "not hidden — gone" data loss through the attach
@@ -786,7 +785,7 @@ function adoptCreatedSubBlock(s: ShellState, oref: string, isStale: () => boolea
     // Set BEFORE onSubBlockCreated, not after: the parent can
     // (and in the real app does) synchronously feed this id
     // straight back as a new `existingSubBlockId` prop value —
-    // that re-triggers the re-attach effect below, whose
+    // that re-triggers the re-attach effect (`watchExternalSubBlockId`), whose
     // "is this just our own echo?" guard compares the new prop
     // against subBlockId(). If subBlockId() were still stale at
     // that moment, the echo would look like an EXTERNAL repoint
