@@ -53,10 +53,10 @@ export const OpenWindowRow = (props: OpenWindowRowProps): JSX.Element => (
             if (props.isEditing()) return; // input owns key handling
             if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault();
-                    props.focus();
+                props.focus();
             } else if (e.key === "F2") {
                 e.preventDefault();
-                    props.enterRename();
+                props.enterRename();
             }
         }}
         {...tip(props.isCurrent() ? "This window — double-click to rename (F2)" : `Click to focus, double-click to rename (F2)`)}
