@@ -559,7 +559,6 @@
 126 frontend/app/view/native-memory/MemoryAdoptionPanel.tsx::MemoryAdoptionPanel
 112 frontend/app/view/native-memory/NativeMemoryCreate.tsx::NativeMemoryCreate
 150 frontend/app/view/native-memory/NativeMemoryFileView.tsx::NativeMemoryFileView
-648 frontend/app/view/native-memory/native-memory-manager.tsx::NativeMemoryManager
 154 frontend/app/view/remotes/remotes-view.tsx::Detail
 240 frontend/app/view/settings/sections/advanced-section.tsx::AdvancedSection
 189 frontend/app/view/settings/sections/agent-site-grants.tsx::AgentSiteGrants
