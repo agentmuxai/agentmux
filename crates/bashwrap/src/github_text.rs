@@ -276,8 +276,7 @@ fn write_stdin_file(text: &str) -> Option<String> {
             }
         }
     }
-    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
-    let path = dir.join(format!("{}-{nanos}.txt", std::process::id()));
+    let path = dir.join(format!("{}-{}.txt", std::process::id(), agentmux_common::time::now_ms()));
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
