@@ -452,7 +452,7 @@
 132 frontend/app/view/agent/agent-pane-chrome-model.ts::buildAgentPaneChromeModel
 674 frontend/app/view/agent/agent-view.tsx::AgentPresentationView
 179 frontend/app/view/agent/attachments/AttachmentLightbox.tsx::AttachmentLightbox
-103 frontend/app/view/agent/attachments/AttachmentTile.tsx::AttachmentTile
+101 frontend/app/view/agent/attachments/AttachmentTile.tsx::AttachmentTile
 296 frontend/app/view/agent/attachments/AttachmentTray.tsx::AttachmentTray
 143 frontend/app/view/agent/buildRuntimeArgs.ts::buildRuntimeArgs
 140 frontend/app/view/agent/cli-notice.ts::parseCliNoticeFrame
@@ -479,7 +479,7 @@
 120 frontend/app/view/agent/components/AgentSessionNotices.tsx::AgentSessionNotices
 239 frontend/app/view/agent/components/AgentSessionStats.tsx::AgentSessionStats
 126 frontend/app/view/agent/components/AgentShellInfoPanel.tsx::AgentShellInfoPanel
-640 frontend/app/view/agent/components/AgentShellSubblock.tsx::AgentShellSubblock
+637 frontend/app/view/agent/components/AgentShellSubblock.tsx::AgentShellSubblock
 259 frontend/app/view/agent/components/AgentShellSubblock.tsx::attachShell
 148 frontend/app/view/agent/components/BtwOverlay.tsx::BtwOverlay
 130 frontend/app/view/agent/components/HiddenTemplatesSection.tsx::HiddenTemplatesSection
