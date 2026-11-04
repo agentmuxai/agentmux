@@ -1,0 +1,50 @@
+{
+  "keys": [
+    "acceptsForeignTabs",
+    "activeBlockId",
+    "activeId",
+    "addTitle",
+    "bodyDrop",
+    "changeConnModalAtom",
+    "collapsed",
+    "connBtnRef",
+    "getColor",
+    "getIcon",
+    "getId",
+    "getLabel",
+    "getTooltipDetail",
+    "getTooltipSeat",
+    "headerBgOverride",
+    "isClosing",
+    "nodeModel",
+    "onActivate",
+    "onAdd",
+    "onClose",
+    "onReceiveForeignTab",
+    "onReceiveForeignTabs",
+    "onReorder",
+    "onSelect",
+    "onTabContextMenu",
+    "onTabDoubleClick",
+    "renderLabel",
+    "selection",
+    "tabs",
+    "useProgress",
+    "viewModel"
+  ],
+  "tabs": [
+    "b1"
+  ],
+  "activeId": "b1",
+  "collapsed": true,
+  "addTitle": "Add tab",
+  "perTab": {
+    "b1": {
+      "label": "(No View)",
+      "color": {
+        "neutralBackground": "neutral-none"
+      },
+      "closing": true
+    }
+  }
+}

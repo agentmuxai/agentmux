@@ -1491,3 +1491,67 @@ describe("renderPaneChromeShell — a closing pane", () => {
         expect(body.inert).toBe(false);
     });
 });
+
+// What the shell draws and hands the strip, pinned whole. A refactor of the shell must leave the
+// committed snapshots as they are; regenerate with `vitest -u` only for a change meant to look different.
+describe("renderPaneChromeShell — markup and strip props", () => {
+    const markup = (el: Element | null): string => (el ? el.outerHTML : "(absent)").replace(/></g, ">\n<") + "\n";
+    const snap = (name: string, ext = "html") => `./__snapshots__/PaneChrome.${name}.${ext}`;
+
+    /** What the strip reads for every tab, resolved, with the callbacks and the model left out. */
+    function stripProps(): string {
+        const h = headerCalls.at(-1);
+        const perTab = Object.fromEntries(
+            h.tabs.map((id: string) => [
+                id,
+                {
+                    label: h.getLabel(id),
+                    tooltipDetail: h.getTooltipDetail(id),
+                    tooltipSeat: h.getTooltipSeat(id),
+                    color: h.getColor(id),
+                    closing: h.isClosing(id),
+                },
+            ])
+        );
+        return (
+            JSON.stringify(
+                {
+                    keys: Object.keys(h).sort(),
+                    tabs: h.tabs,
+                    activeId: h.activeId,
+                    collapsed: h.collapsed(),
+                    headerBgOverride: h.headerBgOverride,
+                    addTitle: h.addTitle,
+                    perTab,
+                },
+                null,
+                2
+            ) + "\n"
+        );
+    }
+
+    it("a focused pane of coloured tabs on a remote, with an agent tab, a swatch and a view model's own chrome", async () => {
+        testConnections = { "dev@box": { "display:color": "#33aa66" } };
+        setObjectValue("block:b1", { meta: { view: "term", "frame:hue": 200, connection: "dev@box" } });
+        setObjectValue("block:b2", { meta: { view: "agent", "frame:title": "Korp", "frame:hue": 30, "agent:seat": "Specialist" } });
+        setObjectValue("block:b3", { meta: { view: "browser" } });
+        unregisterTestTabs.push(
+            registerPaneTab(stubPaneTab("term", { chrome: () => ({ rootClass: "root-term", bodyClass: "body-term", addTitle: "New terminal", contentClass: "term-content" }) as any }))
+        );
+        mockLayoutModel = fakeLayoutModel(["b1", "b2", "b3"]);
+        const { container } = render(() =>
+            renderPaneChromeShell(fakeNodeModel({ isFocused: () => true, numLeafs: () => 3 }), <div data-testid="content">content</div>) as any
+        );
+        await expect(markup(container.querySelector(".pane-stack"))).toMatchFileSnapshot(snap("focused-coloured"));
+        await expect(stripProps()).toMatchFileSnapshot(snap("focused-coloured-strip", "json"));
+    });
+
+    it("a collapsed lone pane that is closing", async () => {
+        mockLayoutModel = fakeLayoutModel(["b1"]);
+        const { container } = render(() =>
+            renderPaneChromeShell(fakeNodeModel({ isMinimized: () => true, isClosing: () => true, isFocused: () => true }), <div>content</div>) as any
+        );
+        await expect(markup(container.querySelector(".pane-stack"))).toMatchFileSnapshot(snap("collapsed-closing"));
+        await expect(stripProps()).toMatchFileSnapshot(snap("collapsed-closing-strip", "json"));
+    });
+});
