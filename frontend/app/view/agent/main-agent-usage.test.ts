@@ -67,7 +67,7 @@ describe("useAgentStream reads usage only through mainAgentUsage", () => {
     // The stream handler is too large to run here, so pin the wiring: usage and
     // the model id come from mainAgentUsage, never from a raw message_start
     // read inline (which is how a subagent's usage got into the context meter).
-    const src = readFileSync(join(process.cwd(), "frontend/app/view/agent/useAgentStream.ts"), "utf8");
+    const src = readFileSync(join(process.cwd(), "frontend/app/view/agent/stream-pipeline.ts"), "utf8");
 
     it("calls it", () => {
         expect(src).toMatch(/mainAgentUsage\(rawEvent\)/);
@@ -147,8 +147,8 @@ describe("the context meter is fed only per-call usage (source pins)", () => {
     const read = (rel: string) => readFileSync(join(process.cwd(), rel), "utf8");
 
     it("the live stream counts each call once (message_start and its assistant frames share an id)", () => {
-        const src = read("frontend/app/view/agent/useAgentStream.ts");
-        expect(src).toMatch(/usage\.messageId === lastUsageMessageId/);
+        const src = read("frontend/app/view/agent/stream-pipeline.ts");
+        expect(src).toMatch(/usage\.messageId === st\.lastUsageMessageId/);
         expect(src).toMatch(/type: "ContextWindowsReported"/);
         expect(src).toMatch(/type: "ContextInvalidated", reason: "fresh_session"/);
     });
