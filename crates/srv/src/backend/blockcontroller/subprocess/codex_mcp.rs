@@ -65,7 +65,7 @@ fn valid_name(name: &str) -> bool {
 }
 
 /// The text of a JSON string, number or bool value; `None` for anything else.
-fn scalar(v: &Value) -> Option<String> {
+pub(super) fn scalar(v: &Value) -> Option<String> {
     match v {
         Value::String(s) => Some(s.clone()),
         Value::Number(_) | Value::Bool(_) => Some(v.to_string()),
@@ -256,14 +256,14 @@ pub(super) fn with_overrides(argv: &[String], overrides: &[String]) -> Vec<Strin
 /// a server only the names it is told to forward, and `agentmux-mcp` needs
 /// srv's endpoint, which is inherited, not in the turn's own variables; and a
 /// server's literal env value must not replace a variable Codex already has.
-fn launch_env(inherited: impl Iterator<Item = (String, String)>, own: &HashMap<String, String>) -> HashMap<String, String> {
+pub(super) fn launch_env(inherited: impl Iterator<Item = (String, String)>, own: &HashMap<String, String>) -> HashMap<String, String> {
     let mut env: HashMap<String, String> = inherited.filter(|(k, _)| !k.starts_with("AGENTMUX") || !crate::backend::pane_env::should_strip(k)).collect();
     env.extend(own.iter().map(|(k, v)| (k.clone(), v.clone())));
     env
 }
 
 /// The value `env` has for `name`; a Windows name is matched without regard to case.
-fn env_value<'a>(env: &'a HashMap<String, String>, name: &str) -> Option<&'a String> {
+pub(super) fn env_value<'a>(env: &'a HashMap<String, String>, name: &str) -> Option<&'a String> {
     if cfg!(windows) { env.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v) } else { env.get(name) }
 }
 
