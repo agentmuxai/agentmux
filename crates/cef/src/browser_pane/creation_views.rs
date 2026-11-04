@@ -66,7 +66,7 @@ use cef::{
     ImplOverlayController, ImplView, ImplWindow, Rect, RuntimeStyle, View, Window,
 };
 #[cfg(not(target_os = "macos"))]
-use cef::{ImplPanel, Point, Size};
+use cef::ImplPanel;
 
 use crate::state::AppState;
 
