@@ -503,7 +503,7 @@
 168 frontend/app/view/agent/failure/useAccountBinding.ts::useAccountBinding
 238 frontend/app/view/agent/flows/launch-flow.ts::runLaunchFlow
 220 frontend/app/view/agent/flows/run-provider-login.ts::runProviderLogin
-687 frontend/app/view/agent/history/AgentHistoryView.tsx::AgentHistoryView
+627 frontend/app/view/agent/history/AgentHistoryView.tsx::AgentHistoryView
 136 frontend/app/view/agent/history/HistoryNavigator.tsx::HistoryNavigator
 167 frontend/app/view/agent/hooks/useAgentCommands.ts::deliverToBackend
 236 frontend/app/view/agent/hooks/useAgentCommands.ts::sendMessage
