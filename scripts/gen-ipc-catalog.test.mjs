@@ -204,9 +204,9 @@ describe("the real route_command", () => {
         expect([...mine].sort()).toEqual([...routeCommandArms(src)].sort());
     });
 
-    it.skipIf(!existsSync(ipc))("names a handler for the two arms that pass it to spawn_blocking without calling it", () => {
+    it.skipIf(!existsSync(ipc))("names a handler for the arm that hands it to the blocking pool by name, and the one that wraps it", () => {
         const by = (name) => routeCommandEntries(readFileSync(ipc, "utf8")).find((e) => e.names.includes(name));
-        expect(by("stop_tab_drag_tracking").handler).toBe("commands::drag::stop_tab_drag_tracking");
+        expect(by("stop_tab_drag_tracking").handler).toBe("commands::drag::stop_tab_drag_tracking_blocking");
         expect(by("store_update_install").handler).toBe("commands::store_update::install_update");
     });
 

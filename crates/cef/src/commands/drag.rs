@@ -424,6 +424,12 @@ pub fn tear_off_pool_promote(
     // across the handoff (Chrome-style no-teleport tear-off).
     let tab_anchor_x = args.get("tabAnchorX").and_then(|v| v.as_f64()).map(|n| n as i32);
     let tab_anchor_y = args.get("tabAnchorY").and_then(|v| v.as_f64()).map(|n| n as i32);
+    // A picture that followed the cursor (live_follow.rs) says where the window opens: where the user saw it.
+    #[cfg(target_os = "windows")]
+    let (tab_anchor_x, tab_anchor_y) = match super::live_follow::landing() {
+        Some((x, y)) => (Some(x), Some(y)),
+        None => (tab_anchor_x, tab_anchor_y),
+    };
 
     match super::window_pool::promote_pool_window(
         state,
@@ -808,6 +814,28 @@ pub fn start_tab_drag_tracking(
         is_last_tab,
     )?;
     Ok(serde_json::Value::Null)
+}
+
+/// `start_tab_drag_tracking` on the blocking pool — it blocks briefly (~ms) on the
+/// hook thread's install-ready channel, same rationale as `tear_off_sc_move_handshake`.
+pub async fn start_tab_drag_tracking_blocking(
+    state: &Arc<AppState>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let (state, args) = (state.clone(), args.clone());
+    tokio::task::spawn_blocking(move || start_tab_drag_tracking(&state, &args))
+        .await
+        .map_err(|e| format!("start_tab_drag_tracking join error: {}", e))?
+}
+
+/// `stop_tab_drag_tracking` on the blocking pool too: macOS's stop_active_hook_session
+/// blocks on a lock shared with start (#2310), so a fast drag-then-release can't stop
+/// the hook before start has installed it. That block belongs on the blocking pool,
+/// not an async worker thread.
+pub async fn stop_tab_drag_tracking_blocking() -> Result<serde_json::Value, String> {
+    tokio::task::spawn_blocking(stop_tab_drag_tracking)
+        .await
+        .map_err(|e| format!("stop_tab_drag_tracking join error: {}", e))?
 }
 
 /// Stop the active tab-drag hook session, if any. Idempotent — also

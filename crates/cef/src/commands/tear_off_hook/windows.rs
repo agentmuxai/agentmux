@@ -88,6 +88,12 @@ thread_local! {
 #[cfg(target_os = "windows")]
 static ACTIVE_HOOK_THREAD: std::sync::Mutex<Option<u32>> = std::sync::Mutex::new(None);
 
+/// Whether a hook session is running now.
+#[cfg(target_os = "windows")]
+pub fn hook_session_active() -> bool {
+    ACTIVE_HOOK_THREAD.lock().map(|g| g.is_some()).unwrap_or(false)
+}
+
 /// Stop the active hook session, if any. Idempotent. Used by the
 /// session-takeover path above and by the frontend's dragend
 /// belt-and-suspenders `stop_tab_drag_tracking` call — a leaked
@@ -295,7 +301,6 @@ fn start_hook_session(seed: HookContextSeed) -> Result<(), String> {
                 }
 
                 let _ = ready_tx.send(Ok(()));
-
                 tracing::info!(
                     target: "dnd:tearoff",
                     "[dnd:tearoff] hooks installed (mouse + keyboard), entering message loop"
@@ -318,6 +323,7 @@ fn start_hook_session(seed: HookContextSeed) -> Result<(), String> {
                 UnhookWindowsHookEx(kb_hook);
                 UnhookWindowsHookEx(mouse_hook);
                 HOOK_CTX.with(|cell| *cell.borrow_mut() = None);
+                crate::commands::live_follow::on_session_end();
                 // Vacate the active-session slot — but only if it still
                 // points at us (a superseding session may have already
                 // replaced it).
@@ -389,6 +395,7 @@ unsafe extern "system" fn low_level_keyboard_proc(
                             tab_id = %ctx.tab_id,
                             "[dnd:tabdrag] ESC pressed — session retired"
                         );
+                        crate::commands::live_follow::on_escape();
                         return;
                     }
                     tracing::info!(
@@ -521,6 +528,7 @@ fn handle_mouse_move(cursor_x: i32, cursor_y: i32) {
                 }),
             );
         }
+        crate::commands::live_follow::on_cursor(cursor_x, cursor_y, candidate.is_some());
         if candidate_changed {
             *ctx.current_target.borrow_mut() = candidate;
         }

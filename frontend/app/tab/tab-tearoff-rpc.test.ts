@@ -36,7 +36,7 @@ const setCurrentDragPayload = vi.fn();
 vi.mock("@/app/drag/CrossWindowDragMonitor", () => ({
     setCurrentDragPayload: (...a: unknown[]) => setCurrentDragPayload(...a),
 }));
-vi.mock("./tab-grab-offset", () => ({ getTabGrabOffset: () => null }));
+vi.mock("./tab-grab-offset", () => ({ tabAnchorOffset: () => null }));
 vi.mock("@/util/platformutil", () => ({ isWindows: () => false }));
 vi.mock("@/app/drag/tearoff-snapshot", () => ({ takeWindowTabSnapshot: vi.fn() }));
 vi.mock("@/util/logger", () => ({ Logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } }));
