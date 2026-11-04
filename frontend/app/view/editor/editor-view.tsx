@@ -17,16 +17,14 @@ import { keymap } from "@codemirror/view";
 import { search, openSearchPanel } from "@codemirror/search";
 import { lintGutter } from "@codemirror/lint";
 import { editorTheme, isLightPolarity } from "./editor-theme";
-import { Markdown } from "@/app/element/markdown";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { settingsAtom } from "@/store/global";
 import { focusManager, giveBlockFocus } from "@/app/store/focusManager";
 import { userIsTypingElsewhereIn } from "./editor-focus-guard";
-import type { EditorMode, EditorViewModel } from "./editor-model";
+import type { EditorViewModel } from "./editor-model";
 import { cursorAtLine } from "./open-at-line";
-import { Button, IconButton, SegmentedControl } from "@/app/element/ui";
-import { previewMedia } from "./editor-preview-media";
+import { IconButton } from "@/app/element/ui";
 import { bodyFocusTarget } from "./editor-body-focus";
 import { TextViewerSwitch, ViewerHost } from "./viewers/viewer-host";
 import { SaveAsInput } from "./editor-save-as-input";
@@ -35,8 +33,7 @@ import { registerDocTabDropZone } from "@/app/doc-tabs/doc-tab-hosts";
 import { FileTree } from "./file-tree";
 import { LspClient, type LspState } from "./lsp/lsp-client";
 import { lspDiagnosticsExtension } from "./lsp/lsp-extensions";
-import { installHintFor, isLspSupportedLanguage } from "./lsp/install-hints";
-import { redactSecrets } from "@/app/errors/redact";
+import { isLspSupportedLanguage } from "./lsp/install-hints";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import "./editor-view.scss";
 import { codeMirrorKeys, keyLabel, paneCommandFor } from "@/app/keybindings";
@@ -44,6 +41,7 @@ import { keybindingsVersion } from "@/app/keybindings/registry";
 import { noteResolved, registerPaneCommandRunner } from "@/app/keybindings/app-api";
 import { OpenFromRemoteModal } from "./open-from-remote-modal";
 import { EditorEmptyState } from "./EditorEmptyState";
+import { EditorErrorPanel, EditorLspBanner, EditorLspStatusChip, EditorMarkdownPreview, EditorModeToolbar } from "./EditorPanels";
 import { decodeFileUri, workspaceCovers } from "./editor-lsp-paths";
 import { lspBannerShows, lspStatusChipText } from "./editor-lsp-status";
 import { buildTreeContextMenuItems, type ConfirmRequest } from "./editor-tree-menu";
@@ -950,19 +948,7 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                 />
 
                 <Show when={isMarkdown() && model.tabsAtom().length > 0}>
-                    <div class="editor-mode-toolbar">
-                        <SegmentedControl<EditorMode>
-                            density="compact"
-                            ariaLabel="View mode"
-                            options={[
-                                { value: "preview", label: "Preview", title: `Rendered preview (${keyLabel("mod+shift+v")})` },
-                                { value: "source", label: "Source", title: "Source editor" },
-                                { value: "split", label: "Split", title: "Split view" },
-                            ]}
-                            value={model.editorMode()}
-                            onChange={(mode) => model.setEditorMode(mode)}
-                        />
-                    </div>
+                    <EditorModeToolbar model={model} />
                 </Show>
 
                 <Show when={model.loadingAtom()}>
@@ -976,21 +962,7 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                     (e.g. save failures) still surface via the top banner
                     below. */}
                 <Show when={model.errorAtom() && model.activeTabAtom() && !model.activeTabAtom()?.contentLoaded}>
-                    <div class="editor-error-panel" role="alert">
-                        <div class="editor-error-panel-icon" aria-hidden="true">⚠</div>
-                        <div class="editor-error-panel-title">Couldn't open file</div>
-                        <div class="editor-error-panel-path">{model.filePathAtom()}</div>
-                        <div class="editor-error-panel-message">{model.errorAtom()}</div>
-                        <Button
-                            class="editor-error-panel-close"
-                            onClick={() => {
-                                const tab = model.activeTabAtom();
-                                if (tab) model.closeTab(tab.id);
-                            }}
-                        >
-                            Close tab
-                        </Button>
-                    </div>
+                    <EditorErrorPanel model={model} />
                 </Show>
 
                 <Show when={model.errorAtom() && model.activeTabAtom()?.contentLoaded}>
@@ -1000,49 +972,7 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                 {/* LSP install banner — appears when the language server's binary
                     isn't on PATH. Dismissable per session via the X button. */}
                 <Show when={lspBannerVisible()}>
-                    {(() => {
-                        const state = lspState();
-                        if (!state || state.kind !== "missing") return null;
-                        const hint = installHintFor(state.language);
-                        return (
-                            <div class="editor-lsp-banner" role="status">
-                                <div class="editor-lsp-banner-row">
-                                    <span class="editor-lsp-banner-icon" aria-hidden="true">ⓘ</span>
-                                    <span class="editor-lsp-banner-text">
-                                        {hint?.serverName ?? state.language} not installed.
-                                    </span>
-                                    <IconButton
-                                        icon="xmark"
-                                        label="Dismiss banner for this session"
-                                        density="compact"
-                                        onClick={() => dismissBanner(state.language)}
-                                    />
-                                </div>
-                                <Show when={hint}>
-                                    <div class="editor-lsp-banner-row editor-lsp-banner-install">
-                                        <span>Install:</span>
-                                        <code class="editor-lsp-banner-cmd">{hint!.install}</code>
-                                        <Button
-                                            density="compact"
-                                            // SPEC_ERROR_COPY_EVERYWHERE_2026_09_24.md §5 — moved to the redacted path.
-                                            onClick={() => copyToClipboard(redactSecrets(hint!.install))}
-                                            title="Copy install command"
-                                        >
-                                            Copy
-                                        </Button>
-                                        <a
-                                            class="editor-lsp-banner-docs"
-                                            href={hint!.docs}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                        >
-                                            Docs ↗
-                                        </a>
-                                    </div>
-                                </Show>
-                            </div>
-                        );
-                    })()}
+                    <EditorLspBanner state={lspState} onDismiss={dismissBanner} onCopy={copyToClipboard} />
                 </Show>
 
                 <Show
@@ -1074,24 +1004,7 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                             />
                         </Show>
                         <Show when={isMarkdown() && model.editorMode() !== "source"}>
-                            <div
-                                class="editor-preview-pane"
-                                style={
-                                    model.editorMode() === "split"
-                                        ? { height: `${model.previewHeightAtom()}px`, flex: "0 0 auto" }
-                                        : { flex: "1 1 auto" }
-                                }
-                            >
-                                <div class="editor-preview-content">
-                                    <Markdown
-                                        textAtom={() => liveDoc()}
-                                        contentClass="editor-preview-markdown-content"
-                                        // Local images in the document render, relative to its
-                                        // folder; none for a document on an SSH host.
-                                        media={previewMedia(model.filePathAtom(), model.connection(), !!model.activeTabAtom()?.isScratch)}
-                                    />
-                                </div>
-                            </div>
+                            <EditorMarkdownPreview model={model} text={liveDoc} />
                         </Show>
                     </div>
                 </Show>
@@ -1099,10 +1012,7 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                 {/* LSP status chip — bottom-of-pane indicator. Only shown when
                     there's an active client (i.e. an LSP-supported file is open). */}
                 <Show when={showsText() && lspState() && lspState()?.kind !== "disposed"}>
-                    <div class="editor-lsp-status" data-kind={statusChipKind()}>
-                        <span class="editor-lsp-status-dot" />
-                        <span class="editor-lsp-status-text">{statusChipText()}</span>
-                    </div>
+                    <EditorLspStatusChip kind={statusChipKind()} text={statusChipText()} />
                 </Show>
             </div>
 
