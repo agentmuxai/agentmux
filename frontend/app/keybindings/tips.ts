@@ -418,7 +418,7 @@ export const TIPS: TipRow[] = [
         gesture: "key:Enter / shift+key:Enter / key:O·S·P·G",
         where: "in a permission prompt",
         label: "Allow / deny / set the scope: once, session, project or global",
-        source: { file: "frontend/app/view/agent/components/AgentDecisionPanel.tsx", anchor: "shiftHeld" },
+        source: { file: "frontend/app/view/agent/components/decision-panel-actions.ts", anchor: "shiftHeld" },
     },
     {
         id: "agent:link:middleclick",
