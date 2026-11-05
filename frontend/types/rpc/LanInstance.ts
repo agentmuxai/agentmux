@@ -15,11 +15,9 @@ channel: string,
  * platform tag in the Swarm. Display only; empty for a peer that does not
  * advertise it (SPEC_SWARM_REMOTE_AGENTS_PLATFORM_TAG_AND_SELECTION_2026_10_03.md §3).
  */
-os: string,
+os: string, 
 /**
- * How the peer is installed (`windows-store`, `windows-setup`, `macos-app`, ...: `InstallKind::label`),
- * only when it is a plain lowercase token. Empty when the peer predates advertising it. It tells a
- * Microsoft Store copy with no agents from the installed one that has them, on the same host.
+ * How the peer is installed (`InstallKind::label`, e.g. `windows-store`); empty when it predates advertising it.
  */
 install: string, address: string, port: number, agents: Array<string>, 
 /**
