@@ -1,0 +1,16 @@
+advance 20ms
+autoUpdate #1 registered (row rowA)
+row mousemove y=215
+[wider than the row] panel={position: fixed; left: 127.27272727272728px; top: 227px; transform: translateX(-9.090909090909092%); max-width: 450px; min-width: 0px; max-height: 40px;} outside=true hidden=null class="agent-node-peek-overlay extra-class" bridge=- afterLeave=-
+autoUpdate #1 disposed
+-- next layout
+advance 20ms
+autoUpdate #2 registered (row rowB)
+row mousemove y=215
+[thin and three lines tall] panel={position: fixed; left: 800px; top: 227px; transform: translateX(-100%); max-width: 700px; min-width: 600px; max-height: 70px;} outside=false hidden=null class="agent-node-peek-overlay" bridge=- afterLeave=-
+autoUpdate #2 disposed
+-- next layout
+advance 20ms
+autoUpdate #3 registered (row rowC)
+row mousemove y=215
+[two lines tall] panel={position: fixed; left: 800px; top: 227px; transform: translateX(-100%); max-width: 700px; min-width: 0px; max-height: 45px;} outside=false hidden=null class="agent-node-peek-overlay" bridge=- afterLeave=-

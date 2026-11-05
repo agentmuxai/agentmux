@@ -34,6 +34,7 @@ import {
 } from "./types";
 
 import { DEFAULT_MAX_CHILDREN, newLayoutNode } from "./layoutNode";
+import { alreadyHeld } from "./layoutDuplicates";
 import { dockedStackOf, moveStackIntoDockColumn } from "./layoutRestore";
 import { countExpandedLeaves, isEffectivelyMinimized, isNodeLocked } from "./layoutMinimize";
 import { LayoutTreeReplaceNodeAction, LayoutTreeSplitHorizontalAction, LayoutTreeSplitVerticalAction } from "./types";
@@ -323,6 +324,7 @@ export function insertNode(layoutState: LayoutTreeState, action: LayoutTreeInser
         console.error("insertNode cannot run, no insert node action provided");
         return;
     }
+    if (alreadyHeld(layoutState, action.node, action.focused)) return;
     if (!layoutState.rootNode) {
         layoutState.rootNode = action.node;
     } else {
@@ -356,6 +358,7 @@ export function insertNodeAtIndex(layoutState: LayoutTreeState, action: LayoutTr
         console.error("insertNodeAtIndex cannot run, either node or indexArr field is missing");
         return;
     }
+    if (alreadyHeld(layoutState, action.node, action.focused)) return;
     if (!layoutState.rootNode) {
         layoutState.rootNode = action.node;
     } else {

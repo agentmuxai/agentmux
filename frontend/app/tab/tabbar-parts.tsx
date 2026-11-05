@@ -31,11 +31,11 @@ export function TabStripScroll(props: {
             classList={{ "has-more-left": props.moreLeft, "has-more-right": props.moreRight }}
             data-drag-region="false"
         >
-            {/* When the hamburger sits to the left of the tabs (Windows/
-                Linux), give the hamburger→first-tab boundary the SAME 1px
+            {/* When the AgentMux logo sits to the left of the tabs (Windows/
+                Linux), give the AgentMux logo→first-tab boundary the SAME 1px
                 separator every tab-to-tab boundary has — otherwise the
-                first tab is flush against the hamburger and reads tighter
-                than the rest. macOS renders the hamburger at the far right,
+                first tab is flush against the AgentMux logo and reads tighter
+                than the rest. macOS renders the AgentMux logo at the far right,
                 so no leading separator there. */}
             <Show when={!isMacOS()}>
                 <div class="tab-separator" aria-hidden="true" />

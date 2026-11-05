@@ -109,7 +109,7 @@ export const BundleSummaryPanel = (props: BundleSummaryPanelProps): JSX.Element 
                     {sentenceLabel} are app-wide data, shared across every agent and
                     window. They are now created, edited, and deleted in one
                     place — {props.kind === "Identity" ? "Connectors → Accounts" : "Memory → Bundles"},
-                    opened from the widget bar or the hamburger menu.
+                    opened from the widget bar or the AgentMux logo menu.
                 </p>
                 <p class="bundle-summary-body bundle-summary-hint">
                     This settings tab no longer manages {lowerPlural}; open the

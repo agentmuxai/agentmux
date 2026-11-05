@@ -252,7 +252,6 @@ describe("NativeMemoryManager — the pane asks for an agent", () => {
 
     test("a declined discard keeps the agent and withdraws the pane's request; the same request later does not ask again", async () => {
         nativeMemoryListMock.mockResolvedValue({ files: [file("one.md")] });
-        const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
         const { pane, setValue, setMeta } = paneWith("a1");
         render(() => <NativeMemoryManager pane={pane} />);
         await waitFor(() => expect(openAgentName()).toBe("Manoz"));
@@ -266,8 +265,8 @@ describe("NativeMemoryManager — the pane asks for an agent", () => {
         reportDirty?.(true);
 
         setValue("a2");
+        fireEvent.click(await screen.findByText("Keep editing"));
         await flush();
-        expect(confirm).toHaveBeenCalledTimes(1);
         expect(openAgentName()).toBe("Manoz");
         expect(screen.getByTestId("history-panel")).toHaveTextContent("a1:one.md");
         expect(setMeta).toHaveBeenLastCalledWith({ "memory:agent": "a1" });
@@ -275,7 +274,7 @@ describe("NativeMemoryManager — the pane asks for an agent", () => {
         // The pane now names the agent that is already open: nothing to ask.
         setValue("a1");
         await flush();
-        expect(confirm).toHaveBeenCalledTimes(1);
+        expect(screen.queryByText("Discard your unsaved changes?")).toBeNull();
         expect(openAgentName()).toBe("Manoz");
     });
 

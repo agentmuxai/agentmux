@@ -831,6 +831,8 @@ declare global {
         "files:sidebar"?: boolean;
         "files:preview"?: boolean;
         "files:view"?: string;
+        // The list view's dragged column widths in px, by column (files-columns.ts).
+        "files:colwidths"?: { name?: number; modified?: number; size?: number; kind?: number };
         "term:localshellpath"?: string;
         "term:localshellopts"?: string[];
         "term:scrollback"?: number;

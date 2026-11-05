@@ -7,13 +7,14 @@
  * out of FilesView; each part reads the hook groups the view built.
  */
 
-import { ConfirmDialog } from "@/app/components/confirm-dialog";
+import { ConfirmModal } from "@/app/element/confirm-modal";
 import { ContextMenu } from "@/app/components/context-menu";
 import { endPathDrag } from "@/app/drag/file-drop";
 import { Button } from "@/app/element/ui";
 import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import { readZoom } from "@/app/store/zoom-factor";
 import { For, Match, Show, Switch, type JSX } from "solid-js";
+import { ColumnResizer } from "./files-column-resizer";
 import { FilesFooter } from "./FilesFooter";
 import { FilesPlaces } from "./FilesPlaces";
 import { FilesToolbar } from "./FilesToolbar";
@@ -72,13 +73,14 @@ export function FilesViewLayout({ v }: { v: FilesViewParts }): JSX.Element {
                 startEditingPath={fv.startEditingPath}
                 commitPath={fv.commitPath}
                 onStopEditing={() => fv.setEditingPath(false)}
-                openFilter={fv.openFilter}
+                toggleFilter={fv.toggleFilter}
                 closeFilter={fv.closeFilter}
                 onToggleViewMode={pointer.toggleViewMode}
                 focusList={() => refs.list?.focus()}
                 pathInputRef={(el) => (refs.pathInput = el)}
                 crumbsRef={(el) => (refs.crumbs = el)}
                 filterRef={(el) => (refs.filterInput = el)}
+                filterButtonRef={(el) => (refs.filterButton = el)}
             />
 
             <div class="files-body">
@@ -103,9 +105,9 @@ export function FilesViewLayout({ v }: { v: FilesViewParts }): JSX.Element {
             </Show>
             <Show when={fv.confirm()}>
                 {(c) => (
-                    <ConfirmDialog
-                        title={c().title}
-                        message={c().message}
+                    <ConfirmModal
+                        open={true} scope="pane" destructive
+                        title={c().title} description={c().message}
                         confirmLabel={c().confirmLabel}
                         onConfirm={() => {
                             c().onConfirm();
@@ -131,6 +133,7 @@ function FilesList({ v }: { v: FilesViewParts }): JSX.Element {
         <div
             ref={(el) => (refs.list = el)}
             class="files-list"
+            style={fv.columns.vars()}
             role="grid"
             aria-label="Files"
             aria-multiselectable="true"
@@ -162,7 +165,7 @@ function FilesList({ v }: { v: FilesViewParts }): JSX.Element {
                 if (e.target === e.currentTarget) model.setSelection({ ...model.selection(), names: new Set() });
             }}
         >
-            <FilesColumnHeader model={model} />
+            <FilesColumnHeader model={model} fv={fv} />
             <FilesNotices v={v} />
             <Show when={model.phase() === "ready" && win.grid()}>
                 <FilesGridTiles v={v} />
@@ -175,7 +178,7 @@ function FilesList({ v }: { v: FilesViewParts }): JSX.Element {
 }
 
 /** The sortable column header. */
-function FilesColumnHeader(props: { model: FilesModel }): JSX.Element {
+function FilesColumnHeader(props: { model: FilesModel; fv: FilesLocal }): JSX.Element {
     const model = props.model;
     return (
         <div class="files-row files-header" role="row" aria-rowindex={1}>
@@ -192,6 +195,12 @@ function FilesColumnHeader(props: { model: FilesModel }): JSX.Element {
                         <Show when={model.sortKey() === col.key}>
                             <i class={`fa fa-caret-${model.sortDir() === "asc" ? "up" : "down"} files-sort-mark`} aria-hidden="true" />
                         </Show>
+                        <ColumnResizer
+                            colKey={col.key}
+                            label={col.label}
+                            columns={props.fv.columns}
+                            zoom={() => readZoom(props.fv.ctx.meta())}
+                        />
                     </Button>
                 )}
             </For>

@@ -1,0 +1,12 @@
+endQuestionTimer(blk-2, {"publish":true})
+reconcileQuestionTimer(blk-2)
+-- nothing pending
+  (no panel)
+startQuestionTimer(blk-2, 30000ms, publish=true)
+-- a question arrives
+  header: The agent is asking
+  Q: ColourPick a colour
+    - Red {radio,-} name=amux-q-q1-0
+    - Blue (Recommended) / Calmer {radio,-,recommended} name=amux-q-q1-0
+    other: ""
+  buttons: Cancel | Accept Recommended | Submit answer (disabled)

@@ -574,20 +574,19 @@ describe("GlobalBundleManager — full view: pinned editor, base-carrying save, 
 
     test("Esc cancels a clean draft at once, and asks first when the draft is dirty", async () => {
         await openAndEdit();
-        const confirmSpy = vi.spyOn(window, "confirm");
         fireEvent.keyDown(textarea()!, { key: "Escape" });
         await waitFor(() => expect(textarea()).toBeNull());
-        expect(confirmSpy).not.toHaveBeenCalled();
+        expect(screen.queryByText("Discard your unsaved changes?")).toBeNull();
 
         fireEvent.click(await screen.findByText("Edit"));
         fireEvent.input(textarea()!, { target: { value: "dirty" } });
-        confirmSpy.mockReturnValueOnce(false);
         fireEvent.keyDown(textarea()!, { key: "Escape" });
-        expect(confirmSpy).toHaveBeenCalledTimes(1);
+        expect(await screen.findByText("Discard your unsaved changes?")).toBeTruthy();
+        fireEvent.click(screen.getByText("Keep editing"));
         expect(textarea()?.value).toBe("dirty");
 
-        confirmSpy.mockReturnValueOnce(true);
         fireEvent.keyDown(textarea()!, { key: "Escape" });
+        fireEvent.click(await screen.findByText("Discard"));
         await waitFor(() => expect(textarea()).toBeNull());
     });
 

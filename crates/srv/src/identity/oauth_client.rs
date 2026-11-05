@@ -901,7 +901,7 @@ pub fn start(
     if needs_cloud_sign_in(ctx.cfg.provider, opts.cloud_signed_in, &ctx.client) {
         return Err(NEEDS_CLOUD_SIGN_IN.to_string());
     }
-    if let Some(why) = restricted_scope_needs_own_client(ctx.cfg.provider, &ctx.requested, &ctx.client) {
+    if let Some(why) = scope_not_offered(ctx.cfg.provider, &ctx.requested, &ctx.client, &ctx.target) {
         return Err(why);
     }
     let brokered = runs_through_broker(ctx.cfg.provider, opts.cloud_signed_in, &ctx.client);
@@ -966,19 +966,25 @@ fn needs_cloud_sign_in(provider: &str, cloud_signed_in: bool, client: &ResolvedC
     provider == github_connect::PROVIDER && !cloud_signed_in && client.mode == ClientMode::Builtin
 }
 
-/// Google's restricted Gmail scopes (every `gmail.*` one, and full mail access): Google reviews an
-/// app that asks for them and, for a server-side app, requires a yearly security assessment. Until
-/// AgentMux's own client has been through that, they are asked only on a client the person brought
-/// (their own, or their organization's internal one).
-fn is_restricted_gmail_scope(scope: &str) -> bool {
-    scope == "https://mail.google.com/" || scope.starts_with("https://www.googleapis.com/auth/gmail.")
-}
-
-/// Why `requested` can't be asked on `client`, if it can't.
-fn restricted_scope_needs_own_client(provider: &str, requested: &[String], client: &ResolvedClient) -> Option<String> {
-    (provider == "google" && client.mode == ClientMode::Builtin && requested.iter().any(|s| is_restricted_gmail_scope(s))).then(|| {
-        "Gmail can't be turned on with AgentMux's own Google client yet: it needs Google's review for mail access. Connect with your own Google client (or your organization's internal one) to use Gmail".to_string()
-    })
+/// Why `requested` can't be asked on `client`, if it can't: AgentMux's own Google client asks only for the
+/// services Google has approved for it in this build (`google_offered`). A client the person brought is
+/// reviewed against their own project, so it is not limited. A Reconnect asks again for the scopes the account
+/// already holds; that keeps a service on, it does not turn one on, so those are not checked.
+fn scope_not_offered(provider: &str, requested: &[String], client: &ResolvedClient, target: &FlowTarget) -> Option<String> {
+    if provider != "google" || client.mode != ClientMode::Builtin {
+        return None;
+    }
+    let held: Vec<&str> = match target {
+        FlowTarget::Existing(acct) => acct
+            .context
+            .get("granted_scopes")
+            .and_then(serde_json::Value::as_array)
+            .map(|a| a.iter().filter_map(serde_json::Value::as_str).collect())
+            .unwrap_or_default(),
+        FlowTarget::New { .. } => Vec::new(),
+    };
+    let new: Vec<String> = requested.iter().filter(|s| !held.contains(&s.as_str())).cloned().collect();
+    super::google_offered::first_not_offered(&new, &super::google_offered::offered())
 }
 
 /// Whether a GitHub connect goes through AgentMux Cloud's broker: the person is signed in to

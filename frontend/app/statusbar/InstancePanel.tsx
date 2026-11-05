@@ -80,7 +80,7 @@ export const OpacityControl = (p: {
                 value={p.currentOpacity()}
                 title="Opacity"
                 aria-label="Opacity"
-                // The hamburger's Opacity sets the same value through
+                // The AgentMux logo's Opacity sets the same value through
                 // the same setter (SPEC_PER_WINDOW_THEME_AND_OPACITY §4.2).
                 onInput={(e) =>
                     setWindowOpacityFor(

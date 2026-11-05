@@ -1,0 +1,120 @@
+== starting: cli being resolved
+<body>
+  <div>
+  <div>
+    <div class="modal-root" role="dialog" aria-modal="true" data-scope="window" data-placement="center" aria-label="Connect Anthropic">
+      <div class="modal-backdrop">
+      <span class="modal-focus-sentinel" aria-hidden="true">
+      <div class="modal-panel accounts-chooser" data-size="md">
+        <div data-testid="inapp" data-provider-id="claude" data-provider-label="Anthropic" data-phase="starting" data-auth-url="">
+          <button>
+            "inapp-cancel"
+          <button>
+            "inapp-terminal"
+      <span class="modal-focus-sentinel" aria-hidden="true">
+  call ResolveCliCommand [{},{"provider_id":"claude","cli_command":"claude","npm_package":"@anthropic-ai/claude-code","pinned_version":"2.1.288","windows_install_command":"irm https://claude.ai/install.ps1 | iex","unix_install_command":"curl -fsSL https://claude.ai/install.sh | bash"},{"timeout":120000}]
+  console warn [login-window] reserve failed: Cannot read properties of undefined (reading 'reserveExternalWindow')
+== login running
+<body>
+  <div>
+  <div>
+    <div class="modal-root" role="dialog" aria-modal="true" data-scope="window" data-placement="center" aria-label="Connect Anthropic">
+      <div class="modal-backdrop">
+      <span class="modal-focus-sentinel" aria-hidden="true">
+      <div class="modal-panel accounts-chooser" data-size="md">
+        <div data-testid="inapp" data-provider-id="claude" data-provider-label="Anthropic" data-phase="starting" data-auth-url="">
+          <button>
+            "inapp-cancel"
+          <button>
+            "inapp-terminal"
+      <span class="modal-focus-sentinel" aria-hidden="true">
+  call ensureProviderAuthDir ["claude"]
+  run provider=claude cliPath=/usr/bin/claude authEnv={"CLAUDE_CONFIG_DIR":"/tmp/claude-auth"} existingAccountId=undefined linkTarget=undefined skipTier1=false awaitTier1Completion=true
+== link ready: waiting to authorize
+<body>
+  <div>
+  <div>
+    <div class="modal-root" role="dialog" aria-modal="true" data-scope="window" data-placement="center" aria-label="Connect Anthropic">
+      <div class="modal-backdrop">
+      <span class="modal-focus-sentinel" aria-hidden="true">
+      <div class="modal-panel accounts-chooser" data-size="md">
+        <div data-testid="inapp" data-provider-id="claude" data-provider-label="Anthropic" data-phase="waiting-authorize" data-auth-url="https://claude.test/authorize">
+          <button>
+            "inapp-cancel"
+          <button>
+            "inapp-terminal"
+      <span class="modal-focus-sentinel" aria-hidden="true">
+  console log [claude-login] opened the browser
+== link cleared
+<body>
+  <div>
+  <div>
+    <div class="modal-root" role="dialog" aria-modal="true" data-scope="window" data-placement="center" aria-label="Connect Anthropic">
+      <div class="modal-backdrop">
+      <span class="modal-focus-sentinel" aria-hidden="true">
+      <div class="modal-panel accounts-chooser" data-size="md">
+        <div data-testid="inapp" data-provider-id="claude" data-provider-label="Anthropic" data-phase="waiting-authorize" data-auth-url="">
+          <button>
+            "inapp-cancel"
+          <button>
+            "inapp-terminal"
+      <span class="modal-focus-sentinel" aria-hidden="true">
+== fallback
+<body>
+  <div>
+  <div>
+    <div class="modal-root" role="dialog" aria-modal="true" data-scope="window" data-placement="center" aria-label="Connect Anthropic">
+      <div class="modal-backdrop">
+      <span class="modal-focus-sentinel" aria-hidden="true">
+      <div class="modal-panel accounts-chooser" data-size="md">
+        <div data-testid="inapp" data-provider-id="claude" data-provider-label="Anthropic" data-phase="fallback" data-auth-url="">
+          <button>
+            "inapp-cancel"
+          <button>
+            "inapp-terminal"
+      <span class="modal-focus-sentinel" aria-hidden="true">
+== terminal polling
+<body>
+  <div>
+  <div>
+    <div class="modal-root" role="dialog" aria-modal="true" data-scope="window" data-placement="center" aria-label="Connect Anthropic">
+      <div class="modal-backdrop">
+      <span class="modal-focus-sentinel" aria-hidden="true">
+      <div class="modal-panel accounts-chooser" data-size="md">
+        <div data-testid="inapp" data-provider-id="claude" data-provider-label="Anthropic" data-phase="terminal-polling" data-auth-url="">
+          <button>
+            "inapp-cancel"
+          <button>
+            "inapp-terminal"
+      <span class="modal-focus-sentinel" aria-hidden="true">
+== waiting to authorize again
+<body>
+  <div>
+  <div>
+    <div class="modal-root" role="dialog" aria-modal="true" data-scope="window" data-placement="center" aria-label="Connect Anthropic">
+      <div class="modal-backdrop">
+      <span class="modal-focus-sentinel" aria-hidden="true">
+      <div class="modal-panel accounts-chooser" data-size="md">
+        <div data-testid="inapp" data-provider-id="claude" data-provider-label="Anthropic" data-phase="waiting-authorize" data-auth-url="">
+          <button>
+            "inapp-cancel"
+          <button>
+            "inapp-terminal"
+      <span class="modal-focus-sentinel" aria-hidden="true">
+== signed in
+<body>
+  <div>
+  <div>
+    <div class="modal-root" role="dialog" aria-modal="true" data-scope="window" data-placement="center" aria-label="Connect Anthropic">
+      <div class="modal-backdrop">
+      <span class="modal-focus-sentinel" aria-hidden="true">
+      <div class="modal-panel accounts-chooser" data-size="md">
+        <div class="accounts-chooser-modes">
+          <div class="oauth-byo-note">
+            "✓ Signed in to Anthropic."
+          <div class="identity-key-actions">
+            <button type="button" class="ui-button ui-tone-accent identity-btn identity-btn-primary">
+              "Done"
+      <span class="modal-focus-sentinel" aria-hidden="true">
+  call refreshAccountCache []
+  call onClose []

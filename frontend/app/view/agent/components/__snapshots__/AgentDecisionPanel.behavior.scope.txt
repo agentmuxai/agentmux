@@ -1,0 +1,48 @@
+-- Project by radio
+  panel [agent-decision-panel] role=dialog aria=Permission decision required tabindex=-1
+  header: Decision required
+  meta: Tool / bash / Target / rm -rf build
+  preview: -
+  scope Once / Just this one call {-} name=agent-decision-scope-<uid>
+  scope Session / Until this pane closes {-} name=agent-decision-scope-<uid>
+  scope Project / This repo, future runs {checked,active} name=agent-decision-scope-<uid>
+  scope Global / Everywhere, future runs {-} name=agent-decision-scope-<uid>
+  buttons: Allow(title: Allow this tool call) | Deny + feedback | Defer
+key o on BODY
+key S on BODY
+key p on BODY
+key G on BODY
+key x on BODY
+key ss on BODY
+-- after o S p G x ss on the body
+  panel [agent-decision-panel] role=dialog aria=Permission decision required tabindex=-1
+  header: Decision required
+  meta: Tool / bash / Target / rm -rf build
+  preview: -
+  scope Once / Just this one call {-} name=agent-decision-scope-<uid>
+  scope Session / Until this pane closes {-} name=agent-decision-scope-<uid>
+  scope Project / This repo, future runs {-} name=agent-decision-scope-<uid>
+  scope Global / Everywhere, future runs {checked,active} name=agent-decision-scope-<uid>
+  buttons: Allow(title: Allow this tool call) | Deny + feedback | Defer
+key o on TEXTAREA[composer]
+-- o in the composer is left alone
+  panel [agent-decision-panel] role=dialog aria=Permission decision required tabindex=-1
+  header: Decision required
+  meta: Tool / bash / Target / rm -rf build
+  preview: -
+  scope Once / Just this one call {-} name=agent-decision-scope-<uid>
+  scope Session / Until this pane closes {-} name=agent-decision-scope-<uid>
+  scope Project / This repo, future runs {-} name=agent-decision-scope-<uid>
+  scope Global / Everywhere, future runs {checked,active} name=agent-decision-scope-<uid>
+  buttons: Allow(title: Allow this tool call) | Deny + feedback | Defer
+key s+ctrl on BODY
+-- ctrl+s counts as s
+  panel [agent-decision-panel] role=dialog aria=Permission decision required tabindex=-1
+  header: Decision required
+  meta: Tool / bash / Target / rm -rf build
+  preview: -
+  scope Once / Just this one call {-} name=agent-decision-scope-<uid>
+  scope Session / Until this pane closes {checked,active} name=agent-decision-scope-<uid>
+  scope Project / This repo, future runs {-} name=agent-decision-scope-<uid>
+  scope Global / Everywhere, future runs {-} name=agent-decision-scope-<uid>
+  buttons: Allow(title: Allow this tool call) | Deny + feedback | Defer

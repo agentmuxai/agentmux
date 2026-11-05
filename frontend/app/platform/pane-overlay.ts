@@ -210,7 +210,7 @@ async function flushClip(): Promise<void> {
     //     the HTTP round-trip + JSON serialize/parse + main-thread
     //     await. Skip entirely.
     // (b) Overlay rects don't intersect any pane? Common case for the
-    //     hamburger menu, statusbar popovers, tooltips in a workspace
+    //     AgentMux logo menu, statusbar popovers, tooltips in a workspace
     //     whose layout has the panes elsewhere. No clip work needed
     //     and no holes to punch.
     //

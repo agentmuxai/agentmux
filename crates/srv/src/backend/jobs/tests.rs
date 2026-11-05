@@ -310,7 +310,7 @@ fn an_agent_in_another_channel_counts_as_back() {
         std::fs::create_dir_all(&path).unwrap();
         let entry = json!({
             "agent_id": agent, "local_url": "http://127.0.0.1:1", "block_id": "b", "pid": pid,
-            "updated_at": 1, "channel": channel, "uid": uid,
+            "updated_at": agentmux_common::time::now_ms(), "channel": channel, "uid": uid,
         });
         std::fs::write(path.join(format!("{channel}.json")), entry.to_string()).unwrap();
     };

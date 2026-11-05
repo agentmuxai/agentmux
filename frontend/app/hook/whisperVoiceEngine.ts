@@ -23,7 +23,7 @@
  * Spec: docs/specs/SPEC_VOICE_STT_ENGINE_2026_06_20.md · tracking #1591.
  */
 
-import { createSignalAtom } from "@/util/util";
+import { createSignalAtom, type SignalAtom } from "@/util/util";
 import { authHeaders } from "@/app/store/auth-headers";
 import { getWebServerEndpoint } from "@/util/endpoints";
 import { getSettingsKeyAtom } from "@/app/store/global";
@@ -86,6 +86,274 @@ function encodeWav(samples: Float32Array, sampleRate: number): Blob {
     return new Blob([view], { type: "audio/wav" });
 }
 
+/** What one voice session and the functions that serve it share. */
+interface WhisperState {
+    isListening: SignalAtom<boolean>;
+    currentTargetId: SignalAtom<string | null>;
+    lastError: SignalAtom<string | null>;
+    lastErrorDetail: SignalAtom<string | null>;
+    isLocal: boolean;
+    activeHandle: PaneVoiceHandle | null;
+    stream: MediaStream | null;
+    audioCtx: AudioContext | null;
+    mime: string;
+
+    // webm mode
+    recorder: MediaRecorder | null;
+    analyser: AnalyserNode | null;
+    levelTimer: number | null;
+    chunks: Blob[];
+
+    // wav mode
+    processor: ScriptProcessorNode | null;
+    pcm: Float32Array[];
+
+    // shared VAD state
+    sawSpeech: boolean;
+    silenceStart: number;
+    segmentStart: number;
+
+    // Serialize transcription so utterances are applied in spoken order.
+    // Capture keeps running concurrently; only the network call + appendFinal
+    // are chained — Groq/whisper latency varies, so POSTing concurrently could
+    // resolve out of order and scramble the composer text (reagent P1 #1623).
+    postChain: Promise<void>;
+}
+
+function enqueuePost(s: WhisperState, blob: Blob) {
+    s.postChain = s.postChain.then(() => postSegment(s, blob)).catch(() => {});
+}
+
+function fail(s: WhisperState, code: string) {
+    s.lastError._set(code);
+    window.dispatchEvent(new CustomEvent("voice-input-error", { detail: code }));
+    void stopCapture(s);
+}
+
+async function postSegment(s: WhisperState, blob: Blob) {
+    if (blob.size === 0) return;
+    const handle = s.activeHandle;
+    if (!handle) return;
+    handle.setInterim("…"); // non-streaming: spinner-ish placeholder
+    try {
+        const base = getWebServerEndpoint();
+        const url = `${base}/api/v1/voice/transcribe?mime=${encodeURIComponent(s.mime)}&lang=${encodeURIComponent(
+            (navigator.language || "").split("-")[0] || "",
+        )}`;
+        const resp = await fetch(url, {
+            method: "POST",
+            headers: authHeaders({ "Content-Type": s.mime }),
+            body: blob,
+        });
+        handle.setInterim("");
+        if (!resp.ok) {
+            // Thread the server's actual error body through as a detail —
+            // additive: existing coarse `lastError` categories used by
+            // MicButton.tsx's tooltip stay unchanged, this only adds a
+            // detail string for surfaces that want it (the Settings ->
+            // Recording test-mic panel).
+            s.lastErrorDetail._set(await readErrorDetail(resp));
+            if (resp.status === 501) {
+                fail(s, "service-not-allowed"); // backend not configured
+            } else {
+                s.lastError._set("service-not-allowed");
+                window.dispatchEvent(new CustomEvent("voice-input-error", { detail: "service-not-allowed" }));
+            }
+            return;
+        }
+        s.lastErrorDetail._set(null);
+        const data = (await resp.json()) as { text?: string };
+        const text = (data.text || "").trim();
+        if (text) handle.appendFinal(text);
+    } catch (e) {
+        handle.setInterim("");
+        s.lastError._set("service-not-allowed");
+        s.lastErrorDetail._set(e instanceof Error ? e.message : null);
+        window.dispatchEvent(new CustomEvent("voice-input-error", { detail: "service-not-allowed" }));
+    }
+}
+
+/** Read `{ "error": "..." }` from a non-OK transcribe response, best-effort. */
+async function readErrorDetail(resp: Response): Promise<string | null> {
+    try {
+        const data = (await resp.json()) as { error?: string };
+        return data.error ?? null;
+    } catch {
+        return null;
+    }
+}
+
+// VAD applied to a fresh RMS reading; returns true when the utterance should
+// be cut. Shared by both modes.
+function vadShouldCut(s: WhisperState, rms: number): boolean {
+    const now = Date.now();
+    if (rms >= SILENCE_RMS) {
+        s.sawSpeech = true;
+        s.silenceStart = 0;
+    } else if (s.sawSpeech) {
+        if (s.silenceStart === 0) s.silenceStart = now;
+        else if (now - s.silenceStart >= SILENCE_MS) return true;
+    }
+    // Hard cap fires regardless of sawSpeech so the WAV-mode PCM buffer
+    // can't grow unbounded under sustained sub-threshold input — a
+    // speechless cut just discards + resets (postSegment/cut are gated on
+    // sawSpeech). webm mode is bounded by MediaRecorder internally.
+    return now - s.segmentStart >= MAX_SEGMENT_MS;
+}
+
+function resetSegment(s: WhisperState) {
+    s.sawSpeech = false;
+    s.silenceStart = 0;
+    s.segmentStart = Date.now();
+}
+
+// ── webm mode (MediaRecorder + AnalyserNode VAD) ─────────────────────────
+
+function startRecorder(s: WhisperState) {
+    if (!s.stream) return;
+    s.chunks = [];
+    resetSegment(s);
+    s.recorder = new MediaRecorder(s.stream, { mimeType: s.mime });
+    s.recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) s.chunks.push(e.data);
+    };
+    s.recorder.onstop = () => {
+        const dur = Date.now() - s.segmentStart;
+        const blob = new Blob(s.chunks, { type: s.mime });
+        s.chunks = [];
+        if (s.sawSpeech && dur >= MIN_SEGMENT_MS) enqueuePost(s, blob);
+        if (s.isListening()) startRecorder(s);
+    };
+    s.recorder.start();
+}
+
+function pollLevel(s: WhisperState) {
+    if (!s.analyser) return;
+    if (vadShouldCut(s, computeRms(s.analyser))) {
+        if (s.recorder && s.recorder.state !== "inactive") s.recorder.stop();
+    }
+}
+
+// ── wav mode (ScriptProcessor PCM @ 16 kHz) ──────────────────────────────
+
+function cutWavSegment(s: WhisperState) {
+    const dur = Date.now() - s.segmentStart;
+    const total = s.pcm.reduce((n, c) => n + c.length, 0);
+    const merged = new Float32Array(total);
+    let off = 0;
+    for (const c of s.pcm) {
+        merged.set(c, off);
+        off += c.length;
+    }
+    s.pcm = [];
+    if (s.sawSpeech && dur >= MIN_SEGMENT_MS && merged.length > 0) {
+        enqueuePost(s, encodeWav(merged, WAV_SAMPLE_RATE));
+    }
+    resetSegment(s);
+}
+
+function onAudioProcess(s: WhisperState, e: AudioProcessingEvent) {
+    const input = e.inputBuffer.getChannelData(0);
+    // Copy (the buffer is reused by the engine).
+    s.pcm.push(new Float32Array(input));
+    let sum = 0;
+    for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
+    if (vadShouldCut(s, Math.sqrt(sum / input.length))) cutWavSegment(s);
+    // Leave outputBuffer silent (don't write it) → no mic echo to speakers.
+}
+
+// ── lifecycle ────────────────────────────────────────────────────────────
+
+async function stopCapture(s: WhisperState) {
+    s.isListening._set(false);
+    s.currentTargetId._set(null);
+    if (s.levelTimer != null) {
+        clearInterval(s.levelTimer);
+        s.levelTimer = null;
+    }
+    if (s.recorder && s.recorder.state !== "inactive") {
+        try {
+            s.recorder.onstop = null as any; // don't restart on deliberate stop
+            s.recorder.stop();
+        } catch {
+            /* ignore */
+        }
+    }
+    s.recorder = null;
+    if (s.processor) {
+        try {
+            s.processor.onaudioprocess = null as any;
+            s.processor.disconnect();
+        } catch {
+            /* ignore */
+        }
+        s.processor = null;
+    }
+    s.analyser = null;
+    if (s.audioCtx) {
+        try { await s.audioCtx.close(); } catch { /* ignore */ }
+        s.audioCtx = null;
+    }
+    if (s.stream) {
+        s.stream.getTracks().forEach((t) => t.stop());
+        s.stream = null;
+    }
+    s.activeHandle?.setInterim("");
+}
+
+async function startCapture(s: WhisperState) {
+    try {
+        // voice:inputDeviceId (Settings -> Recording device picker):
+        // absent/"default" keeps the original unconstrained behavior.
+        const deviceId = getSettingsKeyAtom("voice:inputDeviceId")();
+        const audioConstraint: boolean | MediaTrackConstraints =
+            deviceId && deviceId !== "default" ? { deviceId: { exact: deviceId } } : true;
+        s.stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraint });
+    } catch (e: any) {
+        const name = e?.name || "";
+        if (name === "NotAllowedError" || name === "SecurityError") fail(s, "not-allowed");
+        else if (name === "NotFoundError" || name === "OverconstrainedError") fail(s, "audio-capture");
+        else fail(s, "service-not-allowed");
+        return;
+    }
+    s.lastError._set(null);
+    s.isListening._set(true);
+
+    // Building the audio graph can throw — e.g. a runtime that rejects the
+    // forced 16 kHz AudioContext rate. Catch it so the mic stream is closed
+    // and isListening doesn't get stuck true (fail → stopCapture).
+    try {
+        if (s.isLocal) {
+            s.mime = "audio/wav";
+            // Force 16 kHz so captured PCM is whisper-ready (no resampling).
+            s.audioCtx = new AudioContext({ sampleRate: WAV_SAMPLE_RATE });
+            const src = s.audioCtx.createMediaStreamSource(s.stream);
+            s.processor = s.audioCtx.createScriptProcessor(4096, 1, 1);
+            s.processor.onaudioprocess = (e) => onAudioProcess(s, e);
+            src.connect(s.processor);
+            s.processor.connect(s.audioCtx.destination); // required for onaudioprocess to fire
+            s.pcm = [];
+            resetSegment(s);
+        } else {
+            s.mime = pickMime();
+            s.audioCtx = new AudioContext();
+            const src = s.audioCtx.createMediaStreamSource(s.stream);
+            s.analyser = s.audioCtx.createAnalyser();
+            s.analyser.fftSize = 2048;
+            src.connect(s.analyser);
+            startRecorder(s);
+            s.levelTimer = window.setInterval(() => pollLevel(s), LEVEL_POLL_MS);
+        }
+    } catch {
+        fail(s, "service-not-allowed");
+    }
+}
+
+function toggleListening(s: WhisperState) {
+    if (s.isListening()) void stopCapture(s);
+    else void startCapture(s);
+}
+
 export function createWhisperVoiceSession(): VoiceSession {
     const isListening = createSignalAtom(false);
     const currentTargetId = createSignalAtom<string | null>(null);
@@ -116,263 +384,26 @@ export function createWhisperVoiceSession(): VoiceSession {
         };
     }
 
-    let activeHandle: PaneVoiceHandle | null = null;
-    let stream: MediaStream | null = null;
-    let audioCtx: AudioContext | null = null;
-    let mime = "audio/webm";
-
-    // webm mode
-    let recorder: MediaRecorder | null = null;
-    let analyser: AnalyserNode | null = null;
-    let levelTimer: number | null = null;
-    let chunks: Blob[] = [];
-
-    // wav mode
-    let processor: ScriptProcessorNode | null = null;
-    let pcm: Float32Array[] = [];
-
-    // shared VAD state
-    let sawSpeech = false;
-    let silenceStart = 0;
-    let segmentStart = 0;
-
-    // Serialize transcription so utterances are applied in spoken order.
-    // Capture keeps running concurrently; only the network call + appendFinal
-    // are chained — Groq/whisper latency varies, so POSTing concurrently could
-    // resolve out of order and scramble the composer text (reagent P1 #1623).
-    let postChain: Promise<void> = Promise.resolve();
-    const enqueuePost = (blob: Blob) => {
-        postChain = postChain.then(() => postSegment(blob)).catch(() => {});
-    };
-
-    const fail = (code: string) => {
-        lastError._set(code);
-        window.dispatchEvent(new CustomEvent("voice-input-error", { detail: code }));
-        void stopCapture();
-    };
-
-    const postSegment = async (blob: Blob) => {
-        if (blob.size === 0) return;
-        const handle = activeHandle;
-        if (!handle) return;
-        handle.setInterim("…"); // non-streaming: spinner-ish placeholder
-        try {
-            const base = getWebServerEndpoint();
-            const url = `${base}/api/v1/voice/transcribe?mime=${encodeURIComponent(mime)}&lang=${encodeURIComponent(
-                (navigator.language || "").split("-")[0] || "",
-            )}`;
-            const resp = await fetch(url, {
-                method: "POST",
-                headers: authHeaders({ "Content-Type": mime }),
-                body: blob,
-            });
-            handle.setInterim("");
-            if (!resp.ok) {
-                // Thread the server's actual error body through as a detail —
-                // additive: existing coarse `lastError` categories used by
-                // MicButton.tsx's tooltip stay unchanged, this only adds a
-                // detail string for surfaces that want it (the Settings ->
-                // Recording test-mic panel).
-                lastErrorDetail._set(await readErrorDetail(resp));
-                if (resp.status === 501) {
-                    fail("service-not-allowed"); // backend not configured
-                } else {
-                    lastError._set("service-not-allowed");
-                    window.dispatchEvent(new CustomEvent("voice-input-error", { detail: "service-not-allowed" }));
-                }
-                return;
-            }
-            lastErrorDetail._set(null);
-            const data = (await resp.json()) as { text?: string };
-            const text = (data.text || "").trim();
-            if (text) handle.appendFinal(text);
-        } catch (e) {
-            handle.setInterim("");
-            lastError._set("service-not-allowed");
-            lastErrorDetail._set(e instanceof Error ? e.message : null);
-            window.dispatchEvent(new CustomEvent("voice-input-error", { detail: "service-not-allowed" }));
-        }
-    };
-
-    /** Read `{ "error": "..." }` from a non-OK transcribe response, best-effort. */
-    const readErrorDetail = async (resp: Response): Promise<string | null> => {
-        try {
-            const data = (await resp.json()) as { error?: string };
-            return data.error ?? null;
-        } catch {
-            return null;
-        }
-    };
-
-    // VAD applied to a fresh RMS reading; returns true when the utterance should
-    // be cut. Shared by both modes.
-    const vadShouldCut = (rms: number): boolean => {
-        const now = Date.now();
-        if (rms >= SILENCE_RMS) {
-            sawSpeech = true;
-            silenceStart = 0;
-        } else if (sawSpeech) {
-            if (silenceStart === 0) silenceStart = now;
-            else if (now - silenceStart >= SILENCE_MS) return true;
-        }
-        // Hard cap fires regardless of sawSpeech so the WAV-mode PCM buffer
-        // can't grow unbounded under sustained sub-threshold input — a
-        // speechless cut just discards + resets (postSegment/cut are gated on
-        // sawSpeech). webm mode is bounded by MediaRecorder internally.
-        return now - segmentStart >= MAX_SEGMENT_MS;
-    };
-
-    const resetSegment = () => {
-        sawSpeech = false;
-        silenceStart = 0;
-        segmentStart = Date.now();
-    };
-
-    // ── webm mode (MediaRecorder + AnalyserNode VAD) ─────────────────────────
-
-    const startRecorder = () => {
-        if (!stream) return;
-        chunks = [];
-        resetSegment();
-        recorder = new MediaRecorder(stream, { mimeType: mime });
-        recorder.ondataavailable = (e) => {
-            if (e.data && e.data.size > 0) chunks.push(e.data);
-        };
-        recorder.onstop = () => {
-            const dur = Date.now() - segmentStart;
-            const blob = new Blob(chunks, { type: mime });
-            chunks = [];
-            if (sawSpeech && dur >= MIN_SEGMENT_MS) enqueuePost(blob);
-            if (isListening()) startRecorder();
-        };
-        recorder.start();
-    };
-
-    const pollLevel = () => {
-        if (!analyser) return;
-        if (vadShouldCut(computeRms(analyser))) {
-            if (recorder && recorder.state !== "inactive") recorder.stop();
-        }
-    };
-
-    // ── wav mode (ScriptProcessor PCM @ 16 kHz) ──────────────────────────────
-
-    const cutWavSegment = () => {
-        const dur = Date.now() - segmentStart;
-        const total = pcm.reduce((n, c) => n + c.length, 0);
-        const merged = new Float32Array(total);
-        let off = 0;
-        for (const c of pcm) {
-            merged.set(c, off);
-            off += c.length;
-        }
-        pcm = [];
-        if (sawSpeech && dur >= MIN_SEGMENT_MS && merged.length > 0) {
-            enqueuePost(encodeWav(merged, WAV_SAMPLE_RATE));
-        }
-        resetSegment();
-    };
-
-    const onAudioProcess = (e: AudioProcessingEvent) => {
-        const input = e.inputBuffer.getChannelData(0);
-        // Copy (the buffer is reused by the engine).
-        pcm.push(new Float32Array(input));
-        let sum = 0;
-        for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
-        if (vadShouldCut(Math.sqrt(sum / input.length))) cutWavSegment();
-        // Leave outputBuffer silent (don't write it) → no mic echo to speakers.
-    };
-
-    // ── lifecycle ────────────────────────────────────────────────────────────
-
-    const stopCapture = async () => {
-        isListening._set(false);
-        currentTargetId._set(null);
-        if (levelTimer != null) {
-            clearInterval(levelTimer);
-            levelTimer = null;
-        }
-        if (recorder && recorder.state !== "inactive") {
-            try {
-                recorder.onstop = null as any; // don't restart on deliberate stop
-                recorder.stop();
-            } catch {
-                /* ignore */
-            }
-        }
-        recorder = null;
-        if (processor) {
-            try {
-                processor.onaudioprocess = null as any;
-                processor.disconnect();
-            } catch {
-                /* ignore */
-            }
-            processor = null;
-        }
-        analyser = null;
-        if (audioCtx) {
-            try { await audioCtx.close(); } catch { /* ignore */ }
-            audioCtx = null;
-        }
-        if (stream) {
-            stream.getTracks().forEach((t) => t.stop());
-            stream = null;
-        }
-        activeHandle?.setInterim("");
-    };
-
-    const startCapture = async () => {
-        try {
-            // voice:inputDeviceId (Settings -> Recording device picker):
-            // absent/"default" keeps the original unconstrained behavior.
-            const deviceId = getSettingsKeyAtom("voice:inputDeviceId")();
-            const audioConstraint: boolean | MediaTrackConstraints =
-                deviceId && deviceId !== "default" ? { deviceId: { exact: deviceId } } : true;
-            stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraint });
-        } catch (e: any) {
-            const name = e?.name || "";
-            if (name === "NotAllowedError" || name === "SecurityError") fail("not-allowed");
-            else if (name === "NotFoundError" || name === "OverconstrainedError") fail("audio-capture");
-            else fail("service-not-allowed");
-            return;
-        }
-        lastError._set(null);
-        isListening._set(true);
-
-        // Building the audio graph can throw — e.g. a runtime that rejects the
-        // forced 16 kHz AudioContext rate. Catch it so the mic stream is closed
-        // and isListening doesn't get stuck true (fail → stopCapture).
-        try {
-            if (isLocal) {
-                mime = "audio/wav";
-                // Force 16 kHz so captured PCM is whisper-ready (no resampling).
-                audioCtx = new AudioContext({ sampleRate: WAV_SAMPLE_RATE });
-                const src = audioCtx.createMediaStreamSource(stream);
-                processor = audioCtx.createScriptProcessor(4096, 1, 1);
-                processor.onaudioprocess = onAudioProcess;
-                src.connect(processor);
-                processor.connect(audioCtx.destination); // required for onaudioprocess to fire
-                pcm = [];
-                resetSegment();
-            } else {
-                mime = pickMime();
-                audioCtx = new AudioContext();
-                const src = audioCtx.createMediaStreamSource(stream);
-                analyser = audioCtx.createAnalyser();
-                analyser.fftSize = 2048;
-                src.connect(analyser);
-                startRecorder();
-                levelTimer = window.setInterval(pollLevel, LEVEL_POLL_MS);
-            }
-        } catch {
-            fail("service-not-allowed");
-        }
-    };
-
-    const toggleListening = () => {
-        if (isListening()) void stopCapture();
-        else void startCapture();
+    const s: WhisperState = {
+        isListening,
+        currentTargetId,
+        lastError,
+        lastErrorDetail,
+        isLocal,
+        activeHandle: null,
+        stream: null,
+        audioCtx: null,
+        mime: "audio/webm",
+        recorder: null,
+        analyser: null,
+        levelTimer: null,
+        chunks: [],
+        processor: null,
+        pcm: [],
+        sawSpeech: false,
+        silenceStart: 0,
+        segmentStart: 0,
+        postChain: Promise.resolve(),
     };
 
     return {
@@ -381,9 +412,9 @@ export function createWhisperVoiceSession(): VoiceSession {
         lastError,
         lastErrorDetail,
         isAvailable: () => true,
-        toggleListening,
+        toggleListening: () => toggleListening(s),
         registerPane: (blockId, handle) => {
-            activeHandle = handle;
+            s.activeHandle = handle;
             currentTargetId._set(blockId);
         },
     };

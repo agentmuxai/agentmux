@@ -1,0 +1,60 @@
+registerContentZoom blk-1 scroller=pdf-viewer-container
+setZoomStepRatio blk-1 1.25
+setZoomMax blk-1 15
+loadPdfjs
+new PDFViewer container=pdf-viewer-container viewer=pdfViewer textLayerMode=1 annotationMode=2 maxCanvasPixels=33554432 signal=true aborted=false
+linkService.setViewer
+fetchMediaRange /docs/a.pdf 0-65535 signal=true
+new PDFDataRangeTransport length=104857600 initial=65536
+getDocument #1 disableAutoFetch=true length=104857600 range=range rangeChunkSize=65536 safe=true
+viewer.setDocument pages=5
+linkService.setDocument pages=5 base=null
+task#1.destroy
+viewer.setDocument null
+fetchMediaRange /docs/a.pdf 0-65535 signal=true
+fetchMediaRange /docs/a.pdf 0-9 signal=true
+--- old range failed after reload
+<div class="editor-viewer pdf-viewer">
+  <div class="editor-mode-toolbar editor-viewer-bar" role="toolbar" aria-label="Viewer">
+    <div class="editor-viewer-bar-group">
+      <div class="ui-tooltip-anchor">
+        <button aria-label="Previous page" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button" disabled="">
+          <i aria-hidden="true" class="fa-solid fa-chevron-up">
+      <input class="pdf-viewer-page-input" data-raw-text-field="the viewer bar's page number: a few digits between the arrows, with its own mod+g focus and Enter to go, not a form field" aria-label="Page" title="Page ([mod+g])" value="1">
+      <span class="pdf-viewer-of">
+        "/"
+        "5"
+      <div class="ui-tooltip-anchor">
+        <button aria-label="Next page" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button">
+          <i aria-hidden="true" class="fa-solid fa-chevron-down">
+      <div class="ui-tooltip-anchor">
+        <button aria-label="Zoom out ([mod+-])" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button">
+          <i aria-hidden="true" class="fa-solid fa-magnifying-glass-minus">
+      <span class="pdf-viewer-scale" aria-label="Zoom">
+        "100"
+        "%"
+      <div class="ui-tooltip-anchor">
+        <button aria-label="Zoom in ([mod+=])" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button">
+          <i aria-hidden="true" class="fa-solid fa-magnifying-glass-plus">
+      <button title="Fit the page width" type="button" class="ui-button ui-tone-neutral ui-density-compact">
+        "Width"
+      <button title="Fit the whole page" type="button" class="ui-button ui-tone-neutral ui-density-compact">
+        "Page"
+      <div class="ui-tooltip-anchor">
+        <button aria-label="Invert the pages (for a dark theme)" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button" aria-pressed="false">
+          <i aria-hidden="true" class="fa-solid fa-circle-half-stroke">
+      <input class="pdf-viewer-find" data-raw-text-field="the viewer bar's find box: it sits in the bar's row with its own mod+f focus and Enter for the next match, not a form field" type="search" placeholder="Find" aria-label="Find in the document" title="Find ([mod+f]); Enter for the next match, Shift+Enter for the previous" value="">
+    <div class="editor-viewer-bar-group">
+    <div class="editor-viewer-bar-facts" role="status" aria-live="polite">
+      <span>
+        "5 pages"
+      <span>
+        "32.0 MB"
+      <span>
+        "PDF"
+  <div class="pdf-viewer-body">
+    <div class="pdf-viewer-container" data-zoom-scope="content" aria-label="PDF pages">
+      <div class="pdfViewer">
+    <div class="editor-viewer-message" role="alert">
+      "Couldn't open this PDF:"
+      "late failure"

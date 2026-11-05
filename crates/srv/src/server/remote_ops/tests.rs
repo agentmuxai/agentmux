@@ -9,7 +9,8 @@ use crate::server::remote_ops::op::{lan_audience, OpStatus, RemoteOp, RemoteOpRe
 use serde_json::json;
 
 use super::receive::receive;
-use super::send::resolve_peer;
+use super::send::{explain_not_found, resolve_peer};
+use crate::backend::lan::peer_words::describe_peer;
 use crate::backend::lan::discovery::LanInstance;
 use crate::backend::storage::wan_identity::WanIdentityStore;
 use crate::server::tests::test_state;
@@ -198,6 +199,63 @@ fn a_host_is_named_exactly_and_never_guessed() {
     let none = resolve_peer(&peers, "starpower").unwrap_err();
     assert!(none.contains("Narko") && none.contains("charlie"), "{none}");
     assert!(resolve_peer(&peers, "  ").unwrap_err().contains("never default"), "no machine named");
+}
+
+fn install_peer(host: &str, install: &str, key: &str, port: u16, agents: &[&str]) -> LanInstance {
+    let mut p = peer(host, "stable");
+    p.install = install.to_string();
+    p.auth_key = key.to_string();
+    p.port = port;
+    p.agents = agents.iter().map(|a| a.to_string()).collect();
+    p.last_polled_ok = 1_793_800_000;
+    p
+}
+
+#[test]
+fn two_installs_of_one_host_are_two_peers_told_apart_by_how_they_are_installed() {
+    let peers = vec![
+        install_peer("Area54", "windows-store", "key-a", 29703, &[]),
+        install_peer("Area54", "windows-setup", "key-b", 29704, &["Lazo", "Posa"]),
+    ];
+    // Same host and channel: naming only those fits both, and the error says how to name one.
+    let ambiguous = resolve_peer(&peers, "Area54/stable").unwrap_err();
+    assert!(ambiguous.contains("Area54/stable/windows-store") && ambiguous.contains("Area54/stable/windows-setup"), "{ambiguous}");
+    let store = resolve_peer(&peers, "Area54/stable/windows-store").unwrap();
+    assert_eq!(store.port, 29703);
+    assert_eq!(resolve_peer(&peers, "area54/Stable/Microsoft Store").unwrap().port, 29703, "by the words too");
+    assert_eq!(resolve_peer(&peers, "Area54/stable/installed").unwrap().agents, vec!["Lazo", "Posa"]);
+}
+
+#[test]
+fn a_peer_is_described_by_how_it_is_installed_and_whether_it_runs_agents() {
+    let store = install_peer("Area54", "windows-store", "k", 29703, &[]);
+    assert_eq!(describe_peer(&store), "Area54/stable (Microsoft Store, no agents)");
+    let installed = install_peer("Area54", "windows-setup", "k2", 29704, &["Lazo"]);
+    assert_eq!(describe_peer(&installed), "Area54/stable (installed)");
+    // A peer that was never asked, and one that did not say how it is installed, get no claim made for them.
+    let mut unasked = install_peer("charlie", "", "k3", 29705, &[]);
+    unasked.last_polled_ok = 0;
+    assert_eq!(describe_peer(&unasked), "charlie/stable");
+    // The "no machine" error lists them so.
+    let none = resolve_peer(&[store], "lazo").unwrap_err();
+    assert!(none.contains("Area54/stable (Microsoft Store, no agents)"), "{none}");
+}
+
+#[test]
+fn a_missing_agent_on_a_machine_says_which_machine_it_asked() {
+    let store = install_peer("Area54", "windows-store", "k", 29703, &[]);
+    let mut refused = RemoteOpResult::refused("not_found");
+    refused.result = json!({ "message": "no agent \"lazo\" here" });
+    explain_not_found(&mut refused, &store);
+    let message = refused.result["message"].as_str().unwrap();
+    assert!(message.starts_with("no agent \"lazo\" here") && message.contains("That was Area54/stable (Microsoft Store, no agents)."), "{message}");
+    // A refusal with no message still says it; any other refusal or outcome is left alone.
+    let mut bare = RemoteOpResult::refused("not_found");
+    explain_not_found(&mut bare, &store);
+    assert!(bare.result["message"].as_str().unwrap().contains("Microsoft Store"));
+    let mut other = RemoteOpResult::refused("forbidden");
+    explain_not_found(&mut other, &store);
+    assert!(other.result.is_null());
 }
 
 #[test]

@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Theme list shown in the hamburger menu Theme submenu. Order matters
+ * Theme list shown in the AgentMux logo menu Theme submenu. Order matters
  * for muscle memory — don't reshuffle. Ids must match the schema enum
  * at schema/settings.json `window:theme`, and each theme's SCSS file
  * at frontend/app/themes/<id>.scss.

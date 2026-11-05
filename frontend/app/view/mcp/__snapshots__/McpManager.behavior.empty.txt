@@ -1,0 +1,189 @@
+== empty
+<body>
+  <div>
+    <div class="ui-card-section ui-density-compact mcp-cards">
+      <div class="ui-card-section-header">
+        <h2 class="ui-card-section-title">
+          "MCP servers"
+        <span class="ui-card-section-count">
+          "0"
+        <span class="ui-filter ui-card-section-filter">
+          <i aria-hidden="true" class="fa-solid fa-magnifying-glass ui-search-icon">
+          <input type="text" class="ui-filter-input" data-pane-focus="" placeholder="Filter servers" aria-label="Filter servers" value="">
+        <button type="button" class="ui-button ui-tone-accent mcp-cards-add">
+          <i aria-hidden="true" class="fa-solid fa-plus">
+          "Add server"
+      <div class="ui-card-grid ui-card-grid--chip mcp-add-gallery" style="--ui-card-min: 124px;" role="group" aria-label="Add an MCP server">
+        <div class="ui-card-cell" data-card-key="ableton-live">
+          <div role="button" data-preset="ableton-live" aria-label="Add Ableton Live" class="ui-card ui-card--chip mcp-preset-chip">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-music">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "Ableton Live"
+              <span class="ui-card-subtitle">
+                "Add"
+        <div class="ui-card-cell" data-card-key="touchdesigner">
+          <div role="button" data-preset="touchdesigner" aria-label="Add TouchDesigner" class="ui-card ui-card--chip mcp-preset-chip">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-diagram-project">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "TouchDesigner"
+              <span class="ui-card-subtitle">
+                "Add"
+        <div class="ui-card-cell" data-card-key="\u0000custom">
+          <div role="button" data-preset="custom" aria-label="Add a custom server" class="ui-card ui-card--chip mcp-preset-chip">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-plus">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "Custom server"
+              <span class="ui-card-subtitle">
+                "Any command or URL"
+      <div role="status" class="ui-empty-state ui-empty-state--inline">
+        <div class="ui-empty-state-text">
+          "No MCP servers yet. Add one to give your agents its tools."
+        <div class="ui-empty-state-actions">
+          <button type="button" class="ui-button ui-tone-accent">
+            <i aria-hidden="true" class="fa-solid fa-plus">
+            "Add server"
+  rpc McpCatalogListCommand [{}]
+  rpc ListAgentDefinitionsCommand []
+  rpc McpObservedListCommand []
+== Add server from the empty state
+<body>
+  <div>
+    <div class="ui-card-section ui-density-compact mcp-cards">
+      <div class="ui-card-section-header">
+        <h2 class="ui-card-section-title">
+          "MCP servers"
+        <span class="ui-card-section-count">
+          "0"
+        <span class="ui-filter ui-card-section-filter">
+          <i aria-hidden="true" class="fa-solid fa-magnifying-glass ui-search-icon">
+          <input type="text" class="ui-filter-input" data-pane-focus="" placeholder="Filter servers" aria-label="Filter servers" value="">
+        <button type="button" class="ui-button ui-tone-accent mcp-cards-add">
+          <i aria-hidden="true" class="fa-solid fa-plus">
+          "Add server"
+      <div class="ui-card-grid ui-card-grid--chip mcp-add-gallery" style="--ui-card-min: 124px;" role="group" aria-label="Add an MCP server">
+        <div class="ui-card-cell" data-card-key="ableton-live">
+          <div role="button" data-preset="ableton-live" aria-label="Add Ableton Live" class="ui-card ui-card--chip mcp-preset-chip">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-music">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "Ableton Live"
+              <span class="ui-card-subtitle">
+                "Add"
+        <div class="ui-card-cell" data-card-key="touchdesigner">
+          <div role="button" data-preset="touchdesigner" aria-label="Add TouchDesigner" class="ui-card ui-card--chip mcp-preset-chip">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-diagram-project">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "TouchDesigner"
+              <span class="ui-card-subtitle">
+                "Add"
+        <div class="ui-card-cell" data-card-key="\u0000custom">
+          <div role="button" data-preset="custom" aria-label="Add a custom server" class="ui-card ui-card--chip mcp-preset-chip">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-plus">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "Custom server"
+              <span class="ui-card-subtitle">
+                "Any command or URL"
+      <h4 class="ui-card-group-heading">
+        "Your servers"
+      <div class="ui-card-grid mcp-servers-grid" style="--ui-card-min: 200px;" role="group" aria-label="Your servers">
+        <div class="ui-card-cell" data-card-key="\u0000new">
+          <div role="button" aria-expanded="true" aria-label="New MCP server" class="ui-card is-selected mcp-server-card">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-plus">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "New server"
+              <span class="ui-card-subtitle">
+                "Not saved yet"
+        <div class="ui-card-detail" style="--ui-card-caret-left: 25%;">
+          <form class="mcp-detail mcp-server-form" aria-label="New MCP server">
+            <div class="ui-field ui-field--stacked">
+              <div class="ui-field-text">
+                <label class="ui-field-label" for="ui-field-cl-N">
+                  "Name"
+              <div class="ui-field-control">
+                <input placeholder="e.g. filesystem" type="text" class="ui-input" value="">
+            <div class="ui-field ui-field--stacked">
+              <div class="ui-field-text">
+                <label class="ui-field-label" for="ui-field-cl-N">
+                  "Transport"
+              <div class="ui-field-control">
+                <input placeholder="stdio" type="text" class="ui-input" value="stdio">
+            <div class="ui-field ui-field--stacked">
+              <div class="ui-field-text">
+                <label class="ui-field-label" for="mcp-config-cl-N">
+                  "Config (JSON)"
+              <div class="ui-field-control">
+                <textarea class="ui-input ui-textarea ui-textarea--mono" value="{}">
+            <div class="mcp-detail-actions">
+              <button type="button" class="ui-button ui-tone-neutral">
+                "Cancel"
+              <button type="submit" class="ui-button ui-tone-accent" disabled="">
+                "Save"
+== failed load
+<body>
+  <div>
+    <div class="ui-card-section ui-density-compact mcp-cards">
+      <div class="ui-card-section-header">
+        <h2 class="ui-card-section-title">
+          "MCP servers"
+        <span class="ui-card-section-count">
+          "0"
+        <span class="ui-filter ui-card-section-filter">
+          <i aria-hidden="true" class="fa-solid fa-magnifying-glass ui-search-icon">
+          <input type="text" class="ui-filter-input" data-pane-focus="" placeholder="Filter servers" aria-label="Filter servers" value="">
+        <button type="button" class="ui-button ui-tone-accent mcp-cards-add">
+          <i aria-hidden="true" class="fa-solid fa-plus">
+          "Add server"
+      <div class="ui-notice ui-notice--danger" role="alert">
+        <div class="ui-notice-body">
+          "Failed to load MCP servers: srv down"
+      <div class="ui-card-grid ui-card-grid--chip mcp-add-gallery" style="--ui-card-min: 124px;" role="group" aria-label="Add an MCP server">
+        <div class="ui-card-cell" data-card-key="ableton-live">
+          <div role="button" data-preset="ableton-live" aria-label="Add Ableton Live" class="ui-card ui-card--chip mcp-preset-chip">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-music">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "Ableton Live"
+              <span class="ui-card-subtitle">
+                "Add"
+        <div class="ui-card-cell" data-card-key="touchdesigner">
+          <div role="button" data-preset="touchdesigner" aria-label="Add TouchDesigner" class="ui-card ui-card--chip mcp-preset-chip">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-diagram-project">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "TouchDesigner"
+              <span class="ui-card-subtitle">
+                "Add"
+        <div class="ui-card-cell" data-card-key="\u0000custom">
+          <div role="button" data-preset="custom" aria-label="Add a custom server" class="ui-card ui-card--chip mcp-preset-chip">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-plus">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "Custom server"
+              <span class="ui-card-subtitle">
+                "Any command or URL"
+      <div role="status" class="ui-empty-state ui-empty-state--inline">
+        <div class="ui-empty-state-text">
+          "No MCP servers yet. Add one to give your agents its tools."
+        <div class="ui-empty-state-actions">
+          <button type="button" class="ui-button ui-tone-accent">
+            <i aria-hidden="true" class="fa-solid fa-plus">
+            "Add server"
+  rpc McpCatalogListCommand [{}]
+  rpc ListAgentDefinitionsCommand []
+  rpc McpObservedListCommand []

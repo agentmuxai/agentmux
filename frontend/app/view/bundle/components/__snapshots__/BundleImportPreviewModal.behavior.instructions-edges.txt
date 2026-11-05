@@ -1,0 +1,416 @@
+== empty instructions
+<div>
+  <header class="modal-panel-header">
+    <h2 class="modal-panel-title">
+      "Preview & Select"
+    <p class="modal-panel-description">
+      "Choose what to bring in from"
+      <strong>
+        "Release kit"
+      "."
+  <div class="modal-panel-body bundle-import-preview-body">
+    <label class="bundle-import-field">
+      <span class="bundle-import-field-label">
+        "Bundle name"
+      <input type="text" class="bundle-import-input" value="Release kit">
+      <div class="bundle-import-hint">
+        "A bundle named this already exists."
+        <button type="button" class="ui-button ui-tone-accent ui-button--link">
+          "Use ""
+          "Release kit (2)"
+          "" instead"
+    <section class="bundle-import-section">
+      <label class="bundle-import-checkbox-row">
+        <input type="checkbox" value="on" checked=true>
+        <span>
+          "Include instructions"
+    <section class="bundle-import-section">
+      <h3 class="bundle-import-section-title">
+        "Context files"
+      <label class="bundle-import-checkbox-row">
+        <input type="checkbox" value="on" checked=true>
+        <span class="bundle-import-item-name">
+          "docs/RULES.md"
+        <span class="bundle-import-item-meta">
+          "2.0 KB"
+      <label class="bundle-import-checkbox-row">
+        <input type="checkbox" value="on" checked=true>
+        <span class="bundle-import-item-name">
+          "docs/NOTES.md"
+        <span class="bundle-import-item-meta">
+          "12 B"
+    <section class="bundle-import-section">
+      <h3 class="bundle-import-section-title">
+        "Skills"
+      <div class="bundle-import-skill-row">
+        <label class="bundle-import-checkbox-row">
+          <input type="checkbox" value="on" checked=true>
+          <span class="bundle-import-item-name">
+            "plain"
+        <p class="bundle-import-item-description">
+          "A plain skill"
+        <div class="bundle-import-skill-text-block">
+          <button type="button" class="ui-button ui-tone-quiet wave-button">
+            "Hide"
+            "skill text"
+          <pre class="bundle-import-skill-text">
+            "Plain text."
+      <div class="bundle-import-skill-row">
+        <label class="bundle-import-checkbox-row">
+          <input type="checkbox" value="on" checked=true>
+          <span class="bundle-import-skill-collision">
+            <span class="ui-tag ui-tag--chip ui-tag--warn ui-tag--xs">
+              "already exists in your library"
+            <span class="bundle-import-item-name-readonly">
+              "exists"
+            <input placeholder="rename to import (leave blank to skip)" type="text" class="bundle-import-rename-input" value="">
+        <div class="bundle-import-skill-text-block">
+          <button type="button" class="ui-button ui-tone-quiet wave-button">
+            "Hide"
+            "skill text"
+          <pre class="bundle-import-skill-text">
+            "Exists text."
+      <div class="bundle-import-skill-row">
+        <label class="bundle-import-checkbox-row">
+          <input type="checkbox" value="on" checked=false>
+          <span class="bundle-import-skill-collision">
+            <span class="ui-tag ui-tag--chip ui-tag--warn ui-tag--xs">
+              "another skill in this import uses this name"
+            <span class="bundle-import-item-name-readonly">
+              "dup"
+            <input placeholder="rename to import (leave blank to skip)" disabled="" type="text" class="bundle-import-rename-input" value="">
+        <p class="bundle-import-item-description">
+          "Duplicate"
+        <div class="bundle-import-skill-text-block">
+          <button type="button" class="ui-button ui-tone-quiet wave-button">
+            "Hide"
+            "skill text"
+          <pre class="bundle-import-skill-text">
+            "Cut off…"
+          <div class="bundle-import-hint bundle-import-hint-warn">
+            "Not fully shown —"
+            "8"
+            "of"
+            "5000"
+            "characters. The whole skill is imported if you tick it."
+      <div class="bundle-import-skill-row">
+        <label class="bundle-import-checkbox-row">
+          <input type="checkbox" value="on" checked=true>
+          <span class="bundle-import-item-name">
+            "empty"
+    <section class="bundle-import-section">
+      <h3 class="bundle-import-section-title">
+        "Widgets"
+      <div class="bundle-import-hint">
+        "Each widget asks for your approval before it runs."
+      <div class="bundle-import-skill-row" data-widget-id="acme.board">
+        <label class="bundle-import-checkbox-row">
+          <input type="checkbox" value="on" checked=true>
+          <span class="bundle-import-item-name">
+            "Board"
+          <span class="bundle-import-item-meta">
+            "1.2.0"
+            "· by Acme"
+        <p class="bundle-import-item-description">
+          "Signed by acme · K7Q2-MZ4D-PX3A-9TWE. This is the first acme widget here: check the key with its author if it matters."
+        <p class="bundle-import-item-description">
+          "It can: Keep its own data on this computer · Connect to https://api.acme.test"
+      <div class="bundle-import-skill-row" data-widget-id="acme.tool">
+        <label class="bundle-import-checkbox-row">
+          <input type="checkbox" disabled="" value="on" checked=false>
+          <span class="bundle-import-item-name">
+            "Tool"
+          <span class="bundle-import-item-meta">
+            "1.2.0"
+            "· by Acme"
+        <div class="bundle-import-hint bundle-import-hint-warn">
+          "Can't be imported:"
+          "bundles can carry sandboxed widgets only"
+      <div class="bundle-import-skill-row" data-widget-id="acme.same">
+        <label class="bundle-import-checkbox-row">
+          <input type="checkbox" disabled="" value="on" checked=false>
+          <span class="bundle-import-item-name">
+            "Same"
+          <span class="bundle-import-item-meta">
+            "1.2.0"
+        <div class="bundle-import-hint">
+          "Already installed at this version."
+        <p class="bundle-import-item-description">
+          "Signed by acme · K7Q2-MZ4D-PX3A-9TWE. This is the first acme widget here: check the key with its author if it matters."
+        <p class="bundle-import-item-description">
+          "It asks for no permissions."
+      <div class="bundle-import-skill-row" data-widget-id="acme.up">
+        <label class="bundle-import-checkbox-row">
+          <input type="checkbox" value="on" checked=true>
+          <span class="bundle-import-item-name">
+            "Up"
+          <span class="bundle-import-item-meta">
+            "1.2.0"
+            "· by Acme"
+        <div class="bundle-import-hint">
+          "Replaces version"
+          "1.0.0"
+          "you have."
+        <p class="bundle-import-item-description">
+          "Not signed: AgentMux can't tell who made it."
+        <p class="bundle-import-item-description">
+          "It can: Keep its own data on this computer · Connect to https://api.acme.test"
+      <div class="bundle-import-skill-row" data-widget-id="acme.key">
+        <label class="bundle-import-checkbox-row">
+          <input type="checkbox" value="on" checked=true>
+          <span class="bundle-import-item-name">
+            "Key"
+          <span class="bundle-import-item-meta">
+            "1.2.0"
+            "· by Acme"
+        <p class="bundle-import-item-description bundle-import-hint-warn">
+          "Not signed by the key that signed your other acme widgets (BBBB); this one is signed by AAAA. It may not be from the same author."
+        <p class="bundle-import-item-description">
+          "It can: Keep its own data on this computer · Connect to https://api.acme.test"
+    <section class="bundle-import-section">
+      <h3 class="bundle-import-section-title">
+        "Not imported: MCP servers"
+      <div class="bundle-import-hint">
+        "Bundles don't carry MCP servers. Add these in Connectors and bind them to the agents that need them."
+      <div class="bundle-import-checkbox-row">
+        <span class="bundle-import-item-name">
+          "github"
+        <span class="bundle-import-item-meta">
+          "gh-mcp"
+      <div class="bundle-import-checkbox-row">
+        <span class="bundle-import-item-name">
+          "x.server.json"
+    <section class="bundle-import-section">
+      <h3 class="bundle-import-section-title">
+        "Account requirements"
+      <p class="bundle-import-requirements-summary">
+        "Depends on"
+        "2"
+        "account(s):"
+        "github (resolved), slack (not connected)"
+    <div class="bundle-import-warnings-banner">
+      <button aria-label="Dismiss warnings" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button bundle-import-warnings-dismiss">
+        <i aria-hidden="true" class="fa-solid fa-xmark">
+      <div class="bundle-import-warning-line">
+        "first warning"
+      <div class="bundle-import-warning-line">
+        "second warning"
+      <div class="bundle-import-warning-line">
+        "…more warnings not shown"
+  <footer class="modal-panel-footer">
+    <button data-modal-dismiss="true" type="button" class="ui-button ui-tone-neutral wave-button">
+      "Cancel"
+    <button type="button" class="ui-button ui-tone-accent wave-button">
+      "Next"
+  rpc SkillCatalogListCommand [{}]
+== whole instructions
+<div>
+  <header class="modal-panel-header">
+    <h2 class="modal-panel-title">
+      "Preview & Select"
+    <p class="modal-panel-description">
+      "Choose what to bring in from"
+      <strong>
+        "Release kit"
+      "."
+  <div class="modal-panel-body bundle-import-preview-body">
+    <label class="bundle-import-field">
+      <span class="bundle-import-field-label">
+        "Bundle name"
+      <input type="text" class="bundle-import-input" value="Release kit">
+      <div class="bundle-import-hint">
+        "A bundle named this already exists."
+        <button type="button" class="ui-button ui-tone-accent ui-button--link">
+          "Use ""
+          "Release kit (2)"
+          "" instead"
+    <section class="bundle-import-section">
+      <label class="bundle-import-checkbox-row">
+        <input type="checkbox" value="on" checked=true>
+        <span>
+          "Include instructions"
+      <div class="bundle-import-instructions-preview">
+        <button type="button" class="ui-button ui-tone-accent ui-button--link">
+          "Hide"
+          "preview"
+        <pre class="bundle-import-instructions-text">
+          "Always run the checks."
+    <section class="bundle-import-section">
+      <h3 class="bundle-import-section-title">
+        "Context files"
+      <label class="bundle-import-checkbox-row">
+        <input type="checkbox" value="on" checked=true>
+        <span class="bundle-import-item-name">
+          "docs/RULES.md"
+        <span class="bundle-import-item-meta">
+          "2.0 KB"
+      <label class="bundle-import-checkbox-row">
+        <input type="checkbox" value="on" checked=true>
+        <span class="bundle-import-item-name">
+          "docs/NOTES.md"
+        <span class="bundle-import-item-meta">
+          "12 B"
+    <section class="bundle-import-section">
+      <h3 class="bundle-import-section-title">
+        "Skills"
+      <div class="bundle-import-skill-row">
+        <label class="bundle-import-checkbox-row">
+          <input type="checkbox" value="on" checked=true>
+          <span class="bundle-import-item-name">
+            "plain"
+        <p class="bundle-import-item-description">
+          "A plain skill"
+        <div class="bundle-import-skill-text-block">
+          <button type="button" class="ui-button ui-tone-quiet wave-button">
+            "Hide"
+            "skill text"
+          <pre class="bundle-import-skill-text">
+            "Plain text."
+      <div class="bundle-import-skill-row">
+        <label class="bundle-import-checkbox-row">
+          <input type="checkbox" value="on" checked=true>
+          <span class="bundle-import-skill-collision">
+            <span class="ui-tag ui-tag--chip ui-tag--warn ui-tag--xs">
+              "already exists in your library"
+            <span class="bundle-import-item-name-readonly">
+              "exists"
+            <input placeholder="rename to import (leave blank to skip)" type="text" class="bundle-import-rename-input" value="">
+        <div class="bundle-import-skill-text-block">
+          <button type="button" class="ui-button ui-tone-quiet wave-button">
+            "Hide"
+            "skill text"
+          <pre class="bundle-import-skill-text">
+            "Exists text."
+      <div class="bundle-import-skill-row">
+        <label class="bundle-import-checkbox-row">
+          <input type="checkbox" value="on" checked=false>
+          <span class="bundle-import-skill-collision">
+            <span class="ui-tag ui-tag--chip ui-tag--warn ui-tag--xs">
+              "another skill in this import uses this name"
+            <span class="bundle-import-item-name-readonly">
+              "dup"
+            <input placeholder="rename to import (leave blank to skip)" disabled="" type="text" class="bundle-import-rename-input" value="">
+        <p class="bundle-import-item-description">
+          "Duplicate"
+        <div class="bundle-import-skill-text-block">
+          <button type="button" class="ui-button ui-tone-quiet wave-button">
+            "Hide"
+            "skill text"
+          <pre class="bundle-import-skill-text">
+            "Cut off…"
+          <div class="bundle-import-hint bundle-import-hint-warn">
+            "Not fully shown —"
+            "8"
+            "of"
+            "5000"
+            "characters. The whole skill is imported if you tick it."
+      <div class="bundle-import-skill-row">
+        <label class="bundle-import-checkbox-row">
+          <input type="checkbox" value="on" checked=true>
+          <span class="bundle-import-item-name">
+            "empty"
+    <section class="bundle-import-section">
+      <h3 class="bundle-import-section-title">
+        "Widgets"
+      <div class="bundle-import-hint">
+        "Each widget asks for your approval before it runs."
+      <div class="bundle-import-skill-row" data-widget-id="acme.board">
+        <label class="bundle-import-checkbox-row">
+          <input type="checkbox" value="on" checked=true>
+          <span class="bundle-import-item-name">
+            "Board"
+          <span class="bundle-import-item-meta">
+            "1.2.0"
+            "· by Acme"
+        <p class="bundle-import-item-description">
+          "Signed by acme · K7Q2-MZ4D-PX3A-9TWE. This is the first acme widget here: check the key with its author if it matters."
+        <p class="bundle-import-item-description">
+          "It can: Keep its own data on this computer · Connect to https://api.acme.test"
+      <div class="bundle-import-skill-row" data-widget-id="acme.tool">
+        <label class="bundle-import-checkbox-row">
+          <input type="checkbox" disabled="" value="on" checked=false>
+          <span class="bundle-import-item-name">
+            "Tool"
+          <span class="bundle-import-item-meta">
+            "1.2.0"
+            "· by Acme"
+        <div class="bundle-import-hint bundle-import-hint-warn">
+          "Can't be imported:"
+          "bundles can carry sandboxed widgets only"
+      <div class="bundle-import-skill-row" data-widget-id="acme.same">
+        <label class="bundle-import-checkbox-row">
+          <input type="checkbox" disabled="" value="on" checked=false>
+          <span class="bundle-import-item-name">
+            "Same"
+          <span class="bundle-import-item-meta">
+            "1.2.0"
+        <div class="bundle-import-hint">
+          "Already installed at this version."
+        <p class="bundle-import-item-description">
+          "Signed by acme · K7Q2-MZ4D-PX3A-9TWE. This is the first acme widget here: check the key with its author if it matters."
+        <p class="bundle-import-item-description">
+          "It asks for no permissions."
+      <div class="bundle-import-skill-row" data-widget-id="acme.up">
+        <label class="bundle-import-checkbox-row">
+          <input type="checkbox" value="on" checked=true>
+          <span class="bundle-import-item-name">
+            "Up"
+          <span class="bundle-import-item-meta">
+            "1.2.0"
+            "· by Acme"
+        <div class="bundle-import-hint">
+          "Replaces version"
+          "1.0.0"
+          "you have."
+        <p class="bundle-import-item-description">
+          "Not signed: AgentMux can't tell who made it."
+        <p class="bundle-import-item-description">
+          "It can: Keep its own data on this computer · Connect to https://api.acme.test"
+      <div class="bundle-import-skill-row" data-widget-id="acme.key">
+        <label class="bundle-import-checkbox-row">
+          <input type="checkbox" value="on" checked=true>
+          <span class="bundle-import-item-name">
+            "Key"
+          <span class="bundle-import-item-meta">
+            "1.2.0"
+            "· by Acme"
+        <p class="bundle-import-item-description bundle-import-hint-warn">
+          "Not signed by the key that signed your other acme widgets (BBBB); this one is signed by AAAA. It may not be from the same author."
+        <p class="bundle-import-item-description">
+          "It can: Keep its own data on this computer · Connect to https://api.acme.test"
+    <section class="bundle-import-section">
+      <h3 class="bundle-import-section-title">
+        "Not imported: MCP servers"
+      <div class="bundle-import-hint">
+        "Bundles don't carry MCP servers. Add these in Connectors and bind them to the agents that need them."
+      <div class="bundle-import-checkbox-row">
+        <span class="bundle-import-item-name">
+          "github"
+        <span class="bundle-import-item-meta">
+          "gh-mcp"
+      <div class="bundle-import-checkbox-row">
+        <span class="bundle-import-item-name">
+          "x.server.json"
+    <section class="bundle-import-section">
+      <h3 class="bundle-import-section-title">
+        "Account requirements"
+      <p class="bundle-import-requirements-summary">
+        "Depends on"
+        "2"
+        "account(s):"
+        "github (resolved), slack (not connected)"
+    <div class="bundle-import-warnings-banner">
+      <button aria-label="Dismiss warnings" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button bundle-import-warnings-dismiss">
+        <i aria-hidden="true" class="fa-solid fa-xmark">
+      <div class="bundle-import-warning-line">
+        "first warning"
+      <div class="bundle-import-warning-line">
+        "second warning"
+      <div class="bundle-import-warning-line">
+        "…more warnings not shown"
+  <footer class="modal-panel-footer">
+    <button data-modal-dismiss="true" type="button" class="ui-button ui-tone-neutral wave-button">
+      "Cancel"
+    <button type="button" class="ui-button ui-tone-accent wave-button">
+      "Next"
+  rpc SkillCatalogListCommand [{}]

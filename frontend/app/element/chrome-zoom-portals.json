@@ -1,0 +1,13 @@
+{
+  "block/blockframe.tsx": { "max": 1, "why": "The pane header's tooltip. Moves onto AnchoredPopover with the tooltips." },
+  "components/context-menu.tsx": { "max": 1, "why": "The right-click menu. Moves onto AnchoredPopover (PR 2 of #23943)." },
+  "element/modal.tsx": { "max": 1, "why": "The modal layer: a window or pane dialog. Follows chrome zoom in PR 3 of #23943." },
+  "element/search.tsx": { "max": 1, "why": "The find box of a pane (editor, terminal): it belongs to the pane's content, whose zoom is the pane's." },
+  "element/tooltip.tsx": { "max": 1, "why": "The tooltip. Moves onto AnchoredPopover (PR 2 of #23943)." },
+  "modals/typeaheadmodal.tsx": { "max": 1, "why": "Mounts inside the pane's own block: pane content, not app chrome." },
+  "tab/tab.tsx": { "max": 1, "why": "The tab colour panel. Moves onto AnchoredPopover (PR 2 of #23943)." },
+  "view/agent/attachments/AttachmentLightbox.tsx": { "max": 1, "why": "A full-window viewer for an attachment. Decided with the dialogs (PR 3 of #23943)." },
+  "view/agent/components/AgentProgressBar.tsx": { "max": 1, "why": "Mounts a bar into the agent pane's own element: pane content." },
+  "view/agent/components/PeekOverlay.tsx": { "max": 1, "why": "Follows the agent pane's zoom (--agent-pane-zoom), not the chrome's: it previews pane content." },
+  "view/files/FilesFooter.tsx": { "max": 1, "why": "The Files pane's conflict dialog. Decided with the pane dialogs (PR 3 of #23943)." }
+}

@@ -192,3 +192,22 @@ async fn a_name_that_is_not_a_pane_tool_is_not_in_the_family() {
     assert!(call("PaneNope", &json!({}), &fx.cx()).await.is_err());
     assert!(srv.seen.lock().unwrap().is_empty());
 }
+
+/// srv runs the user's window; the call returns with what was opened and polls nothing.
+#[tokio::test]
+async fn closing_another_pane_answers_pending_at_once_without_polling() {
+    let deadline = agentmux_common::time::now_ms() + 30_000;
+    let srv = stub_srv("202 Accepted", json!({ "status": "pending_user_override", "request_id": "r1", "by": "tester", "via": "ClosePane", "deadline_ms": deadline }));
+    let fx = Fixture::new(&srv);
+    let started = std::time::Instant::now();
+    let said = call("ClosePane", &json!({ "block_id": "b7" }), &fx.cx()).await.unwrap();
+    assert!(started.elapsed() < std::time::Duration::from_secs(1), "no wait for the 30 s window");
+    let paths: Vec<String> = srv.seen.lock().unwrap().iter().map(|(p, _)| p.clone()).collect();
+    assert_eq!(paths, ["/api/v1/agent/pane/close"], "no status polling");
+    let said: Value = serde_json::from_str(&said).unwrap();
+    assert_eq!(said["status"], "pending");
+    assert_eq!(said["pending"][0]["id"], "r1");
+    assert_eq!(said["pending"][0]["targets"], json!(["b7"]));
+    assert_eq!(said["pending"][0]["closes_at"], deadline);
+    assert!(said["note"].as_str().unwrap().contains("one [AgentMux] note"), "{said}");
+}

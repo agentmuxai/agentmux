@@ -186,7 +186,7 @@ pub(super) async fn handle_fleet_bulk_stop(
     out["wait_at_least_ms"] = json!(crate::sagas::pending_shutdown::wait_at_least_ms(pending.iter().map(|p| p.deadline_ms).max().unwrap_or(0)));
     out["pending"] = json!(pending
         .iter()
-        .map(|p| json!({ "block_id": p.block_id, "request_id": p.request_id, "effect": p.effect }))
+        .map(|p| json!({ "block_id": p.block_id, "request_id": p.request_id, "effect": p.effect, "deadline_ms": p.deadline_ms }))
         .collect::<Vec<_>>());
     (StatusCode::ACCEPTED, Json(out)).into_response()
 }

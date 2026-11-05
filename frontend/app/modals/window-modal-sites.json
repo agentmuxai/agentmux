@@ -39,24 +39,6 @@
   "tab/tab-close-confirm-modal.tsx": {
     "window-scope": 1
   },
-  "view/bundle/bundle-manager.tsx": {
-    "native-dialog": 1
-  },
-  "view/editor/editor-model.ts": {
-    "native-dialog": 1
-  },
-  "view/global-bundle/GlobalMemoryFullView.tsx": {
-    "native-dialog": 1
-  },
-  "view/global-bundle/global-bundle-manager.tsx": {
-    "native-dialog": 1
-  },
-  "view/memory-editor/editor-keys.ts": {
-    "native-dialog": 1
-  },
-  "view/native-memory/native-memory-manager.tsx": {
-    "native-dialog": 2
-  },
   "view/vault/vault-request-prompts.tsx": {
     "default-scope": 1,
     "open-modal": 1
@@ -65,7 +47,7 @@
     "window-scope": 1,
     "open-modal": 1
   },
-  "window/hamburger-menu.tsx": {
+  "window/logo-menu.tsx": {
     "open-modal": 1
   },
   "window/window-close-confirm.tsx": {
