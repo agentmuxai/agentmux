@@ -82,7 +82,7 @@ function ConflictDialog(props: {
         [size != null ? formatBytes(size) : null, mtime != null ? new Date(mtime).toLocaleString() : null].filter(Boolean).join(", ");
     let first: HTMLButtonElement | undefined;
     return (
-        <Modal open={true} scope="pane" size="sm" onClose={props.onCancel} initialFocus={() => first ?? null}>
+        <Modal open={true} scope="pane" size="sm" panelClass="files-conflict-panel" closeOnBackdropClick={false} onClose={props.onCancel} initialFocus={() => first ?? null}>
             <ModalHeader title={`“${name()}” already exists here`} />
             <ModalBody>
                 <div class="files-conflict-body">

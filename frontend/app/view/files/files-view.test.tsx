@@ -904,6 +904,22 @@ describe("the Files pane: copy and move (Phase 2a)", () => {
         expect(h.rpc.FsOpResolveCommand.mock.lastCall?.[1]).toEqual({ op_id: "op1", choice: "keep_both", apply_to_all: true });
     });
 
+    it("a click outside the conflict question doesn't stop the copy", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        setClipboard({ kind: "copy", paths: ["D:\\b.txt"] });
+        fireEvent.keyDown(v.list(), { key: "v", ctrlKey: true });
+        await waitFor(() => expect(h.rpc.FsOpStartCommand).toHaveBeenCalled());
+        opEvent({
+            state: "conflict",
+            conflict: { source: "D:\\b.txt", dest: `${HOME}\\b.txt`, source_is_dir: false, dest_is_dir: false, source_size: 2048, dest_size: 10 },
+        });
+        await waitFor(() => expect(screen.getByText("“b.txt” already exists here")).toBeTruthy());
+        fireEvent.click(document.querySelector(".modal-backdrop")!);
+        expect(screen.queryByText("“b.txt” already exists here")).not.toBeNull();
+        expect(h.rpc.FsOpResolveCommand).not.toHaveBeenCalled();
+    });
+
     it("an op that finishes before srv replies leaves no progress bar, and keeps its name (muxreview on #4221)", async () => {
         const v = mount();
         await waitFor(() => expect(v.names()).toHaveLength(4));

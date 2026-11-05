@@ -532,6 +532,11 @@
     background: var(--accent-color);
 }
 
+// A long name has no spaces to wrap at.
+.files-conflict-panel .modal-panel-title {
+    overflow-wrap: anywhere;
+}
+
 .files-conflict-body {
     display: flex;
     flex-direction: column;
