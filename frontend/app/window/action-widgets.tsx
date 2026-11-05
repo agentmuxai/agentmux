@@ -39,7 +39,6 @@ import {
     type JSX,
     type Setter,
 } from "solid-js";
-import { Portal } from "solid-js/web";
 import {
     getMoreWidgets,
     getPinnedKeys,
@@ -668,64 +667,60 @@ function renderMeasureMirrors(s: BarState, responsive: Responsive): JSX.Element 
 
 function renderMoreDropdown(s: BarState, responsive: Responsive): JSX.Element {
     return (
-        <Portal>
-            <Show when={s.moreOpen()}>
-                <MoreDropdown
-                    widgets={() => [...responsive.clippedPinnedWidgets(), ...s.moreWidgets()]}
-                    onClose={() => closeMore(s)}
-                    onItemContextMenu={(pos, key) => handleItemContextMenu(s, pos, key)}
-                    anchor={() => s.moreButtonRef ?? null}
-                    settings={s.settings}
-                    wmap={s.wmap}
-                    ref={(el) => (s.moreDropdownRef = el)}
-                    onSubmenuEnter={() => s.moreHover.onSubmenuEnter()}
-                    onSubmenuLeave={(e) => {
-                        if (isItemMenuOpen(s)) return;
-                        s.moreHover.onSubmenuLeave(e);
-                    }}
-                    setSubmenuEl={(el) => s.moreHover.setSubmenuEl(el)}
-                    isItemMenuOpen={() => isItemMenuOpen(s)}
-                />
-            </Show>
-        </Portal>
+        <Show when={s.moreOpen()}>
+            <MoreDropdown
+                widgets={() => [...responsive.clippedPinnedWidgets(), ...s.moreWidgets()]}
+                onClose={() => closeMore(s)}
+                onItemContextMenu={(pos, key) => handleItemContextMenu(s, pos, key)}
+                anchor={() => s.moreButtonRef ?? null}
+                settings={s.settings}
+                wmap={s.wmap}
+                ref={(el) => (s.moreDropdownRef = el)}
+                onSubmenuEnter={() => s.moreHover.onSubmenuEnter()}
+                onSubmenuLeave={(e) => {
+                    if (isItemMenuOpen(s)) return;
+                    s.moreHover.onSubmenuLeave(e);
+                }}
+                setSubmenuEl={(el) => s.moreHover.setSubmenuEl(el)}
+                isItemMenuOpen={() => isItemMenuOpen(s)}
+            />
+        </Show>
     );
 }
 
 function renderParentFlyout(s: BarState): JSX.Element {
     return (
-        <Portal>
-            <Show when={s.openParentKey()}>
-                {(keyAccessor) => {
-                    // Capture a plain string once instead of re-invoking
-                    // the Show's accessor from these callbacks — several
-                    // of them (onClose, and PinnedWidgetFlyout's own
-                    // onCleanup calling setSubmenuEl(null)) can still fire
-                    // during/after this <Show> branch unmounts, and
-                    // calling a stale keyed-Show accessor post-unmount
-                    // throws ("Attempting to access a stale value from
-                    // <Show>") — reproduced live via muxlog while testing
-                    // this PR's own click-to-close path.
-                    const key = keyAccessor();
-                    return (
-                        <PinnedWidgetFlyout
-                            widget={s.wmap()[key]}
-                            wmap={s.wmap}
-                            settings={s.settings}
-                            onClose={() => closeParentFlyout(s, key)}
-                            onItemContextMenu={(pos, key) => handleItemContextMenu(s, pos, key)}
-                            anchor={() => s.parentSlotRefs.get(key) ?? null}
-                            onSubmenuEnter={() => s.parentHoverControllers.get(key)?.onSubmenuEnter()}
-                            onSubmenuLeave={(e) => {
-                                if (isItemMenuOpen(s)) return;
-                                s.parentHoverControllers.get(key)?.onSubmenuLeave(e);
-                            }}
-                            setSubmenuEl={(el) => s.parentHoverControllers.get(key)?.setSubmenuEl(el)}
-                            ref={(el) => (s.pinnedFlyoutRef = el)}
-                        />
-                    );
-                }}
-            </Show>
-        </Portal>
+        <Show when={s.openParentKey()}>
+            {(keyAccessor) => {
+                // Capture a plain string once instead of re-invoking
+                // the Show's accessor from these callbacks — several
+                // of them (onClose, and PinnedWidgetFlyout's own
+                // onCleanup calling setSubmenuEl(null)) can still fire
+                // during/after this <Show> branch unmounts, and
+                // calling a stale keyed-Show accessor post-unmount
+                // throws ("Attempting to access a stale value from
+                // <Show>") — reproduced live via muxlog while testing
+                // this PR's own click-to-close path.
+                const key = keyAccessor();
+                return (
+                    <PinnedWidgetFlyout
+                        widget={s.wmap()[key]}
+                        wmap={s.wmap}
+                        settings={s.settings}
+                        onClose={() => closeParentFlyout(s, key)}
+                        onItemContextMenu={(pos, key) => handleItemContextMenu(s, pos, key)}
+                        anchor={() => s.parentSlotRefs.get(key) ?? null}
+                        onSubmenuEnter={() => s.parentHoverControllers.get(key)?.onSubmenuEnter()}
+                        onSubmenuLeave={(e) => {
+                            if (isItemMenuOpen(s)) return;
+                            s.parentHoverControllers.get(key)?.onSubmenuLeave(e);
+                        }}
+                        setSubmenuEl={(el) => s.parentHoverControllers.get(key)?.setSubmenuEl(el)}
+                        ref={(el) => (s.pinnedFlyoutRef = el)}
+                    />
+                );
+            }}
+        </Show>
     );
 }
 
