@@ -1,5 +1,5 @@
 {
-  "element/modal.tsx": { "max": 1, "why": "The modal layer: a window or pane dialog. Follows chrome zoom in PR 3 of #23943." },
+  "element/modal.tsx": { "max": 1, "why": "The modal layer: a window, tab or pane dialog, mounted into its scope. Its panel carries the zoom (.modal-panel in modal.scss), the overlay stays in real pixels." },
   "element/search.tsx": { "max": 1, "why": "The find box of a pane (editor, terminal): it belongs to the pane's content, whose zoom is the pane's." },
   "modals/typeaheadmodal.tsx": { "max": 1, "why": "Mounts inside the pane's own block: pane content, not app chrome." },
   "view/agent/components/AgentProgressBar.tsx": { "max": 1, "why": "Mounts a bar into the agent pane's own element: pane content." },
