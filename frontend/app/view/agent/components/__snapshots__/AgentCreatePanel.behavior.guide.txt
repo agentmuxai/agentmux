@@ -1,0 +1,188 @@
+== account list pending
+<div>
+  <section class="agent-create-panel" data-testid="agent-create-panel" aria-label="New Antigravity agent">
+    <header class="agent-create-panel-header">
+      <h3 class="agent-create-panel-title">
+        "New"
+        "Antigravity"
+        "agent"
+    <div data-testid="agent-create-form" data-template="Antigravity" data-runtime="host" data-deciding="false">
+      <button>
+        "form-cancel"
+      <button>
+        "form-busy"
+      <button>
+        "form-created"
+  call probePrereqs [false]
+  call ListIdentityAccounts [{}]
+  call CheckCliAuth [{"cli_path":"/bin/agy","auth_check_args":["models"]},{"timeout":15000}]
+  call InstallCheck [{"providerId":"antigravity","cliCommand":"agy"}]
+== no account: guide
+<div>
+  <section class="agent-create-panel" data-testid="agent-create-panel" aria-label="New Antigravity agent">
+    <header class="agent-create-panel-header">
+      <h3 class="agent-create-panel-title">
+        "New"
+        "Antigravity"
+        "agent"
+    <section class="agent-free-guide" data-testid="agent-free-guide" aria-label="Use Antigravity for free">
+      <h4 class="agent-free-guide-title">
+        "Use"
+        "Antigravity"
+        "for free"
+      <p class="agent-free-guide-lead">
+        "Free with a Google sign-in"
+        "."
+        "A weekly quota that Google doesn't publish. Gemini Flash-class models; other vendors' models need a paid plan."
+      <div class="agent-free-guide-open">
+        <button data-testid="agent-free-guide-open" type="button" class="ui-button ui-tone-accent">
+          "Open the sign-up page"
+          <span aria-hidden="true">
+            "↗"
+      <ol class="agent-free-guide-steps">
+        <li>
+          "Sign in with your Google account when the browser opens."
+        <li>
+          "Come back here. AgentMux sees the sign-in."
+        <li>
+          "Type /usage in the agent to see what is left of your weekly quota."
+      <ul class="agent-free-guide-catches">
+        <li>
+          "Free users can't buy overage credits."
+      <p class="agent-free-guide-checked" data-testid="agent-free-guide-checked">
+        "checked 2026-10-29"
+    <div data-testid="agent-create-form" data-template="Antigravity" data-runtime="host" data-deciding="false">
+      <button>
+        "form-cancel"
+      <button>
+        "form-busy"
+      <button>
+        "form-created"
+  call openExternal ["https://antigravity.google/docs/getting-started?tab=cli"]
+== has an account
+<div>
+  <section class="agent-create-panel" data-testid="agent-create-panel" aria-label="New Antigravity agent">
+    <header class="agent-create-panel-header">
+      <h3 class="agent-create-panel-title">
+        "New"
+        "Antigravity"
+        "agent"
+    <div data-testid="agent-create-form" data-template="Antigravity" data-runtime="host" data-deciding="false">
+      <button>
+        "form-cancel"
+      <button>
+        "form-busy"
+      <button>
+        "form-created"
+  call ListIdentityAccounts [{}]
+  call CheckCliAuth [{"cli_path":"/bin/agy","auth_check_args":["models"]},{"timeout":15000}]
+== accounts unreadable
+<div>
+  <section class="agent-create-panel" data-testid="agent-create-panel" aria-label="New Antigravity agent">
+    <header class="agent-create-panel-header">
+      <h3 class="agent-create-panel-title">
+        "New"
+        "Antigravity"
+        "agent"
+    <div data-testid="agent-create-form" data-template="Antigravity" data-runtime="host" data-deciding="false">
+      <button>
+        "form-cancel"
+      <button>
+        "form-busy"
+      <button>
+        "form-created"
+  call ListIdentityAccounts [{}]
+  call CheckCliAuth [{"cli_path":"/bin/agy","auth_check_args":["models"]},{"timeout":15000}]
+== CLI signed in
+<div>
+  <section class="agent-create-panel" data-testid="agent-create-panel" aria-label="New Antigravity agent">
+    <header class="agent-create-panel-header">
+      <h3 class="agent-create-panel-title">
+        "New"
+        "Antigravity"
+        "agent"
+    <div data-testid="agent-create-form" data-template="Antigravity" data-runtime="host" data-deciding="false">
+      <button>
+        "form-cancel"
+      <button>
+        "form-busy"
+      <button>
+        "form-created"
+  call ListIdentityAccounts [{}]
+  call CheckCliAuth [{"cli_path":"/bin/agy","auth_check_args":["models"]},{"timeout":15000}]
+== CLI check throws
+<div>
+  <section class="agent-create-panel" data-testid="agent-create-panel" aria-label="New Antigravity agent">
+    <header class="agent-create-panel-header">
+      <h3 class="agent-create-panel-title">
+        "New"
+        "Antigravity"
+        "agent"
+    <div data-testid="agent-create-form" data-template="Antigravity" data-runtime="host" data-deciding="false">
+      <button>
+        "form-cancel"
+      <button>
+        "form-busy"
+      <button>
+        "form-created"
+  call ListIdentityAccounts [{}]
+  call CheckCliAuth [{"cli_path":"/bin/agy","auth_check_args":["models"]},{"timeout":15000}]
+== CLI not installed
+<div>
+  <section class="agent-create-panel" data-testid="agent-create-panel" aria-label="New Antigravity agent">
+    <header class="agent-create-panel-header">
+      <h3 class="agent-create-panel-title">
+        "New"
+        "Antigravity"
+        "agent"
+    <section class="agent-free-guide" data-testid="agent-free-guide" aria-label="Use Antigravity for free">
+      <h4 class="agent-free-guide-title">
+        "Use"
+        "Antigravity"
+        "for free"
+      <p class="agent-free-guide-lead">
+        "Free with a Google sign-in"
+        "."
+        "A weekly quota that Google doesn't publish. Gemini Flash-class models; other vendors' models need a paid plan."
+      <div class="agent-free-guide-open">
+        <button data-testid="agent-free-guide-open" type="button" class="ui-button ui-tone-accent">
+          "Open the sign-up page"
+          <span aria-hidden="true">
+            "↗"
+      <ol class="agent-free-guide-steps">
+        <li>
+          "Sign in with your Google account when the browser opens."
+        <li>
+          "Come back here. AgentMux sees the sign-in."
+        <li>
+          "Type /usage in the agent to see what is left of your weekly quota."
+      <ul class="agent-free-guide-catches">
+        <li>
+          "Free users can't buy overage credits."
+      <p class="agent-free-guide-checked" data-testid="agent-free-guide-checked">
+        "checked 2026-10-29"
+    <div data-testid="agent-create-form" data-template="Antigravity" data-runtime="host" data-deciding="false">
+      <button>
+        "form-cancel"
+      <button>
+        "form-busy"
+      <button>
+        "form-created"
+  call ListIdentityAccounts [{}]
+  call InstallCheck [{"providerId":"antigravity","cliCommand":"agy"}]
+== a provider whose CLI has no login of its own: account list decides
+<div>
+  <section class="agent-create-panel" data-testid="agent-create-panel" aria-label="New Codex agent">
+    <header class="agent-create-panel-header">
+      <h3 class="agent-create-panel-title">
+        "New"
+        "Codex"
+        "agent"
+    <div data-testid="agent-create-form" data-template="Codex" data-runtime="host" data-deciding="false">
+      <button>
+        "form-cancel"
+      <button>
+        "form-busy"
+      <button>
+        "form-created"
+  call ListIdentityAccounts [{}]

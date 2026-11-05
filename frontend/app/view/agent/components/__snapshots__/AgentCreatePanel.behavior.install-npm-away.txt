@@ -1,0 +1,62 @@
+  call probePrereqs [false]
+  call InstallStart [{"providerId":"codex"}]
+  call ListIdentityAccounts [{}]
+== reopened: the same run
+<div>
+  <section class="agent-create-panel" data-testid="agent-create-panel" aria-label="New Codex agent">
+    <header class="agent-create-panel-header">
+      <h3 class="agent-create-panel-title">
+        "New"
+        "Codex"
+        "agent"
+      <ol class="agent-create-steps" data-testid="agent-create-steps">
+        <li class="agent-create-step agent-create-step--current" aria-current="step">
+          "Install"
+        <li class="agent-create-step">
+          "Create"
+    <div class="agent-create-install" data-testid="agent-create-npm-install">
+      <p class="agent-create-panel-text">
+        "Codex"
+        "isn't installed yet. AgentMux installs its own copy, kept apart from any you installed yourself. It needs an internet connection, and keeps going if you close this."
+      <div class="install-view">
+        <ol class="install-steps" aria-label="Install steps">
+          <li class="install-step" data-status="active" aria-current="step">
+            <span class="install-step-icon" role="img" aria-label="In progress">
+              "◐"
+            <span class="install-step-label">
+              "Check requirements"
+          <li class="install-step" data-status="pending">
+            <span class="install-step-icon" role="img" aria-label="Not started">
+              "○"
+            <span class="install-step-label">
+              "Download packages"
+          <li class="install-step" data-status="pending">
+            <span class="install-step-icon" role="img" aria-label="Not started">
+              "○"
+            <span class="install-step-label">
+              "Set up files"
+          <li class="install-step" data-status="pending">
+            <span class="install-step-icon" role="img" aria-label="Not started">
+              "○"
+            <span class="install-step-label">
+              "Run setup scripts"
+          <li class="install-step" data-status="pending">
+            <span class="install-step-icon" role="img" aria-label="Not started">
+              "○"
+            <span class="install-step-label">
+              "Check Codex is installed"
+        <details class="install-details">
+          <summary>
+            "Details"
+          <div class="install-details-toolbar">
+            <button type="button" class="ui-button ui-tone-quiet ui-density-compact" disabled="">
+              "Copy all"
+          <div class="install-log" role="log" aria-label="Install output">
+            <div class="install-log-spacer">
+              <div class="install-log-window">
+      <div class="agent-create-actions">
+        <button data-testid="agent-create-install-cancel" type="button" class="ui-button ui-tone-neutral">
+          "Cancel install"
+  call ListIdentityAccounts [{}]
+after unmount: 2 body children
+  call pushNotification [{"icon":"fa-check","title":"Codex is installed","message":"Click its card under New Agent to create the agent.","type":"info"}]

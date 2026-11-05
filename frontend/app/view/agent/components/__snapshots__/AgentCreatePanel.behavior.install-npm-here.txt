@@ -1,0 +1,24 @@
+== done, the panel re-checked and moved on
+<div>
+  <section class="agent-create-panel" data-testid="agent-create-panel" aria-label="New Codex agent">
+    <header class="agent-create-panel-header">
+      <h3 class="agent-create-panel-title">
+        "New"
+        "Codex"
+        "agent"
+      <ol class="agent-create-steps" data-testid="agent-create-steps">
+        <li class="agent-create-step">
+          "Install"
+        <li class="agent-create-step agent-create-step--current" aria-current="step">
+          "Create"
+    <div data-testid="agent-create-form" data-template="Codex" data-runtime="host" data-deciding="false">
+      <button>
+        "form-cancel"
+      <button>
+        "form-busy"
+      <button>
+        "form-created"
+  call probePrereqs [false]
+  call recheckInstalled []
+  call InstallStart [{"providerId":"codex"}]
+  call ListIdentityAccounts [{}]
