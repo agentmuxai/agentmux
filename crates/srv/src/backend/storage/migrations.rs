@@ -2245,7 +2245,7 @@ pub fn run_identity_store_schema(conn: &Connection) -> Result<(), StoreError> {
         "ALTER TABLE db_work_queue ADD COLUMN created_by_uid TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE db_cron_jobs ADD COLUMN created_by_uid TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE db_bundle_versions ADD COLUMN written_by_uid TEXT NOT NULL DEFAULT ''",
-    ].iter().chain(super::cron::JOB_TABLES.iter()) {
+    ].iter().chain(super::cron::JOB_TABLES.iter()).chain(super::vault::VAULT_ALTERS.iter()) {
         if let Err(e) = conn.execute_batch(stmt) {
             let msg = e.to_string();
             if !msg.contains("duplicate column") {

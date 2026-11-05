@@ -17,6 +17,7 @@ const entry = (fields: Record<string, string>): VaultEntryInfo => ({
     kind: "api-key",
     section: "api-keys",
     label: "Stripe",
+    vault_id: "personal",
     fields,
     tags: [],
     parts_set: ["value"],

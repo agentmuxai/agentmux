@@ -369,7 +369,8 @@ pub(crate) const VAULT_TOOL: &str = r#"{
       "fields":    { "type": "object", "additionalProperties": { "type": "string" }, "description": "generate: the entry's plain fields: a login's site and username, an api-key's service and env_name" },
       "rules":     { "type": "object", "description": "generate, rotate: how the value is made (default 20 characters from letters, digits and -_.!@#%^*, at least one of each, no look-alikes)", "properties": { "passwordrules": { "type": "string", "description": "a site's rules, e.g. minlength: 16; maxlength: 32; required: lower; required: digit; allowed: [-_]" }, "length": { "type": "integer", "description": "characters, 8 to 128" }, "maxlength": { "type": "integer", "description": "a field's maxlength, which caps the length; words are refused when they could run past it" }, "words": { "type": "integer", "description": "6 to 12 words instead of characters, for a value a person must type (not with passwordrules)" } } },
       "expires":   { "type": "string", "description": "generate: the date the value stops working, YYYY-MM-DD, if you know it" },
-      "wait_secs": { "type": "integer", "description": "request: how long to wait for the person, in seconds (default 300, at most 600; 0 returns at once with the request's id)" }
+      "wait_secs": { "type": "integer", "description": "request: how long to wait for the person, in seconds (default 300, at most 600; 0 returns at once with the request's id)" },
+      "vault":     { "type": "string", "description": "request, generate: the Vault to keep the entry in, by name (list shows each entry's Vault); default the first Vault you may use. You see only the Vaults the person made open to you" }
     },
     "required": ["action"]
   }

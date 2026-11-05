@@ -25,8 +25,21 @@ pub(super) const VAULT_SCHEMA: &str = "
         sealed       BLOB NOT NULL,
         created_at   INTEGER NOT NULL DEFAULT 0,
         updated_at   INTEGER NOT NULL DEFAULT 0,
-        last_used_at INTEGER NOT NULL DEFAULT 0
+        last_used_at INTEGER NOT NULL DEFAULT 0,
+        vault_id     TEXT NOT NULL DEFAULT 'personal'
     );
+    -- The person's Vaults on this machine: each entry belongs to exactly one. `agents` is who may
+    -- use its entries: `all`, `none`, or `named` with `agent_ids` a JSON array of agent ids.
+    -- `personal` is today's Vault, always there, and can't be deleted.
+    CREATE TABLE IF NOT EXISTS db_vaults (
+        id         TEXT PRIMARY KEY,
+        name       TEXT NOT NULL,
+        agents     TEXT NOT NULL DEFAULT 'all',
+        agent_ids  TEXT NOT NULL DEFAULT '[]',
+        position   INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL DEFAULT 0
+    );
+    INSERT OR IGNORE INTO db_vaults (id, name, agents, position) VALUES ('personal', 'Personal', 'all', 0);
     CREATE TABLE IF NOT EXISTS db_vault_activity (
         seq         INTEGER PRIMARY KEY AUTOINCREMENT,
         at          INTEGER NOT NULL,
@@ -92,6 +105,12 @@ pub(super) const VAULT_SCHEMA: &str = "
     );
 ";
 
+/// Columns added after the Vault's tables first shipped, applied like the identity store's others.
+pub(super) const VAULT_ALTERS: [&str; 1] = [
+    // Several Vaults: every entry made before belongs to `personal`.
+    "ALTER TABLE db_vault_entries ADD COLUMN vault_id TEXT NOT NULL DEFAULT 'personal'",
+];
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct VaultRow {
     pub id: String,
@@ -105,7 +124,25 @@ pub struct VaultRow {
     pub created_at: i64,
     pub updated_at: i64,
     pub last_used_at: i64,
+    /// The Vault the entry belongs to (`db_vaults.id`).
+    pub vault_id: String,
 }
+
+/// A Vault of the person's on this machine.
+#[derive(Debug, Clone, PartialEq)]
+pub struct VaultInfoRow {
+    pub id: String,
+    pub name: String,
+    /// `all`, `none` or `named`.
+    pub agents: String,
+    /// With `named`: the agents' ids, a JSON array.
+    pub agent_ids: String,
+    pub position: i64,
+    pub created_at: i64,
+}
+
+/// The Vault every entry made before Vaults existed belongs to.
+pub const PERSONAL_VAULT: &str = "personal";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct VaultActivityRow {
@@ -120,7 +157,7 @@ pub struct VaultActivityRow {
     pub outcome: String,
 }
 
-const COLUMNS: &str = "id, kind, label, fields, tags, sealed, created_at, updated_at, last_used_at";
+const COLUMNS: &str = "id, kind, label, fields, tags, sealed, created_at, updated_at, last_used_at, vault_id";
 
 fn row_of(r: &rusqlite::Row<'_>) -> rusqlite::Result<VaultRow> {
     Ok(VaultRow {
@@ -133,15 +170,20 @@ fn row_of(r: &rusqlite::Row<'_>) -> rusqlite::Result<VaultRow> {
         created_at: r.get(6)?,
         updated_at: r.get(7)?,
         last_used_at: r.get(8)?,
+        vault_id: r.get(9)?,
     })
+}
+
+fn vault_of(r: &rusqlite::Row<'_>) -> rusqlite::Result<VaultInfoRow> {
+    Ok(VaultInfoRow { id: r.get(0)?, name: r.get(1)?, agents: r.get(2)?, agent_ids: r.get(3)?, position: r.get(4)?, created_at: r.get(5)? })
 }
 
 impl Store {
     pub fn vault_insert(&self, row: &VaultRow) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            &format!("INSERT INTO db_vault_entries ({COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"),
-            params![row.id, row.kind, row.label, row.fields, row.tags, row.sealed, row.created_at, row.updated_at, row.last_used_at],
+            &format!("INSERT INTO db_vault_entries ({COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)"),
+            params![row.id, row.kind, row.label, row.fields, row.tags, row.sealed, row.created_at, row.updated_at, row.last_used_at, row.vault_id],
         )?;
         Ok(())
     }
@@ -272,6 +314,57 @@ impl Store {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    /// The person's Vaults, in their order.
+    pub fn vaults(&self) -> Result<Vec<VaultInfoRow>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT id, name, agents, agent_ids, position, created_at FROM db_vaults ORDER BY position, created_at, id")?;
+        let rows = stmt.query_map([], vault_of)?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    pub fn vault_info(&self, id: &str) -> Result<Option<VaultInfoRow>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        Ok(conn
+            .query_row("SELECT id, name, agents, agent_ids, position, created_at FROM db_vaults WHERE id = ?1", params![id], vault_of)
+            .optional()?)
+    }
+
+    /// Adds a Vault after the others.
+    pub fn vault_add(&self, v: &VaultInfoRow) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO db_vaults (id, name, agents, agent_ids, position, created_at) \
+             VALUES (?1, ?2, ?3, ?4, COALESCE((SELECT MAX(position) + 1 FROM db_vaults), 0), ?5)",
+            params![v.id, v.name, v.agents, v.agent_ids, v.created_at],
+        )?;
+        Ok(())
+    }
+
+    /// Renames a Vault and sets who may use it. False if there is no such Vault.
+    pub fn vault_set(&self, id: &str, name: &str, agents: &str, agent_ids: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        Ok(conn.execute("UPDATE db_vaults SET name = ?2, agents = ?3, agent_ids = ?4 WHERE id = ?1", params![id, name, agents, agent_ids])? > 0)
+    }
+
+    /// Removes an empty Vault. False if it still holds entries or there is no such Vault.
+    pub fn vault_remove(&self, id: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let tx = conn.unchecked_transaction()?;
+        let held: i64 = tx.query_row("SELECT COUNT(*) FROM db_vault_entries WHERE vault_id = ?1", params![id], |r| r.get(0))?;
+        if held > 0 {
+            return Ok(false);
+        }
+        let n = tx.execute("DELETE FROM db_vaults WHERE id = ?1", params![id])?;
+        tx.commit()?;
+        Ok(n > 0)
+    }
+
+    /// Puts an entry in another Vault, keeping its id, versions and grants. False if there is no such entry.
+    pub fn vault_move_entry(&self, entry_id: &str, vault_id: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        Ok(conn.execute("UPDATE db_vault_entries SET vault_id = ?2 WHERE id = ?1", params![entry_id, vault_id])? > 0)
+    }
+
     pub fn vault_count(&self) -> Result<i64, StoreError> {
         let conn = self.conn.lock().unwrap();
         Ok(conn.query_row("SELECT COUNT(*) FROM db_vault_entries", [], |r| r.get(0))?)
@@ -291,8 +384,8 @@ impl Store {
         let tx = conn.unchecked_transaction()?;
         for row in inserts {
             tx.execute(
-                &format!("INSERT INTO db_vault_entries ({COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"),
-                params![row.id, row.kind, row.label, row.fields, row.tags, row.sealed, row.created_at, row.updated_at, row.last_used_at],
+                &format!("INSERT INTO db_vault_entries ({COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)"),
+                params![row.id, row.kind, row.label, row.fields, row.tags, row.sealed, row.created_at, row.updated_at, row.last_used_at, row.vault_id],
             )?;
         }
         for row in updates {
@@ -423,6 +516,7 @@ mod tests {
             created_at: 1,
             updated_at: 1,
             last_used_at: 0,
+            vault_id: PERSONAL_VAULT.into(),
         }
     }
 

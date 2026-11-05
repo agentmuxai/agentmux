@@ -296,8 +296,8 @@ pub(super) async fn inject(
     let agent = agent_of(state, agent_block_id, auth, "a Vault secret")?;
     let mut targets: Vec<(Delivery, FillTarget)> = Vec::new();
     for (delivery, entry) in wanted {
-        let store = state.identity_store.clone();
-        let target = tokio::task::spawn_blocking(move || vault::command_target(&store, &entry))
+        let (store, who) = (state.identity_store.clone(), agent.clone());
+        let target = tokio::task::spawn_blocking(move || vault::command_target(&store, &entry, Some(&who)))
             .await
             .map_err(|e| refuse(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
             .map_err(|e| refuse(StatusCode::BAD_REQUEST, e))?;

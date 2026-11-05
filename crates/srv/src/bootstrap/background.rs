@@ -35,13 +35,7 @@ pub fn spawn_background_subsystems(
     identity_store: &Arc<Store>,
     work_store: &Arc<Store>,
 ) -> BackgroundSubsystems {
-    // Agents' cargo waits for the host-wide build slot (build_slot.rs).
-    std::thread::spawn(|| match agentmux_common::build_slot::install_for_current_user() {
-        Ok(done) if !done.foreign.is_empty() => tracing::warn!(files = ?done.foreign, "build slot: left a cargo that is not ours in place"),
-        Ok(done) if !done.written.is_empty() => tracing::info!(files = ?done.written, "build slot installed"),
-        Ok(_) => {}
-        Err(e) => tracing::warn!(error = %e, "build slot: not installed"),
-    });
+    install_build_slot();
 
     // Event infrastructure
     let event_bus = Arc::new(EventBus::new());
@@ -74,6 +68,66 @@ pub fn spawn_background_subsystems(
     // SPEC_FILE_BROWSER_PANE_2026_10_01.md §6.3.
     let files_watcher = backend::files_watcher::FilesWatcher::new(fs_watch_pool.clone(), broker.clone());
 
+    deploy_shell_integration();
+
+    let config_watcher = start_config_watchers(&fs_watch_pool, &event_bus, &broker);
+
+    spawn_sampling_loops(mstore, filestore, work_store, &event_bus, &broker, &config_watcher);
+
+    let (reactive_handler, poller) = set_up_reactive_handler(mstore);
+
+    start_cloud_services(mstore, id_store, &event_bus, &broker, &config_watcher);
+
+    super::messaging_bridges::start_messaging_bridges(&config_watcher);
+
+    // Set up docsite directory
+    if let Some(app_path) = base::get_mux_app_path() {
+        let docsite_dir = app_path.join("docsite");
+        docsite::set_docsite_dir(docsite_dir);
+    }
+
+    // Local MessageBus for inter-agent communication
+    let messagebus = Arc::new(backend::messagebus::MessageBus::new());
+
+    let subagent_watcher = start_subagent_watcher(mstore, id_store, identity_store, &broker, &event_bus);
+
+    // History service — discovers and indexes past CLI agent conversations
+    let history_service = Arc::new(backend::history::HistoryService::new());
+    history_service.warm_in_background();
+
+    warm_agent_clis(mstore);
+
+    start_session_archiver(mstore, filestore);
+
+    BackgroundSubsystems {
+        event_bus,
+        broker,
+        editor_file_watcher,
+        media_file_watcher,
+        files_watcher,
+        fs_watch_pool,
+        config_watcher,
+        reactive_handler,
+        poller,
+        messagebus,
+        subagent_watcher,
+        history_service,
+    }
+}
+
+
+/// Agents' cargo waits for the host-wide build slot (build_slot.rs).
+fn install_build_slot() {
+    std::thread::spawn(|| match agentmux_common::build_slot::install_for_current_user() {
+        Ok(done) if !done.foreign.is_empty() => tracing::warn!(files = ?done.foreign, "build slot: left a cargo that is not ours in place"),
+        Ok(done) if !done.written.is_empty() => tracing::info!(files = ?done.written, "build slot installed"),
+        Ok(_) => {}
+        Err(e) => tracing::warn!(error = %e, "build slot: not installed"),
+    });
+}
+
+/// Deploys the shell integration scripts at startup, whichever pane is opened first.
+fn deploy_shell_integration() {
     // Deploy shell integration scripts (muxlog.mjs/muxspect.mjs + rcfiles)
     // unconditionally at startup, not opportunistically from a specific
     // controller's spawn path. Previously the only call site was
@@ -93,7 +147,14 @@ pub fn spawn_background_subsystems(
     //     tell users to invoke directly, which must stay predictable.
     backend::shellintegration::deploy_scripts(&backend::shellintegration::integration_base());
     backend::shellintegration::deploy_scripts(&backend::shellintegration::documented_shell_root());
+}
 
+/// Creates the config state and starts the watchers for settings, widgets and the start page.
+fn start_config_watchers(
+    fs_watch_pool: &Arc<backend::fs_watch::FsWatchPool>,
+    event_bus: &Arc<EventBus>,
+    broker: &Arc<Broker>,
+) -> Arc<wconfig::ConfigState> {
     // Config watcher (created before sysinfo loop so it can read telemetry:interval)
     let config_watcher = Arc::new(wconfig::ConfigState::with_config(wconfig::build_default_config()));
 
@@ -128,7 +189,18 @@ pub fn spawn_background_subsystems(
         config_watcher.clone(),
         event_bus.clone(),
     );
+    config_watcher
+}
 
+/// Starts the sampling and watching loops that need no app state.
+fn spawn_sampling_loops(
+    mstore: &Arc<Store>,
+    filestore: &Arc<FileStore>,
+    work_store: &Arc<Store>,
+    event_bus: &Arc<EventBus>,
+    broker: &Arc<Broker>,
+    config_watcher: &Arc<wconfig::ConfigState>,
+) {
     // Say in the log when the runtime stops running tasks, and for how long.
     backend::stall_watch::start();
 
@@ -199,7 +271,10 @@ pub fn spawn_background_subsystems(
     tokio::spawn(async move {
         backend::work_facts::git::run_git_refresh_loop(work_facts_mstore).await;
     });
+}
 
+/// Wires the global reactive handler to the controllers and creates its poller.
+fn set_up_reactive_handler(mstore: &Arc<Store>) -> (&'static reactive::ReactiveHandler, Arc<Poller>) {
     // Reactive handler (global singleton) + poller
     // Before the handler records anything: every jekt audit entry is also kept in a file.
     backend::reactive::audit_store::install_for_this_srv();
@@ -274,7 +349,17 @@ pub fn spawn_background_subsystems(
         },
         reactive_handler,
     ));
+    (reactive_handler, poller)
+}
 
+/// Starts cloud delivery and the services that follow the account.
+fn start_cloud_services(
+    mstore: &Arc<Store>,
+    id_store: &Arc<Store>,
+    event_bus: &Arc<EventBus>,
+    broker: &Arc<Broker>,
+    config_watcher: &Arc<wconfig::ConfigState>,
+) {
     // Cloud delivery's state for the UI, the sign-in notification and the
     // agents' pause/resume notes. Reads nothing from the keychain itself.
     crate::muxbus::delivery_status::install(event_bus.clone(), broker.clone());
@@ -352,171 +437,16 @@ pub fn spawn_background_subsystems(
     crate::backend::upgrade_notice::init(mstore.clone());
     // What the last quit stopped of the agents' background work, to tell them.
     crate::backend::background_work::init();
+}
 
-    // Discord messaging bridge — connects to Discord Gateway if configured.
-    // Set messaging:discord:enabled + messaging:discord:token in settings.json to activate.
-    {
-        let settings = config_watcher.get_settings();
-        if settings.messaging_discord_enabled {
-            match settings.messaging_discord_token.clone() {
-                Some(token) if !token.is_empty() => {
-                    messaging::discord::DiscordBridge::init_global(
-                        messaging::discord::DiscordConfig {
-                            token,
-                            channel_id: settings.messaging_discord_channel.clone(),
-                            target_agent: settings.messaging_discord_target.clone(),
-                            guild_id: settings.messaging_discord_guild.clone(),
-                        },
-                        reqwest::Client::new(),
-                    );
-                }
-                _ => {
-                    tracing::warn!(
-                        "discord bridge: enabled but messaging:discord:token is not set in settings.json"
-                    );
-                }
-            }
-        }
-    }
-
-    // Telegram messaging bridge — long-polls getUpdates if configured.
-    // Set messaging:telegram:enabled + messaging:telegram:token in settings.json to activate.
-    {
-        let settings = config_watcher.get_settings();
-        if settings.messaging_telegram_enabled {
-            match settings.messaging_telegram_token.clone() {
-                Some(token) if !token.is_empty() => {
-                    let allowed_chat_ids = settings
-                        .messaging_telegram_allowed_chats
-                        .split(',')
-                        .filter_map(|s| s.trim().parse::<i64>().ok())
-                        .collect::<Vec<_>>();
-                    let default_chat_id = settings
-                        .messaging_telegram_default_chat
-                        .as_deref()
-                        .and_then(|s| s.parse::<i64>().ok());
-                    messaging::telegram::TelegramBridge::init_global(
-                        messaging::telegram::TelegramConfig {
-                            token,
-                            allowed_chat_ids,
-                            default_chat_id,
-                            target_agent: settings.messaging_telegram_target.clone(),
-                        },
-                        reqwest::Client::new(),
-                    );
-                }
-                _ => {
-                    tracing::warn!(
-                        "telegram bridge: enabled but messaging:telegram:token is not set in settings.json"
-                    );
-                }
-            }
-        }
-    }
-
-    // Slack messaging bridge — opens a Socket Mode connection if configured.
-    // Set messaging:slack:enabled + messaging:slack:bot_token + messaging:slack:app_token
-    // in settings.json to activate.
-    {
-        let settings = config_watcher.get_settings();
-        if settings.messaging_slack_enabled {
-            match (
-                settings.messaging_slack_bot_token.clone(),
-                settings.messaging_slack_app_token.clone(),
-            ) {
-                (Some(bot_token), Some(app_token))
-                    if !bot_token.is_empty() && !app_token.is_empty() =>
-                {
-                    messaging::slack::SlackBridge::init_global(
-                        messaging::slack::SlackConfig {
-                            bot_token,
-                            app_token,
-                            channel_id: settings.messaging_slack_channel.clone(),
-                            target_agent: settings.messaging_slack_target.clone(),
-                        },
-                        reqwest::Client::new(),
-                    );
-                }
-                _ => {
-                    tracing::warn!(
-                        "slack bridge: enabled but messaging:slack:bot_token and/or \
-                         messaging:slack:app_token is not set in settings.json"
-                    );
-                }
-            }
-        }
-    }
-
-    // WhatsApp Cloud API messaging bridge — outbound send + inbound webhook
-    // receiver. Unlike Discord/Telegram/Slack there is no bridge-managed
-    // network connection to open at startup: inbound delivery is passive
-    // HTTP (the GET/POST /webhook/whatsapp routes, registered unauthenticated
-    // in server/mod.rs — Meta cannot supply X-AuthKey), reachable only once
-    // the operator's own tunnel is up and the callback URL is registered in
-    // Meta's App Dashboard, both manual one-time steps this process does not
-    // perform (v1 does not manage a tunnel subprocess — see
-    // messaging/whatsapp/mod.rs). Set messaging:whatsapp:enabled +
-    // access_token/app_secret/webhook_verify_token in settings.json to activate.
-    // See docs/specs/SPEC_MESSAGING_INTEGRATION_WHATSAPP_2026_07_07.md.
-    {
-        let settings = config_watcher.get_settings();
-        if settings.messaging_whatsapp_enabled {
-            match (
-                settings.messaging_whatsapp_access_token.clone(),
-                settings.messaging_whatsapp_app_secret.clone(),
-                settings.messaging_whatsapp_webhook_verify_token.clone(),
-            ) {
-                (Some(token), Some(secret), Some(verify_token))
-                    if !token.is_empty() && !secret.is_empty() && !verify_token.is_empty() =>
-                {
-                    messaging::whatsapp::WhatsAppBridge::init_global(
-                        messaging::whatsapp::WhatsAppConfig {
-                            phone_number_id: settings.messaging_whatsapp_phone_number_id.clone(),
-                            access_token: token,
-                            app_secret: secret,
-                            webhook_verify_token: verify_token,
-                            target_agent: settings.messaging_whatsapp_target.clone(),
-                            fallback_template: settings.messaging_whatsapp_fallback_template.clone(),
-                            fallback_template_lang: settings
-                                .messaging_whatsapp_fallback_template_lang
-                                .clone()
-                                .unwrap_or_else(|| "en_US".to_string()),
-                        },
-                        reqwest::Client::new(),
-                    );
-                    if settings.messaging_whatsapp_tunnel_domain.is_empty() {
-                        tracing::warn!(
-                            "whatsapp bridge: enabled but messaging:whatsapp:tunnel_domain is not set — \
-                             point your own tunnel at this instance's webhook port and register \
-                             https://<your-domain>/webhook/whatsapp in Meta App Dashboard > WhatsApp > Configuration"
-                        );
-                    } else {
-                        tracing::info!(
-                            "whatsapp bridge: initialized — webhook callback = https://{}/webhook/whatsapp \
-                             — verify this is registered in Meta App Dashboard > WhatsApp > Configuration \
-                             (v1 does not manage the tunnel subprocess; ensure it's already running)",
-                            settings.messaging_whatsapp_tunnel_domain
-                        );
-                    }
-                }
-                _ => {
-                    tracing::warn!(
-                        "whatsapp bridge: enabled but one of messaging:whatsapp:{{access_token,app_secret,webhook_verify_token}} is not set in settings.json"
-                    );
-                }
-            }
-        }
-    }
-
-    // Set up docsite directory
-    if let Some(app_path) = base::get_mux_app_path() {
-        let docsite_dir = app_path.join("docsite");
-        docsite::set_docsite_dir(docsite_dir);
-    }
-
-    // Local MessageBus for inter-agent communication
-    let messagebus = Arc::new(backend::messagebus::MessageBus::new());
-
+/// Starts the watcher for subagents spawned by Claude Code sessions.
+fn start_subagent_watcher(
+    mstore: &Arc<Store>,
+    id_store: &Arc<Store>,
+    identity_store: &Arc<Store>,
+    broker: &Arc<Broker>,
+    event_bus: &Arc<EventBus>,
+) -> Arc<backend::subagent_watcher::SubagentWatcher> {
     // Subagent watcher — monitors Claude Code session dirs for spawned subagents
     let subagent_watcher = backend::subagent_watcher::SubagentWatcher::spawn(
         event_bus.clone(),
@@ -533,11 +463,11 @@ pub fn spawn_background_subsystems(
     // 2026_07_20 Phase A) can reach it without threading an Arc through
     // PersistentSubprocessController::new and every one of its callers.
     backend::subagent_watcher::set_global(subagent_watcher.clone());
+    subagent_watcher
+}
 
-    // History service — discovers and indexes past CLI agent conversations
-    let history_service = Arc::new(backend::history::HistoryService::new());
-    history_service.warm_in_background();
-
+/// Installs the pinned CLI of every provider the user's agents use, in the background.
+fn warm_agent_clis(mstore: &Arc<Store>) {
     // Install the pinned CLI of every provider the user's own agents use, in
     // the background, so the first open after a pin bump doesn't wait on npm
     // (SPEC_AGENT_OPEN_LATENCY_2026_09_27.md §4.1). Templates don't count:
@@ -561,7 +491,10 @@ pub fn spawn_background_subsystems(
             (None, _) => tracing::warn!("cli warm-up: no data paths; skipped"),
         }
     }
+}
 
+/// Starts the sweeps that archive sessions inactive for a week.
+fn start_session_archiver(mstore: &Arc<Store>, filestore: &Arc<FileStore>) {
     // Session archiver — auto-archive sessions inactive for >7 days. Archives are kept forever.
     // Skip if home directory can't be determined (would otherwise fall back to a
     // relative path and create archives under the current working directory).
@@ -583,21 +516,6 @@ pub fn spawn_background_subsystems(
         }));
     } else {
         tracing::warn!("session archiver: home dir unavailable, archiver disabled");
-    }
-
-    BackgroundSubsystems {
-        event_bus,
-        broker,
-        editor_file_watcher,
-        media_file_watcher,
-        files_watcher,
-        fs_watch_pool,
-        config_watcher,
-        reactive_handler,
-        poller,
-        messagebus,
-        subagent_watcher,
-        history_service,
     }
 }
 

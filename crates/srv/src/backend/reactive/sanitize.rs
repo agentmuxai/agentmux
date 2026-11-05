@@ -427,6 +427,15 @@ pub fn jekt_trust(
     }
 }
 
+/// How a delivery travelled and how far its sender was proven, for its audit line: the delivery tier (`host`, `channel`,
+/// `lan` or `wan`) and the marker's `TRUST=` label, from the same function the marker is composed with.
+pub fn delivery_how(req: &super::types::InjectionRequest) -> (String, String) {
+    let tier = req.delivery_tier.as_deref().unwrap_or("host");
+    let wan_pinned = tier == "wan" && req.wan_instance.is_some() && req.wan_verified == Some(true);
+    let trust = jekt_trust(tier, req.sig_verified, req.lan_verified, req.channel_verified, wan_pinned);
+    (tier.to_string(), trust.label().to_string())
+}
+
 /// Where a jekt came from, as the record of it stores it (`message_origin`),
 /// from the same typed values the marker is composed from. Nothing is read
 /// from the body.

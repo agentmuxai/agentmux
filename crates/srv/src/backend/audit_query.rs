@@ -14,6 +14,7 @@ mod activity;
 mod jekt_file;
 pub mod message_stats;
 mod ordered;
+mod provenance;
 mod segments;
 mod totals;
 
@@ -257,6 +258,7 @@ fn from_audit_in(prefix: char, at: u64, e: &AuditLogEntry, ctx: &Ctx) -> AuditEn
         reason: e.reason.clone(),
         cost: None,
         links: AuditLinks::default(),
+        provenance: provenance::of(e),
     };
     match e.event_kind.as_str() {
         "register" | "unregister" | "swept" => AuditEntry {
@@ -287,6 +289,14 @@ fn from_audit_in(prefix: char, at: u64, e: &AuditLogEntry, ctx: &Ctx) -> AuditEn
                 ..blank
             }
         }
+        // The sender's half of a message: a row of its own, and joined to the receiver's by the query.
+        crate::backend::reactive::sent_audit::SENT => AuditEntry {
+            kind: KIND_JEKT.to_string(),
+            from: from.map(|f| end_of(f, ts_ms, None, ctx)),
+            to: Some(end_of(&e.target_agent, ts_ms, None, ctx)),
+            summary: format!("{who} → {to}: sent, {} bytes", e.message_length),
+            ..blank
+        },
         other => {
             let cli = other == "cli_native";
             let status = if !e.success {
@@ -409,6 +419,7 @@ pub fn query<'a>(src: &'a Sources<'a>, req: &AuditQueryReq) -> Result<AuditQuery
     ];
 
     let mut entries: Vec<AuditEntry> = Vec::new();
+    let mut joiner = provenance::Joiner::default();
     let mut last: [Option<(u64, String)>; STORES] = std::array::from_fn(|i| place(i).last);
     let mut more = false;
     loop {
@@ -423,13 +434,14 @@ pub fn query<'a>(src: &'a Sources<'a>, req: &AuditQueryReq) -> Result<AuditQuery
             }
         }
         let Some((i, _)) = newest else { break };
-        if entries.len() == limit {
+        // A full page still takes the sender's half of a message it holds the other half of.
+        if entries.len() == limit && !stores[i].peek().is_some_and(|e| joiner.completes(e)) {
             more = true;
             break;
         }
         if let Some(entry) = stores[i].pop() {
             last[i] = Some((entry.ts_ms, entry.id.clone()));
-            entries.push(entry);
+            joiner.push(&mut entries, entry);
         }
     }
     let next_cursor = more.then(|| {
