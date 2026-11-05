@@ -28,6 +28,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let mut profiles = store::read_profiles(&path)?;
             let created = store::add(&mut profiles, &req.name, req.color.as_deref(), agentmux_common::time::now_ms())?;
             store::write_profiles(&path, &profiles)?;
+            state.broker.publish_event::<crate::backend::mps_events::BrowserProfilesChanged>(&(), vec![], 0);
             Ok(result(&state, profiles, Some(created)).await)
         }
     });
@@ -42,6 +43,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let mut profiles = store::read_profiles(&path)?;
             store::update(&mut profiles, &req.id, req.name.as_deref(), req.color.as_deref(), req.agents_allowed)?;
             store::write_profiles(&path, &profiles)?;
+            state.broker.publish_event::<crate::backend::mps_events::BrowserProfilesChanged>(&(), vec![], 0);
             Ok(result(&state, profiles, None).await)
         }
     });
@@ -75,6 +77,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             };
             // The host drops the jar and its folder on this push.
             crate::server::browser_host_sync::push(&state).await;
+            state.broker.publish_event::<crate::backend::mps_events::BrowserProfilesChanged>(&(), vec![], 0);
             Ok(result(&state, profiles, None).await)
         }
     });

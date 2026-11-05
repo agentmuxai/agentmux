@@ -1,0 +1,50 @@
+-- closed
+trigger "mystery-mode · Sonnet" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=false width=- border=3px solid var(--main-text-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: mystery-mode · Sonnet
+  panel: closed
+-- opened
+trigger "mystery-mode · Sonnet" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=true width=- border=3px solid var(--main-text-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: mystery-mode · Sonnet
+  status kind=agrees ["Changes apply on the next turn.",""] restart[hidden=true disabled=true tab=-1]
+  [mode]
+  - Bypass (no prompts) {active}
+  - Auto {}
+  - Accept Edits {}
+  - Plan {}
+  - Default {}
+  [model]
+  - Opus {}
+  - Sonnet {current}
+  - Haiku {}
+  note (placeholder): Running model: shown after the first reply
+  [effort] note: Not applied — no-such-provider has no effort setting
+  - low {disabled}
+  - medium {disabled}
+  - high {disabled}
+  - xhigh {disabled}
+  - max {disabled}
+patchRuntime(block-1, undefined, {"model":"haiku"}, undefined) meta={"agent:runtime":{"model":"sonnet","permissionMode":"mystery-mode","effort":"mystery-effort"}}
+-- a model id that is not in the stock list
+trigger "Default · claude-old-model" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=true width=- border=3px solid var(--main-text-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Default · claude-old-model
+  status kind=agrees ["Changes apply on the next turn.",""] restart[hidden=true disabled=true tab=-1]
+  [mode]
+  - Bypass (no prompts) {}
+  - Auto {}
+  - Accept Edits {}
+  - Plan {}
+  - Default {current}
+  [model]
+  - Opus {}
+  - Sonnet {}
+  - Haiku {active}
+  note (placeholder): Running model: shown after the first reply
+  [effort] note: Not applied — no-such-provider has no effort setting
+  - low {disabled}
+  - medium {disabled}
+  - high {current,disabled}
+  - xhigh {disabled}
+  - max {disabled}

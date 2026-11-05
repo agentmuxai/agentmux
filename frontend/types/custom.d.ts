@@ -350,6 +350,8 @@ declare global {
         }): Promise<void>;
         /** Regions of this window where app UI overlaps native panes, so the host clips them. */
         setOverlayClip(rects: { x: number; y: number; w: number; h: number }[], windowLabel: string): Promise<void>;
+        /** Show (an object) or remove (null) the pane's size badge, drawn inside its page (Views panes on Windows). */
+        setBadge?(blockId: string, badge: { text: string; color: string; background: string; border: string } | null): Promise<void>;
         /** Answer a camera/microphone request (`pane-media-permission-request`). */
         respondMediaPermission(requestId: number, allow: boolean): Promise<void>;
         /** Stop a pane's camera/microphone capture. */
@@ -705,6 +707,8 @@ declare global {
             isLastTab?: boolean;
             /** A pane or pane-tab drag: the hook only reports Escape (`tabdrag:escape-pressed`). */
             escapeOnly?: boolean;
+            /** With `escapeOnly`: the hook also moves the live-follow picture while the cursor is outside every window. */
+            paneFollow?: boolean;
         }) => Promise<void>;
         /** Belt-and-suspenders hook teardown at dragend — the hook
          *  self-uninstalls on mouseup/ESC, but a leaked WH_MOUSE_LL hook
@@ -722,8 +726,8 @@ declare global {
             /** Cursor to the window's top-left. */
             offsetX: number;
             offsetY: number;
-            /** The viewport y below which the picture shows. */
-            tearLineY: number;
+            /** The viewport y below which the picture shows; none: outside every AgentMux window (a pane). */
+            tearLineY?: number;
         }) => Promise<void>;
         /** Drop the picture now. Idempotent. */
         liveFollowEnd: () => Promise<void>;
@@ -1086,6 +1090,8 @@ declare global {
         cefVersion?: string;
         channel?: string;
         platform?: string;
+        /** Windows only in practice: "views" when browser panes are CEF Views overlays (they hide whole under a menu). */
+        paneBackend?: "views" | "hwnd";
         arch?: string;
     }
 

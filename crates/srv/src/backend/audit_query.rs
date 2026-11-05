@@ -49,7 +49,10 @@ pub struct Ctx<'a> {
 
 /// The stores read.
 pub struct Sources<'a> {
+    /// The account's shared audit file.
     pub jekt_file: Option<&'a Path>,
+    /// This srv's own audit file, where it kept its rows while it did not use the shared folder.
+    pub own_file: Option<&'a Path>,
     pub segments: Option<&'a FileStore>,
     pub ctx: Ctx<'a>,
 }
@@ -64,13 +67,15 @@ pub(crate) fn same_agent(a: &str, b: &str) -> bool {
     !a.is_empty() && a == b
 }
 
-/// Where in the query a page stopped, in each store: the last entry given from it, and for the audit file where
-/// reading starts again. (The two stores' entries are not in one sequence, so one position for both would repeat
+/// Where in the query a page stopped, in each store: the last entry given from it, and for an audit file where
+/// reading starts again. (The stores' entries are not in one sequence, so one position for all would repeat
 /// or lose entries.)
 struct Cursor {
     ledger: Option<(u64, String)>,
     jekt: Option<(u64, String)>,
     jekt_end: Option<u64>,
+    own: Option<(u64, String)>,
+    own_end: Option<u64>,
 }
 
 impl Cursor {
@@ -78,16 +83,20 @@ impl Cursor {
         let pair = |p: &Option<(u64, String)>| p.as_ref().map_or(("-".to_string(), String::new()), |(ts, id)| (ts.to_string(), id.clone()));
         let (lts, lid) = pair(&self.ledger);
         let (jts, jid) = pair(&self.jekt);
-        format!("3|{lts}|{lid}|{jts}|{jid}|{}", self.jekt_end.map_or("-".to_string(), |e| e.to_string()))
+        let (ots, oid) = pair(&self.own);
+        let end = |e: Option<u64>| e.map_or("-".to_string(), |e| e.to_string());
+        format!("4|{lts}|{lid}|{jts}|{jid}|{}|{ots}|{oid}|{}", end(self.jekt_end), end(self.own_end))
     }
 
     fn decode(text: &str) -> Result<Self, String> {
         let bad = || "audit.query: that cursor isn't one this query gave".to_string();
-        let mut parts = text.splitn(6, '|');
-        if parts.next() != Some("3") {
+        // Version 3 had no file of the srv's own.
+        let mut parts = text.splitn(9, '|');
+        let version = parts.next();
+        if version != Some("3") && version != Some("4") {
             return Err(bad());
         }
-        let mut pair = || -> Result<Option<(u64, String)>, String> {
+        let pair = |parts: &mut std::str::SplitN<'_, char>| -> Result<Option<(u64, String)>, String> {
             let ts = parts.next().ok_or_else(bad)?;
             let id = parts.next().ok_or_else(bad)?.to_string();
             if ts == "-" {
@@ -96,12 +105,20 @@ impl Cursor {
                 Ok(Some((ts.parse().map_err(|_| bad())?, id)))
             }
         };
-        let (ledger, jekt) = (pair()?, pair()?);
-        let jekt_end = match parts.next().ok_or_else(bad)? {
-            "-" => None,
-            n => Some(n.parse().map_err(|_| bad())?),
+        let (ledger, jekt) = (pair(&mut parts)?, pair(&mut parts)?);
+        let end = |parts: &mut std::str::SplitN<'_, char>| -> Result<Option<u64>, String> {
+            match parts.next().ok_or_else(bad)? {
+                "-" => Ok(None),
+                n => Ok(Some(n.parse().map_err(|_| bad())?)),
+            }
         };
-        Ok(Self { ledger, jekt, jekt_end })
+        let jekt_end = end(&mut parts)?;
+        if version == Some("3") {
+            return Ok(Self { ledger, jekt, jekt_end, own: None, own_end: None });
+        }
+        let own = pair(&mut parts)?;
+        let own_end = end(&mut parts)?;
+        Ok(Self { ledger, jekt, jekt_end, own, own_end })
     }
 }
 
@@ -174,8 +191,14 @@ fn end_of(name: &str, ts_ms: u64, block_id: Option<&str>, ctx: &Ctx) -> AuditEnd
 
 /// The entry for a line of the audit file, and the kind it is.
 fn from_audit(at: u64, e: &AuditLogEntry, ctx: &Ctx) -> AuditEntry {
+    from_audit_in('j', at, e, ctx)
+}
+
+/// `from_audit` for a line of the file whose entry ids start with `prefix` (a byte offset alone would name a line of the
+/// shared file and one of the srv's own file the same).
+fn from_audit_in(prefix: char, at: u64, e: &AuditLogEntry, ctx: &Ctx) -> AuditEntry {
     let ts_ms = e.timestamp;
-    let id = format!("j{at:016x}");
+    let id = format!("{prefix}{at:016x}");
     let from = e.source_agent.as_deref().filter(|s| !s.trim().is_empty());
     let who = from.map(route).unwrap_or_else(|| "unknown".to_string());
     let to = route(&e.target_agent);
@@ -248,19 +271,29 @@ fn from_audit(at: u64, e: &AuditLogEntry, ctx: &Ctx) -> AuditEntry {
     }
 }
 
-/// `a` before `b` in the list: newest first, then by id.
-fn newer(a: &AuditEntry, b: &AuditEntry) -> bool {
-    (a.ts_ms, &a.id) > (b.ts_ms, &b.id)
-}
-
-/// The audit file's entries that pass `filter`, newest first.
-fn jekt_stream<'a>(src: &'a Sources, filter: &'a Filter, cursor: Option<&Cursor>) -> ordered::Ordered<'a> {
+/// One audit file's entries that pass `filter`, newest first. `after` is the last entry the page before gave from it,
+/// `end` where reading starts again.
+fn file_stream<'a>(
+    path: Option<&'a Path>,
+    prefix: char,
+    src: &'a Sources,
+    filter: &'a Filter,
+    after: Option<(u64, String)>,
+    end: Option<u64>,
+) -> ordered::Ordered<'a> {
     let wants_any = [KIND_JEKT, KIND_ACTION, KIND_REGISTRY].iter().any(|k| filter.kinds.contains(*k));
-    let lines: Box<dyn Iterator<Item = _>> = match src.jekt_file.filter(|_| wants_any) {
-        Some(path) => Box::new(jekt_file::entries(path, cursor.and_then(|c| c.jekt_end))),
+    let lines: Box<dyn Iterator<Item = _>> = match path.filter(|_| wants_any) {
+        Some(path) => Box::new(jekt_file::entries(path, end)),
         None => Box::new(std::iter::empty()),
     };
-    ordered::Ordered::new(lines, move |at, e| from_audit(at, e, &src.ctx), move |e| filter.keep(e), filter.since, cursor.and_then(|c| c.jekt.clone()))
+    ordered::Ordered::new(lines, move |at, e| from_audit_in(prefix, at, e, &src.ctx), move |e| filter.keep(e), filter.since, after)
+}
+
+/// A store's place in the merge of a page.
+enum Pick {
+    Ledger,
+    Shared,
+    Own,
 }
 
 /// A page of the Audit.
@@ -279,34 +312,42 @@ pub fn query(src: &Sources, req: &AuditQueryReq) -> Result<AuditQueryResult, Str
     ledger.retain(|e| filter.keep(e) && past.as_ref().is_none_or(|(ts, id)| (e.ts_ms, e.id.as_str()) < (*ts, id.as_str())));
     ledger.sort_by(|a, b| (b.ts_ms, &b.id).cmp(&(a.ts_ms, &a.id)));
     let mut ledger = ledger.into_iter().peekable();
-    let mut jekts = jekt_stream(src, &filter, cursor.as_ref());
+    let mut jekts = file_stream(src.jekt_file, 'j', src, &filter, cursor.as_ref().and_then(|c| c.jekt.clone()), cursor.as_ref().and_then(|c| c.jekt_end));
+    let mut owns = file_stream(src.own_file, 'o', src, &filter, cursor.as_ref().and_then(|c| c.own.clone()), cursor.as_ref().and_then(|c| c.own_end));
 
     let mut entries: Vec<AuditEntry> = Vec::new();
     let mut ledger_last = past;
     let mut jekt_last = cursor.as_ref().and_then(|c| c.jekt.clone());
+    let mut own_last = cursor.as_ref().and_then(|c| c.own.clone());
     let mut more = false;
     loop {
-        let take_ledger = match (ledger.peek(), jekts.peek()) {
-            (None, None) => break,
-            (Some(_), None) => true,
-            (None, Some(_)) => false,
-            (Some(l), Some(j)) => newer(l, j),
-        };
+        // The newest entry waiting in any store goes next.
+        let key = |e: Option<&AuditEntry>| e.map(|e| (e.ts_ms, e.id.clone()));
+        let waiting = [(Pick::Ledger, key(ledger.peek())), (Pick::Shared, key(jekts.peek())), (Pick::Own, key(owns.peek()))];
+        let newest = waiting.into_iter().filter_map(|(p, k)| k.map(|k| (p, k))).reduce(|best, next| if next.1 > best.1 { next } else { best });
+        let Some((pick, _)) = newest else { break };
         if entries.len() == limit {
             more = true;
             break;
         }
-        if take_ledger {
-            if let Some(entry) = ledger.next() {
-                ledger_last = Some((entry.ts_ms, entry.id.clone()));
-                entries.push(entry);
-            }
-        } else if let Some(entry) = jekts.pop() {
-            jekt_last = Some((entry.ts_ms, entry.id.clone()));
-            entries.push(entry);
-        }
+        let entry = match pick {
+            Pick::Ledger => ledger.next().inspect(|e| ledger_last = Some((e.ts_ms, e.id.clone()))),
+            Pick::Shared => jekts.pop().inspect(|e| jekt_last = Some((e.ts_ms, e.id.clone()))),
+            Pick::Own => owns.pop().inspect(|e| own_last = Some((e.ts_ms, e.id.clone()))),
+        };
+        entries.extend(entry);
     }
-    let next_cursor = more.then(|| Cursor { ledger: ledger_last, jekt: jekt_last, jekt_end: jekts.resume(cursor.as_ref().and_then(|c| c.jekt_end)) }.encode());
+    let next_cursor = more.then(|| {
+        let c = cursor.as_ref();
+        Cursor {
+            ledger: ledger_last,
+            jekt: jekt_last,
+            jekt_end: jekts.resume(c.and_then(|c| c.jekt_end)),
+            own: own_last,
+            own_end: owns.resume(c.and_then(|c| c.own_end)),
+        }
+        .encode()
+    });
     let not_recorded = NOT_RECORDED.iter().filter(|k| filter.kinds.contains(**k)).map(|k| k.to_string()).collect();
     let totals = req.totals.unwrap_or(false).then(|| totals::of(src, &filter));
     Ok(AuditQueryResult { entries, next_cursor, not_recorded, totals })

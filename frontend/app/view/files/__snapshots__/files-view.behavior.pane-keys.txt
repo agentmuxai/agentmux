@@ -1,0 +1,8 @@
+no command: handled=false
+model.refresh()
+on the toolbar: handled=true
+in a text field: handled=false
+model.refresh()
+in the list: handled=true
+while renaming: handled=false
+an unknown command: handled=false

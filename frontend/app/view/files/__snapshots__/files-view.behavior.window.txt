@@ -1,0 +1,14 @@
+start: 33 rows f000..f032 height=7200px rowcount=301
+after the first resize: 26 rows f000..f025 height=7200px rowcount=301
+list.scrollTop = 2400
+scrolled to 2400: 26 rows f092..f117 height=7200px rowcount=301
+list.scrollTop = 2410
+scrolled 10 more: 26 rows f092..f117 height=7200px rowcount=301
+active descendant: null
+> a reveal request
+list.scrollTop = 5808
+selection={"names":["f250"],"focus":"f250","anchor":"f250"} range f234..f259 descendant=files-b1-row-250
+> the grid
+grid start: 21 tiles f000..f020 height=13200px
+list.scrollTop = 1320
+grid scrolled: 21 tiles f024..f044

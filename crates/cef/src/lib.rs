@@ -40,6 +40,7 @@ mod srv_ipc;
 mod memory_heartbeat;
 mod memory_pressure;
 mod browser_pane;
+mod pane_backend;
 mod credential_broker;
 mod memory_adoption;
 mod ssh_approval;

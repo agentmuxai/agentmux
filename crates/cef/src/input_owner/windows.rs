@@ -72,6 +72,9 @@ fn select(state: &Arc<AppState>, window: &str, owner: Owner) {
 /// window, no activation message will say so: its machine starts active.
 /// Posted, so the window's label is bound by the time it runs.
 pub fn window_hooked(hwnd: *mut std::ffi::c_void) {
+    if crate::pane_backend::views() {
+        return;
+    }
     let Some(state) = STATE.get() else { return };
     let mut task = WindowHookedTask::new(state.clone(), hwnd as isize);
     post_task(ThreadId::UI, Some(&mut task));
@@ -164,6 +167,11 @@ pub fn app_activation(hwnd: *mut std::ffi::c_void, active: bool, visible: bool) 
 }
 
 fn activation(hwnd: *mut std::ffi::c_void, active: bool, visible: bool, report_background: bool) {
+    // Views pane mode: the window delegate tells the Views adapter (`pane_backend`); both would
+    // drive the same per-window machine.
+    if crate::pane_backend::views() {
+        return;
+    }
     let Some(state) = STATE.get() else { return };
     let Some(window) = state.label_for_hwnd(hwnd as _) else { return };
     if !active {
@@ -223,6 +231,9 @@ wrap_task! {
 
 /// The top-level window `hwnd` was shown, or restored from minimized.
 pub fn window_shown(hwnd: *mut std::ffi::c_void) {
+    if crate::pane_backend::views() {
+        return;
+    }
     let Some(state) = STATE.get() else { return };
     if let Some(window) = state.label_for_hwnd(hwnd as _) {
         dispatch(state, &window, Event::WindowShown);

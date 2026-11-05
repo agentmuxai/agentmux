@@ -9,7 +9,7 @@ use crate::server::tests::test_state;
 
 /// A peer srv that answers `/agentmux/reactive/inject` with a fixed status
 /// and body. The returned guard shuts it down when dropped.
-async fn stub_peer(
+pub(super) async fn stub_peer(
     status: StatusCode,
     body: &'static str,
 ) -> (String, tokio_util::sync::DropGuard) {

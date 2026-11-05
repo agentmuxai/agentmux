@@ -328,13 +328,13 @@ mod platform {
 
 }
 
-/// Linux: a pane is an overlay view inside its window's own widget, so the
+/// Linux, and Windows in Views pane mode (`pane_backend`): a pane is an overlay view inside its window's own widget, so the
 /// keyboard follows Views focus there: the window's focus manager routes keys
 /// to the focused view. Focus moves with `request_focus()` on the view (what a
 /// click does) as well as Chromium's `set_focus`, and the check reads which
 /// view has it (`has_focus()`). Unlike macOS, the overlay isn't a window of its
 /// own, so focusing it doesn't touch window activation.
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+#[cfg(not(target_os = "macos"))]
 mod platform {
     use super::*;
 
@@ -384,38 +384,6 @@ mod platform {
     }
 
     /// Panes are views inside the window here: a deactivation is the window's.
-    pub fn holds_key(_state: &Arc<AppState>, _window: &str) -> bool {
-        false
-    }
-
-    pub fn key_came_back(_window: &str) -> bool {
-        false
-    }
-
-    pub fn others_active(_window: &str) -> Vec<String> {
-        Vec::new()
-    }
-
-}
-
-/// Windows has its own adapter (`super::windows`); this only lets the shared
-/// part above be built and checked there.
-#[cfg(target_os = "windows")]
-mod platform {
-    use super::*;
-
-    pub fn focus_app(state: &Arc<AppState>, window: &str) {
-        focus_window_browser(state, window);
-    }
-
-    pub fn focus_pane(state: &Arc<AppState>, block: &str) {
-        focus_pane_browser(state, block);
-    }
-
-    pub fn focused(_state: &Arc<AppState>, _window: &str) -> Surface {
-        Surface::Elsewhere
-    }
-
     pub fn holds_key(_state: &Arc<AppState>, _window: &str) -> bool {
         false
     }

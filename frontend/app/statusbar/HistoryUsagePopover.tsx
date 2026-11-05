@@ -12,6 +12,7 @@ import { AnchoredPopover, type PopoverAnchor } from "@/app/element/anchored-popo
 import { Button } from "@/app/element/ui";
 import { openOrFocusPaneByView } from "@/app/store/block-component-registry";
 import type { HistoryUsage } from "@/types/rpc/HistoryUsage";
+import { formatLocale } from "@/app/i18n/i18n";
 import { formatBytes } from "@/util/format-bytes";
 import { formatRelativeTime } from "@/util/format-time";
 
@@ -99,7 +100,7 @@ export const HistoryUsagePopover = (props: HistoryUsagePopoverProps): JSX.Elemen
                             </div>
                         </Show>
                         <div class="history-usage-footer">
-                            <span class="history-usage-note">Measured {measuredAgo(usage().computed_at_ms, Date.now())}</span>
+                            <span class="history-usage-note">Measured {measuredAgo(usage().computed_at_ms, Date.now(), formatLocale())}</span>
                             <Button tone="quiet" density="compact" busy={refreshing()} onClick={() => void refresh()}>
                                 {refreshing() ? "Measuring…" : "Measure again"}
                             </Button>

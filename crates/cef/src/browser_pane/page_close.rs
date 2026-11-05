@@ -22,6 +22,9 @@ use crate::state::AppState;
 /// returns true to CEF); false to let the close go on as before.
 #[cfg(target_os = "windows")]
 pub(crate) fn held_back(state: &AppState, browser: &mut Browser) -> bool {
+    if crate::pane_backend::views() {
+        return false;
+    }
     let Some(block_id) = state.block_id_for_browser(browser) else {
         return false;
     };

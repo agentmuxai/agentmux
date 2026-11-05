@@ -55,7 +55,7 @@ impl BrowserPaneManager {
     /// window label — falls through to the no-filter behaviour for
     /// back-compat until every caller is updated.
     #[cfg(target_os = "windows")]
-    pub fn set_pane_overlay_clip(
+    pub fn set_pane_overlay_clip_hwnd(
         &self,
         state: &Arc<AppState>,
         window_label: &str,
@@ -377,8 +377,22 @@ impl BrowserPaneManager {
     /// IPC handler runs on tokio so we post a task and return immediately.
     /// `window_label` filters which panes get visibility-managed: only those
     /// attached to the requesting window are affected.
-    #[cfg(not(target_os = "windows"))]
     pub fn set_pane_overlay_clip(
+        &self,
+        state: &Arc<AppState>,
+        window_label: &str,
+        overlay_rects: &[(i32, i32, i32, i32)],
+    ) {
+        if crate::pane_backend::views() {
+            self.set_pane_overlay_clip_views(state, window_label, overlay_rects);
+        } else {
+            #[cfg(target_os = "windows")]
+            self.set_pane_overlay_clip_hwnd(state, window_label, overlay_rects);
+        }
+    }
+
+    /// The Views body of `set_pane_overlay_clip` (Windows calls it in Views pane mode).
+    pub fn set_pane_overlay_clip_views(
         &self,
         state: &Arc<AppState>,
         window_label: &str,
@@ -415,12 +429,15 @@ impl BrowserPaneManager {
         // Windows: a selection for the window's input owner, which moves the
         // keyboard (`give_keyboard`) on the UI thread if and when it should.
         #[cfg(target_os = "windows")]
-        crate::input_owner::windows::select_pane(state, block_id);
+        if !crate::pane_backend::views() {
+            crate::input_owner::windows::select_pane(state, block_id);
+        }
         // macOS and Linux: the same, through the Views adapter (macOS: the page
         // only gets keystrokes while its overlay NSWindow is the key window).
         // A pane that can't take focus yet keeps the selection until it can.
-        #[cfg(not(target_os = "windows"))]
-        crate::input_owner::views::select_pane(state, block_id);
+        if crate::pane_backend::views() {
+            crate::input_owner::views::select_pane(state, block_id);
+        }
     }
 
     /// Give pane `block_id`'s page the keyboard, in Chromium and in Win32. The
@@ -484,7 +501,6 @@ fn clip_sig_clipped(
 /// other. Coordinates: (x, y, width, height). Used by the Linux/macOS
 /// pane-airspace logic to decide whether an overlay rect from the frontend
 /// covers any part of a pane's bounds.
-#[cfg(not(target_os = "windows"))]
 fn rects_intersect(a: (i32, i32, i32, i32), b: (i32, i32, i32, i32)) -> bool {
     let (ax, ay, aw, ah) = a;
     let (bx, by, bw, bh) = b;
@@ -513,7 +529,7 @@ fn rects_intersect(a: (i32, i32, i32, i32), b: (i32, i32, i32, i32)) -> bool {
 // `pub(crate)`, not private: called from `browser_pane::creation_views`
 // (`resize_browser_pane_view`) via `crate::browser_panes::compute_pane_visible`
 // — re-exported from `browser_panes::mod` so that external path still resolves.
-#[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+#[cfg(not(target_os = "macos"))]
 pub(crate) fn compute_pane_visible(
     state: &Arc<AppState>,
     window_label: &str,
@@ -532,12 +548,10 @@ pub(crate) fn compute_pane_visible(
     !overlays.iter().any(|or| rects_intersect(*or, pane_rect))
 }
 
-// Linux/macOS pane-airspace task — fired by `set_pane_overlay_clip` for the
-// non-Windows code path. For each live OverlayController, hide it when any
-// overlay rect intersects its current bounds; show it otherwise. See the
-// doc comment on `set_pane_overlay_clip` (non-Windows variant) for why this
-// is the equivalent of the Windows SetWindowRgn airspace dance.
-#[cfg(not(target_os = "windows"))]
+// Views pane-airspace task (Linux, macOS, and Windows in Views pane mode) —
+// fired by `set_pane_overlay_clip_views`. For each live OverlayController, hide
+// it when any overlay rect intersects its current bounds; show it otherwise.
+// It is the equivalent of the Windows SetWindowRgn airspace dance for HWND panes.
 wrap_task! {
     pub struct SetPaneOverlayClipViewsTask {
         state: Arc<AppState>,

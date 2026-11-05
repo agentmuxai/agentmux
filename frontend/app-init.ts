@@ -23,6 +23,7 @@ import {
     countersClear,
     countersPrint,
     getApi,
+    getSettingsKeyAtom,
     initGlobal,
     initGlobalEventSubs,
     loadConnStatus,
@@ -36,6 +37,8 @@ import {
     syncUpdaterStatus,
     setFullConfigAtom,
 } from "@/app/store/global";
+import { APP_LOCALE_KEY, bindAppLocaleSetting } from "@/app/i18n/i18n";
+import { devModeOn } from "@/app/store/dev-mode";
 import * as MOS from "@/app/store/mos";
 import { createEffect, createRoot, createSignal } from "solid-js";
 import {
@@ -529,6 +532,7 @@ async function initAppInner() {
     installSrvEventBridge();
     // AgentMux's own model calls' spend, for the status bar (store/ambient-spend.ts).
     installAmbientSpendListener();
+    bindAppLocaleSetting(getSettingsKeyAtom(APP_LOCALE_KEY), devModeOn);
 
     // Register context menu click handler now that window.api exists.
     ContextMenuModel.init();

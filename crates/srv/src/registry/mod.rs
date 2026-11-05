@@ -49,7 +49,7 @@ pub use paths::{
 // crate-internal only — see resolve_global_shared_root's doc comment for why
 // migrations/runner.rs must call this directly instead of deriving `home`
 // from resolve_shared_store_path()'s (isolation-aware) return value.
-pub(crate) use paths::resolve_global_shared_root;
+pub(crate) use paths::{resolve_global_shared_root, shared_root_ignoring_deferral};
 pub use complete_enumeration::enumerate_objects_dbs_complete;
 pub use def_migrate::{migrate_definitions_global_once, DefMigrateStats};
 pub use def_schema::{

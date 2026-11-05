@@ -24,8 +24,14 @@
 
 import { createSignal, onCleanup, type Accessor } from "solid-js";
 import { onMuxEvent } from "@/app/store/mps";
+import { WpsEvent } from "@/app/store/mps-events";
 import type { MuxEventPayloads } from "@/app/store/mps-events.generated";
 import { addWSReconnectHandler } from "@/app/store/ws";
+
+/** A `WpsEvent` name whose event srv types: the key (`"AgentsChanged"`), not the wire name. */
+export type DomainEventKey = {
+    [K in keyof typeof WpsEvent]: (typeof WpsEvent)[K] extends keyof MuxEventPayloads ? K : never;
+}[keyof typeof WpsEvent];
 
 export type DomainStoreOptions<T> = {
     /** What the store holds before the first load. */
@@ -33,7 +39,7 @@ export type DomainStoreOptions<T> = {
     /** Reads the whole domain from srv. */
     load: () => Promise<T>;
     /** The srv events that mean the domain changed. */
-    events: ReadonlyArray<keyof MuxEventPayloads>;
+    events: ReadonlyArray<DomainEventKey>;
     /** A burst of events reloads once, this long after the last (default 150). */
     debounceMs?: number;
     /** Also reload this often while followed. For a domain whose events can be lost. */
@@ -48,6 +54,8 @@ export type DomainStore<T> = {
     loaded: Accessor<boolean>;
     /** The last load's error, cleared by the next success. */
     error: Accessor<string | null>;
+    /** Holds a value the caller already knows, such as the result of its own change, until the next load. A load already running is dropped and run again. */
+    set: (value: T) => void;
     /** Loads now (or once more after the load in flight). */
     refresh: () => Promise<void>;
     /** In a component: live while it is mounted. */
@@ -75,6 +83,8 @@ export function createDomainStore<T>(options: DomainStoreOptions<T>): DomainStor
     const [error, setError] = createSignal<string | null>(null);
     let loading = false;
     let again = false;
+    // Bumped by `set`: a load that began before it may hold the older data, so its answer is dropped.
+    let version = 0;
     let followers = 0;
     let unsubscribers: Array<() => void> = [];
     let debounce: ReturnType<typeof setTimeout> | null = null;
@@ -89,8 +99,13 @@ export function createDomainStore<T>(options: DomainStoreOptions<T>): DomainStor
         try {
             do {
                 again = false;
+                const began = version;
                 try {
                     const next = await options.load();
+                    if (began !== version) {
+                        again = true;
+                        continue;
+                    }
                     setData(() => (options.merge ? options.merge(data(), next) : next));
                     setError(null);
                     setLoaded(true);
@@ -103,6 +118,11 @@ export function createDomainStore<T>(options: DomainStoreOptions<T>): DomainStor
         }
     }
 
+    function set(value: T): void {
+        version++;
+        setData(() => value);
+    }
+
     function changed(): void {
         if (debounce) clearTimeout(debounce);
         debounce = setTimeout(() => {
@@ -113,7 +133,7 @@ export function createDomainStore<T>(options: DomainStoreOptions<T>): DomainStor
 
     function start(): void {
         void refresh();
-        unsubscribers = options.events.map((event) => onMuxEvent(event, () => changed()));
+        unsubscribers = options.events.map((key) => onMuxEvent(WpsEvent[key], () => changed()));
         if (options.safetyPollMs) poll = setInterval(() => void refresh(), options.safetyPollMs);
         followed.add(refresh);
         reloadAfterReconnect();
@@ -135,5 +155,5 @@ export function createDomainStore<T>(options: DomainStoreOptions<T>): DomainStor
         });
     }
 
-    return { data, loaded, error, refresh, follow };
+    return { data, loaded, error, set, refresh, follow };
 }

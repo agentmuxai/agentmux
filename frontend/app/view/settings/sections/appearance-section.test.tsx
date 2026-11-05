@@ -28,8 +28,11 @@ vi.mock("@/app/store/rpc-api", () => ({
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/store/global", () => ({
     settingsAtom: () => settings,
+    getSettingsKeyAtom: (key: string) => () => settings[key],
 }));
 vi.mock("@/app/menu/base-menus", () => ({ THEME_OPTIONS: [] }));
+// The Language row asks whether dev mode is on; no language ships yet, so with it off the row is not rendered.
+vi.mock("@/app/store/dev-mode", () => ({ devModeOn: () => false }));
 // Has its own tests; it reads the pane registry and theme this file doesn't set up.
 vi.mock("./widget-colors", () => ({ WidgetColorsSettings: () => null }));
 
