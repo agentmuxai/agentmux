@@ -387,7 +387,6 @@
 113 frontend/app/element/ui/CardGrid.tsx::CardGrid
 116 frontend/app/hook/useVoiceInput.ts::createWebSpeechVoiceSession
 109 frontend/app/hook/useWindowDrag.win32.ts::installJsDragListener
-302 frontend/app/hook/whisperVoiceEngine.ts::createWhisperVoiceSession
 220 frontend/app/host/js-context-menu.ts::renderItems
 366 frontend/app/host/js-context-menu.ts::showJsContextMenu
 105 frontend/app/init/error-display.ts::showStartupError
