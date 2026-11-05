@@ -20,8 +20,15 @@ function sourceFiles(dir: string): string[] {
     return out;
 }
 
-/** `t("a.b")` and `<Rich k="a.b" />`; keys built at run time are not found, and are not used. */
-const CALLS = [/\bt\(\s*"([a-z][A-Za-z0-9]*(?:\.[A-Za-z0-9-]+)+)"/g, /\bk="([a-z][A-Za-z0-9]*(?:\.[A-Za-z0-9-]+)+)"/g];
+/**
+ * `t("a.b")`, `<Rich k="a.b" />` and a table's `labelKey: "a.b"` (a property named ...Key, read with `t(row.labelKey)`).
+ * A key built at run time is not found, so a table of keys must hold them as written.
+ */
+const CALLS = [
+    /\bt\(\s*"([a-z][A-Za-z0-9]*(?:\.[A-Za-z0-9-]+)+)"/g,
+    /\bk="([a-z][A-Za-z0-9]*(?:\.[A-Za-z0-9-]+)+)"/g,
+    /\b\w*Key:\s*"([a-z][A-Za-z0-9]*(?:\.[A-Za-z0-9-]+)+)"/g,
+];
 
 const known = new Set(Object.keys(english).map((k) => k.replace(/\.(zero|one|two|few|many|other)$/, "")));
 
@@ -34,6 +41,7 @@ describe("the keys the code uses", () => {
 
     it("finds the calls (the scan is not empty)", () => {
         expect(used.size).toBeGreaterThan(10);
+        expect(used.has("signin.continueWithGoogle"), "a key held in a table property is found").toBe(true);
     });
 
     it("are all in the English dictionary", () => {
