@@ -182,7 +182,7 @@ fn log_agents_losing_servers(
             }
         };
         let mut lost: BTreeSet<String> = BTreeSet::new();
-        for bundle_id in mstore.agent_bundle_chain(&def.id) {
+        for bundle_id in mstore.agent_bundle_ids(&def.id).unwrap_or_default() {
             for id in refs.get(&bundle_id).into_iter().flatten() {
                 if own.contains(id) {
                     continue;

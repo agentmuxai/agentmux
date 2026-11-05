@@ -729,7 +729,7 @@ impl Store {
     }
 
     /// Union the rows referenced by `agent_id`'s bundles into `visible`, in
-    /// list order (its own bundle first, then its picks: `agent_bundle_chain`),
+    /// list order (`agent_bundle_ids`),
     /// deduped by id, so the first bundle to name a row wins and a global row
     /// already in `visible` isn't added twice. Composable model v2 — without
     /// this, bundle-level refs would be exactly as inert at launch as the
@@ -742,7 +742,7 @@ impl Store {
         agent_id: &str,
         visible: &mut Vec<R>,
     ) {
-        for bundle_id in self.agent_bundle_chain(agent_id) {
+        for bundle_id in self.agent_bundle_ids(agent_id).unwrap_or_default() {
             // Only the rows the bundle holds a ref to: `managed_list` also
             // returns every global row, which the bundle never named.
             for (row, bound) in self
