@@ -57,7 +57,7 @@ const NotificationBubbles = (): JSX.Element => {
         }
     });
 
-    const { bottom, setStack } = useToastPlacement(() => isOpen() && !notificationPopoverMode(), visible);
+    const { bottom, maxHeight, setStack } = useToastPlacement(() => isOpen() && !notificationPopoverMode(), visible);
     // The stack is an unzoomed shell placed in real pixels; the body inside it carries the chrome zoom.
     const floatingStyles = () => ({
         position: "fixed",
@@ -77,7 +77,10 @@ const NotificationBubbles = (): JSX.Element => {
                     class="notification-bubbles"
                     onClick={(e) => e.stopPropagation()}
                 >
-                    <div class="notification-bubbles-body">
+                    <div
+                        class="notification-bubbles-body"
+                        style={maxHeight() === undefined ? undefined : { "max-height": `calc(${maxHeight()}px / var(--zoomfactor))` }}
+                    >
                         <Show when={more() > 0}>
                             <Button className="notification-more ghost grey" onClick={() => setExpanded(true)}>
                                 +{more()} more

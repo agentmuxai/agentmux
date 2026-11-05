@@ -47,6 +47,23 @@ describe("placeToasts", () => {
         expect(out).toEqual({ bottom: 408 });
     });
 
+    it("shortens the stack to fit above a block docked at the bottom edge, when it cannot go above it at full height", () => {
+        // A status bar wrapped to two rows: y 740..800 across the window. Raised, a 200 px stack needs 740 - 8 - 200 = 532,
+        // which is room; with a tall window it fits whole. In a short one it does not:
+        const bar = box(0, 740, 1000, 800);
+        expect(placeToasts({ ...base, avoid: [bar] })).toEqual({ bottom: 68 });
+        const short = { ...base, viewportHeight: 300, height: 400, avoid: [box(0, 240, 1000, 300)] };
+        // Limit 240 - 8 = 232, minus the top gap 40: 192 px of stack, its bottom edge 68 px from the bottom.
+        expect(placeToasts(short)).toEqual({ bottom: 68, maxHeight: 192 });
+    });
+
+    it("does not shorten the stack for a block that is not docked at the bottom edge, or when too little would be left", () => {
+        const floating = { ...base, viewportHeight: 300, height: 400, avoid: [box(0, 240, 1000, 280)] };
+        expect(placeToasts(floating)).toEqual({ bottom: 34 });
+        const tiny = { ...base, viewportHeight: 300, height: 400, avoid: [box(0, 100, 1000, 300)] };
+        expect(placeToasts(tiny)).toEqual({ bottom: 34 });
+    });
+
     it("keeps the usual place when there is no room above the block", () => {
         // A block from y 100 down: above it there is no room for 200 px (100 - 8 - 200 < 40).
         const out = placeToasts({ ...base, avoid: [box(600, 100, 1000, 790)] });

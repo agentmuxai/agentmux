@@ -56,7 +56,7 @@ export function useToastPlacement(active: Accessor<boolean>, track: () => unknow
             avoid,
         });
         const prev = measured();
-        if (prev.bottom !== next.bottom || prev.zoom !== zoom) setMeasured({ ...next, zoom });
+        if (prev.bottom !== next.bottom || prev.maxHeight !== next.maxHeight || prev.zoom !== zoom) setMeasured({ ...next, zoom });
     };
     // While toasts show: re-place them when the window, a scroll or the page's layout changes, at most
     // every REPLACE_EVERY_MS (streaming text and animations change the DOM constantly, and a persistent
@@ -89,5 +89,7 @@ export function useToastPlacement(active: Accessor<boolean>, track: () => unknow
             cancelAnimationFrame(first);
         });
     });
-    return { bottom, setStack: (el: HTMLDivElement) => (stack = el) };
+    /** The stack's body height cap in real pixels, when it has to be shorter to fit above the status bar. */
+    const maxHeight = () => (measured().zoom === chromeZoomAtom() ? measured().maxHeight : undefined);
+    return { bottom, maxHeight, setStack: (el: HTMLDivElement) => (stack = el) };
 }
