@@ -8,6 +8,7 @@ import { setNotifications } from "@/app/store/flash-notifications";
 import { cleanup, render } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NotificationBubbles } from "./notificationbubbles";
+import { naturalHeight } from "./use-toast-placement";
 
 let resizeCallbacks: Array<() => void> = [];
 let observed: Element[] = [];
@@ -74,5 +75,19 @@ describe("NotificationBubbles placement", () => {
         vi.advanceTimersByTime(250);
         expect(stackBottom()).toBe("34px");
         expect(observed).not.toContain(block);
+    });
+});
+
+describe("the stack's measured height", () => {
+    it("is read with the cap placement put on it lifted, and the cap is put back", () => {
+        // A stack shortened to fit above the status bar reports its shortened height; placed from that, the next
+        // measure would lift the cap and the stack would grow back, and the two would alternate.
+        const stack = document.createElement("div");
+        const body = document.createElement("div");
+        stack.appendChild(body);
+        body.style.maxHeight = "calc(192px / var(--zoomfactor))";
+        Object.defineProperty(stack, "offsetHeight", { get: () => (body.style.maxHeight ? 192 : 400) });
+        expect(naturalHeight(stack)).toBe(400);
+        expect(body.style.maxHeight).toBe("calc(192px / var(--zoomfactor))");
     });
 });

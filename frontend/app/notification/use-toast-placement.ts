@@ -16,6 +16,18 @@ const RIGHT = 58;
 const TOP = 40;
 const REPLACE_EVERY_MS = 200;
 
+/** The stack's height without the cap placement itself put on it. Measured as it is, a stack shortened to fit above
+ *  the status bar would report the shortened height, take the "fits when raised" path on the next measure, lose the
+ *  cap and grow back, and the two would alternate. */
+export function naturalHeight(stack: HTMLElement): number {
+    const body = stack.firstElementChild as HTMLElement | null;
+    const cap = body?.style.maxHeight ?? "";
+    if (body && cap) body.style.maxHeight = "";
+    const height = stack.offsetHeight;
+    if (body && cap) body.style.maxHeight = cap;
+    return height;
+}
+
 /** The stack's distance from the window's right edge, in real pixels. */
 export const toastRight = (): number => RIGHT * chromeZoomAtom();
 
@@ -49,7 +61,7 @@ export function useToastPlacement(active: Accessor<boolean>, track: () => unknow
             viewportWidth: window.innerWidth,
             viewportHeight: window.innerHeight,
             width: stack.offsetWidth,
-            height: stack.offsetHeight,
+            height: naturalHeight(stack),
             right: RIGHT * zoom,
             bottom: USUAL_BOTTOM * zoom,
             top: TOP * zoom,

@@ -57,6 +57,20 @@ describe("placeToasts", () => {
         expect(placeToasts(short)).toEqual({ bottom: 68, maxHeight: 192 });
     });
 
+    it("measures the stack without its own cap, so a shortened stack does not grow back and flip-flop", () => {
+        const short = { ...base, viewportHeight: 300, height: 400, avoid: [box(0, 240, 1000, 300)] };
+        const first = placeToasts(short);
+        expect(first).toEqual({ bottom: 68, maxHeight: 192 });
+
+        // The cap is applied; a stack that reports its capped height places differently (the bug)...
+        const capped = placeToasts({ ...short, height: first.maxHeight! });
+        expect(capped).toEqual({ bottom: 68 });
+
+        // ...so the stack's height is read with the cap lifted (naturalHeight, tested with the DOM in
+        // notificationbubbles-placement.test.tsx), and the same input gives the same answer every measure.
+        expect(placeToasts({ ...short })).toEqual(first);
+    });
+
     it("does not shorten the stack for a block that is not docked at the bottom edge, or when too little would be left", () => {
         const floating = { ...base, viewportHeight: 300, height: 400, avoid: [box(0, 240, 1000, 280)] };
         expect(placeToasts(floating)).toEqual({ bottom: 34 });
