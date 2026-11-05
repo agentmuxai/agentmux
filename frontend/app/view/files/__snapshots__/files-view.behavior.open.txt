@@ -1,0 +1,20 @@
+model.navigate("/home/a/src")
+openInEditor(/home/a/a.md)
+openWithOs(/home/a/pic.png, b1)
+dialog: Run run.exe?run.exe is a program or shortcut. Opening it runs it.CancelRun
+cancelled: dialog=false focusOnList=true
+openWithOs(/home/a/run.exe, b1)
+confirmed: dialog=false focusOnList=true
+> failures
+openInEditor(/home/a/a.md)
+openWithOs(/home/a/pic.png, b1)
+model.setStatus({"text":"Couldn't open a.md: boom","tone":"error"})
+model.setStatus({"text":"Couldn't open pic.png: boom","tone":"error"})
+openWithOs(/home/a/run.exe, b1)
+model.setStatus({"text":"Couldn't open run.exe: boom","tone":"error"})
+> on a host
+openInPane(["editor","~/a.md","b1","user@box"])
+model.notOnHost("Opening programs and other files")
+> in a confined folder
+model.refuseInRoot("Opening this file")
+openInEditor(/home/a/a.md)

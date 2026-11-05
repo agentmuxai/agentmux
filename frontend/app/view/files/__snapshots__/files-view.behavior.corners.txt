@@ -1,0 +1,8 @@
+model.setStatus({"text":"A new tab isn't available here: this folder is shown read-only from an agent's workspace.","tone":"info"})
+openFolderInNewTab(["b1","/home/a",null])
+model.setStatus({"text":"Couldn't open a new tab: boom","tone":"error"})
+buildRowMenu(b.txt, openEntry,openInNewTab,copyPaths,askDeletePermanently)
+model.setStatus({"text":"Copied the path","tone":"info"}, 2500)
+clipboard: ["/home/a/b.txt"]
+self drop: no transfer above
+focusList: true

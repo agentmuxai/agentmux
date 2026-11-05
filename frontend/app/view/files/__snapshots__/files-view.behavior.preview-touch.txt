@@ -1,0 +1,7 @@
+nothing selected: preview="" 5 items
+one: preview="b.txt" 1 selected · 10 B · 5 items
+two: preview="" 2 selected · 10 B · 5 items
+filtered: 1 of 5 items match
+> touches
+badges: ["changed by korp"]
+after 31 minutes: []
