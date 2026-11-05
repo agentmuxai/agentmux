@@ -63,12 +63,37 @@ use std::sync::Arc;
 
 use cef::{
     browser_view_create, BrowserSettings, CefString, DockingMode, ImplBrowser, ImplBrowserHost,
-    ImplOverlayController, ImplView, ImplWindow, Rect, RuntimeStyle, View,
+    ImplOverlayController, ImplView, ImplWindow, Rect, RuntimeStyle, View, Window,
 };
 #[cfg(not(target_os = "macos"))]
-use cef::{ImplPanel, Point, Size};
+use cef::ImplPanel;
 
 use crate::state::AppState;
+
+/// A pane's rect, as the page sends it (physical pixels), in the units Views
+/// sizes and places an overlay in. Windows divides by the window's display scale
+/// (Views works in DIP, the page's CSS pixels); Linux and macOS use the rect as
+/// sent, as they always have.
+pub(crate) fn views_rect(window: Option<&Window>, rect: &Rect) -> Rect {
+    #[cfg(target_os = "windows")]
+    if let Some(scale) = window
+        .and_then(|w| w.display())
+        .map(|d| cef::ImplDisplay::device_scale_factor(&d) as f64)
+        .filter(|s| *s > 0.0)
+    {
+        let dip = |v: i32| (v as f64 / scale).round() as i32;
+        return Rect { x: dip(rect.x), y: dip(rect.y), width: dip(rect.width), height: dip(rect.height) };
+    }
+    let _ = window;
+    rect.clone()
+}
+
+/// Put an overlay at `rect` (the page's physical pixels) in `window`.
+pub(crate) fn place_overlay(controller: &cef::OverlayController, window: Option<&Window>, rect: &Rect) {
+    let dip = views_rect(window, rect);
+    controller.set_size(Some(&cef::Size { width: dip.width, height: dip.height }));
+    controller.set_position(Some(&cef::Point { x: dip.x, y: dip.y }));
+}
 
 /// Create a Views-based browser pane on the CEF UI thread, in `jar` (a named
 /// profile's) or, when `None`, in its window's.
@@ -244,8 +269,7 @@ pub fn create_browser_pane_view(
     //     CEF's event routing for the wrong area → full-window mouse freeze.
     #[cfg(not(target_os = "macos"))]
     {
-        overlay_controller.set_size(Some(&Size { width: rect.width, height: rect.height }));
-        overlay_controller.set_position(Some(&Point { x: rect.x, y: rect.y }));
+        place_overlay(&overlay_controller, Some(&parent_window), &rect);
         parent_window.layout();
     }
 
@@ -433,7 +457,6 @@ pub fn create_browser_pane_view(
     // doc comment on `AppState::browser_pane_physical_rects` for why this
     // (not `controller.bounds()`) is the airspace-hide path's source of
     // truth for this pane's on-screen rect.
-    #[cfg(not(target_os = "windows"))]
     state
         .browser_pane_physical_rects
         .lock()
@@ -511,7 +534,6 @@ pub(crate) fn resize_browser_pane_view_inner(
     // Keep the airspace path's rect source (see `AppState::browser_pane_physical_rects`)
     // fresh on every resize — this is the only place non-Windows learns the
     // pane's current physical on-screen rect.
-    #[cfg(not(target_os = "windows"))]
     state.browser_pane_physical_rects.lock().insert(label.to_string(), pane_rect);
     // macOS visibility is rect-only: overlays no longer hide the pane there —
     // the hole-punch mask (ui_tasks/pane_hole_mask.rs, applied by
@@ -593,8 +615,7 @@ pub(crate) fn resize_browser_pane_view_inner(
             }
             _ => rect,
         };
-        controller.set_size(Some(&Size { width: rect.width, height: rect.height }));
-        controller.set_position(Some(&Point { x: rect.x, y: rect.y }));
+        place_overlay(&controller, window.as_ref(), &rect);
         // Visibility = AND of the two independent hide reasons:
         //  - Zero-area rect (frontend placed the placeholder in `display:none`
         //    when the tab is inactive → getBoundingClientRect reports 0×0).
@@ -648,7 +669,6 @@ pub(crate) fn resize_browser_pane_view_inner(
 /// Must run on the CEF UI thread.
 pub fn detach_browser_pane_view(state: &Arc<AppState>, label: &str) {
     let entry = state.browser_pane_overlays.lock().remove(label);
-    #[cfg(not(target_os = "windows"))]
     state.browser_pane_physical_rects.lock().remove(label);
     crate::browser_panes::bounds::note_layout_base(label, None);
     let Some((_, controller)) = entry else {

@@ -131,6 +131,9 @@ pub fn get_about_modal_details(state: &Arc<AppState>) -> serde_json::Value {
         "cefVersion": env!("AGENTMUX_CEF_VERSION"),
         "channel": channel,
         "platform": agentmux_common::platform_name::platform_name(),
+        // Which kind of browser pane this process creates (`pane_backend`): the page freezes a
+        // frame under a menu that hides a Views pane.
+        "paneBackend": if crate::pane_backend::views() { "views" } else { "hwnd" },
         "arch": std::env::consts::ARCH,
         "backendEndpoints": {
             "ws": endpoints.ws_endpoint,

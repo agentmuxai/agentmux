@@ -14,12 +14,12 @@ pub mod leaving;
 pub mod page_close;
 pub mod identity;
 pub mod profile_carry;
+pub mod size_badge;
 pub mod trace;
 #[cfg(target_os = "windows")]
 pub mod hwnd;
 #[cfg(target_os = "windows")]
 pub mod wrapper;
-#[cfg(not(target_os = "windows"))]
 pub mod creation_views;
 pub mod side_button_cdp;
 pub mod signin_notice;
