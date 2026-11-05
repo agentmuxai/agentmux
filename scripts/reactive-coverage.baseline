@@ -12,7 +12,6 @@ frontend/app/view/agent/components/InputHistorySearch.tsx
 frontend/app/view/agent/components/use-runtime-choice.ts
 frontend/app/view/agent/hooks/useHistoryPagination.ts
 frontend/app/view/bundle-summary.tsx
-frontend/app/view/bundle/components/BundleImportPreviewModal.tsx
 frontend/app/view/bundle/components/BundleImportSelectModal.tsx
 frontend/app/view/drone/drone-view.tsx
 frontend/app/view/editor/editor-view.tsx
