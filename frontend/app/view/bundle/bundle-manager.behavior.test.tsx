@@ -127,16 +127,18 @@ function view(label: string) {
     const err = document.querySelector(".bundle-view-error");
     if (err) log(`  error: ${err.textContent}`);
     if (rail) {
-        for (const li of Array.from(rail.querySelectorAll("li"))) {
-            const tag = li.querySelector(".ui-tag, [class*=tag]")?.textContent;
-            log(`  - ${li.querySelector(".bundle-view-list-item-name-text")?.textContent}${tag ? ` [${tag}]` : ""} / ${li.querySelector(".bundle-view-list-item-provider")?.textContent ?? "-"} {${li.className}}`);
+        for (const card of Array.from(rail.querySelectorAll(".bundle-card"))) {
+            const tag = card.querySelector(".ui-tag, [class*=tag]")?.textContent;
+            log(`  - ${card.querySelector(".ui-card-title")?.textContent}${tag ? ` [${tag}]` : ""} / ${card.querySelector(".ui-card-subtitle")?.textContent ?? "-"} / ${Array.from(card.querySelectorAll(".ui-card-meta > *")).map((m) => m.textContent).join(" , ") || "-"} {${card.className}}`);
         }
     }
     if (detail) {
         const ro = detail.querySelector(".bundle-view-readonly");
         const form = detail.querySelector("form");
         if (ro) {
-            log(`  readonly: ${ro.querySelector("h2")?.textContent} | ${ro.querySelector(".bundle-view-description")?.textContent ?? "-"} | ${ro.querySelector("dl")?.textContent}`);
+            log(`  readonly: ${ro.querySelector("h2")?.textContent} | ${ro.querySelector(".bundle-view-description")?.textContent ?? "-"} | ${ro.querySelector(".bundle-view-scope")?.textContent ?? "-"}`);
+            const ins = ro.querySelector(".bundle-instructions-card");
+            log(`  instructions: ${ins?.querySelector(".ui-card-subtitle")?.textContent} / ${Array.from(ins?.querySelectorAll(".ui-card-meta > *") ?? []).map((m) => m.textContent).join(" , ")}`);
             log(`  actions: ${Array.from(ro.querySelectorAll(".bundle-view-actions button")).map((b) => b.textContent).join(" | ") || "-"} skills=${ro.querySelector("[data-testid=skills]")?.textContent ?? "-"}`);
         }
         if (form) {
@@ -160,7 +162,7 @@ function view(label: string) {
 
 const click = (el: Element | null | undefined) => fireEvent.click(el!);
 const button = (re: RegExp) => Array.from(document.querySelectorAll("button")).find((b) => re.test(b.textContent ?? "")) as HTMLButtonElement;
-const item = (name: string) => Array.from(document.querySelectorAll(".bundle-view-list-item")).find((li) => li.textContent?.includes(name))!;
+const item = (name: string) => Array.from(document.querySelectorAll(".bundle-card")).find((card) => card.textContent?.includes(name))!;
 const field = (cls: string, nth = 0) => document.querySelectorAll(`form .${cls}`)[nth] as HTMLInputElement;
 const type = (el: HTMLInputElement, v: string) => fireEvent.input(el, { target: { value: v } });
 const snapshot = (name: string) => expect(T.join("\n") + "\n").toMatchFileSnapshot(SNAP(name));

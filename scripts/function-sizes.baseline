@@ -469,7 +469,6 @@
 220 frontend/app/view/agent/flows/run-provider-login.ts::runProviderLogin
 136 frontend/app/view/agent/history/HistoryNavigator.tsx::HistoryNavigator
 106 frontend/app/view/agent/hooks/useAgentDecisions.ts::useAgentDecisions
-420 frontend/app/view/agent/hooks/useAgentFailure.ts::useAgentFailure
 137 frontend/app/view/agent/hooks/useAgentQuestions.ts::handleAnswer
 271 frontend/app/view/agent/hooks/useAgentQuestions.ts::useAgentQuestions
 266 frontend/app/view/agent/hooks/useLiveFeedRollOff.ts::useLiveFeedRollOff

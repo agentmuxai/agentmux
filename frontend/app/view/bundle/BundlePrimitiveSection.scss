@@ -11,17 +11,11 @@
 @use "../../element/primitive-list-detail-content" as listDetail;
 @use "../../element/ui/line";
 
+// The skills' content, under the Skills heading (bundle-category).
 .bundle-primitive-section {
-    margin-top: var(--space-3);
-    padding-top: var(--space-2);
-    border-top: 1px solid var(--border-color);
-}
-
-.bundle-primitive-section-title {
-    margin: 0 0 var(--space-1-5) 0;
-    font-size: var(--text-sm);
-    font-weight: 600;
-    color: var(--main-text-color);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1-5);
 }
 
 .bundle-primitive-section-error {
@@ -38,36 +32,23 @@
     font-style: italic;
 }
 
-.bundle-primitive-section-list {
-    list-style: none;
-    margin: 0 0 var(--space-1-5) 0;
-    padding: 0;
+// The label over the chips that bind a global skill.
+.bundle-primitive-section-hint {
+    margin: var(--space-1) 0 0;
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
 }
 
-.bundle-primitive-section-item {
-    display: flex;
-    align-items: center;
-    gap: var(--space-1);
-    padding: var(--space-1) 0;
-    border-bottom: 1px solid var(--border-color);
+// A skill card's details: its content, under the card's row.
+.bundle-skill-content {
+    margin: 0 0 var(--space-1);
+    padding: var(--space-1-5);
+    background: var(--tint-2);
+    white-space: pre-wrap;
+    font-family: var(--font-mono);
     font-size: var(--text-sm);
-
-    &:last-child {
-        border-bottom: none;
-    }
-}
-
-.bundle-primitive-section-item-name {
-    @include listDetail.list-item-name;
-    color: var(--main-text-color);
-}
-
-.bundle-primitive-section-item-badge {
-    @include listDetail.badge;
-
-    &.is-private {
-        @include listDetail.badge-tone(var(--accent-color));
-    }
+    max-height: 240px;
+    overflow-y: auto;
 }
 
 // Buttons here are element/ui Buttons; these rules only place them.
