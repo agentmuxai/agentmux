@@ -86,6 +86,26 @@ if [ "${AGENTMUX_SKIP_CEF_PATCH_CHECK:-0}" != "1" ]; then
     esac
 fi
 
+# --- Release gate: the CEF runtime must not need a newer glibc than the floor we support
+#     (2.34, Ubuntu 22.04). A libcef built without Chromium's sysroot needs the build
+#     host's glibc, and the package then fails to start on every older distro
+#     ("version `GLIBC_2.43' not found (required by libcef.so)", 0.60.14).
+#     Override with AGENTMUX_SKIP_CEF_GLIBC_CHECK=1 (emergency only).
+if [ "${AGENTMUX_SKIP_CEF_GLIBC_CHECK:-0}" != "1" ]; then
+    glibc_dir="$(mktemp -d)"
+    for f in libcef.so libEGL.so libGLESv2.so libvk_swiftshader.so libvulkan.so.1 chrome-sandbox chrome_crashpad_handler; do
+        if [ -f "dist/cef/$f" ]; then ln -s "$PWD/dist/cef/$f" "$glibc_dir/$f"; fi
+    done
+    if ! bash "$REPO_ROOT/scripts/cef-build/verify-glibc-floor.sh" "$glibc_dir"; then
+        rm -rf "$glibc_dir"
+        echo "ERROR: the CEF runtime needs a newer glibc than 2.34 — refusing to package it." >&2
+        echo "       Use a runtime built with use_sysroot=true (scripts/cef-build/args.gn), or set" >&2
+        echo "       AGENTMUX_SKIP_CEF_GLIBC_CHECK=1 to override." >&2
+        exit 1
+    fi
+    rm -rf "$glibc_dir"
+fi
+
 echo "Staging AgentMux v$VERSION runtime → $STAGING_ROOT/usr/bin"
 
 # --- 1. Wipe and recreate the usr/ tree ---

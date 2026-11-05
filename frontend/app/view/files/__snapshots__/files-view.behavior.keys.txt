@@ -1,0 +1,47 @@
+ArrowDown: handled=true selection={"names":["src"],"focus":"src","anchor":"src"}
+ArrowDown: handled=true selection={"names":["a.md"],"focus":"a.md","anchor":"a.md"}
+ArrowDown: handled=true selection={"names":["b.txt"],"focus":"b.txt","anchor":"b.txt"}
+ArrowUp: handled=true selection={"names":["a.md"],"focus":"a.md","anchor":"a.md"}
+list.scrollTop = 24
+End: handled=true selection={"names":["run.exe"],"focus":"run.exe","anchor":"run.exe"}
+list.scrollTop = 0
+Home: handled=true selection={"names":["src"],"focus":"src","anchor":"src"}
+PageDown: handled=true selection={"names":["pic.png"],"focus":"pic.png","anchor":"pic.png"}
+PageUp: handled=true selection={"names":["src"],"focus":"src","anchor":"src"}
+ArrowDown+s: handled=true selection={"names":["src","a.md"],"focus":"a.md","anchor":"src"}
+ArrowDown+c: handled=true selection={"names":["src","a.md"],"focus":"b.txt","anchor":"src"}
+ +c: handled=true selection={"names":["src","a.md","b.txt"],"focus":"b.txt","anchor":"b.txt"}
+model.togglePreview()
+ : handled=true selection={"names":["src","a.md","b.txt"],"focus":"b.txt","anchor":"b.txt"}
+> Enter on a folder, then on two files
+model.navigate("/home/a/src")
+Enter: handled=true selection={"names":["src"],"focus":"src","anchor":"src"}
+openInEditor(/home/a/a.md)
+openInEditor(/home/a/b.txt)
+Enter: handled=true selection={"names":["a.md","b.txt","src"],"focus":"src","anchor":"a.md"}
+model.goBack()
+Backspace: handled=true selection={"names":["a.md","b.txt","src"],"focus":"src","anchor":"a.md"}
+> the filter
+/: handled=true selection={"names":["a.md","b.txt","src"],"focus":"src","anchor":"a.md"}
+filter box: true
+Escape: handled=true selection={"names":["a.md","b.txt","src"],"focus":"src","anchor":"a.md"}
+after Escape: filter="" box=false
+Escape: handled=false selection={"names":["a.md","b.txt","src"],"focus":"src","anchor":"a.md"}
+> type-ahead
+p: handled=true selection={"names":["pic.png"],"focus":"pic.png","anchor":"pic.png"}
+/: handled=true selection={"names":["pic.png"],"focus":"pic.png","anchor":"pic.png"}
+ : handled=true selection={"names":["pic.png"],"focus":"pic.png","anchor":"pic.png"}
+> keys it doesn't use
+F9: handled=false selection={"names":["pic.png"],"focus":"pic.png","anchor":"pic.png"}
+a+c: handled=false selection={"names":["pic.png"],"focus":"pic.png","anchor":"pic.png"}
+ArrowDown+c: handled=false selection={"names":["pic.png"],"focus":"pic.png","anchor":"pic.png"}
+ArrowDown+m: handled=false selection={"names":["pic.png"],"focus":"pic.png","anchor":"pic.png"}
+> a files command key
+model.refresh()
+F5: handled=true selection={"names":["pic.png"],"focus":"pic.png","anchor":"pic.png"}
+model.refresh()
+ArrowDown+c: handled=true selection={"names":["pic.png"],"focus":"pic.png","anchor":"pic.png"}
+> while renaming
+ArrowDown: handled=false selection={"names":["pic.png"],"focus":"pic.png","anchor":"pic.png"}
+> while editing the path
+ArrowDown: handled=false selection={"names":["pic.png"],"focus":"pic.png","anchor":"pic.png"}

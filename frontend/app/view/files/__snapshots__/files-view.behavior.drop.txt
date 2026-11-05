@@ -1,0 +1,20 @@
+before listing: {"ok":false,"reason":"Open a folder first"}
+accept one name = {"ok":true,"message":"Copy x.txt here","icon":"fa-copy"}
+accept one, no name = {"ok":true,"message":"Copy 1 item here","icon":"fa-copy"}
+accept three = {"ok":true,"message":"Copy 3 items here","icon":"fa-copy"}
+accept in-app paths = {"ok":true,"message":"Move a here","icon":"fa-right-left"}
+accept from this pane = {"ok":true,"message":"Drop on a folder to move it there","icon":"fa-folder-open"}
+model.setStatus({"text":"Those files have no path on disk, so they can't be copied here.","tone":"error"})
+> dropping
+model.transfer("move", ["/other/a","/other/b"], "/home/a")
+> dragging over a folder row, then dropping
+drop target row: ["src"]
+model.transfer("move", ["/other/a"], "/home/a/src")
+after the drop: 0
+> over a file row, a folder row being dragged, blank space, and leaving
+file row: 0
+folder being dragged: 0
+blank space: 0
+leave into a row: 1
+leave out: 0
+window dragend: 0

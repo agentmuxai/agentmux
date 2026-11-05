@@ -29,12 +29,12 @@ Five read-only passes covered Connectors and accounts, Settings, Vault / Memory 
 | 8 | Settings, Devices | partly | `onMount(load)` plus a re-load when `viewerPairedAtom` changes (`devices-section.tsx:102`) | verified |
 | 9 | Settings, Browser profiles | stale | loaded once on mount (`browser-section.tsx:228`) | verified |
 | 10 | Vault entries | live | `onMuxEvent(Vault)`; srv publishes on create, update, delete, restore, import, generate, revoke (`vault_handlers.rs`) | reported |
-| 11 | Vault, "kept secrets" | stale | loaded once; no event when the keychain changes | reported |
+| 11 | Vault, "kept secrets" | stale, fixed | was loaded once for the life of the pane, with no event when the keychain changes; now read again each time the tab is shown | verified |
 | 12 | Memory (personal, global, skills, bundles) | live | `agent:memory:changed:<id>` and the others, 250 ms debounce | reported |
 | 13 | Kanban | live | `WorkQueueChanged` with a 150 ms debounce plus a 15 s poll while visible (`kanban-held.tsx:81-85`) | verified |
 | 14 | History (agents) | stale | no subscription; only a Refresh button | reported |
-| 15 | Shortcuts | stale | loaded once | reported |
-| 16 | Drone runs | partly | run events live, the list fetched once; srv publishes `drones:changed` (`drone_handlers.rs:133`) | reported |
+| 15 | Shortcuts | live | the tiles read `fullConfigAtom`, which the config reload keeps current (`shortcuts.tsx`); the earlier "loaded once" was wrong | verified |
+| 16 | Drone runs | partly, list fixed | run events live; the drone list was fetched once although srv publishes `drones:changed` (`drone_handlers.rs:133`), and the model now subscribes | verified |
 | 17 | Swarm, this instance | live | `onMuxEvent` plus a poll while visible | reported |
 | 18 | Swarm, other channels and LAN peers | poll only | the host-global registry has no event; polled about every 5 s while visible | reported |
 | 19 | Audit | poll only, 5 s while at the newest page | no audit event exists (see the Audit spec, #21665) | verified |
