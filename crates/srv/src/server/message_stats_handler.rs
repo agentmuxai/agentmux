@@ -19,9 +19,14 @@ pub struct StatsParams {
 pub async fn handle_message_stats(Query(p): Query<StatsParams>) -> impl IntoResponse {
     let days = p.days.unwrap_or(7);
     let stats = tokio::task::spawn_blocking(move || {
-        crate::backend::reactive::audit_store::default_path()
-            .map(|path| message_stats::from_file(&path, agentmux_common::time::now_ms() as u64, days))
-            .unwrap_or_default()
+        let paths: Vec<_> = [
+            crate::backend::reactive::audit_store::shared_path_for_reading(),
+            crate::backend::reactive::audit_store::own_path(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        message_stats::from_files(&paths, agentmux_common::time::now_ms() as u64, days)
     })
     .await
     .unwrap_or_default();

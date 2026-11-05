@@ -1,0 +1,48 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// An agent's request to install a widget, as a card in its pane
+// (docs/specs/SPEC_PANE_MODALS_NOT_WINDOW_MODALS_2026_11_02.md row 5): the question card's chrome, so the kinds
+// of request above the composer read as one set.
+
+@use "../view/agent/styles/attention-card" as *;
+
+.widget-install-card {
+    @include attention-card;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-3);
+    min-height: 0;
+    container-type: inline-size;
+}
+
+.widget-install-card-title {
+    margin: 0;
+    font-size: var(--text-md);
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+// The permissions list can be long: the body scrolls, the answers never leave the card.
+.widget-install-card-body {
+    min-height: 0;
+    overflow-y: auto;
+    overflow-wrap: anywhere;
+}
+
+.widget-install-card-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: var(--space-2);
+    flex-shrink: 0;
+}
+
+@container (max-width: 280px) {
+    .widget-install-card-actions {
+        flex-direction: column;
+        align-items: stretch;
+        width: 100%;
+    }
+}

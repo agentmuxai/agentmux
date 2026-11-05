@@ -18,7 +18,8 @@
 //!   (`guard_client_meta_write`) then drops the map entry, so ownership ends
 //!   for good, and no client can set the key at all;
 //! - deleting the block drops its entry (`wcore::delete_block`);
-//! - after srv restarts the map is empty, so agents reopen their panes.
+//! - after srv restarts the map is filled again from `browser_pane_records`, for the panes whose block
+//!   still names the same owner (a Take over cleared the key; a copy has no record).
 //! - a Take over is remembered for a day, so the agent that lost the pane is told
 //!   what happened instead of guessing (`lost_message`); a pane that closed is only logged,
 //!   since a deleted block is already answered as "no such pane".
@@ -58,6 +59,18 @@ pub(crate) fn record(block_id: &str, agent_id: &str) {
         .unwrap_or_else(|p| p.into_inner())
         .insert(block_id.to_string(), agent_id.to_string());
     changed().notify_one();
+}
+
+/// Put back the owner `browser_pane_records` kept across a restart, for a pane whose block still
+/// names that agent. Only the owner is restored; the take-over record and a pane's grants keep their own rules.
+pub(crate) fn restore(block_id: &str, agent_id: &str) {
+    owners().lock().unwrap_or_else(|p| p.into_inner()).insert(block_id.to_string(), agent_id.to_string());
+    changed().notify_one();
+}
+
+/// Every pane an agent owns and the agent, for `browser_pane_records`.
+pub(crate) fn all_owners() -> std::collections::BTreeMap<String, String> {
+    owners().lock().unwrap_or_else(|p| p.into_inner()).iter().map(|(k, v)| (k.clone(), v.clone())).collect()
 }
 
 /// Drop `block_id`'s owner: the pane was deleted or taken over. Its bypass,
