@@ -7,6 +7,8 @@
 > **2026-08-07 audit note:** Implemented — `README.md` directly cites and
 > implements this spec by name. Status field was never updated. See
 > [`docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`](../reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md).
+> **2026-11-05 note (Clamk@narko):** the operator moved the logo above the warning: the README now opens with the logo (120 px) and the alpha warning follows directly below it. Everything below that says the warning is the first block is superseded by that order; the warning's wording and the Store copy are unchanged.
+
 **Scope:** Top-of-README banner + Microsoft Store Partner Center listing copy
 
 ---

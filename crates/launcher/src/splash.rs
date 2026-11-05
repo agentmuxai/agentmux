@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Native pre-splash for Windows: a borderless layered popup showing the
-//! AgentMux brain logo (pulsing) while startup runs, with a live startup
+//! AgentMux logo (pulsing) while startup runs, with a live startup
 //! telemetry panel below the logo.
 //!
 //! ## Layout
@@ -10,8 +10,8 @@
 //! ```
 //! ┌─ SPLASH_W × SPLASH_H ────────────────────────────────┐
 //! │  solid BG_COLOR                                       │
-//! │   ┌─ BRAIN_W × BRAIN_H ─┐  ← brain region            │
-//! │   │ brain (pulsing)     │                             │
+//! │   ┌─ BRAIN_W × BRAIN_H ─┐  ← logo region             │
+//! │   │ logo (pulsing)      │                             │
 //! │   └─────────────────────┘                             │
 //! │                                                       │
 //! │  Saga recovery          23ms                          │
@@ -53,7 +53,7 @@ use crate::startup_events::{StartupEvent, StartupStatus};
 include!(concat!(env!("OUT_DIR"), "/brain_dims.rs"));
 
 const SPLASH_PADDING: i32 = 12;
-// Vertical size of the brain-logo region only (280px) — was also the
+// Vertical size of the logo region only (280px) — was also the
 // window's WIDTH until the fix below (SPLASH_W was `= SPLASH_SIZE`), which
 // left only ~28 monospace characters per stage-telemetry row with no
 // word-wrap (`splash_text.rs` clips silently past the DIB edge). A staged
@@ -132,9 +132,9 @@ const BORDER_G: u8 = 0x0D;
 const BORDER_R: u8 = 0x0D;
 const BORDER_WIDTH: i32 = 2;
 
-static BRAIN_PNG: &[u8] = include_bytes!("../resources/brain.png");
+static BRAIN_PNG: &[u8] = include_bytes!("../resources/logo.png");
 
-/// The brain logo as BGRA with pre-multiplied alpha, decoded from
+/// The logo as BGRA with pre-multiplied alpha, decoded from
 /// `BRAIN_PNG` on first use (the first splash frame).
 ///
 /// Pre-multiplied alpha is what `UpdateLayeredWindow`'s BLENDFUNCTION
@@ -698,7 +698,7 @@ mod brain_tests {
 
     #[test]
     fn brain_png_decodes() {
-        let px = decode_brain_bgra(BRAIN_PNG).expect("brain.png decodes as 8-bit RGBA at BRAIN_W x BRAIN_H");
+        let px = decode_brain_bgra(BRAIN_PNG).expect("logo.png decodes as 8-bit RGBA at BRAIN_W x BRAIN_H");
         assert_eq!(px.len(), (BRAIN_W * BRAIN_H * 4) as usize);
         // Pre-multiplied: no colour channel may exceed its alpha.
         assert!(px.chunks_exact(4).all(|p| p[0] <= p[3] && p[1] <= p[3] && p[2] <= p[3]));
