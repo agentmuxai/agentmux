@@ -47,11 +47,13 @@
 
     // Inline SVG (the AgentMux mark; before it, three bars in place of the fa-bars icon font). Icon fonts
     // rasterize each glyph at its own fractional size; SVG rectangles fill uniformly and scale predictably
-    // with parent zoom. The 20 px mark sits in a 27 px button: the 1px bottom margin makes the free space
-    // 6px, so the mark's top edge is at a whole 3px, not 3.5 (the 28 px width gives a whole 4px each side).
+    // with parent zoom. The 20 px mark sits in a 27 px button: the 3px bottom margin makes the free space
+    // 4px, so the mark's top edge is at a whole 2px, not 3.5 (the 28 px width gives a whole 4px each side).
+    // 3px, not the 1px that centres it in the button: the button itself sits low in the bar (the `top`
+    // below was tuned for the old 23 px glyph), and the operator saw the mark 1px low.
     svg {
         display: block;
-        margin-bottom: 1px;
+        margin-bottom: 3px;
     }
 
     // macOS: pinned to the far right of the title bar, after the action
