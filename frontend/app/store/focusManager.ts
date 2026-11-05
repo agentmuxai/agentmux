@@ -304,7 +304,7 @@ function scheduleFocusRetry(blockId: string, model?: LayoutModelLike): void {
         // Parked: on <body>, on this block's dummy, still in the pane the
         // selection just left (Cmd+, from a terminal opens Settings while the
         // caret is in the terminal), or on a window-chrome control that opened
-        // it (the hamburger menu's button). Not a text field outside the panes.
+        // it (the AgentMux logo menu's button). Not a text field outside the panes.
         const parked =
             active == null ||
             active === document.body ||

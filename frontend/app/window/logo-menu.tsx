@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// The app/overflow (hamburger ☰) menu. Extracted from TabBar so it can be
+// The app/overflow menu, opened from the AgentMux logo. Extracted from TabBar so it can be
 // rendered in two places depending on platform:
 //   * Windows / Linux — at the LEFT of the tab strip (default position),
 //     clear of the right-side caption buttons.
@@ -33,9 +33,9 @@ import { THEME_OPTIONS } from "@/app/menu/base-menus";
 import { shortcutFor } from "@/app/keybindings";
 import { refreshWorkspaceList, workspaceList, workspaceName } from "@/app/store/user-workspace";
 import { createEffect, createMemo, on, onCleanup, type JSX } from "solid-js";
-import "./hamburger-menu.scss";
+import "./logo-menu.scss";
 
-interface HamburgerMenuProps {
+interface LogoMenuProps {
     /**
      * Where the button sits in the header. "left" (default) opens the
      * flyout aligned to the left edge; "right" (macOS far-right) opens it
@@ -44,14 +44,14 @@ interface HamburgerMenuProps {
     position?: "left" | "right";
 }
 
-// Every mounted hamburger's close, so the "…" More dropdown can close it when
+// Every mounted logo menu's close, so the "…" More dropdown can close it when
 // it opens beside it (action-widgets.tsx): on macOS both sit at the right of
-// the header, and a More opened by hover drew over an open hamburger.
-const hamburgerClosers = new Set<() => void>();
+// the header, and a More opened by hover drew over an open logo menu.
+const logoMenuClosers = new Set<() => void>();
 
-/** Closes the hamburger menu if it is open. */
-export function closeHamburgerMenu(): void {
-    for (const close of hamburgerClosers) close();
+/** Closes the logo menu if it is open. */
+export function closeLogoMenu(): void {
+    for (const close of logoMenuClosers) close();
 }
 
 /** Run one of ☰ → Workspaces' actions (workspaces.ts, loaded when used). */
@@ -59,10 +59,10 @@ function workspaceAction(run: (m: typeof import("./workspaces")) => Promise<void
     return () => fireAndForget(async () => run(await import("./workspaces")));
 }
 
-export function HamburgerMenu(props: HamburgerMenuProps): JSX.Element {
+export function LogoMenu(props: LogoMenuProps): JSX.Element {
     let close: (() => void) | undefined;
     onCleanup(() => {
-        if (close) hamburgerClosers.delete(close);
+        if (close) logoMenuClosers.delete(close);
     });
     // Open Workspace lists the workspaces: asked for again whenever the open
     // one, or its name, changes.
@@ -246,37 +246,32 @@ export function HamburgerMenu(props: HamburgerMenuProps): JSX.Element {
 
     return (
         <FlyoutMenu
+            anchorClass={atRight() ? "logo-menu-anchor logo-menu-anchor--right" : "logo-menu-anchor"}
             items={menuItems()}
             placement={atRight() ? "bottom-end" : "bottom-start"}
             mirrored={atRight()}
             closeRef={(fn) => {
                 close = fn;
-                hamburgerClosers.add(fn);
+                logoMenuClosers.add(fn);
             }}
         >
             <button
-                class="hamburger-btn"
-                classList={{ "hamburger-btn--right": atRight() }}
+                class="logo-menu-btn"
                 title="Menu"
                 data-drag-region="false"
             >
                 {/*
-                 * Inline SVG with three filled rects instead of
-                 * `fa fa-bars`. Icon-font glyphs rasterized one of
-                 * the three lines on a fractional pixel boundary at
-                 * different chrome zoom levels, making it noticeably
-                 * thinner — and the affected line shifted as zoom
-                 * changed. Filled rects scale uniformly with the
-                 * parent's CSS zoom, no rasterization unevenness.
+                 * The AgentMux mark (frontend/app/asset/logo-mark.svg, the app icon's four blocks) as inline
+                 * rects, not an image or an icon font: they scale evenly with chrome zoom. The mark is the
+                 * icon's shape snapped to a 5 x 5 grid of 4 px cells (20 px), so every edge lands on a whole
+                 * pixel and the bar, the gaps and the small blocks are all one cell. Colour comes from
+                 * `--accent-color` (logo-menu.scss).
                  */}
-                {/* height 23 (not 22) centers the bars vertically: 3px above
-                    AND below (bars span y=3..20). At 22 they sat 1px low (3px
-                    top / 2px bottom). 23 also gives a crisp 2px button inset
-                    (was a sub-pixel 2.5px). */}
-                <svg width="26" height="23" viewBox="0 0 26 23" fill="currentColor">
-                    <rect x="2" y="3" width="22" height="3" rx="1" />
-                    <rect x="2" y="10" width="22" height="3" rx="1" />
-                    <rect x="2" y="17" width="22" height="3" rx="1" />
+                <svg width="20" height="20" viewBox="0 0 5 5" fill="currentColor" shape-rendering="crispEdges" aria-hidden="true">
+                    <rect x="0" y="0" width="5" height="1" />
+                    <rect x="0" y="2" width="2" height="3" />
+                    <rect x="3" y="2" width="2" height="1" />
+                    <rect x="3" y="4" width="2" height="1" />
                 </svg>
             </button>
         </FlyoutMenu>

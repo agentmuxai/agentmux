@@ -28,7 +28,7 @@ export interface TopBarMeasure {
     labeledPx: number;
     /** The widget bar icon-only, every pinned icon (its icon-only mirror). */
     iconOnlyPx: number;
-    /** The tab bar with every tab at its natural width (plus separators, gutter, in-bar hamburger). */
+    /** The tab bar with every tab at its natural width (plus separators, gutter, in-bar AgentMux logo). */
     tabsNaturalPx: number;
     /** Pinned widgets, and one icon's width, for the overflow count. */
     pinnedCount: number;

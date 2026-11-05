@@ -112,7 +112,7 @@ function landingTerminals() {
             await session.wait(2500);
             // openWidget's fallbacks can leave the main menu open; Escape goes to the focused
             // terminal, so close it with its own button.
-            if (await session.evaluate(MENU_OPEN)) await session.clickSelector(".hamburger-btn");
+            if (await session.evaluate(MENU_OPEN)) await session.clickSelector(".logo-menu-btn");
             await session.parkMouse();
             await session.wait(300);
         },
@@ -194,7 +194,7 @@ function landingWorkspace() {
             await session.wait(1500);
             await sendLine(session, terminal, COMMAND.command);
             await session.wait(2500);
-            if (await session.evaluate(MENU_OPEN)) await session.clickSelector(".hamburger-btn");
+            if (await session.evaluate(MENU_OPEN)) await session.clickSelector(".logo-menu-btn");
             await session.parkMouse();
             await session.wait(300);
         },

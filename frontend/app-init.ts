@@ -766,7 +766,7 @@ async function initMuxWrap(initOpts: AgentMuxInitOpts) {
         // mount cascade to settle, then reveal atomically" treatment.
         // This covers:
         //   - Cold app start (the first window in the user's session)
-        //   - "New Window" from the hamburger menu (each opens its
+        //   - "New Window" from the AgentMux logo menu (each opens its
         //     own bootstrap → initMuxWrap)
         //   - Any future window-spawning path that reuses initMux
         //

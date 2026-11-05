@@ -11,7 +11,7 @@ import { TitleBarContextMenu } from "@/app/window/titlebar-context-menu";
 import { SystemStatus } from "@/app/window/system-status";
 import { WindowControlsLeft } from "@/app/window/window-controls.platform";
 import { hostHas } from "@/util/host-caps";
-import { HamburgerMenu } from "@/app/window/hamburger-menu";
+import { LogoMenu } from "@/app/window/logo-menu";
 import { isMacOS } from "@/util/platformutil";
 import "./window-header.platform.scss";
 
@@ -55,12 +55,12 @@ const WindowHeader = (props: WindowHeaderProps): JSX.Element => {
 
             <SystemStatus />
 
-            {/* macOS: the hamburger lives at the far right of the header,
+            {/* macOS: the AgentMux logo lives at the far right of the header,
                 after the action widgets — the native traffic-light controls
-                occupy the left, so a left-side hamburger crowds them. On
+                occupy the left, so a left-side AgentMux logo crowds them. On
                 Windows/Linux it stays in the tab strip (see TabBar). */}
             <Show when={isMacOS()}>
-                <HamburgerMenu position="right" />
+                <LogoMenu position="right" />
             </Show>
 
             {/* PopoverMenu (inside TitleBarContextMenu) already renders into
