@@ -71,9 +71,11 @@ an agent asking for something that affects the user),
   unauthenticated, from srv (it already has an HTTP client and the network
   settings). Compare the tag's semver with this build's. Pre-releases are
   ignored.
-- **When: only when asked** (`update_check::check_now`), never on its own
-  (the operator's decision, 2026-10-18: AgentMux makes no request to a
-  server the user didn't ask for). Maintenance's **Check for update**
+- **When: when asked** (`update_check::check_now`), and since 2026-11-03 on its
+  own too: the operator reversed the 2026-10-18 decision (AgentMux makes no
+  request to a server the user didn't ask for) for the update check, see
+  `SPEC_BACKGROUND_UPDATES_ONE_CLICK_RESTART_2026_11_03.md` (a minute after
+  start, then every ~6 h; `update:auto` turns it off). Maintenance's **Check for update**
   (`app.update-check`), the `App` tool's `version`
   (`GET /api/v1/app/update-status?check=1`) and its `upgrade` ask GitHub at
   once, at most every 30 s between them (GitHub allows 60 unauthenticated
@@ -542,7 +544,9 @@ Each phase is small and useful on its own.
    `QuitSelf`; anything else raises the banner and waits for a click.
 4. ~~The update check is on by default (`app:updatecheck`), one
    unauthenticated request to GitHub every 6 hours.~~ Replaced 2026-10-18:
-   **no automatic check.** AgentMux asks GitHub only when the user clicks
+   **no automatic check** (replaced again 2026-11-03: it checks in the
+   background by default, `SPEC_BACKGROUND_UPDATES_ONE_CLICK_RESTART_2026_11_03.md`).
+   AgentMux asked GitHub only when the user clicks
    Check for update or an agent asks; the button is always shown, and a
    check pins what is installed (§3).
 5. **Old versions:** keep the running version and the one before it; after

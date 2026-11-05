@@ -168,13 +168,14 @@ pub(crate) const MEMORY_NOT_EXPORTED_WARNING: &str =
 
 /// Does any agent bound to `bundle_id` have mirrored native memory?
 ///
-/// **Both bindings count.** A bundle is reachable two ways, and they are
-/// different columns: `AgentDefinition.memory_id` is the agent's own dedicated
-/// bundle (stored in `db_agents.default_memory_id`), while
-/// `AgentInstance.memory_id` is one *launch* deliberately pointed at some other
-/// bundle (`AgentDefinition::memory_id` in `storage/agents/mod.rs`). Checking only
-/// the definition would miss exactly the case the operator is most likely to
-/// hit — exporting the bundle a running instance was launched with. Native memory is keyed on the
+/// **Every binding counts.** A bundle is reachable three ways: the agent's
+/// picks (`db_agent_bundles`), the default an old definition still carries
+/// (`AgentDefinition.memory_id`, stored in `db_agents.default_memory_id`; `m0047`
+/// moves it into the picks), and `AgentInstance.memory_id`, one *launch*
+/// deliberately pointed at some other bundle (`AgentDefinition::memory_id` in
+/// `storage/agents/mod.rs`). Checking only the definition would miss exactly the
+/// case the operator is most likely to hit — exporting the bundle a running
+/// instance was launched with. Native memory is keyed on the
 /// definition id either way (`build_export_for_agent` resolves the agent with
 /// `agent_def_get` before reading memory), so the instance path resolves
 /// through `definition_id`.
@@ -237,7 +238,7 @@ pub(super) fn bound_agent_has_native_memory(
         .map(|agents| {
             agents
                 .iter()
-                .filter(|a| a.memory_id == bundle_id)
+                .filter(|a| a.memory_id == bundle_id || mstore.agent_bundle_ids(&a.id).is_ok_and(|ids| ids.iter().any(|id| id == bundle_id)))
                 .any(|a| has_memory(&a.id))
         })
         .unwrap_or(false);

@@ -20,10 +20,6 @@
     padding: var(--space-0-5) var(--space-1) var(--space-0-5) var(--space-2);
     box-shadow: inset 0 -1px 0 var(--border-color);
     font-size: var(--text-sm);
-
-    &.is-own {
-        padding-block: var(--space-1);
-    }
 }
 
 .bundle-list-editor-name {

@@ -77,7 +77,7 @@
 1186 crates/cef/src/lib.rs::run
 152 crates/cef/src/macos_compat.rs::install_macos_accessibility_governor
 135 crates/cef/src/macos_compat.rs::set_macos_app_display_name_impl
-139 crates/cef/src/memory_heartbeat.rs::start
+138 crates/cef/src/memory_heartbeat.rs::start
 143 crates/cef/src/reducer/mod.rs::HostCommand::fmt
 120 crates/cef/src/reducer/mod.rs::update
 299 crates/cef/src/sidecar.rs::spawn_backend

@@ -5,11 +5,9 @@
  * AgentBundlesTab — the "Bundles…" modal, opened from My Agents' row menu and
  * the agent pane's right-click menu: the
  * agent's Bundles list, in order (SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md §3.6).
- * The agent's own bundle comes first and is fixed; the picks after it are
- * added, removed and reordered here, and saved on each change
+ * The picks are added, removed and reordered here, and saved on each change
  * (`setagentbundles`). From the next launch, their instructions go into the
- * agent's startup file after Global Memory, and their skills and MCP servers
- * are added.
+ * agent's startup file after Global Memory, and their skills are added.
  *
  * Replaces the Startup tab, which picked one bundle to send as the agent's
  * first message; srv folds that old pick into this list.
@@ -32,24 +30,18 @@ interface AgentBundlesTabProps {
 export const AgentBundlesTab = (props: AgentBundlesTabProps): JSX.Element => {
     const [bundles] = createResource(() => RpcApi.ListBundlesCommand(TabRpcClient, {}));
     const [picks, setPicks] = createSignal<string[]>([]);
-    const [ownId, setOwnId] = createSignal("");
     const [loaded, setLoaded] = createSignal(false);
     const [saving, setSaving] = createSignal(false);
     const [error, setError] = createSignal<string | null>(null);
 
     void RpcApi.GetAgentBundlesCommand(TabRpcClient, { agent_id: props.agentId })
-        .then((r) => {
-            setPicks(r.bundle_ids);
-            setOwnId(r.own_bundle_id);
-        })
+        .then((r) => setPicks(r.bundle_ids))
         .catch((e) => setError(String(e)))
         .finally(() => setLoaded(true));
 
     // Blank is the vanilla-CLI sentinel and system entries are Global Memory,
-    // not something to pick (#2782). The agent's own bundle is shown
-    // separately, first.
-    const selectable = () => (bundles() ?? []).filter((b) => !b.is_blank && !b.is_system && b.id !== ownId());
-    const ownName = () => (bundles() ?? []).find((b) => b.id === ownId())?.name;
+    // not something to pick (#2782).
+    const selectable = () => (bundles() ?? []).filter((b) => !b.is_blank && !b.is_system);
 
     const save = async (ids: string[]): Promise<void> => {
         setError(null);
@@ -84,7 +76,6 @@ export const AgentBundlesTab = (props: AgentBundlesTabProps): JSX.Element => {
                     bundles={selectable()}
                     value={picks()}
                     onChange={(ids) => void save(ids)}
-                    own={ownName()}
                     disabled={!loaded() || saving()}
                     testId="agent-bundles-tab-list"
                 />

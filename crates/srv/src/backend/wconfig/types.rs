@@ -100,6 +100,17 @@ pub struct SettingsType {
     #[serde(rename = "app:showoverlayblocknums", default, skip_serializing_if = "Option::is_none")]
     pub app_show_overlay_block_nums: Option<bool>,
 
+    /// Check for a newer release in the background, every few hours (absent =
+    /// on). Off: AgentMux asks GitHub only when the user or an agent does
+    /// (`update::auto`).
+    #[serde(rename = "update:auto", default, skip_serializing_if = "Option::is_none")]
+    pub update_auto: Option<bool>,
+
+    /// Download and stage a newer release by itself once one is found (absent
+    /// = on); nothing is installed without a restart (`update::auto`).
+    #[serde(rename = "update:autodownload", default, skip_serializing_if = "Option::is_none")]
+    pub update_auto_download: Option<bool>,
+
     // -- Terminal settings --
     #[serde(rename = "term:*", default, skip_serializing_if = "is_false")]
     pub term_clear: bool,

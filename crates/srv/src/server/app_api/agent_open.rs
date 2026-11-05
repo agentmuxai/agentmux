@@ -787,8 +787,8 @@ mod write_agent_config_files_tests {
         let work_dir_str = work_dir.path().to_str().unwrap();
 
         let mut agent = make_agent("agent-1", work_dir_str);
-        agent.memory_id = "bundle-1".to_string();
         mstore.agent_def_insert(&mut agent).unwrap();
+        mstore.agent_bundles_set("agent-1", &["bundle-1".to_string()]).unwrap();
 
         mstore
             .bundle_upsert(&crate::backend::storage::bundles::Bundle {

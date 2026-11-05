@@ -3,8 +3,9 @@
 
 /**
  * Whether a newer AgentMux release exists, as srv learns it from GitHub
- * Releases (crates/srv/src/backend/update/check.rs), only when the user clicks
- * Check for update or an agent asks: `app.update-status` when a window opens,
+ * Releases (crates/srv/src/backend/update/check.rs), which srv asks in the
+ * background (`update/auto.rs`) and when the user clicks Check for update or an
+ * agent asks: `app.update-status` when a window opens,
  * kept current by the `app:updatestatus` event. The status-bar chip and the
  * version panel's Maintenance section read it.
  * docs/specs/SPEC_UPGRADE_FOR_USERS_AND_AGENTS_2026_10_15.md §3.
@@ -184,6 +185,40 @@ export function checkedAt(ms: number, now: Date = new Date()): string {
 export function releaseDownload(s: AppUpdateStatus | null = appUpdate()): DownloadStatus | null {
     const d = s?.download;
     return d && s?.latest && d.version === s.latest ? d : null;
+}
+
+/** What's new: the release's own page on GitHub, or the list of releases when the version isn't known. */
+export function releaseNotesUrl(version: string | null | undefined): string {
+    return version
+        ? `https://github.com/agentmuxai/agentmux/releases/tag/v${version}`
+        : "https://github.com/agentmuxai/agentmux/releases";
+}
+
+/**
+ * The newer release once it is downloaded, verified and staged (srv does this by
+ * itself, `update/auto.rs`): ready to restart into, or a restart under way.
+ * Null while it is still downloading, failed, or has no download.
+ */
+export function stagedRelease(
+    s: AppUpdateStatus | null = appUpdate(),
+): { version: string; state: "ready" | "waiting" | "restarting"; waitingFor: number } | null {
+    const d = availableRelease(s) ? releaseDownload(s) : null;
+    if (!d || (d.state !== "ready" && d.state !== "waiting" && d.state !== "restarting")) return null;
+    return { version: d.version, state: d.state, waitingFor: d.waiting_for ?? 0 };
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * How long the staged release has gone unclicked, for the chip's colour: the
+ * "warm" step after 2 days of the release being out, the "hot" step after 4
+ * (Chrome's relaunch icon steps at 2, 4 and 7 days). Nothing nags earlier.
+ */
+export function stagedUrgency(s: AppUpdateStatus | null = appUpdate(), nowMs: number = Date.now()): "calm" | "warm" | "hot" {
+    const published = s?.published_at ? Date.parse(s.published_at) : NaN;
+    if (!Number.isFinite(published)) return "calm";
+    const age = nowMs - published;
+    return age >= 4 * DAY_MS ? "hot" : age >= 2 * DAY_MS ? "warm" : "calm";
 }
 
 /**
