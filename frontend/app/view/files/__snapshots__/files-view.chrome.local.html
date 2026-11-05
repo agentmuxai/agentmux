@@ -27,7 +27,7 @@
 <button type="button" class="ui-button ui-tone-quiet ui-density-compact files-crumb">a</button>
 </nav>
 <div class="ui-tooltip-anchor">
-<button aria-label="Filter (Ctrl+F)" type="button" class="ui-button ui-tone-quiet ui-icon-button files-tool">
+<button aria-label="Filter (Ctrl+F)" type="button" class="ui-button ui-tone-quiet ui-icon-button files-tool files-filter-button" aria-pressed="false">
 <i aria-hidden="true" class="fa-solid fa-filter">
 </i>
 </button>
@@ -124,8 +124,16 @@
 <div class="files-row files-header" role="row" aria-rowindex="1">
 <button role="columnheader" aria-sort="ascending" type="button" class="ui-button ui-tone-quiet files-cell files-col-name">Name<i aria-hidden="true" class="fa fa-caret-up files-sort-mark">
 </i>
+<span class="files-col-resizer" role="separator" aria-orientation="vertical" aria-label="Resize the Name column">
+</span>
 </button>
-<button role="columnheader" aria-sort="none" type="button" class="ui-button ui-tone-quiet files-cell files-col-modified">Modified</button>
-<button role="columnheader" aria-sort="none" type="button" class="ui-button ui-tone-quiet files-cell files-col-size">Size</button>
-<button role="columnheader" aria-sort="none" type="button" class="ui-button ui-tone-quiet files-cell files-col-kind">Kind</button>
+<button role="columnheader" aria-sort="none" type="button" class="ui-button ui-tone-quiet files-cell files-col-modified">Modified<span class="files-col-resizer" role="separator" aria-orientation="vertical" aria-label="Resize the Modified column">
+</span>
+</button>
+<button role="columnheader" aria-sort="none" type="button" class="ui-button ui-tone-quiet files-cell files-col-size">Size<span class="files-col-resizer" role="separator" aria-orientation="vertical" aria-label="Resize the Size column">
+</span>
+</button>
+<button role="columnheader" aria-sort="none" type="button" class="ui-button ui-tone-quiet files-cell files-col-kind">Kind<span class="files-col-resizer" role="separator" aria-orientation="vertical" aria-label="Resize the Kind column">
+</span>
+</button>
 </div>

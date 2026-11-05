@@ -1,0 +1,16 @@
+advance 20ms
+autoUpdate #1 registered (row rowA)
+row mousemove y=215
+[rowA lingering] panel={position: fixed; left: 800px; top: 227px; transform: translateX(-100%); max-width: 700px; min-width: 600px; max-height: 765px;} outside=true hidden=null class="agent-node-peek-overlay" bridge=rowA afterLeave=rowA
+advance 10ms
+[show back on, row switched] panel={position: fixed; left: 800px; top: 227px; transform: translateX(-100%); max-width: 700px; min-width: 600px; max-height: 765px;} outside=true hidden=null class="agent-node-peek-overlay" bridge=- afterLeave=-
+[show off again with rowB] panel={position: fixed; left: 800px; top: 227px; transform: translateX(-100%); max-width: 700px; min-width: 600px; max-height: 765px;} outside=true hidden=null class="agent-node-peek-overlay" bridge=rowB afterLeave=rowB
+advance 2000ms
+autoUpdate #1 disposed
+[closed] panel=- bridge=- afterLeave=-
+advance 20ms
+autoUpdate #2 registered (row rowB)
+row mousemove y=215
+[lingering on rowB, about to unmount] panel={position: fixed; left: 800px; top: 227px; transform: translateX(-100%); max-width: 700px; min-width: 600px; max-height: 765px;} outside=true hidden=null class="agent-node-peek-overlay" bridge=rowB afterLeave=rowB
+autoUpdate #2 disposed
+after unmount: bridge=- afterLeave=- panel=-

@@ -1,0 +1,28 @@
+advance 20ms
+autoUpdate #1 registered (row rowA)
+row mousemove y=215
+[tall, pointer at 215] panel={position: fixed; left: 800px; top: 227px; transform: translateX(-100%); max-width: 700px; min-width: 600px; max-height: 765px;} outside=true hidden=null class="agent-node-peek-overlay" bridge=- afterLeave=-
+row mousemove y=260
+[pointer moved: pinned, not following] panel={position: fixed; left: 800px; top: 227px; transform: translateX(-100%); max-width: 700px; min-width: 600px; max-height: 765px;} outside=true hidden=null class="agent-node-peek-overlay" bridge=- afterLeave=-
+[show off: lingering] panel={position: fixed; left: 800px; top: 227px; transform: translateX(-100%); max-width: 700px; min-width: 600px; max-height: 765px;} outside=true hidden=null class="agent-node-peek-overlay" bridge=rowA afterLeave=rowA
+advance 100ms
+[100ms] panel={position: fixed; left: 800px; top: 227px; transform: translateX(-100%); max-width: 700px; min-width: 600px; max-height: 765px;} outside=true hidden=null class="agent-node-peek-overlay" bridge=rowA afterLeave=rowA
+document mousemove 300,500
+advance 100ms
+[approaching: re-armed] panel={position: fixed; left: 800px; top: 227px; transform: translateX(-100%); max-width: 700px; min-width: 600px; max-height: 765px;} outside=true hidden=null class="agent-node-peek-overlay" bridge=rowA afterLeave=rowA
+document mousemove 250,400
+advance 149ms
+autoUpdate #1 disposed
+[closer again, 149ms] panel=- bridge=- afterLeave=-
+advance 1ms
+[closed after the last linger] panel=- bridge=- afterLeave=-
+advance 20ms
+autoUpdate #2 registered (row rowA)
+row mousemove y=260
+[shown again, measured and moved] panel={position: fixed; left: 800px; top: 230px; transform: translateX(-100%); max-width: 700px; min-width: 600px; max-height: 762px;} outside=true hidden=null class="agent-node-peek-overlay" bridge=- afterLeave=-
+advance 5000ms
+[the pointer is on the panel: held] panel={position: fixed; left: 800px; top: 230px; transform: translateX(-100%); max-width: 700px; min-width: 600px; max-height: 762px;} outside=true hidden=null class="agent-node-peek-overlay" bridge=- afterLeave=rowA
+[left the panel] panel={position: fixed; left: 800px; top: 230px; transform: translateX(-100%); max-width: 700px; min-width: 600px; max-height: 762px;} outside=true hidden=null class="agent-node-peek-overlay" bridge=rowA afterLeave=rowA
+advance 160ms
+autoUpdate #2 disposed
+[closed] panel=- bridge=- afterLeave=-
