@@ -31,7 +31,7 @@ function InstructionsCard(props: { bundle: Bundle; onEdit?: () => void }): JSX.E
             title="Instructions"
             subtitle={text().split("\n")[0] || "(none)"}
             meta={[
-                <span>{text().length} characters</span>,
+                <span>{text().length} {text().length === 1 ? "character" : "characters"}</span>,
                 ...(variants() > 0 ? [<span>{variants()} provider {variants() === 1 ? "variant" : "variants"}</span>] : []),
             ]}
             onSelect={props.onEdit}

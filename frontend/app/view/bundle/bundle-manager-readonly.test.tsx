@@ -94,6 +94,11 @@ describe("the Instructions card", () => {
         expect(meta(instructionsCard())).toEqual(["3 characters"]);
     });
 
+    it("says one character in the singular", () => {
+        mount(bundle({ instructions: " x " }));
+        expect(meta(instructionsCard())).toEqual(["1 character"]);
+    });
+
     it("says there are none when the instructions are empty or missing", () => {
         mount(bundle({ instructions: "   " }));
         expect(instructionsCard().querySelector(".ui-card-subtitle")?.textContent).toBe("(none)");
