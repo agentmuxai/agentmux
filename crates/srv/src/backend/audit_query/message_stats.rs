@@ -96,9 +96,14 @@ pub fn count(entries: impl IntoIterator<Item = AuditLogEntry>, since_ms: u64) ->
 
 /// The last `days` days (at most [`MAX_DAYS`]) counted from the audit file at `path`.
 pub fn from_file(path: &Path, now_ms: u64, days: u64) -> Vec<DayStat> {
+    from_files(&[path.to_path_buf()], now_ms, days)
+}
+
+/// The same over several audit files, which hold different lines: the shared file and a srv's own.
+pub fn from_files(paths: &[std::path::PathBuf], now_ms: u64, days: u64) -> Vec<DayStat> {
     let since = now_ms.saturating_sub(days.clamp(1, MAX_DAYS) * DAY_MS);
-    // Newest first, so stop at the first entry older than the window.
-    let recent = jekt_file::entries(path, None).map(|(_, _, e)| e).take_while(|e| e.timestamp >= since);
+    // Each file is newest first, so stop at its first entry older than the window.
+    let recent = paths.iter().flat_map(move |path| jekt_file::entries(path, None).map(|(_, _, e)| e).take_while(move |e| e.timestamp >= since));
     count(recent, since)
 }
 

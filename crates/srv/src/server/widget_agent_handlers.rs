@@ -227,7 +227,7 @@ pub(super) async fn handle_widgets_install(
             Err(e) => error(StatusCode::BAD_REQUEST, e),
         };
     }
-    let answer = requests::requests().ask(WidgetInstallRequest::of(&pkg, &agent));
+    let answer = requests::requests().ask(WidgetInstallRequest::of(&pkg, &agent, pane.as_deref().unwrap_or("")));
     publish_requests(&state);
     // The asking agent's pane (or, unverified, no pane) waits on the user
     // until this returns: the waiting tone and notification for it.
