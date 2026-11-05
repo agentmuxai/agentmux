@@ -10,9 +10,10 @@
 // agentmux-mobile's SPEC_AGENT_STATUS_AND_LIVE_PANE_FEED_2026_10_07 §4.1.
 
 import { Button, Switch } from "@/app/element/ui";
-import { createEffect, createSignal, For, on, onMount, Show, type JSX } from "solid-js";
+import { createSignal, For, Show, type JSX } from "solid-js";
 
-import { settingsAtom, viewerPairedAtom } from "@/app/store/global";
+import { createDomainStore } from "@/app/store/domain-store";
+import { settingsAtom } from "@/app/store/global";
 import { RpcApi, type ViewerDeviceInfo } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { SettingsIndexEntry } from "../settings-model";
@@ -84,24 +85,23 @@ export function ago(ms: number, nowMs: number): string {
 
 // ── Section: Paired devices ──────────────────────────────────────────────────
 
+// A device pairing (`viewer:paired`), a revoke or a change of its send grant (`viewerdevices:changed`),
+// from this window, a paired device's own request or another window.
+const store = createDomainStore<ViewerDeviceInfo[] | null>({
+    initial: null,
+    events: ["ViewerPaired", "ViewerDevicesChanged"],
+    load: async () => (await RpcApi.ViewerDevicesCommand(TabRpcClient)).devices,
+});
+
 export function DevicesSection(): JSX.Element {
-    const [devices, setDevices] = createSignal<ViewerDeviceInfo[] | null>(null);
-    const [error, setError] = createSignal<string | null>(null);
+    store.follow();
+    const devices = store.data;
+    const setDevices = (change: (list: ViewerDeviceInfo[] | null) => ViewerDeviceInfo[]) => store.set(change(store.data()));
+    const [changeError, setError] = createSignal<string | null>(null);
+    const error = () => changeError() ?? (store.error() && `Couldn't list paired devices: ${store.error()}`);
     const [revoking, setRevoking] = createSignal<string | null>(null);
     const [granting, setGranting] = createSignal<string | null>(null);
 
-    const load = async () => {
-        try {
-            const r = await RpcApi.ViewerDevicesCommand(TabRpcClient);
-            setDevices(r.devices);
-            setError(null);
-        } catch (e) {
-            setError(`Couldn't list paired devices: ${e instanceof Error ? e.message : e}`);
-        }
-    };
-    onMount(() => void load());
-    // A device paired while this is open shows up without a reopen.
-    createEffect(on(viewerPairedAtom, () => void load(), { defer: true }));
 
     const revoke = async (device: ViewerDeviceInfo) => {
         setRevoking(device.device_id);

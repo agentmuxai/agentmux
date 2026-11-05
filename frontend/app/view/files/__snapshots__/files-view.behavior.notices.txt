@@ -1,0 +1,10 @@
+gated: macOS will ask to let AgentMux open your Documents folder. That's so it can show what's inside. It asks again after each AgentMux update.Open Documents
+model.navigate("", {"push":false,"consented":true})
+loading: (none)
+loading slow: Loading…
+loading slow, protected: Waiting for you to answer macOS's prompt…
+error: This folder doesn't exist any more.Try again
+model.refresh()
+empty: This folder is empty.
+empty filtered: Nothing here matches “zz”.
+only hidden: Only hidden files here.

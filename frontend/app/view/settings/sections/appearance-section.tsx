@@ -9,6 +9,7 @@ import { settingsAtom } from "@/app/store/global";
 import { THEME_OPTIONS } from "@/app/menu/base-menus";
 import type { SettingsIndexEntry } from "../settings-model";
 import { NumberControl, SectionHeader, set, SettingRow, SliderControl, ToggleControl } from "../settings-controls";
+import { LANGUAGE_SETTINGS, LanguageRow } from "./language-row";
 import { WidgetColorsSettings } from "./widget-colors";
 
 // ── Search index — one entry per row below, named-key so re-ordering rows
@@ -106,6 +107,7 @@ export const APPEARANCE_SETTINGS = {
         group: "Widget colors",
         keywords: ["color", "colour", "widget", "pane", "tab", "border", "pane:colors"],
     },
+    ...LANGUAGE_SETTINGS,
 } satisfies Record<string, SettingsIndexEntry>;
 
 // ── Section: Appearance ───────────────────────────────────────────────────────
@@ -132,6 +134,7 @@ export function AppearanceSection(): JSX.Element {
                     </Select>
                 }
             />
+            <LanguageRow />
             <SettingRow
                 id={APPEARANCE_SETTINGS.splash.id}
                 label={APPEARANCE_SETTINGS.splash.label}

@@ -7,8 +7,9 @@
 // by asking about each.
 
 import { Button, Select } from "@/app/element/ui";
-import { createSignal, For, onMount, Show, type JSX } from "solid-js";
+import { createSignal, For, Show, type JSX } from "solid-js";
 
+import { createDomainStore } from "@/app/store/domain-store";
 import { RpcApi, type AgentDefinition } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { SettingsIndexEntry } from "../settings-model";
@@ -25,37 +26,44 @@ export const HIDDEN_AGENTS_SETTING = {
 
 const agentName = (agent: AgentDefinition) => agent.name || agent.slug || agent.id;
 
+type HiddenData = { agents: AgentDefinition[]; hiddenIds: string[] };
+
+// The flag has no list call, so it is asked per agent. The agents list changes with `agents:changed`,
+// the flag with `agenthidden:changed`; either one reloads both.
+const store = createDomainStore<HiddenData | null>({
+    initial: null,
+    events: ["AgentsChanged", "AgentHiddenChanged"],
+    load: async () => {
+        const list = await RpcApi.ListAgentDefinitionsCommand(TabRpcClient, { is_seeded: 0 });
+        const flags = await Promise.all(
+            list.map((a) => RpcApi.ViewerAgentHiddenCommand(TabRpcClient, { agent_id: a.id }).then((r) => r.hidden))
+        );
+        return { agents: list, hiddenIds: list.filter((_, i) => flags[i]).map((a) => a.id) };
+    },
+});
+
 export function HiddenAgents(): JSX.Element {
-    const [agents, setAgents] = createSignal<AgentDefinition[] | null>(null);
-    const [hiddenIds, setHiddenIds] = createSignal<string[]>([]);
+    store.follow();
+    const agents = () => store.data()?.agents ?? null;
+    const hiddenIds = () => store.data()?.hiddenIds ?? [];
     const [pick, setPick] = createSignal("");
     const [busy, setBusy] = createSignal<string | null>(null);
-    const [error, setError] = createSignal<string | null>(null);
-
-    const load = async () => {
-        try {
-            const list = await RpcApi.ListAgentDefinitionsCommand(TabRpcClient, { is_seeded: 0 });
-            const flags = await Promise.all(
-                list.map((a) => RpcApi.ViewerAgentHiddenCommand(TabRpcClient, { agent_id: a.id }).then((r) => r.hidden))
-            );
-            setAgents(list);
-            setHiddenIds(list.filter((_, i) => flags[i]).map((a) => a.id));
-            setError(null);
-        } catch (e) {
-            setError(`Couldn't list hidden agents: ${e instanceof Error ? e.message : e}`);
-        }
-    };
-    onMount(() => void load());
+    const [changeError, setChangeError] = createSignal<string | null>(null);
+    const error = () => changeError() ?? (store.error() && `Couldn't list hidden agents: ${store.error()}`);
 
     const change = async (agent: AgentDefinition, hidden: boolean) => {
         setBusy(agent.id);
         try {
             const r = await RpcApi.ViewerAgentHiddenCommand(TabRpcClient, { agent_id: agent.id, hidden });
-            setHiddenIds((ids) => [...ids.filter((id) => id !== agent.id), ...(r.hidden ? [agent.id] : [])]);
+            const data = store.data();
+            if (data) {
+                const hiddenIds = [...data.hiddenIds.filter((id) => id !== agent.id), ...(r.hidden ? [agent.id] : [])];
+                store.set({ ...data, hiddenIds });
+            }
             setPick("");
-            setError(null);
+            setChangeError(null);
         } catch (e) {
-            setError(`Couldn't change ${agentName(agent)}: ${e instanceof Error ? e.message : e}`);
+            setChangeError(`Couldn't change ${agentName(agent)}: ${e instanceof Error ? e.message : e}`);
         } finally {
             setBusy(null);
         }

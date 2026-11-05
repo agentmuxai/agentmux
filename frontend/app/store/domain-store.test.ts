@@ -52,7 +52,7 @@ describe("createDomainStore", () => {
 
     it("loads when first followed, and holds the result", async () => {
         const load = vi.fn().mockResolvedValue(["a"]);
-        const store = createDomainStore({ initial: [] as string[], load, events: ["agents:changed" as never] });
+        const store = createDomainStore({ initial: [] as string[], load, events: ["AgentsChanged"] });
         expect(store.loaded()).toBe(false);
         const unmount = mount(store);
         await flush();
@@ -64,13 +64,13 @@ describe("createDomainStore", () => {
 
     it("reloads once for a burst of events", async () => {
         const load = vi.fn().mockResolvedValue(1);
-        const store = createDomainStore({ initial: 0, load, events: ["x" as never], debounceMs: 100 });
+        const store = createDomainStore({ initial: 0, load, events: ["AgentsChanged"], debounceMs: 100 });
         const unmount = mount(store);
         await flush();
         load.mockClear();
-        fire("x");
-        fire("x");
-        fire("x");
+        fire("agents:changed");
+        fire("agents:changed");
+        fire("agents:changed");
         await vi.advanceTimersByTimeAsync(99);
         expect(load).not.toHaveBeenCalled();
         await vi.advanceTimersByTimeAsync(2);
@@ -92,11 +92,11 @@ describe("createDomainStore", () => {
                     };
                 })
         );
-        const store = createDomainStore({ initial: 0, load, events: ["x" as never], debounceMs: 0 });
+        const store = createDomainStore({ initial: 0, load, events: ["AgentsChanged"], debounceMs: 0 });
         const unmount = mount(store);
         await flush();
         expect(load).toHaveBeenCalledTimes(1);
-        fire("x");
+        fire("agents:changed");
         await vi.advanceTimersByTimeAsync(1); // the event asks while the first load runs
         expect(load).toHaveBeenCalledTimes(1);
         release(1);
@@ -112,8 +112,8 @@ describe("createDomainStore", () => {
     it("reloads every followed store after a reconnect, and not one nobody follows", async () => {
         const a = vi.fn().mockResolvedValue(1);
         const b = vi.fn().mockResolvedValue(1);
-        const followedStore = createDomainStore({ initial: 0, load: a, events: ["x" as never] });
-        const idle = createDomainStore({ initial: 0, load: b, events: ["y" as never] });
+        const followedStore = createDomainStore({ initial: 0, load: a, events: ["AgentsChanged"] });
+        const idle = createDomainStore({ initial: 0, load: b, events: ["NamedAgentsChanged"] });
         const unmount = mount(followedStore);
         await flush();
         a.mockClear();
@@ -130,14 +130,14 @@ describe("createDomainStore", () => {
     });
 
     it("keeps one subscription for several followers and drops it with the last", async () => {
-        const store = createDomainStore({ initial: 0, load: vi.fn().mockResolvedValue(1), events: ["x" as never] });
+        const store = createDomainStore({ initial: 0, load: vi.fn().mockResolvedValue(1), events: ["AgentsChanged"] });
         const first = mount(store);
         const second = mount(store);
-        expect(handlers.get("x")!.size).toBe(1);
+        expect(handlers.get("agents:changed")!.size).toBe(1);
         first();
         expect(unsubscribed).toEqual([]);
         second();
-        expect(unsubscribed).toEqual(["x"]);
+        expect(unsubscribed).toEqual(["agents:changed"]);
     });
 
     it("polls while followed when asked, and stops after", async () => {
@@ -177,6 +177,35 @@ describe("createDomainStore", () => {
         const first = store.data();
         await store.refresh();
         expect(store.data()).toBe(first);
+        unmount();
+    });
+
+    it("set holds a value the caller knows until the next load replaces it", async () => {
+        const load = vi.fn().mockResolvedValueOnce("loaded").mockResolvedValue("reloaded");
+        const store = createDomainStore({ initial: "", load, events: [] });
+        const unmount = mount(store);
+        await flush();
+        store.set("mine");
+        expect(store.data()).toBe("mine");
+        await store.refresh();
+        expect(store.data()).toBe("reloaded");
+        unmount();
+    });
+
+    it("set drops the answer of a load that began before it, and loads again", async () => {
+        const answers: Array<(v: string) => void> = [];
+        const load = vi.fn(() => new Promise<string>((resolve) => answers.push(resolve)));
+        const store = createDomainStore({ initial: "", load, events: [] });
+        const unmount = mount(store);
+        await flush();
+        store.set("after my change");
+        answers[0]("before my change");
+        await flush();
+        expect(store.data()).toBe("after my change");
+        expect(load).toHaveBeenCalledTimes(2);
+        answers[1]("after my change, from srv");
+        await flush();
+        expect(store.data()).toBe("after my change, from srv");
         unmount();
     });
 

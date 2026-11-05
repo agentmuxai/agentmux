@@ -6,10 +6,12 @@
  * pane's menu, its tab marks and the Settings section
  * (docs/specs/SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09.md §3–§4). Loaded
  * on first use and after every change made here; a change made in another
- * window shows the next time a menu opens (it reloads).
+ * window shows the next time a menu opens (it reloads), and at once in a
+ * view that calls `followBrowserProfiles` (the Settings section).
  */
 
 import { createSignal } from "solid-js";
+import { createDomainStore } from "@/app/store/domain-store";
 import { RpcApi } from "@/app/store/rpc-api";
 import { farthestFreeSlot } from "@/app/theme/palette";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -47,6 +49,23 @@ export async function loadBrowserProfiles(): Promise<void> {
     } catch {
         // Keep the last list: a menu still works with it.
     }
+}
+
+// The same load, kept live by srv's `browserprofiles:changed` while a view follows it.
+const live = createDomainStore<BrowserProfilesResult | null>({
+    initial: null,
+    events: ["BrowserProfilesChanged"],
+    load: async () => {
+        const r = await RpcApi.ListBrowserProfilesCommand(TabRpcClient);
+        setProfiles(r);
+        return r;
+    },
+});
+
+/** In a component: the list stays current with changes made anywhere while it is mounted. */
+export function followBrowserProfiles(): void {
+    loaded = true;
+    live.follow();
 }
 
 /** Load once, on first use. */
