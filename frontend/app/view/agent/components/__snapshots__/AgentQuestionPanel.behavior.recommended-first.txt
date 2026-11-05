@@ -1,0 +1,18 @@
+startQuestionTimer(local, 30000ms, publish=false)
+-- a flagged option
+  header: The agent is asking | Auto-selects recommended in 30s [agent-question-panel-countdown]
+  Q: ColourPick a colour
+    - Red {radio,-} name=amux-q-q1-0
+    - Blue (Recommended) / Calmer {radio,-,recommended} name=amux-q-q1-0
+    other: ""
+  buttons: Cancel | Accept Recommended | Submit answer (disabled)
+onAnswer {"tool_use_id":"q1","answers":[{"header":"Colour","selected":["Blue (Recommended)"]}],"answers_map":{"Pick a colour":"Blue (Recommended)"},"answer_text":"Colour: Blue (Recommended)","autoFilledCount":0}
+startQuestionTimer(local, 30000ms, publish=false)
+-- nothing flagged: the first option is the recommended one
+  header: The agent is asking | Auto-selects recommended in 30s [agent-question-panel-countdown]
+  Q: SizeSize
+    - S {radio,-,recommended} name=amux-q-q9-0
+    - L {radio,-} name=amux-q-q9-0
+    other: ""
+  buttons: Cancel | Accept Recommended | Submit answer (disabled)
+onAnswer {"tool_use_id":"q9","answers":[{"header":"Size","selected":["S"]}],"answers_map":{"Size":"S"},"answer_text":"Size: S","autoFilledCount":0}
