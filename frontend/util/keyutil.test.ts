@@ -4,7 +4,7 @@
 /**
  * formatKeyDescription renders a keymodel key description ("Cmd:t") as a
  * shortcut label. The label must name exactly the keys checkKeyPressed matches
- * on that platform. The hamburger menu once showed "Ctrl+T" for "Cmd:t" on
+ * on that platform. The AgentMux logo menu once showed "Ctrl+T" for "Cmd:t" on
  * Windows/Linux, where "Cmd" means Alt, so the label named a key that did nothing.
  */
 
@@ -194,7 +194,7 @@ describe("formatKeyDescription", () => {
         expect(checkKeyPressed(altT, "Cmd:t")).toBe(true);
     });
 
-    // The labels the hamburger menu used to hard-code. Each names a key
+    // The labels the AgentMux logo menu used to hard-code. Each names a key
     // combination that does not fire its binding.
     it.each([
         ["Ctrl+T", "Cmd:t", "win32"],

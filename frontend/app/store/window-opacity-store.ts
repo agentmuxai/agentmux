@@ -53,7 +53,7 @@ export function dispatchWindowOpacity(command: WindowOpacityCommand): void {
 }
 
 /**
- * Set one window's opacity. The status bar panel's slider and the hamburger's
+ * Set one window's opacity. The status bar panel's slider and the AgentMux logo's
  * Opacity both go through here, so they set the same value
  * (SPEC_PER_WINDOW_THEME_AND_OPACITY_2026_10_12 §4.2).
  *

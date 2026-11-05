@@ -451,7 +451,6 @@
 116 frontend/app/view/agent/components/AgentEnvPanel.tsx::AgentEnvPanel
 167 frontend/app/view/agent/components/AgentFooter.tsx::AgentFooter
 255 frontend/app/view/agent/components/AgentPicker.tsx::AgentPicker
-427 frontend/app/view/agent/components/AgentQuestionPanel.tsx::AgentQuestionPanel
 178 frontend/app/view/agent/components/AgentSeatPanel.tsx::AgentSeatPanel
 120 frontend/app/view/agent/components/AgentSessionNotices.tsx::AgentSessionNotices
 239 frontend/app/view/agent/components/AgentSessionStats.tsx::AgentSessionStats
@@ -591,8 +590,8 @@
 180 frontend/app/view/warden-jobs/job-update-diff.tsx::JobUpdateDiff
 253 frontend/app/view/warden-jobs/jobs-history.tsx::JobHistory
 137 frontend/app/view/warden-jobs/warden-jobs-manager.tsx::WardenJobsManager
-223 frontend/app/window/hamburger-menu.tsx::HamburgerMenu
-157 frontend/app/window/hamburger-menu.tsx::menuItems
+218 frontend/app/window/logo-menu.tsx::LogoMenu
+157 frontend/app/window/logo-menu.tsx::menuItems
 233 frontend/app/window/more-dropdown.tsx::MoreDropdown
 107 frontend/app/window/pane-media-capture-indicator.tsx::PaneMediaCaptureIndicator
 112 frontend/app/window/pinned-widget-flyout.tsx::PinnedWidgetFlyout

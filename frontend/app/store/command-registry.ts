@@ -721,7 +721,7 @@ window.addEventListener("agentmux-run-command", ((e: CustomEvent) => {
 // host broadcasts `menu:invoke` (via the generic `agentmux-event` channel) to
 // every top-level window; only the FOCUSED window runs the command, so a menu
 // action lands in the window the user is actually in. Routed through the same
-// registry as the palette + hamburger — the spec's single source of truth.
+// registry as the palette + AgentMux logo — the spec's single source of truth.
 window.addEventListener("agentmux-event", ((e: CustomEvent) => {
     const detail = e.detail;
     if (!detail || detail.event !== "menu:invoke") return;

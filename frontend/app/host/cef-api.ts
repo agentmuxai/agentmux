@@ -345,13 +345,13 @@ function windowLifecycleApi() {
                 // than paper over it with the wrong action. If the host
                 // is mismatched (frontend has the new IPC, host doesn't
                 // yet — e.g. mid-dev-rebuild), the user can fall back
-                // to the hamburger menu's "Dev Tools" toggle manually.
+                // to the AgentMux logo menu's "Dev Tools" toggle manually.
                 const errStr = typeof err === "string" ? err : (err?.message ?? String(err));
                 if (errStr.startsWith("Unknown command")) {
                     console.warn(
                         "[cef-api] inspect_element_at not supported by current host. " +
                         "Rebuild the host binary (task build:backend) to enable Inspect Element; " +
-                        "until then use the hamburger menu's Dev Tools entry."
+                        "until then use the AgentMux logo menu's Dev Tools entry."
                     );
                 } else {
                     console.error("[cef-api] inspect_element_at failed:", err);

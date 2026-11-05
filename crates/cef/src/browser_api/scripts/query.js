@@ -74,7 +74,7 @@
   // `blockId` falsy → no ownership concept applies (the browser-pane
   // case, where the CDP target already IS that block's own isolated
   // page). Otherwise: an element is allowed if it's either (a) inside
-  // blockId's OWN pane, or (b) shared app chrome (status bar, hamburger
+  // blockId's OWN pane, or (b) shared app chrome (status bar, AgentMux logo
   // menu, window controls) — not owned by any one agent, so reaching it
   // isn't the kind of privacy leak reaching another agent's pane would
   // be. Never allowed: inside, OR CONTAINING, a DIFFERENT block's
