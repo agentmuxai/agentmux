@@ -1,6 +1,6 @@
 # Report: live reflow while dragging a pane (algorithms, prior art, plan)
 
-**Status:** phase 1 (the candidate tracker, §4.1 items 2 and 3) implemented in #6502; the transform reflow (phases 2 to 4) is analysis only.
+**Status:** implemented in part: phase 1 (the candidate tracker, §4.1 items 2 and 3) in #6502; the transform reflow (phases 2 to 4) is analysis only.
 
 **Date:** 2026-11-05
 **Scope:** `frontend/layout/lib/` (futureLayout, placementPreview, TileLayout.core, layoutIntentActions, layoutGeometry, tilelayout.scss), `docs/specs/SPEC_DRAG_AND_DROP_CONSOLIDATION_2026_09_27.md`.
