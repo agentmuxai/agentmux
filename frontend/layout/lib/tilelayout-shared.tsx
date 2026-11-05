@@ -300,7 +300,7 @@ export const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
         const crossTab = isCrossTabDrag(props.layoutModel);
         // Cross-tab: the dragged node isn't in this tree, so it rides on the action (preview only);
         // see OverlayNode.computeDropDirection.
-        const { direction, compute } = previewPlacement(props.layoutModel, {
+        const { direction, compute, targetId } = previewPlacement(props.layoutModel, {
             targetId: bestLeafId,
             rect: bestRect,
             offset: clampedOffset,
@@ -311,8 +311,7 @@ export const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
             const plan = dragState.node?.data ? stackMovePlan(dragState.node.data) : undefined;
             const sourceTabId = dragState.layoutModel?.tabAtom()?.oid;
             const targetTabId = props.layoutModel.tabAtom()?.oid;
-            const bestLeaf = props.layoutModel.leafs().find((l) => l.id === bestLeafId);
-            const targetBlockId = bestLeaf?.data?.blockId;
+            const targetBlockId = props.layoutModel.leafs().find((l) => l.id === targetId)?.data?.blockId;
             if (plan && sourceTabId && targetTabId && targetBlockId
                 && direction !== undefined && direction !== DropDirection.Center
                 && crossTabDropOffered(props.layoutModel, compute)) {
@@ -431,7 +430,7 @@ const OverlayNode = (props: OverlayNodeProps) => {
             // can still be computed; the drop below routes to redockDraggedPane, never a local commit),
             // and Outer* is clamped to its inner equivalent so the ghost matches the committed split
             // (clampCrossTabDirection in crossTabDrag.ts).
-            const { direction, compute } = previewPlacement(props.layoutModel, {
+            const { direction, compute, targetId } = previewPlacement(props.layoutModel, {
                 targetId: props.node.id,
                 rect: additionalProps().rect,
                 offset,
@@ -445,7 +444,7 @@ const OverlayNode = (props: OverlayNodeProps) => {
                 const plan = dragState.node?.data ? stackMovePlan(dragState.node.data) : undefined;
                 const sourceTabId = dragState.layoutModel?.tabAtom()?.oid;
                 const targetTabId = props.layoutModel.tabAtom()?.oid;
-                const targetBlockId = props.node.data?.blockId;
+                const targetBlockId = props.layoutModel.leafs().find((l) => l.id === targetId)?.data?.blockId;
                 if (plan && sourceTabId && targetTabId && targetBlockId
                     && direction !== undefined && direction !== DropDirection.Center
                     && crossTabDropOffered(props.layoutModel, compute)) {

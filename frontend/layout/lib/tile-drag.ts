@@ -14,6 +14,7 @@ import { paneTearOffOf } from "@/app/drag/pane-tearoff";
 import { clearCrossTabDrop } from "./crossTabDrag";
 import { layoutDragEnded } from "./layoutIntents";
 import type { LayoutModel } from "./layoutModel";
+import { resetDropIntent } from "./placementPreview";
 import { dragState } from "./tilelayout-drag-state";
 import type { LayoutNode } from "./types";
 
@@ -40,6 +41,7 @@ export function releaseTileDrag(model: LayoutModel): void {
     dragState.layoutModel = null;
     dragState.node = null;
     model.activeDrag._set(false);
+    resetDropIntent(model);
     layoutDragEnded(model);
     markReleased();
 }
