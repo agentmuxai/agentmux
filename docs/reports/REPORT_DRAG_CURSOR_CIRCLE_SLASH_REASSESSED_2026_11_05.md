@@ -1,6 +1,6 @@
 # Report: the circle-slash cursor during pane and tab drags, reassessed
 
-**Status:** option D implemented in #6498 (on by default, `AGENTMUX_DND_CURSOR=0` turns it off). Options E to H and macOS/Linux are analysis only.
+**Status:** implemented in part: option D in #6498 (on by default, `AGENTMUX_DND_CURSOR=0` turns it off); options E to H and macOS/Linux are analysis only.
 
 **Date:** 2026-11-05 (sources read 2026-11-04). **Scope:** Windows first, then macOS and Linux. **Method:** the earlier retros, specs and host code were read, then the Chromium, CEF and Win32 sources were re-read online. Nothing was built or run.
 
