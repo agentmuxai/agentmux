@@ -4,11 +4,11 @@
 //! An agent's Bundles list: the bundles picked for it, in order
 //! (`SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md` §3.6).
 //!
-//! The agent's own bundle (`AgentDefinition::memory_id`) is not stored here:
-//! it is always first and can't be removed, so [`Store::agent_bundle_chain`]
-//! puts it in front of the picks. The table is per channel, like the agent's
-//! own bundle (#3148); bundles themselves live in the identity store, so a
-//! listed id can name a bundle deleted elsewhere, and readers skip it.
+//! This list is all an agent has: there is no bundle of its own in front of
+//! it (`REPORT_AGENT_BUNDLES_REFINE_OR_DROP_2026_11_03.md`; `m0047` moved
+//! any that existed into the picks). The table is per channel (#3148);
+//! bundles themselves live in the identity store, so a listed id can name a
+//! bundle deleted elsewhere, and readers skip it.
 //!
 //! The Stash's old Startup tab stored one bundle as `startup_bundle_id`
 //! agent content. Reading the list folds that pick in and removes it, which
@@ -24,7 +24,7 @@ use super::store::Store;
 pub const STARTUP_BUNDLE_CONTENT_TYPE: &str = "startup_bundle_id";
 
 impl Store {
-    /// The bundles picked for `agent_id`, in order. Not the agent's own.
+    /// The bundles picked for `agent_id`, in order.
     pub fn agent_bundle_ids(&self, agent_id: &str) -> Result<Vec<String>, StoreError> {
         self.agent_bundles_fold_startup_pick(agent_id);
         self.agent_bundle_ids_stored(agent_id)
@@ -59,20 +59,16 @@ impl Store {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
-    /// Replace `agent_id`'s picks with `bundle_ids`, in that order. Blank ids,
-    /// repeats and the agent's own bundle are dropped. Returns what was stored.
+    /// Replace `agent_id`'s picks with `bundle_ids`, in that order. Blank ids
+    /// and repeats are dropped. Returns what was stored.
     pub fn agent_bundles_set(
         &self,
         agent_id: &str,
         bundle_ids: &[String],
     ) -> Result<Vec<String>, StoreError> {
-        let own = self
-            .agent_def_get(agent_id)?
-            .map(|def| def.memory_id)
-            .unwrap_or_default();
         let mut picks: Vec<String> = Vec::new();
         for id in bundle_ids.iter().map(|id| id.trim()) {
-            if !id.is_empty() && id != own && !picks.iter().any(|p| p == id) {
+            if !id.is_empty() && !picks.iter().any(|p| p == id) {
                 picks.push(id.to_string());
             }
         }
@@ -93,25 +89,6 @@ impl Store {
     pub fn agent_bundles_forget_bundle(&self, bundle_id: &str) -> Result<usize, StoreError> {
         let conn = self.conn.lock().unwrap();
         Ok(conn.execute("DELETE FROM db_agent_bundles WHERE bundle_id = ?1", params![bundle_id])?)
-    }
-
-    /// The agent's whole list: its own bundle first (when it has one), then
-    /// its picks. What launch unions skills and MCP servers over.
-    pub fn agent_bundle_chain(&self, agent_id: &str) -> Vec<String> {
-        let own = match self.agent_def_get(agent_id) {
-            Ok(Some(def)) => def.memory_id,
-            _ => String::new(),
-        };
-        let mut chain: Vec<String> = Vec::new();
-        if !own.is_empty() {
-            chain.push(own);
-        }
-        for id in self.agent_bundle_ids(agent_id).unwrap_or_default() {
-            if !chain.contains(&id) {
-                chain.push(id);
-            }
-        }
-        chain
     }
 }
 
@@ -185,10 +162,9 @@ mod tests {
         }
     }
 
-    fn store_with_agent(own_bundle: &str) -> Store {
+    fn store_with_agent() -> Store {
         let s = Store::open_in_memory().unwrap();
         let mut def = test_agent_def("a1", "a1", "claude", "agent", 1, "");
-        def.memory_id = own_bundle.into();
         s.agent_def_insert(&mut def).unwrap();
         s
     }
@@ -198,9 +174,9 @@ mod tests {
     }
 
     #[test]
-    fn set_keeps_order_and_drops_blanks_repeats_and_the_own_bundle() {
-        let s = store_with_agent("own");
-        let stored = s.agent_bundles_set("a1", &ids(&["b2", "", "own", "b1", "b2", " b3 "])).unwrap();
+    fn set_keeps_order_and_drops_blanks_and_repeats() {
+        let s = store_with_agent();
+        let stored = s.agent_bundles_set("a1", &ids(&["b2", "", "b1", "b2", " b3 "])).unwrap();
         assert_eq!(stored, ids(&["b2", "b1", "b3"]));
         assert_eq!(s.agent_bundle_ids("a1").unwrap(), stored);
         // Replacing, not appending.
@@ -221,7 +197,7 @@ mod tests {
 
     #[test]
     fn an_old_startup_pick_is_folded_into_the_list_once() {
-        let s = store_with_agent("own");
+        let s = store_with_agent();
         s.agent_bundles_set("a1", &ids(&["b1"])).unwrap();
         set_startup_pick(&s, "b2");
         assert_eq!(s.agent_bundle_ids("a1").unwrap(), ids(&["b1", "b2"]));
@@ -229,45 +205,32 @@ mod tests {
         // Removing it afterwards sticks: the pick is gone, not re-folded.
         s.agent_bundles_set("a1", &ids(&["b1"])).unwrap();
         assert_eq!(s.agent_bundle_ids("a1").unwrap(), ids(&["b1"]));
-        // Already listed, or the own bundle, or blank: nothing added.
-        for pick in ["b1", "own", " "] {
+        // Already listed, or blank: nothing added.
+        for pick in ["b1", " "] {
             set_startup_pick(&s, pick);
             assert_eq!(s.agent_bundle_ids("a1").unwrap(), ids(&["b1"]), "pick {pick:?}");
             assert!(s.agent_content_get("a1", STARTUP_BUNDLE_CONTENT_TYPE).unwrap().is_none());
         }
         // The launch path reads through the fold too.
         set_startup_pick(&s, "b3");
-        assert_eq!(s.agent_bundle_chain("a1"), ids(&["own", "b1", "b3"]));
+        assert_eq!(s.agent_bundle_ids("a1").unwrap(), ids(&["b1", "b3"]));
     }
 
-    /// `agentdefcreatefromtemplate`'s order: the definition is inserted with
-    /// no own bundle (a new agent has none), then its picks are stored. A pick
-    /// never becomes the own bundle, and every pick stays listed (#4434).
+    /// `agentdefcreatefromtemplate`'s order: the definition is inserted, then
+    /// its picks are stored, and every pick stays listed (#4434).
     #[test]
-    fn a_new_agents_picks_never_become_its_own_bundle() {
+    fn a_new_agents_picks_stay_listed() {
         let s = Store::open_in_memory().unwrap();
         s.bundle_upsert(&bundle("shared", "Shared", "shared rules")).unwrap();
         let mut def = test_agent_def("a1", "a1", "claude", "agent", 1, "");
         s.agent_def_insert(&mut def).unwrap();
-        assert!(def.memory_id.is_empty());
         s.agent_bundles_set("a1", &ids(&["shared"])).unwrap();
-        assert_eq!(s.agent_bundle_chain("a1"), ids(&["shared"]));
-    }
-
-    #[test]
-    fn the_chain_puts_the_own_bundle_first() {
-        let s = store_with_agent("own");
-        assert_eq!(s.agent_bundle_chain("a1"), ids(&["own"]));
-        s.agent_bundles_set("a1", &ids(&["b1", "b2"])).unwrap();
-        assert_eq!(s.agent_bundle_chain("a1"), ids(&["own", "b1", "b2"]));
-        let no_own = store_with_agent("");
-        no_own.agent_bundles_set("a1", &ids(&["b1"])).unwrap();
-        assert_eq!(no_own.agent_bundle_chain("a1"), ids(&["b1"]));
+        assert_eq!(s.agent_bundle_ids("a1").unwrap(), ids(&["shared"]));
     }
 
     #[test]
     fn a_deleted_bundle_leaves_every_list() {
-        let s = store_with_agent("own");
+        let s = store_with_agent();
         let mut other = test_agent_def("a2", "a2", "claude", "agent", 1, "");
         s.agent_def_insert(&mut other).unwrap();
         s.agent_bundles_set("a1", &ids(&["gone", "b1"])).unwrap();
@@ -279,7 +242,7 @@ mod tests {
 
     #[test]
     fn deleting_the_agent_deletes_its_list() {
-        let s = store_with_agent("own");
+        let s = store_with_agent();
         s.agent_bundles_set("a1", &ids(&["b1"])).unwrap();
         assert!(s.agent_def_delete("a1").unwrap());
         assert!(s.agent_bundle_ids("a1").unwrap().is_empty());
@@ -287,7 +250,7 @@ mod tests {
 
     #[test]
     fn picked_bundles_skip_a_missing_one_and_keep_order() {
-        let s = store_with_agent("own");
+        let s = store_with_agent();
         s.bundle_upsert(&bundle("b1", "One", "first")).unwrap();
         s.bundle_upsert(&bundle("b2", "Two", "second")).unwrap();
         s.agent_bundles_set("a1", &ids(&["b2", "gone", "b1"])).unwrap();
