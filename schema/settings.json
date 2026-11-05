@@ -23,6 +23,18 @@
           "x-section": "App",
           "default": true
         },
+        "update:auto": {
+          "type": "boolean",
+          "default": true,
+          "description": "Check for a newer AgentMux release in the background (a minute after start, then every few hours). Set false and AgentMux asks GitHub only when you or an agent does (Check for update).",
+          "x-section": "App"
+        },
+        "update:autodownload": {
+          "type": "boolean",
+          "default": true,
+          "description": "Download and verify a newer release in the background once one is found, so the status bar offers Restart to update. Nothing is installed until you restart. Set false to download only when you click Download.",
+          "x-section": "App"
+        },
         "term:*": {
           "type": "boolean",
           "x-section": "Terminal"
