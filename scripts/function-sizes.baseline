@@ -533,7 +533,6 @@
 359 frontend/app/view/settings/sections/fork-slug-migration.tsx::ForkSlugMigration
 185 frontend/app/view/settings/sections/notifications-section.tsx::NotificationsSection
 109 frontend/app/view/settings/sections/pinned-senders.tsx::PinnedSenders
-312 frontend/app/view/settings/sections/recording-section.tsx::RecordingSection
 201 frontend/app/view/settings/sections/sounds-section.tsx::SoundsSection
 237 frontend/app/view/settings/sections/terminal-section.tsx::TerminalSection
 114 frontend/app/view/settings/sections/widget-bar-settings.tsx::WidgetBarSettings
