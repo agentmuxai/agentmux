@@ -211,10 +211,11 @@ describe("Memory pane", () => {
         expect(tablist.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
-    it("highlights only Bundles", () => {
+    it("gives no tab a standing accent, Bundles included", () => {
         const { container } = mount(memoryPaneTab);
-        const highlighted = Array.from(container.querySelectorAll(".is-abf-highlight")).map((el) => el.textContent);
-        expect(highlighted).toEqual(["Bundles"]);
+        const tabs = Array.from(container.querySelectorAll('[role="tab"]'));
+        expect(tabs.map((el) => el.textContent)).toContain("Bundles");
+        expect(tabs.filter((el) => el.className.includes("highlight"))).toEqual([]);
     });
 });
 

@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// The app's translations: `t("area.thing.label")` in a component is reactive, so a change of language
+// The app's translations: a `t` call in a component is reactive, so a change of language
 // re-renders it. English is bundled; every other language is its own file in `locales/` and is fetched when
 // first needed, so a person loads one language and no other.
 import { createEffect, createRoot, createSignal } from "solid-js";

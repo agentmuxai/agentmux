@@ -11,8 +11,11 @@
 @use "../mixins.scss";
 .modal-panel.command-palette-panel {
     width: 560px;
-    max-width: 92vw;
-    max-height: 480px;
+    max-width: min(100%, calc(92vw / var(--zoomfactor)));
+    // 480px is a zoomed length (720 real px at 150%): cap it by the window's height, in the same lengths. The
+    // palette drops from the top (`data-placement="top"`: the overlay's padding-top is 15vh, its bottom padding
+    // 24px), so what is left for it is 85vh - 24px.
+    max-height: min(480px, calc((85vh - 24px) / var(--zoomfactor)));
     padding: 0;
     // Panel content manages its own scrolling in the list area, so
     // let overflow fall through.

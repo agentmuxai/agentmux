@@ -212,6 +212,7 @@ mod tests {
             color: color.into(),
             created_at: 0,
             agents_allowed: false,
+            owner_agent: None,
         };
         let mut ps = vec![profile("#ec4899"), profile(&slots()[0].hex)];
         assert!(snap_profiles(&mut ps));

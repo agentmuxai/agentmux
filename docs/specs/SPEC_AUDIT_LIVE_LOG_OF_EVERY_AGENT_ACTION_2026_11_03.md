@@ -35,7 +35,7 @@ So the data for "everything" is already written; the Audit has to *index* it, no
 | Kind | Source | What a row holds | Cost |
 |---|---|---|---|
 | `tool` | srv reads each `tool_use` line at `append_output_line` | tool name plus a one-line summary (below), the agent, the turn, a History link to the exact byte | about 150 bytes a row |
-| `turn` (new kind) | the `result` line and the turn start already tracked by the turn tracker | start and end rows with outcome, duration and the cost the Audit already knows (`AuditCost`) | small |
+| `turn` (new kind) | the `result` line at the end of a turn | one row per turn, at its end, with outcome, duration and the measured cost (`AuditCost`); no separate start row, which would add a row and no information (the duration places the start) | small |
 | `thought` | a thinking block | a marker only (duration), no text, linking to the byte in History | small |
 | `jekt` | exists | adds an "open this message" link (3.4) | none |
 | `action`, `registry`, `agent_*` | exist | unchanged | none |
@@ -106,6 +106,8 @@ So the answer to "do we have a method": no. The design:
 5. **Other channels and peers are asked, not read from a shared file.** Another channel on this machine is asked over loopback with its `local_url` and key from the host-global registry, exactly as the Swarm reads other channels (`swarm_remote::channel_statuses`), so a channel that stays out of the shared folder is still reachable. A LAN peer is asked on demand with a typed read-only `audit.query` over the signed remote-op route (`/agentmux/remote/op`, where the signature authorizes the request, never the key alone), answered only when the peer's owner turned on `audit:sharewithpaired` (default off, like `tower:sharewithpaired`). The answer is the same rows, scrubbed the same way (summaries, never message text). A peer's rows are fetched, shown and forgotten here; they are never relayed through the cloud, and the cloud carries no audit rows at all. A cloud message is logged locally at both ends, with tier cloud, which needs nothing more. The live tail covers this channel by push; other channels and peers refresh every 5 to 10 seconds while their scope is shown.
 
 ## 4. Build: five PRs
+
+**Built so far:** PR 0 merged (#6483). PR 1 is built in two parts: 1a, the activity index and the `tool`, `turn` and `thought` kinds in `audit.query` (this section 3.2); 1b, the provenance fields, the `sent` row and the join by `msg_id` (3.6.1, 3.6.2). Tool, turn and thought rows are given only when asked for by kind, so the list the Audit shows today does not change until PR 2.
 
 0. **A deferred srv keeps its rows (3.6.3).** Own audit file when the shared folder is not used; `audit.query` reads both. A failing-first test: a deferred srv appends and queries. Small, and it fixes a loss that exists today.
 1. **Index and provenance (srv, Rust).** `activity` writer at `append_output_line` (tool, turn, thought rows; scrubber; day files; 30-day delete); the new provenance fields and the `sent` row (3.6.1, 3.6.2); `audit.query` answers `tool` / `thought` / `turn` and joins by `msg_id`; tests with recorded stream-json lines, including a secret in a command. Rust: built and tested on charlie (narko is off Rust builds).

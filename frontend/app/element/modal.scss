@@ -95,8 +95,12 @@
 
 .modal-panel {
     position: relative;
+    // Chrome zoom: the dialog scales with the title bar and status bar. `.modal-root` stays unzoomed, so
+    // the backdrop and the centring are in real pixels; `%` widths still resolve against it, and a
+    // length from the viewport (vh, vw) is divided by the zoom so the scaled panel fits the window.
+    zoom: var(--zoomfactor);
     max-width: 100%;
-    max-height: calc(100vh - #{2 * 24px});  // 2 × --space-6 literal; avoid var() in calc mult
+    max-height: calc((100vh - #{2 * 24px}) / var(--zoomfactor));  // 2 × --space-6 literal; avoid var() in calc mult
     overflow: auto;
     background: var(--main-bg-color);
     color: var(--main-text-color);

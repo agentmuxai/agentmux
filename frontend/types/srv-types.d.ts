@@ -740,6 +740,8 @@ declare global {
         /** Legacy "Pane Color" pick, an HSL hue 0–360, read as the slot nearest it; no longer written. */
         "frame:hue"?: number | null;
         "frame:title"?: string;
+        /** The address a browser pane was opened at, with a title its opener gave it; the title goes when the pane moves to another site. */
+        "frame:title_url"?: string;
         "frame:icon"?: string;
         /** A pane tab's last real name and favicon from its view, so the tab reads the same before it is clicked (pane-tab-persist.ts). */
         "pane:label"?: string;
@@ -947,6 +949,8 @@ declare global {
         "shortcuts:from"?: string;
         "memory:section"?: "global" | "personal" | "skills" | "bundles";
         "swarm:section"?: "supervisor" | "broadcast";
+        /** The Swarm sections that are open, Broadcast and Supervise (swarm-section.ts). */
+        "swarm:open"?: ("supervisor" | "broadcast")[];
         "warden:section"?: "jobs";
         /** A Kanban task to open in the drawer, set by a link from elsewhere (a Swarm row's task chip) and cleared once opened. Read by the Kanban pane. */
         "kanban:open"?: string | null;

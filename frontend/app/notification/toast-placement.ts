@@ -22,6 +22,8 @@ export interface Box {
 export interface Placement {
     /** The stack's distance from the window's bottom edge. */
     bottom: number;
+    /** Set when the stack has to be shorter than it is, to fit above a block docked at the window's bottom edge. */
+    maxHeight?: number;
 }
 
 export interface PlacementInput {
@@ -42,6 +44,8 @@ export interface PlacementInput {
 
 /** Space left between the stack and the block it clears. */
 const GAP = 8;
+/** The least a stack is shortened to: below this it is not a list worth reading, and it keeps the usual place. */
+const MIN_SHORTENED = 96;
 
 const overlaps = (a: Box, b: Box) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
 
@@ -65,6 +69,16 @@ export function placeToasts(p: PlacementInput): Placement {
         top = Math.min(...blocking.map((b) => b.top)) - GAP - p.height;
     }
     if (top >= p.top && hits(top).length === 0) return { bottom: p.viewportHeight - top - p.height };
+
+    // A block docked at the window's bottom edge (the status bar, once it wraps to two rows at a high zoom) cannot be
+    // cleared from the top of the window, which is where the stack would go next: the stack is shortened to fit
+    // above it, and scrolls inside.
+    const docked = hits(usualTop).filter((b) => b.bottom >= p.viewportHeight - 1);
+    if (docked.length > 0) {
+        const limit = Math.min(...docked.map((b) => b.top)) - GAP;
+        const maxHeight = limit - p.top;
+        if (maxHeight >= MIN_SHORTENED) return { bottom: p.viewportHeight - limit, maxHeight };
+    }
 
     // No room above: the usual place.
     return { bottom: p.bottom };
