@@ -107,6 +107,25 @@ fn clamp_to_work_area(args: OpenFloatingPaneArgs) -> OpenFloatingPaneArgs {
     OpenFloatingPaneArgs { x, y, width, height, ..args }
 }
 
+fn parse_args(args: &serde_json::Value) -> Result<OpenFloatingPaneArgs, String> {
+    serde_json::from_value(args.clone()).map_err(|e| format!("open_floating_pane_window: invalid args: {e}"))
+}
+
+/// Where a picture of the pane followed the cursor (live_follow.rs), the floater opens there: where the user
+/// saw it, not at the cursor.
+#[cfg(target_os = "windows")]
+fn at_the_picture(args: OpenFloatingPaneArgs) -> OpenFloatingPaneArgs {
+    match super::live_follow::landing() {
+        Some((x, y)) => OpenFloatingPaneArgs { x, y, ..args },
+        None => args,
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn at_the_picture(args: OpenFloatingPaneArgs) -> OpenFloatingPaneArgs {
+    args
+}
+
 #[derive(Debug, serde::Serialize)]
 pub struct OpenFloatingPaneResponse {
     /// The window label assigned to the floating window. Stable for
@@ -123,8 +142,7 @@ pub fn open_floating_pane_window(
     state: &Arc<AppState>,
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    let parsed: OpenFloatingPaneArgs = serde_json::from_value(args.clone())
-        .map_err(|e| format!("open_floating_pane_window: invalid args: {e}"))?;
+    let parsed = at_the_picture(parse_args(args)?);
 
     if parsed.pane_id.is_empty() {
         return Err("open_floating_pane_window: pane_id is required".to_string());

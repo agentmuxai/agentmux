@@ -54,7 +54,8 @@ mod macos;
 
 #[cfg(target_os = "windows")]
 pub use windows::{
-    hook_session_active, start_escape_watch, start_tab_drag_tracking, start_tear_off_tracking, stop_active_hook_session,
+    hook_session_active, start_escape_watch, start_pane_drag_tracking, start_tab_drag_tracking, start_tear_off_tracking,
+    stop_active_hook_session,
 };
 
 #[cfg(target_os = "macos")]
@@ -80,6 +81,11 @@ pub(crate) use macos::replace_window_numbers as macos_replace_window_numbers;
 /// through its tab-drag tap, and elsewhere the page decides from the button.
 #[cfg(not(target_os = "windows"))]
 pub fn start_escape_watch(_state: std::sync::Arc<crate::state::AppState>, _source_label: String) -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn start_pane_drag_tracking(_state: std::sync::Arc<crate::state::AppState>, _source_label: String) -> Result<(), String> {
     Ok(())
 }
 
