@@ -147,7 +147,9 @@ fn publish(state: &AppState) {
         crate::backend::user_attention::Asking::start(
             &state.broker,
             &state.mstore,
-            "",
+            // The asking agent's pane: its card there waits on the user, so the tone, badge and
+            // notification are that pane's.
+            &r.block_id,
             "desktop",
             &format!("{} asks to control {}", r.agent, r.app),
         )
