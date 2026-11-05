@@ -12,9 +12,16 @@
 </div>
 ----
 <div>
-<div class="files-conflict-overlay">
-<div class="files-conflict" role="alertdialog" aria-labelledby="files-conflict-title">
-<div id="files-conflict-title" class="files-conflict-title">“big.iso<!---->” already exists here</div>
+<div class="modal-root" role="dialog" aria-modal="true" tabindex="-1" data-scope="window" data-scope-fallback="pane" data-placement="center" aria-labelledby="modal-title-cl-0">
+<div class="modal-backdrop">
+</div>
+<span class="modal-focus-sentinel" tabindex="0" aria-hidden="true">
+</span>
+<div tabindex="-1" class="modal-panel files-conflict-panel" data-size="sm">
+<header class="modal-panel-header">
+<h2 class="modal-panel-title" id="modal-title-cl-0">“big.iso” already exists here</h2>
+</header>
+<div class="modal-panel-body ">
 <div class="files-conflict-body">
 <div>A file with that name is already in the destination.</div>
 <div class="files-conflict-sides">
@@ -24,12 +31,15 @@
 <label class="files-conflict-all">
 <input type="checkbox"> Do this for every conflict</label>
 </div>
-<div class="files-conflict-actions">
+</div>
+<footer class="modal-panel-footer ">
 <button type="button" class="ui-button ui-tone-neutral files-button">Keep both</button>
 <button type="button" class="ui-button ui-tone-neutral files-button">Skip</button>
 <button type="button" class="ui-button ui-tone-danger files-button files-button-danger">Replace</button>
-<button type="button" class="ui-button ui-tone-neutral files-button">Stop</button>
+<button data-modal-dismiss="true" type="button" class="ui-button ui-tone-neutral files-button">Stop</button>
+</footer>
 </div>
-</div>
+<span class="modal-focus-sentinel" tabindex="0" aria-hidden="true">
+</span>
 </div>
 </div>

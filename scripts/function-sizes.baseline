@@ -426,7 +426,7 @@
 287 frontend/app/view/accounts/OAuthConnectPanel.tsx::OAuthConnectPanel
 130 frontend/app/view/accounts/accounts-manager.tsx::AccountsManager
 132 frontend/app/view/agent/agent-pane-chrome-model.ts::buildAgentPaneChromeModel
-179 frontend/app/view/agent/attachments/AttachmentLightbox.tsx::AttachmentLightbox
+170 frontend/app/view/agent/attachments/AttachmentLightbox.tsx::AttachmentLightbox
 101 frontend/app/view/agent/attachments/AttachmentTile.tsx::AttachmentTile
 296 frontend/app/view/agent/attachments/AttachmentTray.tsx::AttachmentTray
 143 frontend/app/view/agent/buildRuntimeArgs.ts::buildRuntimeArgs
