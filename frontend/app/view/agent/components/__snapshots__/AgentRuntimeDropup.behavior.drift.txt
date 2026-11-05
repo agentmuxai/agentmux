@@ -1,0 +1,136 @@
+-- before any report
+trigger "Bypass · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=false width=- border=3px solid var(--error-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Bypass · Sonnet 5.5 · high
+  panel: closed
+-- the process agrees
+trigger "Bypass · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=false width=- border=3px solid var(--error-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Bypass · Sonnet 5.5 · high
+  panel: closed
+-- a difference, before it has held
+trigger "Bypass · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=false width=- border=3px solid var(--error-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Bypass · Sonnet 5.5 · high
+  panel: closed
+-- a difference that has held
+trigger "Bypass · Sonnet 5.5 · high ⚠" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger agent-runtime-dropup-trigger--differs] expanded=false width=- border=3px solid var(--error-color)
+  title: The agent is not running what is selected. Model: selected Sonnet 5.5, running Opus 5.5; Effort: selected high, running low; Mode: selected Default, running Plan. Open this menu to restart it with your selection.
+  aria: Runtime settings: Bypass · Sonnet 5.5 · high — the agent is not running this selection
+  panel: closed
+-- opened on a difference
+trigger "Bypass · Sonnet 5.5 · high ⚠" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger agent-runtime-dropup-trigger--differs] expanded=true width=- border=3px solid var(--error-color)
+  title: The agent is not running what is selected. Model: selected Sonnet 5.5, running Opus 5.5; Effort: selected high, running low; Mode: selected Default, running Plan. Open this menu to restart it with your selection.
+  aria: Runtime settings: Bypass · Sonnet 5.5 · high — the agent is not running this selection
+  status kind=differs ["The agent is not running what is selected.","Model: selected Sonnet 5.5, running Opus 5.5; Effort: selected high, running low; Mode: selected Default, running Plan"] restart[hidden=false disabled=false tab=0]
+  [mode]
+  - Bypass (no prompts) {current,active}
+  - Auto / classifier asks; all auto-approved {}
+  - Accept Edits / other asks auto-approved, like Bypass {}
+  - Plan / does NOT stop edits; plan auto-approved {}
+  - Default / every ask auto-approved, like Bypass {}
+  [model]
+  - Opus 5.5 / Highest quality {}
+  - Sonnet 5.5 / Balanced speed and quality {current}
+  - Haiku 4.5 / Fastest {}
+  - Fable 5.1 / Long-horizon work {}
+  note (placeholder): Running model: shown after the first reply
+  [effort]
+  - low {}
+  - medium {}
+  - high {current}
+  - xhigh {}
+  - max {}
+patchRuntime(block-1, claude, {}, undefined) meta=undefined
+-- after Restart to apply
+trigger "Bypass · Sonnet 5.5 · high ⚠" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger agent-runtime-dropup-trigger--differs] expanded=true width=- border=3px solid var(--error-color)
+  title: The agent is not running what is selected. Model: selected Sonnet 5.5, running Opus 5.5; Effort: selected high, running low; Mode: selected Default, running Plan. Open this menu to restart it with your selection.
+  aria: Runtime settings: Bypass · Sonnet 5.5 · high — the agent is not running this selection
+  status kind=differs ["The agent is not running what is selected.","Model: selected Sonnet 5.5, running Opus 5.5; Effort: selected high, running low; Mode: selected Default, running Plan"] restart[hidden=false disabled=false tab=0]
+  [mode]
+  - Bypass (no prompts) {current,active}
+  - Auto / classifier asks; all auto-approved {}
+  - Accept Edits / other asks auto-approved, like Bypass {}
+  - Plan / does NOT stop edits; plan auto-approved {}
+  - Default / every ask auto-approved, like Bypass {}
+  [model]
+  - Opus 5.5 / Highest quality {}
+  - Sonnet 5.5 / Balanced speed and quality {current}
+  - Haiku 4.5 / Fastest {}
+  - Fable 5.1 / Long-horizon work {}
+  note (placeholder): Running model: shown after the first reply
+  [effort]
+  - low {}
+  - medium {}
+  - high {current}
+  - xhigh {}
+  - max {}
+-- running on the CLI defaults
+trigger "Bypass · Sonnet 5.5 · high ⚠" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger agent-runtime-dropup-trigger--differs] expanded=true width=- border=3px solid var(--error-color)
+  title: The agent is not running what is selected. Model: selected Sonnet 5.5, running the CLI default; Effort: selected high, running the CLI default; Mode: selected Default, running the CLI default. Open this menu to restart it with your selection.
+  aria: Runtime settings: Bypass · Sonnet 5.5 · high — the agent is not running this selection
+  status kind=differs ["The agent is not running what is selected.","Model: selected Sonnet 5.5, running the CLI default; Effort: selected high, running the CLI default; Mode: selected Default, running the CLI default"] restart[hidden=false disabled=false tab=0]
+  [mode]
+  - Bypass (no prompts) {current,active}
+  - Auto / classifier asks; all auto-approved {}
+  - Accept Edits / other asks auto-approved, like Bypass {}
+  - Plan / does NOT stop edits; plan auto-approved {}
+  - Default / every ask auto-approved, like Bypass {}
+  [model]
+  - Opus 5.5 / Highest quality {}
+  - Sonnet 5.5 / Balanced speed and quality {current}
+  - Haiku 4.5 / Fastest {}
+  - Fable 5.1 / Long-horizon work {}
+  note (placeholder): Running model: shown after the first reply
+  [effort]
+  - low {}
+  - medium {}
+  - high {current}
+  - xhigh {}
+  - max {}
+-- a pending difference
+trigger "Bypass · Sonnet 5.5 · high …" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger agent-runtime-dropup-trigger--pending] expanded=true width=- border=3px solid var(--error-color)
+  title: Applies after the current turn. Effort: selected high, running max.
+  aria: Runtime settings: Bypass · Sonnet 5.5 · high — applies after the current turn
+  status kind=pending ["Applies after the current turn.","Effort: selected high, running max"] restart[hidden=true disabled=true tab=-1]
+  [mode]
+  - Bypass (no prompts) {current,active}
+  - Auto / classifier asks; all auto-approved {}
+  - Accept Edits / other asks auto-approved, like Bypass {}
+  - Plan / does NOT stop edits; plan auto-approved {}
+  - Default / every ask auto-approved, like Bypass {}
+  [model]
+  - Opus 5.5 / Highest quality {}
+  - Sonnet 5.5 / Balanced speed and quality {current}
+  - Haiku 4.5 / Fastest {}
+  - Fable 5.1 / Long-horizon work {}
+  note (placeholder): Running model: shown after the first reply
+  [effort]
+  - low {}
+  - medium {}
+  - high {current}
+  - xhigh {}
+  - max {}
+-- agrees again
+trigger "Bypass · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=true width=- border=3px solid var(--error-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Bypass · Sonnet 5.5 · high
+  status kind=agrees ["Changes apply on the next turn.",""] restart[hidden=true disabled=true tab=-1]
+  [mode]
+  - Bypass (no prompts) {current,active}
+  - Auto / classifier asks; all auto-approved {}
+  - Accept Edits / other asks auto-approved, like Bypass {}
+  - Plan / does NOT stop edits; plan auto-approved {}
+  - Default / every ask auto-approved, like Bypass {}
+  [model]
+  - Opus 5.5 / Highest quality {}
+  - Sonnet 5.5 / Balanced speed and quality {current}
+  - Haiku 4.5 / Fastest {}
+  - Fable 5.1 / Long-horizon work {}
+  note (placeholder): Running model: shown after the first reply
+  [effort]
+  - low {}
+  - medium {}
+  - high {current}
+  - xhigh {}
+  - max {}
