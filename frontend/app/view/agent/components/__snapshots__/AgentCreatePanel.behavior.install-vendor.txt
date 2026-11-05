@@ -1,0 +1,214 @@
+== unix
+<div>
+  <section class="agent-create-panel" data-testid="agent-create-panel" aria-label="New Antigravity agent">
+    <header class="agent-create-panel-header">
+      <h3 class="agent-create-panel-title">
+        "New"
+        "Antigravity"
+        "agent"
+      <ol class="agent-create-steps" data-testid="agent-create-steps">
+        <li class="agent-create-step agent-create-step--current" aria-current="step">
+          "Install"
+        <li class="agent-create-step">
+          "Create"
+    <div class="agent-create-install" data-testid="agent-create-vendor-install">
+      <p class="agent-create-panel-text">
+        "AgentMux doesn't install"
+        "Antigravity"
+        ": install it with its own installer, which puts it on your PATH, outside AgentMux's isolation. Then check again."
+      <div class="agent-create-command">
+        <code data-testid="agent-create-vendor-command">
+          "curl -fsSL https://example.test/install.sh | bash"
+        <button title="Copy" type="button" class="ui-button ui-tone-quiet">
+          <i class="fa-solid fa-copy" aria-hidden="true">
+          "Copy"
+      <a class="agent-create-tool-link" href="https://example.test/agy-docs">
+        "Antigravity"
+        "'s install instructions"
+        <span aria-hidden="true">
+          "↗"
+      <div class="agent-create-actions">
+        <button type="button" class="ui-button ui-tone-neutral">
+          "Cancel"
+        <button data-testid="agent-create-check-again" type="button" class="ui-button ui-tone-accent">
+          "Check again"
+  call probePrereqs [false]
+  call ListIdentityAccounts [{}]
+  call CheckCliAuth [{"cli_path":"/bin/agy","auth_check_args":["models"]},{"timeout":15000}]
+  call InstallCheck [{"providerId":"antigravity","cliCommand":"agy"}]
+== checking again
+<div>
+  <section class="agent-create-panel" data-testid="agent-create-panel" aria-label="New Antigravity agent">
+    <header class="agent-create-panel-header">
+      <h3 class="agent-create-panel-title">
+        "New"
+        "Antigravity"
+        "agent"
+      <ol class="agent-create-steps" data-testid="agent-create-steps">
+        <li class="agent-create-step agent-create-step--current" aria-current="step">
+          "Install"
+        <li class="agent-create-step">
+          "Create"
+    <div class="agent-create-install" data-testid="agent-create-vendor-install">
+      <p class="agent-create-panel-text">
+        "AgentMux doesn't install"
+        "Antigravity"
+        ": install it with its own installer, which puts it on your PATH, outside AgentMux's isolation. Then check again."
+      <div class="agent-create-command">
+        <code data-testid="agent-create-vendor-command">
+          "curl -fsSL https://example.test/install.sh | bash"
+        <button title="Copy" type="button" class="ui-button ui-tone-quiet">
+          <i class="fa-solid fa-copy" aria-hidden="true">
+          "Copy"
+      <a class="agent-create-tool-link" href="https://example.test/agy-docs">
+        "Antigravity"
+        "'s install instructions"
+        <span aria-hidden="true">
+          "↗"
+      <div class="agent-create-actions">
+        <button type="button" class="ui-button ui-tone-neutral">
+          "Cancel"
+        <button data-testid="agent-create-check-again" type="button" class="ui-button ui-tone-accent" disabled="" aria-busy="true">
+          <i aria-hidden="true" class="fa-solid fa-spinner fa-spin">
+          "Check again"
+  call recheckInstalled []
+  call openExternal ["https://example.test/agy-docs"]
+  call clipboard ["curl -fsSL https://example.test/install.sh | bash"]
+== still not found
+<div>
+  <section class="agent-create-panel" data-testid="agent-create-panel" aria-label="New Antigravity agent">
+    <header class="agent-create-panel-header">
+      <h3 class="agent-create-panel-title">
+        "New"
+        "Antigravity"
+        "agent"
+      <ol class="agent-create-steps" data-testid="agent-create-steps">
+        <li class="agent-create-step agent-create-step--current" aria-current="step">
+          "Install"
+        <li class="agent-create-step">
+          "Create"
+    <div class="agent-create-install" data-testid="agent-create-vendor-install">
+      <p class="agent-create-panel-text">
+        "AgentMux doesn't install"
+        "Antigravity"
+        ": install it with its own installer, which puts it on your PATH, outside AgentMux's isolation. Then check again."
+      <div class="agent-create-command">
+        <code data-testid="agent-create-vendor-command">
+          "curl -fsSL https://example.test/install.sh | bash"
+        <button title="Copy" type="button" class="ui-button ui-tone-quiet">
+          <i class="fa-solid fa-copy" aria-hidden="true">
+          "Copy"
+      <a class="agent-create-tool-link" href="https://example.test/agy-docs">
+        "Antigravity"
+        "'s install instructions"
+        <span aria-hidden="true">
+          "↗"
+      <div class="agent-create-actions">
+        <button type="button" class="ui-button ui-tone-neutral">
+          "Cancel"
+        <button data-testid="agent-create-check-again" type="button" class="ui-button ui-tone-accent">
+          "Check again"
+== windows
+<div>
+  <section class="agent-create-panel" data-testid="agent-create-panel" aria-label="New Antigravity agent">
+    <header class="agent-create-panel-header">
+      <h3 class="agent-create-panel-title">
+        "New"
+        "Antigravity"
+        "agent"
+      <ol class="agent-create-steps" data-testid="agent-create-steps">
+        <li class="agent-create-step agent-create-step--current" aria-current="step">
+          "Install"
+        <li class="agent-create-step">
+          "Create"
+    <div class="agent-create-install" data-testid="agent-create-vendor-install">
+      <p class="agent-create-panel-text">
+        "AgentMux doesn't install"
+        "Antigravity"
+        ": install it with its own installer, which puts it on your PATH, outside AgentMux's isolation. Then check again."
+      <div class="agent-create-command">
+        <code data-testid="agent-create-vendor-command">
+          "irm https://example.test/install.ps1 | iex"
+        <button title="Copy" type="button" class="ui-button ui-tone-quiet">
+          <i class="fa-solid fa-copy" aria-hidden="true">
+          "Copy"
+      <a class="agent-create-tool-link" href="https://example.test/agy-docs">
+        "Antigravity"
+        "'s install instructions"
+        <span aria-hidden="true">
+          "↗"
+      <div class="agent-create-actions">
+        <button type="button" class="ui-button ui-tone-neutral">
+          "Cancel"
+        <button data-testid="agent-create-check-again" type="button" class="ui-button ui-tone-accent">
+          "Check again"
+  call ListIdentityAccounts [{}]
+  call CheckCliAuth [{"cli_path":"/bin/agy","auth_check_args":["models"]},{"timeout":15000}]
+== found: Create
+<div>
+  <section class="agent-create-panel" data-testid="agent-create-panel" aria-label="New Antigravity agent">
+    <header class="agent-create-panel-header">
+      <h3 class="agent-create-panel-title">
+        "New"
+        "Antigravity"
+        "agent"
+    <section class="agent-free-guide" data-testid="agent-free-guide" aria-label="Use Antigravity for free">
+      <h4 class="agent-free-guide-title">
+        "Use"
+        "Antigravity"
+        "for free"
+      <p class="agent-free-guide-lead">
+        "Free with a Google sign-in"
+        "."
+        "A weekly quota that Google doesn't publish. Gemini Flash-class models; other vendors' models need a paid plan."
+      <div class="agent-free-guide-open">
+        <button data-testid="agent-free-guide-open" type="button" class="ui-button ui-tone-accent">
+          "Open the sign-up page"
+          <span aria-hidden="true">
+            "↗"
+      <ol class="agent-free-guide-steps">
+        <li>
+          "Sign in with your Google account when the browser opens."
+        <li>
+          "Come back here. AgentMux sees the sign-in."
+        <li>
+          "Type /usage in the agent to see what is left of your weekly quota."
+      <ul class="agent-free-guide-catches">
+        <li>
+          "Free users can't buy overage credits."
+      <p class="agent-free-guide-checked" data-testid="agent-free-guide-checked">
+        "checked 2026-10-29"
+    <div data-testid="agent-create-form" data-template="Antigravity" data-runtime="host" data-deciding="false">
+      <button>
+        "form-cancel"
+      <button>
+        "form-busy"
+      <button>
+        "form-created"
+  call recheckInstalled []
+  call ListIdentityAccounts [{}]
+  call CheckCliAuth [{"cli_path":"/bin/agy","auth_check_args":["models"]},{"timeout":15000}]
+== a vendor CLI with no command and no docs
+<div>
+  <section class="agent-create-panel" data-testid="agent-create-panel" aria-label="New NoDocs agent">
+    <header class="agent-create-panel-header">
+      <h3 class="agent-create-panel-title">
+        "New"
+        "NoDocs"
+        "agent"
+      <ol class="agent-create-steps" data-testid="agent-create-steps">
+        <li class="agent-create-step agent-create-step--current" aria-current="step">
+          "Install"
+        <li class="agent-create-step">
+          "Create"
+    <div class="agent-create-install" data-testid="agent-create-vendor-install">
+      <p class="agent-create-panel-text">
+        "AgentMux doesn't install"
+        "NoDocs"
+        ": install it with its own installer, which puts it on your PATH, outside AgentMux's isolation. Then check again."
+      <div class="agent-create-actions">
+        <button type="button" class="ui-button ui-tone-neutral">
+          "Cancel"
+        <button data-testid="agent-create-check-again" type="button" class="ui-button ui-tone-accent">
+          "Check again"
+  call ListIdentityAccounts [{}]

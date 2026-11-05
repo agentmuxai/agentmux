@@ -1,0 +1,223 @@
+== two tools missing
+<div>
+  <section class="agent-create-panel" data-testid="agent-create-panel" aria-label="New Codex agent">
+    <header class="agent-create-panel-header">
+      <h3 class="agent-create-panel-title">
+        "New"
+        "Codex"
+        "agent"
+      <ol class="agent-create-steps" data-testid="agent-create-steps">
+        <li class="agent-create-step agent-create-step--current" aria-current="step">
+          "Tools"
+        <li class="agent-create-step">
+          "Create"
+    <div class="agent-create-tools" data-testid="agent-create-tools">
+      <p class="agent-create-panel-text">
+        "Codex"
+        "needs tools that aren't on your PATH. Install them, then check again."
+      <ul class="agent-create-tool-list">
+        <li class="agent-create-tool-row">
+          <div class="agent-create-tool-info">
+            <div class="agent-create-tool-tool">
+              "Git"
+              <span class="agent-create-tool-tool-status">
+                "— not found"
+            <a class="agent-create-tool-link" href="https://git-scm.com">
+              "Install Git"
+              <span aria-hidden="true">
+                "↗"
+            <button type="button" class="ui-button ui-tone-quiet">
+              "Install v2.47.1 now ↓"
+        <li class="agent-create-tool-row">
+          <div class="agent-create-tool-info">
+            <div class="agent-create-tool-tool">
+              "jq"
+              <span class="agent-create-tool-tool-status">
+                "— not found"
+            <a class="agent-create-tool-link" href="https://jqlang.org">
+              "Get jq"
+              <span aria-hidden="true">
+                "↗"
+      <p class="agent-create-tool-hint">
+        "Installed somewhere AgentMux can't see? Continue anyway: your CLI might still find it."
+      <div class="agent-create-actions">
+        <button type="button" class="ui-button ui-tone-neutral">
+          "Cancel"
+        <button type="button" class="ui-button ui-tone-neutral">
+          "Check again"
+        <button data-testid="agent-create-tools-continue" type="button" class="ui-button ui-tone-accent">
+          "Continue anyway"
+  call probePrereqs [false]
+  call ToolchainResolve [{"toolId":"git"}]
+  call ListIdentityAccounts [{}]
+== git's inline install open
+<div>
+  <section class="agent-create-panel" data-testid="agent-create-panel" aria-label="New Codex agent">
+    <header class="agent-create-panel-header">
+      <h3 class="agent-create-panel-title">
+        "New"
+        "Codex"
+        "agent"
+      <ol class="agent-create-steps" data-testid="agent-create-steps">
+        <li class="agent-create-step agent-create-step--current" aria-current="step">
+          "Tools"
+        <li class="agent-create-step">
+          "Create"
+    <div class="agent-create-tools" data-testid="agent-create-tools">
+      <p class="agent-create-panel-text">
+        "Codex"
+        "needs tools that aren't on your PATH. Install them, then check again."
+      <ul class="agent-create-tool-list">
+        <li class="agent-create-tool-row">
+          <div class="agent-create-tool-info">
+            <div class="agent-create-tool-tool">
+              "Git"
+              <span class="agent-create-tool-tool-status">
+                "— not found"
+            <a class="agent-create-tool-link" href="https://git-scm.com">
+              "Install Git"
+              <span aria-hidden="true">
+                "↗"
+            <button type="button" class="ui-button ui-tone-quiet">
+              "Install v2.47.1 now ↓"
+            <div class="system-tool-install-inline">
+              <div class="install-confirm">
+                <p class="install-confirm-text">
+                  <i aria-hidden="true" class="install-confirm-brand-icon fa-brands fa-git-alt">
+                  "This will run:"
+                <code class="install-confirm-command">
+                  "winget install --id Git.Git"
+                <p class="install-confirm-elevation">
+                  <i class="fa-solid fa-shield-halved" aria-hidden="true">
+                  "This will ask for your password or show a system permission prompt."
+                <button type="button" class="ui-button ui-tone-accent">
+                  "Install v2.47.1 now"
+        <li class="agent-create-tool-row">
+          <div class="agent-create-tool-info">
+            <div class="agent-create-tool-tool">
+              "jq"
+              <span class="agent-create-tool-tool-status">
+                "— not found"
+            <a class="agent-create-tool-link" href="https://jqlang.org">
+              "Get jq"
+              <span aria-hidden="true">
+                "↗"
+      <p class="agent-create-tool-hint">
+        "Installed somewhere AgentMux can't see? Continue anyway: your CLI might still find it."
+      <div class="agent-create-actions">
+        <button type="button" class="ui-button ui-tone-neutral">
+          "Cancel"
+        <button type="button" class="ui-button ui-tone-neutral">
+          "Check again"
+        <button data-testid="agent-create-tools-continue" type="button" class="ui-button ui-tone-accent">
+          "Continue anyway"
+  call openExternal ["https://jqlang.org"]
+== git installed, restart needed
+<div>
+  <section class="agent-create-panel" data-testid="agent-create-panel" aria-label="New Codex agent">
+    <header class="agent-create-panel-header">
+      <h3 class="agent-create-panel-title">
+        "New"
+        "Codex"
+        "agent"
+      <ol class="agent-create-steps" data-testid="agent-create-steps">
+        <li class="agent-create-step agent-create-step--current" aria-current="step">
+          "Tools"
+        <li class="agent-create-step">
+          "Create"
+    <div class="agent-create-tools" data-testid="agent-create-tools">
+      <p class="agent-create-panel-text">
+        "Codex"
+        "needs tools that aren't on your PATH. Install them, then check again."
+      <ul class="agent-create-tool-list">
+        <li class="agent-create-tool-row is-ok">
+          <div class="agent-create-tool-info">
+            <div class="agent-create-tool-tool">
+              "Git"
+              <span class="agent-create-tool-tool-status agent-create-tool-tool-status-ok">
+                "— installed, restart AgentMux to use it"
+        <li class="agent-create-tool-row">
+          <div class="agent-create-tool-info">
+            <div class="agent-create-tool-tool">
+              "jq"
+              <span class="agent-create-tool-tool-status">
+                "— not found"
+            <a class="agent-create-tool-link" href="https://jqlang.org">
+              "Get jq"
+              <span aria-hidden="true">
+                "↗"
+      <p class="agent-create-tool-hint">
+        "Installed somewhere AgentMux can't see? Continue anyway: your CLI might still find it."
+      <div class="agent-create-actions">
+        <button type="button" class="ui-button ui-tone-neutral">
+          "Cancel"
+        <button type="button" class="ui-button ui-tone-neutral">
+          "Check again"
+        <button data-testid="agent-create-tools-continue" type="button" class="ui-button ui-tone-accent">
+          "Continue anyway"
+  call probePrereqs [true]
+  call ToolchainInstall [{"toolId":"git"}]
+== checked again
+<div>
+  <section class="agent-create-panel" data-testid="agent-create-panel" aria-label="New Codex agent">
+    <header class="agent-create-panel-header">
+      <h3 class="agent-create-panel-title">
+        "New"
+        "Codex"
+        "agent"
+      <ol class="agent-create-steps" data-testid="agent-create-steps">
+        <li class="agent-create-step agent-create-step--current" aria-current="step">
+          "Tools"
+        <li class="agent-create-step">
+          "Create"
+    <div class="agent-create-tools" data-testid="agent-create-tools">
+      <p class="agent-create-panel-text">
+        "Codex"
+        "needs tools that aren't on your PATH. Install them, then check again."
+      <ul class="agent-create-tool-list">
+        <li class="agent-create-tool-row is-ok">
+          <div class="agent-create-tool-info">
+            <div class="agent-create-tool-tool">
+              "Git"
+              <span class="agent-create-tool-tool-status agent-create-tool-tool-status-ok">
+                "— installed, restart AgentMux to use it"
+        <li class="agent-create-tool-row">
+          <div class="agent-create-tool-info">
+            <div class="agent-create-tool-tool">
+              "jq"
+              <span class="agent-create-tool-tool-status">
+                "— not found"
+            <a class="agent-create-tool-link" href="https://jqlang.org">
+              "Get jq"
+              <span aria-hidden="true">
+                "↗"
+      <p class="agent-create-tool-hint">
+        "Installed somewhere AgentMux can't see? Continue anyway: your CLI might still find it."
+      <div class="agent-create-actions">
+        <button type="button" class="ui-button ui-tone-neutral">
+          "Cancel"
+        <button type="button" class="ui-button ui-tone-neutral">
+          "Check again"
+        <button data-testid="agent-create-tools-continue" type="button" class="ui-button ui-tone-accent">
+          "Continue anyway"
+  call probePrereqs [true]
+== continued anyway
+<div>
+  <section class="agent-create-panel" data-testid="agent-create-panel" aria-label="New Codex agent">
+    <header class="agent-create-panel-header">
+      <h3 class="agent-create-panel-title">
+        "New"
+        "Codex"
+        "agent"
+      <ol class="agent-create-steps" data-testid="agent-create-steps">
+        <li class="agent-create-step">
+          "Tools"
+        <li class="agent-create-step agent-create-step--current" aria-current="step">
+          "Create"
+    <div data-testid="agent-create-form" data-template="Codex" data-runtime="host" data-deciding="false">
+      <button>
+        "form-cancel"
+      <button>
+        "form-busy"
+      <button>
+        "form-created"
