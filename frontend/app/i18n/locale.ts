@@ -58,3 +58,24 @@ export function requestedLocales(setting: unknown, system: readonly string[]): r
     const tag = typeof setting === "string" ? setting.trim() : "";
     return tag && tag !== SYSTEM_LOCALE ? [tag] : system;
 }
+
+/**
+ * The locale to format dates, times and numbers in: the tag the person chose, or undefined for "system" so the
+ * browser's own regional format applies (an English-speaking person on a British system keeps "3 Oct"). The
+ * dictionary language is a separate question, answered by negotiation against the shipped languages.
+ */
+export function formatLocaleOf(setting: unknown): string | undefined {
+    const tag = typeof setting === "string" ? setting.trim() : "";
+    if (!tag || tag === SYSTEM_LOCALE || tag === PSEUDO_LOCALE) return undefined;
+    return parts(tag) ? tag : undefined;
+}
+
+/** A language's name in that language, with a capital where the language has capitals: `日本語`, `Português (Brasil)`. */
+export function nativeName(tag: string): string {
+    try {
+        const name = new Intl.DisplayNames(tag, { type: "language" }).of(tag) ?? tag;
+        return name.charAt(0).toLocaleUpperCase(tag) + name.slice(1);
+    } catch {
+        return tag;
+    }
+}

@@ -349,7 +349,7 @@
 129 crates/srv/src/server/work_queue.rs::enqueue_core
 120 crates/srv/src/server/work_queue.rs::handle_work_claim
 198 crates/srv/src/srv_ipc/server.rs::handle_connection
-212 frontend/app-init.ts::initAppInner
+213 frontend/app-init.ts::initAppInner
 147 frontend/app-init.ts::initHostMux
 163 frontend/app-init.ts::initHostNewWindow
 217 frontend/app-init.ts::initMux
@@ -549,7 +549,7 @@
 240 frontend/app/view/settings/sections/advanced-section.tsx::AdvancedSection
 178 frontend/app/view/settings/sections/agent-site-grants.tsx::AgentSiteGrants
 128 frontend/app/view/settings/sections/animations-section.tsx::AnimationsSection
-165 frontend/app/view/settings/sections/appearance-section.tsx::AppearanceSection
+166 frontend/app/view/settings/sections/appearance-section.tsx::AppearanceSection
 120 frontend/app/view/settings/sections/browser-section.tsx::BrowserSection
 171 frontend/app/view/settings/sections/devices-section.tsx::DevicesSection
 359 frontend/app/view/settings/sections/fork-slug-migration.tsx::ForkSlugMigration
