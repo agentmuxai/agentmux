@@ -167,16 +167,16 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
                     alignToAnchorSide={props.alignToAnchorSide}
                     onDismiss={() => onOpenChangeMenu(false)}
                     items={props.items}
-                        hoveredItems={hoveredItems()}
-                        visibleSubMenus={visibleSubMenus()}
-                        subMenuPosition={subMenuPosition()}
-                        handleMouseEnterItem={handleMouseEnterItem}
-                        handleOnClick={handleOnClick}
-                        openSubMenu={openSubMenu}
-                        closeSubMenu={closeSubMenu}
-                        renderMenu={props.renderMenu}
-                        renderMenuItem={props.renderMenuItem}
-                    />
+                    hoveredItems={hoveredItems()}
+                    visibleSubMenus={visibleSubMenus()}
+                    subMenuPosition={subMenuPosition()}
+                    handleMouseEnterItem={handleMouseEnterItem}
+                    handleOnClick={handleOnClick}
+                    openSubMenu={openSubMenu}
+                    closeSubMenu={closeSubMenu}
+                    renderMenu={props.renderMenu}
+                    renderMenuItem={props.renderMenuItem}
+                />
             </Show>
         </>
     );
