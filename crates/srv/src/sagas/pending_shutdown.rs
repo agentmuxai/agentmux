@@ -834,8 +834,8 @@ mod tests {
     }
 
     /// A close takes 10 s only when every pane in it is a browser pane.
-    #[test]
-    fn a_browser_pane_close_has_a_shorter_window() {
+    #[tokio::test]
+    async fn a_browser_pane_close_has_a_shorter_window() {
         let state = test_state();
         let (browser, other) = (uuid::Uuid::new_v4().to_string(), uuid::Uuid::new_v4().to_string());
         crate::server::browser_attention::tests::browser_block(&state, &browser);
