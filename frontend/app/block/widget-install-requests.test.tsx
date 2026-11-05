@@ -126,6 +126,17 @@ describe("agents' widget install requests", () => {
         await vi.waitFor(() => expect(decideWidget).toHaveBeenCalledWith("acme.clock", "h1", false, ""));
     });
 
+    it("a request that two panes now wait on names no pane: its card goes and the window asks", async () => {
+        onEvent!({ requests: [REQUEST] });
+        await Promise.resolve();
+        expect(cardOf()).toBeDefined();
+        const before = opened.length;
+        onEvent!({ requests: [{ ...REQUEST, block_id: "" }] });
+        await Promise.resolve();
+        expect(cardOf()).toBeUndefined();
+        expect(opened).toHaveLength(before + 1);
+    });
+
     it("a request that names no pane (a bundle import, an unverified asker) is still the window prompt", async () => {
         const before = opened.length;
         onEvent!({ requests: [{ ...REQUEST, id: "acme.nopane", block_id: "" }] });

@@ -95,7 +95,11 @@ impl Requests {
             }
             false
         });
-        if let Some((_, waiters)) = pending.iter_mut().find(|(r, _)| same(r)) {
+        if let Some((kept, waiters)) = pending.iter_mut().find(|(r, _)| same(r)) {
+            // Agents in two panes wait on one request: it names no single pane, so the window asks.
+            if kept.block_id != req.block_id {
+                kept.block_id.clear();
+            }
             waiters.push(tx);
         } else {
             if pending.len() >= MAX_PENDING {
@@ -167,6 +171,22 @@ mod tests {
             block_id: String::new(),
             requested_ms: 0,
         }
+    }
+
+    #[tokio::test]
+    async fn a_second_asker_in_another_pane_leaves_the_request_with_no_single_pane() {
+        let r = Requests::default();
+        let mut first = req("acme.x", "h1", "a");
+        first.block_id = "b1".into();
+        let _a = r.ask(first.clone());
+        let _again = r.ask(first.clone());
+        assert_eq!(r.list()[0].block_id, "b1", "the same pane asking again keeps its card");
+        let mut other = first.clone();
+        other.agent = "b".into();
+        other.block_id = "b2".into();
+        let _b = r.ask(other);
+        assert_eq!(r.list().len(), 1);
+        assert_eq!(r.list()[0].block_id, "", "two panes wait on it: the window asks");
     }
 
     #[tokio::test]

@@ -99,7 +99,9 @@ let started = false;
 export function startWidgetInstallRequests(): void {
     if (started || typeof getApi()?.approvals?.decideWidget !== "function") return;
     started = true;
-    const shown = new Map<string, PaneRequestHandle | null>();
+    // What asks for each request, and the pane it named when it did: a request that later names none (agents in two
+    // panes now wait on it) is asked in the window instead.
+    const shown = new Map<string, { blockId: string; card: PaneRequestHandle | null }>();
     // An event is newer than the first fetch: once one arrives, the fetch's
     // answer is stale and is dropped.
     let sawEvent = false;
@@ -111,14 +113,16 @@ export function startWidgetInstallRequests(): void {
         createEffect(
             on(requests, (list) => {
                 const live = new Set(list.map(keyOf));
-                for (const [k, card] of [...shown]) {
+                for (const [k, asked] of [...shown]) {
                     if (live.has(k)) continue;
-                    card?.close();
+                    asked.card?.close();
                     shown.delete(k);
                 }
                 for (const r of list) {
-                    if (shown.has(keyOf(r))) continue;
-                    shown.set(keyOf(r), r.block_id ? showCard(r) : showPrompt(r));
+                    const asked = shown.get(keyOf(r));
+                    if (asked?.blockId === r.block_id) continue;
+                    asked?.card?.close();
+                    shown.set(keyOf(r), { blockId: r.block_id, card: r.block_id ? showCard(r) : showPrompt(r) });
                 }
             })
         )
