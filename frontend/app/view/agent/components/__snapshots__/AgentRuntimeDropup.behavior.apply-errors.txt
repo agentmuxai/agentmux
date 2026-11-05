@@ -1,0 +1,72 @@
+patchRuntime rejects with an Error
+-- after a failed pick
+trigger "Bypass · Sonnet 5.5 · high ⚠" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger agent-runtime-dropup-trigger--error] expanded=true width=- border=3px solid var(--error-color)
+  title: Couldn't apply that change — the agent may still be running the previous settings. rpc down
+  aria: Runtime settings: Bypass · Sonnet 5.5 · high — last change failed to apply
+  status kind=agrees ["Changes apply on the next turn.",""] restart[hidden=true disabled=true tab=-1]
+  [mode]
+  - Bypass (no prompts) {current}
+  - Auto / classifier asks; all auto-approved {}
+  - Accept Edits / other asks auto-approved, like Bypass {}
+  - Plan / does NOT stop edits; plan auto-approved {active}
+  - Default / every ask auto-approved, like Bypass {}
+  [model]
+  - Opus 5.5 / Highest quality {}
+  - Sonnet 5.5 / Balanced speed and quality {current}
+  - Haiku 4.5 / Fastest {}
+  - Fable 5.1 / Long-horizon work {}
+  note (placeholder): Running model: shown after the first reply
+  [effort]
+  - low {}
+  - medium {}
+  - high {current}
+  - xhigh {}
+  - max {}
+patchRuntime rejects with a string
+-- after a second failure
+trigger "Bypass · Sonnet 5.5 · high ⚠" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger agent-runtime-dropup-trigger--error] expanded=true width=- border=3px solid var(--error-color)
+  title: Couldn't apply that change — the agent may still be running the previous settings. plain text
+  aria: Runtime settings: Bypass · Sonnet 5.5 · high — last change failed to apply
+  status kind=agrees ["Changes apply on the next turn.",""] restart[hidden=true disabled=true tab=-1]
+  [mode]
+  - Bypass (no prompts) {current}
+  - Auto / classifier asks; all auto-approved {}
+  - Accept Edits / other asks auto-approved, like Bypass {}
+  - Plan / does NOT stop edits; plan auto-approved {}
+  - Default / every ask auto-approved, like Bypass {}
+  [model]
+  - Opus 5.5 / Highest quality {active}
+  - Sonnet 5.5 / Balanced speed and quality {current}
+  - Haiku 4.5 / Fastest {}
+  - Fable 5.1 / Long-horizon work {}
+  note (placeholder): Running model: shown after the first reply
+  [effort]
+  - low {}
+  - medium {}
+  - high {current}
+  - xhigh {}
+  - max {}
+patchRuntime(block-1, claude, {"model":"sonnet"}, undefined) meta=undefined
+-- after one that works
+trigger "Bypass · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=true width=- border=3px solid var(--error-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Bypass · Sonnet 5.5 · high
+  status kind=agrees ["Changes apply on the next turn.",""] restart[hidden=true disabled=true tab=-1]
+  [mode]
+  - Bypass (no prompts) {current}
+  - Auto / classifier asks; all auto-approved {}
+  - Accept Edits / other asks auto-approved, like Bypass {}
+  - Plan / does NOT stop edits; plan auto-approved {}
+  - Default / every ask auto-approved, like Bypass {}
+  [model]
+  - Opus 5.5 / Highest quality {}
+  - Sonnet 5.5 / Balanced speed and quality {current,active}
+  - Haiku 4.5 / Fastest {}
+  - Fable 5.1 / Long-horizon work {}
+  note (placeholder): Running model: shown after the first reply
+  [effort]
+  - low {}
+  - medium {}
+  - high {current}
+  - xhigh {}
+  - max {}

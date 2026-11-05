@@ -15,7 +15,7 @@ function make(over: Partial<I18nEnv> = {}) {
         setting: () => "system",
         systemLanguages: () => ["en-US"],
         source,
-        supported: ["ja"],
+        supported: () => ["ja"],
         load,
         ...over,
     };

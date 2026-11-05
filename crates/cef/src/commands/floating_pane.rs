@@ -107,6 +107,43 @@ fn clamp_to_work_area(args: OpenFloatingPaneArgs) -> OpenFloatingPaneArgs {
     OpenFloatingPaneArgs { x, y, width, height, ..args }
 }
 
+fn parse_args(args: &serde_json::Value) -> Result<OpenFloatingPaneArgs, String> {
+    serde_json::from_value(args.clone()).map_err(|e| format!("open_floating_pane_window: invalid args: {e}"))
+}
+
+/// Where a picture of the pane followed the cursor (live_follow.rs), the floater opens there: where the user
+/// saw it, not at the cursor.
+#[cfg(target_os = "windows")]
+fn at_the_picture(args: OpenFloatingPaneArgs) -> OpenFloatingPaneArgs {
+    match super::live_follow::landing() {
+        Some((x, y)) => OpenFloatingPaneArgs { x, y, ..args },
+        None => args,
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn at_the_picture(args: OpenFloatingPaneArgs) -> OpenFloatingPaneArgs {
+    args
+}
+
+/// The request, once nothing refuses it. The picture's place is handed out once, so it is taken after every
+/// refusal the caller retries.
+fn accepted_args(state: &Arc<AppState>, args: &serde_json::Value) -> Result<OpenFloatingPaneArgs, String> {
+    let parsed = parse_args(args)?;
+    if parsed.pane_id.is_empty() {
+        return Err("open_floating_pane_window: pane_id is required".to_string());
+    }
+    if parsed.width <= 0 || parsed.height <= 0 {
+        return Err(format!(
+            "open_floating_pane_window: width/height must be positive (got {}×{})",
+            parsed.width, parsed.height
+        ));
+    }
+    // The H.7 main-window-creation gate (any pane mid-close) applies here too; the caller retries.
+    state.check_no_pane_closing("open_floating_pane_window")?;
+    Ok(at_the_picture(parsed))
+}
+
 #[derive(Debug, serde::Serialize)]
 pub struct OpenFloatingPaneResponse {
     /// The window label assigned to the floating window. Stable for
@@ -123,24 +160,7 @@ pub fn open_floating_pane_window(
     state: &Arc<AppState>,
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    let parsed: OpenFloatingPaneArgs = serde_json::from_value(args.clone())
-        .map_err(|e| format!("open_floating_pane_window: invalid args: {e}"))?;
-
-    if parsed.pane_id.is_empty() {
-        return Err("open_floating_pane_window: pane_id is required".to_string());
-    }
-    if parsed.width <= 0 || parsed.height <= 0 {
-        return Err(format!(
-            "open_floating_pane_window: width/height must be positive (got {}×{})",
-            parsed.width, parsed.height
-        ));
-    }
-
-    // The H.7 main-window-creation gate (any pane mid-close → wedged
-    // Chromium IPC) applies here too — same Chromium message loop. If
-    // a pane is closing, refuse the floating-window creation; the
-    // caller retries.
-    state.check_no_pane_closing("open_floating_pane_window")?;
+    let parsed = accepted_args(state, args)?;
 
     let window_id = uuid::Uuid::new_v4();
     let window_label = format!("floating-{}", window_id.simple());

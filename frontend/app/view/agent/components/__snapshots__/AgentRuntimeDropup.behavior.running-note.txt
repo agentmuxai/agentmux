@@ -1,0 +1,46 @@
+-- a reply from another family under a process that was spawned with the selection
+trigger "Default · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=true width=- border=3px solid var(--main-text-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Default · Sonnet 5.5 · high
+  status kind=agrees ["Changes apply on the next turn.",""] restart[hidden=true disabled=true tab=-1]
+  [mode]
+  - Bypass (no prompts) {}
+  - Auto / classifier asks; all auto-approved {}
+  - Accept Edits / other asks auto-approved, like Bypass {}
+  - Plan / does NOT stop edits; plan auto-approved {}
+  - Default / every ask auto-approved, like Bypass {current,active}
+  [model]
+  - Opus 5.5 / Highest quality {}
+  - Sonnet 5.5 / Balanced speed and quality {current}
+  - Haiku 4.5 / Fastest {}
+  - Fable 5.1 / Long-horizon work {}
+  note: ⚠ Last reply used claude-opus-5-5, not sonnet. If you changed the model since, the next reply will show it.
+  [effort]
+  - low {}
+  - medium {}
+  - high {current}
+  - xhigh {}
+  - max {}
+-- the CLI's own report wins over the last reply
+trigger "Default · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=true width=- border=3px solid var(--main-text-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Default · Sonnet 5.5 · high
+  status kind=agrees ["Changes apply on the next turn.",""] restart[hidden=true disabled=true tab=-1]
+  [mode]
+  - Bypass (no prompts) {}
+  - Auto / classifier asks; all auto-approved {}
+  - Accept Edits / other asks auto-approved, like Bypass {}
+  - Plan / does NOT stop edits; plan auto-approved {}
+  - Default / every ask auto-approved, like Bypass {current,active}
+  [model]
+  - Opus 5.5 / Highest quality {}
+  - Sonnet 5.5 / Balanced speed and quality {current}
+  - Haiku 4.5 / Fastest {}
+  - Fable 5.1 / Long-horizon work {}
+  note: ⚠ Running claude-haiku-4-5 · effort low (not sonnet, not effort high)
+  [effort]
+  - low {}
+  - medium {}
+  - high {current}
+  - xhigh {}
+  - max {}

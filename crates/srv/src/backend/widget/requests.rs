@@ -31,12 +31,14 @@ pub struct WidgetInstallRequest {
     pub signature: crate::backend::widget::signature::WidgetSignatureInfo,
     /// The agent that asked.
     pub agent: String,
+    /// The asking agent's pane, for the card there; empty when it has none (an unverified asker, a bundle import).
+    pub block_id: String,
     #[ts(type = "number")]
     pub requested_ms: u64,
 }
 
 impl WidgetInstallRequest {
-    pub fn of(pkg: &WidgetPackageInfo, agent: &str) -> Self {
+    pub fn of(pkg: &WidgetPackageInfo, agent: &str, block_id: &str) -> Self {
         Self {
             id: pkg.id.clone(),
             hash: pkg.hash.clone(),
@@ -48,6 +50,7 @@ impl WidgetInstallRequest {
             permissions: pkg.permissions.clone(),
             signature: pkg.signature.clone(),
             agent: agent.to_string(),
+            block_id: block_id.to_string(),
             requested_ms: agentmux_common::time::now_ms_u64(),
         }
     }
@@ -92,7 +95,11 @@ impl Requests {
             }
             false
         });
-        if let Some((_, waiters)) = pending.iter_mut().find(|(r, _)| same(r)) {
+        if let Some((kept, waiters)) = pending.iter_mut().find(|(r, _)| same(r)) {
+            // Agents in two panes wait on one request: it names no single pane, so the window asks.
+            if kept.block_id != req.block_id {
+                kept.block_id.clear();
+            }
             waiters.push(tx);
         } else {
             if pending.len() >= MAX_PENDING {
@@ -161,8 +168,25 @@ mod tests {
             permissions: vec![],
             signature: crate::backend::widget::signature::describe(id, None, &Default::default()),
             agent: agent.into(),
+            block_id: String::new(),
             requested_ms: 0,
         }
+    }
+
+    #[tokio::test]
+    async fn a_second_asker_in_another_pane_leaves_the_request_with_no_single_pane() {
+        let r = Requests::default();
+        let mut first = req("acme.x", "h1", "a");
+        first.block_id = "b1".into();
+        let _a = r.ask(first.clone());
+        let _again = r.ask(first.clone());
+        assert_eq!(r.list()[0].block_id, "b1", "the same pane asking again keeps its card");
+        let mut other = first.clone();
+        other.agent = "b".into();
+        other.block_id = "b2".into();
+        let _b = r.ask(other);
+        assert_eq!(r.list().len(), 1);
+        assert_eq!(r.list()[0].block_id, "", "two panes wait on it: the window asks");
     }
 
     #[tokio::test]

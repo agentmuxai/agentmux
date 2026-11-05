@@ -1,0 +1,19 @@
+registerPane(hist-1:history)
+usePaneTabVisibility(hist-1)
+getFileSubject(live-1, output)
+subscribe
+startHistoryPoll(cursor,hidden,readBlockId,recover,reloadIfSkipped)
+count({"filename":"output"}, timeout 5000)
+range({"offset":0,"limit":2}, timeout 30000)
+> hidden, a record arrives
+hidden: shown=["q1","a1"] meta="full history loaded" jumpButton=false
+> shown
+count({"filename":"output"}, timeout 5000)
+range({"offset":2,"limit":1}, timeout 15000)
+shown: shown=["q1","a1","q2"] meta="full history loaded" jumpButton=false
+> hidden with a publish armed, then shown
+after the armed publish: shown=["q1","a1","q2","a2"] meta="full history loaded" jumpButton=false
+> hidden, a truncate arrives, then shown
+count({"filename":"output"}, timeout 5000)
+range({"offset":0,"limit":4}, timeout 30000)
+after the truncate: shown=["q1","a1","q2","a2"] meta="full history loaded" jumpButton=false

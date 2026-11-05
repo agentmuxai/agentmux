@@ -1,0 +1,122 @@
+-- closed
+trigger "Bypass · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=false width=- border=3px solid var(--error-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Bypass · Sonnet 5.5 · high
+  panel: closed
+-- opened by the trigger
+trigger "Bypass · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=true width=123.5px border=3px solid var(--error-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Bypass · Sonnet 5.5 · high
+  status kind=agrees ["Changes apply on the next turn.",""] restart[hidden=true disabled=true tab=-1]
+  [mode]
+  - Bypass (no prompts) {current,active}
+  - Auto / classifier asks; all auto-approved {}
+  - Accept Edits / other asks auto-approved, like Bypass {}
+  - Plan / does NOT stop edits; plan auto-approved {}
+  - Default / every ask auto-approved, like Bypass {}
+  [model]
+  - Opus 5.5 / Highest quality {}
+  - Sonnet 5.5 / Balanced speed and quality {current}
+  - Haiku 4.5 / Fastest {}
+  - Fable 5.1 / Long-horizon work {}
+  note (placeholder): Running model: shown after the first reply
+  [effort]
+  - low {}
+  - medium {}
+  - high {current}
+  - xhigh {}
+  - max {}
+-- closed by the trigger
+trigger "Bypass · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=false width=- border=3px solid var(--error-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Bypass · Sonnet 5.5 · high
+  panel: closed
+-- closed by the close button
+trigger "Bypass · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=false width=- border=3px solid var(--error-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Bypass · Sonnet 5.5 · high
+  panel: closed
+-- closed by a mousedown outside
+trigger "Bypass · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=false width=- border=3px solid var(--error-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Bypass · Sonnet 5.5 · high
+  panel: closed
+-- a mousedown inside leaves it open
+trigger "Bypass · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=true width=123.5px border=3px solid var(--error-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Bypass · Sonnet 5.5 · high
+  status kind=agrees ["Changes apply on the next turn.",""] restart[hidden=true disabled=true tab=-1]
+  [mode]
+  - Bypass (no prompts) {current,active}
+  - Auto / classifier asks; all auto-approved {}
+  - Accept Edits / other asks auto-approved, like Bypass {}
+  - Plan / does NOT stop edits; plan auto-approved {}
+  - Default / every ask auto-approved, like Bypass {}
+  [model]
+  - Opus 5.5 / Highest quality {}
+  - Sonnet 5.5 / Balanced speed and quality {current}
+  - Haiku 4.5 / Fastest {}
+  - Fable 5.1 / Long-horizon work {}
+  note (placeholder): Running model: shown after the first reply
+  [effort]
+  - low {}
+  - medium {}
+  - high {current}
+  - xhigh {}
+  - max {}
+-- a mousedown on the trigger leaves it to the click
+trigger "Bypass · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=true width=123.5px border=3px solid var(--error-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Bypass · Sonnet 5.5 · high
+  status kind=agrees ["Changes apply on the next turn.",""] restart[hidden=true disabled=true tab=-1]
+  [mode]
+  - Bypass (no prompts) {current,active}
+  - Auto / classifier asks; all auto-approved {}
+  - Accept Edits / other asks auto-approved, like Bypass {}
+  - Plan / does NOT stop edits; plan auto-approved {}
+  - Default / every ask auto-approved, like Bypass {}
+  [model]
+  - Opus 5.5 / Highest quality {}
+  - Sonnet 5.5 / Balanced speed and quality {current}
+  - Haiku 4.5 / Fastest {}
+  - Fable 5.1 / Long-horizon work {}
+  note (placeholder): Running model: shown after the first reply
+  [effort]
+  - low {}
+  - medium {}
+  - high {current}
+  - xhigh {}
+  - max {}
+-- focus moving within the dropup leaves it open
+trigger "Bypass · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=true width=123.5px border=3px solid var(--error-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Bypass · Sonnet 5.5 · high
+  status kind=agrees ["Changes apply on the next turn.",""] restart[hidden=true disabled=true tab=-1]
+  [mode]
+  - Bypass (no prompts) {current,active}
+  - Auto / classifier asks; all auto-approved {}
+  - Accept Edits / other asks auto-approved, like Bypass {}
+  - Plan / does NOT stop edits; plan auto-approved {}
+  - Default / every ask auto-approved, like Bypass {}
+  [model]
+  - Opus 5.5 / Highest quality {}
+  - Sonnet 5.5 / Balanced speed and quality {current}
+  - Haiku 4.5 / Fastest {}
+  - Fable 5.1 / Long-horizon work {}
+  note (placeholder): Running model: shown after the first reply
+  [effort]
+  - low {}
+  - medium {}
+  - high {current}
+  - xhigh {}
+  - max {}
+-- closed by focus moving outside
+trigger "Bypass · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=false width=- border=3px solid var(--error-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Bypass · Sonnet 5.5 · high
+  panel: closed
+-- a closed panel does not listen to keys
+trigger "Bypass · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=false width=- border=3px solid var(--error-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Bypass · Sonnet 5.5 · high
+  panel: closed

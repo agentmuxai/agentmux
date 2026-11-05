@@ -202,15 +202,7 @@ pub fn spawn_background_subsystems(
 
     // Reactive handler (global singleton) + poller
     // Before the handler records anything: every jekt audit entry is also kept in a file.
-    match backend::reactive::audit_store::default_path() {
-        Some(path) => {
-            let channel_name = std::env::var("AGENTMUX_INSTANCE_CHANNEL").unwrap_or_default();
-            if let Err(e) = backend::reactive::audit_store::install(path.clone(), channel_name) {
-                tracing::warn!(path = %path.display(), error = %e, "jekt audit: not kept in a file");
-            }
-        }
-        None => tracing::warn!("jekt audit: no shared directory; not kept in a file"),
-    }
+    backend::reactive::audit_store::install_for_this_srv();
     let reactive_handler = reactive::get_global_handler();
     reactive_handler.set_input_sender(Arc::new(|block_id: &str, data: &[u8]| {
         backend::blockcontroller::send_input(

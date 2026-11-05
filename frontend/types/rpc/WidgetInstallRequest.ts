@@ -10,4 +10,8 @@ signature: WidgetSignatureInfo,
 /**
  * The agent that asked.
  */
-agent: string, requested_ms: number, };
+agent: string, 
+/**
+ * The asking agent's pane, for the card there; empty when it has none (an unverified asker, a bundle import).
+ */
+block_id: string, requested_ms: number, };

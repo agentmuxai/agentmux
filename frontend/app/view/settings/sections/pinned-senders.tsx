@@ -10,8 +10,9 @@
 // (crates/srv/src/server/app_api/pins.rs).
 
 import { Button } from "@/app/element/ui";
-import { createSignal, For, onMount, Show, type JSX } from "solid-js";
+import { createSignal, For, Show, type JSX } from "solid-js";
 
+import { createDomainStore } from "@/app/store/domain-store";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { PinnedSendersResult } from "@/types/rpc/PinnedSendersResult";
@@ -41,23 +42,23 @@ export function ago(epochSecs: number, nowSecs: number): string {
 const same = (a: PinChange | null, b: PinChange) =>
     a != null && a.kind === b.kind && a.agentId === b.agentId && a.channel === b.channel && a.how === b.how && a.expect === b.expect;
 
+// A pin changes here (`pins:changed`), and a refusal is counted without any event, so the list is
+// also reloaded every half minute while it is open.
+const store = createDomainStore<PinnedSendersResult | null>({
+    initial: null,
+    events: ["PinsChanged"],
+    safetyPollMs: 30_000,
+    load: () => RpcApi.PinsListCommand(TabRpcClient),
+});
+
 export function PinnedSenders(): JSX.Element {
-    const [pins, setPins] = createSignal<PinnedSendersResult | null>(null);
-    const [error, setError] = createSignal<string | null>(null);
+    store.follow();
+    const pins = store.data;
+    const [changeError, setChangeError] = createSignal<string | null>(null);
+    const error = () => changeError() ?? store.error();
     const [asking, setAsking] = createSignal<PinChange | null>(null);
     const [busy, setBusy] = createSignal(false);
     const now = () => Math.floor(Date.now() / 1000);
-
-    const load = async () => {
-        try {
-            setPins(await RpcApi.PinsListCommand(TabRpcClient));
-            setError(null);
-        } catch (e) {
-            setPins(null);
-            setError(e instanceof Error ? e.message : String(e));
-        }
-    };
-    onMount(() => void load());
 
     // The first press asks, the second does it: a pin decides who may speak as an agent.
     const press = async (change: PinChange) => {
@@ -70,14 +71,14 @@ export function PinnedSenders(): JSX.Element {
         // Adopt names what was on screen: srv refuses it if something else was refused since.
         const data = { kind: change.kind, agent_id: change.agentId, channel: change.channel, expect: change.expect };
         try {
-            setPins(
+            store.set(
                 change.how === "adopt"
                     ? await RpcApi.PinsAdoptCommand(TabRpcClient, data)
                     : await RpcApi.PinsForgetCommand(TabRpcClient, data)
             );
-            setError(null);
+            setChangeError(null);
         } catch (e) {
-            setError(e instanceof Error ? e.message : String(e));
+            setChangeError(e instanceof Error ? e.message : String(e));
         } finally {
             setBusy(false);
         }

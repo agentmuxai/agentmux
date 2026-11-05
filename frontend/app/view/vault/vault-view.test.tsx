@@ -246,6 +246,23 @@ describe("the Vault pane", () => {
         }
     });
 
+    it("reads the kept list again each time the tab is shown", async () => {
+        keptRows = [{ label: "first sign-in", what: "sign-in saved by a browser pane", managed_in: "browser" }];
+        try {
+            renderVault();
+            await screen.findByText("Alex");
+            fireEvent.click(screen.getByRole("tab", { name: "Kept by AgentMux" }));
+            await screen.findByText("first sign-in");
+            fireEvent.click(screen.getByRole("tab", { name: "Activity" }));
+            keptRows = [{ label: "second sign-in", what: "sign-in saved by a browser pane", managed_in: "browser" }];
+            fireEvent.click(screen.getByRole("tab", { name: "Kept by AgentMux" }));
+            await screen.findByText("second sign-in");
+            expect(screen.queryByText("first sign-in")).toBeNull();
+        } finally {
+            keptRows = [];
+        }
+    });
+
     it("dismisses an agent's request through the host", async () => {
         requests = [{ id: "req-2", agent: "Agent1", kind: "ssn", label: "Their SSN", why: "", requested_ms: Date.now(), block_id: "pane-1" }];
         renderVault();

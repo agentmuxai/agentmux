@@ -27,9 +27,11 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     _ => None,
                 };
                 let block_exists = |id: &str| state.mstore.get::<crate::backend::obj::Block>(id).ok().flatten().is_some();
-                let file = crate::backend::reactive::audit_store::default_path();
+                let file = crate::backend::reactive::audit_store::shared_path_for_reading();
+                let own = crate::backend::reactive::audit_store::own_path();
                 let src = Sources {
                     jekt_file: file.as_deref(),
+                    own_file: own.as_deref(),
                     segments: state.global_transcript_store.as_deref(),
                     ctx: Ctx { slug_of_uid: &slug_of_uid, uid_of_slug: &uid_of_slug, pane_of_agent: &pane_of_agent, block_exists: &block_exists },
                 };

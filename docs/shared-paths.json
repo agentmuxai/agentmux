@@ -96,6 +96,7 @@
         "crates/srv/src/server/muxspect_handlers.rs",
         "crates/srv/src/server/reactive.rs",
         "crates/srv/src/server/reactive/channel_v2.rs",
+        "crates/srv/src/server/reactive/forward_tiers.rs",
         "crates/srv/src/server/reactive/registration_flags.rs"
       ]
     },
