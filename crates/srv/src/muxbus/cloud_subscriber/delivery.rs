@@ -73,6 +73,13 @@ pub(super) struct PendingInj {
 /// of the signed material, so only `sensitive` is taken: a carried tier can
 /// mark a message sensitive, never lower it below the default `coord`. The
 /// handler's trust rules apply on top as for any jekt.
+/// What is noted when a relay message arrives: it is remembered (a bare "got it" back is refused), and,
+/// as it shows the sender is reachable, a message queued to it is no longer watched for a reply.
+fn note_arrival(mstore: &Store, req: &InjectionRequest) {
+    crate::server::jekt_ack::remember_arrival(mstore, req);
+    crate::muxbus::relay_watch::heard_from(req.source_agent.as_deref(), &req.target_agent);
+}
+
 fn declared_tier(raw: Option<&str>) -> Option<crate::backend::reactive::types::JektTier> {
     (raw == Some("sensitive")).then_some(crate::backend::reactive::types::JektTier::Sensitive)
 }
@@ -407,7 +414,7 @@ pub(super) async fn claim_and_deliver(
         }
         // Remembered, so a bare "got it" back to this sender is refused (`backend::ack_policy`); the relay
         // doesn't carry `reply` yet, so a WAN message never arrives marked `REPLY=none`.
-        crate::server::jekt_ack::remember_arrival(mstore, &req);
+        note_arrival(mstore, &req);
         // Verified, and its agent can't work now: kept here until it can. Injected now it would be lost in
         // a failed turn, or given back to the relay to come again.
         if crate::server::jekt_hold::hold_wan_for_unavailable(mstore, handler, &req) {
