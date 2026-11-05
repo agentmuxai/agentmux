@@ -5,7 +5,11 @@ import type { VaultSection } from "./VaultSection";
  * An entry as the pane shows it: no value, only which parts are set and
  * the main value's last characters.
  */
-export type VaultEntryInfo = { id: string, kind: string, section: VaultSection, label: string, fields: { [key in string]: string }, tags: Array<string>, 
+export type VaultEntryInfo = { id: string, kind: string, section: VaultSection, label: string, 
+/**
+ * The Vault it belongs to (`vaults::VaultInfo::id`).
+ */
+vault_id: string, fields: { [key in string]: string }, tags: Array<string>, 
 /**
  * The parts that hold a value.
  */

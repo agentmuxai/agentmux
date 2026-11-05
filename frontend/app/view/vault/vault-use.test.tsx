@@ -227,6 +227,7 @@ describe("the sites an entry may be filled into", () => {
                 kind: "ssn",
                 section: "personal",
                 label: "Alex",
+                vault_id: "personal",
                 fields: {},
                 tags: [],
                 parts_set: ["value"],

@@ -79,6 +79,43 @@ async fn the_pane_saves_and_lists_and_agents_see_only_names() {
 }
 
 #[tokio::test]
+async fn an_entry_in_a_vault_closed_to_agents_is_the_persons_alone_until_they_move_it() {
+    let app = app().await;
+    let ops = |op: Value| post("/api/v1/host/vault", &[HOST], op);
+    // Only the host makes, changes or empties a Vault, or moves an entry.
+    for op in [json!({ "op": "vault_create", "name": "Mine", "agents": "none" }), json!({ "op": "move_entry", "id": "x", "vault_id": "personal" })] {
+        let (s, _) = send(&app, post("/api/v1/host/vault", &[], op)).await;
+        assert_eq!(s, StatusCode::FORBIDDEN);
+    }
+    let (s, body) = send(&app, ops(json!({ "op": "vault_create", "name": "Mine", "agents": "none" }))).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let vault = body["data"]["vault"]["id"].as_str().unwrap().to_string();
+    let mut ssn = new_ssn();
+    ssn["vault"] = json!(vault);
+    let (_, body) = send(&app, ops(ssn)).await;
+    let id = body["data"]["id"].as_str().unwrap().to_string();
+
+    let (_, body) = send(&app, ops(json!({ "op": "list" }))).await;
+    let entry = body["data"]["entries"].as_array().unwrap().iter().find(|e| e["id"] == id.as_str()).unwrap().clone();
+    assert_eq!(entry["vault_id"], vault.as_str(), "the pane lists it with its Vault");
+    assert!(body["data"]["vaults"].as_array().unwrap().iter().any(|v| v["id"] == vault.as_str() && v["agents"]["mode"] == "none"));
+
+    let agents_see = |body: &Value| body.to_string().contains(&id);
+    let (_, body) = send(&app, get("/api/v1/vault")).await;
+    assert!(!agents_see(&body), "an agent that proves nothing does not see it: {body}");
+    let (s, body) = send(&app, post("/api/v1/vault/list", &[], json!({ "auth": null }))).await;
+    assert_eq!(s, StatusCode::OK);
+    assert!(!agents_see(&body), "nor does one that sends no identity: {body}");
+
+    let (s, _) = send(&app, ops(json!({ "op": "move_entry", "id": id, "vault_id": "personal" }))).await;
+    assert_eq!(s, StatusCode::OK);
+    let (_, body) = send(&app, get("/api/v1/vault")).await;
+    assert!(agents_see(&body) && body.to_string().contains("\"vault\":\"Personal\""), "{body}");
+    let (s, body) = send(&app, ops(json!({ "op": "vault_delete", "id": vault }))).await;
+    assert_eq!(s, StatusCode::OK, "an emptied Vault can go: {body}");
+}
+
+#[tokio::test]
 async fn an_agents_request_is_answered_with_the_new_entrys_id_only() {
     let app = app().await;
     let ask = {

@@ -21,6 +21,7 @@ const key: VaultEntryInfo = {
     kind: "api-key",
     section: "api-keys",
     label: "OpenAI",
+    vault_id: "personal",
     fields: {},
     tags: [],
     parts_set: ["value"],

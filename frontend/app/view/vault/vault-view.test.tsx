@@ -43,6 +43,7 @@ function ssn(over: Partial<VaultEntryInfo> = {}): VaultEntryInfo {
         kind: "ssn",
         section: "personal",
         label: "Alex",
+        vault_id: "personal",
         fields: { owner: "Alex Doe" },
         tags: [],
         parts_set: ["value"],
@@ -138,7 +139,7 @@ describe("the Vault pane", () => {
     });
 
     it("fills an agent's request with its id, on the request's kind", async () => {
-        requests = [{ id: "req-1", agent: "Agent1", kind: "api-key", label: "Stripe test key", why: "run the payment tests", requested_ms: Date.now(), block_id: "pane-1" }];
+        requests = [{ id: "req-1", agent: "Agent1", kind: "api-key", label: "Stripe test key", why: "run the payment tests", requested_ms: Date.now(), block_id: "pane-1", vault: "" }];
         renderVault();
         await screen.findByText("Stripe test key");
         fireEvent.click(screen.getByRole("button", { name: "Fill in" }));
@@ -264,7 +265,7 @@ describe("the Vault pane", () => {
     });
 
     it("dismisses an agent's request through the host", async () => {
-        requests = [{ id: "req-2", agent: "Agent1", kind: "ssn", label: "Their SSN", why: "", requested_ms: Date.now(), block_id: "pane-1" }];
+        requests = [{ id: "req-2", agent: "Agent1", kind: "ssn", label: "Their SSN", why: "", requested_ms: Date.now(), block_id: "pane-1", vault: "" }];
         renderVault();
         await screen.findByText("Their SSN");
         fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));

@@ -74,6 +74,18 @@ fn shown_commands(set: &str, verify: &str) -> String {
     }
 }
 
+/// The entry `id` an agent asks to rotate. Before anything is asked or written, one in a Vault the
+/// agent may not use is refused as one that is not there.
+fn rotatable_entry(state: &AppState, id: &str, agent: &str) -> Result<crate::backend::storage::vault::VaultRow, Response> {
+    let none = || error(StatusCode::BAD_REQUEST, format!("no Vault entry {id:?}: Vault's list action shows the entries"));
+    let row = state.identity_store.vault_get(id).map_err(|e| error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?.ok_or_else(none)?;
+    match vault::vaults::entry_row_usable(&state.identity_store, &row.vault_id, Some(agent)) {
+        Ok(true) => Ok(row),
+        Ok(false) => Err(none()),
+        Err(e) => Err(error(StatusCode::INTERNAL_SERVER_ERROR, e)),
+    }
+}
+
 /// `POST /api/v1/vault/rotate`.
 pub(crate) async fn handle_vault_rotate(State(state): State<AppState>, Json(body): Json<RotateBody>) -> Response {
     let Some(auth) = body.auth.clone() else {
@@ -88,10 +100,9 @@ pub(crate) async fn handle_vault_rotate(State(state): State<AppState>, Json(body
     if set.is_empty() {
         return error(StatusCode::BAD_REQUEST, "rotate needs set: the command that gives the service the new value (NEW_SECRET)");
     }
-    let row = match state.identity_store.vault_get(&body.id) {
-        Ok(Some(r)) => r,
-        Ok(None) => return error(StatusCode::BAD_REQUEST, format!("no Vault entry {:?}: Vault's list action shows the entries", body.id)),
-        Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    let row = match rotatable_entry(&state, &body.id, &agent) {
+        Ok(r) => r,
+        Err(refused) => return refused,
     };
     if !GENERATED_KINDS.iter().any(|(k, _)| *k == row.kind) {
         return error(StatusCode::BAD_REQUEST, format!("{} is a {}: only an API key, a login's password or a note can be rotated", row.label, row.kind));
