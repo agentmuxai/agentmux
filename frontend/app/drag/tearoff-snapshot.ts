@@ -38,7 +38,14 @@ const TAKE_BUDGET_MS = 60;
  */
 export const MAX_SNAPSHOT_CHARS = 1_000_000;
 
-let held: { blockId: string; at: number; picture: Promise<string | null> } | null = null;
+let held: {
+    blockId: string;
+    at: number;
+    picture: Promise<string | null>;
+    /** A pane's: where the pointer went down in it, and its size, both CSS px. */
+    grab?: { x: number; y: number };
+    size?: { width: number; height: number };
+} | null = null;
 
 export interface CssRect {
     left: number;
@@ -223,19 +230,39 @@ export function takeWindowTabSnapshot(tabId: string): Promise<string | undefined
  * the tear-off at release takes it for the new window. Waits for a capture still in flight, up to `waitMs`.
  */
 export async function peekWindowTabSnapshot(tabId: string, waitMs: number): Promise<string | undefined> {
+    return (await peekHeld(windowTabKey(tabId), waitMs))?.picture;
+}
+
+/** A pane's picture for the live follow, with the pointer's place in the pane and the pane's size. */
+export interface PaneFollowPicture {
+    picture: string;
+    grab: { x: number; y: number };
+    size: { width: number; height: number };
+}
+
+/** The picture held for pane `blockId`, without taking it (see `peekWindowTabSnapshot`). */
+export async function peekTearOffSnapshot(blockId: string, waitMs: number): Promise<PaneFollowPicture | undefined> {
+    const got = await peekHeld(blockId, waitMs);
+    return got?.grab && got.size ? { picture: got.picture, grab: got.grab, size: got.size } : undefined;
+}
+
+async function peekHeld(key: string, waitMs: number) {
     const h = held;
-    if (!h || h.blockId !== windowTabKey(tabId) || Date.now() - h.at > MAX_AGE_MS) return undefined;
+    if (!h || h.blockId !== key || Date.now() - h.at > MAX_AGE_MS) return undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const budget = new Promise<null>((resolve) => {
         timer = setTimeout(() => resolve(null), waitMs);
     });
     const picture = await Promise.race([h.picture, budget]);
     clearTimeout(timer);
-    return picture && picture.length <= MAX_SNAPSHOT_CHARS ? picture : undefined;
+    return picture && picture.length <= MAX_SNAPSHOT_CHARS ? { picture, grab: h.grab, size: h.size } : undefined;
 }
 
-/** Start capturing `blockId` (a base64 JPEG), replacing any earlier picture. */
-export function prewarmTearOffSnapshot(blockId: string): void {
+/**
+ * Start capturing `blockId` (a base64 JPEG), replacing any earlier picture. `pointer` is where the press
+ * landed (viewport px): the live follow keeps the pane at that grab.
+ */
+export function prewarmTearOffSnapshot(blockId: string, pointer?: { x: number; y: number }): void {
     const at = Date.now();
     // The rect now, before the drag restyles or moves anything.
     const el = document.querySelector(`[data-blockid="${CSS.escape(blockId)}"]`);
@@ -262,7 +289,13 @@ export function prewarmTearOffSnapshot(blockId: string): void {
             return null;
         }
     );
-    held = { blockId, at, picture };
+    held = {
+        blockId,
+        at,
+        picture,
+        grab: pointer && { x: pointer.x - r.left, y: pointer.y - r.top },
+        size: { width: r.width, height: r.height },
+    };
 }
 
 /**
