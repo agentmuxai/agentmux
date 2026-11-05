@@ -740,6 +740,8 @@ declare global {
         /** Legacy "Pane Color" pick, an HSL hue 0–360, read as the slot nearest it; no longer written. */
         "frame:hue"?: number | null;
         "frame:title"?: string;
+        /** The address a browser pane was opened at, with a title its opener gave it; the title goes when the pane moves to another site. */
+        "frame:title_url"?: string;
         "frame:icon"?: string;
         /** A pane tab's last real name and favicon from its view, so the tab reads the same before it is clicked (pane-tab-persist.ts). */
         "pane:label"?: string;
