@@ -623,18 +623,35 @@ fn github_through_agentmuxs_own_app_needs_a_cloud_sign_in() {
 fn a_service_google_has_not_approved_is_asked_only_on_a_client_the_person_brought() {
     let client = |mode| ResolvedClient { client_id: "id".into(), client_secret: None, mode };
     let gmail = vec!["https://www.googleapis.com/auth/gmail.readonly".to_string()];
+    let new = FlowTarget::New { name: "me".into() };
     // The shipped list approves nothing yet, so AgentMux's own client stops at any service.
     if crate::identity::google_offered::offered().is_empty() {
-        let why = scope_not_offered("google", &gmail, &client(ClientMode::Builtin)).unwrap();
+        let why = scope_not_offered("google", &gmail, &client(ClientMode::Builtin), &new).unwrap();
         assert!(why.contains("isn't available in this version of AgentMux yet"), "{why}");
     }
     // A client the person brought, or their organization's, is reviewed against their own project.
-    assert!(scope_not_offered("google", &gmail, &client(ClientMode::Byo)).is_none());
-    assert!(scope_not_offered("google", &gmail, &client(ClientMode::Workspace)).is_none());
-    assert!(scope_not_offered("github", &gmail, &client(ClientMode::Builtin)).is_none());
+    assert!(scope_not_offered("google", &gmail, &client(ClientMode::Byo), &new).is_none());
+    assert!(scope_not_offered("google", &gmail, &client(ClientMode::Workspace), &new).is_none());
+    assert!(scope_not_offered("github", &gmail, &client(ClientMode::Builtin), &new).is_none());
     // Signing in names no service.
     let sign_in = vec!["openid".to_string(), "email".to_string()];
-    assert!(scope_not_offered("google", &sign_in, &client(ClientMode::Builtin)).is_none());
+    assert!(scope_not_offered("google", &sign_in, &client(ClientMode::Builtin), &new).is_none());
+}
+
+#[test]
+fn a_reconnect_may_ask_again_for_what_the_account_already_holds() {
+    let client = ResolvedClient { client_id: "id".into(), client_secret: None, mode: ClientMode::Builtin };
+    let drive = "https://www.googleapis.com/auth/drive.file".to_string();
+    let gmail = "https://www.googleapis.com/auth/gmail.readonly".to_string();
+    let mut acct = oauth_account("acc-1", "google", "cid");
+    acct.context["granted_scopes"] = serde_json::json!(["openid", drive]);
+    let existing = FlowTarget::Existing(acct);
+    // Drive is held: asking again is a reconnect, whatever the build offers.
+    assert!(scope_not_offered("google", &[drive.clone()], &client, &existing).is_none());
+    // Gmail is not held: turning it on is checked against the list (when the list leaves it out).
+    if !crate::identity::google_offered::offered().iter().any(|s| s == "gmail") {
+        assert!(scope_not_offered("google", &[drive, gmail], &client, &existing).is_some());
+    }
 }
 
 #[tokio::test]

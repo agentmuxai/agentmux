@@ -65,14 +65,24 @@ export function serviceOffered(info: ServiceInfo, clientMode: string | undefined
     return offered.includes(info.service);
 }
 
-/** The services AgentMux's own Google client offers in this build, or null when srv doesn't say. */
-export async function loadOfferedServices(): Promise<string[] | null> {
-    try {
-        const info = await RpcApi.AccountOAuthClientGetCommand(TabRpcClient, { provider: "google" });
-        return info.offeredServices ?? null;
-    } catch {
-        return null;
-    }
+let offeredAsked: Promise<string[] | null> | null = null;
+
+/** The services AgentMux's own Google client offers in this build, or null when srv doesn't say. The list is
+ *  fixed for a running srv, so every row of every account shares one question; an unanswered one is asked again. */
+export function loadOfferedServices(): Promise<string[] | null> {
+    offeredAsked ??= RpcApi.AccountOAuthClientGetCommand(TabRpcClient, { provider: "google" }).then(
+        (info) => info.offeredServices ?? null,
+        () => null,
+    ).then((offered) => {
+        if (offered == null) offeredAsked = null;
+        return offered;
+    });
+    return offeredAsked;
+}
+
+/** Forget the answer, so the next question goes to srv (tests). */
+export function forgetOfferedServices(): void {
+    offeredAsked = null;
 }
 
 /** Whether the account's token covers `scopes`: all, some or none of them. */

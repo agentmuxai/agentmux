@@ -30,7 +30,7 @@ vi.mock("@/app/store/mps", () => ({
 }));
 
 import type { Account } from "@/app/view/identity/identity-model";
-import { callLine, pickDriveFiles, SERVICES, serviceState } from "./google-services";
+import { callLine, forgetOfferedServices, pickDriveFiles, SERVICES, serviceState } from "./google-services";
 import { GoogleServicesSection } from "./GoogleServicesSection";
 
 const P = "https://www.googleapis.com/auth/";
@@ -60,6 +60,7 @@ const DRIVE = ["drive.file"];
 let panel: Record<string, unknown>;
 
 beforeEach(() => {
+    forgetOfferedServices();
     api.value = { approvals: { google } };
     panel = {
         agents: [{ agentId: "def-1", name: "Naki", levels: {} }],
@@ -189,6 +190,7 @@ describe("GoogleServicesSection", () => {
         await waitFor(() => expect(screen.getAllByText("Coming soon.").length).toBe(3));
         expect(screen.queryByRole("button", { name: /^Turn on/ })).toBeNull();
         unmount();
+        forgetOfferedServices();
         rpc.clientGet.mockResolvedValue({ saved: false, hasSecret: false, builtinAvailable: true, offeredServices: ["calendar", "drive", "gmail"] });
         render(() => <GoogleServicesSection account={account([], "builtin")} />);
         expect(await screen.findByRole("button", { name: "Turn on Gmail" })).toBeTruthy();
