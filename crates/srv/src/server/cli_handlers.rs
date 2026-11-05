@@ -766,6 +766,16 @@ fn pi_lists_models(success: bool, stdout: &str, stderr: &str) -> bool {
 /// Run the provider auth-check CLI against `auth_env` and parse the verdict.
 /// Returns `(authenticated, email, auth_method, raw_output)`. Extracted so the
 /// stale-credential self-heal can re-run the exact same check after refreshing.
+/// A probe (`--version`, the auth check) must not start the CLI's own update: agy 1.5 replaces itself on any
+/// run, which held a probe for the length of a 200 MB download and, from a windowless srv, could open a
+/// console of its own. Updating stays with the agent runs and the user's own terminal.
+fn quiet_probe(cmd: &mut tokio::process::Command, cli_path: &str) {
+    let stem = std::path::Path::new(cli_path).file_stem().and_then(|s| s.to_str());
+    if stem.is_some_and(|s| s.eq_ignore_ascii_case("agy")) {
+        cmd.env("AGY_CLI_DISABLE_AUTO_UPDATE", "1");
+    }
+}
+
 async fn run_auth_check(
     cli_path: &str,
     auth_check_args: &[String],
@@ -796,6 +806,7 @@ async fn run_auth_check(
         for (k, v) in auth_env {
             check_cmd.env(k, v);
         }
+        quiet_probe(&mut check_cmd, program);
         // Null stdin: prevents the CLI from blocking on interactive first-run
         // prompts (onboarding, theme selection) that only appear on a TTY.
         check_cmd.stdin(std::process::Stdio::null());
@@ -1090,6 +1101,7 @@ async fn probe_cli_version(cli_path: &str) -> Option<String> {
             // Version probe — same reasoning as the auth check above.
             crate::backend::pane_env::sanitize_external_command(&mut c);
             c.arg("--version").stdin(std::process::Stdio::null());
+            quiet_probe(&mut c, cli_path);
             c.output()
         },
     ).await;

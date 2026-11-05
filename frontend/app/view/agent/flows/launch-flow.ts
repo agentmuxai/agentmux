@@ -296,7 +296,7 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
     let needsLogin = false;
     try {
         const authResult = await checkCliAuth(cliResult.cli_path, provider.authCheckCommand, effectiveAuthEnv, 30000);
-        if (authResult.authenticated) {
+        if (authResult.authenticated || (await signedInOnRecheck(cliResult.cli_path, provider, effectiveAuthEnv, log))) {
             const emailPart = authResult.email ? ` as ${authResult.email}` : "";
             const methodPart = authResult.auth_method ? ` (${authResult.auth_method})` : "";
             log("auth", `authenticated${emailPart}${methodPart}`);
@@ -354,6 +354,34 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
     }
 
     return finishLaunch(opts, log, setPhase, notify);
+}
+
+/** How many more times, and how far apart, a CLI that keeps its own login is asked again after "not signed in". */
+const SIGN_IN_RECHECKS = 2;
+const SIGN_IN_RECHECK_MS = 1500;
+
+/**
+ * A CLI that keeps its own login (Antigravity) can fail its sign-in check for a reason that isn't a sign-out:
+ * it is replacing itself, or still starting. Ask again before sending the pane to sign-in. A check that
+ * throws counts as not answered: the launch goes on as it does for an unknown status.
+ */
+async function signedInOnRecheck(
+    cliPath: string,
+    provider: ProviderDefinition,
+    authEnv: Record<string, string> | undefined,
+    log: LaunchFlowOptions["log"],
+): Promise<boolean> {
+    if (provider.authType !== "cli-managed") return false;
+    for (let i = 0; i < SIGN_IN_RECHECKS; i++) {
+        log("auth", `${provider.cliCommand} says it is not signed in; checking again`);
+        await new Promise((resolve) => setTimeout(resolve, SIGN_IN_RECHECK_MS));
+        try {
+            if ((await checkCliAuth(cliPath, provider.authCheckCommand, authEnv, 30000)).authenticated) return true;
+        } catch {
+            return true;
+        }
+    }
+    return false;
 }
 
 /**
