@@ -131,6 +131,7 @@ function StopReceivingConfirm(props: { onDone: () => void }): JSX.Element {
     return (
         <ConfirmModal
             open={stopRequest() !== null}
+            scope="pane"
             title="Stop receiving messages?"
             description="Messages for this agent stop being delivered to it from this instance."
             confirmLabel="Stop receiving"
