@@ -388,8 +388,6 @@
 116 frontend/app/hook/useVoiceInput.ts::createWebSpeechVoiceSession
 109 frontend/app/hook/useWindowDrag.win32.ts::installJsDragListener
 302 frontend/app/hook/whisperVoiceEngine.ts::createWhisperVoiceSession
-220 frontend/app/host/js-context-menu.ts::renderItems
-366 frontend/app/host/js-context-menu.ts::showJsContextMenu
 105 frontend/app/init/error-display.ts::showStartupError
 138 frontend/app/modals/command-palette.tsx::CommandPaletteModal
 209 frontend/app/modals/conntypeahead.tsx::ChangeConnectionBlockModal
@@ -426,8 +424,6 @@
 185 frontend/app/tab/tabcontent.tsx::TabContent
 134 frontend/app/util/select-trace.ts::createSelectTrace
 119 frontend/app/util/submenu-hover.ts::createSubmenuHover
-341 frontend/app/view/accounts/ClaudeLoginPanel.tsx::ClaudeLoginPanel
-156 frontend/app/view/accounts/ClaudeLoginPanel.tsx::startFlow
 104 frontend/app/view/accounts/GoogleServicesSection.tsx::GoogleServicesSection
 287 frontend/app/view/accounts/OAuthConnectPanel.tsx::OAuthConnectPanel
 130 frontend/app/view/accounts/accounts-manager.tsx::AccountsManager

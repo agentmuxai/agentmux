@@ -74,21 +74,22 @@ function applyMenuPosition(el: HTMLElement, pos: MenuPositionResult) {
     el.style.justifyContent = "flex-start";
 }
 
-/**
- * Render a context menu as a positioned HTML overlay.
- * Fires the callback with the clicked item's id, then removes the overlay.
- * Exported for tests only — production callers go through showContextMenu.
- */
-export function showJsContextMenu(
-    items: NativeContextMenuItem[],
-    position: { x: number; y: number },
-    onClick: ((id: string) => void) | null
-) {
-    // Remove any existing menu (through its own close path, so its pane
-    // overlay holes are released too).
-    closeJsContextMenu();
-    document.getElementById("cef-context-menu-overlay")?.remove();
+/** What one open menu and the functions that serve it share. */
+interface MenuState {
+    position: { x: number; y: number };
+    onClick: ((id: string) => void) | null;
+    opener: HTMLElement | null;
+    overlay: HTMLDivElement;
+    menuEl: HTMLDivElement;
+    overlayHandles: PaneOverlayHandle[];
+    submenuHandles: PaneOverlayHandle[];
+    topLevelSubmenus: Map<string, { hover: SubmenuHoverController; sub: HTMLElement }>;
+    onDocMouseDown: (e: MouseEvent) => void;
+    onDocKeyDown: (e: KeyboardEvent) => void;
+    close: () => void;
+}
 
+function createMenuState(position: { x: number; y: number }, onClick: ((id: string) => void) | null): MenuState {
     // Where the caret was when the menu opened (a terminal's textarea, an
     // input), so a menu that closes without moving focus elsewhere hands it
     // back. SPEC_CONTEXT_MENU_PASTE_KEEPS_TERMINAL_FOCUS_2026_10_07.md.
@@ -112,55 +113,6 @@ export function showJsContextMenu(
     const submenuHandles: PaneOverlayHandle[] = [];
     // Top-level submenu rows by label, to reopen the one that was open after an update.
     const topLevelSubmenus = new Map<string, { hover: SubmenuHoverController; sub: HTMLElement }>();
-    const onDocMouseDown = (e: MouseEvent) => {
-        // The backdrop covers the whole window, so a real click lands on it.
-        // What reaches here from outside is the synthetic body mousedown that
-        // browser-pane-outside-click-bridge.ts fires for a click inside a
-        // native browser pane — treat it as an outside click.
-        if (!(e.target instanceof Node) || !overlay.contains(e.target)) closeMenu();
-    };
-    const onDocKeyDown = (e: KeyboardEvent) => {
-        if (e.key === "Escape") {
-            e.preventDefault();
-            e.stopPropagation();
-            closeMenu();
-        }
-    };
-    function closeMenu() {
-        if (activeContextMenuClose === closeMenu) {
-            activeContextMenuClose = null;
-            activeContextMenuUpdate = null;
-        }
-        for (const h of overlayHandles) h.release();
-        overlayHandles.length = 0;
-        for (const h of submenuHandles) h.release();
-        submenuHandles.length = 0;
-        for (const listener of [...closeListeners]) listener();
-        document.removeEventListener("mousedown", onDocMouseDown, true);
-        document.removeEventListener("keydown", onDocKeyDown, true);
-        overlay.remove();
-        // After the chosen item has run (it runs right after closeMenu): if
-        // focus fell to <body> or went with the removed menu, give it back to
-        // the opener. An item that moved focus on purpose (a split's new pane,
-        // Inspect) keeps it.
-        queueMicrotask(() => {
-            const active = document.activeElement;
-            const lost = active == null || active === document.body || overlay.contains(active);
-            if (lost && opener?.isConnected) opener.focus({ preventScroll: true });
-        });
-    }
-    activeContextMenuClose = closeMenu;
-    document.addEventListener("mousedown", onDocMouseDown, true);
-    document.addEventListener("keydown", onDocKeyDown, true);
-
-    overlay.addEventListener("mousedown", (e) => {
-        // A press on the menu or its backdrop must not take focus: the browser
-        // otherwise blurs the focused element (a terminal's textarea) to
-        // <body>, and after "Paste" the user's next Enter went nowhere.
-        // The click still fires; only the focus change is cancelled.
-        e.preventDefault();
-        if (e.target === overlay) closeMenu();
-    });
 
     const menuEl = document.createElement("div");
     menuEl.className = "menu";
@@ -172,234 +124,317 @@ export function showJsContextMenu(
     // not-yet-positioned menu (visibility:hidden de-registers the rect).
     menuEl.style.visibility = "hidden";
 
-    function renderItems(container: HTMLElement, itemList: NativeContextMenuItem[]) {
-        const topLevel = container === menuEl;
-        // Peers (same-level submenu-bearing rows) close each other instantly
-        // on entry — matches the old zero-delay mouseleave's implicit
-        // sibling-closing side effect, which createSubmenuHover's open-delay/
-        // safe-triangle close otherwise silently drops (reagent P1 on
-        // PR #2525; the terminal's Themes/Font Size/Terminal Zoom/
-        // Transparency submenus were the concrete case). One list
-        // per renderItems call — each call is exactly one menu level, so
-        // nested submenus never reach across levels to close an ancestor.
-        const peers: SubmenuHoverController[] = [];
-        const reserveIconSlot = itemList.some((i) => i.type !== "separator" && i.visible !== false && !i.swatchColor && !!menuIconClass(i.icon));
-        for (const item of itemList) {
-            if (item.type === "separator") {
-                const sep = document.createElement("div");
-                sep.className = "menu-divider";
-                container.appendChild(sep);
-                continue;
+    const s: MenuState = {
+        position,
+        onClick,
+        opener,
+        overlay,
+        menuEl,
+        overlayHandles,
+        submenuHandles,
+        topLevelSubmenus,
+        onDocMouseDown: (e: MouseEvent) => {
+            // The backdrop covers the whole window, so a real click lands on it.
+            // What reaches here from outside is the synthetic body mousedown that
+            // browser-pane-outside-click-bridge.ts fires for a click inside a
+            // native browser pane — treat it as an outside click.
+            if (!(e.target instanceof Node) || !overlay.contains(e.target)) closeMenu(s);
+        },
+        onDocKeyDown: (e: KeyboardEvent) => {
+            if (e.key === "Escape") {
+                e.preventDefault();
+                e.stopPropagation();
+                closeMenu(s);
             }
-            if (item.visible === false) continue;
+        },
+        close: () => closeMenu(s),
+    };
+    return s;
+}
 
-            const row = document.createElement("div");
-            row.className = "menu-item";
-            if (item.enabled === false) {
-                row.style.cursor = "default";
-                row.style.opacity = "0.4";
-                row.style.pointerEvents = "none";
-            }
+function closeMenu(s: MenuState) {
+    if (activeContextMenuClose === s.close) {
+        activeContextMenuClose = null;
+        activeContextMenuUpdate = null;
+    }
+    for (const h of s.overlayHandles) h.release();
+    s.overlayHandles.length = 0;
+    for (const h of s.submenuHandles) h.release();
+    s.submenuHandles.length = 0;
+    for (const listener of [...closeListeners]) listener();
+    document.removeEventListener("mousedown", s.onDocMouseDown, true);
+    document.removeEventListener("keydown", s.onDocKeyDown, true);
+    s.overlay.remove();
+    // After the chosen item has run (it runs right after closeMenu): if
+    // focus fell to <body> or went with the removed menu, give it back to
+    // the opener. An item that moved focus on purpose (a split's new pane,
+    // Inspect) keeps it.
+    queueMicrotask(() => {
+        const active = document.activeElement;
+        const lost = active == null || active === document.body || s.overlay.contains(active);
+        if (lost && s.opener?.isConnected) s.opener.focus({ preventScroll: true });
+    });
+}
 
-            // Radio/checkbox indicator slot — same FA-icon shape the
-            // FlyoutMenu uses. When checked, render fa-check in accent
-            // color; when unchecked but in a check-capable group,
-            // render a blank-width spacer so labels stay aligned.
-            const isCheckableType = item.type === "radio" || item.type === "checkbox";
-            if (isCheckableType || item.checked !== undefined) {
-                const icon = document.createElement("i");
-                icon.className = item.checked
-                    ? "fa-solid fa-fw fa-check menu-item-icon menu-item-check"
-                    : "fa-solid fa-fw menu-item-icon menu-item-check";
-                row.appendChild(icon);
-            } else {
-                // The same leading slot holds the row's icon (SPEC_CONTEXT_MENU_ICONS_2026_10_25.md
-                // §3). A menu level where any row has one reserves the slot on every row, so the
-                // labels line up; a level with none is drawn as before. Decoration only: the label
-                // is the row's name.
-                const iconClass = item.swatchColor ? null : menuIconClass(item.icon);
-                if (iconClass) {
-                    const icon = document.createElement("i");
-                    icon.className = iconClass;
-                    icon.setAttribute("aria-hidden", "true");
-                    row.appendChild(icon);
-                } else if (reserveIconSlot && !item.swatchColor) {
-                    const spacer = document.createElement("span");
-                    spacer.className = "menu-item-icon";
-                    spacer.setAttribute("aria-hidden", "true");
-                    row.appendChild(spacer);
-                }
-            }
+function installDismissal(s: MenuState) {
+    activeContextMenuClose = s.close;
+    document.addEventListener("mousedown", s.onDocMouseDown, true);
+    document.addEventListener("keydown", s.onDocKeyDown, true);
 
-            // Inline color swatch (exact hue) rendered before the label — used
-            // by the pane "Pane Color" submenu. This is a real DOM square, not an
-            // emoji, so it matches our palette colors precisely.
-            if (item.swatchColor) {
-                const swatch = document.createElement("span");
-                swatch.className = "menu-item-swatch";
-                swatch.style.backgroundColor = item.swatchColor;
-                row.appendChild(swatch);
-            }
+    s.overlay.addEventListener("mousedown", (e) => {
+        // A press on the menu or its backdrop must not take focus: the browser
+        // otherwise blurs the focused element (a terminal's textarea) to
+        // <body>, and after "Paste" the user's next Enter went nowhere.
+        // The click still fires; only the focus change is cancelled.
+        e.preventDefault();
+        if (e.target === s.overlay) closeMenu(s);
+    });
+}
 
-            const label = document.createElement("span");
-            label.className = "label";
-            label.textContent = item.label ?? "";
-            row.appendChild(label);
-
-            // Secondary, muted text after the label (right-aligned by the label's
-            // flex-grow) — e.g. the bind-to-agent menu's live binding overview,
-            // or the reason a row is disabled. ContextMenuItem.sublabel was
-            // accepted and forwarded here but never drawn.
-            if (item.sublabel) {
-                const sub = document.createElement("span");
-                sub.className = "menu-item-sublabel";
-                sub.textContent = item.sublabel;
-                row.appendChild(sub);
-            }
-
-            if (item.submenu && item.submenu.length > 0) {
-                // Static CSS fallback (the pre-framework behavior): anchor at
-                // the row's right edge, which needs the row as positioned
-                // ancestor. Kept so a computeMenuPosition rejection still
-                // yields a positioned submenu; the framework placement below
-                // overrides it with fixed viewport coords on success.
-                row.style.position = "relative";
-
-                const arrow = document.createElement("i");
-                arrow.className = "fa-solid fa-chevron-right";
-                row.appendChild(arrow);
-
-                const sub = document.createElement("div");
-                sub.className = "menu sub-menu";
-                sub.setAttribute("data-pane-overlay", "");
-                sub.style.display = "none";
-                sub.style.left = "100%";
-                sub.style.top = "0";
-                renderItems(sub, item.submenu);
-                row.appendChild(sub);
-                // display:none until hovered → no hole until it's shown and
-                // placed; the style observer picks up each open/close.
-                submenuHandles.push(registerPaneOverlay(sub, { keys: true }));
-                // Positioned through the shared framework, like the top-level
-                // menu: anchored to the row, preferring right-start — flip()
-                // sends it left of the parent near the right edge, shift()
-                // pulls it up near the bottom, size() caps it when taller than
-                // the free space. The computed coords are position:fixed, so
-                // staying nested inside the row (which the hover logic needs)
-                // doesn't affect placement. Held visibility:hidden until
-                // placed for the same reason as the parent menu: the
-                // pane-overlay clip must register the final rect only.
-                //
-                // Open/close timing goes through the shared hover-intent core
-                // (SPEC_SUBMENU_POSITIONING_AND_HOVER_TIMING_2026_08_10) instead
-                // of firing instantly on mouseenter/mouseleave: a short open
-                // delay avoids flashing a submenu while the cursor is just
-                // sweeping across sibling rows, and a safe-triangle close lets
-                // the user travel diagonally into the submenu without it
-                // vanishing out from under the cursor.
-                const hover = createSubmenuHover({
-                    // Stays open when the pointer leaves the menu; a sibling
-                    // row's mouseenter (peer close below) closes it.
-                    closeOnLeave: false,
-                    onOpen: () => {
-                        sub.style.visibility = "hidden";
-                        sub.style.display = "";
-                        // Deferred one rAF (mirrors flyoutmenu.tsx's SubMenu /
-                        // registerSubMenu) so the display:none→"" reflow has
-                        // settled before anything gets measured.
-                        requestAnimationFrame(() => {
-                            if (!sub.isConnected || sub.style.display === "none") return;
-                            // The actual bug (root-caused live 2026-08-13,
-                            // reproduced deterministically regardless of anchor
-                            // position — left:121px, top:-393px every time,
-                            // ruling out a mere layout-timing race): `sub`
-                            // starts `position:absolute` (inherited from the
-                            // `.menu` class) as a deliberate row-relative
-                            // fallback for the .catch() below, but
-                            // computeMenuPosition computes coordinates for
-                            // `strategy:"fixed"`. floating-ui resolves the
-                            // floating element's offset parent from its
-                            // CURRENT position at measurement time, so calling
-                            // it while `sub` is still `position:absolute`
-                            // (nested inside `row`, which has
-                            // `position:relative`) resolves coordinates
-                            // against the wrong containing block entirely.
-                            // FlyoutMenu's Solid sibling never hits this
-                            // because its placeholder style is already
-                            // `position:fixed;left:0px;top:0px` before it ever
-                            // calls computeMenuPosition — match that here:
-                            // switch to fixed strategy BEFORE measuring, and
-                            // restore the absolute row-relative fallback
-                            // explicitly if placement itself fails.
-                            sub.style.position = "fixed";
-                            void computeMenuPosition(
-                                {
-                                    anchor: row.getBoundingClientRect(),
-                                    placement: "right-start",
-                                    avoidNativePanes: false,
-                                },
-                                sub,
-                            ).then((pos) => {
-                                // Hover may have left (or the whole menu closed)
-                                // before the async placement resolved.
-                                if (!sub.isConnected || sub.style.display === "none") return;
-                                applyMenuPosition(sub, pos);
-                                sub.style.visibility = "";
-                                assertMenuInPaintableArea(sub, "context-submenu");
-                            }).catch(() => {
-                                if (!sub.isConnected) return;
-                                // Restore the row-relative absolute fallback —
-                                // position:fixed with left:100% would otherwise
-                                // pin it just off the right edge of the screen.
-                                sub.style.position = "absolute";
-                                sub.style.left = "100%";
-                                sub.style.top = "0";
-                                sub.style.visibility = "";
-                            });
-                        });
-                    },
-                    onClose: () => {
-                        sub.style.display = "none";
-                    },
-                });
-                // `sub` reports a zero rect via getBoundingClientRect() while
-                // display:none, which the controller treats as "no geometry
-                // yet" — safe to register once, up front.
-                hover.setSubmenuEl(sub);
-                peers.push(hover);
-                if (topLevel && item.label) topLevelSubmenus.set(item.label, { hover, sub });
-                row.addEventListener("mouseenter", () => {
-                    for (const peer of peers) {
-                        if (peer !== hover) peer.close();
-                    }
-                    hover.onTriggerEnter();
-                });
-                row.addEventListener("mouseleave", (e) => hover.onTriggerLeave(e as MouseEvent));
-                sub.addEventListener("mouseenter", () => hover.onSubmenuEnter());
-                sub.addEventListener("mouseleave", (e) => hover.onSubmenuLeave(e as MouseEvent));
-            } else if (item.enabled !== false) {
-                // A plain (no-submenu) row is still an explicit new selection —
-                // entering it closes any open peer submenu immediately too.
-                row.addEventListener("mouseenter", () => {
-                    for (const peer of peers) peer.close();
-                });
-                row.addEventListener("click", () => {
-                    closeMenu();
-                    if (item.id && onClick) onClick(item.id);
-                });
-            }
-
-            container.appendChild(row);
+function appendLeadingMark(row: HTMLElement, item: NativeContextMenuItem, reserveIconSlot: boolean) {
+    // Radio/checkbox indicator slot — same FA-icon shape the
+    // FlyoutMenu uses. When checked, render fa-check in accent
+    // color; when unchecked but in a check-capable group,
+    // render a blank-width spacer so labels stay aligned.
+    const isCheckableType = item.type === "radio" || item.type === "checkbox";
+    if (isCheckableType || item.checked !== undefined) {
+        const icon = document.createElement("i");
+        icon.className = item.checked
+            ? "fa-solid fa-fw fa-check menu-item-icon menu-item-check"
+            : "fa-solid fa-fw menu-item-icon menu-item-check";
+        row.appendChild(icon);
+    } else {
+        // The same leading slot holds the row's icon (SPEC_CONTEXT_MENU_ICONS_2026_10_25.md
+        // §3). A menu level where any row has one reserves the slot on every row, so the
+        // labels line up; a level with none is drawn as before. Decoration only: the label
+        // is the row's name.
+        const iconClass = item.swatchColor ? null : menuIconClass(item.icon);
+        if (iconClass) {
+            const icon = document.createElement("i");
+            icon.className = iconClass;
+            icon.setAttribute("aria-hidden", "true");
+            row.appendChild(icon);
+        } else if (reserveIconSlot && !item.swatchColor) {
+            const spacer = document.createElement("span");
+            spacer.className = "menu-item-icon";
+            spacer.setAttribute("aria-hidden", "true");
+            row.appendChild(spacer);
         }
     }
+}
 
-    renderItems(menuEl, items);
+function appendSwatchAndLabels(row: HTMLElement, item: NativeContextMenuItem) {
+    // Inline color swatch (exact hue) rendered before the label — used
+    // by the pane "Pane Color" submenu. This is a real DOM square, not an
+    // emoji, so it matches our palette colors precisely.
+    if (item.swatchColor) {
+        const swatch = document.createElement("span");
+        swatch.className = "menu-item-swatch";
+        swatch.style.backgroundColor = item.swatchColor;
+        row.appendChild(swatch);
+    }
 
-    overlay.appendChild(menuEl);
-    document.body.appendChild(overlay);
-    // visibility:hidden until placed below → registers no hole until then.
-    overlayHandles.push(registerPaneOverlay(menuEl, { keys: true }));
+    const label = document.createElement("span");
+    label.className = "label";
+    label.textContent = item.label ?? "";
+    row.appendChild(label);
 
+    // Secondary, muted text after the label (right-aligned by the label's
+    // flex-grow) — e.g. the bind-to-agent menu's live binding overview,
+    // or the reason a row is disabled. ContextMenuItem.sublabel was
+    // accepted and forwarded here but never drawn.
+    if (item.sublabel) {
+        const sub = document.createElement("span");
+        sub.className = "menu-item-sublabel";
+        sub.textContent = item.sublabel;
+        row.appendChild(sub);
+    }
+}
+
+function openSubmenu(row: HTMLElement, sub: HTMLElement) {
+    sub.style.visibility = "hidden";
+    sub.style.display = "";
+    // Deferred one rAF (mirrors flyoutmenu.tsx's SubMenu /
+    // registerSubMenu) so the display:none→"" reflow has
+    // settled before anything gets measured.
+    requestAnimationFrame(() => {
+        if (!sub.isConnected || sub.style.display === "none") return;
+        // The actual bug (root-caused live 2026-08-13,
+        // reproduced deterministically regardless of anchor
+        // position — left:121px, top:-393px every time,
+        // ruling out a mere layout-timing race): `sub`
+        // starts `position:absolute` (inherited from the
+        // `.menu` class) as a deliberate row-relative
+        // fallback for the .catch() below, but
+        // computeMenuPosition computes coordinates for
+        // `strategy:"fixed"`. floating-ui resolves the
+        // floating element's offset parent from its
+        // CURRENT position at measurement time, so calling
+        // it while `sub` is still `position:absolute`
+        // (nested inside `row`, which has
+        // `position:relative`) resolves coordinates
+        // against the wrong containing block entirely.
+        // FlyoutMenu's Solid sibling never hits this
+        // because its placeholder style is already
+        // `position:fixed;left:0px;top:0px` before it ever
+        // calls computeMenuPosition — match that here:
+        // switch to fixed strategy BEFORE measuring, and
+        // restore the absolute row-relative fallback
+        // explicitly if placement itself fails.
+        sub.style.position = "fixed";
+        void computeMenuPosition(
+            {
+                anchor: row.getBoundingClientRect(),
+                placement: "right-start",
+                avoidNativePanes: false,
+            },
+            sub,
+        ).then((pos) => {
+            // Hover may have left (or the whole menu closed)
+            // before the async placement resolved.
+            if (!sub.isConnected || sub.style.display === "none") return;
+            applyMenuPosition(sub, pos);
+            sub.style.visibility = "";
+            assertMenuInPaintableArea(sub, "context-submenu");
+        }).catch(() => {
+            if (!sub.isConnected) return;
+            // Restore the row-relative absolute fallback —
+            // position:fixed with left:100% would otherwise
+            // pin it just off the right edge of the screen.
+            sub.style.position = "absolute";
+            sub.style.left = "100%";
+            sub.style.top = "0";
+            sub.style.visibility = "";
+        });
+    });
+}
+
+function attachSubmenu(
+    s: MenuState,
+    row: HTMLElement,
+    item: NativeContextMenuItem,
+    peers: SubmenuHoverController[],
+    topLevel: boolean
+) {
+    // Static CSS fallback (the pre-framework behavior): anchor at
+    // the row's right edge, which needs the row as positioned
+    // ancestor. Kept so a computeMenuPosition rejection still
+    // yields a positioned submenu; the framework placement below
+    // overrides it with fixed viewport coords on success.
+    row.style.position = "relative";
+
+    const arrow = document.createElement("i");
+    arrow.className = "fa-solid fa-chevron-right";
+    row.appendChild(arrow);
+
+    const sub = document.createElement("div");
+    sub.className = "menu sub-menu";
+    sub.setAttribute("data-pane-overlay", "");
+    sub.style.display = "none";
+    sub.style.left = "100%";
+    sub.style.top = "0";
+    renderItems(s, sub, item.submenu);
+    row.appendChild(sub);
+    // display:none until hovered → no hole until it's shown and
+    // placed; the style observer picks up each open/close.
+    s.submenuHandles.push(registerPaneOverlay(sub, { keys: true }));
+    // Positioned through the shared framework, like the top-level
+    // menu: anchored to the row, preferring right-start — flip()
+    // sends it left of the parent near the right edge, shift()
+    // pulls it up near the bottom, size() caps it when taller than
+    // the free space. The computed coords are position:fixed, so
+    // staying nested inside the row (which the hover logic needs)
+    // doesn't affect placement. Held visibility:hidden until
+    // placed for the same reason as the parent menu: the
+    // pane-overlay clip must register the final rect only.
+    //
+    // Open/close timing goes through the shared hover-intent core
+    // (SPEC_SUBMENU_POSITIONING_AND_HOVER_TIMING_2026_08_10) instead
+    // of firing instantly on mouseenter/mouseleave: a short open
+    // delay avoids flashing a submenu while the cursor is just
+    // sweeping across sibling rows, and a safe-triangle close lets
+    // the user travel diagonally into the submenu without it
+    // vanishing out from under the cursor.
+    const hover = createSubmenuHover({
+        // Stays open when the pointer leaves the menu; a sibling
+        // row's mouseenter (peer close below) closes it.
+        closeOnLeave: false,
+        onOpen: () => openSubmenu(row, sub),
+        onClose: () => {
+            sub.style.display = "none";
+        },
+    });
+    // `sub` reports a zero rect via getBoundingClientRect() while
+    // display:none, which the controller treats as "no geometry
+    // yet" — safe to register once, up front.
+    hover.setSubmenuEl(sub);
+    peers.push(hover);
+    if (topLevel && item.label) s.topLevelSubmenus.set(item.label, { hover, sub });
+    row.addEventListener("mouseenter", () => {
+        for (const peer of peers) {
+            if (peer !== hover) peer.close();
+        }
+        hover.onTriggerEnter();
+    });
+    row.addEventListener("mouseleave", (e) => hover.onTriggerLeave(e as MouseEvent));
+    sub.addEventListener("mouseenter", () => hover.onSubmenuEnter());
+    sub.addEventListener("mouseleave", (e) => hover.onSubmenuLeave(e as MouseEvent));
+}
+
+function attachPlainRow(s: MenuState, row: HTMLElement, item: NativeContextMenuItem, peers: SubmenuHoverController[]) {
+    // A plain (no-submenu) row is still an explicit new selection —
+    // entering it closes any open peer submenu immediately too.
+    row.addEventListener("mouseenter", () => {
+        for (const peer of peers) peer.close();
+    });
+    row.addEventListener("click", () => {
+        closeMenu(s);
+        if (item.id && s.onClick) s.onClick(item.id);
+    });
+}
+
+function renderItems(s: MenuState, container: HTMLElement, itemList: NativeContextMenuItem[]) {
+    const topLevel = container === s.menuEl;
+    // Peers (same-level submenu-bearing rows) close each other instantly
+    // on entry — matches the old zero-delay mouseleave's implicit
+    // sibling-closing side effect, which createSubmenuHover's open-delay/
+    // safe-triangle close otherwise silently drops (reagent P1 on
+    // PR #2525; the terminal's Themes/Font Size/Terminal Zoom/
+    // Transparency submenus were the concrete case). One list
+    // per renderItems call — each call is exactly one menu level, so
+    // nested submenus never reach across levels to close an ancestor.
+    const peers: SubmenuHoverController[] = [];
+    const reserveIconSlot = itemList.some((i) => i.type !== "separator" && i.visible !== false && !i.swatchColor && !!menuIconClass(i.icon));
+    for (const item of itemList) {
+        if (item.type === "separator") {
+            const sep = document.createElement("div");
+            sep.className = "menu-divider";
+            container.appendChild(sep);
+            continue;
+        }
+        if (item.visible === false) continue;
+
+        const row = document.createElement("div");
+        row.className = "menu-item";
+        if (item.enabled === false) {
+            row.style.cursor = "default";
+            row.style.opacity = "0.4";
+            row.style.pointerEvents = "none";
+        }
+        appendLeadingMark(row, item, reserveIconSlot);
+        appendSwatchAndLabels(row, item);
+
+        if (item.submenu && item.submenu.length > 0) {
+            attachSubmenu(s, row, item, peers, topLevel);
+        } else if (item.enabled !== false) {
+            attachPlainRow(s, row, item, peers);
+        }
+
+        container.appendChild(row);
+    }
+}
+
+function placeMenu(s: MenuState) {
     // Position at the cursor via the shared framework — flip/shift/size keep
     // the menu on-screen near window edges. Unlike FlyoutMenu/Popover, a
     // right-click context menu MUST appear where the user clicked, so
@@ -407,43 +442,70 @@ export function showJsContextMenu(
     // pane. The `data-pane-overlay` clip reveals it through the native pane;
     // holding it visibility:hidden until placed means the clip rect registers
     // once, at the final position — no flapping, no stale-rect black artifact.
-    const place = () =>
-        void computeMenuPosition(
-            {
-                anchor: { x: position.x, y: position.y },
-                placement: "bottom-start",
-                avoidNativePanes: false,
-            },
-            menuEl,
-        ).then((pos) => {
-            if (!menuEl.isConnected) return;
-            applyMenuPosition(menuEl, pos);
-            menuEl.style.visibility = "";
-            assertMenuInPaintableArea(menuEl, "context-menu");
-        }).catch(() => {
-            // computeMenuPosition should not throw; if it does, fall back to the
-            // raw cursor position rather than leaving the menu invisible.
-            if (menuEl.isConnected) menuEl.style.visibility = "";
-        });
-    place();
+    void computeMenuPosition(
+        {
+            anchor: { x: s.position.x, y: s.position.y },
+            placement: "bottom-start",
+            avoidNativePanes: false,
+        },
+        s.menuEl,
+    ).then((pos) => {
+        if (!s.menuEl.isConnected) return;
+        applyMenuPosition(s.menuEl, pos);
+        s.menuEl.style.visibility = "";
+        assertMenuInPaintableArea(s.menuEl, "context-menu");
+    }).catch(() => {
+        // computeMenuPosition should not throw; if it does, fall back to the
+        // raw cursor position rather than leaving the menu invisible.
+        if (s.menuEl.isConnected) s.menuEl.style.visibility = "";
+    });
+}
 
-    activeContextMenuUpdate = (next: NativeContextMenuItem[]) => {
-        if (!menuEl.isConnected) return;
-        let openLabel: string | null = null;
-        for (const [label, { hover, sub }] of topLevelSubmenus) {
-            if (sub.style.display !== "none") openLabel = label;
-            hover.dispose();
-        }
-        topLevelSubmenus.clear();
-        for (const h of submenuHandles) h.release();
-        submenuHandles.length = 0;
-        menuEl.replaceChildren();
-        renderItems(menuEl, next);
-        // Same anchor, new height: re-place so a longer list still fits the window.
-        menuEl.style.maxHeight = "";
-        place();
-        if (openLabel) topLevelSubmenus.get(openLabel)?.hover.openNow();
-    };
+function updateItems(s: MenuState, next: NativeContextMenuItem[]) {
+    if (!s.menuEl.isConnected) return;
+    let openLabel: string | null = null;
+    for (const [label, { hover, sub }] of s.topLevelSubmenus) {
+        if (sub.style.display !== "none") openLabel = label;
+        hover.dispose();
+    }
+    s.topLevelSubmenus.clear();
+    for (const h of s.submenuHandles) h.release();
+    s.submenuHandles.length = 0;
+    s.menuEl.replaceChildren();
+    renderItems(s, s.menuEl, next);
+    // Same anchor, new height: re-place so a longer list still fits the window.
+    s.menuEl.style.maxHeight = "";
+    placeMenu(s);
+    if (openLabel) s.topLevelSubmenus.get(openLabel)?.hover.openNow();
+}
+
+/**
+ * Render a context menu as a positioned HTML overlay.
+ * Fires the callback with the clicked item's id, then removes the overlay.
+ * Exported for tests only — production callers go through showContextMenu.
+ */
+export function showJsContextMenu(
+    items: NativeContextMenuItem[],
+    position: { x: number; y: number },
+    onClick: ((id: string) => void) | null
+) {
+    // Remove any existing menu (through its own close path, so its pane
+    // overlay holes are released too).
+    closeJsContextMenu();
+    document.getElementById("cef-context-menu-overlay")?.remove();
+
+    const s = createMenuState(position, onClick);
+    installDismissal(s);
+    renderItems(s, s.menuEl, items);
+
+    s.overlay.appendChild(s.menuEl);
+    document.body.appendChild(s.overlay);
+    // visibility:hidden until placed below → registers no hole until then.
+    s.overlayHandles.push(registerPaneOverlay(s.menuEl, { keys: true }));
+
+    placeMenu(s);
+
+    activeContextMenuUpdate = (next: NativeContextMenuItem[]) => updateItems(s, next);
 }
 
 /** `AppApi.showContextMenu` and `AppApi.onContextMenuClick`, backed by the JS
