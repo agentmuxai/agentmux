@@ -386,7 +386,6 @@
 113 frontend/app/element/ui/CardGrid.tsx::CardGrid
 116 frontend/app/hook/useVoiceInput.ts::createWebSpeechVoiceSession
 109 frontend/app/hook/useWindowDrag.win32.ts::installJsDragListener
-302 frontend/app/hook/whisperVoiceEngine.ts::createWhisperVoiceSession
 105 frontend/app/init/error-display.ts::showStartupError
 138 frontend/app/modals/command-palette.tsx::CommandPaletteModal
 209 frontend/app/modals/conntypeahead.tsx::ChangeConnectionBlockModal
@@ -507,7 +506,6 @@
 190 frontend/app/view/editor/file-tree.tsx::FileTree
 155 frontend/app/view/editor/file-tree.tsx::TreeNode
 276 frontend/app/view/editor/viewers/image/image-viewer.tsx::ImageViewer
-354 frontend/app/view/editor/viewers/pdf/pdf-viewer.tsx::PdfViewer
 101 frontend/app/view/editor/viewers/viewer-host.tsx::ViewerFor
 152 frontend/app/view/files/files-preview.tsx::FilesPreview
 118 frontend/app/view/global-bundle/GlobalMemoryFullView.tsx::EntryView
@@ -534,7 +532,6 @@
 359 frontend/app/view/settings/sections/fork-slug-migration.tsx::ForkSlugMigration
 185 frontend/app/view/settings/sections/notifications-section.tsx::NotificationsSection
 109 frontend/app/view/settings/sections/pinned-senders.tsx::PinnedSenders
-312 frontend/app/view/settings/sections/recording-section.tsx::RecordingSection
 201 frontend/app/view/settings/sections/sounds-section.tsx::SoundsSection
 237 frontend/app/view/settings/sections/terminal-section.tsx::TerminalSection
 114 frontend/app/view/settings/sections/widget-bar-settings.tsx::WidgetBarSettings
@@ -542,7 +539,6 @@
 249 frontend/app/view/settings/sections/widgets-section.tsx::WidgetsSection
 105 frontend/app/view/settings/settings-view.tsx::SettingsView
 178 frontend/app/view/shortcuts/shortcuts.tsx::ShortcutsView
-301 frontend/app/view/skill/skill-manager.tsx::SkillManager
 122 frontend/app/view/swarm/swarm-agent-list.tsx::SwarmAgentList
 163 frontend/app/view/swarm/swarm-fleet-toolbar.tsx::FleetToolbar
 104 frontend/app/view/swarm/swarm-model.ts::SwarmViewModel::buildTree
@@ -572,7 +568,6 @@
 105 frontend/app/view/warden-jobs/job-dry-run.tsx::JobDryRun
 101 frontend/app/view/warden-jobs/job-editor-fields.tsx::PolicySection
 102 frontend/app/view/warden-jobs/job-editor-fields.tsx::WhatSection
-321 frontend/app/view/warden-jobs/job-editor.tsx::JobEditor
 146 frontend/app/view/warden-jobs/job-template-approval.tsx::TemplateApproval
 180 frontend/app/view/warden-jobs/job-update-diff.tsx::JobUpdateDiff
 253 frontend/app/view/warden-jobs/jobs-history.tsx::JobHistory
