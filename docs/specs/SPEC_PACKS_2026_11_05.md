@@ -1,6 +1,6 @@
 # SPEC: Packs: per-application knowledge for computer use (Word, Ableton Live, WaveLab first)
 
-**Status:** approved by the operator 2026-11-05 (v2, relayed by AgentY); build #1560. Stage 1 in progress (the packs as plain skills). Nothing else is built.
+**Status:** active — approved by the operator 2026-11-05 (v2, relayed by AgentY); build #1560. Stage 1 (the five example packs under `docs/examples/packs/`, and this spec) is in the first PR; stages 2 to 5 are not started.
 **Operator decisions folded in (2026-11-05, quoted via AgentY):** "ok lets rename app packs simply packs. Ok, keep bundles, add another tab called packs .. we'll let our recent bundles work settle". So: the name is **packs** (UI, manifest, docs); Memory gets its own **Packs** tab; bundles stay as they are and packs are not folded into them.
 **Date:** 2026-11-05
 **Author:** Manoz@Area54, task #1559, at AgentY's request after the operator asked (quoted) "ok have him write it .. where in the UI would you suggest? toolchain?" and then "memory?"
