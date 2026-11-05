@@ -36,6 +36,8 @@
  * This directory and component are about native memory only.
  */
 
+import { createConfirm, type PaneConfirm } from "@/app/element/create-confirm";
+import { askDiscard } from "@/app/view/memory-editor/editor-keys";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { onMuxEvent } from "@/app/store/mps";
@@ -418,7 +420,8 @@ function createManagerState(props: { pane?: NativeMemoryPane }): ManagerState {
 
 export function NativeMemoryManager(props: { pane?: NativeMemoryPane }): JSX.Element {
     const s = createManagerState(props);
-    watchPaneRequest(s);
+    const confirm = createConfirm();
+    watchPaneRequest(s, confirm);
     subscribeToChanges(s);
     watchAgentSet(s);
     watchSelectedAgentFiles(s);
@@ -426,8 +429,9 @@ export function NativeMemoryManager(props: { pane?: NativeMemoryPane }): JSX.Ele
 
     return (
         <div class="native-memory-manager">
+            <confirm.Dialog />
             <Show when={s.selectedAgent()} fallback={renderAgentGrid(s)}>
-                {(agent) => renderDetail(s, agent)}
+                {(agent) => renderDetail(s, agent, confirm)}
             </Show>
         </div>
     );
@@ -445,16 +449,19 @@ function setSortBy(s: ManagerState, sort: MemoryAgentSortOption): void {
     storeMemorySort(sort);
 }
 
-function watchPaneRequest(s: ManagerState): void {
+function watchPaneRequest(s: ManagerState, confirm: PaneConfirm): void {
     createEffect(() => {
         const id = s.props.pane?.meta()?.[MEMORY_AGENT_KEY];
         if (typeof id !== "string" || id === "") return;
         const wanted = s.agents().find((a) => a.id === id);
         if (!wanted || untrack(s.selectedAgent)?.id === id) return;
         // Unsaved edits in the open file stay: the same confirm Back asks.
-        if (untrack(s.detailDirty) && !window.confirm("Discard your unsaved changes?")) {
-            // Declined: the pane's request is withdrawn, so a later refresh doesn't ask again.
-            s.props.pane?.setMeta({ [MEMORY_AGENT_KEY]: untrack(s.selectedAgent)?.id ?? null });
+        if (untrack(s.detailDirty)) {
+            void askDiscard(confirm)("Discard your unsaved changes?").then((ok) => {
+                if (ok) s.setSelectedAgentState(wanted);
+                // Declined: the pane's request is withdrawn, so a later refresh doesn't ask again.
+                else s.props.pane?.setMeta({ [MEMORY_AGENT_KEY]: untrack(s.selectedAgent)?.id ?? null });
+            });
             return;
         }
         s.setSelectedAgentState(wanted);
@@ -838,7 +845,7 @@ function renderAgentGrid(s: ManagerState): JSX.Element {
     );
 }
 
-function renderDetail(s: ManagerState, agent: Accessor<AgentDefinition>): JSX.Element {
+function renderDetail(s: ManagerState, agent: Accessor<AgentDefinition>, confirm: PaneConfirm): JSX.Element {
     return (
         <div class="native-memory-manager-detail">
             {/* One header serves both detail screens (file grid, then
@@ -846,7 +853,7 @@ function renderDetail(s: ManagerState, agent: Accessor<AgentDefinition>): JSX.El
                 back exactly ONE level rather than always jumping to the
                 agent grid, so the file grid is a real stop on the path
                 and not a screen you can only leave by starting over. */}
-            {renderDetailHeader(s, agent)}
+            {renderDetailHeader(s, agent, confirm)}
 
             <Show when={s.filesError()}>
                 <div class="native-memory-manager-error">{s.filesError()}</div>
@@ -866,6 +873,7 @@ function renderDetail(s: ManagerState, agent: Accessor<AgentDefinition>): JSX.El
                                 filename={s.selectedFilename()}
                                 refreshNonce={s.refreshNonce}
                                 onDirtyChange={s.setDetailDirty}
+                                confirm={confirm}
                             />
                         )}
                     </Show>
@@ -875,18 +883,18 @@ function renderDetail(s: ManagerState, agent: Accessor<AgentDefinition>): JSX.El
     );
 }
 
-function renderDetailHeader(s: ManagerState, agent: Accessor<AgentDefinition>): JSX.Element {
+function renderDetailHeader(s: ManagerState, agent: Accessor<AgentDefinition>, confirm: PaneConfirm): JSX.Element {
     return (
         <div class="native-memory-manager-header">
             <Button
                 class="native-memory-manager-back"
                 density="compact"
-                onClick={() => {
+                onClick={async () => {
                     if (!s.selectedFilename()) {
                         setSelectedAgent(s, null);
                         return;
                     }
-                    if (s.detailDirty() && !window.confirm("Discard your unsaved changes?")) return;
+                    if (s.detailDirty() && !(await askDiscard(confirm)("Discard your unsaved changes?"))) return;
                     s.setSelectedFilename("");
                 }}
             >

@@ -7,6 +7,7 @@
 - 2026-11-03, Agent1@narko: rows 1 and 2 (#6343), 6 and 8 (#6354) done.
 - 2026-11-04, Agent1@narko: row 7 done: the media permission prompt and "Stop camera and microphone access?" are pane modals over the browser pane that asked (`window/pane-media-*.tsx`, tests in `pane-media-prompts.test.tsx`, baseline down by two; #6449).
 - 2026-11-04, Agent1@narko: row 9 done: the Swarm stop and stop-receiving confirms, the Settings fork-slug update and undo confirms, the account delete and MCP server delete confirms are `scope="pane"`.
+- 2026-11-04, Agent1@narko: row 11 done: no `window.confirm` is left in the frontend. The editor, Files and info-card confirms are `<ConfirmModal scope="pane">` (`components/confirm-dialog.tsx` is deleted); the bundle delete, Global Memory remove and every "Discard your unsaved changes?" ask through `createConfirm()` (`element/create-confirm.tsx`), drawn in the pane.
 - 2026-11-04, Agent1@narko: row 5 done: an agent's widget-install request is an operator-only card in its own pane (`block/widget-install-card.tsx`), from a new `block_id` on srv's `WidgetInstallRequest` (the pane `widget_agent_handlers.rs` already knew); srv's attention event for that pane gives the tone. A request naming no pane (a bundle import) is still the window prompt. Row 3 (the Vault cards, Agent2-6's) is the only one left.
 - 2026-11-04, Agent1@narko: row 10 done: closing a pane with busy agents, or a page that would ask "Leave site?", asks as a tab modal inside the tab (`tab/tab-close-confirms.tsx`; they were drawn outside the tab's modal layer).
 

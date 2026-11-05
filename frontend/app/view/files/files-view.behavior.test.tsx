@@ -296,8 +296,8 @@ const leave = (el: Element, related: Element) => {
 };
 const aux = (el: Element, button: number) => fireEvent(el, new MouseEvent("auxclick", { bubbles: true, cancelable: true, button }));
 const flush = () => new Promise<void>((r) => setTimeout(r, 0));
-const dialog = () => document.body.querySelector(".confirm-dialog");
-const dialogButton = (label: string) => [...document.body.querySelectorAll(".confirm-dialog button")].find((b) => b.textContent === label) as HTMLElement;
+const dialog = () => document.body.querySelector(".modal-panel");
+const dialogButton = (label: string) => [...document.body.querySelectorAll(".modal-panel button")].find((b) => b.textContent === label) as HTMLElement;
 const menuLabels = () => [...document.body.querySelectorAll(".ctx-menu .ctx-menu-label")].map((e) => e.textContent);
 const select = (v: Mounted, ...names: string[]) => v.model.setSelection({ names: new Set(names), focus: names[names.length - 1], anchor: names[0] });
 

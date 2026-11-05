@@ -14,6 +14,7 @@
 
 import { For, onCleanup, Show, type JSX } from "solid-js";
 
+import { createConfirm } from "@/app/element/create-confirm";
 import { PrimitiveListDetail } from "@/app/element/primitive-list-detail";
 import { Tooltip } from "@/app/element/tooltip";
 import { useModalLayer } from "@/app/element/modal-layer";
@@ -110,13 +111,9 @@ const BundleManagerBody = (props: BundleManagerBodyProps): JSX.Element => {
         void model.validateDraft();
     };
 
-    const handleDelete = (id: string) => {
-        // Confirm via the most boring possible dialog. Bundles can be
-        // referenced by running instances; deletion is an explicit user
-        // intent we don't want to fast-path.
-        const ok = window.confirm("Delete this bundle? Running instances continue with their snapshot, but new launches won't see it.");
-        if (!ok) return;
-        void model.deleteMemory(id);
+    const confirm = createConfirm();
+    const handleDelete = async (id: string) => {
+        if (await confirm.ask({ title: "Delete this bundle?", description: "Running instances continue with their snapshot, but new launches won't see it.", confirmLabel: "Delete" })) void model.deleteMemory(id);
     };
 
     const updateDraft = <K extends keyof BundleDraft>(
@@ -198,6 +195,7 @@ const BundleManagerBody = (props: BundleManagerBodyProps): JSX.Element => {
 
     const detailView = (
         <div class="bundle-view-detail">
+            <confirm.Dialog />
             <Show when={model.errorAtom()}>
                 <div class="bundle-view-error">{model.errorAtom()}</div>
             </Show>
