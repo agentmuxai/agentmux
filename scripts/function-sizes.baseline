@@ -529,7 +529,6 @@
 168 frontend/app/view/kanban/kanban-card.tsx::KanbanCard
 344 frontend/app/view/kanban/kanban-drawer.tsx::KanbanDrawer
 289 frontend/app/view/kanban/kanban-section.tsx::KanbanSection
-346 frontend/app/view/mcp/mcp-manager.tsx::McpManager
 143 frontend/app/view/memory-editor/MemoryHistory.tsx::MemoryHistory
 126 frontend/app/view/native-memory/MemoryAdoptionPanel.tsx::MemoryAdoptionPanel
 112 frontend/app/view/native-memory/NativeMemoryCreate.tsx::NativeMemoryCreate
