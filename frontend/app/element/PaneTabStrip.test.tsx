@@ -349,12 +349,12 @@ describe("PaneTabStrip", () => {
             // (still a real setTimeout(fn, 0), not synchronous).
             let tip = document.body.querySelector("[data-pane-overlay]") as HTMLElement;
             expect(tip).not.toBeNull();
-            expect(tip.getAttribute("style")).toContain("opacity: 0");
+            expect(tip.firstElementChild!.getAttribute("style")).toContain("opacity: 0");
             // One frame is enough for the placement (the panel stays invisible until it is
             // placed, so it never flashes at the top-left corner).
             await vi.advanceTimersByTimeAsync(20);
             tip = document.body.querySelector("[data-pane-overlay]") as HTMLElement;
-            expect(tip.getAttribute("style")).toContain("opacity: 1");
+            expect(tip.firstElementChild!.getAttribute("style")).toContain("opacity: 1");
         } finally {
             vi.useRealTimers();
         }
