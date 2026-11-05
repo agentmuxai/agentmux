@@ -223,6 +223,17 @@ describe("an agent's Vault requests as cards in its pane", () => {
         expect((item.querySelector('input[type="password"]') as HTMLInputElement).value).toBe("987-65-4321");
     });
 
+    it("follows the countdown to the next parked request when the first is answered", async () => {
+        uses = [use({ block_id: "", deadline_ms: Date.now() + 5_000 }), use({ id: "use-2", block_id: "", entry_label: "Second", deadline_ms: Date.now() + 30_000 })];
+        await refreshVault();
+        render(() => <VaultRowAsks agent="builder" />);
+        const line = await screen.findByTestId("vault-row-asks");
+        expect(line.textContent).toMatch(/goes ahead in 0:0[45]/);
+        uses = [uses[1]];
+        await refreshVault();
+        await waitFor(() => expect(line.textContent).toMatch(/Second · goes ahead in 0:(29|30)/));
+    });
+
     it("shows a parked agent's request on its My agents row and counts it in the status bar", async () => {
         uses = [use({ block_id: "", entry_label: "Parked token" }), use({ id: "use-2" })];
         await refreshVault();

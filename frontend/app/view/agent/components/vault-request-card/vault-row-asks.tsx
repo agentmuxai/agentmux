@@ -39,7 +39,9 @@ export function VaultRowAsks(props: { agent?: string }): JSX.Element {
                 <span class="vault-row-asks-text">
                     Waiting for you in the Vault: <Clipped text={first()} max={CLIP.label} />
                     {count() > 1 ? ` and ${count() - 1} more` : ""}
-                    <Show when={uses()[0]}>{(u) => <Countdown use={u()} />}</Show>
+                    <Show when={uses()[0]?.id} keyed>
+                        {(id) => <Countdown use={uses().find((u) => u.id === id)!} />}
+                    </Show>
                 </span>
                 <Button tone="danger" density="compact" onClick={() => void deny()}>
                     {count() > 1 ? "Deny all" : "Deny"}
