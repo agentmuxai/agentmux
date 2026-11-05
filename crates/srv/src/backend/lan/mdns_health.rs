@@ -74,16 +74,18 @@ pub const PEER_PROOF_WINDOW_MS: u64 = 15 * 60 * 1000;
 /// LAN (Unix ms; 0 for never).
 static LAST_INBOUND_PEER_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-/// Whether a request from `peer` is another machine reaching us (not this host talking to itself).
-pub fn is_remote_peer(peer: IpAddr) -> bool {
-    !peer.is_loopback() && !peer.is_unspecified()
+/// Whether a request from `peer` is another machine reaching us: not this host talking to itself,
+/// over loopback or at one of its own interface addresses (another AgentMux instance on this host is
+/// listed as a LAN peer at the host's own address, and shows nothing about other machines).
+pub fn is_remote_peer(peer: IpAddr, own: &std::collections::HashSet<IpAddr>) -> bool {
+    !peer.is_loopback() && !peer.is_unspecified() && !own.contains(&peer)
 }
 
 /// Record a request that came in over the LAN with the LAN key. The self-check
 /// below can't see through a shared UDP 5353 (Chrome, Windows' own mDNS, others
 /// bind it too), but a peer that got through has shown it can find us.
 pub fn note_inbound_peer(peer: IpAddr) {
-    if is_remote_peer(peer) {
+    if is_remote_peer(peer, &crate::backend::lan::listeners::cached_local_addresses()) {
         LAST_INBOUND_PEER_MS.store(agentmux_common::time::now_ms_u64(), std::sync::atomic::Ordering::Relaxed);
     }
 }
@@ -363,10 +365,13 @@ mod tests {
 
     #[test]
     fn this_host_talking_to_itself_is_not_a_peer() {
-        assert!(!is_remote_peer("127.0.0.1".parse().unwrap()));
-        assert!(!is_remote_peer("::1".parse().unwrap()));
-        assert!(!is_remote_peer("0.0.0.0".parse().unwrap()));
-        assert!(is_remote_peer("198.51.100.30".parse().unwrap()));
+        let own: std::collections::HashSet<IpAddr> = ["198.51.100.20".parse().unwrap()].into_iter().collect();
+        assert!(!is_remote_peer("127.0.0.1".parse().unwrap(), &own));
+        assert!(!is_remote_peer("::1".parse().unwrap(), &own));
+        assert!(!is_remote_peer("0.0.0.0".parse().unwrap(), &own));
+        // A sibling instance on this host reaches us from the host's own LAN address.
+        assert!(!is_remote_peer("198.51.100.20".parse().unwrap(), &own));
+        assert!(is_remote_peer("198.51.100.30".parse().unwrap(), &own));
     }
 
     #[test]
