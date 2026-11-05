@@ -9,8 +9,9 @@
 // request for auto-approve can add one when the person answers "Always".
 
 import { Button, Notice, Select, TextInput } from "@/app/element/ui";
-import { createSignal, For, onMount, Show, type JSX } from "solid-js";
+import { createSignal, For, Show, type JSX } from "solid-js";
 
+import { createDomainStore } from "@/app/store/domain-store";
 import { RpcApi, type AgentDefinition } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { BrowserGrantsResult } from "@/types/rpc/BrowserGrantsResult";
@@ -30,40 +31,45 @@ export const AGENT_SITE_GRANTS_SETTING = {
 
 const agentName = (a: AgentDefinition) => a.name || a.slug || a.id;
 
+type GrantsData = { grants: BrowserGrantsResult; agents: AgentDefinition[] };
+
+// The rows change here, and also when the person answers "Always" on an agent's request banner, which
+// srv announces as `browsergrants:changed`; the agent names come with `agents:changed`.
+const store = createDomainStore<GrantsData | null>({
+    initial: null,
+    events: ["BrowserGrantsChanged", "AgentsChanged"],
+    load: async () => {
+        const [grants, agents] = await Promise.all([
+            RpcApi.BrowserGrantsListCommand(TabRpcClient),
+            RpcApi.ListAgentDefinitionsCommand(TabRpcClient, { is_seeded: 0 }),
+        ]);
+        return { grants, agents };
+    },
+});
+
 export function AgentSiteGrants(): JSX.Element {
-    const [data, setData] = createSignal<BrowserGrantsResult | null>(null);
-    const [agents, setAgents] = createSignal<AgentDefinition[]>([]);
-    const [error, setError] = createSignal<string | null>(null);
+    store.follow();
+    const data = () => store.data()?.grants ?? null;
+    const agents = () => store.data()?.agents ?? [];
+    const [changeError, setChangeError] = createSignal<string | null>(null);
+    const error = () => changeError() ?? (store.error() && `Couldn't load the agents on sites: ${store.error()}`);
     const [busy, setBusy] = createSignal(false);
     const [pick, setPick] = createSignal("");
     const [site, setSite] = createSignal("");
     const [terminal, setTerminal] = createSignal(false);
     const now = () => Math.floor(Date.now() / 1000);
 
-    const load = async () => {
-        try {
-            const [grants, defs] = await Promise.all([
-                RpcApi.BrowserGrantsListCommand(TabRpcClient),
-                RpcApi.ListAgentDefinitionsCommand(TabRpcClient, { is_seeded: 0 }),
-            ]);
-            setData(grants);
-            setAgents(defs);
-            setError(null);
-        } catch (e) {
-            setError(`Couldn't load the agents on sites: ${e instanceof Error ? e.message : e}`);
-        }
-    };
-    onMount(() => void load());
-
     /** One change, then the list as srv now has it. */
     const run = async (what: string, change: () => Promise<BrowserGrantsResult>) => {
         setBusy(true);
         try {
-            setData(await change());
-            setError(null);
+            const grants = await change();
+            const current = store.data();
+            if (current) store.set({ ...current, grants });
+            setChangeError(null);
             return true;
         } catch (e) {
-            setError(`Couldn't ${what}: ${e instanceof Error ? e.message : e}`);
+            setChangeError(`Couldn't ${what}: ${e instanceof Error ? e.message : e}`);
             return false;
         } finally {
             setBusy(false);
