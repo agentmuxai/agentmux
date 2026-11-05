@@ -42,6 +42,7 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "message_stats", tool: "AgentMessageStats", rename: &[] },
     Act { action: "set_container_limits", tool: "AgentSetContainerLimits", rename: &[] },
     Act { action: "container_caches", tool: "AgentContainerCaches", rename: &[] },
+    Act { action: "migrate_ids", tool: "AgentMigrateIds", rename: &[] },
 ];
 
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
@@ -88,6 +89,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 "AgentMessageStats" => message_stats(cx, &args).await,
                 "AgentSetContainerLimits" => set_container_limits(cx, &args).await,
                 "AgentContainerCaches" => container_caches(cx, &args).await,
+                "AgentMigrateIds" => migrate_ids(cx, &args).await,
                 _ => history::call(act.tool, &args, cx).await,
             };
             let result = result.map_err(|e| anyhow::anyhow!(public_params(&format!("{e:#}"), act.rename)));
@@ -507,6 +509,33 @@ async fn set_seats(cx: &ToolCtx<'_>, args: &Value) -> Result<String> {
         anyhow::bail!("Agents set_seat: {}", body["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("srv answered {status}: {body}")));
     }
     Ok(serde_json::to_string_pretty(&body)?)
+}
+
+/// `migrate_ids`: the agent id update, one step at a time (`/api/v1/agent/migrate-ids`). `step` is `plan`
+/// (the default; changes nothing), `stop`, `apply` or `rollback` (the latest finished run); srv acts as the agent this process's token
+/// names and records every step but `plan` under it.
+async fn migrate_ids(cx: &ToolCtx<'_>, args: &Value) -> Result<String> {
+    require_agent_env(cx.local_url, cx.auth_key, cx.block_id)?;
+    let step = str_arg(args, "step").unwrap_or_else(|| "plan".to_string());
+    let mut body = json!({ "step": step });
+    if let Some(choices) = args.get("choices").filter(|v| v.is_array()) {
+        body["choices"] = choices.clone();
+    }
+    let url = format!("{}/api/v1/agent/migrate-ids", cx.local_url.trim_end_matches('/'));
+    let resp = cx
+        .client
+        .post(&url)
+        .header(AUTH_KEY_HEADER, cx.auth_key)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    let status = resp.status();
+    let answer: Value = resp.json().await.unwrap_or(Value::Null);
+    if !status.is_success() {
+        anyhow::bail!("Agents migrate_ids: {}", answer["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("srv answered {status}: {answer}")));
+    }
+    Ok(serde_json::to_string_pretty(&answer)?)
 }
 
 /// `rename`: the agent in `agent` gets the displayed name in `name`, by srv as the agent this process's token
