@@ -2,7 +2,7 @@
 
 **Date:** 2026-11-05
 **Author:** Manoz@Area54, for task #1555 (operator's question to AgentY, 2026-11-05)
-**Status:** research only, no code. Uncommitted by design; it ships with the PR that cites it.
+**Status:** analysis — research only, no code. It follows the packs spec (`docs/specs/SPEC_PACKS_2026_11_05.md`), which ships in the same PR.
 **Checked against:** origin/main `dd45d365a` (v0.60.16). Web sources were read on 2026-11-05; where a figure comes from a secondary page it says so.
 
 > [!IMPORTANT]

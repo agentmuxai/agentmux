@@ -5,6 +5,8 @@ description: Use when you need to edit, process or master audio in Steinberg Wav
 
 # WaveLab (Steinberg WaveLab Pro / Elements)
 
+**Status:** draft — unverified: written from Steinberg's help and forum reports, not yet run on any WaveLab version.
+
 Pack: `wavelab` v0.1, unverified. Written from Steinberg's WaveLab help and forum reports; no step has been run by an agent yet, and WaveLab's own pages could not be read in full while writing (the help site refused automated fetches), so **read the installed documentation before you trust a name below** (see Pitfalls).
 
 ## The ladder: use the first route that works

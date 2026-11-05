@@ -1,5 +1,7 @@
 # Packs (examples)
 
+**Status:** active — Stage 1 of the packs spec; the Blender pack is verified, the other four are not.
+
 Per-application knowledge for agents that drive desktop apps. A pack is versioned: `version`, `changelog`, `app.versions` and `verified` records that name the pack version (spec §10); a line that differs between app versions starts with a range tag such as `[v >=21]`. See `docs/specs/SPEC_PACKS_2026_11_05.md` for the format and `docs/reports/REPORT_COMPUTER_USE_STATE_AND_APP_SKILL_PACKS_2026_11_05.md` for why.
 
 | Folder | App | Best route | State |

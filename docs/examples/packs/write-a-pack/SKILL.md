@@ -5,6 +5,8 @@ description: Use when asked to write, review or update a pack: the per-applicati
 
 # Write a pack
 
+**Status:** active — the guide for writing a pack (spec: docs/specs/SPEC_PACKS_2026_11_05.md).
+
 A **pack** is per-application knowledge for an agent that drives a desktop app: how to control it, best route first, its keys, its traps, and a check after each step. The format is an Agent Skill (`SKILL.md`) plus a small manifest. Spec: `docs/specs/SPEC_PACKS_2026_11_05.md`. Examples: `docs/examples/packs/word`, `ableton-live`, `wavelab`.
 
 ## What to write

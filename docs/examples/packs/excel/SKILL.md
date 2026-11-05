@@ -5,6 +5,8 @@ description: Use when you need to create, read or edit a Microsoft Excel workboo
 
 # Excel (Microsoft Excel for Windows)
 
+**Status:** draft — unverified: written from Microsoft's and the libraries' documentation, not yet run on any Excel version.
+
 Pack: `excel` v0.1.0, unverified. Executable: `EXCEL.EXE`. Written from Microsoft's documentation and the library docs; no step below has been run by an agent yet (see Proof).
 
 ## The ladder: use the first route that works

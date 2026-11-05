@@ -5,6 +5,8 @@ description: Use when you need to make, change or render 3D scenes in Blender (b
 
 # Blender
 
+**Status:** active — verified on Windows with Blender 5.2.3 LTS (see Proof); the shortcut and Desktop routes are not verified.
+
 Pack: `blender` v0.1.0. Executables: `blender.exe` (Windows), `blender` (macOS, Linux). The Python route was run on Windows with Blender 5.2.3 LTS on 2026-11-05 and passed (see Proof); the shortcut and Desktop routes are not verified.
 
 ## The ladder: use the first route that works

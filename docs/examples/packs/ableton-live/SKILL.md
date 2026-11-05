@@ -5,6 +5,8 @@ description: Use when you need to make or change music in Ableton Live (Live.exe
 
 # Ableton Live
 
+**Status:** draft — unverified: written from Ableton's manual and the AbletonMCP README, not yet run on any Live version.
+
 Pack: `ableton-live` v0.1, unverified. Executables: `Live.exe` (Windows), the `Ableton Live` app (macOS). Written from Ableton's manual and the AbletonMCP project's README; no step has been run by an agent yet (see Proof).
 
 ## The ladder: use the first route that works

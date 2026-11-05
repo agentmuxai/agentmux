@@ -5,6 +5,8 @@ description: Use when you need to create, read or edit a Microsoft Word document
 
 # Word (Microsoft Word for Windows)
 
+**Status:** draft — unverified: written from Microsoft's documentation, not yet run on any Word version.
+
 Pack: `word` v0.1, unverified. Executable: `WINWORD.EXE`. Written from Microsoft's documentation; no step below has been run by an agent yet (see Proof).
 
 ## The ladder: use the first route that works
