@@ -6,14 +6,14 @@
 import { For, Show, type Accessor, type JSX } from "solid-js";
 import { Tooltip } from "@/app/element/tooltip";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
-import { Button, Tag, TextArea, TextInput } from "@/app/element/ui";
+import { Button, TextArea, TextInput } from "@/app/element/ui";
 import { PROVIDERS } from "@/app/view/agent/providers/catalog";
 import { focusOnOpen } from "@/util/focusutil";
 import type { Bundle } from "@/app/store/rpc-api";
 import type { BundleActions } from "./bundle-manager-actions";
 import type { BundleDraft, BundleViewModel } from "./bundle-model";
 import { BundleProviderInstructionsSection } from "./BundleProviderInstructionsSection";
-import { BundleSkillsSection } from "./BundleSkillsSection";
+import { BundleReadOnly } from "./bundle-manager-readonly";
 
 interface DetailProps {
     model: BundleViewModel;
@@ -28,56 +28,6 @@ const FieldHelp = (props: { text: string }): JSX.Element => (
         <i class="fa-solid fa-circle-info bundle-view-field-help" aria-hidden="true" />
     </Tooltip>
 );
-
-function BundleReadOnly(props: DetailProps & { memory: Accessor<Bundle> }): JSX.Element {
-    const { model, act, memory } = props;
-    return (
-        <div class="bundle-view-readonly">
-            <h2 class="bundle-view-name">{memory().name}</h2>
-            <Show when={memory().description}>
-                <p class="bundle-view-description">{memory().description}</p>
-            </Show>
-            <dl class="bundle-view-fields">
-                <Show when={memory().is_global}>
-                    <dt>Scope</dt>
-                    <dd>
-                        <Tag size="xs" tone="accent" detail="Injected into all agents at launch">Global</Tag>
-                        {" "}— injected into every agent at launch
-                    </dd>
-                </Show>
-                <dt>Instructions</dt>
-                <dd class="bundle-view-instructions-readonly">
-                    <pre>{memory().instructions || "(none)"}</pre>
-                </dd>
-            </dl>
-            <Show when={!memory().is_blank}>
-                <div class="bundle-view-actions">
-                    <Button
-                        class="bundle-view-edit-btn"
-                        onClick={() => model.startEdit(memory())}
-                    >
-                        Edit
-                    </Button>
-                    <Button
-                        tone="danger"
-                        class="bundle-view-delete-btn"
-                        onClick={() => act.handleDelete(memory().id)}
-                    >
-                        Delete
-                    </Button>
-                </div>
-                {/* Skills are managed live via their own
-                    bind/unbind + upsert-for-bundle RPCs,
-                    independent of the edit-draft flow above.
-                    A bundle carries
-                    no MCP servers; they're bound to agents in
-                    Connectors
-                    (SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07.md). */}
-                <BundleSkillsSection bundleId={memory().id} />
-            </Show>
-        </div>
-    );
-}
 
 /** Name, description and the provider hint (with its vendor, when the provider has several). */
 function BundleIdentityFields(props: { draft: Accessor<BundleDraft>; act: BundleActions }): JSX.Element {
