@@ -979,8 +979,30 @@ pub(crate) async fn fleet_close_agents_with_override(
     let (asked, remote_pending, left_open) = ask_other_instances(state, by, None, true, forwards).await;
     now.succeeded.extend(asked.succeeded);
     now.failed.extend(asked.failed);
+    // `Stop agents` doesn't wait for the windows: the caller is told by a note if the user keeps an
+    // agent or a close fails. One note per window, however many of its agents are in the request.
+    for v in &pending {
+        crate::sagas::pending_shutdown::tell_when_settled(state, &v.request_id, by, "FleetBulkStop");
+    }
+    for v in &remote_pending {
+        watch_remote_window(state, by, v);
+    }
     pending.extend(remote_pending);
     (now, pending, left_open)
+}
+
+/// A close asked of another AgentMux on this machine: its user's window runs there, so this instance
+/// watches it and tells `by` by note if that user keeps the agent or the close fails.
+fn watch_remote_window(state: &AppState, by: &str, v: &crate::sagas::pending_shutdown::PendingView) {
+    let Some(remote) = crate::sagas::pending_shutdown::remote_for(&v.request_id) else { return };
+    let (state, by, request_id, target) = (state.clone(), by.to_string(), v.request_id.clone(), v.target.clone());
+    tokio::spawn(async move {
+        let Err(why) = wait_for_remote_window(&state, &remote.local_url, &remote.auth_key, &request_id).await else { return };
+        let text = format!("[AgentMux] Your Stop agents (request {request_id}): {target} was not closed: {why}.");
+        if let Err(e) = state.reactive_handler.hold_system_note(&by, &format!("shutdown:{request_id}"), &text) {
+            tracing::debug!(by, request_id, "shutdown note not held: {e}");
+        }
+    });
 }
 
 /// `batch_failures / batch_len` (as a percentage) exceeds `max_pct`.

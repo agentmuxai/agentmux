@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Connect Google (docs/specs/SPEC_GOOGLE_CONNECTORS_GMAIL_CALENDAR_DRIVE_2026_10_14.md
-// §7 "Connect (new account)"): the saved client is used without retyping, the
-// BYO fields show once with the console steps, and a Reconnect re-runs the
-// consent for the same account.
+// §7 "Connect (new account)"; SPEC_GOOGLE_PHASE_B_AGENTMUXS_OWN_CLIENT_2026_11_01.md D5): Google shows no
+// client fields and never mentions a client; a client saved earlier is still used, and a build with no
+// client of its own says Google isn't available yet. A Reconnect re-runs the consent for the same account.
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -35,8 +35,9 @@ const BLOCKED =
     "blocked by your organization: a google Workspace administrator doesn't allow this app (admin_policy_enforced). " +
     "Ask the administrator to allow it, or use a Workspace internal client.";
 
-const NOT_SAVED = { saved: false, hasSecret: false, builtinAvailable: false };
-const SAVED = { saved: true, clientId: "123-abc.apps.googleusercontent.com", hasSecret: true, mode: "byo", builtinAvailable: false };
+const NOT_SAVED = { saved: false, hasSecret: false, builtinAvailable: false, offeredServices: [] };
+const SAVED = { saved: true, clientId: "123-abc.apps.googleusercontent.com", hasSecret: true, mode: "byo", builtinAvailable: false, offeredServices: [] };
+const BUILTIN = { saved: false, hasSecret: false, builtinAvailable: true, offeredServices: ["drive"] };
 
 beforeEach(() => {
     rpc.AccountOAuthClientGetCommand.mockResolvedValue(NOT_SAVED);
@@ -56,65 +57,42 @@ afterEach(() => {
 });
 
 const connectButton = () => screen.getByRole("button", { name: "Connect Google" });
+/** Connect, once srv's answer about the client is in and the button is live. */
+const readyConnect = async () => {
+    await waitFor(() => expect((connectButton() as HTMLButtonElement).disabled).toBe(false));
+    return connectButton();
+};
 
 describe("Connect Google", () => {
-    it("uses the saved client without asking for it again", async () => {
-        rpc.AccountOAuthClientGetCommand.mockResolvedValue(SAVED);
+    it("uses AgentMux's own client with no client fields and no mention of a client", async () => {
+        rpc.AccountOAuthClientGetCommand.mockResolvedValue(BUILTIN);
         render(() => <OAuthConnectPanel provider="google" onConnected={() => {}} />);
-        await screen.findByText("Using your saved client");
-        expect(screen.getByText(SAVED.clientId)).toBeTruthy();
-        expect(screen.getByText("Your own client")).toBeTruthy();
-        expect(screen.queryByPlaceholderText(/apps\.googleusercontent\.com/)).toBeNull();
-
-        fireEvent.click(connectButton());
+        fireEvent.click(await readyConnect());
         await waitFor(() => expect(rpc.AccountOAuthStartCommand).toHaveBeenCalledTimes(1));
-        const req = rpc.AccountOAuthStartCommand.mock.calls[0][1];
-        // No client in the request: srv uses the saved one. No name needed:
-        // the sign-in's email names the account.
-        expect(req).toEqual({ provider: "google", name: undefined, accountId: undefined, scopes: undefined });
+        // No client in the request, and no name: the sign-in's email names the account.
+        expect(rpc.AccountOAuthStartCommand.mock.calls[0][1]).toEqual({ provider: "google", name: undefined, accountId: undefined, scopes: undefined });
+        expect(screen.queryByPlaceholderText(/apps\.googleusercontent\.com/)).toBeNull();
+        expect(screen.queryByText(/client/i)).toBeNull();
         await waitFor(() => expect(openLink).toHaveBeenCalledWith("https://accounts.google.com/o/oauth2/v2/auth?x"));
     });
 
-    it("shows the BYO fields once, with the console steps, and sends the client with its mode", async () => {
+    it("still uses a client saved earlier, without showing it", async () => {
+        rpc.AccountOAuthClientGetCommand.mockResolvedValue(SAVED);
         render(() => <OAuthConnectPanel provider="google" onConnected={() => {}} />);
-        await screen.findByText(/application type “Desktop app”/);
-        const id = screen.getByPlaceholderText(/apps\.googleusercontent\.com/) as HTMLInputElement;
-        const secret = screen.getByPlaceholderText(/stored in your OS keychain/) as HTMLInputElement;
-
-        // Google's Desktop client needs its secret for the token exchange.
-        fireEvent.input(id, { target: { value: " 123-abc.apps.googleusercontent.com " } });
-        fireEvent.click(connectButton());
-        expect(await screen.findByText("Client secret is required")).toBeTruthy();
-        expect(rpc.AccountOAuthStartCommand).not.toHaveBeenCalled();
-
-        fireEvent.input(secret, { target: { value: "GOCSPX-shh" } });
-        fireEvent.click(screen.getByRole("radio", { name: "Workspace internal" }));
-        fireEvent.click(connectButton());
+        fireEvent.click(await readyConnect());
         await waitFor(() => expect(rpc.AccountOAuthStartCommand).toHaveBeenCalledTimes(1));
-        expect(rpc.AccountOAuthStartCommand.mock.calls[0][1]).toMatchObject({
-            provider: "google",
-            clientId: "123-abc.apps.googleusercontent.com",
-            clientSecret: "GOCSPX-shh",
-            clientMode: "workspace",
-        });
-        // The secret leaves the frontend with the request; nothing keeps it.
-        expect(secret.value).toBe("");
+        expect(rpc.AccountOAuthStartCommand.mock.calls[0][1]).toEqual({ provider: "google", name: undefined, accountId: undefined, scopes: undefined });
+        expect(screen.queryByText("Using your saved client")).toBeNull();
+        expect(screen.queryByText(SAVED.clientId)).toBeNull();
+        expect(screen.queryByRole("button", { name: "Forget this client" })).toBeNull();
     });
 
-    it("offers a different client, and forgets the saved one", async () => {
-        rpc.AccountOAuthClientGetCommand.mockResolvedValueOnce(SAVED).mockResolvedValueOnce(NOT_SAVED);
+    it("says Google isn't available in a build with no client of its own, and offers nothing to type or press", async () => {
         render(() => <OAuthConnectPanel provider="google" onConnected={() => {}} />);
-        await screen.findByText("Using your saved client");
-
-        fireEvent.click(screen.getByRole("button", { name: "Use a different client" }));
-        expect(screen.getByPlaceholderText(/apps\.googleusercontent\.com/)).toBeTruthy();
-        fireEvent.click(screen.getByRole("button", { name: "Use the saved client" }));
+        expect(await screen.findByText(/Google isn't available in this version of AgentMux yet/)).toBeTruthy();
+        expect(screen.queryByRole("button", { name: "Connect Google" })).toBeNull();
         expect(screen.queryByPlaceholderText(/apps\.googleusercontent\.com/)).toBeNull();
-
-        fireEvent.click(screen.getByRole("button", { name: "Forget this client" }));
-        await waitFor(() => expect(rpc.AccountOAuthClientClearCommand).toHaveBeenCalledWith({}, { provider: "google" }));
-        await screen.findByPlaceholderText(/apps\.googleusercontent\.com/);
-        expect(screen.queryByText("Using your saved client")).toBeNull();
+        expect(rpc.AccountOAuthStartCommand).not.toHaveBeenCalled();
     });
 
     it("reports a partial grant for the new account", async () => {
@@ -125,8 +103,7 @@ describe("Connect Google", () => {
         });
         const onConnected = vi.fn();
         render(() => <OAuthConnectPanel provider="google" onConnected={onConnected} />);
-        await screen.findByText("Using your saved client");
-        fireEvent.click(connectButton());
+        fireEvent.click(await readyConnect());
         await waitFor(() => expect(onConnected).toHaveBeenCalledTimes(1));
         expect(onConnected.mock.calls[0][0]).toEqual({ accountId: "acc-1", missingScopes: [CAL], email: "me@example.com" });
         expect(oauthNote("acc-1")?.missingScopes).toEqual([CAL]);
@@ -136,8 +113,7 @@ describe("Connect Google", () => {
         rpc.AccountOAuthClientGetCommand.mockResolvedValue(SAVED);
         rpc.AccountOAuthStartCommand.mockResolvedValue({ sessionId: "s1", status: { status: "failed", error: BLOCKED } });
         render(() => <OAuthConnectPanel provider="google" onConnected={() => {}} />);
-        await screen.findByText("Using your saved client");
-        fireEvent.click(connectButton());
+        fireEvent.click(await readyConnect());
         expect(await screen.findByText("Blocked by your organization")).toBeTruthy();
         expect(screen.getByText(/Ask the administrator to allow it/)).toBeTruthy();
         expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
@@ -159,7 +135,7 @@ describe("Reconnect", () => {
         });
     });
 
-    it("waits for the client when none is saved, prefilled with the account's", async () => {
+    it("starts nothing and says so when the build has no client of its own and none is saved", async () => {
         render(() => (
             <OAuthConnectPanel
                 provider="google"
@@ -169,10 +145,10 @@ describe("Reconnect", () => {
                 onConnected={() => {}}
             />
         ));
-        const id = (await screen.findByPlaceholderText(/apps\.googleusercontent\.com/)) as HTMLInputElement;
-        expect(id.value).toBe("123-abc.apps.googleusercontent.com");
+        expect(await screen.findByText(/Google isn't available in this version of AgentMux yet/)).toBeTruthy();
         expect(rpc.AccountOAuthStartCommand).not.toHaveBeenCalled();
-        expect(screen.getByRole("button", { name: "Reconnect" })).toBeTruthy();
+        expect(screen.queryByRole("button", { name: "Reconnect" })).toBeNull();
+        expect(screen.queryByPlaceholderText(/apps\.googleusercontent\.com/)).toBeNull();
     });
 
     it("marks the account blocked when its organization refuses", async () => {

@@ -247,3 +247,94 @@ async fn the_shared_close_refuses_an_agent_pane_for_any_caller() {
     assert!(body["error"].as_str().unwrap_or_default().contains("Stop with action \"agents\""));
     assert!(crate::sagas::pending_shutdown::active_for(&background).is_none());
 }
+
+/// A caller that doesn't wait for the window (`Stop agents`, `Stop pane`): an agent whose notes can be held.
+async fn register_caller(state: &AppState) -> (String, String) {
+    let (tab_id, block) = seed(state).await;
+    let id = format!("stop-caller-{}", uuid::Uuid::new_v4());
+    state.reactive_handler.register_agent(&id, &block, Some(&tab_id)).unwrap();
+    (id, block)
+}
+
+/// What is held for the caller's next turn, if anything arrives within a moment (the note follows the status).
+async fn held_for(state: &AppState, caller: &(String, String), request_id: &str) -> Option<String> {
+    let key = format!("shutdown:{request_id}");
+    for _ in 0..50 {
+        if state.reactive_handler.holds_system_note(&caller.0, &key) {
+            let (message, notes) = crate::backend::reactive::held_notes::attach(&caller.1, "next");
+            notes.delivered();
+            return Some(message);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    None
+}
+
+/// The window is srv's: the call comes back at once, and the user keeping an agent tells the caller by
+/// one note, however many of the request's agents were kept.
+#[tokio::test]
+async fn stop_agents_returns_at_once_and_a_kept_agent_is_one_note_to_the_caller() {
+    let state = test_state();
+    let caller = register_caller(&state).await;
+    let (_, visible, background) = seed_two_agent_pane(&state).await;
+    let started = std::time::Instant::now();
+    let (_, pending, _) =
+        super::fleet::fleet_close_agents_with_override(&state, &caller.0, None, vec![visible.clone(), background.clone()]).await;
+    assert!(started.elapsed() < std::time::Duration::from_secs(1), "no wait for the 30 s window");
+    let id = pending[0].request_id.clone();
+    assert!(pending.iter().all(|p| p.request_id == id), "several closes, one window");
+    assert_eq!(crate::sagas::pending_shutdown::keep(&state, &visible, &id), "kept_by_user");
+    assert!(!state.reactive_handler.holds_system_note(&caller.0, &format!("shutdown:{id}")), "told when it settles, not before");
+    crate::sagas::pending_shutdown::expire_now(&id);
+    assert_eq!(crate::sagas::pending_shutdown::settled(&id).await.status, "shut_down");
+    let said = held_for(&state, &caller, &id).await.expect("the caller is told the user kept one");
+    assert_eq!(said.matches("[AgentMux]").count(), 1, "{said}");
+    assert!(said.contains("Stop agents") && said.contains("keep") && said.contains("running"), "{said}");
+    assert!(!state.srv_state.lock().await.blocks.contains_key(&background), "the other one closed");
+}
+
+/// A close that went ahead as asked says nothing, and neither does asking twice: the second ask joins the first.
+#[tokio::test]
+async fn stop_agents_says_nothing_when_it_closed_and_asking_twice_shares_the_window() {
+    let state = test_state();
+    let caller = register_caller(&state).await;
+    let (tab_id, _) = seed(&state).await;
+    let agent = create_agent_block(&state, &tab_id, &format!("quiet-{}", uuid::Uuid::new_v4())).await;
+    let ask = || super::fleet::fleet_close_agents_with_override(&state, &caller.0, None, vec![agent.clone()]);
+    let (_, first, _) = ask().await;
+    let (_, second, _) = ask().await;
+    assert_eq!(first[0].request_id, second[0].request_id, "one window");
+    crate::sagas::pending_shutdown::expire_now(&first[0].request_id);
+    assert_eq!(crate::sagas::pending_shutdown::settled(&first[0].request_id).await.status, "shut_down");
+    assert!(held_for(&state, &caller, &first[0].request_id).await.is_none(), "closed as asked: no note");
+}
+
+/// `Stop pane`: 202 at once; kept by the user, the caller gets the one note; a failed close is told too.
+#[tokio::test]
+async fn stop_pane_returns_at_once_and_a_kept_pane_is_a_note_to_the_caller() {
+    let state = test_state();
+    let caller = register_caller(&state).await;
+    let (_, plain) = seed(&state).await;
+    let started = std::time::Instant::now();
+    let (code, body) = close_pane_as(&state, &caller.0, &plain, None, "ClosePane").await;
+    assert!(started.elapsed() < std::time::Duration::from_secs(1), "no wait for the 30 s window");
+    assert_eq!(code, axum::http::StatusCode::ACCEPTED);
+    let id = body["request_id"].as_str().unwrap().to_string();
+    assert_eq!(crate::sagas::pending_shutdown::keep(&state, &plain, &id), "kept_by_user");
+    let said = held_for(&state, &caller, &id).await.expect("the caller is told the user kept it");
+    assert!(said.contains("Stop pane") && said.contains("keep"), "{said}");
+    assert!(state.srv_state.lock().await.blocks.contains_key(&plain), "still open");
+}
+
+/// A caller that asks after its request already ended is told at once rather than never.
+#[tokio::test]
+async fn a_caller_that_registers_after_the_request_ended_is_still_told() {
+    let state = test_state();
+    let caller = register_caller(&state).await;
+    let (_, plain) = seed(&state).await;
+    let (_, body) = close_pane_as(&state, "someone-else", &plain, None, "UI command").await;
+    let id = body["request_id"].as_str().unwrap().to_string();
+    assert_eq!(crate::sagas::pending_shutdown::keep(&state, &plain, &id), "kept_by_user");
+    crate::sagas::pending_shutdown::tell_when_settled(&state, &id, &caller.0, "ClosePane");
+    assert!(held_for(&state, &caller, &id).await.is_some());
+}
