@@ -7,14 +7,13 @@ import { createEffect } from "solid-js";
 import { movedMeta } from "@/app/store/pane-sections";
 import type { PaneTabHostContext, PaneTabInstance } from "@/app/store/pane-tab-registry";
 import { SwarmViewModel } from "./swarm-model";
-import { createSwarmSection, swarmTitleOf } from "./swarm-section";
+import { SWARM_TITLE } from "./swarm-section";
 import { SwarmView } from "./swarm-root";
 import type { SwarmFilterFocus } from "./swarm-filter-bar";
 import { createSignalAtom } from "@/util/util";
 
 export function create(ctx: PaneTabHostContext): PaneTabInstance {
     const model = new SwarmViewModel(ctx.blockId);
-    const section = createSwarmSection(ctx.meta);
     // A saved Swarm that was on its Kanban section becomes the Kanban pane (the board left the Swarm,
     // #9670). Its `kanban:*` meta is the same block's, so lanes and collapsed columns carry over.
     createEffect(() => {
@@ -41,8 +40,7 @@ export function create(ctx: PaneTabHostContext): PaneTabInstance {
     return {
         component: () => <SwarmView model={model} ctx={ctx} filterFocusRef={(focus) => (filterBox = focus)} />,
         search: () => searchAtoms,
-        // The selected section names the pane: "Swarm · Broadcast".
-        liveTitle: () => ({ text: swarmTitleOf(section()) }),
+        liveTitle: () => ({ text: SWARM_TITLE }),
         dispose: () => model.dispose(),
     };
 }

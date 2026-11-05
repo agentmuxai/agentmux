@@ -88,7 +88,7 @@ describe("SwarmView with no agents here and agents on another machine", () => {
     it("shows the toolbar once a remote agent is selected, so there is something to act with", () => {
         const { container } = setup();
         fireEvent.click(container.querySelector<HTMLInputElement>(".swarm-remote-agent input[type=checkbox]")!);
-        const count = container.querySelector(".swarm-fleet-toolbar-count");
+        const count = container.querySelector(".swarm-select-toggle__stats");
         expect(count?.textContent?.replace(/\s+/g, " ").trim()).toBe("1 selected · 1 on other machines");
         // This instance's empty state is still said.
         expect(container.querySelector(".ui-empty-state-title")).not.toBeNull();

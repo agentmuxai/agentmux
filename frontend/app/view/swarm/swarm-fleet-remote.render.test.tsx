@@ -16,10 +16,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/app/element/confirm-modal", () => ({ ConfirmModal: () => null }));
 
 import { BroadcastDock } from "./swarm-broadcast";
-import { FleetResultPanel, FleetToolbar, StopTargetRows } from "./swarm-fleet-toolbar";
+import { FleetResultPanel, StopTargetRows, SuperviseActions } from "./swarm-fleet-toolbar";
 import { localFleetTargets, remoteFleetTargets } from "./swarm-fleet-targets";
 import type { FleetResultEntry, SwarmViewModel } from "./swarm-model";
 import { remoteSections, type SwarmOtherInstances } from "./swarm-remote";
+import { SwarmSelectToggle } from "./swarm-select-toggle";
 
 afterEach(() => cleanup());
 
@@ -58,6 +59,7 @@ function modelStub(selectedKeys: string[]) {
         fleetActionInFlightAtom: () => false,
         selectAll: vi.fn(),
         clearSelection: vi.fn(),
+        setManySelected: vi.fn(),
         toggleSelected: () => {},
         isSelected: (k: string) => selected().has(k),
         broadcastToSelection: vi.fn(),
@@ -67,28 +69,28 @@ function modelStub(selectedKeys: string[]) {
     } as unknown as SwarmViewModel;
 }
 
-const toolbar = (model: SwarmViewModel) => render(() => <FleetToolbar model={model} allBlockIds={() => ["blk-korp"]} />);
+const toolbar = (model: SwarmViewModel) => render(() => <SuperviseActions model={model} allBlockIds={() => ["blk-korp"]} />);
+const toggle = (model: SwarmViewModel) => render(() => <SwarmSelectToggle model={model} ids={() => ["blk-korp"]} />);
+const statsText = () => document.querySelector(".swarm-select-toggle__stats")!.textContent!.replace(/\s+/g, " ").trim();
 const dock = (model: SwarmViewModel) =>
     render(() => <BroadcastDock model={model} agents={{ tree: () => [{ blockId: "blk-korp", agentName: "Korp" }] as never }} />);
 const type = (text: string) =>
     fireEvent.input(document.querySelector<HTMLTextAreaElement>(".swarm-broadcast-input")!, { target: { value: text } });
 
-describe("FleetToolbar with agents of other instances selected", () => {
+describe("Select all and the Supervise actions with agents of other instances selected", () => {
     it("says how many of the selected are on other machines, not counting this machine's other channels", () => {
-        toolbar(modelStub(["blk-korp", LOAP, MANOZ]));
-        expect(document.querySelector(".swarm-fleet-toolbar-count")!.textContent!.replace(/\s+/g, " ").trim()).toBe(
-            "3 selected · 1 on other machines"
-        );
+        toggle(modelStub(["blk-korp", LOAP, MANOZ]));
+        expect(statsText()).toBe("3 selected · 1 on other machines");
     });
 
     it("shows a bare count when the others selected are on this machine", () => {
-        toolbar(modelStub(["blk-korp", LOAP]));
-        expect(document.querySelector(".swarm-fleet-toolbar-count")!.textContent!.trim()).toBe("2 selected");
+        toggle(modelStub(["blk-korp", LOAP]));
+        expect(statsText()).toBe("2 selected");
     });
 
     it("shows a bare count when everything selected is here", () => {
-        toolbar(modelStub(["blk-korp"]));
-        expect(document.querySelector(".swarm-fleet-toolbar-count")!.textContent!.trim()).toBe("1 selected");
+        toggle(modelStub(["blk-korp"]));
+        expect(statsText()).toBe("1 selected");
     });
 
     it("counts only the agents a stop can reach", () => {
