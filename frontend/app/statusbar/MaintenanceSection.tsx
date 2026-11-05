@@ -14,6 +14,7 @@ import {
     releaseNotesUrl,
     startAppUpdateDownload,
     storeAnswer,
+    storeFallbackLine,
     storeOfferLine,
     upgradeAndRestart,
     upgradeUnderWay,
@@ -116,7 +117,7 @@ export const MaintenanceSection = (): JSX.Element => {
             const result = await getApi()?.approvals?.storeUpdate?.(release()?.version).catch(() => undefined);
             if (result?.outcome === "none" && release()) recordStoreNone(release()!.version);
             if (!result || result.outcome === "fallback") {
-                if (result?.message) setStoreNote(result.message);
+                setStoreNote(storeFallbackLine(result?.message));
                 void openLink(MS_STORE_PAGE_URL);
             } else {
                 setStoreNote(result.message);
