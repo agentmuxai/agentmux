@@ -13,7 +13,7 @@ mod core;
 mod skills;
 mod history;
 pub(crate) mod rename;
-pub(crate) mod template;
+mod template;
 mod template_create;
 mod template_image;
 mod fork_history;

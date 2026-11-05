@@ -132,7 +132,7 @@ fn bundles(state: &AppState, req: &BundlesRequest) -> Result<Value, Refusal> {
         match state.id_store.bundle_get(id).map_err(internal)? {
             Some(b) if !b.is_blank && !b.is_system => {}
             Some(_) => return Err(bad(format!("bundle {id} is the blank or a system entry, which an agent doesn't pick"))),
-            None => return Err(refuse(StatusCode::NOT_FOUND, format!("no bundle {id}; Memory list shows the bundles"))),
+            None => return Err(refuse(StatusCode::NOT_FOUND, format!("no bundle {id}; Identity presets lists the bundles"))),
         }
     }
     let stored = state.mstore.agent_bundles_set(&target.agent_id, ids).map_err(internal)?;
