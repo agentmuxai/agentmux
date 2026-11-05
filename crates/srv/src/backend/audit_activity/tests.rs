@@ -31,6 +31,9 @@ fn a_command_that_holds_a_secret_is_cut_to_its_tool_name() {
         "echo AKIAIOSFODNN7EXAMPLE",
         "deploy --token sk-live-1234567890abcdef",
         "echo 3f786850e387550fdab836ed7e6dc881de23001b0a1f9cd0",
+        "curl https://user:hunter2@host.test/x",
+        "git clone https://oauth2:abc123@github.com/o/r.git",
+        "wget 'ftp://admin@files.test/a'",
     ] {
         assert_eq!(summarize("Bash", &json!({ "command": command })), "Bash", "{command}");
     }
@@ -56,7 +59,11 @@ fn muxapi_tools_give_their_action_and_a_messages_target_never_its_text() {
     assert_eq!(summarize("mcp__agentmux__Vault", &json!({"action": "reveal", "id": "abc", "part": "value"})), "Vault reveal");
     assert_eq!(summarize("mcp__agentmux__Tasks", &json!({"action": "claim", "id": "12"})), "Tasks claim");
     assert_eq!(summarize("SomethingNew", &json!({"anything": "x"})), "SomethingNew");
-    assert_eq!(summarize("WebFetch", &json!({"url": "https://x.test/a?token=abc#frag"})), "WebFetch https://x.test/a");
+    // A URL is its site only: the path can hold a token, and the part before the host a password.
+    assert_eq!(summarize("WebFetch", &json!({"url": "https://x.test/a?token=abc#frag"})), "WebFetch https://x.test");
+    assert_eq!(summarize("WebFetch", &json!({"url": "https://hooks.test/services/T000/B000/abcdefgh"})), "WebFetch https://hooks.test");
+    assert_eq!(summarize("WebFetch", &json!({"url": "https://user:hunter2@host.test/x"})), "WebFetch");
+    assert_eq!(summarize("WebFetch", &json!({"url": "not a url"})), "WebFetch");
 }
 
 // ── the lines

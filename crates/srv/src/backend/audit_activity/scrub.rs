@@ -34,7 +34,7 @@ pub fn summarize(tool: &str, input: &Value) -> String {
             field("file_path").or_else(|| field("notebook_path")).map(|p| first_line(p, PATH_MAX))
         }
         "Glob" | "Grep" => field("pattern").and_then(text),
-        "WebFetch" | "WebSearch" => field("url").map(site_of).or_else(|| field("query").and_then(text)),
+        "WebFetch" | "WebSearch" => field("url").and_then(site_of).or_else(|| field("query").and_then(text)),
         "Task" | "Agent" => field("description").and_then(text),
         _ => mux_detail(tool, input),
     };
@@ -67,10 +67,18 @@ fn is_word(s: &str) -> bool {
     !s.is_empty() && s.len() <= 40 && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
 }
 
-/// `https://host/path` without the query or fragment, which is where tokens go.
-fn site_of(url: &str) -> String {
-    let cut = url.split(['?', '#']).next().unwrap_or(url);
-    first_line(cut, PATH_MAX)
+/// `scheme://host` of a URL, and nothing after it: a path can hold a token (a webhook's), and the part before the host
+/// can hold a password. None when the URL has user information or does not look like a URL.
+fn site_of(url: &str) -> Option<String> {
+    let (scheme, rest) = url.split_once("://")?;
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let site = format!("{scheme}://{authority}");
+    (!authority.is_empty() && !authority.contains('@') && is_word_like(scheme) && !looks_secret(&site)).then(|| first_line(&site, PATH_MAX))
+}
+
+/// A scheme: letters, digits and the few signs a scheme may have.
+fn is_word_like(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 12 && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
 }
 
 /// The first line of `s`, at most `max` characters, with the cut marked.
@@ -89,13 +97,22 @@ fn first_line(s: &str, max: usize) -> String {
 /// variable or flag with a value, or an authorization header.
 pub fn looks_secret(s: &str) -> bool {
     let lower = s.to_ascii_lowercase();
-    if lower.contains("authorization") || lower.contains("bearer ") || lower.contains("-----begin") {
+    if lower.contains("authorization") || lower.contains("bearer ") || lower.contains("-----begin") || has_userinfo(s) {
         return true;
     }
     if names_a_secret(&lower) {
         return true;
     }
     s.split(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '+'))).any(token_looks_secret)
+}
+
+/// A URL with user information (`scheme://user:password@host`): the part before the host can be a password.
+fn has_userinfo(s: &str) -> bool {
+    s.match_indices("://").any(|(at, _)| {
+        let rest = &s[at + 3..];
+        let authority = rest.split(|c: char| c == '/' || c == '?' || c == '#' || c.is_whitespace() || matches!(c, '\'' | '"')).next().unwrap_or("");
+        authority.contains('@')
+    })
 }
 
 /// `NAME=value`, `NAME: value` or `--name value` where the name is a secret's.
