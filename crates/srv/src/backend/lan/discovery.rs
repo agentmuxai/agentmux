@@ -230,6 +230,8 @@ pub struct LanInstance {
     /// advertise it (SPEC_SWARM_REMOTE_AGENTS_PLATFORM_TAG_AND_SELECTION_2026_10_03.md §3).
     #[serde(default)]
     pub os: String,
+    /// How the peer is installed (`InstallKind::label`, e.g. `windows-store`); empty when it predates advertising it.
+    #[serde(default)] pub install: String,
     pub address: String,
     pub port: u16,
     /// The peer's `lan_key`; never serialized, as no reader of the JSON needs it.
@@ -515,7 +517,7 @@ impl LanDiscovery {
             ("hostname", hostname.as_str()),
             ("instance_id", instance_id.as_str()),
             ("channel", channel.as_str()),
-            ("os", os.as_str()),
+            ("os", os.as_str()), ("install", crate::backend::update::check::install_kind().label()),
             ("auth_key", auth_key.as_str()),
         ];
         if let Some(id) = install_id.as_deref() {
@@ -874,7 +876,7 @@ impl LanDiscovery {
         // this instance over UDP can tell two channels on one host apart. An
         // extra field: older parsers (mobile included) ignore it.
         response["channel"] = json!(crate::backend::reactive::registry::local_channel_id());
-        response["os"] = json!(crate::backend::host_os::local_os());
+        response["os"] = json!(crate::backend::host_os::local_os()); response["install"] = json!(crate::backend::update::check::install_kind().label());
         // What a phone merges this install with its cloud record by, and how
         // many channels this machine runs, shared on the LAN or not
         // (agentmux-mobile's SPEC_FLEET_HOST_TAGS_AND_CLOUD_HOSTS_2026_10_06
@@ -1185,10 +1187,7 @@ impl LanDiscovery {
                     .unwrap_or_default()
                     .to_string();
                 // Self-reported by the peer, so only a plain token is kept.
-                let os = info
-                    .get_property_val_str("os")
-                    .and_then(crate::backend::host_os::sanitize_os)
-                    .unwrap_or_default();
+                let (os, install) = crate::backend::lan::peer_words::os_and_install(&info);
                 let other_ttl_secs = info.get_other_ttl();
 
                 let mut instances = self.instances.write();
@@ -1201,7 +1200,7 @@ impl LanDiscovery {
                     hostname: hostname.clone(),
                     version: version.clone(),
                     channel: channel.clone(),
-                    os: os.clone(),
+                    os: os.clone(), install: install.clone(),
                     address: address.clone(),
                     port: info.get_port(),
                     auth_key: auth_key.clone(),
@@ -1235,6 +1234,7 @@ impl LanDiscovery {
                 if !peer_id.is_empty() {
                     entry.instance_id = peer_id.clone();
                 }
+                crate::backend::lan::peer_words::keep_known(&mut entry.install, install);
                 if !hostname.is_empty() {
                     entry.hostname = hostname;
                 }
@@ -1974,7 +1974,7 @@ impl LanDiscoveryController {
             tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             loop {
                 tick.tick().await;
-                let Some(health) = self.health() else {
+                let Some(health) = self.health().map(mdns_health::corrected) else {
                     if self.is_wanted() {
                         // Wanted but no daemon: a rebuild whose new daemon failed to
                         // start. Retry, and keep the rebuild budget (no `reset`).

@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { availableRelease, loadAppUpdate, openVersionPanel } from "@/store/app-update";
+import { availableRelease, loadAppUpdate, openVersionPanel, updateOffered, useStoreOffer } from "@/store/app-update";
 import { atoms, getApi } from "@/store/global";
 import { onMount, Show, type JSX } from "solid-js";
 
@@ -10,7 +10,9 @@ import { onMount, Show, type JSX } from "solid-js";
 // (downloading, ready, …) are kept for a host that has one.
 const UpdateStatus = (): JSX.Element => {
     onMount(() => void loadAppUpdate());
-    const fromSrv = () => availableRelease();
+    useStoreOffer();
+    // A Store install shows the chip only once the Store itself lists the update.
+    const fromSrv = () => (updateOffered() ? availableRelease() : null);
     const updaterStatus = () => (fromSrv() ? "available" : atoms.updaterStatusAtom());
     const updaterVersion = () => fromSrv()?.version ?? atoms.updaterVersionAtom();
 

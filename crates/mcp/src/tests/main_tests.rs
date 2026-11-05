@@ -171,6 +171,16 @@ fn send_message_outcome_names_the_state_and_the_id() {
     assert!(t.ends_with(" id=inj-43") && !t.contains("  "), "{t:?}");
     let t = ok(json!({ "success": true, "request_id": "inj-44", "target_in_account": true }));
     assert!(!t.contains("signed in from your account"), "{t}");
+    // srv says which LAN peers it saw: the sender can tell at once the target is not on any of them.
+    let t = ok(json!({ "success": true, "request_id": "inj-45", "lan_peers": ["Area54/stable (Microsoft Store, no agents)", "charlie/stable"] }));
+    assert!(t.contains("Camper is not running on this machine or on any LAN peer"), "{t}");
+    assert!(t.contains("LAN peers: Area54/stable (Microsoft Store, no agents); charlie/stable"), "{t}");
+    assert!(t.contains("you get a note that it was never confirmed"), "{t}");
+    let t = ok(json!({ "success": true, "request_id": "inj-46", "lan_peers": [] }));
+    assert!(t.contains("(no LAN peers found)") && t.ends_with(" id=inj-46") && !t.contains("  "), "{t:?}");
+    // An srv that says nothing about peers adds no claim about them.
+    let t = ok(json!({ "success": true, "request_id": "inj-47" }));
+    assert!(!t.contains("LAN peer"), "{t}");
 
     let t = ok(json!({ "success": false, "held": true, "request_id": "1-2-3", "error": "agent Camper is not running" }));
     assert!(t.starts_with("HELD for Camper (not_running)"), "{t}");
