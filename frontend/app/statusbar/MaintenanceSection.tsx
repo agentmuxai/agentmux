@@ -11,6 +11,7 @@ import {
     recordStoreNone,
     setStoreStayed,
     releaseDownload,
+    releaseNotesUrl,
     startAppUpdateDownload,
     storeAnswer,
     storeOfferLine,
@@ -28,10 +29,6 @@ import { StoreUpdateNotes } from "./StoreUpdateNotes";
 
 // The host opens exactly this link (`external_url_allowed` in the CEF host).
 const MS_STORE_PAGE_URL = "ms-windows-store://pdp/?productid=9P9QCXNNCRK3";
-
-// What's new: the release's own page on GitHub, or the list of releases when the version isn't known.
-const releasesPageUrl = (version: string | null | undefined): string =>
-    version ? `https://github.com/agentmuxai/agentmux/releases/tag/v${version}` : "https://github.com/agentmuxai/agentmux/releases";
 
 // What to do with a Store install older than the release's upgrade floor.
 const STORE_MOVE_OFF_URL = "https://docs.agentmux.ai/installation/#moving-off-the-microsoft-store-build";
@@ -186,7 +183,7 @@ export const MaintenanceSection = (): JSX.Element => {
                         <span class="maintenance-row-text">
                             {storeLine() ?? (updaterVersion() ? `v${updaterVersion()} is out` : "Update available")}
                         </span>
-                        <Button density="compact" class="maintenance-btn" onClick={() => void openLink(releasesPageUrl(updaterVersion()))}>
+                        <Button density="compact" class="maintenance-btn" onClick={() => void openLink(releaseNotesUrl(updaterVersion()))}>
                             What's new
                         </Button>
                         <Show when={!storeBelowFloor() && storeOffers()}>

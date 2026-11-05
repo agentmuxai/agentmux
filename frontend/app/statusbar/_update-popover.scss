@@ -1,0 +1,39 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// The panel the status bar's "Restart to update" chip opens.
+
+@use "../element/popover-frame" as popoverFrame;
+
+.update-popover {
+    @include popoverFrame.readout-popover;
+
+    .update-popover-title {
+        @include popoverFrame.readout-popover-title;
+    }
+
+    .update-popover-note,
+    .update-popover-wait {
+        margin-top: var(--space-1);
+        font-size: var(--text-xs);
+        opacity: 0.8;
+    }
+
+    .update-popover-wait {
+        color: var(--warning-text-color);
+        opacity: 1;
+    }
+
+    .update-popover-error {
+        margin-top: var(--space-1);
+        font-size: var(--text-xs);
+        color: var(--error-text-color);
+    }
+
+    .update-popover-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: var(--space-1);
+        margin-top: var(--space-2);
+    }
+}

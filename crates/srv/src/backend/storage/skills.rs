@@ -953,9 +953,10 @@ mod effective_skills_tests {
             container_name: String::new(),
             use_ambient_login: 0,
             model_vendor_base_url: String::new(),
-            memory_id: memory_id.to_string(),
+            memory_id: String::new(),
         };
         store.agent_def_insert(&mut def).unwrap();
+        store.agent_bundles_set(id, &[memory_id.to_string()]).unwrap();
     }
 
     pub(super) fn insert_test_bundle(store: &Store, id: &str) {

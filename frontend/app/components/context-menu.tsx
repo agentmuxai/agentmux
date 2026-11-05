@@ -6,9 +6,8 @@
 // onSelect handlers. Single-level only — no submenus.
 
 import { createEffect, createSignal, onCleanup, type JSX } from "solid-js";
-import { Portal } from "solid-js/web";
+import { AnchoredPopover, pointAnchor } from "@/app/element/anchored-popover";
 import { menuIconClass } from "@/app/util/menu-icons";
-import { Z_TRANSIENT } from "@/app/zindex";
 import "./context-menu.scss";
 
 export interface ContextMenuItem {
@@ -27,6 +26,44 @@ interface Props {
     x: number;
     y: number;
     onClose: () => void;
+}
+
+function ContextMenuRow(props: {
+    item: ContextMenuItem;
+    hasIcons: boolean;
+    focused: boolean;
+    onPick: () => void;
+    onHover: () => void;
+}): JSX.Element {
+    const item = props.item;
+    return (
+        <div
+            class="ctx-menu-item"
+            classList={{
+                "ctx-menu-item--disabled": !!item.disabled,
+                "ctx-menu-item--danger": !!item.danger,
+                "ctx-menu-item--focused": props.focused,
+            }}
+            onPointerDown={(e) => {
+                e.stopPropagation();
+                if (!item.disabled) props.onPick();
+            }}
+            onPointerEnter={() => {
+                if (!item.disabled) props.onHover();
+            }}
+        >
+            <span class="ctx-menu-main">
+                {props.hasIcons &&
+                    (menuIconClass(item.icon) ? (
+                        <i class={menuIconClass(item.icon)!} aria-hidden="true" />
+                    ) : (
+                        <span class="menu-item-icon" aria-hidden="true" />
+                    ))}
+                <span class="ctx-menu-label">{item.label}</span>
+            </span>
+            {item.shortcut && <span class="ctx-menu-shortcut">{item.shortcut}</span>}
+        </div>
+    );
 }
 
 export function ContextMenu(props: Props): JSX.Element {
@@ -87,52 +124,43 @@ export function ContextMenu(props: Props): JSX.Element {
         });
     });
 
-    // Clamp to viewport so the menu never clips off-screen.
-    const style = (): JSX.CSSProperties => {
-        const x = Math.min(props.x, window.innerWidth - 260);
-        const y = Math.min(props.y, window.innerHeight - 400);
-        return { position: "fixed", left: `${x}px`, top: `${y}px`, "z-index": Z_TRANSIENT };
-    };
+    // The cursor is a point (a zero-size rect) AnchoredPopover opens the menu at, flipping or shifting to stay in
+    // the window; it follows chrome zoom and cuts the hole in any browser pane behind it.
+    const point = pointAnchor(props.x, props.y);
 
     return (
-        <Portal>
-            <div ref={(el) => { menuRef = el; }} class="ctx-menu" style={style()} tabIndex={-1}>
-                {props.items.map((item, i) =>
-                    item.type === "separator" ? (
-                        <div class="ctx-menu-sep" />
-                    ) : (
-                        <div
-                            class="ctx-menu-item"
-                            classList={{
-                                "ctx-menu-item--disabled": !!item.disabled,
-                                "ctx-menu-item--danger": !!item.danger,
-                                "ctx-menu-item--focused": focusedIdx() === i,
-                            }}
-                            onPointerDown={(e) => {
-                                e.stopPropagation();
-                                if (!item.disabled) {
-                                    item.onSelect?.();
-                                    props.onClose();
-                                }
-                            }}
-                            onPointerEnter={() => { if (!item.disabled) setFocusedIdx(i); }}
-                        >
-                            <span class="ctx-menu-main">
-                                {hasIcons() &&
-                                    (menuIconClass(item.icon) ? (
-                                        <i class={menuIconClass(item.icon)!} aria-hidden="true" />
-                                    ) : (
-                                        <span class="menu-item-icon" aria-hidden="true" />
-                                    ))}
-                                <span class="ctx-menu-label">{item.label}</span>
-                            </span>
-                            {item.shortcut && (
-                                <span class="ctx-menu-shortcut">{item.shortcut}</span>
-                            )}
-                        </div>
-                    )
-                )}
-            </div>
-        </Portal>
+        <AnchoredPopover
+            anchor={point}
+            placement="bottom-start"
+            gutter={0}
+            fitHeight
+            hideUntilPlaced
+            // It cannot take focus while hidden: arrow keys work from the moment it is shown.
+            onShown={() => menuRef?.focus()}
+            overlayKeys
+            shellClass="anchored-popover--menu"
+            class="ctx-menu"
+            ref={(el) => {
+                menuRef = el;
+                el.tabIndex = -1;
+            }}
+        >
+            {props.items.map((item, i) =>
+                item.type === "separator" ? (
+                    <div class="ctx-menu-sep" />
+                ) : (
+                    <ContextMenuRow
+                        item={item}
+                        hasIcons={hasIcons()}
+                        focused={focusedIdx() === i}
+                        onPick={() => {
+                            item.onSelect?.();
+                            props.onClose();
+                        }}
+                        onHover={() => setFocusedIdx(i)}
+                    />
+                )
+            )}
+        </AnchoredPopover>
     );
 }

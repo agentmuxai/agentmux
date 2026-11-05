@@ -11,7 +11,7 @@
 // taken is listed with the reason and the next free id; "Use <id>" (or an id of
 // the user's own) gives it that one, as the spec asks: never picked silently.
 
-import { createSignal, For, onMount, Show, type JSX } from "solid-js";
+import { createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 
 import { ConfirmModal } from "@/app/element/confirm-modal";
 import { Button, TextInput } from "@/app/element/ui";
@@ -69,6 +69,57 @@ export function planLine(plan: ForkSlugPlan): string {
     return `${base} ${refused} can't be updated yet: pick another id below.`;
 }
 
+/** A plan this old is shown again, when the card comes back into view. */
+export const RECHECK_AFTER_MS = 2000;
+
+/** Whether coming back into view (the Settings tab shown again, the window focused) should read the
+ *  plan again: only when nothing is under way, and the plan on screen isn't from the last moment. The
+ *  tab stays mounted while hidden, so without this it shows what was true when it was first opened. */
+export function shouldRecheck(phase: Phase, loadedAt: number, now: number): boolean {
+    return phase === "idle" && now - loadedAt >= RECHECK_AFTER_MS;
+}
+
+/** `load`, which also runs again when the user comes back to the card (the window focused, the tab
+ *  visible, the card scrolled into view): the plan changes under it (an agent stopped, a pane closed
+ *  elsewhere) and the user acts on what it says. */
+function reloadOnReturn<T>(phase: () => Phase, cardId: string, load: () => Promise<T | null>): () => Promise<T | null> {
+    let loadedAt = 0;
+    let reading = 0;
+    // The caller gets `load`'s own promise: a wrapper that awaited it would answer a tick later. The
+    // plan's age counts from when the read started, and a read is never started while another is under way.
+    const stamped = (): Promise<T | null> => {
+        loadedAt = Date.now();
+        reading++;
+        const loading = load();
+        void loading.finally(() => reading--);
+        return loading;
+    };
+    const recheck = () => {
+        if (reading === 0 && shouldRecheck(phase(), loadedAt, Date.now())) void stamped();
+    };
+    onMount(() => {
+        const onVisible = () => {
+            if (document.visibilityState === "visible") recheck();
+        };
+        window.addEventListener("focus", recheck);
+        document.addEventListener("visibilitychange", onVisible);
+        const card = document.getElementById(cardId);
+        const seen =
+            typeof IntersectionObserver === "undefined" || !card
+                ? undefined
+                : new IntersectionObserver((entries) => {
+                      if (entries.some((e) => e.isIntersecting)) recheck();
+                  });
+        if (card) seen?.observe(card);
+        onCleanup(() => {
+            window.removeEventListener("focus", recheck);
+            document.removeEventListener("visibilitychange", onVisible);
+            seen?.disconnect();
+        });
+    });
+    return stamped;
+}
+
 function call(mode: ForkSlugMigrationMode, journal?: string, choices?: ForkSlugChoice[]): Promise<MigrateForkSlugsResult> {
     const data = { mode, ...(journal ? { journal } : {}), ...(choices && choices.length > 0 ? { choices } : {}) };
     return RpcApi.AgentsMigrateForkSlugsCommand(TabRpcClient, data);
@@ -88,7 +139,7 @@ export function ForkSlugMigration(): JSX.Element {
     const [customFor, setCustomFor] = createSignal<string | null>(null);
     const [customId, setCustomId] = createSignal("");
 
-    const load = async (): Promise<ForkSlugPlan | null> => {
+    const load = reloadOnReturn(phase, `setting-${FORK_SLUG_SETTING.id}`, async (): Promise<ForkSlugPlan | null> => {
         try {
             const p = (await call("plan", undefined, chosen())).plan ?? null;
             setPlan(p);
@@ -97,7 +148,7 @@ export function ForkSlugMigration(): JSX.Element {
             setError(`Couldn't check the agent ids: ${errorText(e)}`);
             return null;
         }
-    };
+    });
     onMount(async () => {
         await load();
         setPhase("idle");
