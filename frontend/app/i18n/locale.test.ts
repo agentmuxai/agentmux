@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { negotiateLocale, requestedLocales } from "./locale";
+import { formatLocaleOf, negotiateLocale, nativeName, requestedLocales } from "./locale";
 
 const SHIPPED = ["en", "ja", "zh-Hans", "pt-BR"];
 
@@ -56,5 +56,28 @@ describe("requestedLocales", () => {
     it("uses the chosen tag alone", () => {
         expect(requestedLocales("ja", system)).toEqual(["ja"]);
         expect(requestedLocales(" pt-BR ", system)).toEqual(["pt-BR"]);
+    });
+});
+
+describe("formatLocaleOf", () => {
+    it("is the chosen tag, and undefined for system, the pseudo-locale and anything unusable", () => {
+        expect(formatLocaleOf("ja")).toBe("ja");
+        expect(formatLocaleOf(" pt-BR ")).toBe("pt-BR");
+        expect(formatLocaleOf("system")).toBeUndefined();
+        expect(formatLocaleOf(undefined)).toBeUndefined();
+        expect(formatLocaleOf("en-XA")).toBeUndefined();
+        expect(formatLocaleOf("not a tag!!")).toBeUndefined();
+    });
+});
+
+describe("nativeName", () => {
+    it("names a language in itself", () => {
+        expect(nativeName("ja")).toBe("日本語");
+        expect(nativeName("de")).toBe("Deutsch");
+        expect(nativeName("pt-BR")).toMatch(/^Português/);
+        expect(nativeName("en")).toBe("English");
+    });
+    it("falls back to the tag for one it cannot name", () => {
+        expect(nativeName("not a tag!!")).toBe("not a tag!!");
     });
 });

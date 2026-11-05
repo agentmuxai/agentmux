@@ -16,6 +16,7 @@ import type { InputHistoryItem } from "@/types/rpc/InputHistoryItem";
 import { createEffect, createSignal, For, on, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { clearInputHistory, forgetInputHistoryEntry } from "../agent-input-history";
 import { tip } from "@/app/element/tip";
+import { formatLocale } from "@/app/i18n/i18n";
 import { formatTimeOrDate } from "@/util/format-time";
 
 const LIMIT = 50;
@@ -23,8 +24,8 @@ const LIMIT = 50;
 const SEARCH_DELAY_MS = 120;
 
 /** "14:05", "Oct 3", for when an entry was last sent. */
-function sentAt(ms: number, now = new Date()): string {
-    return formatTimeOrDate(ms, now);
+function sentAt(ms: number, now = new Date(), locale?: string): string {
+    return formatTimeOrDate(ms, now, locale);
 }
 
 export function InputHistorySearch(props: {
@@ -150,7 +151,7 @@ export function InputHistorySearch(props: {
                             <span class="input-history-search__text">{item.text.split("\n")[0]}</span>
                             <span class="input-history-search__meta">
                                 {item.sends > 1 ? `${item.sends}× · ` : ""}
-                                {sentAt(item.sent_at_ms)}
+                                {sentAt(item.sent_at_ms, new Date(), formatLocale())}
                             </span>
                         </div>
                     )}

@@ -10,6 +10,7 @@ import { createEffect, createSignal, For, Show, type JSX } from "solid-js";
 import { Button } from "@/app/element/ui";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { formatLocale } from "@/app/i18n/i18n";
 import { measuredAgo } from "@/app/statusbar/HistoryUsagePopover";
 import type { HistoryCompression } from "@/types/rpc/HistoryCompression";
 import type { HistoryReclaim } from "@/types/rpc/HistoryReclaim";
@@ -198,7 +199,7 @@ export const HistoryStorage = (props: { visible: boolean }): JSX.Element => {
                             )}
                         </Show>
                         <div class="warden-history-bar">
-                            <span class="warden-manager-dim">Measured {measuredAgo(u().computed_at_ms, Date.now())}</span>
+                            <span class="warden-manager-dim">Measured {measuredAgo(u().computed_at_ms, Date.now(), formatLocale())}</span>
                             <Button tone="quiet" density="compact" busy={loading()} onClick={() => void load(true)}>
                                 {loading() ? "Measuring…" : "Measure again"}
                             </Button>

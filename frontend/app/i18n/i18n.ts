@@ -4,12 +4,11 @@
 // The app's translations: `t("area.thing.label")` in a component is reactive, so a change of language
 // re-renders it. English is bundled; every other language is its own file in `locales/` and is fetched when
 // first needed, so a person loads one language and no other.
-import { createRoot } from "solid-js";
+import { createEffect, createRoot, createSignal } from "solid-js";
 import { isDev } from "@/app/store/misc-utils";
-import { getSettingsKeyAtom } from "@/store/global";
 import en from "./locales/en.json";
 import { createI18n } from "./i18n-store";
-import { PSEUDO_LOCALE } from "./locale";
+import { formatLocaleOf, PSEUDO_LOCALE } from "./locale";
 import { pseudoDict } from "./pseudo";
 import type { Dict } from "./translate";
 
@@ -25,12 +24,25 @@ function tagOf(path: string): string {
 
 const loaders = new Map(Object.entries(files).map(([path, load]) => [tagOf(path), load]));
 
-/** The languages that can be picked besides English: the files present, and the pseudo-locale in a dev build. */
-export const SUPPORTED_LOCALES: readonly string[] = [...loaders.keys(), ...(isDev() ? [PSEUDO_LOCALE] : [])];
+/** The languages that ship besides English: the dictionary files present. */
+export const SHIPPED_LOCALES: readonly string[] = [...loaders.keys()];
 
-const i18n = createRoot(() =>
-    createI18n({
-        setting: getSettingsKeyAtom(APP_LOCALE_KEY),
+/** What `app:locale` can name: the shipped languages and the pseudo-locale (listed in the picker only in dev mode). */
+export const SUPPORTED_LOCALES: readonly string[] = [...SHIPPED_LOCALES, PSEUDO_LOCALE];
+
+// Where the setting is read from: bound once at startup (app-init), so this module needs no store of its own.
+const [reader, setReader] = createSignal<() => unknown>(() => undefined);
+
+/** Point the translations at the `app:locale` setting, a reactive getter. Called once, when the app starts. */
+export function bindAppLocaleSetting(read: () => unknown): void {
+    setReader(() => read);
+}
+
+const setting = (): unknown => reader()();
+
+const i18n = createRoot(() => {
+    const store = createI18n({
+        setting,
         systemLanguages: () => (typeof navigator === "undefined" ? [] : navigator.languages),
         source: en,
         supported: SUPPORTED_LOCALES,
@@ -43,10 +55,18 @@ const i18n = createRoot(() =>
         onMissing: (key) => {
             if (isDev()) console.warn(`[i18n] missing key: ${key}`);
         },
-    })
-);
+    });
+    // The page's language follows the app's: screen readers pick a voice by it, and `:lang()` picks fonts.
+    createEffect(() => {
+        if (typeof document !== "undefined") document.documentElement.lang = store.locale();
+    });
+    return store;
+});
 
 export const t = i18n.t;
 
-/** The language in effect, for `<html lang>` and for the formatters. Reactive. */
+/** The language of the app's own text in effect (a shipped language, or English). Reactive. */
 export const appLocale = i18n.locale;
+
+/** The locale for dates, times and numbers: the chosen tag, or undefined to let the browser's regional format apply. Reactive. */
+export const formatLocale = (): string | undefined => formatLocaleOf(setting());
