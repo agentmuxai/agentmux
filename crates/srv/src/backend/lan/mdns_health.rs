@@ -74,10 +74,6 @@ pub const PEER_PROOF_WINDOW_MS: u64 = 15 * 60 * 1000;
 /// LAN (Unix ms; 0 for never).
 static LAST_INBOUND_PEER_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-fn now_ms() -> u64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
-}
-
 /// Whether a request from `peer` is another machine reaching us (not this host talking to itself).
 pub fn is_remote_peer(peer: IpAddr) -> bool {
     !peer.is_loopback() && !peer.is_unspecified()
@@ -88,7 +84,7 @@ pub fn is_remote_peer(peer: IpAddr) -> bool {
 /// bind it too), but a peer that got through has shown it can find us.
 pub fn note_inbound_peer(peer: IpAddr) {
     if is_remote_peer(peer) {
-        LAST_INBOUND_PEER_MS.store(now_ms(), std::sync::atomic::Ordering::Relaxed);
+        LAST_INBOUND_PEER_MS.store(agentmux_common::time::now_ms_u64(), std::sync::atomic::Ordering::Relaxed);
     }
 }
 
@@ -114,7 +110,7 @@ pub fn with_peer_proof(health: MdnsHealth, last_inbound_peer_ms: Option<u64>, no
 
 /// [`with_peer_proof`] with the clock and the recorded contact.
 pub fn corrected(health: MdnsHealth) -> MdnsHealth {
-    with_peer_proof(health, last_inbound_peer_ms(), now_ms())
+    with_peer_proof(health, last_inbound_peer_ms(), agentmux_common::time::now_ms_u64())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
