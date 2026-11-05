@@ -337,6 +337,28 @@ async fn quit_and_relaunch_reopens_every_window_and_lists_none_closed() {
 }
 
 #[tokio::test]
+async fn a_save_marked_as_a_quit_without_its_background_work_keeps_every_window_through_the_closes() {
+    let state = fresh_state().await;
+    let main = open_window(&state, "main", false).await;
+    add_user_pane(&state, &main.workspaceid, "term").await;
+    let second = open_window(&state, "window-2", false).await;
+    add_user_pane(&state, &second.workspaceid, "term").await;
+
+    // A Store update's save: a quit's record (arg 0) that skips the quit's background-work record (arg 1).
+    let ret = handle_save_session_snapshot(&state, &call("SaveSessionSnapshot", vec![json!(true), json!(false)])).await;
+    assert!(ret.success, "{:?}", ret.error);
+    close(&state, &second.oid).await;
+    close(&state, &main.oid).await;
+    assert!(exists(&state, &main.workspaceid) && exists(&state, &second.workspaceid));
+
+    let relaunched = open_window(&state, "main", true).await;
+    assert_eq!(relaunched.workspaceid, main.workspaceid);
+    let others = rpc(&state, "TakeRestoredWindows", vec![]).await.data.unwrap();
+    assert_eq!(others.as_array().unwrap().len(), 1, "the other window comes back too, not only the last one closed");
+    assert_eq!(others[0]["workspaceid"], json!(second.workspaceid));
+}
+
+#[tokio::test]
 async fn a_cold_start_keeps_closed_windows_closed() {
     let state = fresh_state().await;
     let main = open_window(&state, "main", false).await;

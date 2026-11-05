@@ -328,11 +328,14 @@ pub(crate) async fn handle_save_session_snapshot(
         .ok()
         .flatten()
         .unwrap_or(false);
+    // Arg 1 (default true): whether a quit's save also records the agents' background work. A Store
+    // update's save is marked as a quit's (its closes keep the record) but is no quit until the app closes.
+    let run_at_quit = crate::backend::service::get_optional_arg::<bool>(&call.args, 1).ok().flatten().unwrap_or(true);
     let result = flush_snapshot(store, for_quit);
     // A quit closes every pane, and with them what agents left running:
     // record it for their note, and let another AgentMux among it save its
     // own session first (`background_work`). After this session's own save.
-    if for_quit {
+    if for_quit && run_at_quit {
         crate::backend::background_work::at_quit().await;
     }
     result
