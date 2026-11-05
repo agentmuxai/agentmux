@@ -1,0 +1,61 @@
+== +500ms a tool just started (timers: 3)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "|"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+      "Build it"
+  <div class="agent-working-row-right">
+    "0s"
+== +30500ms a tool running a while (timers: 3)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "-"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+      "Running the srv tests · 30s"
+  <span class="agent-working-row-operation">
+    <div class="activity-animation-tip">
+      <span aria-hidden="true" class="activity-animation" data-bucket="test">
+    <span>
+      "Testing 30s"
+  <div class="agent-working-row-right">
+    "30s"
+== +150500ms a long while (timers: 3)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "-"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+      "Running the srv tests · 2m 30s"
+  <span class="agent-working-row-operation">
+    <div class="activity-animation-tip">
+      <span aria-hidden="true" class="activity-animation" data-bucket="test">
+    <span>
+      "Testing 2m 30s"
+  <div class="agent-working-row-right">
+    "2m 30s"
+== +151500ms a subagent's call does not count (timers: 3)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "-"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+      "Running the srv tests · 3m 20s"
+  <div class="agent-working-row-right">
+    "2m 31s"
+== +152500ms needing you outranks it (timers: 3)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "-"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+      "Approve?"
+  <span class="agent-working-row-operation">
+    <div class="activity-animation-tip">
+      <span aria-hidden="true" class="activity-animation" data-bucket="wait">
+        "(O)"
+    <span>
+      "Waiting"
+  <div class="agent-working-row-right">
+    "2m 32s"

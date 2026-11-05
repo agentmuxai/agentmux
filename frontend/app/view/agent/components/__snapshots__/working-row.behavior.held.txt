@@ -1,0 +1,160 @@
+== +3000ms live (timers: 3)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "/"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+      "Ship it"
+  <div class="agent-working-row-right">
+    "3s"
+== +6000ms needs you (timers: 3)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "-"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+      "Waiting for your approval: git push"
+  <span class="agent-working-row-operation">
+    <div class="activity-animation-tip">
+      <span aria-hidden="true" class="activity-animation" data-bucket="wait">
+        "(o)"
+    <span>
+      "Waiting"
+  <div class="agent-working-row-right">
+    "6s"
+== +9000ms rate limited, with a countdown (timers: 3)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "\"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+      "Rate limited — retrying in 1m 27s"
+  <span class="agent-working-row-operation">
+    <div class="activity-animation-tip">
+      <span aria-hidden="true" class="activity-animation" data-bucket="hold">
+        "zZz"
+    <span>
+      "Held"
+  <div class="agent-working-row-right">
+    "9s"
+== +10000ms a second later (timers: 3)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "\"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+      "Rate limited — retrying in 1m 26s"
+  <span class="agent-working-row-operation">
+    <div class="activity-animation-tip">
+      <span aria-hidden="true" class="activity-animation" data-bucket="hold">
+        "z"
+    <span>
+      "Held"
+  <div class="agent-working-row-right">
+    "10s"
+== +13000ms rate limited, no countdown (timers: 3)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "|"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+      "Rate limited — retrying…"
+  <span class="agent-working-row-operation">
+    <div class="activity-animation-tip">
+      <span aria-hidden="true" class="activity-animation" data-bucket="hold">
+    <span>
+      "Held"
+  <div class="agent-working-row-right">
+    "13s"
+== +16000ms stopping (timers: 3)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "/"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+      "Stopping…"
+  <div class="agent-working-row-right">
+    "16s"
+== +19000ms waiting for the login link: cancel offered (timers: 3)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "-"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+      "Waiting for login link… up to 12s"
+  <div class="agent-working-row-right">
+    "19s"
+    <button type="button" class="ui-button ui-tone-quiet ui-button--link agent-working-row-cancel-login">
+      "Cancel"
+cancel clicks: 1
+== +22000ms a URL was captured: no cancel (timers: 3)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "\"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+      "Waiting for login link… up to 9s"
+  <div class="agent-working-row-right">
+    "22s"
+== +25000ms opening the login terminal (timers: 3)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "|"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+      "Opening login terminal"
+  <div class="agent-working-row-right">
+    "25s"
+    <button type="button" class="ui-button ui-tone-quiet ui-button--link agent-working-row-cancel-login">
+      "Cancel"
+== +28000ms waiting for login completion (timers: 3)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "/"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+      "Waiting for you to finish logging in… up to 4m 57s"
+  <div class="agent-working-row-right">
+    "28s"
+    <button type="button" class="ui-button ui-tone-quiet ui-button--link agent-working-row-cancel-login">
+      "Cancel"
+== +31000ms first login (timers: 3)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "-"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+      "Sign-in required"
+  <div class="agent-working-row-right">
+    "31s"
+    <button type="button" class="ui-button ui-tone-quiet ui-button--link agent-working-row-cancel-login">
+      "Cancel"
+== +34000ms auth expired (timers: 3)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "\"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+      "Login expired — sign in required"
+  <div class="agent-working-row-right">
+    "34s"
+    <button type="button" class="ui-button ui-tone-quiet ui-button--link agent-working-row-cancel-login">
+      "Cancel"
+== +37000ms verifying: not cancellable (timers: 3)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "|"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+      "Verifying login"
+  <div class="agent-working-row-right">
+    "37s"
+== +40000ms no cancel handler (timers: 3)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "/"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+      "Resolving CLI"
+  <div class="agent-working-row-right">
+    "40s"
