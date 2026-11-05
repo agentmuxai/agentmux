@@ -89,7 +89,7 @@ The signing scheme is the widget one (`SPEC_WIDGET_SHARING` §2: `pack.sig`, Ed2
 
 ## 6. The MCP pointer
 
-A pack says "use catalog entry `ableton-mcp`", not "run this command". The MCP tab installs and approves it as today; the pack's `verified` records say which server version they were tested with. If the entry is not installed, the pack's `SKILL.md` says to continue down the ladder, and Memory shows "plug-in not installed" (§8).
+A pack says "use catalog entry `ableton-live`" (the MCP catalog's id; its server package is `ableton-mcp`), not "run this command". The MCP tab installs and approves it as today; the pack's `verified` records say which server version they were tested with. If the entry is not installed, the pack's `SKILL.md` says to continue down the ladder, and Memory shows "plug-in not installed" (§8).
 
 ## 7. Proof: the test task and who runs it
 
