@@ -198,40 +198,20 @@ interface DocumentNodeBodyProps {
     dispatchMatches?: Accessor<Map<string, AgentDispatch>>;
 }
 
-/**
- * Routes a DocumentNode to the right block component. Each branch
- * accesses props.node() reactively so streaming updates and state-set
- * toggles propagate without remount.
- *
- * Reactivity discipline (carried over from the original
- * DocumentNodeRenderer comment): never destructure props in this
- * function. The pinned state (`documentState().pinnedNodes`) lives in
- * documentState (separate from the document array that the parent <For>
- * keys off), so a destructured pinned value would stay stale forever even
- * though ToolBlock uses props.pinned correctly. See PR #346.
- */
-function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
+/** What the node body and the functions that serve it share. */
+interface NodeBodyState {
+    props: DocumentNodeBodyProps;
+    disclosure: () => ReturnType<typeof rowDisclosureIn>;
+    onExpand: () => void;
+    peek: RowPeek;
+    dispatchMatch: Accessor<AgentDispatch | undefined>;
+}
+
+function createNodeBodyState(props: DocumentNodeBodyProps): NodeBodyState {
     // The message rows (agent message, jekt, context delivery) take their open
     // state and their click from the shared rule, as the `e` key does.
     const disclosure = () => rowDisclosureIn(props.node(), props.documentState());
     const onExpand = (): void => flipRow(props.node(), props.documentState(), props);
-    // SolidJS <Show> with keyed:false (the default) calls the child
-    // factory ONCE when `when` first becomes truthy and never re-runs
-    // it. The previous version of this function was:
-    //
-    //   <Show when={props.node()}>{(n) => { const node = n(); switch ...}}
-    //
-    // which captured a one-time `node = n()` snapshot. Streaming token
-    // updates and tool transitions (running → success, etc.) silently
-    // failed to propagate to ToolBlock / AgentMessageBlock until the
-    // row remounted — defeating the whole streaming buffer.
-    //
-    // Use separate <Show when={node.type === "X"}> branches per kind.
-    // Each branch reads props.node() reactively at every prop site, so
-    // the matching branch's children update when the underlying node
-    // changes. This was committed on the Phase 2 PR but landed after
-    // the squash-merge cutoff — adding back as a follow-up.
-
     // Peek tooltip for the node kinds still rendered INLINE below
     // (section/agent_error/context_compacted/compaction_started/
     // day_divider/session_outcome) — SPEC_TRANSCRIPT_NODE_HOVER_PEEK_ALL_KINDS_2026_08_25.
@@ -263,6 +243,28 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
         return n ? props.dispatchMatches?.().get(n.id) : undefined;
     });
 
+    return { props, disclosure, onExpand, peek, dispatchMatch };
+}
+
+// SolidJS <Show> with keyed:false (the default) calls the child
+// factory ONCE when `when` first becomes truthy and never re-runs
+// it. The previous version of this function was:
+//
+//   <Show when={props.node()}>{(n) => { const node = n(); switch ...}}
+//
+// which captured a one-time `node = n()` snapshot. Streaming token
+// updates and tool transitions (running → success, etc.) silently
+// failed to propagate to ToolBlock / AgentMessageBlock until the
+// row remounted — defeating the whole streaming buffer.
+//
+// Use separate <Show when={node.type === "X"}> branches per kind.
+// Each branch reads props.node() reactively at every prop site, so
+// the matching branch's children update when the underlying node
+// changes. This was committed on the Phase 2 PR but landed after
+// the squash-merge cutoff — adding back as a follow-up.
+
+function renderMessageRows(s: NodeBodyState): JSX.Element {
+    const { props } = s;
     return (
         <>
             <Show when={props.node() && props.node().type === "markdown"}>
@@ -290,21 +292,21 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                     onHoldOpen={() => props.onHoldNodeOpen?.(props.node().id)}
                     userCollapsed={props.documentState().collapsedNodes.has(props.node().id)}
                     onToggleCollapse={() => props.onToggleCollapse(props.node().id)}
-                    dispatchMatch={dispatchMatch()}
+                    dispatchMatch={s.dispatchMatch()}
                 />
             </Show>
             <Show when={props.node() && props.node().type === "agent_message"}>
                 <AgentMessageBlock
                     node={props.node() as Extract<DocumentNode, { type: "agent_message" }>}
-                    collapsed={!disclosure().open}
-                    onToggle={onExpand}
+                    collapsed={!s.disclosure().open}
+                    onToggle={s.onExpand}
                 />
             </Show>
             <Show when={props.node() && props.node().type === "jekt_message"}>
                 <OriginContainer
                     node={props.node() as Extract<DocumentNode, { type: "jekt_message" }>}
-                    collapsed={!disclosure().open}
-                    onToggle={onExpand}
+                    collapsed={!s.disclosure().open}
+                    onToggle={s.onExpand}
                     onHoldOpen={() => props.onHoldNodeOpen?.(props.node().id)}
                 />
             </Show>
@@ -314,8 +316,8 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
             <Show when={props.node() && props.node().type === "context_delivery"}>
                 <ContextDeliveryCard
                     node={props.node() as ContextDeliveryNode}
-                    collapsed={!disclosure().open}
-                    onToggle={onExpand}
+                    collapsed={!s.disclosure().open}
+                    onToggle={s.onExpand}
                 />
             </Show>
             <Show when={props.node() && props.node().type === "user_message"}>
@@ -335,20 +337,28 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                     onTogglePin={() => props.onTogglePin(props.node().id)}
                 />
             </Show>
+        </>
+    );
+}
+
+function renderInlineRows(s: NodeBodyState): JSX.Element {
+    const { props } = s;
+    return (
+        <>
             <Show when={props.node() && props.node().type === "agent_error"}>
-                <AgentErrorRow node={props.node} peek={peek} onAgentErrorLogin={props.onAgentErrorLogin} />
+                <AgentErrorRow node={props.node} peek={s.peek} onAgentErrorLogin={props.onAgentErrorLogin} />
             </Show>
             <Show when={props.node() && props.node().type === "context_compacted"}>
-                <ContextCompactedRow node={props.node} peek={peek} />
+                <ContextCompactedRow node={props.node} peek={s.peek} />
             </Show>
             <Show when={props.node() && props.node().type === "compaction_started"}>
-                <CompactionStartedRow node={props.node} peek={peek} />
+                <CompactionStartedRow node={props.node} peek={s.peek} />
             </Show>
             <Show when={props.node() && props.node().type === "memory_reinjection"}>
-                <MemoryReinjectionRow node={props.node} peek={peek} />
+                <MemoryReinjectionRow node={props.node} peek={s.peek} />
             </Show>
             <Show when={props.node() && props.node().type === "day_divider"}>
-                <DayDividerRow node={props.node} peek={peek} />
+                <DayDividerRow node={props.node} peek={s.peek} />
             </Show>
             {/* history_link intentionally has no peek — a render-time synthetic
                 CTA row (id "history-link" at the top of the feed, or
@@ -368,11 +378,34 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                 <ResumePreflightRow node={props.node} onOpenHistory={props.onOpenHistory} />
             </Show>
             <Show when={props.node() && props.node().type === "session_outcome"}>
-                <SessionOutcomeRow node={props.node} peek={peek} />
+                <SessionOutcomeRow node={props.node} peek={s.peek} />
             </Show>
             <Show when={props.node() && props.node().type === "cli_notice"}>
                 <CliNoticeRow node={props.node} />
             </Show>
+        </>
+    );
+}
+
+/**
+ * Routes a DocumentNode to the right block component. Each branch
+ * accesses props.node() reactively so streaming updates and state-set
+ * toggles propagate without remount.
+ *
+ * Reactivity discipline (carried over from the original
+ * DocumentNodeRenderer comment): never destructure props in this
+ * function. The pinned state (`documentState().pinnedNodes`) lives in
+ * documentState (separate from the document array that the parent <For>
+ * keys off), so a destructured pinned value would stay stale forever even
+ * though ToolBlock uses props.pinned correctly. See PR #346.
+ */
+function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
+    const s = createNodeBodyState(props);
+
+    return (
+        <>
+            {renderMessageRows(s)}
+            {renderInlineRows(s)}
         </>
     );
 }
