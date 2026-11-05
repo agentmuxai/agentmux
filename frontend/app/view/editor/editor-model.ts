@@ -1210,18 +1210,13 @@ export class EditorViewModel {
 
     /** Delete a file or folder, closing any open tabs that were pointing to it.
      *
-     *  When `confirmNeeded` is provided, the caller is responsible for showing
-     *  a confirmation UI. It receives a `proceed` callback — call it to execute
-     *  the delete; not calling it aborts. When omitted, falls back to
-     *  `window.confirm` (for programmatic or non-UI callers). */
+     *  The caller is responsible for showing a confirmation UI. `confirmNeeded` receives a `proceed` callback — call it to execute
+     *  the delete; not calling it aborts. */
     async deleteFile(
         path: string,
         recursive: boolean,
-        confirmNeeded?: (proceed: () => void) => void,
+        confirmNeeded: (proceed: () => void) => void,
     ): Promise<void> {
-        const label = recursive ? "folder and all its contents" : "file";
-        const name = path.split(/[/\\]/).pop() ?? path;
-
         const doDelete = async () => {
             try {
                 await RpcApi.DeleteEditorFileCommand(TabRpcClient, { path, recursive });
@@ -1240,12 +1235,7 @@ export class EditorViewModel {
             }
         };
 
-        if (confirmNeeded) {
-            confirmNeeded(() => void doDelete());
-        } else {
-            if (!window.confirm(`Delete ${name} (${label})? This cannot be undone.`)) return;
-            await doDelete();
-        }
+        confirmNeeded(() => void doDelete());
     }
 
     /** Create an empty file in the tree. Opens it as a preview tab on success. */

@@ -8,7 +8,7 @@
 
 import { createSignal, onCleanup, onMount, Show, type Accessor, type JSX } from "solid-js";
 import { ContextMenu } from "@/app/components/context-menu";
-import { ConfirmDialog } from "@/app/components/confirm-dialog";
+import { ConfirmModal } from "@/app/element/confirm-modal";
 import { DocTabStrip } from "@/app/doc-tabs/DocTabStrip";
 import type { DocTabsModel } from "@/app/doc-tabs/doc-tabs-controller";
 import type { EditorBuffer } from "@/app/store/editor-pane-state-store";
@@ -407,10 +407,13 @@ function EditorDialogs(props: { tree: TreeMenu }): JSX.Element {
             {/* Delete confirmation modal — replaces window.confirm() */}
             <Show when={tree.deleteConfirm()}>
                 {(dc) => (
-                    <ConfirmDialog
+                    <ConfirmModal
+                        open={true}
+                        scope="pane"
                         title={dc().title}
-                        message={dc().message}
+                        description={dc().message}
                         confirmLabel={dc().confirmLabel ?? "Delete"}
+                        destructive
                         onConfirm={() => { dc().onConfirm(); tree.setDeleteConfirm(null); }}
                         onCancel={() => tree.setDeleteConfirm(null)}
                     />

@@ -13,7 +13,7 @@
  */
 
 import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
-import { ConfirmDialog } from "@/app/components/confirm-dialog";
+import { ConfirmModal } from "@/app/element/confirm-modal";
 import { ContextMenu, type ContextMenuItem } from "@/app/components/context-menu";
 import { formatBytes } from "@/util/format-bytes";
 import { holdPaneContent, trackPaneContent } from "@/app/store/pane-content-holds";
@@ -802,9 +802,9 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
             </Show>
             <Show when={confirm()}>
                 {(c) => (
-                    <ConfirmDialog
-                        title={c().title}
-                        message={c().message}
+                    <ConfirmModal
+                        open={true} scope="pane" destructive
+                        title={c().title} description={c().message}
                         confirmLabel={c().confirmLabel}
                         onConfirm={() => {
                             c().onConfirm();
