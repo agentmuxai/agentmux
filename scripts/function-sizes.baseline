@@ -277,7 +277,7 @@
 102 crates/srv/src/sagas/redock_floating_pane.rs::run
 108 crates/srv/src/server/agent_handlers/container_turn.rs::ContainerStartup::run_reporting
 717 crates/srv/src/server/agent_handlers/core.rs::register
-830 crates/srv/src/server/agent_handlers/identity.rs::register
+829 crates/srv/src/server/agent_handlers/identity.rs::register
 775 crates/srv/src/server/agent_handlers/session.rs::register
 143 crates/srv/src/server/agent_handlers/template.rs::copy_definition
 153 crates/srv/src/server/agent_handlers/template_create.rs::create_from_template
@@ -431,7 +431,7 @@
 341 frontend/app/view/accounts/ClaudeLoginPanel.tsx::ClaudeLoginPanel
 156 frontend/app/view/accounts/ClaudeLoginPanel.tsx::startFlow
 104 frontend/app/view/accounts/GoogleServicesSection.tsx::GoogleServicesSection
-292 frontend/app/view/accounts/OAuthConnectPanel.tsx::OAuthConnectPanel
+287 frontend/app/view/accounts/OAuthConnectPanel.tsx::OAuthConnectPanel
 130 frontend/app/view/accounts/accounts-manager.tsx::AccountsManager
 156 frontend/app/view/agent/agent-model.ts::AgentViewModel::launchAgentDefinition
 132 frontend/app/view/agent/agent-pane-chrome-model.ts::buildAgentPaneChromeModel
