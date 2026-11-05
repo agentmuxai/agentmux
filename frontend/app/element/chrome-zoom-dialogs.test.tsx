@@ -55,6 +55,8 @@ describe("toasts and chrome zoom", () => {
 
     it("keeps the stack's shell unzoomed and puts the zoom on its body", () => {
         expect(ruleOf("../notification/notificationbubbles.scss", ".notification-bubbles-body")).toContain("zoom: var(--zoomfactor)");
+        // The expanded stack's vertical scrollbar takes room from the fixed width: it must not grow a sideways one.
+        expect(ruleOf("../notification/notificationbubbles.scss", ".notification-bubbles-body")).toContain("overflow-x: hidden");
         const src = readFileSync(join(__dirname, "../notification/notificationbubbles.scss"), "utf8");
         expect(src).not.toMatch(/\.notification-bubbles \{[^}]*zoom:/);
 

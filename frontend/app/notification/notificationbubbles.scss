@@ -16,6 +16,8 @@
     // real pixels, the body's lengths are zoomed.
     max-height: calc((100vh - 80px * var(--zoomfactor)) / var(--zoomfactor));
     overflow-y: auto;
+    // The scrollbar of an expanded stack takes room from the fixed 380px width: no sideways scrolling for it.
+    overflow-x: hidden;
 }
 
 // "+N more": the toasts past the first few, shown on click.
