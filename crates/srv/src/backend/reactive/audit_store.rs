@@ -63,6 +63,8 @@ pub fn install_for_this_srv() {
         }
         None => tracing::warn!("jekt audit: no shared directory and no channel directory; not kept in a file"),
     }
+    // The index of what agents do goes beside it.
+    crate::backend::audit_activity::install_for_this_srv();
 }
 
 /// Start recording to `path` for the rest of this process. The first call wins.

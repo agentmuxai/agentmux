@@ -6,7 +6,6 @@
 //! nothing, and how many the agent sent (`SPEC_CHEAPER_FLEET_MESSAGING_2026_10_30.md` §7).
 
 use std::collections::BTreeMap;
-use std::path::Path;
 
 use serde::Serialize;
 
@@ -94,16 +93,12 @@ pub fn count(entries: impl IntoIterator<Item = AuditLogEntry>, since_ms: u64) ->
     by.into_values().collect()
 }
 
-/// The last `days` days (at most [`MAX_DAYS`]) counted from the audit file at `path`.
-pub fn from_file(path: &Path, now_ms: u64, days: u64) -> Vec<DayStat> {
-    from_files(&[path.to_path_buf()], now_ms, days)
-}
-
-/// The same over several audit files, which hold different lines: the shared file and a srv's own.
+/// The last `days` days (at most [`MAX_DAYS`]) counted from the audit files at `paths`, which hold different lines (the
+/// shared file and a srv's own).
 pub fn from_files(paths: &[std::path::PathBuf], now_ms: u64, days: u64) -> Vec<DayStat> {
     let since = now_ms.saturating_sub(days.clamp(1, MAX_DAYS) * DAY_MS);
     // Each file is newest first, so stop at its first entry older than the window.
-    let recent = paths.iter().flat_map(move |path| jekt_file::entries(path, None).map(|(_, _, e)| e).take_while(move |e| e.timestamp >= since));
+    let recent = paths.iter().flat_map(move |path| jekt_file::entries::<AuditLogEntry>(path, None).map(|(_, _, e)| e).take_while(move |e| e.timestamp >= since));
     count(recent, since)
 }
 
