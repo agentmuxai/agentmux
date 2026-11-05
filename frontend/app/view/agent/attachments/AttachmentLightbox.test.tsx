@@ -7,6 +7,8 @@
  */
 
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/app/platform/pane-overlay", () => ({
@@ -87,5 +89,22 @@ describe("AttachmentLightbox as a pane modal", () => {
         expect(onIndex).toHaveBeenLastCalledWith(1);
         fireEvent.keyDown(inner, { key: "Escape" });
         expect(onClose).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe("the preview in a narrow pane", () => {
+    // jsdom loads no stylesheet, so the rules are read from the source. A 338 px agent pane showed the bar's Next and
+    // Close buttons 36 px past its edge, reachable only by scrolling the bar sideways (Linux look check, #6484).
+    const scss = readFileSync(join(__dirname, "../styles/_attachments.scss"), "utf8");
+    const rule = (selector: string) => scss.slice(scss.indexOf(`${selector} {`), scss.indexOf("\n    }", scss.indexOf(`${selector} {`)));
+
+    it("wraps the bottom bar, and lets the name shrink instead of pushing the buttons out", () => {
+        expect(rule("&__bar")).toContain("flex-wrap: wrap");
+        expect(rule("&__title")).toMatch(/flex: 1 1 \d+px/);
+        expect(rule("&__actions")).toContain("flex-shrink: 0");
+    });
+
+    it("lets the image area be narrower than 320px when the pane is", () => {
+        expect(rule("&__image")).toContain("min-width: min(320px, 100%)");
     });
 });
