@@ -164,6 +164,9 @@ pub struct AccountOAuthClientInfo {
     /// Whether AgentMux ships its own client for the provider (the one-click
     /// path); false means a connect needs the user's own client.
     builtin_available: bool,
+    /// For Google: the services AgentMux's own client may ask for in this build (`google_offered`);
+    /// empty for any other provider, and moot for a client the person brought.
+    offered_services: Vec<String>,
 }
 
 /// What `account.oauth.client.clear` answers: whether a client was saved.
@@ -172,6 +175,14 @@ pub struct AccountOAuthClientInfo {
 #[serde(rename_all = "camelCase")]
 pub struct AccountOAuthClientClearResult {
     cleared: bool,
+}
+
+/// Whether AgentMux ships its own client for `provider`, and (Google) which services it may ask for in this build.
+fn builtin_client_of(provider: &str) -> Result<(bool, Vec<String>), String> {
+    let cfg = crate::identity::oauth_client::config_for(provider)
+        .ok_or_else(|| format!("account.oauth.client.get: unknown OAuth provider: {provider}"))?;
+    let offered = if provider == "google" { crate::identity::google_offered::offered() } else { Vec::new() };
+    Ok((crate::identity::oauth_client::builtin_client_available(&cfg), offered))
 }
 
 /// The `OAuthStartReq` fields that become `oauth_client::StartOptions`,
@@ -703,9 +714,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // one, and forgetting it. Accounts made with it keep refreshing: each
     // keeps its own copy of what a refresh needs.
     engine.register_typed(COMMAND_ACCOUNT_OAUTH_CLIENT_GET, move |req: OAuthClientReq, _ctx| async move {
-        let builtin_available = crate::identity::oauth_client::config_for(&req.provider)
-            .map(|cfg| crate::identity::oauth_client::builtin_client_available(&cfg))
-            .ok_or_else(|| format!("account.oauth.client.get: unknown OAuth provider: {}", req.provider))?;
+        let (builtin_available, offered_services) = builtin_client_of(&req.provider)?;
         let provider = req.provider.clone();
         let saved = tokio::task::spawn_blocking(move || crate::identity::oauth_tokens::load_saved_client(&provider))
             .await
@@ -717,6 +726,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             has_secret: saved.as_ref().is_some_and(|c| c.client_secret.is_some()),
             mode: saved.as_ref().map(|c| c.mode.as_str().to_string()),
             builtin_available,
+            offered_services,
         })
     });
 

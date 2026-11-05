@@ -25,9 +25,6 @@ export interface ServiceInfo {
     /** What a "read and write" level adds, with its own consent: the scopes it asks for when the
      *  person allows writing. A service without this has no write level to offer. */
     write?: { label: string; line: string; scopes: string[] };
-    /** Offered only on a client the person brought (their own, or their organization's internal one):
-     *  Google's restricted scopes are reviewed per app, and AgentMux's own client has not been. */
-    needsOwnClient?: boolean;
 }
 
 export const SERVICES: ServiceInfo[] = [
@@ -55,14 +52,27 @@ export const SERVICES: ServiceInfo[] = [
             line: "Agents you allow to write can write drafts, put labels on threads and take them off. To send a mail, or move a thread to the trash, an agent has to ask you: a window shows you the mail as it will go, and nothing happens until you approve it.",
             scopes: [PREFIX + "gmail.compose", PREFIX + "gmail.modify"],
         },
-        needsOwnClient: true,
     },
 ];
 
-/** Why Gmail can't be turned on for this account's client, or null when it can (or isn't Gmail). */
-export function ownClientNeeded(info: ServiceInfo, clientMode: string | undefined): string | null {
-    if (!info.needsOwnClient || clientMode === "byo" || clientMode === "workspace") return null;
-    return `${info.label} needs your own Google client, or your organization's internal one: Google reviews apps that read mail, and AgentMux's own client hasn't been through that yet. Connect a Google account with your own client to use it.`;
+/**
+ * Whether a service can be turned on for an account. A client the person brought is reviewed against their
+ * own project, so it offers everything; AgentMux's own offers what Google has approved for it in this build
+ * (`offered`, srv's list). `null` is "not known yet": srv still refuses a service the build does not offer.
+ */
+export function serviceOffered(info: ServiceInfo, clientMode: string | undefined, offered: readonly string[] | null): boolean {
+    if (clientMode === "byo" || clientMode === "workspace" || offered == null) return true;
+    return offered.includes(info.service);
+}
+
+/** The services AgentMux's own Google client offers in this build, or null when srv doesn't say. */
+export async function loadOfferedServices(): Promise<string[] | null> {
+    try {
+        const info = await RpcApi.AccountOAuthClientGetCommand(TabRpcClient, { provider: "google" });
+        return info.offeredServices ?? null;
+    } catch {
+        return null;
+    }
 }
 
 /** Whether the account's token covers `scopes`: all, some or none of them. */

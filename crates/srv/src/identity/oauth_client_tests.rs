@@ -620,19 +620,21 @@ fn github_through_agentmuxs_own_app_needs_a_cloud_sign_in() {
 }
 
 #[test]
-fn gmail_is_asked_only_on_a_client_the_person_brought() {
+fn a_service_google_has_not_approved_is_asked_only_on_a_client_the_person_brought() {
     let client = |mode| ResolvedClient { client_id: "id".into(), client_secret: None, mode };
     let gmail = vec!["https://www.googleapis.com/auth/gmail.readonly".to_string()];
-    let why = restricted_scope_needs_own_client("google", &gmail, &client(ClientMode::Builtin)).unwrap();
-    assert!(why.contains("your own Google client"), "{why}");
-    assert!(restricted_scope_needs_own_client("google", &gmail, &client(ClientMode::Byo)).is_none());
-    assert!(restricted_scope_needs_own_client("google", &gmail, &client(ClientMode::Workspace)).is_none());
-    // Full mail access is restricted too; Calendar and Drive's file scope are not.
-    let full = vec!["https://mail.google.com/".to_string()];
-    assert!(restricted_scope_needs_own_client("google", &full, &client(ClientMode::Builtin)).is_some());
-    let others = vec!["https://www.googleapis.com/auth/calendar.events.readonly".to_string(), "https://www.googleapis.com/auth/drive.file".to_string()];
-    assert!(restricted_scope_needs_own_client("google", &others, &client(ClientMode::Builtin)).is_none());
-    assert!(restricted_scope_needs_own_client("github", &gmail, &client(ClientMode::Builtin)).is_none());
+    // The shipped list approves nothing yet, so AgentMux's own client stops at any service.
+    if crate::identity::google_offered::offered().is_empty() {
+        let why = scope_not_offered("google", &gmail, &client(ClientMode::Builtin)).unwrap();
+        assert!(why.contains("isn't available in this version of AgentMux yet"), "{why}");
+    }
+    // A client the person brought, or their organization's, is reviewed against their own project.
+    assert!(scope_not_offered("google", &gmail, &client(ClientMode::Byo)).is_none());
+    assert!(scope_not_offered("google", &gmail, &client(ClientMode::Workspace)).is_none());
+    assert!(scope_not_offered("github", &gmail, &client(ClientMode::Builtin)).is_none());
+    // Signing in names no service.
+    let sign_in = vec!["openid".to_string(), "email".to_string()];
+    assert!(scope_not_offered("google", &sign_in, &client(ClientMode::Builtin)).is_none());
 }
 
 #[tokio::test]

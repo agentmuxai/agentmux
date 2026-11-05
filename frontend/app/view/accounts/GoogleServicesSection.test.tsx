@@ -10,9 +10,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const google = vi.hoisted(() => vi.fn());
 const api = vi.hoisted(() => ({ value: { approvals: { google } } as Record<string, unknown> }));
 vi.mock("@/util/app-api", () => ({ getApi: () => api.value }));
-const rpc = vi.hoisted(() => ({ poll: vi.fn(), cancel: vi.fn() }));
+const rpc = vi.hoisted(() => ({ poll: vi.fn(), cancel: vi.fn(), clientGet: vi.fn() }));
 vi.mock("@/app/store/rpc-api", () => ({
-    RpcApi: { AccountOAuthPollCommand: rpc.poll, AccountOAuthCancelCommand: rpc.cancel },
+    RpcApi: {
+        AccountOAuthPollCommand: rpc.poll,
+        AccountOAuthCancelCommand: rpc.cancel,
+        AccountOAuthClientGetCommand: rpc.clientGet,
+    },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 const events = vi.hoisted(() => ({ handlers: [] as Array<() => void> }));
@@ -63,6 +67,8 @@ beforeEach(() => {
         services: ["calendar", "drive", "gmail"],
     };
     google.mockImplementation(async (op: string) => (op === "account" ? panel : true));
+    // The stage Google has reached for AgentMux's own client: Calendar and Drive approved, Gmail not.
+    rpc.clientGet.mockResolvedValue({ saved: false, hasSecret: false, builtinAvailable: true, offeredServices: ["calendar", "drive"] });
 });
 
 afterEach(() => {
@@ -70,6 +76,7 @@ afterEach(() => {
     google.mockReset();
     rpc.poll.mockReset();
     rpc.cancel.mockReset();
+    rpc.clientGet.mockReset();
 });
 
 describe("google-services", () => {
@@ -167,11 +174,32 @@ describe("GoogleServicesSection", () => {
         expect(within(screen.getByRole("radiogroup", { name: "Calendar for Naki" })).queryByRole("radio", { name: "Read and write" })).toBeNull();
     });
 
-    it("says why Gmail can't be turned on with AgentMux's own client", async () => {
+    it("shows a service Google hasn't approved for AgentMux's own client as coming soon, with no switch", async () => {
         render(() => <GoogleServicesSection account={account([], "builtin")} />);
-        expect(await screen.findByText(/Gmail needs your own Google client/)).toBeTruthy();
+        expect(await screen.findByText("Coming soon.")).toBeTruthy();
+        expect(screen.getAllByText("Coming soon.").length).toBe(1);
         expect(screen.queryByRole("button", { name: "Turn on Gmail" })).toBeNull();
         expect(screen.getByRole("button", { name: "Turn on Calendar" })).toBeTruthy();
+        expect(screen.getByRole("button", { name: "Turn on Drive" })).toBeTruthy();
+    });
+
+    it("offers nothing to turn on before any tier is approved, and everything once all are", async () => {
+        rpc.clientGet.mockResolvedValue({ saved: false, hasSecret: false, builtinAvailable: true, offeredServices: [] });
+        const { unmount } = render(() => <GoogleServicesSection account={account([], "builtin")} />);
+        await waitFor(() => expect(screen.getAllByText("Coming soon.").length).toBe(3));
+        expect(screen.queryByRole("button", { name: /^Turn on/ })).toBeNull();
+        unmount();
+        rpc.clientGet.mockResolvedValue({ saved: false, hasSecret: false, builtinAvailable: true, offeredServices: ["calendar", "drive", "gmail"] });
+        render(() => <GoogleServicesSection account={account([], "builtin")} />);
+        expect(await screen.findByRole("button", { name: "Turn on Gmail" })).toBeTruthy();
+        expect(screen.queryByText("Coming soon.")).toBeNull();
+    });
+
+    it("keeps a service that is already on, whatever the build offers", async () => {
+        rpc.clientGet.mockResolvedValue({ saved: false, hasSecret: false, builtinAvailable: true, offeredServices: [] });
+        render(() => <GoogleServicesSection account={account(DRIVE, "builtin")} />);
+        await waitFor(() => expect(screen.getAllByText("Coming soon.").length).toBe(2));
+        expect(screen.getByText("On")).toBeTruthy();
     });
 
     it("shows srv's refusal", async () => {
