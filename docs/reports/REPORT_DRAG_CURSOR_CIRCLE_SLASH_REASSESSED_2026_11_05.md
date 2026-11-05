@@ -1,6 +1,6 @@
 # Report: the circle-slash cursor during pane and tab drags, reassessed
 
-**Status:** analysis, not implemented.
+**Status:** option D implemented in #6498 (on by default, `AGENTMUX_DND_CURSOR=0` turns it off). Options E to H and macOS/Linux are analysis only.
 
 **Date:** 2026-11-05 (sources read 2026-11-04). **Scope:** Windows first, then macOS and Linux. **Method:** the earlier retros, specs and host code were read, then the Chromium, CEF and Win32 sources were re-read online. Nothing was built or run.
 
@@ -170,6 +170,8 @@ Goal: prove that wrapping the drop source removes the slash, with minimal code b
 7. **Pass criterion:** a to c show no slash, and d to f match the control. If the slash survives while the override is logged as applied, something sets the cursor after `GiveFeedback`, and we move to E.
 
 ### 5.2 Incremental plan
+
+As shipped in #6498: PR 1 and PR 2 were merged into one change. The wrapper is installed at startup by default, active only while a tear-off hook session runs, and `AGENTMUX_DND_CURSOR=0` is the opt-out (the control run in §5.1 step 7g). The `AGENTMUX_DND_CURSOR_EXPERIMENT=1` gate and the off-by-default setting below were not used. The `tab-reorder.ts` `dragover` hack is untouched and can be removed once the cursor is confirmed live.
 
 1. **PR 1:** the wrapper behind a setting, off by default. Include a unit test of the pure effect-to-cursor decision and the `dumpbin` finding. No frontend change.
 2. **PR 2:** turn it on for tab and pane drags. Remove the Windows `dragover` hack in `tab-reorder.ts` if it proves redundant. That also fixes the Codex P2 about overwriting a strip drop effect.
