@@ -53,7 +53,15 @@ pub(super) fn of(src: &Sources, filter: &Filter) -> AuditTotals {
         }
     }
     let wants_file = [KIND_JEKT, KIND_ACTION, KIND_REGISTRY].iter().any(|k| filter.kinds.contains(*k));
-    let Some(path) = src.jekt_file.filter(|_| wants_file) else { return sum };
+    // The two files hold different lines (a line goes to one), so their sums add.
+    for path in [src.jekt_file, src.own_file].into_iter().flatten().filter(|_| wants_file) {
+        add_file(&mut sum, path, filter);
+    }
+    sum
+}
+
+/// Adds to `sum` what `filter` matches in the audit file at `path`.
+fn add_file(sum: &mut AuditTotals, path: &Path, filter: &Filter) {
     let key = format!("{}|{}", path.display(), filter.key());
     let (mut read, mut from_file) = (0u64, AuditTotals::default());
     let mut guard = KEPT_SUMS.lock().unwrap_or_else(|e| e.into_inner());
@@ -92,7 +100,6 @@ pub(super) fn of(src: &Sources, filter: &Filter) -> AuditTotals {
         (a, b) => Some(a.unwrap_or(0.0) + b.unwrap_or(0.0)),
     };
     sum.estimated |= from_file.estimated;
-    sum
 }
 
 fn scan_into(path: &Path, from: u64, filter: &Filter, sum: &mut AuditTotals) -> Option<u64> {

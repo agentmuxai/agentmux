@@ -234,7 +234,7 @@
 206 crates/srv/src/backend/vault/import/onepux.rs::item_into
 102 crates/srv/src/backend/vault/transfer.rs::inspect_keyed
 123 crates/srv/src/backend/widget/packages.rs::describe
-580 crates/srv/src/bootstrap/background.rs::spawn_background_subsystems
+572 crates/srv/src/bootstrap/background.rs::spawn_background_subsystems
 102 crates/srv/src/bootstrap/logging.rs::init_logging
 234 crates/srv/src/bootstrap/network.rs::bind_listeners_and_network
 144 crates/srv/src/bootstrap/plumbing.rs::build_app_state
