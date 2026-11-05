@@ -1,0 +1,87 @@
+== no retry hint
+<body>
+  <div>
+  <div>
+    <div class="modal-root" role="dialog" aria-modal="true" data-scope="window" data-placement="center" aria-label="Connect Anthropic">
+      <div class="modal-backdrop">
+      <span class="modal-focus-sentinel" aria-hidden="true">
+      <div class="modal-panel accounts-chooser" data-size="md">
+        <div class="accounts-chooser-modes">
+          <div class="oauth-byo-note">
+            "Error: no hint"
+          <div class="identity-key-actions">
+            <button type="button" class="ui-button ui-tone-accent identity-btn identity-btn-primary">
+              "Retry"
+            <button type="button" class="ui-button ui-tone-neutral identity-btn identity-btn-secondary">
+              "Close"
+      <span class="modal-focus-sentinel" aria-hidden="true">
+  call ResolveCliCommand [{},{"provider_id":"claude","cli_command":"claude","npm_package":"@anthropic-ai/claude-code","pinned_version":"2.1.288","windows_install_command":"irm https://claude.ai/install.ps1 | iex","unix_install_command":"curl -fsSL https://claude.ai/install.sh | bash"},{"timeout":120000}]
+  console warn [login-window] reserve failed: Cannot read properties of undefined (reading 'reserveExternalWindow')
+== login rejected with a retry hint
+<body>
+  <div>
+  <div>
+    <div class="modal-root" role="dialog" aria-modal="true" data-scope="window" data-placement="center" aria-label="Connect Anthropic">
+      <div class="modal-backdrop">
+      <span class="modal-focus-sentinel" aria-hidden="true">
+      <div class="modal-panel accounts-chooser" data-size="md">
+        <div class="accounts-chooser-modes">
+          <div class="oauth-byo-note">
+            "Error: spawn failed — try again"
+          <div class="identity-key-actions">
+            <button type="button" class="ui-button ui-tone-accent identity-btn identity-btn-primary">
+              "Retry"
+            <button type="button" class="ui-button ui-tone-neutral identity-btn identity-btn-secondary">
+              "Close"
+      <span class="modal-focus-sentinel" aria-hidden="true">
+  call ResolveCliCommand [{},{"provider_id":"claude","cli_command":"claude","npm_package":"@anthropic-ai/claude-code","pinned_version":"2.1.288","windows_install_command":"irm https://claude.ai/install.ps1 | iex","unix_install_command":"curl -fsSL https://claude.ai/install.sh | bash"},{"timeout":120000}]
+  call ensureProviderAuthDir ["claude"]
+  call cancelCliLogin []
+  run provider=claude cliPath=/usr/bin/claude authEnv={"CLAUDE_CONFIG_DIR":"/tmp/claude-auth"} existingAccountId=undefined linkTarget=undefined skipTier1=false awaitTier1Completion=true
+  console warn [login-window] reserve failed: Cannot read properties of undefined (reading 'reserveExternalWindow')
+== link check failed with a plain string
+<body>
+  <div>
+  <div>
+    <div class="modal-root" role="dialog" aria-modal="true" data-scope="window" data-placement="center" aria-label="Connect Anthropic">
+      <div class="modal-backdrop">
+      <span class="modal-focus-sentinel" aria-hidden="true">
+      <div class="modal-panel accounts-chooser" data-size="md">
+        <div class="accounts-chooser-modes">
+          <div class="oauth-byo-note">
+            "Signed in, but AgentMux couldn't confirm the account was linked to this agent. Try again."
+          <div class="identity-key-actions">
+            <button type="button" class="ui-button ui-tone-accent identity-btn identity-btn-primary">
+              "Retry"
+            <button type="button" class="ui-button ui-tone-neutral identity-btn identity-btn-secondary">
+              "Close"
+      <span class="modal-focus-sentinel" aria-hidden="true">
+  call ResolveCliCommand [{},{"provider_id":"claude","cli_command":"claude","npm_package":"@anthropic-ai/claude-code","pinned_version":"2.1.288","windows_install_command":"irm https://claude.ai/install.ps1 | iex","unix_install_command":"curl -fsSL https://claude.ai/install.sh | bash"},{"timeout":120000}]
+  call ensureProviderAuthDir ["claude"]
+  call ListAgentIdentities [{},{"agent_id":"agent-1"}]
+  run provider=claude cliPath=/usr/bin/claude authEnv={"CLAUDE_CONFIG_DIR":"/tmp/claude-auth"} existingAccountId=undefined linkTarget={"agentDefinitionId":"agent-1"} skipTier1=false awaitTier1Completion=true
+  console warn [login-window] reserve failed: Cannot read properties of undefined (reading 'reserveExternalWindow')
+  console warn [claude-login] failed to verify the agent link: plain list failure
+== unlink failed with a plain string
+<body>
+  <div>
+  <div>
+    <div class="modal-root" role="dialog" aria-modal="true" data-scope="window" data-placement="center" aria-label="Connect Anthropic">
+      <div class="modal-backdrop">
+      <span class="modal-focus-sentinel" aria-hidden="true">
+      <div class="modal-panel accounts-chooser" data-size="md">
+        <div class="accounts-chooser-modes">
+          <div class="oauth-byo-note">
+            "✓ Signed in to Anthropic."
+          <div class="identity-key-actions">
+            <button type="button" class="ui-button ui-tone-accent identity-btn identity-btn-primary">
+              "Done"
+      <span class="modal-focus-sentinel" aria-hidden="true">
+  call ResolveCliCommand [{},{"provider_id":"claude","cli_command":"claude","npm_package":"@anthropic-ai/claude-code","pinned_version":"2.1.288","windows_install_command":"irm https://claude.ai/install.ps1 | iex","unix_install_command":"curl -fsSL https://claude.ai/install.sh | bash"},{"timeout":120000}]
+  call ensureProviderAuthDir ["claude"]
+  call ListAgentIdentities [{},{"agent_id":"agent-1"}]
+  call UnlinkAgentIdentity [{},{"agent_id":"agent-1","provider":"claude-code","silent":true}]
+  call refreshAccountCache []
+  run provider=claude cliPath=/usr/bin/claude authEnv={"CLAUDE_CONFIG_DIR":"/tmp/claude-auth"} existingAccountId=undefined linkTarget={"agentDefinitionId":"agent-1"} skipTier1=false awaitTier1Completion=true
+  console warn [login-window] reserve failed: Cannot read properties of undefined (reading 'reserveExternalWindow')
+  console warn [claude-login] failed to unlink stale alias "claude-code": plain unlink failure
