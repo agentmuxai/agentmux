@@ -117,7 +117,7 @@ fn every_creating_path_skips_a_slug_another_channel_holds() {
     std::fs::create_dir_all(&registrations).unwrap();
     let entry = serde_json::json!({
         "agent_id": "live-one", "local_url": "http://127.0.0.1:1", "block_id": "b-live",
-        "pid": std::process::id(), "updated_at": 1,
+        "pid": std::process::id(), "updated_at": agentmux_common::time::now_ms(),
     });
     std::fs::write(registrations.join("live-one.json"), serde_json::to_vec(&entry).unwrap()).unwrap();
 
