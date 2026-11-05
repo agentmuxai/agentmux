@@ -1162,6 +1162,26 @@ fn prune_result(
 
 #[cfg(test)]
 mod tests {
+    fn quiet_env(cli_path: &str) -> bool {
+        let mut cmd = tokio::process::Command::new(cli_path);
+        super::quiet_probe(&mut cmd, cli_path);
+        cmd.as_std()
+            .get_envs()
+            .any(|(k, v)| k == "AGY_CLI_DISABLE_AUTO_UPDATE" && v == Some(std::ffi::OsStr::new("1")))
+    }
+
+    #[test]
+    fn agy_probes_run_without_the_clis_own_update() {
+        assert!(quiet_env("C:\\Users\\x\\AppData\\Local\\agy\\bin\\agy.exe"));
+        assert!(quiet_env("/home/x/.local/bin/agy"));
+    }
+
+    #[test]
+    fn other_clis_are_left_alone() {
+        assert!(!quiet_env("/usr/bin/claude"));
+        assert!(!quiet_env("C:\\tools\\agyx.exe"));
+    }
+
 
     /// The one lookup decides npm vs PATH from the registry: an npm provider's
     /// CLI on PATH is not "found" (a launch would never run it), while a
