@@ -1,0 +1,40 @@
+advance 20ms
+autoUpdate #1 registered (row rowA)
+row mousemove y=215
+document mousemove 500,940
+advance 100ms
+document mousemove 500,880
+advance 100ms
+autoUpdate #1 disposed
+document mousemove 500,820
+advance 100ms
+document mousemove 500,760
+advance 100ms
+document mousemove 500,700
+advance 100ms
+document mousemove 500,640
+advance 100ms
+document mousemove 500,580
+advance 100ms
+document mousemove 500,520
+advance 100ms
+document mousemove 500,460
+advance 100ms
+document mousemove 500,400
+advance 100ms
+document mousemove 500,340
+advance 100ms
+document mousemove 500,280
+advance 100ms
+[after 12 approaches] panel=- bridge=- afterLeave=-
+advance 300ms
+[past the cap] panel=- bridge=- afterLeave=-
+advance 20ms
+autoUpdate #2 registered (row rowA)
+row mousemove y=215
+document mousemove 900,900
+advance 100ms
+document mousemove 1000,1000
+advance 100ms
+autoUpdate #2 disposed
+[moving away] panel=- bridge=- afterLeave=-

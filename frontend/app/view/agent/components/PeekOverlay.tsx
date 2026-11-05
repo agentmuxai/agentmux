@@ -86,483 +86,50 @@
  * `right:` offset would need the opposite correction.
  */
 
-import { useHiddenTabMarker } from "@/app/platform/pane-overlay";
 import clsx from "clsx";
-import { autoUpdate } from "@floating-ui/dom";
-import { createSignal, createComputed, createEffect, createMemo, on, onCleanup, Show, untrack, type JSX } from "solid-js";
+import { Show, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
-import { findScrollContainerRect } from "./hover-anchor";
-import { computePeekHorizontal, computePeekVertical, READABLE_WIDTH_CHARS } from "./peek-placement";
-import {
-    beginPeekBridge,
-    clearPeekPanelOpenAfterLeave,
-    endPeekBridge,
-    markPeekPanelOpenAfterLeave,
-} from "./peek-bridge";
-
-interface PeekOverlayProps {
-    /** Whether the overlay should be mounted right now. */
-    show: boolean;
-    /**
-     * Getter for the hovered row this overlay is anchored to. A getter, not
-     * a plain value — the row's own `ref` callback assigns the caller's
-     * local `let rowEl` variable AFTER this component's props are first
-     * evaluated, so a plain value would freeze at `undefined` forever.
-     * `() => rowEl` re-reads the caller's closure on every call.
-     */
-    rowEl: () => HTMLElement | undefined;
-    /**
-     * Extra class appended alongside the base `.agent-node-peek-overlay`
-     * chrome — for callers whose content needs its own distinct visual
-     * identity without forking the whole component.
-     */
-    class?: string;
-    children?: JSX.Element;
-}
+import { createPeekBridge, usePeekLinger } from "./peek-overlay-bridge";
+import { createPeekMeasure } from "./peek-overlay-measure";
+import { createPeekPlacement } from "./peek-overlay-placement";
+import { createPeekState, type PeekOverlayProps } from "./peek-overlay-state";
+import { usePeekTracking } from "./peek-overlay-tracking";
 
 /**
- * How long an enterable panel lingers after the pointer leaves its row, so the
- * pointer can reach it. Re-armed on every move that brings the pointer closer
- * to the panel, so a slow or diagonal approach still makes it; a pointer moving
- * away lets it close after this long. Entering the panel then holds it open
- * (scroll bar, text selection). Standard hover-card grace.
+ * The overlay is a state object (peek-overlay-state.ts) and a run of hook groups that act on it, called in
+ * the order their computations and effects must be created: the linger and marker, then the tracking.
  */
-const HOVER_BRIDGE_MS = 150;
-/** The longest an approaching pointer can keep the grace period going, in total. */
-const HOVER_BRIDGE_MAX_MS = 1000;
-/**
- * The narrowest a TALL peek panel ("end" mode) may be, in the panel's own pixels
- * (it scales with pane zoom). A very narrow, very tall panel (a long command made
- * of short lines) looked broken. Placement treats such a panel as at least this
- * wide (so one wider than its row goes left-pinned, over the pane border), and
- * caps it to the room actually available.
- */
-const PEEK_MIN_WIDTH_PX = 600;
-/**
- * The minimum width applies only to a panel more than two lines tall, so the
- * small panels (a time/estimate line, a one-line command) stay compact. Measured
- * in panel px at the width the panel would have WITHOUT the minimum. Two lines
- * come to about 45px (a 13px x 1.4 meta line + a 13px x 1.45 body line, the 2px
- * gap, 2+2px padding, 1+1px border); three lines to about 64px. 54 splits them.
- */
-const PEEK_MIN_WIDTH_ABOVE_HEIGHT_PX = 54;
-
-/**
- * This overlay's owning pane's zoom factor, read off the anchor row.
- *
- * `agent-view.tsx` sets BOTH `zoom: <factor>` and `--agent-pane-zoom:
- * <factor>` on the pane root. The row is inside that subtree, so the custom
- * property inherits down to it — reading from the row means this works for
- * whichever pane the hovered entry belongs to (and for the history view,
- * which sets the same pair) without threading a prop through all six
- * call sites.
- *
- * Returns 1 for anything unparseable, absent, or non-positive: a peek
- * rendered outside an agent pane (or in a test harness with no computed
- * custom properties) must keep behaving exactly as it did before.
- */
-function readPaneZoom(row: HTMLElement | undefined): number {
-    if (!row) return 1;
-    const raw = getComputedStyle(row).getPropertyValue("--agent-pane-zoom").trim();
-    const parsed = Number.parseFloat(raw);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
-}
-
-/** Style lengths that are in real viewport px and must be de-scaled. */
-const ZOOM_SCALED_LENGTHS = ["left", "top", "width", "max-width", "min-width", "max-height"] as const;
-
-/**
- * Re-express a style computed in REAL viewport pixels so it renders
- * identically on an element that carries `zoom: paneZoom`.
- *
- * This is the whole fix, and the division is the non-obvious half of it.
- * CSS `zoom` on an element multiplies the used value of that element's OWN
- * lengths — including the inset properties of a positioned element. With
- * `zoom: 2`, `left: 100px` paints at 200px from the viewport's left edge.
- * Every input here comes from `getBoundingClientRect()`, which already
- * reports post-zoom rendered pixels, so each length must be pre-divided by
- * the factor to land where it did before.
- *
- * `transform: translateX(-100%)` is deliberately NOT touched: it resolves
- * against the element's own border-box width, which scales with it, so it
- * stays correct at any zoom.
- *
- * A `paneZoom` of exactly 1 returns the style untouched (no `zoom`
- * property emitted at all) — the overwhelmingly common case stays
- * byte-identical to the pre-fix behavior.
- */
-function withPaneZoom(style: JSX.CSSProperties, paneZoom: number): JSX.CSSProperties {
-    if (paneZoom === 1) return style;
-    const scaled: JSX.CSSProperties = { ...style, zoom: paneZoom };
-    for (const key of ZOOM_SCALED_LENGTHS) {
-        const value = style[key];
-        if (typeof value !== "string") continue;
-        const px = Number.parseFloat(value);
-        if (!Number.isFinite(px)) continue;
-        scaled[key] = `${px / paneZoom}px`;
-    }
-    return scaled;
-}
-
 export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
-    // Portal-mounted: drop its pane hole while its window tab is hidden (pane-overlay.ts).
-    const hiddenTab = useHiddenTabMarker();
-    const [floatingStyle, setFloatingStyle] = createSignal<JSX.CSSProperties>({
-        position: "fixed",
-        left: "0px",
-        top: "0px",
-    });
-
-    // True when the panel reaches past the pane (wider than the row, or taller
-    // than the transcript). Only then does it carry `data-pane-overlay`, so the
-    // browser-pane airspace cut (platform/pane-overlay-auto.ts) is not driven for
-    // every short peek.
-    const [outside, setOutside] = createSignal(false);
-    // True when the last `update()` had to cut the panel's height, so it scrolls.
-    // Only such a panel is meant to be ENTERED (scroll bar, text selection).
-    let lastEnterable = false;
-
-    // Hover bridge. The panel is portalled, so moving onto it
-    // fires the row's `mouseleave` and the caller turns `show` off. Keep it up
-    // for HOVER_BRIDGE_MS after that, and while the pointer is on it, so the
-    // pointer can cross the gap and use the scroll bar / select text. The
-    // caller's `show` stays authoritative: when it goes true again (pointer back
-    // on the row) the linger is cancelled.
-    //
-    // `open` is the ONLY thing `<Show>` reads, written synchronously by a
-    // computation. Deriving "show || lingering" from two signals instead made the
-    // panel unmount for one update (show false, linger not yet set) and remount
-    // when the linger arrived — a flicker of its own.
-    // `show` read through one memo owned by this component: a caller's
-    // `show={a() && b()}` compiles to a getter that makes a new memo on every
-    // read, and a read from a timer or an event handler (no owner) leaks it.
-    const show = createMemo(() => props.show);
-    const [open, setOpen] = createSignal(show());
-    let held = false;
-    let bridgeTimer: ReturnType<typeof setTimeout> | undefined;
-    let bridgeStartedAt = 0;
-    let closestApproach = Infinity;
-    // The row this panel bridged, remembered rather than re-read at release time,
-    // so a row element that changes meanwhile cannot leave the bridge set (which
-    // would hold off every other peek).
-    let bridgedRow: HTMLElement | undefined;
-    const releaseBridge = () => {
-        endPeekBridge(bridgedRow);
-        bridgedRow = undefined;
-    };
-
-    // How far the pointer is from the panel (0 inside it).
-    const distanceToPanel = (x: number, y: number): number => {
-        const r = floatingEl?.getBoundingClientRect();
-        if (!r) return Infinity;
-        const dx = Math.max(r.left - x, 0, x - r.right);
-        const dy = Math.max(r.top - y, 0, y - r.bottom);
-        return Math.hypot(dx, dy);
-    };
-    // During the grace period: a move that brings the pointer closer than it has
-    // been re-arms the timer (up to HOVER_BRIDGE_MAX_MS in total).
-    const onApproach = (e: MouseEvent) => {
-        const d = distanceToPanel(e.clientX, e.clientY);
-        if (d < closestApproach) {
-            closestApproach = d;
-            armBridgeTimer();
-        }
-    };
-    const clearBridgeTimer = () => {
-        if (bridgeTimer !== undefined) clearTimeout(bridgeTimer);
-        bridgeTimer = undefined;
-        document.removeEventListener("mousemove", onApproach);
-    };
-    const armBridgeTimer = () => {
-        if (bridgeTimer !== undefined) clearTimeout(bridgeTimer);
-        const budget = HOVER_BRIDGE_MAX_MS - (Date.now() - bridgeStartedAt);
-        bridgeTimer = setTimeout(endLinger, Math.max(0, Math.min(HOVER_BRIDGE_MS, budget)));
-    };
-    const endLinger = () => {
-        clearBridgeTimer();
-        if (!held && !show()) {
-            releaseBridge();
-            setOpen(false);
-        }
-    };
-    const startLinger = () => {
-        clearBridgeTimer();
-        bridgeStartedAt = Date.now();
-        closestApproach = Infinity;
-        // Other rows' peeks wait while the pointer crosses to this panel.
-        bridgedRow = props.rowEl();
-        beginPeekBridge(bridgedRow);
-        document.addEventListener("mousemove", onApproach, { passive: true });
-        armBridgeTimer();
-    };
-    createComputed(
-        on(
-            () => show(),
-            (show) => {
-                clearBridgeTimer();
-                if (show) {
-                    // The pointer is back on the row: nothing is being crossed.
-                    releaseBridge();
-                    setOpen(true);
-                } else if (untrack(open) && lastEnterable) {
-                    // Only a panel that had to be cut (it scrolls) is meant to be
-                    // ENTERED, so only it lingers. A panel that fits has nothing
-                    // to scroll and closes the instant the pointer leaves, exactly
-                    // as it always did.
-                    startLinger(); // stay open; the timer closes it
-                } else {
-                    setOpen(false);
-                }
-            },
-            { defer: true },
-        ),
-    );
-    onCleanup(clearBridgeTimer);
-
-    // The panel is on screen although its row is no longer hovered (lingering, or
-    // the pointer on it). The caller's `isPeeking()` is false then, so tell it,
-    // through peek-bridge.ts, that the content must stay: callers gate content on
-    // `useNodePeek().panelVisible()`. The row is remembered so the same one is
-    // cleared even if the caller's row element changes meanwhile.
-    let markedRow: HTMLElement | undefined;
-    createComputed(() => {
-        const openAfterLeave = open() && !show();
-        untrack(() => {
-            if (openAfterLeave) {
-                markedRow = props.rowEl();
-                markPeekPanelOpenAfterLeave(markedRow);
-            } else if (markedRow) {
-                clearPeekPanelOpenAfterLeave(markedRow);
-                markedRow = undefined;
-            }
-        });
-    });
-    onCleanup(() => {
-        clearPeekPanelOpenAfterLeave(markedRow);
-        markedRow = undefined;
-    });
-
-    let floatingEl: HTMLElement | undefined;
-    let cleanupAutoUpdate: (() => void) | null = null;
-    // Latest mouse Y within the hovered row, tracked continuously (not
-    // gated on `show`) so the panel already has a real position for its
-    // very first render instead of flashing at rect.top first. Plain
-    // closure var, not a signal — applied via direct style writes, same as
-    // the rest of this component's positioning.
-    let lastMouseY: number | null = null;
-    let mouseMoveRaf: number | null = null;
-    // Pointer Y relative to the row's top, frozen the first time the panel turns
-    // out to be enterable (it scrolls). From then until it closes, placement uses
-    // this instead of the live pointer, so the panel holds still while the pointer
-    // moves toward it, and it still moves with the row if the transcript scrolls.
-    // Following the live pointer made a tall panel unreachable: each move toward
-    // it moved it away and cut its height again.
-    let pinnedOffsetY: number | null = null;
-
-    const update = () => {
-        const row = props.rowEl();
-        if (!row) return;
-        const rect = row.getBoundingClientRect();
-        const container = findScrollContainerRect(row);
-        const paneZoom = readPaneZoom(row);
-        // Shrink-wrapped, near the pointer. Horizontal and vertical are decided
-        // by peek-placement.ts (see its header): right-aligned to the row, or
-        // reaching over the pane borders, split by the pane's place in the
-        // window, when wider than the row; below/above the pointer, leaving the
-        // transcript and cutting its
-        // height to the room when too tall. The invariant it keeps — the
-        // pointer is never inside the panel — is swept by its tests.
-        const viewport = { width: window.innerWidth, height: window.innerHeight };
-        const rowRect = { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
-        // Placed first without a minimum, to see the panel's natural shape. Only
-        // if that is more than two lines tall does the minimum width apply
-        // (PEEK_MIN_WIDTH_ABOVE_HEIGHT_PX), and the panel is re-placed with it.
-        // Both measurements are at fixed inputs, so the outcome never depends on
-        // the previous placement. The px constants are in the panel's own pixels,
-        // so they scale with the pane's zoom; placement works in viewport px.
-        const naturalWidth = measureWidth();
-        const readableWidth = measureReadableWidth();
-        let hz = computePeekHorizontal({ row: rowRect, viewport, naturalWidth, readableWidth });
-        let naturalHeight = measureHeightAt(hz.maxWidth, 0, paneZoom);
-        if (naturalHeight > PEEK_MIN_WIDTH_ABOVE_HEIGHT_PX * paneZoom) {
-            hz = computePeekHorizontal({ row: rowRect, viewport, naturalWidth, readableWidth, minWidth: PEEK_MIN_WIDTH_PX * paneZoom });
-            naturalHeight = measureHeightAt(hz.maxWidth, hz.minWidth, paneZoom);
-        }
-        const placeAt = { row: rowRect, container, viewport, naturalHeight };
-        let vt: ReturnType<typeof computePeekVertical>;
-        if (pinnedOffsetY != null) {
-            vt = computePeekVertical({ ...placeAt, mouseY: rect.top + pinnedOffsetY, flushToRow: true });
-        } else {
-            vt = computePeekVertical({ ...placeAt, mouseY: lastMouseY });
-            // Enterable: pin it, and keep its near edge on the row so the way to
-            // it does not cross another row. Decided on the unpinned placement
-            // and then sticky until it closes, so the two never alternate.
-            if (vt.scrolls && lastMouseY != null) {
-                pinnedOffsetY = lastMouseY - rect.top;
-                vt = computePeekVertical({ ...placeAt, mouseY: lastMouseY, flushToRow: true });
-            }
-        }
-        // Enterable if pinned, or if it scrolls with no pointer Y to pin to yet
-        // (a peek opened by the drag-release hover resync before any mousemove:
-        // it still needs its linger, and pins on the first move).
-        lastEnterable = pinnedOffsetY != null || vt.scrolls;
-        setOutside(hz.extendsPastRow || vt.leavesContainer);
-        setFloatingStyle(
-            withPaneZoom(
-                {
-                    position: "fixed",
-                    left: `${hz.left}px`,
-                    top: `${vt.top}px`,
-                    ...(hz.shift > 0 ? { transform: `translateX(${-hz.shift * 100}%)` } : {}),
-                    "max-width": `${hz.maxWidth}px`,
-                    "min-width": `${hz.minWidth}px`,
-                    "max-height": `${vt.maxHeight}px`,
-                },
-                paneZoom,
-            ),
-        );
-    };
-
-    // The panel measured with its caps lifted. Inline styles are set and
-    // restored synchronously, so nothing paints between. With the height cap
-    // lifted `getBoundingClientRect` IS the natural size, in real viewport px
-    // at any pane zoom (unlike `scrollHeight`, which is in unzoomed px).
-    //
-    // Width first, with no width cap: the content's max-content width, which
-    // does not depend on the layout it is currently in. Then the height at the
-    // width the horizontal placement chose. Measuring at fixed inputs means the
-    // placement never depends on the placement chosen last time.
-    const withCapsLifted = <T,>(maxWidth: string, minWidth: string, read: (el: HTMLElement) => T, fallback: T): T => {
-        const el = floatingEl;
-        if (!el) return fallback;
-        const prevW = el.style.maxWidth;
-        const prevMin = el.style.minWidth;
-        const prevH = el.style.maxHeight;
-        el.style.maxWidth = maxWidth;
-        el.style.minWidth = minWidth;
-        el.style.maxHeight = "none";
-        const out = read(el);
-        el.style.maxWidth = prevW;
-        el.style.minWidth = prevMin;
-        el.style.maxHeight = prevH;
-        return out;
-    };
-    // The content's own width: no cap and no minimum.
-    const measureWidth = (): number =>
-        withCapsLifted("none", "0px", (el) => el.getBoundingClientRect().width, 0);
-    // `READABLE_WIDTH_CHARS` of the panel's code font, in viewport px (so at the
-    // pane's zoom and font size); 0 when there is no panel to measure in.
-    const measureReadableWidth = (): number => {
-        const el = floatingEl;
-        if (!el) return 0;
-        const probe = document.createElement("span");
-        probe.style.cssText = `position:absolute;visibility:hidden;font-family:var(--font-mono);width:${READABLE_WIDTH_CHARS}ch`;
-        el.appendChild(probe);
-        const w = probe.getBoundingClientRect().width;
-        probe.remove();
-        return w;
-    };
-    // The height at the width the panel will actually have (between min and max).
-    const measureHeightAt = (maxWidthPx: number, minWidthPx: number, paneZoom: number): number =>
-        withCapsLifted(`${maxWidthPx / paneZoom}px`, `${minWidthPx / paneZoom}px`, (el) => el.getBoundingClientRect().height, 0);
-
-    // Track the mouse continuously while the row exists, independent of
-    // `show` (the 50ms enter-delay in useNodePeek means `show` flips true
-    // slightly after hover starts — this way the first visible frame
-    // already has a real Y instead of one captured from a stale/absent
-    // mousemove). rAF-coalesced so fast mouse movement doesn't write
-    // styles once per raw event — same pattern `registerFloating` below
-    // already uses for its own rAF-gated setup.
-    createEffect(() => {
-        const row = props.rowEl();
-        if (!row) return;
-        const onMouseMove = (e: MouseEvent) => {
-            lastMouseY = e.clientY;
-            if (mouseMoveRaf != null) return;
-            mouseMoveRaf = requestAnimationFrame(() => {
-                mouseMoveRaf = null;
-                // A pinned panel does not follow the pointer (see pinnedOffsetY).
-                if (show() && pinnedOffsetY == null) update();
-            });
-        };
-        row.addEventListener("mousemove", onMouseMove);
-        onCleanup(() => {
-            row.removeEventListener("mousemove", onMouseMove);
-            if (mouseMoveRaf != null) {
-                cancelAnimationFrame(mouseMoveRaf);
-                mouseMoveRaf = null;
-            }
-        });
-    });
-
-    // reagent P1 on PR #2392: the RAF below used to be un-cancellable and
-    // `floatingEl` was never reset, so a rapid hover→leave (very reachable
-    // given the 150ms enter-delay that mounts this Portal, followed by a
-    // mouseleave within the same animation frame) let a stale RAF fire
-    // AFTER the `<Show>` had already unmounted this div — `floatingEl`
-    // still pointed at the detached node, `row` was still valid, so
-    // `autoUpdate(row, floatingEl, update)` ran anyway and registered
-    // scroll/resize listeners nothing would ever clean up, since the
-    // owning `onCleanup` (which only fires once per component-level
-    // unmount, not per `show` toggle) had already run with
-    // `cleanupAutoUpdate` still `null` at that point. Registering
-    // `onCleanup` HERE, synchronously inside the ref callback, attaches
-    // it to THIS specific `<Show>` branch's own reactive scope — it fires
-    // on every unmount of this div (whether from `show` flipping false or
-    // the whole component unmounting), 1:1 with `registerFloating`'s own
-    // mounts, so there's no toggle-without-matching-cleanup gap left.
-    const registerFloating = (el: HTMLElement) => {
-        floatingEl = el;
-        const rafId = requestAnimationFrame(() => {
-            const row = props.rowEl();
-            if (!row || !floatingEl) return;
-            cleanupAutoUpdate?.();
-            cleanupAutoUpdate = autoUpdate(row, floatingEl, update);
-        });
-        onCleanup(() => {
-            cancelAnimationFrame(rafId);
-            cleanupAutoUpdate?.();
-            cleanupAutoUpdate = null;
-            floatingEl = undefined;
-            // Closed: the next opening places itself afresh, and nothing is
-            // being crossed to any more.
-            pinnedOffsetY = null;
-            lastEnterable = false;
-            clearBridgeTimer();
-            releaseBridge();
-        });
-    };
-
-    createEffect(() => {
-        if (show()) {
-            update();
-        }
-    });
+    const s = createPeekState(props);
+    const bridge = createPeekBridge(s);
+    usePeekLinger(s, bridge);
+    const placement = createPeekPlacement(s, createPeekMeasure(s));
+    const { registerFloating } = usePeekTracking(s, placement, bridge);
 
     return (
-        <Show when={open()}>
+        <Show when={s.open()}>
             <Portal>
                 <div
                     ref={registerFloating}
                     class={clsx("agent-node-peek-overlay", props.class)}
-                    data-pane-overlay={outside() ? "" : undefined}
-                    data-window-tab-hidden={hiddenTab()}
+                    data-pane-overlay={s.outside() ? "" : undefined}
+                    data-window-tab-hidden={s.hiddenTab()}
                     onMouseEnter={() => {
-                        clearBridgeTimer();
-                        held = true;
+                        bridge.clearBridgeTimer();
+                        s.held = true;
                         // Arrived: the crossing is over. (Rows under the panel
                         // cannot be hovered while the pointer is on it anyway, so
                         // no bridge is needed here, and none can go stale if a
                         // mouseleave is ever missed.)
-                        releaseBridge();
+                        bridge.releaseBridge();
                     }}
                     onMouseLeave={() => {
-                        held = false;
+                        s.held = false;
                         // Pointer left the panel: linger briefly (it may be heading
                         // back to the row, whose mouseenter will re-show it).
-                        if (!show()) startLinger();
+                        if (!s.show()) bridge.startLinger();
                     }}
-                    style={floatingStyle()}
+                    style={s.floatingStyle()}
                 >
                     {props.children}
                 </div>
