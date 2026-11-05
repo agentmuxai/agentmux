@@ -459,6 +459,13 @@ fn unregister_pane(block_id_wait: &str, agent_id: Option<&str>) {
     // Deregister from jekt — removes the agent_id → block_id mapping so
     // subsequent jekt attempts fall back to MessageBus rather than a dead PTY.
     crate::backend::reactive::get_global_handler().unregister_block(block_id_wait);
+    // Every file registered for this block, under whatever name it is filed by: the one removal by name
+    // below misses an entry a turn wrote for the pane's current name.
+    {
+        let data_dir = crate::backend::base::get_mux_data_dir();
+        crate::backend::reactive::registry::remove_for_block(&data_dir, block_id_wait, None);
+        crate::backend::reactive::registry::remove_shared_for_block_from_env(block_id_wait, None);
+    }
 
     // Also remove from cross-instance file registry and cloud subscriber.
     if let Some(agent_id) = agent_id {

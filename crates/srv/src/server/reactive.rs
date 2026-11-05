@@ -1434,6 +1434,11 @@ pub(super) async fn unregister_pane(state: &AppState, req: UnregisterRequest) ->
         all_names.push(req.agent_id.clone());
     }
     let data_dir = base::get_mux_data_dir();
+    if let Some(block_id) = block_id.as_deref() {
+        // Whatever name an entry for this block is filed under, not only the names it held in memory.
+        agent_registry::remove_for_block(&data_dir, block_id, None);
+        agent_registry::remove_shared_for_block_from_env(block_id, None);
+    }
     for name in &all_names {
         // Also remove from cross-instance file registry.
         agent_registry::remove(&data_dir, name);

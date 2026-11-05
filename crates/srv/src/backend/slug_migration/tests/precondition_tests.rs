@@ -50,12 +50,26 @@ fn a_running_agent_refuses() {
 #[test]
 fn a_live_registration_refuses() {
     let (fx, _) = fixture();
-    let entry = serde_json::json!({ "agent_id": "naki-naki-2", "local_url": "", "block_id": "b", "pid": std::process::id(), "updated_at": 1, "channel": "local-x", "uid": NAKI2 });
+    let entry = serde_json::json!({ "agent_id": "naki-naki-2", "local_url": "", "block_id": "b", "pid": std::process::id(), "updated_at": agentmux_common::time::now_ms(), "channel": "local-x", "uid": NAKI2 });
     let dir = fx.home.reactive().join("naki-naki-2");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("local-x.json"), serde_json::to_vec(&entry).unwrap()).unwrap();
     let err = refuses_and_writes_nothing(&fx, "registered");
     assert!(err.contains("Naki #2 is running"), "{err}");
+}
+
+/// A registration is a record an srv wrote, and its pid is that srv's, not the agent's. Once the srv has
+/// exited the pid can belong to any program; a record whose pid started after it was written is not running.
+#[test]
+fn a_registration_whose_pid_was_reused_doesnt_refuse() {
+    let (fx, _) = fixture();
+    // This process is alive but started long after the entry was written: the pid an old srv left behind.
+    let written = agentmux_common::time::now_ms() - 3_600_000;
+    let entry = serde_json::json!({ "agent_id": "naki-naki-2", "local_url": "", "block_id": "b", "pid": std::process::id(), "updated_at": written, "channel": "local-x", "uid": NAKI2 });
+    let dir = fx.home.reactive().join("naki-naki-2");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("local-x.json"), serde_json::to_vec(&entry).unwrap()).unwrap();
+    assert!(super::super::plan(&fx.home, false).unwrap().blockers.is_empty());
 }
 
 #[test]
@@ -84,7 +98,7 @@ fn an_old_version_instance_refuses() {
 fn an_instance_known_only_to_the_registry_refuses() {
     let (fx, _) = fixture();
     crate::backend::process_identity::test_srv::treat_as_srv(&[std::process::id()]);
-    let entry = serde_json::json!({ "agent_id": "someone", "local_url": "", "block_id": "b", "pid": std::process::id(), "updated_at": 1, "channel": "ancient" });
+    let entry = serde_json::json!({ "agent_id": "someone", "local_url": "", "block_id": "b", "pid": std::process::id(), "updated_at": agentmux_common::time::now_ms(), "channel": "ancient" });
     let dir = fx.home.reactive().join("someone");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("ancient.json"), serde_json::to_vec(&entry).unwrap()).unwrap();
@@ -116,7 +130,7 @@ fn a_held_lock_refuses() {
 fn blockers_say_their_kind_and_only_a_running_agent_is_cleared_by_stopping() {
     let (fx, data) = fixture();
     crate::backend::process_identity::test_srv::treat_as_srv(&[std::process::id()]);
-    let entry = serde_json::json!({ "agent_id": "naki-naki-2", "local_url": "", "block_id": "b", "pid": std::process::id(), "updated_at": 1, "channel": "stable", "uid": NAKI2 });
+    let entry = serde_json::json!({ "agent_id": "naki-naki-2", "local_url": "", "block_id": "b", "pid": std::process::id(), "updated_at": agentmux_common::time::now_ms(), "channel": "stable", "uid": NAKI2 });
     let dir = fx.home.reactive().join("naki-naki-2");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("stable.json"), serde_json::to_vec(&entry).unwrap()).unwrap();
@@ -166,7 +180,7 @@ fn a_rollback_or_restore_refuses_while_a_migrated_agent_runs() {
 
     // A registration under the new id refuses too.
     std::fs::remove_file(fx.home.leases().join(format!("{LOAP2}.lease.json"))).unwrap();
-    let entry = serde_json::json!({ "agent_id": "loap-2", "local_url": "", "block_id": "b", "pid": std::process::id(), "updated_at": 1, "channel": "stable", "uid": LOAP2 });
+    let entry = serde_json::json!({ "agent_id": "loap-2", "local_url": "", "block_id": "b", "pid": std::process::id(), "updated_at": agentmux_common::time::now_ms(), "channel": "stable", "uid": LOAP2 });
     let dir = fx.home.reactive().join("loap-2");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("stable.json"), serde_json::to_vec(&entry).unwrap()).unwrap();
