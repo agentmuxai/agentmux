@@ -956,6 +956,12 @@ pub(crate) fn register_ipc_with_backend(
 /// saves every window then, and keeps that record through the closes that
 /// follow (`session_windows.rs` in srv).
 pub(crate) fn backend_save_session_snapshot(web_endpoint: &str, auth_key: &str, for_quit: bool) -> bool {
+    save_session_snapshot_with(web_endpoint, auth_key, for_quit, true)
+}
+
+/// The same, with `run_at_quit` false for a save marked as a quit's (its closes keep the record) that is
+/// not a quit yet and records no background work: a Store update's, before the Store closes the app.
+pub(crate) fn save_session_snapshot_with(web_endpoint: &str, auth_key: &str, for_quit: bool, run_at_quit: bool) -> bool {
     use std::io::{Read, Write};
 
     let Some(addr) = parse_web_endpoint(web_endpoint, "session-flush") else {
@@ -965,7 +971,7 @@ pub(crate) fn backend_save_session_snapshot(web_endpoint: &str, auth_key: &str, 
     let body = serde_json::json!({
         "service": "window",
         "method": "SaveSessionSnapshot",
-        "args": [for_quit],
+        "args": [for_quit, run_at_quit],
         "uicontext": null,
     })
     .to_string();
