@@ -2,22 +2,24 @@ ListBundlesCommand
 -- asked
   showing: detail
   back: "Bundles"
-  readonly: Review kit | Reviews | InstructionsReview it
+  readonly: Review kit | Reviews | -
+  instructions: Review it / 9 characters
   actions: Edit | Delete skills=skills for b1
   dialog: Delete this bundle?Running instances continue with their snapshot, but new launches won't see it.CancelDelete
 -- not deleted
   showing: detail
   back: "Bundles"
-  readonly: Review kit | Reviews | InstructionsReview it
+  readonly: Review kit | Reviews | -
+  instructions: Review it / 9 characters
   actions: Edit | Delete skills=skills for b1
 DeleteBundleCommand {"id":"b1"}
 ListBundlesCommand
 -- after confirming
   showing: list
   back: -
-  - — Blank (vanilla CLI) — / - {bundle-view-list-item is-blank}
-  - Global kit [GlobalInjected into all agents at launch] / For all {bundle-view-list-item is-global}
-  - Review kit / Reviews {bundle-view-list-item}
+  - — Blank (vanilla CLI) — / - / - {ui-card is-muted bundle-card}
+  - Global kit [GlobalInjected into all agents at launch] / For all / GlobalInjected into all agents at launch {ui-card bundle-card}
+  - Review kit / Reviews / claude {ui-card bundle-card}
 modalLayer.open {"kind":"bundle-import-select","onPreviewed":"[fn]","onCancel":"[fn]"}
 opened kind=bundle-import-select
 modalLayer.replace {"kind":"bundle-import-preview","filePath":"/tmp/a.abf","preview":{"content_digest":"abc"},"onNext":"[fn]","onCancel":"[fn]"}

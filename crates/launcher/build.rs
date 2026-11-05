@@ -51,32 +51,32 @@ fn main() {
         res.set_manifest(WINDOWS_APP_MANIFEST);
         res.compile().expect("winres compile failed");
 
-        // Read the brain logo PNG's header (transparent background, RGBA,
+        // Read the logo PNG's header (transparent background, RGBA,
         // 256×256) so splash.rs gets its dimensions as consts. The pixels
         // themselves are NOT decoded here: splash.rs embeds the PNG (about
         // 15 KB) and decodes it once on the first frame, instead of baking
         // a 256 KB raw bitmap into the exe. The runtime `png` decoder is
         // already linked for the tray icon, so this costs no new code.
-        let png_path = std::path::Path::new("resources/brain.png");
+        let png_path = std::path::Path::new("resources/logo.png");
         println!("cargo:rerun-if-changed={}", png_path.display());
-        let f = std::fs::File::open(png_path).expect("resources/brain.png not found");
+        let f = std::fs::File::open(png_path).expect("resources/logo.png not found");
         let decoder = png::Decoder::new(f);
         let reader = decoder.read_info().expect("png header");
         let info = reader.info().clone();
         assert_eq!(
             info.color_type,
             png::ColorType::Rgba,
-            "splash brain.png must be RGBA (transparent background)"
+            "splash logo.png must be RGBA (transparent background)"
         );
         assert_eq!(
             info.bit_depth,
             png::BitDepth::Eight,
-            "splash brain.png must be 8-bit"
+            "splash logo.png must be 8-bit"
         );
         let out_dir = std::env::var("OUT_DIR").unwrap();
 
         // Emit dimensions as Rust consts so splash.rs `include!`-s them
-        // and stays in lockstep with whatever brain.png actually contains.
+        // and stays in lockstep with whatever logo.png actually contains.
         // Hardcoded values would silently desync if the PNG is regenerated
         // at a different size.
         let dims_rs = format!(
@@ -89,27 +89,27 @@ fn main() {
 
     #[cfg(target_os = "linux")]
     {
-        // Decode the brain logo PNG (RGBA, transparent background) to raw
+        // Decode the logo PNG (RGBA, transparent background) to raw
         // *straight* (non-pre-multiplied) RGBA8 bytes for the Linux splash
         // backends (X11 pixmap + Wayland wl_shm). The backends alpha-blend the
         // brain over the solid backdrop themselves each frame, so they need the
         // un-pre-multiplied source. Decoding at compile time keeps a PNG decoder
         // out of the launcher runtime binary (mirrors the Windows arm above).
-        let png_path = std::path::Path::new("resources/brain.png");
+        let png_path = std::path::Path::new("resources/logo.png");
         println!("cargo:rerun-if-changed={}", png_path.display());
-        let f = std::fs::File::open(png_path).expect("resources/brain.png not found");
+        let f = std::fs::File::open(png_path).expect("resources/logo.png not found");
         let decoder = png::Decoder::new(f);
         let mut reader = decoder.read_info().expect("png header");
         let info = reader.info().clone();
         assert_eq!(
             info.color_type,
             png::ColorType::Rgba,
-            "splash brain.png must be RGBA (transparent background)"
+            "splash logo.png must be RGBA (transparent background)"
         );
         assert_eq!(
             info.bit_depth,
             png::BitDepth::Eight,
-            "splash brain.png must be 8-bit"
+            "splash logo.png must be 8-bit"
         );
         let mut buf = vec![0u8; reader.output_buffer_size()];
         reader.next_frame(&mut buf).expect("png decode");

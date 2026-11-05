@@ -17,66 +17,11 @@
     color: var(--main-text-color);
 }
 
-.bundle-view-rail-header {
-    padding: 8px;
-    border-bottom: 1px solid var(--border-color);
-}
-
-// Buttons here are element/ui Buttons; these rules only place them.
-.bundle-view-new-btn {
-    width: 100%;
-
-    & + & {
-        margin-top: var(--space-1);
-    }
-}
-
-.bundle-view-list {
+// The list's card grid scrolls under the actions row (primitive-card-actions, primitive-card-body).
+.bundle-view-cards {
     flex: 1 1 auto;
-    list-style: none;
-    margin: 0;
-    padding: 0;
+    min-height: 0;
     overflow-y: auto;
-}
-
-.bundle-view-list-item {
-    padding: 10px 12px;
-    cursor: default;
-    border-bottom: 1px solid var(--tint-2);
-
-    &:hover {
-        background: var(--hover-bg-color);
-    }
-
-    &.is-selected {
-        background: var(--tint-3);
-    }
-
-    &.is-blank {
-        font-style: italic;
-        color: var(--secondary-text-color);
-    }
-}
-
-.bundle-view-list-item-name {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: var(--text-base);
-    font-weight: 500;
-    min-width: 0;
-}
-
-.bundle-view-list-item-name-text {
-    flex: 1 1 0;
-    min-width: 0;
-    @include mixins.truncate;
-}
-
-.bundle-view-list-item-provider {
-    font-size: var(--text-xs);
-    color: var(--secondary-text-color);
-    margin-top: 2px;
 }
 
 .bundle-view-detail {
@@ -105,44 +50,24 @@
 }
 
 .bundle-view-description {
-    margin: 0 0 16px;
+    margin: 0 0 var(--space-2);
     color: var(--secondary-text-color);
 }
 
-.bundle-view-fields {
-    display: grid;
-    grid-template-columns: 140px 1fr;
-    column-gap: 16px;
-    row-gap: 8px;
-    margin: 0 0 16px;
-
-    dt {
-        color: var(--secondary-text-color);
-        font-size: var(--text-base);
-    }
-
-    dd {
-        margin: 0;
-        font-size: var(--text-base);
-    }
-}
-
-.bundle-view-instructions-readonly pre {
-    margin: 0;
-    padding: 8px;
-    background: rgba(0, 0, 0, 0.2);
-    border-radius: 0;
-    white-space: pre-wrap;
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-    max-height: 240px;
-    overflow-y: auto;
+.bundle-view-scope {
+    margin: 0 0 var(--space-2);
+    font-size: var(--text-base);
 }
 
 .bundle-view-actions {
     display: flex;
-    gap: 8px;
-    margin-top: 16px;
+    gap: var(--space-1-5);
+    margin-bottom: var(--space-2);
+}
+
+// A category of what a bundle holds (Instructions, Skills): a small heading over its cards.
+.bundle-category {
+    margin-top: var(--space-3);
 }
 
 // ── Edit form ───────────────────────────────────────────────────

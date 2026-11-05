@@ -4,9 +4,9 @@
 //! Native macOS startup splash, owned by the **launcher** — the macOS analogue
 //! of the Win32 `splash.rs`, matching its look and effects:
 //!
-//! * a solid **dark backdrop** (RGB 26,26,31) with the brain logo centered on
+//! * a solid **dark backdrop** (RGB 26,26,31) with the logo centered on
 //!   it (Win32 paints an opaque dark DIB; here a layer-backed `NSView`);
-//! * the brain **pulses** (alpha fades in 0→1 over 200 ms, then a 1.1 Hz sine
+//! * the logo **pulses** (alpha fades in 0→1 over 200 ms, then a 1.1 Hz sine
 //!   between ~0.73 and 1.0 — the backdrop stays solid);
 //! * on first host frame the whole splash **fades out** (~160 ms) then leaves.
 //!
@@ -41,8 +41,8 @@ use crate::splash_core::{
 };
 use crate::startup_events::{StartupEvent, StartupStatus};
 
-// The brain logo (transparent PNG). NSImage decodes it natively at runtime.
-static BRAIN_PNG: &[u8] = include_bytes!("../resources/brain.png");
+// The logo (transparent PNG). NSImage decodes it natively at runtime.
+static BRAIN_PNG: &[u8] = include_bytes!("../resources/logo.png");
 
 const BRAIN_PX: f64 = 150.0; // displayed brain size
 const PAD_PX: f64 = 35.0; // backdrop padding around the brain

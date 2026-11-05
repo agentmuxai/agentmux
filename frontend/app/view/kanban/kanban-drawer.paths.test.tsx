@@ -1380,3 +1380,57 @@ describe("KanbanDrawer: what a move's answer does", () => {
         expect(screen.getByText("only step")).toBeTruthy();
     });
 });
+
+describe("KanbanDrawer: the order of its parts", () => {
+    it("runs from the header to the history, in the order the operator reads it", async () => {
+        mount(
+            task(
+                { state: "blocked", claimed_by: "Naki-2", holder: naki, result: "so far so good" },
+                {
+                    question: "which repo?",
+                    request_text: "please fix it",
+                    checklist: [{ text: "write it", status: "pending" }],
+                    after: [after(5, { kind: "spec", doc: "docs/a.md" })],
+                    doc: "own.md",
+                }
+            ),
+            { detail: { media: [mediaItem(1)] } }
+        );
+        await screen.findByText("shot1.png");
+        const parts = [
+            ".kanban-drawer__head",
+            ".kanban-drawer__facts",
+            "p.kanban-drawer__reason",
+            "blockquote.kanban-drawer__quote",
+            ".kanban-drawer__payload",
+            ".kanban-checklist",
+            ".kanban-after",
+            ".kanban-media__grid",
+            ".kanban-drawer__doc",
+            ".kanban-drawer__actions",
+            ".kanban-history",
+        ].map((sel) => document.querySelector(sel) as HTMLElement);
+        parts.forEach((p, i) => expect(p, `part ${i}`).toBeTruthy());
+        for (let i = 1; i < parts.length; i++) {
+            expect(
+                parts[i - 1].compareDocumentPosition(parts[i]) & Node.DOCUMENT_POSITION_FOLLOWING,
+                `part ${i}`
+            ).toBeTruthy();
+        }
+        // The task's result sits between its documents and its actions.
+        const result = [...document.querySelectorAll(".kanban-drawer__payload")].find(
+            (e) => e.textContent === "so far so good"
+        )!;
+        expect(parts[8].compareDocumentPosition(result) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(result.compareDocumentPosition(parts[9]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it("puts the box for your words above the buttons that use them", () => {
+        mount(task({ state: "blocked", claimed_by: "Naki-2", holder: naki }));
+        const box = actions().querySelector("textarea") as HTMLElement;
+        const answer = button("Answer");
+        expect(box.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        const takeBack = button("Take it back");
+        expect(takeBack.compareDocumentPosition(box) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+});

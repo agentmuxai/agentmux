@@ -177,29 +177,78 @@ describe("the list", () => {
         expect(await screen.findByText("No skills yet")).toBeInTheDocument();
     });
 
-    it("lists each skill with who it reaches", async () => {
+    const metaOf = (name: string) =>
+        [...screen.getByText(name).closest(".ui-card")!.querySelectorAll(".ui-card-meta > *")].map(
+            (e) => e.textContent
+        );
+
+    it("lists each skill as a card with who it reaches", async () => {
         rpc.SkillCatalogListCommand.mockResolvedValue([
             skill({ id: "k1", name: "alpha", bound_count: 0 }),
             skill({ id: "k2", name: "beta", bound_count: 1 }),
             skill({ id: "k3", name: "gamma", bound_count: 3 }),
             skill({ id: "k4", name: "delta", bound_count: 3, all_agents: true }),
+            skill({ id: "k5", name: "epsilon", bound_count: 0, new_agents: true }),
+            skill({ id: "k6", name: "zeta", bound_count: 2, new_agents: true }),
         ]);
         render(() => <SkillManager />);
         await screen.findByText("alpha");
-        const badge = (name: string) =>
-            screen.getByText(name).parentElement!.querySelector(".agent-primitive-modal-list-item-badge")!.textContent;
-        expect(badge("alpha")).toBe("0 agents");
-        expect(badge("beta")).toBe("1 agent");
-        expect(badge("gamma")).toBe("3 agents");
-        expect(badge("delta")).toBe("all agents");
+        expect(metaOf("alpha")).toEqual(["0 agents"]);
+        expect(metaOf("beta")).toEqual(["1 agent"]);
+        expect(metaOf("gamma")).toEqual(["3 agents"]);
+        expect(metaOf("delta")).toEqual(["Every agent"]);
+        expect(metaOf("epsilon")).toEqual(["New agents"]);
+        expect(metaOf("zeta")).toEqual(["New agents", "2 agents"]);
         expect(screen.queryByText("No skills yet")).toBeNull();
     });
 
-    it("marks none of the skills as selected while the list is showing", async () => {
+    it("shows a skill's description under its name, and nothing when it has none", async () => {
+        rpc.SkillCatalogListCommand.mockResolvedValue([
+            skill({ id: "k1", name: "alpha", description: "Reads PDFs" }),
+            skill({ id: "k2", name: "beta", description: "" }),
+        ]);
         render(() => <SkillManager />);
-        await screen.findByText("pdf-extraction");
-        expect(document.querySelectorAll(".agent-primitive-modal-list-item.is-selected")).toHaveLength(0);
-        expect(document.querySelectorAll(".agent-primitive-modal-list-item")).toHaveLength(1);
+        await screen.findByText("alpha");
+        expect(screen.getByText("alpha").closest(".ui-card")!.querySelector(".ui-card-subtitle")?.textContent).toBe(
+            "Reads PDFs"
+        );
+        expect(screen.getByText("beta").closest(".ui-card")!.querySelector(".ui-card-subtitle")).toBeNull();
+    });
+
+    it("names where an imported skill came from", async () => {
+        rpc.SkillCatalogListCommand.mockResolvedValue([
+            skill({
+                id: "k1",
+                name: "alpha",
+                bound_count: 1,
+                source: { location: "github.com/acme/skills", git_ref: "main", item_key: "pdf" },
+            }),
+            skill({ id: "k2", name: "beta", bound_count: 1 }),
+        ]);
+        render(() => <SkillManager />);
+        await screen.findByText("alpha");
+        expect(metaOf("alpha")).toEqual(["1 agent", "Imported from github.com/acme/skills"]);
+        expect(metaOf("beta")).toEqual(["1 agent"]);
+    });
+
+    it("shows the skills as one grid of cards, none of them open", async () => {
+        rpc.SkillCatalogListCommand.mockResolvedValue([
+            skill({ id: "k1", name: "alpha" }),
+            skill({ id: "k2", name: "beta" }),
+        ]);
+        render(() => <SkillManager />);
+        await screen.findByText("alpha");
+        const grid = screen.getByLabelText("Skills");
+        expect(grid.querySelectorAll(".ui-card")).toHaveLength(2);
+        expect(grid.closest(".ui-density-compact")).not.toBeNull();
+        expect(document.querySelectorAll(".ui-card.is-selected")).toHaveLength(0);
+    });
+
+    it("opens a skill from its card with Enter as well as a click", async () => {
+        render(() => <SkillManager />);
+        const card = (await screen.findByText("pdf-extraction")).closest(".ui-card")!;
+        fireEvent.keyDown(card, { key: "Enter" });
+        await screen.findByRole("heading", { name: "pdf-extraction" });
     });
 
     it("offers a new skill, an import and the agents-and-skills matrix", async () => {

@@ -1,8 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Several raw SVGs this app inlines (notably logo-brain.svg, whose 16-stop
-// gradient illustration renders AgentMux's brand mark) define internal
+// Several raw SVGs this app inlines (notably illustrations with a multi-stop
+// gradient, such as AgentMux's former brain mark) define internal
 // `<linearGradient id="...">`s with plain, non-unique ids and reference
 // them via `fill="url(#...)"`. `innerHTML`-mounting the SAME raw markup
 // more than once on one page (e.g. the Connectors → Accounts gallery tile AND

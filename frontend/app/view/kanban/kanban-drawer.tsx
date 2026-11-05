@@ -4,7 +4,7 @@
 // A task opened on the Kanban: its prompt, the operator's own words, the checklist, links, its history,
 // and the moves its column allows (SPEC_WARDEN_KANBAN_2026_10_20.md §6.4, §6.7).
 
-import { createResource, createSignal, For, Show, type JSX } from "solid-js";
+import { createResource, createSignal, For, Show, type Accessor, type JSX, type Resource, type Setter } from "solid-js";
 
 import { Button, IconButton, Select, TextArea } from "@/app/element/ui";
 import { createBlock } from "@/app/store/block-layout-actions";
@@ -16,7 +16,15 @@ import { DrawerMedia } from "./kanban-media";
 import { agentStateWords, AgentChip } from "./kanban-card";
 import { columnOf, isFinishedColumn, isResearchKind, needsReason, requestedBy } from "./kanban-columns";
 import type { KanbanModel } from "./kanban-model";
-import type { KanbanActRequest, KanbanAgent, KanbanEvent, KanbanTask } from "./kanban-types";
+import type {
+    KanbanActRequest,
+    KanbanActResult,
+    KanbanAfter,
+    KanbanAgent,
+    KanbanEvent,
+    KanbanTask,
+    KanbanTaskDetail,
+} from "./kanban-types";
 import { agentsByRecentUse } from "./kanban-agent-order";
 
 const EVENT_WORDS: Record<string, string> = {
@@ -65,7 +73,7 @@ function EventLine(props: { ev: KanbanEvent; now: number }): JSX.Element {
     );
 }
 
-export function KanbanDrawer(props: {
+interface DrawerProps {
     model: KanbanModel;
     task: KanbanTask;
     agents: KanbanAgent[];
@@ -73,7 +81,36 @@ export function KanbanDrawer(props: {
     onClose: () => void;
     onOpenAgent: (blockId: string) => void;
     onOpenTask: (id: string) => void;
-}): JSX.Element {
+}
+
+/** What the drawer's parts share: its signals, what it reads off the task, and the two moves it makes. */
+interface DrawerState {
+    props: DrawerProps;
+    t: () => KanbanTask;
+    detail: Resource<KanbanTaskDetail | null>;
+    text: Accessor<string>;
+    setText: Setter<string>;
+    startOn: Accessor<string>;
+    setStartOn: Setter<string>;
+    busy: Accessor<boolean>;
+    confirming: Accessor<{ words: string; req: KanbanActRequest } | null>;
+    setConfirming: Setter<{ words: string; req: KanbanActRequest } | null>;
+    giveTo: Accessor<string>;
+    setGiveTo: Setter<string>;
+    cancelBuild: Accessor<boolean>;
+    setCancelBuild: Setter<boolean>;
+    openFollowers: () => KanbanAfter[];
+    docs: () => { label: string; path: string }[];
+    column: () => ReturnType<typeof columnOf>;
+    heldByAgent: () => boolean;
+    otherAgents: () => KanbanAgent[];
+    specUnlocks: () => string;
+    runningAgents: () => KanbanAgent[];
+    act: (req: KanbanActRequest) => Promise<KanbanActResult | null>;
+    takeBack: (req: KanbanActRequest) => Promise<void>;
+}
+
+function createDrawerState(props: DrawerProps): DrawerState {
     const t = () => props.task;
     // Re-read the history whenever the task changes on the board.
     // A string, so an equal task after a refresh is the same source and isn't fetched again.
@@ -131,42 +168,63 @@ export function KanbanDrawer(props: {
         if (res?.ok) setGiveTo("");
     };
 
+    return {
+        props, t, detail, text, setText, startOn, setStartOn, busy, confirming, setConfirming, giveTo, setGiveTo,
+        cancelBuild, setCancelBuild, openFollowers, docs, column, heldByAgent, otherAgents, specUnlocks,
+        runningAgents, act, takeBack,
+    };
+}
+
+function DrawerHead(props: { m: DrawerState }): JSX.Element {
+    const m = props.m;
     return (
-        <aside class="kanban-drawer" aria-label={`Task ${t().card.num}`}>
-            <header class="kanban-drawer__head">
-                <span class="kanban-card__num">#{t().card.num}</span>
-                <h3 class="kanban-drawer__title">{t().title}</h3>
-                <IconButton icon="xmark" label="Close" onClick={props.onClose} />
-            </header>
+        <header class="kanban-drawer__head">
+            <span class="kanban-card__num">#{m.t().card.num}</span>
+            <h3 class="kanban-drawer__title">{m.t().title}</h3>
+            <IconButton icon="xmark" label="Close" onClick={m.props.onClose} />
+        </header>
+    );
+}
 
-            <div class="kanban-drawer__facts">
-                <Show when={t().claimed_by || t().target_agent}>
-                    {(name) => (
-                        <span>
-                            <AgentChip name={name()} agent={t().holder ?? props.agents.find((a) => a.name === name())} />
-                            <span class="warden-manager-dim"> {agentStateWords((t().holder ?? props.agents.find((a) => a.name === name()))?.state)}</span>
-                        </span>
-                    )}
-                </Show>
-                <span class="warden-manager-dim">asked by {requestedBy(t())}</span>
-                <Show when={t().card.repo}>
-                    <span class="warden-manager-dim">{t().card.repo}{t().card.branch ? ` · ${t().card.branch}` : ""}</span>
-                </Show>
-                <Show when={t().card.pr_url}>
-                    <Button density="compact" tone="quiet" icon="code-pull-request" onClick={() => void openLink(t().card.pr_url)}>
-                        Open the PR
-                    </Button>
-                </Show>
-                <Show when={t().card.pr?.merged_at}>
-                    {(at) => (
-                        <span class="warden-manager-dim">
-                            merged {formatAge(Math.max(0, props.now - at()))} ago
-                            {t().card.pr?.released_in ? ` · released in ${t().card.pr?.released_in}` : ""}
-                        </span>
-                    )}
-                </Show>
-            </div>
+function DrawerFacts(props: { m: DrawerState }): JSX.Element {
+    const m = props.m;
+    const t = m.t;
+    return (
+        <div class="kanban-drawer__facts">
+            <Show when={t().claimed_by || t().target_agent}>
+                {(name) => (
+                    <span>
+                        <AgentChip name={name()} agent={t().holder ?? m.props.agents.find((a) => a.name === name())} />
+                        <span class="warden-manager-dim"> {agentStateWords((t().holder ?? m.props.agents.find((a) => a.name === name()))?.state)}</span>
+                    </span>
+                )}
+            </Show>
+            <span class="warden-manager-dim">asked by {requestedBy(t())}</span>
+            <Show when={t().card.repo}>
+                <span class="warden-manager-dim">{t().card.repo}{t().card.branch ? ` · ${t().card.branch}` : ""}</span>
+            </Show>
+            <Show when={t().card.pr_url}>
+                <Button density="compact" tone="quiet" icon="code-pull-request" onClick={() => void openLink(t().card.pr_url)}>
+                    Open the PR
+                </Button>
+            </Show>
+            <Show when={t().card.pr?.merged_at}>
+                {(at) => (
+                    <span class="warden-manager-dim">
+                        merged {formatAge(Math.max(0, m.props.now - at()))} ago
+                        {t().card.pr?.released_in ? ` · released in ${t().card.pr?.released_in}` : ""}
+                    </span>
+                )}
+            </Show>
+        </div>
+    );
+}
 
+/** Why it needs you, what you asked, the task's own words and its checklist. */
+function DrawerAbout(props: { m: DrawerState }): JSX.Element {
+    const t = props.m.t;
+    return (
+        <>
             <Show when={needsReason(t())}>{(r) => <p class="kanban-drawer__reason">{r()}</p>}</Show>
 
             <Show when={t().card.request_text}>
@@ -199,213 +257,291 @@ export function KanbanDrawer(props: {
                     </ul>
                 </section>
             </Show>
+        </>
+    );
+}
 
-            <KanbanAfterSection model={props.model} task={t()} onOpen={props.onOpenTask} />
-
-            <DrawerMedia task={t()} items={detail()?.media ?? []} now={props.now} busy={busy()} onAct={act} />
-            <Show when={docs().length > 0}>
-                <section class="kanban-drawer__section">
-                    <h4>Document</h4>
-                    <For each={docs()}>
-                        {(d) => (
-                            <div class="kanban-drawer__row">
-                                <span class="kanban-drawer__doc">
-                                    {d.label}
-                                    {d.path}
-                                </span>
-                                <Button
-                                    density="compact"
-                                    tone="quiet"
-                                    icon="file-lines"
-                                    onClick={() => void createBlock({ meta: { view: "editor", file: d.path } })}
-                                >
-                                    Open
-                                </Button>
-                            </div>
-                        )}
-                    </For>
-                </section>
-            </Show>
-
-            <Show when={t().result}>
-                <section class="kanban-drawer__section">
-                    <h4>{t().state === "failed" || t().state === "open" ? "Last handed back because" : "Result"}</h4>
-                    <div class="kanban-drawer__payload">{t().result}</div>
-                </section>
-            </Show>
-
-            <section class="kanban-drawer__actions" data-toast-avoid>
-                <Show when={heldByAgent()}>
-                    <Show when={t().holder_unavailable}>
-                        <p class="warden-manager-dim">
-                            {t().claimed_by || "Its agent"} can't work right now. Take the task back to let someone else do it.
-                        </p>
-                    </Show>
-                    <div class="kanban-drawer__row">
-                        <Button
-                            density="compact"
-                            icon="rotate-left"
-                            disabled={busy()}
-                            title="Return it to the backlog; its agent is told to stop"
-                            onClick={() => void takeBack({ action: "release" })}
-                        >
-                            Take it back
-                        </Button>
-                        <Select
-                            value={giveTo()}
-                            onChange={setGiveTo}
-                            density="compact"
-                            ariaLabel="Agent to give it to"
-                            options={[
-                                { value: "", label: "Give it to…" },
-                                { value: ANYONE, label: "Anyone" },
-                                ...otherAgents().map((a) => ({ value: a.name, label: `${a.name} (${agentStateWords(a.state)})` })),
-                            ]}
-                        />
-                        <Button
-                            density="compact"
-                            tone="accent"
-                            icon="share"
-                            disabled={!giveTo() || busy()}
-                            onClick={() => void takeBack({ action: "reassign", agent: giveTo() === ANYONE ? "" : giveTo() })}
-                        >
-                            Give
-                        </Button>
-                    </div>
-                    <Show when={confirming()}>
-                        {(c) => (
-                            <div class="kanban-drawer__confirm" role="alert">
-                                <p class="kanban-drawer__reason">{c().words}</p>
-                                <div class="kanban-drawer__row">
-                                    <Button
-                                        density="compact"
-                                        tone="danger"
-                                        icon="rotate-left"
-                                        disabled={busy()}
-                                        onClick={() => void takeBack({ ...c().req, confirm: true })}
-                                    >
-                                        Take it back anyway
-                                    </Button>
-                                    <Button density="compact" tone="quiet" disabled={busy()} onClick={() => setConfirming(null)}>
-                                        Leave it
-                                    </Button>
-                                </div>
-                            </div>
-                        )}
-                    </Show>
-                </Show>
-                <Show when={column() === "backlog" || column() === "specd"}>
-                    <div class="kanban-drawer__row">
-                        <Select
-                            value={startOn()}
-                            onChange={setStartOn}
-                            density="compact"
-                            ariaLabel="Agent to start it on"
-                            options={[{ value: "", label: "Start on…" }, ...runningAgents().map((a) => ({ value: a.name, label: `${a.name} (${agentStateWords(a.state)})` }))]}
-                        />
-                        <Button density="compact" tone="accent" icon="play" disabled={!startOn() || busy()} onClick={() => void act({ action: "start", agent: startOn() })}>
-                            Start
-                        </Button>
-                        <Button density="compact" icon={t().state === "held" ? "play" : "pause"} disabled={busy()} onClick={() => void act({ action: "move", hold: t().state !== "held" })}>
-                            {t().state === "held" ? "Release hold" : "Hold"}
-                        </Button>
-                        <Show when={t().target_agent}>
-                            <Button density="compact" tone="quiet" disabled={busy()} onClick={() => void act({ action: "move", agent: "" })}>
-                                Give to anyone
-                            </Button>
-                        </Show>
-                    </div>
-                </Show>
-                <Show when={t().state === "blocked" || t().state === "review"}>
-                    <TextArea variant="plain"
-                        class="kanban-drawer__text"
-                        rows={3}
-                        placeholder={t().state === "blocked" ? "Your answer" : "What to fix (for Send back)"}
-                        value={text()}
-                        onInput={(e) => setText(e.currentTarget.value)}
-                    />
-                </Show>
-                <div class="kanban-drawer__row">
-                    <Show when={t().state === "blocked"}>
-                        <Button density="compact" tone="accent" icon="reply" disabled={!text().trim() || busy()} onClick={() => void act({ action: "answer", text: text() })}>
-                            Answer
-                        </Button>
-                    </Show>
-                    <Show when={t().state === "review"}>
-                        <Button
-                            density="compact"
-                            tone="accent"
-                            icon="check"
-                            disabled={busy()}
-                            title={specUnlocks() || undefined}
-                            onClick={() => void act({ action: "accept" })}
-                        >
-                            {isResearchKind(t().kind) ? `Accept ${t().kind.trim().toLowerCase()}` : "Accept"}
-                        </Button>
-                        <Button density="compact" icon="rotate-left" disabled={busy()} onClick={() => void act({ action: "send_back", text: text() })}>
-                            Send back
-                        </Button>
-                    </Show>
-                    <Show when={t().accepted_by}>
-                        {(a) => (
+function DrawerDocs(props: { m: DrawerState }): JSX.Element {
+    return (
+        <Show when={props.m.docs().length > 0}>
+            <section class="kanban-drawer__section">
+                <h4>Document</h4>
+                <For each={props.m.docs()}>
+                    {(d) => (
+                        <div class="kanban-drawer__row">
+                            <span class="kanban-drawer__doc">
+                                {d.label}
+                                {d.path}
+                            </span>
                             <Button
                                 density="compact"
-                                icon="rotate-left"
-                                disabled={busy()}
-                                title={`${a().name} accepted it. This puts it back in Review.`}
-                                onClick={() => void act({ action: "reopen", text: text() })}
+                                tone="quiet"
+                                icon="file-lines"
+                                onClick={() => void createBlock({ meta: { view: "editor", file: d.path } })}
                             >
-                                Reopen
+                                Open
                             </Button>
-                        )}
-                    </Show>
-                    <Show when={t().state === "failed"}>
-                        <Button density="compact" tone="accent" icon="rotate-right" disabled={busy()} onClick={() => void act({ action: "retry" })}>
-                            Try again
-                        </Button>
-                    </Show>
-                    <Show when={t().holder}>
-                        {(h) => (
-                            <Button density="compact" tone="quiet" icon="arrow-up-right-from-square" onClick={() => props.onOpenAgent(h().block_id)}>
-                                Open {h().name}
-                            </Button>
-                        )}
-                    </Show>
-                    <Show when={!isFinishedColumn(column()) && openFollowers().length > 0}>
-                        <label class="kanban-new__hold">
-                            <input
-                                type="checkbox"
-                                checked={cancelBuild()}
-                                onChange={(e) => setCancelBuild(e.currentTarget.checked)}
-                            />
-                            Cancelling also cancels {openFollowers().map((f) => `#${f.num}`).join(", ")} (else they go on
-                            hold)
-                        </label>
-                    </Show>
-                    <Show when={!isFinishedColumn(column())}>
-                        <Button density="compact" tone="danger" icon="ban" disabled={busy()} onClick={() =>
-                                void act({
-                                    action: "cancel",
-                                    text: text(),
-                                    followers: openFollowers().length ? (cancelBuild() ? "cancel" : "hold") : undefined,
-                                })
-                            }>
-                            Cancel task
-                        </Button>
-                    </Show>
-                </div>
-            </section>
-
-            <section class="kanban-drawer__section">
-                <h4>History</h4>
-                <Show when={detail()?.events} fallback={<p class="warden-manager-dim">Loading…</p>}>
-                    {(events) => (
-                        <ul class="kanban-history">
-                            <For each={events()}>{(ev) => <EventLine ev={ev} now={props.now} />}</For>
-                        </ul>
+                        </div>
                     )}
-                </Show>
+                </For>
             </section>
+        </Show>
+    );
+}
+
+function DrawerResult(props: { m: DrawerState }): JSX.Element {
+    const t = props.m.t;
+    return (
+        <Show when={t().result}>
+            <section class="kanban-drawer__section">
+                <h4>{t().state === "failed" || t().state === "open" ? "Last handed back because" : "Result"}</h4>
+                <div class="kanban-drawer__payload">{t().result}</div>
+            </section>
+        </Show>
+    );
+}
+
+/** Take it back from the agent holding it, or give it to another. */
+function TakeBackRows(props: { m: DrawerState }): JSX.Element {
+    const m = props.m;
+    const t = m.t;
+    return (
+        <Show when={m.heldByAgent()}>
+            <Show when={t().holder_unavailable}>
+                <p class="warden-manager-dim">
+                    {t().claimed_by || "Its agent"} can't work right now. Take the task back to let someone else do it.
+                </p>
+            </Show>
+            <div class="kanban-drawer__row">
+                <Button
+                    density="compact"
+                    icon="rotate-left"
+                    disabled={m.busy()}
+                    title="Return it to the backlog; its agent is told to stop"
+                    onClick={() => void m.takeBack({ action: "release" })}
+                >
+                    Take it back
+                </Button>
+                <Select
+                    value={m.giveTo()}
+                    onChange={m.setGiveTo}
+                    density="compact"
+                    ariaLabel="Agent to give it to"
+                    options={[
+                        { value: "", label: "Give it to…" },
+                        { value: ANYONE, label: "Anyone" },
+                        ...m.otherAgents().map((a) => ({ value: a.name, label: `${a.name} (${agentStateWords(a.state)})` })),
+                    ]}
+                />
+                <Button
+                    density="compact"
+                    tone="accent"
+                    icon="share"
+                    disabled={!m.giveTo() || m.busy()}
+                    onClick={() => void m.takeBack({ action: "reassign", agent: m.giveTo() === ANYONE ? "" : m.giveTo() })}
+                >
+                    Give
+                </Button>
+            </div>
+            <Show when={m.confirming()}>
+                {(c) => (
+                    <div class="kanban-drawer__confirm" role="alert">
+                        <p class="kanban-drawer__reason">{c().words}</p>
+                        <div class="kanban-drawer__row">
+                            <Button
+                                density="compact"
+                                tone="danger"
+                                icon="rotate-left"
+                                disabled={m.busy()}
+                                onClick={() => void m.takeBack({ ...c().req, confirm: true })}
+                            >
+                                Take it back anyway
+                            </Button>
+                            <Button density="compact" tone="quiet" disabled={m.busy()} onClick={() => m.setConfirming(null)}>
+                                Leave it
+                            </Button>
+                        </div>
+                    </div>
+                )}
+            </Show>
+        </Show>
+    );
+}
+
+/** Start a waiting task on an agent, hold it, or let anyone take it. */
+function StartRows(props: { m: DrawerState }): JSX.Element {
+    const m = props.m;
+    const t = m.t;
+    return (
+        <Show when={m.column() === "backlog" || m.column() === "specd"}>
+            <div class="kanban-drawer__row">
+                <Select
+                    value={m.startOn()}
+                    onChange={m.setStartOn}
+                    density="compact"
+                    ariaLabel="Agent to start it on"
+                    options={[{ value: "", label: "Start on…" }, ...m.runningAgents().map((a) => ({ value: a.name, label: `${a.name} (${agentStateWords(a.state)})` }))]}
+                />
+                <Button density="compact" tone="accent" icon="play" disabled={!m.startOn() || m.busy()} onClick={() => void m.act({ action: "start", agent: m.startOn() })}>
+                    Start
+                </Button>
+                <Button density="compact" icon={t().state === "held" ? "play" : "pause"} disabled={m.busy()} onClick={() => void m.act({ action: "move", hold: t().state !== "held" })}>
+                    {t().state === "held" ? "Release hold" : "Hold"}
+                </Button>
+                <Show when={t().target_agent}>
+                    <Button density="compact" tone="quiet" disabled={m.busy()} onClick={() => void m.act({ action: "move", agent: "" })}>
+                        Give to anyone
+                    </Button>
+                </Show>
+            </div>
+        </Show>
+    );
+}
+
+/** The operator's words for an answer, a send-back, a reopening or a cancellation. */
+function WordsBox(props: { m: DrawerState }): JSX.Element {
+    const m = props.m;
+    return (
+        <Show when={m.t().state === "blocked" || m.t().state === "review"}>
+            <TextArea variant="plain"
+                class="kanban-drawer__text"
+                rows={3}
+                placeholder={m.t().state === "blocked" ? "Your answer" : "What to fix (for Send back)"}
+                value={m.text()}
+                onInput={(e) => m.setText(e.currentTarget.value)}
+            />
+        </Show>
+    );
+}
+
+/** Answer, accept, send back, reopen, try again, open the agent, and cancel. */
+function MoveButtons(props: { m: DrawerState }): JSX.Element {
+    const m = props.m;
+    const t = m.t;
+    return (
+        <div class="kanban-drawer__row">
+            <Show when={t().state === "blocked"}>
+                <Button density="compact" tone="accent" icon="reply" disabled={!m.text().trim() || m.busy()} onClick={() => void m.act({ action: "answer", text: m.text() })}>
+                    Answer
+                </Button>
+            </Show>
+            <Show when={t().state === "review"}>
+                <Button
+                    density="compact"
+                    tone="accent"
+                    icon="check"
+                    disabled={m.busy()}
+                    title={m.specUnlocks() || undefined}
+                    onClick={() => void m.act({ action: "accept" })}
+                >
+                    {isResearchKind(t().kind) ? `Accept ${t().kind.trim().toLowerCase()}` : "Accept"}
+                </Button>
+                <Button density="compact" icon="rotate-left" disabled={m.busy()} onClick={() => void m.act({ action: "send_back", text: m.text() })}>
+                    Send back
+                </Button>
+            </Show>
+            <Show when={t().accepted_by}>
+                {(a) => (
+                    <Button
+                        density="compact"
+                        icon="rotate-left"
+                        disabled={m.busy()}
+                        title={`${a().name} accepted it. This puts it back in Review.`}
+                        onClick={() => void m.act({ action: "reopen", text: m.text() })}
+                    >
+                        Reopen
+                    </Button>
+                )}
+            </Show>
+            <Show when={t().state === "failed"}>
+                <Button density="compact" tone="accent" icon="rotate-right" disabled={m.busy()} onClick={() => void m.act({ action: "retry" })}>
+                    Try again
+                </Button>
+            </Show>
+            <Show when={t().holder}>
+                {(h) => (
+                    <Button density="compact" tone="quiet" icon="arrow-up-right-from-square" onClick={() => m.props.onOpenAgent(h().block_id)}>
+                        Open {h().name}
+                    </Button>
+                )}
+            </Show>
+            <CancelControls m={m} />
+        </div>
+    );
+}
+
+/** Cancel the task, and say what becomes of the builds waiting on a spec. */
+function CancelControls(props: { m: DrawerState }): JSX.Element {
+    const m = props.m;
+    return (
+        <>
+            <Show when={!isFinishedColumn(m.column()) && m.openFollowers().length > 0}>
+                <label class="kanban-new__hold">
+                    <input
+                        type="checkbox"
+                        checked={m.cancelBuild()}
+                        onChange={(e) => m.setCancelBuild(e.currentTarget.checked)}
+                    />
+                    Cancelling also cancels {m.openFollowers().map((f) => `#${f.num}`).join(", ")} (else they go on
+                    hold)
+                </label>
+            </Show>
+            <Show when={!isFinishedColumn(m.column())}>
+                <Button density="compact" tone="danger" icon="ban" disabled={m.busy()} onClick={() =>
+                        void m.act({
+                            action: "cancel",
+                            text: m.text(),
+                            followers: m.openFollowers().length ? (m.cancelBuild() ? "cancel" : "hold") : undefined,
+                        })
+                    }>
+                    Cancel task
+                </Button>
+            </Show>
+        </>
+    );
+}
+
+function DrawerActions(props: { m: DrawerState }): JSX.Element {
+    return (
+        <section class="kanban-drawer__actions" data-toast-avoid>
+            <TakeBackRows m={props.m} />
+            <StartRows m={props.m} />
+            <WordsBox m={props.m} />
+            <MoveButtons m={props.m} />
+        </section>
+    );
+}
+
+function DrawerHistory(props: { m: DrawerState }): JSX.Element {
+    return (
+        <section class="kanban-drawer__section">
+            <h4>History</h4>
+            <Show when={props.m.detail()?.events} fallback={<p class="warden-manager-dim">Loading…</p>}>
+                {(events) => (
+                    <ul class="kanban-history">
+                        <For each={events()}>{(ev) => <EventLine ev={ev} now={props.m.props.now} />}</For>
+                    </ul>
+                )}
+            </Show>
+        </section>
+    );
+}
+
+export function KanbanDrawer(props: DrawerProps): JSX.Element {
+    const m = createDrawerState(props);
+    return (
+        <aside class="kanban-drawer" aria-label={`Task ${m.t().card.num}`}>
+            <DrawerHead m={m} />
+            <DrawerFacts m={m} />
+            <DrawerAbout m={m} />
+
+            <KanbanAfterSection model={props.model} task={m.t()} onOpen={props.onOpenTask} />
+
+            <DrawerMedia task={m.t()} items={m.detail()?.media ?? []} now={props.now} busy={m.busy()} onAct={m.act} />
+            <DrawerDocs m={m} />
+            <DrawerResult m={m} />
+            <DrawerActions m={m} />
+            <DrawerHistory m={m} />
         </aside>
     );
 }

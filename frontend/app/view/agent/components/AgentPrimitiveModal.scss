@@ -33,23 +33,6 @@
     @include listDetail.list-empty;
 }
 
-.agent-primitive-modal-list-item {
-    @include listDetail.list-item;
-}
-
-.agent-primitive-modal-list-item-name {
-    @include listDetail.list-item-name;
-}
-
-.agent-primitive-modal-list-item-badge {
-    @include listDetail.badge;
-    @include listDetail.badge-tone(var(--accent-color));
-
-    &.is-bound {
-        @include listDetail.badge-tone(var(--success-color));
-    }
-}
-
 .agent-primitive-modal-new-btn {
     @include listDetail.new-btn;
 }

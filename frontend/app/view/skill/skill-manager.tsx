@@ -19,9 +19,8 @@ import { SkillImportModel } from "./skill-import-model";
 import { SkillImportPanel, SkillImportResult } from "./skill-import";
 import { SkillMatrix } from "./skill-matrix";
 import "./skill-import.scss";
-import "./skill-manager.scss";
 import "../agent/components/AgentPrimitiveModal.scss";
-import { Button, Switch, TextArea, TextInput } from "@/app/element/ui";
+import { Button, Card, CardGrid, Switch, TextArea, TextInput } from "@/app/element/ui";
 import { focusOnOpen } from "@/util/focusutil";
 
 /** The agents a skill is bound to, each with Unbind. */
@@ -131,10 +130,58 @@ function goBack(m: ManagerState): void {
     m.model.setDraft(null);
 }
 
+/** Who gets a skill, as the short facts a card shows: every agent, the new ones, or how many it is bound to. */
+function reachFacts(skill: SkillCatalogItem): string[] {
+    if (skill.all_agents) return ["Every agent"];
+    const bound = `${skill.bound_count} ${skill.bound_count === 1 ? "agent" : "agents"}`;
+    if (!skill.new_agents) return [bound];
+    return skill.bound_count > 0 ? ["New agents", bound] : ["New agents"];
+}
+
+function SkillCard(p: { m: ManagerState; skill: SkillCatalogItem }): JSX.Element {
+    const facts = () => [
+        ...reachFacts(p.skill).map((fact) => <span>{fact}</span>),
+        ...(p.skill.source ? [<span>Imported from {p.skill.source.location}</span>] : []),
+    ];
+    return (
+        <Card
+            class="skill-card"
+            icon={<i class="fa-solid fa-wand-magic-sparkles" />}
+            title={p.skill.name}
+            subtitle={p.skill.description || undefined}
+            meta={facts()}
+            onSelect={() => {
+                p.m.setImporting(null);
+                p.m.setShowMatrix(false);
+                p.m.model.handleSelect(p.skill);
+            }}
+        />
+    );
+}
+
 function SkillList(p: { m: ManagerState }): JSX.Element {
     const model = p.m.model;
     return (
-        <div class="agent-primitive-modal-list">
+        <div class="agent-primitive-modal-list ui-density-compact">
+            <div class="primitive-card-actions">
+                <Button density="compact" onClick={() => model.startNew()}>
+                    + New skill
+                </Button>
+                <Button density="compact" onClick={() => startImport(p.m)}>
+                    Import a skill…
+                </Button>
+                <Button
+                    density="compact"
+                    onClick={() => {
+                        model.setSelectedId(null);
+                        model.setDraft(null);
+                        p.m.setImporting(null);
+                        p.m.setShowMatrix(true);
+                    }}
+                >
+                    Agents and skills
+                </Button>
+            </div>
             <Show when={model.errorAtom()}>
                 <div class="agent-primitive-modal-error">{model.errorAtom()}</div>
             </Show>
@@ -142,48 +189,15 @@ function SkillList(p: { m: ManagerState }): JSX.Element {
                 when={model.skillsAtom().length > 0}
                 fallback={<div class="agent-primitive-modal-list-empty">No skills yet</div>}
             >
-                <For each={model.skillsAtom()}>
-                    {(skill) => (
-                        <Button
-                            class={
-                                model.selectedIdAtom() === skill.id
-                                    ? "agent-primitive-modal-list-item is-selected"
-                                    : "agent-primitive-modal-list-item"
-                            }
-                            onClick={() => {
-                                p.m.setImporting(null);
-                                p.m.setShowMatrix(false);
-                                model.handleSelect(skill);
-                            }}
-                        >
-                            <span class="agent-primitive-modal-list-item-name">{skill.name}</span>
-                            <span class="agent-primitive-modal-list-item-badge">
-                                {skill.all_agents
-                                    ? "all agents"
-                                    : `${skill.bound_count} ${skill.bound_count === 1 ? "agent" : "agents"}`}
-                            </span>
-                        </Button>
-                    )}
-                </For>
+                <div class="primitive-card-body">
+                    <CardGrid
+                        ariaLabel="Skills"
+                        items={model.skillsAtom()}
+                        keyOf={(skill) => skill.id}
+                        renderCard={(skill) => <SkillCard m={p.m} skill={skill} />}
+                    />
+                </div>
             </Show>
-
-            <Button class="agent-primitive-modal-new-btn" onClick={() => model.startNew()}>
-                + New skill
-            </Button>
-            <Button class="agent-primitive-modal-new-btn" onClick={() => startImport(p.m)}>
-                Import a skill…
-            </Button>
-            <Button
-                class="agent-primitive-modal-new-btn"
-                onClick={() => {
-                    model.setSelectedId(null);
-                    model.setDraft(null);
-                    p.m.setImporting(null);
-                    p.m.setShowMatrix(true);
-                }}
-            >
-                Agents and skills
-            </Button>
         </div>
     );
 }

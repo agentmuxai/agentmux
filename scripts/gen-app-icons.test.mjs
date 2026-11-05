@@ -97,7 +97,7 @@ describe("drawing", () => {
 
 describe("the mark the app draws for itself", () => {
     it("the splash PNG is the four blocks alone on a transparent 256 px canvas (the size build.rs reads)", () => {
-        const img = decode(out("crates/launcher/resources/brain.png"));
+        const img = decode(out("crates/launcher/resources/logo.png"));
         expect([img.w, img.h]).toEqual([256, 256]);
         expect(img.at(0, 0)[3]).toBe(0); // no tile
         expect(img.at(128, 48)).toEqual([107, 130, 222, 255]); // the bar

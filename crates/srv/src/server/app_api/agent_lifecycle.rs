@@ -100,7 +100,7 @@ fn may_have_process(row: &AgentRuntime) -> bool {
     !matches!(row.state, AgentRuntimeState::Stopped | AgentRuntimeState::Error)
 }
 
-fn audit(state: &AppState, actor: &Actor, action: &str, target: &str, block_id: &str, ok: bool, error: Option<&str>, note: &str) -> String {
+pub(super) fn audit(state: &AppState, actor: &Actor, action: &str, target: &str, block_id: &str, ok: bool, error: Option<&str>, note: &str) -> String {
     let request_id = uuid::Uuid::new_v4().to_string();
     let reason = format!("agent-initiated {action} by {} (uid {}): {note}", actor.slug, actor.uid);
     tracing::info!(action, target, ok, "{reason}");
