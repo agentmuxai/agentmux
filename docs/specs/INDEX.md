@@ -771,6 +771,7 @@ partial list.
 | [`SPEC_OFFLINE_RESILIENCE_2026_10_20`](SPEC_OFFLINE_RESILIENCE_2026_10_20.md) | SPEC: Stay in control of every agent when the internet drops, and recover by itself |
 | [`SPEC_ONE_COMMAND_INSTALL_ALL_PLATFORMS_2026_11_01`](SPEC_ONE_COMMAND_INSTALL_ALL_PLATFORMS_2026_11_01.md) | Spec: install AgentMux with one copyable command on Windows, macOS and Linux |
 | [`SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24`](SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md) | SPEC: OS notification system (native toasts) + tray re-enablement |
+| [`SPEC_PACKS_2026_11_05`](SPEC_PACKS_2026_11_05.md) | SPEC: Packs: per-application knowledge for computer use (Word, Ableton Live, WaveLab first) |
 | [`SPEC_PANE_CLOSING_INDICATOR_AND_FASTER_CLOSE_2026_10_28`](SPEC_PANE_CLOSING_INDICATOR_AND_FASTER_CLOSE_2026_10_28.md) | A pane shows it is closing, and a close stops waiting on srv |
 | [`SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20`](SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20.md) | SPEC — Consolidate pane loading into one readiness system |
 | [`SPEC_PANE_MODALS_NOT_WINDOW_MODALS_2026_11_02`](SPEC_PANE_MODALS_NOT_WINDOW_MODALS_2026_11_02.md) | Spec: pane modals, not window modals, for sign-in and OAuth; an audit of every window modal (2026-11-02) |
