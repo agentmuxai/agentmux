@@ -49,7 +49,7 @@ pub(super) fn explain_not_found(result: &mut RemoteOpResult, peer: &LanInstance)
         return;
     }
     let said = format!("That was {}.", describe_peer(peer));
-    match result.result.get_mut("message").and_then(Value::as_str).map(str::to_string) {
+    match result.result.get("message").and_then(Value::as_str).map(str::to_string) {
         Some(message) => result.result["message"] = Value::String(format!("{message} {said}")),
         None => result.result = json!({ "message": said }),
     }

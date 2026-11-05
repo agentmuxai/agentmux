@@ -92,7 +92,7 @@ pub fn decide_check(listed: Result<usize, String>) -> StoreCheck {
 /// Blocks on the Store's answer, so call it off the async workers.
 #[cfg(target_os = "windows")]
 pub fn check_update() -> StoreCheck {
-    decide_check(on_winrt_thread("store-check", || list_updates().map(|(_, n, _)| n)).and_then(|r| r))
+    decide_check(on_winrt_thread("store-check", || list_updates().map(|(_, n)| n)).and_then(|r| r))
 }
 
 /// Only Windows has a Store.
@@ -121,10 +121,9 @@ fn on_winrt_thread<T: Send + 'static>(name: &str, f: impl FnOnce() -> T + Send +
     }
 }
 
-/// The Store's context (our window attached), how many updates it lists for this
-/// app, and the list itself.
+/// The Store's context (our window attached) and how many updates it lists for this app.
 #[cfg(target_os = "windows")]
-fn list_updates() -> Result<(windows::Services::Store::StoreContext, usize, windows::Foundation::Collections::IVectorView<windows::Services::Store::StorePackageUpdate>), String> {
+fn list_updates() -> Result<(windows::Services::Store::StoreContext, usize), String> {
     use windows::core::Interface;
     use windows::Services::Store::StoreContext;
     use windows::Win32::Foundation::HWND;
@@ -141,7 +140,7 @@ fn list_updates() -> Result<(windows::Services::Store::StoreContext, usize, wind
         .and_then(|op| op.get())
         .map_err(|e| format!("couldn't list updates: {e}"))?;
     let listed = updates.Size().map_err(|e| format!("couldn't count updates: {e}"))? as usize;
-    Ok((context, listed, updates))
+    Ok((context, listed))
 }
 
 /// Ask the Store to install AgentMux's update. Blocks until the Store is done
@@ -158,10 +157,15 @@ pub fn install_update() -> StoreOutcome {
 fn install_update_here() -> Result<StoreOutcome, String> {
     use windows::Services::Store::StorePackageUpdateState as S;
 
-    let (context, listed, updates) = list_updates()?;
+    let (context, listed) = list_updates()?;
     if listed == 0 {
         return Ok(decide(0, None));
     }
+    // The install call takes the list itself, so ask for it again.
+    let updates = context
+        .GetAppAndOptionalStorePackageUpdatesAsync()
+        .and_then(|op| op.get())
+        .map_err(|e| format!("couldn't list updates: {e}"))?;
     let result = context
         .RequestDownloadAndInstallStorePackageUpdatesAsync(&updates)
         .and_then(|op| op.get())
