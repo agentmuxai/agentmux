@@ -1,0 +1,47 @@
+-- a definition pins Opus, low and Plan
+trigger "Plan · Opus 5.5 · low" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=true width=- border=3px solid var(--success-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Plan · Opus 5.5 · low
+  status kind=agrees ["Changes apply on the next turn.",""] restart[hidden=true disabled=true tab=-1]
+  [mode]
+  - Bypass (no prompts) {}
+  - Auto / classifier asks; all auto-approved {}
+  - Accept Edits / other asks auto-approved, like Bypass {}
+  - Plan / does NOT stop edits; plan auto-approved {current,active}
+  - Default / every ask auto-approved, like Bypass {}
+  [model]
+  - Opus 5.5 / Highest quality {current}
+  - Sonnet 5.5 / Balanced speed and quality {}
+  - Haiku 4.5 / Fastest {}
+  - Fable 5.1 / Long-horizon work {}
+  note (placeholder): Running model: shown after the first reply
+  [effort]
+  - low {current}
+  - medium {}
+  - high {}
+  - xhigh {}
+  - max {}
+patchRuntime(block-1, claude, {"model":"haiku"}, undefined) meta={"agent:runtime":{"model":"sonnet","permissionMode":"bypass","effort":"high"},"agent:provider_flags":"--model opus --effort low --permission-mode plan"}
+-- picking holds
+trigger "Plan · Opus 5.5 · low" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=true width=- border=3px solid var(--success-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Plan · Opus 5.5 · low
+  status kind=agrees ["Changes apply on the next turn.",""] restart[hidden=true disabled=true tab=-1]
+  [mode]
+  - Bypass (no prompts) {}
+  - Auto / classifier asks; all auto-approved {}
+  - Accept Edits / other asks auto-approved, like Bypass {}
+  - Plan / does NOT stop edits; plan auto-approved {current}
+  - Default / every ask auto-approved, like Bypass {}
+  [model]
+  - Opus 5.5 / Highest quality {current}
+  - Sonnet 5.5 / Balanced speed and quality {}
+  - Haiku 4.5 / Fastest {active}
+  - Fable 5.1 / Long-horizon work {}
+  note (placeholder): Running model: shown after the first reply
+  [effort]
+  - low {current}
+  - medium {}
+  - high {}
+  - xhigh {}
+  - max {}

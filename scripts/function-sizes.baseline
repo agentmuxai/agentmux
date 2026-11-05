@@ -454,7 +454,6 @@
 167 frontend/app/view/agent/components/AgentFooter.tsx::AgentFooter
 255 frontend/app/view/agent/components/AgentPicker.tsx::AgentPicker
 427 frontend/app/view/agent/components/AgentQuestionPanel.tsx::AgentQuestionPanel
-527 frontend/app/view/agent/components/AgentRuntimeDropup.tsx::AgentRuntimeDropup
 178 frontend/app/view/agent/components/AgentSeatPanel.tsx::AgentSeatPanel
 120 frontend/app/view/agent/components/AgentSessionNotices.tsx::AgentSessionNotices
 239 frontend/app/view/agent/components/AgentSessionStats.tsx::AgentSessionStats
