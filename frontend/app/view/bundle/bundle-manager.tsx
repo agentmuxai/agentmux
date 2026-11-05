@@ -113,8 +113,7 @@ const BundleManagerBody = (props: BundleManagerBodyProps): JSX.Element => {
 
     const confirm = createConfirm();
     const handleDelete = async (id: string) => {
-        const ok = await confirm.ask({ title: "Delete this bundle?", description: "Running instances continue with their snapshot, but new launches won't see it.", confirmLabel: "Delete" });
-        if (ok) void model.deleteMemory(id);
+        if (await confirm.ask({ title: "Delete this bundle?", description: "Running instances continue with their snapshot, but new launches won't see it.", confirmLabel: "Delete" })) void model.deleteMemory(id);
     };
 
     const updateDraft = <K extends keyof BundleDraft>(
@@ -148,7 +147,6 @@ const BundleManagerBody = (props: BundleManagerBodyProps): JSX.Element => {
 
     const listView = (
         <div class="bundle-view-rail">
-            <confirm.Dialog />
             <Show when={model.errorAtom()}>
                 <div class="bundle-view-error">{model.errorAtom()}</div>
             </Show>
@@ -197,6 +195,7 @@ const BundleManagerBody = (props: BundleManagerBodyProps): JSX.Element => {
 
     const detailView = (
         <div class="bundle-view-detail">
+            <confirm.Dialog />
             <Show when={model.errorAtom()}>
                 <div class="bundle-view-error">{model.errorAtom()}</div>
             </Show>
