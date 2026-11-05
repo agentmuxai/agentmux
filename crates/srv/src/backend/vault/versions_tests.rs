@@ -169,7 +169,7 @@ fn a_version_past_its_seven_days_is_never_put_back_even_before_it_is_pruned() {
 }
 
 fn value_of(s: &Store, vault: &str) -> String {
-    let t = crate::backend::vault::command_target(s, vault).unwrap();
+    let t = crate::backend::vault::command_target(s, vault, None).unwrap();
     crate::backend::vault::value_for_command(s, &t).unwrap().to_string()
 }
 
@@ -223,9 +223,9 @@ fn a_pending_value_left_by_a_stopped_srv_is_marked_interrupted_and_frees_the_ent
 fn a_command_names_only_previous_or_pending_and_says_when_there_is_none() {
     let s = store();
     let id = create(&s, key("sk_live_first_value")).unwrap();
-    let Err(e) = crate::backend::vault::command_target(&s, &format!("{id}@latest")) else { panic!("@latest is refused") };
+    let Err(e) = crate::backend::vault::command_target(&s, &format!("{id}@latest"), None) else { panic!("@latest is refused") };
     assert!(e.contains("@previous"), "{e}");
-    let t = crate::backend::vault::command_target(&s, &format!("{id}@previous.value")).unwrap();
+    let t = crate::backend::vault::command_target(&s, &format!("{id}@previous.value"), None).unwrap();
     assert_eq!((t.version, t.part), (Some("previous"), "value"));
     assert!(crate::backend::vault::value_for_command(&s, &t).unwrap_err().contains("no previous value"));
 }

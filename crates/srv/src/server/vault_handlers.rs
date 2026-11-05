@@ -23,6 +23,7 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use crate::backend::storage::vault::PERSONAL_VAULT;
 use crate::backend::vault::{self, requests, EntryChange, NewEntry};
 
 use super::AppState;
@@ -97,6 +98,49 @@ fn kept(state: &AppState) -> Vec<Value> {
     out
 }
 
+/// Who may use a Vault, from a host op's body: `agents` is `all`, `none`, or `named` with `agent_ids`.
+fn vault_agents(body: &Value) -> Result<vault::vaults::VaultAgents, String> {
+    use vault::vaults::VaultAgents;
+    match body.get("agents").and_then(Value::as_str).unwrap_or("all") {
+        "all" => Ok(VaultAgents::All),
+        "none" => Ok(VaultAgents::None),
+        "named" => {
+            let ids = body.get("agent_ids").and_then(Value::as_array).ok_or("named needs agent_ids, a list of agent ids")?;
+            Ok(VaultAgents::Named(ids.iter().filter_map(Value::as_str).map(str::to_string).collect()))
+        }
+        other => Err(format!("agents is all, none or named, not {other:?}")),
+    }
+}
+
+/// The host ops on Vaults and on an entry's earlier values.
+fn entry_ops(store: &crate::backend::storage::store::Store, op: &str, body: &Value) -> Result<(Value, bool), String> {
+    let s = |k: &str| body.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+    match op {
+        // The person's Vaults: made, renamed or given other agents, deleted when empty, and
+        // an entry moved between them. Only the host: a move can open a value to more agents.
+        "vault_create" => Ok((json!({ "vault": vault::vaults::create(store, &s("name"), vault_agents(body)?)? }), true)),
+        "vault_update" => {
+            vault::vaults::update(store, &s("id"), &s("name"), vault_agents(body)?)?;
+            Ok((json!({}), true))
+        }
+        "vault_delete" => {
+            vault::vaults::remove(store, &s("id"))?;
+            Ok((json!({}), true))
+        }
+        "move_entry" => {
+            vault::vaults::move_entry(store, &s("id"), &s("vault_id"))?;
+            Ok((json!({}), true))
+        }
+        // An entry's earlier values, and putting one back (spec §4.4 of the generate spec).
+        "versions" => Ok((json!({ "versions": vault::versions::list(store, &s("id"))? }), false)),
+        _ => {
+            let seq = body.get("seq").and_then(Value::as_i64).ok_or("restore needs the version's seq")?;
+            vault::versions::restore(store, &s("id"), seq)?;
+            Ok((json!({}), true))
+        }
+    }
+}
+
 /// `POST /api/v1/host/vault`: the pane's operations, from the host only.
 pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: HeaderMap, Json(body): Json<Value>) -> Response {
     if !super::ui_handlers::from_host(&state, &headers).await {
@@ -112,6 +156,7 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
                 Ok((
                     json!({
                         "entries": entries,
+                        "vaults": vault::vaults::list(&store)?,
                         "problem": problem,
                         "requests": requests::requests().list(),
                         "uses": vault::uses::uses().list(),
@@ -122,8 +167,9 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
             }
             "create" => {
                 let request_id = body.get("request_id").and_then(Value::as_str).unwrap_or("").to_string();
+                let vault_id = body.get("vault").and_then(Value::as_str).filter(|v| !v.is_empty()).unwrap_or(PERSONAL_VAULT).to_string();
                 let entry: NewEntry = serde_json::from_value(body).map_err(|_| shape_error("an entry"))?;
-                let id = vault::create(&store, entry)?;
+                let id = vault::create_in(&store, entry, &vault_id)?;
                 if !request_id.is_empty() {
                     if let Some(req) = requests::requests().get(&request_id) {
                         vault::record(&store, &id, &req.label, vault::PERSON, "filled a request", &req.agent, "done");
@@ -155,17 +201,7 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
                 vault::delete(&store, id)?;
                 Ok((json!({}), true))
             }
-            // An entry's earlier values, and putting one back (spec §4.4 of the generate spec).
-            "versions" => {
-                let id = body.get("id").and_then(Value::as_str).unwrap_or("");
-                Ok((json!({ "versions": vault::versions::list(&store, id)? }), false))
-            }
-            "restore" => {
-                let id = body.get("id").and_then(Value::as_str).unwrap_or("");
-                let seq = body.get("seq").and_then(Value::as_i64).ok_or("restore needs the version's seq")?;
-                vault::versions::restore(&store, id, seq)?;
-                Ok((json!({}), true))
-            }
+            "vault_create" | "vault_update" | "vault_delete" | "move_entry" | "versions" | "restore" => entry_ops(&store, &op, &body),
             "decline_request" => {
                 let id = body.get("request_id").and_then(Value::as_str).unwrap_or("");
                 if let Some(req) = requests::requests().get(id) {
@@ -336,7 +372,27 @@ pub(crate) async fn handle_vault_on_screen(State(state): State<AppState>) -> Res
 /// never touches the keychain.
 pub(crate) async fn handle_vault_list(State(state): State<AppState>) -> Response {
     let store = state.identity_store.clone();
-    match tokio::task::spawn_blocking(move || vault::list_for_agent(&store)).await {
+    match tokio::task::spawn_blocking(move || vault::list_for_agent(&store, None)).await {
+        Ok(Ok(entries)) => Json(json!({ "entries": entries })).into_response(),
+        Ok(Err(e)) => error(StatusCode::INTERNAL_SERVER_ERROR, e),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct ListBody {
+    /// The asking agent's signed identity: the Vaults it may use depend on who it is.
+    #[serde(default)]
+    auth: Option<agentmux_common::api_types::UiAutomationAuth>,
+}
+
+/// `POST /api/v1/vault/list`: the entries of the Vaults the proven agent may use. An agent that
+/// doesn't prove who it is sees only the Vaults open to every agent, as `GET /api/v1/vault` does.
+pub(crate) async fn handle_vault_list_for(State(state): State<AppState>, Json(body): Json<ListBody>) -> Response {
+    let (agent, pane) = asking_agent(&state, body.auth.as_ref());
+    let proven = pane.is_some();
+    let store = state.identity_store.clone();
+    match tokio::task::spawn_blocking(move || vault::list_for_agent(&store, proven.then_some(agent.as_str()))).await {
         Ok(Ok(entries)) => Json(json!({ "entries": entries })).into_response(),
         Ok(Err(e)) => error(StatusCode::INTERNAL_SERVER_ERROR, e),
         Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
@@ -388,6 +444,9 @@ pub(crate) struct RequestBody {
     auth: Option<agentmux_common::api_types::UiAutomationAuth>,
     #[serde(default)]
     wait_secs: Option<u64>,
+    /// The Vault the entry should go in, by name or id; the form starts on it.
+    #[serde(default)]
+    vault: Option<String>,
 }
 
 /// The person is reading or acting in a use's prompt: its countdown holds
@@ -432,7 +491,21 @@ pub(crate) async fn handle_vault_request(State(state): State<AppState>, Json(bod
         return error(StatusCode::BAD_REQUEST, "a request needs a label: what the entry is, e.g. \"Stripe test key\"");
     }
     let (agent, pane) = asking_agent(&state, body.auth.as_ref());
+    let vault_id = match body.vault.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        None => String::new(),
+        Some(which) => {
+            let store = state.identity_store.clone();
+            let who = pane.is_some().then(|| agent.clone());
+            let which = which.to_string();
+            match tokio::task::spawn_blocking(move || vault::vaults::resolve(&store, &which, Some(who.as_deref())).map(|v| v.id)).await {
+                Ok(Ok(id)) => id,
+                Ok(Err(e)) => return error(StatusCode::BAD_REQUEST, e),
+                Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+            }
+        }
+    };
     let req = requests::VaultRequest {
+        vault: vault_id,
         id: uuid::Uuid::new_v4().to_string(),
         agent: agent.clone(),
         kind: body.kind.clone(),

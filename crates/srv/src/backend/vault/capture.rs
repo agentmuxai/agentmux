@@ -218,6 +218,9 @@ pub fn plan(store: &Store, rules: &[CaptureRule], agent: &str, cmd: &str) -> Res
             (Some(_), Some(_)) => return Err(which("\"as\" names an entry by id, or a new one by kind and label, not both".into())),
             (Some(id), None) => {
                 let row = store.vault_get(id.trim()).map_err(|e| e.to_string())?.ok_or_else(|| which(format!("there is no entry {id:?}")))?;
+                if !super::vaults::entry_row_usable(store, &row.vault_id, Some(agent))? {
+                    return Err(which(format!("there is no entry {id:?}")));
+                }
                 let kind = kinds::kind(&row.kind).ok_or_else(|| which(format!("entry {id} has an unknown kind")))?;
                 let part = part_of(kind, r.into.part.as_deref()).map_err(which)?;
                 if r.into.label.as_deref().is_some_and(|l| l.trim() != row.label) {
@@ -391,6 +394,7 @@ impl Capture {
                         created_at: now,
                         updated_at: now,
                         last_used_at: 0,
+                        vault_id: super::vaults::default_for(store, Some(&self.agent))?,
                     }));
                     made.push((id, label.clone()));
                 }

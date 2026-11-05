@@ -26,6 +26,7 @@ pub mod signups;
 pub mod slots;
 pub mod transfer;
 pub mod uses;
+pub mod vaults;
 pub mod versions;
 mod wordlist;
 
@@ -35,7 +36,7 @@ use agentmux_common::time::now_ms;
 use serde::{Deserialize, Serialize};
 
 use crate::backend::storage::store::Store;
-use crate::backend::storage::vault::{VaultActivityRow, VaultRow};
+use crate::backend::storage::vault::{VaultActivityRow, VaultRow, PERSONAL_VAULT};
 use kinds::VaultSection;
 use seal::Parts;
 
@@ -58,6 +59,8 @@ pub struct VaultEntryInfo {
     pub kind: String,
     pub section: VaultSection,
     pub label: String,
+    /// The Vault it belongs to (`vaults::VaultInfo::id`).
+    pub vault_id: String,
     pub fields: BTreeMap<String, String>,
     pub tags: Vec<String>,
     /// The parts that hold a value.
@@ -84,6 +87,8 @@ pub struct VaultAgentEntry {
     pub label: String,
     pub kind: String,
     pub section: VaultSection,
+    /// The Vault's name, so an agent can say where an entry is kept and name it in `request`.
+    pub vault: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expires: Option<String>,
 }
@@ -238,8 +243,19 @@ pub fn create(store: &Store, entry: NewEntry) -> Result<String, String> {
     insert(store, entry, PERSON, "created", "")
 }
 
+/// [`create`] in the Vault `vault_id`, which must exist.
+pub fn create_in(store: &Store, entry: NewEntry, vault_id: &str) -> Result<String, String> {
+    insert_in(store, entry, PERSON, "created", "", vault_id)
+}
+
 /// Saves a new entry and records who made it and how.
-fn insert(store: &Store, mut entry: NewEntry, actor: &str, action: &str, target: &str) -> Result<String, String> {
+fn insert(store: &Store, entry: NewEntry, actor: &str, action: &str, target: &str) -> Result<String, String> {
+    insert_in(store, entry, actor, action, target, PERSONAL_VAULT)
+}
+
+/// [`insert`] in the Vault `vault_id`.
+fn insert_in(store: &Store, mut entry: NewEntry, actor: &str, action: &str, target: &str, vault_id: &str) -> Result<String, String> {
+    store.vault_info(vault_id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no Vault {vault_id}"))?;
     let kind = kinds::kind(&entry.kind).ok_or_else(|| format!("unknown kind {:?}", entry.kind))?;
     drop_empty(&mut entry.parts);
     let mut fields = trimmed(std::mem::take(&mut entry.fields));
@@ -262,6 +278,7 @@ fn insert(store: &Store, mut entry: NewEntry, actor: &str, action: &str, target:
         created_at: now,
         updated_at: now,
         last_used_at: 0,
+        vault_id: vault_id.to_string(),
     };
     store.vault_insert(&row).map_err(|e| e.to_string())?;
     record(store, &id, &label, actor, action, target, "done");
@@ -288,9 +305,10 @@ pub struct GenerateRequest {
     /// is reminded before then (spec §15.2).
     #[serde(default)]
     pub expires: Option<String>,
-}
-
-/// What `generate` made: the entry, never its value.
+    /// The Vault to make it in, by name or id; the agent's first Vault when left out.
+    #[serde(default)]
+    pub vault: Option<String>,
+}/// What `generate` made: the entry, never its value.
 #[derive(Debug, Serialize, PartialEq)]
 pub struct Generated {
     pub id: String,
@@ -319,7 +337,11 @@ pub fn generate_entry(store: &Store, req: GenerateRequest, actor: &str) -> Resul
     }
     let entry = NewEntry { kind: kind.to_string(), label: req.label, fields, tags: Vec::new(), parts };
     let label = entry.label.trim().to_string();
-    let id = insert(store, entry, actor, "generated", &target)?;
+    let vault_id = match req.vault.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        Some(which) => vaults::resolve(store, which, Some(Some(actor)))?.id,
+        None => vaults::default_for(store, Some(actor))?,
+    };
+    let id = insert_in(store, entry, actor, "generated", &target, &vault_id)?;
     Ok(Generated { id, label, kind: kind.to_string(), made: generate::describe(&rules) })
 }
 
@@ -441,10 +463,21 @@ pub struct FillTarget {
     pub version: Option<&'static str>,
 }
 
+/// The entry `id` for an agent's use. One in a Vault the agent may not use is refused as an
+/// entry that isn't there, so an agent learns nothing about Vaults it can't use.
+fn usable_entry(store: &Store, id: &str, agent: Option<&str>) -> Result<VaultRow, String> {
+    let none = || format!("no Vault entry {id:?}: Vault's list action shows the entries");
+    let row = store.vault_get(id).map_err(|e| e.to_string())?.ok_or_else(none)?;
+    if !vaults::entry_row_usable(store, &row.vault_id, agent)? {
+        return Err(none());
+    }
+    Ok(row)
+}
+
 /// Resolves `"id"` or `"id.part"` for a fill, or says why it can't be filled.
-pub fn fill_target(store: &Store, vault: &str) -> Result<FillTarget, String> {
+pub fn fill_target(store: &Store, vault: &str, agent: Option<&str>) -> Result<FillTarget, String> {
     let (id, part) = slots::split(vault);
-    let row = store.vault_get(id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no Vault entry {id:?}: Vault's list action shows the entries"))?;
+    let row = usable_entry(store, id, agent)?;
     let kind = kinds::kind(&row.kind).ok_or_else(|| format!("entry {id} has an unknown kind"))?;
     let part = slots::fillable_part(kind, part)?;
     let slot = slots::slot(kind, part);
@@ -467,7 +500,7 @@ pub fn request_target(kind: &str, label: &str) -> Result<FillTarget, String> {
 /// the part handed to the process, the kind's main part unless another is named.
 /// Unlike a web form, a command may be given any kind of entry; the person is
 /// asked first (spec section 7.3).
-pub fn command_target(store: &Store, vault: &str) -> Result<FillTarget, String> {
+pub fn command_target(store: &Store, vault: &str, agent: Option<&str>) -> Result<FillTarget, String> {
     // `id@previous` or `id@pending`, then `.part` as usual.
     let (vault, version) = match vault.trim().split_once('@') {
         Some((id, rest)) => {
@@ -481,7 +514,7 @@ pub fn command_target(store: &Store, vault: &str) -> Result<FillTarget, String> 
         }
         None => (vault.to_string(), None),
     };
-    let mut target = command_target_now(store, &vault)?;
+    let mut target = command_target_now(store, &vault, agent)?;
     target.version = version;
     if let Some(v) = version {
         target.what = format!("{} ({v} value)", target.what);
@@ -489,9 +522,9 @@ pub fn command_target(store: &Store, vault: &str) -> Result<FillTarget, String> 
     Ok(target)
 }
 
-fn command_target_now(store: &Store, vault: &str) -> Result<FillTarget, String> {
+fn command_target_now(store: &Store, vault: &str, agent: Option<&str>) -> Result<FillTarget, String> {
     let (id, part) = slots::split(vault);
-    let row = store.vault_get(id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no Vault entry {id:?}: Vault's list action shows the entries"))?;
+    let row = usable_entry(store, id, agent)?;
     let kind = kinds::kind(&row.kind).ok_or_else(|| format!("entry {id} has an unknown kind"))?;
     let part = match part {
         None => kind.parts[0],
@@ -568,6 +601,7 @@ pub fn list_for_pane(store: &Store) -> Result<(Vec<VaultEntryInfo>, Option<Strin
             id: row.id,
             kind: row.kind,
             label: row.label,
+            vault_id: row.vault_id,
             parts_set,
             tail,
             created_at: row.created_at,
@@ -578,17 +612,23 @@ pub fn list_for_pane(store: &Store) -> Result<(Vec<VaultEntryInfo>, Option<Strin
     Ok((out, problem))
 }
 
-/// Every entry as an agent may see it. Reads no value, so it never needs the
-/// keychain.
-pub fn list_for_agent(store: &Store) -> Result<Vec<VaultAgentEntry>, String> {
+/// Every entry `agent` may use, as it may see it. Reads no value, so it never needs the
+/// keychain. An agent that isn't proven (`None`) sees the Vaults open to every agent.
+pub fn list_for_agent(store: &Store, agent: Option<&str>) -> Result<Vec<VaultAgentEntry>, String> {
+    let vaults = store.vaults().map_err(|e| e.to_string())?;
     Ok(store
         .vault_list()
         .map_err(|e| e.to_string())?
         .into_iter()
         .filter_map(|r| {
+            let vault = vaults.iter().find(|v| v.id == r.vault_id);
+            if !vault.is_none_or(|v| vaults::may_use(v, agent)) {
+                return None;
+            }
             let section = kinds::kind(&r.kind)?.section;
             let expires = expiry::of(&r).map(|d| d.to_string());
-            Some(VaultAgentEntry { id: r.id, label: r.label, kind: r.kind, section, expires })
+            let vault = vault.map(|v| v.name.clone()).unwrap_or_default();
+            Some(VaultAgentEntry { id: r.id, label: r.label, kind: r.kind, section, vault, expires })
         })
         .collect())
 }
