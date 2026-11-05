@@ -89,6 +89,22 @@ export function giveTitleBack(el: HTMLElement): void {
     if (text !== undefined && el.getAttribute("title") === "") el.setAttribute("title", text);
 }
 
+/** The shell AnchoredPopover is made of (placed in real pixels, never zoomed) around the body (chrome zoom, the fade). */
+function createPanel(doc: Document): { shell: HTMLDivElement; panel: HTMLDivElement } {
+    const panel = doc.createElement("div");
+    panel.className = `${PANEL_CLASS} anchored-popover-body anchored-popover-body--chrome-zoom`;
+    panel.setAttribute("role", "tooltip");
+    panel.style.cssText =
+        "opacity:0;pointer-events:none;max-width:24rem;white-space:pre-line;" +
+        "transition:opacity var(--duration-instant) var(--ease-out)";
+    const shell = doc.createElement("div");
+    shell.className = "anchored-popover anchored-popover--tooltip";
+    shell.setAttribute("data-pane-overlay", "");
+    shell.style.cssText = "left:0;top:0;pointer-events:none";
+    shell.append(panel);
+    return { shell, panel };
+}
+
 /**
  * Start showing the shared tooltip for titled elements in `doc`. Safe to call twice (the
  * first call wins); returns a function that stops it and removes the panel.
@@ -164,19 +180,7 @@ export function initTitleTooltips(doc: Document = document): () => void {
         current = el;
         visible = false;
         positioned = false;
-        if (!panel || !shell) {
-            panel = doc.createElement("div");
-            panel.className = `${PANEL_CLASS} anchored-popover-body anchored-popover-body--chrome-zoom`;
-            panel.setAttribute("role", "tooltip");
-            panel.style.cssText =
-                "opacity:0;pointer-events:none;max-width:24rem;white-space:pre-line;" +
-                "transition:opacity var(--duration-instant) var(--ease-out)";
-            shell = doc.createElement("div");
-            shell.className = "anchored-popover anchored-popover--tooltip";
-            shell.setAttribute("data-pane-overlay", "");
-            shell.style.cssText = "left:0;top:0;pointer-events:none";
-            shell.append(panel);
-        }
+        if (!panel || !shell) ({ shell, panel } = createPanel(doc));
         panel.textContent = text;
         panel.style.opacity = "0";
         doc.body.append(shell);
