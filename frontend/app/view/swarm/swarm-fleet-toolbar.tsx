@@ -146,7 +146,7 @@ export function FleetToolbar(props: {
             </div>
 
             <ConfirmModal
-                open={stopConfirmOpen()}
+                open={stopConfirmOpen()} scope="pane"
                 title={`Stop ${reachable("stop")} ${plural(reachable("stop"))}?`}
                 description="This stops the selected agent panes. Each pane's own stop outcome is reported individually — a partial failure never shows as a single pass/fail."
                 destructive

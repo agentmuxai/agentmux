@@ -15,7 +15,7 @@ import {
     createBrowserProfile,
     deleteBrowserProfile,
     profileSignins,
-    loadBrowserProfiles,
+    followBrowserProfiles,
     updateBrowserProfile,
 } from "@/app/view/browser/browser-profiles";
 import { ProfileBadge } from "@/app/view/browser/browser-profile-menu";
@@ -225,8 +225,8 @@ function ProfileRow(props: { profile: BrowserProfile }): JSX.Element {
 export function BrowserSection(): JSX.Element {
     const [newName, setNewName] = createSignal("");
     const [error, setError] = createSignal<string | null>(null);
+    followBrowserProfiles();
     onMount(() => {
-        void loadBrowserProfiles();
         startBrowserPauseAll();
     });
     const s = () => settingsAtom() ?? ({} as any);

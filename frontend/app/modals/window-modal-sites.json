@@ -39,9 +39,6 @@
   "tab/tab-close-confirm-modal.tsx": {
     "window-scope": 1
   },
-  "tab/tabcontent.tsx": {
-    "default-scope": 2
-  },
   "view/bundle/bundle-manager.tsx": {
     "native-dialog": 1
   },
@@ -59,15 +56,6 @@
   },
   "view/native-memory/native-memory-manager.tsx": {
     "native-dialog": 2
-  },
-  "view/settings/sections/fork-slug-migration.tsx": {
-    "default-scope": 2
-  },
-  "view/swarm/swarm-fleet-toolbar.tsx": {
-    "default-scope": 1
-  },
-  "view/swarm/swarm-row-registration.tsx": {
-    "default-scope": 1
   },
   "view/vault/vault-request-prompts.tsx": {
     "default-scope": 1,

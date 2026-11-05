@@ -446,7 +446,7 @@ export function DeleteAccountConfirm({ model, account }: { model: IdentityViewMo
     return (
         <ConfirmModal
             open={true}
-            scope="tab"
+            scope="pane"
             title={`Delete ${accountLabel(account, model.accountsAtom())}?`}
             confirmLabel="Delete account"
             destructive

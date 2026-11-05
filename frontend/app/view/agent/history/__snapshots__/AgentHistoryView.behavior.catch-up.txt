@@ -1,0 +1,28 @@
+registerPane(hist-1:history)
+usePaneTabVisibility(hist-1)
+getFileSubject(live-1, output)
+subscribe
+startHistoryPoll(cursor,hidden,readBlockId,recover,reloadIfSkipped)
+count({"filename":"output"}, timeout 5000)
+range({"offset":0,"limit":2}, timeout 30000)
+> same stream
+(hidden)
+count({"filename":"output"}, timeout 5000)
+range({"offset":2,"limit":1}, timeout 15000)
+same stream: shown=["q1","a1during same stream"] meta="full history loaded" jumpButton=false
+> another generation
+(hidden)
+count({"filename":"output"}, timeout 5000)
+count({"filename":"output"}, timeout 5000)
+range({"offset":0,"limit":4}, timeout 30000)
+another generation: shown=["q1","a1during same streamduri…(45)"] meta="full history loaded" jumpButton=false
+> a gap too big to fill
+(hidden)
+count({"filename":"output"}, timeout 5000)
+range({"offset":4,"limit":701}, timeout 15000)
+a gap too big to fill: shown=["q1","a1during same streamduri…(4863)"] meta="full history loaded" jumpButton=false
+> a failing count
+(hidden)
+count({"filename":"output"}, timeout 5000)
+count({"filename":"output"}, timeout 5000)
+a failing count: shown=["q1","a1during same streamduri…(4863)"] meta="couldn't load history: count failed" jumpButton=false

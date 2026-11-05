@@ -349,7 +349,7 @@
 129 crates/srv/src/server/work_queue.rs::enqueue_core
 120 crates/srv/src/server/work_queue.rs::handle_work_claim
 198 crates/srv/src/srv_ipc/server.rs::handle_connection
-212 frontend/app-init.ts::initAppInner
+213 frontend/app-init.ts::initAppInner
 147 frontend/app-init.ts::initHostMux
 163 frontend/app-init.ts::initHostNewWindow
 217 frontend/app-init.ts::initMux
@@ -427,7 +427,7 @@
 351 frontend/app/tab/tab-tearoff-events.ts::useTabTearOffEvents
 179 frontend/app/tab/tab-tearoff-rpc.ts::requestTearOff
 228 frontend/app/tab/tab.tsx::Tab
-215 frontend/app/tab/tabcontent.tsx::TabContent
+185 frontend/app/tab/tabcontent.tsx::TabContent
 134 frontend/app/util/select-trace.ts::createSelectTrace
 119 frontend/app/util/submenu-hover.ts::createSubmenuHover
 341 frontend/app/view/accounts/ClaudeLoginPanel.tsx::ClaudeLoginPanel
@@ -437,7 +437,6 @@
 130 frontend/app/view/accounts/accounts-manager.tsx::AccountsManager
 156 frontend/app/view/agent/agent-model.ts::AgentViewModel::launchAgentDefinition
 132 frontend/app/view/agent/agent-pane-chrome-model.ts::buildAgentPaneChromeModel
-616 frontend/app/view/agent/agent-view.tsx::AgentPresentationView
 179 frontend/app/view/agent/attachments/AttachmentLightbox.tsx::AttachmentLightbox
 101 frontend/app/view/agent/attachments/AttachmentTile.tsx::AttachmentTile
 296 frontend/app/view/agent/attachments/AttachmentTray.tsx::AttachmentTray
@@ -486,7 +485,6 @@
 168 frontend/app/view/agent/failure/useAccountBinding.ts::useAccountBinding
 238 frontend/app/view/agent/flows/launch-flow.ts::runLaunchFlow
 220 frontend/app/view/agent/flows/run-provider-login.ts::runProviderLogin
-627 frontend/app/view/agent/history/AgentHistoryView.tsx::AgentHistoryView
 136 frontend/app/view/agent/history/HistoryNavigator.tsx::HistoryNavigator
 386 frontend/app/view/agent/hooks/useAgentControllerStatus.ts::useAgentControllerStatus
 106 frontend/app/view/agent/hooks/useAgentDecisions.ts::useAgentDecisions
@@ -531,7 +529,6 @@
 354 frontend/app/view/editor/viewers/pdf/pdf-viewer.tsx::PdfViewer
 101 frontend/app/view/editor/viewers/viewer-host.tsx::ViewerFor
 152 frontend/app/view/files/files-preview.tsx::FilesPreview
-739 frontend/app/view/files/files-view.tsx::FilesView
 118 frontend/app/view/global-bundle/GlobalMemoryFullView.tsx::EntryView
 253 frontend/app/view/global-bundle/global-bundle-manager.tsx::GlobalBundleManager
 153 frontend/app/view/history/history-agents.tsx::HistoryAgents
@@ -549,15 +546,14 @@
 150 frontend/app/view/native-memory/NativeMemoryFileView.tsx::NativeMemoryFileView
 154 frontend/app/view/remotes/remotes-view.tsx::Detail
 240 frontend/app/view/settings/sections/advanced-section.tsx::AdvancedSection
-189 frontend/app/view/settings/sections/agent-site-grants.tsx::AgentSiteGrants
+178 frontend/app/view/settings/sections/agent-site-grants.tsx::AgentSiteGrants
 128 frontend/app/view/settings/sections/animations-section.tsx::AnimationsSection
-165 frontend/app/view/settings/sections/appearance-section.tsx::AppearanceSection
+166 frontend/app/view/settings/sections/appearance-section.tsx::AppearanceSection
 120 frontend/app/view/settings/sections/browser-section.tsx::BrowserSection
-180 frontend/app/view/settings/sections/devices-section.tsx::DevicesSection
+171 frontend/app/view/settings/sections/devices-section.tsx::DevicesSection
 359 frontend/app/view/settings/sections/fork-slug-migration.tsx::ForkSlugMigration
-107 frontend/app/view/settings/sections/hidden-agents.tsx::HiddenAgents
 185 frontend/app/view/settings/sections/notifications-section.tsx::NotificationsSection
-118 frontend/app/view/settings/sections/pinned-senders.tsx::PinnedSenders
+109 frontend/app/view/settings/sections/pinned-senders.tsx::PinnedSenders
 312 frontend/app/view/settings/sections/recording-section.tsx::RecordingSection
 201 frontend/app/view/settings/sections/sounds-section.tsx::SoundsSection
 237 frontend/app/view/settings/sections/terminal-section.tsx::TerminalSection

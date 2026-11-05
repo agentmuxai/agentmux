@@ -951,6 +951,14 @@ jobs:
       - name: cef-verify self-test
         run: bash scripts/cef-verify.test.sh
 
+      # The Linux CEF runtime's glibc floor check (use_sysroot=true; 0.60.14 needed GLIBC_2.43).
+      - name: glibc floor self-test
+        run: bash scripts/cef-build/verify-glibc-floor.test.sh
+
+      # The Linux CEF runtime archive a build downloads must match the hash in cef-runtime-pins.sh.
+      - name: runtime archive check self-test
+        run: bash scripts/cef-build/verify-runtime-archive.test.sh
+
       # `task dev` refuses a Vite port Chromium won't load pages from (6000 and
       # friends); this is the list and the checks behind that.
       # docs/specs/SPEC_DEV_VITE_UNSAFE_PORT_GUARD_2026_10_02.md

@@ -21,7 +21,8 @@
 #      `cef/libcef_dll/ctocpp/views/window_ctocpp.cc` "missing and no known rule"
 #      (it's translator-generated for the patched CefWindow::begin_window_drag API).
 #   2. Copy the canonical args.gn into out/Release_GN_x64/ (backing up any existing).
-#   3. Run `gn gen out/Release_GN_x64`.
+#   3. Install Chromium's Debian sysroot (the args build against it: use_sysroot=true, so the
+#      libraries need no newer glibc than it has) and run `gn gen out/Release_GN_x64`.
 #
 # After it succeeds, build with the OOM-resistant ninja wrapper (step 5 of the doc).
 
@@ -64,7 +65,11 @@ fi
 cp "$CANONICAL_ARGS" "$OUT_DIR/args.gn"
 echo "==> Installed canonical args.gn → $CEF_SRC/$OUT_DIR/args.gn"
 
-# 3. gn gen — prefer the in-tree gn (no PATH dependency), fall back to PATH.
+# 3. The sysroot the args build against. Idempotent: a present, current one is kept.
+echo "==> Installing Chromium's Debian sysroot (amd64)…"
+python3 build/linux/sysroot_scripts/install-sysroot.py --arch=amd64
+
+# 4. gn gen — prefer the in-tree gn (no PATH dependency), fall back to PATH.
 if [ -x "buildtools/linux64/gn" ]; then
     GN="./buildtools/linux64/gn"
 elif command -v gn >/dev/null 2>&1; then

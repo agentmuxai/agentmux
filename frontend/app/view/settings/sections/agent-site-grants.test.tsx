@@ -23,6 +23,14 @@ vi.mock("@/app/store/rpc-api", () => ({
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
+const muxHandlers = new Map<string, () => void>();
+vi.mock("@/app/store/mps", () => ({
+    onMuxEvent: (event: string, handler: () => void) => {
+        muxHandlers.set(event, handler);
+        return () => muxHandlers.delete(event);
+    },
+}));
+vi.mock("@/app/store/ws", () => ({ addWSReconnectHandler: () => {} }));
 
 import { AgentSiteGrants } from "./agent-site-grants";
 
@@ -55,6 +63,15 @@ describe("AgentSiteGrants", () => {
         expect(within(li).getByText("Naki-2")).toBeInTheDocument();
         expect(within(li).getByText(/granted 3 h ago/)).toBeInTheDocument();
         expect(within(li).getByRole("checkbox", { name: /Terminal.*Naki-2/ })).toBeChecked();
+    });
+
+    it("shows a grant the person gave from a request banner, when srv says the grants changed", async () => {
+        list.mockResolvedValue(result([]));
+        render(() => <AgentSiteGrants />);
+        await screen.findByText(/No agent has a standing grant/);
+        list.mockResolvedValue(result([row({ origins: ["https://example.test"] })]));
+        muxHandlers.get("browsergrants:changed")!();
+        await screen.findByText("example.test");
     });
 
     it("says the 2.6 second limit where the terminal power is given", async () => {

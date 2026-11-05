@@ -154,6 +154,7 @@ fn change(state: &AppState, req: &CommandPinsChangeData, how: Change) -> Result<
         other => return Err(format!("pins: unknown kind {other:?} (lan or wan)")),
     };
     lan_continuity::audit(&json!({ "action": how.as_str(), "kind": req.kind, "agent": agent, "channel": req.channel, "from": done.0, "to": done.1, "by": "operator" }));
+    state.broker.publish_event::<crate::backend::mps_events::PinsChanged>(&(), vec![], 0);
     Ok(())
 }
 

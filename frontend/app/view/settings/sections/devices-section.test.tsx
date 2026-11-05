@@ -23,9 +23,17 @@ vi.mock("@/app/store/rpc-api", () => ({
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
+const muxHandlers = new Map<string, () => void>();
+vi.mock("@/app/store/mps", () => ({
+    onMuxEvent: (event: string, handler: () => void) => {
+        muxHandlers.set(event, handler);
+        return () => muxHandlers.delete(event);
+    },
+}));
+vi.mock("@/app/store/ws", () => ({ addWSReconnectHandler: () => {} }));
 const setConfig = vi.fn();
 let settings: Record<string, unknown> = {};
-vi.mock("@/app/store/global", () => ({ viewerPairedAtom: () => null, settingsAtom: () => settings }));
+vi.mock("@/app/store/global", () => ({ settingsAtom: () => settings }));
 
 import { ago, DevicesSection } from "./devices-section";
 
@@ -65,6 +73,22 @@ describe("DevicesSection", () => {
         expect(within(pixel).getByText("10 min ago")).toBeInTheDocument();
         const tablet = screen.getByText("Tablet").closest("tr")!;
         expect(within(tablet).getByText("never")).toBeInTheDocument();
+    });
+
+    it("shows a device that paired, and drops one revoked elsewhere, when srv says the devices changed", async () => {
+        const device = (id: string, name: string) => ({ device_id: id, device_name: name, created_ms: Date.now(), last_seen_ms: 0 });
+        listDevices.mockResolvedValue({ devices: [device("d1", "Pixel 9")] });
+        render(() => <DevicesSection />);
+        await screen.findByText("Pixel 9");
+        listDevices.mockResolvedValue({ devices: [device("d2", "Tablet")] });
+        muxHandlers.get("viewerdevices:changed")!();
+        await waitFor(() => {
+            expect(screen.getByText("Tablet")).toBeInTheDocument();
+            expect(screen.queryByText("Pixel 9")).not.toBeInTheDocument();
+        });
+        listDevices.mockResolvedValue({ devices: [device("d2", "Tablet"), device("d3", "Phone")] });
+        muxHandlers.get("viewer:paired")!();
+        await screen.findByText("Phone");
     });
 
     it("Revoke removes the device", async () => {

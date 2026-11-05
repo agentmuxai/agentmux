@@ -358,7 +358,7 @@ export const McpManager = (): JSX.Element => {
                 {(server) => (
                     <ConfirmModal
                         open={true}
-                        scope="tab"
+                        scope="pane"
                         title={`Delete ${server().name}?`}
                         confirmLabel="Delete server"
                         destructive
