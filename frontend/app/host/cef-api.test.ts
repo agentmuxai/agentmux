@@ -143,7 +143,9 @@ describe("showJsContextMenu — submenu placement", () => {
         showJsContextMenu(menuWithSub, { x: 40, y: 40 }, null);
         const overlay = document.getElementById("cef-context-menu-overlay")!;
         const row = overlay.querySelector<HTMLElement>(".menu-item")!;
-        const sub = overlay.querySelector<HTMLElement>(".sub-menu")!;
+        // Every level is a shell in the overlay (the menu's first, then the submenus'), the rows in its body; the
+        // submenu is a sibling of the menu, not a child of its row.
+        const sub = overlay.children[1] as HTMLElement;
         return { overlay, row, sub };
     };
 
@@ -155,14 +157,14 @@ describe("showJsContextMenu — submenu placement", () => {
         }
     };
 
-    test("submenu starts hidden with the static edge-anchored fallback", () => {
+    test("submenu starts hidden, a level of its own beside the menu, not inside its row", () => {
         const { row, sub } = open();
         expect(sub.style.display).toBe("none");
-        // Degraded fallback: if framework placement ever rejects, these CSS
-        // values still anchor the submenu at the row's right edge.
-        expect(sub.style.left).toBe("100%");
-        expect(sub.style.top).toBe("0px");
-        expect(row.style.position).toBe("relative");
+        expect(sub.classList.contains("anchored-popover")).toBe(true);
+        expect(sub.querySelector(".sub-menu")).not.toBeNull();
+        expect(row.contains(sub)).toBe(false);
+        // Placed from floating-ui's fixed coordinates (left/top in real pixels); until then at the origin.
+        expect([sub.style.left, sub.style.top]).toEqual(["0px", "0px"]);
     });
 
     test("hover reveals it only after the open delay AND framework placement (fixed px coords + size cap)", async () => {
@@ -194,9 +196,10 @@ describe("showJsContextMenu — submenu placement", () => {
             expect(sub.style.position).toBe("fixed");
             expect(sub.style.left).toMatch(/^-?\d+px$/);
             expect(sub.style.top).toMatch(/^-?\d+px$/);
-            // size() cap applied: taller-than-free-space menus scroll internally.
-            expect(sub.style.maxHeight).toMatch(/^\d+px$/);
-            expect(sub.style.overflowY).toBe("auto");
+            // size() cap applied on the body, in its zoomed lengths: taller-than-free-space menus scroll internally.
+            const body = sub.firstElementChild as HTMLElement;
+            expect(body.style.maxHeight).toMatch(/^calc\(\d+px \/ var\(--zoomfactor, 1\)\)$/);
+            expect(body.style.overflowY).toBe("auto");
         } finally {
             vi.useRealTimers();
         }
@@ -250,12 +253,12 @@ describe("showJsContextMenu — submenu placement", () => {
 
     test("top-level menu is framework-placed too (fixed coords, then revealed)", async () => {
         const { overlay } = open();
-        const menuEl = overlay.querySelector<HTMLElement>(".menu")!;
-        expect(menuEl.style.visibility).toBe("hidden");
-        await waitFor(() => menuEl.style.visibility === "");
-        expect(menuEl.style.position).toBe("fixed");
-        expect(menuEl.style.left).toMatch(/^-?\d+px$/);
-        expect(menuEl.style.maxHeight).toMatch(/^\d+px$/);
+        const shell = overlay.firstElementChild as HTMLElement;
+        expect(shell.style.visibility).toBe("hidden");
+        await waitFor(() => shell.style.visibility === "");
+        expect(shell.style.position).toBe("fixed");
+        expect(shell.style.left).toMatch(/^-?\d+px$/);
+        expect((shell.firstElementChild as HTMLElement).style.maxHeight).toMatch(/^calc\(\d+px \/ var\(--zoomfactor, 1\)\)$/);
     });
 });
 
@@ -293,8 +296,8 @@ describe("showJsContextMenu — pane overlay registration and close paths", () =
     test("registers the menu and each submenu as pane overlays", () => {
         const overlay = open();
         const els = overlayRegs.map((r) => r.el);
-        expect(els).toContain(overlay.querySelector(".menu:not(.sub-menu)"));
-        expect(els).toContain(overlay.querySelector(".sub-menu"));
+        expect(els).toContain(overlay.children[0]);
+        expect(els).toContain(overlay.children[1]);
         // The full-window backdrop must never punch a hole (it would mask the whole pane).
         expect(els).not.toContain(overlay);
         expect(overlayRegs.some((r) => r.released)).toBe(false);
@@ -436,7 +439,7 @@ describe("showJsContextMenu — focus", () => {
 
 describe("showJsContextMenu — live update", () => {
     const labels = () =>
-        [...document.querySelectorAll("#cef-context-menu-overlay > .menu > .menu-item > .label")].map((el) => el.textContent);
+        [...document.querySelectorAll("#cef-context-menu-overlay > .anchored-popover > .menu > .menu-item > .label")].map((el) => el.textContent);
 
     beforeEach(() => {
         overlayRegs.length = 0;
@@ -462,7 +465,11 @@ describe("showJsContextMenu — live update", () => {
         );
         const before = overlayRegs.length;
         updateJsContextMenu([{ id: "m", label: "Messengers", submenu: [{ id: "s", label: "Slack" }] }] as NativeContextMenuItem[]);
-        expect(overlayRegs.slice(0, before).filter((r) => r.el.classList.contains("sub-menu")).every((r) => r.released)).toBe(true);
+        // Everything registered but the menu's own shell is a submenu's shell.
+        const menuShell = document.getElementById("cef-context-menu-overlay")!.children[0];
+        const old = overlayRegs.slice(0, before).filter((r) => r.el !== menuShell);
+        expect(old.length).toBeGreaterThan(0);
+        expect(old.every((r) => r.released)).toBe(true);
         closeJsContextMenu();
         expect(overlayRegs.every((r) => r.released)).toBe(true);
     });
