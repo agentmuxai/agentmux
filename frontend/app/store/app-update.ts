@@ -10,7 +10,7 @@
  * docs/specs/SPEC_UPGRADE_FOR_USERS_AND_AGENTS_2026_10_15.md §3.
  */
 
-import { createEffect, createSignal } from "solid-js";
+import { createEffect, createSignal, onCleanup } from "solid-js";
 
 import { WpsEvent } from "@/app/store/mps-events";
 import { getApi } from "@/util/app-api";
@@ -69,9 +69,9 @@ export type StoreOffer = { version: string; state: "asking" | "available" | "non
 
 const [storeOffer, setStoreOffer] = createSignal<StoreOffer | null>(null);
 
-/** Ask the Store (through the host) whether it lists an update, instead of guessing from GitHub. */
-export async function askStore(version: string): Promise<void> {
-    setStoreOffer({ version, state: "asking", message: "" });
+/** Ask the Store (through the host) whether it lists an update, instead of guessing from GitHub. `quiet`: keep showing the last answer until the new one comes. */
+export async function askStore(version: string, quiet = false): Promise<void> {
+    if (!quiet) setStoreOffer({ version, state: "asking", message: "" });
     let next: StoreOffer;
     try {
         const r = await getApi()?.approvals?.storeUpdateCheck?.();
@@ -116,12 +116,21 @@ export function storeOfferLine(version: string | null | undefined, offer: StoreO
     return `${released} Couldn't ask the Microsoft Store whether it has it${offer.message ? ` (${offer.message})` : ""}.`;
 }
 
-/** In a component: ask the Store once about each release on offer to a Store install. */
+/** The Store certifies a release hours after GitHub publishes it: how often to ask again while it hasn't listed it. */
+const STORE_REASK_MS = 30 * 60 * 1000;
+
+/** In a component: ask the Store about each release on offer to a Store install, and again every half hour until it lists it. */
 export function useStoreOffer(): void {
     createEffect(() => {
         const release = availableRelease();
         if (viaStore() && release && storeOffer()?.version !== release.version) void askStore(release.version);
     });
+    const timer = setInterval(() => {
+        const release = availableRelease();
+        const state = storeAnswer()?.state;
+        if (viaStore() && release && (state === "none" || state === "unknown")) void askStore(release.version, true);
+    }, STORE_REASK_MS);
+    onCleanup(() => clearInterval(timer));
 }
 
 /** The release srv says is newer than this build, or null. */

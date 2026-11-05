@@ -397,6 +397,22 @@ describe("Maintenance on a Microsoft Store install", () => {
         expect(screen.queryByText(/still reviewing/)).toBeNull();
     });
 
+    it("asks the Store again later while it hasn't listed the release, so the button appears without a click", async () => {
+        vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+        try {
+            storeCheck.mockResolvedValue({ state: "none", message: "" });
+            updateStatus.mockResolvedValue(STORE);
+            render(() => <MaintenanceSection />);
+            expect(await screen.findByText(/still reviewing/)).toBeTruthy();
+            storeCheck.mockResolvedValue({ state: "available", message: "" });
+            vi.advanceTimersByTime(30 * 60 * 1000);
+            expect(await screen.findByRole("button", { name: "Update in the Store" })).toBeTruthy();
+            expect(screen.queryByText(/still reviewing/)).toBeNull();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
     it("asks the Store to install it first, and opens the Store page only when the Store can't", async () => {
         updateStatus.mockResolvedValue(STORE);
         storeUpdate.mockResolvedValue({ outcome: "installed", message: "The Store installed the update. AgentMux restarts to finish it." });
