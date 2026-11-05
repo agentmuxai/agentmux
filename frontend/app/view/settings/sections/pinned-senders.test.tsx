@@ -19,6 +19,14 @@ vi.mock("@/app/store/rpc-api", () => ({
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
+const muxHandlers = new Map<string, () => void>();
+vi.mock("@/app/store/mps", () => ({
+    onMuxEvent: (event: string, handler: () => void) => {
+        muxHandlers.set(event, handler);
+        return () => muxHandlers.delete(event);
+    },
+}));
+vi.mock("@/app/store/ws", () => ({ addWSReconnectHandler: () => {} }));
 
 import { ago, PinnedSenders } from "./pinned-senders";
 
@@ -94,6 +102,14 @@ describe("PinnedSenders", () => {
         fireEvent.click(await screen.findByText("Press again to accept"));
         await waitFor(() => expect(adopt).toHaveBeenCalledTimes(1));
         expect(adopt.mock.calls[0][1]).toEqual({ kind: "wan", agent_id: "lazo", channel: "stable", expect: "area54~wxyz9876" });
+    });
+
+    it("reloads the list when srv says a pin changed", async () => {
+        render(() => <PinnedSenders />);
+        await screen.findByText(/Key cccccccccc/);
+        list.mockResolvedValue({ lan: [], wan: [] });
+        muxHandlers.get("pins:changed")!();
+        await screen.findByText(/Nothing is pinned yet/);
     });
 
     it("says why when the list can't be read or a change is refused", async () => {

@@ -1,0 +1,307 @@
+-- opened
+trigger "Bypass · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=true width=- border=3px solid var(--error-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Bypass · Sonnet 5.5 · high
+  status kind=agrees ["Changes apply on the next turn.",""] restart[hidden=true disabled=true tab=-1]
+  [mode]
+  - Bypass (no prompts) {current,active}
+  - Auto / classifier asks; all auto-approved {}
+  - Accept Edits / other asks auto-approved, like Bypass {}
+  - Plan / does NOT stop edits; plan auto-approved {}
+  - Default / every ask auto-approved, like Bypass {}
+  [model]
+  - Opus 5.5 / Highest quality {}
+  - Sonnet 5.5 / Balanced speed and quality {current}
+  - Haiku 4.5 / Fastest {}
+  - Fable 5.1 / Long-horizon work {}
+  note (placeholder): Running model: shown after the first reply
+  [effort]
+  - low {}
+  - medium {}
+  - high {current}
+  - xhigh {}
+  - max {}
+key ArrowDown
+key ArrowDown
+-- two down
+trigger "Bypass · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=true width=- border=3px solid var(--error-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Bypass · Sonnet 5.5 · high
+  status kind=agrees ["Changes apply on the next turn.",""] restart[hidden=true disabled=true tab=-1]
+  [mode]
+  - Bypass (no prompts) {current}
+  - Auto / classifier asks; all auto-approved {}
+  - Accept Edits / other asks auto-approved, like Bypass {active}
+  - Plan / does NOT stop edits; plan auto-approved {}
+  - Default / every ask auto-approved, like Bypass {}
+  [model]
+  - Opus 5.5 / Highest quality {}
+  - Sonnet 5.5 / Balanced speed and quality {current}
+  - Haiku 4.5 / Fastest {}
+  - Fable 5.1 / Long-horizon work {}
+  note (placeholder): Running model: shown after the first reply
+  [effort]
+  - low {}
+  - medium {}
+  - high {current}
+  - xhigh {}
+  - max {}
+key ArrowUp
+-- one up
+trigger "Bypass · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=true width=- border=3px solid var(--error-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Bypass · Sonnet 5.5 · high
+  status kind=agrees ["Changes apply on the next turn.",""] restart[hidden=true disabled=true tab=-1]
+  [mode]
+  - Bypass (no prompts) {current}
+  - Auto / classifier asks; all auto-approved {active}
+  - Accept Edits / other asks auto-approved, like Bypass {}
+  - Plan / does NOT stop edits; plan auto-approved {}
+  - Default / every ask auto-approved, like Bypass {}
+  [model]
+  - Opus 5.5 / Highest quality {}
+  - Sonnet 5.5 / Balanced speed and quality {current}
+  - Haiku 4.5 / Fastest {}
+  - Fable 5.1 / Long-horizon work {}
+  note (placeholder): Running model: shown after the first reply
+  [effort]
+  - low {}
+  - medium {}
+  - high {current}
+  - xhigh {}
+  - max {}
+key ArrowUp
+key ArrowUp
+key ArrowUp
+key ArrowUp
+-- up past the first wraps to the last
+trigger "Bypass · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=true width=- border=3px solid var(--error-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Bypass · Sonnet 5.5 · high
+  status kind=agrees ["Changes apply on the next turn.",""] restart[hidden=true disabled=true tab=-1]
+  [mode]
+  - Bypass (no prompts) {current}
+  - Auto / classifier asks; all auto-approved {}
+  - Accept Edits / other asks auto-approved, like Bypass {}
+  - Plan / does NOT stop edits; plan auto-approved {}
+  - Default / every ask auto-approved, like Bypass {}
+  [model]
+  - Opus 5.5 / Highest quality {}
+  - Sonnet 5.5 / Balanced speed and quality {current}
+  - Haiku 4.5 / Fastest {}
+  - Fable 5.1 / Long-horizon work {}
+  note (placeholder): Running model: shown after the first reply
+  [effort]
+  - low {}
+  - medium {}
+  - high {current,active}
+  - xhigh {}
+  - max {}
+key ArrowDown
+-- down past the last wraps to the first
+trigger "Bypass · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=true width=- border=3px solid var(--error-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Bypass · Sonnet 5.5 · high
+  status kind=agrees ["Changes apply on the next turn.",""] restart[hidden=true disabled=true tab=-1]
+  [mode]
+  - Bypass (no prompts) {current}
+  - Auto / classifier asks; all auto-approved {}
+  - Accept Edits / other asks auto-approved, like Bypass {}
+  - Plan / does NOT stop edits; plan auto-approved {}
+  - Default / every ask auto-approved, like Bypass {}
+  [model]
+  - Opus 5.5 / Highest quality {}
+  - Sonnet 5.5 / Balanced speed and quality {current}
+  - Haiku 4.5 / Fastest {}
+  - Fable 5.1 / Long-horizon work {}
+  note (placeholder): Running model: shown after the first reply
+  [effort]
+  - low {}
+  - medium {}
+  - high {current}
+  - xhigh {active}
+  - max {}
+key p
+-- p jumps to Plan
+trigger "Bypass · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=true width=- border=3px solid var(--error-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Bypass · Sonnet 5.5 · high
+  status kind=agrees ["Changes apply on the next turn.",""] restart[hidden=true disabled=true tab=-1]
+  [mode]
+  - Bypass (no prompts) {current}
+  - Auto / classifier asks; all auto-approved {}
+  - Accept Edits / other asks auto-approved, like Bypass {}
+  - Plan / does NOT stop edits; plan auto-approved {active}
+  - Default / every ask auto-approved, like Bypass {}
+  [model]
+  - Opus 5.5 / Highest quality {}
+  - Sonnet 5.5 / Balanced speed and quality {current}
+  - Haiku 4.5 / Fastest {}
+  - Fable 5.1 / Long-horizon work {}
+  note (placeholder): Running model: shown after the first reply
+  [effort]
+  - low {}
+  - medium {}
+  - high {current}
+  - xhigh {}
+  - max {}
+key H
+-- H jumps to Haiku
+trigger "Bypass · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=true width=- border=3px solid var(--error-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Bypass · Sonnet 5.5 · high
+  status kind=agrees ["Changes apply on the next turn.",""] restart[hidden=true disabled=true tab=-1]
+  [mode]
+  - Bypass (no prompts) {current}
+  - Auto / classifier asks; all auto-approved {}
+  - Accept Edits / other asks auto-approved, like Bypass {}
+  - Plan / does NOT stop edits; plan auto-approved {}
+  - Default / every ask auto-approved, like Bypass {}
+  [model]
+  - Opus 5.5 / Highest quality {}
+  - Sonnet 5.5 / Balanced speed and quality {current}
+  - Haiku 4.5 / Fastest {active}
+  - Fable 5.1 / Long-horizon work {}
+  note (placeholder): Running model: shown after the first reply
+  [effort]
+  - low {}
+  - medium {}
+  - high {current}
+  - xhigh {}
+  - max {}
+key z
+-- z matches nothing
+trigger "Bypass · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=true width=- border=3px solid var(--error-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Bypass · Sonnet 5.5 · high
+  status kind=agrees ["Changes apply on the next turn.",""] restart[hidden=true disabled=true tab=-1]
+  [mode]
+  - Bypass (no prompts) {current}
+  - Auto / classifier asks; all auto-approved {}
+  - Accept Edits / other asks auto-approved, like Bypass {}
+  - Plan / does NOT stop edits; plan auto-approved {}
+  - Default / every ask auto-approved, like Bypass {}
+  [model]
+  - Opus 5.5 / Highest quality {}
+  - Sonnet 5.5 / Balanced speed and quality {current}
+  - Haiku 4.5 / Fastest {active}
+  - Fable 5.1 / Long-horizon work {}
+  note (placeholder): Running model: shown after the first reply
+  [effort]
+  - low {}
+  - medium {}
+  - high {current}
+  - xhigh {}
+  - max {}
+key p+ctrl
+key p+meta
+key p+alt
+key Tab
+key F5
+key -
+-- modified and non-letter keys do nothing
+trigger "Bypass · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=true width=- border=3px solid var(--error-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Bypass · Sonnet 5.5 · high
+  status kind=agrees ["Changes apply on the next turn.",""] restart[hidden=true disabled=true tab=-1]
+  [mode]
+  - Bypass (no prompts) {current}
+  - Auto / classifier asks; all auto-approved {}
+  - Accept Edits / other asks auto-approved, like Bypass {}
+  - Plan / does NOT stop edits; plan auto-approved {}
+  - Default / every ask auto-approved, like Bypass {}
+  [model]
+  - Opus 5.5 / Highest quality {}
+  - Sonnet 5.5 / Balanced speed and quality {current}
+  - Haiku 4.5 / Fastest {active}
+  - Fable 5.1 / Long-horizon work {}
+  note (placeholder): Running model: shown after the first reply
+  [effort]
+  - low {}
+  - medium {}
+  - high {current}
+  - xhigh {}
+  - max {}
+key Enter
+patchRuntime(block-1, claude, {"model":"haiku"}, undefined) meta=undefined
+-- Enter applies the active row and keeps the panel open
+trigger "Bypass · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=true width=- border=3px solid var(--error-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Bypass · Sonnet 5.5 · high
+  status kind=agrees ["Changes apply on the next turn.",""] restart[hidden=true disabled=true tab=-1]
+  [mode]
+  - Bypass (no prompts) {current}
+  - Auto / classifier asks; all auto-approved {}
+  - Accept Edits / other asks auto-approved, like Bypass {}
+  - Plan / does NOT stop edits; plan auto-approved {}
+  - Default / every ask auto-approved, like Bypass {}
+  [model]
+  - Opus 5.5 / Highest quality {}
+  - Sonnet 5.5 / Balanced speed and quality {current}
+  - Haiku 4.5 / Fastest {active}
+  - Fable 5.1 / Long-horizon work {}
+  note (placeholder): Running model: shown after the first reply
+  [effort]
+  - low {}
+  - medium {}
+  - high {current}
+  - xhigh {}
+  - max {}
+key ArrowDown
+key Enter
+patchRuntime(block-1, claude, {"model":"claude-fable-5-1"}, undefined) meta=undefined
+key Escape
+-- Escape closes
+trigger "Bypass · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=false width=- border=3px solid var(--error-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Bypass · Sonnet 5.5 · high
+  panel: closed
+-- reopened: the active row is the current mode again
+trigger "Bypass · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=true width=- border=3px solid var(--error-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Bypass · Sonnet 5.5 · high
+  status kind=agrees ["Changes apply on the next turn.",""] restart[hidden=true disabled=true tab=-1]
+  [mode]
+  - Bypass (no prompts) {current,active}
+  - Auto / classifier asks; all auto-approved {}
+  - Accept Edits / other asks auto-approved, like Bypass {}
+  - Plan / does NOT stop edits; plan auto-approved {}
+  - Default / every ask auto-approved, like Bypass {}
+  [model]
+  - Opus 5.5 / Highest quality {}
+  - Sonnet 5.5 / Balanced speed and quality {current}
+  - Haiku 4.5 / Fastest {}
+  - Fable 5.1 / Long-horizon work {}
+  note (placeholder): Running model: shown after the first reply
+  [effort]
+  - low {}
+  - medium {}
+  - high {current}
+  - xhigh {}
+  - max {}
+key ArrowDown
+key Enter
+key Escape
+-- keys with focus elsewhere in the page are ignored, the panel still open
+trigger "Bypass · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=true width=- border=3px solid var(--error-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Bypass · Sonnet 5.5 · high
+  status kind=agrees ["Changes apply on the next turn.",""] restart[hidden=true disabled=true tab=-1]
+  [mode]
+  - Bypass (no prompts) {current,active}
+  - Auto / classifier asks; all auto-approved {}
+  - Accept Edits / other asks auto-approved, like Bypass {}
+  - Plan / does NOT stop edits; plan auto-approved {}
+  - Default / every ask auto-approved, like Bypass {}
+  [model]
+  - Opus 5.5 / Highest quality {}
+  - Sonnet 5.5 / Balanced speed and quality {current}
+  - Haiku 4.5 / Fastest {}
+  - Fable 5.1 / Long-horizon work {}
+  note (placeholder): Running model: shown after the first reply
+  [effort]
+  - low {}
+  - medium {}
+  - high {current}
+  - xhigh {}
+  - max {}

@@ -15,8 +15,8 @@ export interface I18nEnv {
     systemLanguages: () => readonly string[];
     /** The English source dictionary, always bundled. */
     source: Dict;
-    /** The tags that have a dictionary besides English. */
-    supported: readonly string[];
+    /** The tags that have a dictionary besides English, read where a change is tracked. */
+    supported: () => readonly string[];
     /** Fetches one language's dictionary; called once per language. */
     load: (tag: string) => Promise<Dict>;
     /** Called with a key that no dictionary has. */
@@ -36,7 +36,7 @@ export interface I18n {
 export function createI18n(env: I18nEnv): I18n {
     const [loaded, setLoaded] = createSignal<Readonly<Record<string, Dict>>>({});
     const locale = createMemo(() =>
-        negotiateLocale(requestedLocales(env.setting(), env.systemLanguages()), [SOURCE_LOCALE, ...env.supported])
+        negotiateLocale(requestedLocales(env.setting(), env.systemLanguages()), [SOURCE_LOCALE, ...env.supported()])
     );
     const requested = new Set<string>();
 

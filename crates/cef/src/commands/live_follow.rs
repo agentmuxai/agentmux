@@ -81,7 +81,7 @@ mod win {
     /// How long a picture stays after the drag ends: the real window is promoted at its place meanwhile.
     const GRACE_MS: u32 = 1_500;
     /// The window sizes taken from the page, in physical pixels.
-    const MIN_DIM: i32 = 200;
+    const MIN_DIM: i32 = 100;
     const MAX_DIM: i32 = 8_000;
 
     struct Follower {
@@ -154,7 +154,11 @@ mod win {
             px(num(args, "windowHeight")?).clamp(MIN_DIM, MAX_DIM),
         );
         let offset = (px(num(args, "offsetX")?), px(num(args, "offsetY")?));
-        let tear_line_y = client_top + px(num(args, "tearLineY")?);
+        // A pane has no tear line: it shows wherever the cursor is outside every AgentMux window.
+        let tear_line_y = match args.get("tearLineY").and_then(|v| v.as_f64()) {
+            Some(line) => client_top + px(line),
+            None => i32::MIN,
+        };
         let bgra = decode_bgra(&jpeg, size.0 as u32, size.1 as u32)?;
 
         end_now();
@@ -457,5 +461,12 @@ mod tests {
     #[test]
     fn the_picture_stays_hidden_over_another_window() {
         assert!(!in_tear_zone(900, 300, true));
+    }
+
+    #[test]
+    fn a_pane_has_no_tear_line_so_it_shows_wherever_no_window_is() {
+        assert!(in_tear_zone(0, i32::MIN, false));
+        assert!(in_tear_zone(-5_000, i32::MIN, false));
+        assert!(!in_tear_zone(0, i32::MIN, true));
     }
 }

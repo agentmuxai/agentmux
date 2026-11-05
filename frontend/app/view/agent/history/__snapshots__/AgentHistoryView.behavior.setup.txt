@@ -1,0 +1,17 @@
+registerPane(hist-1:history)
+usePaneTabVisibility(hist-1)
+getFileSubject(live-1, output)
+subscribe
+startHistoryPoll(cursor,hidden,readBlockId,recover,reloadIfSkipped)
+count({"filename":"output"}, timeout 5000)
+> mounted, before the reads settle
+range({"offset":0,"limit":2}, timeout 30000)
+loaded: shown=["q1","a1"] meta="full history loaded" jumpButton=false
+document props: blockId,documentNodes,documentStateAtom,followingRef,layoutView,loadingOlder,onLoadOlder,scrollToBottomRef,zoomFactor
+navigator props: agentId,archiveZone,hasNewer,hasOlder,mode,onJump,onLatest,onOpenArchive,onShowNewer,onShowOlder,readBlockId
+navigator: hasNewer=false hasOlder=false mode=live archive=null
+layout key: hist-1:history
+poll stopped
+unsubscribe
+release
+unregisterPane(hist-1:history)

@@ -77,7 +77,7 @@ impl World {
         let uid = |slug: &str| Some(format!("uid-{slug}"));
         let pane = |slug: &str| (slug == "korp").then(|| "live-korp".to_string());
         let exists = |b: &str| b == "block-Maricon-2";
-        let src = Sources { jekt_file: Some(&self.jekts), segments: Some(&self.store), ctx: Ctx { slug_of_uid: &slug, uid_of_slug: &uid, pane_of_agent: &pane, block_exists: &exists } };
+        let src = Sources { own_file: None, jekt_file: Some(&self.jekts), segments: Some(&self.store), ctx: Ctx { slug_of_uid: &slug, uid_of_slug: &uid, pane_of_agent: &pane, block_exists: &exists } };
         query(&src, &req)
     }
 
@@ -140,7 +140,7 @@ fn a_name_the_registry_does_not_know_gets_no_history_button() {
     let uid = |slug: &str| (slug == "korp").then(|| "uid-korp".to_string());
     let pane = |_: &str| None;
     let exists = |_: &str| false;
-    let src = Sources { jekt_file: Some(&world.jekts), segments: Some(&world.store), ctx: Ctx { slug_of_uid: &slug, uid_of_slug: &uid, pane_of_agent: &pane, block_exists: &exists } };
+    let src = Sources { own_file: None, jekt_file: Some(&world.jekts), segments: Some(&world.store), ctx: Ctx { slug_of_uid: &slug, uid_of_slug: &uid, pane_of_agent: &pane, block_exists: &exists } };
     let entry = query(&src, &AuditQueryReq::default()).unwrap().entries.remove(0);
     assert!(entry.from.unwrap().links.history.is_some());
     assert!(entry.to.unwrap().links.history.is_none(), "the reader opens an agent by UID: with none there is nothing to open");
@@ -242,7 +242,7 @@ fn a_bad_cursor_or_kind_is_refused_and_a_missing_file_is_an_empty_audit() {
     let slug = |_: &str| None;
     let none = |_: &str| None;
     let exists = |_: &str| false;
-    let src = Sources { jekt_file: Some(Path::new("/nonexistent/jekt-audit.jsonl")), segments: None, ctx: Ctx { slug_of_uid: &slug, uid_of_slug: &none, pane_of_agent: &none, block_exists: &exists } };
+    let src = Sources { own_file: None, jekt_file: Some(Path::new("/nonexistent/jekt-audit.jsonl")), segments: None, ctx: Ctx { slug_of_uid: &slug, uid_of_slug: &none, pane_of_agent: &none, block_exists: &exists } };
     assert!(query(&src, &AuditQueryReq::default()).unwrap().entries.is_empty());
 }
 
@@ -398,4 +398,107 @@ fn totals_count_a_started_agent_but_cost_it_nothing() {
     ledger::record_start(&world.store, start("a1", 500, 0)).unwrap();
     let got = world.run(AuditQueryReq { totals: Some(true), ..Default::default() }).unwrap().totals.unwrap();
     assert_eq!((got.entries, got.input), (2, 100));
+}
+
+
+/// Two audit files, as a srv that kept its rows in its own file while it did not use the shared folder has: the
+/// shared file (`j` ids) and its own (`o` ids). Either may be missing.
+struct TwoFiles {
+    _dir: tempfile::TempDir,
+    shared: Option<std::path::PathBuf>,
+    own: Option<std::path::PathBuf>,
+}
+
+impl TwoFiles {
+    fn new(shared: Option<&[AuditLogEntry]>, own: Option<&[AuditLogEntry]>) -> Self {
+        let dir = tempfile::tempdir().unwrap();
+        let in_dir = |name: &str, entries: &[AuditLogEntry]| {
+            let sub = dir.path().join(name);
+            std::fs::create_dir_all(&sub).unwrap();
+            write(&sub, entries)
+        };
+        let (shared, own) = (shared.map(|e| in_dir("shared", e)), own.map(|e| in_dir("own", e)));
+        Self { _dir: dir, shared, own }
+    }
+
+    fn run(&self, req: AuditQueryReq) -> Result<AuditQueryResult, String> {
+        let slug = |uid: &str| Some(format!("agent-{uid}"));
+        let uid = |slug: &str| Some(format!("uid-{slug}"));
+        let none = |_: &str| None;
+        let exists = |_: &str| false;
+        let src = Sources {
+            jekt_file: self.shared.as_deref(),
+            own_file: self.own.as_deref(),
+            segments: None,
+            ctx: Ctx { slug_of_uid: &slug, uid_of_slug: &uid, pane_of_agent: &none, block_exists: &exists },
+        };
+        query(&src, &req)
+    }
+}
+
+#[test]
+fn a_srv_without_the_shared_folder_lists_the_rows_it_kept_in_its_own_file() {
+    // The shared file is not there (or not readable) and the srv has appended to its own.
+    let two = TwoFiles::new(None, Some(&[audit_entry(1_000, "Korp", "Opaz"), audit_entry(2_000, "Opaz", "Korp")]));
+    let got = two.run(AuditQueryReq::default()).unwrap().entries;
+    assert_eq!(got.iter().map(|e| e.ts_ms).collect::<Vec<_>>(), vec![2_000, 1_000]);
+    assert!(got.iter().all(|e| e.id.starts_with('o')), "its own file's ids say so: {:?}", ids(&got));
+}
+
+#[test]
+fn the_shared_file_and_the_srvs_own_are_merged_newest_first() {
+    let two = TwoFiles::new(
+        Some(&[audit_entry(1_000, "Korp", "Opaz"), audit_entry(3_000, "Korp", "Opaz")]),
+        Some(&[audit_entry(2_000, "Opaz", "Korp"), audit_entry(4_000, "Opaz", "Korp")]),
+    );
+    let got = two.run(AuditQueryReq::default()).unwrap().entries;
+    assert_eq!(got.iter().map(|e| e.ts_ms).collect::<Vec<_>>(), vec![4_000, 3_000, 2_000, 1_000]);
+    let from: Vec<char> = got.iter().map(|e| e.id.chars().next().unwrap()).collect();
+    assert_eq!(from, vec!['o', 'j', 'o', 'j']);
+}
+
+#[test]
+fn the_same_byte_offset_in_both_files_is_two_entries_not_one() {
+    // The first line of each file starts at byte 0, so only the prefix tells them apart.
+    let two = TwoFiles::new(Some(&[audit_entry(1_000, "Korp", "Opaz")]), Some(&[audit_entry(1_000, "Korp", "Opaz")]));
+    let got = two.run(AuditQueryReq::default()).unwrap().entries;
+    assert_eq!(got.len(), 2);
+    assert_ne!(got[0].id, got[1].id);
+}
+
+#[test]
+fn pages_follow_each_other_across_both_files_without_repeating_or_skipping() {
+    let shared: Vec<AuditLogEntry> = (0..60).map(|n| audit_entry(1_000 + 2 * n, "Korp", "Opaz")).collect();
+    let own: Vec<AuditLogEntry> = (0..60).map(|n| audit_entry(1_001 + 2 * n, "Opaz", "Korp")).collect();
+    let two = TwoFiles::new(Some(&shared), Some(&own));
+    let whole = two.run(AuditQueryReq { limit: Some(200), ..Default::default() }).unwrap().entries;
+    assert_eq!(whole.len(), 120);
+    assert!(whole.windows(2).all(|w| w[0].ts_ms > w[1].ts_ms), "newest first");
+
+    let (mut seen, mut cursor) = (Vec::new(), None);
+    loop {
+        let page = two.run(AuditQueryReq { limit: Some(25), cursor: cursor.clone(), ..Default::default() }).unwrap();
+        seen.extend(ids(&page.entries));
+        match page.next_cursor {
+            Some(next) => cursor = Some(next),
+            None => break,
+        }
+    }
+    assert_eq!(seen, ids(&whole));
+}
+
+#[test]
+fn a_cursor_from_before_the_srvs_own_file_still_reads() {
+    // The version 3 cursor had no position for it.
+    let two = TwoFiles::new(Some(&[audit_entry(1_000, "Korp", "Opaz")]), None);
+    let got = two.run(AuditQueryReq { cursor: Some("3|-||-||-".to_string()), ..Default::default() }).unwrap();
+    assert_eq!(got.entries.len(), 1);
+    assert!(two.run(AuditQueryReq { cursor: Some("9|-".to_string()), ..Default::default() }).is_err());
+}
+
+#[test]
+fn totals_add_the_two_files() {
+    let two = TwoFiles::new(Some(&[audit_entry(1_000, "Korp", "Opaz")]), Some(&[audit_entry(2_000, "Opaz", "Korp")]));
+    let got = two.run(AuditQueryReq { totals: Some(true), ..Default::default() }).unwrap().totals.unwrap();
+    assert_eq!((got.entries, got.input), (2, 200));
 }

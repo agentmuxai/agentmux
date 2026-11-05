@@ -1,0 +1,100 @@
+patchRuntime (migration) rejects
+console.warn could not migrate the stored model id
+-- a superseded id, migration failing
+trigger "Default · claude-fable-5 · high" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=false width=- border=3px solid var(--main-text-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Default · claude-fable-5 · high
+  panel: closed
+-- opened
+trigger "Default · claude-fable-5 · high" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=true width=- border=3px solid var(--main-text-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Default · claude-fable-5 · high
+  status kind=agrees ["Changes apply on the next turn.",""] restart[hidden=true disabled=true tab=-1]
+  [mode]
+  - Bypass (no prompts) {}
+  - Auto / classifier asks; all auto-approved {}
+  - Accept Edits / other asks auto-approved, like Bypass {}
+  - Plan / does NOT stop edits; plan auto-approved {}
+  - Default / every ask auto-approved, like Bypass {current,active}
+  [model]
+  - Opus 5.5 / Highest quality {}
+  - Sonnet 5.5 / Balanced speed and quality {}
+  - Haiku 4.5 / Fastest {}
+  - Fable 5.1 / Long-horizon work {}
+  note (placeholder): Running model: shown after the first reply
+  [effort]
+  - low {}
+  - medium {}
+  - high {current}
+  - xhigh {}
+  - max {}
+patchRuntime(block-1, claude, {"model":"claude-fable-5-1"}, {"migration":true}) meta={"agent:runtime":{"model":"claude-fable-5","permissionMode":"default","effort":"high"}}
+-- an alias is left alone
+trigger "Default · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=true width=- border=3px solid var(--main-text-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Default · Sonnet 5.5 · high
+  status kind=agrees ["Changes apply on the next turn.",""] restart[hidden=true disabled=true tab=-1]
+  [mode]
+  - Bypass (no prompts) {}
+  - Auto / classifier asks; all auto-approved {}
+  - Accept Edits / other asks auto-approved, like Bypass {}
+  - Plan / does NOT stop edits; plan auto-approved {}
+  - Default / every ask auto-approved, like Bypass {current,active}
+  [model]
+  - Opus 5.5 / Highest quality {}
+  - Sonnet 5.5 / Balanced speed and quality {current}
+  - Haiku 4.5 / Fastest {}
+  - Fable 5.1 / Long-horizon work {}
+  note (placeholder): Running model: shown after the first reply
+  [effort]
+  - low {}
+  - medium {}
+  - high {current}
+  - xhigh {}
+  - max {}
+-- an unrecognised id is left alone
+trigger "Default · some-unknown-model · high" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=true width=- border=3px solid var(--main-text-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Default · some-unknown-model · high
+  status kind=agrees ["Changes apply on the next turn.",""] restart[hidden=true disabled=true tab=-1]
+  [mode]
+  - Bypass (no prompts) {}
+  - Auto / classifier asks; all auto-approved {}
+  - Accept Edits / other asks auto-approved, like Bypass {}
+  - Plan / does NOT stop edits; plan auto-approved {}
+  - Default / every ask auto-approved, like Bypass {current,active}
+  [model]
+  - Opus 5.5 / Highest quality {}
+  - Sonnet 5.5 / Balanced speed and quality {}
+  - Haiku 4.5 / Fastest {}
+  - Fable 5.1 / Long-horizon work {}
+  note (placeholder): Running model: shown after the first reply
+  [effort]
+  - low {}
+  - medium {}
+  - high {current}
+  - xhigh {}
+  - max {}
+-- no model named
+trigger "Default · CLI default · high" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=true width=- border=3px solid var(--main-text-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Default · CLI default · high
+  status kind=agrees ["Changes apply on the next turn.",""] restart[hidden=true disabled=true tab=-1]
+  [mode]
+  - Bypass (no prompts) {}
+  - Auto / classifier asks; all auto-approved {}
+  - Accept Edits / other asks auto-approved, like Bypass {}
+  - Plan / does NOT stop edits; plan auto-approved {}
+  - Default / every ask auto-approved, like Bypass {current,active}
+  [model]
+  - Opus 5.5 / Highest quality {}
+  - Sonnet 5.5 / Balanced speed and quality {}
+  - Haiku 4.5 / Fastest {}
+  - Fable 5.1 / Long-horizon work {}
+  note (placeholder): Running model: shown after the first reply
+  [effort]
+  - low {}
+  - medium {}
+  - high {current}
+  - xhigh {}
+  - max {}

@@ -28,7 +28,7 @@ const WRITER = "frontend/app/view/agent/scroll/one-way-flow.ts";
 export const EXEMPT = {
     "frontend/app/view/agent/scroll/preview-follow.ts": "a tool preview box",
     "frontend/app/view/agent/components/tool-overlay-log-state.ts": "a tool preview box",
-    "frontend/app/view/agent/history/AgentHistoryView.tsx": "the History tab's own list",
+    "frontend/app/view/agent/history/history-paging.ts": "the History tab's own list",
     "frontend/app/view/agent/components/SlashCommandPicker.tsx": "the slash-command picker's list",
 };
 

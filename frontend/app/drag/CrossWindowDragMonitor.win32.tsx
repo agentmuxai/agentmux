@@ -70,7 +70,7 @@ function CrossWindowDragMonitor(): JSX.Element {
         const onPointerDown = (e: PointerEvent) => {
             if (e.button !== 0) return;
             const blockId = paneDragCandidate(e.target);
-            if (blockId) prewarmTearOffSnapshot(blockId);
+            if (blockId) prewarmTearOffSnapshot(blockId, { x: e.clientX, y: e.clientY });
         };
         document.addEventListener("pointerdown", onPointerDown, true);
         onCleanup(() => document.removeEventListener("pointerdown", onPointerDown, true));

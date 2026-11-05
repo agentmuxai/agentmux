@@ -43,6 +43,7 @@ import {
     cropRectInImage,
     MAX_SNAPSHOT_CHARS,
     paneDragCandidate,
+    peekTearOffSnapshot,
     peekWindowTabSnapshot,
     prewarmTearOffSnapshot,
     prewarmWindowTabSnapshot,
@@ -108,6 +109,25 @@ describe("tear-off snapshot", () => {
         expect(await takeTearOffSnapshot("b1")).toBe(btoa("cropped-pane"));
         // The pane's CSS rect at 2 device px per CSS px.
         expect(shots.drawn).toEqual([[20, 40, 600, 400, 0, 0, 600, 400]]);
+    });
+
+    it("shows a pane's picture to the live follow with the grab and size, and leaves it for the tear-off", async () => {
+        mountPane("b1", { left: 10, top: 20, width: 300, height: 200 });
+        prewarmTearOffSnapshot("b1", { x: 60, y: 35 });
+        expect(await peekTearOffSnapshot("b1", 500)).toEqual({
+            picture: btoa("cropped-pane"),
+            grab: { x: 50, y: 15 },
+            size: { width: 300, height: 200 },
+        });
+        expect(await takeTearOffSnapshot("b1")).toBe(btoa("cropped-pane"));
+    });
+
+    it("has no pane picture to follow without the press position, or for another pane", async () => {
+        mountPane("b1");
+        prewarmTearOffSnapshot("b1");
+        expect(await peekTearOffSnapshot("b1", 50)).toBeUndefined();
+        prewarmTearOffSnapshot("b1", { x: 1, y: 1 });
+        expect(await peekTearOffSnapshot("b2", 50)).toBeUndefined();
     });
 
     it("a native browser pane is captured from its own page, not the window's", async () => {

@@ -1,0 +1,8 @@
+openInEditor(/home/a/b.txt)
+openEntryWithOs(b.txt)
+pathOf: /home/a/b.txt blockId=b1
+mac meta-click: selection={"names":["src","pic.png"],"focus":"pic.png","anchor":"pic.png"}
+mac ctrl-click: selection={"names":["a.md"],"focus":"a.md","anchor":"a.md"}
+mac meta+ArrowDown: selection={"names":["a.md"],"focus":"b.txt","anchor":"a.md"}
+tile rename box: true value=a.md
+after Escape: box=false renaming=null focusOnList=true

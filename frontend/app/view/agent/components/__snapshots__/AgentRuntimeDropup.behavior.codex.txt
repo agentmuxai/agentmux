@@ -1,0 +1,96 @@
+refreshCodexModels()
+-- mounted
+trigger "Full access · GPT-6-Astra · low" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=false width=- border=3px solid var(--error-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Full access · GPT-6-Astra · low
+  panel: closed
+refreshCodexModels()
+-- the process reported
+trigger "Full access · GPT-6-Astra · low" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=false width=- border=3px solid var(--error-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Full access · GPT-6-Astra · low
+  panel: closed
+refreshCodexModels()
+-- opened
+trigger "Full access · GPT-6-Astra · low" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=true width=- border=3px solid var(--error-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Full access · GPT-6-Astra · low
+  status kind=agrees ["Changes apply on the next turn.",""] restart[hidden=true disabled=true tab=-1]
+  [mode]
+  - Full access / no sandbox, no prompts {current,active}
+  - Workspace write / sandboxed: edits in the workspace only {}
+  - Read only / sandboxed: no edits or writes {}
+  [model]
+  - GPT-6-Astra {current}
+  - GPT-6-Mini {}
+  note (placeholder): Running model: shown after the first reply
+  [effort]
+  - low {current}
+  - medium {}
+  - ultra {}
+patchRuntime(block-1, codex, {"permissionMode":"plan"}, undefined) meta={"agent:runtime":{"model":"gpt-6-astra","permissionMode":"bypass","effort":"max"}}
+patchRuntime(block-1, codex, {"effort":"ultra"}, undefined) meta={"agent:runtime":{"model":"gpt-6-astra","permissionMode":"bypass","effort":"max"}}
+-- picked a mode and an effort
+trigger "Full access · GPT-6-Astra · low" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=true width=- border=3px solid var(--error-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Full access · GPT-6-Astra · low
+  status kind=agrees ["Changes apply on the next turn.",""] restart[hidden=true disabled=true tab=-1]
+  [mode]
+  - Full access / no sandbox, no prompts {current}
+  - Workspace write / sandboxed: edits in the workspace only {}
+  - Read only / sandboxed: no edits or writes {}
+  [model]
+  - GPT-6-Astra {current}
+  - GPT-6-Mini {}
+  note (placeholder): Running model: shown after the first reply
+  [effort]
+  - low {current}
+  - medium {}
+  - ultra {active}
+patchRuntime(block-1, codex, {"model":"gpt-6-astra"}, {"migration":true}) meta={"agent:runtime":{"model":"gpt-5-gone","permissionMode":"plan","effort":"low"}}
+-- a model the account no longer offers moves to the list's default
+trigger "Read only · gpt-5-gone" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=true width=- border=3px solid var(--success-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Read only · gpt-5-gone
+  status kind=agrees ["Changes apply on the next turn.",""] restart[hidden=true disabled=true tab=-1]
+  [mode]
+  - Full access / no sandbox, no prompts {}
+  - Workspace write / sandboxed: edits in the workspace only {}
+  - Read only / sandboxed: no edits or writes {current}
+  [model]
+  - GPT-6-Astra {}
+  - GPT-6-Mini {}
+  note (placeholder): Running model: shown after the first reply
+  [effort] note: Not applied — the account's models aren't known yet
+refreshCodexModels()
+-- a second report
+trigger "Read only · gpt-5-gone" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=true width=- border=3px solid var(--success-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Read only · gpt-5-gone
+  status kind=agrees ["Changes apply on the next turn.",""] restart[hidden=true disabled=true tab=-1]
+  [mode]
+  - Full access / no sandbox, no prompts {}
+  - Workspace write / sandboxed: edits in the workspace only {}
+  - Read only / sandboxed: no edits or writes {current}
+  [model]
+  - GPT-6-Astra {}
+  - GPT-6-Mini {}
+  note (placeholder): Running model: shown after the first reply
+  [effort] note: Not applied — the account's models aren't known yet
+refreshCodexModels()
+-- closed and opened again
+trigger "Read only · gpt-5-gone" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=true width=- border=3px solid var(--success-color)
+  title: Mode / Model / Effort — applies on the next turn
+  aria: Runtime settings: Read only · gpt-5-gone
+  status kind=agrees ["Changes apply on the next turn.",""] restart[hidden=true disabled=true tab=-1]
+  [mode]
+  - Full access / no sandbox, no prompts {}
+  - Workspace write / sandboxed: edits in the workspace only {}
+  - Read only / sandboxed: no edits or writes {current,active}
+  [model]
+  - GPT-6-Astra {}
+  - GPT-6-Mini {}
+  note (placeholder): Running model: shown after the first reply
+  [effort] note: Not applied — the account's models aren't known yet
+refreshCodexModels()
+patchRuntime(block-1, codex, {"model":"gpt-6-astra"}, {"migration":true}) meta={"agent:runtime":{"model":"gpt-5-gone","permissionMode":"plan","effort":"low"}}

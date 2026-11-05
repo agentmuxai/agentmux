@@ -1,0 +1,32 @@
+trackPaneContent(b1)
+holdPaneContent(b1)
+trackAgentFocus()
+registerPaneCommandRunner(b1)
+registerFileDropTarget(b1)
+model.start()
+ResizeObserver.observe(list)
+model.onShown()
+model.applyRequestedSelection()
+window.addEventListener(dragend, capture=true)
+setInterval(60000)
+model.navigate("/home/a", {"push":false})
+model.applyRequestedSelection()
+pane content released
+model.applyRequestedSelection()
+> listed: ["src","a.md","b.txt","pic.png","run.exe"]
+> the pane is hidden, then shown
+model.onShown()
+> the select request changes
+model.applyRequestedSelection()
+> a folder is opened with the filter open
+model.navigate("/home/a/src")
+model.applyRequestedSelection()
+> opened: path=/home/a/src listScrollTop=0 rows=["inner.ts"]
+> the list's size changes
+> unmounted
+ResizeObserver.disconnect()
+file drop target disposed
+pane command runner disposed
+pane content released
+trackPaneContent disposed
+dragend listeners added: 1
