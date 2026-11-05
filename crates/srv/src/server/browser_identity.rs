@@ -236,6 +236,20 @@ pub(crate) fn asks_for_own(agent_id: &str, requested: Option<&str>) -> bool {
     }
 }
 
+/// The `profile` an agent's open is carried out with. With none asked for, the agent browses as its own: made here,
+/// the first time. If it can't be made (the shared folder is given up to an older srv), a fresh Incognito jar, never
+/// the user's Personal.
+pub(crate) async fn requested_or_own(state: &AppState, agent_id: &str, requested: Option<&str>) -> Option<String> {
+    if asks_for_own(agent_id, requested) {
+        let owner = profile_owner(state, agent_id);
+        if let Err(e) = crate::server::app_api::browser_ensure_agent_profile(state, &owner, agent_id).await {
+            tracing::warn!(agent_id = %agent_id, error = %e, "[ui-automation] browser open: no own profile; Incognito instead");
+            return Some("incognito".to_string());
+        }
+    }
+    requested.map(str::to_string)
+}
+
 /// `OpenBrowser`'s `profile`: give the agent's new tab the identity it asked
 /// for, checked like any new tab (the platform, the Incognito cap). With nothing asked, every agent, native
 /// or container, browses as its own profile ([`requested_by_container`] for the container's other rules).
