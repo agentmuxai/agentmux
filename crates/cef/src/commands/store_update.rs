@@ -16,6 +16,15 @@
 //! unit-tested, the WinRT calls are type-checked only.
 
 use serde::Serialize;
+use std::time::{Duration, Instant};
+
+/// How long the Store gets to list the updates before it counts as not answering. Only the listing is
+/// bounded: a download and install legitimately take minutes.
+const LIST_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// The reason a call gives when the Store never answered; `refused` and `decide_check` turn it into
+/// their own outcome rather than quoting it.
+pub const NO_ANSWER: &str = "the Microsoft Store did not answer";
 
 /// What the Store's overall result for the update was, apart from the WinRT type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,9 +54,12 @@ impl StoreOutcome {
 }
 
 /// The API refused or isn't there (not a packaged install, the Store app is
-/// missing, a call failed): the page opens the Store page instead.
+/// missing, a call failed, or it never answered): the page opens the Store page instead, and says so.
 pub fn refused(why: &str) -> StoreOutcome {
-    StoreOutcome::new("fallback", format!("Couldn't ask the Store to install it ({why}); opening the Store page instead."))
+    if why == NO_ANSWER {
+        return StoreOutcome::new("fallback", "The Microsoft Store didn't answer in time.");
+    }
+    StoreOutcome::new("fallback", format!("Couldn't ask the Store to install it ({why})."))
 }
 
 /// The decision, once the Store answered: how many updates it listed for this
@@ -71,8 +83,9 @@ pub fn decide(updates_listed: usize, installed: Option<StoreState>) -> StoreOutc
 /// answer the page needs to decide whether to offer "Update in the Store".
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct StoreCheck {
-    /// `available` (the Store lists an update), `none` (it lists none yet), or
-    /// `unknown` (it could not be asked: not a packaged install, offline, or the call failed).
+    /// `available` (the Store lists an update), `none` (it lists none yet), `no_answer` (it was asked
+    /// and never answered), or `unknown` (it could not be asked: not a packaged install, offline, or
+    /// the call failed).
     pub state: &'static str,
     /// Why, when the state is `unknown`; empty otherwise.
     pub message: String,
@@ -84,6 +97,7 @@ pub fn decide_check(listed: Result<usize, String>) -> StoreCheck {
     match listed {
         Ok(0) => StoreCheck { state: "none", message: String::new() },
         Ok(_) => StoreCheck { state: "available", message: String::new() },
+        Err(why) if why == NO_ANSWER => StoreCheck { state: "no_answer", message: String::new() },
         Err(why) => StoreCheck { state: "unknown", message: why },
     }
 }
@@ -121,6 +135,37 @@ fn on_winrt_thread<T: Send + 'static>(name: &str, f: impl FnOnce() -> T + Send +
     }
 }
 
+/// Poll `done` every `step` until it is true (`true`) or `limit` has passed (`false`).
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn wait_until(limit: Duration, step: Duration, mut done: impl FnMut() -> bool) -> bool {
+    let deadline = Instant::now() + limit;
+    while !done() {
+        if Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(step);
+    }
+    true
+}
+
+/// The Store's answer to `op`, or `NO_ANSWER` (and the call cancelled) if it has not come within `limit`.
+#[cfg(target_os = "windows")]
+fn answer_within<T: windows::core::RuntimeType + 'static>(op: windows_future::IAsyncOperation<T>, limit: Duration) -> Result<T, String> {
+    use windows_future::AsyncStatus;
+    let started = || op.Status().map_or(false, |s| s == AsyncStatus::Started);
+    if wait_until(limit, Duration::from_millis(100), || !started()) {
+        return op.get().map_err(|e| e.to_string());
+    }
+    let _ = op.Cancel();
+    Err(NO_ANSWER.to_string())
+}
+
+/// A failed or unanswered listing, as the reason a call gives: the no-answer marker stays itself.
+#[cfg(target_os = "windows")]
+fn list_error(e: String) -> String {
+    if e == NO_ANSWER { e } else { format!("couldn't list updates: {e}") }
+}
+
 /// The Store's context (our window attached) and how many updates it lists for this app.
 #[cfg(target_os = "windows")]
 fn list_updates() -> Result<(windows::Services::Store::StoreContext, usize), String> {
@@ -135,10 +180,8 @@ fn list_updates() -> Result<(windows::Services::Store::StoreContext, usize), Str
         let init: IInitializeWithWindow = context.cast().map_err(|e| format!("no window interop: {e}"))?;
         unsafe { init.Initialize(HWND(hwnd as *mut _)) }.map_err(|e| format!("couldn't attach the window: {e}"))?;
     }
-    let updates = context
-        .GetAppAndOptionalStorePackageUpdatesAsync()
-        .and_then(|op| op.get())
-        .map_err(|e| format!("couldn't list updates: {e}"))?;
+    let updates = context.GetAppAndOptionalStorePackageUpdatesAsync().map_err(|e| list_error(e.to_string()))?;
+    let updates = answer_within(updates, LIST_TIMEOUT).map_err(list_error)?;
     let listed = updates.Size().map_err(|e| format!("couldn't count updates: {e}"))? as usize;
     Ok((context, listed))
 }
@@ -202,10 +245,8 @@ fn install_update_here(target: &str, web_endpoint: &str, auth_key: &str) -> Resu
         return Ok(decide(0, None));
     }
     // The calls below take the list itself, so ask for it again.
-    let updates = context
-        .GetAppAndOptionalStorePackageUpdatesAsync()
-        .and_then(|op| op.get())
-        .map_err(|e| format!("couldn't list updates: {e}"))?;
+    let updates = context.GetAppAndOptionalStorePackageUpdatesAsync().map_err(|e| list_error(e.to_string()))?;
+    let updates = answer_within(updates, LIST_TIMEOUT).map_err(list_error)?;
     // Downloaded first (it takes minutes and the app is not touched): only the install closes this app.
     let downloaded = context
         .RequestDownloadStorePackageUpdatesAsync(&updates)
@@ -269,7 +310,38 @@ mod tests {
         assert_eq!(decide(1, None).outcome, "fallback");
         let o = refused("no Store context: 0x80070490");
         assert_eq!(o.outcome, "fallback");
-        assert!(o.message.contains("0x80070490") && o.message.contains("Store page"));
+        assert!(o.message.contains("0x80070490"), "{}", o.message);
+    }
+
+    /// A Store that never answers is its own outcome, in the check and in the install: told plainly,
+    /// not as a call that failed.
+    #[test]
+    fn a_store_that_never_answers_is_told_as_that() {
+        let check = decide_check(Err(NO_ANSWER.into()));
+        assert_eq!((check.state, check.message.as_str()), ("no_answer", ""));
+        let install = refused(NO_ANSWER);
+        assert_eq!(install.outcome, "fallback");
+        assert!(install.message.contains("didn't answer"), "{}", install.message);
+    }
+
+    /// The wait for the Store's listing, with a stand-in that never completes and one that does.
+    #[test]
+    fn the_wait_gives_up_at_the_limit_and_returns_at_once_when_done() {
+        let started = Instant::now();
+        let mut polls = 0;
+        assert!(!wait_until(Duration::from_millis(60), Duration::from_millis(5), || {
+            polls += 1;
+            false
+        }));
+        assert!(polls >= 2 && started.elapsed() >= Duration::from_millis(60) && started.elapsed() < Duration::from_secs(5));
+        let mut left = 3;
+        assert!(wait_until(Duration::from_secs(30), Duration::from_millis(1), || {
+            left -= 1;
+            left == 0
+        }));
+        let quick = Instant::now();
+        assert!(wait_until(Duration::from_secs(30), Duration::from_secs(10), || true));
+        assert!(quick.elapsed() < Duration::from_secs(1), "an answer that is already there is not waited for");
     }
 
     #[test]
