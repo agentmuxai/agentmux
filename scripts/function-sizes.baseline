@@ -427,7 +427,7 @@
 351 frontend/app/tab/tab-tearoff-events.ts::useTabTearOffEvents
 179 frontend/app/tab/tab-tearoff-rpc.ts::requestTearOff
 228 frontend/app/tab/tab.tsx::Tab
-215 frontend/app/tab/tabcontent.tsx::TabContent
+185 frontend/app/tab/tabcontent.tsx::TabContent
 134 frontend/app/util/select-trace.ts::createSelectTrace
 119 frontend/app/util/submenu-hover.ts::createSubmenuHover
 341 frontend/app/view/accounts/ClaudeLoginPanel.tsx::ClaudeLoginPanel
