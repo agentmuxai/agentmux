@@ -111,10 +111,9 @@ pub fn before_install(target: &str) {
 }
 
 /// The install call came back, so nothing closed this app: there is nothing to come back from.
-pub fn install_returned() {
-    if let Some(dir) = DIR.get() {
-        let _ = std::fs::remove_file(dir.join(FILE));
-    }
+/// Whether an install had been started (a marker was there).
+pub fn install_returned() -> bool {
+    DIR.get().is_some_and(|dir| std::fs::remove_file(dir.join(FILE)).is_ok())
 }
 
 /// A Store install runs from the package's folder.

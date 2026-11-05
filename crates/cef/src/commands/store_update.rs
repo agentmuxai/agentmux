@@ -169,12 +169,16 @@ fn json<T: Serialize>(v: T) -> Result<serde_json::Value, String> {
 #[cfg(target_os = "windows")]
 pub fn install_update(target: &str, web_endpoint: &str, auth_key: &str) -> StoreOutcome {
     let (target, web_endpoint, auth_key) = (target.to_string(), web_endpoint.to_string(), auth_key.to_string());
-    let outcome = match on_winrt_thread("store-update", move || install_update_here(&target, &web_endpoint, &auth_key).unwrap_or_else(|e| refused(&e))) {
+    let (endpoint, key) = (web_endpoint.clone(), auth_key.clone());
+    let outcome = match on_winrt_thread("store-update", move || install_update_here(&target, &endpoint, &key).unwrap_or_else(|e| refused(&e))) {
         Ok(outcome) => outcome,
         Err(why) => refused(&why),
     };
-    // Back here, so the Store did not close this app: there is nothing to come back from.
-    super::store_restart::install_returned();
+    // Back here, so the Store did not close this app: there is nothing to come back from, and the record it
+    // saved as a quit's is saved again as for no quit (a later crash restores by the usual rules).
+    if super::store_restart::install_returned() {
+        crate::client::backend_save_session_snapshot(&web_endpoint, &auth_key, false);
+    }
     outcome
 }
 
@@ -211,10 +215,10 @@ fn install_update_here(target: &str, web_endpoint: &str, auth_key: &str) -> Resu
     if state != StoreState::Completed {
         return Ok(decide(listed, Some(state)));
     }
-    // The Store now closes this app to swap the package: have it opened again after, and the windows saved
-    // as for an OS shutdown (not as for a quit: the app keeps running if the install does not go through).
+    // The Store now closes this app to swap the package: have it opened again after, and every window saved
+    // as a quit saves them (the closes that follow keep the record), without the quit's background-work record.
     super::store_restart::before_install(target);
-    crate::client::backend_save_session_snapshot(web_endpoint, auth_key, false);
+    crate::client::save_session_snapshot_with(web_endpoint, auth_key, true, false);
     let result = context
         .RequestDownloadAndInstallStorePackageUpdatesAsync(&updates)
         .and_then(|op| op.get())
