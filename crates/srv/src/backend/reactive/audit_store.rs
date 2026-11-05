@@ -36,10 +36,12 @@ pub fn shared_path_for_reading() -> Option<PathBuf> {
     crate::registry::shared_root_ignoring_deferral().map(|root| root.join("audit").join("jekt-audit.jsonl"))
 }
 
-/// `<this srv's data folder>/audit/jekt-audit.jsonl`: where a srv that gave the shared folder up
-/// keeps its own rows. A line goes to exactly one of this and the shared file.
+/// `<this channel's folder>/audit/jekt-audit.jsonl`: where a srv that gave the shared folder up keeps its own
+/// rows. A line goes to exactly one of this and the shared file. It is the channel's own folder, not the
+/// per-version data folder (`--wavedata`, `AGENTMUX_DATA_DIR`): a srv that deferred is usually upgraded next, and
+/// the new version must still find the rows the old one kept.
 pub fn own_path() -> Option<PathBuf> {
-    std::env::var_os("AGENTMUX_DATA_DIR").filter(|d| !d.is_empty()).map(|d| PathBuf::from(d).join("audit").join("jekt-audit.jsonl"))
+    std::env::var_os("AGENTMUX_INSTANCE_DIR").filter(|d| !d.is_empty()).map(|d| PathBuf::from(d).join("audit").join("jekt-audit.jsonl"))
 }
 
 /// Where this srv appends: the shared file, or its own when it doesn't use the shared folder.
@@ -59,7 +61,7 @@ pub fn install_for_this_srv() {
                 tracing::warn!(path = %path.display(), error = %e, "jekt audit: not kept in a file");
             }
         }
-        None => tracing::warn!("jekt audit: no shared directory and no data directory; not kept in a file"),
+        None => tracing::warn!("jekt audit: no shared directory and no channel directory; not kept in a file"),
     }
 }
 
@@ -156,15 +158,19 @@ mod tests {
     }
 
     #[test]
-    fn a_srv_without_the_shared_folder_keeps_its_rows_in_its_data_folder() {
+    fn a_srv_without_the_shared_folder_keeps_its_rows_in_its_channel_folder_not_the_per_version_data_folder() {
         let _g = crate::test_support::ISOLATED_AUTH_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = tempfile::tempdir().unwrap();
-        let before = std::env::var_os("AGENTMUX_DATA_DIR");
-        std::env::set_var("AGENTMUX_DATA_DIR", dir.path());
+        let saved = (std::env::var_os("AGENTMUX_INSTANCE_DIR"), std::env::var_os("AGENTMUX_DATA_DIR"));
+        // The data folder is `<channel folder>/versions/<version>/data`: the next version does not see it.
+        std::env::set_var("AGENTMUX_INSTANCE_DIR", dir.path());
+        std::env::set_var("AGENTMUX_DATA_DIR", dir.path().join("versions").join("1.2.3").join("data"));
         let own = own_path();
-        match before {
-            Some(v) => std::env::set_var("AGENTMUX_DATA_DIR", v),
-            None => std::env::remove_var("AGENTMUX_DATA_DIR"),
+        for (name, value) in [("AGENTMUX_INSTANCE_DIR", saved.0), ("AGENTMUX_DATA_DIR", saved.1)] {
+            match value {
+                Some(v) => std::env::set_var(name, v),
+                None => std::env::remove_var(name),
+            }
         }
         assert_eq!(own, Some(dir.path().join("audit").join("jekt-audit.jsonl")));
     }
