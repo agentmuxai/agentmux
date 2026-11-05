@@ -50,7 +50,7 @@ export function SwarmSections(props: {
     const { model, agents } = props;
     const isOpen = (id: SwarmSection) => props.open().includes(id);
     return (
-        <div class="swarm-compartment swarm-compartment--on">
+        <div class="swarm-compartment">
             <SectionBlock id="broadcast" open={isOpen("broadcast")} onToggle={() => props.onToggle("broadcast")}>
                 {/* The composer; the selection it sends to is ticked in the list below. */}
                 <BroadcastDock model={model} agents={agents} />

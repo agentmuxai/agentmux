@@ -980,45 +980,29 @@
 }
 
 // The Supervisor's and Broadcast's own controls: one raised surface apart from the agent list,
-// which keeps the pane background. In the agents section the wrapper adds nothing (`display: contents`).
-// One custom property for the surface, so a shared compartment token can replace it in one line.
+// which keeps the pane background. One custom property for the surface, so a shared compartment
+// token can replace it in one line. It has no height or overflow of its own: the pane scrolls.
 .swarm-compartment {
     --swarm-compartment-bg: var(--hover-bg-color);
-    display: contents;
+    display: flex;
+    flex: 0 0 auto;
+    flex-direction: column;
+    gap: 1px;
+    margin: 6px 8px;
+    background: var(--swarm-compartment-bg);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
 
-    &--on {
-        display: flex;
-        flex: 0 0 auto;
-        flex-direction: column;
-        gap: 1px;
-        margin: 6px 8px;
-        background: var(--swarm-compartment-bg);
-        border: 1px solid var(--border-color);
-        border-radius: var(--radius-md);
-
-        // Their own bars and dividers become the compartment's inner structure.
-        > .swarm-fleet-result-panel {
-            background: transparent;
-            margin: 0;
-            max-height: none;
-            border-bottom: 0;
-            overflow: visible;
-        }
-
-        > * + * {
-            border-top: 1px solid var(--border-color);
-        }
+    // Their own bars and dividers become the compartment's inner structure.
+    > .swarm-fleet-result-panel {
+        background: transparent;
+        margin: 0;
+        border-bottom: 0;
     }
-}
 
-.swarm-fleet-toolbar-count {
-    font-weight: 600;
-    font-size: var(--text-sm);
-    margin-right: 4px;
-}
-
-.swarm-fleet-toolbar-clear {
-    margin-left: auto;
+    > * + * {
+        border-top: 1px solid var(--border-color);
+    }
 }
 
 // Fleet toolbar buttons are element/ui Buttons: primary accent, destructive
