@@ -68,6 +68,7 @@ const PopoverMenu = (props: PopoverMenuProps): JSX.Element => {
             anchor={point}
             placement="bottom-start"
             gutter={0}
+            fitHeight
             hideUntilPlaced
             overlayKeys
             shellClass="anchored-popover--menu"
