@@ -110,13 +110,21 @@ function VaultPromptsNote(props: { onClose: () => void }): JSX.Element {
 function VaultKept(props: { visible: boolean }): JSX.Element {
     const [kept, setKept] = createSignal<KeptSecret[] | null>(null);
     const [error, setError] = createSignal<string | null>(null);
-    createEffect(() => {
-        if (props.visible && kept() === null) {
-            loadKept()
-                .then(setKept)
-                .catch((e) => setError(String(e)));
-        }
-    });
+    // Read again each time the tab is shown: the keychain changes where these secrets are managed, with no event.
+    createEffect(
+        on(
+            () => props.visible,
+            (visible) => {
+                if (!visible) return;
+                loadKept()
+                    .then((list) => {
+                        setKept(list);
+                        setError(null);
+                    })
+                    .catch((e) => setError(String(e)));
+            }
+        )
+    );
     return (
         <div class="warden-manager-body">
             <p class="warden-manager-summary">
