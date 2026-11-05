@@ -1,0 +1,28 @@
+ListBundlesCommand
+-- asked
+  showing: detail
+  back: "Bundles"
+  readonly: Review kit | Reviews | InstructionsReview it
+  actions: Edit | Delete skills=skills for b1
+  dialog: Delete this bundle?Running instances continue with their snapshot, but new launches won't see it.CancelDelete
+-- not deleted
+  showing: detail
+  back: "Bundles"
+  readonly: Review kit | Reviews | InstructionsReview it
+  actions: Edit | Delete skills=skills for b1
+DeleteBundleCommand {"id":"b1"}
+ListBundlesCommand
+-- after confirming
+  showing: list
+  back: -
+  - — Blank (vanilla CLI) — / - {bundle-view-list-item is-blank}
+  - Global kit [GlobalInjected into all agents at launch] / For all {bundle-view-list-item is-global}
+  - Review kit / Reviews {bundle-view-list-item}
+modalLayer.open {"kind":"bundle-import-select","onPreviewed":"[fn]","onCancel":"[fn]"}
+opened kind=bundle-import-select
+modalLayer.replace {"kind":"bundle-import-preview","filePath":"/tmp/a.abf","preview":{"content_digest":"abc"},"onNext":"[fn]","onCancel":"[fn]"}
+replaced kind=bundle-import-preview
+modalLayer.replace {"kind":"bundle-import-confirm","filePath":"/tmp/a.abf","contentDigest":"abc","bundleDisplayName":"Imported","selection":{"bundleName":"Imported"},"onImported":"[fn]","onCancel":"[fn]"}
+replaced kind=bundle-import-confirm name=Imported digest=abc
+modalLayer.close
+modalLayer.close
