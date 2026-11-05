@@ -526,11 +526,9 @@ async fn run_close_pane(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
         let body: Value = resp.json().await.unwrap_or(Value::Null);
         let request_id = body["request_id"].as_str().unwrap_or_default();
         return match target_block_id.as_deref() {
-            // Another agent's pane: its user had 30 s to keep it (§6.5).
-            Some(b) => {
-                let now = await_shutdown(client, local_url, auth_key, request_id, true).await;
-                close_pane_outcome(b, &now)
-            }
+            // Another pane: its user has 30 s to keep it (§6.5). srv runs the window and tells this
+            // agent by note if it is kept or the close fails, so the call doesn't wait.
+            Some(b) => Ok(close_pane_pending(b, &body, agentmux_common::time::now_ms())),
             // Yourself (§7): as QuitSelf, done once it's proceeding —
             // the quit waits for this very turn to end.
             None => {

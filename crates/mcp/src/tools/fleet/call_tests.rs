@@ -121,3 +121,35 @@ async fn a_name_that_is_not_a_fleet_tool_is_not_in_the_family() {
     assert!(call("FleetNope", &json!({}), &fx.cx()).await.is_err());
     assert!(srv.seen.lock().unwrap().is_empty());
 }
+
+/// Several targets share srv's one window: the answer is at once, lists the window once, and nothing
+/// polls for the user's answer (srv tells the agent by note if it is kept or fails).
+#[tokio::test]
+async fn a_bulk_stop_answers_pending_at_once_with_one_entry_per_window() {
+    let deadline = agentmux_common::time::now_ms() + 30_000;
+    let entry = |block: &str, request: &str| json!({ "block_id": block, "request_id": request, "effect": "close_tab", "deadline_ms": deadline });
+    let srv = stub_srv(
+        "202 Accepted",
+        json!({
+            "status": "pending_user_override",
+            "succeeded": [],
+            "failed": [{ "id": "gone", "error": "block not found: gone" }],
+            "deadline_ms": deadline,
+            "pending": [entry("b1", "r1"), entry("b2", "r1"), entry("b3", "r2")],
+        }),
+    );
+    let fx = Fixture::new(&srv);
+    let started = std::time::Instant::now();
+    let said = call("FleetBulkStop", &json!({ "targets": ["b1", "b2", "b3", "gone"] }), &fx.cx()).await.unwrap();
+    assert!(started.elapsed() < std::time::Duration::from_secs(1), "no wait for the 30 s window");
+    let paths: Vec<String> = srv.seen.lock().unwrap().iter().map(|(p, _)| p.clone()).collect();
+    assert_eq!(paths, ["/api/v1/fleet/bulk-stop"], "no status polling");
+    let result: Value = serde_json::from_str(&said).unwrap();
+    assert_eq!(result["failed"][0]["id"], "gone");
+    let windows = result["pending"].as_array().unwrap();
+    assert_eq!(windows.len(), 2, "{result}");
+    assert_eq!((windows[0]["id"].as_str(), windows[0]["targets"].clone()), (Some("r1"), json!(["b1", "b2"])));
+    assert_eq!(windows[0]["closes_at"], deadline);
+    assert!(result["note"].as_str().unwrap().contains("one [AgentMux] note"), "{result}");
+    assert!(result.get("kept_by_user").is_none(), "nothing is known to be kept yet: {result}");
+}
