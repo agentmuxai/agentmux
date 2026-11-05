@@ -10,6 +10,7 @@
  * docs/specs/SPEC_UPGRADE_FOR_USERS_AND_AGENTS_2026_10_15.md §3.
  */
 
+import { pushNotification } from "@/app/store/flash-notifications";
 import { createEffect, createSignal, onCleanup } from "solid-js";
 
 import { WpsEvent } from "@/app/store/mps-events";
@@ -114,6 +115,31 @@ export function storeOfferLine(version: string | null | undefined, offer: StoreO
     if (!offer || offer.state === "asking") return `${released} Asking the Microsoft Store whether it has it…`;
     if (offer.state === "none") return `${released} The Microsoft Store is still reviewing it.`;
     return `${released} Couldn't ask the Microsoft Store whether it has it${offer.message ? ` (${offer.message})` : ""}.`;
+}
+
+/** What the Store's last install left (host: store_restart): the app came back `updated`, or `stayed` on the version it was closed on. */
+export type StoreCameBack = { state: "none" | "updated" | "stayed"; from: string; target: string };
+const [storeStayed, setStoreStayed] = createSignal<StoreCameBack | null>(null);
+export { storeStayed, setStoreStayed };
+
+/** Said before the Store is asked to install: it closes the app to swap the package. */
+export const storeClosesLine = (version: string): string => `The Store closes AgentMux while it installs v${version}, then opens it again.`;
+
+/** Said when the app is back on the version the Store closed it on: the install did not happen. */
+export const storeStayedLine = (s: StoreCameBack): string =>
+    `The Store closed AgentMux to install v${s.target}, but this is still v${s.from}. Try Update in the Store again, or install it from the Microsoft Store app.`;
+
+/** At start: say how the Store's last install ended, when one was under way. */
+export async function loadStoreCameBack(): Promise<void> {
+    const r = await getApi()?.approvals?.storeUpdateCameBack?.().catch(() => undefined);
+    if (!r || r.state === "none") return;
+    const note = { id: "store-update-came-back", timestamp: new Date().toISOString() };
+    if (r.state === "updated") {
+        pushNotification({ ...note, icon: "fa-circle-check", title: "AgentMux updated", message: `Updated to v${r.target} through the Microsoft Store.`, type: "update", expiration: Date.now() + 10000 });
+        return;
+    }
+    setStoreStayed(r);
+    pushNotification({ ...note, icon: "fa-triangle-exclamation", title: "The update did not install", message: storeStayedLine(r), type: "warning", persistent: true });
 }
 
 /** The Store certifies a release hours after GitHub publishes it: how often to ask again while it hasn't listed it. */

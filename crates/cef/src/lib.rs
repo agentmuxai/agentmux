@@ -600,6 +600,7 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
     // Initialize dual-output tracing: rolling log file + stderr.
     // The log file guard must live for the entire process to ensure flushing.
     let _log_guard = logging::init_logging(&log_dir);
+    commands::store_restart::at_startup(common_paths.as_ref());
 
     tracing::info!(
         version,
