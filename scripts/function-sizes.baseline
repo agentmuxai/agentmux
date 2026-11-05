@@ -435,7 +435,6 @@
 270 frontend/app/view/agent/components/AgentBottomPanels.tsx::AgentBottomPanels
 200 frontend/app/view/agent/components/AgentCard.tsx::AgentCard
 160 frontend/app/view/agent/components/AgentContainerLimitsPanel.tsx::AgentContainerLimitsPanel
-327 frontend/app/view/agent/components/AgentCreateForm.tsx::AgentCreateForm
 116 frontend/app/view/agent/components/AgentDocumentView.tsx::AgentDocumentView
 116 frontend/app/view/agent/components/AgentEnvPanel.tsx::AgentEnvPanel
 167 frontend/app/view/agent/components/AgentFooter.tsx::AgentFooter
