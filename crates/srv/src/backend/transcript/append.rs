@@ -299,6 +299,11 @@ pub(crate) fn append_transcript_with(
             Some(done) => done,
             None => mirror_append_to_global(gfs, zone, &records),
         };
+        // The Audit's index of tool calls and turns, for what the agent wrote (not srv's echo of a message it sent).
+        if echo.is_none() {
+            let at = landed.as_ref().map(|p| p.records_offset.max(0) as u64);
+            crate::backend::audit_activity::note_records(block_id, zone, &records, at);
+        }
         if let Some(c) = landed.and_then(|p| p.counted) {
             pos.push(mps::StreamPos { stream: format!("g:{zone}"), gen: c.gen, line: c.first_line, lines: c.lines });
         }
