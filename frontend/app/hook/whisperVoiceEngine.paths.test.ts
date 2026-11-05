@@ -275,7 +275,7 @@ describe("starting capture", () => {
         expect(getUserMedia).toHaveBeenLastCalledWith({ audio: true });
     });
 
-    it("clears the last error and detail it showed", async () => {
+    it("clears the last error it showed", async () => {
         const { session } = open();
         getUserMedia.mockRejectedValueOnce(Object.assign(new Error("x"), { name: "NotAllowedError" }));
         session.toggleListening();
@@ -683,7 +683,7 @@ describe("cutting utterances (WAV)", () => {
         expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
-    it("stops detaching the processor from the callback and the graph when stopped", async () => {
+    it("detaches the processor from its callback and the graph when stopped", async () => {
         const { session } = await listen(true);
         const proc = ctx().processor!;
         session.toggleListening();
