@@ -141,6 +141,37 @@ describe("layout intents", () => {
     });
 
     describe("showing srv's stored tree", () => {
+        it("shows a block once when the stored row holds it in two places", async () => {
+            const model = createModel();
+            insert(model, "a");
+            intentsSent()[0].resolve({ applied: true, version: 3 });
+            await settle();
+            const leaf = (id: string, blockId: string) => ({ id, size: 10, data: { blockId } }) as LayoutNode;
+            const stored = {
+                id: "srv-root",
+                flexDirection: "row",
+                size: 10,
+                children: [leaf("one", "agent2"), leaf("two", "agent2"), leaf("three", "z")],
+            } as LayoutNode;
+            storeRow(model, 3, stored);
+            const holders = model.leafs().filter((l) => l.data?.blockId === "agent2");
+            expect(holders.map((l) => l.id)).toEqual(["one"]);
+            expect(model.leafs().map((l) => l.id)).toEqual(["one", "three"]);
+        });
+
+        it("opening a block the layout already holds adds no second pane", async () => {
+            const model = createModel();
+            insert(model, "a");
+            insert(model, "b");
+            const sent = intentsSent().length;
+            const again = newLayoutNode(undefined, undefined, undefined, { blockId: "a" });
+            model.treeReducer({ type: LayoutTreeActionType.InsertNode, node: again, magnified: false, focused: true } as LayoutTreeInsertNodeAction);
+            expect(model.leafs().map((l) => l.data?.blockId)).toEqual(["a", "b"]);
+            // Its pane is focused, and srv is not asked to place the block a second time.
+            expect(model.treeState.focusedNodeId).toBe(model.leafs().find((l) => l.data?.blockId === "a")!.id);
+            expect(intentsSent().length).toBe(sent);
+        });
+
         it("replaces the local tree when srv stored something else", async () => {
             const model = createModel();
             const a = insert(model, "a");

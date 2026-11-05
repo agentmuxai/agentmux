@@ -14,6 +14,7 @@ import { createPlacementPreview, type FutureLayout } from "./futureLayout";
 import { getLayoutStateAtomFromTab } from "./layoutAtom";
 import { findNode, withDerivedNodeIds } from "./layoutNode";
 import { computeMoveNode } from "./layoutTree";
+import { placementRefused } from "./layoutDuplicates";
 import { applyLayoutAction, intentForAction, isIntentAction } from "./layoutIntentActions";
 import { flushLayoutOutbox, type LayoutOutboxItem } from "./layoutIntents";
 import {
@@ -640,7 +641,8 @@ export class LayoutModel {
         // action id, as srv names them.
         if (isIntentAction(action.type)) {
             const actionId = opts?.actionId ?? crypto.randomUUID();
-            const intent = intentForAction(action);
+            // A placement of a block the layout holds adds nothing, so srv is told nothing either (layoutDuplicates.ts).
+            const intent = placementRefused(this.treeState, action as { type: string; node?: LayoutNode }) ? null : intentForAction(action);
             withDerivedNodeIds(actionId, () => applyLayoutAction(this.treeState, action));
             // A queued backend action being mirrored is srv's own edit.
             const local = opts?.local || this.processingBackendActions;
