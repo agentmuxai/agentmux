@@ -1129,9 +1129,9 @@ pub struct UiBrowserOpenRequest {
     /// (SPEC_BROWSER_PANE_ALLOWED_ORIGINS_2026_10_09.md).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub allowed_origins: Option<Vec<String>>,
-    /// Browse as `"incognito"` (a fresh jar of its own) or a named browser
-    /// profile the user lets agents use; absent: Personal
-    /// (SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09.md §5).
+    /// Browse as `"incognito"` (a fresh jar of its own), `"personal"` (the user's own sign-ins; not for a container
+    /// agent) or a named browser profile the user lets agents use; absent: the agent's own profile, made the first
+    /// time (SPEC_AGENT_OWN_BROWSER_PROFILE_2026_11_04.md; SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09.md §5).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile: Option<String>,
 }
