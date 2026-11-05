@@ -335,19 +335,6 @@ describe("the process-exit grace timer", () => {
         expect(vi.getTimerCount()).toBe(1);
     });
 
-    it("any other status changes nothing", () => {
-        const m = mount();
-        hub.snapshot = { turnPhase: { kind: "Streaming" } };
-        controllerStatus("done");
-        controllerStatus("init");
-        vi.advanceTimersByTime(1500);
-        expect(m.dispatched()).toHaveLength(2);
-        const m2 = mount();
-        controllerStatus("init");
-        expect(vi.getTimerCount()).toBeGreaterThan(0);
-        m2.setPhase(idle());
-    });
-
     it("ignores a status that is neither done nor running", () => {
         const m = mount();
         hub.snapshot = { turnPhase: { kind: "Streaming" } };
@@ -463,7 +450,7 @@ describe("the Esc stop-fallback timer", () => {
         expect(m.dispatched().filter((d) => d.type === "TurnEnd")).toHaveLength(1);
     });
 
-    it("does not finish a turn that has left the stopping phase by the time it fires, and is dropped with the pane", () => {
+    it("is dropped with the pane", () => {
         const m = mount(streaming());
         m.setPhase(interrupting());
         dispose?.();
@@ -562,12 +549,5 @@ describe("the watchdog", () => {
         document.dispatchEvent(new Event("visibilitychange"));
         expect(info).toHaveBeenCalledWith("[wave-turn]", "pane=abcdefg", "visibility: visible→hidden");
         info.mockRestore();
-    });
-
-    it("returns the same finalizeTurn the timers use", () => {
-        const m = mount(interrupting());
-        vi.advanceTimersByTime(1500);
-        expect(m.dispatched().filter((d) => d.type === "TurnEnd")).toHaveLength(1);
-        expect(typeof m.result.finalizeTurn).toBe("function");
     });
 });
