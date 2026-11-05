@@ -709,12 +709,12 @@ pub(crate) async fn handle_ui_browser_focus_info(
     (StatusCode::OK, Json(json!({ "ok": true, "data": data }))).into_response()
 }
 
-/// Where an agent's browser pane goes when it names no placement: above the agent's own pane, which
-/// gives up half of its space (`up:half`, see `resolve_placement`).
-const BROWSER_DEFAULT_SPLIT: &str = "up:half";
+/// Where an agent's browser pane goes when it names no placement: below the agent's own pane, which
+/// gives up half of its space (`down:half`, see `resolve_placement`).
+const BROWSER_DEFAULT_SPLIT: &str = "down:half";
 
 /// `POST /api/v1/ui/browser/open` — backs `OpenBrowser`. Opens a browser pane
-/// above the caller's own pane (or where it asks) and records the caller as its owner, so the
+/// below the caller's own pane (or where it asks) and records the caller as its owner, so the
 /// `Browser*`/`UI*` tools accept it as `pane`
 /// (docs/specs/SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §3).
 pub(crate) async fn handle_ui_browser_open(
@@ -734,7 +734,7 @@ pub(crate) async fn handle_ui_browser_open(
             format!("Browser's open action takes an http:// or https:// URL, not {url:?}"),
         );
     }
-    // With no placement asked for, the browser goes above the agent: its space split in half, top and bottom.
+    // With no placement asked for, the browser goes below the agent: its space split in half, top and bottom.
     let split = match req.split.as_deref() {
         None => BROWSER_DEFAULT_SPLIT,
         Some(s @ ("right" | "left" | "up" | "down")) => s,
