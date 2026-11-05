@@ -185,12 +185,11 @@ pub fn start(state: std::sync::Arc<crate::state::AppState>) {
             let mut tick: u64 = 0;
             loop {
                 std::thread::sleep(Duration::from_secs(20));
-                log_memory_stats(); renderer_memory_log::tick(&state, tick);
+                log_memory_stats();
+                renderer_memory_log::tick(&state, tick);
                 tick += 1;
-                if tick % 3 == 1 {
-                    if let Some(root) = data_root.as_deref() {
-                        check_low_disk(&state, root, &mut low_disk);
-                    }
+                if let (true, Some(root)) = (tick % 3 == 1, data_root.as_deref()) {
+                    check_low_disk(&state, root, &mut low_disk);
                 }
                 // Feed the debounced memory-pressure trackers from the just-
                 // sampled readings; on a level transition, log it AND push
