@@ -763,19 +763,23 @@ fn pi_lists_models(success: bool, stdout: &str, stderr: &str) -> bool {
     success && !stdout.contains("No models available") && !stderr.contains("No models available")
 }
 
-/// Run the provider auth-check CLI against `auth_env` and parse the verdict.
-/// Returns `(authenticated, email, auth_method, raw_output)`. Extracted so the
-/// stale-credential self-heal can re-run the exact same check after refreshing.
 /// A probe (`--version`, the auth check) must not start the CLI's own update: agy 1.5 replaces itself on any
 /// run, which held a probe for the length of a 200 MB download and, from a windowless srv, could open a
 /// console of its own. Updating stays with the agent runs and the user's own terminal.
 fn quiet_probe(cmd: &mut tokio::process::Command, cli_path: &str) {
-    let stem = std::path::Path::new(cli_path).file_stem().and_then(|s| s.to_str());
-    if stem.is_some_and(|s| s.eq_ignore_ascii_case("agy")) {
+    if is_agy(cli_path) {
         cmd.env("AGY_CLI_DISABLE_AUTO_UPDATE", "1");
     }
 }
 
+fn is_agy(cli_path: &str) -> bool {
+    let stem = std::path::Path::new(cli_path).file_stem().and_then(|s| s.to_str());
+    stem.is_some_and(|s| s.eq_ignore_ascii_case("agy"))
+}
+
+/// Run the provider auth-check CLI against `auth_env` and parse the verdict.
+/// Returns `(authenticated, email, auth_method, raw_output)`. Extracted so the
+/// stale-credential self-heal can re-run the exact same check after refreshing.
 async fn run_auth_check(
     cli_path: &str,
     auth_check_args: &[String],
@@ -1162,24 +1166,22 @@ fn prune_result(
 
 #[cfg(test)]
 mod tests {
-    fn quiet_env(cli_path: &str) -> bool {
-        let mut cmd = tokio::process::Command::new(cli_path);
-        super::quiet_probe(&mut cmd, cli_path);
-        cmd.as_std()
-            .get_envs()
-            .any(|(k, v)| k == "AGY_CLI_DISABLE_AUTO_UPDATE" && v == Some(std::ffi::OsStr::new("1")))
-    }
-
     #[test]
     fn agy_probes_run_without_the_clis_own_update() {
-        assert!(quiet_env("C:\\Users\\x\\AppData\\Local\\agy\\bin\\agy.exe"));
-        assert!(quiet_env("/home/x/.local/bin/agy"));
+        assert!(super::is_agy("/home/x/.local/bin/agy"));
+        assert!(super::is_agy("/home/x/.local/bin/AGY"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn agy_exe_on_windows_is_found_by_its_name() {
+        assert!(super::is_agy("C:\\Users\\x\\AppData\\Local\\agy\\bin\\agy.exe"));
     }
 
     #[test]
     fn other_clis_are_left_alone() {
-        assert!(!quiet_env("/usr/bin/claude"));
-        assert!(!quiet_env("C:\\tools\\agyx.exe"));
+        assert!(!super::is_agy("/usr/bin/claude"));
+        assert!(!super::is_agy("/opt/tools/agyx"));
     }
 
 
