@@ -94,6 +94,12 @@ function referenceFor(anchor: Element | DOMRect) {
     return { getBoundingClientRect: () => anchor };
 }
 
+/** The body's classes, as one string. */
+function bodyClass(props: AnchoredPopoverProps): string {
+    const chrome = (props.zoom ?? "chrome") === "chrome" ? "anchored-popover-body--chrome-zoom" : "";
+    return ["anchored-popover-body", chrome, props.class ?? ""].filter(Boolean).join(" ");
+}
+
 function isEditable(el: EventTarget | null): boolean {
     if (!(el instanceof HTMLElement)) return false;
     return el.isContentEditable || el.matches("input, textarea, select");
@@ -226,11 +232,7 @@ export const AnchoredPopover = (props: AnchoredPopoverProps): JSX.Element => {
                     }}
                     // One class string, not class + classList: a changing
                     // `class` would wipe what classList added.
-                    class={[
-                        "anchored-popover-body",
-                        (props.zoom ?? "chrome") === "chrome" ? "anchored-popover-body--chrome-zoom" : "",
-                        props.class ?? "",
-                    ].filter(Boolean).join(" ")}
+                    class={bodyClass(props)}
                     // The room is in screen pixels and the body is zoomed, so its own max-height is the room over the zoom.
                     style={roomHeight() === undefined ? props.style : { ...props.style, "max-height": `calc(${roomHeight()}px / var(--zoomfactor, 1))`, "overflow-y": "auto" }}
                     role={props.role}
