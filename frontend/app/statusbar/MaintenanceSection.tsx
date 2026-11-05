@@ -8,16 +8,23 @@ import {
     checkedAt,
     checkForUpdate,
     loadAppUpdate,
+    recordStoreNone,
+    setStoreStayed,
     releaseDownload,
     startAppUpdateDownload,
+    storeAnswer,
+    storeOfferLine,
     upgradeAndRestart,
     upgradeUnderWay,
+    useStoreOffer,
+    viaStore,
 } from "@/store/app-update";
 import { atoms, getApi, openLink } from "@/store/global";
 import { createSignal, For, onMount, Show, type JSX } from "solid-js";
 import "./_maintenance-section.scss";
 import { Button } from "@/app/element/ui";
 import { tip } from "@/app/element/tip";
+import { StoreUpdateNotes } from "./StoreUpdateNotes";
 
 // The host opens exactly this link (`external_url_allowed` in the CEF host).
 const MS_STORE_PAGE_URL = "ms-windows-store://pdp/?productid=9P9QCXNNCRK3";
@@ -35,6 +42,7 @@ export const MaintenanceSection = (): JSX.Element => {
     // A newer release srv found (store/app-update.ts) leads; the host
     // updater's own states are kept for a host that has one.
     onMount(() => void loadAppUpdate());
+    useStoreOffer();
     const release = () => availableRelease();
     const download = () => (release() ? releaseDownload() : null);
     const updaterStatus = () => {
@@ -88,8 +96,9 @@ export const MaintenanceSection = (): JSX.Element => {
         upgradeAndRestart(now).catch((e) => setStartError(String(e?.message ?? e)));
     };
 
-    // A Microsoft Store install is updated by the Store, not by AgentMux.
-    const viaStore = () => appUpdate()?.install === "windows-store";
+    // A Store install is updated by the Store: no button until it lists the release, and a plain line until then.
+    const storeOffers = () => !viaStore() || storeAnswer()?.state === "available";
+    const storeLine = () => (viaStore() && !storeBelowFloor() ? storeOfferLine(updaterVersion(), storeAnswer()) : null);
     // Older than the release upgrades from: its floor version first, from its page.
     const installFirst = () => (release() ? appUpdate()?.install_first : undefined);
     // A Store install below that floor has no safe route: the Store installs only
@@ -106,7 +115,9 @@ export const MaintenanceSection = (): JSX.Element => {
         setStoreNote(null);
         setStoreBusy(true);
         try {
-            const result = await getApi()?.approvals?.storeUpdate?.().catch(() => undefined);
+            setStoreStayed(null);
+            const result = await getApi()?.approvals?.storeUpdate?.(release()?.version).catch(() => undefined);
+            if (result?.outcome === "none" && release()) recordStoreNone(release()!.version);
             if (!result || result.outcome === "fallback") {
                 if (result?.message) setStoreNote(result.message);
                 void openLink(MS_STORE_PAGE_URL);
@@ -173,12 +184,12 @@ export const MaintenanceSection = (): JSX.Element => {
                     <Show when={updaterStatus() === "available"}>
                         <span class="maintenance-icon maintenance-icon--update">↓</span>
                         <span class="maintenance-row-text">
-                            {updaterVersion() ? `v${updaterVersion()} is out` : "Update available"}
+                            {storeLine() ?? (updaterVersion() ? `v${updaterVersion()} is out` : "Update available")}
                         </span>
                         <Button density="compact" class="maintenance-btn" onClick={() => void openLink(releasesPageUrl(updaterVersion()))}>
                             What's new
                         </Button>
-                        <Show when={!storeBelowFloor()}>
+                        <Show when={!storeBelowFloor() && storeOffers()}>
                             <Button
                                 density="compact"
                                 tone="accent"
@@ -296,11 +307,6 @@ export const MaintenanceSection = (): JSX.Element => {
             <Show when={download()?.state === "ready" && download()?.error}>
                 <div class="maintenance-row-text maintenance-row-text--error">{download()!.error}</div>
             </Show>
-            <Show when={updaterStatus() === "available" && viaStore() && !storeBelowFloor()}>
-                <div class="maintenance-row-text maintenance-row-text--dim">
-                    {`The Microsoft Store updates this install. It gets each release after GitHub does, so v${updaterVersion()} may not be there yet.`}
-                </div>
-            </Show>
             <Show when={installFirst() && !viaStore()}>
                 <div class="maintenance-row-text maintenance-row-text--warn">
                     This version is older than v{updaterVersion()} upgrades from: install v{installFirst()} first, then upgrade.
@@ -317,18 +323,17 @@ export const MaintenanceSection = (): JSX.Element => {
             <Show when={startError()}>
                 <div class="maintenance-row-text maintenance-row-text--error">{startError()}</div>
             </Show>
-            <Show when={storeBusy()}>
-                <div class="maintenance-row-text maintenance-row-text--dim">Asking the Microsoft Store to install the update…</div>
-            </Show>
-            <Show when={storeNote()}>
-                <div class="maintenance-row-text maintenance-row-text--dim">{storeNote()}</div>
-            </Show>
+            <StoreUpdateNotes
+                closesFor={viaStore() && !storeBelowFloor() && storeOffers() && updaterStatus() === "available" ? updaterVersion() : null}
+                busy={storeBusy()}
+                note={storeNote()}
+            />
             {/* Check for update, always: nothing checks on its own, and a new
                 check replaces the release on offer (not while a download or
                 restart into it is under way). A `task dev` build, which
                 doesn't upgrade, learns which release is latest. */}
             <div class="maintenance-update-row">
-                <span class="maintenance-row-text maintenance-row-text--dim maintenance-row-text--wrap">{standing()}</span>
+                <span class="maintenance-row-text maintenance-row-text--dim">{standing()}</span>
                 <Show when={appUpdate()?.state === "local-build" && appUpdate()?.url}>
                     <Button density="compact" class="maintenance-btn" onClick={() => void openLink(appUpdate()!.url!)}>
                         View

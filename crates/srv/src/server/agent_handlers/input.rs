@@ -434,6 +434,10 @@ pub(crate) fn agent_stop(cmd: CommandAgentStopData) -> Result<(), String> {
                     sub.remove_agent(name);
                 }
             }
+            // A stop leaves no registration behind, under any name: an entry a turn filed under the
+            // block's current name is not one of `names`, and would read as "running" afterwards.
+            crate::backend::reactive::registry::remove_for_block(&data_dir, &cmd.blockid, None);
+            crate::backend::reactive::registry::remove_shared_for_block_from_env(&cmd.blockid, None);
             Ok(())
         }
         // Stopping a block with no controller is a no-op, not an

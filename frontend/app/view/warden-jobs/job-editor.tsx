@@ -6,8 +6,8 @@
 // sends it with `jobs.save`, which only the operator's own window may do. Dry run shows what the
 // definition would do and starts nothing. A template must be approved before a job is made from it.
 
-import { createMemo, createSignal, For, onMount, Show, type JSX } from "solid-js";
-import { createStore, reconcile } from "solid-js/store";
+import { createMemo, createSignal, For, onMount, Show, type Accessor, type JSX, type Setter } from "solid-js";
+import { createStore, reconcile, type SetStoreFunction } from "solid-js/store";
 
 import {
     Button,
@@ -26,6 +26,7 @@ import type { CapDefaults } from "@/types/rpc/CapDefaults";
 import type { JobTemplateInfo } from "@/types/rpc/JobTemplateInfo";
 import type { JobsDryRunResult } from "@/types/rpc/JobsDryRunResult";
 import type { JobsSaveResult } from "@/types/rpc/JobsSaveResult";
+import type { VaultEntryInfo } from "@/types/rpc/VaultEntryInfo";
 
 import {
     blankDraft,
@@ -52,12 +53,47 @@ const STATE_PILL: Record<string, { label: string; tone: PillTone }> = {
     invalid: { label: "Can't be read", tone: "error" },
 };
 
-export function JobEditor(props: {
+interface JobEditorProps {
     start: EditorStart;
     model: JobsModel;
     defaults: CapDefaults | undefined;
     onClose: () => void;
-}): JSX.Element {
+}
+
+/** What the editor's parts share: its fields, the signals around them and the Vault and agent lists. */
+interface EditorState {
+    props: JobEditorProps;
+    draft: JobDraft;
+    setDraft: SetStoreFunction<JobDraft>;
+    templates: Accessor<JobTemplateInfo[]>;
+    setTemplates: Setter<JobTemplateInfo[]>;
+    loading: Accessor<boolean>;
+    setLoading: Setter<boolean>;
+    source: Accessor<"blank" | "template">;
+    setSource: Setter<"blank" | "template">;
+    chosen: Accessor<boolean>;
+    setChosen: Setter<boolean>;
+    approving: Accessor<JobTemplateInfo | null>;
+    setApproving: Setter<JobTemplateInfo | null>;
+    busy: Accessor<"save" | "dry" | "approve" | null>;
+    setBusy: Setter<"save" | "dry" | "approve" | null>;
+    errors: Accessor<string[]>;
+    setErrors: Setter<string[]>;
+    paramErrors: Accessor<Record<string, string>>;
+    setParamErrors: Setter<Record<string, string>>;
+    failure: Accessor<string | null>;
+    setFailure: Setter<string | null>;
+    dry: Accessor<JobsDryRunResult | null>;
+    setDry: Setter<JobsDryRunResult | null>;
+    confirm: Accessor<JobsSaveResult | null>;
+    setConfirm: Setter<JobsSaveResult | null>;
+    manifest: Accessor<JobTemplateInfo["manifest"]>;
+    agentOptions: Accessor<SelectOption[]>;
+    nameOf: (id: string) => string;
+    vault: () => readonly VaultEntryInfo[] | null;
+}
+
+function createEditorState(props: JobEditorProps): EditorState {
     const [draft, setDraft] = createStore<JobDraft>(blankDraft());
     const [templates, setTemplates] = createSignal<JobTemplateInfo[]>([]);
     const [loading, setLoading] = createSignal(props.start.mode !== "new");
@@ -78,297 +114,350 @@ export function JobEditor(props: {
     );
     const nameOf = (id: string) => agentOptions().find((o) => o.value === id)?.label ?? id;
     const vault = () => (vaultAvailable() ? (vaultEntries() ?? []) : null);
-
-    onMount(async () => {
-        if (vaultAvailable()) void refreshVault();
-        try {
-            setTemplates((await props.model.templates()).templates);
-        } catch (e) {
-            setFailure(String(e));
-        }
-        const start = props.start;
-        if (start.mode === "new") return;
-        try {
-            const { definition } = await props.model.get(start.jobId);
-            const id = (definition.template as { id?: string } | undefined)?.id;
-            const info = templates().find((t) => t.id === id);
-            setDraft(reconcile(draftFromDefinition(definition, info?.manifest ?? null, start.mode)));
-            setChosen(true);
-        } catch (e) {
-            setFailure(String(e));
-        } finally {
-            setLoading(false);
-        }
-    });
-
-    const chooseSource = (next: "blank" | "template") => {
-        setSource(next);
-        setChosen(false);
-        setDry(null);
-        setDraft(reconcile(blankDraft()));
+    return {
+        props,
+        draft,
+        setDraft,
+        templates,
+        setTemplates,
+        loading,
+        setLoading,
+        source,
+        setSource,
+        chosen,
+        setChosen,
+        approving,
+        setApproving,
+        busy,
+        setBusy,
+        errors,
+        setErrors,
+        paramErrors,
+        setParamErrors,
+        failure,
+        setFailure,
+        dry,
+        setDry,
+        confirm,
+        setConfirm,
+        manifest,
+        agentOptions,
+        nameOf,
+        vault,
     };
+}
 
-    const useTemplate = (info: JobTemplateInfo) => {
-        setDraft(reconcile(draftFromTemplate(info)));
-        setChosen(true);
-        setDry(null);
-    };
+async function loadEditor(ed: EditorState): Promise<void> {
+    if (vaultAvailable()) void refreshVault();
+    try {
+        ed.setTemplates((await ed.props.model.templates()).templates);
+    } catch (e) {
+        ed.setFailure(String(e));
+    }
+    const start = ed.props.start;
+    if (start.mode === "new") return;
+    try {
+        const { definition } = await ed.props.model.get(start.jobId);
+        const id = (definition.template as { id?: string } | undefined)?.id;
+        const info = ed.templates().find((t) => t.id === id);
+        ed.setDraft(reconcile(draftFromDefinition(definition, info?.manifest ?? null, start.mode)));
+        ed.setChosen(true);
+    } catch (e) {
+        ed.setFailure(String(e));
+    } finally {
+        ed.setLoading(false);
+    }
+}
 
-    const approve = async () => {
-        const info = approving();
-        if (!info) return;
-        setBusy("approve");
-        setFailure(null);
-        try {
-            const res = await props.model.approveTemplate({
-                id: info.id,
-                hash: info.hash,
-                signer: info.signature.fingerprint ?? "",
-            });
-            setTemplates(res.templates);
-            setApproving(null);
-        } catch (e) {
-            setFailure(String(e));
-        } finally {
-            setBusy(null);
-        }
-    };
+function chooseSource(ed: EditorState, next: "blank" | "template"): void {
+    ed.setSource(next);
+    ed.setChosen(false);
+    ed.setDry(null);
+    ed.setDraft(reconcile(blankDraft()));
+}
 
-    /** The definition for the draft, or null (with the reasons shown) when it can't be sent yet. */
-    const built = () => {
-        const b = buildDefinition(draft, manifest());
-        setErrors(b.errors);
-        setParamErrors(b.paramErrors);
-        return b.errors.length > 0 ? null : b.definition;
-    };
+function useTemplate(ed: EditorState, info: JobTemplateInfo): void {
+    ed.setDraft(reconcile(draftFromTemplate(info)));
+    ed.setChosen(true);
+    ed.setDry(null);
+}
 
-    const save = async (confirmNoCost = false) => {
-        setFailure(null);
-        const definition = built();
-        if (!definition) return;
-        setBusy("save");
-        try {
-            const res = await props.model.save({
-                ...(draft.id ? { job_id: draft.id } : {}),
-                definition,
-                ...(confirmNoCost ? { confirm_no_cost: true } : {}),
-            });
-            if (res.needs_confirmation) setConfirm(res);
-            else props.onClose();
-        } catch (e) {
-            setFailure(String(e));
-        } finally {
-            setBusy(null);
-        }
-    };
+async function approveTemplate(ed: EditorState): Promise<void> {
+    const info = ed.approving();
+    if (!info) return;
+    ed.setBusy("approve");
+    ed.setFailure(null);
+    try {
+        const res = await ed.props.model.approveTemplate({
+            id: info.id,
+            hash: info.hash,
+            signer: info.signature.fingerprint ?? "",
+        });
+        ed.setTemplates(res.templates);
+        ed.setApproving(null);
+    } catch (e) {
+        ed.setFailure(String(e));
+    } finally {
+        ed.setBusy(null);
+    }
+}
 
-    const dryRun = async () => {
-        setFailure(null);
-        const definition = built();
-        if (!definition) return;
-        setBusy("dry");
-        try {
-            setDry(await props.model.dryRun({ ...(draft.id ? { job_id: draft.id } : {}), definition }));
-        } catch (e) {
-            setFailure(String(e));
-        } finally {
-            setBusy(null);
-        }
-    };
+/** The definition for the draft, or null (with the reasons shown) when it can't be sent yet. */
+function builtDefinition(ed: EditorState) {
+    const b = buildDefinition(ed.draft, ed.manifest());
+    ed.setErrors(b.errors);
+    ed.setParamErrors(b.paramErrors);
+    return b.errors.length > 0 ? null : b.definition;
+}
 
-    const title = () =>
-        props.start.mode === "edit"
-            ? `Edit ${draft.name || "job"}`
-            : props.start.mode === "clone"
-              ? "Clone job"
-              : "New job";
-    const showForm = () => !loading() && (props.start.mode !== "new" || source() === "blank" || chosen());
+async function saveJob(ed: EditorState, confirmNoCost = false): Promise<void> {
+    ed.setFailure(null);
+    const definition = builtDefinition(ed);
+    if (!definition) return;
+    ed.setBusy("save");
+    try {
+        const res = await ed.props.model.save({
+            ...(ed.draft.id ? { job_id: ed.draft.id } : {}),
+            definition,
+            ...(confirmNoCost ? { confirm_no_cost: true } : {}),
+        });
+        if (res.needs_confirmation) ed.setConfirm(res);
+        else ed.props.onClose();
+    } catch (e) {
+        ed.setFailure(String(e));
+    } finally {
+        ed.setBusy(null);
+    }
+}
+
+async function dryRunJob(ed: EditorState): Promise<void> {
+    ed.setFailure(null);
+    const definition = builtDefinition(ed);
+    if (!definition) return;
+    ed.setBusy("dry");
+    try {
+        ed.setDry(await ed.props.model.dryRun({ ...(ed.draft.id ? { job_id: ed.draft.id } : {}), definition }));
+    } catch (e) {
+        ed.setFailure(String(e));
+    } finally {
+        ed.setBusy(null);
+    }
+}
+
+const editorTitle = (ed: EditorState) =>
+    ed.props.start.mode === "edit"
+        ? `Edit ${ed.draft.name || "job"}`
+        : ed.props.start.mode === "clone"
+          ? "Clone job"
+          : "New job";
+const showForm = (ed: EditorState) =>
+    !ed.loading() && (ed.props.start.mode !== "new" || ed.source() === "blank" || ed.chosen());
+
+function TemplateItem(p: { ed: EditorState; t: JobTemplateInfo }): JSX.Element {
+    const pill = STATE_PILL[p.t.state] ?? STATE_PILL.invalid;
+    return (
+        <li class="warden-jobs-template">
+            <div class="warden-jobs-template-head">
+                <strong>{p.t.manifest?.name ?? p.t.id}</strong>
+                <span class="warden-manager-dim">{p.t.manifest?.version}</span>
+                <Pill tone={pill.tone}>{pill.label}</Pill>
+                <Show when={p.t.source === "builtin"}>
+                    <Pill>AgentMux</Pill>
+                </Show>
+            </div>
+            <div class="warden-manager-dim">{p.t.manifest?.description ?? p.t.error}</div>
+            <div class="warden-jobs-actions">
+                <Show when={p.t.state === "approved"}>
+                    <Button density="compact" icon="clone" onClick={() => useTemplate(p.ed, p.t)}>
+                        Clone to a job
+                    </Button>
+                </Show>
+                <Show when={p.t.state === "needs_approval" || p.t.state === "changed"}>
+                    <Button density="compact" icon="shield-halved" onClick={() => p.ed.setApproving(p.t)}>
+                        Review and approve
+                    </Button>
+                </Show>
+            </div>
+        </li>
+    );
+}
+
+function StartFrom(p: { ed: EditorState }): JSX.Element {
+    return (
+        <>
+            <Field label="Start from" layout="stacked">
+                <SegmentedControl
+                    options={[
+                        { value: "blank", label: "A blank job" },
+                        { value: "template", label: "A template" },
+                    ]}
+                    value={p.ed.source()}
+                    onChange={(next) => chooseSource(p.ed, next)}
+                />
+            </Field>
+            <Show when={p.ed.source() === "template" && !p.ed.chosen()}>
+                <Show
+                    when={p.ed.templates().length > 0}
+                    fallback={<div class="warden-section-stub">No templates are installed.</div>}
+                >
+                    <ul class="warden-jobs-templates">
+                        <For each={p.ed.templates()}>{(t) => <TemplateItem ed={p.ed} t={t} />}</For>
+                    </ul>
+                </Show>
+            </Show>
+        </>
+    );
+}
+
+function JobForm(p: { ed: EditorState }): JSX.Element {
+    const ed = p.ed;
+    return (
+        <>
+            <Show when={ed.draft.template}>
+                {(t) => (
+                    <div class="warden-manager-dim">
+                        Made from <strong>{ed.manifest()?.name ?? t().id}</strong>{" "}
+                        {t().version || ed.manifest()?.version}. The template writes the brief; its settings are
+                        below.
+                    </div>
+                )}
+            </Show>
+            <div class="warden-jobs-form">
+                <div class="warden-jobs-grid">
+                    <Field label="Name" layout="stacked">
+                        <TextInput
+                            value={ed.draft.name}
+                            onInput={(e) => ed.setDraft("name", e.currentTarget.value)}
+                            maxLength={200}
+                        />
+                    </Field>
+                    <Field label="Owner" layout="stacked" description="Its leader gets the failure alerts.">
+                        <Select
+                            value={ed.draft.owner}
+                            onChange={(v) => ed.setDraft("owner", v)}
+                            options={withCurrent(ed.agentOptions(), ed.draft.owner, "You (no agent)")}
+                        />
+                    </Field>
+                </div>
+                <Show when={ed.draft.template && ed.manifest()}>
+                    {(m) => (
+                        <JobParamsForm
+                            manifest={m()}
+                            values={ed.draft.params}
+                            errors={ed.paramErrors()}
+                            vault={ed.vault()}
+                            onChange={(name: string, value: ParamValue) => ed.setDraft("params", name, value)}
+                        />
+                    )}
+                </Show>
+                <Show when={ed.draft.template && !ed.manifest() && !ed.loading()}>
+                    <div class="warden-manager-error">
+                        This job's template isn't installed any more, so its settings stay as they are.
+                    </div>
+                </Show>
+                <WhenSection draft={ed.draft} set={ed.setDraft} />
+                <WhatSection
+                    draft={ed.draft}
+                    set={ed.setDraft}
+                    agents={ed.agentOptions()}
+                    templated={ed.draft.template != null}
+                />
+                <PolicySection draft={ed.draft} set={ed.setDraft} defaults={ed.props.defaults} />
+            </div>
+        </>
+    );
+}
+
+function ConfirmNote(p: { ed: EditorState; result: JobsSaveResult }): JSX.Element {
+    return (
+        <div class="warden-jobs-note" role="alert">
+            {p.result.error}
+            <div class="warden-jobs-actions">
+                <Button
+                    tone="danger"
+                    icon="check"
+                    busy={p.ed.busy() === "save"}
+                    onClick={() => void saveJob(p.ed, true)}
+                >
+                    Confirm and save
+                </Button>
+                <Button tone="quiet" onClick={() => p.ed.setConfirm(null)}>
+                    Not now
+                </Button>
+            </div>
+        </div>
+    );
+}
+
+function EditorActions(p: { ed: EditorState }): JSX.Element {
+    const ed = p.ed;
+    return (
+        <div class="warden-jobs-actions">
+            <Button
+                tone="accent"
+                icon="floppy-disk"
+                busy={ed.busy() === "save"}
+                disabled={!showForm(ed) || ed.busy() != null}
+                onClick={() => void saveJob(ed)}
+            >
+                {ed.draft.id ? "Save changes" : "Create job"}
+            </Button>
+            <Button
+                icon="vial"
+                busy={ed.busy() === "dry"}
+                disabled={!showForm(ed) || ed.busy() != null}
+                onClick={() => void dryRunJob(ed)}
+            >
+                Dry run
+            </Button>
+            <Button tone="quiet" onClick={() => ed.props.onClose()}>
+                Cancel
+            </Button>
+        </div>
+    );
+}
+
+export function JobEditor(props: JobEditorProps): JSX.Element {
+    const ed = createEditorState(props);
+    onMount(() => loadEditor(ed));
 
     return (
-        <section class="warden-jobs-editor" aria-label={title()}>
-            <h3 class="warden-jobs-heading">{title()}</h3>
-            <Show when={approving()}>
+        <section class="warden-jobs-editor" aria-label={editorTitle(ed)}>
+            <h3 class="warden-jobs-heading">{editorTitle(ed)}</h3>
+            <Show when={ed.approving()}>
                 {(info) => (
                     <TemplateApproval
                         info={info()}
-                        busy={busy() === "approve"}
-                        error={failure()}
-                        onApprove={() => void approve()}
-                        onCancel={() => setApproving(null)}
+                        busy={ed.busy() === "approve"}
+                        error={ed.failure()}
+                        onApprove={() => void approveTemplate(ed)}
+                        onCancel={() => ed.setApproving(null)}
                     />
                 )}
             </Show>
-            <Show when={!approving()}>
+            <Show when={!ed.approving()}>
                 <Show when={props.start.mode === "new"}>
-                    <Field label="Start from" layout="stacked">
-                        <SegmentedControl
-                            options={[
-                                { value: "blank", label: "A blank job" },
-                                { value: "template", label: "A template" },
-                            ]}
-                            value={source()}
-                            onChange={chooseSource}
-                        />
-                    </Field>
-                    <Show when={source() === "template" && !chosen()}>
-                        <Show
-                            when={templates().length > 0}
-                            fallback={<div class="warden-section-stub">No templates are installed.</div>}
-                        >
-                            <ul class="warden-jobs-templates">
-                                <For each={templates()}>
-                                    {(t) => {
-                                        const pill = STATE_PILL[t.state] ?? STATE_PILL.invalid;
-                                        return (
-                                            <li class="warden-jobs-template">
-                                                <div class="warden-jobs-template-head">
-                                                    <strong>{t.manifest?.name ?? t.id}</strong>
-                                                    <span class="warden-manager-dim">{t.manifest?.version}</span>
-                                                    <Pill tone={pill.tone}>{pill.label}</Pill>
-                                                    <Show when={t.source === "builtin"}>
-                                                        <Pill>AgentMux</Pill>
-                                                    </Show>
-                                                </div>
-                                                <div class="warden-manager-dim">
-                                                    {t.manifest?.description ?? t.error}
-                                                </div>
-                                                <div class="warden-jobs-actions">
-                                                    <Show when={t.state === "approved"}>
-                                                        <Button
-                                                            density="compact"
-                                                            icon="clone"
-                                                            onClick={() => useTemplate(t)}
-                                                        >
-                                                            Clone to a job
-                                                        </Button>
-                                                    </Show>
-                                                    <Show when={t.state === "needs_approval" || t.state === "changed"}>
-                                                        <Button
-                                                            density="compact"
-                                                            icon="shield-halved"
-                                                            onClick={() => setApproving(t)}
-                                                        >
-                                                            Review and approve
-                                                        </Button>
-                                                    </Show>
-                                                </div>
-                                            </li>
-                                        );
-                                    }}
-                                </For>
-                            </ul>
-                        </Show>
-                    </Show>
+                    <StartFrom ed={ed} />
                 </Show>
-                <Show when={loading()}>
+                <Show when={ed.loading()}>
                     <div class="warden-section-stub">Loading…</div>
                 </Show>
-                <Show when={showForm()}>
-                    <Show when={draft.template}>
-                        {(t) => (
-                            <div class="warden-manager-dim">
-                                Made from <strong>{manifest()?.name ?? t().id}</strong>{" "}
-                                {t().version || manifest()?.version}. The template writes the brief; its settings are
-                                below.
-                            </div>
-                        )}
-                    </Show>
-                    <div class="warden-jobs-form">
-                        <div class="warden-jobs-grid">
-                            <Field label="Name" layout="stacked">
-                                <TextInput
-                                    value={draft.name}
-                                    onInput={(e) => setDraft("name", e.currentTarget.value)}
-                                    maxLength={200}
-                                />
-                            </Field>
-                            <Field label="Owner" layout="stacked" description="Its leader gets the failure alerts.">
-                                <Select
-                                    value={draft.owner}
-                                    onChange={(v) => setDraft("owner", v)}
-                                    options={withCurrent(agentOptions(), draft.owner, "You (no agent)")}
-                                />
-                            </Field>
-                        </div>
-                        <Show when={draft.template && manifest()}>
-                            {(m) => (
-                                <JobParamsForm
-                                    manifest={m()}
-                                    values={draft.params}
-                                    errors={paramErrors()}
-                                    vault={vault()}
-                                    onChange={(name: string, value: ParamValue) => setDraft("params", name, value)}
-                                />
-                            )}
-                        </Show>
-                        <Show when={draft.template && !manifest() && !loading()}>
-                            <div class="warden-manager-error">
-                                This job's template isn't installed any more, so its settings stay as they are.
-                            </div>
-                        </Show>
-                        <WhenSection draft={draft} set={setDraft} />
-                        <WhatSection
-                            draft={draft}
-                            set={setDraft}
-                            agents={agentOptions()}
-                            templated={draft.template != null}
-                        />
-                        <PolicySection draft={draft} set={setDraft} defaults={props.defaults} />
-                    </div>
+                <Show when={showForm(ed)}>
+                    <JobForm ed={ed} />
                 </Show>
-                <Show when={errors().length > 0}>
+                <Show when={ed.errors().length > 0}>
                     <ul class="warden-manager-error warden-jobs-problems" role="alert">
-                        <For each={errors()}>{(e) => <li>{e}</li>}</For>
+                        <For each={ed.errors()}>{(e) => <li>{e}</li>}</For>
                     </ul>
                 </Show>
-                <Show when={failure()}>
+                <Show when={ed.failure()}>
                     <div class="warden-manager-error" role="alert">
-                        {failure()}
+                        {ed.failure()}
                     </div>
                 </Show>
-                <Show when={confirm()}>
-                    {(c) => (
-                        <div class="warden-jobs-note" role="alert">
-                            {c().error}
-                            <div class="warden-jobs-actions">
-                                <Button
-                                    tone="danger"
-                                    icon="check"
-                                    busy={busy() === "save"}
-                                    onClick={() => void save(true)}
-                                >
-                                    Confirm and save
-                                </Button>
-                                <Button tone="quiet" onClick={() => setConfirm(null)}>
-                                    Not now
-                                </Button>
-                            </div>
-                        </div>
-                    )}
-                </Show>
-                <Show when={dry()}>{(d) => <JobDryRun result={d()} vault={vault()} nameOf={nameOf} />}</Show>
-                <div class="warden-jobs-actions">
-                    <Button
-                        tone="accent"
-                        icon="floppy-disk"
-                        busy={busy() === "save"}
-                        disabled={!showForm() || busy() != null}
-                        onClick={() => void save()}
-                    >
-                        {draft.id ? "Save changes" : "Create job"}
-                    </Button>
-                    <Button
-                        icon="vial"
-                        busy={busy() === "dry"}
-                        disabled={!showForm() || busy() != null}
-                        onClick={() => void dryRun()}
-                    >
-                        Dry run
-                    </Button>
-                    <Button tone="quiet" onClick={() => props.onClose()}>
-                        Cancel
-                    </Button>
-                </div>
+                <Show when={ed.confirm()}>{(c) => <ConfirmNote ed={ed} result={c()} />}</Show>
+                <Show when={ed.dry()}>{(d) => <JobDryRun result={d()} vault={ed.vault()} nameOf={ed.nameOf} />}</Show>
+                <EditorActions ed={ed} />
             </Show>
         </section>
     );

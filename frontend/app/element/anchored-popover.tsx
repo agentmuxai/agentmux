@@ -48,8 +48,14 @@ export interface AnchoredPopoverProps {
     /** Read once, when the panel's first frame runs. */
     anchor: PopoverAnchor;
     placement?: Placement;
+    /** The gap to the anchor, in real pixels. Default 8. */
+    gutter?: number;
     /** How the panel comes in and goes out (`enter`/`exit` kind). Omit for none. */
     motion?: EnterKind;
+    /** Keep the panel hidden until its first placement, so it never shows at the corner (implied by `motion`). */
+    hideUntilPlaced?: boolean;
+    /** Forward keys to the panel while a native browser pane has focus. Default: when `onDismiss` is given. */
+    overlayKeys?: boolean;
     /** Once, when the panel is first shown in place. With `motion` that is after its first placement, not at mount. */
     onShown?: () => void;
     /** `"chrome"` (default): the body scales with chrome zoom (`--zoomfactor`). */
@@ -86,6 +92,12 @@ function referenceFor(anchor: Element | DOMRect) {
         return { getBoundingClientRect: () => anchor.getBoundingClientRect(), contextElement: anchor };
     }
     return { getBoundingClientRect: () => anchor };
+}
+
+/** The body's classes, as one string. */
+function bodyClass(props: AnchoredPopoverProps): string {
+    const chrome = (props.zoom ?? "chrome") === "chrome" ? "anchored-popover-body--chrome-zoom" : "";
+    return ["anchored-popover-body", chrome, props.class ?? ""].filter(Boolean).join(" ");
 }
 
 function isEditable(el: EventTarget | null): boolean {
@@ -129,7 +141,7 @@ export const AnchoredPopover = (props: AnchoredPopoverProps): JSX.Element => {
     let entered = false;
     const [roomHeight, setRoomHeight] = createSignal<number | undefined>();
     const [shellStyle, setShellStyle] = createSignal<JSX.CSSProperties>(
-        untrack(() => props.motion) ? WAITING_STYLE : IDLE_STYLE,
+        untrack(() => props.motion || props.hideUntilPlaced) ? WAITING_STYLE : IDLE_STYLE,
     );
     /** The first time the panel is shown, in place: play its entrance. */
     const shown = () => {
@@ -144,7 +156,7 @@ export const AnchoredPopover = (props: AnchoredPopoverProps): JSX.Element => {
     let disposed = false;
 
     // A dismissible popover takes Escape; a passive one (a tooltip) does not.
-    usePaneOverlay(() => shell, { keys: !!props.onDismiss });
+    usePaneOverlay(() => shell, { keys: props.overlayKeys ?? !!props.onDismiss });
 
     const registerShell = (el: HTMLDivElement) => {
         shell = el;
@@ -162,10 +174,12 @@ export const AnchoredPopover = (props: AnchoredPopoverProps): JSX.Element => {
             const placement = untrack(() => props.placement) ?? "top-start";
             const container = untrack(() => props.containWithin)?.() ?? undefined;
             const update = async () => {
+                if (disposed) return;
                 const pos = await computeMenuPosition(
                     {
                         anchor: reference.getBoundingClientRect(),
                         placement,
+                        gutter: untrack(() => props.gutter),
                         avoidNativePanes: false,
                         containWithin: container,
                         alignToAnchorSide: untrack(() => props.alignToAnchorSide),
@@ -218,11 +232,7 @@ export const AnchoredPopover = (props: AnchoredPopoverProps): JSX.Element => {
                     }}
                     // One class string, not class + classList: a changing
                     // `class` would wipe what classList added.
-                    class={[
-                        "anchored-popover-body",
-                        (props.zoom ?? "chrome") === "chrome" ? "anchored-popover-body--chrome-zoom" : "",
-                        props.class ?? "",
-                    ].filter(Boolean).join(" ")}
+                    class={bodyClass(props)}
                     // The room is in screen pixels and the body is zoomed, so its own max-height is the room over the zoom.
                     style={roomHeight() === undefined ? props.style : { ...props.style, "max-height": `calc(${roomHeight()}px / var(--zoomfactor, 1))`, "overflow-y": "auto" }}
                     role={props.role}

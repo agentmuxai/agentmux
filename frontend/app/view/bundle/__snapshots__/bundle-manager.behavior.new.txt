@@ -1,0 +1,111 @@
+ListBundlesCommand
+-- new form
+  showing: detail
+  back: "Bundles"
+  form: New Bundle
+    input bundle-view-input value="" required ph="e.g. Claude-coder"
+    input bundle-view-input value="" ph="Short label shown in the launch picker"
+    select bundle-view-input value=""
+    textarea bundle-view-textarea value="" ph="System prompt. The agent's soul."
+    by-provider: by provider: {}
+    buttons: Validate(disabled) | Cancel | Save(disabled)
+    helps: 5
+-- blank name: Save and Validate disabled
+  showing: detail
+  back: "Bundles"
+  form: New Bundle
+    input bundle-view-input value="  " required ph="e.g. Claude-coder"
+    input bundle-view-input value="" ph="Short label shown in the launch picker"
+    select bundle-view-input value=""
+    textarea bundle-view-textarea value="" ph="System prompt. The agent's soul."
+    by-provider: by provider: {}
+    buttons: Validate(disabled) | Cancel | Save(disabled)
+    helps: 5
+-- provider claude: one vendor, no vendor select
+  showing: detail
+  back: "Bundles"
+  form: New Bundle
+    input bundle-view-input value="Kit" required ph="e.g. Claude-coder"
+    input bundle-view-input value="A kit" ph="Short label shown in the launch picker"
+    select bundle-view-input value="claude"
+    textarea bundle-view-textarea value="" ph="System prompt. The agent's soul."
+    by-provider: by provider: {}
+    buttons: Validate | Cancel | Save
+    helps: 5
+multi-vendor provider: muxcode
+-- a provider with several vendors
+  showing: detail
+  back: "Bundles"
+  form: New Bundle
+    input bundle-view-input value="Kit" required ph="e.g. Claude-coder"
+    input bundle-view-input value="A kit" ph="Short label shown in the launch picker"
+    select bundle-view-input value="muxcode"
+    select bundle-view-input value="ollama"
+    textarea bundle-view-textarea value="" ph="System prompt. The agent's soul."
+    by-provider: by provider: {}
+    buttons: Validate | Cancel | Save
+    helps: 6
+-- the second vendor
+  showing: detail
+  back: "Bundles"
+  form: New Bundle
+    input bundle-view-input value="Kit" required ph="e.g. Claude-coder"
+    input bundle-view-input value="A kit" ph="Short label shown in the launch picker"
+    select bundle-view-input value="muxcode"
+    select bundle-view-input value="anthropic"
+    textarea bundle-view-textarea value="" ph="System prompt. The agent's soul."
+    by-provider: by provider: {}
+    buttons: Validate | Cancel | Save
+    helps: 6
+-- any provider again
+  showing: detail
+  back: "Bundles"
+  form: New Bundle
+    input bundle-view-input value="Kit" required ph="e.g. Claude-coder"
+    input bundle-view-input value="A kit" ph="Short label shown in the launch picker"
+    select bundle-view-input value=""
+    textarea bundle-view-textarea value="" ph="System prompt. The agent's soul."
+    by-provider: by provider: {}
+    buttons: Validate | Cancel | Save
+    helps: 5
+-- filled in
+  showing: detail
+  back: "Bundles"
+  form: New Bundle
+    input bundle-view-input value="Kit" required ph="e.g. Claude-coder"
+    input bundle-view-input value="A kit" ph="Short label shown in the launch picker"
+    select bundle-view-input value=""
+    textarea bundle-view-textarea value="Do good" ph="System prompt. The agent's soul."
+    by-provider: by provider: {"codex":"hi"}
+    buttons: Validate | Cancel | Save
+    helps: 5
+ValidateBundleCommand name=Kit
+-- validated
+  showing: detail
+  back: "Bundles"
+  form: New Bundle
+    input bundle-view-input value="Kit" required ph="e.g. Claude-coder"
+    input bundle-view-input value="A kit" ph="Short label shown in the launch picker"
+    select bundle-view-input value=""
+    textarea bundle-view-textarea value="Do good" ph="System prompt. The agent's soul."
+    by-provider: by provider: {"codex":"hi"}
+    buttons: Validate | Cancel | Save
+    validation [bundle-view-validation]: bundle-view-validation-item is-error:context_files: unsafe path ; bundle-view-validation-item is-warning:x: note
+    helps: 5
+-- an edit clears the report
+  showing: detail
+  back: "Bundles"
+  form: New Bundle
+    input bundle-view-input value="Kit 2" required ph="e.g. Claude-coder"
+    input bundle-view-input value="A kit" ph="Short label shown in the launch picker"
+    select bundle-view-input value=""
+    textarea bundle-view-textarea value="Do good" ph="System prompt. The agent's soul."
+    by-provider: by provider: {"codex":"hi"}
+    buttons: Validate | Cancel | Save
+    helps: 5
+ValidateBundleCommand name=Kit 2
+UpsertBundleCommand {"id":"","name":"Kit 2","description":"A kit","is_global":false,"provider":"","model":"","instructions":"Do good","instructions_by_provider":"{\"codex\":\"hi\"}","context_files":"[]","mcp_servers":"[]","skills":"[]","created_at":0,"updated_at":0}
+ListBundlesCommand
+-- saved
+  showing: detail
+  back: "Bundles"

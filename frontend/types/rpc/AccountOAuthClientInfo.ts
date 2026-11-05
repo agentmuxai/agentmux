@@ -9,4 +9,9 @@ export type AccountOAuthClientInfo = { saved: boolean, clientId?: string, hasSec
  * Whether AgentMux ships its own client for the provider (the one-click
  * path); false means a connect needs the user's own client.
  */
-builtinAvailable: boolean, };
+builtinAvailable: boolean, 
+/**
+ * For Google: the services AgentMux's own client may ask for in this build (`google_offered`);
+ * empty for any other provider, and moot for a client the person brought.
+ */
+offeredServices: Array<string>, };

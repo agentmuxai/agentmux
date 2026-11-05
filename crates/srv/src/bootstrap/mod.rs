@@ -63,6 +63,7 @@ mod network;
 mod plumbing;
 mod shutdown;
 mod delivery;
+mod state_services;
 
 pub use watchers::*;
 pub use logging::*;
@@ -72,3 +73,4 @@ pub use network::*;
 pub use plumbing::*;
 pub use shutdown::*;
 pub use delivery::*;
+pub use state_services::*;

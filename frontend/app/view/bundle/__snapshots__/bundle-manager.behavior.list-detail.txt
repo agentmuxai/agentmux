@@ -1,0 +1,28 @@
+ListBundlesCommand
+-- list
+  showing: list
+  back: -
+  - — Blank (vanilla CLI) — / - {bundle-view-list-item is-blank}
+  - Global kit [GlobalInjected into all agents at launch] / For all {bundle-view-list-item is-global}
+  - Review kit / Reviews {bundle-view-list-item}
+-- the blank bundle
+  showing: detail
+  back: "Bundles"
+  readonly: Blank | ignored for blank | Instructions(none)
+  actions: - skills=-
+-- back
+  showing: list
+  back: -
+  - — Blank (vanilla CLI) — / - {bundle-view-list-item is-blank}
+  - Global kit [GlobalInjected into all agents at launch] / For all {bundle-view-list-item is-global}
+  - Review kit / Reviews {bundle-view-list-item}
+-- the global bundle
+  showing: detail
+  back: "Bundles"
+  readonly: Global kit | For all | ScopeGlobalInjected into all agents at launch — injected into every agent at launchInstructionsBe kind
+  actions: Edit | Delete skills=skills for g1
+-- a normal bundle
+  showing: detail
+  back: "Bundles"
+  readonly: Review kit | Reviews | InstructionsReview it
+  actions: Edit | Delete skills=skills for b1

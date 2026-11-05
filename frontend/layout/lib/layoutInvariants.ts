@@ -14,6 +14,7 @@
 // The unbalanced passes (`updateTree(false)`: resize, stack, magnify) skip
 // them.
 
+import { duplicateBlockIds } from "./layoutDuplicates";
 import type { LayoutNode } from "./types";
 import { FlexDirection } from "./types";
 
@@ -61,6 +62,15 @@ export function isEffectivelyMinimized(node: LayoutNode | undefined): boolean {
     if (!node) return false;
     if (!node.children?.length) return isNodeLocked(node);
     return node.children.every((c) => isEffectivelyMinimized(c));
+}
+
+/** I10 — a block is held by one pane only: two holders draw it twice, and closing either closes both. */
+function duplicateViolations(root: LayoutNode): LayoutViolation[] {
+    return duplicateBlockIds(root).map((blockId) => ({
+        code: "DUPLICATE_BLOCK",
+        nodeId: root.id,
+        detail: `block ${blockId} is held in more than one place`,
+    }));
 }
 
 /**
@@ -184,7 +194,7 @@ export function validateLayoutInvariants(root: LayoutNode | undefined): LayoutVi
         });
     }
 
-    return violations;
+    return [...violations, ...duplicateViolations(root)];
 }
 
 /**

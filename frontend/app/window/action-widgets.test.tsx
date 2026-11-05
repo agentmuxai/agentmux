@@ -76,7 +76,7 @@ const h = vi.hoisted(() => {
         unpinWidget: vi.fn(),
         hideFromWidgetBar: vi.fn(),
         openMenuAt: vi.fn(),
-        closeHamburgerMenu: vi.fn(),
+        closeLogoMenu: vi.fn(),
         openActions: vi.fn(),
         runAction: vi.fn(),
     };
@@ -95,7 +95,7 @@ vi.mock("./action-widgets-config", async (importOriginal) => ({
 }));
 vi.mock("./action-widgets-menu", () => ({ buildWidgetOpenActions: h.openActions }));
 vi.mock("./widget-bar-hide", () => ({ hideFromWidgetBar: h.hideFromWidgetBar }));
-vi.mock("./hamburger-menu", () => ({ closeHamburgerMenu: h.closeHamburgerMenu }));
+vi.mock("./logo-menu", () => ({ closeLogoMenu: h.closeLogoMenu }));
 vi.mock("@/app/element/ui", () => ({ openMenuAt: h.openMenuAt }));
 vi.mock("@/app/element/tooltip", () => ({
     Tooltip: (p: {
@@ -513,17 +513,17 @@ describe("the More button and the measuring mirrors", () => {
 });
 
 describe("the More dropdown", () => {
-    it("opens after the hover delay, closes the hamburger, and lists the clipped pins before the rest", () => {
+    it("opens after the hover delay, closes the AgentMux logo, and lists the clipped pins before the rest", () => {
         h.setClipped([{ key: "defwidget@settings", widget: WIDGETS["defwidget@settings"] }]);
         h.setClipCount(1);
         render(() => <ActionWidgets />);
         mouseEnter(moreBtn()!);
         tick(89);
         expect(moreUp()).toBeNull();
-        expect(h.closeHamburgerMenu).not.toHaveBeenCalled();
+        expect(h.closeLogoMenu).not.toHaveBeenCalled();
         tick(1);
         expect(moreUp()).not.toBeNull();
-        expect(h.closeHamburgerMenu).toHaveBeenCalledTimes(1);
+        expect(h.closeLogoMenu).toHaveBeenCalledTimes(1);
         expect(moreUp()!.textContent).toBe("defwidget@settings,defwidget@notes");
     });
 
@@ -531,7 +531,7 @@ describe("the More dropdown", () => {
         render(() => <ActionWidgets />);
         fireEvent.click(moreBtn()!);
         expect(moreUp()).not.toBeNull();
-        expect(h.closeHamburgerMenu).toHaveBeenCalledTimes(1);
+        expect(h.closeLogoMenu).toHaveBeenCalledTimes(1);
     });
 
     it("is anchored to the More button, with the config and the item-menu flag", () => {

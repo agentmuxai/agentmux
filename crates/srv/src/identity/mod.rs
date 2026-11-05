@@ -40,6 +40,7 @@ pub mod credential_watch;
 pub mod foreign_dir;
 pub mod aws_broker;
 pub mod github_connect;
+pub mod google_offered;
 pub mod github_installs;
 pub mod gh_agent_token;
 pub mod github_hooks;

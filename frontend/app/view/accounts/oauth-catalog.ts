@@ -37,6 +37,9 @@ export interface OAuthServiceInfo {
     workspaceMode?: boolean;
     /** The sign-in reports the account's email, which names the account: no name needed. */
     namedBySignIn?: boolean;
+    /** AgentMux's own client is the only one the person sees: no client fields, no mention of a client
+     *  (SPEC_GOOGLE_PHASE_B_AGENTMUXS_OWN_CLIENT_2026_11_01.md D5). A client saved earlier is still used. */
+    hidesClient?: boolean;
 }
 
 /**
@@ -75,6 +78,7 @@ const OAUTH_SERVICES: Partial<Record<AccountProvider, OAuthServiceInfo>> = {
         byoNeedsSecret: true,
         workspaceMode: true,
         namedBySignIn: true,
+        hidesClient: true,
     },
     slack: {
         provider: "slack",

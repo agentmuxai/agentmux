@@ -412,7 +412,7 @@ describe("focusManager", () => {
             expect(giveFocus).toHaveBeenCalledTimes(3);
         });
 
-        // The hamburger menu opened Settings: the caret is on its button.
+        // The AgentMux logo menu opened Settings: the caret is on its button.
         it("keeps retrying while the caret is on a window-chrome button", () => {
             giveFocus.mockReturnValueOnce(false).mockReturnValueOnce(false).mockReturnValue(true);
             document.body.innerHTML = `<button id="menu">≡</button><div data-blockid="block-1"></div>`;

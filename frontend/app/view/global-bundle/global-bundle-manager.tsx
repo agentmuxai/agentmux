@@ -26,6 +26,8 @@
 // own still-isolated RPCs.
 
 import { createSignal, For, onCleanup, Show, type JSX } from "solid-js";
+import { createConfirm } from "@/app/element/create-confirm";
+import { askDiscard } from "@/app/view/memory-editor/editor-keys";
 import { beginDrag, endDrag, session, type DragEndReason } from "@/app/drag/drag-session";
 import type { Bundle } from "@/app/store/rpc-api";
 import { GlobalMemoryImportBanner } from "./GlobalMemoryImportBanner";
@@ -86,12 +88,11 @@ export const GlobalBundleManager = (): JSX.Element => {
         return [share, age].filter(Boolean).join(" · ");
     };
 
-    // Leaving a full view with unsaved edits asks first — the same
-    // protection Esc has (editor-keys.ts).
-    const guardDirty = () => !model.draft.dirtyAtom() || window.confirm("Discard your unsaved changes?");
+    // Leaving a full view with unsaved edits asks first, as Esc does (editor-keys.ts).
+    const confirm = createConfirm();
     const openView = (view: GlobalMemoryView) => model.open(view);
-    const back = () => {
-        if (guardDirty()) model.close();
+    const back = async () => {
+        if (!model.draft.dirtyAtom() || (await askDiscard(confirm)("Discard your unsaved changes?"))) model.close();
     };
 
     // ── Drag to reorder (ordinary entries only; system entries never
@@ -277,6 +278,7 @@ export const GlobalBundleManager = (): JSX.Element => {
 
     return (
         <div class="global-bundle">
+            <confirm.Dialog />
             <Show when={model.viewAtom()} fallback={grid}>
                 {(view) => (
                     <div class="native-memory-manager-detail global-bundle-detail">

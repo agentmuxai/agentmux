@@ -817,6 +817,10 @@ pub(crate) async fn close_pane_as(
         &reason,
         crate::sagas::pending_shutdown::Action::ClosePane { block_ids: pane_block_ids },
     );
+    // `Stop pane` doesn't wait for the window: it is told by a note if the user keeps the pane.
+    if via == "ClosePane" {
+        crate::sagas::pending_shutdown::tell_when_settled(state, &pending.request_id, &caller_agent_id, via);
+    }
     state.reactive_handler.log_fleet_action_audit(
         Some(&caller_agent_id),
         &target_agent,

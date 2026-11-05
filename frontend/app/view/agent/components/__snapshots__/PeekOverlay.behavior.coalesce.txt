@@ -1,0 +1,12 @@
+advance 20ms
+autoUpdate #1 registered (row rowA)
+two moves in one frame
+[before the frame] panel={position: fixed; left: 800px; top: 200px; transform: translateX(-100%); max-width: 700px; min-width: 0px; max-height: 0px;} outside=false hidden=null class="agent-node-peek-overlay" bridge=- afterLeave=-
+advance 20ms
+[after the frame: the last y wins] panel={position: fixed; left: 800px; top: 232px; transform: translateX(-100%); max-width: 700px; min-width: 0px; max-height: 40px;} outside=false hidden=null class="agent-node-peek-overlay" bridge=- afterLeave=-
+a move, then unmount before its frame
+autoUpdate #1 disposed
+advance 100ms
+after unmount: panel=-
+advance 100ms
+[the row went away before the first frame] panel={position: fixed; left: 800px; top: 200px; transform: translateX(-100%); max-width: 700px; min-width: 0px; max-height: 0px;} outside=false hidden=null class="agent-node-peek-overlay" bridge=- afterLeave=-

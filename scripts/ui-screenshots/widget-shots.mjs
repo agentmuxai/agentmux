@@ -106,7 +106,7 @@ export const visibleCenter = (selector) => `(() => {
 
 /** Opens widget `w`, trying in turn: its pinned icon in the top bar (the icon
  *  class comes from widgets.json), its entry in the top bar's More list, the
- *  hamburger menu, and the command palette ("Open <label>"). Returns which
+ *  AgentMux logo menu, and the command palette ("Open <label>"). Returns which
  *  route was used. */
 export async function openWidget(session, w) {
     if (w.icon && !w.icon.includes("@")) {
@@ -126,14 +126,14 @@ export async function openWidget(session, w) {
         return "More list";
     }
     await session.pressKey("Escape");
-    await session.clickSelector(".hamburger-btn");
+    await session.clickSelector(".logo-menu-btn");
     await session.wait(300);
     const inMenu = await session.evaluate(
         `[...document.querySelectorAll('.menu .menu-item')].some(e => e.innerText.trim().split('\\n')[0].trim() === ${JSON.stringify(w.label)})`
     );
     if (inMenu) {
         await session.clickText(".menu", w.label);
-        return "hamburger menu";
+        return "AgentMux logo menu";
     }
     await session.pressKey("Escape");
     await session.pressKey("P", { ctrl: true, shift: true });
@@ -214,7 +214,7 @@ export const VISIBLE_BLOCK_IDS = `[...document.querySelectorAll('.pane-stack')].
  *  shot's cleanup closes that tab and no other. */
 export async function openNewTab(session, state) {
     const tabsBefore = new Set(await session.evaluate(TAB_IDS));
-    await session.clickSelector(".hamburger-btn");
+    await session.clickSelector(".logo-menu-btn");
     await session.wait(300);
     await session.clickText(".menu", "New Tab");
     const deadline = Date.now() + 10000;

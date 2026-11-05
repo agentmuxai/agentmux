@@ -10,7 +10,7 @@
 
 import { formatBytes } from "@/util/format-bytes";
 import { Button } from "@/app/element/ui";
-import { ConfirmDialog } from "@/app/components/confirm-dialog";
+import { ConfirmModal } from "@/app/element/confirm-modal";
 import { createSignal, Show, type JSX } from "solid-js";
 import { ViewerBar, type ViewerBarProps } from "../viewer-bar";
 import { isProgramPath, TEXT_MAX_BYTES, type FileProbe } from "../viewer-choice";
@@ -117,9 +117,12 @@ export function InfoCard(props: InfoCardProps): JSX.Element {
                 </div>
             </div>
             <Show when={confirmRun()}>
-                <ConfirmDialog
+                <ConfirmModal
+                    open={true}
+                    scope="pane"
                     title="Run this file?"
-                    message={`${name()} is a program or script. Opening it with the system runs it.`}
+                    description={`${name()} is a program or script. Opening it with the system runs it.`}
+                    destructive
                     confirmLabel="Run"
                     onConfirm={() => {
                         const open = confirmRun();

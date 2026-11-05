@@ -1,0 +1,34 @@
+registerContentZoom blk-1 scroller=pdf-viewer-container
+setZoomStepRatio blk-1 1.25
+setZoomMax blk-1 15
+loadPdfjs
+new PDFViewer container=pdf-viewer-container viewer=pdfViewer textLayerMode=1 annotationMode=2 maxCanvasPixels=33554432 signal=true aborted=false
+linkService.setViewer
+fetchMediaBlob /docs/a.pdf signal=true
+getDocument #1 data=Uint8Array(8) safe=true
+viewer.setDocument pages=5
+linkService.setDocument pages=5 base=null
+viewer.currentScaleValue = page-width
+registerContentZoom blk-2 scroller=pdf-viewer-container
+setZoomStepRatio blk-2 1.25
+setZoomMax blk-2 15
+loadPdfjs
+new PDFViewer container=pdf-viewer-container viewer=pdfViewer textLayerMode=1 annotationMode=2 maxCanvasPixels=33554432 signal=true aborted=false
+linkService.setViewer
+fetchMediaBlob /docs/c.pdf signal=true
+getDocument #2 data=Uint8Array(8) safe=true
+viewer.setDocument pages=5
+linkService.setDocument pages=5 base=null
+signals: false,false
+release zoomMax blk-1
+release zoomStepRatio blk-1
+release contentZoom blk-1
+task#1.destroy
+viewer.setDocument null
+after the first closed: false,false
+release zoomMax blk-2
+release zoomStepRatio blk-2
+release contentZoom blk-2
+task#2.destroy
+viewer.setDocument null
+after the last closed: true,true

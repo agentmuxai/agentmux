@@ -24,10 +24,11 @@
  */
 
 import { createEffect, on, onCleanup, Show, type Accessor, type JSX } from "solid-js";
+import type { PaneConfirm } from "@/app/element/create-confirm";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { NativeMemoryHistoryModel } from "@/app/view/agent/native-memory-history-model";
-import { handleMemoryEditorKeyDown, requestCancel } from "@/app/view/memory-editor/editor-keys";
+import { askDiscard, handleMemoryEditorKeyDown, requestCancel } from "@/app/view/memory-editor/editor-keys";
 import { MemoryConflictBanner } from "@/app/view/memory-editor/MemoryConflictBanner";
 import { MemoryContent } from "@/app/view/memory-editor/MemoryContent";
 import { MemoryDraftModel } from "@/app/view/memory-editor/memory-draft-model";
@@ -45,6 +46,8 @@ interface NativeMemoryFileViewProps {
     refreshNonce: Accessor<number>;
     /** Lets the manager guard its Back button / file switch. */
     onDirtyChange?: (dirty: boolean) => void;
+    /** Where "Discard your unsaved changes?" is asked: the manager's, drawn in the pane. */
+    confirm: PaneConfirm;
 }
 
 export function NativeMemoryFileView(props: NativeMemoryFileViewProps): JSX.Element {
@@ -128,7 +131,7 @@ export function NativeMemoryFileView(props: NativeMemoryFileViewProps): JSX.Elem
             isEditing: draft.editingAtom,
             isDirty: draft.dirtyAtom,
             onSave: () => void save(),
-            onCancel: cancel,
+            onCancel: cancel, confirm: askDiscard(props.confirm),
         });
 
     const top = (
@@ -161,7 +164,7 @@ export function NativeMemoryFileView(props: NativeMemoryFileViewProps): JSX.Elem
                         density="compact"
                         class="memory-editor-btn"
                         disabled={draft.savingAtom()}
-                        onClick={() => requestCancel({ isDirty: draft.dirtyAtom, onCancel: cancel })}
+                        onClick={() => requestCancel({ isDirty: draft.dirtyAtom, onCancel: cancel, confirm: askDiscard(props.confirm) })}
                         title="Cancel (Esc)"
                     >
                         Cancel

@@ -40,7 +40,7 @@ describe("the window's grip", () => {
         expect(grip.querySelector("svg")).not.toBeNull();
     });
 
-    it("stays last when the host draws no window controls (macOS's hamburger follows the status area)", () => {
+    it("stays last when the host draws no window controls (macOS's AgentMux logo follows the status area)", () => {
         h.chrome = false;
         const { container } = render(() => <SystemStatus />);
         expect(order(container)).toEqual(["widgets", "window-grip"]);

@@ -2,6 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 import { cleanup, fireEvent, render } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+// jsdom can't lay out a floating panel; only the placing is stubbed.
+vi.mock("@/app/util/menu-position", () => ({
+    computeMenuPosition: vi.fn(async () => ({
+        style: { position: "fixed", left: "0px", top: "0px" },
+        placement: "bottom-start",
+        maxHeight: Infinity,
+        maxWidth: Infinity,
+    })),
+}));
+
 import { PopoverMenu, type PopoverMenuItem } from "./popover-menu";
 
 afterEach(() => cleanup());
@@ -74,5 +85,30 @@ describe("PopoverMenu icons", () => {
         const slot = rowOf("Show Icons Only").querySelector(".menu-item-icon")!;
         expect(slot.classList.contains("fa-check")).toBe(true);
         expect(slot.classList.contains("fa-plus")).toBe(false);
+    });
+});
+
+describe("PopoverMenu chrome zoom", () => {
+    it("caps its height at the room the window leaves and scrolls inside it (a long menu at 150% zoom)", async () => {
+        const { computeMenuPosition } = await import("@/app/util/menu-position");
+        vi.mocked(computeMenuPosition).mockResolvedValueOnce({
+            style: { position: "fixed", left: "0px", top: "0px" },
+            placement: "bottom-start",
+            maxHeight: 600,
+            maxWidth: 800,
+        });
+        mount();
+        await new Promise((r) => requestAnimationFrame(() => r(null)));
+        await new Promise((r) => setTimeout(r, 0));
+        const body = document.body.querySelector<HTMLElement>(".popover-menu")!;
+        expect(body.style.maxHeight).toBe("calc(600px / var(--zoomfactor, 1))");
+        expect(body.style.overflowY).toBe("auto");
+    });
+
+    it("is drawn in AnchoredPopover's zoomed body, so it scales with the chrome like the button that opened it", () => {
+        mount();
+        const body = document.body.querySelector(".popover-menu")!;
+        expect(body.classList.contains("anchored-popover-body--chrome-zoom")).toBe(true);
+        expect(body.parentElement!.classList.contains("anchored-popover")).toBe(true);
     });
 });

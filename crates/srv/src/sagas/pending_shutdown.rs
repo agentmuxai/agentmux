@@ -203,6 +203,9 @@ struct Entry {
     /// The person chose Close now: the window task is about to begin it, so a second press or a
     /// Keep running finds `too_late`.
     closing: bool,
+    /// Callers that did not wait for the window (`Stop pane`, `Stop agents`), as (agent, tool): each is
+    /// told once, by an `[AgentMux]` note, if the user keeps what they asked to close or the close fails.
+    told: Vec<(String, String)>,
 }
 
 static ENTRIES: LazyLock<Mutex<HashMap<String, Entry>>> = LazyLock::new(Default::default);
@@ -411,7 +414,7 @@ fn request_within(
                 action: Some(action),
                 requesters: vec![(by.to_string(), via.to_string(), reason.trim().to_string())],
                 covers: new_covers.clone(),
-                closing: false,
+                closing: false, told: Vec::new(),
             },
         );
         view
@@ -457,7 +460,73 @@ fn spawn_window(state: &AppState, v: PendingView, window: std::time::Duration) {
         };
         audit(&state, &v.request_id, &shown, error.as_deref());
         set_status(&v.request_id, status, error);
+        tell_requesters(&state, &v.request_id);
     });
+}
+
+/// Have `by` told, by one `[AgentMux]` note, how `request_id` ended if the user kept what `via` asked to
+/// close or the close failed. For a caller that did not wait for the window; a close that went ahead
+/// says nothing, as the caller asked for it. A request that has already ended tells at once.
+pub fn tell_when_settled(state: &AppState, request_id: &str, by: &str, via: &str) {
+    let ended = {
+        let mut map = entries();
+        let Some(e) = map.get_mut(request_id) else { return };
+        if is_active(e.view.status) {
+            if !e.told.iter().any(|(b, v)| b == by && v == via) {
+                e.told.push((by.to_string(), via.to_string()));
+            }
+            return;
+        }
+        e.view.clone()
+    };
+    send_settled_note(state, &ended, by, via);
+}
+
+/// The note for everyone `tell_when_settled` registered, once the request has ended.
+fn tell_requesters(state: &AppState, request_id: &str) {
+    let Some((view, told)) = entries().get_mut(request_id).map(|e| (e.view.clone(), std::mem::take(&mut e.told))) else { return };
+    for (by, via) in told {
+        send_settled_note(state, &view, &by, &via);
+    }
+}
+
+fn send_settled_note(state: &AppState, v: &PendingView, by: &str, via: &str) {
+    let Some(text) = settled_text(v, via) else { return };
+    if let Err(e) = state.reactive_handler.hold_system_note(by, &format!("shutdown:{}", v.request_id), &text) {
+        tracing::debug!(by, request_id = %v.request_id, "shutdown note not held: {e}");
+    }
+}
+
+/// What a caller that did not wait is told of an ended request: which agents the user kept running and
+/// which closes failed. `None` when everything it asked for was closed (or was already gone).
+fn settled_text(v: &PendingView, via: &str) -> Option<String> {
+    let (kept, failed): (Vec<String>, Vec<String>) = match v.outcomes.as_ref() {
+        Some(all) => (
+            all.iter().filter(|o| o.outcome == "kept_by_user").map(|o| o.name.clone()).collect(),
+            all.iter().filter(|o| o.outcome == "failed").map(|o| format!("{}: {}", o.name, o.error.as_deref().unwrap_or("close failed"))).collect(),
+        ),
+        None => match v.status {
+            "kept_by_user" => (vec![v.target.clone()], Vec::new()),
+            "failed" => (Vec::new(), vec![format!("{}: {}", v.target, v.error.as_deref().unwrap_or("close failed"))]),
+            _ => (Vec::new(), Vec::new()),
+        },
+    };
+    let mut parts = Vec::new();
+    if !kept.is_empty() {
+        parts.push(format!("the user chose to keep {} running, so it was not closed", kept.join(", ")));
+    }
+    if !failed.is_empty() {
+        parts.push(format!("closing failed for {}", failed.join("; ")));
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    let tool = match via {
+        "ClosePane" => "Stop pane",
+        "FleetBulkStop" => "Stop agents",
+        other => other,
+    };
+    Some(format!("[AgentMux] Your {tool} (request {}): {}.", v.request_id, parts.join("; ")))
 }
 
 /// Whether the block's session is running, not merely registered: a stopped
@@ -706,6 +775,7 @@ pub fn keep(state: &AppState, block_id: &str, request_id: &str) -> &'static str 
     };
     cleared(state, &view, "kept_by_user");
     audit(state, request_id, "kept_by_user", None);
+    tell_requesters(state, request_id);
     tracing::info!(block_id, request_id, by = %view.by, "shutdown pending: kept by the user");
     "kept_by_user"
 }

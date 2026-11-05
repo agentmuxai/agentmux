@@ -572,6 +572,7 @@ mod tests {
             version: "0".into(),
             channel: "stable".into(),
             os: String::new(),
+            install: String::new(),
             address: "10.0.0.26".into(),
             port: 29700,
             auth_key: "k".into(),

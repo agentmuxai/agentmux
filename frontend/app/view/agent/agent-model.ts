@@ -46,6 +46,27 @@ import {
     loadAgentContent,
 } from "./launch-agent-steps";
 
+/** What the first stage of a launch resolved: the harness, and where its CLI is on the host. */
+interface LaunchTarget {
+    effectiveProvider: string;
+    provider: NonNullable<ReturnType<typeof getProvider>>;
+    cliBin: string | undefined;
+}
+
+/** What the second stage worked out for the launch to carry. */
+interface LaunchPlan {
+    contentMap: Awaited<ReturnType<typeof loadAgentContent>>;
+    instanceName: string;
+    agentMode: string;
+    workDir: string;
+    paneFlags: string;
+    runtimeConfig: ReturnType<typeof resolveLaunchRuntime>["runtimeConfig"];
+    cliArgs: string[];
+    forkSessionArgs: ReturnType<typeof resolveForkSessionArgs>;
+    envVars: Awaited<ReturnType<typeof buildLaunchEnv>>;
+}
+
+
 /** The agent's state behind its native pane tab (`agentPaneTabManifest`,
  *  agent-manifest.tsx). */
 export class AgentViewModel {
@@ -351,13 +372,30 @@ export class AgentViewModel {
         targetBlockId?: string,
         targetTabId?: string,
     ): Promise<boolean> => {
+        const target = await this.resolveLaunchTarget(agent, overrides, targetBlockId);
+        if (target == null) return false;
+        const plan = await this.planLaunch(agent, overrides, target);
+        if (plan == null) return false;
+        return this.startLaunch(agent, overrides, target, plan, targetBlockId, targetTabId);
+    };
+
+    /**
+     * The first stage of a launch: the provider the agent runs on, whether it runs in a container,
+     * and (on the host) Node.js and the CLI. Null when the launch cannot go on, with the reason set
+     * on the model.
+     */
+    private async resolveLaunchTarget(
+        agent: AgentDefinition,
+        overrides: LaunchOverrides | undefined,
+        targetBlockId: string | undefined,
+    ): Promise<LaunchTarget | null> {
         // The shared resolver (agent-launch-env.ts), the one the server's spawn and credential gate
         // mirror: the agent's own provider, or its bundle's only when it has none.
         const effectiveProvider = await resolveEffectiveLaunchProvider(agent);
         const provider = getProvider(effectiveProvider);
         if (!provider) {
             Logger.error("agent", "Unknown provider in agent definition", { agentId: agent.id, provider: effectiveProvider });
-            return false;
+            return null;
         }
 
         // A container agent's CLI is installed inside its container on the first message, so launching
@@ -367,7 +405,7 @@ export class AgentViewModel {
         if (nodejsError) {
             this.nodejsError = nodejsError;
             Logger.error("agent", "Node.js not available for agent definition", { agentId: agent.id, error: nodejsError });
-            return false;
+            return null;
         }
 
         // Where the backend actually installed the CLI -- see resolveCliBin.
@@ -379,10 +417,22 @@ export class AgentViewModel {
                 const t = translateError(e);
                 this.launchError = `${t.title}: ${t.message}`;
                 Logger.error("agent", "Could not resolve the agent CLI for agent definition", { agentId: agent.id, error: String(e) });
-                return false;
+                return null;
             }
         }
+        return { effectiveProvider, provider, cliBin };
+    }
 
+    /**
+     * The second stage: the names, the folder, the mode, the runtime and the arguments and
+     * environment the launch will carry. Null when the harness cannot run in the mode asked for.
+     */
+    private async planLaunch(
+        agent: AgentDefinition,
+        overrides: LaunchOverrides | undefined,
+        target: LaunchTarget,
+    ): Promise<LaunchPlan | null> {
+        const { effectiveProvider, provider } = target;
         Logger.info("agent", `Launching agent definition ${agent.name} (${effectiveProvider})`, {
             agentId: agent.id,
             provider: effectiveProvider,
@@ -406,7 +456,7 @@ export class AgentViewModel {
         const agentMode = overrides?.agentType ?? agent.agent_type ?? "host";
         if ((provider.controllerType === "terminal" || provider.controllerType === "msp") && isContainerAgentMode(agentMode)) {
             this.launchError = `${provider.displayName} runs on this computer, not in a container.`;
-            return false;
+            return null;
         }
         const isPersistent = isPersistentLaunch(provider, agentMode);
         // The runtime config the strip will show, resolved BEFORE the args so both come from one
@@ -434,7 +484,23 @@ export class AgentViewModel {
             cliArgs.push("--fork-session");
         }
         const envVars = await buildLaunchEnv({ agent, provider, slug, instanceSlug, instanceName, contentMap, isPersistent });
+        return { contentMap, instanceName, agentMode, workDir, paneFlags, runtimeConfig, cliArgs, forkSessionArgs, envVars };
+    }
 
+    /**
+     * The last stage: write the block's meta, record the launch, start the controller, link the
+     * account and, for a resume, ask the agent to catch up. Never throws; says whether it started.
+     */
+    private async startLaunch(
+        agent: AgentDefinition,
+        overrides: LaunchOverrides | undefined,
+        target: LaunchTarget,
+        plan: LaunchPlan,
+        targetBlockId: string | undefined,
+        targetTabId: string | undefined,
+    ): Promise<boolean> {
+        const { effectiveProvider, provider, cliBin } = target;
+        const { contentMap, instanceName, agentMode, workDir, paneFlags, runtimeConfig, cliArgs, forkSessionArgs, envVars } = plan;
         const blockId = targetBlockId ?? this.blockId;
         const oref = MOS.makeORef("block", blockId);
         try {
@@ -500,7 +566,7 @@ export class AgentViewModel {
             Logger.error("agent", "Failed to launch agent definition", { error: String(e) });
             return false;
         }
-    };
+    }
 
     /**
      * Right-click body context menu — blockframe.tsx splices this at the

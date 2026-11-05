@@ -10,7 +10,8 @@
  * docs/specs/SPEC_UPGRADE_FOR_USERS_AND_AGENTS_2026_10_15.md §3.
  */
 
-import { createSignal } from "solid-js";
+import { pushNotification } from "@/app/store/flash-notifications";
+import { createEffect, createSignal, onCleanup } from "solid-js";
 
 import { WpsEvent } from "@/app/store/mps-events";
 import { getApi } from "@/util/app-api";
@@ -45,6 +46,9 @@ export function acceptAppUpdate(next: unknown): void {
  */
 export async function checkForUpdate(): Promise<void> {
     acceptAppUpdate(await RpcApi.AppUpdateCheckCommand(TabRpcClient));
+    // A Store install is updated by the Store, which lags GitHub: ask it again too.
+    const release = availableRelease();
+    if (viaStore() && release) await askStore(release.version);
 }
 
 /** Ask srv for the status now (a window opened after the last event). */
@@ -54,6 +58,105 @@ export async function loadAppUpdate(): Promise<void> {
     } catch {
         // An older srv without the command: no update news.
     }
+}
+
+/** A Microsoft Store install: the Store, not AgentMux, updates it. */
+export function viaStore(s: AppUpdateStatus | null = appUpdate()): boolean {
+    return s?.install === "windows-store";
+}
+
+/** What the Store itself said about `version`: `asking` until it answers; `unknown` carries why it couldn't be asked. */
+export type StoreOffer = { version: string; state: "asking" | "available" | "none" | "unknown"; message: string };
+
+const [storeOffer, setStoreOffer] = createSignal<StoreOffer | null>(null);
+
+/** Ask the Store (through the host) whether it lists an update, instead of guessing from GitHub. `quiet`: keep showing the last answer until the new one comes. */
+export async function askStore(version: string, quiet = false): Promise<void> {
+    if (!quiet) setStoreOffer({ version, state: "asking", message: "" });
+    let next: StoreOffer;
+    try {
+        const r = await getApi()?.approvals?.storeUpdateCheck?.();
+        next = r ? { version, state: r.state, message: r.message } : { version, state: "unknown", message: "this window can't ask the Store" };
+    } catch (e: any) {
+        next = { version, state: "unknown", message: String(e?.message ?? e) };
+    }
+    setStoreOffer(next);
+}
+
+/** Forget the Store's answer: the next look at a release on offer asks again. */
+export function forgetStoreOffer(): void {
+    setStoreOffer(null);
+}
+
+/** Record what the Store said when asked to install (it had nothing to install). */
+export function recordStoreNone(version: string): void {
+    setStoreOffer({ version, state: "none", message: "" });
+}
+
+/** The Store's answer about the release on offer, or null when none was asked about it. */
+export function storeAnswer(s: AppUpdateStatus | null = appUpdate()): StoreOffer | null {
+    const release = availableRelease(s);
+    const offer = storeOffer();
+    return viaStore(s) && release && offer?.version === release.version ? offer : null;
+}
+
+/**
+ * Whether an update can be had now: always, for an install AgentMux updates
+ * itself; for a Store install, only when the Store lists it.
+ */
+export function updateOffered(s: AppUpdateStatus | null = appUpdate()): boolean {
+    return !viaStore(s) || storeAnswer(s)?.state === "available";
+}
+
+/** What the panel says in place of "v1.2 is out" while the Store has not listed it; null once it has. */
+export function storeOfferLine(version: string | null | undefined, offer: StoreOffer | null): string | null {
+    if (offer?.state === "available") return null;
+    const released = `v${version} is released.`;
+    if (!offer || offer.state === "asking") return `${released} Asking the Microsoft Store whether it has it…`;
+    if (offer.state === "none") return `${released} The Microsoft Store is still reviewing it.`;
+    return `${released} Couldn't ask the Microsoft Store whether it has it${offer.message ? ` (${offer.message})` : ""}.`;
+}
+
+/** What the Store's last install left (host: store_restart): the app came back `updated`, or `stayed` on the version it was closed on. */
+export type StoreCameBack = { state: "none" | "updated" | "stayed"; from: string; target: string };
+const [storeStayed, setStoreStayed] = createSignal<StoreCameBack | null>(null);
+export { storeStayed, setStoreStayed };
+
+/** Said before the Store is asked to install: it closes the app to swap the package. */
+export const storeClosesLine = (version: string): string => `The Store closes AgentMux while it installs v${version}, then opens it again.`;
+
+/** Said when the app is back on the version the Store closed it on: the install did not happen. */
+export const storeStayedLine = (s: StoreCameBack): string =>
+    `The Store closed AgentMux to install v${s.target}, but this is still v${s.from}. Try Update in the Store again, or install it from the Microsoft Store app.`;
+
+/** At start: say how the Store's last install ended, when one was under way. */
+export async function loadStoreCameBack(): Promise<void> {
+    const r = await getApi()?.approvals?.storeUpdateCameBack?.().catch(() => undefined);
+    if (!r || r.state === "none") return;
+    const note = { id: "store-update-came-back", timestamp: new Date().toISOString() };
+    if (r.state === "updated") {
+        pushNotification({ ...note, icon: "fa-circle-check", title: "AgentMux updated", message: `Updated to v${r.target} through the Microsoft Store.`, type: "update", expiration: Date.now() + 10000 });
+        return;
+    }
+    setStoreStayed(r);
+    pushNotification({ ...note, icon: "fa-triangle-exclamation", title: "The update did not install", message: storeStayedLine(r), type: "warning", persistent: true });
+}
+
+/** The Store certifies a release hours after GitHub publishes it: how often to ask again while it hasn't listed it. */
+const STORE_REASK_MS = 30 * 60 * 1000;
+
+/** In a component: ask the Store about each release on offer to a Store install, and again every half hour until it lists it. */
+export function useStoreOffer(): void {
+    createEffect(() => {
+        const release = availableRelease();
+        if (viaStore() && release && storeOffer()?.version !== release.version) void askStore(release.version);
+    });
+    const timer = setInterval(() => {
+        const release = availableRelease();
+        const state = storeAnswer()?.state;
+        if (viaStore() && release && (state === "none" || state === "unknown")) void askStore(release.version, true);
+    }, STORE_REASK_MS);
+    onCleanup(() => clearInterval(timer));
 }
 
 /** The release srv says is newer than this build, or null. */

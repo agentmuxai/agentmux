@@ -413,20 +413,15 @@ async fn run_fleet_bulk_stop(arguments: &Value, cx: &ToolCtx<'_>) -> Result<Stri
         .await
         .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
     if result["status"] == "pending_user_override" {
-        // Each running target's user had 30 s to keep it (§6.5). srv
-        // runs the windows in parallel, so waiting on them one after
-        // another costs no extra time.
+        // The user's 30 s window runs in srv, which tells this agent by note if it is kept or fails:
+        // answer now with what was opened. Several targets share one window.
         let pending = result["pending"].as_array().cloned().unwrap_or_default();
-        let mut outcomes = Vec::with_capacity(pending.len());
-        for p in &pending {
-            let request_id = p["request_id"].as_str().unwrap_or_default();
-            let block = p["block_id"].as_str().unwrap_or_default().to_string();
-            let now = await_shutdown(client, local_url, auth_key, request_id, true).await;
-            outcomes.push((block.clone(), own_outcome(now, &block)));
-        }
+        let windows = pending_windows(&pending, result["deadline_ms"].as_i64(), agentmux_common::time::now_ms());
         let note = result["note"].as_str().map(str::to_string);
-        result = merge_bulk_stop_outcomes(result, outcomes);
+        result = json!({ "succeeded": result["succeeded"], "failed": result["failed"], "pending": windows });
         add_stop_notes(&mut result, note, &pending);
+        let said = result["note"].as_str().map_or_else(|| PENDING_NOTE.to_string(), |n| format!("{n}; {PENDING_NOTE}"));
+        result["note"] = json!(said);
     } else if result.get("kept_by_user").is_none() {
         // Nothing waited (all refused or already gone): the same shape.
         result["kept_by_user"] = json!([]);

@@ -119,6 +119,7 @@ pub fn request_batch(state: &AppState, blocks: &[String], by: &str, reason: &str
                     requesters: vec![(by.to_string(), "FleetBulkStop".to_string(), reason.trim().to_string())],
                     covers: ids,
                     closing: false,
+                    told: Vec::new(),
                 },
             );
             Some(view)
@@ -204,6 +205,7 @@ pub(super) fn keep_member(state: &AppState, block_id: &str, request_id: &str) ->
             router.resolve_nonblocking(&group(request_id), crate::backend::notify::policy::Family::Shutdown);
         }
         audit(state, request_id, &format!("kept_by_user ({})", summary(&view)), None);
+        tell_requesters(state, request_id);
     } else {
         // The banners and the toast name who is still closing.
         for b in &left {

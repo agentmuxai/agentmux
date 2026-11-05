@@ -80,6 +80,8 @@ pub(super) struct UdpPeer {
     /// The peer's operating system, only if it is a plain lowercase token.
     /// Empty when the peer predates advertising it.
     pub os: String,
+    /// How the peer is installed, as for `LanInstance::install`; empty when it predates advertising it.
+    pub install: String,
     pub address: IpAddr,
     pub port: u16,
     pub auth_key: String,
@@ -116,6 +118,11 @@ pub(super) fn parse_peer_reply(bytes: &[u8], src: &std::net::SocketAddr) -> Opti
         .and_then(|v| v.as_str())
         .and_then(crate::backend::host_os::sanitize_os)
         .unwrap_or_default();
+    let install = value
+        .get("install")
+        .and_then(|v| v.as_str())
+        .and_then(crate::backend::host_os::sanitize_os)
+        .unwrap_or_default();
     let port = u16::try_from(value.get("port")?.as_u64()?)
         .ok()
         .filter(|p| *p >= MIN_PEER_PORT)?;
@@ -125,6 +132,7 @@ pub(super) fn parse_peer_reply(bytes: &[u8], src: &std::net::SocketAddr) -> Opti
         version,
         channel,
         os,
+        install,
         address: src.ip(),
         port,
         auth_key,
@@ -189,6 +197,9 @@ pub(super) fn merge_udp_peer(
             if !peer.os.is_empty() {
                 existing.os = peer.os.clone();
             }
+            if !peer.install.is_empty() {
+                existing.install = peer.install.clone();
+            }
             existing.auth_key = peer.auth_key.clone();
         } else {
             if existing.auth_key.is_empty() {
@@ -199,6 +210,9 @@ pub(super) fn merge_udp_peer(
             }
             if existing.os.is_empty() {
                 existing.os = peer.os.clone();
+            }
+            if existing.install.is_empty() {
+                existing.install = peer.install.clone();
             }
         }
         return Merge::Refreshed;
@@ -220,6 +234,7 @@ pub(super) fn merge_udp_peer(
             version: peer.version.clone(),
             channel: peer.channel.clone(),
             os: peer.os.clone(),
+            install: peer.install.clone(),
             address,
             port: peer.port,
             auth_key: peer.auth_key.clone(),
@@ -448,6 +463,7 @@ mod tests {
             version: "0.59.4".into(),
             channel: "stable".into(),
             os: String::new(),
+            install: String::new(),
             address: addr.parse().unwrap(),
             port,
             auth_key: "k".into(),
@@ -461,6 +477,7 @@ mod tests {
             version: "0.59.4".into(),
             channel: String::new(),
             os: String::new(),
+            install: String::new(),
             address: addr.into(),
             port,
             auth_key: "mdns-key".into(),

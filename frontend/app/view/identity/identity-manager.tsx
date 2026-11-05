@@ -9,7 +9,7 @@
 //   1. The `view: "identity"` agent-settings pane demoted to a
 //      read-only `<BundleSummaryPanel/>` back in
 //      docs/specs/archive/SPEC_BUNDLE_MANAGEMENT_2026_05_22.md PR 5.
-//   2. The "hamburger Identity & Memory manager" (`BundleManagerModal`)
+//   2. The "Identity & Memory manager" in the AgentMux logo menu (`BundleManagerModal`)
 //      referenced in that pane's comment was never actually built —
 //      the Armory pane's now-removed "Identities" tab
 //      (`AgentIdentitiesPanel`) shipped

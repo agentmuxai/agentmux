@@ -1,0 +1,33 @@
+== +0ms live, whole at once (timers: 2)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "*"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+      "Fix the login redirect loop"
+  <div class="agent-working-row-right">
+    "0s"
+== +0ms a new line, whole at once (timers: 2)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "*"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+      "Approve?"
+  <span class="agent-working-row-operation">
+    <div class="activity-animation-tip">
+      <span aria-hidden="true" class="activity-animation" data-bucket="wait">
+        "(o)"
+    <span>
+      "Waiting"
+  <div class="agent-working-row-right">
+    "0s"
+== +100ms no text (timers: 2)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "*"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+      "Working…"
+  <div class="agent-working-row-right">
+    "0s"

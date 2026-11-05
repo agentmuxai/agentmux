@@ -1300,6 +1300,12 @@
           "description": "Leave the Claude CLI's own cross-session messaging on for Claude agents. Off, agents message each other through AgentMux only.",
           "x-section": "Agents"
         },
+        "agent:claudeaiconnectors": {
+          "type": "boolean",
+          "default": false,
+          "description": "Load the signed-in claude.ai account's connectors (Gmail, Calendar, Drive, Docs) into Claude agents. Off, agents use AgentMux's own Google tools, which the person turns on per agent in Connectors. Takes effect at an agent's next launch.",
+          "x-section": "Agents"
+        },
         "jekt:cold_hold_minutes": {
           "type": "number",
           "default": 55,

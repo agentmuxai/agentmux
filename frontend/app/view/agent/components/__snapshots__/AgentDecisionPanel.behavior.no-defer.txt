@@ -1,0 +1,13 @@
+-- no onDefer
+  panel [agent-decision-panel] role=dialog aria=Permission decision required tabindex=-1
+  header: Decision required
+  meta: Tool / bash / Target / rm -rf build
+  preview: -
+  scope Once / Just this one call {checked,active} name=agent-decision-scope-<uid>
+  scope Session / Until this pane closes {-} name=agent-decision-scope-<uid>
+  scope Project / This repo, future runs {-} name=agent-decision-scope-<uid>
+  scope Global / Everywhere, future runs {-} name=agent-decision-scope-<uid>
+  buttons: Allow(title: Allow this tool call) | Deny + feedback
+key Escape on BODY
+-- after Escape
+  minimized [ui-button ui-tone-attention ui-button--row agent-decision-panel-minimized] "⚠Decision pending — bashclick to decide" aria=Re-open decision prompt

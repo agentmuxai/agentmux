@@ -261,17 +261,9 @@ impl PersistentSubprocessController {
                     // could collide with ours (codex P1 on PR #2500).
                     let registration_was_ours = crate::backend::reactive::get_global_handler()
                         .unregister_block_if_nonce(&block_id_wait, nonce_wait);
+                    sweep_stopped_registrations(&block_id_wait, nonce_wait, registration_was_ours);
                     if let Some(ref agent_id) = agent_id_wait {
-                        let data_dir = crate::backend::base::get_mux_data_dir();
-                        crate::backend::reactive::registry::remove_if_nonce(
-                            &data_dir,
-                            agent_id,
-                            nonce_wait,
-                        );
-                        crate::backend::reactive::registry::remove_shared_from_env_if_nonce(
-                            agent_id,
-                            nonce_wait,
-                        );
+                        remove_registration_files_by_name(agent_id, nonce_wait);
                         // The cloud subscriber's agent set records no
                         // per-agent identity to compare against, so the
                         // in-memory registration's outcome above stands
@@ -724,17 +716,9 @@ impl PersistentSubprocessController {
                     // could collide with ours (codex P1 on PR #2500).
                     let registration_was_ours = crate::backend::reactive::get_global_handler()
                         .unregister_block_if_nonce(&block_id_wait, nonce_wait);
+                    sweep_stopped_registrations(&block_id_wait, nonce_wait, registration_was_ours);
                     if let Some(ref agent_id) = agent_id_wait {
-                        let data_dir = crate::backend::base::get_mux_data_dir();
-                        crate::backend::reactive::registry::remove_if_nonce(
-                            &data_dir,
-                            agent_id,
-                            nonce_wait,
-                        );
-                        crate::backend::reactive::registry::remove_shared_from_env_if_nonce(
-                            agent_id,
-                            nonce_wait,
-                        );
+                        remove_registration_files_by_name(agent_id, nonce_wait);
                         // The cloud subscriber's agent set records no
                         // per-agent identity to compare against, so the
                         // in-memory registration's outcome above stands
@@ -821,4 +805,29 @@ async fn settle_reader_tasks(
         );
         abort_handle.abort();
     }
+}
+
+/// Remove the registration files a stopped spawn left for its block, under every name they are
+/// filed by (slug, former slug, display-name route). An entry a turn wrote for the block's current
+/// name is filed under that name, with no nonce, so the removal keyed on the spawn's own name and
+/// nonce never reaches it, and the agent then reads as running to anything that reads the files
+/// (the ID update's running check). Spares a newer spawn's entries: one registered since leaves
+/// the block registered in memory under a nonce that isn't ours.
+fn sweep_stopped_registrations(block_id: &str, nonce: u64, registration_was_ours: bool) {
+    let newer_spawn_holds_block = !registration_was_ours
+        && crate::backend::reactive::get_global_handler().try_get_agent_by_block(block_id).is_some();
+    if newer_spawn_holds_block {
+        return;
+    }
+    let data_dir = crate::backend::base::get_mux_data_dir();
+    crate::backend::reactive::registry::remove_for_block(&data_dir, block_id, Some(nonce));
+    crate::backend::reactive::registry::remove_shared_for_block_from_env(block_id, Some(nonce));
+}
+
+/// The files a stopped spawn registered under `agent_id`, removed only if they are still its own
+/// (compare-and-remove on its nonce, issue #2363: a respawn's fresh entry stays).
+fn remove_registration_files_by_name(agent_id: &str, nonce: u64) {
+    let data_dir = crate::backend::base::get_mux_data_dir();
+    crate::backend::reactive::registry::remove_if_nonce(&data_dir, agent_id, nonce);
+    crate::backend::reactive::registry::remove_shared_from_env_if_nonce(agent_id, nonce);
 }

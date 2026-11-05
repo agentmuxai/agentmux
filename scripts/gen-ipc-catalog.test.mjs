@@ -207,7 +207,7 @@ describe("the real route_command", () => {
     it.skipIf(!existsSync(ipc))("names a handler for the arm that hands it to the blocking pool by name, and the one that wraps it", () => {
         const by = (name) => routeCommandEntries(readFileSync(ipc, "utf8")).find((e) => e.names.includes(name));
         expect(by("stop_tab_drag_tracking").handler).toBe("commands::drag::stop_tab_drag_tracking_blocking");
-        expect(by("store_update_install").handler).toBe("commands::store_update::install_update");
+        expect(by("store_update_install").handler).toBe("commands::store_update::run");
     });
 
     it.skipIf(!existsSync(ipc))("generates a block from the repo's own code", () => {

@@ -225,7 +225,7 @@ const UNSET_MEANS: Record<string, [unknown, string, RegExp]> = {
     "window:magnifiedblockblurprimarypx": [
         0,
         "frontend/app/block/blockframe.tsx",
-        /"--magnified-block-blur": `\$\{magnifiedBlockBlur\(\)\}px`/,
+        /"--magnified-block-blur": `\$\{s\.magnifiedBlockBlur\(\)\}px`/,
     ],
     "window:magnifiedblockblursecondarypx": [
         0,

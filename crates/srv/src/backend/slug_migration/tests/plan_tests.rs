@@ -160,7 +160,7 @@ fn a_target_held_only_by_the_same_uid_is_free() {
     fx.chains(&data, true);
     let ws = fx.root().join("ws");
     fx.pane(&data, LOAP3, "loap-loap-2-loap-3", "block-own", &ws);
-    let entry = serde_json::json!({ "agent_id": "Loap-3", "local_url": "", "block_id": "block-own", "pid": std::process::id(), "updated_at": 1 });
+    let entry = serde_json::json!({ "agent_id": "Loap-3", "local_url": "", "block_id": "block-own", "pid": std::process::id(), "updated_at": agentmux_common::time::now_ms() });
     std::fs::create_dir_all(data.join("agents")).unwrap();
     std::fs::write(data.join("agents").join("loap-3.json"), serde_json::to_vec(&entry).unwrap()).unwrap();
     let plan = super::super::plan(&fx.home, false).unwrap();

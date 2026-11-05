@@ -457,7 +457,7 @@ pub async fn probe_other_instances(uid: &str) -> Option<LegacyHolder> {
     let others: Vec<_> = entries
         .into_iter()
         .filter(|e| e.channel != own_channel && e.pid != own_pid && !e.local_url.is_empty())
-        .filter(|e| crate::backend::reactive::registry::pid_alive(e.pid))
+        .filter(|e| e.srv_alive())
         .filter(|e| seen.insert(e.local_url.clone()))
         .collect();
     let probes = others.into_iter().map(|e| async move {
@@ -907,7 +907,7 @@ pub async fn endpoint_for_channel(channel: &str) -> Option<HolderEndpoint> {
         .ok()?;
     entries
         .into_iter()
-        .find(|e| e.channel == channel && !e.local_url.is_empty() && crate::backend::reactive::registry::pid_alive(e.pid))
+        .find(|e| e.channel == channel && !e.local_url.is_empty() && e.srv_alive())
         .map(|e| HolderEndpoint { channel: e.channel, local_url: e.local_url, auth_key: e.auth_key })
 }
 
