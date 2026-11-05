@@ -1,6 +1,6 @@
 # SPEC: A limited, agent-owned browser pane keeps its limit and its owner across an srv restart
 
-**Status:** built in the PR that carries this file (Kanban #20857).
+**Status:** implemented — in the PR that carries this file (Kanban #20857).
 **Author:** Korp@narko, 2026-11-04. **Follow-up to:** the restore-loop fix (#6206).
 **Builds on:** `SPEC_BROWSER_PANE_ALLOWED_ORIGINS_2026_10_09.md`, `SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md` §3.
 
