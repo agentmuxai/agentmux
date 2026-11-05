@@ -143,6 +143,19 @@ fn list_updates() -> Result<(windows::Services::Store::StoreContext, usize), Str
     Ok((context, listed))
 }
 
+/// The IPC commands `store_update_install` and `store_update_check`: the Store downloads and installs the
+/// update itself (the page opens the Store page when it says `fallback`), or, with `check_only`, only says
+/// whether it lists one. Both block on the Store, so they run on the blocking pool.
+pub async fn run(check_only: bool) -> Result<serde_json::Value, String> {
+    tracing::info!("[ipc] store_update check_only={check_only}");
+    let json = if check_only {
+        tokio::task::spawn_blocking(check_update).await.map(|v| serde_json::to_value(v))
+    } else {
+        tokio::task::spawn_blocking(install_update).await.map(|v| serde_json::to_value(v))
+    };
+    json.map_err(|e| format!("store_update: {e}"))?.map_err(|e| e.to_string())
+}
+
 /// Ask the Store to install AgentMux's update. Blocks until the Store is done
 /// (minutes, for a download), so call it off the async workers.
 #[cfg(target_os = "windows")]
