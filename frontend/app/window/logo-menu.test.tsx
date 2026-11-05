@@ -587,6 +587,14 @@ describe("the menu button's glyph", () => {
         expect(scss).toMatch(/height: calc\(5 \* var\(--mark-cell\)\);/);
     });
 
+    it("leaves an even number of device pixels around the mark, so centring it never lands on half a pixel (1x at 150%)", () => {
+        const scss = readFileSync(join(process.cwd(), "frontend/app/window/logo-menu.scss"), "utf8");
+        // The anchor is the mark plus twice a whole number of device pixels (round(down, ..., --snap-chrome)).
+        expect(scss).toMatch(
+            /\.logo-menu-anchor \{[^}]*height: calc\(\s*5 \* var\(--mark-cell\) \+ 2 \* round\(down, calc\(\(100% \+ var\(--space-1-5\) - var\(--snap-chrome\) - 5 \* var\(--mark-cell\)\) \/ 2\), var\(--snap-chrome\)\)\s*\);/,
+        );
+    });
+
     it("takes its colour from the theme's primary colour, as the three bars did, brighter on hover", () => {
         const scss = readFileSync(join(process.cwd(), "frontend/app/window/logo-menu.scss"), "utf8");
         expect(scss).toMatch(/\.logo-menu-btn \{[^}]*color: var\(--accent-color\);/);

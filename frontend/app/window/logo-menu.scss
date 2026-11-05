@@ -23,7 +23,14 @@
     align-self: flex-start;
     margin: calc(-1 * var(--space-1-5)) 4px 0;
     width: 28px;
-    height: calc(100% + var(--space-1-5) - var(--snap-chrome));
+    // The mark's cell, in whole device pixels (see the svg below); the anchor's height is built from it.
+    --mark-cell: max(var(--snap-chrome), round(nearest, 4px, var(--snap-chrome)));
+    // The band's height less the line, shrunk so that what is left over around the mark is an even number of
+    // device pixels: the band is a fractional number of them at some zooms (150% on a 1x screen is 48.5), and
+    // centring a mark in an odd leftover puts its top on half a pixel and half-covers its bottom row.
+    height: calc(
+        5 * var(--mark-cell) + 2 * round(down, calc((100% + var(--space-1-5) - var(--snap-chrome) - 5 * var(--mark-cell)) / 2), var(--snap-chrome))
+    );
     -webkit-app-region: no-drag;
     cursor: default;
 }
@@ -57,7 +64,6 @@
     // changes. `--snap-chrome` is one device pixel in this header's CSS px, so a cell rounded to it is a
     // whole number of them (never less than one), and every edge lands on a device pixel at every zoom.
     svg {
-        --mark-cell: max(var(--snap-chrome), round(nearest, 4px, var(--snap-chrome)));
         display: block;
         width: calc(5 * var(--mark-cell));
         height: calc(5 * var(--mark-cell));
