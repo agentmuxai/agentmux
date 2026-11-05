@@ -122,7 +122,7 @@
 108 crates/launcher/src/splash_mac.rs::flatten_rows
 272 crates/launcher/src/srv_spawner.rs::spawn_srv_once
 858 crates/launcher/src/supervisor/unix.rs::run_unix
-1287 crates/launcher/src/supervisor/windows.rs::run_windows
+1290 crates/launcher/src/supervisor/windows.rs::run_windows
 161 crates/launcher/src/tray/windows.rs::run
 102 crates/launcher/src/wrr/mod.rs::apply_hwnd_destroyed
 175 crates/launcher/src/wrr/mod.rs::apply_hwnd_opened
