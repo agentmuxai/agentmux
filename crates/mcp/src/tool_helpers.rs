@@ -178,7 +178,9 @@ pub(crate) fn own_outcome(now: Value, block: &str) -> Value {
 /// What `Stop pane` and `Stop agents` say instead of waiting for the user's window: the call returns
 /// at once, srv runs the window, and the agent is told by one `[AgentMux]` note only if the user keeps
 /// what it asked to close or the close fails.
-pub(crate) const PENDING_NOTE: &str = "Not closed yet: the user has 30 s to keep it running, and it closes after that unless they do. Don't wait or poll: you get one [AgentMux] note only if they keep it or the close fails.";
+pub(crate) fn pending_note(secs: u64) -> String {
+    format!("Not closed yet: the user has {secs} s to keep it running, and it closes after that unless they do. Don't wait or poll: you get one [AgentMux] note only if they keep it or the close fails.")
+}
 
 /// The windows a stop opened, one per request id (several targets can share one): their targets and
 /// when each closes unless the user keeps it. `pending` is srv's list of {block_id, request_id,
@@ -212,7 +214,9 @@ pub(crate) fn pending_windows(pending: &[Value], fallback_deadline_ms: Option<i6
 /// outlive it.
 pub(crate) fn close_pane_pending(block: &str, body: &Value, now_ms: i64) -> String {
     let entry = json!({ "block_id": block, "request_id": body["request_id"], "deadline_ms": body["deadline_ms"] });
-    let mut note = PENDING_NOTE.to_string();
+    // A browser pane's window is shorter than the 30 s of the rest: say what srv set.
+    let secs = body["deadline_ms"].as_i64().map_or(30, |d| ((d - now_ms).max(0) as u64).div_ceil(1000));
+    let mut note = pending_note(secs);
     if let Some(via) = body["via"].as_str().filter(|v| !matches!(*v, "ClosePane" | "Browser close")).map(public_stop) {
         let by = body["by"].as_str().unwrap_or("another agent");
         note.push_str(&format!(" It joined {by}'s {via}, already under way, which may leave the pane itself open: check Pane layout."));

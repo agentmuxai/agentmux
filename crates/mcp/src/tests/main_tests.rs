@@ -119,6 +119,15 @@ fn stop_pane_answers_pending_and_says_who_it_joined() {
 
 
 
+/// A browser pane's window is 10 s, and the note says what srv set, not a fixed 30.
+#[test]
+fn stop_pane_says_the_window_srv_set() {
+    let browser = serde_json::json!({ "request_id": "r9", "by": "me", "via": "ClosePane", "deadline_ms": 110_000 });
+    let said: Value = serde_json::from_str(&close_pane_pending("blk", &browser, 100_000)).unwrap();
+    assert_eq!(said["pending"][0]["closes_in_s"], 10);
+    assert!(said["note"].as_str().unwrap().contains("the user has 10 s to keep it"), "{said}");
+}
+
 /// Stop's `self` keeps QuitSelf's warning and its required quote; that it
 /// takes no target is checked in stop_tool's own tests.
 #[test]
