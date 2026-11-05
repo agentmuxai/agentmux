@@ -883,6 +883,10 @@ fn agent_definition_routes() -> Router<AppState> {
         .route("/api/v1/agent/seats", post(app_api::agent_seats::handle_agent_seats))
         .route("/api/v1/agent/migrate-ids", post(app_api::agent_migrate_ids::handle_agent_migrate_ids))
         .route("/api/v1/agent/rename", post(app_api::agent_rename::handle_agent_rename))
+        .route("/api/v1/agent/update", post(app_api::agent_definition::handle_agent_update))
+        .route("/api/v1/agent/bundles", post(app_api::agent_definition::handle_agent_bundles))
+        .route("/api/v1/agent/hide", post(app_api::agent_definition::handle_agent_hide))
+        .route("/api/v1/agent/unhide", post(app_api::agent_definition::handle_agent_unhide))
 }
 
 /// Google connectors for agents: srv makes the call with the account's token, for an agent with a
