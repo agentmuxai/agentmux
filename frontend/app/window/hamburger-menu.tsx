@@ -262,16 +262,16 @@ export function HamburgerMenu(props: HamburgerMenuProps): JSX.Element {
             >
                 {/*
                  * The AgentMux mark (frontend/app/asset/logo-mark.svg, the app icon's four blocks) as inline
-                 * rects, not an image or an icon font: they scale evenly with chrome zoom. The mark is a
-                 * 12-unit square (the icon's 16-unit grid without its 2-unit margin) drawn at 24 px, so it
-                 * fills the 28 x 27 button and every edge lands on a whole pixel (2 px a unit). Colour comes
-                 * from `--brand-mark-color` (hamburger-menu.scss).
+                 * rects, not an image or an icon font: they scale evenly with chrome zoom. The mark is the
+                 * icon's shape snapped to a 5 x 5 grid of 4 px cells (20 px), so every edge lands on a whole
+                 * pixel and the bar, the gaps and the small blocks are all one cell. Colour comes from
+                 * `--brand-mark-color` (hamburger-menu.scss).
                  */}
-                <svg width="24" height="24" viewBox="2 2 12 12" fill="currentColor" shape-rendering="crispEdges" aria-hidden="true">
-                    <rect x="2" y="2" width="12" height="2" />
-                    <rect x="2" y="6" width="5" height="8" />
-                    <rect x="9" y="6" width="5" height="3" />
-                    <rect x="9" y="11" width="5" height="3" />
+                <svg width="20" height="20" viewBox="0 0 5 5" fill="currentColor" shape-rendering="crispEdges" aria-hidden="true">
+                    <rect x="0" y="0" width="5" height="1" />
+                    <rect x="0" y="2" width="2" height="3" />
+                    <rect x="3" y="2" width="2" height="1" />
+                    <rect x="3" y="4" width="2" height="1" />
                 </svg>
             </button>
         </FlyoutMenu>

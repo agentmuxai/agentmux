@@ -554,14 +554,19 @@ describe("the menu button's glyph", () => {
         expect(svg.getAttribute("fill")).toBe("currentColor");
     });
 
-    it("is the app icon's four blocks filling the button: 24 px for a 12-unit square, so every edge is on a whole pixel", () => {
+    it("is the app icon's four blocks on a 5 x 5 grid of 4 px cells: 20 px, so every edge is on a whole pixel", () => {
         const svg = button().querySelector("svg")!;
-        expect([svg.getAttribute("width"), svg.getAttribute("height"), svg.getAttribute("viewBox")]).toEqual(["24", "24", "2 2 12 12"]);
+        expect([svg.getAttribute("width"), svg.getAttribute("height"), svg.getAttribute("viewBox")]).toEqual(["20", "20", "0 0 5 5"]);
         const drawn = [...svg.querySelectorAll("rect")].map((r) => ["x", "y", "width", "height"].map((a) => Number(r.getAttribute(a))));
         expect(drawn).toHaveLength(4);
         for (const rect of drawn) for (const v of rect) expect(Number.isInteger(v)).toBe(true);
-        // The same geometry as frontend/app/asset/logo-mark.svg (a 512 unit square, 32 units to the pixel).
-        const mark = [...logoMark.matchAll(/<rect x="(\d+)" y="(\d+)" width="(\d+)" height="(\d+)"/g)].map((m) => m.slice(1).map((n) => Number(n) / 32));
+        // The shape of frontend/app/asset/logo-mark.svg (its blocks span 384 units; 32 to a grid unit, 12 units
+        // across) with every edge moved to the nearest of the 5 cells.
+        const cells = (n: number) => Math.round(((n / 32 - 2) * 5) / 12);
+        const mark = [...logoMark.matchAll(/<rect x="(\d+)" y="(\d+)" width="(\d+)" height="(\d+)"/g)].map((m) => {
+            const [x, y, w, h] = m.slice(1).map(Number);
+            return [cells(x), cells(y), cells(x + w) - cells(x), cells(y + h) - cells(y)];
+        });
         expect(drawn).toEqual(mark);
     });
 
