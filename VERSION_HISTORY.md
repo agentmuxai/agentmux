@@ -1,5 +1,52 @@
 # AgentMux Version History
 
+## 0.60.17 — 2026-11-05
+
+- The Swarm's Broadcast and Supervise are two sections that open on their own, the list is one list with a labelled part per host, and the sections and the list scroll as one container with a single scrollbar
+- AgentMux now checks for a newer release by itself (a minute after start, then every few hours), downloads and verifies it in the background, and the status bar offers Restart to update. Nothing installs until you restart. Turn it off with update:auto: false, or keep the check and skip the download with update:autodownload: false.
+- An agent's Vault requests no longer open window-wide prompts: the Vault pane lists every pending request with its countdown, a parked agent's My agents row and the status bar show what it waits on, and you can deny all of one agent's requests at once
+- Every agent's Browser open now defaults to a profile of its own, named after it and kept between panes, restarts and upgrades, so its sign-ins stay; Settings → Browser lists agents' profiles apart from yours
+- Jobs: the list test no longer fails when it starts within a second of local midnight
+- Agents no longer have a bundle of their own: a bundle holds only what agents share, and any existing one moves into the agent's Bundles list
+- The Files pane's name-conflict question and the attachment preview now appear over their own pane instead of the whole window.
+- Settings > Agents > Outdated agent ids reads the plan again when it comes back into view, and an agent can run the agent id update with Agents migrate_ids
+- Tooltips, the hover labels on titled buttons, the tab colour panel and the editor tree's context menu now scale with chrome zoom.
+- Host log: a line every five minutes for each renderer (app windows and browser panes) with its role, origin and private memory
+- Add characterisation tests for the Kanban task drawer
+- Toasts and dialogs follow chrome zoom: the toast stack and every window, tab and pane dialog scale with the title bar and status bar, and stay in the window at any zoom.
+- fix(store): after a Microsoft Store update Windows opens the launcher again (the tray, srv and the host come back together), not the host alone; a Store install that completed keeps its note for the next start
+- The Audit can list agents' tool calls, turn ends and thoughts (asked for by kind), indexed from the transcript as it is written
+- The app-wide right-click menu and its submenus follow chrome zoom: each level is an unzoomed shell around a zoomed body, and submenus are no longer nested in the row that opens them.
+- Store update: a Store that never answers the update check or listing is told as that after 60 s, and an install that falls back to the Store page says so in the update panel
+- The AgentMux Cloud sign-in screens read their text from the translation dictionary (no change in English); groundwork for translating them
+- A browser pane's title given by an agent now goes when the pane moves to another site, so the page's own title shows
+- Google call: an agent whose client never lists a just-granted Calendar, Drive or Gmail tool can use it through the Google tool
+- Memory > Skills shows the skills as cards, and the Bundles tab no longer has a standing blue accent
+- Google: an agent can read Google status and turn a Google service on or off on another machine over remote operations (google.status, google.grant)
+- Memory > Bundles shows bundles as cards, and an open bundle shows its Instructions and Skills as cards by category
+- Split the Kanban task drawer into a state object and one component per part
+- An agent's Browser pane now opens below the agent, and closing a browser pane gives its user 10 seconds to keep it instead of 30
+- A check that stops new untranslatable text appearing in screens that have started to use the translation dictionary; no change to the app
+- Agents can update, set the Bundles list of, and hide or show the picker templates of, agents with the Agents tool
+- Update solid-js to 1.9.18, which brings seroval 1.6.12 (fixes two seroval advisories), and the zod patch release
+- The new four-block logo replaces the old brain everywhere it still showed: the README opens with it (alpha warning right below), the launcher splash image is logo.png, Mux Code's provider logo is the mark, and the unused brain artwork is deleted
+- Cover the agent failure hook's seed, countdown, Take over, copy and verdict paths with tests
+- Split useAgentFailure into a state object and one function per concern
+- Cover the agent controller status hook's launch, login, bind and recheck paths with tests
+- Split useAgentControllerStatus into a context object and one function per concern
+- Add characterisation tests for the turn-lifecycle hook (finalizeTurn, grace and stop-fallback timers, watchdog)
+- Split useTurnLifecycle into a state object and small functions, behaviour unchanged
+- Internal: srv's store opening at startup (open_stores_and_migrate) split into named steps (no behaviour change)
+- The Vault can hold several Vaults on one computer: each entry belongs to one, and the person decides which agents may use each (agents see only the entries of Vaults open to them)
+- Audit: each row says which computer, channel and version wrote it and how it travelled; a sent message is logged at hand-off and joined to its delivery by message id
+- Internal: srv's background startup (spawn_background_subsystems) split into named steps (no behaviour change)
+- Fix the native memory mirror failing on an existing install: a store made before last_seen_mtime_ms gets the column
+- Internal: the persistent agent controller's spawn_process split into named steps (no behaviour change)
+- Add characterisation tests for the new-agent create form (payload, busy state, keys, runtime handed in, model follow)
+- The Vault's "Got it" button now stands out in the highlight colour
+- Split the new-agent create form into hooks and small field components, behaviour unchanged
+- A new Antigravity agent no longer leaves the pane black with the logo: the create panel stopped remounting while it checked the sign-in, and the version and sign-in checks no longer start the CLI's own update
+
 ## 0.60.16 — 2026-11-05
 
 - feat(browser-pane): Windows can host browser panes as CEF Views overlays in the window's own compositor (AGENTMUX_PANE_BACKEND=views), opt-in
