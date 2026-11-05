@@ -130,6 +130,15 @@ cp /path/to/agentmux/scripts/cef-build/args.gn out/Release_GN_x64/args.gn
 ./buildtools/linux64/gn gen out/Release_GN_x64
 ```
 
+> **`use_sysroot=true` is the glibc floor — do not turn it off.** The libraries are then built against
+> Chromium's Debian sysroot (glibc 2.31) and run on any distro from Ubuntu 22.04 / Debian 12 / Fedora 41
+> up. With `use_sysroot=false` they need the build host's glibc: r1-r4 were built on a host with glibc
+> 2.43, so libcef.so, libGLESv2.so, libvk_swiftshader.so and libvulkan.so.1 asked for `GLIBC_2.43` and
+> AgentMux 0.60.14 would not start on Ubuntu 24.04, Debian 13 or Fedora 42. `configure-cef-build.sh`
+> installs the sysroot (`build/linux/sysroot_scripts/install-sysroot.py --arch=amd64`); after any change
+> to the args, check the result with `bash scripts/cef-build/verify-glibc-floor.sh <runtime dir>`
+> (no file may need more than `GLIBC_2.34`). The packager (`stage-linux-runtime.sh`) runs the same check.
+>
 > **`is_official_build=true` is the size lever — do not omit it.** It enables
 > thin-LTO + identical-code-folding + full optimization. Without it (a plain
 > `is_debug=false` Release), `libcef.so` is **~2x** the official size:
@@ -160,7 +169,10 @@ cat > ~/cef-build/ninja-with-retry.sh <<'EOF'
 set -uo pipefail
 cd ~/cef-build/chromium_git/chromium/src
 for attempt in 1 2 3; do
-    if ninja -j 12 -l 16 -C out/Release_GN_x64 cef; then
+    # -k 0: with use_sysroot=true the cefclient test app (not shipped) cannot compile (no gtk headers).
+    # ninja would stop there, before it links libcef.so, so keep going past it.
+    ninja -k 0 -j 12 -l 16 -C out/Release_GN_x64 cef
+    if ninja -j 12 -l 16 -C out/Release_GN_x64 libcef.so; then
         echo "==================== NINJA SUCCESS on attempt $attempt at $(date) ===================="
         exit 0
     fi
@@ -288,6 +300,11 @@ gh release create "cef-linux-x86_64-${CEF_VERSION}" --repo agentmuxai/cef \
   --notes "BeginWindowDrag + right-click passthrough. Built from agentmuxai/cef ${CEF_FORK_SHA:0:12} (branch 7778)." \
   "cef-linux-x86_64-${CEF_VERSION}.tar.gz"
 ```
+
+> **Pin the new tag with its hash.** `scripts/cef-build/cef-runtime-pins.sh` carries `CEF_LINUX_RUNTIME_TAG` and
+> `CEF_LINUX_RUNTIME_SHA256` (`sha256sum` of the tarball, also shown as the asset's digest on the release). The
+> Linux build checks the download against it (`verify-runtime-archive.sh`), so a changed archive under a pinned
+> tag fails the build. Both lines move in the same PR as the tag.
 
 > **`chrome-sandbox` is intentionally omitted** from the tarball. AgentMux's Linux sandbox
 > (the `agentmux-cef` `sandbox` Cargo feature, **default-on** — `default = ["sandbox"]`)
