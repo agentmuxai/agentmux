@@ -142,7 +142,7 @@ function VaultActivityLog(props: { visible: boolean }): JSX.Element {
             <p class="warden-manager-summary">
                 Every change to the Vault and every use of an entry: who, what, where. Never a value.{" "}
                 <Button density="compact" onClick={() => void openOrFocusPaneByView("audit")}>
-                    See agents' use in the Audit
+                    {"See agents' use in the Audit"}
                 </Button>
             </p>
             <Show when={error()}>
@@ -178,8 +178,8 @@ function VaultActivityLog(props: { visible: boolean }): JSX.Element {
     );
 }
 
-/** The request the Vault was opened on (a parked agent's row, the status bar), to mark in the
- *  list; the meta is cleared so a later reopen doesn't scroll back to it. */
+/** The request the Vault was opened on (from a parked agent row or the status bar), to mark in the
+ *  list; the meta is cleared so a later reopen does not scroll back to it. */
 function focusedRequest(model: VaultViewModel): Accessor<string> {
     const [focused, setFocused] = createSignal("");
     createEffect(
