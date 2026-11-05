@@ -55,7 +55,16 @@
     // Inline SVG (the AgentMux mark; before it, three bars in place of the fa-bars icon font). Icon fonts
     // rasterize each glyph at its own fractional size; SVG rectangles fill uniformly and scale predictably
     // with parent zoom.
+    //
+    // Sized in whole device pixels. The header is CSS-zoomed (chrome zoom) on a screen with its own pixel
+    // ratio, so a fixed 4px cell is a fractional number of device pixels at most zoom levels, and each edge
+    // of the four blocks rounds on its own: parts of the mark drift a pixel against each other as the zoom
+    // changes. `--snap-chrome` is one device pixel in this header's CSS px, so a cell rounded to it is a
+    // whole number of them (never less than one), and every edge lands on a device pixel at every zoom.
     svg {
+        --mark-cell: max(var(--snap-chrome), round(nearest, 4px, var(--snap-chrome)));
         display: block;
+        width: calc(5 * var(--mark-cell));
+        height: calc(5 * var(--mark-cell));
     }
 }

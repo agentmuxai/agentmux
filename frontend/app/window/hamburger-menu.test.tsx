@@ -580,6 +580,13 @@ describe("the menu button's glyph", () => {
         expect(drawn).toEqual(mark);
     });
 
+    it("sizes its cell in whole device pixels at any chrome zoom, so no edge of the mark drifts against another", () => {
+        const scss = readFileSync(join(process.cwd(), "frontend/app/window/hamburger-menu.scss"), "utf8");
+        expect(scss).toMatch(/--mark-cell: max\(var\(--snap-chrome\), round\(nearest, 4px, var\(--snap-chrome\)\)\);/);
+        expect(scss).toMatch(/width: calc\(5 \* var\(--mark-cell\)\);/);
+        expect(scss).toMatch(/height: calc\(5 \* var\(--mark-cell\)\);/);
+    });
+
     it("takes its colour from the brand-mark token: the dark blue-violet, and the deeper one on light themes", () => {
         const theme = readFileSync(join(process.cwd(), "frontend/app/theme.scss"), "utf8");
         const scss = readFileSync(join(process.cwd(), "frontend/app/window/hamburger-menu.scss"), "utf8");
