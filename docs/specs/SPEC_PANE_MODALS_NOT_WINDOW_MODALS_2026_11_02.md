@@ -7,6 +7,7 @@
 - 2026-11-03, Agent1@narko: rows 1 and 2 (#6343), 6 and 8 (#6354) done.
 - 2026-11-04, Agent1@narko: row 7 done: the media permission prompt and "Stop camera and microphone access?" are pane modals over the browser pane that asked (`window/pane-media-*.tsx`, tests in `pane-media-prompts.test.tsx`, baseline down by two; #6449).
 - 2026-11-04, Agent1@narko: row 9 done: the Swarm stop and stop-receiving confirms, the Settings fork-slug update and undo confirms, the account delete and MCP server delete confirms are `scope="pane"`.
+- 2026-11-04, Agent1@narko: row 5 done: an agent's widget-install request is an operator-only card in its own pane (`block/widget-install-card.tsx`), from a new `block_id` on srv's `WidgetInstallRequest` (the pane `widget_agent_handlers.rs` already knew); srv's attention event for that pane gives the tone. A request naming no pane (a bundle import) is still the window prompt. Rows 3 (Vault, Agent2-6's cards) is the only one left.
 
 The operator, 2026-11-02: "when choosing to sign in via the agent pane, lets have the modal be a pane (not a window) modal. Same when oauth login from connectors. in fact, lets audit all the times we use window modals, they should be very rarely used".
 

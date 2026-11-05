@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Agents' requests to install a widget, as a prompt for the user
- * (docs/specs/SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §10).
+ * Agents' requests to install a widget, as a card in the asking agent's pane, or a prompt for the user
+ * when the request names no pane (docs/specs/SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §10;
+ * docs/specs/SPEC_PANE_MODALS_NOT_WINDOW_MODALS_2026_11_02.md row 5).
  *
  * srv holds each request (`widgetrequests` event, `widgets.requests` RPC)
  * while the agent's `WidgetInstall` waits. The prompt shows what Settings →
@@ -15,6 +16,7 @@ import { createEffect, createRoot, createSignal, on, type JSX } from "solid-js";
 
 import { ConfirmModal } from "@/app/element/confirm-modal";
 import { modalsModel, type ModalCloseProps } from "@/app/store/modalmodel";
+import { paneRequests, type PaneRequestHandle } from "@/app/store/pane-requests";
 import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -22,11 +24,16 @@ import type { WidgetInstallRequest } from "@/app/store/rpc-api/widgets";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getApi } from "@/util/app-api";
 import { installLabel, WidgetApprovalDetails } from "@/app/view/settings/sections/widget-approval-details";
+import { WidgetInstallCard } from "./widget-install-card";
 
 const [requests, setRequests] = createSignal<WidgetInstallRequest[]>([]);
 
 // The signer is part of a version: a re-signed package is a new prompt.
 const keyOf = (r: Pick<WidgetInstallRequest, "id" | "hash" | "signature">) => `${r.id}@${r.hash}@${r.signature?.fingerprint ?? ""}`;
+
+/** Sends the answer to srv through the host, the one way an approval can. */
+const decide = (r: WidgetInstallRequest, approve: boolean): Promise<void> =>
+    getApi().approvals.decideWidget(r.id, r.hash, approve, r.signature?.fingerprint ?? "");
 
 function InstallRequestPrompt(props: { request: WidgetInstallRequest } & ModalCloseProps): JSX.Element {
     const r = props.request;
@@ -35,9 +42,9 @@ function InstallRequestPrompt(props: { request: WidgetInstallRequest } & ModalCl
     createEffect(() => {
         if (!requests().some((x) => keyOf(x) === keyOf(r))) props.close();
     });
-    const decide = async (approve: boolean) => {
+    const answer = async (approve: boolean) => {
         try {
-            await getApi().approvals.decideWidget(r.id, r.hash, approve, r.signature?.fingerprint ?? "");
+            await decide(r, approve);
             props.close();
         } catch (e) {
             setError(e instanceof Error ? e.message : String(e));
@@ -54,8 +61,8 @@ function InstallRequestPrompt(props: { request: WidgetInstallRequest } & ModalCl
             destructive={r.signature?.state === "key_changed"}
             confirmLabel={installLabel(r)}
             cancelLabel="Don't install"
-            onConfirm={() => decide(true)}
-            onCancel={() => void decide(false)}
+            onConfirm={() => answer(true)}
+            onCancel={() => void answer(false)}
         >
             <WidgetApprovalDetails pkg={r} />
             {error() && (
@@ -67,13 +74,32 @@ function InstallRequestPrompt(props: { request: WidgetInstallRequest } & ModalCl
     );
 }
 
+// The card sits in every window's registry and shows in the one that has the pane; srv's attention event for
+// the pane gives the tone and the notification.
+function showCard(r: WidgetInstallRequest): PaneRequestHandle {
+    return paneRequests.push(r.block_id, {
+        source: "widget-install",
+        Component: WidgetInstallCard,
+        props: { request: r, decide: (approve: boolean) => decide(r, approve) },
+        summary: `${r.agent}: install ${r.name}`,
+        waits: false,
+        // The pane was closed with the question open: No.
+        onGone: () => void decide(r, false).catch(() => {}),
+    });
+}
+
+function showPrompt(r: WidgetInstallRequest): null {
+    modalsModel.openModal(InstallRequestPrompt, { request: r });
+    return null;
+}
+
 let started = false;
 
 /** Follow srv's requests and open a prompt for each new one. Call once. */
 export function startWidgetInstallRequests(): void {
     if (started || typeof getApi()?.approvals?.decideWidget !== "function") return;
     started = true;
-    const shown = new Set<string>();
+    const shown = new Map<string, PaneRequestHandle | null>();
     // An event is newer than the first fetch: once one arrives, the fetch's
     // answer is stale and is dropped.
     let sawEvent = false;
@@ -85,11 +111,14 @@ export function startWidgetInstallRequests(): void {
         createEffect(
             on(requests, (list) => {
                 const live = new Set(list.map(keyOf));
-                for (const k of [...shown]) if (!live.has(k)) shown.delete(k);
+                for (const [k, card] of [...shown]) {
+                    if (live.has(k)) continue;
+                    card?.close();
+                    shown.delete(k);
+                }
                 for (const r of list) {
                     if (shown.has(keyOf(r))) continue;
-                    shown.add(keyOf(r));
-                    modalsModel.openModal(InstallRequestPrompt, { request: r });
+                    shown.set(keyOf(r), r.block_id ? showCard(r) : showPrompt(r));
                 }
             })
         )

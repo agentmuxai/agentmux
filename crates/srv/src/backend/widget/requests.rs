@@ -31,12 +31,14 @@ pub struct WidgetInstallRequest {
     pub signature: crate::backend::widget::signature::WidgetSignatureInfo,
     /// The agent that asked.
     pub agent: String,
+    /// The asking agent's pane, for the card there; empty when it has none (an unverified asker, a bundle import).
+    pub block_id: String,
     #[ts(type = "number")]
     pub requested_ms: u64,
 }
 
 impl WidgetInstallRequest {
-    pub fn of(pkg: &WidgetPackageInfo, agent: &str) -> Self {
+    pub fn of(pkg: &WidgetPackageInfo, agent: &str, block_id: &str) -> Self {
         Self {
             id: pkg.id.clone(),
             hash: pkg.hash.clone(),
@@ -48,6 +50,7 @@ impl WidgetInstallRequest {
             permissions: pkg.permissions.clone(),
             signature: pkg.signature.clone(),
             agent: agent.to_string(),
+            block_id: block_id.to_string(),
             requested_ms: agentmux_common::time::now_ms_u64(),
         }
     }
@@ -161,6 +164,7 @@ mod tests {
             permissions: vec![],
             signature: crate::backend::widget::signature::describe(id, None, &Default::default()),
             agent: agent.into(),
+            block_id: String::new(),
             requested_ms: 0,
         }
     }
