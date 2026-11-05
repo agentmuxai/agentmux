@@ -1,0 +1,33 @@
+registerPane(hist-1:history)
+usePaneTabVisibility(hist-1)
+getFileSubject(live-1, output)
+subscribe
+startHistoryPoll(cursor,hidden,readBlockId,recover,reloadIfSkipped)
+count({"filename":"output"}, timeout 5000)
+range({"offset":3050,"limit":3000}, timeout 30000)
+> a byte in the current conversation
+locate({"at_byte":123})
+count({"filename":"output"}, timeout 15000)
+onStartAtApplied()
+range({"offset":0,"limit":40}, timeout 30000)
+scrollToBottom(history-jump)
+located: shown=["line 0line 1line 2line 3…(42)","early","line 8line 9line 10line …(222)"] meta="lines 1–40 of 6050" jumpButton=false
+mode=jumped
+> the same request again, then a time in an archive
+locate({"archive_zone":"agent:a1:archive:1","at_ms":5000})
+count({"filename":"output","archive_zone":"agent:a1:archive:1"}, timeout 15000)
+onStartAtApplied()
+range({"offset":0,"limit":2,"archive_zone":"agent:a1:archive:1"}, timeout 30000)
+scrollToBottom(history-jump)
+archive located: shown=["old 0","old 1"] meta="archived conversation · lines 1–2 of 2" jumpButton=false
+mode=archive archive=agent:a1:archive:1
+> a zone that is the current one, then a failing locate
+locate({"at_ms":6000})
+count({"filename":"output"}, timeout 15000)
+onStartAtApplied()
+range({"offset":0,"limit":40}, timeout 30000)
+scrollToBottom(history-jump)
+locate({"at_ms":7000})
+onStartAtApplied()
+locate failed: shown=["line 0line 1line 2line 3…(42)","early","line 8line 9line 10line …(222)"] meta="couldn't load history: locate failed" jumpButton=false
+> not a position

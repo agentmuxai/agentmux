@@ -1,0 +1,45 @@
+registerPane(hist-1:history)
+usePaneTabVisibility(hist-1)
+getFileSubject(live-1, output)
+subscribe
+startHistoryPoll(cursor,hidden,readBlockId,recover,reloadIfSkipped)
+count({"filename":"output"}, timeout 5000)
+range({"offset":3050,"limit":3000}, timeout 30000)
+newest page: shown=["line 3050line 3051line 3…(27000)"] meta="6050 lines · scroll up for earlier" jumpButton=false
+> jump to line 4000
+count({"filename":"output"}, timeout 15000)
+range({"offset":1000,"limit":3000}, timeout 30000)
+scrollToBottom(history-jump)
+jumped: shown=["line 1000line 1001line 1…(27000)"] meta="lines 1001–4000 of 6050" jumpButton=false
+mode=jumped hasNewer=true hasOlder=true
+> show newer
+range({"offset":4000,"limit":2050}, timeout 15000)
+newer: shown=["line 1000line 1001line 1…(45450)"] meta="lines 1001–6050 of 6050" jumpButton=false
+> open an archive, then jump inside it
+count({"filename":"output","archive_zone":"agent:a1:archive:1"}, timeout 15000)
+range({"offset":0,"limit":2,"archive_zone":"agent:a1:archive:1"}, timeout 30000)
+scrollToBottom(history-jump)
+archive: shown=["old 0","old 1"] meta="archived conversation · lines 1–2 of 2" jumpButton=false
+mode=archive archive=agent:a1:archive:1
+count({"filename":"output","archive_zone":"agent:a1:archive:1"}, timeout 15000)
+range({"offset":0,"limit":1,"archive_zone":"agent:a1:archive:1"}, timeout 30000)
+scrollToBottom(history-jump)
+mode after a jump in an archive=archive
+> a failing archive read
+count({"filename":"output","archive_zone":"agent:a1:archive:1"}, timeout 15000)
+range({"offset":0,"limit":2,"archive_zone":"agent:a1:archive:1"}, timeout 30000)
+archive failed: shown=["old 0"] meta="couldn't load history: range failed" jumpButton=false
+> the archive's close, with no zone
+count({"filename":"output"}, timeout 5000)
+range({"offset":3050,"limit":3000}, timeout 30000)
+scrollToBottom(history-back-to-latest)
+latest again: shown=["line 3050line 3051line 3…(27000)"] meta="6050 lines · scroll up for earlier" jumpButton=false
+mode=live archive=null
+> Latest
+count({"filename":"output"}, timeout 15000)
+range({"offset":0,"limit":100}, timeout 30000)
+scrollToBottom(history-jump)
+count({"filename":"output"}, timeout 5000)
+range({"offset":3050,"limit":3000}, timeout 30000)
+scrollToBottom(history-back-to-latest)
+mode=live

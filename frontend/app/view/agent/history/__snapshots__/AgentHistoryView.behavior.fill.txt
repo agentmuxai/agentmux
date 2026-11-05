@@ -1,0 +1,22 @@
+registerPane(hist-1:history)
+usePaneTabVisibility(hist-1)
+getFileSubject(live-1, output)
+subscribe
+startHistoryPoll(cursor,hidden,readBlockId,recover,reloadIfSkipped)
+count({"filename":"output"}, timeout 5000)
+range({"offset":6050,"limit":3000}, timeout 30000)
+> wheel up at the top
+range({"offset":3050,"limit":3000}, timeout 15000)
+scrollTop = 0
+> wheel down, wheel up away from the top
+> a short page after a jump fills with older pages
+count({"filename":"output"}, timeout 15000)
+range({"offset":6000,"limit":3000}, timeout 30000)
+scrollToBottom(history-jump)
+range({"offset":3000,"limit":3000}, timeout 15000)
+range({"offset":0,"limit":3000}, timeout 15000)
+reads: 5
+> a pane with no height, and one that is tall enough
+count({"filename":"output"}, timeout 15000)
+range({"offset":5990,"limit":3000}, timeout 30000)
+scrollToBottom(history-jump)
