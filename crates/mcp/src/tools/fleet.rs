@@ -420,7 +420,7 @@ async fn run_fleet_bulk_stop(arguments: &Value, cx: &ToolCtx<'_>) -> Result<Stri
         let note = result["note"].as_str().map(str::to_string);
         result = json!({ "succeeded": result["succeeded"], "failed": result["failed"], "pending": windows });
         add_stop_notes(&mut result, note, &pending);
-        let said = result["note"].as_str().map_or_else(|| PENDING_NOTE.to_string(), |n| format!("{n}; {PENDING_NOTE}"));
+        let said = result["note"].as_str().map_or_else(|| pending_note(30), |n| format!("{n}; {}", pending_note(30)));
         result["note"] = json!(said);
     } else if result.get("kept_by_user").is_none() {
         // Nothing waited (all refused or already gone): the same shape.
