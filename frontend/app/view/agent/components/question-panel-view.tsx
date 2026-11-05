@@ -147,7 +147,6 @@ export function QuestionPanelBody(props: QuestionViewProps & { r: AskUserQuestio
     return (
         <>
             <QuestionPanelClip getEl={() => s.rootEl} />
-            {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions */}
             <div
                 ref={(el) => (s.rootEl = el)}
                 class="agent-question-panel"
