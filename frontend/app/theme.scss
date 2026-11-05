@@ -73,6 +73,9 @@
     --fixed-font: normal var(--font-mono-size) / normal var(--font-mono);
     --accent-color: rgb(65, 159, 224);
     --accent-color-rgb: 65, 159, 224;
+    // The AgentMux mark in the title bar's menu button: the brand blue-violet of the dark app icon
+    // (assets/icon/agentmux-dark.svg); light themes take the deeper one of the light icon below.
+    --brand-mark-color: #6b82de;
 
     // Top-bar widget menu icon tokens. The icon bar is a nav-chrome
     // surface — monochrome by default, brighter on hover, accent on
@@ -778,6 +781,8 @@
 // window-controls.win32.scss already uses for dark/light chrome decisions.
 [data-theme-polarity="light"] {
     color-scheme: light;
+    // The brand mark on a light page: agentmux-light.svg's deeper blue-violet.
+    --brand-mark-color: #4b5fcf;
     // The attention magenta, deep enough to read on a light page (5.5:1
     // against white), with white text on it.
     --attention-color: rgb(196, 0, 155);

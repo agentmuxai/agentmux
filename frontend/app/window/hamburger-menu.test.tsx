@@ -13,6 +13,9 @@
  * that stops matching its binding fails here.
  */
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import logoMark from "@/app/asset/logo-mark.svg?raw";
 import { cleanup, render } from "@solidjs/testing-library";
 import { createRoot, createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -530,5 +533,43 @@ describe("DevTools follows dev mode", () => {
             dispose();
         });
         h.win.theme = () => "default";
+    });
+});
+
+// The menu button shows the AgentMux mark (the app icon's four blocks), not three bars.
+describe("the menu button's glyph", () => {
+    const button = () => document.querySelector<HTMLButtonElement>(".hamburger-btn")!;
+
+    beforeEach(() => {
+        h.menu.items = [];
+        render(() => <HamburgerMenu />);
+    });
+
+    afterEach(() => cleanup());
+
+    it("keeps its title, is one button, and draws the glyph for the eye only", () => {
+        expect(button().getAttribute("title")).toBe("Menu");
+        const svg = button().querySelector("svg")!;
+        expect(svg.getAttribute("aria-hidden")).toBe("true");
+        expect(svg.getAttribute("fill")).toBe("currentColor");
+    });
+
+    it("is the app icon's four blocks on a 16 px grid: 16 px wide, every edge on a whole pixel", () => {
+        const svg = button().querySelector("svg")!;
+        expect([svg.getAttribute("width"), svg.getAttribute("height"), svg.getAttribute("viewBox")]).toEqual(["16", "16", "0 0 16 16"]);
+        const drawn = [...svg.querySelectorAll("rect")].map((r) => ["x", "y", "width", "height"].map((a) => Number(r.getAttribute(a))));
+        expect(drawn).toHaveLength(4);
+        for (const rect of drawn) for (const v of rect) expect(Number.isInteger(v)).toBe(true);
+        // The same geometry as frontend/app/asset/logo-mark.svg (a 512 unit square, 32 units to the pixel).
+        const mark = [...logoMark.matchAll(/<rect x="(\d+)" y="(\d+)" width="(\d+)" height="(\d+)"/g)].map((m) => m.slice(1).map((n) => Number(n) / 32));
+        expect(drawn).toEqual(mark);
+    });
+
+    it("takes its colour from the brand-mark token: the dark blue-violet, and the deeper one on light themes", () => {
+        const theme = readFileSync(join(process.cwd(), "frontend/app/theme.scss"), "utf8");
+        const scss = readFileSync(join(process.cwd(), "frontend/app/window/hamburger-menu.scss"), "utf8");
+        expect(scss).toMatch(/\.hamburger-btn \{[^}]*color: var\(--brand-mark-color\)/);
+        expect(theme).toMatch(/--brand-mark-color: #6b82de;/);
+        expect(theme).toMatch(/\[data-theme-polarity="light"\] \{[^}]*--brand-mark-color: #4b5fcf;/);
     });
 });

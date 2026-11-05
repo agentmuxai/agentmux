@@ -261,22 +261,16 @@ export function HamburgerMenu(props: HamburgerMenuProps): JSX.Element {
                 data-drag-region="false"
             >
                 {/*
-                 * Inline SVG with three filled rects instead of
-                 * `fa fa-bars`. Icon-font glyphs rasterized one of
-                 * the three lines on a fractional pixel boundary at
-                 * different chrome zoom levels, making it noticeably
-                 * thinner — and the affected line shifted as zoom
-                 * changed. Filled rects scale uniformly with the
-                 * parent's CSS zoom, no rasterization unevenness.
+                 * The AgentMux mark (frontend/app/asset/logo-mark.svg, the app icon's four blocks) as inline
+                 * rects, not an image or an icon font: they scale evenly with chrome zoom, and every edge
+                 * lands on a whole pixel because the mark is a 16-unit grid drawn at 16 px. Colour comes
+                 * from `--brand-mark-color` (hamburger-menu.scss).
                  */}
-                {/* height 23 (not 22) centers the bars vertically: 3px above
-                    AND below (bars span y=3..20). At 22 they sat 1px low (3px
-                    top / 2px bottom). 23 also gives a crisp 2px button inset
-                    (was a sub-pixel 2.5px). */}
-                <svg width="26" height="23" viewBox="0 0 26 23" fill="currentColor">
-                    <rect x="2" y="3" width="22" height="3" rx="1" />
-                    <rect x="2" y="10" width="22" height="3" rx="1" />
-                    <rect x="2" y="17" width="22" height="3" rx="1" />
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" shape-rendering="crispEdges" aria-hidden="true">
+                    <rect x="2" y="2" width="12" height="2" />
+                    <rect x="2" y="6" width="5" height="8" />
+                    <rect x="9" y="6" width="5" height="3" />
+                    <rect x="9" y="11" width="5" height="3" />
                 </svg>
             </button>
         </FlyoutMenu>

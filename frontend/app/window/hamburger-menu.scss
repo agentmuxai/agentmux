@@ -14,7 +14,7 @@
     width: 28px;
     height: 27px;
     @include mixins.button-reset;
-    color: var(--accent-color);
+    color: var(--brand-mark-color);
     -webkit-app-region: no-drag;
     cursor: default;
     align-self: center;
@@ -36,18 +36,22 @@
     margin-left: 4px;
     margin-right: 4px;
 
+    // Toward the text colour, so the mark brightens on a dark theme and deepens on a light one.
     &:hover {
-        color: color-mix(in srgb, var(--accent-color), white 25%);
+        color: color-mix(in srgb, var(--brand-mark-color), var(--main-text-color) 30%);
     }
 
-    // Inline SVG (replaces fa-bars icon font). Icon fonts rasterize
-    // each glyph independently at the zoomed size; tiny sub-pixel
-    // boundary differences caused one of the three hamburger bars
-    // to render thinner than the other two, with a different bar
-    // affected at each zoom level. SVG rectangles fill uniformly
-    // and scale predictably with parent zoom.
+    &:active {
+        color: color-mix(in srgb, var(--brand-mark-color), var(--main-text-color) 50%);
+    }
+
+    // Inline SVG (the AgentMux mark; before it, three bars in place of the fa-bars icon font). Icon fonts
+    // rasterize each glyph at its own fractional size; SVG rectangles fill uniformly and scale predictably
+    // with parent zoom. The 16 px mark sits in a 27 px button: the 1px bottom margin makes the free space
+    // 10px, so the mark's top edge is at a whole 5px, not 5.5.
     svg {
         display: block;
+        margin-bottom: 1px;
     }
 
     // macOS: pinned to the far right of the title bar, after the action
