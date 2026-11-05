@@ -28,7 +28,7 @@ export interface TrackerConfig {
     staleMs: number;
 }
 
-export const DEFAULT_TRACKER: TrackerConfig = { marginPx: 8, dwellMs: 120, slowPxPerMs: 0.35, staleMs: 1500 };
+export const DEFAULT_TRACKER: TrackerConfig = { marginPx: 8, dwellMs: 120, slowPxPerMs: 0.35, staleMs: 600 };
 
 export interface Step {
     /** The candidate to show now. */

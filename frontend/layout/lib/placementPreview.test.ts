@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { previewPlacement, resetDropIntent } from "./placementPreview";
+import { clearPlacement, previewPlacement, resetAllDropIntent, resetDropIntent } from "./placementPreview";
 import { dragState } from "./tilelayout-drag-state";
 import { DropDirection, LayoutTreeActionType } from "./types";
 
@@ -58,5 +58,32 @@ describe("previewPlacement", () => {
         reducer.mockClear();
         vi.advanceTimersByTime(500);
         expect(reducer).not.toHaveBeenCalled();
+    });
+
+    it("shows nothing when the ghost was cleared while a candidate waited", () => {
+        vi.useFakeTimers();
+        dragState.nodeId = "dragged";
+        previewPlacement(model, input("A", 40, 200));
+        vi.setSystemTime(Date.now() + 50);
+        previewPlacement(model, input("B", 3000, 3000));
+        clearPlacement(model);
+        reducer.mockClear();
+        vi.advanceTimersByTime(500);
+        expect(reducer).not.toHaveBeenCalled();
+    });
+
+    it("starts afresh after the pointer was over the dragged pane", () => {
+        previewPlacement(model, input("A", 40, 200));
+        clearPlacement(model, true);
+        const { targetId } = previewPlacement(model, input("B", 40, 200));
+        expect(targetId).toBe("B");
+    });
+
+    it("resets every tab's steadying at the end of a drag", () => {
+        const other = { treeState: { rootNode: undefined }, treeReducer: vi.fn() } as never;
+        previewPlacement(other, input("A", 40, 200));
+        resetAllDropIntent();
+        expect(previewPlacement(other, input("B", 40, 200)).targetId).toBe("B");
+        resetDropIntent(other);
     });
 });

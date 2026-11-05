@@ -32,7 +32,7 @@ import {
     LayoutTreeActionType,
     LayoutTreeComputeMoveNodeAction,
 } from "./types";
-import { previewPlacement } from "./placementPreview";
+import { clearPlacement, previewPlacement } from "./placementPreview";
 import {
     clampCrossTabDirection,
     noteCrossTabDrop,
@@ -258,7 +258,7 @@ export const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
             offset.y >= originRect.top &&
             offset.y <= originRect.top + originRect.height
         ) {
-            props.layoutModel.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
+            clearPlacement(props.layoutModel, true);
             return;
         }
 
@@ -336,7 +336,7 @@ export const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
             y: input.clientY - box.y,
         });
         if (!marked) return false;
-        props.layoutModel.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
+        clearPlacement(props.layoutModel, true);
         setCurrentDragPayload(marked);
         return true;
     };
@@ -357,7 +357,7 @@ export const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
                 // Only clear when this container was the innermost match;
                 // a transition INTO an inner overlay-node should not
                 // clear (the inner's onDrag will set a fresh action).
-                props.layoutModel.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
+                clearPlacement(props.layoutModel);
             },
             onDrop: ({ source, location }) => {
                 // Released over the dragged pane itself (the only place with no ghost): the pane tears off
@@ -471,7 +471,7 @@ const OverlayNode = (props: OverlayNodeProps) => {
                 computeDropDirection(cursor.clientX, cursor.clientY);
             },
             onDragLeave: () => {
-                props.layoutModel.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
+                clearPlacement(props.layoutModel);
             },
             onDrop: () => {
                 // Valid in-window drop — clear cross-window payload so dragend monitor skips.

@@ -80,6 +80,8 @@ interface Steadying {
 }
 
 const steadying = new WeakMap<LayoutModel, Steadying>();
+/** The models with a drag being steadied, so the end of a drag can reset the destination tab's too. */
+const steadied = new Set<LayoutModel>();
 
 function steadyingOf(model: LayoutModel, cross: boolean): Steadying {
     const have = steadying.get(model);
@@ -89,6 +91,7 @@ function steadyingOf(model: LayoutModel, cross: boolean): Steadying {
     const config = cross ? { ...DEFAULT_TRACKER, dwellMs: 0 } : DEFAULT_TRACKER;
     const made = { tracker: new DropIntentTracker(config), cross, inputs: new Map<string, PlacementInput>() };
     steadying.set(model, made);
+    steadied.add(model);
     return made;
 }
 
@@ -98,6 +101,22 @@ export function resetDropIntent(model: LayoutModel): void {
     if (!have) return;
     clearTimeout(have.timer);
     steadying.delete(model);
+    steadied.delete(model);
+}
+
+/**
+ * Clear the ghost. A candidate still waiting must not bring it back, so its timer goes too; `reset` also drops
+ * the armed candidate (the pointer is over the dragged pane itself, where there is none).
+ */
+export function clearPlacement(model: LayoutModel, reset = false): void {
+    if (reset) resetDropIntent(model);
+    else clearTimeout(steadying.get(model)?.timer);
+    model.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
+}
+
+/** The drag is over, in whichever tab it was steadied (a pane dragged to another tab has two). */
+export function resetAllDropIntent(): void {
+    for (const model of [...steadied]) resetDropIntent(model);
 }
 
 /**
