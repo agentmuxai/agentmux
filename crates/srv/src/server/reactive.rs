@@ -733,7 +733,6 @@ async fn admit(
     verify_lan_signature(state, req).await;
     verify_cross_channel_signature(state, req);
     lan_v2::log_receipt(req);
-    crate::backend::reactive::sent_audit::record(req);
     let mut replay = replay::reserve(req, now_unix_secs());
     req.route_unsigned_target();
     resolve_transcript_request_tier_fields(&state.mstore, req);
@@ -747,6 +746,7 @@ async fn admit(
     if let Some(refused) = super::jekt_ack::refuse_empty_reply(state, auth_via, req) {
         return Err(refused);
     }
+    crate::backend::reactive::sent_audit::record(req);
     // An agent here out of quota or signed out would lose it in a failed turn, and a Claude
     // session gone cold should not be woken by a routine one: hold it, or refuse it where it
     // can't be held (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §5, SPEC_JEKT_HOLD_FOR_COLD_SESSIONS_

@@ -36,7 +36,9 @@ fn line(req: &InjectionRequest) -> Option<AuditLogEntry> {
 }
 
 /// Writes the `sent` line of `req` to the audit file, when it has one, after giving a request with no id the one it will
-/// be delivered under. Not kept in the in-memory ring: that serves the deliveries, and a message would take two places in it.
+/// be delivered under. Called from `admit` once the message is accepted: after the replay check (which treats a signed
+/// message with no id as one it cannot count, so it must see the request as it came) and the refusals of files and of an
+/// empty reply, and before a hold, so a held message is joined to its later delivery. Not kept in the in-memory ring: that serves the deliveries, and a message would take two places in it.
 pub fn record(req: &mut InjectionRequest) {
     req.request_id = Some(req.request_id.take().filter(|id| !id.is_empty()).unwrap_or_else(|| uuid::Uuid::new_v4().to_string()));
     if let Some(entry) = line(req) {
