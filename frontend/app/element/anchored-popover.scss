@@ -11,6 +11,11 @@
     z-index: var(--z-popover);
 }
 
+// A tooltip sits above every other panel.
+.anchored-popover.anchored-popover--tooltip {
+    z-index: var(--z-tooltip);
+}
+
 // A menu-styled panel (`.menu` body) keeps the flyout-menu tier it had.
 .anchored-popover--menu {
     z-index: var(--z-flyout-menu);
