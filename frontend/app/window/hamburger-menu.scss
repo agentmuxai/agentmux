@@ -39,17 +39,13 @@
     width: 100%;
     height: 100%;
     @include mixins.button-reset;
-    color: var(--brand-mark-color);
+    // The theme's primary colour, as the three bars were: the mark follows the theme.
+    color: var(--accent-color);
     -webkit-app-region: no-drag;
     cursor: default;
 
-    // Toward the text colour, so the mark brightens on a dark theme and deepens on a light one.
     &:hover {
-        color: color-mix(in srgb, var(--brand-mark-color), var(--main-text-color) 30%);
-    }
-
-    &:active {
-        color: color-mix(in srgb, var(--brand-mark-color), var(--main-text-color) 50%);
+        color: color-mix(in srgb, var(--accent-color), white 25%);
     }
 
     // Inline SVG (the AgentMux mark; before it, three bars in place of the fa-bars icon font). Icon fonts

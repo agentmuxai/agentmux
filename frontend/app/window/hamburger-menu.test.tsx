@@ -587,11 +587,10 @@ describe("the menu button's glyph", () => {
         expect(scss).toMatch(/height: calc\(5 \* var\(--mark-cell\)\);/);
     });
 
-    it("takes its colour from the brand-mark token: the dark blue-violet, and the deeper one on light themes", () => {
-        const theme = readFileSync(join(process.cwd(), "frontend/app/theme.scss"), "utf8");
+    it("takes its colour from the theme's primary colour, as the three bars did, brighter on hover", () => {
         const scss = readFileSync(join(process.cwd(), "frontend/app/window/hamburger-menu.scss"), "utf8");
-        expect(scss).toMatch(/\.hamburger-btn \{[^}]*color: var\(--brand-mark-color\)/);
-        expect(theme).toMatch(/--brand-mark-color: #6b82de;/);
-        expect(theme).toMatch(/\[data-theme-polarity="light"\] \{[^}]*--brand-mark-color: #4b5fcf;/);
+        expect(scss).toMatch(/\.hamburger-btn \{[^}]*color: var\(--accent-color\);/);
+        expect(scss).toMatch(/&:hover \{\s*color: color-mix\(in srgb, var\(--accent-color\), white 25%\);/);
+        expect(scss).not.toMatch(/brand-mark/);
     });
 });
