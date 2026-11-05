@@ -515,7 +515,7 @@
 148 frontend/app/view/browser/use-freeze-frame.ts::useFreezeFrame
 394 frontend/app/view/browser/use-pane-rect-sync.ts::usePaneRectSync
 155 frontend/app/view/bundle/BundleProviderInstructionsSection.tsx::BundleProviderInstructionsSection
-414 frontend/app/view/bundle/bundle-manager.tsx::BundleManagerBody
+411 frontend/app/view/bundle/bundle-manager.tsx::BundleManagerBody
 118 frontend/app/view/bundle/components/BundleImportConfirmModal.tsx::BundleImportConfirmModalPanel
 360 frontend/app/view/bundle/components/BundleImportPreviewModal.tsx::BundleImportPreviewModalPanel
 432 frontend/app/view/drone/drone-view.tsx::Canvas
@@ -576,7 +576,6 @@
 268 frontend/app/view/term/termwrap.ts::TermWrap::init
 128 frontend/app/view/toolchain/CliDiskSpace.tsx::CliDiskSpace
 103 frontend/app/view/toolchain/SystemToolInstallInline.tsx::SystemToolInstallInline
-563 frontend/app/view/toolchain/toolchain-view.tsx::ToolchainView
 105 frontend/app/view/tower/tower-agents.tsx::Detail
 127 frontend/app/view/tower/tower-model.ts::TowerViewModel::constructor
 224 frontend/app/view/tower/tower-view.tsx::HostTable

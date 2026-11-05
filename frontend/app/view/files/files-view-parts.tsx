@@ -7,7 +7,7 @@
  * out of FilesView; each part reads the hook groups the view built.
  */
 
-import { ConfirmDialog } from "@/app/components/confirm-dialog";
+import { ConfirmModal } from "@/app/element/confirm-modal";
 import { ContextMenu } from "@/app/components/context-menu";
 import { endPathDrag } from "@/app/drag/file-drop";
 import { Button } from "@/app/element/ui";
@@ -103,9 +103,9 @@ export function FilesViewLayout({ v }: { v: FilesViewParts }): JSX.Element {
             </Show>
             <Show when={fv.confirm()}>
                 {(c) => (
-                    <ConfirmDialog
-                        title={c().title}
-                        message={c().message}
+                    <ConfirmModal
+                        open={true} scope="pane" destructive
+                        title={c().title} description={c().message}
                         confirmLabel={c().confirmLabel}
                         onConfirm={() => {
                             c().onConfirm();
