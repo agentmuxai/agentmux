@@ -61,10 +61,10 @@ export function healDuplicateBlocks(root: LayoutNode | undefined): string[] {
         }
         if (!node.data) return true;
         const members = blockIdsOfLeaf(node);
-        const fresh = members.filter((id) => !kept.has(id));
-        members.forEach((id) => kept.add(id));
+        // Each id is kept as it is accepted, so a block repeated inside one strip loses its repeats too.
+        const fresh = members.filter((id) => !kept.has(id) && !!kept.add(id));
         if (fresh.length === members.length) return true;
-        removed.push(...members.filter((id) => !fresh.includes(id)));
+        removed.push(...members.filter((id, i) => members.indexOf(id) !== i || !fresh.includes(id)));
         if (fresh.length === 0) return false;
         // The visible tab stays the one that was visible when it survives (`blockId` and `activeBlockId` name
         // it together everywhere else), else the first member left.

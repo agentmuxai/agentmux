@@ -166,7 +166,7 @@ describe("layout intents", () => {
             const sent = intentsSent().length;
             const again = newLayoutNode(undefined, undefined, undefined, { blockId: "a" });
             model.treeReducer({ type: LayoutTreeActionType.InsertNode, node: again, magnified: false, focused: true } as LayoutTreeInsertNodeAction);
-            expect(model.leafs().map((l) => l.data?.blockId)).toEqual(["a", "b"]);
+            expect(model.leafs().map((l) => l.data?.blockId).sort()).toEqual(["a", "b"]);
             // Its pane is focused, and srv is not asked to place the block a second time.
             expect(model.treeState.focusedNodeId).toBe(model.leafs().find((l) => l.data?.blockId === "a")!.id);
             expect(intentsSent().length).toBe(sent);

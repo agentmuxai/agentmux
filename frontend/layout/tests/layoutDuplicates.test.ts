@@ -68,6 +68,13 @@ describe("a block held in two places", () => {
         expect(t3.children![1].data).toMatchObject({ blockStack: ["b", "c"], activeBlockId: "c", blockId: "c" });
     });
 
+    it("drops a block repeated inside one strip", () => {
+        const tree = row("r", leaf("one", "a", ["a", "b", "a"]), leaf("two", "c"));
+        expect(healDuplicateBlocks(tree)).toEqual(["a"]);
+        expect(leafHolding(tree, "b")?.data).toMatchObject({ blockStack: ["a", "b"], blockId: "a" });
+        expect(duplicateBlockIds(tree)).toEqual([]);
+    });
+
     it("leaves a healthy tree untouched", () => {
         const tree = row("r", leaf("1", "a"), leaf("2", "b", ["b", "c"]));
         const before = JSON.stringify(tree);
