@@ -1,0 +1,729 @@
+  menu: item "Edit" icon=pen sub=- enabled=-
+  menu: submenu "Bind to agent" icon=link sub=- enabled=-
+    menu: item "Korp" icon=- sub=- enabled=-
+    menu: item "AgentY" icon=- sub=- enabled=-
+  menu: separator "" icon=- sub=- enabled=-
+  menu: item "Delete…" icon=trash sub=- enabled=-
+== right-click git, observed card still open
+<body>
+  <div>
+    <div class="ui-card-section ui-density-compact mcp-cards">
+      <div class="ui-card-section-header">
+        <h2 class="ui-card-section-title">
+          "MCP servers"
+        <span class="ui-card-section-count">
+          "8"
+        <span class="ui-filter ui-card-section-filter">
+          <i aria-hidden="true" class="fa-solid fa-magnifying-glass ui-search-icon">
+          <input type="text" class="ui-filter-input" data-pane-focus="" placeholder="Filter servers" aria-label="Filter servers" value="">
+        <button type="button" class="ui-button ui-tone-accent mcp-cards-add">
+          <i aria-hidden="true" class="fa-solid fa-plus">
+          "Add server"
+      <div class="ui-card-grid ui-card-grid--chip mcp-add-gallery" style="--ui-card-min: 124px;" role="group" aria-label="Add an MCP server">
+        <div class="ui-card-cell" data-card-key="ableton-live">
+          <div role="button" data-preset="ableton-live" aria-label="Ableton Live, added: open it" class="ui-card ui-card--chip mcp-preset-chip">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-music">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "Ableton Live"
+              <span class="ui-card-subtitle">
+                "Added"
+        <div class="ui-card-cell" data-card-key="touchdesigner">
+          <div role="button" data-preset="touchdesigner" aria-label="Add TouchDesigner" class="ui-card ui-card--chip mcp-preset-chip">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-diagram-project">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "TouchDesigner"
+              <span class="ui-card-subtitle">
+                "Add"
+        <div class="ui-card-cell" data-card-key="\u0000custom">
+          <div role="button" data-preset="custom" aria-label="Add a custom server" class="ui-card ui-card--chip mcp-preset-chip">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-plus">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "Custom server"
+              <span class="ui-card-subtitle">
+                "Any command or URL"
+      <h4 class="ui-card-group-heading">
+        "Your servers"
+      <div class="ui-card-grid mcp-servers-grid" style="--ui-card-min: 200px;" role="group" aria-label="Your servers">
+        <div class="ui-card-cell" data-card-key="s1">
+          <div role="button" aria-expanded="false" data-mcp-server="Ableton Live" aria-label="Ableton Live" class="ui-card mcp-server-card">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-music">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "Ableton Live"
+              <span class="ui-card-subtitle">
+                "stdio · uvx"
+              <span class="ui-card-meta">
+                <span>
+                  "2 agents"
+            <span role="img" class="ui-status-dot ui-status-dot--ok ui-card-status" aria-label="Connected for 1 agent." title="Connected for 1 agent.">
+        <div class="ui-card-cell" data-card-key="s2">
+          <div role="button" aria-expanded="false" data-mcp-server="git" aria-label="git" class="ui-card mcp-server-card">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-plug">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "git"
+              <span class="ui-card-subtitle">
+                "stdio · npx"
+              <span class="ui-card-meta">
+                <span>
+                  "All agents"
+                <span>
+                  "Containers too"
+            <span role="img" class="ui-status-dot ui-status-dot--warn ui-card-status" aria-label="Needs sign-in for AgentY." title="Needs sign-in for AgentY.">
+        <div class="ui-card-cell" data-card-key="s3">
+          <div role="button" aria-expanded="false" data-mcp-server="linear" aria-label="linear" class="ui-card is-attention mcp-server-card">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-plug">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "linear"
+              <span class="ui-card-subtitle">
+                "http · mcp.linear.app/sse"
+              <span class="ui-card-meta">
+                <span>
+                  "0 agents"
+            <span role="img" class="ui-status-dot ui-status-dot--error ui-card-status" aria-label="Failed for Korp." title="Failed for Korp.">
+        <div class="ui-card-cell" data-card-key="s4">
+          <div role="button" aria-expanded="false" data-mcp-server="notes" aria-label="notes" class="ui-card mcp-server-card">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-plug">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "notes"
+              <span class="ui-card-subtitle">
+                "stdio"
+              <span class="ui-card-meta">
+                <span>
+                  "0 agents"
+            <span role="img" class="ui-status-dot ui-status-dot--idle ui-card-status" aria-label="No running agent reports it." title="No running agent reports it.">
+        <div class="ui-card-cell" data-card-key="s5">
+          <div role="button" aria-expanded="false" data-mcp-server="fetch" aria-label="fetch" class="ui-card mcp-server-card">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-plug">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "fetch"
+              <span class="ui-card-subtitle">
+                "stdio"
+              <span class="ui-card-meta">
+                <span>
+                  "0 agents"
+            <span role="img" class="ui-status-dot ui-status-dot--warn ui-card-status" aria-label="No running agent reports it. Not loaded by AgentY. Restart it to apply." title="No running agent reports it. Not loaded by AgentY. Restart it to apply.">
+      <h4 class="ui-card-group-heading">
+        "Also in use"
+      <div class="ui-card-grid mcp-observed-grid" style="--ui-card-min: 200px;" role="group" aria-label="Also in use">
+        <div class="ui-card-cell" data-card-key="builtin\u0000agentmux">
+          <div role="button" aria-expanded="false" data-mcp-observed="agentmux" aria-label="agentmux" class="ui-card mcp-observed-card">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-plug">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "agentmux"
+              <span class="ui-card-subtitle">
+                "Built in"
+              <span class="ui-card-meta">
+                <span>
+                  "1 agent"
+            <span role="img" class="ui-status-dot ui-status-dot--ok ui-card-status" aria-label="Connected for 1 agent." title="Connected for 1 agent.">
+        <div class="ui-card-cell" data-card-key="claudeai\u0000github">
+          <div role="button" aria-expanded="true" data-mcp-observed="github" aria-label="github" class="ui-card is-selected mcp-observed-card">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-plug">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "github"
+              <span class="ui-card-subtitle">
+                "claude.ai connector"
+              <span class="ui-card-meta">
+                <span>
+                  "1 agent, 1 not connected"
+            <span role="img" class="ui-status-dot ui-status-dot--warn ui-card-status" aria-label="Starting for AgentY." title="Starting for AgentY.">
+        <div class="ui-card-detail" style="--ui-card-caret-left: 75%;">
+          <div class="mcp-detail">
+            <p class="mcp-detail-note">
+              "claude.ai connector"
+              ": not in AgentMux's catalog, so it is read-only here."
+            <ul class="mcp-uses" aria-label="Agents that report it">
+              <li class="mcp-use" data-status="pending">
+                <span role="img" class="ui-status-dot ui-status-dot--busy" aria-label="starting" title="starting">
+                <span class="mcp-use-agent">
+                  "AgentY"
+                <span class="mcp-use-status">
+                  "starting"
+                <span class="mcp-use-tools">
+                  "2"
+                  "tools"
+        <div class="ui-card-cell" data-card-key="claudeai\u0000slack">
+          <div role="button" aria-expanded="false" data-mcp-observed="slack" aria-label="slack" class="ui-card mcp-observed-card">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-plug">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "slack"
+              <span class="ui-card-subtitle">
+                "claude.ai connector"
+              <span class="ui-card-meta">
+                <span>
+                  "1 agent"
+            <span role="img" class="ui-status-dot ui-status-dot--ok ui-card-status" aria-label="Connected for 1 agent." title="Connected for 1 agent.">
+  rpc McpCatalogListCommand [{}]
+  rpc ListAgentDefinitionsCommand []
+  rpc McpObservedListCommand []
+== bound to AgentY
+<body>
+  <div>
+    <div class="ui-card-section ui-density-compact mcp-cards">
+      <div class="ui-card-section-header">
+        <h2 class="ui-card-section-title">
+          "MCP servers"
+        <span class="ui-card-section-count">
+          "8"
+        <span class="ui-filter ui-card-section-filter">
+          <i aria-hidden="true" class="fa-solid fa-magnifying-glass ui-search-icon">
+          <input type="text" class="ui-filter-input" data-pane-focus="" placeholder="Filter servers" aria-label="Filter servers" value="">
+        <button type="button" class="ui-button ui-tone-accent mcp-cards-add">
+          <i aria-hidden="true" class="fa-solid fa-plus">
+          "Add server"
+      <div class="ui-card-grid ui-card-grid--chip mcp-add-gallery" style="--ui-card-min: 124px;" role="group" aria-label="Add an MCP server">
+        <div class="ui-card-cell" data-card-key="ableton-live">
+          <div role="button" data-preset="ableton-live" aria-label="Ableton Live, added: open it" class="ui-card ui-card--chip mcp-preset-chip">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-music">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "Ableton Live"
+              <span class="ui-card-subtitle">
+                "Added"
+        <div class="ui-card-cell" data-card-key="touchdesigner">
+          <div role="button" data-preset="touchdesigner" aria-label="Add TouchDesigner" class="ui-card ui-card--chip mcp-preset-chip">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-diagram-project">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "TouchDesigner"
+              <span class="ui-card-subtitle">
+                "Add"
+        <div class="ui-card-cell" data-card-key="\u0000custom">
+          <div role="button" data-preset="custom" aria-label="Add a custom server" class="ui-card ui-card--chip mcp-preset-chip">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-plus">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "Custom server"
+              <span class="ui-card-subtitle">
+                "Any command or URL"
+      <h4 class="ui-card-group-heading">
+        "Your servers"
+      <div class="ui-card-grid mcp-servers-grid" style="--ui-card-min: 200px;" role="group" aria-label="Your servers">
+        <div class="ui-card-cell" data-card-key="s1">
+          <div role="button" aria-expanded="false" data-mcp-server="Ableton Live" aria-label="Ableton Live" class="ui-card mcp-server-card">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-music">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "Ableton Live"
+              <span class="ui-card-subtitle">
+                "stdio · uvx"
+              <span class="ui-card-meta">
+                <span>
+                  "2 agents"
+            <span role="img" class="ui-status-dot ui-status-dot--ok ui-card-status" aria-label="Connected for 1 agent." title="Connected for 1 agent.">
+        <div class="ui-card-cell" data-card-key="s2">
+          <div role="button" aria-expanded="false" data-mcp-server="git" aria-label="git" class="ui-card mcp-server-card">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-plug">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "git"
+              <span class="ui-card-subtitle">
+                "stdio · npx"
+              <span class="ui-card-meta">
+                <span>
+                  "All agents"
+                <span>
+                  "Containers too"
+            <span role="img" class="ui-status-dot ui-status-dot--warn ui-card-status" aria-label="Needs sign-in for AgentY." title="Needs sign-in for AgentY.">
+        <div class="ui-card-cell" data-card-key="s3">
+          <div role="button" aria-expanded="false" data-mcp-server="linear" aria-label="linear" class="ui-card is-attention mcp-server-card">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-plug">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "linear"
+              <span class="ui-card-subtitle">
+                "http · mcp.linear.app/sse"
+              <span class="ui-card-meta">
+                <span>
+                  "0 agents"
+            <span role="img" class="ui-status-dot ui-status-dot--error ui-card-status" aria-label="Failed for Korp." title="Failed for Korp.">
+        <div class="ui-card-cell" data-card-key="s4">
+          <div role="button" aria-expanded="false" data-mcp-server="notes" aria-label="notes" class="ui-card mcp-server-card">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-plug">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "notes"
+              <span class="ui-card-subtitle">
+                "stdio"
+              <span class="ui-card-meta">
+                <span>
+                  "0 agents"
+            <span role="img" class="ui-status-dot ui-status-dot--idle ui-card-status" aria-label="No running agent reports it." title="No running agent reports it.">
+        <div class="ui-card-cell" data-card-key="s5">
+          <div role="button" aria-expanded="false" data-mcp-server="fetch" aria-label="fetch" class="ui-card mcp-server-card">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-plug">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "fetch"
+              <span class="ui-card-subtitle">
+                "stdio"
+              <span class="ui-card-meta">
+                <span>
+                  "0 agents"
+            <span role="img" class="ui-status-dot ui-status-dot--warn ui-card-status" aria-label="No running agent reports it. Not loaded by AgentY. Restart it to apply." title="No running agent reports it. Not loaded by AgentY. Restart it to apply.">
+      <h4 class="ui-card-group-heading">
+        "Also in use"
+      <div class="ui-card-grid mcp-observed-grid" style="--ui-card-min: 200px;" role="group" aria-label="Also in use">
+        <div class="ui-card-cell" data-card-key="builtin\u0000agentmux">
+          <div role="button" aria-expanded="false" data-mcp-observed="agentmux" aria-label="agentmux" class="ui-card mcp-observed-card">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-plug">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "agentmux"
+              <span class="ui-card-subtitle">
+                "Built in"
+              <span class="ui-card-meta">
+                <span>
+                  "1 agent"
+            <span role="img" class="ui-status-dot ui-status-dot--ok ui-card-status" aria-label="Connected for 1 agent." title="Connected for 1 agent.">
+        <div class="ui-card-cell" data-card-key="claudeai\u0000github">
+          <div role="button" aria-expanded="true" data-mcp-observed="github" aria-label="github" class="ui-card is-selected mcp-observed-card">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-plug">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "github"
+              <span class="ui-card-subtitle">
+                "claude.ai connector"
+              <span class="ui-card-meta">
+                <span>
+                  "1 agent, 1 not connected"
+            <span role="img" class="ui-status-dot ui-status-dot--warn ui-card-status" aria-label="Starting for AgentY." title="Starting for AgentY.">
+        <div class="ui-card-detail" style="--ui-card-caret-left: 75%;">
+          <div class="mcp-detail">
+            <p class="mcp-detail-note">
+              "claude.ai connector"
+              ": not in AgentMux's catalog, so it is read-only here."
+            <ul class="mcp-uses" aria-label="Agents that report it">
+              <li class="mcp-use" data-status="pending">
+                <span role="img" class="ui-status-dot ui-status-dot--busy" aria-label="starting" title="starting">
+                <span class="mcp-use-agent">
+                  "AgentY"
+                <span class="mcp-use-status">
+                  "starting"
+                <span class="mcp-use-tools">
+                  "2"
+                  "tools"
+        <div class="ui-card-cell" data-card-key="claudeai\u0000slack">
+          <div role="button" aria-expanded="false" data-mcp-observed="slack" aria-label="slack" class="ui-card mcp-observed-card">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-plug">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "slack"
+              <span class="ui-card-subtitle">
+                "claude.ai connector"
+              <span class="ui-card-meta">
+                <span>
+                  "1 agent"
+            <span role="img" class="ui-status-dot ui-status-dot--ok ui-card-status" aria-label="Connected for 1 agent." title="Connected for 1 agent.">
+  rpc McpCatalogListCommand [{}]
+  rpc McpCatalogBindCommand [{"agent_id":"a2","mcp_id":"s2"}]
+== Edit: observed card closed, form open
+<body>
+  <div>
+    <div class="ui-card-section ui-density-compact mcp-cards">
+      <div class="ui-card-section-header">
+        <h2 class="ui-card-section-title">
+          "MCP servers"
+        <span class="ui-card-section-count">
+          "8"
+        <span class="ui-filter ui-card-section-filter">
+          <i aria-hidden="true" class="fa-solid fa-magnifying-glass ui-search-icon">
+          <input type="text" class="ui-filter-input" data-pane-focus="" placeholder="Filter servers" aria-label="Filter servers" value="">
+        <button type="button" class="ui-button ui-tone-accent mcp-cards-add">
+          <i aria-hidden="true" class="fa-solid fa-plus">
+          "Add server"
+      <div class="ui-card-grid ui-card-grid--chip mcp-add-gallery" style="--ui-card-min: 124px;" role="group" aria-label="Add an MCP server">
+        <div class="ui-card-cell" data-card-key="ableton-live">
+          <div role="button" data-preset="ableton-live" aria-label="Ableton Live, added: open it" class="ui-card ui-card--chip mcp-preset-chip">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-music">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "Ableton Live"
+              <span class="ui-card-subtitle">
+                "Added"
+        <div class="ui-card-cell" data-card-key="touchdesigner">
+          <div role="button" data-preset="touchdesigner" aria-label="Add TouchDesigner" class="ui-card ui-card--chip mcp-preset-chip">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-diagram-project">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "TouchDesigner"
+              <span class="ui-card-subtitle">
+                "Add"
+        <div class="ui-card-cell" data-card-key="\u0000custom">
+          <div role="button" data-preset="custom" aria-label="Add a custom server" class="ui-card ui-card--chip mcp-preset-chip">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-plus">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "Custom server"
+              <span class="ui-card-subtitle">
+                "Any command or URL"
+      <h4 class="ui-card-group-heading">
+        "Your servers"
+      <div class="ui-card-grid mcp-servers-grid" style="--ui-card-min: 200px;" role="group" aria-label="Your servers">
+        <div class="ui-card-cell" data-card-key="s1">
+          <div role="button" aria-expanded="false" data-mcp-server="Ableton Live" aria-label="Ableton Live" class="ui-card mcp-server-card">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-music">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "Ableton Live"
+              <span class="ui-card-subtitle">
+                "stdio · uvx"
+              <span class="ui-card-meta">
+                <span>
+                  "2 agents"
+            <span role="img" class="ui-status-dot ui-status-dot--ok ui-card-status" aria-label="Connected for 1 agent." title="Connected for 1 agent.">
+        <div class="ui-card-cell" data-card-key="s2">
+          <div role="button" aria-expanded="true" data-mcp-server="git" aria-label="git" class="ui-card is-selected mcp-server-card">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-plug">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "git"
+              <span class="ui-card-subtitle">
+                "stdio · npx"
+              <span class="ui-card-meta">
+                <span>
+                  "All agents"
+                <span>
+                  "Containers too"
+            <span role="img" class="ui-status-dot ui-status-dot--warn ui-card-status" aria-label="Needs sign-in for AgentY." title="Needs sign-in for AgentY.">
+        <div class="ui-card-detail" style="--ui-card-caret-left: 75%;">
+          <form class="mcp-detail mcp-server-form" aria-label="Edit git">
+            <div class="ui-field ui-field--stacked">
+              <div class="ui-field-text">
+                <label class="ui-field-label" for="ui-field-cl-N">
+                  "Name"
+              <div class="ui-field-control">
+                <input placeholder="e.g. filesystem" type="text" class="ui-input" value="git">
+            <div class="ui-field ui-field--stacked">
+              <div class="ui-field-text">
+                <label class="ui-field-label" for="ui-field-cl-N">
+                  "Transport"
+              <div class="ui-field-control">
+                <input placeholder="stdio" type="text" class="ui-input" value="stdio">
+            <div class="ui-field ui-field--stacked">
+              <div class="ui-field-text">
+                <label class="ui-field-label" for="mcp-config-cl-12">
+                  "Config (JSON)"
+              <div class="ui-field-control">
+                <textarea class="ui-input ui-textarea ui-textarea--mono" value="{\"command\":\"npx\",\"args\":[\"-y\",\"git-mcp\"],\"env\":{\"GITHUB_TOKEN\":\"ghp_secret123\"}}">
+            <div class="mcp-detail-actions">
+              <button type="button" class="ui-button ui-tone-neutral">
+                "Cancel"
+              <button type="submit" class="ui-button ui-tone-accent">
+                "Save"
+        <div class="ui-card-cell" data-card-key="s3">
+          <div role="button" aria-expanded="false" data-mcp-server="linear" aria-label="linear" class="ui-card is-attention mcp-server-card">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-plug">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "linear"
+              <span class="ui-card-subtitle">
+                "http · mcp.linear.app/sse"
+              <span class="ui-card-meta">
+                <span>
+                  "0 agents"
+            <span role="img" class="ui-status-dot ui-status-dot--error ui-card-status" aria-label="Failed for Korp." title="Failed for Korp.">
+        <div class="ui-card-cell" data-card-key="s4">
+          <div role="button" aria-expanded="false" data-mcp-server="notes" aria-label="notes" class="ui-card mcp-server-card">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-plug">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "notes"
+              <span class="ui-card-subtitle">
+                "stdio"
+              <span class="ui-card-meta">
+                <span>
+                  "0 agents"
+            <span role="img" class="ui-status-dot ui-status-dot--idle ui-card-status" aria-label="No running agent reports it." title="No running agent reports it.">
+        <div class="ui-card-cell" data-card-key="s5">
+          <div role="button" aria-expanded="false" data-mcp-server="fetch" aria-label="fetch" class="ui-card mcp-server-card">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-plug">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "fetch"
+              <span class="ui-card-subtitle">
+                "stdio"
+              <span class="ui-card-meta">
+                <span>
+                  "0 agents"
+            <span role="img" class="ui-status-dot ui-status-dot--warn ui-card-status" aria-label="No running agent reports it. Not loaded by AgentY. Restart it to apply." title="No running agent reports it. Not loaded by AgentY. Restart it to apply.">
+      <h4 class="ui-card-group-heading">
+        "Also in use"
+      <div class="ui-card-grid mcp-observed-grid" style="--ui-card-min: 200px;" role="group" aria-label="Also in use">
+        <div class="ui-card-cell" data-card-key="builtin\u0000agentmux">
+          <div role="button" aria-expanded="false" data-mcp-observed="agentmux" aria-label="agentmux" class="ui-card mcp-observed-card">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-plug">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "agentmux"
+              <span class="ui-card-subtitle">
+                "Built in"
+              <span class="ui-card-meta">
+                <span>
+                  "1 agent"
+            <span role="img" class="ui-status-dot ui-status-dot--ok ui-card-status" aria-label="Connected for 1 agent." title="Connected for 1 agent.">
+        <div class="ui-card-cell" data-card-key="claudeai\u0000github">
+          <div role="button" aria-expanded="false" data-mcp-observed="github" aria-label="github" class="ui-card mcp-observed-card">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-plug">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "github"
+              <span class="ui-card-subtitle">
+                "claude.ai connector"
+              <span class="ui-card-meta">
+                <span>
+                  "1 agent, 1 not connected"
+            <span role="img" class="ui-status-dot ui-status-dot--warn ui-card-status" aria-label="Starting for AgentY." title="Starting for AgentY.">
+        <div class="ui-card-cell" data-card-key="claudeai\u0000slack">
+          <div role="button" aria-expanded="false" data-mcp-observed="slack" aria-label="slack" class="ui-card mcp-observed-card">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-plug">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "slack"
+              <span class="ui-card-subtitle">
+                "claude.ai connector"
+              <span class="ui-card-meta">
+                <span>
+                  "1 agent"
+            <span role="img" class="ui-status-dot ui-status-dot--ok ui-card-status" aria-label="Connected for 1 agent." title="Connected for 1 agent.">
+== Delete from the menu
+<body>
+  <div>
+    <div class="ui-card-section ui-density-compact mcp-cards">
+      <div class="ui-card-section-header">
+        <h2 class="ui-card-section-title">
+          "MCP servers"
+        <span class="ui-card-section-count">
+          "8"
+        <span class="ui-filter ui-card-section-filter">
+          <i aria-hidden="true" class="fa-solid fa-magnifying-glass ui-search-icon">
+          <input type="text" class="ui-filter-input" data-pane-focus="" placeholder="Filter servers" aria-label="Filter servers" value="">
+        <button type="button" class="ui-button ui-tone-accent mcp-cards-add">
+          <i aria-hidden="true" class="fa-solid fa-plus">
+          "Add server"
+      <div class="ui-card-grid ui-card-grid--chip mcp-add-gallery" style="--ui-card-min: 124px;" role="group" aria-label="Add an MCP server">
+        <div class="ui-card-cell" data-card-key="ableton-live">
+          <div role="button" data-preset="ableton-live" aria-label="Ableton Live, added: open it" class="ui-card ui-card--chip mcp-preset-chip">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-music">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "Ableton Live"
+              <span class="ui-card-subtitle">
+                "Added"
+        <div class="ui-card-cell" data-card-key="touchdesigner">
+          <div role="button" data-preset="touchdesigner" aria-label="Add TouchDesigner" class="ui-card ui-card--chip mcp-preset-chip">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-diagram-project">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "TouchDesigner"
+              <span class="ui-card-subtitle">
+                "Add"
+        <div class="ui-card-cell" data-card-key="\u0000custom">
+          <div role="button" data-preset="custom" aria-label="Add a custom server" class="ui-card ui-card--chip mcp-preset-chip">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-plus">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "Custom server"
+              <span class="ui-card-subtitle">
+                "Any command or URL"
+      <h4 class="ui-card-group-heading">
+        "Your servers"
+      <div class="ui-card-grid mcp-servers-grid" style="--ui-card-min: 200px;" role="group" aria-label="Your servers">
+        <div class="ui-card-cell" data-card-key="s1">
+          <div role="button" aria-expanded="false" data-mcp-server="Ableton Live" aria-label="Ableton Live" class="ui-card mcp-server-card">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-music">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "Ableton Live"
+              <span class="ui-card-subtitle">
+                "stdio · uvx"
+              <span class="ui-card-meta">
+                <span>
+                  "2 agents"
+            <span role="img" class="ui-status-dot ui-status-dot--ok ui-card-status" aria-label="Connected for 1 agent." title="Connected for 1 agent.">
+        <div class="ui-card-cell" data-card-key="s2">
+          <div role="button" aria-expanded="true" data-mcp-server="git" aria-label="git" class="ui-card is-selected mcp-server-card">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-plug">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "git"
+              <span class="ui-card-subtitle">
+                "stdio · npx"
+              <span class="ui-card-meta">
+                <span>
+                  "All agents"
+                <span>
+                  "Containers too"
+            <span role="img" class="ui-status-dot ui-status-dot--warn ui-card-status" aria-label="Needs sign-in for AgentY." title="Needs sign-in for AgentY.">
+        <div class="ui-card-detail" style="--ui-card-caret-left: 75%;">
+          <form class="mcp-detail mcp-server-form" aria-label="Edit git">
+            <div class="ui-field ui-field--stacked">
+              <div class="ui-field-text">
+                <label class="ui-field-label" for="ui-field-cl-N">
+                  "Name"
+              <div class="ui-field-control">
+                <input placeholder="e.g. filesystem" type="text" class="ui-input" value="git">
+            <div class="ui-field ui-field--stacked">
+              <div class="ui-field-text">
+                <label class="ui-field-label" for="ui-field-cl-N">
+                  "Transport"
+              <div class="ui-field-control">
+                <input placeholder="stdio" type="text" class="ui-input" value="stdio">
+            <div class="ui-field ui-field--stacked">
+              <div class="ui-field-text">
+                <label class="ui-field-label" for="mcp-config-cl-12">
+                  "Config (JSON)"
+              <div class="ui-field-control">
+                <textarea class="ui-input ui-textarea ui-textarea--mono" value="{\"command\":\"npx\",\"args\":[\"-y\",\"git-mcp\"],\"env\":{\"GITHUB_TOKEN\":\"ghp_secret123\"}}">
+            <div class="mcp-detail-actions">
+              <button type="button" class="ui-button ui-tone-neutral">
+                "Cancel"
+              <button type="submit" class="ui-button ui-tone-accent">
+                "Save"
+        <div class="ui-card-cell" data-card-key="s3">
+          <div role="button" aria-expanded="false" data-mcp-server="linear" aria-label="linear" class="ui-card is-attention mcp-server-card">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-plug">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "linear"
+              <span class="ui-card-subtitle">
+                "http · mcp.linear.app/sse"
+              <span class="ui-card-meta">
+                <span>
+                  "0 agents"
+            <span role="img" class="ui-status-dot ui-status-dot--error ui-card-status" aria-label="Failed for Korp." title="Failed for Korp.">
+        <div class="ui-card-cell" data-card-key="s4">
+          <div role="button" aria-expanded="false" data-mcp-server="notes" aria-label="notes" class="ui-card mcp-server-card">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-plug">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "notes"
+              <span class="ui-card-subtitle">
+                "stdio"
+              <span class="ui-card-meta">
+                <span>
+                  "0 agents"
+            <span role="img" class="ui-status-dot ui-status-dot--idle ui-card-status" aria-label="No running agent reports it." title="No running agent reports it.">
+        <div class="ui-card-cell" data-card-key="s5">
+          <div role="button" aria-expanded="false" data-mcp-server="fetch" aria-label="fetch" class="ui-card mcp-server-card">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-plug">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "fetch"
+              <span class="ui-card-subtitle">
+                "stdio"
+              <span class="ui-card-meta">
+                <span>
+                  "0 agents"
+            <span role="img" class="ui-status-dot ui-status-dot--warn ui-card-status" aria-label="No running agent reports it. Not loaded by AgentY. Restart it to apply." title="No running agent reports it. Not loaded by AgentY. Restart it to apply.">
+      <h4 class="ui-card-group-heading">
+        "Also in use"
+      <div class="ui-card-grid mcp-observed-grid" style="--ui-card-min: 200px;" role="group" aria-label="Also in use">
+        <div class="ui-card-cell" data-card-key="builtin\u0000agentmux">
+          <div role="button" aria-expanded="false" data-mcp-observed="agentmux" aria-label="agentmux" class="ui-card mcp-observed-card">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-plug">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "agentmux"
+              <span class="ui-card-subtitle">
+                "Built in"
+              <span class="ui-card-meta">
+                <span>
+                  "1 agent"
+            <span role="img" class="ui-status-dot ui-status-dot--ok ui-card-status" aria-label="Connected for 1 agent." title="Connected for 1 agent.">
+        <div class="ui-card-cell" data-card-key="claudeai\u0000github">
+          <div role="button" aria-expanded="false" data-mcp-observed="github" aria-label="github" class="ui-card mcp-observed-card">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-plug">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "github"
+              <span class="ui-card-subtitle">
+                "claude.ai connector"
+              <span class="ui-card-meta">
+                <span>
+                  "1 agent, 1 not connected"
+            <span role="img" class="ui-status-dot ui-status-dot--warn ui-card-status" aria-label="Starting for AgentY." title="Starting for AgentY.">
+        <div class="ui-card-cell" data-card-key="claudeai\u0000slack">
+          <div role="button" aria-expanded="false" data-mcp-observed="slack" aria-label="slack" class="ui-card mcp-observed-card">
+            <span class="ui-card-icon" aria-hidden="true">
+              <i class="fa-solid fa-plug">
+            <span class="ui-card-text">
+              <span class="ui-card-title">
+                "slack"
+              <span class="ui-card-subtitle">
+                "claude.ai connector"
+              <span class="ui-card-meta">
+                <span>
+                  "1 agent"
+            <span role="img" class="ui-status-dot ui-status-dot--ok ui-card-status" aria-label="Connected for 1 agent." title="Connected for 1 agent.">
+  <div>
+    <div class="modal-root" role="dialog" aria-modal="true" data-scope="window" data-scope-fallback="pane" data-placement="center" aria-labelledby="modal-title-cl-16">
+      <div class="modal-backdrop">
+      <span class="modal-focus-sentinel" aria-hidden="true">
+      <div class="modal-panel " data-size="sm">
+        <header class="modal-panel-header">
+          <h2 class="modal-panel-title">
+            "Delete fetch?"
+        <div class="modal-panel-body ">
+          <div class="mcp-delete-confirm">
+            <p>
+              "AgentMux removes it from the catalog. Agents stop getting it the next time they start."
+        <footer class="modal-panel-footer ">
+          <button data-modal-dismiss="true" type="button" class="ui-button ui-tone-neutral">
+            "Cancel"
+          <button type="button" class="ui-button ui-tone-danger">
+            "Delete server"
+      <span class="modal-focus-sentinel" aria-hidden="true">

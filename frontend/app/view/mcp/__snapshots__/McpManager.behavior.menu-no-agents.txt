@@ -1,0 +1,7 @@
+  menu: item "Edit" icon=pen sub=- enabled=-
+  menu: item "Bind to agent" icon=link sub=no agents enabled=false
+  menu: separator "" icon=- sub=- enabled=-
+  menu: item "Delete…" icon=trash sub=- enabled=-
+  rpc McpCatalogListCommand [{}]
+  rpc ListAgentDefinitionsCommand []
+  rpc McpObservedListCommand []
