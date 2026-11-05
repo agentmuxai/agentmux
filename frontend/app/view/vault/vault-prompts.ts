@@ -34,7 +34,7 @@ export function vaultPromptNotes(platform: VaultPlatform): string[] {
     } else {
         notes.push("Reveal and Copy aren't available on this system yet: there is no standard way to confirm it's you without administrator rights.");
     }
-    notes.push("When an agent wants to fill a form field or run a command with an entry, AgentMux asks you in its own window, showing the site or the command. You can allow it once, always for that site or agent, or deny it.");
+    notes.push("When an agent wants to fill a form field or run a command with an entry, AgentMux asks you in that agent's pane, showing the site or the command (a request with no pane on screen is listed at the top of this pane). You can allow it once, always for that site or agent, or deny it.");
     notes.push("The Vault never asks for administrator rights. Agents never see these prompts, and can't answer them.");
     return notes;
 }

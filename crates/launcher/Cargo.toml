@@ -69,6 +69,8 @@ windows-sys = { version = "0.59", features = [
     "Win32_System_LibraryLoader",
     "Win32_System_JobObjects",
     "Win32_System_Threading",
+    # RegisterApplicationRestart: a Store install is opened again after an update (src/store_restart.rs).
+    "Win32_System_Recovery",
     # GlobalMemoryStatusEx / MEMORYSTATUSEX — the launcher's commit-free probe
     # for memory-aware host relaunch (mem_supervisor.rs;
     # SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16).

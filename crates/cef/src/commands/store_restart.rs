@@ -1,19 +1,19 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! What a Microsoft Store update has to leave behind for AgentMux to come back
-//! (task #23915). The Store closes a packaged app to swap its package and
-//! doesn't start it again by itself, so a Store install:
+//! What a Microsoft Store update has to leave behind for AgentMux to say how it ended
+//! (task #23915). The Store closes a packaged app to swap its package and doesn't start it
+//! again by itself, so a Store install:
 //!
-//! - registers for an application restart (`RegisterApplicationRestart`, for an
-//!   update only, never after a crash, a hang or a reboot), at start and again
-//!   just before it asks the Store to install, so Windows opens it after the swap;
-//! - writes a small marker just before asking the Store to install, so the next
-//!   start can say whether it came back updated or on the same version (the
-//!   install failed after closing it).
+//! - is registered for an application restart by the launcher (`agentmux.exe`, the package's
+//!   entry point: `crates/launcher/src/store_restart.rs`), so Windows opens the launcher and with
+//!   it the tray, srv and this host again after the swap. It is not registered here: Windows
+//!   would reopen this host alone;
+//! - writes a small marker just before asking the Store to install, so the next start can say
+//!   whether it came back updated or on the same version (the install failed after closing it).
 //!
-//! NOT run against a packaged install by whoever wrote it: the decision about the
-//! marker is unit-tested, the Windows call is type-checked only.
+//! NOT run against a packaged install by whoever wrote it: the decision about the marker is
+//! unit-tested.
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -73,14 +73,10 @@ fn read(dir: &Path) -> Option<Marker> {
     serde_json::from_slice(&std::fs::read(dir.join(FILE)).ok()?).ok()
 }
 
-/// Called once at start with the data paths (the marker lives in the instance folder): remembers
-/// it and, for a Store install, registers for a restart after an update.
+/// Called once at start with the data paths (the marker lives in the instance folder): remembers it.
 pub fn at_startup(paths: Option<&agentmux_common::DataPaths>) {
     if let Some(p) = paths {
         let _ = DIR.set(p.instance_dir.clone());
-    }
-    if is_packaged() {
-        register_restart();
     }
 }
 
@@ -94,7 +90,7 @@ pub fn came_back() -> CameBack {
     verdict
 }
 
-/// Just before the Store is asked to install `target`: the marker, and the restart registration again.
+/// Just before the Store is asked to install `target`: the marker.
 pub fn before_install(target: &str) {
     if let Some(dir) = DIR.get() {
         let marker = Marker { from: current().into(), target: target.into(), at_ms: agentmux_common::time::now_ms_u64() };
@@ -107,33 +103,21 @@ pub fn before_install(target: &str) {
             Err(e) => tracing::warn!(error = %e, "store update: could not encode the marker"),
         }
     }
-    register_restart();
 }
 
-/// The install call came back, so nothing closed this app: there is nothing to come back from.
-/// Whether an install had been started (a marker was there).
-pub fn install_returned() -> bool {
-    DIR.get().is_some_and(|dir| std::fs::remove_file(dir.join(FILE)).is_ok())
+/// The install call came back. `completed`: the Store installed the update, so it closes this app
+/// at its own pace (it may do so a moment after the call returns): the marker stays, and the next
+/// start says `updated`, or `stayed` if the package did not change. Otherwise (cancelled, refused,
+/// an error) nothing closes the app and there is nothing to come back from: the marker goes.
+/// Whether it went, which is when the session record saved before the install is to be saved
+/// again as for no quit.
+pub fn install_returned(completed: bool) -> bool {
+    DIR.get().is_some_and(|dir| after_return(dir, completed))
 }
 
-/// A Store install runs from the package's folder.
-fn is_packaged() -> bool {
-    std::env::current_exe().map(|p| p.to_string_lossy().contains("WindowsApps")).unwrap_or(false)
+fn after_return(dir: &Path, completed: bool) -> bool {
+    !completed && std::fs::remove_file(dir.join(FILE)).is_ok()
 }
-
-/// Windows opens this app again after it closed it for an update. No command line, and not
-/// after a crash, a hang or a reboot.
-#[cfg(target_os = "windows")]
-fn register_restart() {
-    use windows_sys::Win32::System::Recovery::{RegisterApplicationRestart, RESTART_NO_CRASH, RESTART_NO_HANG, RESTART_NO_REBOOT};
-    let hr = unsafe { RegisterApplicationRestart(std::ptr::null(), RESTART_NO_CRASH | RESTART_NO_HANG | RESTART_NO_REBOOT) };
-    if hr != 0 {
-        tracing::warn!(hresult = format!("{hr:#x}"), "store update: could not register for a restart after the update");
-    }
-}
-
-#[cfg(not(target_os = "windows"))]
-fn register_restart() {}
 
 #[cfg(test)]
 mod tests {
@@ -169,6 +153,20 @@ mod tests {
         let (v, keep) = judge(Some(&marker(1_000)), "0.60.14", 1_000 + STALE_MS + 1);
         assert_eq!(v.state, "none");
         assert!(!keep);
+    }
+
+    #[test]
+    fn a_completed_install_keeps_its_marker_and_any_other_result_removes_it() {
+        let dir = std::env::temp_dir().join(format!("agentmux-store-marker-after-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let write = || std::fs::write(dir.join(FILE), serde_json::to_vec(&marker(5)).unwrap()).unwrap();
+        write();
+        assert!(!after_return(&dir, true), "the Store is closing the app: nothing to save again");
+        assert!(dir.join(FILE).exists(), "the next start says how it ended");
+        assert!(after_return(&dir, false), "cancelled or refused: the marker was there and went");
+        assert!(!dir.join(FILE).exists());
+        assert!(!after_return(&dir, false), "no marker, nothing to remove");
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
