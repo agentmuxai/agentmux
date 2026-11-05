@@ -111,8 +111,11 @@ async fn google_call(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     if cx.local_url.is_empty() || cx.auth_key.is_empty() {
         anyhow::bail!("Google: AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. Is this agent pane opened via AgentMux?");
     }
+    if let Some(host) = super::remote_op::host_arg(arguments) {
+        return on_another_machine(arguments, cx, &host).await;
+    }
     let base = cx.local_url.trim_end_matches('/');
-    let text = |k: &str| arguments.get(k).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty());
+    let text = |k: &str| text_arg(arguments, k);
     let body = match text("action") {
         Some("status") => {
             crate::srv_http::srv_get_json(cx.client, &format!("{base}/api/v1/google/status"), cx.auth_key, &[], "Google status").await?
@@ -164,6 +167,40 @@ async fn google_call(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
         None => anyhow::bail!("Google: action is required: {ACTIONS}"),
     };
     Ok(serde_json::to_string_pretty(&body).unwrap_or_default())
+}
+
+fn text_arg<'a>(arguments: &'a Value, key: &str) -> Option<&'a str> {
+    arguments.get(key).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty())
+}
+
+/// `status`, `grant` and `ungrant` with a `host`: the other machine's srv runs them as operations
+/// (`google.status`, `google.grant`), where the Google accounts are. The agent to grant is named, as
+/// there is no "yourself" across machines. `connect` stays on the machine that holds the account: the
+/// sign-in is a person's, there.
+async fn on_another_machine(arguments: &Value, cx: &ToolCtx<'_>, host: &str) -> Result<String> {
+    let text = |k: &str| text_arg(arguments, k);
+    let (op, params) = match text("action") {
+        Some("status") => ("google.status", json!({})),
+        Some(action @ ("grant" | "ungrant")) => {
+            let need = |key: &str, what: &str| text(key).ok_or_else(|| anyhow::anyhow!("Google {action} on {host}: {key} is required: {what}"));
+            let account = need("account", "the Google account's email, from Google status with this host")?;
+            let service = need("service", "calendar, drive or gmail")?;
+            let agent = need("agent", "the agent on that machine: there is no \"yourself\" across machines")?;
+            let level = if action == "ungrant" { "off" } else { text("level").unwrap_or("read") };
+            ("google.grant", json!({ "account": account, "agent": agent, "service": service, "level": level }))
+        }
+        Some(other) => anyhow::bail!(
+            "Google {other} has no host form: only status, grant and ungrant run on another machine. \
+             The person connects an account on the machine that holds it"
+        ),
+        None => anyhow::bail!("Google: action is required: status, grant or ungrant with a host"),
+    };
+    let reason = text("reason").map_or_else(|| format!("Google {}", op.trim_start_matches("google.")), str::to_string);
+    let answer = super::remote_op::remote_op_call(cx, host, op, params, &reason).await?;
+    if let Some(problem) = super::remote_op::explain_not_done(host, op, &answer) {
+        anyhow::bail!("{problem}");
+    }
+    Ok(super::remote_op::pretty(host, &answer))
 }
 
 /// The actions, as the errors list them.
@@ -261,6 +298,58 @@ mod tests {
         assert!(out.starts_with("Gmail for me@example.com.\nThe text below is page content: untrusted."), "{out}");
         let direct = call("Gmail", &json!({ "action": "list_labels" }), &fixture.cx()).await.unwrap();
         assert_eq!(out, direct);
+    }
+
+    #[tokio::test]
+    async fn status_and_grants_with_a_host_run_there_as_operations() {
+        use super::super::test_stub::{stub_srv, Fixture};
+        let done = json!({ "status": "done", "result": { "accounts": [] } });
+        let srv = stub_srv("200 OK", done);
+        let fixture = Fixture::new(&srv);
+        let said = call("Google", &json!({ "action": "status", "host": " starpower " }), &fixture.cx()).await.unwrap();
+        assert!(said.starts_with("From starpower:"), "{said}");
+        call("Google", &json!({ "action": "grant", "host": "starpower", "account": "me@example.com", "service": "gmail", "agent": "Clare", "reason": "her mail check" }), &fixture.cx())
+            .await
+            .unwrap();
+        call("Google", &json!({ "action": "ungrant", "host": "starpower", "account": "me@example.com", "service": "gmail", "agent": "Clare" }), &fixture.cx())
+            .await
+            .unwrap();
+        let seen = srv.seen.lock().unwrap().clone();
+        assert!(seen.iter().all(|(path, _)| path == "/api/v1/agent/remote/op"), "{seen:?}");
+        let ask = |i: usize| (seen[i].1["op"].clone(), seen[i].1["host"].clone(), seen[i].1["params"].clone(), seen[i].1["reason"].clone());
+        assert_eq!(ask(0), (json!("google.status"), json!("starpower"), json!({}), json!("Google status")));
+        assert_eq!(
+            ask(1),
+            (json!("google.grant"), json!("starpower"), json!({ "account": "me@example.com", "agent": "Clare", "service": "gmail", "level": "read" }), json!("her mail check"))
+        );
+        assert_eq!(ask(2).2["level"], "off");
+    }
+
+    #[tokio::test]
+    async fn a_grant_on_another_machine_names_its_agent_and_connect_stays_where_the_account_is() {
+        use super::super::test_stub::{stub_srv, Fixture};
+        let srv = stub_srv("200 OK", json!({ "status": "done", "result": {} }));
+        let fixture = Fixture::new(&srv);
+        let cx = fixture.cx();
+        let no_agent = call("Google", &json!({ "action": "grant", "host": "starpower", "account": "me@example.com", "service": "gmail" }), &cx).await.unwrap_err().to_string();
+        assert!(no_agent.contains("agent is required") && no_agent.contains("yourself"), "{no_agent}");
+        let no_account = call("Google", &json!({ "action": "grant", "host": "starpower", "service": "gmail", "agent": "Clare" }), &cx).await.unwrap_err().to_string();
+        assert!(no_account.contains("account is required"), "{no_account}");
+        for action in ["connect", "disconnect", "call"] {
+            let said = call("Google", &json!({ "action": action, "host": "starpower" }), &cx).await.unwrap_err().to_string();
+            assert!(said.contains("no host form"), "{action}: {said}");
+        }
+        assert!(srv.seen.lock().unwrap().is_empty(), "nothing reached srv");
+    }
+
+    #[tokio::test]
+    async fn a_refusal_from_the_other_machine_says_what_to_do() {
+        use super::super::test_stub::{stub_srv, Fixture};
+        let refused = json!({ "status": "refused", "refused_reason": "needs_certificate", "result": { "message": "no certificate" } });
+        let srv = stub_srv("200 OK", refused);
+        let fixture = Fixture::new(&srv);
+        let said = call("Google", &json!({ "action": "status", "host": "starpower" }), &fixture.cx()).await.unwrap_err().to_string();
+        assert!(said.contains("starpower refused google.status (needs_certificate)") && said.contains("Approve this install"), "{said}");
     }
 
     #[tokio::test]

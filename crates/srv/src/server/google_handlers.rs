@@ -428,38 +428,40 @@ pub(crate) async fn handle_google_status(State(state): State<AppState>, caller: 
         Ok(d) => d,
         Err(e) => return error(StatusCode::FORBIDDEN, e),
     };
-    let result = (|| -> Result<serde_json::Value, String> {
-        let names: std::collections::HashMap<String, String> = state
-            .mstore
-            .agent_def_list()
-            .map_err(|e| e.to_string())?
-            .into_iter()
-            .map(|d| (d.id, d.name))
-            .collect();
-        let mut accounts = Vec::new();
-        for acct in google_accounts(&state)? {
-            let grants = state.identity_store.google_grants_for_account(&acct.id).map_err(|e| e.to_string())?;
-            let mut services = serde_json::Map::new();
-            for service in SERVICES {
-                let holders: Vec<_> = grants
-                    .iter()
-                    .filter(|g| g.service == service.as_str())
-                    .map(|g| json!({ "agent": names.get(&g.agent_id).cloned().unwrap_or_else(|| g.agent_id.clone()), "level": g.level }))
-                    .collect();
-                let mine = grants.iter().find(|g| g.service == service.as_str() && g.agent_id == def.id).map(|g| g.level.as_str());
-                services.insert(
-                    service.as_str().to_string(),
-                    json!({ "connected_for": supported_level(&acct, service), "yours": mine.unwrap_or("off"), "holders": holders }),
-                );
-            }
-            accounts.push(json!({ "account": access::email_of(&acct), "status": acct.status, "services": services }));
-        }
-        Ok(json!({ "you": def.name, "accounts": accounts }))
-    })();
-    match result {
+    match status_for(&state, Some(&def)) {
         Ok(v) => Json(v).into_response(),
         Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, e),
     }
+}
+
+/// The accounts, what each supports and who holds what. `viewer` is the agent asking, whose own level
+/// is added as `yours`; a caller from another machine has no agent here and gets the holders alone.
+pub(crate) fn status_for(state: &AppState, viewer: Option<&AgentDefinition>) -> Result<serde_json::Value, String> {
+    let names: std::collections::HashMap<String, String> =
+        state.mstore.agent_def_list().map_err(|e| e.to_string())?.into_iter().map(|d| (d.id, d.name)).collect();
+    let mut accounts = Vec::new();
+    for acct in google_accounts(state)? {
+        let grants = state.identity_store.google_grants_for_account(&acct.id).map_err(|e| e.to_string())?;
+        let mut services = serde_json::Map::new();
+        for service in SERVICES {
+            let holders: Vec<_> = grants
+                .iter()
+                .filter(|g| g.service == service.as_str())
+                .map(|g| json!({ "agent": names.get(&g.agent_id).cloned().unwrap_or_else(|| g.agent_id.clone()), "level": g.level }))
+                .collect();
+            let mut entry = json!({ "connected_for": supported_level(&acct, service), "holders": holders });
+            if let Some(def) = viewer {
+                let mine = grants.iter().find(|g| g.service == service.as_str() && g.agent_id == def.id).map(|g| g.level.as_str());
+                entry["yours"] = json!(mine.unwrap_or("off"));
+            }
+            services.insert(service.as_str().to_string(), entry);
+        }
+        accounts.push(json!({ "account": access::email_of(&acct), "status": acct.status, "services": services }));
+    }
+    Ok(match viewer {
+        Some(def) => json!({ "you": def.name, "accounts": accounts }),
+        None => json!({ "accounts": accounts }),
+    })
 }
 
 #[derive(Debug, Deserialize)]
@@ -568,6 +570,18 @@ async fn disconnect_by_agent(state: &AppState, actor: &AgentDefinition, body: &D
 }
 
 fn grant_by_agent(state: &AppState, actor: &AgentDefinition, body: &GrantBody) -> Result<serde_json::Value, String> {
+    grant_as(state, &actor.id, &actor.name, Some(actor), body)
+}
+
+/// A grant, recorded under `by_name` (`by_id`). With no `agent` in the body it goes to `yourself`, which a
+/// caller from another machine has none of: it names the agent here.
+pub(crate) fn grant_as(
+    state: &AppState,
+    by_id: &str,
+    by_name: &str,
+    yourself: Option<&AgentDefinition>,
+    body: &GrantBody,
+) -> Result<serde_json::Value, String> {
     use crate::backend::storage::google_grants::GoogleCall;
     let service = SERVICES
         .into_iter()
@@ -589,7 +603,7 @@ fn grant_by_agent(state: &AppState, actor: &AgentDefinition, body: &GrantBody) -
     let target = body.agent.as_deref().map(str::trim).filter(|s| !s.is_empty());
     let defs = state.mstore.agent_def_list().map_err(|e| e.to_string())?;
     let target_def = match target {
-        None => actor.clone(),
+        None => yourself.cloned().ok_or("agent is required: name the agent on this computer to grant")?,
         Some(t) => defs
             .into_iter()
             .find(|d| d.id == t || d.name.eq_ignore_ascii_case(t))
@@ -624,24 +638,13 @@ fn grant_by_agent(state: &AppState, actor: &AgentDefinition, body: &GrantBody) -
         }
     }
     let now = chrono::Utc::now().timestamp_millis();
-    // The agent names an email, so one grant per email: clear the service on that email's other
-    // connections, or an ungrant (or a change of level) would leave an older grant usable.
-    for other in same_email.iter().filter(|o| o.id != account.id) {
-        state
-            .identity_store
-            .google_grant_set(&target_def.id, &other.id, service.as_str(), None, now)
-            .map_err(|e| e.to_string())?;
-    }
-    state
-        .identity_store
-        .google_grant_set(&target_def.id, &account.id, service.as_str(), level, now)
-        .map_err(|e| e.to_string())?;
+    set_grant_on_email(state, &target_def.id, (account, &same_email), service, level, now)?;
     crate::identity::accounts_changed::announce();
     let level_name = level.map_or("off", |l| l.as_str());
     let line = GoogleCall {
         at: now,
-        agent_id: actor.id.clone(),
-        agent_name: actor.name.clone(),
+        agent_id: by_id.to_string(),
+        agent_name: by_name.to_string(),
         service: service.as_str().to_string(),
         action: if level.is_some() { "grant".to_string() } else { "ungrant".to_string() },
         ids: format!("{}:{level_name}", target_def.name),
@@ -653,14 +656,31 @@ fn grant_by_agent(state: &AppState, actor: &AgentDefinition, body: &GrantBody) -
     tracing::info!(
         target: "google",
         account_id = %account.id,
-        by = %actor.name,
+        by = %by_name,
         agent = %target_def.name,
         service = %service.as_str(),
         level = level_name,
         "google: grant set by an agent"
     );
-    crate::identity::accounts_changed::tell_windows(grant_notice(&actor.name, &target_def.name, service, level, &email));
+    crate::identity::accounts_changed::tell_windows(grant_notice(by_name, &target_def.name, service, level, &email));
     Ok(json!({ "account": email, "agent": target_def.name, "service": service.as_str(), "level": level_name }))
+}
+
+/// Set an agent's grant on `chosen`, one of the connections of an email (`same_email`, all of them). The agent
+/// names an email, so one grant per email: the service is cleared on the email's other connections, or an
+/// ungrant (or a change of level) would leave an older grant usable.
+fn set_grant_on_email(
+    state: &AppState,
+    agent_id: &str,
+    (chosen, same_email): (&crate::backend::storage::store::IdentityAccount, &[&crate::backend::storage::store::IdentityAccount]),
+    service: Service,
+    level: Option<crate::backend::storage::google_grants::GrantLevel>,
+    now: i64,
+) -> Result<(), String> {
+    for other in same_email.iter().filter(|o| o.id != chosen.id) {
+        state.identity_store.google_grant_set(agent_id, &other.id, service.as_str(), None, now).map_err(|e| e.to_string())?;
+    }
+    state.identity_store.google_grant_set(agent_id, &chosen.id, service.as_str(), level, now).map_err(|e| e.to_string())
 }
 
 /// "Naki-2 gave Agent5 Calendar read on me@example.com", or "Naki-2 turned off Calendar for Agent5 on ...".
