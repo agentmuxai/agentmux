@@ -353,7 +353,6 @@
 217 frontend/app-init.ts::initMux
 366 frontend/app/block/block.tsx::Block
 142 frontend/app/block/block.tsx::BlockFull
-243 frontend/app/block/blockframe.tsx::BlockFrame_Default_Component
 280 frontend/app/block/blockframe.tsx::BlockFrame_Header
 117 frontend/app/block/blockframe.tsx::EndIcons
 114 frontend/app/block/blockutil.tsx::ConnectionButton
