@@ -108,6 +108,49 @@ pub struct AuditCost {
     pub basis: String,
 }
 
+/// Where an entry came from and how it travelled, and for a jekt which of its two halves it is. Old lines have little
+/// of it: a tier only where the line itself proves it (`tier_inferred`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct AuditProvenance {
+    /// The computer that wrote the line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub host: Option<String>,
+    /// The channel that wrote it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub channel: Option<String>,
+    /// The version of the srv that wrote it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub version: Option<String>,
+    /// `host`, `channel`, `lan` or `cloud`. Absent on an old line that does not prove it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub tier: Option<String>,
+    /// The tier was worked out from the line (a cloud verdict, a LAN-claimed UID), not recorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub tier_inferred: Option<bool>,
+    /// How far the sender was proven (the marker's `TRUST=` label).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub trust: Option<String>,
+    /// The message's id, the same on both of its halves.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub msg_id: Option<String>,
+    /// On a joined row, when the sender handed the message over (`ts_ms` is when it was delivered).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub sent_ms: Option<u64>,
+    /// The row is the sender's half alone: the other end was not seen (the peer is off, or not paired).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub sent_only: Option<bool>,
+}
+
 /// One row of the Audit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
@@ -143,6 +186,10 @@ pub struct AuditEntry {
     /// For entries about one agent; a jekt's are on `from` and `to`.
     #[serde(default)]
     pub links: AuditLinks,
+    /// Where it came from and how it travelled. Absent for a row that has no such record (an agent start, a tool call).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub provenance: Option<AuditProvenance>,
 }
 
 /// The cost of every entry a filter matches (all of them, not a page).

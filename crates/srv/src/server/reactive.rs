@@ -9,8 +9,7 @@ use axum::{
 use serde_json::json;
 
 use crate::backend::blockcontroller;
-use crate::backend::reactive::{AgentRegistration, InjectionRequest};
-use crate::backend::reactive::registry as agent_registry;
+use crate::backend::reactive::{registry as agent_registry, AgentRegistration, InjectionRequest};
 use crate::backend::subagent_watcher;
 use crate::backend::base;
 
@@ -734,6 +733,7 @@ async fn admit(
     verify_lan_signature(state, req).await;
     verify_cross_channel_signature(state, req);
     lan_v2::log_receipt(req);
+    crate::backend::reactive::sent_audit::record(req);
     let mut replay = replay::reserve(req, now_unix_secs());
     req.route_unsigned_target();
     resolve_transcript_request_tier_fields(&state.mstore, req);

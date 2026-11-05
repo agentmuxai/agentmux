@@ -34,6 +34,12 @@ fn entry(rec: &ActionRecord, target_agent: String) -> AuditLogEntry {
         wan: None,
         cli_native: None,
         turn: None,
+        host: None,
+        channel: None,
+        version: None,
+        tier: None,
+        trust: None,
+        msg_id: None,
     }
 }
 

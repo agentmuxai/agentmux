@@ -21,6 +21,7 @@ pub mod poller;
 mod rate_limiter;
 pub mod registry;
 pub mod sanitize;
+pub mod sent_audit;
 pub mod transcript_request;
 pub mod types;
 #[cfg(test)]

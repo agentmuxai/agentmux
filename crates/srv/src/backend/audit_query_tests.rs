@@ -26,6 +26,12 @@ fn audit_entry(ts: u64, from: &str, to: &str) -> AuditLogEntry {
         wan: None,
         cli_native: None,
         turn: None,
+        host: None,
+        channel: None,
+        version: None,
+        tier: None,
+        trust: None,
+        msg_id: None,
     }
 }
 
@@ -647,4 +653,73 @@ fn a_cursor_with_a_bad_activity_position_is_refused() {
     for bad in bad_ones {
         assert!(a.run(AuditQueryReq { cursor: Some(bad.clone()), ..Default::default() }).is_err(), "{bad}");
     }
+}
+
+// ── provenance, and the two halves of a message
+
+fn half(ts: u64, msg: &str, sent: bool) -> AuditLogEntry {
+    AuditLogEntry {
+        event_kind: if sent { "sent" } else { "delivery" }.into(),
+        outcome: sent.then(|| "sent".to_string()),
+        msg_id: Some(msg.into()),
+        request_id: msg.into(),
+        tier: Some("host".into()),
+        trust: (!sent).then(|| "host-verified".to_string()),
+        host: Some("narko".into()),
+        channel: Some("dev".into()),
+        version: Some("0.60.16".into()),
+        ..audit_entry(ts, "Korp", "Opaz")
+    }
+}
+
+#[test]
+fn the_sent_and_delivered_lines_of_a_message_are_one_row_with_both_times_and_a_page_boundary_does_not_split_it() {
+    let mut lines = Vec::new();
+    for n in 0..30u64 {
+        lines.push(half(1_000 + n * 10, &format!("m{n}"), true));
+        lines.push(half(1_003 + n * 10, &format!("m{n}"), false));
+    }
+    let world = World::new(&lines);
+    let whole = world.all(AuditQueryReq::default());
+    assert_eq!(whole.len(), 30, "one row for each message");
+    for e in &whole {
+        let p = e.provenance.as_ref().unwrap();
+        assert_eq!((p.sent_ms, p.sent_only, p.tier.as_deref(), p.trust.as_deref()), (Some(e.ts_ms - 3), None, Some("host"), Some("host-verified")));
+        assert_eq!((p.host.as_deref(), p.channel.as_deref(), p.version.as_deref()), (Some("narko"), Some("dev"), Some("0.60.16")));
+    }
+    let (mut seen, mut cursor) = (Vec::new(), None);
+    loop {
+        let page = world.run(AuditQueryReq { limit: Some(7), cursor: cursor.clone(), ..Default::default() }).unwrap();
+        seen.extend(ids(&page.entries));
+        match page.next_cursor {
+            Some(next) => cursor = Some(next),
+            None => break,
+        }
+    }
+    assert_eq!(seen, ids(&whole), "no row repeated, none lost, none split from its other half");
+}
+
+#[test]
+fn a_sent_line_with_no_delivery_is_a_row_marked_other_end_not_seen_and_is_not_counted_in_the_totals() {
+    let world = World::new(&[half(1_000, "alone", true), half(2_000, "both", true), half(2_002, "both", false)]);
+    let got = world.run(AuditQueryReq { totals: Some(true), ..Default::default() }).unwrap();
+    assert_eq!(got.entries.len(), 2);
+    let alone = got.entries.iter().find(|e| e.provenance.as_ref().unwrap().msg_id.as_deref() == Some("alone")).unwrap();
+    assert_eq!(alone.provenance.as_ref().unwrap().sent_only, Some(true));
+    assert!(alone.summary.contains("sent"), "{}", alone.summary);
+    assert_eq!(got.totals.unwrap().entries, 1, "only the receiver's lines are counted, so a message is one entry and a lone sent line none");
+}
+
+#[test]
+fn old_lines_read_as_before_and_say_their_tier_only_where_they_prove_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("jekt-audit.jsonl");
+    let old = r#"{"timestamp":1000,"source_agent":"Korp","target_agent":"Opaz","block_id":"b","message_hash":"h","message_length":3,"success":true,"request_id":"r1","channel":"dev"}
+{"timestamp":2000,"source_agent":"Korp","target_agent":"Opaz","block_id":"b","message_hash":"h","message_length":3,"success":true,"request_id":"r2","wan":{"verified":true}}
+"#;
+    std::fs::write(&path, old).unwrap();
+    let world = World { _dir: dir, jekts: path, store: FileStore::open_in_memory().unwrap() };
+    let got = world.all(AuditQueryReq::default());
+    let tiers: Vec<_> = got.iter().map(|e| e.provenance.as_ref().map(|p| (p.tier.clone(), p.tier_inferred, p.channel.clone()))).collect();
+    assert_eq!(tiers, vec![Some((Some("cloud".to_string()), Some(true), None)), Some((None, None, Some("dev".to_string())))]);
 }
