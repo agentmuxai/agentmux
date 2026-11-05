@@ -63,6 +63,13 @@ describe("the Language row", () => {
         expect(setConfig).toHaveBeenCalledWith({}, { "app:locale": "ja" });
     });
 
+    it("reads a stored value the picker does not list as the system's", () => {
+        state.shipped = ["ja"];
+        state.settings = { "app:locale": "en-XA" };
+        render(() => <LanguageRow />);
+        expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("system");
+    });
+
     it("shows the setting's value as chosen", () => {
         state.shipped = ["ja"];
         state.settings = { "app:locale": "ja" };

@@ -30,12 +30,17 @@ export const SHIPPED_LOCALES: readonly string[] = [...loaders.keys()];
 /** What `app:locale` can name: the shipped languages and the pseudo-locale (listed in the picker only in dev mode). */
 export const SUPPORTED_LOCALES: readonly string[] = [...SHIPPED_LOCALES, PSEUDO_LOCALE];
 
-// Where the setting is read from: bound once at startup (app-init), so this module needs no store of its own.
+// Where the setting and the dev-mode switch are read from: bound once at startup (app-init), so this module needs no store of its own.
 const [reader, setReader] = createSignal<() => unknown>(() => undefined);
+const [pseudoReader, setPseudoReader] = createSignal<() => boolean>(() => false);
 
-/** Point the translations at the `app:locale` setting, a reactive getter. Called once, when the app starts. */
-export function bindAppLocaleSetting(read: () => unknown): void {
+/**
+ * Point the translations at the `app:locale` setting, a reactive getter, and say when the pseudo-locale may be used
+ * (dev mode: with it off, a stored `en-XA` shows English, so no one is stuck in it). Called once, when the app starts.
+ */
+export function bindAppLocaleSetting(read: () => unknown, pseudoAllowed: () => boolean = () => false): void {
     setReader(() => read);
+    setPseudoReader(() => pseudoAllowed);
 }
 
 const setting = (): unknown => reader()();
@@ -45,7 +50,7 @@ const i18n = createRoot(() => {
         setting,
         systemLanguages: () => (typeof navigator === "undefined" ? [] : navigator.languages),
         source: en,
-        supported: SUPPORTED_LOCALES,
+        supported: () => (pseudoReader()() ? SUPPORTED_LOCALES : SHIPPED_LOCALES),
         load: async (tag) => {
             if (tag === PSEUDO_LOCALE) return pseudoDict(en);
             const load = loaders.get(tag);

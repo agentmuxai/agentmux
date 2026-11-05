@@ -36,7 +36,8 @@ describe("the app's translations", () => {
     it("follows the setting it is bound to: the pseudo-locale's text, the page's language, the format locale", async () => {
         const { bindAppLocaleSetting, t, appLocale, formatLocale } = await import("./i18n");
         const [setting, setSetting] = createSignal<unknown>("system");
-        bindAppLocaleSetting(setting);
+        const [pseudoAllowed, setPseudoAllowed] = createSignal(true);
+        bindAppLocaleSetting(setting, pseudoAllowed);
         expect(formatLocale(), "system leaves the regional format to the browser").toBeUndefined();
         setSetting("ja");
         expect(formatLocale()).toBe("ja");
@@ -46,6 +47,10 @@ describe("the app's translations", () => {
         expect(appLocale()).toBe("en-XA");
         expect(t("settings.language.label")).toBe("[Ļáñĝúáĝé ~ ~]");
         expect(document.documentElement.lang).toBe("en-XA");
+        setPseudoAllowed(false);
+        expect(appLocale(), "with dev mode off a stored en-XA shows English, so no one is stuck in it").toBe("en");
+        expect(t("settings.language.label")).toBe("Language");
+        expect(document.documentElement.lang).toBe("en");
         setSetting("system");
     });
 });

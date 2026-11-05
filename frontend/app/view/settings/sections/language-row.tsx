@@ -39,12 +39,14 @@ export function languageLabel(value: string, beta: string, systemLabel: string):
 }
 
 export function LanguageRow(): JSX.Element {
+    const choices = () => languageChoices(devModeOn());
+    // A stored value the picker does not list (the pseudo-locale with dev mode off, a language that no longer ships) reads as the system's.
     const current = () => {
         const v = settingsAtom()?.["app:locale"];
-        return typeof v === "string" && v ? v : SYSTEM_LOCALE;
+        return typeof v === "string" && choices().includes(v) ? v : SYSTEM_LOCALE;
     };
     const options = () =>
-        languageChoices(devModeOn()).map((value) => ({
+        choices().map((value) => ({
             value,
             label: languageLabel(value, t("settings.language.beta"), t("settings.language.system")),
         }));
