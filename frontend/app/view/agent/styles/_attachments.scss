@@ -417,23 +417,19 @@ $gap: 6px;
     }
 }
 
-// ── Preview (portalled to <body>, so not under .agent-view) ────────────
+// ── Preview (a pane modal: drawn over the pane it is in, by the modal layer, so not under .agent-view) ───
 .agent-attachment-lightbox {
-    @include mixins.fixed-fill;
-    z-index: var(--z-modal);
-    @include mixins.flex-center;
-    // A dimming scrim reads the same in every theme.
-    background: rgb(0 0 0 / 72%);
+    // The modal panel is the frame (border, background, radius, scroll): a preview larger than the pane
+    // scrolls inside it.
+    &__panel {
+        overflow: auto;
+    }
 
     &__dialog {
         display: flex;
         flex-direction: column;
-        max-width: 92vw;
-        max-height: 92vh;
+        max-width: 100%;
         overflow: hidden;
-        border: 1px solid var(--border-color);
-        border-radius: var(--radius-lg);
-        background: var(--modal-bg-color);
         outline: none;
     }
 

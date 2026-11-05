@@ -3,11 +3,12 @@
 
 /** Below the Files pane's list: the progress of running copies and moves, the conflict question, and the status line. */
 
-import { Portal } from "solid-js/web";
+import { Modal } from "@/app/element/modal";
+import { ModalBody, ModalFooter, ModalHeader } from "@/app/element/modal-parts";
 import { Button } from "@/app/element/ui";
 import { tip } from "@/app/element/tip";
 import { formatBytes } from "@/util/format-bytes";
-import { createSignal, For, onMount, Show, type JSX } from "solid-js";
+import { createSignal, For, Show, type JSX } from "solid-js";
 import type { FilesModel } from "./files-model";
 import { opProgressText } from "./files-ops";
 import { gitSummary } from "./files-view-text";
@@ -80,53 +81,40 @@ function ConflictDialog(props: {
     const side = (size?: number, mtime?: number) =>
         [size != null ? formatBytes(size) : null, mtime != null ? new Date(mtime).toLocaleString() : null].filter(Boolean).join(", ");
     let first: HTMLButtonElement | undefined;
-    onMount(() => first?.focus());
     return (
-        <Portal>
-            <div
-                class="files-conflict-overlay"
-                onKeyDown={(e) => {
-                    if (e.key === "Escape") {
-                        e.preventDefault();
-                        props.onCancel();
-                    }
-                }}
-            >
-                <div class="files-conflict" role="alertdialog" aria-labelledby="files-conflict-title">
-                    <div id="files-conflict-title" class="files-conflict-title">
-                        “{name()}” already exists here
+        <Modal open={true} scope="pane" size="sm" onClose={props.onCancel} initialFocus={() => first ?? null}>
+            <ModalHeader title={`“${name()}” already exists here`} />
+            <ModalBody>
+                <div class="files-conflict-body">
+                    <div>
+                        {c().dest_is_dir ? "A folder" : "A file"} with that name is already in the destination
+                        {c().source_is_dir && c().dest_is_dir ? "." : `${c().dest_is_dir !== c().source_is_dir ? `, and the one being ${props.op.kind === "move" ? "moved" : "copied"} is a ${c().source_is_dir ? "folder" : "file"}.` : "."}`}
                     </div>
-                    <div class="files-conflict-body">
-                        <div>
-                            {c().dest_is_dir ? "A folder" : "A file"} with that name is already in the destination
-                            {c().source_is_dir && c().dest_is_dir ? "." : `${c().dest_is_dir !== c().source_is_dir ? `, and the one being ${props.op.kind === "move" ? "moved" : "copied"} is a ${c().source_is_dir ? "folder" : "file"}.` : "."}`}
+                    <Show when={!c().source_is_dir && !c().dest_is_dir}>
+                        <div class="files-conflict-sides">
+                            <div>Existing: {side(c().dest_size ?? undefined, c().dest_mtime ?? undefined)}</div>
+                            <div>Incoming: {side(c().source_size ?? undefined, c().source_mtime ?? undefined)}</div>
                         </div>
-                        <Show when={!c().source_is_dir && !c().dest_is_dir}>
-                            <div class="files-conflict-sides">
-                                <div>Existing: {side(c().dest_size ?? undefined, c().dest_mtime ?? undefined)}</div>
-                                <div>Incoming: {side(c().source_size ?? undefined, c().source_mtime ?? undefined)}</div>
-                            </div>
-                        </Show>
-                        <label class="files-conflict-all">
-                            <input type="checkbox" checked={all()} onChange={(e) => setAll(e.currentTarget.checked)} /> Do this for every conflict
-                        </label>
-                    </div>
-                    <div class="files-conflict-actions">
-                        <Button ref={first} class="files-button" onClick={() => props.onResolve("keep_both", all())}>
-                            Keep both
-                        </Button>
-                        <Button class="files-button" onClick={() => props.onResolve("skip", all())}>
-                            Skip
-                        </Button>
-                        <Button tone="danger" class="files-button files-button-danger" onClick={() => props.onResolve("replace", all())}>
-                            Replace
-                        </Button>
-                        <Button class="files-button" onClick={props.onCancel}>
-                            Stop
-                        </Button>
-                    </div>
+                    </Show>
+                    <label class="files-conflict-all">
+                        <input type="checkbox" checked={all()} onChange={(e) => setAll(e.currentTarget.checked)} /> Do this for every conflict
+                    </label>
                 </div>
-            </div>
-        </Portal>
+            </ModalBody>
+            <ModalFooter>
+                <Button ref={first} class="files-button" onClick={() => props.onResolve("keep_both", all())}>
+                    Keep both
+                </Button>
+                <Button class="files-button" onClick={() => props.onResolve("skip", all())}>
+                    Skip
+                </Button>
+                <Button tone="danger" class="files-button files-button-danger" onClick={() => props.onResolve("replace", all())}>
+                    Replace
+                </Button>
+                <Button class="files-button" data-modal-dismiss onClick={props.onCancel}>
+                    Stop
+                </Button>
+            </ModalFooter>
+        </Modal>
     );
 }

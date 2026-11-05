@@ -532,35 +532,10 @@
     background: var(--accent-color);
 }
 
-.files-conflict-overlay {
-    @include mixins.fixed-fill;
-    z-index: var(--z-modal);
-    @include mixins.flex-center;
-    background: var(--modal-shadow-color);
-}
-
-.files-conflict {
-    width: min(440px, 90vw);
-    padding: 16px;
-    border: 1px solid var(--modal-border-color);
-    border-radius: var(--radius-md);
-    background: var(--modal-bg-color);
-    color: var(--main-text-color);
-    font-family: var(--font-sans);
-    font-size: var(--text-base);
-}
-
-.files-conflict-title {
-    margin-bottom: 8px;
-    font-weight: 600;
-    word-break: break-all;
-}
-
 .files-conflict-body {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    margin-bottom: 14px;
     line-height: 1.5;
 }
 
@@ -573,12 +548,6 @@
     align-items: center;
     gap: 6px;
     cursor: pointer;
-}
-
-.files-conflict-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
 }
 
 .files-button-danger {
