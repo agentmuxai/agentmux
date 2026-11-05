@@ -127,6 +127,12 @@ mod tests {
             wan: None,
             cli_native: None,
             turn: turn.map(str::to_string),
+            host: None,
+            channel: None,
+            version: None,
+            tier: None,
+            trust: None,
+            msg_id: None,
         }
     }
 

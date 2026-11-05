@@ -94,6 +94,8 @@ pub struct Handler {
     /// Whether the delivery in flight started a turn or joined one (`started` / `joined`); the
     /// next entry `log_audit` writes takes it.
     delivery_turn: Option<&'static str>,
+    /// The tier and trust label of the delivery in flight (`sanitize::delivery_how`); set and restored like `delivery_wan`.
+    delivery_how: Option<(String, String)>,
     rate_limiter: RateLimiter,
     include_source_in_message: bool,
 }
@@ -175,6 +177,7 @@ impl Handler {
             delivery_wan: None,
             delivery_lan_claimed_uid: String::new(),
             delivery_turn: None,
+            delivery_how: None,
             rate_limiter: RateLimiter::new(RATE_LIMIT_MAX),
             include_source_in_message: false,
         }
@@ -810,11 +813,13 @@ impl Handler {
         let outer = std::mem::replace(&mut self.delivery_source_uid, uid);
         let outer_wan = std::mem::replace(&mut self.delivery_wan, super::types::WanAudit::from_request(&req));
         let outer_lan = std::mem::replace(&mut self.delivery_lan_claimed_uid, std::mem::take(&mut req.lan_claimed_uid));
+        let outer_how = std::mem::replace(&mut self.delivery_how, Some(super::sanitize::delivery_how(&req)));
         let resp = self.deliver_audited(req, outcome_on_success, outcome_on_failure);
         // Restore, not clear: leave the fields as the caller had them.
         self.delivery_source_uid = outer;
         self.delivery_wan = outer_wan;
         self.delivery_lan_claimed_uid = outer_lan;
+        self.delivery_how = outer_how;
         resp
     }
 
@@ -1557,6 +1562,10 @@ impl Handler {
             wan: self.delivery_wan.clone(),
             cli_native: None,
             turn: self.delivery_turn.take().map(str::to_string),
+            tier: self.delivery_how.as_ref().map(|(tier, _)| tier.clone()),
+            trust: self.delivery_how.as_ref().map(|(_, trust)| trust.clone()),
+            msg_id: Some(request_id.to_string()).filter(|id| !id.is_empty()),
+            ..Default::default()
         };
 
         super::audit_store::push(&mut self.audit_log, AUDIT_LOG_MAX, entry);
@@ -1578,24 +1587,12 @@ impl Handler {
     ) {
         let entry = AuditLogEntry {
             timestamp: now_unix_millis(),
-            source_agent: None,
             target_agent: agent_id.to_string(),
             block_id: block_id.to_string(),
-            message_hash: String::new(),
-            message_length: 0,
-            success: true,
-            error_message: None,
-            request_id: String::new(),
-            outcome: None,
-            reason: None,
             event_kind: event_kind.to_string(),
             evicted_block: evicted_block.map(|s| s.to_string()),
             evicted_agent: evicted_agent.map(|s| s.to_string()),
-            audit_source_uid: String::new(),
-            lan_claimed_uid: String::new(),
-            wan: None,
-            cli_native: None,
-            turn: None,
+            ..Default::default()
         };
 
         super::audit_store::push(&mut self.audit_log, AUDIT_LOG_MAX, entry);

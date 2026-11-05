@@ -47,6 +47,7 @@ fn entry_of(tag: char, day: &str, at: u64, row: &ActivityRow, ctx: &Ctx) -> Audi
             }),
             pane: Some(row.block.as_str()).filter(|b| !b.is_empty() && (ctx.block_exists)(b)).map(|b| AuditPaneLink { block_id: b.to_string() }),
         },
+        provenance: None,
     }
 }
 

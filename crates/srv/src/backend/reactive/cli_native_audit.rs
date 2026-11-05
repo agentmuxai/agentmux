@@ -52,6 +52,12 @@ fn entry(ev: &Event) -> AuditLogEntry {
             preview: preview(&ev.text),
         }),
         turn: None,
+        host: None,
+        channel: None,
+        version: None,
+        tier: None,
+        trust: None,
+        msg_id: None,
     }
 }
 
