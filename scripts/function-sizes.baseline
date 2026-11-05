@@ -424,8 +424,6 @@
 185 frontend/app/tab/tabcontent.tsx::TabContent
 134 frontend/app/util/select-trace.ts::createSelectTrace
 119 frontend/app/util/submenu-hover.ts::createSubmenuHover
-341 frontend/app/view/accounts/ClaudeLoginPanel.tsx::ClaudeLoginPanel
-156 frontend/app/view/accounts/ClaudeLoginPanel.tsx::startFlow
 104 frontend/app/view/accounts/GoogleServicesSection.tsx::GoogleServicesSection
 287 frontend/app/view/accounts/OAuthConnectPanel.tsx::OAuthConnectPanel
 130 frontend/app/view/accounts/accounts-manager.tsx::AccountsManager

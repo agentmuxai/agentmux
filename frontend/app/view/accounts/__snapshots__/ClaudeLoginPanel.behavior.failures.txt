@@ -1,0 +1,81 @@
+== cli could not be resolved
+<body>
+  <div>
+  <div>
+    <div class="modal-root" role="dialog" aria-modal="true" data-scope="window" data-placement="center" aria-label="Connect Anthropic">
+      <div class="modal-backdrop">
+      <span class="modal-focus-sentinel" aria-hidden="true">
+      <div class="modal-panel accounts-chooser" data-size="md">
+        <div class="accounts-chooser-modes">
+          <div class="oauth-byo-note">
+            "Error: not installed — install it"
+          <div class="identity-key-actions">
+            <button type="button" class="ui-button ui-tone-accent identity-btn identity-btn-primary">
+              "Retry"
+            <button type="button" class="ui-button ui-tone-neutral identity-btn identity-btn-secondary">
+              "Close"
+      <span class="modal-focus-sentinel" aria-hidden="true">
+  call ResolveCliCommand [{},{"provider_id":"claude","cli_command":"claude","npm_package":"@anthropic-ai/claude-code","pinned_version":"2.1.288","windows_install_command":"irm https://claude.ai/install.ps1 | iex","unix_install_command":"curl -fsSL https://claude.ai/install.sh | bash"},{"timeout":120000}]
+  console warn [login-window] reserve failed: Cannot read properties of undefined (reading 'reserveExternalWindow')
+== auth dir failed
+<body>
+  <div>
+  <div>
+    <div class="modal-root" role="dialog" aria-modal="true" data-scope="window" data-placement="center" aria-label="Connect Anthropic">
+      <div class="modal-backdrop">
+      <span class="modal-focus-sentinel" aria-hidden="true">
+      <div class="modal-panel accounts-chooser" data-size="md">
+        <div class="accounts-chooser-modes">
+          <div class="oauth-byo-note">
+            "disk full"
+          <div class="identity-key-actions">
+            <button type="button" class="ui-button ui-tone-accent identity-btn identity-btn-primary">
+              "Retry"
+            <button type="button" class="ui-button ui-tone-neutral identity-btn identity-btn-secondary">
+              "Close"
+      <span class="modal-focus-sentinel" aria-hidden="true">
+  call ResolveCliCommand [{},{"provider_id":"claude","cli_command":"claude","npm_package":"@anthropic-ai/claude-code","pinned_version":"2.1.288","windows_install_command":"irm https://claude.ai/install.ps1 | iex","unix_install_command":"curl -fsSL https://claude.ai/install.sh | bash"},{"timeout":120000}]
+  call ensureProviderAuthDir ["claude"]
+  console warn [login-window] reserve failed: Cannot read properties of undefined (reading 'reserveExternalWindow')
+== auth dir failed with a plain string
+<body>
+  <div>
+  <div>
+    <div class="modal-root" role="dialog" aria-modal="true" data-scope="window" data-placement="center" aria-label="Connect Anthropic">
+      <div class="modal-backdrop">
+      <span class="modal-focus-sentinel" aria-hidden="true">
+      <div class="modal-panel accounts-chooser" data-size="md">
+        <div class="accounts-chooser-modes">
+          <div class="oauth-byo-note">
+            "plain string"
+          <div class="identity-key-actions">
+            <button type="button" class="ui-button ui-tone-accent identity-btn identity-btn-primary">
+              "Retry"
+            <button type="button" class="ui-button ui-tone-neutral identity-btn identity-btn-secondary">
+              "Close"
+      <span class="modal-focus-sentinel" aria-hidden="true">
+  call ResolveCliCommand [{},{"provider_id":"claude","cli_command":"claude","npm_package":"@anthropic-ai/claude-code","pinned_version":"2.1.288","windows_install_command":"irm https://claude.ai/install.ps1 | iex","unix_install_command":"curl -fsSL https://claude.ai/install.sh | bash"},{"timeout":120000}]
+  call ensureProviderAuthDir ["claude"]
+  console warn [login-window] reserve failed: Cannot read properties of undefined (reading 'reserveExternalWindow')
+== login rejected: cancelled, error shown
+<body>
+  <div>
+  <div>
+    <div class="modal-root" role="dialog" aria-modal="true" data-scope="window" data-placement="center" aria-label="Connect Anthropic">
+      <div class="modal-backdrop">
+      <span class="modal-focus-sentinel" aria-hidden="true">
+      <div class="modal-panel accounts-chooser" data-size="md">
+        <div class="accounts-chooser-modes">
+          <div class="oauth-byo-note">
+            "Error: pty failed to spawn"
+          <div class="identity-key-actions">
+            <button type="button" class="ui-button ui-tone-accent identity-btn identity-btn-primary">
+              "Retry"
+            <button type="button" class="ui-button ui-tone-neutral identity-btn identity-btn-secondary">
+              "Close"
+      <span class="modal-focus-sentinel" aria-hidden="true">
+  call ResolveCliCommand [{},{"provider_id":"claude","cli_command":"claude","npm_package":"@anthropic-ai/claude-code","pinned_version":"2.1.288","windows_install_command":"irm https://claude.ai/install.ps1 | iex","unix_install_command":"curl -fsSL https://claude.ai/install.sh | bash"},{"timeout":120000}]
+  call ensureProviderAuthDir ["claude"]
+  call cancelCliLogin []
+  run provider=claude cliPath=/usr/bin/claude authEnv={"CLAUDE_CONFIG_DIR":"/tmp/claude-auth"} existingAccountId=undefined linkTarget=undefined skipTier1=false awaitTier1Completion=true
+  console warn [login-window] reserve failed: Cannot read properties of undefined (reading 'reserveExternalWindow')
