@@ -1,0 +1,105 @@
+injectGapRows([{"id":"n1"}], ["gap"])
+injectHistoryLink([{"id":"n1"}], false, {"earlierTurns":0})
+buildResumePreflightNode([{"id":"n1"}], null, false)
+injectResumePreflight([{"id":"n1"}], null)
+markResolvedAuthErrors([{"id":"n1"}])
+deriveDisplayNodes([{"id":"n1"}], "full", {})
+reveal.connectLaunchStatus(status is the launch flow: true)
+log("agent", "Korp selected (provider: Claude)")
+log("env", "working directory: /work")
+launch.startLaunchFlow()
+> hidden follows the tab's visibility
+active = false
+hidden = true
+window-hidden = true
+> the view controls read the document and write its state
+injectGapRows([{"id":"n1"}], ["gap"])
+injectHistoryLink([{"id":"n1"}], false, {"earlierTurns":0})
+buildResumePreflightNode([{"id":"n1"}], null, false)
+injectResumePreflight([{"id":"n1"}], null)
+nodes = [{"id":"n1"}]
+setDocState -> {"keep":1,"a":0,"view":"x"}
+> the model's modal opener: with a layer, then without
+injectGapRows([{"id":"n1"}], ["gap"])
+injectHistoryLink([{"id":"n1"}], false, {"earlierTurns":0})
+buildResumePreflightNode([{"id":"n1"}], null, false)
+injectResumePreflight([{"id":"n1"}], null)
+markResolvedAuthErrors([{"id":"n1"}])
+deriveDisplayNodes([{"id":"n1"}], "full", {})
+reveal.connectLaunchStatus(status is the launch flow: true)
+log("agent", "korp selected (provider: Claude)")
+launch.startLaunchFlow()
+modalLayer.open({"kind":"identity"})
+injectGapRows([{"id":"n1"}], ["gap"])
+injectHistoryLink([{"id":"n1"}], false, {"earlierTurns":0})
+buildResumePreflightNode([{"id":"n1"}], null, false)
+injectResumePreflight([{"id":"n1"}], null)
+markResolvedAuthErrors([{"id":"n1"}])
+deriveDisplayNodes([{"id":"n1"}], "full", {})
+reveal.connectLaunchStatus(status is the launch flow: true)
+log("agent", "korp selected (provider: Claude)")
+launch.startLaunchFlow()
+opener without a layer = undefined
+> an auth failure overrides the durable sign-in status
+injectGapRows([{"id":"n1"}], ["gap"])
+injectHistoryLink([{"id":"n1"}], false, {"earlierTurns":0})
+buildResumePreflightNode([{"id":"n1"}], null, false)
+injectResumePreflight([{"id":"n1"}], null)
+markResolvedAuthErrors([{"id":"n1"}])
+deriveDisplayNodes([{"id":"n1"}], "full", {})
+reveal.connectLaunchStatus(status is the launch flow: true)
+log("agent", "Korp selected (provider: Claude)")
+log("env", "working directory: /work")
+launch.startLaunchFlow()
+strip authStatus, failing = "unauthenticated"
+injectGapRows([{"id":"n1"}], ["gap"])
+injectHistoryLink([{"id":"n1"}], false, {"earlierTurns":0})
+buildResumePreflightNode([{"id":"n1"}], null, false)
+injectResumePreflight([{"id":"n1"}], null)
+markResolvedAuthErrors([{"id":"n1"}])
+deriveDisplayNodes([{"id":"n1"}], "full", {})
+reveal.connectLaunchStatus(status is the launch flow: true)
+log("agent", "Korp selected (provider: Claude)")
+log("env", "working directory: /work")
+launch.startLaunchFlow()
+strip authStatus, signed in = "authenticated"
+> a provider the registry doesn't know
+injectGapRows([{"id":"n1"}], ["gap"])
+injectHistoryLink([{"id":"n1"}], false, {"earlierTurns":0})
+buildResumePreflightNode([{"id":"n1"}], null, false)
+injectResumePreflight([{"id":"n1"}], null)
+markResolvedAuthErrors([{"id":"n1"}])
+deriveDisplayNodes([{"id":"n1"}], "full", {})
+reveal.connectLaunchStatus(status is the launch flow: true)
+log("agent", "Korp selected (provider: unknown)")
+log("env", "working directory: /work")
+launch.startLaunchFlow()
+authProviderId = "unknown"
+panels providerId = ""
+strip providerId = ""
+> a context-menu region under the click keeps the copy menu away
+injectGapRows([{"id":"n1"}], ["gap"])
+injectHistoryLink([{"id":"n1"}], false, {"earlierTurns":0})
+buildResumePreflightNode([{"id":"n1"}], null, false)
+injectResumePreflight([{"id":"n1"}], null)
+markResolvedAuthErrors([{"id":"n1"}])
+deriveDisplayNodes([{"id":"n1"}], "full", {})
+reveal.connectLaunchStatus(status is the launch flow: true)
+log("agent", "Korp selected (provider: Claude)")
+log("env", "working directory: /work")
+launch.startLaunchFlow()
+copy menu calls = 0
+> the view popover hangs from the strip when the pane has no chip
+injectGapRows([{"id":"n1"}], ["gap"])
+injectHistoryLink([{"id":"n1"}], false, {"earlierTurns":0})
+buildResumePreflightNode([{"id":"n1"}], null, false)
+injectResumePreflight([{"id":"n1"}], null)
+markResolvedAuthErrors([{"id":"n1"}])
+deriveDisplayNodes([{"id":"n1"}], "full", {})
+reveal.connectLaunchStatus(status is the launch flow: true)
+log("agent", "Korp selected (provider: Claude)")
+log("env", "working directory: /work")
+launch.startLaunchFlow()
+strip viewOpen = true
+popover controls: same
+popover anchor = undefined

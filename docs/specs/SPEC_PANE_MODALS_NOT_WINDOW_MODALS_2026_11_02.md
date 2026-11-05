@@ -5,7 +5,8 @@
 
 **Progress** (one line per merged PR; `window-modal-sites.json` shrinks with each):
 - 2026-11-03, Agent1@narko: rows 1 and 2 (#6343), 6 and 8 (#6354) done.
-- 2026-11-04, Agent1@narko: row 7 done: the media permission prompt and "Stop camera and microphone access?" are pane modals over the browser pane that asked (`window/pane-media-*.tsx`, tests in `pane-media-prompts.test.tsx`, baseline down by two).
+- 2026-11-04, Agent1@narko: row 7 done: the media permission prompt and "Stop camera and microphone access?" are pane modals over the browser pane that asked (`window/pane-media-*.tsx`, tests in `pane-media-prompts.test.tsx`, baseline down by two; #6449).
+- 2026-11-04, Agent1@narko: row 9 done: the Swarm stop and stop-receiving confirms, the Settings fork-slug update and undo confirms, the account delete and MCP server delete confirms are `scope="pane"`.
 
 The operator, 2026-11-02: "when choosing to sign in via the agent pane, lets have the modal be a pane (not a window) modal. Same when oauth login from connectors. in fact, lets audit all the times we use window modals, they should be very rarely used".
 

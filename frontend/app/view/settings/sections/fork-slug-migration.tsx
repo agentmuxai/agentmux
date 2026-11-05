@@ -410,7 +410,7 @@ export function ForkSlugMigration(): JSX.Element {
             </Show>
             <ConfirmModal
                 open={confirmStop()}
-                destructive
+                destructive scope="pane"
                 title={`Stop ${plural(running().length, "pane")}?`}
                 description="These panes run agents being updated. Each one shows a Keep running button for 30 seconds before it stops; the update starts once they have."
                 confirmLabel="Stop and update"
@@ -423,7 +423,7 @@ export function ForkSlugMigration(): JSX.Element {
             </ConfirmModal>
             <ConfirmModal
                 open={confirmUndo()}
-                destructive
+                destructive scope="pane"
                 title="Undo the update?"
                 description="Every change it made is reversed, step by step, from its journal, and the agents take their old ids at their next launch."
                 confirmLabel="Undo"
