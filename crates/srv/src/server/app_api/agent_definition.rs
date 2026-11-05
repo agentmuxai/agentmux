@@ -6,9 +6,12 @@
 //! without the operator's window, by the code the window's `updateagent`, `forkagentdefinition`,
 //! `setagentbundles` and `agentdefhide`/`agentdefunhide` run.
 //!
-//! - update: only the fields given change. The name has its own action (`rename`), the provider is fixed when an
-//!   agent is made, environment variables have `env_set`, and accounts, container settings and the seat have
-//!   their own actions; none of those is taken here.
+//! - update: only the fields given change, and only ones that say how the agent is listed or when it runs:
+//!   description, icon, auto_start, restart_on_crash and idle_timeout_minutes. What decides what an agent runs, or
+//!   where its traffic goes or which project files it reads (shell, provider_flags, working_directory,
+//!   model_vendor_base_url) is not taken, as `env_set` refuses the same: the operator sets those in My Agents. The
+//!   name has its own action (`rename`), the provider is fixed when an agent is made, and environment variables,
+//!   accounts, container settings and the seat have their own actions.
 //! - fork: a copy of the definition under a new name that records its parent. The conversation is not copied.
 //! - bundles: with `bundle_ids`, replaces the agent's picked bundles, in order; without, reads them.
 //! - hide, unhide: a seeded picker template; an agent you made is removed with `delete`.
@@ -32,20 +35,17 @@ const MAX_TEXT_CHARS: usize = 4000;
 /// A week: the longest idle timeout.
 const MAX_IDLE_MINUTES: i64 = 7 * 24 * 60;
 
+/// A field outside the list above is refused by name (`deny_unknown_fields`), never ignored.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct UpdateRequest {
     /// The agent's id, slug or name.
     agent: String,
     description: Option<String>,
     icon: Option<String>,
-    working_directory: Option<String>,
-    shell: Option<String>,
-    provider_flags: Option<String>,
     auto_start: Option<bool>,
     restart_on_crash: Option<bool>,
     idle_timeout_minutes: Option<i64>,
-    /// `Some("")` clears the override.
-    model_vendor_base_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -105,9 +105,6 @@ fn update(state: &AppState, req: &UpdateRequest) -> Result<(String, Vec<&'static
     };
     set("description", &mut agent.description, &req.description)?;
     set("icon", &mut agent.icon, &req.icon)?;
-    set("working_directory", &mut agent.working_directory, &req.working_directory)?;
-    set("shell", &mut agent.shell, &req.shell)?;
-    set("provider_flags", &mut agent.provider_flags, &req.provider_flags)?;
     if let Some(on) = req.auto_start {
         agent.auto_start = i64::from(on);
         changed.push("auto_start");
@@ -123,13 +120,8 @@ fn update(state: &AppState, req: &UpdateRequest) -> Result<(String, Vec<&'static
         agent.idle_timeout_minutes = minutes;
         changed.push("idle_timeout_minutes");
     }
-    if let Some(url) = &req.model_vendor_base_url {
-        super::validate_vendor_base_url(&agent.provider, url).map_err(bad)?;
-        agent.model_vendor_base_url = url.trim().to_string();
-        changed.push("model_vendor_base_url");
-    }
     if changed.is_empty() {
-        return Err(bad("nothing to change; give at least one of description, icon, working_directory, shell, provider_flags, auto_start, restart_on_crash, idle_timeout_minutes, model_vendor_base_url (name: rename; environment: env_set)"));
+        return Err(bad("nothing to change; give at least one of description, icon, auto_start, restart_on_crash, idle_timeout_minutes (name: rename; environment: env_set)"));
     }
     if !state.mstore.agent_def_update(&mut agent).map_err(internal)? {
         return Err(refuse(StatusCode::NOT_FOUND, format!("no agent '{}' on this machine", req.agent)));

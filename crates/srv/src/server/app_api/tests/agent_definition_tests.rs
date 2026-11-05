@@ -67,6 +67,14 @@ async fn an_update_with_nothing_to_change_or_a_bad_value_is_refused_and_recorded
     assert_eq!(audited(&me).iter().filter(|e| !e.success).count(), 3);
 }
 
+#[test]
+fn a_field_that_decides_what_runs_or_where_traffic_goes_is_not_taken() {
+    for field in ["shell", "provider_flags", "working_directory", "model_vendor_base_url"] {
+        let parsed = serde_json::from_value::<UpdateRequest>(json!({ "agent": "a", field: "x" }));
+        assert!(parsed.is_err(), "{field} must be refused by name");
+    }
+}
+
 #[tokio::test]
 async fn a_request_without_an_agent_token_is_refused() {
     let state = test_state();

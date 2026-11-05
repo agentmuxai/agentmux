@@ -573,10 +573,10 @@ async fn rename_agent(cx: &ToolCtx<'_>, args: &Value) -> Result<String> {
 
 /// The fields `update` may change (`/api/v1/agent/update`); the name, provider, environment, accounts and
 /// seat have their own actions.
-const DEFINITION_FIELDS: &[&str] = &[
-    "description", "icon", "working_directory", "shell", "provider_flags", "auto_start", "restart_on_crash", "idle_timeout_minutes",
-    "model_vendor_base_url",
-];
+const DEFINITION_FIELDS: &[&str] = &["description", "icon", "auto_start", "restart_on_crash", "idle_timeout_minutes"];
+/// What decides what an agent runs, where its traffic goes or which project files it reads: the operator's to set in
+/// My Agents, as `env_set` refuses the same.
+const OPERATOR_FIELDS: &[&str] = &["shell", "provider_flags", "working_directory", "model_vendor_base_url"];
 
 /// `update`, `fork`, `bundles`, `hide` and `unhide`: srv acts on the definition of the agent in `agent` (a picker
 /// template in `template` for hide and unhide) as the agent this process's token names, and records it under
@@ -586,6 +586,9 @@ async fn definition_action(cx: &ToolCtx<'_>, action: &str, args: &Value) -> Resu
     let need = |key: &str| str_arg(args, key).ok_or_else(|| anyhow::anyhow!("missing required parameter: {key}"));
     let body = match action {
         "update" => {
+            if let Some(field) = OPERATOR_FIELDS.iter().find(|f| args.get(**f).is_some_and(|v| !v.is_null())) {
+                anyhow::bail!("Agents update does not take {field}: shell, provider_flags, working_directory and model_vendor_base_url decide what an agent runs, where its traffic goes and which project files it reads, so the operator sets them in My Agents");
+            }
             let mut body = json!({ "agent": need("agent")? });
             for field in DEFINITION_FIELDS {
                 if let Some(v) = args.get(*field).filter(|v| !v.is_null()) {
@@ -774,6 +777,18 @@ mod tests {
         for (action, tool) in [("update", "AgentUpdate"), ("fork", "AgentFork"), ("bundles", "AgentBundles"), ("hide", "AgentHide"), ("unhide", "AgentUnhide")] {
             let (act, _) = pick("Agents", ACTS, &json!({ "action": action, "agent": "pulse", "template": "t" })).unwrap();
             assert_eq!(act.tool, tool, "{action}");
+        }
+    }
+
+    #[tokio::test]
+    async fn update_refuses_what_decides_what_runs_before_anything_is_sent() {
+        let client = reqwest::Client::new();
+        let loops = LoopRegistry::default();
+        let counter = std::sync::atomic::AtomicU64::new(0);
+        let cx = ToolCtx { local_url: "http://127.0.0.1:1", auth_key: "k", block_id: "b", client: &client, loops: &loops, loop_counter: &counter };
+        for field in ["shell", "provider_flags", "working_directory", "model_vendor_base_url"] {
+            let e = call("Agents", &json!({ "action": "update", "agent": "pulse", field: "x" }), &cx).await.unwrap_err().to_string();
+            assert!(e.contains(&format!("does not take {field}")), "{field}: {e}");
         }
     }
 
