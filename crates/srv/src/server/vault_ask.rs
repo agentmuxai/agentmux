@@ -31,10 +31,11 @@ pub(super) async fn ask(state: &AppState, attention_block: &str, mut request: Us
     let (id, entry, label, agent) = (request.id.clone(), request.entry_id.clone(), request.entry_label.clone(), request.agent.clone());
     let target = target_of(&request);
     let attention_block = if request.block_id.is_empty() { attention_block.to_string() } else { request.block_id.clone() };
+    let headline = notice(headline, uses::goes_ahead_on_silence(&request.kind, request.needs_value));
     let answer = uses::uses().ask(request, wait);
     let _waiting = Waiting::new(id, state.clone());
     super::vault_handlers::publish(state);
-    let _asking = crate::backend::user_attention::Asking::start(&state.broker, &state.mstore, &attention_block, "vault", headline);
+    let _asking = crate::backend::user_attention::Asking::start(&state.broker, &state.mstore, &attention_block, "vault", &headline);
     let answer = match tokio::time::timeout(wait + GRACE, answer).await {
         Ok(Ok(a)) => Some(a),
         // The request was taken down without an answer: as a no.
@@ -46,6 +47,17 @@ pub(super) async fn ask(state: &AppState, attention_block: &str, mut request: Us
         crate::backend::vault::record(&state.identity_store, &entry, &label, &agent, ASKED, &target, uses::WENT_AHEAD_OUTCOME);
     }
     (ended, answer)
+}
+
+/// The notification's text: what the agent wants, and what silence does
+/// (spec §6): "Builder wants to rotate Stripe: goes ahead in 30 s unless you
+/// deny", or "...: needs your yes" for an ID or card entry.
+fn notice(headline: &str, goes_ahead: bool) -> String {
+    if goes_ahead {
+        format!("{headline}: goes ahead in {} s unless you deny", uses::VETO.as_secs())
+    } else {
+        format!("{headline}: needs your yes")
+    }
 }
 
 /// `out`, a successful answer to the agent, saying it went ahead because nobody
@@ -90,4 +102,15 @@ pub(super) fn shown_pane(state: &AppState, block_id: &str) -> String {
 /// Empty when the agent's identity doesn't name one.
 pub(super) fn agent_pane(state: &AppState, caller: Option<&crate::server::caller::Caller>, auth: &agentmux_common::api_types::UiAutomationAuth) -> String {
     super::ui_handlers::verified_block_id(state, caller, auth).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::notice;
+
+    #[test]
+    fn the_notice_says_what_silence_does() {
+        assert_eq!(notice("Builder wants to use Stripe", true), "Builder wants to use Stripe: goes ahead in 30 s unless you deny");
+        assert_eq!(notice("Builder wants to fill your passport", false), "Builder wants to fill your passport: needs your yes");
+    }
 }

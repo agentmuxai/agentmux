@@ -17,6 +17,8 @@ export class VaultViewModel {
     sectionAtom: Accessor<VaultPaneSection>;
     /** An agent's request to fill in, set when the request's prompt opens the Vault. */
     requestAtom: Accessor<string>;
+    /** A pending use or ask to show in the Requests list, set by openVaultAt. */
+    focusAtom: Accessor<string>;
     viewName: Accessor<string>;
     /** Whether the pane is on screen (its tab active, its window shown). */
     shown: Accessor<boolean>;
@@ -36,6 +38,10 @@ export class VaultViewModel {
         this.requestAtom = createMemo<string>(() => {
             const r = meta()?.["vault:request"];
             return typeof r === "string" ? r : "";
+        });
+        this.focusAtom = createMemo<string>(() => {
+            const f = meta()?.["vault:focus"];
+            return typeof f === "string" ? f : "";
         });
         this.viewName = createMemo<string>(() => SECTION_LABELS[this.sectionAtom()]);
         this.promptsOpen = createMemo<boolean>(() => meta()?.["vault:prompts-read"] !== true);

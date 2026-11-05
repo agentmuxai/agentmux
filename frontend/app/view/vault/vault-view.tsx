@@ -5,13 +5,14 @@
 // seeing them (docs/specs/SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md §5).
 // A rail of sections; agents' requests for new entries on top.
 
-import { createEffect, createSignal, For, on, onCleanup, Show, type JSX } from "solid-js";
+import { createEffect, createSignal, For, on, onCleanup, Show, type Accessor, type JSX } from "solid-js";
 
 import { Button, TabbedPane, type TabItem } from "@/app/element/ui";
 import type { VaultActivity } from "@/types/rpc/VaultActivity";
 import type { VaultRequest } from "@/types/rpc/VaultRequest";
 import type { VaultSection } from "@/types/rpc/VaultSection";
 import { VaultEntries } from "./vault-entries";
+import { VaultRequestsList } from "./vault-requests-list";
 import { VaultShown } from "./vault-reveal";
 import { VaultExportDialog } from "./vault-export";
 import { VaultImportDialog } from "./vault-import";
@@ -23,7 +24,6 @@ import { openOrFocusPaneByView } from "@/app/store/block-component-registry";
 import { getPlatform } from "@/util/platformutil";
 import type { VaultViewModel } from "./vault-model";
 import {
-    declineRequest,
     followVault,
     holdVaultShown,
     loadActivity,
@@ -50,45 +50,6 @@ const MANAGED_IN: Record<string, string> = {
     tower: "Tower",
     browser: "The browser pane that asked for it",
 };
-
-function VaultRequests(props: { onFill: (r: VaultRequest) => void }): JSX.Element {
-    const [error, setError] = createSignal<string | null>(null);
-    const dismiss = async (r: VaultRequest) => {
-        try {
-            await declineRequest(r.id);
-            setError(null);
-        } catch (e) {
-            setError(e instanceof Error ? e.message : String(e));
-        }
-    };
-    return (
-        <Show when={vaultRequests().length > 0}>
-            <div class="vault-requests" role="region" aria-label="Agents' requests">
-                <For each={vaultRequests()}>
-                    {(r) => (
-                        <div class="vault-request" data-request={r.id}>
-                            <div class="vault-request-text">
-                                <strong>{r.agent}</strong> asks for a {vaultKind(r.kind)?.label.toLowerCase() ?? r.kind}: <strong>{r.label}</strong>
-                                <Show when={r.why}>
-                                    <div class="warden-manager-dim">{r.why}</div>
-                                </Show>
-                            </div>
-                            <Button tone="attention" density="compact" onClick={() => props.onFill(r)}>
-                                Fill in
-                            </Button>
-                            <Button tone="quiet" density="compact" onClick={() => void dismiss(r)}>
-                                Dismiss
-                            </Button>
-                        </div>
-                    )}
-                </For>
-                <Show when={error()}>
-                    <div class="warden-manager-error">⚠ {error()}</div>
-                </Show>
-            </div>
-        </Show>
-    );
-}
 
 /** What may ask the person while they use the Vault, said before it does. */
 function VaultPromptsNote(props: { onClose: () => void }): JSX.Element {
@@ -181,7 +142,7 @@ function VaultActivityLog(props: { visible: boolean }): JSX.Element {
             <p class="warden-manager-summary">
                 Every change to the Vault and every use of an entry: who, what, where. Never a value.{" "}
                 <Button density="compact" onClick={() => void openOrFocusPaneByView("audit")}>
-                    See agents' use in the Audit
+                    {"See agents' use in the Audit"}
                 </Button>
             </p>
             <Show when={error()}>
@@ -215,6 +176,20 @@ function VaultActivityLog(props: { visible: boolean }): JSX.Element {
             </Show>
         </div>
     );
+}
+
+/** The request the Vault was opened on (from a parked agent row or the status bar), to mark in the
+ *  list; the meta is cleared so a later reopen does not scroll back to it. */
+function focusedRequest(model: VaultViewModel): Accessor<string> {
+    const [focused, setFocused] = createSignal("");
+    createEffect(
+        on(model.focusAtom, (id) => {
+            if (!id) return;
+            setFocused(id);
+            model.setMeta({ "vault:focus": null });
+        })
+    );
+    return focused;
 }
 
 export function VaultView(props: { model: VaultViewModel }): JSX.Element {
@@ -256,6 +231,8 @@ export function VaultView(props: { model: VaultViewModel }): JSX.Element {
         });
     });
 
+    const focused = focusedRequest(model);
+
     // Opened from an agent's request prompt: open its form once the request is known.
     createEffect(
         on([model.requestAtom, vaultRequests], ([id, list]) => {
@@ -280,7 +257,7 @@ export function VaultView(props: { model: VaultViewModel }): JSX.Element {
                     <Show when={model.promptsOpen()}>
                         <VaultPromptsNote onClose={() => model.setMeta({ "vault:prompts-read": true })} />
                     </Show>
-                    <VaultRequests onFill={fill} />
+                    <VaultRequestsList onFill={fill} focused={focused} />
                     <Show when={vaultError() ?? vaultProblem()}>
                         <div class="warden-manager-error vault-problem" role="alert">
                             ⚠ {vaultError() ?? vaultProblem()}

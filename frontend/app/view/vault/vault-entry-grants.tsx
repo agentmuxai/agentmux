@@ -9,7 +9,8 @@ import { For, Show, type JSX } from "solid-js";
 
 import { IconButton } from "@/app/element/ui";
 import type { VaultEntryInfo } from "@/types/rpc/VaultEntryInfo";
-import { COMMAND_GRANT, commandGrantLabel, isSiteGrant, SIGNIN_GRANT, signinGrantLabel, siteOf } from "./vault-use-prompts";
+import { COMMAND_GRANT, commandGrantLabel, isSiteGrant, SIGNIN_GRANT, signinGrantLabel } from "./vault-grant-labels";
+import { siteOf } from "./vault-use-question";
 
 /** One kind of grant: a line of names, each with its revoke button. */
 function GrantList(props: { grants: string[]; label: string; lead: string; name: (g: string) => string; stop: (g: string) => string; revoke: (g: string) => void }): JSX.Element {
