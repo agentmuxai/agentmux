@@ -6,6 +6,8 @@ import type { LanInstance } from "@/types/rpc/LanInstance";
 import type { LanPinInfo } from "@/types/rpc/LanPinInfo";
 import {
     hostsWithSeveralInstances,
+    hasNoAgents,
+    installLabel,
     lastSeenText,
     middleTruncate,
     osAndChannel,
@@ -66,6 +68,27 @@ describe("osAndChannel", () => {
         expect(osAndChannel({ os: "", channel: "dev" })).toBe("dev");
         expect(osAndChannel({ os: "linux", channel: "" })).toBe("Linux");
         expect(osAndChannel({ os: "", channel: "" })).toBe("");
+    });
+});
+
+describe("installLabel and install in osAndChannel", () => {
+    it("says how a peer is installed, and nothing for what it did not advertise", () => {
+        expect(installLabel("windows-store")).toBe("Microsoft Store");
+        expect(installLabel("windows-setup")).toBe("installed");
+        expect(installLabel("windows-portable")).toBe("portable");
+        expect(installLabel("")).toBe("");
+        expect(installLabel("unknown")).toBe("");
+        expect(installLabel(undefined)).toBe("");
+        expect(osAndChannel({ os: "windows", channel: "stable", install: "windows-store" })).toBe("Windows · stable · Microsoft Store");
+    });
+});
+
+describe("hasNoAgents", () => {
+    it("is true only for a peer that was asked and runs nobody", () => {
+        expect(hasNoAgents({ agents: [], last_polled_ok: 5 })).toBe(true);
+        // Not asked yet: an empty list says nothing.
+        expect(hasNoAgents({ agents: [], last_polled_ok: 0 })).toBe(false);
+        expect(hasNoAgents({ agents: ["Lazo"], last_polled_ok: 5 })).toBe(false);
     });
 });
 

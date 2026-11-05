@@ -15,7 +15,11 @@ channel: string,
  * platform tag in the Swarm. Display only; empty for a peer that does not
  * advertise it (SPEC_SWARM_REMOTE_AGENTS_PLATFORM_TAG_AND_SELECTION_2026_10_03.md §3).
  */
-os: string, address: string, port: number, agents: Array<string>, 
+os: string, 
+/**
+ * How the peer is installed (`InstallKind::label`, e.g. `windows-store`); empty when it predates advertising it.
+ */
+install: string, address: string, port: number, agents: Array<string>, 
 /**
  * Each listed agent's state and summary line as the peer reported them, by
  * lower-cased name (`lan/discovery/agent_names.rs`). Self-reported, for the Swarm.

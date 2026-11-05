@@ -330,13 +330,27 @@ fn sent_text(to: &str, result: &Value, id: &str) -> Result<String> {
     } else {
         ""
     };
+    // What srv could see when it queued the message: the target runs on no LAN peer (or it would
+    // have been delivered there), so only an install of the sender's elsewhere can pick it up.
+    let nowhere_near = match result.get("lan_peers").and_then(|v| v.as_array()) {
+        Some(peers) => {
+            let seen: Vec<&str> = peers.iter().filter_map(|p| p.as_str()).collect();
+            let peers_said = if seen.is_empty() { "no LAN peers found".to_string() } else { format!("LAN peers: {}", seen.join("; ")) };
+            format!(
+                " {to} is not running on this machine or on any LAN peer ({peers_said}), so it \
+                 arrives only if an install of yours elsewhere runs {to} and is online."
+            )
+        }
+        None => String::new(),
+    };
     Ok(format!(
         "QUEUED for {to} via the cloud relay (unconfirmed, expires in 30 min) — NOT yet \
          delivered. The relay accepted it; their AgentMux picks it up when it next syncs, \
          and the relay drops it after 30 minutes if nothing does (which is what happens if \
-         that instance stays offline). You get this same result for an agent name that \
+         that instance stays offline). If {to} has not written to you by then, you get a note \
+         that it was never confirmed. You get this same result for an agent name that \
          does not exist anywhere, so check the spelling against Agents list if you \
-         expected local delivery.{not_yours}{id}"
+         expected local delivery.{nowhere_near}{not_yours}{id}"
     ))
 }
 

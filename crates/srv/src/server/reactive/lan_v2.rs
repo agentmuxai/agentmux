@@ -24,8 +24,10 @@ pub(super) fn sign_and_log(
     req
 }
 
-/// One INFO line for a request that arrived over the LAN: what was made of its signature.
+/// One INFO line for a request that arrived over the LAN: what was made of its signature. Called for
+/// every request `deliver` takes, so it also tells `relay_watch` that the sender is reachable.
 pub(super) fn log_receipt(req: &InjectionRequest) {
+    crate::muxbus::relay_watch::heard_from(req.source_agent.as_deref(), &req.target_agent);
     if let Some(note) = receipt_note(req) {
         tracing::info!(target = %req.target_agent, source = req.source_agent.as_deref().unwrap_or(""), v2 = req.lan_sig_v2.is_some(), "LAN receipt: {note}");
     }

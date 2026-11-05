@@ -195,6 +195,10 @@ pub(super) async fn lan_or_full_auth_middleware(
             next.run(req).await
         }
         Some(key) if secret_eq(key.as_bytes(), state.lan_key.as_bytes()) => {
+            // Another machine got through with the LAN key: it can find and reach us.
+            if let Some(peer) = req.extensions().get::<axum::extract::ConnectInfo<std::net::SocketAddr>>() {
+                crate::backend::lan::mdns_health::note_inbound_peer(peer.0.ip());
+            }
             req.extensions_mut().insert(ReactiveAuthVia::LanKey);
             next.run(req).await
         }
