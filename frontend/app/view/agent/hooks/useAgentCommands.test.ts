@@ -3478,4 +3478,66 @@ describe("sendMessage with image attachments (SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_
             dispose();
         });
     });
+
+    it("keeps a message queued mid-turn on the pending list with its images", async () => {
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+        await createRoot(async (dispose) => {
+            const commands = commandsFor(model);
+            hub.agentInput.mockResolvedValueOnce(undefined);
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("first", false);
+            await commands.sendMessage("with images", true, null, refs);
+            const queued = (paneSnapshot(BLOCK_ID)?.pending ?? []).find((p) => p.text === "with images");
+            expect(queued?.enqueuedWhileBusy).toBe(true);
+            expect(queued?.attachments).toEqual(refs);
+            dispose();
+        });
+    });
+
+    it("hands a recalled (edited) queued message its images back, and sends nothing", async () => {
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+        await createRoot(async (dispose) => {
+            const commands = commandsFor(model);
+            hub.agentInput.mockResolvedValueOnce(undefined);
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("first", false);
+            await commands.sendMessage("with images", true, null, refs);
+            hub.agentInput.mockClear();
+            expect(commands.recallLatestHeld()).toEqual({ text: "with images", attachments: refs });
+            // Recalled: off the queue and off the pending list, and a later flush has nothing to send.
+            expect((paneSnapshot(BLOCK_ID)?.pending ?? []).some((p) => p.text === "with images")).toBe(false);
+            await commands.flushHeldMessages();
+            expect(hub.agentInput).not.toHaveBeenCalled();
+            dispose();
+        });
+    });
+
+    it("sends each queued message's own images, in order, when several are queued", async () => {
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+        const other = [{ id: "c".repeat(64), name: "other.png" }];
+        await createRoot(async (dispose) => {
+            const commands = commandsFor(model);
+            hub.agentInput.mockResolvedValueOnce(undefined);
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("first", false);
+            await commands.sendMessage("one", true, null, refs);
+            await commands.sendMessage("two", true);
+            await commands.sendMessage("three", true, null, other);
+            hub.agentInput.mockClear();
+            hub.agentInput.mockResolvedValue(undefined);
+            await commands.flushHeldMessages();
+            const sent = hub.agentInput.mock.calls.map((c) => c[1] as { message: string; attachments?: unknown });
+            expect(sent.map((m) => m.message)).toEqual(["one", "two", "three"]);
+            expect(sent[0].attachments).toEqual(refs);
+            expect(sent[1]).not.toHaveProperty("attachments");
+            expect(sent[2].attachments).toEqual(other);
+            dispose();
+        });
+    });
 });
