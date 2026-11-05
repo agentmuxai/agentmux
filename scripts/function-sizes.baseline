@@ -509,7 +509,6 @@
 394 frontend/app/view/browser/use-pane-rect-sync.ts::usePaneRectSync
 155 frontend/app/view/bundle/BundleProviderInstructionsSection.tsx::BundleProviderInstructionsSection
 118 frontend/app/view/bundle/components/BundleImportConfirmModal.tsx::BundleImportConfirmModalPanel
-360 frontend/app/view/bundle/components/BundleImportPreviewModal.tsx::BundleImportPreviewModalPanel
 432 frontend/app/view/drone/drone-view.tsx::Canvas
 285 frontend/app/view/editor/editor-model.ts::EditorViewModel::constructor
 190 frontend/app/view/editor/file-tree.tsx::FileTree
