@@ -1,0 +1,191 @@
+> questions, turn confirmation and the turn-end sweep
+commands.sendWithState("hello")
+dispatchPane({"type":"ReconcileTurnActive","at":1234,"active":true}, "system")
+commands.flushPendingControllerRefresh()
+turnEnded: same
+liveFeed.scheduleRollOff()
+> the launch flow's inner hooks
+commands.sendWithState("opening", [], true)
+peerAgents = [{"id":"korp"}]
+currentAgent = {"id":"korp"}
+providerDisplayName = "Claude"
+onReady: same
+clearFailure(<paneModel>, {"reason":"recovered","system":true})
+log("agent", "Retry — no prior message to re-send; relaunching the agent")
+launch.startLaunchFlow()
+> recovered, a message to resend
+clearFailure(<paneModel>, {"reason":"recovered","system":true})
+commands.sendWithState("again", [{"n":1}], false)
+> recovered while another flow runs
+computeTermSizeFromEl(.agent-view)
+reconcileTurnActive(true)
+reconcileTurnActive(false)
+> controller events and refocus
+reconcileTurnActive(true)
+trackTurnJustEnded(true)
+reconcileTurnActive(false)
+trackTurnJustEnded(false)
+declareAuthHealthy()
+windowFocused = true
+trackTurnJustEnded: same
+commands.flushPendingControllerRefresh()
+> activity summary and next-prompt suggestion
+turnPhase = "idle"
+rootWidth = 321
+composer empty before the footer registers = true
+composer empty after = false
+turnPhase = "idle"
+turnJustEndedAtom: same
+document: same
+> narration
+dispatchDoc({"type":"StreamFlush","newNodes":[{"id":"amb"}],"updatedNodes":[]})
+dispatchDoc({"type":"StreamFlush","newNodes":[{"id":"bg"}],"updatedNodes":[]})
+handoff document: same
+> the stream, before and after the list registers its scroller
+outputFormat = "claude-stream-json"
+provider = "claude"
+agentName = "Korp"
+enabled = true
+compacting = false
+turnPhase = "idle"
+pendingMessages = []
+documentNodes: same
+scrollToBottom("queued-turn")
+scrollToBottom("accepted")
+> the commands
+showingLaunchActivity idle = false
+showingLaunchActivity in relogin = true
+showingLaunchActivity loading = true
+setAuthUrl: same
+canRetry: same
+loginWaiting: same
+setAuthNotice: same
+notifyControllerHealthy: same
+forceControllerRefresh: same
+beginRecoveryFlow: same
+endRecoveryFlow: same
+isCancelled: same
+resetCancelled: same
+isBackendTurnActive: same
+isBackendTurnConfirmedIdle: same
+block: same
+model: same
+documentNodes: same
+log: same
+provider = "claude"
+pendingMessages = []
+model.backToPicker()
+quickForkAgent({"blockId":"blk-12345678"})
+askSideQuestion("blk-12345678", "why", [{"id":"n1"}])
+scrollToBottom("sent")
+> offline input, the sign-in row, the account binding and the auth health
+agentId = "korp"
+provider = "claude"
+send: same
+stop: same
+canRetry: same
+providerId = "claude"
+bindExistingAccount: same
+signedOut = false
+signedOut after sign-out = true
+launch.relogin({"retryAfterLogin":false})
+launch.relogin({"retryAfterLogin":true})
+agentDefinitionId = undefined
+status: same
+refreshLinkedAccountId: same
+> the failure row and held messages
+model: same
+paneModel: same
+status: same
+account: same
+offline: same
+send: same
+log: same
+log("agent", "Retry — no prior message to re-send; relaunching the agent")
+launch.startLaunchFlow()
+commands.sendWithState("again", [], true)
+hasHeldMessages: same
+flushHeldMessages: same
+commands.flushPendingControllerRefresh()
+> search, keyboard and scrolling
+jumpTo: same
+document: same
+search.setVisible(true)
+search.close()
+onCycleView: same
+onFollowDefaultView: same
+> the root element, snapshot persistence and the shell
+drop-attach root: same
+pty width root: same
+pty width log: same
+atoms are stable: same
+detailsOpen = false
+snapshotIsForeignBlock = true
+getDocument: same
+hidden = false
+definitionId = "korp"
+log: same
+decisions document: same
+questions document: same
+shellSubBlockId = undefined
+clearTermWrite: same
+paneModel: same
+context reading model: same
+context reading block: same
+turn ledger model: same
+live feed history: same
+live feed paneModel: same
+live feed block: same
+live feed hidden = false
+> the strip
+dispatchPane({"type":"DetailsToggle"}, "user")
+onSwitchAccount: same
+viewControls.setPopoverOpen(true)
+> the transcript
+log("auth", "Login Again (inline error node) — forcing a fresh provider login")
+launch.relogin()
+onLoadOlder: same
+loadingOlder: same
+hasOlderHistory, nothing to page = false
+hasOlderHistory, nothing older = false
+hasOlderHistory, paging allowed = true
+hasOlderHistory, paging not allowed = false
+liveFeed.setFollowingBottom(true)
+highlightNodeId: same
+scrollCommand: same
+zoomFactor = 1
+new activity before the list reports = false
+new activity after = true
+scrollToBottom("new-activity-pill")
+scrollToBottom("typing")
+search visible: same
+search onSearch: same
+search onNext: same
+search onPrev: same
+search onClose: same
+search matchIndex: same
+search matchCount: same
+> the panels, the preparing row and the shell drawer
+pendingDecisions: same
+pendingQuestions: same
+onDecide: same
+onAnswer: same
+onCancel: same
+failureRow: same
+backgroundTasksAtom: same
+workingRowVisible: same
+workingRowLoading: same
+status: same
+offline: same
+paneModel: same
+log: same
+pendingMessages = []
+enabled = false
+injectGapRows([{"id":"n1"}], ["gap"])
+injectHistoryLink([{"id":"n1"}], false, {"earlierTurns":0})
+buildResumePreflightNode([{"id":"n1"}], null, false)
+injectResumePreflight([{"id":"n1"}], null)
+nodes = [{"id":"n1"}]
+onTermReady: same
+onTermDispose: same
+onShellExited: same

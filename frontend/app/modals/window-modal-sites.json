@@ -57,15 +57,6 @@
   "view/native-memory/native-memory-manager.tsx": {
     "native-dialog": 2
   },
-  "view/settings/sections/fork-slug-migration.tsx": {
-    "default-scope": 2
-  },
-  "view/swarm/swarm-fleet-toolbar.tsx": {
-    "default-scope": 1
-  },
-  "view/swarm/swarm-row-registration.tsx": {
-    "default-scope": 1
-  },
   "view/vault/vault-request-prompts.tsx": {
     "default-scope": 1,
     "open-modal": 1
