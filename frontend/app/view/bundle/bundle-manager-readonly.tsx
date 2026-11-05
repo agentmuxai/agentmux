@@ -22,7 +22,7 @@ function variantCount(bundle: Bundle): number {
 
 /** The bundle's instructions as one card; opening it opens the edit form, where they are written. */
 function InstructionsCard(props: { bundle: Bundle; onEdit?: () => void }): JSX.Element {
-    const text = () => props.bundle.instructions.trim();
+    const text = () => (props.bundle.instructions || "").trim();
     const variants = () => variantCount(props.bundle);
     return (
         <Card

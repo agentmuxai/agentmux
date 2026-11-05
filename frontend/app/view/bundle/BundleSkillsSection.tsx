@@ -13,7 +13,7 @@
  * single-pane swap nested inside that would fight for the same space.
  */
 
-import { createSignal, For, onCleanup, Show, type JSX } from "solid-js";
+import { createSignal, onCleanup, Show, type JSX } from "solid-js";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { BundleSkillModel } from "./bundle-skill-model";
 import "./BundlePrimitiveSection.scss";
@@ -25,33 +25,11 @@ interface BundleSkillsSectionProps {
     bundleId: string;
 }
 
-export const BundleSkillsSection = (props: BundleSkillsSectionProps): JSX.Element => {
-    const model = new BundleSkillModel(props.bundleId);
-    onCleanup(() => model.dispose());
+const unbindWord = (skill: SkillBundleListItem) => (skill.is_global ? "Unbind" : "Remove");
 
-    const [newName, setNewName] = createSignal("");
-    const [newContent, setNewContent] = createSignal("");
-
-    const handleAdd = (e: Event) => {
-        e.preventDefault();
-        const name = newName().trim();
-        if (!name) return;
-        // addPrivate never rejects (errors go to errorAtom), so only clear the
-        // form on the reported success; otherwise a failed add would silently
-        // wipe what the user typed (PR #2647).
-        void model.addPrivate(name, newContent()).then((ok) => {
-            if (!ok) return;
-            setNewName("");
-            setNewContent("");
-        });
-    };
-
-    const bound = () => model.skillsAtom().filter((s) => s.bound_to_bundle);
-    // Global skills nothing binds here yet: one click binds one.
-    const available = () => model.skillsAtom().filter((s) => s.is_global && !s.bound_to_bundle);
-    const unbindWord = (skill: SkillBundleListItem) => (skill.is_global ? "Unbind" : "Remove");
-
-    const skillCard = (skill: SkillBundleListItem): JSX.Element => (
+/** One bound skill as a card: its name, description and kind, with Unbind (or Remove, for a private one). */
+function skillCard(model: BundleSkillModel, skill: SkillBundleListItem): JSX.Element {
+    return (
         <Card
             class="bundle-skill-card"
             icon={<i class="fa-solid fa-wand-magic-sparkles" />}
@@ -71,8 +49,11 @@ export const BundleSkillsSection = (props: BundleSkillsSectionProps): JSX.Elemen
             }
         />
     );
+}
 
-    const skillDetail = (skill: SkillBundleListItem): JSX.Element => (
+/** What opening a bound skill's card shows under it: its content, and where it is edited. */
+function skillDetail(skill: SkillBundleListItem): JSX.Element {
+    return (
         <div class="bundle-skill-detail">
             <pre class="bundle-skill-content">{skill.content || "(no content)"}</pre>
             <p class="bundle-primitive-section-empty">
@@ -82,6 +63,114 @@ export const BundleSkillsSection = (props: BundleSkillsSectionProps): JSX.Elemen
             </p>
         </div>
     );
+}
+
+/** The skills the bundle holds, as cards; or that it holds none. */
+function BoundSkills(props: { model: BundleSkillModel }): JSX.Element {
+    const model = props.model;
+    const bound = () => model.skillsAtom().filter((s) => s.bound_to_bundle);
+    return (
+        <Show when={bound().length > 0} fallback={<p class="bundle-primitive-section-empty">No skills yet</p>}>
+            <CardGrid
+                ariaLabel="Skills in this bundle"
+                items={bound()}
+                keyOf={(skill) => skill.id}
+                renderCard={(skill) => skillCard(model, skill)}
+                selectedKey={model.selectedIdAtom()}
+                renderDetail={skillDetail}
+                onClose={() => model.setSelectedId(null)}
+            />
+        </Show>
+    );
+}
+
+/** Global skills nothing binds here yet, as chips: one click binds one. */
+function BindableSkills(props: { model: BundleSkillModel }): JSX.Element {
+    const model = props.model;
+    const available = () => model.skillsAtom().filter((s) => s.is_global && !s.bound_to_bundle);
+    return (
+        <Show when={available().length > 0}>
+            <p class="bundle-primitive-section-hint">Bind a global skill:</p>
+            <CardGrid
+                size="chip"
+                ariaLabel="Global skills to bind"
+                items={available()}
+                keyOf={(skill) => skill.id}
+                renderCard={(skill) => (
+                    <Card
+                        size="chip"
+                        class="bundle-skill-chip"
+                        icon={<i class="fa-solid fa-plus" />}
+                        title={skill.name}
+                        subtitle="Bind"
+                        aria-label={`Bind ${skill.name}`}
+                        onSelect={() => void model.bind(skill.id)}
+                    />
+                )}
+            />
+        </Show>
+    );
+}
+
+/** The form that gives the bundle a skill of its own. */
+function AddPrivateSkill(props: { model: BundleSkillModel }): JSX.Element {
+    const model = props.model;
+    const [newName, setNewName] = createSignal("");
+    const [newContent, setNewContent] = createSignal("");
+
+    const handleAdd = (e: Event) => {
+        e.preventDefault();
+        const name = newName().trim();
+        if (!name) return;
+        // addPrivate never rejects (errors go to errorAtom), so only clear the
+        // form on the reported success; otherwise a failed add would silently
+        // wipe what the user typed (PR #2647).
+        void model.addPrivate(name, newContent()).then((ok) => {
+            if (!ok) return;
+            setNewName("");
+            setNewContent("");
+        });
+    };
+
+    return (
+        <>
+            <p class="bundle-primitive-section-caveat">
+                Binding a global skill here gives it to every agent with this bundle. A
+                global skill nothing is bound to reaches no agent. Add a new private skill
+                below to give this bundle its own skill.
+            </p>
+            <form class="bundle-primitive-section-add" onSubmit={handleAdd}>
+                <TextInput variant="plain"
+                    class="bundle-primitive-section-add-input"
+                    placeholder="Skill name"
+                    value={newName()}
+                    onInput={(e) => setNewName(e.currentTarget.value)}
+                    onContextMenu={showTextInputContextMenu}
+                />
+                <TextArea variant="plain"
+                    class="bundle-primitive-section-add-textarea"
+                    placeholder="Skill content / prompt"
+                    rows={3}
+                    value={newContent()}
+                    onInput={(e) => setNewContent(e.currentTarget.value)}
+                    onContextMenu={showTextInputContextMenu}
+                />
+                <Button
+                    type="submit"
+                    tone="accent"
+                    class="bundle-primitive-section-add-btn"
+                    disabled={model.addingAtom() || !newName().trim()}
+                >
+                    {model.addingAtom() ? "Adding…" : "+ Add private skill"}
+                </Button>
+            </form>
+        </>
+    );
+}
+
+export const BundleSkillsSection = (props: BundleSkillsSectionProps): JSX.Element => {
+    const model = new BundleSkillModel(props.bundleId);
+    onCleanup(() => model.dispose());
 
     return (
         <BundleCategory title="Skills">
@@ -89,67 +178,9 @@ export const BundleSkillsSection = (props: BundleSkillsSectionProps): JSX.Elemen
                 <Show when={model.errorAtom()}>
                     <div class="bundle-primitive-section-error">{model.errorAtom()}</div>
                 </Show>
-                <Show when={bound().length > 0} fallback={<p class="bundle-primitive-section-empty">No skills yet</p>}>
-                    <CardGrid
-                        ariaLabel="Skills in this bundle"
-                        items={bound()}
-                        keyOf={(skill) => skill.id}
-                        renderCard={skillCard}
-                        selectedKey={model.selectedIdAtom()}
-                        renderDetail={skillDetail}
-                        onClose={() => model.setSelectedId(null)}
-                    />
-                </Show>
-                <Show when={available().length > 0}>
-                    <p class="bundle-primitive-section-empty">Bind a global skill:</p>
-                    <CardGrid
-                        size="chip"
-                        ariaLabel="Global skills to bind"
-                        items={available()}
-                        keyOf={(skill) => skill.id}
-                        renderCard={(skill) => (
-                            <Card
-                                size="chip"
-                                class="bundle-skill-chip"
-                                icon={<i class="fa-solid fa-plus" />}
-                                title={skill.name}
-                                subtitle="Bind"
-                                aria-label={`Bind ${skill.name}`}
-                                onSelect={() => void model.bind(skill.id)}
-                            />
-                        )}
-                    />
-                </Show>
-                <p class="bundle-primitive-section-caveat">
-                    Binding a global skill here gives it to every agent with this bundle. A
-                    global skill nothing is bound to reaches no agent. Add a new private skill
-                    below to give this bundle its own skill.
-                </p>
-                <form class="bundle-primitive-section-add" onSubmit={handleAdd}>
-                    <TextInput variant="plain"
-                        class="bundle-primitive-section-add-input"
-                        placeholder="Skill name"
-                        value={newName()}
-                        onInput={(e) => setNewName(e.currentTarget.value)}
-                        onContextMenu={showTextInputContextMenu}
-                    />
-                    <TextArea variant="plain"
-                        class="bundle-primitive-section-add-textarea"
-                        placeholder="Skill content / prompt"
-                        rows={3}
-                        value={newContent()}
-                        onInput={(e) => setNewContent(e.currentTarget.value)}
-                        onContextMenu={showTextInputContextMenu}
-                    />
-                    <Button
-                        type="submit"
-                        tone="accent"
-                        class="bundle-primitive-section-add-btn"
-                        disabled={model.addingAtom() || !newName().trim()}
-                    >
-                        {model.addingAtom() ? "Adding…" : "+ Add private skill"}
-                    </Button>
-                </form>
+                <BoundSkills model={model} />
+                <BindableSkills model={model} />
+                <AddPrivateSkill model={model} />
             </div>
         </BundleCategory>
     );

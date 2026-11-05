@@ -9,7 +9,6 @@ import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { Button, TextArea, TextInput } from "@/app/element/ui";
 import { PROVIDERS } from "@/app/view/agent/providers/catalog";
 import { focusOnOpen } from "@/util/focusutil";
-import type { Bundle } from "@/app/store/rpc-api";
 import type { BundleActions } from "./bundle-manager-actions";
 import type { BundleDraft, BundleViewModel } from "./bundle-model";
 import { BundleProviderInstructionsSection } from "./BundleProviderInstructionsSection";
