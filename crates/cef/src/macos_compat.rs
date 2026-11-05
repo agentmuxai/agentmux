@@ -648,8 +648,8 @@ pub(crate) unsafe fn set_macos_dock_icon() {
     type Sel   = *const c_void;
     type Class = *mut c_void;
 
-    // The normal AgentMux logo (panel layout, not the brain-alternate),
-    // matching the Linux taskbar source.
+    // The AgentMux logo (the four blocks on the dark tile), matching the Linux
+    // taskbar source.
     const ICON_PNG: &[u8] =
         include_bytes!("../../../assets/linux/icons/hicolor/512x512/apps/agentmux.png");
 

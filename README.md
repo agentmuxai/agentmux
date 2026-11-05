@@ -1,6 +1,13 @@
-<!-- The alpha warning is the first content block by design — see
-docs/specs/SPEC_EARLY_ALPHA_WARNING_2026_06_05.md. Decorative logo/title
-follow below so the warning is never pushed below the fold. -->
+<!-- The logo is the first block and the alpha warning follows directly below it: the operator's
+order (2026-11-05), which replaced "warning first". The logo is 120 px, so the warning stays above the
+fold. See docs/specs/SPEC_EARLY_ALPHA_WARNING_2026_06_05.md. -->
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./assets/icon/agentmux-dark.svg">
+    <img src="./assets/icon/agentmux-light.svg" alt="AgentMux" width="120">
+  </picture>
+</p>
 
 > ## Alpha
 >
@@ -23,10 +30,6 @@ follow below so the warning is never pushed below the fold. -->
 > https://github.com/agentmuxai/agentmux/issues — that's how alpha gets to beta.
 
 ---
-
-<p align="center">
-  <img src="./frontend/logos/agentmux-logo-brain-alternate.svg" alt="AgentMux Logo" width="120">
-</p>
 
 # AgentMux
 
