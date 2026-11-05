@@ -37,8 +37,8 @@ describe("a restored tab that has not mounted", () => {
 
     it("names the other sectioned panes the way their mounted view does", () => {
         expect(describePaneTab(restored("vault", { "vault:section": "cards" })).label).toBe("Vault · Cards and banks");
-        expect(describePaneTab(restored("swarm", { "swarm:section": "broadcast" })).label).toBe("Swarm · Broadcast");
-        expect(describePaneTab(restored("swarm", {})).label).toBe("Swarm · Supervisor");
+        expect(describePaneTab(restored("swarm", { "swarm:section": "broadcast" })).label).toBe("Swarm");
+        expect(describePaneTab(restored("swarm", {})).label).toBe("Swarm");
         expect(describePaneTab(restored("connectors", { "connectors:section": "mcp" })).label).toBe("Connectors · MCP servers");
         expect(describePaneTab(restored("memory", { "memory:section": "skills" })).label).toBe("Memory · Skills");
     });

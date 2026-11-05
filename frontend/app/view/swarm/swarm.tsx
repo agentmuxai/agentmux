@@ -5,15 +5,15 @@
 // first Swarm pane (swarm-instance.tsx).
 
 import { lazyPaneTab } from "@/app/block/lazy-pane-tab";
-import { sectionTitleOf } from "@/app/store/pane-sections";
-import { SWARM_SECTIONS } from "./swarm-section";
+import { SWARM_SECTIONS, SWARM_TITLE } from "./swarm-section";
+
 
 /** Swarm as a native pane tab (Pane Tab contract Phase 2c). */
 export const swarmPaneTab = lazyPaneTab({
     apiVersion: 1,
     view: "swarm",
     label: "Swarm",
-    title: (meta) => sectionTitleOf(SWARM_SECTIONS, "swarm", meta, "Swarm"),
+    title: () => SWARM_TITLE,
     icon: "diagram-project",
     defaultColor: "red",
     // Applies `term:zoom` as CSS zoom; fills the pane edge to edge.

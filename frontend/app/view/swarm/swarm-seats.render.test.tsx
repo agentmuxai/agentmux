@@ -135,14 +135,16 @@ function setup(groupBy: "lead" | null, others: SwarmOtherInstances = OTHERS) {
     const ctx = { meta, setMeta, visibility: () => "active" } as unknown as PaneTabHostContext;
     const view = render(() => <SwarmView model={model} ctx={ctx} />);
     const tree = () => view.container.querySelector(".swarm-tree")!;
-    /** The list's direct children, in order: "# heading" or the row's key. */
+    /** The list's direct children, in order: "@ host or channel", "# lead heading" or the row's key. */
     const children = () =>
         [...tree().children]
             .filter((el) => !el.classList.contains("swarm-seat-indent"))
             .map((el) =>
-                el.classList.contains("swarm-seat-heading")
-                    ? `# ${el.querySelector(".swarm-seat-heading__label")!.textContent}`
-                    : (el as HTMLElement).dataset.swarmKey
+                el.classList.contains("swarm-origin-heading")
+                    ? `@ ${el.querySelector(".swarm-origin-heading__label")!.textContent}`
+                    : el.classList.contains("swarm-seat-heading")
+                      ? `# ${el.querySelector(".swarm-seat-heading__label")!.textContent}`
+                      : (el as HTMLElement).dataset.swarmKey
             );
     const rowKeys = () =>
         [...tree().querySelectorAll<HTMLElement>(":scope > [data-swarm-key]")].map((el) => el.dataset.swarmKey);
@@ -192,14 +194,15 @@ describe("Swarm seats", () => {
         expect(far.querySelector(".swarm-seat-badge")!.getAttribute("title")).toBe(
             "Leader · product — reports to the operator — builds"
         );
-        expect(children()).not.toContain("# Other instances");
-        expect(children().slice(0, 5)).toEqual(["# The operator", "b-camper", "b-w1", "b-opaz", far.dataset.swarmKey]);
+        expect(children().slice(0, 5)).toEqual(["@ narko", "# The operator", "b-camper", "b-w1", "b-opaz"]);
+        expect(children()).toContain("@ Area54");
+        expect(children()).toContain(far.dataset.swarmKey);
     });
 
     it("lists the rows in one list when not grouped", () => {
         seedAgents();
         const { children } = setup(null);
-        expect(children()).toEqual(["b-w1", "b-free", "b-camper", "b-opaz", expect.stringContaining("Far")]);
+        expect(children()).toEqual(["@ narko", "b-w1", "b-free", "b-camper", "b-opaz", expect.stringMatching(/^@ /), expect.stringContaining("Far")]);
     });
 
     it("groups by lead with rows as direct children of the list, each group in the list's order", () => {
@@ -208,12 +211,14 @@ describe("Swarm seats", () => {
         const far = rowKeys().at(-1)!;
         expect(far).toContain("Far");
         expect(children()).toEqual([
+            "@ narko",
             "# The operator",
             "b-camper",
             "b-w1",
             "b-opaz",
             "# No seat",
             "b-free",
+            "@ Area54",
             "# Other instances",
             far,
         ]);
@@ -251,7 +256,7 @@ describe("Swarm seats", () => {
         fireEvent.click(getByRole("radio", { name: "Lead" }));
         expect(setMeta).toHaveBeenLastCalledWith({ "swarm:groupby": "lead" });
         await Promise.resolve();
-        expect(children()[0]).toBe("# The operator");
+        expect(children()[1]).toBe("# The operator");
         fireEvent.click(getByRole("radio", { name: "None" }));
         expect(setMeta).toHaveBeenLastCalledWith({ "swarm:groupby": null });
     });

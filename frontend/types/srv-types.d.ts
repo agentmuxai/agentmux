@@ -947,6 +947,8 @@ declare global {
         "shortcuts:from"?: string;
         "memory:section"?: "global" | "personal" | "skills" | "bundles";
         "swarm:section"?: "supervisor" | "broadcast";
+        /** The Swarm sections that are open, Broadcast and Supervise (swarm-section.ts). */
+        "swarm:open"?: ("supervisor" | "broadcast")[];
         "warden:section"?: "jobs";
         /** A Kanban task to open in the drawer, set by a link from elsewhere (a Swarm row's task chip) and cleared once opened. Read by the Kanban pane. */
         "kanban:open"?: string | null;

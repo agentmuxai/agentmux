@@ -12,7 +12,6 @@ import { MODE_DESCRIPTIONS, MODE_LABELS, SUPERVISOR_MODES, SUPERVISOR_OFF_REASON
 import { localTarget, partitionTargets, remoteFleetTargets, unavailableReason, type FleetAction } from "./swarm-fleet-targets";
 import type { FleetResultEntry, SwarmViewModel } from "./swarm-model";
 import { remoteSections } from "./swarm-remote";
-import type { SwarmSection } from "./swarm-section";
 import { Button, IconButton, openMenuAt, Tag, TextInput } from "@/app/element/ui";
 
 // Staged rollout only offered once a selection is large enough that
@@ -31,33 +30,23 @@ const NOTHING_REACHABLE = "Stopping agents on another machine isn't supported ye
  *  supervises its own agents. */
 const NOTHING_SUPERVISABLE = "The Supervisor runs in each AgentMux for its own agents; select agents of this one";
 
-export function FleetToolbar(props: {
+export function SuperviseActions(props: {
     model: SwarmViewModel;
-    /** The Supervisor shows Stop and the mode menu; Broadcast has the selection only (its composer sits above). */
-    section?: SwarmSection;
     /** Every currently-listed agent's blockId. Passed down rather than read via
      *  `model.buildTree()` here — SwarmView already computes this from the same
      *  memo the row list renders from, so the toolbar and the rows never
      *  disagree about what's selectable. */
     allBlockIds: () => string[];
 }): JSX.Element {
-    // `section` changes while this stays mounted, so it is read through `props`, never destructured.
     const { model, allBlockIds } = props;
     // What an action reaches is the selected agents the filter shows; a selected agent it hides
     // stays selected, is counted, and is not included (swarm-filter-state.ts).
     const selected = () => new Set(actionableKeys(model, model.selectedBlockIdsAtom()));
     const count = () => model.selectedBlockIdsAtom().size;
-    const hiddenCount = () => count() - selected().size;
     // Agents on other instances in the selection, and how many of the selected
     // an action can reach. Cheap: only the other instances' list is read, not
     // this instance's tree (docs/specs/SPEC_SWARM_REMOTE_AGENTS_PLATFORM_TAG_AND_SELECTION_2026_10_03.md §5).
     const remoteMap = createMemo(() => remoteFleetTargets(remoteSections(model.otherInstancesAtom())));
-    // The count's "on other machines" leaves out this machine's other channels.
-    const otherMachineN = () => {
-        let n = 0;
-        for (const key of selected()) if (remoteMap().get(key)?.otherMachine) n++;
-        return n;
-    };
     // Every listed target: the remote ones, and this instance's by key. A
     // selected key in neither counts as unreachable, as the action treats it.
     const known = createMemo(() => {
@@ -82,67 +71,45 @@ export function FleetToolbar(props: {
         await model.bulkStopSelection({ staged });
     };
 
-    // Shown while there's a selection to act on. "Select all" is not here: it sits under the
-    // filter (swarm-select-toggle.tsx), reachable with nothing selected.
+    // Stop and the mode menu, in the Supervise section, always there: they say how many agents they reach
+    // and are off when it is none. How many are selected is beside Select all / none (swarm-select-toggle.tsx).
     return (
-        <Show when={count() > 0}>
+        <>
             <div class="swarm-fleet-toolbar">
-                {/* Never "act on selected" without stating the concrete count
-                    first (spec §3: hidden scope is the top accidental-broadcast
-                    cause). Selection-dependent actions below are gated on
-                    count() > 0 individually; only this bar's own visibility
-                    doesn't require a selection. */}
-                <Show when={count() > 0}>
-                    <span class="swarm-fleet-toolbar-count">
-                        {count()} selected
-                        <Show when={hiddenCount() > 0}> · {hiddenCount()} hidden by the filter, not included</Show>
-                        <Show when={otherMachineN() > 0}> · {otherMachineN()} on other machines</Show>
-                    </span>
-
-                    <Show when={props.section !== "broadcast"}>
-                        <Button
-                            tone="danger"
-                            class="swarm-fleet-btn swarm-fleet-btn--destructive"
-                            disabled={model.fleetActionInFlightAtom() || reachable("stop") === 0}
-                            title={reachable("stop") === 0 ? NOTHING_REACHABLE : undefined}
-                            onClick={() => setStopConfirmOpen(true)}
-                        >
-                            <i class="fa-solid fa-stop" /> Stop {reachable("stop")}
-                        </Button>
-                        {/* Sets the Supervisor's mode on the selection, from a
-                            menu of the three modes. Not destructive, so no
-                            confirm, like Broadcast; the result panel reports
-                            each agent (docs/specs/SPEC_SWARM_SUPERVISOR_2026_10_16.md §3.8). */}
-                        <Button
-                            class="swarm-fleet-btn"
-                            disabled={model.fleetActionInFlightAtom() || reachable("supervise") === 0}
-                            title={reachable("supervise") === 0 ? NOTHING_SUPERVISABLE : undefined}
-                            onClick={(e: MouseEvent) =>
-                                openMenuAt(
-                                    SUPERVISOR_MODES.map((mode) => {
-                                        // Switched off: srv refuses Steady and Drive, so say so here (Off is always fine).
-                                        const blocked = mode !== "off" && !supervisorEnabled(settingsAtom());
-                                        return {
-                                            label: `Supervisor: ${MODE_LABELS[mode]} for ${reachable("supervise")} ${plural(reachable("supervise"))}`,
-                                            sublabel: blocked ? SUPERVISOR_OFF_REASON : MODE_DESCRIPTIONS[mode],
-                                            enabled: !blocked,
-                                            click: () => void model.superviseSelection(mode),
-                                        };
-                                    }),
-                                    e
-                                )
-                            }
-                        >
-                            <i class="fa-solid fa-user-shield" /> Supervisor
-                        </Button>
-                    </Show>
-                </Show>
-
-                <Show when={count() > 0}>
-                    <Button class="swarm-fleet-btn swarm-fleet-toolbar-clear" onClick={() => model.clearSelection()}>
-                        Clear
-                    </Button>
-                </Show>
+                <Button
+                    tone="danger"
+                    class="swarm-fleet-btn swarm-fleet-btn--destructive"
+                    disabled={model.fleetActionInFlightAtom() || reachable("stop") === 0}
+                    title={count() === 0 ? "Select agents to stop" : reachable("stop") === 0 ? NOTHING_REACHABLE : undefined}
+                    onClick={() => setStopConfirmOpen(true)}
+                >
+                    <i class="fa-solid fa-stop" /> Stop {reachable("stop")}
+                </Button>
+                {/* Sets the Supervisor's mode on the selection, from a menu of the three modes. Not
+                    destructive, so no confirm, like Broadcast; the result panel reports each agent
+                    (docs/specs/SPEC_SWARM_SUPERVISOR_2026_10_16.md §3.8). */}
+                <Button
+                    class="swarm-fleet-btn"
+                    disabled={model.fleetActionInFlightAtom() || reachable("supervise") === 0}
+                    title={count() === 0 ? "Select agents to supervise" : reachable("supervise") === 0 ? NOTHING_SUPERVISABLE : undefined}
+                    onClick={(e: MouseEvent) =>
+                        openMenuAt(
+                            SUPERVISOR_MODES.map((mode) => {
+                                // Switched off: srv refuses Steady and Drive, so say so here (Off is always fine).
+                                const blocked = mode !== "off" && !supervisorEnabled(settingsAtom());
+                                return {
+                                    label: `Supervisor: ${MODE_LABELS[mode]} for ${reachable("supervise")} ${plural(reachable("supervise"))}`,
+                                    sublabel: blocked ? SUPERVISOR_OFF_REASON : MODE_DESCRIPTIONS[mode],
+                                    enabled: !blocked,
+                                    click: () => void model.superviseSelection(mode),
+                                };
+                            }),
+                            e
+                        )
+                    }
+                >
+                    <i class="fa-solid fa-user-shield" /> Mode
+                </Button>
             </div>
 
             <ConfirmModal
@@ -191,7 +158,7 @@ export function FleetToolbar(props: {
                     </Show>
                 </Show>
             </ConfirmModal>
-        </Show>
+        </>
     );
 }
 
@@ -245,14 +212,14 @@ const FLEET_ACTION_TITLES: Record<FleetResultEntry["action"], string> = {
     supervisor: "Supervisor",
 };
 
-/** `quietWhenClean`: show a result only when something failed, for a section that already lists
- *  what it sent (the Broadcast dock's recent list). */
+/** `quietWhenClean`: a broadcast's result shows only when something failed, while the Broadcast section
+ *  is open and lists what it sent (its recent list). Another action's result always shows. */
 export function FleetResultPanel(props: { model: SwarmViewModel; quietWhenClean?: boolean }): JSX.Element {
     const model = props.model;
     // `quietWhenClean` follows the section while this stays mounted, so it is read through `props`.
     const entry = () => {
         const e = model.lastFleetResultAtom();
-        if (!e || !props.quietWhenClean) return e;
+        if (!e || !props.quietWhenClean || e.action !== "broadcast") return e;
         return e.result.failed.length > 0 || e.result.aborted_early ? e : null;
     };
 
