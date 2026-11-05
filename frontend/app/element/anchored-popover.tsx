@@ -41,6 +41,11 @@ import { createSignal, onCleanup, onMount, untrack, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 import "./anchored-popover.scss";
 
+/** A zero-size rect at a point: the cursor, for a menu that opens where the user clicked. */
+export function pointAnchor(x: number, y: number): DOMRect {
+    return { x, y, left: x, top: y, right: x, bottom: y, width: 0, height: 0, toJSON: () => ({}) } as DOMRect;
+}
+
 /** An element (followed live) or a fixed rect. */
 export type PopoverAnchor = Element | DOMRect | null | undefined;
 

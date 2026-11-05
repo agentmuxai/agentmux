@@ -4,12 +4,14 @@
 //! Whether a newer AgentMux release exists
 //! (`docs/specs/SPEC_UPGRADE_FOR_USERS_AND_AGENTS_2026_10_15.md` §3).
 //!
-//! srv asks GitHub Releases for the latest release only when asked: the
-//! user's **Check for update** in the version panel, or an agent's `App`
-//! `version` or `upgrade` ([`check_now`]), at most every 30 seconds between
-//! them. Nothing checks on its own, at startup or on a timer: AgentMux makes
-//! no request the user didn't ask for. Offline, a rate limit or any error
-//! keeps what the last check found.
+//! srv asks GitHub Releases for the latest release when asked: the user's
+//! **Check for update** in the version panel, or an agent's `App` `version` or
+//! `upgrade` ([`check_now`]), at most every 30 seconds between them; and by
+//! itself, a minute after start and every few hours, unless the user turned
+//! `update:auto` off (`update::auto`, which also downloads and stages the
+//! release; the operator reversed the 2026-10-18 "no request the user didn't
+//! ask for" rule for this check on 2026-11-03). Offline, a rate limit or any
+//! error keeps what the last check found.
 //!
 //! Which release is latest comes from the `releases/latest` web page's
 //! redirect, which GitHub's 60-an-hour anonymous API limit (shared by
@@ -247,7 +249,7 @@ fn without_floor(body: &str) -> String {
 /// Whether `channel` is a `task dev` build, which runs from source and so
 /// never upgrades itself. A local `task package` build (`local-…`) is a
 /// portable like a release's, and upgrades like one.
-fn is_dev_build(channel: &str) -> bool {
+pub(crate) fn is_dev_build(channel: &str) -> bool {
     channel.starts_with("dev-") || channel == "dev"
 }
 
@@ -506,7 +508,7 @@ async fn fetch_latest(client: &reqwest::Client, web: &reqwest::Client) -> Result
     }
 }
 
-/// Get ready to check when asked (`bootstrap::background`). Asks nothing.
+/// Get ready to check (`bootstrap::background`). Asks nothing itself: `update::auto` and the user ask.
 pub fn init(event_bus: Arc<crate::backend::eventbus::EventBus>) {
     let current = env!("CARGO_PKG_VERSION");
     let _ = STATUS.set(RwLock::new(AppUpdateStatus::initial(current)));

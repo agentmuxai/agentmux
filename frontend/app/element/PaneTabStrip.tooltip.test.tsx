@@ -13,11 +13,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { PaneTabStrip } from "./PaneTabStrip";
 
 vi.mock("@floating-ui/dom", () => ({
-    autoUpdate: vi.fn(() => vi.fn()),
+    // The real autoUpdate places the panel at once; AnchoredPopover places it only through it.
+    autoUpdate: vi.fn((_reference: unknown, _floating: unknown, update: () => void) => {
+        update();
+        return vi.fn();
+    }),
     computePosition: vi.fn(() => Promise.resolve({ x: 0, y: 0 })),
     flip: vi.fn(() => ({})),
     offset: vi.fn(() => ({})),
     shift: vi.fn(() => ({})),
+    size: vi.fn(() => ({})),
 }));
 
 interface T {
@@ -58,8 +63,8 @@ describe("PaneTabStrip tooltip detail", () => {
         const tip = overlay()!;
         expect(tip.querySelector(".pane-tab-tip-label")!.textContent).toBe("AgentX");
         expect(tip.querySelector(".pane-tab-tip-summary")!.textContent).toBe("Develop hardening spec for swarm summaries");
-        expect(tip.getAttribute("style")).toContain("opacity: 1");
-        expect(tip.getAttribute("style")).toContain("transition: none");
+        expect(tip.firstElementChild!.getAttribute("style")).toContain("opacity: 1");
+        expect(tip.firstElementChild!.getAttribute("style")).toContain("transition: none");
     });
 
     it("leaves a tab with no summary exactly as it was: just the label, with the default fade", async () => {
@@ -71,7 +76,7 @@ describe("PaneTabStrip tooltip detail", () => {
         expect(tip.textContent).toBe("Terminal");
         expect(tip.querySelector(".pane-tab-tip-summary")).toBeNull();
         // The default (not `immediate`) keeps its short fade rather than "none".
-        expect(tip.getAttribute("style")).toContain("opacity var(--duration-instant)");
+        expect(tip.firstElementChild!.getAttribute("style")).toContain("opacity var(--duration-instant)");
     });
 
     it("goes away the moment the pointer leaves", async () => {
@@ -112,7 +117,7 @@ describe("PaneTabStrip tooltip detail", () => {
         const tip = overlay()!;
         expect(tip.querySelector(".pane-tab-tip-seat")!.textContent).toBe("Specialist — reports to Camper");
         expect(tip.querySelector(".pane-tab-tip-summary")).toBeNull();
-        expect(tip.getAttribute("style")).toContain("opacity: 1");
+        expect(tip.firstElementChild!.getAttribute("style")).toContain("opacity: 1");
     });
 
     it("follows a summary that changes while the tooltip is open", async () => {

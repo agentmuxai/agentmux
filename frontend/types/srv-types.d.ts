@@ -1071,6 +1071,10 @@ declare global {
         "app:dismissarchitecturewarning"?: boolean;
         "app:defaultnewblock"?: string;
         "app:showoverlayblocknums"?: boolean;
+        /** Check for a newer release in the background (absent = on). */
+        "update:auto"?: boolean;
+        /** Download and stage a newer release by itself (absent = on). */
+        "update:autodownload"?: boolean;
         "term:*"?: boolean;
         "term:fontsize"?: number;
         "term:fontfamily"?: string;
