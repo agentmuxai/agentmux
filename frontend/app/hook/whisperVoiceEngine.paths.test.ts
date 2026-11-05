@@ -12,14 +12,19 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const h = vi.hoisted(() => ({ settings: {} as Record<string, unknown>, rms: 0 }));
+const h = vi.hoisted(() => ({ settings: {} as Record<string, unknown>, rms: 0, polls: 0 }));
 
 vi.mock("@/app/store/global", () => ({ getSettingsKeyAtom: (key: string) => () => h.settings[key] }));
 vi.mock("@/util/endpoints", () => ({ getWebServerEndpoint: () => "http://srv:1" }));
 vi.mock("@/app/store/auth-headers", () => ({
     authHeaders: (extra: Record<string, string> = {}) => ({ ...extra, "X-Auth": "key" }),
 }));
-vi.mock("./audioLevel", () => ({ computeRms: () => h.rms }));
+vi.mock("./audioLevel", () => ({
+    computeRms: () => {
+        h.polls++;
+        return h.rms;
+    },
+}));
 
 import type { PaneVoiceHandle } from "./useVoiceInput";
 import { createWhisperVoiceSession, pickMime } from "./whisperVoiceEngine";
@@ -110,6 +115,7 @@ beforeEach(() => {
     vi.setSystemTime(1_000_000);
     h.settings = {};
     h.rms = 0;
+    h.polls = 0;
     tracks = [];
     FakeAudioContext.instances = [];
     FakeAudioContext.failConstruct = false;
@@ -355,12 +361,16 @@ describe("cutting utterances (webm)", () => {
         await tick(ms);
     };
 
-    it("polls the level every 100 ms", async () => {
+    it("reads the level once every 100 ms", async () => {
         await listen();
-        await poll(0.5, 99);
-        await poll(0.5, 1);
-        await poll(0, 800 - 100); // silence begins on the poll at t+200
-        expect(recorder().starts).toBe(1);
+        await tick(99);
+        expect(h.polls).toBe(0);
+        await tick(1);
+        expect(h.polls).toBe(1);
+        await tick(100);
+        expect(h.polls).toBe(2);
+        await tick(300);
+        expect(h.polls).toBe(5);
     });
 
     it("cuts after 800 ms of silence following speech, and not a moment before", async () => {
