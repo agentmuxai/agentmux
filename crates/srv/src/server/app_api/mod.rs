@@ -50,6 +50,7 @@ pub(crate) mod agent_open_remote;
 /// serialization. See REPORT_AGENT_OPEN_API_GAP_2026_09_06.md.
 pub(crate) use agent_open::open_agent_impl;
 /// The `Agents` `spawn` action's route (SPEC_AGENT_WORKERS_2026_10_15.md).
+pub(crate) mod agent_migrate_ids;
 pub(crate) mod agent_seats;
 pub(crate) mod agent_rename;
 pub(crate) mod agent_history_reclaim;

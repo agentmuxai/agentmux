@@ -17,7 +17,7 @@ vi.mock("@/app/store/rpc-api", () => ({
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
-import { ForkSlugMigration, planLine } from "./fork-slug-migration";
+import { ForkSlugMigration, planLine, RECHECK_AFTER_MS, shouldRecheck } from "./fork-slug-migration";
 
 function cand(name: string, old_slug: string, new_slug: string, extra: Partial<ForkSlugCandidate> = {}): ForkSlugCandidate {
     return {
@@ -331,5 +331,69 @@ describe("ForkSlugMigration", () => {
         await waitFor(() => expect(modes()).toEqual(["plan", "plan", "plan"]));
         expect(migrate.mock.calls[2][1]).toEqual({ mode: "plan" });
         expect(await screen.findByRole("button", { name: "Use loap-3-2" })).toBeEnabled();
+    });
+});
+
+describe("reading the plan again on coming back into view", () => {
+    it("reads again only when idle and the plan is old enough", () => {
+        expect(shouldRecheck("idle", 1000, 1000 + RECHECK_AFTER_MS)).toBe(true);
+        expect(shouldRecheck("idle", 1000, 1000 + RECHECK_AFTER_MS - 1)).toBe(false);
+        for (const busy of ["loading", "checking", "stopping", "applying", "undoing"] as const) {
+            expect(shouldRecheck(busy, 0, 10 * RECHECK_AFTER_MS)).toBe(false);
+        }
+    });
+
+    describe("the card", () => {
+        let now = 1_000_000;
+        beforeEach(() => {
+            migrate.mockReset();
+            now = 1_000_000;
+            vi.spyOn(Date, "now").mockImplementation(() => now);
+        });
+        afterEach(() => {
+            cleanup();
+            vi.restoreAllMocks();
+        });
+
+        it("shows a changed plan when the window is focused again after a while", async () => {
+            srv([plan(THREE), plan([])]);
+            render(() => <ForkSlugMigration />);
+            await screen.findByText("3 agents have an outdated id.");
+            now += RECHECK_AFTER_MS + 1;
+            fireEvent(window, new Event("focus"));
+            await screen.findByText("Every agent has an up-to-date id.");
+            expect(modes().filter((m) => m === "plan")).toHaveLength(2);
+        });
+
+        it("shows a changed plan when the tab becomes visible again", async () => {
+            srv([plan(THREE), plan([])]);
+            render(() => <ForkSlugMigration />);
+            await screen.findByText("3 agents have an outdated id.");
+            now += RECHECK_AFTER_MS + 1;
+            document.dispatchEvent(new Event("visibilitychange"));
+            await screen.findByText("Every agent has an up-to-date id.");
+        });
+
+        it("leaves a plan that was just read alone", async () => {
+            srv([plan(THREE), plan([])]);
+            render(() => <ForkSlugMigration />);
+            await screen.findByText("3 agents have an outdated id.");
+            now += RECHECK_AFTER_MS - 1;
+            fireEvent(window, new Event("focus"));
+            await Promise.resolve();
+            expect(modes().filter((m) => m === "plan")).toHaveLength(1);
+            expect(screen.getByText("3 agents have an outdated id.")).toBeTruthy();
+        });
+
+        it("stops listening when the card goes away", async () => {
+            srv([plan(THREE), plan([])]);
+            render(() => <ForkSlugMigration />);
+            await screen.findByText("3 agents have an outdated id.");
+            cleanup();
+            now += RECHECK_AFTER_MS + 1;
+            fireEvent(window, new Event("focus"));
+            await Promise.resolve();
+            expect(modes().filter((m) => m === "plan")).toHaveLength(1);
+        });
     });
 });
