@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 mod low_disk;
+mod renderer_memory_log;
 
 /// Latest observed system commit-free (available page file) in MB. Published by
 /// the heartbeat loop and by the on-demand probe; read by the gated renderer
@@ -184,7 +185,7 @@ pub fn start(state: std::sync::Arc<crate::state::AppState>) {
             let mut tick: u64 = 0;
             loop {
                 std::thread::sleep(Duration::from_secs(20));
-                log_memory_stats();
+                log_memory_stats(); renderer_memory_log::tick(&state, tick);
                 tick += 1;
                 if tick % 3 == 1 {
                     if let Some(root) = data_root.as_deref() {
