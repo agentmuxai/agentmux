@@ -40,10 +40,3 @@
         display: none;
     }
 }
-
-// ABF gets a standing accent on its icon whatever the selection
-// (SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24.md §5).
-.ui-tab.is-abf-highlight:not([aria-selected="true"]) i {
-    color: var(--accent-color);
-    opacity: 1;
-}
