@@ -22,9 +22,13 @@ const REPLACE_EVERY_MS = 200;
 export function naturalHeight(stack: HTMLElement): number {
     const body = stack.firstElementChild as HTMLElement | null;
     const cap = body?.style.maxHeight ?? "";
-    if (body && cap) body.style.maxHeight = "";
+    if (!body || !cap) return stack.offsetHeight;
+    // With the cap lifted the body no longer overflows, which clamps its scroll position to 0; put it back.
+    const scrolled = body.scrollTop;
+    body.style.maxHeight = "";
     const height = stack.offsetHeight;
-    if (body && cap) body.style.maxHeight = cap;
+    body.style.maxHeight = cap;
+    body.scrollTop = scrolled;
     return height;
 }
 

@@ -90,4 +90,22 @@ describe("the stack's measured height", () => {
         expect(naturalHeight(stack)).toBe(400);
         expect(body.style.maxHeight).toBe("calc(192px / var(--zoomfactor))");
     });
+
+    it("keeps the body's scroll position: with the cap lifted a browser clamps it to 0", () => {
+        const stack = document.createElement("div");
+        const body = document.createElement("div");
+        stack.appendChild(body);
+        body.style.maxHeight = "calc(192px / var(--zoomfactor))";
+        // A body that can only scroll while capped, as a real one does.
+        let scrollTop = 120;
+        Object.defineProperty(body, "scrollTop", {
+            get: () => (body.style.maxHeight ? scrollTop : 0),
+            set: (v: number) => {
+                if (body.style.maxHeight) scrollTop = v;
+            },
+        });
+        Object.defineProperty(stack, "offsetHeight", { get: () => (body.style.maxHeight ? 192 : 400) });
+        naturalHeight(stack);
+        expect(body.scrollTop).toBe(120);
+    });
 });

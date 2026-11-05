@@ -35,8 +35,10 @@ describe("dialogs and chrome zoom", () => {
         expect(ruleOf("modal.scss", ".modal-panel")).toMatch(/max-height: calc\(\(100vh - .*\) \/ var\(--zoomfactor\)\)/);
         const palette = ruleOf("../modals/command-palette.scss", ".modal-panel.command-palette-panel");
         expect(palette).toContain("/ var(--zoomfactor)");
-        // Its fixed 480px height is a zoomed length too (720 real px at 150%, off a 750 px window): capped by the window.
-        expect(palette).toMatch(/max-height: min\(480px, calc\(\(100vh - 48px\) \/ var\(--zoomfactor\)\)\)/);
+        // Its fixed 480px height is a zoomed length too (720 real px at 150%, off a 750 px window): capped by the
+        // window. It drops from the top (the overlay's padding-top is 15vh, its bottom padding 24px): 85vh - 24px.
+        expect(palette).toMatch(/max-height: min\(480px, calc\(\(85vh - 24px\) \/ var\(--zoomfactor\)\)\)/);
+        expect(readFileSync(join(__dirname, "modal.scss"), "utf8")).toMatch(/\[data-placement="top"\] \{[^}]*padding-top: 15vh/);
         expect(ruleOf("../view/accounts/accounts-gallery.scss", ".modal-panel.accounts-chooser")).toContain("/ var(--zoomfactor)");
     });
 });
