@@ -1,0 +1,6 @@
+open: focused=true
+filter="a" rows=["a.md"] status=1 of 5 items match
+ArrowDown: selection={"names":["a.md"],"focus":"a.md","anchor":"a.md"} focusOnList=true
+Escape: filter="" box=false rows=["src","a.md","b.txt","pic.png","run.exe"] focusOnList=true
+> navigating clears the filter box
+box=false

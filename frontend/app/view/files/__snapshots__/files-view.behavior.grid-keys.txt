@@ -1,0 +1,9 @@
+ArrowRight: handled=true selection={"names":["src"],"focus":"src","anchor":"src"}
+ArrowDown: handled=true selection={"names":["run.exe"],"focus":"run.exe","anchor":"run.exe"}
+ArrowLeft: handled=true selection={"names":["pic.png"],"focus":"pic.png","anchor":"pic.png"}
+ArrowUp: handled=true selection={"names":["src"],"focus":"src","anchor":"src"}
+PageDown: handled=true selection={"names":["run.exe"],"focus":"run.exe","anchor":"run.exe"}
+End: handled=true selection={"names":["run.exe"],"focus":"run.exe","anchor":"run.exe"}
+PageUp: handled=true selection={"names":["src"],"focus":"src","anchor":"src"}
+Home: handled=true selection={"names":["src"],"focus":"src","anchor":"src"}
+ArrowRight+a: handled=false selection={"names":["src"],"focus":"src","anchor":"src"}
