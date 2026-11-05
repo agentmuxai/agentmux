@@ -43,6 +43,15 @@ describe("dialogs and chrome zoom", () => {
     });
 });
 
+describe("dialog bodies and chrome zoom", () => {
+    it("divides a viewport length in a dialog body by the zoom, like the panel's own cap", () => {
+        // Inside the zoomed panel 60vh is 60vh times the zoom in real pixels: at 150% the body outgrows the panel.
+        const src = readFileSync(join(__dirname, "../view/bundle/components/BundleImportModal.scss"), "utf8");
+        expect(src).toContain("max-height: calc(60vh / var(--zoomfactor))");
+        expect(src).not.toMatch(/max-height: 60vh/);
+    });
+});
+
 describe("toasts and chrome zoom", () => {
     beforeEach(() => {
         vi.useFakeTimers();
