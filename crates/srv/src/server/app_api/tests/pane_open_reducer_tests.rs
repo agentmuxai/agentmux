@@ -3100,3 +3100,25 @@ async fn a_container_agents_browser_open_gets_its_own_incognito_jar() {
     assert_eq!(s, axum::http::StatusCode::OK, "{body}");
     assert_eq!(body["data"]["browsing_as"], "incognito");
 }
+
+/// A title given to a browser pane at open is kept with the address it was given at, so the pane can drop the
+/// title when it moves to another site; other views and untitled panes carry no such marker.
+#[test]
+fn a_browser_panes_given_title_is_kept_with_its_address() {
+    let mut cmd = editor_open_cmd(None, "/work/repo", None, None);
+    cmd.view = "browser".into();
+    cmd.url = Some("https://signup.example.com/start".into());
+    cmd.title = Some("Signup".into());
+    let meta = pane::build_pane_meta(&cmd).unwrap();
+    assert_eq!(meta["frame:title"], "Signup");
+    assert_eq!(meta["frame:title_url"], "https://signup.example.com/start");
+
+    cmd.title = None;
+    assert!(!pane::build_pane_meta(&cmd).unwrap().contains_key("frame:title_url"), "no title, no marker");
+
+    let mut files = editor_open_cmd(None, "/work/repo", None, None);
+    files.view = "files".into();
+    files.title = Some("Notes".into());
+    files.url = Some("https://example.com".into());
+    assert!(!pane::build_pane_meta(&files).unwrap().contains_key("frame:title_url"), "only a browser pane has an address");
+}
