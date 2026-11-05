@@ -67,6 +67,54 @@ pub fn should_publish(health: &MdnsHealth, changed: bool) -> bool {
     }
 }
 
+/// How long a peer's request keeps proving that other machines can reach this one.
+pub const PEER_PROOF_WINDOW_MS: u64 = 15 * 60 * 1000;
+
+/// When another machine last made an authenticated request of this one over the
+/// LAN (Unix ms; 0 for never).
+static LAST_INBOUND_PEER_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Whether a request from `peer` is another machine reaching us: not this host talking to itself,
+/// over loopback or at one of its own interface addresses (another AgentMux instance on this host is
+/// listed as a LAN peer at the host's own address, and shows nothing about other machines).
+pub fn is_remote_peer(peer: IpAddr, own: &std::collections::HashSet<IpAddr>) -> bool {
+    !peer.is_loopback() && !peer.is_unspecified() && !own.contains(&peer)
+}
+
+/// Record a request that came in over the LAN with the LAN key. The self-check
+/// below can't see through a shared UDP 5353 (Chrome, Windows' own mDNS, others
+/// bind it too), but a peer that got through has shown it can find us.
+pub fn note_inbound_peer(peer: IpAddr) {
+    if is_remote_peer(peer, &crate::backend::lan::listeners::cached_local_addresses()) {
+        LAST_INBOUND_PEER_MS.store(agentmux_common::time::now_ms_u64(), std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// When a peer last reached us, if one has.
+pub fn last_inbound_peer_ms() -> Option<u64> {
+    match LAST_INBOUND_PEER_MS.load(std::sync::atomic::Ordering::Relaxed) {
+        0 => None,
+        ms => Some(ms),
+    }
+}
+
+/// The self-check's verdict, corrected by what actually happened: while a peer
+/// has reached us within the window, other machines can see this one, so an
+/// `Undiscoverable` verdict is not true. `Healthy` also stops the watchdog's
+/// rebuild count from climbing, and clears the warning.
+pub fn with_peer_proof(health: MdnsHealth, last_inbound_peer_ms: Option<u64>, now_ms: u64) -> MdnsHealth {
+    let proven = last_inbound_peer_ms.is_some_and(|t| now_ms.saturating_sub(t) <= PEER_PROOF_WINDOW_MS);
+    match health {
+        MdnsHealth::Undiscoverable { .. } if proven => MdnsHealth::Healthy,
+        other => other,
+    }
+}
+
+/// [`with_peer_proof`] with the clock and the recorded contact.
+pub fn corrected(health: MdnsHealth) -> MdnsHealth {
+    with_peer_proof(health, last_inbound_peer_ms(), agentmux_common::time::now_ms_u64())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum MdnsHealth {
     /// Too soon after start to say.
@@ -283,6 +331,47 @@ mod tests {
     }
     fn undiscoverable() -> MdnsHealth {
         MdnsHealth::Undiscoverable { missing: vec![ip("192.168.1.26")] }
+    }
+
+    #[test]
+    fn a_peer_that_reached_us_overrides_an_undiscoverable_verdict() {
+        let now = 10_000_000;
+        let recent = Some(now - 60_000);
+        assert_eq!(with_peer_proof(undiscoverable(), recent, now), MdnsHealth::Healthy);
+        // Contact at the edge of the window still counts; past it, the verdict stands.
+        assert_eq!(with_peer_proof(undiscoverable(), Some(now - PEER_PROOF_WINDOW_MS), now), MdnsHealth::Healthy);
+        assert!(with_peer_proof(undiscoverable(), Some(now - PEER_PROOF_WINDOW_MS - 1), now).is_undiscoverable());
+        // No peer has ever reached us: the self-check stands.
+        assert!(with_peer_proof(undiscoverable(), None, now).is_undiscoverable());
+        // Other verdicts are left alone.
+        let degraded = MdnsHealth::Degraded { missing: vec![ip("198.51.100.9")] };
+        assert_eq!(with_peer_proof(degraded.clone(), recent, now), degraded);
+        assert_eq!(with_peer_proof(MdnsHealth::Pending, recent, now), MdnsHealth::Pending);
+    }
+
+    #[test]
+    fn proof_keeps_the_rebuild_count_from_climbing() {
+        let mut w = Watchdog::default();
+        assert_eq!(w.observe(&undiscoverable()), Action::Nothing);
+        assert_eq!(w.observe(&undiscoverable()), Action::Rebuild);
+        assert_eq!(w.rebuilds(), 1);
+        // From here every tick has a peer's proof: Healthy resets the budget and nothing rebuilds.
+        for _ in 0..40 {
+            let h = with_peer_proof(undiscoverable(), Some(1), 2);
+            assert_eq!(w.observe(&h), Action::Nothing);
+        }
+        assert_eq!(w.rebuilds(), 0);
+    }
+
+    #[test]
+    fn this_host_talking_to_itself_is_not_a_peer() {
+        let own: std::collections::HashSet<IpAddr> = ["198.51.100.20".parse().unwrap()].into_iter().collect();
+        assert!(!is_remote_peer("127.0.0.1".parse().unwrap(), &own));
+        assert!(!is_remote_peer("::1".parse().unwrap(), &own));
+        assert!(!is_remote_peer("0.0.0.0".parse().unwrap(), &own));
+        // A sibling instance on this host reaches us from the host's own LAN address.
+        assert!(!is_remote_peer("198.51.100.20".parse().unwrap(), &own));
+        assert!(is_remote_peer("198.51.100.30".parse().unwrap(), &own));
     }
 
     #[test]

@@ -16,7 +16,9 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import type { LanInstance } from "@/types/rpc/LanInstance";
 import type { LanPinInfo } from "@/types/rpc/LanPinInfo";
 import {
+    hasNoAgents,
     hostsWithSeveralInstances,
+    installLabel,
     lastSeenText,
     middleTruncate,
     osAndChannel,
@@ -39,6 +41,31 @@ const CHANNEL_MAX_CHARS = 18;
 
 /** Which peer a row is, across the fresh objects each `laninstances` event brings. */
 const peerKey = (peer: LanInstance): string => peer.instance_id || `${peer.address}:${peer.port}`;
+
+/** The chips after a peer's name and version: its channel and install (when its host runs several), and no agents. */
+function PeerChips(props: { peer: LanInstance; showChannel?: boolean }): JSX.Element {
+    return (
+        <>
+        <Show when={props.showChannel && props.peer.channel}>
+            <Tooltip
+                content={props.peer.channel}
+                disable={props.peer.channel.length <= CHANNEL_MAX_CHARS}
+                divStyle={{ display: "inline-flex" }}
+            >
+                <span class="status-bar-popover-mono lan-peer-channel" aria-label={props.peer.channel}>
+                    {middleTruncate(props.peer.channel, CHANNEL_MAX_CHARS)}
+                </span>
+            </Tooltip>
+        </Show>
+        <Show when={props.showChannel && installLabel(props.peer.install)}>
+            <span class="status-bar-popover-mono lan-peer-channel">{installLabel(props.peer.install)}</span>
+        </Show>
+        <Show when={hasNoAgents(props.peer)}>
+            <span class="status-bar-popover-mono lan-peer-channel" data-testid="lan-peer-no-agents">no agents</span>
+        </Show>
+        </>
+    );
+}
 
 export function LanPeerRow(props: {
     peer: LanInstance;
@@ -68,17 +95,7 @@ export function LanPeerRow(props: {
                 <Show when={props.peer.version}>
                     <span class="status-bar-popover-mono lan-peer-version">v{props.peer.version}</span>
                 </Show>
-                <Show when={props.showChannel && props.peer.channel}>
-                    <Tooltip
-                        content={props.peer.channel}
-                        disable={props.peer.channel.length <= CHANNEL_MAX_CHARS}
-                        divStyle={{ display: "inline-flex" }}
-                    >
-                        <span class="status-bar-popover-mono lan-peer-channel" aria-label={props.peer.channel}>
-                            {middleTruncate(props.peer.channel, CHANNEL_MAX_CHARS)}
-                        </span>
-                    </Tooltip>
-                </Show>
+                <PeerChips peer={props.peer} showChannel={props.showChannel} />
                 <Show when={refusals().length > 0}>
                     <i
                         class="fa-solid fa-triangle-exclamation lan-peer-warn"
@@ -104,7 +121,7 @@ export function LanPeerRow(props: {
                     <div class="status-bar-popover-row">
                         <span class="status-bar-popover-label">Agents</span>
                         <span>
-                            {agentCount()}
+                            {agentCount() === 0 && hasNoAgents(props.peer) ? "none: this install runs no agents" : agentCount()}
                             <Show when={agentCount() > 0}>
                                 {" "}
                                 <Button tone="accent" density="compact" onClick={openSwarm}>

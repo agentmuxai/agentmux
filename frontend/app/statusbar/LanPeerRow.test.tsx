@@ -68,6 +68,31 @@ describe("LanPeerList", () => {
         expect(screen.queryByText("Show in Swarm")).toBeNull();
     });
 
+    it("says a peer is an install with no agents, and how it is installed", () => {
+        render(() => <LanPeerList peers={[inst({ hostname: "Area54", agents: [], last_polled_ok: 5, install: "windows-store", os: "windows" })]} />);
+        expect(screen.getByTestId("lan-peer-no-agents")).toBeTruthy();
+        fireEvent.click(screen.getByRole("button", { name: /Area54/ }));
+        expect(screen.getByText("Windows · stable · Microsoft Store")).toBeTruthy();
+        expect(screen.getByText(/this install runs no agents/)).toBeTruthy();
+    });
+
+    it("says nothing about agents for a peer that has not been asked yet", () => {
+        render(() => <LanPeerList peers={[inst({ agents: [], last_polled_ok: 0 })]} />);
+        expect(screen.queryByTestId("lan-peer-no-agents")).toBeNull();
+    });
+
+    it("lists two installs of one host as two, each saying how it is installed", () => {
+        const peers = [
+            inst({ instance_id: "a", hostname: "Area54", channel: "stable", install: "windows-store", agents: [], last_polled_ok: 5 }),
+            inst({ instance_id: "b", hostname: "Area54", channel: "stable", install: "windows-setup", agents: ["Lazo"], last_polled_ok: 5 }),
+        ];
+        render(() => <LanPeerList peers={peers} />);
+        expect(screen.getAllByTestId("lan-peer")).toHaveLength(2);
+        expect(screen.getByText("Microsoft Store")).toBeTruthy();
+        expect(screen.getByText("installed")).toBeTruthy();
+        expect(screen.getAllByTestId("lan-peer-no-agents")).toHaveLength(1);
+    });
+
     it("warns on a peer whose agent's key was refused and links to Pinned senders", async () => {
         pinsList.mockResolvedValue({
             lan: [
