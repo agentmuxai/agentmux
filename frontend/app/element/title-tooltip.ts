@@ -13,6 +13,7 @@
 import { autoUpdate, computePosition, flip, offset, shift } from "@floating-ui/dom";
 import { isPrimaryButtonDown } from "@/app/util/pointer-drag-state";
 import { claimOpen, HIDE_DELAY_MS, isWarm, releaseOpen, SHOW_DELAY_MS, type OpenTip } from "./tooltip-timing";
+import "./anchored-popover.scss";
 
 const CANDIDATE = "[title], [data-hover-tip]";
 const KEEP_NATIVE = "option, optgroup, iframe, [data-native-title]";
@@ -97,6 +98,9 @@ export function initTitleTooltips(doc: Document = document): () => void {
     if (started) return started;
     const win = doc.defaultView ?? window;
 
+    // The same shell and body AnchoredPopover is made of (anchored-popover.tsx), built by hand because this tooltip is
+    // not a component: the shell is placed in real pixels and never zoomed, the body inside it carries chrome zoom.
+    let shell: HTMLDivElement | null = null;
     let panel: HTMLDivElement | null = null;
     let current: HTMLElement | null = null;
     let positioned = false;
@@ -122,14 +126,15 @@ export function initTitleTooltips(doc: Document = document): () => void {
 
     const place = async () => {
         const reference = current;
-        if (!reference || !panel) return;
-        const pos = await computePosition(reference, panel, {
+        if (!reference || !shell) return;
+        const pos = await computePosition(reference, shell, {
+            strategy: "fixed",
             placement: "top",
             middleware: [offset(10), flip(), shift({ padding: 12 })],
         });
-        if (current !== reference || !panel) return;
-        panel.style.left = `${pos.x}px`;
-        panel.style.top = `${pos.y}px`;
+        if (current !== reference || !shell) return;
+        shell.style.left = `${pos.x}px`;
+        shell.style.top = `${pos.y}px`;
         positioned = true;
         paint();
     };
@@ -146,7 +151,7 @@ export function initTitleTooltips(doc: Document = document): () => void {
         current = null;
         visible = false;
         positioned = false;
-        panel?.remove();
+        shell?.remove();
     }
 
     const openFor = (el: HTMLElement, text: string) => {
@@ -159,19 +164,23 @@ export function initTitleTooltips(doc: Document = document): () => void {
         current = el;
         visible = false;
         positioned = false;
-        if (!panel) {
+        if (!panel || !shell) {
             panel = doc.createElement("div");
-            panel.className = PANEL_CLASS;
-            panel.setAttribute("data-pane-overlay", "");
+            panel.className = `${PANEL_CLASS} anchored-popover-body anchored-popover-body--chrome-zoom`;
             panel.setAttribute("role", "tooltip");
             panel.style.cssText =
-                "position:absolute;left:0;top:0;opacity:0;pointer-events:none;max-width:24rem;white-space:pre-line;" +
+                "opacity:0;pointer-events:none;max-width:24rem;white-space:pre-line;" +
                 "transition:opacity var(--duration-instant) var(--ease-out)";
+            shell = doc.createElement("div");
+            shell.className = "anchored-popover anchored-popover--tooltip";
+            shell.setAttribute("data-pane-overlay", "");
+            shell.style.cssText = "left:0;top:0;pointer-events:none";
+            shell.append(panel);
         }
         panel.textContent = text;
         panel.style.opacity = "0";
-        doc.body.append(panel);
-        stopAutoUpdate = autoUpdate(el, panel, () => void place());
+        doc.body.append(shell);
+        stopAutoUpdate = autoUpdate(el, shell, () => void place());
         void place();
         const delay = handOver || isWarm(self) ? 0 : SHOW_DELAY_MS;
         const show = () => {
