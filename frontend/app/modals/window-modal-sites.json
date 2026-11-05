@@ -39,9 +39,6 @@
   "tab/tab-close-confirm-modal.tsx": {
     "window-scope": 1
   },
-  "tab/tabcontent.tsx": {
-    "default-scope": 2
-  },
   "view/bundle/bundle-manager.tsx": {
     "native-dialog": 1
   },
