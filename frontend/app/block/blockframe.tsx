@@ -15,7 +15,7 @@ import { devModeOn } from "@/app/store/dev-mode";
 import { atoms, getConnStatusAtom, getSettingsKeyAtom, MOS, useBlockAtom } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { computeMenuPosition } from "@/app/util/menu-position";
+import { AnchoredPopover } from "@/app/element/anchored-popover";
 import { remoteSettingsMenuItems } from "@/app/view/remotes/open-remotes";
 import { BlockStatsBadge, statsBadgeShown } from "@/element/blockstats";
 import { ErrorBoundary } from "@/element/errorboundary";
@@ -27,11 +27,9 @@ import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { computeBgStyleFromMeta } from "@/util/muxutil";
 import * as util from "@/util/util";
 import { FaviconImage } from "@/app/element/FaviconImage";
-import { autoUpdate } from "@floating-ui/dom";
 import clsx from "clsx";
 import type { Accessor, JSX, Setter } from "solid-js";
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
-import { Portal } from "solid-js/web";
 import { CopyButton } from "../element/copybutton";
 import { getEffectiveTitle, isUsableFocusRingColor, pickReadableTextColor } from "./autotitle";
 import { BlockFrameProps } from "./blocktypes";
@@ -497,73 +495,27 @@ function EndIcons(props: {
  * classes as `Tooltip` for visual consistency —
  * see SPEC_PANE_HEADER_TEXT_HOVER_TOOLTIP_2026_09_21.md.
  *
- * Positioning goes through `computeMenuPosition`
- * (`util/menu-position.ts`), not a raw `computePosition` call. That is
- * the repo-wide rule for any floating surface
- * (SPEC_MENU_PAINTABLE_AREA_GUARD_2026_05_20, enforced by
- * `scripts/check-menu-positioning.sh`), and it matters concretely here:
- * browser panes are native `CefBrowserView` child windows that paint
- * ABOVE the webview's DOM, so a tooltip that merely fits the viewport can
- * still be drawn behind one. `computeMenuPosition` treats those rects as
- * boundaries; a bare `computePosition` does not, and this tooltip anchors
- * to a pane header that very often sits right next to a browser pane.
+ * It is drawn by `AnchoredPopover` (element/anchored-popover.tsx), the one floating panel of the chrome: it
+ * places the tooltip under the header (through `computeMenuPosition`, the repo-wide rule for a floating surface),
+ * follows chrome zoom, and cuts a hole in any native browser pane behind it, which paints above the webview's DOM.
  */
 function AnchoredTooltip(props: {
     anchor: () => HTMLElement | null;
     visible: boolean;
     content: JSX.Element;
 }): JSX.Element {
-    const [floatingStyle, setFloatingStyle] = createSignal<JSX.CSSProperties>({
-        position: "fixed",
-        left: "0px",
-        top: "0px",
-    });
-    let floatingEl: HTMLElement | undefined;
-    let cleanupAutoUpdate: (() => void) | null = null;
-
-    const updatePosition = async () => {
-        const anchorEl = props.anchor();
-        if (!anchorEl || !floatingEl) return;
-        // gutter 6 preserves the original `offset(6)` spacing; flip/shift
-        // equivalents are built into computeMenuPosition.
-        const pos = await computeMenuPosition({ anchor: anchorEl, placement: "bottom", gutter: 6 }, floatingEl);
-        setFloatingStyle(pos.style);
-    };
-
-    createEffect(() => {
-        if (!props.visible) {
-            cleanupAutoUpdate?.();
-            cleanupAutoUpdate = null;
-            return;
-        }
-        const anchorEl = props.anchor();
-        if (!anchorEl || !floatingEl) return;
-        // Deferred a frame so the Portal below has time to insert
-        // floatingEl into the DOM before floating-ui traverses ancestors —
-        // same reasoning as Tooltip's own registerFloating.
-        requestAnimationFrame(() => {
-            if (!props.visible) return;
-            cleanupAutoUpdate?.();
-            cleanupAutoUpdate = autoUpdate(anchorEl, floatingEl!, updatePosition);
-        });
-    });
-
-    onCleanup(() => cleanupAutoUpdate?.());
-
     return (
         <Show when={props.visible}>
-            <Portal>
-                <div
-                    ref={(el) => {
-                        floatingEl = el;
-                    }}
-                    style={floatingStyle()}
-                    class="bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl z-[var(--z-tooltip)]"
-                    data-pane-overlay
-                >
-                    {props.content}
-                </div>
-            </Portal>
+            <AnchoredPopover
+                anchor={props.anchor()}
+                placement="bottom"
+                gutter={6}
+                hideUntilPlaced
+                shellClass="anchored-popover--tooltip"
+                class="bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl"
+            >
+                {props.content}
+            </AnchoredPopover>
         </Show>
     );
 }
