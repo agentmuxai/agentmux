@@ -797,6 +797,16 @@ describe("save", () => {
         await waitFor(() => expect(model.save).toHaveBeenCalledTimes(1));
         expect(model.save.mock.calls[0][0].job_id).toBe("j1");
         expect("confirm_no_cost" in model.save.mock.calls[0][0]).toBe(false);
+        cleanup();
+        model.save.mockClear();
+        mount({ mode: "clone", jobId: "j1" });
+        await waitFor(() => expect(btn("Create job")).toBeInTheDocument());
+        await waitFor(() =>
+            expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Nightly build (copy)")
+        );
+        fireEvent.click(btn("Create job"));
+        await waitFor(() => expect(model.save).toHaveBeenCalledTimes(1));
+        expect("job_id" in model.save.mock.calls[0][0]).toBe(false);
     });
 });
 
