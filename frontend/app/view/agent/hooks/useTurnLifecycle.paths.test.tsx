@@ -221,6 +221,16 @@ describe("finalizeTurn", () => {
         expect(hub.recorded[1].meta).toMatchObject({ costUsd: undefined, numTurns: undefined });
     });
 
+    it("records the usage before the turn's end clears the live tokens", () => {
+        hub.snapshot = { turnTokens: { input: 7, output: 3, outputDone: 0 } };
+        const m = mount(idle(), { provider: "claude" });
+        m.dispatchPane.mockImplementation(() => {
+            hub.snapshot = null;
+        });
+        m.result.finalizeTurn(null);
+        expect(hub.recorded[0].tokens).toMatchObject({ input: 7, output: 3 });
+    });
+
     it("counts the live turn's output as its total, not the last call's", () => {
         hub.snapshot = { turnTokens: { input: 1, output: 4, outputDone: 10, shownOutput: 20 } };
         const m = mount(idle(), { provider: "claude" });
