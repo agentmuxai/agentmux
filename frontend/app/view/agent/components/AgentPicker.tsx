@@ -255,8 +255,8 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                             it doesn't add work when no templates are
                             hidden. Sits under the templates tier so
                             hide + unhide live in the same surface
-                            (CLAUDE.md notes that the AgentMux logo
-                            Settings menu just opens settings.json,
+                            (CLAUDE.md notes that the AgentMux logo menu's
+                            Settings entry just opens settings.json,
                             so there's no separate settings panel to
                             host this in). */}
                         <HiddenTemplatesSection />

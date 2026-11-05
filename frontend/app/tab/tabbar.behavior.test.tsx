@@ -39,7 +39,7 @@ const [moreLeft, setMoreLeft] = createSignal(false);
 const [moreRight, setMoreRight] = createSignal(false);
 
 vi.mock("@/app/hook/useWindowDrag.platform", () => ({ useWindowDrag: () => ({ dragProps: { "data-dragprops": "yes" } }) }));
-vi.mock("@/app/window/logo-menu", () => ({ LogoMenu: () => <div class="AgentMux logo" /> }));
+vi.mock("@/app/window/logo-menu", () => ({ LogoMenu: () => <div class="logo-menu" /> }));
 vi.mock("@/layout/index", () => ({ deleteLayoutModelForTab: (id: string) => log(`deleteLayoutModelForTab ${id}`) }));
 vi.mock("@/store/config-signals", () => ({ settingsAtom: () => settings() }));
 vi.mock("@/store/global", () => ({ atoms: { activeTabId: () => activeTab() } }));
@@ -163,7 +163,7 @@ const dom = () => {
     });
     const scroll = document.querySelector(".tab-bar-scroll");
     log(
-        `dom root=${document.querySelector(".tab-bar")?.getAttribute("data-dragprops")} AgentMux logo=${document.querySelectorAll(".AgentMux logo").length} ` +
+        `dom root=${document.querySelector(".tab-bar")?.getAttribute("data-dragprops")} logoMenu=${document.querySelectorAll(".logo-menu").length} ` +
             `separators=${document.querySelectorAll(".tab-separator").length} fill=${document.querySelectorAll(".tab-bar-fill").length} ` +
             `scroll="${scroll?.className}" drag=${scroll?.getAttribute("data-drag-region")} modal=${document.querySelector(".modal")?.getAttribute("data-tab") ?? "none"}`,
     );

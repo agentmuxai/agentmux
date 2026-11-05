@@ -11,7 +11,7 @@
  * button per row to bring them back into the main picker.
  *
  * Why this lives in AgentPicker rather than a separate settings
- * panel: per the project CLAUDE.md note, the AgentMux logo Settings menu
+ * panel: per the project CLAUDE.md note, the AgentMux logo menu's Settings entry
  * just opens `settings.json` in the user's editor — AgentMux doesn't
  * have an in-app settings panel that's a natural home for "manage
  * hidden agent templates". Co-locating hide + unhide on the picker

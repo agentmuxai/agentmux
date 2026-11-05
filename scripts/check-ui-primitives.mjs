@@ -177,7 +177,7 @@ export const BUTTON_ALLOWLIST = {
     },
     "frontend/app/window/logo-menu.tsx": {
         max: 1,
-        reason: "the window-chrome menu trigger: a hand-drawn three-bar glyph that must stay pixel-exact, inside the drag region",
+        reason: "the window-chrome menu trigger: the hand-drawn AgentMux mark (a 5x5 grid of rects) that must stay pixel-exact, inside the drag region",
     },
     "frontend/app/element/PaneTabStrip.tsx": {
         max: 2,

@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// The app/overflow (AgentMux logo ☰) menu. Extracted from TabBar so it can be
+// The app/overflow menu, opened from the AgentMux logo. Extracted from TabBar so it can be
 // rendered in two places depending on platform:
 //   * Windows / Linux — at the LEFT of the tab strip (default position),
 //     clear of the right-side caption buttons.
@@ -44,12 +44,12 @@ interface LogoMenuProps {
     position?: "left" | "right";
 }
 
-// Every mounted AgentMux logo's close, so the "…" More dropdown can close it when
+// Every mounted logo menu's close, so the "…" More dropdown can close it when
 // it opens beside it (action-widgets.tsx): on macOS both sit at the right of
-// the header, and a More opened by hover drew over an open AgentMux logo.
+// the header, and a More opened by hover drew over an open logo menu.
 const logoMenuClosers = new Set<() => void>();
 
-/** Closes the AgentMux logo menu if it is open. */
+/** Closes the logo menu if it is open. */
 export function closeLogoMenu(): void {
     for (const close of logoMenuClosers) close();
 }
@@ -265,7 +265,7 @@ export function LogoMenu(props: LogoMenuProps): JSX.Element {
                  * rects, not an image or an icon font: they scale evenly with chrome zoom. The mark is the
                  * icon's shape snapped to a 5 x 5 grid of 4 px cells (20 px), so every edge lands on a whole
                  * pixel and the bar, the gaps and the small blocks are all one cell. Colour comes from
-                 * `--brand-mark-color` (logo-menu.scss).
+                 * `--accent-color` (logo-menu.scss).
                  */}
                 <svg width="20" height="20" viewBox="0 0 5 5" fill="currentColor" shape-rendering="crispEdges" aria-hidden="true">
                     <rect x="0" y="0" width="5" height="1" />

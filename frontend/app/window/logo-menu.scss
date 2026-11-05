@@ -1,8 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// The menu button: the AgentMux mark that opens the app menu (the class names keep the old "AgentMux logo", from
-// when it was three bars). Top-level (un-nested) so the same rules apply whether the button is rendered inside
+// The menu button: the AgentMux mark that opens the app menu (the classes are `logo-menu-*`). Top-level (un-nested) so the same rules apply whether the button is rendered inside
 // `.tab-bar` (Windows/Linux) or as a direct child of `.window-header` (macOS far-right).
 //
 // Two boxes, one job each:

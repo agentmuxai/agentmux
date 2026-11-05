@@ -553,7 +553,7 @@ describe("rule 14: native titles are a hard zero", () => {
             { path: "frontend/app/window/logo-menu.tsx", source: '<button title="menu"/>' },
         ];
         expect(hardZeroViolations(collect(files))).toContain("nativeTitles: frontend/app/view/x/x.tsx has 1, allowed 0");
-        expect(hardZeroViolations(collect(files)).filter((v) => v.startsWith("nativeTitles") && v.includes("AgentMux logo"))).toEqual([]);
+        expect(hardZeroViolations(collect(files)).filter((v) => v.startsWith("nativeTitles") && v.includes("logo-menu"))).toEqual([]);
     });
 });
 

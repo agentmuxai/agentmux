@@ -195,8 +195,8 @@ function createBarState(): BarState {
     const [moreConfirmedByClick, setMoreConfirmedByClick] = createSignal(false);
     const moreHover = createSubmenuHover({
         onOpen: () => {
-            // More opens on hover beside the AgentMux logo (macOS): close the
-            // AgentMux logo so the two menus never overlap.
+            // More opens on hover beside the logo menu button (macOS): close the
+            // logo menu so the two menus never overlap.
             closeLogoMenu();
             setMoreOpen(true);
         },
