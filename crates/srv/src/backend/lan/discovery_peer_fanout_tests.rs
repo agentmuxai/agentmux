@@ -39,6 +39,7 @@ fn peer_at(addr: &str) -> LanInstance {
         version: "0".into(),
         channel: String::new(),
         os: String::new(),
+        install: String::new(),
         address: host.to_string(),
         port: port.parse().unwrap(),
         auth_key: "k".into(),

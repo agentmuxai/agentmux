@@ -1227,26 +1227,11 @@ pub(super) async fn try_cloud_relay(state: &AppState, req: &InjectionRequest, ca
                 },
                 priority, req.files_delivery.as_ref(),
             );
-            let body = crate::backend::reactive::types::InjectionResponse {
-                deferred: None,
-                success: true,
-                request_id,
-                block_id: None,
-                error: None,
-                timestamp: now_unix_secs().max(0) as u64,
-                // No receiver has seen the message yet, so there is no applied
-                // tier or STOP decision to report — deliberately left unset
-                // rather than guessed at.
-                effective_tier: None,
-                requires_stop: None,
-                channel_verified: None,
-            };
-            let mut body = serde_json::to_value(&body).unwrap_or_default();
-            // Passed through for the `Message` tool, which warns of a likely typo
-            // on `false` (PLAN_JEKT_LOCAL_FIRST_ROUTING_2026_10_02.md R-3).
-            if let (Some(in_account), Some(obj)) = (target_in_account, body.as_object_mut()) {
-                obj.insert("target_in_account".to_string(), serde_json::Value::Bool(in_account));
-            }
+            // Watched for the sender's sake: a message nobody picks up is reported, not forgotten
+            // (muxbus::relay_watch). The LAN peers go in the answer: the target is on none of them.
+            crate::muxbus::relay_watch::watch(state.reactive_handler, source, &req.target_agent, &request_id);
+            let peers = state.lan_discovery.get_instances().iter().map(crate::backend::lan::peer_words::describe_peer).collect();
+            let body = crate::muxbus::relay_watch::queued_answer(request_id, target_in_account, peers, now_unix_secs().max(0) as u64);
             Some(body)
         }
         crate::muxbus::relay::RelayOutcome::Failed(e) => {

@@ -36,10 +36,30 @@ export function lastSeenText(seenSecs: number, nowSecs: number, locale?: string)
 
 const OS_LABELS: Record<string, string> = { windows: "Windows", macos: "macOS", linux: "Linux" };
 
-/** "Windows · stable": the peer's OS and channel, leaving out what it did not advertise. */
-export function osAndChannel(peer: Pick<LanInstance, "os" | "channel">): string {
+const INSTALL_LABELS: Record<string, string> = {
+    "windows-store": "Microsoft Store",
+    "windows-setup": "installed",
+    "windows-portable": "portable",
+    "macos-app": "app",
+    "linux-appimage": "AppImage",
+    "linux-portable": "portable",
+    "linux-package": "package",
+};
+
+/** How a peer is installed, in words ("Microsoft Store", "installed", "portable"); empty when it did not say. */
+export function installLabel(install: string | undefined): string {
+    return (install && INSTALL_LABELS[install]) || "";
+}
+
+/** "Windows · stable · Microsoft Store": the peer's OS, channel and install, leaving out what it did not advertise. */
+export function osAndChannel(peer: Pick<LanInstance, "os" | "channel"> & { install?: string }): string {
     const os = OS_LABELS[peer.os] ?? peer.os;
-    return [os, peer.channel].filter((p) => p).join(" · ");
+    return [os, peer.channel, installLabel(peer.install)].filter((p) => p).join(" · ");
+}
+
+/** Whether a peer that has been asked who it runs says it runs nobody (an install with no agents). */
+export function hasNoAgents(peer: Pick<LanInstance, "agents" | "last_polled_ok">): boolean {
+    return peer.last_polled_ok > 0 && peer.agents.length === 0;
 }
 
 const hostKey = (hostname: string): string => hostname.trim().toLowerCase();

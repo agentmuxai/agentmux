@@ -71,7 +71,7 @@
 119 crates/cef/src/floating_pane.rs::CreatePanePoolWindowWin32Task::Task::execute
 152 crates/cef/src/floating_pane.rs::create_popup
 142 crates/cef/src/floating_pane.rs::floating_pane_wndproc
-1156 crates/cef/src/ipc.rs::route_command
+1148 crates/cef/src/ipc.rs::route_command
 130 crates/cef/src/launcher_ipc/mod.rs::apply_event_to_shadow
 259 crates/cef/src/launcher_ipc/mod.rs::connect_to_launcher
 209 crates/cef/src/launcher_ipc/mod.rs::connect_to_launcher#2
@@ -184,7 +184,7 @@
 112 crates/srv/src/backend/history/index.rs::SessionIndex::refresh_holding
 104 crates/srv/src/backend/history/index.rs::search_candidates
 113 crates/srv/src/backend/lan/discovery.rs::LanDiscovery::agent_names_refresh_loop
-206 crates/srv/src/backend/lan/discovery.rs::LanDiscovery::handle_event
+204 crates/srv/src/backend/lan/discovery.rs::LanDiscovery::handle_event
 176 crates/srv/src/backend/lan/discovery.rs::LanDiscovery::start
 141 crates/srv/src/backend/layout/mod.rs::validate_layout_invariants
 200 crates/srv/src/backend/layout_file.rs::PlanBuilder::view_meta
@@ -324,7 +324,7 @@
 355 crates/srv/src/server/reactive.rs::deliver
 101 crates/srv/src/server/reactive.rs::handle_reactive_history_search
 203 crates/srv/src/server/reactive.rs::handle_reactive_register
-125 crates/srv/src/server/reactive.rs::try_cloud_relay
+110 crates/srv/src/server/reactive.rs::try_cloud_relay
 110 crates/srv/src/server/remote_ops/receive.rs::receive
 130 crates/srv/src/server/service/host_ipc.rs::handle_register
 277 crates/srv/src/server/service/misc.rs::handle_misc_service
@@ -411,7 +411,7 @@
 197 frontend/app/statusbar/CpuCoresPopover.tsx::CpuCoresPopover
 140 frontend/app/statusbar/HostPopover.tsx::HostPopover
 277 frontend/app/statusbar/HostPopover.tsx::HostPopoverPanel
-318 frontend/app/statusbar/MaintenanceSection.tsx::MaintenanceSection
+316 frontend/app/statusbar/MaintenanceSection.tsx::MaintenanceSection
 169 frontend/app/statusbar/PairDevicePanel.tsx::PairDevicePanel
 171 frontend/app/statusbar/SystemStats.tsx::SystemStats
 219 frontend/app/statusbar/TokenBreakdownPopover.tsx::TokenBreakdownPopover

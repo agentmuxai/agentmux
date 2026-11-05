@@ -22,6 +22,7 @@ use crate::server::remote_ops::op::{lan_audience, RemoteOp, RemoteOpResult, Requ
 
 use super::enabled;
 use crate::backend::lan::discovery::{one_per_instance, LanInstance};
+use crate::backend::lan::peer_words::{describe_peer, install_words};
 use crate::server::actor::{self, ActorSite};
 use crate::server::{app_api_response, caller, AppState};
 
@@ -41,30 +42,56 @@ pub(crate) struct RemoteOpRequest {
     pub reason: String,
 }
 
-/// The one LAN instance `host` names, or why not.
+/// A refusal because the agent isn't on that machine, with the machine said in words: the Store copy
+/// of a host that runs no agents answers like a host that has none of this one.
+pub(super) fn explain_not_found(result: &mut RemoteOpResult, peer: &LanInstance) {
+    if result.refused_reason.as_deref() != Some("not_found") {
+        return;
+    }
+    let said = format!("That was {}.", describe_peer(peer));
+    match result.result.get_mut("message").and_then(Value::as_str).map(str::to_string) {
+        Some(message) => result.result["message"] = Value::String(format!("{message} {said}")),
+        None => result.result = json!({ "message": said }),
+    }
+}
+
+/// The one LAN instance `host` names, or why not. `machine`, `machine/channel` or
+/// `machine/channel/install` (`windows-store`, or "Microsoft Store"): two installs of one channel on a
+/// host differ only by how they are installed.
 pub(super) fn resolve_peer(peers: &[LanInstance], host: &str) -> Result<LanInstance, String> {
     let wanted = host.trim();
     if wanted.is_empty() {
         return Err("name the machine (host): remote operations never default to a machine".into());
     }
-    let (name, channel) = match wanted.split_once('/') {
-        Some((n, c)) => (n.trim(), Some(c.trim())),
-        None => (wanted, None),
-    };
+    let mut parts = wanted.splitn(3, '/').map(str::trim);
+    let name = parts.next().unwrap_or(wanted);
+    let channel = parts.next();
+    let install = parts.next();
     // One machine found at two addresses is one instance, not two to choose between.
     let peers = one_per_instance(peers.to_vec());
     let found: Vec<&LanInstance> = peers
         .iter()
-        .filter(|p| p.hostname.trim().eq_ignore_ascii_case(name) && channel.is_none_or(|c| p.channel.eq_ignore_ascii_case(c)))
+        .filter(|p| {
+            p.hostname.trim().eq_ignore_ascii_case(name)
+                && channel.is_none_or(|c| p.channel.eq_ignore_ascii_case(c))
+                && install.is_none_or(|i| p.install.eq_ignore_ascii_case(i) || install_words(&p.install).eq_ignore_ascii_case(i))
+        })
         .collect();
     match found.as_slice() {
         [one] => Ok((*one).clone()),
         [] => {
-            let known: Vec<String> = peers.iter().map(|p| p.hostname.trim().to_string()).collect();
+            let known: Vec<String> = peers.iter().map(describe_peer).collect();
             Err(format!("no machine {wanted:?} among the LAN peers; they are: {}", known.join(", ")))
         }
         many => {
-            let names: Vec<String> = many.iter().map(|p| format!("{}/{}", p.hostname.trim(), p.channel)).collect();
+            // Said so that a name can be copied: the install part tells two of one channel apart.
+            let names: Vec<String> = many
+                .iter()
+                .map(|p| {
+                    let base = format!("{}/{}", p.hostname.trim(), p.channel);
+                    if p.install.is_empty() { base } else { format!("{base}/{}", p.install) }
+                })
+                .collect();
             Err(format!("{wanted:?} fits more than one instance: name one of {}", names.join(", ")))
         }
     }
@@ -119,7 +146,8 @@ async fn call_as(state: &AppState, slug: &str, uid: &str, host: &str, op: &str, 
     let Some(signed) = envelope.sign_with(&key, super::max_params_of(op)) else {
         return RemoteOpResult::failed("the request could not be signed (too long, or a malformed field)");
     };
-    let result = post(state, &peer, &signed).await;
+    let mut result = post(state, &peer, &signed).await;
+    explain_not_found(&mut result, &peer);
     let ok = matches!(result.status, crate::server::remote_ops::op::OpStatus::Done | crate::server::remote_ops::op::OpStatus::Queued | crate::server::remote_ops::op::OpStatus::PendingVeto);
     let note = result.refused_reason.clone().or_else(|| result.result.get("error").and_then(Value::as_str).map(str::to_string));
     state.reactive_handler.log_fleet_action_audit(
