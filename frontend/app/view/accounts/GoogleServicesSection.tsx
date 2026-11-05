@@ -17,9 +17,10 @@ import {
     canManageGrants,
     levelOptions,
     loadGooglePanel,
-    ownClientNeeded,
+    loadOfferedServices,
     pickDriveFiles,
     scopesState,
+    serviceOffered,
     serviceState,
     SERVICES,
     setGoogleGrant,
@@ -193,10 +194,13 @@ function DrivePicker(props: { account: Account }): JSX.Element {
 
 function ServiceRow(props: { account: Account; info: ServiceInfo }): JSX.Element {
     const [turningOn, setTurningOn] = createSignal(false);
+    // What AgentMux's own client may ask for in this build: the rest are "Coming soon" (Phase B spec §8).
+    const [offered] = createResource(loadOfferedServices);
     const state = () => serviceState(props.info, props.account.context.granted_scopes ?? []);
     const stateText = () => ({ on: "On", partly: "Partly granted", off: "Off" })[state()];
-    // A service Google reviews per app can't be offered on AgentMux's own client.
-    const blocked = () => (state() === "on" ? null : ownClientNeeded(props.info, props.account.context.oauth_client?.mode));
+    // A service Google hasn't approved for AgentMux's own client yet has no switch.
+    const comingSoon = () =>
+        state() !== "on" && !serviceOffered(props.info, props.account.context.oauth_client?.mode, offered() ?? null);
     return (
         <>
             <div class="identity-detail-field">
@@ -207,14 +211,16 @@ function ServiceRow(props: { account: Account; info: ServiceInfo }): JSX.Element
             <Show when={props.info.service === "drive" && state() === "on" && canManageGrants()}>
                 <DrivePicker account={props.account} />
             </Show>
-            <Show when={blocked()}>{(why) => <div class="identity-detail-hint">{why()}</div>}</Show>
-            <Show when={props.info.write && state() === "on" && !blocked()}>
+            <Show when={comingSoon()}>
+                <div class="identity-detail-hint">Coming soon.</div>
+            </Show>
+            <Show when={props.info.write && state() === "on"}>
                 <WriteRow account={props.account} info={props.info} />
             </Show>
             <Show
                 when={turningOn()}
                 fallback={
-                    <Show when={state() !== "on" && !blocked()}>
+                    <Show when={state() !== "on" && !comingSoon()}>
                         <div class="identity-key-actions">
                             <Button density="compact" tone="accent" onClick={() => setTurningOn(true)}>
                                 {state() === "off" ? `Turn on ${props.info.label}` : `Ask again for ${props.info.label}`}

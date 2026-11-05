@@ -1,0 +1,7 @@
+ListBundlesCommand
+-- recovered
+  showing: list
+  back: -
+  - — Blank (vanilla CLI) — / - {bundle-view-list-item is-blank}
+  - Global kit [GlobalInjected into all agents at launch] / For all {bundle-view-list-item is-global}
+  - Review kit / Reviews {bundle-view-list-item}
