@@ -169,7 +169,7 @@ class FakeResizeObserver {
 
 function mount(meta: Record<string, unknown> = {}, prep?: (m: FilesModel) => void) {
     const [m, setM] = createSignal<Record<string, unknown>>(meta);
-    const [vis, setVis] = createSignal<"active" | "hidden">("active");
+    const [vis, setVis] = createSignal<"active" | "dormant">("active");
     const ctx: PaneTabHostContext = {
         blockId: "b1",
         meta: () => m() as MetaType,
@@ -253,7 +253,7 @@ describe("FilesView setup", () => {
         await settled(v);
         log(`> listed: ${fmt(rowNames(v))}`);
         log("> the pane is hidden, then shown");
-        v.setVis("hidden");
+        v.setVis("dormant");
         v.setVis("active");
         log("> the select request changes");
         v.setM({ "files:select": ["b.txt"] });
