@@ -336,7 +336,7 @@ function ShortcutsView(props: { model: ShortcutsViewModel }): JSX.Element {
 
     return (
         <div class="relative w-full h-full p-4 box-border overflow-hidden flex flex-col items-center">
-            {/* Faded brain mark behind the tiles, as in an empty Editor */}
+            {/* Faded logo behind the tiles, as in an empty Editor */}
             <EmptyPaneLogo />
             <div class="relative z-[1] w-full max-w-[420px] shrink-0 flex">
                 <FilterInput
