@@ -39,7 +39,6 @@ import {
     type JSX,
     type Setter,
 } from "solid-js";
-import { Portal } from "solid-js/web";
 import {
     getMoreWidgets,
     getPinnedKeys,
@@ -668,7 +667,6 @@ function renderMeasureMirrors(s: BarState, responsive: Responsive): JSX.Element 
 
 function renderMoreDropdown(s: BarState, responsive: Responsive): JSX.Element {
     return (
-        <Portal>
             <Show when={s.moreOpen()}>
                 <MoreDropdown
                     widgets={() => [...responsive.clippedPinnedWidgets(), ...s.moreWidgets()]}
@@ -687,13 +685,11 @@ function renderMoreDropdown(s: BarState, responsive: Responsive): JSX.Element {
                     isItemMenuOpen={() => isItemMenuOpen(s)}
                 />
             </Show>
-        </Portal>
     );
 }
 
 function renderParentFlyout(s: BarState): JSX.Element {
     return (
-        <Portal>
             <Show when={s.openParentKey()}>
                 {(keyAccessor) => {
                     // Capture a plain string once instead of re-invoking
@@ -725,7 +721,6 @@ function renderParentFlyout(s: BarState): JSX.Element {
                     );
                 }}
             </Show>
-        </Portal>
     );
 }
 

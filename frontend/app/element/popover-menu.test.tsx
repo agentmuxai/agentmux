@@ -76,3 +76,12 @@ describe("PopoverMenu icons", () => {
         expect(slot.classList.contains("fa-plus")).toBe(false);
     });
 });
+
+describe("PopoverMenu chrome zoom", () => {
+    it("is drawn in AnchoredPopover's zoomed body, so it scales with the chrome like the button that opened it", () => {
+        mount();
+        const body = document.body.querySelector(".popover-menu")!;
+        expect(body.classList.contains("anchored-popover-body--chrome-zoom")).toBe(true);
+        expect(body.parentElement!.classList.contains("anchored-popover")).toBe(true);
+    });
+});

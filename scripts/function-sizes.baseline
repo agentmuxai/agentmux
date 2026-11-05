@@ -372,7 +372,7 @@
 149 frontend/app/element/PaneTabStrip.tsx::PaneTabStripItem
 122 frontend/app/element/ProviderLogo.tsx::ProviderLogo
 114 frontend/app/element/anchored-popover.tsx::AnchoredPopover
-196 frontend/app/element/flyoutmenu.tsx::FlyoutMenu
+126 frontend/app/element/flyoutmenu.tsx::FlyoutMenu
 157 frontend/app/element/install/LogView.tsx::LogView
 160 frontend/app/element/install/install-session.ts::createInstallSession
 118 frontend/app/element/markdown-incremental.ts::findSafeSplitPoint
@@ -580,9 +580,8 @@
 137 frontend/app/view/warden-jobs/warden-jobs-manager.tsx::WardenJobsManager
 218 frontend/app/window/logo-menu.tsx::LogoMenu
 157 frontend/app/window/logo-menu.tsx::menuItems
-233 frontend/app/window/more-dropdown.tsx::MoreDropdown
+197 frontend/app/window/more-dropdown.tsx::MoreDropdown
 107 frontend/app/window/pane-media-capture-indicator.tsx::PaneMediaCaptureIndicator
-112 frontend/app/window/pinned-widget-flyout.tsx::PinnedWidgetFlyout
 117 frontend/app/window/titlebar-context-menu.tsx::TitleBarContextMenu
 128 frontend/app/window/use-widget-bar-responsive.ts::useWidgetBarResponsive
 170 frontend/app/workspace/redock-ghost.ts::installFloatingRedockHoverListener
