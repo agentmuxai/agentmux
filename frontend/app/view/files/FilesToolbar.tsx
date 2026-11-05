@@ -19,13 +19,14 @@ export function FilesToolbar(props: {
     commitPath: (value: string) => void;
     /** Leave the path editor without navigating. */
     onStopEditing: () => void;
-    openFilter: () => void;
+    toggleFilter: () => void;
     closeFilter: () => void;
     onToggleViewMode: () => void;
     focusList: () => void;
     pathInputRef: (el: HTMLInputElement) => void;
     crumbsRef: (el: HTMLElement) => void;
     filterRef: (el: HTMLInputElement) => void;
+    filterButtonRef: (el: HTMLElement) => void;
 }): JSX.Element {
     const model = props.model;
     return (
@@ -75,28 +76,10 @@ export function FilesToolbar(props: {
                     </For>
                 </nav>
             </Show>
-            <Show when={props.filterOpen() || model.filter() !== ""}>
-                <input
-                    ref={props.filterRef}
-                    class="files-filter-input" data-raw-text-field="the folder filter in the pane's toolbar row: it owns Escape, Enter and ArrowDown to hand the focus to the list, not a form field"
-                    placeholder="Filter"
-                    aria-label="Filter this folder"
-                    value={model.filter()}
-                    spellcheck={false}
-                    onInput={(e) => model.setFilter(e.currentTarget.value)}
-                    onKeyDown={(e) => {
-                        e.stopPropagation();
-                        if (e.key === "Escape") props.closeFilter();
-                        else if (e.key === "Enter" || e.key === "ArrowDown") {
-                            e.preventDefault();
-                            const first = model.order()[0];
-                            if (first) model.setSelection({ names: new Set([first]), focus: first, anchor: first });
-                            props.focusList();
-                        }
-                    }}
-                />
+            <Show when={props.filterOpen()}>
+                <FilterBox model={model} closeFilter={props.closeFilter} focusList={props.focusList} filterRef={props.filterRef} />
             </Show>
-            <IconButton icon="filter" label={`Filter (${shortcutFor("files:filter")})`} class="files-tool" onClick={props.openFilter} />
+            <FilterButton model={model} open={props.filterOpen} toggle={props.toggleFilter} buttonRef={props.filterButtonRef} />
             <IconButton icon="folder-plus" label="New folder" class="files-tool" onClick={() => void model.createNew("dir")} />
             <IconButton icon={model.showHidden() ? "eye" : "eye-slash"} label={model.showHidden() ? "Hide hidden files" : "Show hidden files"} pressed={model.showHidden()} class="files-tool" onClick={() => model.toggleHidden()} />
             <IconButton icon="arrows-rotate" label="Refresh (F5)" class="files-tool" onClick={() => model.refresh()} />
@@ -104,5 +87,67 @@ export function FilesToolbar(props: {
             <IconButton icon={props.grid() ? "list" : "table-cells-large"} label={props.grid() ? "Show as a list" : "Show as thumbnails"} pressed={props.grid()} class="files-tool" onClick={props.onToggleViewMode} />
             <IconButton icon="eye" label={model.showPreview() ? "Hide preview (Space)" : "Show preview (Space)"} pressed={model.showPreview()} class="files-tool" onClick={() => model.togglePreview()} />
         </div>
+    );
+}
+
+/** The filter box. Escape clears the text and hides it; Enter or ArrowDown hands the focus to the first match. */
+function FilterBox(props: {
+    model: FilesModel;
+    closeFilter: () => void;
+    focusList: () => void;
+    filterRef: (el: HTMLInputElement) => void;
+}): JSX.Element {
+    const { model } = props;
+    return (
+        <input
+            ref={props.filterRef}
+            class="files-filter-input" data-raw-text-field="the folder filter in the pane's toolbar row: it owns Escape, Enter and ArrowDown to hand the focus to the list, not a form field"
+            placeholder="Filter"
+            aria-label="Filter this folder"
+            value={model.filter()}
+            spellcheck={false}
+            onInput={(e) => model.setFilter(e.currentTarget.value)}
+            onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === "Escape") props.closeFilter();
+                else if (e.key === "Enter" || e.key === "ArrowDown") {
+                    e.preventDefault();
+                    const first = model.order()[0];
+                    if (first) model.setSelection({ names: new Set([first]), focus: first, anchor: first });
+                    props.focusList();
+                }
+            }}
+        />
+    );
+}
+
+/**
+ * The filter button: a toggle for the box. Pressed and in the accent tone while the box is shown or a
+ * filter is applied; a filter with text stays applied while the box is hidden, and the button says so
+ * (a dot, and its label).
+ */
+function FilterButton(props: {
+    model: FilesModel;
+    open: () => boolean;
+    toggle: () => void;
+    buttonRef: (el: HTMLElement) => void;
+}): JSX.Element {
+    const applied = () => props.model.filter() !== "" && !props.open();
+    const label = () =>
+        props.open()
+            ? `Hide the filter (${shortcutFor("files:filter")})`
+            : applied()
+              ? `Filter: "${props.model.filter()}" (click to edit)`
+              : `Filter (${shortcutFor("files:filter")})`;
+    return (
+        <IconButton
+            ref={props.buttonRef}
+            icon="filter"
+            label={label()}
+            class={`files-tool files-filter-button${applied() ? " files-filter-button--applied" : ""}`}
+            pressed={props.open() || applied()}
+            tone={props.open() || applied() ? "accent" : undefined}
+            onClick={props.toggle}
+        />
     );
 }

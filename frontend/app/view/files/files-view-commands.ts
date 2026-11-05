@@ -89,7 +89,7 @@ export function useFilesCommands(fv: FilesLocal, win: FilesWindow, opening: File
                 void model.createNew("dir");
                 return true;
             case "files:filter":
-                fv.openFilter();
+                fv.toggleFilter();
                 return true;
         }
         return false;
