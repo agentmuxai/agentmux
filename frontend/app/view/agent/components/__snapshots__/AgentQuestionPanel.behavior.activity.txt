@@ -1,0 +1,56 @@
+startQuestionTimer(local, 30000ms, publish=false)
+-- pointer entered
+  header: The agent is asking | Auto-selects recommended in 30s [agent-question-panel-countdown]
+  Q: ColourPick a colour
+    - Red {radio,-} name=amux-q-q1-0
+    - Blue (Recommended) / Calmer {radio,-,recommended} name=amux-q-q1-0
+    other: ""
+  buttons: Cancel | Accept Recommended | Submit answer (disabled)
+-- a move to the same place
+  header: The agent is asking | Auto-selects recommended in 30s [agent-question-panel-countdown]
+  Q: ColourPick a colour
+    - Red {radio,-} name=amux-q-q1-0
+    - Blue (Recommended) / Calmer {radio,-,recommended} name=amux-q-q1-0
+    other: ""
+  buttons: Cancel | Accept Recommended | Submit answer (disabled)
+noteQuestionActivity(local)
+-- a real move hides the countdown
+  header: The agent is asking
+  Q: ColourPick a colour
+    - Red {radio,-} name=amux-q-q1-0
+    - Blue (Recommended) / Calmer {radio,-,recommended} name=amux-q-q1-0
+    other: ""
+  buttons: Cancel | Accept Recommended | Submit answer (disabled)
+-- 15s later it is back
+  header: The agent is asking | Auto-selects recommended in 30s [agent-question-panel-countdown]
+  Q: ColourPick a colour
+    - Red {radio,-} name=amux-q-q1-0
+    - Blue (Recommended) / Calmer {radio,-,recommended} name=amux-q-q1-0
+    other: ""
+  buttons: Cancel | Accept Recommended | Submit answer (disabled)
+key a on TEXTAREA[composer]
+noteQuestionActivity(local)
+key a (repeat) on TEXTAREA[composer]
+-- a key, then a held key
+  header: The agent is asking
+  Q: ColourPick a colour
+    - Red {radio,-} name=amux-q-q1-0
+    - Blue (Recommended) / Calmer {radio,-,recommended} name=amux-q-q1-0
+    other: ""
+  buttons: Cancel | Accept Recommended | Submit answer (disabled)
+noteQuestionActivity(local)
+-- focus inside the panel
+  header: The agent is asking
+  Q: ColourPick a colour
+    - Red {radio,-} name=amux-q-q1-0
+    - Blue (Recommended) / Calmer {radio,-,recommended} name=amux-q-q1-0
+    other: ""
+  buttons: Cancel | Accept Recommended | Submit answer (disabled)
+-- focus outside the panel is ignored
+  header: The agent is asking
+  Q: ColourPick a colour
+    - Red {radio,-} name=amux-q-q1-0
+    - Blue (Recommended) / Calmer {radio,-,recommended} name=amux-q-q1-0
+    other: ""
+  buttons: Cancel | Accept Recommended | Submit answer (disabled)
+noteQuestionActivity(local)

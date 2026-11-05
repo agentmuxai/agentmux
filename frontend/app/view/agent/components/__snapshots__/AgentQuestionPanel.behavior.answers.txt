@@ -1,0 +1,146 @@
+startQuestionTimer(local, 30000ms, publish=false)
+-- opened: nothing chosen
+  header: The agent is asking | Auto-selects recommended in 30s [agent-question-panel-countdown]
+  Q: ColourPick a colour
+    - Red {radio,-,recommended} name=amux-q-q2-0
+    - Blue {radio,-} name=amux-q-q2-0
+    other: ""
+  Q: ToppingsPick toppings
+    - Ham (Recommended) {checkbox,-,recommended} name=amux-q-q2-1
+    - Egg {checkbox,-} name=amux-q-q2-1
+    - Cheese (recommended) {checkbox,-,recommended} name=amux-q-q2-1
+    other: ""
+  Q: ExtraAnything else
+    other: ""
+  buttons: Cancel | Accept Recommended | Submit answer (disabled)
+-- Red
+  header: The agent is asking | Auto-selects recommended in 30s [agent-question-panel-countdown]
+  Q: ColourPick a colour
+    - Red {radio,checked,recommended} name=amux-q-q2-0
+    - Blue {radio,-} name=amux-q-q2-0
+    other: ""
+  Q: ToppingsPick toppings
+    - Ham (Recommended) {checkbox,-,recommended} name=amux-q-q2-1
+    - Egg {checkbox,-} name=amux-q-q2-1
+    - Cheese (recommended) {checkbox,-,recommended} name=amux-q-q2-1
+    other: ""
+  Q: ExtraAnything else
+    other: ""
+  buttons: Cancel | Accept Recommended | Submit answer (disabled)
+-- typing Other supersedes the radio choice
+  header: The agent is asking | Auto-selects recommended in 30s [agent-question-panel-countdown]
+  Q: ColourPick a colour
+    - Red {radio,-,recommended} name=amux-q-q2-0
+    - Blue {radio,-} name=amux-q-q2-0
+    other: "Green"
+  Q: ToppingsPick toppings
+    - Ham (Recommended) {checkbox,-,recommended} name=amux-q-q2-1
+    - Egg {checkbox,-} name=amux-q-q2-1
+    - Cheese (recommended) {checkbox,-,recommended} name=amux-q-q2-1
+    other: ""
+  Q: ExtraAnything else
+    other: ""
+  buttons: Cancel | Accept Recommended | Submit answer (disabled)
+-- choosing a radio clears Other
+  header: The agent is asking | Auto-selects recommended in 30s [agent-question-panel-countdown]
+  Q: ColourPick a colour
+    - Red {radio,-,recommended} name=amux-q-q2-0
+    - Blue {radio,checked} name=amux-q-q2-0
+    other: ""
+  Q: ToppingsPick toppings
+    - Ham (Recommended) {checkbox,-,recommended} name=amux-q-q2-1
+    - Egg {checkbox,-} name=amux-q-q2-1
+    - Cheese (recommended) {checkbox,-,recommended} name=amux-q-q2-1
+    other: ""
+  Q: ExtraAnything else
+    other: ""
+  buttons: Cancel | Accept Recommended | Submit answer (disabled)
+-- two toppings
+  header: The agent is asking | Auto-selects recommended in 30s [agent-question-panel-countdown]
+  Q: ColourPick a colour
+    - Red {radio,-,recommended} name=amux-q-q2-0
+    - Blue {radio,checked} name=amux-q-q2-0
+    other: ""
+  Q: ToppingsPick toppings
+    - Ham (Recommended) {checkbox,checked,recommended} name=amux-q-q2-1
+    - Egg {checkbox,checked} name=amux-q-q2-1
+    - Cheese (recommended) {checkbox,-,recommended} name=amux-q-q2-1
+    other: ""
+  Q: ExtraAnything else
+    other: ""
+  buttons: Cancel | Accept Recommended | Submit answer (disabled)
+-- Ham toggled off
+  header: The agent is asking | Auto-selects recommended in 30s [agent-question-panel-countdown]
+  Q: ColourPick a colour
+    - Red {radio,-,recommended} name=amux-q-q2-0
+    - Blue {radio,checked} name=amux-q-q2-0
+    other: ""
+  Q: ToppingsPick toppings
+    - Ham (Recommended) {checkbox,-,recommended} name=amux-q-q2-1
+    - Egg {checkbox,checked} name=amux-q-q2-1
+    - Cheese (recommended) {checkbox,-,recommended} name=amux-q-q2-1
+    other: ""
+  Q: ExtraAnything else
+    other: ""
+  buttons: Cancel | Accept Recommended | Submit answer (disabled)
+-- Other on a multi-select keeps the choices
+  header: The agent is asking | Auto-selects recommended in 30s [agent-question-panel-countdown]
+  Q: ColourPick a colour
+    - Red {radio,-,recommended} name=amux-q-q2-0
+    - Blue {radio,checked} name=amux-q-q2-0
+    other: ""
+  Q: ToppingsPick toppings
+    - Ham (Recommended) {checkbox,-,recommended} name=amux-q-q2-1
+    - Egg {checkbox,checked} name=amux-q-q2-1
+    - Cheese (recommended) {checkbox,-,recommended} name=amux-q-q2-1
+    other: "Olives"
+  Q: ExtraAnything else
+    other: ""
+  buttons: Cancel | Accept Recommended | Submit answer (disabled)
+-- a blank Other counts for nothing
+  header: The agent is asking | Auto-selects recommended in 30s [agent-question-panel-countdown]
+  Q: ColourPick a colour
+    - Red {radio,-,recommended} name=amux-q-q2-0
+    - Blue {radio,checked} name=amux-q-q2-0
+    other: ""
+  Q: ToppingsPick toppings
+    - Ham (Recommended) {checkbox,-,recommended} name=amux-q-q2-1
+    - Egg {checkbox,checked} name=amux-q-q2-1
+    - Cheese (recommended) {checkbox,-,recommended} name=amux-q-q2-1
+    other: "   "
+  Q: ExtraAnything else
+    other: ""
+  buttons: Cancel | Accept Recommended | Submit answer (disabled)
+-- everything answered
+  header: The agent is asking | Auto-selects recommended in 30s [agent-question-panel-countdown]
+  Q: ColourPick a colour
+    - Red {radio,-,recommended} name=amux-q-q2-0
+    - Blue {radio,checked} name=amux-q-q2-0
+    other: ""
+  Q: ToppingsPick toppings
+    - Ham (Recommended) {checkbox,-,recommended} name=amux-q-q2-1
+    - Egg {checkbox,checked} name=amux-q-q2-1
+    - Cheese (recommended) {checkbox,-,recommended} name=amux-q-q2-1
+    other: "   "
+  Q: ExtraAnything else
+    other: "A note"
+  buttons: Cancel | Accept Recommended | Submit answer
+onAnswer {"tool_use_id":"q2","answers":[{"header":"Colour","selected":["Blue"]},{"header":"Toppings","selected":["Egg"]},{"header":"Extra","selected":[],"other":"A note"}],"answers_map":{"Pick a colour":"Blue","Pick toppings":["Egg"],"Anything else":"A note"},"answer_text":"Colour: Blue\nToppings: Egg\nExtra: Other: A note","autoFilledCount":0}
+-- Extra emptied
+  header: The agent is asking | Auto-selects recommended in 30s [agent-question-panel-countdown]
+  Q: ColourPick a colour
+    - Red {radio,-,recommended} name=amux-q-q2-0
+    - Blue {radio,checked} name=amux-q-q2-0
+    other: ""
+  Q: ToppingsPick toppings
+    - Ham (Recommended) {checkbox,-,recommended} name=amux-q-q2-1
+    - Egg {checkbox,checked} name=amux-q-q2-1
+    - Cheese (recommended) {checkbox,-,recommended} name=amux-q-q2-1
+    other: "   "
+  Q: ExtraAnything else
+    other: ""
+  buttons: Cancel | Accept Recommended | Submit answer (disabled)
+key Enter+shift on BODY
+noteQuestionActivity(local)
+key Enter on BODY
+noteQuestionActivity(local)
