@@ -64,15 +64,15 @@ impl PersistentSubprocessController {
         resume_retry_payload: Option<persistent_resume::QueuedRetryEntry>,
     ) -> Result<Launch, String> {
         // Captured before `resume_retry_payload` is moved further down (the
-        // resume-bookkeeping match), for the turn-active decision near the
-        // end of this function — see that check's own comment. Every
+        // resume-bookkeeping match), for the turn-active decision in
+        // `take_pipes` — see that check's own comment. Every
         // pre-existing caller either passes `Some(payload)` (a message is
         // about to be delivered directly) or `None` because a message is
         // already sitting in `pending_send_messages` waiting to be drained
         // right after this spawn succeeds (`respawn_once_for_leftover_
         // queue`) — this flag alone can't tell those two `None` cases
-        // apart, which is exactly why the check below also looks at the
-        // queue.
+        // apart, which is exactly why the check in `take_pipes` also looks at
+        // the queue.
         let had_retry_payload = resume_retry_payload.is_some();
 
         // Build command — use make_cli_cmd to resolve .cmd wrappers to node on Windows
@@ -473,7 +473,7 @@ impl PersistentSubprocessController {
             &self.block_id,
         );
         // Cloned before `global_output_zone` moves into the stdout-reader
-        // task below — the process-waiter task (spawned further down) needs
+        // task below — the process-waiter task (spawned in `spawn_waiter`) needs
         // its own copy for the segment-end record and to append the resume
         // state machine's exit-time lines (a held-back error-result line, a
         // session-outcome event).
@@ -489,7 +489,7 @@ impl PersistentSubprocessController {
         // codex P1 on PR #2371: the JoinHandle is kept (not discarded) so the
         // process-waiter task can await this task's full completion before
         // resolving the retry decision, mirroring `stderr_reader_handle`
-        // below. `child.wait()` resolving is NOT proof this task has already
+        // (started in `take_pipes`). `child.wait()` resolving is NOT proof this task has already
         // read and held back the doomed attempt's terminal error-result line
         // (`ResumeState`'s `held_error_line`) — without this wait, the
         // waiter could resolve the resume state (`ProcessExited`) and launch
@@ -592,7 +592,7 @@ impl PersistentSubprocessController {
         // muxbus/registry removals below (issue #2363 / codex P1 on PR
         // #2500 — see `my_registration_nonce`'s own doc comment). NOT
         // `my_registration_nonce` directly — `exit_cleanup_nonce` is that
-        // same value UNLESS registration was skipped above, in which case
+        // same value UNLESS registration was skipped (`register_with_muxbus`), in which case
         // it's whatever nonce actually ended up on record instead (reagent
         // P1 on PR #3084; see the skip arm's own comment for why using our
         // own never-written nonce here would leak the registration).
