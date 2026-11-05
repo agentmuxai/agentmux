@@ -35,9 +35,12 @@ import { uniquifySvgIds } from "@/util/svg-ids";
 
 // Inlined SVGs need unique ids per copy: see uniquifySvgIds (@/util/svg-ids).
 
-// Mux Code wears AgentMux's own mark, the four blocks. The source SVG has a viewBox only, so give it the
-// 1em size the lobehub icons have and the wrapper's font-size drives.
-const MUX_CODE_MARK = markSvg.replace("<svg ", '<svg width="1em" height="1em" ');
+// Mux Code wears AgentMux's own mark, the four blocks. The source SVG has a viewBox only, and its blocks
+// sit inside a margin (64..448 of 512) that the lobehub icons don't have, so crop the viewBox to the blocks
+// and give it the 1em size the wrapper's font-size drives.
+const MUX_CODE_MARK = markSvg
+    .replace("viewBox=\"0 0 512 512\"", "viewBox=\"64 64 384 384\"")
+    .replace("<svg ", '<svg width="1em" height="1em" ');
 
 export interface ProviderLogoProps {
     provider: string;
