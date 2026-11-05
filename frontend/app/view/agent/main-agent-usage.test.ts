@@ -163,10 +163,10 @@ describe("the context meter is fed only per-call usage (source pins)", () => {
     });
 
     it("the strip never falls back to a provider-wide window", () => {
-        const src = read("frontend/app/view/agent/agent-view.tsx");
-        expect(src).not.toMatch(/provider\(\)\?\.contextWindow/);
-        expect(src).toMatch(/useContextReading\(model\.blockId, paneModel, block\)/);
-        expect(src).toMatch(/contextTokens=\{contextReading\(\)\?\.tokens \?\? null\}/);
+        const parts = ["agent-view.tsx", "agent-view-foundation.ts", "agent-view-layout.tsx"].map((f) => read(`frontend/app/view/agent/${f}`));
+        for (const src of parts) expect(src).not.toMatch(/provider\(\)\?\.contextWindow/);
+        expect(parts[1]).toMatch(/useContextReading\(model\.blockId, paneModel, block\)/);
+        expect(parts[2]).toMatch(/contextTokens=\{context\.reading\(\)\?\.tokens \?\? null\}/);
         expect(read("frontend/app/view/agent/hooks/useContextReading.ts")).toMatch(/plausibleReading\(context\(\)\)/);
     });
 });
