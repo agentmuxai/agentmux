@@ -178,12 +178,12 @@ pub struct AgentDefinition {
     /// (known limitation, not wired into the registry mirror).
     #[serde(default)]
     pub model_vendor_base_url: String,
-    /// The agent's own dedicated ABF bundle (`db_bundles.id`). Distinct from
-    /// `AgentInstance.memory_id` (a specific *launch*'s bundle, which can
-    /// still be pointed at a different bundle on purpose — this is just the
-    /// default a launch inherits when it doesn't override). Empty string =
-    /// not yet provisioned (legacy row predating this field, or a definition
-    /// awaiting `m0021`'s backfill). Stored in `db_agents.default_memory_id`
+    /// Legacy: the agent's own dedicated ABF bundle (`db_bundles.id`). An agent
+    /// has no bundle of its own now: `m0047` moved any into the agent's picks
+    /// (`db_agent_bundles`) and emptied this. It stays set only for an agent
+    /// with no provider of its own, whose provider is read from the bundle
+    /// (`Store::resolve_effective_provider_id`). Distinct from
+    /// `AgentInstance.memory_id` (a specific *launch*'s bundle). Stored in `db_agents.default_memory_id`
     /// — a separate column from `db_agents.memory_id`, which is the
     /// instance-scoped field this doc paragraph opens by distinguishing it
     /// from. Schema v19; the two-column split dates to

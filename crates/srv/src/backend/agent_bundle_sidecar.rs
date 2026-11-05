@@ -11,8 +11,9 @@
 //! need a schema bump older builds reject. So it goes in a sidecar zone in
 //! the global store, `agent-uid:<uid>:bundle`, holding `{memory_id}`. It was
 //! written when the agent's bundle was provisioned; a new agent has no bundle
-//! now, so this is only read: m0021 binds a recorded bundle, and m0046 keeps
-//! every recorded bundle when it removes the empty ones nothing points at.
+//! now, so this is only read: m0021 binds a recorded bundle (m0047 then moves it into
+//! the agent's picks), and m0046 keeps every recorded bundle when it removes the empty ones
+//! nothing points at.
 
 use serde::{Deserialize, Serialize};
 

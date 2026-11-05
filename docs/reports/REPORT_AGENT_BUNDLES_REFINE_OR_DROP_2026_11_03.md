@@ -1,6 +1,6 @@
 # REPORT: Agent bundles — refine or drop?
 
-**Status:** active — approved by the operator ("great, proceed with recommendations", 2026-11-04). Step 1 of §1 (no bundle per new agent, `m0021` stops minting, `m0046` removes the empty copies, export and import are counted) is built in PR #6382. Steps 2 (bundles hold only Global Memory entries and instruction sets) and 3 (move agents by reference to their id) remain.
+**Status:** active — approved by the operator ("great, proceed with recommendations", 2026-11-04). Step 1 of §1 (no bundle per new agent, `m0021` stops minting, `m0046` removes the empty copies, export and import are counted) is built in PR #6382. Step 2 (an agent has no bundle of its own: `m0047` moves any into its picks, the chain is the picks only, `own_bundle_id` is gone from the API and the Bundles tab) is built in the next PR. Step 3 (move agents by reference to their id) remains.
 **Date:** 2026-11-03
 **Author:** Agent5 (Agent5@narko), at the operator's request
 

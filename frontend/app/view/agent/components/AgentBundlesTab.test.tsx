@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Tests for AgentBundlesTab — the Bundles… modal: the agent's own bundle
- * first and fixed, then its picks, saved on each change
+ * Tests for AgentBundlesTab — the Bundles… modal: the agent's picks, saved on each change
  * (SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md §3.6).
  */
 
@@ -45,7 +44,6 @@ function mkBundle(overrides: Partial<Bundle>): Bundle {
 const BUNDLES = [
     mkBundle({ id: "blank", name: "Vanilla CLI", is_blank: true }),
     mkBundle({ id: "sys", name: "Operator Config", is_system: true }),
-    mkBundle({ id: "own", name: "Mary — ABF" }),
     mkBundle({ id: "b1", name: "Code Reviewer" }),
     mkBundle({ id: "b2", name: "Release Notes Writer" }),
 ];
@@ -61,25 +59,22 @@ async function ready(expected: string[]) {
 describe("AgentBundlesTab", () => {
     beforeEach(() => {
         listBundles.mockReset().mockResolvedValue(BUNDLES);
-        getAgentBundles.mockReset().mockResolvedValue({ bundle_ids: ["b2"], own_bundle_id: "own" });
+        getAgentBundles.mockReset().mockResolvedValue({ bundle_ids: ["b2"] });
         setAgentBundles
             .mockReset()
             .mockImplementation(async (_c: unknown, d: { bundle_ids: string[] }) => ({
                 bundle_ids: d.bundle_ids,
-                own_bundle_id: "own",
             }));
         openMemory.mockReset();
     });
 
     afterEach(() => cleanup());
 
-    it("shows the own bundle first and fixed, then the picks", async () => {
+    it("shows the picks in order", async () => {
         render(() => <AgentBundlesTab agentId="agent-1" />);
-        await waitFor(() => expect(screen.getByText("Mary — ABF")).toBeInTheDocument());
-        expect(screen.getByText("this agent's own")).toBeInTheDocument();
         await waitFor(() => expect(names()).toEqual(["Release Notes Writer"]));
 
-        // Only what can still be added: not blank, system, own or picked.
+        // Only what can still be added: not blank, system or picked.
         const add = screen.getByTestId("bundle-list-editor-add") as HTMLSelectElement;
         const options = Array.from(add.options).filter((o) => o.value).map((o) => o.textContent);
         expect(options).toEqual(["Code Reviewer"]);
@@ -117,7 +112,7 @@ describe("AgentBundlesTab", () => {
     });
 
     it("names a listed bundle that was deleted, so it can be removed", async () => {
-        getAgentBundles.mockResolvedValue({ bundle_ids: ["gone"], own_bundle_id: "own" });
+        getAgentBundles.mockResolvedValue({ bundle_ids: ["gone"] });
         render(() => <AgentBundlesTab agentId="agent-1" />);
         await waitFor(() => expect(names()).toEqual(["Deleted bundle"]));
     });
