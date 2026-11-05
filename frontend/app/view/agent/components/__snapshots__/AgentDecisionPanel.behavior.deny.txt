@@ -1,0 +1,102 @@
+key Enter+shift on BODY
+-- Shift+Enter opens the feedback
+  panel [agent-decision-panel] role=dialog aria=Permission decision required tabindex=-1
+  header: Decision required
+  meta: Tool / bash / Target / rm -rf build
+  preview: -
+  scope Once / Just this one call {checked,active} name=agent-decision-scope-<uid>
+  scope Session / Until this pane closes {-} name=agent-decision-scope-<uid>
+  scope Project / This repo, future runs {-} name=agent-decision-scope-<uid>
+  scope Global / Everywhere, future runs {-} name=agent-decision-scope-<uid>
+  feedback "" [agent-decision-panel-feedback-input] invalid=false describedby=- focused=true
+  buttons: Back | Send denial
+onDecide {"request_id":"a","outcome":"deny","scope":"once"}
+-- once with no feedback is sent
+  panel [agent-decision-panel] role=dialog aria=Permission decision required tabindex=-1
+  header: Decision required
+  meta: Tool / bash / Target / rm -rf build
+  preview: -
+  scope Once / Just this one call {checked,active} name=agent-decision-scope-<uid>
+  scope Session / Until this pane closes {-} name=agent-decision-scope-<uid>
+  scope Project / This repo, future runs {-} name=agent-decision-scope-<uid>
+  scope Global / Everywhere, future runs {-} name=agent-decision-scope-<uid>
+  buttons: Allow(title: Allow this tool call) | Deny + feedback | Defer
+-- session with no feedback is refused
+  panel [agent-decision-panel] role=dialog aria=Permission decision required tabindex=-1
+  header: Decision required
+  meta: Tool / bash / Target / rm -rf build
+  preview: -
+  scope Once / Just this one call {-} name=agent-decision-scope-<uid>
+  scope Session / Until this pane closes {checked,active} name=agent-decision-scope-<uid>
+  scope Project / This repo, future runs {-} name=agent-decision-scope-<uid>
+  scope Global / Everywhere, future runs {-} name=agent-decision-scope-<uid>
+  feedback "" [agent-decision-panel-feedback-input agent-decision-panel-feedback-input--error] invalid=true describedby=agent-decision-deny-error-<uid> focused=true error="Feedback is required when the denial applies beyond just this call." id=agent-decision-deny-error-<uid> role=alert
+  buttons: Back | Send denial
+-- typing clears the error
+  panel [agent-decision-panel] role=dialog aria=Permission decision required tabindex=-1
+  header: Decision required
+  meta: Tool / bash / Target / rm -rf build
+  preview: -
+  scope Once / Just this one call {-} name=agent-decision-scope-<uid>
+  scope Session / Until this pane closes {checked,active} name=agent-decision-scope-<uid>
+  scope Project / This repo, future runs {-} name=agent-decision-scope-<uid>
+  scope Global / Everywhere, future runs {-} name=agent-decision-scope-<uid>
+  feedback "no" [agent-decision-panel-feedback-input] invalid=false describedby=- focused=true
+  buttons: Back | Send denial
+key Enter on TEXTAREA
+-- Enter in the textarea does nothing
+  panel [agent-decision-panel] role=dialog aria=Permission decision required tabindex=-1
+  header: Decision required
+  meta: Tool / bash / Target / rm -rf build
+  preview: -
+  scope Once / Just this one call {-} name=agent-decision-scope-<uid>
+  scope Session / Until this pane closes {checked,active} name=agent-decision-scope-<uid>
+  scope Project / This repo, future runs {-} name=agent-decision-scope-<uid>
+  scope Global / Everywhere, future runs {-} name=agent-decision-scope-<uid>
+  feedback "no" [agent-decision-panel-feedback-input] invalid=false describedby=- focused=true
+  buttons: Back | Send denial
+key Enter+shift on TEXTAREA
+onDecide {"request_id":"b","outcome":"deny","scope":"session","feedback":"no"}
+-- Shift+Enter in the textarea sends
+  panel [agent-decision-panel] role=dialog aria=Permission decision required tabindex=-1
+  header: Decision required
+  meta: Tool / bash / Target / rm -rf build
+  preview: -
+  scope Once / Just this one call {-} name=agent-decision-scope-<uid>
+  scope Session / Until this pane closes {checked,active} name=agent-decision-scope-<uid>
+  scope Project / This repo, future runs {-} name=agent-decision-scope-<uid>
+  scope Global / Everywhere, future runs {-} name=agent-decision-scope-<uid>
+  buttons: Allow(title: Allow this tool call) | Deny + feedback | Defer
+key Enter on BODY
+onDecide {"request_id":"c","outcome":"deny","scope":"once","feedback":"because"}
+-- Enter on the body in deny mode sends, trimmed
+  panel [agent-decision-panel] role=dialog aria=Permission decision required tabindex=-1
+  header: Decision required
+  meta: Tool / bash / Target / rm -rf build
+  preview: -
+  scope Once / Just this one call {checked,active} name=agent-decision-scope-<uid>
+  scope Session / Until this pane closes {-} name=agent-decision-scope-<uid>
+  scope Project / This repo, future runs {-} name=agent-decision-scope-<uid>
+  scope Global / Everywhere, future runs {-} name=agent-decision-scope-<uid>
+  buttons: Allow(title: Allow this tool call) | Deny + feedback | Defer
+-- Back clears the draft
+  panel [agent-decision-panel] role=dialog aria=Permission decision required tabindex=-1
+  header: Decision required
+  meta: Tool / bash / Target / rm -rf build
+  preview: -
+  scope Once / Just this one call {checked,active} name=agent-decision-scope-<uid>
+  scope Session / Until this pane closes {-} name=agent-decision-scope-<uid>
+  scope Project / This repo, future runs {-} name=agent-decision-scope-<uid>
+  scope Global / Everywhere, future runs {-} name=agent-decision-scope-<uid>
+  buttons: Allow(title: Allow this tool call) | Deny + feedback | Defer
+-- and the feedback is empty again
+  panel [agent-decision-panel] role=dialog aria=Permission decision required tabindex=-1
+  header: Decision required
+  meta: Tool / bash / Target / rm -rf build
+  preview: -
+  scope Once / Just this one call {checked,active} name=agent-decision-scope-<uid>
+  scope Session / Until this pane closes {-} name=agent-decision-scope-<uid>
+  scope Project / This repo, future runs {-} name=agent-decision-scope-<uid>
+  scope Global / Everywhere, future runs {-} name=agent-decision-scope-<uid>
+  feedback "" [agent-decision-panel-feedback-input] invalid=false describedby=- focused=false
+  buttons: Back | Send denial
