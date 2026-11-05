@@ -144,7 +144,7 @@ export function previewPlacement(
 /** The dwell ran out with no new sample: show the candidate that was waiting. */
 function showWaiting(model: LayoutModel, held: Steadying, draggedId: string): void {
     if (dragState.nodeId !== draggedId) return;
-    const armed = held.tracker.flush(performance.now());
+    const armed = held.tracker.armWaiting();
     const shown = armed && held.inputs.get(armed.targetId);
     if (armed && shown) showPlacement(model, shown, armed.direction);
 }

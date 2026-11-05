@@ -72,9 +72,13 @@ export class DropIntentTracker {
         return { armed: this.armed, flushAt: this.waiting.since + this.config.dwellMs };
     }
 
-    /** The waiting candidate once its dwell is over with no new sample; the armed one otherwise. */
-    flush(t: number): Candidate | null {
-        if (this.waiting && t - this.waiting.since >= this.config.dwellMs) {
+    /**
+     * The dwell timer fired: arm the candidate that was waiting. The timer is set to the end of the dwell and
+     * cleared by any newer sample, so firing means it is over; comparing clocks here could find a timer that
+     * fired a hair early still short, and the ghost would then wait for the next drag event (up to 350 ms).
+     */
+    armWaiting(): Candidate | null {
+        if (this.waiting) {
             this.armed = this.waiting.candidate;
             this.waiting = null;
         }

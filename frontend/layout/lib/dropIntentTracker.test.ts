@@ -52,12 +52,12 @@ describe("DropIntentTracker", () => {
         expect(step.armed).toEqual(b(DropDirection.Left));
     });
 
-    it("arms the waiting candidate from a timer when no further sample comes", () => {
+    it("arms the waiting candidate when the dwell timer fires with no further sample", () => {
         const tracker = new DropIntentTracker();
         tracker.step("d", 100, 100, 0, a(DropDirection.Left));
         tracker.step("d", 300, 100, 50, b(DropDirection.Left));
-        expect(tracker.flush(100)).toEqual(a(DropDirection.Left));
-        expect(tracker.flush(170)).toEqual(b(DropDirection.Left));
+        expect(tracker.armWaiting()).toEqual(b(DropDirection.Left));
+        expect(tracker.armWaiting()).toEqual(b(DropDirection.Left));
     });
 
     it("a different waiting candidate restarts the dwell", () => {
@@ -74,7 +74,7 @@ describe("DropIntentTracker", () => {
         tracker.step("d", 100, 100, 0, a(DropDirection.Left));
         tracker.step("d", 300, 100, 50, b(DropDirection.Left));
         tracker.step("d", 110, 100, 100, a(DropDirection.Left));
-        expect(tracker.flush(500)).toEqual(a(DropDirection.Left));
+        expect(tracker.armWaiting()).toEqual(a(DropDirection.Left));
     });
 
     it("starts afresh for another dragged pane or after a long gap", () => {
