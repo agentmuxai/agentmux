@@ -11,7 +11,7 @@
 @use "../mixins.scss";
 .modal-panel.command-palette-panel {
     width: 560px;
-    max-width: 92vw;
+    max-width: min(100%, calc(92vw / var(--zoomfactor)));
     max-height: 480px;
     padding: 0;
     // Panel content manages its own scrolling in the list area, so
