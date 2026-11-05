@@ -66,8 +66,11 @@ export function healDuplicateBlocks(root: LayoutNode | undefined): string[] {
         if (fresh.length === members.length) return true;
         removed.push(...members.filter((id) => !fresh.includes(id)));
         if (fresh.length === 0) return false;
-        node.data = { ...node.data, blockStack: fresh.length > 1 ? fresh : undefined, blockId: fresh[0] };
-        if (fresh.length > 1) node.data.activeBlockId = fresh.includes(node.data.activeBlockId ?? "") ? node.data.activeBlockId : fresh[0];
+        // The visible tab stays the one that was visible when it survives (`blockId` and `activeBlockId` name
+        // it together everywhere else), else the first member left.
+        const shown = [node.data.activeBlockId, node.data.blockId].find((id) => !!id && fresh.includes(id)) ?? fresh[0];
+        node.data = { ...node.data, blockStack: fresh.length > 1 ? fresh : undefined, blockId: shown };
+        if (fresh.length > 1) node.data.activeBlockId = shown;
         else delete node.data.activeBlockId;
         return true;
     };

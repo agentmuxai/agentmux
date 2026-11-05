@@ -59,7 +59,13 @@ describe("a block held in two places", () => {
         const t2 = row("r", leaf("one", "a"), leaf("two", "a", ["a", "b", "c"]));
         t2.children![1].data!.activeBlockId = "a";
         healDuplicateBlocks(t2);
-        expect(t2.children![1].data).toMatchObject({ blockStack: ["b", "c"], activeBlockId: "b" });
+        expect(t2.children![1].data).toMatchObject({ blockStack: ["b", "c"], activeBlockId: "b", blockId: "b" });
+        // A surviving active tab that is not first stays the shown one: blockId and activeBlockId still agree.
+        const t3 = row("r", leaf("one", "a"), leaf("two", "a", ["a", "b", "c"]));
+        t3.children![1].data!.activeBlockId = "c";
+        t3.children![1].data!.blockId = "c";
+        healDuplicateBlocks(t3);
+        expect(t3.children![1].data).toMatchObject({ blockStack: ["b", "c"], activeBlockId: "c", blockId: "c" });
     });
 
     it("leaves a healthy tree untouched", () => {
