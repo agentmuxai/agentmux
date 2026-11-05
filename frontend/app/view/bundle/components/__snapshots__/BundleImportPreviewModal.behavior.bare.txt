@@ -1,0 +1,33 @@
+== bare
+<div>
+  <header class="modal-panel-header">
+    <h2 class="modal-panel-title">
+      "Preview & Select"
+    <p class="modal-panel-description">
+      "Choose what to bring in from"
+      <strong>
+        "Release kit"
+      "."
+  <div class="modal-panel-body bundle-import-preview-body">
+    <label class="bundle-import-field">
+      <span class="bundle-import-field-label">
+        "Bundle name"
+      <input type="text" class="bundle-import-input" value="Release kit">
+      <div class="bundle-import-hint">
+        "A bundle named this already exists."
+        <button type="button" class="ui-button ui-tone-accent ui-button--link">
+          "Use ""
+          "Release kit (2)"
+          "" instead"
+    <section class="bundle-import-section">
+      <label class="bundle-import-checkbox-row">
+        <input type="checkbox" value="on" checked=true>
+        <span>
+          "Include instructions"
+  <footer class="modal-panel-footer">
+    <button data-modal-dismiss="true" type="button" class="ui-button ui-tone-neutral wave-button">
+      "Cancel"
+    <button type="button" class="ui-button ui-tone-accent wave-button">
+      "Next"
+  rpc SkillCatalogListCommand [{}]
+  onNext {"bundleName":"Release kit","includeInstructions":true,"includeContextFileIds":[],"skills":[],"includeWidgets":[]}
