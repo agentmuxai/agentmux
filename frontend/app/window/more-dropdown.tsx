@@ -116,7 +116,7 @@ const MoreDropdown = ({
             placement="bottom-end"
             gutter={4}
             hideUntilPlaced
-            overlayKeys={false}
+            onDismiss={(reason) => reason === "escape" && onClose()}
             shellClass="anchored-popover--menu"
             class="action-widget-more-dropdown"
             ref={(el) => {

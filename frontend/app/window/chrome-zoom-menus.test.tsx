@@ -46,6 +46,22 @@ describe("title bar menus and chrome zoom", () => {
         zoomed(".action-widget-more-dropdown");
     });
 
+    it("closes the More dropdown on Esc", () => {
+        const onClose = vi.fn();
+        render(() => (
+            <MoreDropdown
+                widgets={() => [{ key: "a", widget: widget("A") }]}
+                onClose={onClose}
+                onItemContextMenu={vi.fn()}
+                anchor={anchor}
+                settings={() => ({})}
+                wmap={() => ({})}
+            />
+        ));
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+        expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
     it("draws a parent widget's flyout in the zoomed body", () => {
         render(() => (
             <PinnedWidgetFlyout
