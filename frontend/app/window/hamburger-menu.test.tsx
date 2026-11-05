@@ -554,9 +554,9 @@ describe("the menu button's glyph", () => {
         expect(svg.getAttribute("fill")).toBe("currentColor");
     });
 
-    it("is the app icon's four blocks on a 16 px grid: 16 px wide, every edge on a whole pixel", () => {
+    it("is the app icon's four blocks filling the button: 24 px for a 12-unit square, so every edge is on a whole pixel", () => {
         const svg = button().querySelector("svg")!;
-        expect([svg.getAttribute("width"), svg.getAttribute("height"), svg.getAttribute("viewBox")]).toEqual(["16", "16", "0 0 16 16"]);
+        expect([svg.getAttribute("width"), svg.getAttribute("height"), svg.getAttribute("viewBox")]).toEqual(["24", "24", "2 2 12 12"]);
         const drawn = [...svg.querySelectorAll("rect")].map((r) => ["x", "y", "width", "height"].map((a) => Number(r.getAttribute(a))));
         expect(drawn).toHaveLength(4);
         for (const rect of drawn) for (const v of rect) expect(Number.isInteger(v)).toBe(true);
