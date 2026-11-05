@@ -215,8 +215,10 @@ export function Select(props: SelectProps): JSX.Element {
     // Options given as children are not there yet when `value` is first set on the element, so the browser
     // falls back to the first one. Set it again once they are in (and whenever they change); the `options`
     // form marks its own option `selected`, so it never needed this.
+    // Only to a value that is one of the options: assigning one that is not (a microphone that is unplugged) would
+    // leave the control blank, where the browser shows the first option.
     const syncValue = () => {
-        if (el.value !== local.value) el.value = local.value;
+        if (el.value !== local.value && Array.from(el.options).some((o) => o.value === local.value)) el.value = local.value;
     };
     createEffect(syncValue);
     onMount(() => {

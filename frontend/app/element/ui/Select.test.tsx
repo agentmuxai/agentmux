@@ -52,6 +52,17 @@ describe("Select shows its value on first render", () => {
         expect(select().value).toBe("b");
     });
 
+    it("shows the first option, not a blank control, when the value is none of the options", () => {
+        render(() => (
+            <Select value="unplugged" onChange={vi.fn()} ariaLabel="Input device">
+                <option value="default">System default</option>
+                <option value="mic">Microphone</option>
+            </Select>
+        ));
+        expect(select().selectedIndex).toBe(0);
+        expect(select().value).toBe("default");
+    });
+
     it("keeps showing the value when the children arrive later, and follows it when it changes", async () => {
         const [value, setValue] = createSignal("b");
         const [choices, setChoices] = createSignal<string[]>([]);
