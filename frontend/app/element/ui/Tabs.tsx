@@ -18,7 +18,7 @@ export interface TabItem<T extends string = string> {
      * does.
      */
     tooltip?: string;
-    /** Extra class on the tab, e.g. a standing highlight on one section. */
+    /** Extra class on the tab. */
     class?: string;
 }
 

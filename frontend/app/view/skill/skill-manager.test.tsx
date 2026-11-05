@@ -98,10 +98,10 @@ describe("SkillManager", () => {
         expect(screen.getByRole("button", { name: "Unbind Korp" })).toBeTruthy();
     });
 
-    it("says a skill used by every agent, and its list badge says so", async () => {
+    it("says a skill used by every agent, and its card says so", async () => {
         rpc.SkillCatalogListCommand.mockResolvedValue([skill({ all_agents: true, new_agents: true })]);
         render(() => <SkillManager />);
-        expect(await screen.findByText("all agents")).toBeTruthy();
+        expect(await screen.findByText("Every agent")).toBeTruthy();
         fireEvent.click(screen.getByText("pdf-extraction"));
         await screen.findByText("Used by every agent");
     });
