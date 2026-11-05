@@ -6,7 +6,7 @@
 //! (`agents.migrateForkSlugs`, `agent_handlers/fork_slugs.rs`): `plan` reads and changes nothing,
 //! `stop` asks every pane running an affected agent to stop (each with its user's 30 s override,
 //! and the answer says how long to wait), `apply` migrates, `rollback` undoes a run from its
-//! journal. The caller is the agent its token names; a request without one is refused, so a change
+//! journal (always the latest finished run: an agent names no journal file). The caller is the agent its token names; a request without one is refused, so a change
 //! is never attributed to the operator. Every step but `plan` is recorded in the audit log under
 //! the calling agent's slug.
 
@@ -29,7 +29,8 @@ pub(crate) const AUDIT_ACTION: &str = "agent.ids.update";
 pub(crate) struct MigrateIdsRequest {
     /// `plan`, `stop`, `apply` or `rollback`.
     step: String,
-    /// `rollback`: the run's `journal.jsonl`; the latest finished run when absent.
+    /// Not accepted: opening a journal repairs it in place and its undo steps rename and restore the paths it
+    /// names, so a path from an agent would reach any file. A rollback undoes the latest finished run.
     #[serde(default)]
     journal: Option<String>,
     /// The id to give an agent whose computed id is taken: `[{uid, new_slug}]`.
@@ -79,6 +80,9 @@ pub(crate) async fn handle_agent_migrate_ids(
             "no agent token: Agents migrate_ids acts as the calling agent; the operator runs the update in Settings › Agents",
         );
     };
+    if req.journal.is_some() {
+        return refuse(StatusCode::BAD_REQUEST, "INVALID_ARG: journal is not accepted from an agent: rollback undoes the latest finished run");
+    }
     let step = req.step.trim().to_string();
     let Some(mode) = mode_of(&step) else {
         return refuse(StatusCode::BAD_REQUEST, "INVALID_ARG: step is plan, stop, apply or rollback");
@@ -88,7 +92,7 @@ pub(crate) async fn handle_agent_migrate_ids(
         Ok(None) => return refuse(StatusCode::UNAUTHORIZED, "the agent token names no agent on this machine"),
         Err(e) => return refuse(StatusCode::INTERNAL_SERVER_ERROR, format!("agent id update: {e}")),
     };
-    let cmd = CommandMigrateForkSlugsData { mode, journal: req.journal, quick: None, choices: req.choices };
+    let cmd = CommandMigrateForkSlugsData { mode, journal: None, quick: None, choices: req.choices };
     let stopped_by = format!("{} (Agents migrate_ids)", def.slug);
     let result = fork_slugs::run(&state, cmd, &stopped_by).await;
     if mode != ForkSlugMigrationMode::Plan {

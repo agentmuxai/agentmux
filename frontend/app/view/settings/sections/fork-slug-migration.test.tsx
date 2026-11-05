@@ -385,6 +385,29 @@ describe("reading the plan again on coming back into view", () => {
             expect(screen.getByText("3 agents have an outdated id.")).toBeTruthy();
         });
 
+        it("starts no second read while one is under way", async () => {
+            let release: () => void = () => {};
+            const gate = new Promise<void>((r) => (release = r));
+            srv([plan(THREE), plan([])]);
+            const answer = migrate.getMockImplementation()!;
+            let plans = 0;
+            migrate.mockImplementation(async (c: unknown, data: { mode: string }) => {
+                if (data.mode === "plan" && ++plans === 2) await gate;
+                return answer(c, data);
+            });
+            render(() => <ForkSlugMigration />);
+            await screen.findByText("3 agents have an outdated id.");
+            now += RECHECK_AFTER_MS + 1;
+            fireEvent(window, new Event("focus"));
+            document.dispatchEvent(new Event("visibilitychange"));
+            fireEvent(window, new Event("focus"));
+            await Promise.resolve();
+            expect(modes().filter((m) => m === "plan")).toHaveLength(2);
+            release();
+            await screen.findByText("Every agent has an up-to-date id.");
+            expect(modes().filter((m) => m === "plan")).toHaveLength(2);
+        });
+
         it("stops listening when the card goes away", async () => {
             srv([plan(THREE), plan([])]);
             render(() => <ForkSlugMigration />);

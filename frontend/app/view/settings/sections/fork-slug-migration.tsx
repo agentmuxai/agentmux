@@ -84,16 +84,18 @@ export function shouldRecheck(phase: Phase, loadedAt: number, now: number): bool
  *  elsewhere) and the user acts on what it says. */
 function reloadOnReturn<T>(phase: () => Phase, cardId: string, load: () => Promise<T | null>): () => Promise<T | null> {
     let loadedAt = 0;
-    // The caller gets `load`'s own promise: a wrapper that awaited it would answer a tick later.
+    let reading = 0;
+    // The caller gets `load`'s own promise: a wrapper that awaited it would answer a tick later. The
+    // plan's age counts from when the read started, and a read is never started while another is under way.
     const stamped = (): Promise<T | null> => {
+        loadedAt = Date.now();
+        reading++;
         const loading = load();
-        void loading.then((r) => {
-            if (r) loadedAt = Date.now();
-        });
+        void loading.finally(() => reading--);
         return loading;
     };
     const recheck = () => {
-        if (shouldRecheck(phase(), loadedAt, Date.now())) void stamped();
+        if (reading === 0 && shouldRecheck(phase(), loadedAt, Date.now())) void stamped();
     };
     onMount(() => {
         const onVisible = () => {

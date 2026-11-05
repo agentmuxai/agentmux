@@ -49,3 +49,11 @@ async fn a_token_naming_no_agent_here_is_refused() {
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     assert!(body["error"].as_str().unwrap().contains("no agent on this machine"), "{body}");
 }
+
+#[tokio::test]
+async fn an_agent_may_not_name_a_journal_file() {
+    // A journal is opened and repaired in place, and its undo steps rename and restore the paths it names.
+    let (status, body) = call(Some("some-agent"), json!({ "step": "rollback", "journal": "C:/anywhere/journal.jsonl" })).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body["error"].as_str().unwrap().contains("journal is not accepted"), "{body}");
+}

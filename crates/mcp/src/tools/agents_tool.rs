@@ -512,15 +512,12 @@ async fn set_seats(cx: &ToolCtx<'_>, args: &Value) -> Result<String> {
 }
 
 /// `migrate_ids`: the agent id update, one step at a time (`/api/v1/agent/migrate-ids`). `step` is `plan`
-/// (the default; changes nothing), `stop`, `apply` or `rollback`; srv acts as the agent this process's token
+/// (the default; changes nothing), `stop`, `apply` or `rollback` (the latest finished run); srv acts as the agent this process's token
 /// names and records every step but `plan` under it.
 async fn migrate_ids(cx: &ToolCtx<'_>, args: &Value) -> Result<String> {
     require_agent_env(cx.local_url, cx.auth_key, cx.block_id)?;
     let step = str_arg(args, "step").unwrap_or_else(|| "plan".to_string());
     let mut body = json!({ "step": step });
-    if let Some(journal) = str_arg(args, "journal") {
-        body["journal"] = json!(journal);
-    }
     if let Some(choices) = args.get("choices").filter(|v| v.is_array()) {
         body["choices"] = choices.clone();
     }
