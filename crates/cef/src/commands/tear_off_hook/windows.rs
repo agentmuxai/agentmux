@@ -30,6 +30,9 @@ enum HookMode {
     /// which the page can't see during the OS drag. Reported as
     /// `tabdrag:escape-pressed`, like `TabDrag`.
     EscapeWatch,
+    /// A pane drag with the live-follow picture: Escape, and the cursor, which moves the picture while it is
+    /// outside every AgentMux window (inside one the drag is a tile drop). No hover events, no merge.
+    PaneDrag,
 }
 
 #[cfg(target_os = "windows")]
@@ -175,6 +178,23 @@ pub fn start_escape_watch(state: Arc<AppState>, source_label: String) -> Result<
     start_hook_session(HookContextSeed {
         state,
         mode: HookMode::EscapeWatch,
+        source_label,
+        dragged_label: String::new(),
+        tab_id: String::new(),
+        source_ws_id: String::new(),
+        dest_ws_id: String::new(),
+        original_tab_index: 0,
+        was_pinned: false,
+    })
+}
+
+/// Install the hook for a pane drag whose picture follows the cursor (`live_follow`): Escape, and the
+/// cursor. The session ends on mouse-up or Escape.
+#[cfg(target_os = "windows")]
+pub fn start_pane_drag_tracking(state: Arc<AppState>, source_label: String) -> Result<(), String> {
+    start_hook_session(HookContextSeed {
+        state,
+        mode: HookMode::PaneDrag,
         source_label,
         dragged_label: String::new(),
         tab_id: String::new(),
@@ -383,7 +403,7 @@ unsafe extern "system" fn low_level_keyboard_proc(
                     // after the cancel its `dragend` can only guess from the
                     // mouse button, which a slow host or a quick release
                     // turns into a tear-off.
-                    if matches!(ctx.mode, HookMode::TabDrag { .. } | HookMode::EscapeWatch) {
+                    if matches!(ctx.mode, HookMode::TabDrag { .. } | HookMode::EscapeWatch | HookMode::PaneDrag) {
                         crate::events::emit_event_to_window(
                             &ctx.state,
                             &ctx.source_label,
@@ -451,7 +471,7 @@ unsafe extern "system" fn low_level_mouse_proc(
             handle_mouse_move(cursor_x, cursor_y);
         }
         WM_LBUTTONUP => {
-            if !escape_watch_only() {
+            if !pane_or_escape_session() {
                 handle_button_up(cursor_x, cursor_y);
             }
             // Tell our message loop to exit — the move-loop is over.
@@ -470,6 +490,22 @@ fn escape_watch_only() -> bool {
     HOOK_CTX.with(|cell| cell.borrow().as_ref().is_some_and(|ctx| ctx.mode == HookMode::EscapeWatch))
 }
 
+/// A pane or pane-tab drag session: nothing to merge or cancel back on mouse-up.
+#[cfg(target_os = "windows")]
+fn pane_or_escape_session() -> bool {
+    HOOK_CTX.with(|cell| {
+        cell.borrow().as_ref().is_some_and(|ctx| matches!(ctx.mode, HookMode::EscapeWatch | HookMode::PaneDrag))
+    })
+}
+
+/// A pane drag's cursor: the picture shows while the cursor is outside every AgentMux window.
+#[cfg(target_os = "windows")]
+fn follow_pane(ctx: &HookContext, x: i32, y: i32) {
+    let browsers: std::collections::HashMap<String, cef::Browser> = ctx.state.list_browsers().into_iter().collect();
+    let over_window = window_label_at(&ctx.state, &browsers, x, y).is_some();
+    crate::commands::live_follow::on_cursor(x, y, over_window);
+}
+
 #[cfg(target_os = "windows")]
 fn handle_mouse_move(cursor_x: i32, cursor_y: i32) {
     HOOK_CTX.with(|cell| {
@@ -477,6 +513,10 @@ fn handle_mouse_move(cursor_x: i32, cursor_y: i32) {
         let Some(ctx) = ctx_ref.as_ref() else {
             return;
         };
+        if ctx.mode == HookMode::PaneDrag {
+            follow_pane(ctx, cursor_x, cursor_y);
+            return;
+        }
 
         // Single browsers-lock acquisition: detect candidate AND
         // pre-clone the browser handles for prev/next targets in

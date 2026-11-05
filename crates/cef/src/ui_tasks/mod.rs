@@ -42,16 +42,13 @@ pub use window_maximized::*;
 pub use drag::*;
 pub use pool::*;
 pub use popup::{post_close_popup, post_close_popup_window, post_show_popup};
-#[cfg(not(target_os = "windows"))]
 pub use pane_geometry::*;
 // `clear_pane_swizzle_statics` is always present (real impl on macOS, no-op
 // elsewhere) and is the only cross-platform item in `platform_macos`. The
 // remaining swizzle statics/fns are macOS-only, so glob-importing the module
 // only makes sense there.
-// `clear_pane_swizzle_statics` (real impl on macOS, no-op on Linux) is only
-// called from the non-Windows browser-pane detach path, so its re-export is
-// gated to match. The remaining swizzle statics/fns are macOS-only.
-#[cfg(not(target_os = "windows"))]
+// `clear_pane_swizzle_statics` (real impl on macOS, no-op elsewhere) is called
+// from the Views browser-pane detach path, which Windows has in Views pane mode.
 pub(crate) use platform_macos::clear_pane_swizzle_statics;
 #[cfg(target_os = "macos")]
 pub(crate) use platform_macos::*;

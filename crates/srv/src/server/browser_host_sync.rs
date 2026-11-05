@@ -14,6 +14,8 @@ use crate::server::AppState;
 pub(crate) fn spawn(state: AppState) {
     // A deleted pane's browser ownership, waits and limits go with it.
     super::browser_pane_gone::install();
+    // The owners and site limits the last run kept, before anything can change them.
+    super::browser_pane_records::restore(&state);
     tokio::spawn(async move {
         loop {
             let _ = tokio::time::timeout(
@@ -21,6 +23,7 @@ pub(crate) fn spawn(state: AppState) {
                 crate::server::browser_owner::changed().notified(),
             )
             .await;
+            super::browser_pane_records::save();
             push(&state).await;
         }
     });

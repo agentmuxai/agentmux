@@ -300,6 +300,7 @@ partial list.
 | [`SPEC_BROWSER_PANE_CLICK_TO_SELECT_2026_07_07`](SPEC_BROWSER_PANE_CLICK_TO_SELECT_2026_07_07.md) | SPEC — Browser pane: clicking the body selects the pane (macOS) |
 | [`SPEC_BROWSER_PANE_HTTP_BASIC_AUTH_2026_05_18`](SPEC_BROWSER_PANE_HTTP_BASIC_AUTH_2026_05_18.md) | SPEC: Browser Pane HTTP Basic / Digest Auth |
 | [`SPEC_BROWSER_PANE_LOADING_INDICATOR_FLICKER_2026_08_17`](SPEC_BROWSER_PANE_LOADING_INDICATOR_FLICKER_2026_08_17.md) | SPEC — Browser pane: stop the loading-brain flicker / page-hide flashing |
+| [`SPEC_BROWSER_PANE_RECORDS_SURVIVE_RESTART_2026_11_04`](SPEC_BROWSER_PANE_RECORDS_SURVIVE_RESTART_2026_11_04.md) | SPEC: A limited, agent-owned browser pane keeps its limit and its owner across an srv restart |
 | [`SPEC_BROWSER_PANE_START_PAGE_2026_09_16`](SPEC_BROWSER_PANE_START_PAGE_2026_09_16.md) | SPEC — Browser pane: "Set as Start Page" in the bookmarks menu |
 | [`SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15`](SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15.md) | SPEC — Browser pane: replace Chromium's native right-click menu with the app's own |
 | [`SPEC_CEF_CDP_IN_PROCESS_AND_DEBUG_PORT_OPT_IN_2026_09_25`](SPEC_CEF_CDP_IN_PROCESS_AND_DEBUG_PORT_OPT_IN_2026_09_25.md) | SPEC: Browser API over in-process CDP; the CEF debug port is opt-in in release builds |

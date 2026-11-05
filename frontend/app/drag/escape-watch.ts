@@ -13,6 +13,7 @@ import { Logger } from "@/util/logger";
 import { isWindows } from "@/util/platformutil";
 import { onSessionEnded } from "./drag-session";
 import { noteHostEscape } from "./host-escape";
+import { followPaneDrag } from "./pane-live-follow";
 
 let listening = false;
 let watching = false;
@@ -23,8 +24,11 @@ function inOrder(call: () => Promise<unknown>): void {
     calls = calls.then(call).catch((e) => Logger.warn("dnd", "escape watch call failed", { error: String(e) }));
 }
 
-/** Arm the Escape hook for the drag that just began. A no-op off Windows. */
-export function watchEscapeDuringDrag(): void {
+/**
+ * Arm the Escape hook for the drag that just began. A no-op off Windows. With `follow`, the same hook also
+ * moves the picture of that pane while the cursor is outside every window (pane-live-follow.ts).
+ */
+export function watchEscapeDuringDrag(follow?: { blockId: string }): void {
     if (!isWindows()) return;
     if (!listening) {
         listening = true;
@@ -37,7 +41,8 @@ export function watchEscapeDuringDrag(): void {
     watching = true;
     inOrder(async () => {
         const sourceWindowLabel = await getApi().getWindowLabel();
-        await getApi().startTabDragTracking({ sourceWindowLabel, escapeOnly: true });
+        await getApi().startTabDragTracking({ sourceWindowLabel, escapeOnly: true, ...(follow ? { paneFollow: true } : {}) });
+        if (follow) void followPaneDrag(follow.blockId, sourceWindowLabel);
     });
 }
 

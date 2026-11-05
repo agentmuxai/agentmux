@@ -19,7 +19,7 @@
     line-height: 1.4;
     letter-spacing: 0.02em;
     color: var(--main-text-color);
-    background: color-mix(in srgb, var(--main-bg-color) 88%, transparent);
+    background: color-mix(in srgb, var(--main-bg-color) 80%, transparent);
     border: 1px solid var(--border-color);
     border-radius: 0;             // hard-corners design (SPEC_HARD_CORNERS_2026_05_26)
     backdrop-filter: blur(2px);   // legibility over busy content

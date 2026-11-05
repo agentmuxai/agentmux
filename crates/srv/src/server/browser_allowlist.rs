@@ -7,7 +7,8 @@
 //!
 //! One list per chain of panes: the pane `OpenBrowser` opened (the root) and
 //! every popup pane opened from it, or from those. Like the owner map, this
-//! is srv's own record, in memory: the block's `browser:allowed_origins`
+//! is srv's own record, kept in memory and in a file across a restart
+//! (`browser_pane_records`): the block's `browser:allowed_origins`
 //! meta key mirrors it for the pane's header, and clients can't write it. The
 //! host keeps a copy of every member's list, pushed with the owned-pane set
 //! (`browser_host_sync`), and stops navigations off it.
@@ -70,6 +71,25 @@ pub(crate) fn join(pane: &str, opener: &str) -> Option<Vec<String>> {
     drop(l);
     crate::server::browser_owner::changed().notify_one();
     Some(list)
+}
+
+/// Put back `pane`'s place in the chain of `root` and the chain's `list`, as `browser_pane_records`
+/// kept them across a restart. A chain that is already there keeps its list.
+pub(crate) fn restore(pane: &str, root: &str, list: Vec<String>) {
+    let mut l = lock();
+    l.lists.entry(root.to_string()).or_insert(list);
+    l.members.insert(pane.to_string(), root.to_string());
+    drop(l);
+    crate::server::browser_owner::changed().notify_one();
+}
+
+/// Every limited pane's chain root, and each chain's list, for `browser_pane_records`.
+pub(crate) fn chains() -> (std::collections::BTreeMap<String, String>, std::collections::BTreeMap<String, Vec<String>>) {
+    let l = lock();
+    (
+        l.members.iter().map(|(p, r)| (p.clone(), r.clone())).collect(),
+        l.lists.iter().map(|(r, list)| (r.clone(), list.clone())).collect(),
+    )
 }
 
 /// `pane`'s list, if its chain has one.

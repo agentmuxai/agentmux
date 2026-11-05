@@ -5,13 +5,8 @@
 // including the macOS ObjC frame-commit + swizzle-install path. Split out of
 // the single-file `ui_tasks` module unchanged.
 
-// The task in this file is entirely `#[cfg(not(target_os = "windows"))]`, so
-// these imports are only needed off Windows.
-#[cfg(not(target_os = "windows"))]
 use std::sync::Arc;
-#[cfg(not(target_os = "windows"))]
 use cef::*;
-#[cfg(not(target_os = "windows"))]
 use crate::state::AppState;
 // macOS-only: the ObjC block references this swizzle-storage static by bare
 // name; the other swizzle statics/fns are referenced via `crate::ui_tasks::…`.
@@ -41,7 +36,6 @@ use super::ORIG_RWHVC_SHOULD_IGNORE;
 // Pane coords from the frontend are physical pixels; NSWindow setFrame: uses
 // points, so we divide by [mainWindow backingScaleFactor] (2.0 on Retina).
 // set_visible(1) is called ONLY after the frame is committed.
-#[cfg(not(target_os = "windows"))]
 wrap_task! {
     pub struct SetPaneBoundsViewsTask {
         state: Arc<AppState>,
@@ -87,8 +81,7 @@ wrap_task! {
             };
 
             // CEF Views sizing — no-ops on macOS, functional on Linux.
-            controller.set_size(Some(&Size { width, height }));
-            controller.set_position(Some(&Point { x, y }));
+            crate::browser_pane::creation_views::place_overlay(&controller, self.state.windows.lock().get(&self.window_label), &Rect { x, y, width, height });
             // Skip window.layout() on macOS: it schedules a deferred CEF Views layout
             // pass that calls NativeWidgetMac::SetBoundsRect(0,0,0,0) AFTER our ObjC
             // setFrame, resetting the overlay to off-screen and re-engaging its event
@@ -945,7 +938,6 @@ pub fn move_shown_pane_overlay(
     true
 }
 
-#[cfg(not(target_os = "windows"))]
 pub fn post_set_pane_bounds_views(
     state: &Arc<AppState>,
     label: &str,
