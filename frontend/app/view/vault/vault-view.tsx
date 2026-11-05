@@ -61,7 +61,7 @@ function VaultPromptsNote(props: { onClose: () => void }): JSX.Element {
                     <For each={vaultPromptNotes(getPlatform())}>{(line) => <li>{line}</li>}</For>
                 </ul>
             </div>
-            <Button tone="quiet" density="compact" onClick={props.onClose}>
+            <Button tone="accent" density="compact" onClick={props.onClose}>
                 Got it
             </Button>
         </div>
