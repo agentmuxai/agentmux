@@ -84,7 +84,6 @@ function createLoad(s: HistoryReader): () => Promise<void> {
             });
         }
     };
-
 }
 
 /**

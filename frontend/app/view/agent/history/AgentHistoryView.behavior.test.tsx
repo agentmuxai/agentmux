@@ -412,6 +412,11 @@ describe("AgentHistoryView paging", () => {
         await flush();
         state(r.container, "newest page");
         log(`hasOlder=${h.nav.hasOlder()}`);
+        log("> a read that fails: the ask is dropped quietly and can be made again");
+        fail.range = true;
+        await h.doc.onLoadOlder();
+        fail.range = false;
+        log(`after the failed read: hasOlder=${h.nav.hasOlder()} loadingOlder=${h.doc.loadingOlder()}`);
         geometry(h.scroller!, { clientHeight: 400, scrollHeight: 5000 }, 1200);
         log("> the list asks for older");
         await h.doc.onLoadOlder();
@@ -427,8 +432,6 @@ describe("AgentHistoryView paging", () => {
         geometry(h.scroller!, { clientHeight: 400, scrollHeight: 9000 }, 100);
         log(`hasOlder=${h.nav.hasOlder()}`);
         await h.doc.onLoadOlder();
-        log("> a read that fails");
-        disk.lines = disk.lines.slice();
         await expect(out()).toMatchFileSnapshot(snap("older"));
     });
 
@@ -581,9 +584,7 @@ describe("AgentHistoryView races", () => {
         });
         await flush(HISTORY_PUBLISH_MIN_INTERVAL_MS);
         state(r.container, "after the append");
-        log("> the view goes while a locate is pending");
-        const pending = new Promise<void>(() => {});
-        void pending;
+        log("> the view goes, then a position is asked for");
         r.unmount();
         setAt({ at_byte: 5, n: 1 });
         await flush();

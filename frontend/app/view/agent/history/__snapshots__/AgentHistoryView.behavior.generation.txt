@@ -9,7 +9,7 @@ range({"offset":0,"limit":2}, timeout 30000)
 count({"filename":"output"}, timeout 5000)
 range({"offset":0,"limit":2}, timeout 30000)
 after the append: shown=["q1","a1"] meta="full history loaded" jumpButton=false
-> the view goes while a locate is pending
+> the view goes, then a position is asked for
 poll stopped
 unsubscribe
 release
