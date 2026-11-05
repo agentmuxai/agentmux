@@ -151,3 +151,47 @@ fn generate_goes_to_the_named_vault_or_the_agents_first_one() {
     assert_eq!(s.vault_get(&made.id).unwrap().unwrap().vault_id, work.id);
     assert!(generate_entry(&s, req(Some("Work")), "other").is_err(), "an agent can't make an entry in a Vault it may not use");
 }
+
+#[test]
+fn a_capture_is_refused_before_the_command_runs_when_it_cannot_be_kept() {
+    use crate::backend::vault::capture::plan;
+    use agentmux_common::api_types::{CaptureFrom, CaptureInto, CaptureRule};
+    let s = store();
+    let work = create(&s, "Work", named(&["builder"])).unwrap();
+    let hidden = create_in(&s, key("Work token"), &work.id).unwrap();
+    let new_key = |label: &str| CaptureRule {
+        into: CaptureInto { kind: Some("api-key".into()), label: Some(label.into()), ..Default::default() },
+        from: CaptureFrom::Stdout("all".into()),
+    };
+    let existing = |id: &str| CaptureRule { into: CaptureInto { id: Some(id.into()), ..Default::default() }, from: CaptureFrom::Stdout("all".into()) };
+
+    assert!(plan(&s, &[existing(&hidden)], "other", "true").unwrap_err().contains("there is no entry"), "an entry in a Vault it may not use is not there");
+    assert!(plan(&s, &[existing(&hidden)], "builder", "true").is_ok());
+
+    // Nowhere for a new entry to go: refused now, not after a command has issued a key.
+    update(&s, "personal", "Personal", VaultAgents::None).unwrap();
+    assert!(plan(&s, &[new_key("Fresh")], "other", "true").unwrap_err().contains("no Vault is open"));
+    let ok = plan(&s, &[new_key("Fresh")], "builder", "true").unwrap();
+    assert!(matches!(&ok.rules[0].into, crate::backend::vault::capture::Target::New { vault_id, .. } if *vault_id == work.id), "it goes to the agent's first Vault");
+}
+
+#[test]
+fn an_agents_browser_sign_in_chooses_only_from_vaults_it_may_use() {
+    use crate::backend::vault::signins;
+    let s = store();
+    let work = create(&s, "Work", named(&["builder"])).unwrap();
+    let site = "https://intranet.example.com";
+    let entry = NewEntry {
+        kind: "login".into(),
+        label: "Intranet".into(),
+        fields: [("username", "alex"), ("site", site)].map(|(k, v)| (k.to_string(), v.to_string())).into(),
+        tags: vec![],
+        parts: Parts([("password".to_string(), "pw".to_string())].into()),
+    };
+    let id = create_in(&s, entry, &work.id).unwrap();
+    let origins = [site.to_string()];
+    let ids = |agent: &str| signins::offered_for_agent(&s, "personal", &origins, agent).unwrap().into_iter().map(|f| f.0).collect::<Vec<_>>();
+    assert_eq!(ids("builder"), [id.clone()]);
+    assert!(ids("other").is_empty(), "a sign-in in a Vault it may not use is not there");
+    assert_eq!(signins::offered_for(&s, "personal", &origins).unwrap().len(), 1, "the key button the person presses lists it");
+}

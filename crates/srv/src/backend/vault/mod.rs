@@ -308,7 +308,9 @@ pub struct GenerateRequest {
     /// The Vault to make it in, by name or id; the agent's first Vault when left out.
     #[serde(default)]
     pub vault: Option<String>,
-}/// What `generate` made: the entry, never its value.
+}
+
+/// What `generate` made: the entry, never its value.
 #[derive(Debug, Serialize, PartialEq)]
 pub struct Generated {
     pub id: String,
