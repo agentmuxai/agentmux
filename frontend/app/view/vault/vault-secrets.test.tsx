@@ -32,6 +32,7 @@ const entry = (over: Partial<VaultEntryInfo> = {}): VaultEntryInfo => ({
     kind: "api-key",
     section: "api-keys",
     label: "Stripe",
+    vault_id: "personal",
     fields: {},
     tags: [],
     parts_set: ["value"],

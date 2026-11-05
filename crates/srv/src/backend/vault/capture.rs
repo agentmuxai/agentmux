@@ -42,7 +42,7 @@ pub const CAPTURED: &str = "captured";
 pub enum Target {
     /// `fields`: plain fields it starts with (a browser capture's origin, as its
     /// `service` or `site`).
-    New { kind: &'static str, label: String, part: &'static str, fields: BTreeMap<String, String> },
+    New { kind: &'static str, label: String, part: &'static str, fields: BTreeMap<String, String>, vault_id: String },
     /// An existing entry, as it was when the command was approved: a value is
     /// never stored into an entry deleted and made again since.
     Existing { id: String, created_at: i64, label: String, part: &'static str, kind: String },
@@ -218,6 +218,9 @@ pub fn plan(store: &Store, rules: &[CaptureRule], agent: &str, cmd: &str) -> Res
             (Some(_), Some(_)) => return Err(which("\"as\" names an entry by id, or a new one by kind and label, not both".into())),
             (Some(id), None) => {
                 let row = store.vault_get(id.trim()).map_err(|e| e.to_string())?.ok_or_else(|| which(format!("there is no entry {id:?}")))?;
+                if !super::vaults::entry_row_usable(store, &row.vault_id, Some(agent))? {
+                    return Err(which(format!("there is no entry {id:?}")));
+                }
                 let kind = kinds::kind(&row.kind).ok_or_else(|| which(format!("entry {id} has an unknown kind")))?;
                 let part = part_of(kind, r.into.part.as_deref()).map_err(which)?;
                 if r.into.label.as_deref().is_some_and(|l| l.trim() != row.label) {
@@ -238,7 +241,9 @@ pub fn plan(store: &Store, rules: &[CaptureRule], agent: &str, cmd: &str) -> Res
                 if part != k.parts[0] {
                     return Err(which(format!("a new {} entry is made from its {}; capture the {part} into it once it exists", k.name, k.parts[0])));
                 }
-                Target::New { kind: k.name, label: label.to_string(), part, fields: BTreeMap::new() }
+                // Settled now, before the command runs: a command that issues a key must not run when the value cannot be kept.
+                let vault_id = super::vaults::default_for(store, Some(agent)).map_err(which)?;
+                Target::New { kind: k.name, label: label.to_string(), part, fields: BTreeMap::new(), vault_id }
             }
             (None, None) => return Err(which("\"as\" needs an entry's id, or a kind and label for a new one".into())),
         };
@@ -372,7 +377,7 @@ impl Capture {
         let mut made: Vec<(String, String)> = Vec::with_capacity(found.len());
         for (rule, f) in self.rules.iter().zip(found) {
             match &rule.into {
-                Target::New { kind, label, part, fields } => {
+                Target::New { kind, label, part, fields, vault_id } => {
                     let k = kinds::kind(kind).ok_or_else(|| format!("unknown kind {kind:?}"))?;
                     let mut parts = Parts::default();
                     parts.0.insert(part.to_string(), f.value.to_string());
@@ -391,6 +396,7 @@ impl Capture {
                         created_at: now,
                         updated_at: now,
                         last_used_at: 0,
+                        vault_id: vault_id.clone(),
                     }));
                     made.push((id, label.clone()));
                 }

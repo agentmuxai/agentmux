@@ -152,9 +152,9 @@ pub(crate) async fn handle_vault_fill(
     let agent = req.auth.agent_id.chars().take(64).collect::<String>();
     // The entry and part, by name only: nothing here reads the value yet.
     let store = state.identity_store.clone();
-    let (wanted, kind, label) = (req.vault.clone(), req.request_kind.clone(), req.request_label.clone());
+    let (wanted, kind, label, who) = (req.vault.clone(), req.request_kind.clone(), req.request_label.clone(), agent.clone());
     let target = match tokio::task::spawn_blocking(move || match (wanted, kind) {
-        (Some(v), None) => vault::fill_target(&store, &v),
+        (Some(v), None) => vault::fill_target(&store, &v, Some(&who)),
         (None, Some(k)) => vault::request_target(&k, &label.unwrap_or_default()),
         _ => Err("name an entry (vault), or ask for a value (request_value), not both".to_string()),
     })

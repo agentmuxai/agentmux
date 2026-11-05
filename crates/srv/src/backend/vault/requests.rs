@@ -34,6 +34,9 @@ pub struct VaultRequest {
     /// The asking agent's own pane, where the person answers it; empty when
     /// the agent's identity didn't verify.
     pub block_id: String,
+    /// The Vault the agent asked the entry to go in (its id), if it named one: the form
+    /// starts on it. Empty when it didn't.
+    pub vault: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -178,6 +181,7 @@ mod tests {
 
     fn req(id: &str) -> VaultRequest {
         VaultRequest {
+            vault: String::new(),
             id: id.into(),
             agent: "Agent1".into(),
             kind: "api-key".into(),

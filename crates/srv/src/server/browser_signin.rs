@@ -188,8 +188,8 @@ fn profile_of(block: &crate::backend::obj::Block) -> (String, bool) {
 /// sign-in form the page shows now.
 async fn chosen(state: &AppState, block_id: &str, agent: &str, profile: &str, entry: Option<&str>) -> Result<Chosen, Response> {
     let origins = super::browser_signin_fill::form_origins(block_id);
-    let (store, p) = (state.identity_store.clone(), profile.to_string());
-    let found = match tokio::task::spawn_blocking(move || signins::offered_for(&store, &p, &origins)).await {
+    let (store, p, who) = (state.identity_store.clone(), profile.to_string(), agent.to_string());
+    let found = match tokio::task::spawn_blocking(move || signins::offered_for_agent(&store, &p, &origins, &who)).await {
         Ok(Ok(f)) => f,
         Ok(Err(e)) => return Err(err_response(StatusCode::INTERNAL_SERVER_ERROR, e)),
         Err(e) => return Err(err_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),

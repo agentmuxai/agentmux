@@ -144,6 +144,19 @@ pub fn offered_for(store: &Store, profile: &str, origins: &[String]) -> Result<V
         .collect())
 }
 
+/// [`offered_for`], limited to the sign-ins in Vaults `agent` may use: what an agent's own
+/// `Browser` `signin` chooses from. A sign-in in a Vault it may not use is one that is not there.
+/// (The key button the person presses lists every sign-in.)
+pub fn offered_for_agent(store: &Store, profile: &str, origins: &[String], agent: &str) -> Result<Vec<(String, String, String)>, String> {
+    let mut usable = Vec::new();
+    for found in offered_for(store, profile, origins)? {
+        if super::vaults::entry_usable(store, &found.0, Some(agent))? {
+            usable.push(found);
+        }
+    }
+    Ok(usable)
+}
+
 /// What a fill of entry `id` types: `(origin, user name, password, label)`, if it
 /// is a sign-in `profile` holds for one of the frame origins the page shows a
 /// form for. Anything else is refused: a sign-in never goes to another site or

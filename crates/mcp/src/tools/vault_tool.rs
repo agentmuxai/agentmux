@@ -23,8 +23,10 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let base = cx.local_url.trim_end_matches('/');
             match arguments.get("action").and_then(Value::as_str).unwrap_or("") {
                 "list" => {
-                    let body = crate::srv_http::srv_get_json(cx.client, &format!("{base}/api/v1/vault"), cx.auth_key, &[], "Vault list").await?;
-                    Ok(serde_json::to_string_pretty(&body).unwrap_or_default())
+                    // Which entries it sees depends on which Vaults the person made open to this agent.
+                    let body = json!({ "auth": crate::identity::sign_ui_automation_auth().ok() });
+                    let result = crate::srv_http::srv_post_json(cx.client, &format!("{base}/api/v1/vault/list"), cx.auth_key, &body, "Vault list").await?;
+                    Ok(serde_json::to_string_pretty(&result).unwrap_or_default())
                 }
                 "request" => {
                     let s = |k: &str| arguments.get(k).and_then(Value::as_str).unwrap_or("").to_string();
@@ -33,6 +35,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                         "kind": s("kind"),
                         "label": s("label"),
                         "why": s("why"),
+                        "vault": arguments.get("vault").and_then(Value::as_str),
                         "auth": crate::identity::sign_ui_automation_auth().ok(),
                         "wait_secs": wait,
                     });
@@ -63,6 +66,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                         "fields": arguments.get("fields").cloned().unwrap_or_else(|| json!({})),
                         "rules": arguments.get("rules").cloned().unwrap_or_else(|| json!({})),
                         "expires": arguments.get("expires").and_then(Value::as_str),
+                        "vault": arguments.get("vault").and_then(Value::as_str),
                         "auth": crate::identity::sign_ui_automation_auth().map_err(|e| anyhow::anyhow!("Vault generate needs this agent's signed identity: {e}"))?,
                     });
                     let result = crate::srv_http::srv_post_json(cx.client, &format!("{base}/api/v1/vault/generate"), cx.auth_key, &body, "Vault generate").await?;

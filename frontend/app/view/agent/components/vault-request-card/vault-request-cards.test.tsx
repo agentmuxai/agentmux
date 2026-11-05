@@ -66,6 +66,7 @@ const request = (over: Partial<VaultRequest> = {}): VaultRequest => ({
     why: "run the migrations",
     requested_ms: Date.now(),
     block_id: PANE,
+    vault: "",
     ...over,
 });
 const calls = (op: string) => vault.mock.calls.filter((c) => c[0] === op).map((c) => c[1] ?? {});

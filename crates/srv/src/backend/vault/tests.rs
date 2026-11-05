@@ -41,8 +41,8 @@ fn an_entry_is_stored_sealed_and_listed_without_its_value() {
     let shown = serde_json::to_string(&pane).unwrap();
     assert!(!shown.contains("123-45"), "the pane never gets the whole value: {shown}");
 
-    let agent = serde_json::to_string(&list_for_agent(&s).unwrap()).unwrap();
-    assert_eq!(agent, r#"[{"id":"ssn-alex","label":"Alex","kind":"ssn","section":"personal"}]"#);
+    let agent = serde_json::to_string(&list_for_agent(&s, None).unwrap()).unwrap();
+    assert_eq!(agent, r#"[{"id":"ssn-alex","label":"Alex","kind":"ssn","section":"personal","vault":"Personal"}]"#);
 }
 
 #[test]
@@ -176,7 +176,7 @@ fn a_reveal_of_a_missing_part_or_an_unknown_use_is_refused() {
 }
 
 fn gen(kind: &str, label: &str) -> GenerateRequest {
-    GenerateRequest { kind: kind.into(), label: label.into(), why: "deploy key for the staging site".into(), fields: BTreeMap::new(), rules: Default::default(), expires: None }
+    GenerateRequest { kind: kind.into(), label: label.into(), why: "deploy key for the staging site".into(), fields: BTreeMap::new(), rules: Default::default(), expires: None, vault: None }
 }
 
 #[test]
@@ -189,8 +189,8 @@ fn generate_makes_an_entry_whose_value_nobody_was_given() {
     let value = reveal(&s, &made.id, "value", "revealed").unwrap();
     assert_eq!(value.chars().count(), generate::DEFAULT_LENGTH);
     // What an agent can see names it, and nothing else.
-    let listed = list_for_agent(&s).unwrap();
-    assert_eq!(listed, vec![VaultAgentEntry { id: made.id.clone(), label: "Staging deploy key".into(), kind: "api-key".into(), section: VaultSection::ApiKeys, expires: None }]);
+    let listed = list_for_agent(&s, None).unwrap();
+    assert_eq!(listed, vec![VaultAgentEntry { id: made.id.clone(), label: "Staging deploy key".into(), kind: "api-key".into(), section: VaultSection::ApiKeys, vault: "Personal".into(), expires: None }]);
     // The record names the agent, and never the value.
     let rows = activity(&s, 10).unwrap();
     let line = rows.iter().find(|r| r.action == "generated").unwrap();
