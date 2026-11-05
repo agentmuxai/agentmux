@@ -29,7 +29,7 @@ import * as util from "@/util/util";
 import { FaviconImage } from "@/app/element/FaviconImage";
 import { autoUpdate } from "@floating-ui/dom";
 import clsx from "clsx";
-import type { Accessor, JSX } from "solid-js";
+import type { Accessor, JSX, Setter } from "solid-js";
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { Portal } from "solid-js/web";
 import { CopyButton } from "../element/copybutton";
@@ -1101,79 +1101,92 @@ function BlockMask({ nodeModel }: { nodeModel: NodeModel }): JSX.Element {
     );
 }
 
-function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
-    const nodeModel = props.nodeModel;
-    const [blockData] = MOS.useMuxObjectValue<Block>(MOS.makeORef("block", nodeModel.blockId));
-    const isFocused = () => nodeModel.isFocused();
-    // With only one pane in the tab, there's nothing to distinguish
-    // "focused" from "unfocused" against, so the focus ring carries no
-    // signal — same reasoning as the floating-pane-workspace's always-on
-    // suppression (frontend/app/workspace/floating-pane-workspace.scss).
-    const isAlone = () => nodeModel.numLeafs() <= 1;
-    const manageConnection = util.useAtomValueSafe(props.viewModel?.manageConnection);
-    const changeConnModalAtom = useBlockAtom(nodeModel.blockId, "changeConn", () => {
-        return util.createSignalAtom(false);
-    }) as util.SignalAtom<boolean>;
-    const connModalOpen = () => changeConnModalAtom();
-    const isMagnified = () => nodeModel.isMagnified();
-    const isEphemeral = () => nodeModel.isEphemeral();
-    const magnifiedBlockBlurAtom = getSettingsKeyAtom("window:magnifiedblockblurprimarypx");
-    const magnifiedBlockBlur = () => magnifiedBlockBlurAtom();
-    const magnifiedBlockOpacityAtom = getSettingsKeyAtom("window:magnifiedblockopacity");
-    const magnifiedBlockOpacity = () => magnifiedBlockOpacityAtom();
-    // Shared per-block holder rather than a plain local: when a pane's
-    // header is HOISTED out of this component (pane-leaf-chrome.tsx —
-    // `nodeModel.paneChromeHoisted`), the header, and therefore the
-    // connection button whose element this captures, renders in a different
-    // component tree, but the ChangeConnectionBlockModal it anchors stays
-    // HERE. A local ref would then never be populated and the modal would
-    // lose its anchor. Keyed on blockId through the block-atom cache, so
-    // both sides resolve the same object and it's cleaned up with the block.
-    const connBtnRef = useBlockAtom(nodeModel.blockId, "connBtnRef", () => {
+/** What the pane frame and the functions that serve it share. */
+interface FrameState {
+    props: BlockFrameProps;
+    nodeModel: NodeModel;
+    blockData: Accessor<Block | undefined>;
+    isFocused: () => boolean;
+    isAlone: () => boolean;
+    isMagnified: () => boolean;
+    isEphemeral: () => boolean;
+    magnifiedBlockBlur: () => SettingsType["window:magnifiedblockblurprimarypx"];
+    magnifiedBlockOpacity: () => SettingsType["window:magnifiedblockopacity"];
+    changeConnModalAtom: util.SignalAtom<boolean>;
+    connModalOpen: () => boolean;
+    connBtnRef: ReturnType<typeof useConnBtnHolder>;
+    noHeader: () => boolean;
+    showStatsBadge: Accessor<boolean>;
+    frameEl: Accessor<HTMLDivElement | undefined>;
+    setFrameEl: Setter<HTMLDivElement | undefined>;
+    blockAgentColor: Accessor<string | null>;
+    blockIdentityColor: Accessor<string | undefined>;
+    innerStyle: () => JSX.CSSProperties;
+    previewElem: JSX.Element;
+    headerElem: JSX.Element;
+    headerElemNoView: JSX.Element;
+    onBodyContextMenu: ReturnType<typeof useBodyContextMenu>;
+}
+
+// Shared per-block holder rather than a plain local: when a pane's
+// header is HOISTED out of this component (pane-leaf-chrome.tsx —
+// `nodeModel.paneChromeHoisted`), the header, and therefore the
+// connection button whose element this captures, renders in a different
+// component tree, but the ChangeConnectionBlockModal it anchors stays
+// HERE. A local ref would then never be populated and the modal would
+// lose its anchor. Keyed on blockId through the block-atom cache, so
+// both sides resolve the same object and it's cleaned up with the block.
+function useConnBtnHolder(nodeModel: NodeModel) {
+    return useBlockAtom(nodeModel.blockId, "connBtnRef", () => {
         const holder: { current: HTMLDivElement | null } = { current: null };
         return () => holder;
     })();
-    // Deliberately a plain function reference, NOT eagerly invoked here —
-    // this used to be `util.useAtomValueSafe(props.viewModel?.noHeader)`,
-    // computed once as a plain boolean at this component's own (one-time)
-    // setup. That silently froze the header decision forever, since
-    // `BlockFrame_Default_Component` itself is constructed once and never
-    // remounts (SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md) and
-    // `props.viewModel`'s underlying signal doesn't change identity on a
-    // block.tsx ViewModel-registry ADOPTION either (same object, so the
-    // signal setter is a same-reference no-op) — so a value read here once
-    // could never update even after `paneChromeHoisted` genuinely flipped.
-    // Calling `noHeader()` inline at each JSX use site below instead keeps
-    // this a normal Solid reactive read, correctly re-deriving whenever
-    // `paneChromeHoisted` (now a live accessor, not a snapshot — see
-    // `BlockNodeModel.paneChromeHoisted`'s own doc comment) changes.
-    //
-    // The HOST decides, not each view: when pane chrome is hoisted around
-    // this block (`nodeModel.paneChromeHoisted`), chrome draws the header,
-    // so this inline one must not. Every view type used to repeat that same
-    // one-line `noHeader` itself, and one that forgot got a double header
-    // (SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md §2.4, Phase 1). A view's own
-    // `noHeader` can still hide the header in other cases (Launcher). A
-    // drag-preview thumbnail (`tabcontent.tsx`'s plain `<Block preview>` with
-    // the raw leaf nodeModel, no chrome around it) is never tagged, so it
-    // keeps this header (codex P2 on #3151).
+}
+
+// Deliberately a plain function reference, NOT eagerly invoked here —
+// this used to be `util.useAtomValueSafe(props.viewModel?.noHeader)`,
+// computed once as a plain boolean at this component's own (one-time)
+// setup. That silently froze the header decision forever, since
+// `BlockFrame_Default_Component` itself is constructed once and never
+// remounts (SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md) and
+// `props.viewModel`'s underlying signal doesn't change identity on a
+// block.tsx ViewModel-registry ADOPTION either (same object, so the
+// signal setter is a same-reference no-op) — so a value read here once
+// could never update even after `paneChromeHoisted` genuinely flipped.
+// Calling `noHeader()` inline at each JSX use site (in `renderFrameInner`) instead keeps
+// this a normal Solid reactive read, correctly re-deriving whenever
+// `paneChromeHoisted` (now a live accessor, not a snapshot — see
+// `BlockNodeModel.paneChromeHoisted`'s own doc comment) changes.
+//
+// The HOST decides, not each view: when pane chrome is hoisted around
+// this block (`nodeModel.paneChromeHoisted`), chrome draws the header,
+// so this inline one must not. Every view type used to repeat that same
+// one-line `noHeader` itself, and one that forgot got a double header
+// (SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md §2.4, Phase 1). A view's own
+// `noHeader` can still hide the header in other cases (Launcher). A
+// drag-preview thumbnail (`tabcontent.tsx`'s plain `<Block preview>` with
+// the raw leaf nodeModel, no chrome around it) is never tagged, so it
+// keeps this header (codex P2 on #3151).
+function createNoHeader(props: BlockFrameProps): () => boolean {
     const noHeader = () =>
         (props.nodeModel as { paneChromeHoisted?: () => boolean } | undefined)?.paneChromeHoisted?.() === true ||
         (props.viewModel?.noHeader?.() ?? false);
-    // Terminal-only: "term:showstatsbadge" (Settings → Terminal). Other view
-    // types keep the badge unconditionally, matching prior behavior — this
-    // setting exists specifically for the terminal pane's CPU%/mem overlay.
-    // Never in a drag-preview frame (`statsBadgeShown`).
-    const showStatsBadge = createMemo(() => {
+    return noHeader;
+}
+
+// Terminal-only: "term:showstatsbadge" (Settings → Terminal). Other view
+// types keep the badge unconditionally, matching prior behavior — this
+// setting exists specifically for the terminal pane's CPU%/mem overlay.
+// Never in a drag-preview frame (`statsBadgeShown`).
+function createStatsBadge(props: BlockFrameProps, blockData: Accessor<Block | undefined>): Accessor<boolean> {
+    return createMemo(() => {
         const setting = paneTabCapability(blockData()?.meta?.view, "statsBadgeSetting");
         const settingOn = setting == null || getSettingsKeyAtom(setting as any)() !== false;
         return statsBadgeShown(!!props.preview, settingOn);
     });
-    // Captured outer-frame ref for PaneSizeBadge. Live as long as the
-    // frame is mounted; cleared on unmount via the callback ref.
-    // SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md.
-    const [frameEl, setFrameEl] = createSignal<HTMLDivElement | undefined>(undefined);
+}
 
+function createFrameColors(props: BlockFrameProps, blockData: Accessor<Block | undefined>) {
     // Agent color for border — matches header color and
     // computeFocusRingBorderColor's precedence on agent-loaded terminals.
     // Gated by isUsableFocusRingColor: the focused ring is the selection
@@ -1208,16 +1221,15 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
     const blockIdentityColor = createMemo(() =>
         props.preview ? undefined : computeBlockIdentityColor(blockData()?.meta, isLightThemeActive())
     );
+    return { blockAgentColor, blockIdentityColor };
+}
 
-    useBlockConnection({ nodeModel, manageConnection, changeConnModalAtom, blockData, preview: props.preview });
-
-    const viewIconUnion = util.useAtomValueSafe(props.viewModel?.viewIcon) ?? blockViewToIcon(blockData()?.meta?.view);
-    const viewIconElem = getViewIconElem(viewIconUnion, blockData());
-    // Reactive: a background with `url(...)` is computed once its parser has
-    // loaded (computeBgStyleFromMeta).
-    const innerStyle = (): JSX.CSSProperties =>
-        props.preview ? {} : computeBgStyleFromMeta(util.useAtomValueSafe(props.viewModel?.blockBg));
-    const previewElem = <div class="block-frame-preview">{viewIconElem}</div>;
+function createFrameHeaders(
+    props: BlockFrameProps,
+    nodeModel: NodeModel,
+    connBtnRef: ReturnType<typeof useConnBtnHolder>,
+    changeConnModalAtom: util.SignalAtom<boolean>
+) {
     // Trivial wrapper — behavior-preserving today. A hoisted pane-chrome
     // caller (PR 3) will pass nodeModel.activeBlockId instead, to track a
     // switch without this header remounting.
@@ -1239,6 +1251,49 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
             blockId={headerBlockId}
         />
     );
+    return { headerElem, headerElemNoView };
+}
+
+function createFrameState(props: BlockFrameProps): FrameState {
+    const nodeModel = props.nodeModel;
+    const [blockData] = MOS.useMuxObjectValue<Block>(MOS.makeORef("block", nodeModel.blockId));
+    const isFocused = () => nodeModel.isFocused();
+    // With only one pane in the tab, there's nothing to distinguish
+    // "focused" from "unfocused" against, so the focus ring carries no
+    // signal — same reasoning as the floating-pane-workspace's always-on
+    // suppression (frontend/app/workspace/floating-pane-workspace.scss).
+    const isAlone = () => nodeModel.numLeafs() <= 1;
+    const manageConnection = util.useAtomValueSafe(props.viewModel?.manageConnection);
+    const changeConnModalAtom = useBlockAtom(nodeModel.blockId, "changeConn", () => {
+        return util.createSignalAtom(false);
+    }) as util.SignalAtom<boolean>;
+    const connModalOpen = () => changeConnModalAtom();
+    const isMagnified = () => nodeModel.isMagnified();
+    const isEphemeral = () => nodeModel.isEphemeral();
+    const magnifiedBlockBlurAtom = getSettingsKeyAtom("window:magnifiedblockblurprimarypx");
+    const magnifiedBlockBlur = () => magnifiedBlockBlurAtom();
+    const magnifiedBlockOpacityAtom = getSettingsKeyAtom("window:magnifiedblockopacity");
+    const magnifiedBlockOpacity = () => magnifiedBlockOpacityAtom();
+    const connBtnRef = useConnBtnHolder(nodeModel);
+    const noHeader = createNoHeader(props);
+    const showStatsBadge = createStatsBadge(props, blockData);
+    // Captured outer-frame ref for PaneSizeBadge. Live as long as the
+    // frame is mounted; cleared on unmount via the callback ref.
+    // SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md.
+    const [frameEl, setFrameEl] = createSignal<HTMLDivElement | undefined>(undefined);
+
+    const { blockAgentColor, blockIdentityColor } = createFrameColors(props, blockData);
+
+    useBlockConnection({ nodeModel, manageConnection, changeConnModalAtom, blockData, preview: props.preview });
+
+    const viewIconUnion = util.useAtomValueSafe(props.viewModel?.viewIcon) ?? blockViewToIcon(blockData()?.meta?.view);
+    const viewIconElem = getViewIconElem(viewIconUnion, blockData());
+    // Reactive: a background with `url(...)` is computed once its parser has
+    // loaded (computeBgStyleFromMeta).
+    const innerStyle = (): JSX.CSSProperties =>
+        props.preview ? {} : computeBgStyleFromMeta(util.useAtomValueSafe(props.viewModel?.blockBg));
+    const previewElem = <div class="block-frame-preview">{viewIconElem}</div>;
+    const { headerElem, headerElemNoView } = createFrameHeaders(props, nodeModel, connBtnRef, changeConnModalAtom);
 
     const onBodyContextMenu = useBodyContextMenu({
         nodeModel,
@@ -1248,81 +1303,81 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
         frameEl,
     });
 
+    return {
+        props,
+        nodeModel,
+        blockData,
+        isFocused,
+        isAlone,
+        isMagnified,
+        isEphemeral,
+        magnifiedBlockBlur,
+        magnifiedBlockOpacity,
+        changeConnModalAtom,
+        connModalOpen,
+        connBtnRef,
+        noHeader,
+        showStatsBadge,
+        frameEl,
+        setFrameEl,
+        blockAgentColor,
+        blockIdentityColor,
+        innerStyle,
+        previewElem,
+        headerElem,
+        headerElemNoView,
+        onBodyContextMenu,
+    };
+}
+
+function renderFrameInner(s: FrameState): JSX.Element {
+    const { props, nodeModel } = s;
     return (
-        <div
-            class={clsx("block", "block-frame-default", "block-" + nodeModel.blockId, {
-                "block-focused": isFocused() || props.preview,
-                "block-preview": props.preview,
-                "has-agent-color": !!blockAgentColor(),
-                "pane-alone": isAlone(),
-                ephemeral: isEphemeral(),
-                magnified: isMagnified(),
-            })}
-            data-blockid={nodeModel.blockId}
-            onClick={props.blockModel?.onClick}
-            onFocusIn={props.blockModel?.onFocusCapture}
-            onContextMenu={onBodyContextMenu}
-            ref={(el) => {
-                setFrameEl(el);
-                if (props.blockModel?.blockRef) {
-                    props.blockModel.blockRef.current = el;
-                }
-            }}
-            style={
-                {
-                    "--magnified-block-opacity": magnifiedBlockOpacity(),
-                    "--magnified-block-blur": `${magnifiedBlockBlur()}px`,
-                    "--block-agent-color": blockAgentColor() ?? "transparent",
-                    "--block-identity-color": blockIdentityColor(),
-                } as JSX.CSSProperties
-            }
-            inert={props.preview || undefined}
-        >
-            <Show when={!props.preview && props.viewModel != null}>
-                <ConnStatusOverlay
-                    nodeModel={nodeModel}
-                    viewModel={props.viewModel}
-                    changeConnModalAtom={changeConnModalAtom}
+        <div class="block-frame-default-inner" style={s.innerStyle()}>
+            {s.noHeader() || <ErrorBoundary fallback={s.headerElemNoView}>{s.headerElem}</ErrorBoundary>}
+            <Show when={!props.preview && s.blockData()}>
+                <TitleBar
+                    blockId={nodeModel.blockId}
+                    blockMeta={s.blockData()?.meta}
+                    title={getEffectiveTitle(
+                        s.blockData(),
+                        false,
+                        atoms.fullConfigAtom()?.settings?.["cmd:env"] as Record<string, string> | undefined
+                    )}
                 />
             </Show>
-            <div class="block-frame-default-inner" style={innerStyle()}>
-                {noHeader() || <ErrorBoundary fallback={headerElemNoView}>{headerElem}</ErrorBoundary>}
-                <Show when={!props.preview && blockData()}>
-                    <TitleBar
-                        blockId={nodeModel.blockId}
-                        blockMeta={blockData()?.meta}
-                        title={getEffectiveTitle(
-                            blockData(),
-                            false,
-                            atoms.fullConfigAtom()?.settings?.["cmd:env"] as Record<string, string> | undefined
-                        )}
-                    />
-                </Show>
-                {props.preview ? previewElem : props.children}
-                <Show when={showStatsBadge()}>
-                    <BlockStatsBadge
-                        blockId={nodeModel.blockId}
-                        noHeader={noHeader()}
-                        connection={
-                            // Only a terminal's badge measures a remote shell;
-                            // other panes on a connection (Files, preview) have
-                            // none and keep the local badge's behavior.
-                            blockData()?.meta?.view === "term"
-                                ? (blockData()?.meta?.connection as string | undefined)
-                                : undefined
-                        }
-                    />
-                </Show>
-            </div>
-            <Show when={!props.preview && props.viewModel != null && connModalOpen()}>
+            {props.preview ? s.previewElem : props.children}
+            <Show when={s.showStatsBadge()}>
+                <BlockStatsBadge
+                    blockId={nodeModel.blockId}
+                    noHeader={s.noHeader()}
+                    connection={
+                        // Only a terminal's badge measures a remote shell;
+                        // other panes on a connection (Files, preview) have
+                        // none and keep the local badge's behavior.
+                        s.blockData()?.meta?.view === "term"
+                            ? (s.blockData()?.meta?.connection as string | undefined)
+                            : undefined
+                    }
+                />
+            </Show>
+        </div>
+    );
+}
+
+function renderFrameOverlays(s: FrameState): JSX.Element {
+    const { props, nodeModel } = s;
+    return (
+        <>
+            <Show when={!props.preview && props.viewModel != null && s.connModalOpen()}>
                 <ChangeConnectionBlockModal
                     blockId={nodeModel.blockId}
                     nodeModel={nodeModel}
                     viewModel={props.viewModel}
                     blockRef={props.blockModel?.blockRef}
-                    changeConnModalOpen={changeConnModalAtom}
-                    setChangeConnModalOpen={(v) => changeConnModalAtom._set(v)}
-                    connBtnRef={connBtnRef}
+                    changeConnModalOpen={s.changeConnModalAtom}
+                    setChangeConnModalOpen={(v) => s.changeConnModalAtom._set(v)}
+                    connBtnRef={s.connBtnRef}
                 />
             </Show>
             {/* Pane size badge — bottom-left WxH while a splitter is
@@ -1336,11 +1391,58 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
                 badge's strip (use-pane-rect-sync.ts, SIZE_BADGE_STRIP_CSS).
                 SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md. */}
             <Show when={!props.preview && nodeModel.isSplitterDragging()}>
-                <PaneSizeBadge target={frameEl} blockId={nodeModel.blockId} />
+                <PaneSizeBadge target={s.frameEl} blockId={nodeModel.blockId} />
             </Show>
             {/* BlockMask is last in DOM so it paints above all block content,
                 including hardware-accelerated WebGL surfaces */}
             <BlockMask nodeModel={nodeModel} />
+        </>
+    );
+}
+
+function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
+    const s = createFrameState(props);
+    const nodeModel = props.nodeModel;
+
+    return (
+        <div
+            class={clsx("block", "block-frame-default", "block-" + nodeModel.blockId, {
+                "block-focused": s.isFocused() || props.preview,
+                "block-preview": props.preview,
+                "has-agent-color": !!s.blockAgentColor(),
+                "pane-alone": s.isAlone(),
+                ephemeral: s.isEphemeral(),
+                magnified: s.isMagnified(),
+            })}
+            data-blockid={nodeModel.blockId}
+            onClick={props.blockModel?.onClick}
+            onFocusIn={props.blockModel?.onFocusCapture}
+            onContextMenu={s.onBodyContextMenu}
+            ref={(el) => {
+                s.setFrameEl(el);
+                if (props.blockModel?.blockRef) {
+                    props.blockModel.blockRef.current = el;
+                }
+            }}
+            style={
+                {
+                    "--magnified-block-opacity": s.magnifiedBlockOpacity(),
+                    "--magnified-block-blur": `${s.magnifiedBlockBlur()}px`,
+                    "--block-agent-color": s.blockAgentColor() ?? "transparent",
+                    "--block-identity-color": s.blockIdentityColor(),
+                } as JSX.CSSProperties
+            }
+            inert={props.preview || undefined}
+        >
+            <Show when={!props.preview && props.viewModel != null}>
+                <ConnStatusOverlay
+                    nodeModel={nodeModel}
+                    viewModel={props.viewModel}
+                    changeConnModalAtom={s.changeConnModalAtom}
+                />
+            </Show>
+            {renderFrameInner(s)}
+            {renderFrameOverlays(s)}
         </div>
     );
 }
