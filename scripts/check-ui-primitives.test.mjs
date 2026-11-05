@@ -15,6 +15,7 @@ import {
     collect,
     colourLiterals,
     compare,
+    followRenames,
     countButtons,
     countMenus,
     deadFallbacks,
@@ -320,6 +321,24 @@ describe("hard zero for other rules", () => {
     });
 });
 
+describe("followRenames", () => {
+    const baseline = { buttons: { "old.tsx": 2, "keep.tsx": 1 }, menus: { "old.tsx": 1 }, radius: {}, solidFills: [], undefinedVars: [] };
+
+    it("moves a renamed file's counts to its new path, so the rename is not new hand-rolled UI", () => {
+        const moved = followRenames(baseline, [["old.tsx", "new.tsx"]]);
+        expect(moved.buttons).toEqual({ "new.tsx": 2, "keep.tsx": 1 });
+        expect(moved.menus).toEqual({ "new.tsx": 1 });
+        const current = { buttons: { "new.tsx": 2, "keep.tsx": 1 }, menus: { "new.tsx": 1 }, radius: {}, solidFills: [], undefinedVars: [] };
+        expect(compare(current, moved)).toEqual({ grew: [], shrank: [] });
+    });
+
+    it("still catches a renamed file that gained a hand-rolled control, and leaves the original untouched", () => {
+        const current = { buttons: { "new.tsx": 3, "keep.tsx": 1 }, menus: { "new.tsx": 1 }, radius: {}, solidFills: [], undefinedVars: [] };
+        expect(compare(current, followRenames(baseline, [["old.tsx", "new.tsx"]])).grew).toEqual(["buttons: new.tsx has 3, base 2"]);
+        expect(baseline.buttons["old.tsx"]).toBe(2);
+    });
+});
+
 describe("compare", () => {
     const baseline = {
         buttons: { "a.tsx": 2 },
@@ -531,10 +550,10 @@ describe("rule 14: native titles are a hard zero", () => {
     it("refuses a title on text, and allows only what CONTROL_TITLES_ALLOWLIST lists for a control", () => {
         const files = [
             { path: "frontend/app/view/x/x.tsx", source: '<span title="a"/>' },
-            { path: "frontend/app/window/hamburger-menu.tsx", source: '<button title="menu"/>' },
+            { path: "frontend/app/window/logo-menu.tsx", source: '<button title="menu"/>' },
         ];
         expect(hardZeroViolations(collect(files))).toContain("nativeTitles: frontend/app/view/x/x.tsx has 1, allowed 0");
-        expect(hardZeroViolations(collect(files)).filter((v) => v.startsWith("nativeTitles") && v.includes("hamburger"))).toEqual([]);
+        expect(hardZeroViolations(collect(files)).filter((v) => v.startsWith("nativeTitles") && v.includes("AgentMux logo"))).toEqual([]);
     });
 });
 
@@ -659,11 +678,11 @@ describe("menus (rule 16)", () => {
     it("is a hard zero except for the window-chrome menus named, each with a reason", () => {
         expect(Object.keys(MENUS_ALLOWLIST).sort()).toEqual([
             "frontend/app/window/action-widgets.tsx",
-            "frontend/app/window/hamburger-menu.tsx",
+            "frontend/app/window/logo-menu.tsx",
             "frontend/app/window/titlebar-context-menu.tsx",
         ]);
         for (const entry of Object.values(MENUS_ALLOWLIST)) expect(entry.reason.length).toBeGreaterThan(40);
-        expect(hardZeroViolations({ menus: { "frontend/app/window/hamburger-menu.tsx": 1 } }, { menus: MENUS_ALLOWLIST })).toEqual([
+        expect(hardZeroViolations({ menus: { "frontend/app/window/logo-menu.tsx": 1 } }, { menus: MENUS_ALLOWLIST })).toEqual([
             "menus: frontend/app/window/action-widgets.tsx has none; remove it from the menus allowlist",
             "menus: frontend/app/window/titlebar-context-menu.tsx has none; remove it from the menus allowlist",
         ]);

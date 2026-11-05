@@ -7,12 +7,12 @@ cancelAnimationFrame 7
 beginClosePromotion t3
 CloseTab ws1 t2
 -- t2 pending
-dom root=yes hamburger=1 separators=3 fill=1 scroll="tab-bar-scroll" drag=false modal=none
+dom root=yes AgentMux logo=1 separators=3 fill=1 scroll="tab-bar-scroll" drag=false modal=none
 tabs ["t1[active=false activeId=t3 first=true beforeActive=true count=3 index=0 ids=t1,t2,t3]","t3[active=true activeId=t3 first=false beforeActive=false count=3 index=2 ids=t1,t2,t3]"]
 cancelAnimationFrame 7
 deleteLayoutModelForTab t2
 settlePromotion true
 cancelAnimationFrame 7
 -- closed
-dom root=yes hamburger=1 separators=3 fill=1 scroll="tab-bar-scroll" drag=false modal=none
+dom root=yes AgentMux logo=1 separators=3 fill=1 scroll="tab-bar-scroll" drag=false modal=none
 tabs ["t1[active=false activeId=t2 first=true beforeActive=false count=2 index=0 ids=t1,t3]","t3[active=false activeId=t2 first=false beforeActive=false count=2 index=1 ids=t1,t3]"]

@@ -3,7 +3,7 @@
 
 /**
  * The window's grip: a fixed drag square at the end of the widget bar, before
- * the window controls (Windows, Linux) or the hamburger (macOS). A press on it
+ * the window controls (Windows, Linux) or the AgentMux logo (macOS). A press on it
  * drags the window, a double-click maximizes it and a right-click opens the
  * title-bar menu, like the rest of the header's empty space; the dots take no
  * events. It sits outside the scrolling tab strip, so it never scrolls or

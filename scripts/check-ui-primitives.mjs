@@ -175,7 +175,7 @@ export const BUTTON_ALLOWLIST = {
         max: 3,
         reason: "macOS traffic lights are round coloured dots, not a line control",
     },
-    "frontend/app/window/hamburger-menu.tsx": {
+    "frontend/app/window/logo-menu.tsx": {
         max: 1,
         reason: "the window-chrome menu trigger: a hand-drawn three-bar glyph that must stay pixel-exact, inside the drag region",
     },
@@ -271,7 +271,7 @@ export const CONTROL_TITLES_ALLOWLIST = {
         max: 2,
         reason: "the row and section select checkboxes: a bare checkbox whose title says why it can't be selected",
     },
-    "frontend/app/window/hamburger-menu.tsx": {
+    "frontend/app/window/logo-menu.tsx": {
         max: 1,
         reason: "the window-chrome menu trigger, on the button allowlist",
     },
@@ -355,9 +355,9 @@ export const TS_COLOURS_ALLOWLIST = {
  * checks are one batch on a machine that can run `task dev`). Flip an entry off when that check passes and the menu moves.
  */
 export const MENUS_ALLOWLIST = {
-    "frontend/app/window/hamburger-menu.tsx": {
+    "frontend/app/window/logo-menu.tsx": {
         max: 1,
-        reason: "the window-chrome menu opened from the hamburger inside the drag region: it must take clicks there and draw above a native browser pane, unverified for the kit Menu",
+        reason: "the window-chrome menu opened from the AgentMux logo inside the drag region: it must take clicks there and draw above a native browser pane, unverified for the kit Menu",
     },
     "frontend/app/window/titlebar-context-menu.tsx": {
         max: 1,
@@ -1026,6 +1026,35 @@ function sortObject(obj) {
 
 const PER_FILE = ["buttons", "radius", "durations", "fontSizes", "fallbacks", "zIndex", "focusRings", "colours", "tsColours", "tags", "nativeTitles", "textFields", "controlTitles", "menus"];
 
+/**
+ * `baseline` with each renamed file's counts moved to its new path, so a file moved or renamed since the base is
+ * compared with what it had, not with nothing (a rename would otherwise read as new hand-rolled UI).
+ * `renames` is `[[oldPath, newPath], ...]`.
+ */
+export function followRenames(baseline, renames) {
+    const out = structuredClone(baseline);
+    for (const [from, to] of renames) {
+        for (const key of PER_FILE) {
+            const counts = out[key];
+            if (counts && from in counts) {
+                counts[to] = (counts[to] ?? 0) + counts[from];
+                delete counts[from];
+            }
+        }
+    }
+    return out;
+}
+
+/** The files renamed between `base` and the working tree, as `[[oldPath, newPath], ...]` (paths from the repo root). */
+function renamesSince(base) {
+    const res = git(["diff", "--name-status", "-M", "--diff-filter=R", base]);
+    if (res.status !== 0) return [];
+    return String(res.stdout)
+        .split("\n")
+        .filter((l) => l.startsWith("R"))
+        .map((l) => l.split("\t").slice(1, 3));
+}
+
 /** How `current` differs from `baseline` (the base branch), as human-readable lines. */
 export function compare(current, baseline) {
     const grew = [];
@@ -1125,7 +1154,7 @@ if (isMain(import.meta.url)) {
         process.exit(0);
     }
     const current = collect(walk(FRONTEND).map((p) => ({ path: rel(p), source: readFileSync(p, "utf8") })));
-    const before = collect(filesAtRef(base));
+    const before = followRenames(collect(filesAtRef(base)), renamesSince(base));
     const { grew, shrank } = compare(current, before);
     grew.unshift(...hardZeroViolations(current));
 

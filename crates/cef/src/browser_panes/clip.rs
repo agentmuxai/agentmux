@@ -522,7 +522,7 @@ fn rects_intersect(a: (i32, i32, i32, i32), b: (i32, i32, i32, i32)) -> bool {
 /// - Its rect has non-zero width and height (frontend places it in a
 ///   `display:none` placeholder when the tab is inactive → reports 0×0).
 /// - It does not intersect any registered overlay-clip rect for its window
-///   (e.g. a hamburger menu, tooltip, modal popover).
+///   (e.g. a AgentMux logo menu, tooltip, modal popover).
 // Linux-only since the macOS hole-punch mask (ui_tasks/pane_hole_mask.rs):
 // macOS paths use rect-only visibility and mask overlays instead of hiding.
 //

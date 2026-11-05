@@ -197,7 +197,7 @@ export function failureToRow(f: AgentFailure, view: FailureViewState, on: Failur
         disabled: view.retrying, onClick: on.retry,
     };
     const openAccounts: PaneRowAction = {
-        // The Connectors pane's own icon (its widget and hamburger item).
+        // The Connectors pane's own icon (its widget and AgentMux logo item).
         icon: "plug", label: "Connectors → Accounts", title: "Open Connectors → Accounts", onClick: on.openAccounts,
     };
 

@@ -103,8 +103,8 @@
         }
     }
 
-    // .hamburger-btn styles moved to window/hamburger-menu.scss (top-level,
-    // un-nested) when the menu was extracted into <HamburgerMenu> — on macOS
+    // .logo-menu-btn styles moved to window/logo-menu.scss (top-level,
+    // un-nested) when the menu was extracted into <LogoMenu> — on macOS
     // the button renders in the window header, outside .tab-bar.
 
     // --- Drag-and-drop wrapper for each tab ---

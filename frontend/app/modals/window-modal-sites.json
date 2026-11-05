@@ -65,7 +65,7 @@
     "window-scope": 1,
     "open-modal": 1
   },
-  "window/hamburger-menu.tsx": {
+  "window/logo-menu.tsx": {
     "open-modal": 1
   },
   "window/window-close-confirm.tsx": {

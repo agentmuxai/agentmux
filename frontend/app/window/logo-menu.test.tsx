@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The hamburger menu's shortcut labels must be the bindings keymodel.ts
+ * The AgentMux logo menu's shortcut labels must be the bindings keymodel.ts
  * actually registers. They used to be hand-written, and three were wrong:
  * "Ctrl+T" for New Tab on Windows/Linux (the binding is Cmd:t, i.e. Alt+T),
  * "⌘⇧N" for New Window on macOS and "⌘P" for Command Palette on macOS (both
@@ -148,7 +148,7 @@ import { registerGlobalKeys } from "@/app/store/keymodel";
 import { appHandleKeyDown, keyCommands } from "@/app/store/keymodel-dispatch";
 import { adaptFromReactOrNativeKeyEvent, setKeyUtilPlatform } from "@/util/keyutil";
 import { setPlatform } from "@/util/platformutil";
-import { closeHamburgerMenu, HamburgerMenu } from "./hamburger-menu";
+import { closeLogoMenu, LogoMenu } from "./logo-menu";
 
 type Platform = "darwin" | "win32" | "linux";
 type Keys = { key: string; code: string; ctrlKey?: boolean; altKey?: boolean; shiftKey?: boolean; metaKey?: boolean };
@@ -213,14 +213,14 @@ function pressKeys(keys: Keys): boolean {
     return appHandleKeyDown(adaptFromReactOrNativeKeyEvent(new KeyboardEvent("keydown", keys)));
 }
 
-describe.each(["darwin", "win32", "linux"] as Platform[])("hamburger menu shortcut labels on %s", (platform) => {
+describe.each(["darwin", "win32", "linux"] as Platform[])("AgentMux logo menu shortcut labels on %s", (platform) => {
     beforeEach(() => {
         setKeyUtilPlatform(platform);
         setPlatform(platform);
         keyCommands.clear();
         registerGlobalKeys();
         h.menu.items = [];
-        render(() => <HamburgerMenu />);
+        render(() => <LogoMenu />);
         vi.clearAllMocks();
     });
 
@@ -287,7 +287,7 @@ describe("on a host without multiWindow", () => {
         keyCommands.clear();
         registerGlobalKeys();
         h.menu.items = [];
-        render(() => <HamburgerMenu />);
+        render(() => <LogoMenu />);
         vi.clearAllMocks();
     });
 
@@ -322,7 +322,7 @@ describe("Workspaces entry", () => {
     });
 
     it("sits after Opacity, with New, Open, Import, Export, Rename and Delete", () => {
-        render(() => <HamburgerMenu />);
+        render(() => <LogoMenu />);
         const labels = h.menu.items.map((i) => i.label);
         expect(labels).not.toContain("Layouts");
         const at = labels.indexOf("Workspaces");
@@ -345,7 +345,7 @@ describe("Workspaces entry", () => {
 
     it("asks srv for the workspaces when it mounts", () => {
         h.workspaces.refresh.mockClear();
-        render(() => <HamburgerMenu />);
+        render(() => <LogoMenu />);
         expect(h.workspaces.refresh).toHaveBeenCalledTimes(1);
     });
 
@@ -354,7 +354,7 @@ describe("Workspaces entry", () => {
             { id: "b", name: "Reviews", current: true },
             { id: "a", name: "Default Workspace", current: false },
         ];
-        render(() => <HamburgerMenu />);
+        render(() => <LogoMenu />);
         const open = sub("Open Workspace")?.subItems ?? [];
         expect(open.map((i) => [i.label, i.checked])).toEqual([
             ["Reviews", true],
@@ -365,12 +365,12 @@ describe("Workspaces entry", () => {
     });
 
     it("Open Workspace shows the open one before srv has answered", () => {
-        render(() => <HamburgerMenu />);
+        render(() => <LogoMenu />);
         expect(sub("Open Workspace")?.subItems?.map((i) => [i.label, i.checked])).toEqual([["Default Workspace", true]]);
     });
 
     it("each item runs its action", async () => {
-        render(() => <HamburgerMenu />);
+        render(() => <LogoMenu />);
         const runs: [string, keyof typeof h.actions][] = [
             ["New Workspace…", "newWorkspace"],
             ["Import…", "importWorkspace"],
@@ -393,7 +393,7 @@ describe("Theme and Opacity", () => {
     const sub = (label: string) => h.menu.items.find((i) => i.label === label)?.subItems ?? [];
 
     it("keep the menu open; Workspaces' items close it", () => {
-        render(() => <HamburgerMenu />);
+        render(() => <LogoMenu />);
         expect(sub("Theme").length).toBeGreaterThan(1);
         expect(sub("Theme").every((i) => i.keepOpen === true)).toBe(true);
         expect(sub("Opacity").every((i) => i.keepOpen === true)).toBe(true);
@@ -405,7 +405,7 @@ describe("Theme and Opacity", () => {
         const [theme, setTheme] = createSignal("default");
         h.win.theme = theme;
         createRoot((dispose) => {
-            render(() => <HamburgerMenu />);
+            render(() => <LogoMenu />);
             const before = h.menu.items;
             expect(sub("Theme").filter((i) => i.checked)).toHaveLength(1);
 
@@ -433,7 +433,7 @@ describe("Theme and Opacity are this window's", () => {
 
     it("a theme sets this window's theme, not the setting", async () => {
         const { RpcApi } = await import("@/app/store/rpc-api");
-        render(() => <HamburgerMenu />);
+        render(() => <LogoMenu />);
         const dracula = sub("Theme").find((i) => i.label !== sub("Theme")[0].label)!;
         dracula.onClick!(undefined as never);
         await Promise.resolve();
@@ -444,7 +444,7 @@ describe("Theme and Opacity are this window's", () => {
 
     it("an opacity sets and stores this window's opacity, through the slider's setter", async () => {
         const { RpcApi } = await import("@/app/store/rpc-api");
-        render(() => <HamburgerMenu />);
+        render(() => <LogoMenu />);
         sub("Opacity").find((i) => i.label === "70%")!.onClick!(undefined as never);
         expect(h.win.setOpacity).toHaveBeenCalledWith({ label: "win-a", windowId: "w-a" }, 0.7, "commit");
         expect(RpcApi.SetConfigCommand).not.toHaveBeenCalled();
@@ -456,7 +456,7 @@ describe("Theme and Opacity are this window's", () => {
         h.win.opacity = () => 0.8;
         h.win.live = live;
         createRoot((dispose) => {
-            render(() => <HamburgerMenu />);
+            render(() => <LogoMenu />);
             const checked = () => sub("Opacity").filter((i) => i.checked).map((i) => i.label);
             expect(checked()).toEqual(["80%"]);
             setLive(0.55);
@@ -470,18 +470,18 @@ describe("Theme and Opacity are this window's", () => {
     });
 });
 
-describe("closeHamburgerMenu", () => {
+describe("closeLogoMenu", () => {
     afterEach(() => cleanup());
 
-    it("closes a mounted hamburger, and nothing once it is unmounted", () => {
-        const { unmount } = render(() => <HamburgerMenu position="right" />);
+    it("closes a mounted AgentMux logo, and nothing once it is unmounted", () => {
+        const { unmount } = render(() => <LogoMenu position="right" />);
         h.menu.close.mockClear();
-        closeHamburgerMenu();
+        closeLogoMenu();
         expect(h.menu.close).toHaveBeenCalledTimes(1);
 
         unmount();
         h.menu.close.mockClear();
-        closeHamburgerMenu();
+        closeLogoMenu();
         expect(h.menu.close).not.toHaveBeenCalled();
     });
 });
@@ -497,7 +497,7 @@ describe("DevTools follows dev mode", () => {
 
     it("is not in the menu while dev mode is off", () => {
         createRoot((dispose) => {
-            render(() => <HamburgerMenu />);
+            render(() => <LogoMenu />);
             expect(labels()).not.toContain("DevTools");
             expect(labels()).toContain("Command Palette");
             expect(labels()).toContain("Online Docs");
@@ -508,7 +508,7 @@ describe("DevTools follows dev mode", () => {
     it("is in the menu, between Command Palette and Online Docs, while it is on", () => {
         h.dev.read = () => true;
         createRoot((dispose) => {
-            render(() => <HamburgerMenu />);
+            render(() => <LogoMenu />);
             const at = labels().indexOf("DevTools");
             expect(at).toBeGreaterThan(-1);
             expect(labels()[at - 1]).toBe("Command Palette");
@@ -523,7 +523,7 @@ describe("DevTools follows dev mode", () => {
         h.dev.read = on;
         h.win.theme = theme;
         createRoot((dispose) => {
-            render(() => <HamburgerMenu />);
+            render(() => <LogoMenu />);
             expect(labels()).not.toContain("DevTools");
             const before = h.menu.live();
             setTheme("__none__");
@@ -539,11 +539,11 @@ describe("DevTools follows dev mode", () => {
 
 // The menu button shows the AgentMux mark (the app icon's four blocks), not three bars.
 describe("the menu button's glyph", () => {
-    const button = () => document.querySelector<HTMLButtonElement>(".hamburger-btn")!;
+    const button = () => document.querySelector<HTMLButtonElement>(".logo-menu-btn")!;
 
     beforeEach(() => {
         h.menu.items = [];
-        render(() => <HamburgerMenu />);
+        render(() => <LogoMenu />);
     });
 
     afterEach(() => cleanup());
@@ -551,10 +551,10 @@ describe("the menu button's glyph", () => {
     it("is a button inside one anchor box that is the flex item in its bar; the button has no placement of its own", () => {
         const anchor = button().parentElement!;
         expect(anchor.classList.contains("menu-anchor")).toBe(true);
-        expect(anchor.classList.contains("hamburger-anchor")).toBe(true);
-        expect(anchor.classList.contains("hamburger-anchor--right")).toBe(false);
+        expect(anchor.classList.contains("logo-menu-anchor")).toBe(true);
+        expect(anchor.classList.contains("logo-menu-anchor--right")).toBe(false);
         expect(button().getAttribute("style")).toBeNull();
-        expect(button().className).toBe("hamburger-btn");
+        expect(button().className).toBe("logo-menu-btn");
     });
 
     it("keeps its title, is one button, and draws the glyph for the eye only", () => {
@@ -581,15 +581,15 @@ describe("the menu button's glyph", () => {
     });
 
     it("sizes its cell in whole device pixels at any chrome zoom, so no edge of the mark drifts against another", () => {
-        const scss = readFileSync(join(process.cwd(), "frontend/app/window/hamburger-menu.scss"), "utf8");
+        const scss = readFileSync(join(process.cwd(), "frontend/app/window/logo-menu.scss"), "utf8");
         expect(scss).toMatch(/--mark-cell: max\(var\(--snap-chrome\), round\(nearest, 4px, var\(--snap-chrome\)\)\);/);
         expect(scss).toMatch(/width: calc\(5 \* var\(--mark-cell\)\);/);
         expect(scss).toMatch(/height: calc\(5 \* var\(--mark-cell\)\);/);
     });
 
     it("takes its colour from the theme's primary colour, as the three bars did, brighter on hover", () => {
-        const scss = readFileSync(join(process.cwd(), "frontend/app/window/hamburger-menu.scss"), "utf8");
-        expect(scss).toMatch(/\.hamburger-btn \{[^}]*color: var\(--accent-color\);/);
+        const scss = readFileSync(join(process.cwd(), "frontend/app/window/logo-menu.scss"), "utf8");
+        expect(scss).toMatch(/\.logo-menu-btn \{[^}]*color: var\(--accent-color\);/);
         expect(scss).toMatch(/&:hover \{\s*color: color-mix\(in srgb, var\(--accent-color\), white 25%\);/);
         expect(scss).not.toMatch(/brand-mark/);
     });

@@ -10,7 +10,7 @@ cancelAnimationFrame 7
 deleteLayoutModelForTab t2
 settlePromotion true
 cancelAnimationFrame 7
-dom root=yes hamburger=1 separators=2 fill=1 scroll="tab-bar-scroll" drag=false modal=none
+dom root=yes AgentMux logo=1 separators=2 fill=1 scroll="tab-bar-scroll" drag=false modal=none
 tabs ["t1[active=false activeId=t2 first=true beforeActive=false count=1 index=0 ids=t1]"]
 -- unmount
 cancelAnimationFrame 7

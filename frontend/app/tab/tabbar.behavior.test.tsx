@@ -7,7 +7,7 @@
  * gives the drag hooks), the optimistic select and its loop, the optimistic close with and
  * without the confirm modal, the close of the active tab, a failed close, the close request from
  * the keyboard, the legacy pinned-tab migration, and the scroll that keeps the active tab in
- * view. The tab itself, the confirm modal, the drag and tear-off hooks, the hamburger and the
+ * view. The tab itself, the confirm modal, the drag and tear-off hooks, the AgentMux logo and the
  * services are stand-ins that log; the strip, its selection rules and its close rules are real. A
  * refactor of TabBar must leave the committed snapshots as they are; regenerate with `vitest -u`
  * only for a change meant to behave differently.
@@ -39,7 +39,7 @@ const [moreLeft, setMoreLeft] = createSignal(false);
 const [moreRight, setMoreRight] = createSignal(false);
 
 vi.mock("@/app/hook/useWindowDrag.platform", () => ({ useWindowDrag: () => ({ dragProps: { "data-dragprops": "yes" } }) }));
-vi.mock("@/app/window/hamburger-menu", () => ({ HamburgerMenu: () => <div class="hamburger" /> }));
+vi.mock("@/app/window/logo-menu", () => ({ LogoMenu: () => <div class="AgentMux logo" /> }));
 vi.mock("@/layout/index", () => ({ deleteLayoutModelForTab: (id: string) => log(`deleteLayoutModelForTab ${id}`) }));
 vi.mock("@/store/config-signals", () => ({ settingsAtom: () => settings() }));
 vi.mock("@/store/global", () => ({ atoms: { activeTabId: () => activeTab() } }));
@@ -163,7 +163,7 @@ const dom = () => {
     });
     const scroll = document.querySelector(".tab-bar-scroll");
     log(
-        `dom root=${document.querySelector(".tab-bar")?.getAttribute("data-dragprops")} hamburger=${document.querySelectorAll(".hamburger").length} ` +
+        `dom root=${document.querySelector(".tab-bar")?.getAttribute("data-dragprops")} AgentMux logo=${document.querySelectorAll(".AgentMux logo").length} ` +
             `separators=${document.querySelectorAll(".tab-separator").length} fill=${document.querySelectorAll(".tab-bar-fill").length} ` +
             `scroll="${scroll?.className}" drag=${scroll?.getAttribute("data-drag-region")} modal=${document.querySelector(".modal")?.getAttribute("data-tab") ?? "none"}`,
     );
@@ -206,7 +206,7 @@ afterEach(() => {
 });
 
 describe("the strip", () => {
-    it("lists the tabs with a separator between and around them, the hamburger on the left, and gives the hooks the raw list", async () => {
+    it("lists the tabs with a separator between and around them, the AgentMux logo on the left, and gives the hooks the raw list", async () => {
         await mount(wsOf(["t1", "t2", "t3"]), "t2");
         dom();
         log(`dnd raw=${JSON.stringify(h.dnd!.allTabIds())} ws=${h.dnd!.getWorkspace().oid} scrollRef=${h.dnd!.refs.tabBarScrollRef()?.className}`);
@@ -217,7 +217,7 @@ describe("the strip", () => {
         await expect(out()).toMatchFileSnapshot(snap("render"));
     });
 
-    it("on macOS has no hamburger and no leading separator", async () => {
+    it("on macOS has no AgentMux logo and no leading separator", async () => {
         h.mac = true;
         await mount(wsOf(["t1", "t2"]), "t1");
         dom();

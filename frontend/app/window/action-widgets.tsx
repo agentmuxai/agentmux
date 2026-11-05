@@ -56,7 +56,7 @@ import {
 import { hideFromWidgetBar } from "./widget-bar-hide";
 import { buildWidgetOpenActions } from "./action-widgets-menu";
 import { MoreDropdown } from "./more-dropdown";
-import { closeHamburgerMenu } from "./hamburger-menu";
+import { closeLogoMenu } from "./logo-menu";
 import { PinnedWidgetFlyout } from "./pinned-widget-flyout";
 import { useWidgetBarResponsive } from "./use-widget-bar-responsive";
 import { useWidgetDragReorder } from "./use-widget-drag-reorder";
@@ -195,9 +195,9 @@ function createBarState(): BarState {
     const [moreConfirmedByClick, setMoreConfirmedByClick] = createSignal(false);
     const moreHover = createSubmenuHover({
         onOpen: () => {
-            // More opens on hover beside the hamburger (macOS): close the
-            // hamburger so the two menus never overlap.
-            closeHamburgerMenu();
+            // More opens on hover beside the AgentMux logo (macOS): close the
+            // AgentMux logo so the two menus never overlap.
+            closeLogoMenu();
             setMoreOpen(true);
         },
         onClose: () => {

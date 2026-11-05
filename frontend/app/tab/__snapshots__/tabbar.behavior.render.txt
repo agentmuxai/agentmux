@@ -3,7 +3,7 @@ useTabDragAndDrop tearOff=function
 createScrollEdges
 useTabTearOffEvents
 registerTabCloseRequestHandler
-dom root=yes hamburger=1 separators=4 fill=1 scroll="tab-bar-scroll" drag=false modal=none
+dom root=yes AgentMux logo=1 separators=4 fill=1 scroll="tab-bar-scroll" drag=false modal=none
 tabs ["t1[active=false activeId=t2 first=true beforeActive=true count=3 index=0 ids=t1,t2,t3]","t2[active=true activeId=t2 first=false beforeActive=false count=3 index=1 ids=t1,t2,t3]","t3[active=false activeId=t2 first=false beforeActive=false count=3 index=2 ids=t1,t2,t3]"]
 dnd raw=["t1","t2","t3"] ws=ws1 scrollRef=tab-bar-scroll
 tearEvents raw=["t1","t2","t3"] scrollRef=tab-bar-scroll

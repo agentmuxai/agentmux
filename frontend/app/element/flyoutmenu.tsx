@@ -66,7 +66,7 @@ type MenuProps = {
      * laid out right-to-left (icon on the right, label right-aligned, chevron
      * on the left pointing left) and submenus prefer to open to the LEFT.
      * Use for menus anchored to the right edge (e.g. the macOS far-right
-     * hamburger). Best practice for edge-anchored menus — the disclosure arrow
+     * AgentMux logo). Best practice for edge-anchored menus — the disclosure arrow
      * points the same way the submenu actually opens. Default off; every other
      * menu keeps the standard left-to-right layout.
      */
@@ -82,8 +82,8 @@ type MenuProps = {
     onOpenChange?: (isOpen: boolean) => void;
     /**
      * Receives a function that closes the menu, for an owner that must close
-     * it from outside (the hamburger closes when the "…" More dropdown
-     * opens beside it, hamburger-menu.tsx).
+     * it from outside (the AgentMux logo closes when the "…" More dropdown
+     * opens beside it, logo-menu.tsx).
      */
     closeRef?: (close: () => void) => void;
     children?: JSX.Element;
