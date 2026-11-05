@@ -9,7 +9,7 @@
  */
 
 import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
-import { createMemo, createSignal } from "solid-js";
+import { createEffect, createMemo, createSignal, untrack } from "solid-js";
 import type { SortKey } from "./files-sort";
 
 export const META_COLWIDTHS = "files:colwidths";
@@ -51,39 +51,65 @@ export function columnVars(widths: ColumnWidths): Record<string, string> {
     return vars;
 }
 
+/** A width held over the stored ones: a number to show, or null for "the column's own width". */
+type Held = Partial<Record<SortKey, number | null>>;
+
 export function createColumnWidths(ctx: PaneTabHostContext) {
-    const [live, setLive] = createSignal<ColumnWidths>({});
+    const [held, setHeld] = createSignal<Held>({});
     const stored = createMemo(() => readColumnWidths(ctx.meta()?.[META_COLWIDTHS]));
-    /** What is drawn: the stored widths, with a width being dragged on top. */
-    const widths = createMemo((): ColumnWidths => ({ ...stored(), ...live() }));
-    const write = (next: ColumnWidths): void => {
+    /** What is drawn: the stored widths, with the held ones on top. */
+    const widths = createMemo((): ColumnWidths => {
+        const out: ColumnWidths = { ...stored() };
+        for (const [key, px] of Object.entries(held()) as [SortKey, number | null][]) {
+            if (px === null) delete out[key];
+            else out[key] = px;
+        }
+        return out;
+    });
+    const hold = (key: SortKey, px: number | null): void => {
+        setHeld((h) => ({ ...h, [key]: px }));
+    };
+    const drop = (key: SortKey): void => {
+        setHeld((h) => {
+            const { [key]: _, ...rest } = h;
+            return rest;
+        });
+    };
+    // A width stays held until the pane's meta shows it: the write is an RPC and the meta follows it, so
+    // letting go at once would show the old width for a moment. A refused write lets it go.
+    createEffect(() => {
+        const now = stored();
+        for (const [key, px] of Object.entries(untrack(held)) as [SortKey, number | null][]) {
+            if ((px === null ? now[key] === undefined : now[key] === px)) drop(key);
+        }
+    });
+    const write = (key: SortKey, next: ColumnWidths): void => {
         const empty = Object.keys(next).length === 0;
-        void ctx.setMeta({ [META_COLWIDTHS]: empty ? null : next });
+        void Promise.resolve(ctx.setMeta({ [META_COLWIDTHS]: empty ? null : next })).catch(() => drop(key));
     };
     return {
         widths,
         vars: () => columnVars(widths()),
         /** A divider is being dragged: show `px` (clamped) without writing it yet. */
         preview(key: SortKey, px: number): void {
-            setLive((w) => ({ ...w, [key]: clampColumnWidth(key, px) }));
+            hold(key, clampColumnWidth(key, px));
         },
-        /** The drag ended: keep the previewed width. */
+        /** The drag ended: write the previewed width, and keep showing it until the meta has it. */
         commit(key: SortKey): void {
-            const px = live()[key];
-            setLive((w) => {
-                const { [key]: _, ...rest } = w;
-                return rest;
-            });
-            if (px !== undefined && px !== stored()[key]) write({ ...stored(), [key]: px });
+            const px = held()[key];
+            if (px === undefined || px === null) return;
+            if (px === stored()[key]) drop(key);
+            else write(key, { ...stored(), [key]: px });
         },
         /** Double-click on a divider: back to the column's own width. */
         reset(key: SortKey): void {
-            setLive((w) => {
-                const { [key]: _, ...rest } = w;
-                return rest;
-            });
+            if (!(key in stored())) {
+                drop(key);
+                return;
+            }
             const { [key]: _, ...rest } = stored();
-            if (key in stored()) write(rest);
+            hold(key, null);
+            write(key, rest);
         },
     };
 }

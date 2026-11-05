@@ -822,6 +822,34 @@ describe("FilesView filter button and column dividers", () => {
         expect(v.ctx.meta()?.["files:colwidths"]).toBeUndefined();
     });
 
+    it("keeps a released width on screen while the meta write is in flight, then lets the meta show it", async () => {
+        const v = mount();
+        await settled(v);
+        const real = v.ctx.setMeta;
+        let finish: () => void = () => {};
+        v.ctx.setMeta = (patch) => new Promise<void>((resolve) => (finish = () => resolve(real(patch))));
+        const handle = modifiedDivider(v);
+        vi.spyOn(handle.parentElement!, "getBoundingClientRect").mockReturnValue({ width: 110 } as DOMRect);
+        pointer(handle, "pointerdown", 500);
+        pointer(handle, "pointermove", 560);
+        pointer(handle, "pointerup", 560);
+        // Released, but the meta has not changed yet: the column does not snap back.
+        expect(v.ctx.meta()?.["files:colwidths"]).toBeUndefined();
+        expect(listVar(v, "--files-w-modified")).toBe("170px");
+        finish();
+        await flush();
+        expect(v.ctx.meta()?.["files:colwidths"]).toEqual({ modified: 170 });
+        expect(listVar(v, "--files-w-modified")).toBe("170px");
+        // The same for a reset: the column's own width at once, not the old one until the meta follows.
+        fireEvent.dblClick(handle);
+        expect(listVar(v, "--files-w-modified")).toBe("");
+        expect(v.ctx.meta()?.["files:colwidths"]).toEqual({ modified: 170 });
+        finish();
+        await flush();
+        expect(v.ctx.meta()?.["files:colwidths"]).toBeUndefined();
+        expect(listVar(v, "--files-w-modified")).toBe("");
+    });
+
     it("draws a pane's stored column widths, and ignores ones that are not numbers", async () => {
         const v = mount({ "files:colwidths": { size: 100, kind: "wide", name: 300 } });
         await settled(v);
