@@ -59,6 +59,7 @@ mod shared_root;
 pub(crate) mod shared_guard;
 pub(crate) mod carry_forward;
 mod background;
+mod messaging_bridges;
 mod network;
 mod plumbing;
 mod shutdown;
