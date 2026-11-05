@@ -1,0 +1,106 @@
+== +0ms open turn, lead-in (timers: 4)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "|"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+  <div class="agent-working-row-right">
+    "2s"
+== +112ms lead-in typing (timers: 4)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "|"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+      "↳ je"
+  <div class="agent-working-row-right">
+    "2s"
+== +672ms lead-in typed (timers: 3)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "/"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+      "↳ jekt from AgentY"
+  <div class="agent-working-row-right">
+    "2s"
+== +6672ms lead-in has passed (timers: 3)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "\"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+      "Answer the jekt"
+  <div class="agent-working-row-right">
+    "8s"
+== +7672ms tokens with the ledger (timers: 3)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "\"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+      "Answer the jekt"
+  <div class="agent-working-row-right">
+    "↓ 400 tokens  ·  9s"
+== +7672ms settling between passes: live, dimmed (timers: 3)
+<span class="agent-working-row agent-working-row--loading is-settling">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "\"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+      "Answer the jekt"
+  <div class="agent-working-row-right">
+    "400 tokens  ·  9s"
+== +8672ms a next pass starts (timers: 3)
+<span class="agent-working-row agent-working-row--loading is-settling">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "|"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+      "Answer the jekt"
+  <div class="agent-working-row-right">
+    "400 tokens  ·  9s"
+== +8672ms second pass (timers: 3)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "|"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+      "Answer the jekt"
+  <div class="agent-working-row-right">
+    "↓ 400 tokens  ·  10s"
+== +8672ms ended: the whole turn's figures (timers: 1)
+<span class="agent-working-row agent-working-row--worked">
+  <span class="agent-working-row-left">
+    "✓ Worked on AgentY's jekt  ·  12s  ·  5.3k tokens"
+  <span class="agent-working-row-right">
+    <span class="agent-working-row-secondary">
+      "$0.456  ·  9 steps  ·  2 passes  ·  +2 your messages  ·  +1 jekt  ·  +1 more"
+== +8672ms ended, one pass, scheduled run (timers: 1)
+<span class="agent-working-row agent-working-row--worked">
+  <span class="agent-working-row-left">
+    "✓ Worked on a scheduled run  ·  11s  ·  400 tokens"
+  <span class="agent-working-row-right">
+    <span class="agent-working-row-secondary">
+      "1 step"
+== +8672ms ended, uncounted passes: the pane's own sum (timers: 1)
+<span class="agent-working-row agent-working-row--worked">
+  <span class="agent-working-row-left">
+    "✓ Worked on a finished task  ·  12s  ·  777 tokens"
+  <span class="agent-working-row-right">
+    <span class="agent-working-row-secondary">
+      "$0.500  ·  4 steps  ·  2 passes"
+== +8672ms another turn's carry is not used (timers: 1)
+<span class="agent-working-row agent-working-row--worked">
+  <span class="agent-working-row-left">
+    "✓ Worked on a finished task  ·  12s  ·  400 tokens"
+  <span class="agent-working-row-right">
+    <span class="agent-working-row-secondary">
+      "1 step  ·  2 passes"
+== +9672ms ended by the clock, no end stamp (timers: 1)
+<span class="agent-working-row agent-working-row--worked">
+  <span class="agent-working-row-left">
+    "✓ Worked on AgentY's jekt  ·  4s  ·  400 tokens"
+  <span class="agent-working-row-right">
+    <span class="agent-working-row-secondary">
+      "1 step"

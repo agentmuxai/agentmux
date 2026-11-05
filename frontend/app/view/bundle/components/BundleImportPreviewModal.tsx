@@ -10,105 +10,24 @@
  * this panel makes no RPC calls of its own.
  */
 
-import { createSignal, For, onMount, Show, type JSX } from "solid-js";
+import type { JSX } from "solid-js";
 
 import { Button } from "@/element/button";
-import { Button as UiButton, IconButton, Tag, TextInput } from "@/app/element/ui";
-import { RpcApi } from "@/app/store/rpc-api";
-import { TabRpcClient } from "@/app/store/rpc-util";
-import { formatBytes } from "@/util/format-bytes";
-import type { BundleImportSelectionState, BundleImportSkillSelectionState } from "@/app/element/modal-layer";
-import type { BundleImportPreviewResponse } from "@/app/store/rpc-api";
-import { describePermission, describeSignature } from "@/app/view/settings/sections/widget-permissions";
+import { SkillsSection, WidgetsSection } from "./bundle-import-preview-items";
+import {
+    ContextSection,
+    InstructionsSection,
+    McpSection,
+    NameField,
+    RequirementsSection,
+    WarningsBanner,
+} from "./bundle-import-preview-sections";
+import { createPreviewActions, createPreviewState, type BundleImportPreviewProps } from "./bundle-import-preview-state";
 
-interface BundleImportPreviewModalPanelProps {
-    preview: BundleImportPreviewResponse;
-    onNext: (selection: BundleImportSelectionState) => void;
-    onCancel: () => void;
-}
-
-export const BundleImportPreviewModalPanel = (
-    props: BundleImportPreviewModalPanelProps,
-): JSX.Element => {
-    const { preview } = props;
-
-    const [bundleName, setBundleName] = createSignal(preview.name);
-    const [includeInstructions, setIncludeInstructions] = createSignal(true);
-    const [instructionsExpanded, setInstructionsExpanded] = createSignal(false);
-    const [contextChecked, setContextChecked] = createSignal<Record<number, boolean>>(
-        Object.fromEntries(preview.context_files.map((cf) => [cf.id, true])),
-    );
-    const [skills, setSkills] = createSignal<BundleImportSkillSelectionState[]>(
-        // A skill whose text the preview could not show in full starts unchecked:
-        // it is imported only once the person has chosen to take what they could
-        // not read.
-        preview.skills.map((s) => ({ sourceDir: s.source_dir, checked: !s.content_truncated, renameValue: "" })),
-    );
-    // A skill's text is shown by default (it is what an agent will be told to
-    // follow); this holds the ones the person folded away.
-    const [skillTextHidden, setSkillTextHidden] = createSignal<Record<string, boolean>>({});
-    const [warningsDismissed, setWarningsDismissed] = createSignal(false);
-    // Widgets the bundle carries (SPEC_WIDGET_SHARING_2026_10_10.md §3.3): on
-    // by default, except one that can't be imported or is installed already.
-    const offeredWidgets = () => (preview.widgets ?? []).filter((w) => !w.error && !w.same_as_installed);
-    const [widgetChecked, setWidgetChecked] = createSignal<Record<string, boolean>>(
-        Object.fromEntries((preview.widgets ?? []).filter((w) => !w.error && !w.same_as_installed).map((w) => [w.id, true])),
-    );
-
-    // §4.1 point 2: the modal fetches the full existing global skill-name
-    // list ONCE, up front, via skill.catalog.list -- not just the subset
-    // preview.skills already flagged "name_conflict" against itself (a
-    // rename to some OTHER, unrelated existing global skill name would
-    // otherwise show no client-side warning and silently be skipped at
-    // commit, since skill_upsert_unique_global still rejects it there).
-    const [globalSlugs, setGlobalSlugs] = createSignal<Set<string>>(new Set());
-    onMount(() => {
-        void RpcApi.SkillCatalogListCommand(TabRpcClient, {})
-            .then((items) => setGlobalSlugs(new Set(items.map((i) => i.name))))
-            .catch(() => {}); // advisory only -- a failed fetch just means no client-side hint; commit is still authoritative.
-    });
-
-    // Live union of the global catalog + every OTHER selected skill's
-    // current slug/rename (§4.1 point 2) -- advisory client-side check
-    // only; skill_upsert_unique_global is the real authority at commit.
-    const takenSlugsFor = (sourceDir: string): Set<string> => {
-        const taken = new Set<string>(globalSlugs());
-        for (const row of skills()) {
-            if (row.sourceDir === sourceDir || !row.checked) continue;
-            const other = preview.skills.find((s) => s.source_dir === row.sourceDir);
-            const effective = row.renameValue.trim() || other?.slug;
-            if (effective) taken.add(effective);
-        }
-        return taken;
-    };
-
-    const updateSkill = (sourceDir: string, patch: Partial<BundleImportSkillSelectionState>) => {
-        setSkills((prev) => prev.map((s) => (s.sourceDir === sourceDir ? { ...s, ...patch } : s)));
-    };
-
-    const toggleContext = (id: number) => {
-        setContextChecked((prev) => ({ ...prev, [id]: !prev[id] }));
-    };
-
-    const suggestedAltName = () => {
-        const m = bundleName().match(/^(.*) \((\d+)\)$/);
-        if (m) return `${m[1]} (${Number(m[2]) + 1})`;
-        return `${bundleName()} (2)`;
-    };
-
-    const next = () => {
-        props.onNext({
-            bundleName: bundleName().trim() || preview.name,
-            includeInstructions: includeInstructions(),
-            includeContextFileIds: preview.context_files
-                .filter((cf) => contextChecked()[cf.id])
-                .map((cf) => cf.id),
-            skills: skills(),
-            includeWidgets: offeredWidgets()
-                .filter((w) => widgetChecked()[w.id])
-                .map((w) => w.id),
-        });
-    };
+export const BundleImportPreviewModalPanel = (props: BundleImportPreviewProps): JSX.Element => {
+    const s = createPreviewState(props);
+    const act = createPreviewActions(s);
+    const { preview } = s;
 
     return (
         <>
@@ -119,268 +38,20 @@ export const BundleImportPreviewModalPanel = (
                 </p>
             </header>
             <div class="modal-panel-body bundle-import-preview-body">
-                <label class="bundle-import-field">
-                    <span class="bundle-import-field-label">Bundle name</span>
-                    <TextInput variant="plain"
-                        class="bundle-import-input"
-                        value={bundleName()}
-                        onInput={(e) => setBundleName(e.currentTarget.value)}
-                    />
-                    <Show when={preview.name_collision}>
-                        <div class="bundle-import-hint">
-                            A bundle named this already exists.{" "}
-                            <UiButton
-                                variant="link"
-                                tone="accent"
-                                onClick={() => setBundleName(suggestedAltName())}
-                            >
-                                Use "{suggestedAltName()}" instead
-                            </UiButton>
-                        </div>
-                    </Show>
-                </label>
-
-                <section class="bundle-import-section">
-                    <label class="bundle-import-checkbox-row">
-                        <input
-                            type="checkbox"
-                            checked={includeInstructions()}
-                            onChange={(e) => setIncludeInstructions(e.currentTarget.checked)}
-                        />
-                        <span>Include instructions</span>
-                    </label>
-                    <Show when={includeInstructions() && preview.instructions_preview}>
-                        <div class="bundle-import-instructions-preview">
-                            <UiButton
-                                variant="link"
-                                tone="accent"
-                                onClick={() => setInstructionsExpanded((v) => !v)}
-                            >
-                                {instructionsExpanded() ? "Hide" : "Show"} preview
-                            </UiButton>
-                            <Show when={instructionsExpanded()}>
-                                <pre class="bundle-import-instructions-text">{preview.instructions_preview}</pre>
-                                <Show when={preview.instructions_truncated}>
-                                    <div class="bundle-import-hint">
-                                        Preview truncated — {preview.instructions_total_chars} characters total,
-                                        the full instructions are still imported.
-                                    </div>
-                                </Show>
-                            </Show>
-                        </div>
-                    </Show>
-                </section>
-
-                <Show when={preview.context_files.length > 0}>
-                    <section class="bundle-import-section">
-                        <h3 class="bundle-import-section-title">Context files</h3>
-                        <For each={preview.context_files}>
-                            {(cf) => (
-                                <label class="bundle-import-checkbox-row">
-                                    <input
-                                        type="checkbox"
-                                        checked={!!contextChecked()[cf.id]}
-                                        onChange={() => toggleContext(cf.id)}
-                                    />
-                                    <span class="bundle-import-item-name">{cf.display_path}</span>
-                                    <span class="bundle-import-item-meta">{formatBytes(cf.size_bytes)}</span>
-                                </label>
-                            )}
-                        </For>
-                    </section>
-                </Show>
-
-                <Show when={preview.skills.length > 0}>
-                    <section class="bundle-import-section">
-                        <h3 class="bundle-import-section-title">Skills</h3>
-                        <For each={preview.skills}>
-                            {(skill) => {
-                                const row = () => skills().find((s) => s.sourceDir === skill.source_dir)!;
-                                const colliding = skill.collision !== "none";
-                                const renameConflict = () =>
-                                    colliding &&
-                                    row().renameValue.trim().length > 0 &&
-                                    takenSlugsFor(skill.source_dir).has(row().renameValue.trim());
-                                return (
-                                    <div class="bundle-import-skill-row">
-                                        <label class="bundle-import-checkbox-row">
-                                            <input
-                                                type="checkbox"
-                                                checked={row().checked}
-                                                onChange={(e) =>
-                                                    updateSkill(skill.source_dir, { checked: e.currentTarget.checked })
-                                                }
-                                            />
-                                            <Show
-                                                when={!colliding}
-                                                fallback={
-                                                    <span class="bundle-import-skill-collision">
-                                                        <Tag size="xs" tone="warn">
-                                                            {skill.collision === "name_conflict"
-                                                                ? "already exists in your library"
-                                                                : "another skill in this import uses this name"}
-                                                        </Tag>
-                                                        <span class="bundle-import-item-name-readonly">{skill.slug}</span>
-                                                        <TextInput variant="plain"
-                                                            class="bundle-import-rename-input"
-                                                            placeholder="rename to import (leave blank to skip)"
-                                                            value={row().renameValue}
-                                                            disabled={!row().checked}
-                                                            onInput={(e) =>
-                                                                updateSkill(skill.source_dir, { renameValue: e.currentTarget.value })
-                                                            }
-                                                        />
-                                                    </span>
-                                                }
-                                            >
-                                                <span class="bundle-import-item-name">{skill.slug}</span>
-                                            </Show>
-                                        </label>
-                                        <Show when={skill.description}>
-                                            <p class="bundle-import-item-description">{skill.description}</p>
-                                        </Show>
-                                        <Show when={skill.content_total_chars > 0}>
-                                            <div class="bundle-import-skill-text-block">
-                                                <Button
-                                                    className="ghost"
-                                                    onClick={() =>
-                                                        setSkillTextHidden((prev) => ({
-                                                            ...prev,
-                                                            [skill.source_dir]: !prev[skill.source_dir],
-                                                        }))
-                                                    }
-                                                >
-                                                    {skillTextHidden()[skill.source_dir] ? "Show" : "Hide"} skill text
-                                                </Button>
-                                                <Show when={!skillTextHidden()[skill.source_dir]}>
-                                                    <pre class="bundle-import-skill-text">{skill.content}</pre>
-                                                </Show>
-                                                <Show when={skill.content_truncated}>
-                                                    <div class="bundle-import-hint bundle-import-hint-warn">
-                                                        Not fully shown — {Array.from(skill.content).length} of {skill.content_total_chars}{" "}
-                                                        characters. The whole skill is imported if you tick it.
-                                                    </div>
-                                                </Show>
-                                            </div>
-                                        </Show>
-                                        <Show when={renameConflict()}>
-                                            <div class="bundle-import-hint bundle-import-hint-warn">
-                                                This name is also taken — pick another.
-                                            </div>
-                                        </Show>
-                                    </div>
-                                );
-                            }}
-                        </For>
-                    </section>
-                </Show>
-
-                <Show when={(preview.widgets ?? []).length > 0}>
-                    <section class="bundle-import-section">
-                        <h3 class="bundle-import-section-title">Widgets</h3>
-                        <div class="bundle-import-hint">Each widget asks for your approval before it runs.</div>
-                        <For each={preview.widgets}>
-                            {(w) => {
-                                const sig = describeSignature(w.signature);
-                                return (
-                                    <div class="bundle-import-skill-row" data-widget-id={w.id}>
-                                        <label class="bundle-import-checkbox-row">
-                                            <input
-                                                type="checkbox"
-                                                checked={!!widgetChecked()[w.id]}
-                                                disabled={!!w.error || w.same_as_installed}
-                                                onChange={(e) =>
-                                                    setWidgetChecked((prev) => ({ ...prev, [w.id]: e.currentTarget.checked }))
-                                                }
-                                            />
-                                            <span class="bundle-import-item-name">{w.name}</span>
-                                            <span class="bundle-import-item-meta">
-                                                {w.version}
-                                                {w.author ? ` · by ${w.author}` : ""}
-                                            </span>
-                                        </label>
-                                        <Show
-                                            when={!w.error}
-                                            fallback={<div class="bundle-import-hint bundle-import-hint-warn">Can't be imported: {w.error}</div>}
-                                        >
-                                            <Show when={w.same_as_installed}>
-                                                <div class="bundle-import-hint">Already installed at this version.</div>
-                                            </Show>
-                                            <Show when={!w.same_as_installed && w.installed_version}>
-                                                <div class="bundle-import-hint">Replaces version {w.installed_version} you have.</div>
-                                            </Show>
-                                            <p class={`bundle-import-item-description${sig.warning ? " bundle-import-hint-warn" : ""}`}>{sig.text}</p>
-                                            <p class="bundle-import-item-description">
-                                                {w.permissions.length > 0
-                                                    ? `It can: ${w.permissions.map((p) => describePermission(p).text).join(" · ")}`
-                                                    : "It asks for no permissions."}
-                                            </p>
-                                        </Show>
-                                    </div>
-                                );
-                            }}
-                        </For>
-                    </section>
-                </Show>
-
-                {/* Listed, not offered: a bundle carries no MCP servers
-                    (SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07.md §3.1). */}
-                <Show when={preview.mcp_servers.length > 0}>
-                    <section class="bundle-import-section">
-                        <h3 class="bundle-import-section-title">Not imported: MCP servers</h3>
-                        <div class="bundle-import-hint">
-                            Bundles don't carry MCP servers. Add these in Connectors and bind them to
-                            the agents that need them.
-                        </div>
-                        <For each={preview.mcp_servers}>
-                            {(m) => (
-                                <div class="bundle-import-checkbox-row">
-                                    <span class="bundle-import-item-name">
-                                        {m.display.name ?? m.source_path.split("/").pop()}
-                                    </span>
-                                    <Show when={m.display.command}>
-                                        <span class="bundle-import-item-meta">{m.display.command}</span>
-                                    </Show>
-                                </div>
-                            )}
-                        </For>
-                    </section>
-                </Show>
-
-                <Show when={preview.requirements.length > 0}>
-                    <section class="bundle-import-section">
-                        <h3 class="bundle-import-section-title">Account requirements</h3>
-                        <p class="bundle-import-requirements-summary">
-                            Depends on {preview.requirements.length} account(s):{" "}
-                            {preview.requirements
-                                .map((r) => `${r.provider} (${r.resolved ? "resolved" : "not connected"})`)
-                                .join(", ")}
-                        </p>
-                    </section>
-                </Show>
-
-                <Show when={preview.warnings.length > 0 && !warningsDismissed()}>
-                    <div class="bundle-import-warnings-banner">
-                        <IconButton
-                            icon="xmark"
-                            label="Dismiss warnings"
-                            tooltip={false}
-                            density="compact"
-                            class="bundle-import-warnings-dismiss"
-                            onClick={() => setWarningsDismissed(true)}
-                        />
-                        <For each={preview.warnings}>{(w) => <div class="bundle-import-warning-line">{w}</div>}</For>
-                        <Show when={preview.warnings_truncated}>
-                            <div class="bundle-import-warning-line">…more warnings not shown</div>
-                        </Show>
-                    </div>
-                </Show>
+                <NameField s={s} act={act} />
+                <InstructionsSection s={s} act={act} />
+                <ContextSection s={s} act={act} />
+                <SkillsSection s={s} act={act} />
+                <WidgetsSection s={s} />
+                <McpSection s={s} act={act} />
+                <RequirementsSection s={s} act={act} />
+                <WarningsBanner s={s} act={act} />
             </div>
             <footer class="modal-panel-footer">
                 <Button onClick={() => props.onCancel()} data-modal-dismiss>
                     Cancel
                 </Button>
-                <Button onClick={next} className="green solid">
+                <Button onClick={act.next} className="green solid">
                     Next
                 </Button>
             </footer>

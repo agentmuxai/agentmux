@@ -74,3 +74,41 @@ describe("PendingMessagesPanel — flushing copy split", () => {
         expect(container.querySelector(".agent-pending-item-flushing")).not.toBeNull();
     });
 });
+
+describe("PendingMessagesPanel — image attachments", () => {
+    const attachments = [
+        { id: "a".repeat(64), name: "shot.png" },
+        { id: "b".repeat(64), name: "diagram.png" },
+    ];
+
+    it("shows a queued message's images above its text, as a sent message does", () => {
+        const [pending] = createSignal<PendingMessage[]>([msg({ text: "look at these", attachments })]);
+        const { container } = render(() => <PendingMessagesPanel pendingMessages={pending} />);
+        const item = container.querySelector(".agent-pending-item")!;
+        expect(item.querySelector(".agent-attachment-strip")).not.toBeNull();
+        expect(item.querySelectorAll(".agent-attachment-tile").length).toBe(2);
+        expect(item.querySelector("pre")?.textContent).toBe("look at these");
+        // Strip first, then the words, like UserMessageBlock.
+        const strip = item.querySelector(".agent-attachment-strip")!;
+        expect(strip.compareDocumentPosition(item.querySelector("pre")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it("shows an images-only message without an empty text block", () => {
+        const [pending] = createSignal<PendingMessage[]>([msg({ text: "", attachments })]);
+        const { container } = render(() => <PendingMessagesPanel pendingMessages={pending} />);
+        expect(container.querySelector(".agent-attachment-strip")).not.toBeNull();
+        expect(container.querySelector(".agent-pending-item pre")).toBeNull();
+    });
+
+    it("shows no strip for a text-only message", () => {
+        const [pending] = createSignal<PendingMessage[]>([msg({})]);
+        const { container } = render(() => <PendingMessagesPanel pendingMessages={pending} />);
+        expect(container.querySelector(".agent-attachment-strip")).toBeNull();
+    });
+
+    it("keeps the images while the entry is being delivered", () => {
+        const [pending] = createSignal<PendingMessage[]>([msg({ flushing: true, attachments })]);
+        const { container } = render(() => <PendingMessagesPanel pendingMessages={pending} />);
+        expect(container.querySelectorAll(".agent-pending-item-flushing .agent-attachment-tile").length).toBe(2);
+    });
+});

@@ -2,47 +2,14 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import {
-    autoUpdate,
-    type Placement,
-} from "@floating-ui/dom";
+import type { Placement } from "@floating-ui/dom";
 import clsx from "clsx";
-import { createSignal, For, JSX, onCleanup, onMount, Show } from "solid-js";
-import { Portal } from "solid-js/web";
+import { createSignal, For, JSX, onCleanup, Show } from "solid-js";
 
-import { useHiddenTabMarker, usePaneOverlay } from "@/app/platform/pane-overlay";
-import {
-    assertMenuInPaintableArea,
-    computeMenuPosition,
-    type MenuPositionResult,
-} from "@/app/util/menu-position";
+import { AnchoredPopover } from "@/app/element/anchored-popover";
 import { createPeerRegistry, createSubmenuHover, type SubmenuHoverController } from "@/app/util/submenu-hover";
 
 import "./flyoutmenu.scss";
-
-/**
- * Serialize a MenuPositionResult (position:fixed + left/top + size cap) to a
- * CSS string. The size() max-height cap makes a menu taller than the free
- * space scroll internally instead of overflowing the window. max-width is
- * deliberately NOT applied — an inline max-width would override (and can
- * loosen) the .menu 400px CSS cap, and horizontal fit is already guaranteed
- * by flip+shift for menus at or under that cap. justify-content is forced to
- * flex-start because the .menu rule's flex-end makes overflow unreachable in
- * a scroll container (a no-op when the menu fits).
- *
- * Deliberately omits `visibility` — the caller's placeholder style carries
- * `visibility:hidden` and this full-string replacement drops it once a real
- * position is known, which is what reveals the menu already in the right
- * spot instead of flashing at the placeholder coordinates first
- * (SPEC_SUBMENU_POSITIONING_AND_HOVER_TIMING_2026_08_10 §1.1).
- */
-function styleToString(pos: MenuPositionResult): string {
-    const s = pos.style;
-    return (
-        `position:${s.position};left:${s.left};top:${s.top};` +
-        `max-height:${pos.maxHeight}px;overflow-y:auto;justify-content:flex-start`
-    );
-}
 
 // createPeerRegistry moved to @/app/util/submenu-hover (hoisted so
 // action-widgets.tsx's pinned-parent flyouts (Case A, SPEC_WIDGET_BAR_
@@ -51,9 +18,6 @@ function styleToString(pos: MenuPositionResult): string {
 // (one per MenuBody, one per SubMenu) here — peers never reach across
 // levels, so a still-open descendant closes naturally via Solid unmounting
 // it when its own ancestor's <Show> flips off, not through this registry.
-
-// Where a menu is until its position is computed: in the DOM, not visible.
-const HIDDEN_FLOATING_STYLE = "position:absolute;left:0px;top:0px;visibility:hidden";
 
 type MenuProps = {
     items: MenuItem[];
@@ -97,22 +61,13 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
     const [subMenuPosition, setSubMenuPosition] = createSignal<SubMenuPositionMap>({});
 
     const [isOpen, setIsOpen] = createSignal(false);
-    const [floatingStyle, setFloatingStyle] = createSignal(HIDDEN_FLOATING_STYLE);
 
     let referenceEl: HTMLElement | null = null;
-    let floatingEl: HTMLElement | null = null;
-    let cleanupAutoUpdate: (() => void) | null = null;
 
     const onOpenChangeMenu = (open: boolean) => {
         if (!open) {
-            // The menu is leaving the DOM: stop following its anchor and
-            // container (autoUpdate, and the container's resize observer).
-            cleanupAutoUpdate?.();
-            cleanupAutoUpdate = null;
-            floatingEl = null;
-            // Reopened later, it starts hidden until its position is computed,
-            // not at wherever it was last shown.
-            setFloatingStyle(HIDDEN_FLOATING_STYLE);
+            // The menu is leaving the DOM (AnchoredPopover stops following its
+            // anchor and container with it); a reopen starts hidden again.
             setVisibleSubMenus({});
             setHoveredItems([]);
             setSubMenuPosition({});
@@ -122,68 +77,6 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
     };
     props.closeRef?.(() => {
         if (isOpen()) onOpenChangeMenu(false);
-    });
-
-    const updatePosition = async () => {
-        if (!referenceEl || !floatingEl) return;
-        // avoidNativePanes:false — this menu always renders with
-        // `data-pane-overlay` (below), which clips a hole through any native
-        // browser/webview pane HWND so the DOM menu shows on top. So it should
-        // open in place at its anchor, NOT be pushed into the largest pane-free
-        // rect (which shoved the menu to the window edge whenever a browser/
-        // slack/webview pane sat under the anchor). Matches showJsContextMenu
-        // and the statusbar popovers.
-        const pos = await computeMenuPosition(
-            {
-                anchor: referenceEl,
-                placement: props.placement ?? "bottom-start",
-                avoidNativePanes: false,
-                containWithin: props.containWithin?.() ?? undefined,
-                alignToAnchorSide: props.alignToAnchorSide,
-            },
-            floatingEl,
-        );
-        setFloatingStyle(styleToString(pos));
-    };
-
-    const registerFloating = (el: HTMLElement) => {
-        floatingEl = el;
-        requestAnimationFrame(() => {
-            if (!(referenceEl instanceof Element) || !(floatingEl instanceof Element)) return;
-            cleanupAutoUpdate?.();
-            const stopAutoUpdate = autoUpdate(referenceEl, floatingEl, updatePosition);
-            // A menu kept inside a container must follow the container's own
-            // resize (a pane's splitter dragged under an open menu), which
-            // autoUpdate doesn't watch: it sees only the anchor and the menu.
-            const container = props.containWithin?.();
-            const observer = container && typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => void updatePosition()) : undefined;
-            if (container) observer?.observe(container);
-            cleanupAutoUpdate = () => {
-                stopAutoUpdate();
-                observer?.disconnect();
-            };
-            // Dev-only paintable-area guard (spec §6.1); gated so it is
-            // zero-cost in release builds.
-            assertMenuInPaintableArea(el, "flyout-menu");
-        });
-    };
-
-    const handleClickOutside = (e: MouseEvent) => {
-        if (!isOpen()) return;
-        const target = e.target as Node;
-        if (referenceEl?.contains(target) || floatingEl?.contains(target)) return;
-        const el = target instanceof Element ? target : (target as Node).parentElement;
-        if (el?.closest(".menu, .sub-menu")) return;
-        onOpenChangeMenu(false);
-    };
-
-    onMount(() => {
-        document.addEventListener("mousedown", handleClickOutside);
-    });
-
-    onCleanup(() => {
-        document.removeEventListener("mousedown", handleClickOutside);
-        cleanupAutoUpdate?.();
     });
 
     const handleSubMenuPosition = (key: string, itemRect: DOMRect, label: string) => {
@@ -265,24 +158,25 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
                 {props.children}
             </div>
             <Show when={isOpen()}>
-                <Portal>
-                    <MenuBody
-                        className={props.className}
-                        mirrored={props.mirrored}
-                        style={floatingStyle()}
-                        registerFloating={registerFloating}
-                        items={props.items}
-                        hoveredItems={hoveredItems()}
-                        visibleSubMenus={visibleSubMenus()}
-                        subMenuPosition={subMenuPosition()}
-                        handleMouseEnterItem={handleMouseEnterItem}
-                        handleOnClick={handleOnClick}
-                        openSubMenu={openSubMenu}
-                        closeSubMenu={closeSubMenu}
-                        renderMenu={props.renderMenu}
-                        renderMenuItem={props.renderMenuItem}
-                    />
-                </Portal>
+                <MenuBody
+                    className={props.className}
+                    mirrored={props.mirrored}
+                    anchor={referenceEl}
+                    placement={props.placement ?? "bottom-start"}
+                    containWithin={props.containWithin}
+                    alignToAnchorSide={props.alignToAnchorSide}
+                    onDismiss={() => onOpenChangeMenu(false)}
+                    items={props.items}
+                    hoveredItems={hoveredItems()}
+                    visibleSubMenus={visibleSubMenus()}
+                    subMenuPosition={subMenuPosition()}
+                    handleMouseEnterItem={handleMouseEnterItem}
+                    handleOnClick={handleOnClick}
+                    openSubMenu={openSubMenu}
+                    closeSubMenu={closeSubMenu}
+                    renderMenu={props.renderMenu}
+                    renderMenuItem={props.renderMenuItem}
+                />
             </Show>
         </>
     );
@@ -313,43 +207,39 @@ type MenuLevelProps = {
 
 type MenuBodyProps = MenuLevelProps & {
     className?: string;
-    style: string;
-    registerFloating: (el: HTMLElement) => void;
+    anchor: HTMLElement | null;
+    placement: Placement;
+    containWithin?: () => HTMLElement | null | undefined;
+    alignToAnchorSide?: boolean;
+    /** An outside press or Esc. */
+    onDismiss: () => void;
     items: MenuItem[];
 };
 
 /**
- * Split out from FlyoutMenu's render (rather than inlined under <Show>) so
- * `usePaneOverlay` mounts fresh on every open — mirrors SubMenu below.
- * `data-pane-overlay` alone isn't enough here: the auto-discovery service
- * that watches for it is gated to Windows only (pane-overlay-auto.ts), so
- * on macOS/Linux this explicit hook call is what actually clips the
- * native browser pane behind the menu (same belt-and-suspenders pattern
- * as MoreDropdown in action-widgets.tsx).
+ * The top level of a menu: one AnchoredPopover, which places it at its anchor, follows chrome zoom
+ * (so the menu is the size of the button that opened it), cuts the hole in any native browser pane
+ * behind it (on every platform, and dropping it while its window tab is hidden) and dismisses it on
+ * an outside press or Esc. It starts hidden and is shown once placed, so a reopened menu never
+ * flashes at the corner or where it was last.
  */
-const MenuBody = (props: MenuBodyProps): JSX.Element => {
-    // Portal-mounted: drop its pane hole while its window tab is hidden (pane-overlay.ts).
-    const hiddenTab = useHiddenTabMarker();
-    let menuEl: HTMLDivElement | undefined;
-    usePaneOverlay(() => menuEl, { keys: true });
-
-    const registerFloating = (el: HTMLDivElement) => {
-        menuEl = el;
-        props.registerFloating(el);
-    };
-
-    return (
-        <div
-            class={clsx("menu", props.className, { "menu--mirrored": props.mirrored })}
-            ref={registerFloating}
-            style={props.style}
-            data-pane-overlay
-            data-window-tab-hidden={hiddenTab()}
-        >
-            <MenuRows {...props} parentKey={null} />
-        </div>
-    );
-};
+const MenuBody = (props: MenuBodyProps): JSX.Element => (
+    <AnchoredPopover
+        anchor={props.anchor}
+        placement={props.placement}
+        containWithin={props.containWithin}
+        alignToAnchorSide={props.alignToAnchorSide}
+        fitHeight
+        hideUntilPlaced
+        shellClass="anchored-popover--menu"
+        class={clsx("menu", props.className, { "menu--mirrored": props.mirrored })}
+        onDismiss={() => props.onDismiss()}
+        // A press in a submenu (its own panel, mounted apart from this one) is inside.
+        keepOpenOn={(t) => !!(t instanceof Element ? t : t.parentElement)?.closest(".menu, .sub-menu")}
+    >
+        <MenuRows {...props} parentKey={null} />
+    </AnchoredPopover>
+);
 
 type MenuRowsProps = MenuLevelProps & {
     items: MenuItem[];
@@ -468,95 +358,37 @@ type SubMenuProps = MenuLevelProps & {
 };
 
 const SubMenu = (props: SubMenuProps): JSX.Element => {
-    // Portal-mounted: drop its pane hole while its window tab is hidden (pane-overlay.ts).
-    const hiddenTab = useHiddenTabMarker();
     const position = () => props.subMenuPosition[props.parentKey];
 
-    // Submenu positioning routes through the Phase 1 primitive: anchored to the
-    // parent menu item's rect, preferred placement right-start — flip() turns
-    // that into left-start near the right edge, shift() pulls it back inside
-    // near the bottom edge, all paintable-area aware. autoUpdate keeps it live
-    // on scroll/resize (the old one-shot `flipped` flag never re-evaluated).
-    //
-    // Starts `visibility:hidden` and only sheds it once computeMenuPosition
-    // resolves (styleToString's output never includes `visibility`, so the
-    // full style-string replacement below drops it) — otherwise this panel
-    // paints fully visible at the placeholder (0,0) for the frame(s) before
-    // the real position commits (SPEC_SUBMENU_POSITIONING_AND_HOVER_TIMING_
-    // 2026_08_10 §1.1, the confirmed primary cause of the upper-left flash).
-    const [subStyle, setSubStyle] = createSignal("position:fixed;left:0px;top:0px;visibility:hidden");
-    let cleanupAutoUpdate: (() => void) | null = null;
-    let subMenuEl: HTMLDivElement | undefined;
-
-    // Same rationale as MenuBody above — the submenu also carries
-    // `data-pane-overlay`, but macOS/Linux auto-discovery is gated off, so
-    // it needs this explicit call to actually occlude the browser pane.
-    usePaneOverlay(() => subMenuEl, { keys: true });
-
-    const registerSubMenu = (el: HTMLDivElement) => {
-        subMenuEl = el;
-        // Registered immediately (not gated on positioning) — the safe-
-        // triangle test degrades gracefully on a not-yet-positioned/zero-size
-        // rect (submenu-hover.ts falls back to a plain delay) and picks up
-        // real geometry as soon as `update()` below commits it.
-        props.hover.setSubmenuEl(el);
-        requestAnimationFrame(() => {
-            const pos = position();
-            if (!pos || !(el instanceof Element)) return;
-            const update = async () => {
-                const cur = position();
-                if (!cur) return;
-                // Mirrored (right-anchored) menus prefer to open submenus to
-                // the LEFT; flip() still sends them right if there's no room.
-                // Standard menus prefer right, flipping left near the edge.
-                // avoidNativePanes:false — same rationale as the top-level menu:
-                // the submenu also carries `data-pane-overlay` and must open at
-                // its parent row, not get pushed off toward the window edge when
-                // a native pane sits behind it.
-                const computed = await computeMenuPosition(
-                    {
-                        anchor: cur.anchorRect,
-                        placement: props.mirrored ? "left-start" : "right-start",
-                        avoidNativePanes: false,
-                    },
-                    el,
-                );
-                setSubStyle(styleToString(computed));
-            };
-            cleanupAutoUpdate?.();
-            // anchorRect is a static DOMRect, so autoUpdate's reference is a
-            // virtual element; it still re-runs on scroll/resize.
-            cleanupAutoUpdate = autoUpdate(
-                { getBoundingClientRect: () => position()?.anchorRect ?? pos.anchorRect },
-                el,
-                update,
-            );
-            // Dev-only paintable-area guard (spec §6.1).
-            assertMenuInPaintableArea(el, "submenu");
-        });
-    };
-
-    onCleanup(() => cleanupAutoUpdate?.());
-
+    // Anchored to the parent row's rect, preferred placement right-start: flip() turns that into
+    // left-start near the right edge, shift() pulls it back inside near the bottom edge. A mirrored
+    // (right-anchored) menu prefers the LEFT. AnchoredPopover places it, follows chrome zoom and cuts
+    // the hole in any native pane behind it; it stays hidden until placed (SPEC_SUBMENU_POSITIONING_
+    // AND_HOVER_TIMING_2026_08_10 §1.1: no flash at the upper left).
     const subMenu = (
-        <div
-            ref={registerSubMenu}
-            class={clsx("menu sub-menu", { "menu--mirrored": props.mirrored })}
-            style={subStyle()}
-            data-pane-overlay
-            data-window-tab-hidden={hiddenTab()}
-            onMouseEnter={() => props.hover.onSubmenuEnter()}
-            onMouseLeave={(e) => props.hover.onSubmenuLeave(e)}
-        >
-            <MenuRows {...props} items={props.subItems} parentKey={props.parentKey} />
-        </div>
+        <Show when={position()}>
+            {(pos) => (
+                <AnchoredPopover
+                    anchor={pos().anchorRect}
+                    placement={props.mirrored ? "left-start" : "right-start"}
+                    fitHeight
+                    hideUntilPlaced
+                    overlayKeys
+                    shellClass="anchored-popover--menu"
+                    class={clsx("menu sub-menu", { "menu--mirrored": props.mirrored })}
+                    ref={(el) => {
+                        props.hover.setSubmenuEl(el);
+                        el.addEventListener("mouseenter", () => props.hover.onSubmenuEnter());
+                        el.addEventListener("mouseleave", (e) => props.hover.onSubmenuLeave(e));
+                    }}
+                >
+                    <MenuRows {...props} items={props.subItems} parentKey={props.parentKey} />
+                </AnchoredPopover>
+            )}
+        </Show>
     );
 
-    return (
-        <Portal>
-            {props.renderMenu ? props.renderMenu(subMenu, { parentKey: props.parentKey }) : subMenu}
-        </Portal>
-    );
+    return props.renderMenu ? props.renderMenu(subMenu, { parentKey: props.parentKey }) : subMenu;
 };
 
 export { FlyoutMenu };

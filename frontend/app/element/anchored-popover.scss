@@ -22,6 +22,12 @@
     position: relative;
 }
 
+// A menu's rows start at the top of the panel: `.menu`'s flex-end would put the overflow of a scrolled
+// panel out of reach.
+.anchored-popover--menu > .menu {
+    justify-content: flex-start;
+}
+
 .anchored-popover-body--chrome-zoom {
     zoom: var(--zoomfactor);
 }

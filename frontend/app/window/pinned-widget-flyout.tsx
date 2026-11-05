@@ -19,14 +19,10 @@
  * as (Case A only) click-toggle/outside-click/Escape.
  */
 
-import { usePaneOverlay } from "@/app/platform/pane-overlay";
-import {
-    assertMenuInPaintableArea,
-    computeMenuPosition,
-} from "@/app/util/menu-position";
+import { AnchoredPopover } from "@/app/element/anchored-popover";
 import { makeIconClass } from "@/util/util";
-import { autoUpdate, type Placement } from "@floating-ui/dom";
-import { createSignal, For, onCleanup, type JSX } from "solid-js";
+import type { Placement } from "@floating-ui/dom";
+import { For, onCleanup, type JSX } from "solid-js";
 import { getChildWidgets, openWidget, widgetIconStyle } from "./action-widgets-config";
 
 const PinnedWidgetFlyout = (props: {
@@ -53,54 +49,9 @@ const PinnedWidgetFlyout = (props: {
 }): JSX.Element => {
     const children = () => getChildWidgets(props.widget, props.wmap(), props.settings());
 
-    let overlayEl: HTMLDivElement | undefined;
-    // Cut a transparent hole through any browser pane HWND behind this
-    // flyout so DOM renders above the pane in this rect — same requirement
-    // as MoreDropdown. See `frontend/app/platform/pane-overlay.ts`.
-    usePaneOverlay(() => overlayEl, { keys: true });
-
-    const [floatingStyle, setFloatingStyle] = createSignal<JSX.CSSProperties>({
-        position: "fixed",
-        left: "0px",
-        top: "0px",
-        visibility: "hidden",
-    });
-    let cleanupAutoUpdate: (() => void) | null = null;
-
-    const registerFloating = (el: HTMLDivElement) => {
-        overlayEl = el;
-        props.ref?.(el);
-        props.setSubmenuEl?.(el);
-        requestAnimationFrame(() => {
-            const anchorEl = props.anchor();
-            if (!(anchorEl instanceof Element) || !(el instanceof Element)) return;
-            const update = async () => {
-                const a = props.anchor();
-                if (!a) return;
-                // avoidNativePanes:false — carries data-pane-overlay, same
-                // rationale as MoreDropdown: open in place under the slot,
-                // not pushed toward the window edge by a pane behind it.
-                const pos = await computeMenuPosition(
-                    {
-                        anchor: a,
-                        placement: props.placement ?? "bottom-start",
-                        gutter: props.gutter ?? 4,
-                        avoidNativePanes: false,
-                    },
-                    el,
-                );
-                setFloatingStyle({ ...pos.style });
-            };
-            cleanupAutoUpdate?.();
-            cleanupAutoUpdate = autoUpdate(anchorEl, el, update);
-            assertMenuInPaintableArea(el, "pinned-widget-flyout");
-        });
-    };
-
-    onCleanup(() => {
-        cleanupAutoUpdate?.();
-        props.setSubmenuEl?.(null);
-    });
+    // AnchoredPopover places it, follows chrome zoom and cuts the hole in any browser pane behind it
+    // (the same requirement as MoreDropdown; see `frontend/app/platform/pane-overlay.ts`).
+    onCleanup(() => props.setSubmenuEl?.(null));
 
     const handleItemClick = (widget: WidgetConfigType, e?: MouseEvent) => {
         openWidget(widget, { forceNew: e?.shiftKey });
@@ -116,13 +67,20 @@ const PinnedWidgetFlyout = (props: {
     };
 
     return (
-        <div
-            ref={registerFloating}
+        <AnchoredPopover
+            anchor={props.anchor()}
+            placement={props.placement ?? "bottom-start"}
+            gutter={props.gutter ?? 4}
+            hideUntilPlaced
+            overlayKeys
+            shellClass="anchored-popover--menu"
             class="action-widget-more-dropdown action-widget-pinned-flyout"
-            style={floatingStyle()}
-            data-pane-overlay
-            onMouseEnter={() => props.onSubmenuEnter?.()}
-            onMouseLeave={(e) => props.onSubmenuLeave?.(e)}
+            ref={(el) => {
+                props.ref?.(el);
+                props.setSubmenuEl?.(el);
+                el.addEventListener("mouseenter", () => props.onSubmenuEnter?.());
+                el.addEventListener("mouseleave", (e) => props.onSubmenuLeave?.(e));
+            }}
         >
             <For each={children()}>
                 {({ key, widget }) => (
@@ -138,7 +96,7 @@ const PinnedWidgetFlyout = (props: {
                     </div>
                 )}
             </For>
-        </div>
+        </AnchoredPopover>
     );
 };
 
