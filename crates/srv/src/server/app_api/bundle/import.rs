@@ -1042,7 +1042,7 @@ async fn install_bundle_widgets(
         for pkg in packages.iter().filter(|p| asking.contains(&p.id) && p.state != WidgetState::Approved) {
             // Nobody waits on the answer: the prompt is the user's, and the
             // widget stays in Settings → Widgets until they answer.
-            drop(crate::backend::widget::requests::requests().ask(crate::backend::widget::requests::WidgetInstallRequest::of(pkg, &asker)));
+            drop(crate::backend::widget::requests::requests().ask(crate::backend::widget::requests::WidgetInstallRequest::of(pkg, &asker, "")));
         }
         crate::server::widget_agent_handlers::publish_requests(app);
     }
