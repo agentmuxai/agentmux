@@ -516,7 +516,6 @@
 165 frontend/app/view/identity/identity-accounts-tab.tsx::AccountDetailPanel
 229 frontend/app/view/kanban/kanban-board.tsx::KanbanBoard
 168 frontend/app/view/kanban/kanban-card.tsx::KanbanCard
-344 frontend/app/view/kanban/kanban-drawer.tsx::KanbanDrawer
 289 frontend/app/view/kanban/kanban-section.tsx::KanbanSection
 143 frontend/app/view/memory-editor/MemoryHistory.tsx::MemoryHistory
 126 frontend/app/view/native-memory/MemoryAdoptionPanel.tsx::MemoryAdoptionPanel
