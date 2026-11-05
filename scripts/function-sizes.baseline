@@ -469,7 +469,6 @@
 257 frontend/app/view/agent/components/my-agents-list-data.ts::useMyAgentsData
 478 frontend/app/view/agent/components/my-agents-list-panels.ts::createRowPanels
 326 frontend/app/view/agent/components/shell-highlight/tokenize.ts::Scanner::scanListInner
-329 frontend/app/view/agent/components/working-row.tsx::AgentWorkingRow
 189 frontend/app/view/agent/failure/failure-accessory.ts::failureToRow
 168 frontend/app/view/agent/failure/useAccountBinding.ts::useAccountBinding
 238 frontend/app/view/agent/flows/launch-flow.ts::runLaunchFlow
