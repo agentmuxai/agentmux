@@ -78,6 +78,9 @@ fn register_devices(engine: &Arc<WshRpcEngine>, state: &AppState) {
 /// feed it has open is closed now.
 pub(crate) fn revoke_impl(state: &AppState, device_id: &str) -> Result<ViewerRevokeResult, String> {
     let revoked = state.mstore.viewer_device_delete(device_id).map_err(|e| format!("viewer.revoke: {e}"))?;
+    if revoked {
+        state.broker.publish_event::<crate::backend::mps_events::ViewerDevicesChanged>(&(), vec![], 0);
+    }
     let feeds_closed = state.viewer.close_device_feeds(device_id);
     state.viewer.forget_device(device_id);
     if revoked {
@@ -95,9 +98,9 @@ fn register_revoke(engine: &Arc<WshRpcEngine>, state: &AppState) {
 }
 
 fn register_agent_hidden(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let mstore = state.mstore.clone();
+    let state = state.clone();
     engine.register_typed(COMMAND_VIEWER_AGENT_HIDDEN, move |cmd: CommandViewerAgentHiddenData, _ctx| {
-        let mstore = mstore.clone();
+        let (mstore, broker) = (state.mstore.clone(), state.broker.clone());
         async move {
             if let Some(hidden) = cmd.hidden {
                 let found = mstore
@@ -106,6 +109,7 @@ fn register_agent_hidden(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 if !found {
                     return Err(format!("viewer.agent-hidden: no agent {}", cmd.agent_id));
                 }
+                broker.publish_event::<crate::backend::mps_events::AgentHiddenChanged>(&(), vec![], 0);
             }
             let hidden = mstore
                 .agent_hide_from_devices_get(&cmd.agent_id)
@@ -133,6 +137,7 @@ pub(crate) fn can_send_impl(state: &AppState, device_id: &str, can_send: bool) -
         .mstore
         .viewer_device_set_can_send(device_id, can_send)
         .map_err(|e| format!("viewer.can-send: {e}"))?;
+    state.broker.publish_event::<crate::backend::mps_events::ViewerDevicesChanged>(&(), vec![], 0);
     tracing::info!(%device_id, can_send, "viewer: send grant changed");
     Ok(ViewerCanSendResult { can_send })
 }
