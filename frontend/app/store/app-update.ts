@@ -66,8 +66,8 @@ export function viaStore(s: AppUpdateStatus | null = appUpdate()): boolean {
     return s?.install === "windows-store";
 }
 
-/** What the Store itself said about `version`: `asking` until it answers; `unknown` carries why it couldn't be asked. */
-export type StoreOffer = { version: string; state: "asking" | "available" | "none" | "unknown"; message: string };
+/** What the Store itself said about `version`: `asking` until it answers; `no_answer` when it never did; `unknown` carries why it couldn't be asked. */
+export type StoreOffer = { version: string; state: "asking" | "available" | "none" | "no_answer" | "unknown"; message: string };
 
 const [storeOffer, setStoreOffer] = createSignal<StoreOffer | null>(null);
 
@@ -115,6 +115,7 @@ export function storeOfferLine(version: string | null | undefined, offer: StoreO
     const released = `v${version} is released.`;
     if (!offer || offer.state === "asking") return `${released} Asking the Microsoft Store whether it has it…`;
     if (offer.state === "none") return `${released} The Microsoft Store is still reviewing it.`;
+    if (offer.state === "no_answer") return `${released} The Microsoft Store didn't answer; try again later.`;
     return `${released} Couldn't ask the Microsoft Store whether it has it${offer.message ? ` (${offer.message})` : ""}.`;
 }
 
@@ -122,6 +123,9 @@ export function storeOfferLine(version: string | null | undefined, offer: StoreO
 export type StoreCameBack = { state: "none" | "updated" | "stayed"; from: string; target: string };
 const [storeStayed, setStoreStayed] = createSignal<StoreCameBack | null>(null);
 export { storeStayed, setStoreStayed };
+
+/** Said when the install fell back to the Store page: `why` is the host's reason, when it gave one. */
+export const storeFallbackLine = (why?: string): string => `${why ? `${why} ` : ""}Opened the Microsoft Store page to finish the update.`;
 
 /** Said before the Store is asked to install: it closes the app to swap the package. */
 export const storeClosesLine = (version: string): string => `The Store closes AgentMux while it installs v${version}, then opens it again.`;

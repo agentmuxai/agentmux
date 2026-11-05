@@ -185,8 +185,8 @@ declare global {
         appUpdate?(action: "download" | "restart" | "cancel", now?: boolean): Promise<unknown>;
         /** A Microsoft Store install: ask the Store to install the update; `fallback` means open the Store page instead. */
         storeUpdate?(version?: string): Promise<{ outcome: "installed" | "canceled" | "none" | "fallback"; message: string }>;
-        /** A Microsoft Store install: whether the Store itself lists an update (nothing is installed); `unknown` says why it couldn't be asked. */
-        storeUpdateCheck?(): Promise<{ state: "available" | "none" | "unknown"; message: string }>;
+        /** A Microsoft Store install: whether the Store itself lists an update (nothing is installed); `no_answer` means it never answered, `unknown` says why it couldn't be asked. */
+        storeUpdateCheck?(): Promise<{ state: "available" | "none" | "no_answer" | "unknown"; message: string }>;
         /** What the Store's last install left: the app came back `updated`, or `stayed` on the version the Store closed it on. */
         storeUpdateCameBack?(): Promise<{ state: "none" | "updated" | "stayed"; from: string; target: string }>;
         /** Forget the key a widget publisher is pinned to (Settings → Widgets),

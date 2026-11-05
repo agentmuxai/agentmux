@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// External shutdown: 30 seconds (15 for an agent's own quit) for the user to override
+// External shutdown: 30 seconds (15 for an agent's own quit, 10 for a browser pane's close) for the user to override
 // (docs/specs/SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.5, contract §12.2–12.3).
 //
 // A shutdown the user didn't ask for doesn't happen at once. `request` marks
@@ -27,6 +27,22 @@ pub const OVERRIDE_WINDOW: std::time::Duration = std::time::Duration::from_secs(
 /// An agent's own quit, from a turn the user didn't start: it waits for that turn to end
 /// anyway, so its window stays short.
 pub const SELF_QUIT_WINDOW: std::time::Duration = std::time::Duration::from_secs(15);
+/// Closing a browser pane: it holds no conversation to lose, and the person is looking at it.
+pub const BROWSER_CLOSE_WINDOW: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// How long the user has to keep these panes when an agent asks to close them: `BROWSER_CLOSE_WINDOW` when every one
+/// is a browser pane, else `OVERRIDE_WINDOW`.
+pub fn close_window(state: &AppState, block_ids: &[String]) -> std::time::Duration {
+    let is_browser = |id: &String| {
+        let block = state.mstore.get::<crate::backend::obj::Block>(id).ok().flatten();
+        block.is_some_and(|b| b.meta.get("view").and_then(|v| v.as_str()) == Some("browser"))
+    };
+    if !block_ids.is_empty() && block_ids.iter().all(is_browser) {
+        BROWSER_CLOSE_WINDOW
+    } else {
+        OVERRIDE_WINDOW
+    }
+}
 pub const EVENT_SHUTDOWN_PENDING: &str = "agent:shutdown-pending";
 pub const EVENT_SHUTDOWN_PENDING_CLEARED: &str = "agent:shutdown-pending-cleared";
 /// Finished requests stay answerable this long, then are dropped.
@@ -319,7 +335,7 @@ pub fn request(state: &AppState, block_id: &str, by: &str, via: &str, reason: &s
     request_within(state, block_id, by, via, reason, action, window)
 }
 
-fn request_within(
+pub(crate) fn request_within(
     state: &AppState,
     block_id: &str,
     by: &str,
@@ -815,6 +831,18 @@ mod tests {
         assert_eq!((b.request_id.as_str(), b.deadline_ms), (a.request_id.as_str(), a.deadline_ms), "never restarts the clock");
         assert_eq!(active_for("blk-p1").map(|v| v.request_id), Some(a.request_id.clone()));
         assert_eq!(keep(&state, "blk-p1", &a.request_id), "kept_by_user");
+    }
+
+    /// A close takes 10 s only when every pane in it is a browser pane.
+    #[tokio::test]
+    async fn a_browser_pane_close_has_a_shorter_window() {
+        let state = test_state();
+        let (browser, other) = (uuid::Uuid::new_v4().to_string(), uuid::Uuid::new_v4().to_string());
+        crate::server::browser_attention::tests::browser_block(&state, &browser);
+        assert_eq!(close_window(&state, &[browser.clone()]), BROWSER_CLOSE_WINDOW);
+        assert_eq!(close_window(&state, &[browser.clone(), other]), OVERRIDE_WINDOW, "stacked with a pane that is not one");
+        assert_eq!(close_window(&state, &[uuid::Uuid::new_v4().to_string()]), OVERRIDE_WINDOW, "an unknown pane");
+        assert_eq!(close_window(&state, &[]), OVERRIDE_WINDOW);
     }
 
     /// "Close now" ends the wait and the shutdown begins at once, once; a kept request, one that has
