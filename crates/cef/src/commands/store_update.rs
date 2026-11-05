@@ -179,33 +179,47 @@ pub fn install_update(target: &str, web_endpoint: &str, auth_key: &str) -> Store
 }
 
 #[cfg(target_os = "windows")]
-fn install_update_here(target: &str, web_endpoint: &str, auth_key: &str) -> Result<StoreOutcome, String> {
+fn store_state(s: windows::Services::Store::StorePackageUpdateState) -> StoreState {
     use windows::Services::Store::StorePackageUpdateState as S;
-
-    let (context, listed) = list_updates()?;
-    if listed == 0 {
-        return Ok(decide(0, None));
-    }
-    // The Store closes this app to swap the package: have it opened again after, and the windows saved as at a quit.
-    super::store_restart::before_install(target);
-    crate::client::backend_save_session_snapshot(web_endpoint, auth_key, true);
-    // The install call takes the list itself, so ask for it again.
-    let updates = context
-        .GetAppAndOptionalStorePackageUpdatesAsync()
-        .and_then(|op| op.get())
-        .map_err(|e| format!("couldn't list updates: {e}"))?;
-    let result = context
-        .RequestDownloadAndInstallStorePackageUpdatesAsync(&updates)
-        .and_then(|op| op.get())
-        .map_err(|e| format!("the install call failed: {e}"))?;
-    let state = match result.OverallState().map_err(|e| format!("no result state: {e}"))? {
+    match s {
         S::Completed => StoreState::Completed,
         S::Canceled => StoreState::Canceled,
         S::ErrorLowBattery => StoreState::LowBattery,
         S::ErrorWiFiRecommended => StoreState::WifiRecommended,
         S::ErrorWiFiRequired => StoreState::WifiRequired,
         _ => StoreState::Other,
-    };
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn install_update_here(target: &str, web_endpoint: &str, auth_key: &str) -> Result<StoreOutcome, String> {
+    let (context, listed) = list_updates()?;
+    if listed == 0 {
+        return Ok(decide(0, None));
+    }
+    // The calls below take the list itself, so ask for it again.
+    let updates = context
+        .GetAppAndOptionalStorePackageUpdatesAsync()
+        .and_then(|op| op.get())
+        .map_err(|e| format!("couldn't list updates: {e}"))?;
+    // Downloaded first (it takes minutes and the app is not touched): only the install closes this app.
+    let downloaded = context
+        .RequestDownloadStorePackageUpdatesAsync(&updates)
+        .and_then(|op| op.get())
+        .map_err(|e| format!("the download call failed: {e}"))?;
+    let state = store_state(downloaded.OverallState().map_err(|e| format!("no result state: {e}"))?);
+    if state != StoreState::Completed {
+        return Ok(decide(listed, Some(state)));
+    }
+    // The Store now closes this app to swap the package: have it opened again after, and the windows saved
+    // as for an OS shutdown (not as for a quit: the app keeps running if the install does not go through).
+    super::store_restart::before_install(target);
+    crate::client::backend_save_session_snapshot(web_endpoint, auth_key, false);
+    let result = context
+        .RequestDownloadAndInstallStorePackageUpdatesAsync(&updates)
+        .and_then(|op| op.get())
+        .map_err(|e| format!("the install call failed: {e}"))?;
+    let state = store_state(result.OverallState().map_err(|e| format!("no result state: {e}"))?);
     Ok(decide(listed, Some(state)))
 }
 
