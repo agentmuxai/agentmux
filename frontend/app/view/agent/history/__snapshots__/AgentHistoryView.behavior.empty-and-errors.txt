@@ -1,0 +1,32 @@
+registerPane(hist-1:history)
+usePaneTabVisibility(hist-1)
+getFileSubject(live-1, output)
+subscribe
+startHistoryPoll(cursor,hidden,readBlockId,recover,reloadIfSkipped)
+count({"filename":"output"}, timeout 5000)
+empty: shown=[] meta="no recorded history" jumpButton=false
+poll stopped
+unsubscribe
+release
+unregisterPane(hist-1:history)
+> a failing count
+registerPane(hist-1:history)
+usePaneTabVisibility(hist-1)
+getFileSubject(live-1, output)
+subscribe
+startHistoryPoll(cursor,hidden,readBlockId,recover,reloadIfSkipped)
+count({"filename":"output"}, timeout 5000)
+count failed: shown=[] meta="couldn't load history: count failed" jumpButton=false
+poll stopped
+unsubscribe
+release
+unregisterPane(hist-1:history)
+> a failing range
+registerPane(hist-1:history)
+usePaneTabVisibility(hist-1)
+getFileSubject(live-1, output)
+subscribe
+startHistoryPoll(cursor,hidden,readBlockId,recover,reloadIfSkipped)
+count({"filename":"output"}, timeout 5000)
+range({"offset":0,"limit":1}, timeout 30000)
+range failed: shown=[] meta="couldn't load history: range failed" jumpButton=false
