@@ -881,6 +881,7 @@ fn browser_control_routes() -> Router<AppState> {
 fn agent_definition_routes() -> Router<AppState> {
     Router::new()
         .route("/api/v1/agent/seats", post(app_api::agent_seats::handle_agent_seats))
+        .route("/api/v1/agent/migrate-ids", post(app_api::agent_migrate_ids::handle_agent_migrate_ids))
         .route("/api/v1/agent/rename", post(app_api::agent_rename::handle_agent_rename))
 }
 
