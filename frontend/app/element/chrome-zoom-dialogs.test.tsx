@@ -33,7 +33,10 @@ describe("dialogs and chrome zoom", () => {
 
     it("divides a viewport length by the zoom, so a scaled panel still fits the window", () => {
         expect(ruleOf("modal.scss", ".modal-panel")).toMatch(/max-height: calc\(\(100vh - .*\) \/ var\(--zoomfactor\)\)/);
-        expect(ruleOf("../modals/command-palette.scss", ".modal-panel.command-palette-panel")).toContain("/ var(--zoomfactor)");
+        const palette = ruleOf("../modals/command-palette.scss", ".modal-panel.command-palette-panel");
+        expect(palette).toContain("/ var(--zoomfactor)");
+        // Its fixed 480px height is a zoomed length too (720 real px at 150%, off a 750 px window): capped by the window.
+        expect(palette).toMatch(/max-height: min\(480px, calc\(\(100vh - 48px\) \/ var\(--zoomfactor\)\)\)/);
         expect(ruleOf("../view/accounts/accounts-gallery.scss", ".modal-panel.accounts-chooser")).toContain("/ var(--zoomfactor)");
     });
 });
@@ -71,6 +74,13 @@ describe("toasts and chrome zoom", () => {
         setChromeZoomSignal(1.5);
         vi.advanceTimersByTime(50);
         expect([stack().style.right, stack().style.bottom]).toEqual(["87px", "51px"]);
+    });
+
+    it("keeps clear of the status bar however tall it is, since it wraps to two rows at a narrow width and high zoom", () => {
+        // The usual bottom gap is one row of the bar times the zoom; the bar itself is marked, so a taller bar moves
+        // the stack up instead of being covered.
+        const bar = readFileSync(join(__dirname, "../statusbar/StatusBar.tsx"), "utf8");
+        expect(bar).toMatch(/<div class="status-bar" data-toast-avoid>/);
     });
 
     it("opens at the current zoom's gaps when the zoom changed while no toast showed", () => {

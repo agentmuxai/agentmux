@@ -121,7 +121,7 @@ function registerBuiltinStatusBarItems(): void {
 const StatusBar = (): JSX.Element => {
     registerBuiltinStatusBarItems();
     return (
-        <div class="status-bar">
+        <div class="status-bar" data-toast-avoid>
             <div class="status-bar-left">
                 <For each={statusBarItems("left")}>
                     {(item, i) => (

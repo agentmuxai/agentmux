@@ -12,7 +12,8 @@
 .modal-panel.command-palette-panel {
     width: 560px;
     max-width: min(100%, calc(92vw / var(--zoomfactor)));
-    max-height: 480px;
+    // 480px is a zoomed length (720 real px at 150%): cap it by the window's height, in the same lengths.
+    max-height: min(480px, calc((100vh - 48px) / var(--zoomfactor)));
     padding: 0;
     // Panel content manages its own scrolling in the list area, so
     // let overflow fall through.
