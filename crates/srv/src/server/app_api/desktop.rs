@@ -32,7 +32,8 @@ use super::*;
 /// Actions `authorize` is asked about.
 const ACTIONS: &[&str] = &["look", "click", "scroll", "type", "key", "wait"];
 
-static ASKING: Mutex<Option<crate::backend::user_attention::Asking>> = Mutex::new(None);
+/// One attention per pending request (by request id), so every asking pane's card waits on the user.
+static ASKING: Mutex<Vec<(String, crate::backend::user_attention::Asking)>> = Mutex::new(Vec::new());
 
 /// What a desktop-control request was filed for, by the request's id: the agent, its pane, the app
 /// and the minutes, which the countdown's end turns into the grant.
@@ -143,8 +144,14 @@ fn snapshot() -> DesktopEvent {
 fn publish(state: &AppState) {
     let event = snapshot();
     let mut asking = ASKING.lock().unwrap_or_else(|e| e.into_inner());
-    *asking = event.requests.first().map(|r| {
-        crate::backend::user_attention::Asking::start(
+    // A request that is still pending keeps its attention (no end and start again); one that was
+    // answered lets go of it, and a new one starts its own.
+    asking.retain(|(id, _)| event.requests.iter().any(|r| &r.id == id));
+    for r in &event.requests {
+        if asking.iter().any(|(id, _)| id == &r.id) {
+            continue;
+        }
+        let ask = crate::backend::user_attention::Asking::start(
             &state.broker,
             &state.mstore,
             // The asking agent's pane: its card there waits on the user, so the tone, badge and
@@ -152,8 +159,9 @@ fn publish(state: &AppState) {
             &r.block_id,
             "desktop",
             &format!("{} asks to control {}", r.agent, r.app),
-        )
-    });
+        );
+        asking.push((r.id.clone(), ask));
+    }
     drop(asking);
     state.broker.publish_event::<crate::backend::mps_events::AppDesktop>(&event, vec![], 0);
 }
