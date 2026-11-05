@@ -595,7 +595,7 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
             )
         }
     };
-    std::fs::create_dir_all(&data_dir).ok();
+    std::fs::create_dir_all(&data_dir).ok(); commands::store_restart::at_startup(common_paths.as_ref());
 
     // Initialize dual-output tracing: rolling log file + stderr.
     // The log file guard must live for the entire process to ensure flushing.

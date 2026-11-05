@@ -12,6 +12,7 @@ const updateDownload = vi.fn();
 const upgradeRestart = vi.fn();
 const upgradeCancel = vi.fn();
 const storeCheck = vi.fn();
+const cameBack = vi.fn();
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         AppUpdateStatusCommand: (...a: unknown[]) => updateStatus(...a),
@@ -26,6 +27,7 @@ vi.mock("@/util/app-api", () => ({
             appUpdate: (action: string, now?: boolean) =>
                 action === "download" ? updateDownload() : action === "restart" ? upgradeRestart(now) : upgradeCancel(),
             storeUpdateCheck: () => storeCheck(),
+            storeUpdateCameBack: () => cameBack(),
         },
     }),
 }));
@@ -44,7 +46,8 @@ vi.mock("@/store/global", async (importOriginal) => {
     };
 });
 
-import { acceptAppUpdate, appUpdate, availableRelease, forgetStoreOffer, releaseDownload } from "@/app/store/app-update";
+import { acceptAppUpdate, appUpdate, availableRelease, forgetStoreOffer, releaseDownload, setStoreStayed } from "@/app/store/app-update";
+import { notifications, setNotifications } from "@/app/store/flash-notifications";
 import { MaintenanceSection } from "./MaintenanceSection";
 import { UpdateStatus } from "./UpdateStatus";
 
@@ -75,6 +78,9 @@ beforeEach(() => {
     installAppUpdate.mockReset();
     storeUpdate.mockReset().mockResolvedValue({ outcome: "fallback", message: "" });
     storeCheck.mockReset().mockResolvedValue({ state: "available", message: "" });
+    cameBack.mockReset().mockResolvedValue({ state: "none", from: "", target: "" });
+    setStoreStayed(null);
+    setNotifications([]);
     forgetStoreOffer();
     revealInFileExplorer.mockReset().mockResolvedValue(undefined);
     acceptAppUpdate({ state: "unknown", current: "0.59.26", checked_ms: 0, install: "unknown", can_download: false });
@@ -413,9 +419,47 @@ describe("Maintenance on a Microsoft Store install", () => {
         }
     });
 
+    it("says before the click that the Store closes AgentMux and opens it again", async () => {
+        updateStatus.mockResolvedValue(STORE);
+        render(() => <MaintenanceSection />);
+        await screen.findByRole("button", { name: "Update in the Store" });
+        expect(screen.getByText("The Store closes AgentMux while it installs v0.59.27, then opens it again.")).toBeTruthy();
+    });
+
+    it("passes the release being installed to the host, so a restart can tell what it came back from", async () => {
+        updateStatus.mockResolvedValue(STORE);
+        render(() => <MaintenanceSection />);
+        fireEvent.click(await screen.findByRole("button", { name: "Update in the Store" }));
+        await vi.waitFor(() => expect(storeUpdate).toHaveBeenCalledWith("0.59.27"));
+    });
+
+    it("on a start that came back updated, tells the person once", async () => {
+        cameBack.mockResolvedValue({ state: "updated", from: "0.59.26", target: "0.59.27" });
+        render(() => <UpdateStatus />);
+        await vi.waitFor(() => expect(notifications().map((n) => n.message)).toContain("Updated to v0.59.27 through the Microsoft Store."));
+        expect(notifications()).toHaveLength(1);
+    });
+
+    it("on a start that stayed on the old version, says the install did not happen, in a toast and in the panel", async () => {
+        cameBack.mockResolvedValue({ state: "stayed", from: "0.59.26", target: "0.59.27" });
+        updateStatus.mockResolvedValue(STORE);
+        render(() => (
+            <>
+                <UpdateStatus />
+                <MaintenanceSection />
+            </>
+        ));
+        const line = "The Store closed AgentMux to install v0.59.27, but this is still v0.59.26. Try Update in the Store again, or install it from the Microsoft Store app.";
+        expect(await screen.findByText(line)).toBeTruthy();
+        expect(notifications().some((n) => n.message === line && n.persistent)).toBe(true);
+        // Trying again clears it.
+        fireEvent.click(await screen.findByRole("button", { name: "Update in the Store" }));
+        await vi.waitFor(() => expect(screen.queryByText(line)).toBeNull());
+    });
+
     it("asks the Store to install it first, and opens the Store page only when the Store can't", async () => {
         updateStatus.mockResolvedValue(STORE);
-        storeUpdate.mockResolvedValue({ outcome: "installed", message: "The Store installed the update. AgentMux restarts to finish it." });
+        storeUpdate.mockResolvedValue({ outcome: "installed", message: "The Store installed the update. Open AgentMux again to use it." });
         render(() => <MaintenanceSection />);
         fireEvent.click(await screen.findByRole("button", { name: "Update in the Store" }));
         expect(await screen.findByText(/The Store installed the update/)).toBeTruthy();

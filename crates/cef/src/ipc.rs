@@ -869,8 +869,7 @@ async fn route_command(
             .await
             .map_err(|e| format!("app_update_action: {e}"))?
         }
-        "store_update_install" => crate::commands::store_update::run(false).await,
-        "store_update_check" => crate::commands::store_update::run(true).await,
+        "store_update_install" | "store_update_check" | "store_update_came_back" => crate::commands::store_update::run(state, cmd, args).await,
         "upgrade_request_decide" => {
             // The user's Upgrade now / Later on an agent's request to upgrade
             // AgentMux, relayed to srv as the host: no agent can approve its
