@@ -22,7 +22,10 @@ export const toastRight = (): number => RIGHT * chromeZoomAtom();
 /** Tracks where the stack goes while `active()`. Pass the stack's element to `setStack`, and in `track`
  *  read whatever (the visible toasts) should trigger a fresh measure. */
 export function useToastPlacement(active: Accessor<boolean>, track: () => unknown) {
-    const [placement, setPlacement] = createSignal<Placement>({ bottom: USUAL_BOTTOM * chromeZoomAtom() });
+    // The last measured placement and the zoom it was measured at: a placement from another zoom is stale,
+    // so until the next measure the stack sits at the usual gap for the current zoom.
+    const [measured, setMeasured] = createSignal<Placement & { zoom: number }>({ bottom: USUAL_BOTTOM, zoom: 1 });
+    const bottom = () => (measured().zoom === chromeZoomAtom() ? measured().bottom : USUAL_BOTTOM * chromeZoomAtom());
     let stack: HTMLDivElement | undefined;
     // A marked block can change size with no DOM change (the composer's textarea grows as you type), so
     // the marked blocks are watched for resizing too; the set is re-synced at every measure.
@@ -52,8 +55,8 @@ export function useToastPlacement(active: Accessor<boolean>, track: () => unknow
             top: TOP * zoom,
             avoid,
         });
-        const prev = placement();
-        if (prev.bottom !== next.bottom) setPlacement(next);
+        const prev = measured();
+        if (prev.bottom !== next.bottom || prev.zoom !== zoom) setMeasured({ ...next, zoom });
     };
     // While toasts show: re-place them when the window, a scroll or the page's layout changes, at most
     // every REPLACE_EVERY_MS (streaming text and animations change the DOM constantly, and a persistent
@@ -86,5 +89,5 @@ export function useToastPlacement(active: Accessor<boolean>, track: () => unknow
             cancelAnimationFrame(first);
         });
     });
-    return { placement, setStack: (el: HTMLDivElement) => (stack = el) };
+    return { bottom, setStack: (el: HTMLDivElement) => (stack = el) };
 }

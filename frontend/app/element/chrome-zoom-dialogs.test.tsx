@@ -72,4 +72,13 @@ describe("toasts and chrome zoom", () => {
         vi.advanceTimersByTime(50);
         expect([stack().style.right, stack().style.bottom]).toEqual(["87px", "51px"]);
     });
+
+    it("opens at the current zoom's gaps when the zoom changed while no toast showed", () => {
+        render(() => <NotificationBubbles />);
+        setChromeZoomSignal(1.5);
+        setNotifications([{ id: "t", icon: "bell", title: "t", message: "", timestamp: "" }]);
+        const stack = document.querySelector(".notification-bubbles") as HTMLElement;
+        // Before any measure (a frame later): already the 1.5 gaps, not the 1x bottom beside a 1.5 right.
+        expect([stack.style.right, stack.style.bottom]).toEqual(["87px", "51px"]);
+    });
 });

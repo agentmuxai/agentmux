@@ -57,12 +57,12 @@ const NotificationBubbles = (): JSX.Element => {
         }
     });
 
-    const { placement, setStack } = useToastPlacement(() => isOpen() && !notificationPopoverMode(), visible);
+    const { bottom, setStack } = useToastPlacement(() => isOpen() && !notificationPopoverMode(), visible);
     // The stack is an unzoomed shell placed in real pixels; the body inside it carries the chrome zoom.
     const floatingStyles = () => ({
         position: "fixed",
         right: `${toastRight()}px`,
-        bottom: `${placement().bottom}px`,
+        bottom: `${bottom()}px`,
         top: "auto",
         left: "auto",
     });
