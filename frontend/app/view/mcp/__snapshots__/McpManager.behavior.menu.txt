@@ -439,7 +439,7 @@
                 <input placeholder="stdio" type="text" class="ui-input" value="stdio">
             <div class="ui-field ui-field--stacked">
               <div class="ui-field-text">
-                <label class="ui-field-label" for="mcp-config-cl-12">
+                <label class="ui-field-label" for="mcp-config-cl-N">
                   "Config (JSON)"
               <div class="ui-field-control">
                 <textarea class="ui-input ui-textarea ui-textarea--mono" value="{\"command\":\"npx\",\"args\":[\"-y\",\"git-mcp\"],\"env\":{\"GITHUB_TOKEN\":\"ghp_secret123\"}}">
@@ -619,7 +619,7 @@
                 <input placeholder="stdio" type="text" class="ui-input" value="stdio">
             <div class="ui-field ui-field--stacked">
               <div class="ui-field-text">
-                <label class="ui-field-label" for="mcp-config-cl-12">
+                <label class="ui-field-label" for="mcp-config-cl-N">
                   "Config (JSON)"
               <div class="ui-field-control">
                 <textarea class="ui-input ui-textarea ui-textarea--mono" value="{\"command\":\"npx\",\"args\":[\"-y\",\"git-mcp\"],\"env\":{\"GITHUB_TOKEN\":\"ghp_secret123\"}}">
@@ -710,7 +710,7 @@
                   "1 agent"
             <span role="img" class="ui-status-dot ui-status-dot--ok ui-card-status" aria-label="Connected for 1 agent." title="Connected for 1 agent.">
   <div>
-    <div class="modal-root" role="dialog" aria-modal="true" data-scope="window" data-scope-fallback="pane" data-placement="center" aria-labelledby="modal-title-cl-16">
+    <div class="modal-root" role="dialog" aria-modal="true" data-scope="window" data-scope-fallback="pane" data-placement="center" aria-labelledby="modal-title-cl-N">
       <div class="modal-backdrop">
       <span class="modal-focus-sentinel" aria-hidden="true">
       <div class="modal-panel " data-size="sm">

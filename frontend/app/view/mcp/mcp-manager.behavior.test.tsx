@@ -127,11 +127,11 @@ function dump(node: Node, depth = 0, out: string[] = []): string[] {
     if (node.nodeType !== Node.ELEMENT_NODE) return out;
     const el = node as HTMLElement;
     if (el.tagName === "svg" || el.tagName === "STYLE") return out;
-    // Field ids count up across the whole file, and a closed modal leaves `style=""` on the body: neither is
-    // the page's, and either would tie a snapshot to the order the scenarios run in.
+    // Generated ids (fields, textareas, modal titles) count up across the whole file, and a closed modal leaves
+    // `style=""` on the body: neither is the page's, and either would tie a snapshot to the order scenarios run in.
     const attrs = [...el.attributes]
         .filter((a) => ATTRS.test(a.name) && !(el === document.body && a.name === "style"))
-        .map((a) => `${a.name}=${JSON.stringify(a.value.replace(/(ui-field-(?:desc-)?cl)-\d+/g, "$1-N"))}`);
+        .map((a) => `${a.name}=${JSON.stringify(a.value.replace(/(-cl)-\d+/g, "$1-N"))}`);
     if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) {
         attrs.push(`value=${JSON.stringify(el.value)}`);
         if (el instanceof HTMLInputElement && (el.type === "checkbox" || el.type === "radio")) {

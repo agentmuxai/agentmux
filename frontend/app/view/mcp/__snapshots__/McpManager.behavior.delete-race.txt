@@ -214,7 +214,7 @@
                   "1 agent"
             <span role="img" class="ui-status-dot ui-status-dot--ok ui-card-status" aria-label="Connected for 1 agent." title="Connected for 1 agent.">
   <div>
-    <div class="modal-root" role="dialog" aria-modal="true" data-scope="window" data-scope-fallback="pane" data-placement="center" aria-labelledby="modal-title-cl-56">
+    <div class="modal-root" role="dialog" aria-modal="true" data-scope="window" data-scope-fallback="pane" data-placement="center" aria-labelledby="modal-title-cl-N">
       <div class="modal-backdrop">
       <span class="modal-focus-sentinel" aria-hidden="true">
       <div class="modal-panel " data-size="sm">

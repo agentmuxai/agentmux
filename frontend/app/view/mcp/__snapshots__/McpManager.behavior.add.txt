@@ -82,7 +82,7 @@
                 <input placeholder="stdio" type="text" class="ui-input" value="stdio">
             <div class="ui-field ui-field--stacked">
               <div class="ui-field-text">
-                <label class="ui-field-label" for="mcp-config-cl-18">
+                <label class="ui-field-label" for="mcp-config-cl-N">
                   "Config (JSON)"
               <div class="ui-field-control">
                 <textarea class="ui-input ui-textarea ui-textarea--mono" value="{}">
@@ -434,7 +434,7 @@
                 <input placeholder="stdio" type="text" class="ui-input" value="stdio">
             <div class="ui-field ui-field--stacked">
               <div class="ui-field-text">
-                <label class="ui-field-label" for="mcp-config-cl-22">
+                <label class="ui-field-label" for="mcp-config-cl-N">
                   "Config (JSON)"
               <div class="ui-field-control">
                 <textarea class="ui-input ui-textarea ui-textarea--mono" value="{\n  \"command\": \"npx\",\n  \"args\": [\n    \"-y\",\n    \"touchdesigner-mcp-server@1.5.0\",\n    \"--stdio\"\n  ]\n}">
@@ -1031,7 +1031,7 @@
                 <input placeholder="stdio" type="text" class="ui-input" value="stdio">
             <div class="ui-field ui-field--stacked">
               <div class="ui-field-text">
-                <label class="ui-field-label" for="mcp-config-cl-32">
+                <label class="ui-field-label" for="mcp-config-cl-N">
                   "Config (JSON)"
               <div class="ui-field-control">
                 <textarea class="ui-input ui-textarea ui-textarea--mono" value="{}">
