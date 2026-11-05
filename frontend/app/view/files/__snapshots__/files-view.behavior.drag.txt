@@ -1,0 +1,8 @@
+no data transfer: true selection={"names":[],"focus":null,"anchor":null}
+beginPathDrag(["/home/a/b.txt"], b1)
+one row: true selection={"names":["b.txt"],"focus":"b.txt","anchor":"b.txt"}
+beginPathDrag(["/home/a/a.md","/home/a/b.txt"], b1)
+a selected row of two: true selection={"names":["a.md","b.txt"],"focus":"b.txt","anchor":"a.md"}
+endPathDrag()
+on a host: notPrevented=false
+confined: notPrevented=false

@@ -8,6 +8,7 @@ import { createEffect, createRoot, createSignal, untrack } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
 import { toastDebugText, type ToastDebugEnv } from "./toast-debug";
 import { windowId } from "@/app/store/window-identity";
+import { formatLocale } from "@/app/i18n/i18n";
 import { formatRelativeTime } from "@/util/format-time";
 
 /** A notification older than this shows its date, not "N days ago". */
@@ -164,7 +165,7 @@ export function useNotification() {
         const notificationTime = new Date(timestamp).getTime();
         const now = Date.now();
         return now - notificationTime < NOTIFICATION_AGO_DAYS * 86_400_000
-            ? formatRelativeTime(notificationTime, now, { nowBelowSecs: 60 })
+            ? formatRelativeTime(notificationTime, now, { locale: formatLocale(), nowBelowSecs: 60 })
             : new Date(timestamp).toLocaleString();
     };
 

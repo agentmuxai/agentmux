@@ -18,7 +18,7 @@ import { createBlock } from "@/store/block-layout-actions";
 import * as services from "@/store/services";
 import * as MOS from "@/store/mos";
 import { buildPaneWidgetMenuItems } from "@/app/window/action-widgets-config";
-import { ConfirmModal } from "@/app/element/confirm-modal";
+import { TabCloseConfirms } from "@/app/tab/tab-close-confirms";
 import {
     busyMembers,
     closesWithShutdownLog,
@@ -40,7 +40,7 @@ import {
 import { pushFlashError } from "@/app/store/flash-notifications";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { createMemo, createSignal, For, onCleanup, Show } from "solid-js";
+import { createMemo, createSignal, onCleanup, Show } from "solid-js";
 import type { JSX } from "solid-js";
 
 /**
@@ -274,42 +274,12 @@ function TabContent(props: { tabId: string }): JSX.Element {
                                 tabAtom={tabAtom()}
                                 getCursorPoint={getApi().getCursorPoint}
                             />
+                            <TabCloseConfirms busy={pendingClose} leave={pendingLeave} answerBusy={answerPendingClose} answerLeave={answerPendingLeave} />
                         </ModalLayer>
                     }
                 >
                     <EmptyTabIdentity />
                 </Show>
-            </Show>
-            <Show when={pendingClose()}>
-                {(pending) => (
-                    <ConfirmModal
-                        open={true}
-                        title="Close this pane?"
-                        description="Closing stops these agents. A turn in progress is interrupted, and processes they started are stopped."
-                        confirmLabel="Shut down"
-                        destructive
-                        onConfirm={() => answerPendingClose(true)}
-                        onCancel={() => answerPendingClose(false)}
-                    >
-                        <ul class="list-disc pl-5 text-sm">
-                            <For each={pending().busy}>{(m) => <li>{describeBusyMember(m)}</li>}</For>
-                        </ul>
-                    </ConfirmModal>
-                )}
-            </Show>
-            <Show when={pendingLeave()}>
-                {(pending) => (
-                    <ConfirmModal
-                        open={true}
-                        title="Close this pane?"
-                        description={describeLeave(pending().leaving)}
-                        confirmLabel="Close anyway"
-                        cancelLabel="Keep open"
-                        destructive
-                        onConfirm={() => answerPendingLeave(true)}
-                        onCancel={() => answerPendingLeave(false)}
-                    />
-                )}
             </Show>
         </div>
     );

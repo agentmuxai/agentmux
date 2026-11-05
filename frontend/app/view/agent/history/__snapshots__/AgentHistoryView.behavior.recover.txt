@@ -1,0 +1,32 @@
+registerPane(hist-1:history)
+usePaneTabVisibility(hist-1)
+getFileSubject(live-1, output)
+subscribe
+startHistoryPoll(cursor,hidden,readBlockId,recover,reloadIfSkipped)
+count({"filename":"output"}, timeout 5000)
+range({"offset":0,"limit":2}, timeout 30000)
+> a record the parser rejects, following the bottom
+warn: [AgentHistoryView] parse failed; reloading
+count({"filename":"output"}, timeout 5000)
+range({"offset":0,"limit":3}, timeout 30000)
+after the first reload, the parser still failing: shown=["q1","a1"] meta="couldn't load history: parse failed" jumpButton=false
+> the same, reading older turns
+warn: [AgentHistoryView] parse failed; reloading
+stale: shown=["q1","a1"] meta="couldn't load history: parse failed" jumpButton=true
+> a record while stale is not shown
+still stale: shown=["q1","a1"] meta="couldn't load history: parse failed" jumpButton=true
+> the reader scrolls back to the bottom
+count({"filename":"output"}, timeout 5000)
+range({"offset":0,"limit":5}, timeout 30000)
+reloaded at the bottom: shown=["q1","a1badbad againwhile stal…(25)"] meta="full history loaded" jumpButton=false
+> stale again, then Jump to latest
+warn: [AgentHistoryView] parse failed; reloading
+count({"filename":"output"}, timeout 5000)
+range({"offset":0,"limit":6}, timeout 30000)
+warn: [AgentHistoryView] parse failed; reloading
+count({"filename":"output"}, timeout 5000)
+range({"offset":0,"limit":7}, timeout 30000)
+scrollToBottom(history-jump-to-latest)
+after Jump to latest: shown=["q1","a1badbad againwhile stal…(44)"] meta="full history loaded" jumpButton=false
+> the poll's hooks reach the same recovery
+poll hidden()=false cursor=set

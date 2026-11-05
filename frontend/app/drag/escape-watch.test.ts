@@ -18,6 +18,8 @@ const api = {
 vi.mock("@/store/global", () => ({ getApi: () => api }));
 vi.mock("@/util/logger", () => ({ Logger: { info: vi.fn(), warn: vi.fn() } }));
 vi.mock("@/util/platformutil", () => ({ isWindows: () => os.windows }));
+const followPaneDrag = vi.hoisted(() => vi.fn(async () => {}));
+vi.mock("./pane-live-follow", () => ({ followPaneDrag }));
 
 import { beginDrag, endDrag } from "./drag-session";
 import { watchEscapeDuringDrag } from "./escape-watch";
@@ -42,6 +44,14 @@ describe("watchEscapeDuringDrag", () => {
         endDrag("dragend");
         await settle();
         expect(calls[1]).toBe("stop");
+    });
+
+    it("for a pane drag, asks the host to move the pane's picture too, once the hook is armed", async () => {
+        beginDrag("tile", { nodeId: "n1" });
+        watchEscapeDuringDrag({ blockId: "b1" });
+        await settle();
+        expect(calls).toEqual([`start ${JSON.stringify({ sourceWindowLabel: "main", escapeOnly: true, paneFollow: true })}`]);
+        expect(followPaneDrag).toHaveBeenCalledWith("b1", "main");
     });
 
     it("keeps the host's Escape for the end of the drag, and forgets it at the next drag", async () => {

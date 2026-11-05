@@ -15,6 +15,14 @@ vi.mock("@/app/store/rpc-api", () => ({
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
+const muxHandlers = new Map<string, () => void>();
+vi.mock("@/app/store/mps", () => ({
+    onMuxEvent: (event: string, handler: () => void) => {
+        muxHandlers.set(event, handler);
+        return () => muxHandlers.delete(event);
+    },
+}));
+vi.mock("@/app/store/ws", () => ({ addWSReconnectHandler: () => {} }));
 
 import { HiddenAgents } from "./hidden-agents";
 
@@ -92,6 +100,17 @@ describe("HiddenAgents", () => {
             "Couldn't change Alpha: viewer.agent-hidden: no agent a1"
         );
         expect(screen.getByRole("button", { name: "Remove Alpha from the hidden list" })).toBeInTheDocument();
+    });
+
+    it("shows a flag set elsewhere (an agent, another window) when srv says the flag changed", async () => {
+        const flags: Record<string, boolean> = {};
+        agentHidden.mockImplementation(async (_c: unknown, data: { agent_id: string }) => ({ hidden: !!flags[data.agent_id] }));
+        render(() => <HiddenAgents />);
+        expect(await screen.findByText(/No agent is hidden/)).toBeInTheDocument();
+        flags.a2 = true;
+        muxHandlers.get("agenthidden:changed")!();
+        const row = (await screen.findByText("Bravo", { selector: ".setting-hidden-agent-name" })).closest("li")!;
+        expect(within(row).getByRole("button", { name: /Remove Bravo/ })).toBeInTheDocument();
     });
 
     it("says so when the agents can't be listed", async () => {

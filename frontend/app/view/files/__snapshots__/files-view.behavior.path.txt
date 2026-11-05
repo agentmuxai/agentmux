@@ -1,0 +1,6 @@
+editing: true value=/home/a focused=true
+model.navigate("/home/a/src")
+committed: input=false crumbs=true focusOnList=true
+same path: input=false
+Escape: input=false focusOnList=true
+blur: input=false

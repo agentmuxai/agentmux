@@ -24,8 +24,8 @@ export interface LiveFollowSpec {
     /** Cursor to the window's top-left, DIP. */
     offsetX: number;
     offsetY: number;
-    /** The viewport y below which the picture shows, DIP. */
-    tearLineY: number;
+    /** The viewport y below which the picture shows, DIP; none for a pane, which shows outside every window. */
+    tearLineY?: number;
 }
 
 /** Hand the host the picture and where it goes. A failure only means no picture: the tear-off is unchanged. */
