@@ -140,6 +140,9 @@ export const cefBrowserPanes: BrowserPaneHostApi = {
     setOverlayClip: async (rects, windowLabel) => {
         await invokeCommand("browser_panes_set_overlay_clip", { rects, window_label: windowLabel });
     },
+    setBadge: async (blockId, badge) => {
+        await invokeCommand("browser_pane_set_badge", { block_id: blockId, badge });
+    },
     respondMediaPermission: async (requestId, allow) => {
         await invokeCommand("pane_media_permission_respond", { requestId, allow });
     },

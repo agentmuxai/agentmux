@@ -21,16 +21,33 @@
  * Spec: docs/specs/SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md.
  */
 
-import { createSignal, onCleanup, onMount, type JSX } from "solid-js";
+import { isViewsPanesOnWindows } from "@/app/platform/pane-backend";
+import { getPaneRect } from "@/app/platform/pane-rect-registry";
+import { getApi } from "@/util/app-api";
+import { createEffect, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 
 interface PaneSizeBadgeProps {
     /** Accessor for the pane's outer frame. Measured via ResizeObserver. */
     target: () => HTMLElement | undefined;
+    /** The block, for a browser pane whose page is a Views overlay: the badge is drawn inside it. */
+    blockId?: string;
 }
 
 export const PaneSizeBadge = (props: PaneSizeBadgeProps): JSX.Element => {
     const [size, setSize] = createSignal<{ w: number; h: number }>({ w: 0, h: 0 });
     let ro: ResizeObserver | null = null;
+    let badgeEl: HTMLDivElement | undefined;
+    // A Views pane (Windows) covers this badge, so its page draws one of its own, with these colours.
+    const inPage = (): boolean => !!props.blockId && isViewsPanesOnWindows() && getPaneRect(props.blockId) != null;
+    createEffect(() => {
+        const { w, h } = size();
+        if (!inPage() || !badgeEl) return;
+        const css = getComputedStyle(badgeEl);
+        void getApi().browserPanes.setBadge?.(props.blockId!, { text: `${w}×${h}`, color: css.color, background: css.backgroundColor, border: css.borderTopColor });
+    });
+    onCleanup(() => {
+        if (inPage()) void getApi().browserPanes.setBadge?.(props.blockId!, null);
+    });
 
     onMount(() => {
         const el = props.target();
@@ -67,7 +84,7 @@ export const PaneSizeBadge = (props: PaneSizeBadgeProps): JSX.Element => {
     });
 
     return (
-        <div class="pane-size-badge" aria-hidden="true">
+        <div class="pane-size-badge" aria-hidden="true" ref={(el) => (badgeEl = el)}>
             {size().w}×{size().h}
         </div>
     );

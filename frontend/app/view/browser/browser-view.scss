@@ -715,7 +715,10 @@ $browser-nav-stack-below: 388px;
    doesn't shift content by a subpixel. */
 .browser-freeze-snapshot {
     position: absolute;
-    object-fit: fill;
+    // The frame follows the pane's box while a splitter is dragged. Uniform
+    // scale, top-left, so images are never squashed; the rest stays empty.
+    object-fit: contain;
+    object-position: top left;
     pointer-events: none;
 }
 

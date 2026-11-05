@@ -265,7 +265,7 @@ pub(crate) fn resolve_pane_label(state: &Arc<AppState>, browser: &Browser) -> Op
 ///    (`crate::input_owner`), and tell it the pane is live.
 pub fn on_after_created_browser_pane(state: &Arc<AppState>, browser: &Browser) {
     #[cfg(target_os = "windows")]
-    {
+    if !crate::pane_backend::views() {
         if let Some(host) = browser.host() {
             let wh = host.window_handle();
             if !wh.0.is_null() {
@@ -304,8 +304,7 @@ pub fn on_after_created_browser_pane(state: &Arc<AppState>, browser: &Browser) {
     // side buttons (no window procedure to take them in).
     crate::browser_pane::side_button_cdp::install(state, browser);
     crate::browser_pane::signin_notice::password_manager_off(browser);
-    #[cfg(not(target_os = "windows"))]
-    {
+    if crate::pane_backend::views() {
         // CEF's on_after_created fires from inside add_overlay_view
         // (when the BrowserView is added to the widget hierarchy) and gives
         // focus to the new pane browser. creation_views::create_browser_pane_view
@@ -367,7 +366,6 @@ pub fn on_before_close_browser_pane(state: &Arc<AppState>, label: &str, browser_
     // Step 1 (Linux/macOS): destroy the deferred OverlayController.
     // Safe now because the Browser is fully torn down and Chromium has
     // drained any queued tasks holding `WeakPtr<View>` to its BrowserView.
-    #[cfg(not(target_os = "windows"))]
     {
         let stashed = state.pending_overlay_destroy.lock().remove(label);
         if let Some(controller) = stashed {
@@ -494,7 +492,7 @@ pub fn on_load_end_browser_pane(state: &Arc<AppState>, browser: &Browser) {
     }
 
     #[cfg(target_os = "windows")]
-    {
+    if !crate::pane_backend::views() {
         if let Some(host) = browser.host() {
             let wh = host.window_handle();
             if !wh.0.is_null() {

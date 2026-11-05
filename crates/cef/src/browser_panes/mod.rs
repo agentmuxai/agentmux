@@ -61,7 +61,7 @@ mod zoom;
 // path keeps resolving now that the definition lives in the `clip` submodule.
 // Same cfg gate as the definition (Linux only — macOS uses the hole-punch
 // mask, Windows uses SetWindowRgn; see `clip::compute_pane_visible`'s doc).
-#[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+#[cfg(not(target_os = "macos"))]
 pub(crate) use clip::compute_pane_visible;
 
 /// Abstraction over the CEF-side operations `close()` performs on the host
