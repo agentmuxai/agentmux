@@ -268,8 +268,8 @@ mod tests {
         // What an older build left inline; bundle_upsert itself always stores "[]".
         exec(&shared, r#"UPDATE db_bundles SET mcp_servers = '[{"name":"inline","env":{"T":"x"}}]' WHERE id = 'b1'"#, &[]);
         let mut def = test_agent_def("agent-1", "Agent", "claude", "agent", 1, "");
-        def.memory_id = "b1".to_string();
         mstore.agent_def_insert(&mut def).unwrap();
+        mstore.agent_bundles_set("agent-1", &["b1".to_string()]).unwrap();
 
         // b1 refs a private server, a global one, and a private one agent-1 also binds itself.
         for (id, global) in [("private", false), ("global", true), ("shared-with-agent", false), ("agent-own", false)] {
