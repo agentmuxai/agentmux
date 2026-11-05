@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import clsx from "clsx";
-import { createEffect, createSignal, For, type JSX, on, onCleanup, Show, splitProps } from "solid-js";
+import { createEffect, createSignal, For, type JSX, on, onCleanup, onMount, Show, splitProps } from "solid-js";
 import { focusOnOpen } from "@/util/focusutil";
 import { useField } from "./Field";
 import { densityClass, type UiDensity } from "./shared";
@@ -211,9 +211,23 @@ export interface SelectProps
 export function Select(props: SelectProps): JSX.Element {
     const [local, rest] = splitProps(props, ["options", "children", "value", "onChange", "density", "id", "ariaLabel", "class"]);
     const field = fieldAttrs(() => local.id);
+    let el!: HTMLSelectElement;
+    // Options given as children are not there yet when `value` is first set on the element, so the browser
+    // falls back to the first one. Set it again once they are in (and whenever they change); the `options`
+    // form marks its own option `selected`, so it never needed this.
+    const syncValue = () => {
+        if (el.value !== local.value) el.value = local.value;
+    };
+    createEffect(syncValue);
+    onMount(() => {
+        const observer = new MutationObserver(syncValue);
+        observer.observe(el, { childList: true, subtree: true });
+        onCleanup(() => observer.disconnect());
+    });
     return (
         <select
             {...rest}
+            ref={el}
             id={field.id()}
             class={clsx("ui-input", densityClass(local.density), local.class)}
             aria-label={local.ariaLabel ?? rest["aria-label"]}
