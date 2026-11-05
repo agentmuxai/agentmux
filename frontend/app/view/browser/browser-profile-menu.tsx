@@ -24,7 +24,7 @@ import {
     parseIdentity,
 } from "@/app/util/browser-identity";
 import type { BrowserViewModel } from "./browser-model";
-import { browserProfiles, ensureBrowserProfiles, loadBrowserProfiles, profileById, profileInitial } from "./browser-profiles";
+import { ensureBrowserProfiles, loadBrowserProfiles, profileById, profileInitial, userProfiles } from "./browser-profiles";
 import { NewProfileModal } from "./new-profile-modal";
 import "./browser-profiles.scss";
 
@@ -131,7 +131,7 @@ export function BrowserProfileButton(props: {
                 onSelect: () => void openTabAs(model.blockId, tabUrl(), undefined),
             },
         ];
-        for (const pr of browserProfiles()) {
+        for (const pr of userProfiles()) {
             list.push({
                 label: pr.name,
                 icon: badgeIcon(pr.name, pr.color),

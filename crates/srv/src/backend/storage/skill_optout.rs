@@ -149,7 +149,7 @@ mod optout_tests {
             is_system: false,
         })
         .unwrap();
-        m.conn().lock().unwrap().execute("UPDATE db_agents SET default_memory_id = 'b1' WHERE id = 'a1'", []).unwrap();
+        m.agent_bundles_set("a1", &["b1".to_string()]).unwrap();
         m.bundle_skill_bind(&c, &m, "b1", "s1").unwrap();
         c.skill_set_reach("s1", true, false, 5).unwrap();
         c.skill_optout_put("s1", "a1", true).unwrap();

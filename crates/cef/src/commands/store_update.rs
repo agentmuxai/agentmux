@@ -174,9 +174,10 @@ pub fn install_update(target: &str, web_endpoint: &str, auth_key: &str) -> Store
         Ok(outcome) => outcome,
         Err(why) => refused(&why),
     };
-    // Back here, so the Store did not close this app: there is nothing to come back from, and the record it
-    // saved as a quit's is saved again as for no quit (a later crash restores by the usual rules).
-    if super::store_restart::install_returned() {
+    // Back here. If the Store installed it, it closes this app at its own pace and the next start says how it
+    // ended. Any other result closes nothing: there is nothing to come back from, and the record saved as a
+    // quit's is saved again as for no quit (a later crash restores by the usual rules).
+    if super::store_restart::install_returned(outcome.outcome == "installed") {
         crate::client::backend_save_session_snapshot(&web_endpoint, &auth_key, false);
     }
     outcome

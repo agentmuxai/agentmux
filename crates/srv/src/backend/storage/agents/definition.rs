@@ -721,6 +721,14 @@ impl Store {
         Ok(rows > 0)
     }
 
+    /// Empty `db_agents.default_memory_id` on a LOCAL agent: it no longer has a
+    /// bundle of its own (`m0047`). Returns whether a binding was cleared.
+    pub fn agent_def_clear_memory_id(&self, id: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let rows = conn.execute("UPDATE db_agents SET default_memory_id = '' WHERE id = ?1 AND default_memory_id != ''", params![id])?;
+        Ok(rows > 0)
+    }
+
     /// The provider's default vendor, or `"custom"` when the agent has a
     /// non-empty `model_vendor_base_url` override — same rule the
     /// frontend's `resolveEffectiveVendor`

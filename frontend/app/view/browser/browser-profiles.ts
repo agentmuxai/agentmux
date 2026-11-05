@@ -33,8 +33,14 @@ export function profileSignins(id: string): number {
     return signins()[id] ?? 0;
 }
 
-/** The profiles there are (Personal isn't listed: it always exists). */
+/** The profiles there are (Personal isn't listed: it always exists), the user's and the agents' own. */
 export const browserProfiles = profiles;
+
+/** The user's own profiles: the ones they make, switch tabs to and share with agents. */
+export const userProfiles = (): BrowserProfile[] => profiles().filter((p) => !p.owner_agent);
+
+/** Each agent's own profile, made by AgentMux the first time that agent opens a browser. */
+export const agentProfiles = (): BrowserProfile[] => profiles().filter((p) => !!p.owner_agent);
 
 /** The colour srv would give a profile made now (`palette.rs` farthest_free_slot),
  *  so most people never choose. */

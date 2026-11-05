@@ -77,7 +77,7 @@
 1186 crates/cef/src/lib.rs::run
 152 crates/cef/src/macos_compat.rs::install_macos_accessibility_governor
 135 crates/cef/src/macos_compat.rs::set_macos_app_display_name_impl
-139 crates/cef/src/memory_heartbeat.rs::start
+138 crates/cef/src/memory_heartbeat.rs::start
 143 crates/cef/src/reducer/mod.rs::HostCommand::fmt
 120 crates/cef/src/reducer/mod.rs::update
 299 crates/cef/src/sidecar.rs::spawn_backend
@@ -122,7 +122,7 @@
 108 crates/launcher/src/splash_mac.rs::flatten_rows
 272 crates/launcher/src/srv_spawner.rs::spawn_srv_once
 858 crates/launcher/src/supervisor/unix.rs::run_unix
-1287 crates/launcher/src/supervisor/windows.rs::run_windows
+1290 crates/launcher/src/supervisor/windows.rs::run_windows
 161 crates/launcher/src/tray/windows.rs::run
 102 crates/launcher/src/wrr/mod.rs::apply_hwnd_destroyed
 175 crates/launcher/src/wrr/mod.rs::apply_hwnd_opened
@@ -358,7 +358,6 @@
 108 frontend/app/block/lazy-pane-tab.tsx::createStandIn
 235 frontend/app/block/sandboxed-widget-host.tsx::createSandboxedInstance
 202 frontend/app/block/widget-bridge.ts::answer
-107 frontend/app/components/context-menu.tsx::ContextMenu
 203 frontend/app/devtools/agent-pane-perf-section.tsx::AgentPanePerfSection
 206 frontend/app/devtools/diag-panel.tsx::DiagPanel
 106 frontend/app/drag/CrossWindowDragMonitor.darwin.tsx::performTearOff
@@ -382,8 +381,8 @@
 217 frontend/app/element/quicktips.tsx::QuickTips
 180 frontend/app/element/search.tsx::SearchComponent
 155 frontend/app/element/strip-reveal-controller.ts::createStripReveal
-152 frontend/app/element/title-tooltip.ts::initTitleTooltips
-185 frontend/app/element/tooltip.tsx::TooltipInner
+148 frontend/app/element/title-tooltip.ts::initTitleTooltips
+159 frontend/app/element/tooltip.tsx::TooltipInner
 113 frontend/app/element/ui/CardGrid.tsx::CardGrid
 116 frontend/app/hook/useVoiceInput.ts::createWebSpeechVoiceSession
 109 frontend/app/hook/useWindowDrag.win32.ts::installJsDragListener
@@ -453,7 +452,7 @@
 157 frontend/app/view/agent/components/InputHistorySearch.tsx::InputHistorySearch
 193 frontend/app/view/agent/components/MarkdownBlock.tsx::MarkdownBlock
 141 frontend/app/view/agent/components/MyAgentsList.tsx::MyAgentsList
-170 frontend/app/view/agent/components/MyAgentsRow.tsx::MyAgentsRow
+171 frontend/app/view/agent/components/MyAgentsRow.tsx::MyAgentsRow
 241 frontend/app/view/agent/components/MyAgentsRowPanel.tsx::MyAgentsRowPanel
 147 frontend/app/view/agent/components/PersistentShellBlock.tsx::PersistentShellBlock
 130 frontend/app/view/agent/components/SeatRosterImport.tsx::SeatRosterImport

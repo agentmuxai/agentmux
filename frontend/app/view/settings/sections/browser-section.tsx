@@ -11,12 +11,13 @@ import { Button, IconButton, Switch, TextInput } from "@/app/element/ui";
 import { normalizeKeepAwakeSite } from "@/app/view/browser/hibernation";
 import type { BrowserProfile } from "@/types/rpc/BrowserProfile";
 import {
-    browserProfiles,
+    agentProfiles,
     createBrowserProfile,
     deleteBrowserProfile,
     profileSignins,
     followBrowserProfiles,
     updateBrowserProfile,
+    userProfiles,
 } from "@/app/view/browser/browser-profiles";
 import { ProfileBadge } from "@/app/view/browser/browser-profile-menu";
 import type { SettingsIndexEntry } from "../settings-model";
@@ -170,30 +171,39 @@ function ProfileRow(props: { profile: BrowserProfile }): JSX.Element {
     return (
         <div class="browser-profile-row">
             <ProfileBadge name={props.profile.name} color={props.profile.color} />
-            <TextInput
-                detached
-                aria-label={`Name of ${props.profile.name}`}
-                value={name()}
-                maxLength={40}
-                onInput={(e) => setName(e.currentTarget.value)}
-                onBlur={rename}
-                onKeyDown={(e) => {
-                    if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
-                    if (e.key === "Escape") setName(props.profile.name);
-                }}
-            />
-            <PaletteSwatches
-                label={`Colour of ${props.profile.name}`}
-                value={props.profile.color}
-                onSelect={(slot) => slot && void run(() => updateBrowserProfile(props.profile.id, { color: slot.hex }))}
-            />
+            <Show
+                when={!props.profile.owner_agent}
+                fallback={
+                    <span class="browser-profile-fixed">
+                        {props.profile.name} <span class="browser-profile-agent-tag">agent</span>
+                    </span>
+                }
+            >
+                <TextInput
+                    detached
+                    aria-label={`Name of ${props.profile.name}`}
+                    value={name()}
+                    maxLength={40}
+                    onInput={(e) => setName(e.currentTarget.value)}
+                    onBlur={rename}
+                    onKeyDown={(e) => {
+                        if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
+                        if (e.key === "Escape") setName(props.profile.name);
+                    }}
+                />
+                <PaletteSwatches
+                    label={`Colour of ${props.profile.name}`}
+                    value={props.profile.color}
+                    onSelect={(slot) => slot && void run(() => updateBrowserProfile(props.profile.id, { color: slot.hex }))}
+                />
+            </Show>
             <label class="browser-profile-agents">
                 <Switch
                     checked={props.profile.agents_allowed}
                     ariaLabel={`Agents may use ${props.profile.name}`}
                     onChange={(on) => void run(() => updateBrowserProfile(props.profile.id, { agents_allowed: on }))}
                 />
-                <span>Agents may use it</span>
+                <span>{props.profile.owner_agent ? "Other agents may use it" : "Agents may use it"}</span>
             </label>
             <Show
                 when={confirming() && saved() > 0}
@@ -219,6 +229,30 @@ function ProfileRow(props: { profile: BrowserProfile }): JSX.Element {
                 </div>
             </Show>
         </div>
+    );
+}
+
+/** The user's profiles, then each agent's own, which AgentMux makes the first time that agent opens a browser. */
+function ProfileRows(): JSX.Element {
+    return (
+        <>
+            <For each={userProfiles()}>{(p) => <ProfileRow profile={p} />}</For>
+            <AgentProfiles />
+        </>
+    );
+}
+
+function AgentProfiles(): JSX.Element {
+    return (
+        <Show when={agentProfiles().length > 0}>
+            <div class="setting-devices-description">
+                Each agent browses as a profile of its own by default, so its sign-ins stay from one pane to the next. Deleting one signs that
+                agent out everywhere; it gets a fresh one the next time it opens a browser.
+            </div>
+            <div class="browser-profile-list" aria-label="Agents' profiles">
+                <For each={agentProfiles()}>{(p) => <ProfileRow profile={p} />}</For>
+            </div>
+        </Show>
     );
 }
 
@@ -302,7 +336,7 @@ export function BrowserSection(): JSX.Element {
                         </span>
                         <span class="browser-profile-fixed">Personal</span>
                     </div>
-                    <For each={browserProfiles()}>{(p) => <ProfileRow profile={p} />}</For>
+                    <ProfileRows />
                 </div>
                 <div class="browser-profile-add">
                     <TextInput

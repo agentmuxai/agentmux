@@ -38,7 +38,7 @@ use super::{Migration, MigrationContext, MigrationError, MigrationScope};
 pub struct M0046RemoveEmptyAgentBundles;
 
 /// "<x> — ABF" or "<x> — ABF (n)": the name the per-agent bundle was given.
-fn is_abf_name(name: &str) -> bool {
+pub(super) fn is_abf_name(name: &str) -> bool {
     let base = match name.rsplit_once(" (") {
         Some((base, tail)) if tail.len() > 1 && tail.ends_with(')') && tail[..tail.len() - 1].bytes().all(|b| b.is_ascii_digit()) => base,
         _ => name,
@@ -46,23 +46,22 @@ fn is_abf_name(name: &str) -> bool {
     base.ends_with(" — ABF")
 }
 
-/// Whether `b` is a per-agent bundle that holds nothing (the references and history are checked
-/// separately).
-fn is_empty_agent_bundle(b: &Bundle) -> bool {
-    !b.is_blank
-        && !b.is_global
-        && !b.is_system
-        && b.id != "blank"
-        && !b.id.starts_with("seed-")
-        && is_abf_name(&b.name)
-        && b.description.trim().is_empty()
+/// Whether `b` carries no text, context files, skills or servers of its own (the references and
+/// history are checked separately).
+pub(super) fn holds_nothing(b: &Bundle) -> bool {
+    b.description.trim().is_empty()
         && b.instructions.trim().is_empty()
         && [&b.instructions_by_provider, &b.context_files, &b.mcp_servers, &b.skills]
             .iter()
             .all(|s| matches!(s.trim(), "" | "{}" | "[]"))
 }
 
-fn table_exists(conn: &Connection, table: &str) -> bool {
+/// Whether `b` is a per-agent bundle that holds nothing.
+fn is_empty_agent_bundle(b: &Bundle) -> bool {
+    !b.is_blank && !b.is_global && !b.is_system && b.id != "blank" && !b.id.starts_with("seed-") && is_abf_name(&b.name) && holds_nothing(b)
+}
+
+pub(super) fn table_exists(conn: &Connection, table: &str) -> bool {
     conn.query_row("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1", params![table], |_| Ok(())).is_ok()
 }
 
@@ -135,30 +134,39 @@ impl Migration for M0046RemoveEmptyAgentBundles {
     }
 
     fn up(&self, ctx: &MigrationContext) -> Result<(), MigrationError> {
-        if !ctx.channel_store_path.exists() || !ctx.shared_store_path.exists() {
+        remove_empty_unreferenced(ctx, true)
+    }
+}
+
+/// Remove the empty per-agent bundles nothing points at, as listed in the module doc. With
+/// `honour_recorded` a bundle some agent's recorded bundle names is kept too; `m0047` passes
+/// false, since no agent has a bundle of its own any more for that record to restore.
+pub(super) fn remove_empty_unreferenced(ctx: &MigrationContext, honour_recorded: bool) -> Result<(), MigrationError> {
+    if !ctx.channel_store_path.exists() || !ctx.shared_store_path.exists() {
+        return Ok(());
+    }
+    let mstore = Arc::new(
+        Store::open(&ctx.channel_store_path)
+            .map_err(|e| MigrationError(format!("remove_empty_agent_bundles: open channel store: {e}")))?,
+    );
+    let bundle_store = Store::open_shared(&ctx.shared_store_path)
+        .map_err(|e| MigrationError(format!("remove_empty_agent_bundles: open shared store: {e}")))?;
+    // The global registry lists agents that exist only there, so their recorded bundles count.
+    if let Some(def_dir) = resolve_shared_definitions_dir() {
+        match DefinitionStore::open(def_dir) {
+            Ok(def_store) => mstore.set_def_registry(Arc::new(def_store)),
+            Err(e) => tracing::warn!(error = %e, "remove_empty_agent_bundles: global def registry unavailable"),
+        }
+    }
+    // A store that can't be read could hold a binding, so nothing is removed this time.
+    let mut keep = match referenced_anywhere(&mstore, &ctx.home) {
+        Ok(keep) => keep,
+        Err(e) => {
+            tracing::warn!(error = %e, "remove_empty_agent_bundles: a channel store could not be read; nothing removed");
             return Ok(());
         }
-        let mstore = Arc::new(
-            Store::open(&ctx.channel_store_path)
-                .map_err(|e| MigrationError(format!("remove_empty_agent_bundles: open channel store: {e}")))?,
-        );
-        let bundle_store = Store::open_shared(&ctx.shared_store_path)
-            .map_err(|e| MigrationError(format!("remove_empty_agent_bundles: open shared store: {e}")))?;
-        // The global registry lists agents that exist only there, so their recorded bundles count.
-        if let Some(def_dir) = resolve_shared_definitions_dir() {
-            match DefinitionStore::open(def_dir) {
-                Ok(def_store) => mstore.set_def_registry(Arc::new(def_store)),
-                Err(e) => tracing::warn!(error = %e, "remove_empty_agent_bundles: global def registry unavailable"),
-            }
-        }
-        // A store that can't be read could hold a binding, so nothing is removed this time.
-        let mut keep = match referenced_anywhere(&mstore, &ctx.home) {
-            Ok(keep) => keep,
-            Err(e) => {
-                tracing::warn!(error = %e, "remove_empty_agent_bundles: a channel store could not be read; nothing removed");
-                return Ok(());
-            }
-        };
+    };
+    if honour_recorded {
         // Without the recorded-bundle store there is no telling which bundle an agent in another
         // channel still uses, so nothing is removed. Not an error: a start without the shared
         // folder must still go on.
@@ -174,35 +182,35 @@ impl Migration for M0046RemoveEmptyAgentBundles {
                 keep.insert(id);
             }
         }
-        let held_content = {
-            let conn = bundle_store.conn().lock().unwrap();
-            if table_exists(&conn, "db_bundle_versions") {
-                column(&conn, "SELECT DISTINCT bundle_id FROM db_bundle_versions WHERE trim(instructions) != ''")
-                    .map_err(|e| MigrationError(format!("remove_empty_agent_bundles: {e}")))?
-            } else {
-                Vec::new()
-            }
-        };
-        keep.extend(held_content);
-
-        let doomed: Vec<Bundle> = bundle_store
-            .bundle_list()
-            .map_err(|e| MigrationError(format!("remove_empty_agent_bundles: list bundles: {e}")))?
-            .into_iter()
-            .filter(|b| is_empty_agent_bundle(b) && !keep.contains(&b.id))
-            .collect();
-        if doomed.is_empty() {
-            return Ok(());
-        }
-        let removed: Vec<Removed> = doomed
-            .iter()
-            .map(|b| Removed { id: b.id.clone(), name: b.name.clone(), created_at: b.created_at })
-            .collect();
-        record(ctx, &removed);
-        delete(&bundle_store, &removed).map_err(|e| MigrationError(format!("remove_empty_agent_bundles: {e}")))?;
-        tracing::info!(removed = removed.len(), kept_referenced = keep.len(), "remove_empty_agent_bundles: removed empty per-agent bundles nothing points at");
-        Ok(())
     }
+    let held_content = {
+        let conn = bundle_store.conn().lock().unwrap();
+        if table_exists(&conn, "db_bundle_versions") {
+            column(&conn, "SELECT DISTINCT bundle_id FROM db_bundle_versions WHERE trim(instructions) != ''")
+                .map_err(|e| MigrationError(format!("remove_empty_agent_bundles: {e}")))?
+        } else {
+            Vec::new()
+        }
+    };
+    keep.extend(held_content);
+
+    let doomed: Vec<Bundle> = bundle_store
+        .bundle_list()
+        .map_err(|e| MigrationError(format!("remove_empty_agent_bundles: list bundles: {e}")))?
+        .into_iter()
+        .filter(|b| is_empty_agent_bundle(b) && !keep.contains(&b.id))
+        .collect();
+    if doomed.is_empty() {
+        return Ok(());
+    }
+    let removed: Vec<Removed> = doomed
+        .iter()
+        .map(|b| Removed { id: b.id.clone(), name: b.name.clone(), created_at: b.created_at })
+        .collect();
+    record(ctx, &removed);
+    delete(&bundle_store, &removed).map_err(|e| MigrationError(format!("remove_empty_agent_bundles: {e}")))?;
+    tracing::info!(removed = removed.len(), kept_referenced = keep.len(), "remove_empty_agent_bundles: removed empty per-agent bundles nothing points at");
+    Ok(())
 }
 
 /// Write the list of what is about to go, so it can be seen afterwards. Not fatal: every one is empty.

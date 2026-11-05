@@ -27,6 +27,8 @@ import { CopyableErrorMessage } from "@/app/errors/CopyableErrorMessage";
 import { createMuxBusCloudConfig } from "./muxbus-cloud-config";
 import { muxbusNeedsSignInAgain } from "./muxbus-session";
 import { IconButton } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
+import { Rich } from "@/app/i18n/rich";
 import { acceptMuxbusDelivery, type MuxBusDeliveryStatus } from "@/store/muxbus-delivery";
 import { MuxBusSignInChoices, type MuxBusIdentityProvider } from "./muxbus-sign-in-choices";
 import { MuxBusSignOutButton } from "./muxbus-sign-out";
@@ -267,15 +269,12 @@ export function AgentMuxConnectBody(props: { muxbus: MuxBusController }): JSX.El
                     when={muxbus.status()?.connected}
                     fallback={
                         <>
-                            <div class="oauth-byo-note">
-                                ⓘ Sign in to AgentMux Cloud in your browser — one account per
-                                install, no key to manage.
-                            </div>
+                            <div class="oauth-byo-note">{t("signin.panel.note")}</div>
                             <MuxBusSignInChoices
                                 identityProviders={muxbus.identityProviders()}
                                 loading={muxbus.loading()}
-                                label="Connect with AgentMux"
-                                cancelLabel="Connecting… (Cancel)"
+                                label={t("signin.connectWithAgentMux")}
+                                cancelLabel={t("signin.connectingCancel")}
                                 onSignIn={(provider) => void muxbus.connect(provider)}
                                 onCancel={() => void muxbus.cancel()}
                             />
@@ -287,23 +286,20 @@ export function AgentMuxConnectBody(props: { muxbus: MuxBusController }): JSX.El
                             when={muxbusNeedsSignInAgain(muxbus.status())}
                             fallback={
                                 <>
-                                    Connected as{" "}
-                                    <strong>{muxbus.status()!.email || "AgentMux Cloud"}</strong>
-                                    <Show when={!muxbus.status()!.valid}> (token expired)</Show>
+                                    <Rich k="signin.panel.connectedAs" params={{ who: muxbus.status()!.email || "AgentMux Cloud" }} />
+                                    <Show when={!muxbus.status()!.valid}>{t("signin.panel.tokenExpired")}</Show>
                                 </>
                             }
                         >
-                            ⓘ The sign-in for{" "}
-                            <strong>{muxbus.status()!.email || "AgentMux Cloud"}</strong> no longer
-                            works. Sign in again to reconnect.
+                            <Rich k="signin.panel.signInNoLongerWorks" params={{ who: muxbus.status()!.email || "AgentMux Cloud" }} />
                         </Show>
                     </div>
                     <Show when={muxbusNeedsSignInAgain(muxbus.status())}>
                         <MuxBusSignInChoices
                             identityProviders={muxbus.identityProviders()}
                             loading={muxbus.loading()}
-                            label="Sign in again"
-                            cancelLabel="Connecting… (Cancel)"
+                            label={t("signin.signInAgain")}
+                            cancelLabel={t("signin.connectingCancel")}
                             onSignIn={(provider) => void muxbus.connect(provider)}
                             onCancel={() => void muxbus.cancel()}
                         />
@@ -312,7 +308,7 @@ export function AgentMuxConnectBody(props: { muxbus: MuxBusController }): JSX.El
                         <MuxBusSignOutButton
                             muxbus={muxbus}
                             class="identity-btn identity-btn-secondary"
-                            label="Disconnect"
+                            label={t("signin.panel.disconnect")}
                         />
                     </div>
                 </Show>

@@ -3076,7 +3076,7 @@ async fn a_container_agents_browser_open_gets_its_own_incognito_jar() {
     };
 
     // As KCont sent it: a site limit and a title, and no profile.
-    let (s, body) = open(token.clone(), serde_json::json!({ "allowed_origins": ["https://example.com"], "title": "dev" })).await;
+    let (s, body) = open(token.clone(), serde_json::json!({ "allowed_origins": ["https://example.com"], "title": "dev", "profile": "incognito" })).await;
     assert_eq!(s, axum::http::StatusCode::OK, "{body}");
     let jar = identity_of(&body).expect("the pane has a jar of its own, not Personal");
     assert!(jar.as_str().is_some_and(|j| j.starts_with("incognito:")), "{jar}");
@@ -3085,8 +3085,8 @@ async fn a_container_agents_browser_open_gets_its_own_incognito_jar() {
     let (s, body) = open(token.clone(), serde_json::json!({ "profile": "personal" })).await;
     assert_eq!(s, axum::http::StatusCode::BAD_REQUEST, "{body}");
 
-    // The same request with the instance key (an agent on the user's machine) browses as the user.
-    let (s, body) = open("test-secret-key".to_string(), serde_json::json!({})).await;
+    // The same request with the instance key (an agent on the user's machine) can ask for the user's own.
+    let (s, body) = open("test-secret-key".to_string(), serde_json::json!({ "profile": "personal" })).await;
     assert_eq!(s, axum::http::StatusCode::OK, "{body}");
     assert_eq!(identity_of(&body), None);
     assert_eq!(body["data"]["browsing_as"], "personal");
@@ -3096,7 +3096,6 @@ async fn a_container_agents_browser_open_gets_its_own_incognito_jar() {
     block.meta.insert("agentMode".into(), serde_json::json!("container"));
     block.meta.insert("agentId".into(), serde_json::json!(agent));
     state.mstore.update(&mut block).unwrap();
-    let (s, body) = open("test-secret-key".to_string(), serde_json::json!({})).await;
-    assert_eq!(s, axum::http::StatusCode::OK, "{body}");
-    assert_eq!(body["data"]["browsing_as"], "incognito");
+    let (s, body) = open("test-secret-key".to_string(), serde_json::json!({ "profile": "personal" })).await;
+    assert_eq!(s, axum::http::StatusCode::BAD_REQUEST, "{body}");
 }

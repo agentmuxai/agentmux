@@ -271,6 +271,9 @@ pub(crate) async fn run_windows(
         });
     }
 
+    // A Store install is opened again by Windows after the Store updates it: this process, so the tray, srv and host come back too.
+    crate::store_restart::register_if_packaged();
+
     // Optional tray icon (issue #2977 Workstream 1). Started here, right after
     // the single-instance pipe is claimed: this is the first point where we
     // know we are THE instance, so we can't put a second icon in the tray, and

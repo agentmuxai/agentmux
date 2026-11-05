@@ -7,9 +7,7 @@
  * (SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md §3.6). Order matters: when
  * two bundles name the same skill, the first wins.
  *
- * Controlled: `value` is the picked ids, `onChange` gets the next list. The
- * agent's own bundle, when given as `own`, is shown first and can't be moved
- * or removed; it isn't part of `value`.
+ * Controlled: `value` is the picked ids, `onChange` gets the next list.
  */
 
 import { createMemo, For, Show, type JSX } from "solid-js";
@@ -22,8 +20,6 @@ export interface BundleListEditorProps {
     bundles: Bundle[];
     value: string[];
     onChange: (ids: string[]) => void;
-    /** The agent's own bundle's name, shown first and fixed. */
-    own?: string;
     disabled?: boolean;
     testId?: string;
 }
@@ -45,14 +41,6 @@ export function BundleListEditor(props: BundleListEditorProps): JSX.Element {
 
     return (
         <div class="bundle-list-editor" data-testid={props.testId}>
-            <Show when={props.own}>
-                {(own) => (
-                    <div class="bundle-list-editor-row is-own">
-                        <span class="bundle-list-editor-name">{own()}</span>
-                        <span class="bundle-list-editor-hint">this agent's own</span>
-                    </div>
-                )}
-            </Show>
             <For each={props.value}>
                 {(id, index) => (
                     <div class="bundle-list-editor-row" data-testid="bundle-list-editor-item">

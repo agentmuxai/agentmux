@@ -610,6 +610,7 @@ partial list.
 | [`SPEC_AGENT_INSTALL_STAGE_2026_05_17`](SPEC_AGENT_INSTALL_STAGE_2026_05_17.md) | SPEC: Agent Install Stage |
 | [`SPEC_AGENT_OPEN_FIRST_SCREEN_THEN_REST_2026_10_19`](SPEC_AGENT_OPEN_FIRST_SCREEN_THEN_REST_2026_10_19.md) | Spec: opening an agent shows its first screen at once, and loads the rest afterwards |
 | [`SPEC_AGENT_OVERLAP_AWARENESS_2026_10_10`](SPEC_AGENT_OVERLAP_AWARENESS_2026_10_10.md) | SPEC: agents can see who else is working on the same thing |
+| [`SPEC_AGENT_OWN_BROWSER_PROFILE_2026_11_04`](SPEC_AGENT_OWN_BROWSER_PROFILE_2026_11_04.md) | SPEC: every agent browses with its own named, persistent profile (2026-11-04) |
 | [`SPEC_AGENT_PANE_BASH_HIGHLIGHTING_2026_10_04`](SPEC_AGENT_PANE_BASH_HIGHLIGHTING_2026_10_04.md) | SPEC: Robust highlighting for Bash tool panels in the agent pane |
 | [`SPEC_AGENT_PANE_BOTTOM_TIGHT_INVARIANT_2026_10_29`](SPEC_AGENT_PANE_BOTTOM_TIGHT_INVARIANT_2026_10_29.md) | Agent pane: the latest message stays tight against the bottom edge, always |
 | [`SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23`](SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md) | SPEC: Agent pane bounded live window — migration plan |
@@ -651,6 +652,7 @@ partial list.
 | [`SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02`](SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02.md) | Spec: an orthogonal "attached task" status axis, sibling to `TurnPhase` |
 | [`SPEC_AUDIT_LIVE_LOG_OF_EVERY_AGENT_ACTION_2026_11_03`](SPEC_AUDIT_LIVE_LOG_OF_EVERY_AGENT_ACTION_2026_11_03.md) | Spec: the Audit as a live log of every agent action |
 | [`SPEC_BACKGROUND_TASK_STRUCTURED_FEED_AND_SWARM_OWNERSHIP_2026_09_27`](SPEC_BACKGROUND_TASK_STRUCTURED_FEED_AND_SWARM_OWNERSHIP_2026_09_27.md) | Spec: Background tasks from the CLI's structured task feed, owned in Swarm |
+| [`SPEC_BACKGROUND_UPDATES_ONE_CLICK_RESTART_2026_11_03`](SPEC_BACKGROUND_UPDATES_ONE_CLICK_RESTART_2026_11_03.md) | Spec: background updates, one "Restart to update" click |
 | [`SPEC_BASHWRAP_PER_AGENT_CWD_2026_10_18`](SPEC_BASHWRAP_PER_AGENT_CWD_2026_10_18.md) | SPEC: each agent's Bash calls keep their own working directory |
 | [`SPEC_BROWSER_AND_EDITOR_PANES_2026_04_16`](SPEC_BROWSER_AND_EDITOR_PANES_2026_04_16.md) | SPEC: Browser and Editor Panes |
 | [`SPEC_BROWSER_PANE_BYPASS_2026_10_16`](SPEC_BROWSER_PANE_BYPASS_2026_10_16.md) | SPEC: Bypass: the person lets the agent act without asking in one browser pane |

@@ -45,7 +45,8 @@ const vault = vi.fn(async (op: string, _args?: Record<string, unknown>): Promise
 });
 vi.mock("@/util/app-api", () => ({ getApi: () => ({ approvals: { vault } }) }));
 
-import { clock, siteOf, UsePrompt } from "./vault-use-prompts";
+import { VaultUseItem as UsePrompt } from "./vault-requests-list";
+import { clock, siteOf } from "./vault-use-question";
 import { VaultEntries } from "./vault-entries";
 import { refreshVault } from "./vault-store";
 
@@ -62,7 +63,7 @@ describe("the prompt for an agent's use of an entry", () => {
 
     it("names the agent, the entry, the site, the field and why, and says the agent never sees the value", async () => {
         render(() => <UsePrompt use={uses[0]} close={vi.fn()} />);
-        const dialog = await screen.findByRole("dialog");
+        const dialog = await screen.findByRole("group");
         expect(dialog.textContent).toContain("Agent1 wants to fill your Social Security number");
         expect(dialog.textContent).toContain("Social Security Number");
         expect(dialog.textContent).toContain("www.irs.gov");
@@ -81,7 +82,7 @@ describe("the prompt for an agent's use of an entry", () => {
             vault.mockClear();
             const close = vi.fn();
             const { unmount } = render(() => <UsePrompt use={uses[0]} close={close} />);
-            const dialog = await screen.findByRole("dialog");
+            const dialog = await screen.findByRole("group");
             fireEvent.click(within(dialog).getByRole("button", { name: label }));
             await waitFor(() => expect(calls("answer_use")).toEqual([{ id: "use-1", decision }]));
             await waitFor(() => expect(close).toHaveBeenCalled());
@@ -94,7 +95,7 @@ describe("the prompt for an agent's use of an entry", () => {
         await refreshVault();
         const close = vi.fn();
         render(() => <UsePrompt use={uses[0]} close={close} />);
-        const dialog = await screen.findByRole("dialog");
+        const dialog = await screen.findByRole("group");
         expect(dialog.textContent).toContain("Agent1 wants to run a command with your API key");
         expect(dialog.textContent).toContain("stripe balance retrieve");
         expect(dialog.textContent).toContain("STRIPE_API_KEY");
@@ -119,7 +120,7 @@ describe("the prompt for an agent's use of an entry", () => {
         ];
         await refreshVault();
         render(() => <UsePrompt use={uses[0]} close={vi.fn()} />);
-        const dialog = await screen.findByRole("dialog");
+        const dialog = await screen.findByRole("group");
         expect(dialog.textContent).toContain("Agent1 wants to sign in to accounts.example.com as al***");
         expect(dialog.textContent).toContain("sign-in form on accounts.example.com");
         expect(dialog.textContent).toContain("never sees the user name or the password");
@@ -132,7 +133,7 @@ describe("the prompt for an agent's use of an entry", () => {
         uses = [use({ origin: "", field: "", what: "value", entry_label: "GitHub token", kind: "", command: "gh auth token", cwd: "C:/work", offer_always: false, replaces: true, reason: "what the command prints replaces the value" })];
         await refreshVault();
         render(() => <UsePrompt use={uses[0]} close={vi.fn()} />);
-        const dialog = await screen.findByRole("dialog");
+        const dialog = await screen.findByRole("group");
         expect(dialog.textContent).toContain("Agent1 wants to replace GitHub token with what a command prints");
         expect(dialog.textContent).toContain("gh auth token");
         expect(dialog.textContent).toContain("becomes the value of GitHub token");
@@ -147,7 +148,7 @@ describe("the prompt for an agent's use of an entry", () => {
         uses = [use({ offer_always: false, reason: "the field doesn't look like what this entry is" })];
         await refreshVault();
         render(() => <UsePrompt use={uses[0]} close={vi.fn()} />);
-        const dialog = await screen.findByRole("dialog");
+        const dialog = await screen.findByRole("group");
         expect(within(dialog).queryByRole("button", { name: /Always/ })).toBeNull();
         expect(within(dialog).getByRole("button", { name: "Allow once" })).toBeInTheDocument();
         expect(dialog.textContent).toContain("doesn't look like what this entry is");
@@ -156,7 +157,7 @@ describe("the prompt for an agent's use of an entry", () => {
     it("goes when the request was answered elsewhere, and shows an error if the answer fails", async () => {
         const close = vi.fn();
         render(() => <UsePrompt use={uses[0]} close={close} />);
-        const dialog = await screen.findByRole("dialog");
+        const dialog = await screen.findByRole("group");
         vault.mockRejectedValueOnce(new Error("couldn't reach AgentMux's host"));
         fireEvent.click(within(dialog).getByRole("button", { name: "Allow once" }));
         expect((await screen.findByRole("alert")).textContent).toContain("couldn't reach");
@@ -169,7 +170,7 @@ describe("the prompt for an agent's use of an entry", () => {
     it("closes when the answer says nothing is waiting any more, instead of staying stuck", async () => {
         const close = vi.fn();
         render(() => <UsePrompt use={uses[0]} close={close} />);
-        const dialog = await screen.findByRole("dialog");
+        const dialog = await screen.findByRole("group");
         // The agent gave up and its prompt wasn't taken down: the answer is refused.
         vault.mockRejectedValueOnce(new Error("that request is no longer waiting"));
         fireEvent.click(within(dialog).getByRole("button", { name: "Deny" }));
@@ -182,7 +183,7 @@ describe("the prompt for an agent's use of an entry", () => {
         await refreshVault();
         const close = vi.fn();
         render(() => <UsePrompt use={uses[0]} close={close} />);
-        const dialog = await screen.findByRole("dialog");
+        const dialog = await screen.findByRole("group");
         expect(dialog.textContent).toContain("Agent1 needs your Social Security number");
         expect(dialog.textContent).toContain("there is no Vault entry for this yet");
         expect(within(dialog).queryByRole("button", { name: /Always/ })).toBeNull();
@@ -201,7 +202,7 @@ describe("the prompt for an agent's use of an entry", () => {
         uses = [use({ needs_value: true, offer_always: false })];
         await refreshVault();
         render(() => <UsePrompt use={uses[0]} close={vi.fn()} />);
-        const dialog = await screen.findByRole("dialog");
+        const dialog = await screen.findByRole("group");
         const field = dialog.querySelector('input[type="password"]') as HTMLInputElement;
         fireEvent.input(field, { target: { value: "987-65-4321" } });
         fireEvent.click(within(dialog).getByRole("button", { name: "Deny" }));
@@ -302,7 +303,7 @@ describe("srv's deadline in the prompt", () => {
         uses = [use()];
         await refreshVault();
         render(() => <UsePrompt use={uses[0]} close={vi.fn()} />);
-        const dialog = await screen.findByRole("dialog");
+        const dialog = await screen.findByRole("group");
         expect(dialog.textContent).toContain("ID and card details are never used without a yes");
         expect(screen.queryByRole("timer")).toBeNull();
         fireEvent.pointerMove(dialog.querySelector(".vault-use-deadline") as HTMLElement);
