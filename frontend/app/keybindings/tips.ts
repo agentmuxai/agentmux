@@ -297,7 +297,7 @@ export const TIPS: TipRow[] = [
         gesture: "mod+click / shift+click",
         where: "on rows in the Files pane",
         label: "Add or remove one row / select a range",
-        source: { file: "frontend/app/view/files/files-view.tsx", anchor: "e.shiftKey" },
+        source: { file: "frontend/app/view/files/files-view-pointer.ts", anchor: "e.shiftKey" },
     },
     {
         // Not on macOS: Spotlight takes ⌘Space and the input-source switch ⌃Space
@@ -308,7 +308,7 @@ export const TIPS: TipRow[] = [
         where: "in the Files list",
         label: "Add or remove the focused row without moving it",
         os: ["win32", "linux"],
-        source: { file: "frontend/app/view/files/files-view.tsx", anchor: 'e.key === " " && isMod(e)' },
+        source: { file: "frontend/app/view/files/files-view-keys.ts", anchor: 'e.key === " " && isMod(e)' },
     },
     {
         id: "files:keys",
@@ -316,7 +316,7 @@ export const TIPS: TipRow[] = [
         gesture: "key:Space / key:/ / key:Backspace",
         where: "in the Files list",
         label: "Preview the file / filter / go back; typing a name jumps to it",
-        source: { file: "frontend/app/view/files/files-view.tsx", anchor: "new TypeAhead()" },
+        source: { file: "frontend/app/view/files/files-view-state.ts", anchor: "new TypeAhead()" },
     },
     {
         id: "files:folder:middleclick",
@@ -324,7 +324,7 @@ export const TIPS: TipRow[] = [
         gesture: "middleclick",
         where: "on a folder in the Files pane",
         label: "Open it in a new tab",
-        source: { file: "frontend/app/view/files/files-view.tsx", anchor: "Middle-click a folder: open it in a new tab." },
+        source: { file: "frontend/app/view/files/files-view-parts.tsx", anchor: "Middle-click a folder: open it in a new tab." },
     },
     {
         id: "files:path:dblclick",
@@ -332,7 +332,7 @@ export const TIPS: TipRow[] = [
         gesture: "dblclick",
         where: "on the Files pane's folder path",
         label: "Type a path",
-        source: { file: "frontend/app/view/files/files-view.tsx", anchor: "startEditingPath" },
+        source: { file: "frontend/app/view/files/files-view-state.ts", anchor: "startEditingPath" },
     },
     {
         id: "files:drag",
@@ -340,7 +340,7 @@ export const TIPS: TipRow[] = [
         gesture: "drag / drop",
         where: "Files rows onto a pane, or files onto the list",
         label: "Send files to an agent, editor or terminal pane; dropping copies here, or into the folder under the pointer",
-        source: { file: "frontend/app/view/files/files-view.tsx", anchor: "registerFileDropTarget(model.blockId" },
+        source: { file: "frontend/app/view/files/files-view-drag.ts", anchor: "registerFileDropTarget(model.blockId" },
     },
 
     // ── Editor viewers ──
