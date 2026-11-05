@@ -12,7 +12,7 @@
 // run whatever the window), starts with nothing open, checks with `verify` that
 // what it opened is on screen, and closes it again afterwards. Menus are DOM
 // overlays in the page (spec §9.3), found by these selectors:
-//   - the hamburger menu and the top bar's submenus: `.menu`, and each open
+//   - the AgentMux logo menu and the top bar's submenus: `.menu`, and each open
 //     submenu as a separate `.menu.sub-menu` at the end of the body;
 //   - right-click and pane `+` menus: `.menu` inside `#cef-context-menu-overlay`,
 //     submenus nested in their row.
@@ -71,14 +71,14 @@ async function firstVisiblePane(session) {
     return `.pane-stack:has([data-blockid="${id}"])`;
 }
 
-async function openHamburger(session) {
-    await session.clickSelector(".hamburger-btn");
+async function openLogoMenu(session) {
+    await session.clickSelector(".logo-menu-btn");
     await session.wait(300);
 }
 
-/** Opens the hamburger menu's `label` submenu, by hovering its row. */
-async function openHamburgerSubmenu(session, label) {
-    await openHamburger(session);
+/** Opens the AgentMux logo menu's `label` submenu, by hovering its row. */
+async function openLogoMenuSubmenu(session, label) {
+    await openLogoMenu(session);
     await session.hoverText(MENU, label);
     await session.wait(500);
 }
@@ -143,7 +143,7 @@ async function maximize(session, pane) {
 }
 
 /** Opens Settings from the widget bar (by its icon or the More list; the
- *  hamburger menu has no Settings since #5357) in the current tab and
+ *  AgentMux logo menu has no Settings since #5357) in the current tab and
  *  maximizes its pane; returns the pane's selector. */
 async function openSettings(session) {
     await openWidget(session, { label: "Settings", icon: "cog" });
@@ -205,7 +205,7 @@ export const shots = [
     shot({
         id: "chrome-top-bar",
         title: "Top bar",
-        description: "The hamburger menu, the window's tabs, and the widget buttons.",
+        description: "The AgentMux logo menu, the window's tabs, and the widget buttons.",
         selector: ".window-header",
     }),
     shot({
@@ -264,12 +264,12 @@ export const shots = [
         });
     })(),
 
-    // ── The hamburger menu ────────────────────────────────────────────────
+    // ── The AgentMux logo menu ────────────────────────────────────────────────
     shot({
-        id: "chrome-hamburger-menu",
-        title: "Hamburger menu",
+        id: "chrome-logo-menu",
+        title: "AgentMux logo menu",
         description: "The main menu, from the button at the top left.",
-        prep: openHamburger,
+        prep: openLogoMenu,
         verify: MENU,
         selector: MENU,
         padding: 4,
@@ -280,10 +280,10 @@ export const shots = [
         ["Workspaces", "workspaces"],
     ].map(([label, key]) =>
         shot({
-            id: `chrome-hamburger-${key}`,
-            title: `Hamburger menu — ${label}`,
+            id: `chrome-logo-${key}`,
+            title: `AgentMux logo menu — ${label}`,
             description: `The main menu with its ${label} submenu open.`,
-            prep: (session) => openHamburgerSubmenu(session, label),
+            prep: (session) => openLogoMenuSubmenu(session, label),
             // A submenu closes when the pointer leaves its row.
             keepPointer: true,
             verify: [MENU, SUBMENU],

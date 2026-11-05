@@ -177,7 +177,7 @@ async function maximize(session, pane) {
 const WIDGET_ICONS = { Memory: "brain", Connectors: "plug", Settings: "cog" };
 
 /** Opens `item` (Memory, Connectors or Settings) from the widget bar, by its
- *  icon or the More list (the hamburger menu has none of them since #5357),
+ *  icon or the More list (the AgentMux logo menu has none of them since #5357),
  *  in the current tab, maximized, and returns its pane. */
 async function openFromMenu(session, item, marker) {
     await openWidget(session, { label: item, icon: WIDGET_ICONS[item] });
@@ -221,7 +221,7 @@ const visibleText = (text) => `[...document.querySelectorAll(".pane-stack")].som
 })`;
 const showsText = (text, why) => async (session) => (await session.evaluate(visibleText(text))) || why;
 
-/** A shot of a pane opened from the hamburger menu in a tab of its own;
+/** A shot of a pane opened from the AgentMux logo menu in a tab of its own;
  *  `inPane(session, pane)` takes it to the state shown. */
 function paneShot({ item, marker, inPane, ...def }) {
     const t = { tabId: null };

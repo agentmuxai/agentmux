@@ -35,16 +35,16 @@ export const shots = [
     {
         id: "top-tab-bar",
         title: "Top tab bar",
-        description: "Hamburger menu, window tab strip, and the pinned-widget button row.",
+        description: "AgentMux logo menu, window tab strip, and the pinned-widget button row.",
         selector: ".window-header",
     },
     {
-        id: "hamburger-menu-open",
-        title: "Hamburger menu, open",
-        description: "The dropdown menu reached from the hamburger button.",
+        id: "logo-menu-open",
+        title: "AgentMux logo menu, open",
+        description: "The dropdown menu reached from the AgentMux logo button.",
         selector: ".menu",
         prep: async (session) => {
-            await session.clickSelector(".hamburger-btn");
+            await session.clickSelector(".logo-menu-btn");
         },
     },
     {

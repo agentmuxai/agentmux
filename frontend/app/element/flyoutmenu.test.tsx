@@ -3,7 +3,7 @@
 
 /**
  * FlyoutMenu closes when a leaf item is clicked, unless the item sets
- * `keepOpen` — the hamburger's Theme and Opacity choices, so the user can
+ * `keepOpen` — the AgentMux logo's Theme and Opacity choices, so the user can
  * try several in a row. An outside click still closes it either way.
  */
 

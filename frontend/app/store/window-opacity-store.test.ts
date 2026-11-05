@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // SPEC_PER_WINDOW_THEME_AND_OPACITY_2026_10_12 §4.2: the status bar slider and
-// the hamburger set a window's opacity through one setter.
+// the AgentMux logo set a window's opacity through one setter.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 

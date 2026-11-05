@@ -1,0 +1,8 @@
+startQuestionTimer(local, 30000ms, publish=false)
+-- three queued
+  header: The agent is asking | +2 more | Auto-selects recommended in 30s [agent-question-panel-countdown]
+  Q: ColourPick a colour
+    - Red {radio,-} name=amux-q-q1-0
+    - Blue (Recommended) / Calmer {radio,-,recommended} name=amux-q-q1-0
+    other: ""
+  buttons: Cancel | Accept Recommended | Submit answer (disabled)
