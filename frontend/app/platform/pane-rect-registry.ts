@@ -6,7 +6,7 @@
 // browser view on every create / resize and cleared on close. Read by
 // `pane-overlay.ts` to skip the `browser_panes_set_overlay_clip` IPC
 // when no overlay actually intersects a pane — most top-bar /
-// statusbar / hamburger-menu hovers don't, and the IPC + `SetWindowRgn`
+// statusbar / logo-menu hovers don't, and the IPC + `SetWindowRgn`
 // fan-out on every pane HWND is the dominant cost behind the hover-lag
 // felt vs. VS Code (see discussion #1097).
 //

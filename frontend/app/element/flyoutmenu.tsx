@@ -58,13 +58,15 @@ const HIDDEN_FLOATING_STYLE = "position:absolute;left:0px;top:0px;visibility:hid
 type MenuProps = {
     items: MenuItem[];
     className?: string;
+    /** An extra class on the anchor `<div>` around the trigger: the box that is the flex item in its bar. */
+    anchorClass?: string;
     placement?: Placement;
     /**
      * Mirror the menu for a right-anchored (left-opening) placement: items are
      * laid out right-to-left (icon on the right, label right-aligned, chevron
      * on the left pointing left) and submenus prefer to open to the LEFT.
      * Use for menus anchored to the right edge (e.g. the macOS far-right
-     * hamburger). Best practice for edge-anchored menus — the disclosure arrow
+     * AgentMux logo). Best practice for edge-anchored menus — the disclosure arrow
      * points the same way the submenu actually opens. Default off; every other
      * menu keeps the standard left-to-right layout.
      */
@@ -80,8 +82,8 @@ type MenuProps = {
     onOpenChange?: (isOpen: boolean) => void;
     /**
      * Receives a function that closes the menu, for an owner that must close
-     * it from outside (the hamburger closes when the "…" More dropdown
-     * opens beside it, hamburger-menu.tsx).
+     * it from outside (the AgentMux logo closes when the "…" More dropdown
+     * opens beside it, logo-menu.tsx).
      */
     closeRef?: (close: () => void) => void;
     children?: JSX.Element;
@@ -245,7 +247,7 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
         <>
             <div
                 ref={(el) => { referenceEl = el; }}
-                class="menu-anchor"
+                class={clsx("menu-anchor", props.anchorClass)}
                 data-drag-region="false"
                 onPointerDown={() => {
                     // Pre-warm pane freeze-frames ~100ms before the click

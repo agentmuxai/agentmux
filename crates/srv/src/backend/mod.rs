@@ -25,6 +25,7 @@ pub mod identity_spawn;
 pub mod agent_session;
 pub mod blockcontroller;
 pub mod bash_background;
+pub mod claudeai_connectors;
 pub mod cli_messaging;
 pub mod cli_native;
 pub mod bookmarks_store;

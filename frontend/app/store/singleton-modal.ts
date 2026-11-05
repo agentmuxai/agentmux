@@ -337,7 +337,7 @@ function isWindowLive(label: string): boolean {
  * Two windows racing a genuinely-free singleton is possible but rare
  * (both must call within the MPS round-trip); last-write-wins and both
  * converge. For the bundle manager the trigger is a deliberate
- * hamburger click, so the race is not a practical concern.
+ * AgentMux logo click, so the race is not a practical concern.
  */
 export function acquireSingleton(kind: SingletonKind): boolean {
     const st = kindState(kind);

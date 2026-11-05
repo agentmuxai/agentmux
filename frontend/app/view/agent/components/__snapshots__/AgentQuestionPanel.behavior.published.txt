@@ -1,0 +1,33 @@
+startQuestionTimer(blk-1, 30000ms, publish=true)
+reconcileQuestionTimer(blk-1)
+-- mounted with a block
+  header: The agent is asking
+  Q: ColourPick a colour
+    - Red {radio,-} name=amux-q-q1-0
+    - Blue (Recommended) / Calmer {radio,-,recommended} name=amux-q-q1-0
+    other: ""
+  buttons: Cancel | Accept Recommended | Submit answer (disabled)
+startQuestionTimer(blk-1, 30000ms, publish=true)
+-- next question
+  header: The agent is asking
+  Q: ColourPick a colour
+    - Red {radio,-} name=amux-q-q2-0
+    - Blue (Recommended) / Calmer {radio,-,recommended} name=amux-q-q2-0
+    other: ""
+  buttons: Cancel | Accept Recommended | Submit answer (disabled)
+onAnswer {"tool_use_id":"q2","answers":[{"header":"Colour","selected":["Blue (Recommended)"]}],"answers_map":{"Pick a colour":"Blue (Recommended)"},"answer_text":"Colour: Blue (Recommended)","autoFilledCount":1,"autoTimeoutMs":30000}
+-- it expired
+  header: The agent is asking
+  Q: ColourPick a colour
+    - Red {radio,-} name=amux-q-q2-0
+    - Blue (Recommended) / Calmer {radio,checked,recommended} name=amux-q-q2-0
+    other: ""
+  buttons: Cancel | Accept Recommended | Submit answer
+endQuestionTimer(blk-1, {"publish":true})
+-- nothing pending
+  (no panel)
+startQuestionTimer(blk-1, 30000ms, publish=true)
+endQuestionTimer(blk-1, null)
+onCancel q3
+releaseQuestionTimer(blk-1)
+unmounted

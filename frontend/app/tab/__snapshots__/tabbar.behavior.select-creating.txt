@@ -6,17 +6,17 @@ registerTabCloseRequestHandler
 -- click on the displayed tab done
 cancelAnimationFrame 7
 -- creating t3
-dom root=yes hamburger=1 separators=4 fill=1 scroll="tab-bar-scroll" drag=false modal=none
+dom root=yes logoMenu=1 separators=4 fill=1 scroll="tab-bar-scroll" drag=false modal=none
 tabs ["t1[active=false activeId=t3 first=true beforeActive=false count=3 index=0 ids=t1,t2,t3]","t2[active=false activeId=t3 first=false beforeActive=true count=3 index=1 ids=t1,t2,t3]","t3[active=true activeId=t3 first=false beforeActive=false count=3 index=2 ids=t1,t2,t3]"]
 cancelTabCreation
 cancelAnimationFrame 7
 cancelAnimationFrame 7
 setActiveTab t2
 -- click on t2
-dom root=yes hamburger=1 separators=4 fill=1 scroll="tab-bar-scroll" drag=false modal=none
+dom root=yes logoMenu=1 separators=4 fill=1 scroll="tab-bar-scroll" drag=false modal=none
 tabs ["t1[active=false activeId=t2 first=true beforeActive=true count=3 index=0 ids=t1,t2,t3]","t2[active=true activeId=t2 first=false beforeActive=false count=3 index=1 ids=t1,t2,t3]","t3[active=false activeId=t2 first=false beforeActive=false count=3 index=2 ids=t1,t2,t3]"]
 cancelAnimationFrame 7
 setActiveTab t2 applied
 cancelAnimationFrame 7
-dom root=yes hamburger=1 separators=4 fill=1 scroll="tab-bar-scroll" drag=false modal=none
+dom root=yes logoMenu=1 separators=4 fill=1 scroll="tab-bar-scroll" drag=false modal=none
 tabs ["t1[active=false activeId=t2 first=true beforeActive=true count=3 index=0 ids=t1,t2,t3]","t2[active=true activeId=t2 first=false beforeActive=false count=3 index=1 ids=t1,t2,t3]","t3[active=false activeId=t2 first=false beforeActive=false count=3 index=2 ids=t1,t2,t3]"]
