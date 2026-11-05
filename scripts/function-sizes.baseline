@@ -122,7 +122,7 @@
 108 crates/launcher/src/splash_mac.rs::flatten_rows
 272 crates/launcher/src/srv_spawner.rs::spawn_srv_once
 858 crates/launcher/src/supervisor/unix.rs::run_unix
-1287 crates/launcher/src/supervisor/windows.rs::run_windows
+1290 crates/launcher/src/supervisor/windows.rs::run_windows
 161 crates/launcher/src/tray/windows.rs::run
 102 crates/launcher/src/wrr/mod.rs::apply_hwnd_destroyed
 175 crates/launcher/src/wrr/mod.rs::apply_hwnd_opened
@@ -294,7 +294,7 @@
 406 crates/srv/src/server/app_api/kanban.rs::act_as
 111 crates/srv/src/server/app_api/layout.rs::layout_open_impl
 109 crates/srv/src/server/app_api/memory.rs::memory_write_impl
-104 crates/srv/src/server/app_api/pane.rs::build_pane_meta
+102 crates/srv/src/server/app_api/pane.rs::build_pane_meta
 300 crates/srv/src/server/app_api/pane.rs::open_pane
 161 crates/srv/src/server/app_api/pane.rs::open_pane_floating
 126 crates/srv/src/server/browser_bypass_routes.rs::handle_ui_browser_request_bypass
@@ -391,7 +391,6 @@
 209 frontend/app/modals/conntypeahead.tsx::ChangeConnectionBlockModal
 160 frontend/app/modals/typeaheadmodal.tsx::TypeAheadModal
 162 frontend/app/modals/userinputmodal.tsx::UserInputModal
-140 frontend/app/notification/notificationbubbles.tsx::NotificationBubbles
 121 frontend/app/notification/notificationitem.tsx::NotificationItem
 148 frontend/app/notification/sound/sound-service.ts::installSoundService
 111 frontend/app/platform/pane-overlay.ts::flushClip
@@ -426,7 +425,7 @@
 287 frontend/app/view/accounts/OAuthConnectPanel.tsx::OAuthConnectPanel
 130 frontend/app/view/accounts/accounts-manager.tsx::AccountsManager
 132 frontend/app/view/agent/agent-pane-chrome-model.ts::buildAgentPaneChromeModel
-179 frontend/app/view/agent/attachments/AttachmentLightbox.tsx::AttachmentLightbox
+170 frontend/app/view/agent/attachments/AttachmentLightbox.tsx::AttachmentLightbox
 101 frontend/app/view/agent/attachments/AttachmentTile.tsx::AttachmentTile
 296 frontend/app/view/agent/attachments/AttachmentTray.tsx::AttachmentTray
 143 frontend/app/view/agent/buildRuntimeArgs.ts::buildRuntimeArgs
@@ -452,7 +451,7 @@
 157 frontend/app/view/agent/components/InputHistorySearch.tsx::InputHistorySearch
 193 frontend/app/view/agent/components/MarkdownBlock.tsx::MarkdownBlock
 141 frontend/app/view/agent/components/MyAgentsList.tsx::MyAgentsList
-170 frontend/app/view/agent/components/MyAgentsRow.tsx::MyAgentsRow
+171 frontend/app/view/agent/components/MyAgentsRow.tsx::MyAgentsRow
 241 frontend/app/view/agent/components/MyAgentsRowPanel.tsx::MyAgentsRowPanel
 147 frontend/app/view/agent/components/PersistentShellBlock.tsx::PersistentShellBlock
 130 frontend/app/view/agent/components/SeatRosterImport.tsx::SeatRosterImport
@@ -539,8 +538,8 @@
 249 frontend/app/view/settings/sections/widgets-section.tsx::WidgetsSection
 105 frontend/app/view/settings/settings-view.tsx::SettingsView
 178 frontend/app/view/shortcuts/shortcuts.tsx::ShortcutsView
-122 frontend/app/view/swarm/swarm-agent-list.tsx::SwarmAgentList
-163 frontend/app/view/swarm/swarm-fleet-toolbar.tsx::FleetToolbar
+111 frontend/app/view/swarm/swarm-agent-list.tsx::SwarmAgentList
+131 frontend/app/view/swarm/swarm-fleet-toolbar.tsx::SuperviseActions
 104 frontend/app/view/swarm/swarm-model.ts::SwarmViewModel::buildTree
 153 frontend/app/view/swarm/swarm-model.ts::SwarmViewModel::constructor
 165 frontend/app/view/swarm/swarm-view.tsx::AgentRow

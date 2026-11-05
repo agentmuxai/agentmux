@@ -13,7 +13,7 @@ import { Button, IconButton } from "@/app/element/ui";
 import type { VaultActivity } from "@/types/rpc/VaultActivity";
 import { formatWhen } from "./vault-format";
 import { openVault } from "./open-vault";
-import { grantText } from "./vault-use-prompts";
+import { grantText } from "./vault-grant-labels";
 import { loadActivity, loadGrants, revokeGrant, vaultAvailable, vaultChangedMs, type GrantedEntry } from "./vault-store";
 
 /** How many of an agent's recent uses to list. */

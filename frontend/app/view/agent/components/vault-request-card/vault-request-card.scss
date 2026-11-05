@@ -89,3 +89,26 @@
         margin-inline-end: 0;
     }
 }
+
+// "Deny all from <agent>", under the card's answers, apart from them.
+.vault-request-card-deny-all {
+    align-self: flex-start;
+}
+
+// A parked agent's line on its My agents row: its own controls, above the
+// tile's stretched open button, as the row's actions toggle is.
+.vault-row-asks {
+    position: relative;
+    z-index: var(--z-over-content);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    color: var(--attention-color);
+    overflow-wrap: anywhere;
+}
+
+.vault-row-asks-text {
+    flex: 1 1 auto;
+    min-width: 0;
+}

@@ -137,9 +137,18 @@ const withSub = (label: string, submenu: NativeContextMenuItem[], extra: Partial
 const show = (items: NativeContextMenuItem[], onClick: ((id: string) => void) | null = null, at = { x: 7, y: 9 }) =>
     showJsContextMenu(items, at, onClick);
 const overlay = () => document.getElementById("cef-context-menu-overlay")!;
-const menuEl = () => overlay().querySelector<HTMLElement>(".menu:not(.sub-menu)")!;
+// A level is an unzoomed shell (placed, hidden, registered as a pane overlay) around a body (the rows). The menu's
+// shell is the overlay's first child; every submenu shell is a sibling after it, in the order of the rows that open
+// them, not nested in those rows.
+const menuShell = () => overlay().firstElementChild as HTMLElement;
+const menuEl = () => menuShell().firstElementChild as HTMLElement;
 const rowAt = (i: number) => menuEl().children[i] as HTMLElement;
-const subOf = (row: HTMLElement) => row.querySelector<HTMLElement>(".sub-menu")!;
+const subShells = () => [...overlay().children].slice(1) as HTMLElement[];
+const subOf = (row: HTMLElement) => {
+    const opening = [...row.parentElement!.children].filter((r) => r.querySelector(":scope > .fa-chevron-right"));
+    return subShells()[opening.indexOf(row)];
+};
+const bodyOf = (shell: HTMLElement) => shell.firstElementChild as HTMLElement;
 
 describe("menu state and close listeners", () => {
     it("reports whether a menu is open", () => {
@@ -320,8 +329,9 @@ describe("the overlay and the menu element", () => {
 
     it("starts the menu hidden at the cursor, marked as a pane overlay, until it is placed", async () => {
         show([item("A")]);
-        const el = menuEl();
-        expect(el.className).toBe("menu");
+        const el = menuShell();
+        expect(el.className).toBe("anchored-popover anchored-popover--menu");
+        expect(menuEl().className).toBe("menu anchored-popover-body anchored-popover-body--chrome-zoom");
         expect(el.hasAttribute("data-pane-overlay")).toBe(true);
         expect(el.style.left).toBe("7px");
         expect(el.style.top).toBe("9px");
@@ -332,7 +342,7 @@ describe("the overlay and the menu element", () => {
 
     it("registers the menu and its submenu as keyed pane overlays", () => {
         show([withSub("Group", [item("One")])]);
-        const menuReg = h.regs.find((r) => r.el === menuEl())!;
+        const menuReg = h.regs.find((r) => r.el === menuShell())!;
         const subReg = h.regs.find((r) => r.el === subOf(rowAt(0)))!;
         expect(menuReg.opts).toEqual({ keys: true });
         expect(subReg.opts).toEqual({ keys: true });
@@ -343,24 +353,19 @@ describe("placing the menu", () => {
     it("asks for the spot below the cursor, and lets the menu cover a browser pane", () => {
         show([item("A")]);
         expect(h.places.length).toBe(1);
-        expect(h.places[0].el).toBe(menuEl());
+        expect(h.places[0].el).toBe(menuShell());
         expect(h.places[0].req).toEqual({ anchor: { x: 7, y: 9 }, placement: "bottom-start", avoidNativePanes: false });
     });
 
     it("applies the computed spot and size cap, then reveals and checks the menu", async () => {
         show([item("A")]);
         await settle();
-        const s = menuEl().style;
-        expect([s.position, s.left, s.top, s.maxHeight, s.overflowY, s.justifyContent, s.visibility]).toEqual([
-            "fixed",
-            "12px",
-            "34px",
-            "456px",
-            "auto",
-            "flex-start",
-            "",
-        ]);
-        expect(h.asserts).toEqual([{ el: menuEl(), label: "context-menu" }]);
+        const s = menuShell().style;
+        expect([s.position, s.left, s.top, s.visibility]).toEqual(["fixed", "12px", "34px", ""]);
+        // The cap is on the body, in its own zoomed lengths: the free height divided by the chrome zoom.
+        const b = menuEl().style;
+        expect([b.maxHeight, b.overflowY]).toEqual(["calc(456px / var(--zoomfactor, 1))", "auto"]);
+        expect(h.asserts).toEqual([{ el: menuShell(), label: "context-menu" }]);
     });
 
     it("does not place or check a menu that closed while placement was pending", async () => {
@@ -378,14 +383,14 @@ describe("placing the menu", () => {
         h.mode = "reject";
         show([item("A")]);
         await settle();
-        expect(menuEl().style.visibility).toBe("");
-        expect(menuEl().style.left).toBe("7px");
+        expect(menuShell().style.visibility).toBe("");
+        expect(menuShell().style.left).toBe("7px");
     });
 
     it("leaves a menu that closed before placement failed alone", async () => {
         h.mode = "hold";
         show([item("A")]);
-        const el = menuEl();
+        const el = menuShell();
         closeJsContextMenu();
         h.held[0].reject(new Error("late"));
         await settle();
@@ -523,7 +528,7 @@ describe("submenu hover wiring", () => {
 
     it("keeps the levels apart: entering a row in a submenu closes only that level's peers", () => {
         show([withSub("A", [withSub("Inner", [item("x")]), item("Plain")]), withSub("B", [item("b1")])]);
-        const innerPlain = subOf(rowAt(0)).children[1] as HTMLElement;
+        const innerPlain = bodyOf(subOf(rowAt(0))).children[1] as HTMLElement;
         innerPlain.dispatchEvent(new MouseEvent("mouseenter", { bubbles: false }));
         const [inner, a, b] = h.hovers;
         expect(inner.close).toHaveBeenCalledTimes(1);
@@ -582,14 +587,8 @@ describe("submenu hover wiring", () => {
         expect(call.req.avoidNativePanes).toBe(false);
         await settle();
         const s = sub.style;
-        expect([s.position, s.left, s.top, s.maxHeight, s.overflowY, s.visibility]).toEqual([
-            "fixed",
-            "12px",
-            "34px",
-            "456px",
-            "auto",
-            "",
-        ]);
+        expect([s.position, s.left, s.top, s.visibility]).toEqual(["fixed", "12px", "34px", ""]);
+        expect([bodyOf(sub).style.maxHeight, bodyOf(sub).style.overflowY]).toEqual(["calc(456px / var(--zoomfactor, 1))", "auto"]);
         expect(h.asserts).toContainEqual({ el: sub, label: "context-submenu" });
     });
 
@@ -620,7 +619,7 @@ describe("submenu hover wiring", () => {
         sub.style.display = "none";
         h.held[h.held.length - 1].resolve(h.placed);
         await settle();
-        expect(sub.style.left).toBe("100%");
+        expect(sub.style.left).toBe("0px");
         expect(h.asserts.some((a) => a.el === sub)).toBe(false);
     });
 
@@ -633,11 +632,11 @@ describe("submenu hover wiring", () => {
         closeJsContextMenu();
         h.held[h.held.length - 1].resolve(h.placed);
         await settle();
-        expect(sub.style.left).toBe("100%");
+        expect(sub.style.left).toBe("0px");
         expect(h.asserts.some((a) => a.el === sub)).toBe(false);
     });
 
-    it("falls back to the row-relative spot, and shows the submenu, when its placement fails", async () => {
+    it("falls back to the row's right edge, in real pixels, and shows the submenu, when its placement fails", async () => {
         h.mode = "reject";
         twoSubs();
         const sub = subOf(rowAt(0));
@@ -645,7 +644,8 @@ describe("submenu hover wiring", () => {
         flushFrames();
         await settle();
         const s = sub.style;
-        expect([s.position, s.left, s.top, s.visibility]).toEqual(["absolute", "100%", "0px", ""]);
+        // jsdom gives the row an empty rect at the origin: its right edge and top are 0.
+        expect([s.position, s.left, s.top, s.visibility]).toEqual(["fixed", "0px", "0px", ""]);
     });
 
     it("leaves a submenu whose menu closed before its placement failed untouched", async () => {
@@ -669,7 +669,9 @@ describe("updating an open menu", () => {
         expect(h.hovers[0].dispose).toHaveBeenCalledTimes(1);
         expect(h.hovers.length).toBe(2);
         expect(h.hovers[1].openNow).toHaveBeenCalledTimes(1);
-        expect(menuEl().querySelector(".sub-menu .label")!.textContent).toBe("a2");
+        // The old submenu shell is gone and the new one is a sibling of the menu, not nested in a row.
+        expect(subShells().length).toBe(1);
+        expect(subShells()[0].querySelector(".label")!.textContent).toBe("a2");
     });
 
     it("leaves a submenu that was closed closed", () => {
@@ -710,13 +712,13 @@ describe("updating an open menu", () => {
     it("clears the old height and places the new list again", async () => {
         show([item("A")]);
         await settle();
-        expect(menuEl().style.maxHeight).toBe("456px");
+        expect(menuEl().style.maxHeight).toBe("calc(456px / var(--zoomfactor, 1))");
         h.mode = "hold";
         const before = h.places.length;
         updateJsContextMenu([item("A"), item("B")]);
         expect(menuEl().style.maxHeight).toBe("");
         expect(h.places.length).toBe(before + 1);
-        expect(h.places[before].el).toBe(menuEl());
+        expect(h.places[before].el).toBe(menuShell());
     });
 
     it("draws the new items", () => {
@@ -744,12 +746,12 @@ describe("jsContextMenuApi", () => {
 
     it("opens a menu at the origin when no position is given", () => {
         jsContextMenuApi().showContextMenu("w", [item("A")]);
-        expect([menuEl().style.left, menuEl().style.top]).toEqual(["0px", "0px"]);
+        expect([menuShell().style.left, menuShell().style.top]).toEqual(["0px", "0px"]);
     });
 
     it("opens a menu at the position it is given", () => {
         jsContextMenuApi().showContextMenu("w", [item("A")], { x: 21, y: 22 });
-        expect([menuEl().style.left, menuEl().style.top]).toEqual(["21px", "22px"]);
+        expect([menuShell().style.left, menuShell().style.top]).toEqual(["21px", "22px"]);
     });
 
     it("reports a clicked row to the registered callback", () => {
@@ -759,5 +761,37 @@ describe("jsContextMenuApi", () => {
         api.showContextMenu("w", [item("A")]);
         rowAt(0).click();
         expect(cb).toHaveBeenCalledWith("A");
+    });
+});
+
+describe("chrome zoom (task #23943)", () => {
+    it("draws every level as an unzoomed shell around a zoomed body, all siblings in the overlay", () => {
+        show([withSub("A", [withSub("Inner", [item("x")])]), item("Plain")]);
+        const shells = [...overlay().children] as HTMLElement[];
+        expect(shells.length).toBe(3); // the menu, A's submenu, Inner's submenu
+        for (const shell of shells) {
+            expect(shell.classList.contains("anchored-popover")).toBe(true);
+            expect(bodyOf(shell).classList.contains("anchored-popover-body--chrome-zoom")).toBe(true);
+            // The shell is never zoomed itself (that would apply the factor twice) and never nested in a row,
+            // where a zoomed body would scale its fixed left/top a second time.
+            expect(shell.className).not.toContain("chrome-zoom");
+            expect(shell.parentElement).toBe(overlay());
+            expect(shell.closest(".menu-item")).toBeNull();
+        }
+        expect(shells.map((shell) => bodyOf(shell).classList.contains("sub-menu"))).toEqual([false, true, true]);
+    });
+
+    it("closes a submenu's own submenus with it, since they are no longer hidden by its display", () => {
+        show([withSub("A", [withSub("Inner", [item("x")])])]);
+        const [inner, a] = h.hovers;
+        a.opts.onClose();
+        expect(subOf(rowAt(0)).style.display).toBe("none");
+        expect(inner.close).toHaveBeenCalledTimes(1);
+    });
+
+    it("stacks a submenu above the level that opened it", () => {
+        show([withSub("A", [withSub("Inner", [item("x")])])]);
+        const order = [...overlay().children];
+        expect(order.indexOf(subShells()[0])).toBeLessThan(order.indexOf(subShells()[1]));
     });
 });

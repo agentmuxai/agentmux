@@ -11,37 +11,11 @@ import { readZoom } from "@/app/store/zoom-factor";
 import { SwarmAgentList, useSwarmAgents, type SwarmAgents } from "./swarm-agent-list";
 import type { SwarmFilterFocus } from "./swarm-filter-bar";
 import { ClearCompletedButton } from "./swarm-view";
-import { SwarmSectionBar } from "./swarm-section-bar";
+import { SwarmSections } from "./swarm-section-panel";
 import { RegistrationFlagsProvider } from "./swarm-row-registration";
-import { createSwarmSection, swarmDensityOf, type SwarmSection } from "./swarm-section";
-import { BroadcastDock } from "./swarm-broadcast";
-import { SupervisorSettingsBar } from "./swarm-supervisor-settings";
-import { FleetToolbar, FleetResultPanel } from "./swarm-fleet-toolbar";
+import { createOpenSwarmSections, swarmDensityOf, toggledMeta, type SwarmSection } from "./swarm-section";
 import { EmptyState } from "@/app/element/ui";
 import "./swarm-view.scss";
-
-/** The controls a section shows above the shared list: the Supervisor's settings, Broadcast's composer,
- *  the fleet toolbar and its result. In the Supervisor and Broadcast they sit in one compartment
- *  (`swarm-compartment`) of their own, apart from the list; the agents section shows them as before. */
-function SectionControls(props: { model: SwarmViewModel; agents: SwarmAgents; section: SwarmSection }): JSX.Element {
-    const { model, agents } = props;
-    return (
-        <div class="swarm-compartment" classList={{ "swarm-compartment--on": props.section === "supervisor" || props.section === "broadcast" }}>
-            <Show when={props.section === "supervisor"}>
-                <SupervisorSettingsBar blockId={model.blockId} />
-            </Show>
-            {/* The composer is the top of the Broadcast section, above the selection bar and the list. */}
-            <Show when={props.section === "broadcast"}>
-                <BroadcastDock model={model} agents={agents} />
-            </Show>
-            {/* Outside the tree's own Show: agents on other instances can be selected
-                when this instance has none, and the toolbar is what acts on them. It
-                shows itself only when there is something to select or act on. */}
-            <FleetToolbar model={model} allBlockIds={agents.shownSelectableKeys} section={props.section} />
-            <FleetResultPanel model={model} quietWhenClean={props.section === "broadcast"} />
-        </div>
-    );
-}
 
 /** What a section shows with the shared list: an empty-state note or the "Clear completed" button. */
 function SectionListNotes(props: { model: SwarmViewModel; agents: SwarmAgents }): JSX.Element {
@@ -85,8 +59,9 @@ export function SwarmView(props: {
     });
 
     const zoomFactor = createMemo(() => readZoom(ctx.meta()));
-    const section = createSwarmSection(ctx.meta);
-    const density = createMemo(() => swarmDensityOf(section()));
+    const open = createOpenSwarmSections(ctx.meta);
+    const density = createMemo(() => swarmDensityOf(open()));
+    const toggle = (id: SwarmSection) => void ctx.setMeta(toggledMeta(ctx.meta(), id));
     // Trace presses on agent rows whose click never arrives (select-trace.ts).
     // Capture listeners on the root, which a rebuild of the rows never replaces.
     onMount(() => {
@@ -130,18 +105,16 @@ export function SwarmView(props: {
             >
                 <RegistrationFlagsProvider visible={() => ctx.visibility() === "active"}>
                     <AccountAvailabilityStrip />
-                    <SwarmSectionBar section={section} onChange={(id) => void ctx.setMeta({ "swarm:section": id })}>
-                        {/* The body is the same elements in every section: the area above the list
-                            follows the section, the list itself is rendered once and never remounted
-                            by a switch, which is what keeps a press on a row from being lost (#5208). */}
-                        <div class="swarm-section-body">
-                            <div class="swarm-agents-pane">
-                                <SectionControls model={model} agents={agents} section={section()} />
-                                <SectionListNotes model={model} agents={agents} />
-                                <SwarmAgentList model={model} ctx={ctx} agents={agents} density={density} filterFocusRef={props.filterFocusRef} />
-                            </div>
+                    {/* The area above the list follows the open sections; the list itself is rendered once and
+                        never remounted by opening or closing one, which is what keeps a press on a row from
+                        being lost (#5208). */}
+                    <div class="swarm-section-body">
+                        <div class="swarm-agents-pane">
+                            <SwarmSections model={model} agents={agents} open={open} onToggle={toggle} />
+                            <SectionListNotes model={model} agents={agents} />
+                            <SwarmAgentList model={model} ctx={ctx} agents={agents} density={density} filterFocusRef={props.filterFocusRef} />
                         </div>
-                    </SwarmSectionBar>
+                    </div>
                 </RegistrationFlagsProvider>
             </Show>
         </div>

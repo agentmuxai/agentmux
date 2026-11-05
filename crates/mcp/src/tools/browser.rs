@@ -93,6 +93,7 @@ async fn run_open(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
             " It browses Incognito: signed in nowhere, and what it keeps is gone when it closes.".to_string()
         }
         s if s.eq_ignore_ascii_case("personal") => " It browses as the user's own Personal profile, with their sign-ins.".to_string(),
+        "own" => " It browses as your own profile: a sign-in made in it (by hand-off, or a Vault sign-in) is still there in your next pane.".to_string(),
         p => format!(" It browses as the user's {:?} profile.", p.strip_prefix("profile:").unwrap_or(p)),
     };
     Ok(format!(

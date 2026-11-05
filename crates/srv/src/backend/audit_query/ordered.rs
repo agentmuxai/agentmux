@@ -1,13 +1,12 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! The audit file's entries in time order. Several srvs append to the file, each stamping its entries when it
+//! A file's entries in time order (the jekt audit file's, or an activity day's). Several srvs append to the file, each stamping its entries when it
 //! queues them, so the file is in time order only to within a short skew. Read from its end, a line is given only
 //! once every line not yet read must be older: a window of the newest lines is held and sorted.
 
 use std::collections::BinaryHeap;
 
-use crate::backend::reactive::types::AuditLogEntry;
 use crate::backend::rpc_types::AuditEntry;
 
 /// How far out of time order two lines of the file may be.
@@ -43,9 +42,11 @@ impl Ord for Held {
 }
 
 /// The lines of the file, newest first, mapped to entries and kept if `keep` says so.
-pub(super) struct Ordered<'a> {
-    lines: Box<dyn Iterator<Item = (u64, u64, AuditLogEntry)> + 'a>,
-    map: Box<dyn Fn(u64, &AuditLogEntry) -> AuditEntry + 'a>,
+pub(super) struct Ordered<'a, T> {
+    lines: Box<dyn Iterator<Item = (u64, u64, T)> + 'a>,
+    /// The time of a line, to stop at the window's start.
+    stamp: Box<dyn Fn(&T) -> u64 + 'a>,
+    map: Box<dyn Fn(u64, &T) -> AuditEntry + 'a>,
     keep: Box<dyn Fn(&AuditEntry) -> bool + 'a>,
     /// Lines older than this need not be read.
     since: u64,
@@ -58,15 +59,16 @@ pub(super) struct Ordered<'a> {
     done: bool,
 }
 
-impl<'a> Ordered<'a> {
+impl<'a, T> Ordered<'a, T> {
     pub fn new(
-        lines: impl Iterator<Item = (u64, u64, AuditLogEntry)> + 'a,
-        map: impl Fn(u64, &AuditLogEntry) -> AuditEntry + 'a,
+        lines: impl Iterator<Item = (u64, u64, T)> + 'a,
+        stamp: impl Fn(&T) -> u64 + 'a,
+        map: impl Fn(u64, &T) -> AuditEntry + 'a,
         keep: impl Fn(&AuditEntry) -> bool + 'a,
         since: u64,
         after: Option<(u64, String)>,
     ) -> Self {
-        Self { lines: Box::new(lines), map: Box::new(map), keep: Box::new(keep), since, after, held: BinaryHeap::new(), oldest_ms: u64::MAX, oldest_start: None, done: false }
+        Self { lines: Box::new(lines), stamp: Box::new(stamp), map: Box::new(map), keep: Box::new(keep), since, after, held: BinaryHeap::new(), oldest_ms: u64::MAX, oldest_start: None, done: false }
     }
 
     /// Reads until the newest held entry can be given: no line left unread can be newer.
@@ -82,11 +84,12 @@ impl<'a> Ordered<'a> {
                 self.done = true;
                 continue;
             };
-            if raw.timestamp.saturating_add(SKEW_MS) < self.since {
+            let at = (self.stamp)(&raw);
+            if at.saturating_add(SKEW_MS) < self.since {
                 self.done = true;
                 continue;
             }
-            self.oldest_ms = self.oldest_ms.min(raw.timestamp);
+            self.oldest_ms = self.oldest_ms.min(at);
             self.oldest_start = Some(start);
             let entry = (self.map)(start, &raw);
             let fresh = self.after.as_ref().is_none_or(|(ts, id)| (entry.ts_ms, entry.id.as_str()) < (*ts, id.as_str()));

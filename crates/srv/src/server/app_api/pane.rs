@@ -22,7 +22,8 @@ fn register_pane_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 crate::server::browser_identity::check_new_tab(&state, meta)?;
                 // An agent browses as a named profile only if the user lets it.
                 if !ctx.agent_id.is_empty() {
-                    crate::server::browser_identity::check_agent_may_use(meta)?;
+                    let owner = crate::server::browser_identity::profile_owner(&state, &ctx.agent_id);
+                    crate::server::browser_identity::check_agent_may_use(meta, &owner)?;
                 }
             }
             open_pane(&state, cmd).await
@@ -232,6 +233,16 @@ pub(super) async fn open_pane_floating(
     })
 }
 
+/// The title the opener gave the pane. A browser pane also records the address it was opened at, so it keeps
+/// the title only while it stays on that site (frontend/app/view/browser/given-title.ts).
+fn add_title(meta: &mut MetaMapType, cmd: &CommandPaneOpenData) {
+    let Some(title) = cmd.title.as_deref().filter(|s| !s.is_empty()) else { return };
+    meta.insert("frame:title".to_string(), json!(title));
+    if let Some(url) = cmd.url.as_deref().filter(|s| !s.is_empty()).filter(|_| cmd.view == "browser") {
+        meta.insert("frame:title_url".to_string(), json!(url));
+    }
+}
+
 /// Build the metadata map for a pane.open request, validating required args.
 pub(crate) fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, String> {
     let mut meta = MetaMapType::new();
@@ -318,9 +329,7 @@ pub(crate) fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, 
         }
     }
 
-    if let Some(title) = cmd.title.as_deref().filter(|s| !s.is_empty()) {
-        meta.insert("frame:title".to_string(), json!(title));
-    }
+    add_title(&mut meta, cmd);
 
     // The connection the pane works on, for the views that have one; media
     // reads this computer's files only.

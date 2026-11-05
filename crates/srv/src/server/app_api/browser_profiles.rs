@@ -114,6 +114,28 @@ fn path() -> Result<std::path::PathBuf, String> {
     store::profiles_file_path().ok_or_else(|| "browser profiles: could not resolve the shared data directory".to_string())
 }
 
+/// The own profile of the agent `owner` (its uid), made the first time it is needed and named `name`, the agent's. This is the one
+/// place an agent makes a profile, and only its own: the calls above stay the user's
+/// (docs/specs/SPEC_AGENT_OWN_BROWSER_PROFILE_2026_11_04.md). The host makes its jar on first use.
+pub(crate) async fn ensure_agent_profile(state: &AppState, owner: &str, name: &str) -> Result<store::BrowserProfile, String> {
+    let (own, changed) = ensure_agent_profile_at(&path()?, owner, name).await?;
+    if changed {
+        crate::server::browser_host_sync::push(state).await;
+    }
+    Ok(own)
+}
+
+/// [`ensure_agent_profile`] on the profiles file at `path`; whether the file changed is the second part.
+async fn ensure_agent_profile_at(path: &std::path::Path, owner: &str, name: &str) -> Result<(store::BrowserProfile, bool), String> {
+    let _writing = WRITING.lock().await;
+    let mut profiles = store::read_profiles(path)?;
+    let (own, changed) = store::ensure_agent_profile(&mut profiles, owner, name, agentmux_common::time::now_ms());
+    if changed {
+        store::write_profiles(path, &profiles)?;
+    }
+    Ok((own, changed))
+}
+
 /// The profiles, or none when the shared folder can't be resolved.
 pub(crate) fn list() -> Result<Vec<store::BrowserProfile>, String> {
     match store::profiles_file_path() {
@@ -176,5 +198,25 @@ mod tests {
             let err = call_with(command, data, RpcContext::default()).await;
             assert!(err.contains("FORBIDDEN") && err.contains("isn't the AgentMux window"), "{command}: {err}");
         }
+    }
+
+    /// The one profile an agent makes is its own, made once however many panes ask at the same moment, and it is not
+    /// the user's to create from this call (the test above): the RPC still refuses an agent.
+    #[tokio::test]
+    async fn an_agent_makes_its_own_profile_once_even_when_two_panes_ask_together() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("browser-profiles.json");
+        let (a, b) = tokio::join!(ensure_agent_profile_at(&path, "uid-1", "camper-2"), ensure_agent_profile_at(&path, "uid-1", "camper-2"));
+        let (a, b) = (a.unwrap(), b.unwrap());
+        assert_eq!(a.0, b.0);
+        assert_eq!([a.1, b.1].iter().filter(|c| **c).count(), 1, "only one of them wrote it");
+        let profiles = store::read_profiles(&path).unwrap();
+        assert_eq!(profiles.len(), 1);
+        assert_eq!((profiles[0].id.clone(), profiles[0].owner_agent.as_deref()), (store::agent_profile_id("uid-1"), Some("uid-1")));
+        // A rename of the agent changes the name on the same row; another agent gets a row of its own.
+        let (renamed, _) = ensure_agent_profile_at(&path, "uid-1", "camper-9").await.unwrap();
+        assert_eq!((renamed.id.as_str(), renamed.name.as_str()), (profiles[0].id.as_str(), "camper-9"));
+        ensure_agent_profile_at(&path, "uid-2", "kcont").await.unwrap();
+        assert_eq!(store::read_profiles(&path).unwrap().len(), 2);
     }
 }

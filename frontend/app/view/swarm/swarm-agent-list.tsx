@@ -12,13 +12,14 @@ import { readZoom } from "@/app/store/zoom-factor";
 import { selectTrace } from "@/app/util/select-trace";
 import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
 import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
-import { Show, createEffect, createMemo, type Accessor, type JSX } from "solid-js";
+import { For, Show, createEffect, createMemo, type Accessor, type JSX } from "solid-js";
 import { phaseToDisplayStatus } from "./swarm-display-status";
 import { remoteAgentKey } from "./swarm-fleet-targets";
 import { lastActiveMs } from "./swarm-last-active";
 import { collectClearableRows, type AgentTreeNode, type SwarmViewModel } from "./swarm-model";
 import type { SwarmOrderItem } from "./swarm-order";
 import { useSwarmOrder } from "./swarm-order-hold";
+import { LOCAL_PART_ID, localPartLabel, partsByOrigin } from "./swarm-origin-parts";
 import { remoteChip, remoteRows, remoteSections, type RemoteRow } from "./swarm-remote";
 import { agentsWithoutRow } from "./swarm-runtime";
 import { openAgentInActiveTab, sharedAgentRuntime, startAgent } from "@/app/store/agent-runtime-live";
@@ -103,6 +104,74 @@ export function useSwarmAgents(model: SwarmViewModel, ctx: PaneTabHostContext): 
     return { tree, keyedRows, rowsByKey, remote, remoteByKey, clearableCount, stopped, selectableKeys, shownSelectableKeys, filter };
 }
 
+type OriginPartData = ReturnType<typeof partsByOrigin>[number];
+
+/** One host's or channel's part of the list: its heading once the list is labelled, its rows, and (this machine's) the stopped agents. */
+function OriginPart(props: {
+    id: string;
+    part: OriginPartData | undefined;
+    labelled: boolean;
+    seats: ReturnType<typeof useSwarmSeats>;
+    agents: SwarmAgents;
+    focusedBlockId: Accessor<string | null>;
+    model: SwarmViewModel;
+}): JSX.Element {
+    const { rowsByKey, remoteByKey, remote, tree, filter } = props.agents;
+    return (
+        <>
+            <Show when={props.labelled}>
+                <div class="swarm-origin-heading" role="heading" aria-level={2} data-origin={props.id}>
+                    <span class="swarm-origin-heading__label">{props.part?.label}</span>
+                    <span class="swarm-origin-heading__count">{props.part?.keys.length}</span>
+                </div>
+            </Show>
+            <SwarmSeatList seats={props.seats} order={() => props.part?.keys ?? []}>
+                {(key) =>
+                    // Which kind of row it is comes from the maps the rows are read from. A key in
+                    // neither (the agent just left) has no row to show.
+                    rowsByKey().has(key) ? (
+                        <AgentRowHost rowKey={key} rows={rowsByKey} focusedBlockId={props.focusedBlockId} model={props.model} />
+                    ) : remoteByKey().has(key) ? (
+                        <RemoteAgentRowHost rowKey={key} rows={remoteByKey} model={props.model} />
+                    ) : null
+                }
+            </SwarmSeatList>
+            <Show when={props.id === LOCAL_PART_ID}>
+                <StoppedAgents
+                    agents={filter.stopped}
+                    hasLive={() => tree().length > 0 || remote().length > 0}
+                    onOpen={openAgentInActiveTab}
+                    onStart={startAgent}
+                />
+            </Show>
+        </>
+    );
+}
+
+/** What the order is settled from: one item per row, this instance's and the other instances'. */
+function orderItems(rows: (readonly [string, AgentTreeNode])[], remote: RemoteRow[]): SwarmOrderItem[] {
+    return [
+        ...rows.map(([key, n]): SwarmOrderItem => {
+            const meta = n.blockId ? MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", n.blockId))()?.meta : undefined;
+            const status = phaseToDisplayStatus(n.blockId, n.agentStatus);
+            return {
+                key,
+                remote: false,
+                working: chipStatus(status, isAwaitingUser(meta, n.agentStatus)) !== "idle",
+                lastActive: lastActiveMs(meta),
+                name: n.agentName,
+            };
+        }),
+        ...remote.map((r): SwarmOrderItem => ({
+            key: remoteAgentKey(r.section, r.agent),
+            remote: true,
+            working: remoteChip(r.agent.status, r.section.stale)?.status === "working",
+            lastActive: 0,
+            name: r.agent.name,
+        })),
+    ];
+}
+
 export function SwarmAgentList(props: {
     model: SwarmViewModel;
     ctx: PaneTabHostContext;
@@ -122,28 +191,7 @@ export function SwarmAgentList(props: {
     const swarmOrder = useSwarmOrder({
         list: () => treeRef,
         zoom: zoomFactor,
-        items: () => [
-            ...keyedRows().map(([key, n]): SwarmOrderItem => {
-                const meta = n.blockId
-                    ? MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", n.blockId))()?.meta
-                    : undefined;
-                const status = phaseToDisplayStatus(n.blockId, n.agentStatus);
-                return {
-                    key,
-                    remote: false,
-                    working: chipStatus(status, isAwaitingUser(meta, n.agentStatus)) !== "idle",
-                    lastActive: lastActiveMs(meta),
-                    name: n.agentName,
-                };
-            }),
-            ...remote().map((r): SwarmOrderItem => ({
-                key: remoteAgentKey(r.section, r.agent),
-                remote: true,
-                working: remoteChip(r.agent.status, r.section.stale)?.status === "working",
-                lastActive: 0,
-                name: r.agent.name,
-            })),
-        ],
+        items: () => orderItems(keyedRows(), remote()),
     });
     const seats = useSwarmSeats(props.ctx, keyedRows, remoteByKey); // Group by lead (swarm-seats.tsx)
     // The filter keeps the rows it shows, in the order the list holds: it never re-settles the
@@ -172,6 +220,20 @@ export function SwarmAgentList(props: {
         return focusedActiveBlockId(layoutModel);
     });
 
+    // The list cut into a labelled part per host and channel (swarm-origin-parts.ts). Labels show once
+    // another instance has agents in the list; a part with nothing left to show after the filter is not there.
+    const sections = createMemo(() => remoteSections(model.otherInstancesAtom()));
+    const localLabel = createMemo(() => {
+        const other = model.otherInstancesAtom();
+        return localPartLabel(other?.hostname, other?.channel, sections().some((s) => s.tier === "host"));
+    });
+    const parts = createMemo(() =>
+        partsByOrigin(shownOrder(), remoteByKey(), sections(), localLabel(), filter.stopped().length > 0)
+    );
+    const partIds = createMemo(() => parts().map((p) => p.id));
+    const partsById = createMemo(() => new Map(parts().map((p) => [p.id, p] as const)));
+    const labelled = () => remote().length > 0;
+
     return (
         // One list: this instance's agents and the other instances', working ones
         // first (swarm-order.ts; docs/specs/SPEC_SWARM_REFINEMENTS_2026_10_17.md §5).
@@ -189,6 +251,10 @@ export function SwarmAgentList(props: {
                     <SwarmSelectToggle model={model} ids={props.agents.shownSelectableKeys} />
                     <SwarmGroupByControl seats={seats} />
                 </div>
+            </Show>
+            {/* The one scrolling list: a labelled part per host and channel (this machine's first), and the
+                stopped agents at the end of this machine's part. */}
+            <Show when={tree().length > 0 || remote().length > 0 || filter.stopped().length > 0}>
                 <div
                     class="swarm-tree"
                     data-density={props.density()}
@@ -198,30 +264,22 @@ export function SwarmAgentList(props: {
                     }}
                     {...swarmOrder.listHandlers}
                 >
-                    <SwarmSeatList seats={seats} order={shownOrder}>
-                        {(key) =>
-                            // Which kind of row it is comes from the maps the rows are read from. A key in
-                            // neither (the agent just left) has no row to show.
-                            rowsByKey().has(key) ? (
-                                <AgentRowHost
-                                    rowKey={key}
-                                    rows={rowsByKey}
-                                    focusedBlockId={focusedBlockId}
-                                    model={model}
-                                />
-                            ) : remoteByKey().has(key) ? (
-                                <RemoteAgentRowHost rowKey={key} rows={remoteByKey} model={model} />
-                            ) : null
-                        }
-                    </SwarmSeatList>
+                    {/* Keyed by id, so a reorder moves a part's rows instead of building them again. */}
+                    <For each={partIds()}>
+                        {(id) => (
+                            <OriginPart
+                                id={id}
+                                part={partsById().get(id)}
+                                labelled={labelled()}
+                                seats={seats}
+                                agents={props.agents}
+                                focusedBlockId={focusedBlockId}
+                                model={model}
+                            />
+                        )}
+                    </For>
                 </div>
             </Show>
-            <StoppedAgents
-                agents={filter.stopped}
-                hasLive={() => tree().length > 0 || remote().length > 0}
-                onOpen={openAgentInActiveTab}
-                onStart={startAgent}
-            />
         </>
     );
 }

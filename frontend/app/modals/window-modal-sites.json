@@ -39,14 +39,6 @@
   "tab/tab-close-confirm-modal.tsx": {
     "window-scope": 1
   },
-  "view/vault/vault-request-prompts.tsx": {
-    "default-scope": 1,
-    "open-modal": 1
-  },
-  "view/vault/vault-use-prompts.tsx": {
-    "window-scope": 1,
-    "open-modal": 1
-  },
   "window/logo-menu.tsx": {
     "open-modal": 1
   },

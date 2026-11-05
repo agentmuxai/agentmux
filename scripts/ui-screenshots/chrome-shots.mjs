@@ -14,8 +14,8 @@
 // overlays in the page (spec §9.3), found by these selectors:
 //   - the AgentMux logo menu and the top bar's submenus: `.menu`, and each open
 //     submenu as a separate `.menu.sub-menu` at the end of the body;
-//   - right-click and pane `+` menus: `.menu` inside `#cef-context-menu-overlay`,
-//     submenus nested in their row.
+//   - right-click and pane `+` menus: `.menu` in a shell inside `#cef-context-menu-overlay`,
+//     each open submenu a sibling shell with its own `.menu.sub-menu`.
 
 import { SIZES } from "./sizes.mjs";
 import { VISIBLE_BLOCK_IDS, closeTab, openNewTab, openWidget, visibleCenter } from "./widget-shots.mjs";
@@ -24,7 +24,7 @@ const VIEWPORT = SIZES.medium;
 
 const MENU = ".menu:not(.sub-menu)";
 const SUBMENU = ".menu.sub-menu";
-const CONTEXT_MENU = "#cef-context-menu-overlay > .menu";
+const CONTEXT_MENU = "#cef-context-menu-overlay > .anchored-popover > .menu:not(.sub-menu)";
 const CONTEXT_SUBMENU = "#cef-context-menu-overlay .menu.sub-menu";
 const MORE_DROPDOWN = ".action-widget-more-dropdown";
 const PALETTE = ".command-palette-panel";

@@ -10,6 +10,8 @@
  */
 
 import { Button } from "@/app/element/ui";
+import { Rich } from "@/app/i18n/rich";
+import { t } from "@/app/i18n/i18n";
 import { For, Show, type JSX } from "solid-js";
 
 import "./muxbus-sign-in-choices.scss";
@@ -52,9 +54,9 @@ function AppleMark(): JSX.Element {
     );
 }
 
-const PROVIDERS: { name: MuxBusIdentityProvider; label: string; class: string; mark: () => JSX.Element }[] = [
-    { name: "Google", label: "Continue with Google", class: "muxbus-signin-google", mark: GoogleMark },
-    { name: "SignInWithApple", label: "Continue with Apple", class: "muxbus-signin-apple", mark: AppleMark },
+const PROVIDERS: { name: MuxBusIdentityProvider; labelKey: string; class: string; mark: () => JSX.Element }[] = [
+    { name: "Google", labelKey: "signin.continueWithGoogle", class: "muxbus-signin-google", mark: GoogleMark },
+    { name: "SignInWithApple", labelKey: "signin.continueWithApple", class: "muxbus-signin-apple", mark: AppleMark },
 ];
 
 /** The published providers this app has a button for, Google first. */
@@ -97,42 +99,35 @@ export function MuxBusSignInChoices(props: MuxBusSignInChoicesProps): JSX.Elemen
                                 onClick={() => props.onSignIn(p.name)}
                             >
                                 <p.mark />
-                                <span>{p.label}</span>
+                                <span>{t(p.labelKey)}</span>
                             </Button>
                         )}
                     </For>
                     <Show when={providers().length}>
                         <div class="muxbus-signin-or" role="separator">
-                            <span>or</span>
+                            <span>{t("signin.or")}</span>
                         </div>
                     </Show>
                     <Button tone="accent" disabled={props.disabled} onClick={() => props.onSignIn()}>
-                        {providers().length ? "Sign in with email" : props.label}
+                        {providers().length ? t("signin.withEmail") : props.label}
                     </Button>
                 </div>
                 <Show when={providers().length}>
                     <div class="muxbus-signin-scopes">
-                        <p class="muxbus-signin-scopes-title">What each sign-in shares with AgentMux</p>
+                        <p class="muxbus-signin-scopes-title">{t("signin.scopes.title")}</p>
                         <ul>
                             <Show when={has("Google")}>
                                 <li>
-                                    <strong>Google:</strong> your name, email address and profile picture (the{" "}
-                                    <code>openid</code>, <code>email</code> and <code>profile</code> permissions).
+                                    <Rich k="signin.scopes.google" />
                                 </li>
                             </Show>
                             <Show when={has("SignInWithApple")}>
                                 <li>
-                                    <strong>Apple:</strong> your name, if you choose to share it, and your email
-                                    address, or a private relay address if you choose Hide My Email (the{" "}
-                                    <code>name</code> and <code>email</code> permissions). While AgentMux Cloud is
-                                    invitation-only, choose Share My Email.
+                                    <Rich k="signin.scopes.apple" />
                                 </li>
                             </Show>
                         </ul>
-                        <p>
-                            Neither gives AgentMux access to your Gmail, Google Drive, Calendar, iCloud or anything else
-                            in your account.
-                        </p>
+                        <p>{t("signin.scopes.neither")}</p>
                     </div>
                 </Show>
             </div>

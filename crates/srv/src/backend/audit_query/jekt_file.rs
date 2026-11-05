@@ -83,11 +83,11 @@ impl Iterator for ReverseLines {
     }
 }
 
-/// An entry of the file, with where its line starts and where it ends (the next line's start).
-pub(super) fn entries(path: &Path, end: Option<u64>) -> impl Iterator<Item = (u64, u64, AuditLogEntry)> {
+/// An entry of the file (an `AuditLogEntry` of the jekt file, an `ActivityRow` of a day's), with where its line starts and where it ends (the next line's start).
+pub(super) fn entries<T: serde::de::DeserializeOwned>(path: &Path, end: Option<u64>) -> impl Iterator<Item = (u64, u64, T)> {
     ReverseLines::open(path, end).into_iter().flatten().map_while(Result::ok).filter_map(|line| {
         let to = line.start + line.bytes.len() as u64 + 1;
-        serde_json::from_slice::<AuditLogEntry>(&line.bytes).ok().map(|e| (line.start, to, e))
+        serde_json::from_slice::<T>(&line.bytes).ok().map(|e| (line.start, to, e))
     })
 }
 
@@ -190,12 +190,12 @@ mod tests {
     fn an_empty_or_missing_file_has_no_lines() {
         let (_dir, path) = file_of(&[], false);
         assert!(all(&path, None, 4).is_empty());
-        assert_eq!(entries(&path.with_file_name("nope"), None).count(), 0);
+        assert_eq!(entries::<AuditLogEntry>(&path.with_file_name("nope"), None).count(), 0);
     }
 
     #[test]
     fn a_line_that_is_not_an_entry_is_skipped() {
         let (_dir, path) = file_of(&["{not json", "{\"x\":1}"], true);
-        assert_eq!(entries(&path, None).count(), 0);
+        assert_eq!(entries::<AuditLogEntry>(&path, None).count(), 0);
     }
 }
