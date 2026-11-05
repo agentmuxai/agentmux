@@ -25,9 +25,44 @@ use super::types::AuditLogEntry;
 
 static SINK: OnceLock<Sender<AuditLogEntry>> = OnceLock::new();
 
-/// `<shared root>/audit/jekt-audit.jsonl`.
+/// `<shared root>/audit/jekt-audit.jsonl`, or `None` while this srv has given the shared folder up.
 pub fn default_path() -> Option<PathBuf> {
     crate::registry::resolve_global_shared_root().map(|root| root.join("audit").join("jekt-audit.jsonl"))
+}
+
+/// The shared file to read, whether or not this srv may write to it: a srv that gave the folder up
+/// still lists what the account's other srvs recorded.
+pub fn shared_path_for_reading() -> Option<PathBuf> {
+    crate::registry::shared_root_ignoring_deferral().map(|root| root.join("audit").join("jekt-audit.jsonl"))
+}
+
+/// `<this channel's folder>/audit/jekt-audit.jsonl`: where a srv that gave the shared folder up keeps its own
+/// rows. A line goes to exactly one of this and the shared file. It is the channel's own folder, not the
+/// per-version data folder (`--wavedata`, `AGENTMUX_DATA_DIR`): a srv that deferred is usually upgraded next, and
+/// the new version must still find the rows the old one kept.
+pub fn own_path() -> Option<PathBuf> {
+    std::env::var_os("AGENTMUX_INSTANCE_DIR").filter(|d| !d.is_empty()).map(|d| PathBuf::from(d).join("audit").join("jekt-audit.jsonl"))
+}
+
+/// Where this srv appends: the shared file, or its own when it doesn't use the shared folder.
+pub fn write_path() -> Option<PathBuf> {
+    default_path().or_else(own_path)
+}
+
+/// Start recording where this srv writes ([`write_path`]), and say so in the log when that is its own file.
+pub fn install_for_this_srv() {
+    match write_path() {
+        Some(path) => {
+            if default_path().is_none() {
+                tracing::info!(path = %path.display(), "jekt audit: the shared folder is not used; this srv keeps its rows in its own file");
+            }
+            let channel_name = std::env::var("AGENTMUX_INSTANCE_CHANNEL").unwrap_or_default();
+            if let Err(e) = install(path.clone(), channel_name) {
+                tracing::warn!(path = %path.display(), error = %e, "jekt audit: not kept in a file");
+            }
+        }
+        None => tracing::warn!("jekt audit: no shared directory and no channel directory; not kept in a file"),
+    }
 }
 
 /// Start recording to `path` for the rest of this process. The first call wins.
@@ -120,6 +155,24 @@ mod tests {
             cli_native: None,
             turn: None,
         }
+    }
+
+    #[test]
+    fn a_srv_without_the_shared_folder_keeps_its_rows_in_its_channel_folder_not_the_per_version_data_folder() {
+        let _g = crate::test_support::ISOLATED_AUTH_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        let saved = (std::env::var_os("AGENTMUX_INSTANCE_DIR"), std::env::var_os("AGENTMUX_DATA_DIR"));
+        // The data folder is `<channel folder>/versions/<version>/data`: the next version does not see it.
+        std::env::set_var("AGENTMUX_INSTANCE_DIR", dir.path());
+        std::env::set_var("AGENTMUX_DATA_DIR", dir.path().join("versions").join("1.2.3").join("data"));
+        let own = own_path();
+        for (name, value) in [("AGENTMUX_INSTANCE_DIR", saved.0), ("AGENTMUX_DATA_DIR", saved.1)] {
+            match value {
+                Some(v) => std::env::set_var(name, v),
+                None => std::env::remove_var(name),
+            }
+        }
+        assert_eq!(own, Some(dir.path().join("audit").join("jekt-audit.jsonl")));
     }
 
     #[test]

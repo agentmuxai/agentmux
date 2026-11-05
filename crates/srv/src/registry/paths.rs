@@ -163,6 +163,12 @@ pub(crate) fn resolve_global_shared_root() -> Option<PathBuf> {
     if crate::bootstrap::shared_guard::deferred() {
         return None;
     }
+    shared_root_ignoring_deferral()
+}
+
+/// The same root while this srv has given the folder up: only for a plain file it reads and never
+/// writes (the jekt audit file), where an earlier srv's lines are still the account's record.
+pub(crate) fn shared_root_ignoring_deferral() -> Option<PathBuf> {
     // `var_os` throughout: a path that isn't valid UTF-8 must not read as unset.
     if let Some(s) = std::env::var_os("AGENTMUX_HOME_OVERRIDE") {
         if !s.is_empty() {
