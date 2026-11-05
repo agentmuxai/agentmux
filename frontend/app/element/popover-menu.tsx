@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { AnchoredPopover } from "@/app/element/anchored-popover";
+import { AnchoredPopover, pointAnchor } from "@/app/element/anchored-popover";
 import { menuIconClass } from "@/app/util/menu-icons";
 import clsx from "clsx";
 import { createSignal, For, JSX, onCleanup, onMount, Show } from "solid-js";
@@ -53,8 +53,7 @@ const PopoverMenu = (props: PopoverMenuProps): JSX.Element => {
     // The cursor is a point (a zero-size rect) AnchoredPopover places the menu at, without a gap. It
     // follows chrome zoom, cuts the hole in any browser pane behind it and dismisses on an outside press
     // or Esc. Starts hidden and is shown once placed.
-    const { x, y } = props.pos;
-    const point = { x, y, left: x, top: y, right: x, bottom: y, width: 0, height: 0, toJSON: () => ({}) } as DOMRect;
+    const point = pointAnchor(props.pos.x, props.pos.y);
 
     const handleVisibilityChange = () => {
         if (document.hidden) close();
