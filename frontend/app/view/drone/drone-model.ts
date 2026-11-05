@@ -26,6 +26,7 @@ import {
     type DroneRunStatus,
 } from "@/app/store/drone-run-state-store";
 import { onMuxEvent } from "@/app/store/mps";
+import { WpsEvent } from "@/app/store/mps-events";
 import type { RunEvent } from "@/types/rpc/RunEvent";
 import { getMuxObjectAtom, makeORef } from "@/app/store/mos";
 import { createMemo, createSignal, type Accessor } from "solid-js";
@@ -170,6 +171,10 @@ export class DroneViewModel {
     // unsubscribe on dispose / when the run changes.
     private activeRunUnsub: (() => void) | null = null;
 
+    // `drones:changed`: a drone was saved, deleted or defined elsewhere (another window, an agent),
+    // so the list this pane shows is read again.
+    private dronesChangedUnsub: (() => void) | null = null;
+
     // Idempotency flag — block-cleanup paths can call dispose() more
     // than once on the same view model. A second call would re-fire
     // `dispatchDroneRun(..., Disposed)` against a slot the first
@@ -213,6 +218,7 @@ export class DroneViewModel {
         });
 
         void this.refreshList();
+        this.dronesChangedUnsub = onMuxEvent(WpsEvent.DronesChanged, () => void this.refreshList());
     }
 
     async refreshList(): Promise<void> {
@@ -594,6 +600,8 @@ export class DroneViewModel {
     dispose(): void {
         if (this.disposed) return;
         this.disposed = true;
+        this.dronesChangedUnsub?.();
+        this.dronesChangedUnsub = null;
         if (this.activeRunUnsub) {
             this.activeRunUnsub();
             this.activeRunUnsub = null;
