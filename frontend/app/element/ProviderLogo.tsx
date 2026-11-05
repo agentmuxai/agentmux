@@ -35,6 +35,10 @@ import { uniquifySvgIds } from "@/util/svg-ids";
 
 // Inlined SVGs need unique ids per copy: see uniquifySvgIds (@/util/svg-ids).
 
+// Mux Code wears AgentMux's own mark, the four blocks. The source SVG has a viewBox only, so give it the
+// 1em size the lobehub icons have and the wrapper's font-size drives.
+const MUX_CODE_MARK = markSvg.replace("<svg ", '<svg width="1em" height="1em" ');
+
 export interface ProviderLogoProps {
     provider: string;
     size?: number;
@@ -82,11 +86,7 @@ export const ProviderLogo = (props: ProviderLogoProps): JSX.Element => {
         // marks, and Muse has no mark of its own to use.
         if (p === "aider") return { png: aiderUrl };
 
-        // Mux Code wears AgentMux's own mark, the four blocks. The source SVG has a viewBox only, so give it
-        // the 1em size the lobehub icons have and the wrapper's font-size drives.
-        if (p === "muxcode" || p === "mux-code" || p === "mux_code") {
-            return { html: markSvg.replace("<svg ", '<svg width="1em" height="1em" ') };
-        }
+        if (p === "muxcode" || p === "mux-code" || p === "mux_code") return { html: MUX_CODE_MARK };
 
         // AgentMux's own brand mark — the app's block-tile icon (same mark as
         // the taskbar/favicon icon, assets/linux/icons/hicolor/*/apps/agentmux.png).
