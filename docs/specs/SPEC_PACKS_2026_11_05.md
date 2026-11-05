@@ -85,7 +85,7 @@ Not preloaded for everyone. A pack costs nothing for an agent that never meets t
 | An `mcp` entry | the MCP tab's own install and approval, and a **pinned version** | an MCP server (Ableton's runs arbitrary Python inside Live in one variant) executes code; the pack only points at the catalog entry |
 | Anything | never a `Desktop` grant | the person grants per app, at the time, with the countdown |
 
-The signing scheme is the widget one (`SPEC_WIDGET_SHARING` §2: `pack.sig`, Ed25519 over id, version and content hash, publisher pinned on first use). An update from a different publisher key than the pin is refused with a clear message. A pack can ask for nothing the `Desktop` grant did not already allow, so a hostile pack's worst effect is bad advice to an agent that is still gated, rate-limited and audited. The pack text is untrusted input to the agent like any file; `Desktop` still refuses a password field and a blocked app.
+The signing scheme is the widget one (`SPEC_WIDGET_SHARING` §2: `pack.sig`, Ed25519 over id, version and content hash, publisher pinned on first use). An update from a different publisher key than the pin is refused with a clear message. A pack can ask for nothing the `Desktop` grant did not already allow, so a hostile pack's worst effect is bad advice to an agent that is still gated, rate-limited and audited. The pack text is untrusted input to the agent like any file; `Desktop` still refuses a blocked app. It does **not** yet refuse a password field (the guard is Phase 2 of the Desktop spec and is not built), so every pack must tell the agent to ask the person for any password, never to type one.
 
 ## 6. The MCP pointer
 
