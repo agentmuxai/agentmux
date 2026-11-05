@@ -27,6 +27,7 @@
 
 import { For, Show, createMemo, type Accessor, type JSX } from "solid-js";
 import type { PendingMessage } from "../../../agent-model/state";
+import { AttachmentStrip } from "../attachments/AttachmentStrip";
 
 interface PendingMessagesPanelProps {
     pendingMessages: Accessor<PendingMessage[]>;
@@ -79,7 +80,12 @@ export const PendingMessagesPanel = (props: PendingMessagesPanelProps): JSX.Elem
                             classList={{ "agent-pending-item-flushing": !!msg.flushing }}
                             data-message-id={msg.id}
                         >
-                            <pre>{msg.text}</pre>
+                            <Show when={msg.attachments?.length}>
+                                <AttachmentStrip attachments={msg.attachments!} />
+                            </Show>
+                            <Show when={msg.text}>
+                                <pre>{msg.text}</pre>
+                            </Show>
                         </div>
                     )}
                 </For>
