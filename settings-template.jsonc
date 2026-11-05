@@ -526,6 +526,11 @@
     // message each other through AgentMux only.
     // "agent:climessaging": false,
 
+    // Load the signed-in claude.ai account's connectors (Gmail, Calendar, Drive, Docs) into
+    // Claude agents. Off, agents use AgentMux's own Google tools, which the person turns on per
+    // agent in Connectors. Takes effect at an agent's next launch.
+    // "agent:claudeaiconnectors": false,
+
     // Minutes of quiet after which an agent's session counts as cold: a message that can wait
     // is then held until the agent is next active, so it does not start a turn that pays for
     // the whole context again. 0 turns the hold off.
