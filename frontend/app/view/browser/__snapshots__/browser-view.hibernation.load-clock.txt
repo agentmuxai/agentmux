@@ -1,0 +1,10 @@
+diag view-mount window_label=main initial-urlAtom="https://example.com/page"
+register pane
+diag [hibernate] wake-start why=intent visible=false
+-- page created at wake
+diag [hibernate] wake-loaded ms=900 why=intent visible=false
+probe loaded: rect.asleep=false drag.unavailable=true pane.visible=false pane.asleep=true pane.frozen=false hiddenSince=1793707200000
+-- page lost
+-- a plain load while awake is recorded
+model.recordLoadMs 333
+-- a load with no loading seen

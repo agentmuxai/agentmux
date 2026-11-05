@@ -1,0 +1,26 @@
+api getAboutModalDetails
+api getWindowLabel
+popover class=instance-panel role=dialog label=AgentMux instance panel placement=top-end width=320px
+ListClosedWindows
+PlaceWindowSlots ["w1","w2"]
+console.debug [wave-panel] windowId=win1 label=main idx=0 displayName=<none> workspaceName=Main Space → name="Main Space"
+console.debug [wave-panel] windowId=win1 label=main idx=0 displayName=<none> workspaceName=Main Space → name="Main Space"
+PlaceWindowSlots ["w1","w2"]
+<div class="instance-panel-section">
+<div class="instance-panel-section-title">Floating panes — 0</div>
+<div class="instance-panel-pane-empty">No floating panes</div>
+</div>
+api getAboutModalDetails
+api getWindowLabel
+popover class=instance-panel role=dialog label=AgentMux instance panel placement=top-end width=320px
+ListClosedWindows
+PlaceWindowSlots ["w1","w2"]
+console.debug [wave-panel] windowId=win1 label=main idx=0 displayName=<none> workspaceName=Main Space → name="Main Space"
+console.debug [wave-panel] windowId=win1 label=main idx=0 displayName=<none> workspaceName=Main Space → name="Main Space"
+PlaceWindowSlots ["w1","w2"]
+title: Floating panes — 3
+names: Pane 1 | Other Space | Main Space
+<div class="instance-panel-pane-row" data-hover-tip="Click to focus" aria-description="Click to focus" role="button" tabindex="0">
+<span class="instance-panel-pane-icon">◈</span>
+<span class="instance-panel-pane-name">Pane 1</span>
+</div>

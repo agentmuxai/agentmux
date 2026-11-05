@@ -1,0 +1,5 @@
+diag sync urlAtom="https://example.com/" addressBar="https://example.com/" focused=false willUpdate=false
+listen browser-pane-shortcut
+rpc ListBookmarks
+img=true globe=false
+img=false globe=true

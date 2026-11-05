@@ -1,0 +1,14 @@
+running then success: calls after mount and each change = 0, 1
+pending approval, running, success: calls after mount and each change = 0, 0, 1
+running then failed: calls after mount and each change = 0, 1
+running then denied: calls after mount and each change = 0, 1
+running then canceled: calls after mount and each change = 0, 1
+loaded success, then a note: calls after mount and each change = 0, 0
+finished a second ago on arrival: calls after mount and each change = 1
+finished a minute ago on arrival: calls after mount and each change = 0
+finished without a stamp on arrival: calls after mount and each change = 0
+denied a second ago on arrival: calls after mount and each change = 0
+running on arrival: calls after mount and each change = 0
+another node takes the slot, finished live: calls after mount and each change = 0, 1
+another node takes the slot, running then finished: calls after mount and each change = 0, 0, 1
+the slot's old status is not the new node's baseline: calls after mount and each change = 0, 0

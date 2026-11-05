@@ -1,0 +1,7 @@
+rpc CreateScratchFile {}
+rpc ReadEditorFile {"path":"/tmp/scratch-1.md"}
+codemirror built: true
+after {"ctrlKey":true,"shiftKey":true}: save-as input shown: false
+resolved editor:saveAs editor
+after {"metaKey":true,"shiftKey":true}: save-as input shown: false
+save-as input shown: false

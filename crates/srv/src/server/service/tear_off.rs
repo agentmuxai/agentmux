@@ -13,6 +13,7 @@ use super::layout_helpers::{
     queue_source_layout_delete, queue_target_layout_insert, queue_target_layout_split,
     queue_target_stack_push, setup_torn_off_stack_layout,
 };
+use super::redock_origin::{self, Resolution};
 use super::reducer_helpers::{dispatch_to_reducer, publish_events};
 
 // Phase E.5.5 — TearOffBlock migrated to saga (reducer-state
@@ -49,6 +50,8 @@ pub(crate) async fn handle_tear_off_block(state: &AppState, call: &WebCallType) 
     let members: Vec<String> = service::get_optional_arg(args, 4).unwrap_or(None).unwrap_or_default();
     let order = crate::sagas::tear_off_block::tear_off_order(&block_id, &members);
     tracing::info!(block_id = %block_id, members = order.len(), source_tab = %source_tab_id, source_ws = %source_ws_id, "[dnd:svc] TearOffBlock via saga");
+    // Read before the leaf leaves the tree: where a redock by the button puts the pane back.
+    let origin = redock_origin::record_for(state, &source_tab_id, &source_ws_id, &order).await;
     let saga_result = crate::sagas::tear_off_block::run_stack(
         state,
         block_id.clone(),
@@ -73,6 +76,7 @@ pub(crate) async fn handle_tear_off_block(state: &AppState, call: &WebCallType) 
         }
         Err(reason) => return WebReturnType::error(reason),
     };
+    redock_origin::remember(state, &order, origin.as_ref()).await;
 
     // Layout setup for the new tab — make the moved block its
     // single root node so the frontend renders it. Best-effort;
@@ -127,35 +131,36 @@ pub(crate) async fn handle_tear_off_block(state: &AppState, call: &WebCallType) 
         }
     }
 
-    let mut updates = Vec::new();
-    if let Ok(src_tab) = store.must_get::<Tab>(&source_tab_id) {
-        updates.push(MuxObjUpdate {
-            updatetype: "update".into(),
-            otype: OTYPE_TAB.to_string(),
-            oid: source_tab_id.clone(),
-            obj: Some(mux_obj_to_value(&src_tab)),
-        });
-    }
-    if let Ok(src_ws) = store.must_get::<Workspace>(&source_ws_id) {
-        updates.push(MuxObjUpdate {
-            updatetype: "update".into(),
-            otype: OTYPE_WORKSPACE.to_string(),
-            oid: source_ws_id.clone(),
-            obj: Some(mux_obj_to_value(&src_ws)),
-        });
-    }
-    if let Ok(new_ws) = store.must_get::<Workspace>(&new_ws_oid) {
-        updates.push(MuxObjUpdate {
-            updatetype: "update".into(),
-            otype: OTYPE_WORKSPACE.to_string(),
-            oid: new_ws_oid.clone(),
-            obj: Some(mux_obj_to_value(&new_ws)),
-        });
-    }
+    let updates = torn_off_updates(state, &source_tab_id, &source_ws_id, &new_ws_oid);
     WebReturnType::success_data_updates(
         serde_json::to_value(&new_ws_oid).unwrap_or_default(),
         updates,
     )
+}
+
+/// The object updates a tear-off owes the renderers: the source tab, the source workspace and the new one.
+fn torn_off_updates(state: &AppState, source_tab_id: &str, source_ws_id: &str, new_ws_id: &str) -> Vec<MuxObjUpdate> {
+    let store = &state.mstore;
+    let mut updates = Vec::new();
+    if let Ok(tab) = store.must_get::<Tab>(source_tab_id) {
+        updates.push(MuxObjUpdate {
+            updatetype: "update".into(),
+            otype: OTYPE_TAB.to_string(),
+            oid: source_tab_id.to_string(),
+            obj: Some(mux_obj_to_value(&tab)),
+        });
+    }
+    for ws_id in [source_ws_id, new_ws_id] {
+        if let Ok(ws) = store.must_get::<Workspace>(ws_id) {
+            updates.push(MuxObjUpdate {
+                updatetype: "update".into(),
+                otype: OTYPE_WORKSPACE.to_string(),
+                oid: ws_id.to_string(),
+                obj: Some(mux_obj_to_value(&ws)),
+            });
+        }
+    }
+    updates
 }
 
 // Floating-pane Phase 4a — re-dock a floater's block back into
@@ -167,7 +172,6 @@ pub(crate) async fn handle_tear_off_block(state: &AppState, call: &WebCallType) 
 // empty-tab watcher once its tab.blockids is empty.
 // Spec: docs/specs/SPEC_FLOATING_PANE_REDOCK_2026-05-27.md
 pub(crate) async fn handle_redock_floating_pane(state: &AppState, call: &WebCallType) -> WebReturnType {
-    let store = &state.mstore;
     let args = &call.args;
     let block_id: String = match service::get_arg(args, 0) {
         Ok(v) => v,
@@ -206,6 +210,15 @@ pub(crate) async fn handle_redock_floating_pane(state: &AppState, call: &WebCall
     // back as it left. Absent → just `block_id`.
     let members: Vec<String> = service::get_optional_arg(args, 8).unwrap_or(None).unwrap_or_default();
     let active_block_id: String = service::get_optional_arg(args, 9).unwrap_or(None).unwrap_or_else(|| block_id.clone());
+    // The Redock button and `pane:redock`: back where the pane was torn from, when that place can still be found;
+    // the target named above is then only the fallback. A drag redock names its own target and leaves this off.
+    // SPEC_FLOATING_PANE_REDOCK_TO_ORIGIN_2026_11_03.md.
+    let to_origin: bool = service::get_optional_arg(args, 10).unwrap_or(None).unwrap_or(false);
+    let (target_tab_id, target_ws_id, origin) = if to_origin {
+        redock_origin::target_for(state, &block_id, target_tab_id, target_ws_id).await
+    } else {
+        (target_tab_id, target_ws_id, Resolution::Fallback)
+    };
     tracing::info!(
         block_id = %block_id,
         source_tab = %source_tab_id,
@@ -251,9 +264,11 @@ pub(crate) async fn handle_redock_floating_pane(state: &AppState, call: &WebCall
     // present, queue SplitHorizontal/SplitVertical so the block lands
     // in the exact slot the ghost previewed. Otherwise fall back to
     // the generic InsertNode (Phase 4a behavior).
-    let target_layout_result = match (target_block_id.as_deref(), direction) {
-        (Some(tbid), _) if as_tab => redock_as_tab(state, &target_tab_id, &block_id, tbid, true).await,
-        (Some(tbid), Some(dir)) => {
+    let target_layout_result = match (&origin, target_block_id.as_deref(), direction) {
+        (Resolution::StackMate(mate), _, _) => redock_as_tab(state, &target_tab_id, &block_id, mate, true).await,
+        (Resolution::Split(anchor), _, _) => redock_origin::place_at_anchor(state, &target_tab_id, &block_id, anchor).await,
+        (_, Some(tbid), _) if as_tab => redock_as_tab(state, &target_tab_id, &block_id, tbid, true).await,
+        (_, Some(tbid), Some(dir)) => {
             queue_target_layout_split(state, &target_tab_id, &block_id, tbid, dir).await
         }
         _ => queue_target_layout_insert(state, &target_tab_id, &block_id).await,
@@ -302,48 +317,9 @@ pub(crate) async fn handle_redock_floating_pane(state: &AppState, call: &WebCall
         }
     }
 
-    let mut updates = Vec::new();
-    // Layout updates MUST come first — the queue helpers persist
-    // via the reducer route (SPEC_864 Phase 4), whose SQLite write
-    // is NOT auto-broadcast (only the row gets a new version).
-    // Without these entries in the response, the target window's
-    // frontend never sees the new leaf and renders nothing; the
-    // source's pending delete action never gets pulled either.
-    // Both layouts are read AFTER the helpers return — the
-    // helpers persist synchronously inside the reducer lock, so
-    // the re-read always sees the appended actions.
-    if let Ok(src_tab) = store.must_get::<Tab>(&source_tab_id) {
-        if let Ok(src_layout) = store.must_get::<LayoutState>(&src_tab.layoutstate) {
-            updates.push(MuxObjUpdate {
-                updatetype: "update".into(),
-                otype: OTYPE_LAYOUT.to_string(),
-                oid: src_tab.layoutstate.clone(),
-                obj: Some(mux_obj_to_value(&src_layout)),
-            });
-        }
-        updates.push(MuxObjUpdate {
-            updatetype: "update".into(),
-            otype: OTYPE_TAB.to_string(),
-            oid: source_tab_id.clone(),
-            obj: Some(mux_obj_to_value(&src_tab)),
-        });
-    }
-    if let Ok(dst_tab) = store.must_get::<Tab>(&target_tab_id) {
-        if let Ok(dst_layout) = store.must_get::<LayoutState>(&dst_tab.layoutstate) {
-            updates.push(MuxObjUpdate {
-                updatetype: "update".into(),
-                otype: OTYPE_LAYOUT.to_string(),
-                oid: dst_tab.layoutstate.clone(),
-                obj: Some(mux_obj_to_value(&dst_layout)),
-            });
-        }
-        updates.push(MuxObjUpdate {
-            updatetype: "update".into(),
-            otype: OTYPE_TAB.to_string(),
-            oid: target_tab_id.clone(),
-            obj: Some(mux_obj_to_value(&dst_tab)),
-        });
-    }
+    // The docked pane is home: the origin has done its job, on every tab of the pane.
+    redock_origin::clear(state, &[vec![block_id.clone()], members.clone()].concat()).await;
+    let updates = redock_updates(state, &source_tab_id, &target_tab_id);
     // CRITICAL: MuxObjUpdates in the response only reach the
     // CALLING renderer (the floater that's about to close). The
     // TARGET window's renderer is a different process and won't
@@ -363,9 +339,39 @@ pub(crate) async fn handle_redock_floating_pane(state: &AppState, call: &WebCall
             "redocked": true,
             "block_id": block_id,
             "target_tab_id": target_tab_id,
+            "target_workspace_id": target_ws_id,
+            "placed": origin.label(),
         }),
         updates,
     )
+}
+
+/// The object updates a redock owes the renderers: the source and target tabs and their layouts. Layout updates
+/// MUST come first: the queue helpers persist via the reducer route (SPEC_864 Phase 4), whose SQLite write is NOT
+/// auto-broadcast (only the row gets a new version). Without them the target window never sees the new leaf and
+/// renders nothing, and the source's pending delete action never gets pulled. Both layouts are read AFTER the
+/// helpers return: they persist synchronously inside the reducer lock, so the re-read sees the appended actions.
+fn redock_updates(state: &AppState, source_tab_id: &str, target_tab_id: &str) -> Vec<MuxObjUpdate> {
+    let store = &state.mstore;
+    let mut updates = Vec::new();
+    for tab_id in [source_tab_id, target_tab_id] {
+        let Ok(tab) = store.must_get::<Tab>(tab_id) else { continue };
+        if let Ok(layout) = store.must_get::<LayoutState>(&tab.layoutstate) {
+            updates.push(MuxObjUpdate {
+                updatetype: "update".into(),
+                otype: OTYPE_LAYOUT.to_string(),
+                oid: tab.layoutstate.clone(),
+                obj: Some(mux_obj_to_value(&layout)),
+            });
+        }
+        updates.push(MuxObjUpdate {
+            updatetype: "update".into(),
+            otype: OTYPE_TAB.to_string(),
+            oid: tab_id.to_string(),
+            obj: Some(mux_obj_to_value(&tab)),
+        });
+    }
+    updates
 }
 
 /// Undo a redock whose layout step failed after the `MoveBlock` saga moved
@@ -853,5 +859,129 @@ mod tests {
         assert_eq!(data.block_id, b, "same visible tab");
         assert!(srv.tabs[&floater_tab].block_ids.is_empty(), "nothing is left in the floater");
         assert!(srv.tabs[&tab_id].block_ids.contains(&a) && srv.tabs[&tab_id].block_ids.contains(&b));
+    }
+
+    // ---- Redock to the origin (SPEC_FLOATING_PANE_REDOCK_TO_ORIGIN_2026_11_03.md) ----
+
+    /// A window that shows `ws_id`: the origin is only used while its workspace is open in one.
+    async fn open_window_on(state: &AppState, ws_id: &str) {
+        state.srv_state.lock().await.windows.insert(
+            "w1".into(),
+            crate::state::WindowRecord { window_id: "w1".into(), workspace_id: ws_id.into() },
+        );
+    }
+
+    async fn new_tab(state: &AppState, ws_id: &str) -> String {
+        dispatch_apply(state, Command::CreateTab { workspace_id: ws_id.into(), name: "fallback".into() })
+            .await
+            .iter()
+            .find_map(|e| match e {
+                Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+                _ => None,
+            })
+            .unwrap()
+    }
+
+    /// The Redock button's call: the floater's one block, `fallback` as the target it names, `toOrigin` on.
+    async fn redock_by_button(state: &AppState, block: &str, floater_tab: &str, floater_ws: &str, fallback_tab: &str, fallback_ws: &str) -> WebReturnType {
+        handle_redock_floating_pane(
+            state,
+            &call(
+                "RedockFloatingPane",
+                vec![
+                    block.into(),
+                    floater_tab.into(),
+                    floater_ws.into(),
+                    fallback_tab.into(),
+                    fallback_ws.into(),
+                    serde_json::Value::Null,
+                    serde_json::Value::Null,
+                    false.into(),
+                    serde_json::json!([block]),
+                    block.into(),
+                    true.into(),
+                ],
+            ),
+        )
+        .await
+    }
+
+    async fn leaf_blocks(state: &AppState, tab_id: &str) -> Vec<String> {
+        fn walk(n: &agentmux_common::LayoutNode, out: &mut Vec<String>) {
+            if let Some(d) = n.data.as_ref() {
+                out.push(d.block_id.clone());
+            }
+            n.children.iter().for_each(|c| walk(c, out));
+        }
+        let srv = state.srv_state.lock().await;
+        let mut out = Vec::new();
+        if let Some(root) = srv.tabs[tab_id].rootnode.as_ref() {
+            walk(root, &mut out);
+        }
+        out
+    }
+
+    #[tokio::test]
+    async fn the_button_puts_a_torn_off_pane_back_beside_its_neighbour_not_in_the_fallback_tab() {
+        let state = test_state();
+        let (ws_id, tab_id, a, _b, c) = two_tab_pane_and_a_neighbour(&state).await;
+        open_window_on(&state, &ws_id).await;
+        let fallback_tab = new_tab(&state, &ws_id).await;
+        let new_ws = tear_off(&state, &c, &tab_id, &ws_id).await;
+        let floater_tab = state.srv_state.lock().await.workspaces[&new_ws].tab_ids[0].clone();
+        let recorded = state.mstore.must_get::<Block>(&c).unwrap().meta.contains_key(redock_origin::META_KEY);
+        assert!(recorded, "the tear-off recorded where the pane was");
+
+        let ret = redock_by_button(&state, &c, &floater_tab, &new_ws, &fallback_tab, &ws_id).await;
+        assert!(ret.error.is_none(), "redock failed: {:?}", ret.error);
+
+        let data = ret.data.unwrap();
+        assert_eq!(data["placed"], "neighbour");
+        assert_eq!(data["target_tab_id"], tab_id.as_str());
+        assert_eq!(leaf_blocks(&state, &tab_id).await, vec![a, c.clone()], "after its old neighbour, as it was");
+        assert!(leaf_blocks(&state, &fallback_tab).await.is_empty(), "nothing went to the fallback tab");
+        let cleared = !state.mstore.must_get::<Block>(&c).unwrap().meta.contains_key(redock_origin::META_KEY);
+        assert!(cleared, "a docked pane keeps no origin");
+    }
+
+    #[tokio::test]
+    async fn the_button_falls_back_to_the_named_tab_when_the_origin_window_is_gone() {
+        let state = test_state();
+        let (ws_id, tab_id, _a, _b, c) = two_tab_pane_and_a_neighbour(&state).await;
+        // No window shows the origin workspace: the pane would land where nobody sees it.
+        let fallback_tab = new_tab(&state, &ws_id).await;
+        let new_ws = tear_off(&state, &c, &tab_id, &ws_id).await;
+        let floater_tab = state.srv_state.lock().await.workspaces[&new_ws].tab_ids[0].clone();
+
+        let ret = redock_by_button(&state, &c, &floater_tab, &new_ws, &fallback_tab, &ws_id).await;
+        assert!(ret.error.is_none(), "redock failed: {:?}", ret.error);
+
+        let data = ret.data.unwrap();
+        assert_eq!(data["placed"], "fallback");
+        assert_eq!(data["target_tab_id"], fallback_tab.as_str());
+        assert_eq!(leaf_blocks(&state, &fallback_tab).await, vec![c]);
+    }
+
+    #[tokio::test]
+    async fn a_redock_that_names_its_own_target_ignores_the_origin() {
+        let state = test_state();
+        let (ws_id, tab_id, _a, _b, c) = two_tab_pane_and_a_neighbour(&state).await;
+        open_window_on(&state, &ws_id).await;
+        let other_tab = new_tab(&state, &ws_id).await;
+        let new_ws = tear_off(&state, &c, &tab_id, &ws_id).await;
+        let floater_tab = state.srv_state.lock().await.workspaces[&new_ws].tab_ids[0].clone();
+
+        // The drag redock passes no `toOrigin`.
+        let ret = handle_redock_floating_pane(
+            &state,
+            &call(
+                "RedockFloatingPane",
+                vec![c.clone().into(), floater_tab.into(), new_ws.into(), other_tab.clone().into(), ws_id.into()],
+            ),
+        )
+        .await;
+        assert!(ret.error.is_none(), "redock failed: {:?}", ret.error);
+        assert_eq!(ret.data.unwrap()["placed"], "fallback");
+        assert_eq!(leaf_blocks(&state, &other_tab).await, vec![c], "it went where it was dropped");
     }
 }

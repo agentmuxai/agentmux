@@ -31,7 +31,7 @@
  *                       user scrolls near the top
  */
 
-import { batch, createSignal, onCleanup, onMount, type Accessor } from "solid-js";
+import { batch, createSignal, onCleanup, onMount, type Accessor, type Setter } from "solid-js";
 import { hasScrolledUpMemo, noteOlderHistoryLoaded } from "../virtualization/scroll-memo";
 import { msSinceLastInput } from "@/app/store/last-input";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -45,7 +45,7 @@ import type { DocumentState, FilterState, LogFn } from "../../../agent-model/typ
 import { endHistoryLoad } from "@/app/store/agent-document-store";
 import { logAgentOpenRest, markAgentOpen } from "../open-trace";
 import { linesBytes, planFill, runHistoryFill } from "./history-fill";
-import { OPEN_TAIL_BYTES, readOpenTail, startsAtTurn } from "./open-tail";
+import { OPEN_TAIL_BYTES, readOpenTail, startsAtTurn, type OpenTailResult } from "./open-tail";
 
 export interface UseHistoryPaginationOptions {
     blockId: string;
@@ -243,8 +243,64 @@ export function seedContextFromHistory(
 }
 
 export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHistoryPagination {
-    // Every page parsed here — the newest window first, older pages later — also
-    // tells the Activity Dock which background tasks ended (agent-model/task-outcomes.ts).
+    const s = createHistoryState();
+
+    // Initial load — async, non-blocking, fires immediately on mount.
+    // Reads the latest PAGE_SIZE lines and prepends them. Dedupes by id
+    // against any live events that may have arrived in the meantime
+    // during a reconnect (where in-flight turns can briefly appear in
+    // both the persisted ring buffer and the live stream).
+    onMount(() => startInitialLoad(opts, s));
+
+    return {
+        historyOffset: s.historyOffset,
+        historyTotal: s.historyTotal,
+        loadingOlder: s.loadingOlder,
+        loadOlder: () => loadOlder(opts, s),
+        snapshotIsForeignBlock: s.snapshotIsForeignBlock,
+    };
+}
+
+interface HistoryState {
+    historyOffset: Accessor<number>;
+    setHistoryOffset: Setter<number>;
+    historyTotal: Accessor<number>;
+    setHistoryTotal: Setter<number>;
+    loadingOlder: Accessor<boolean>;
+    setLoadingOlder: Setter<boolean>;
+    snapshotIsForeignBlock: Accessor<boolean>;
+    setSnapshotIsForeignBlock: Setter<boolean>;
+    /** Older pages (a scroll-up's, and the background fill's) read and prepend one at a time, so each starts where the last one ended. */
+    pageChain: Promise<unknown>;
+    /** Whether the context meter needs no more seeding. A first screen that held no call turns it on, so an older page that has one seeds it instead. */
+    contextSeeded: boolean;
+    /** False once the pane has closed: nothing is dispatched after that. */
+    mounted: boolean;
+}
+
+function createHistoryState(): HistoryState {
+    const [historyOffset, setHistoryOffset] = createSignal(0);
+    const [historyTotal, setHistoryTotal] = createSignal(0);
+    const [loadingOlder, setLoadingOlder] = createSignal(false);
+    const [snapshotIsForeignBlock, setSnapshotIsForeignBlock] = createSignal(false);
+    return {
+        historyOffset,
+        setHistoryOffset,
+        historyTotal,
+        setHistoryTotal,
+        loadingOlder,
+        setLoadingOlder,
+        snapshotIsForeignBlock,
+        setSnapshotIsForeignBlock,
+        pageChain: Promise.resolve(),
+        contextSeeded: true,
+        mounted: true,
+    };
+}
+
+// Every page parsed here — the newest window first, older pages later — also
+// tells the Activity Dock which background tasks ended (agent-model/task-outcomes.ts).
+function parseOptsAt(opts: UseHistoryPaginationOptions, resp: { stream?: string; gen?: string }, firstLine: number) {
     const parseOpts = {
         onTaskFrame: (frame: Record<string, unknown>, at: number | undefined) => noteTaskFrame(opts.blockId, frame, at),
     };
@@ -252,671 +308,695 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
     // node records its result's line and the pane can unload it
     // (SPEC_AGENT_PANE_TOOL_RESULT_UNLOADING_2026_10_01.md §3.2). Without a
     // stream and generation the line can't be read back reliably: no source.
-    const parseOptsAt = (resp: { stream?: string; gen?: string }, firstLine: number) => ({
+    return {
         ...parseOpts,
         idFirstLine: firstLine,
         idGen: resp.gen,
         ...(resp.stream && resp.gen ? { source: { stream: resp.stream, gen: resp.gen, firstLine } } : {}),
-    });
-    const [historyOffset, setHistoryOffset] = createSignal(0);
-    const [historyTotal, setHistoryTotal] = createSignal(0);
-    const [loadingOlder, setLoadingOlder] = createSignal(false);
-    const [snapshotIsForeignBlock, setSnapshotIsForeignBlock] = createSignal(false);
-
-    // Older pages (a scroll-up's, and the background fill's) read and prepend
-    // one at a time, so each starts where the last one ended.
-    let pageChain: Promise<unknown> = Promise.resolve();
-    const exclusive = <T>(fn: () => Promise<T>): Promise<T> => {
-        const p = pageChain.then(fn, fn);
-        pageChain = p.catch(() => undefined);
-        return p;
     };
-    // Whether the context meter needs no more seeding. A first screen that held
-    // no call turns it on, so an older page that has one seeds it instead.
-    let contextSeeded = true;
+}
 
-    /**
-     * Read the page of up to `maxLines` lines just below what is loaded and
-     * prepend it. `expectGen`: read only that generation of the file.
-     * `tailBytes`: keep only the newest lines that fit (the restore's budget);
-     * `trimmed` then says the page starts above where it was asked to.
-     * Null: nothing loaded (at the start, or the file is another generation).
-     */
-    const fetchOlderPage = async (
-        maxLines: number,
-        extra?: { expectGen?: string; tailBytes?: number; alignFloor?: number },
-    ): Promise<{ lines: number; bytes: number; nodes: number; trimmed: boolean } | null> => {
-        const currentOffset = historyOffset();
-        if (currentOffset === 0) return null; // already at the beginning
-        const newOffset = Math.max(0, currentOffset - maxLines);
-        const readLines = (offset: number, limit: number, tailBytes?: number) =>
-            RpcApi.BlockfileReadRangeCommand(TabRpcClient, {
+function exclusive<T>(s: HistoryState, fn: () => Promise<T>): Promise<T> {
+    const p = s.pageChain.then(fn, fn);
+    s.pageChain = p.catch(() => undefined);
+    return p;
+}
+
+/**
+ * Read the page of up to `maxLines` lines just below what is loaded and
+ * prepend it. `expectGen`: read only that generation of the file.
+ * `tailBytes`: keep only the newest lines that fit (the restore's budget);
+ * `trimmed` then says the page starts above where it was asked to.
+ * Null: nothing loaded (at the start, or the file is another generation).
+ */
+async function fetchOlderPage(
+    opts: UseHistoryPaginationOptions,
+    s: HistoryState,
+    maxLines: number,
+    extra?: { expectGen?: string; tailBytes?: number; alignFloor?: number },
+): Promise<{ lines: number; bytes: number; nodes: number; trimmed: boolean } | null> {
+    const currentOffset = s.historyOffset();
+    if (currentOffset === 0) return null; // already at the beginning
+    const newOffset = Math.max(0, currentOffset - maxLines);
+    const readLines = (offset: number, limit: number, tailBytes?: number) =>
+        RpcApi.BlockfileReadRangeCommand(TabRpcClient, {
+            block_id: opts.blockId,
+            filename: "output",
+            offset,
+            limit,
+            ...(extra?.expectGen ? { expect_gen: extra.expectGen } : {}),
+            ...(tailBytes ? { tail_bytes: tailBytes } : {}),
+        }, { timeout: 15000 });
+
+    const resp = await readLines(newOffset, currentOffset - newOffset, extra?.tailBytes);
+    // The file is another generation now: these lines aren't this document's.
+    if (resp.gen_mismatch) return null;
+    let readStart = typeof resp.offset === "number" ? resp.offset : newOffset;
+    const trimmed = readStart > newOffset;
+    let lines = resp.lines ?? [];
+    let stamps = resp.stamps;
+
+    // A page of the restore window parses apart from the rows below it, and a
+    // streamed run that straddled the seam would get two ids and show as two
+    // rows; the usual open parses the window whole. So the fill's page starts at
+    // a turn start (`alignFloor` is the window's lowest line): the lines before
+    // the first one wait for the next page, and a page with none reads further
+    // back until it has one. A page the byte budget cut was already placed at a
+    // turn start by srv, and the window's own top is as the usual open leaves it.
+    if (extra?.alignFloor !== undefined && !trimmed) {
+        let first = lines.findIndex(startsAtTurn);
+        while (first < 0 && readStart > extra.alignFloor) {
+            const more = Math.min(maxLines, readStart - extra.alignFloor);
+            const prev = await readLines(readStart - more, more);
+            if (prev.gen_mismatch) return null;
+            lines = [...(prev.lines ?? []), ...lines];
+            stamps = stamps && prev.stamps ? [...prev.stamps, ...stamps] : undefined;
+            readStart -= more;
+            first = lines.findIndex(startsAtTurn);
+        }
+        if (first > 0) {
+            lines = lines.slice(first);
+            stamps = stamps?.slice(first);
+            readStart += first;
+        }
+    }
+
+    const parsed = parseHistoryLines(lines, opts.outputFormat(), opts.agentName?.(), stamps, parseOptsAt(opts, resp, readStart));
+    const newNodes = parsed.nodes;
+    if (newNodes.length > 0) {
+        // batch() ensures HistoryLoaded's documentAtom write is not a
+        // standalone runUpdates frame that could interleave with a
+        // concurrent RAF StreamFlush if both land in the same browser
+        // task. Without batch(), two independent documentAtom writes
+        // can race to trigger <Index> reconcileArrays from separate
+        // frames → replaceChild NotFoundError.
+        // (SPEC_REPLACECHILD_CRASH_FULL_ANALYSIS_AND_FIX_2026-06-06.md §3.2)
+        // The fill's rows are above the screen and collapsed: their results
+        // would unload in the next pass, so they arrive unloaded.
+        batch(() => opts.model.dispatchDoc({ type: "HistoryLoaded", nodes: newNodes, unloadResults: extra?.alignFloor !== undefined }));
+    }
+    if (!s.contextSeeded && (parsed.lastContext || Object.keys(parsed.reportedContextWindows).length > 0)) {
+        s.contextSeeded = true;
+        seedContextFromHistory(opts.model, parsed);
+    }
+
+    s.setHistoryOffset(readStart);
+    return { lines: lines.length, bytes: linesBytes(lines), nodes: newNodes.length, trimmed };
+}
+
+/**
+ * Load the previous page of history and prepend to the document.
+ * Called by AgentDocumentView when the user scrolls near the top.
+ * Idempotent at the start-of-history boundary (returns immediately
+ * if `historyOffset === 0`). Guarded against concurrent re-entry.
+ */
+async function loadOlder(opts: UseHistoryPaginationOptions, s: HistoryState): Promise<void> {
+    if (s.historyOffset() === 0) return; // already at the beginning
+    if (s.loadingOlder()) return;
+
+    s.setLoadingOlder(true);
+    try {
+        const page = await exclusive(s, () => fetchOlderPage(opts, s, OLDER_PAGE_LINES));
+        if (page && page.nodes > 0) noteOlderHistoryLoaded(opts.blockId);
+        opts.log("history", `loaded ${page?.nodes ?? 0} older messages (offset ${s.historyOffset()})`);
+    } catch (err: any) {
+        opts.log("history", `failed to load older messages: ${err?.message ?? String(err)}`, "warn");
+    } finally {
+        s.setLoadingOlder(false);
+    }
+}
+
+function startInitialLoad(opts: UseHistoryPaginationOptions, s: HistoryState): void {
+    // Mounted guard (codex P2 on PR #742). If the pane is closed
+    // while either RPC round-trip is in flight, AgentPresentationView
+    // unregisters the pane-state slot in its own onCleanup, and any
+    // post-await `dispatchPane` would throw because the
+    // store rejects dispatches against unregistered panes. Track
+    // mounted via a flag on the shared state and bail before each post-await
+    // dispatch. Both the success path (InitReady + HistoryLoaded)
+    // and the error path (InitFailed) need the guard.
+    s.mounted = true;
+    onCleanup(() => {
+        s.mounted = false;
+    });
+
+    // Init lifecycle (issue #728 gap 1): dispatch InitStart before the
+    // fetch, InitReady on success, InitFailed on error. The reducer
+    // gates TurnStart on initPhase.kind !== "InitPending" so we don't
+    // accept sends while history is still loading.
+    // Soft variant — cascade-during-dispatch could dispose the pane
+    // before this fires; retro 2026-05-23 (agent-pane cascade →
+    // replaceChild quick-win).
+    opts.model.dispatchPane({ type: "InitStart" });
+    markAgentOpen(opts.blockId, "history_start");
+    void openHistory(opts, s);
+}
+
+async function openHistory(opts: UseHistoryPaginationOptions, s: HistoryState): Promise<void> {
+    let firstScreen = false;
+    try {
+        firstScreen = await openFirstScreen(opts, s);
+    } catch (err: any) {
+        // Before anything was painted: the usual open still works.
+        opts.log("history", `first screen failed (${err?.message ?? String(err)}); opening the usual way`, "warn");
+    }
+    if (firstScreen) return;
+    // Fast path: try the reducer-state snapshot first. If it exists
+    // and the schema version matches, restore wholesale and skip
+    // the lossy 200-line NDJSON replay. Spec
+    // docs/specs/SPEC_AGENT_PANE_STATE_PERSISTENCE_2026_05_15.md §4.4.
+    //
+    // Option E (PR #1007 backend, this PR frontend): when a
+    // `definitionId` is available, read from the agent-anchored
+    // session zone (`agent:<defId>:current`) so continuation is
+    // structural — any new pane for the same agent definition
+    // picks up where the last one left off. When the caller
+    // didn't pass `definitionId` (legacy / picker), skip the
+    // fast path and fall straight through to the NDJSON replay.
+    // P2 fix on #1008 reagent: prior version threw an exception
+    // purely for control flow into the catch arm — clean code
+    // path but emitted a stack on every legacy mount. Use an
+    // explicit early-skip instead.
+    if (opts.definitionId && (await restoreFromSnapshot(opts, s))) return;
+    await loadUsualHistory(opts, s);
+}
+
+// Schema v2: apply DocumentState + pane overlay via the caller's callback.
+function applySnapshotOverlay(opts: UseHistoryPaginationOptions, snapshot: any): void {
+    const ds = snapshot.documentState;
+    if (!ds || !opts.onSnapshotOverlay) return;
+    const restoredHeld: string[] = Array.isArray(ds.heldOpenNodeIds)
+        ? ds.heldOpenNodeIds.filter((id: unknown): id is string => typeof id === "string").slice(-MAX_SAVED_HELD)
+        : [];
+    opts.onSnapshotOverlay({
+        documentState: {
+            collapsedNodes: new Set<string>(ds.collapsedNodeIds ?? []),
+            pinnedNodes: new Set<string>(ds.pinnedNodeIds ?? []),
+            // What the pane had open when it was last hidden or closed
+            // (a few ids at most, `MAX_SAVED_HELD`); nothing for a
+            // snapshot without them, so restored history renders collapsed.
+            heldOpenNodes: new Set<string>(restoredHeld),
+            restoredHeldNodes: restoredHeld.length > 0 ? new Set<string>(restoredHeld) : undefined,
+            scrollPosition: typeof ds.scrollPosition === "number" ? ds.scrollPosition : 0,
+            filter: ds.filter ?? DEFAULT_FILTER_STATE,
+        },
+        detailsOpen: snapshot.paneState?.detailsOpen,
+    });
+}
+
+// First screen (SPEC_AGENT_OPEN_FIRST_SCREEN_THEN_REST_2026_10_19.md): one
+// small read paints the newest ~64 KB and lets the user send at once; the
+// rest of the restore window fills in afterwards, a page at a time, on
+// idle. True when the pane opened this way; false: open the usual way
+// (srv has no open tail for this file, or a snapshot only that path
+// restores from).
+async function openFirstScreen(opts: UseHistoryPaginationOptions, s: HistoryState): Promise<boolean> {
+    // A pane that was scrolled up goes back to its row once its history has
+    // loaded, and that row may be older than a first screen.
+    if (hasScrolledUpMemo(opts.blockId)) return firstScreenFallback(opts, "scrolled_up");
+    // Claude transcripts only: its turn starts are what a seam can safely sit at.
+    // The format may not be known yet; it is checked again after the read.
+    const format = opts.outputFormat();
+    if (format && format !== CLAUDE_FORMAT) return firstScreenFallback(opts, "format");
+    const tailTurns = opts.restoreTurns?.();
+    const tail = await readOpenTail({
+        block_id: opts.blockId,
+        filename: "output",
+        tail_bytes: OPEN_TAIL_BYTES,
+        ...(opts.definitionId ? { definition_id: opts.definitionId } : {}),
+        ...(tailTurns ? { tail_turns: tailTurns } : {}),
+    });
+    if (!s.mounted) return true;
+    markAgentOpen(opts.blockId, "first_screen_attempt", { tail_lines: tail?.lines.length ?? 0 });
+    if (!tail) return firstScreenFallback(opts, "no_tail");
+    if (opts.outputFormat() !== CLAUDE_FORMAT) return firstScreenFallback(opts, "format");
+    // The older part parses on its own later. A first screen that starts inside a
+    // long response would show it as two rows once that part arrives, so such a
+    // slice isn't used: the usual open parses it whole.
+    if (tail.start_line > 0 && !startsAtTurn(tail.lines[0])) {
+        opts.log("history", "first screen starts mid-turn; opening the usual way");
+        return firstScreenFallback(opts, "mid_turn");
+    }
+
+    let snapshot: any;
+    if (tail.snapshot) {
+        try {
+            snapshot = JSON.parse(tail.snapshot);
+        } catch {
+            snapshot = undefined;
+        }
+    }
+    const schema: number = snapshot?.schemaVersion ?? 0;
+    // A v1 snapshot carries its nodes: the usual path restores from it.
+    if (schema === SNAPSHOT_SCHEMA_VERSION_V1 && Array.isArray(snapshot.nodes)) return firstScreenFallback(opts, "v1_snapshot");
+    return paintFirstScreen(opts, s, tail, snapshot, schema, tailTurns);
+}
+
+/** Gave up on the first screen: the usual open runs next. `fallback_at` says when, `fallback` why. */
+function firstScreenFallback(opts: UseHistoryPaginationOptions, why: string): false {
+    markAgentOpen(opts.blockId, "fallback_at", { fallback: why });
+    return false;
+}
+
+/** Paint the first screen and start the fill; false when it fell back to the usual open. */
+function paintFirstScreen(
+    opts: UseHistoryPaginationOptions,
+    s: HistoryState,
+    tail: OpenTailResult,
+    snapshot: any,
+    schema: number,
+    tailTurns: number | undefined,
+): boolean {
+    // Nothing here may leave the pane waiting: before the first dispatch the
+    // usual open can still run; after it, fail open as that path does.
+    let dispatched = false;
+    try {
+        markAgentOpen(opts.blockId, "history_read", { history_lines: tail.lines.length });
+        const parsed = parseHistoryLines(tail.lines, opts.outputFormat(), opts.agentName?.(), tail.stamps, parseOptsAt(opts, tail, tail.start_line));
+        markAgentOpen(opts.blockId, "parsed");
+
+        // The same decisions the v2 restore makes below.
+        const hasUsableHwm = schema >= SNAPSHOT_SCHEMA_VERSION_V2 && typeof snapshot.highWaterMark === "number" && snapshot.highWaterMark > 0;
+        const sourceMatchesThisBlock =
+            typeof snapshot?.sourceBlockId !== "string" || snapshot.sourceBlockId === "" || snapshot.sourceBlockId === opts.blockId;
+        const restored = hasUsableHwm && (sourceMatchesThisBlock || !!opts.definitionId);
+        if (schema >= SNAPSHOT_SCHEMA_VERSION_V2 && !restored && !sourceMatchesThisBlock) s.setSnapshotIsForeignBlock(true);
+
+        if (restored) {
+            batch(() => opts.model.dispatchDoc({ type: "HistoryRestored", fromSnapshot: true, nodes: parsed.nodes }));
+        } else if (parsed.nodes.length > 0) {
+            batch(() => opts.model.dispatchDoc({ type: "HistoryLoaded", nodes: parsed.nodes }));
+        }
+        dispatched = true;
+        // Live records resume at the slice's end line: earlier ones are on
+        // screen, later ones arrive as events (or as a gap the cursor reads).
+        opts.transcriptSettle?.settle(tail.end_line === 0 ? "empty" : { stream: tail.stream, gen: tail.gen, next: tail.end_line });
+        seedContextFromHistory(opts.model, parsed);
+        s.contextSeeded = !!parsed.lastContext || Object.keys(parsed.reportedContextWindows).length > 0;
+        if (restored) applySnapshotOverlay(opts, snapshot);
+
+        s.setHistoryOffset(tail.start_line);
+        s.setHistoryTotal(tail.total_lines);
+        opts.log(
+            "history",
+            `first screen: ${parsed.nodes.length} nodes from lines [${tail.start_line}, ${tail.end_line}) of ${tail.total_lines}` +
+                (tail.start_line > 0 ? ` (${tail.start_line} older lines to fill)` : ""),
+        );
+        markAgentOpen(opts.blockId, "first_screen");
+        opts.model.dispatchPane({ type: "InitReady", at: Date.now(), historyDamaged: tail.history_damaged });
+        opts.onHistoryReady?.();
+
+        const sliceBytes =
+            typeof tail.start_byte === "number" && typeof tail.end_byte === "number"
+                ? tail.end_byte - tail.start_byte
+                : linesBytes(tail.lines);
+        void fillRest(
+            opts,
+            s,
+            tail.gen,
+            planFill({
+                startLine: tail.start_line,
+                endLine: tail.end_line,
+                sliceBytes,
+                windowLines: RESTORE_WINDOW_LINES,
+                restoreBytes: opts.restoreBytes?.(),
+            }),
+            tailTurns !== undefined,
+        );
+    } catch (err: any) {
+        if (!s.mounted) return true;
+        const reason = err?.message ?? String(err);
+        if (!dispatched) {
+            opts.log("history", `first screen failed (${reason}); opening the usual way`, "warn");
+            return firstScreenFallback(opts, "error");
+        }
+        opts.log("history", `first screen failed after painting: ${reason}`, "warn");
+        opts.transcriptSettle?.settle(null);
+        opts.model.dispatchPane({ type: "InitFailed", at: Date.now(), reason });
+        opts.onHistoryReady?.();
+    }
+    return true;
+}
+
+// The rest of the restore window, below the first screen: pages on idle,
+// paused while the user is active or the pane hidden, ended when it closes.
+// With a turn cap set, the feed keeps few turns and the first screen plus
+// scrolling up is enough.
+async function fillRest(opts: UseHistoryPaginationOptions, s: HistoryState, gen: string, plan: ReturnType<typeof planFill>, turnCapped: boolean): Promise<void> {
+    const began = performance.now();
+    if (!plan || turnCapped) {
+        markAgentOpen(opts.blockId, "rest_loaded", { rest_pages: 0 });
+        endHistoryLoad(opts.blockId);
+        return;
+    }
+    let fillBytes = 0;
+    const out = await runHistoryFill({
+        plan,
+        pageLines: OLDER_PAGE_LINES,
+        offset: s.historyOffset,
+        page: async (maxLines) => {
+            try {
+                const budget = Number.isFinite(plan.budgetBytes) ? Math.max(1, plan.budgetBytes - fillBytes) : undefined;
+                const page = await exclusive(s, () => fetchOlderPage(opts, s, maxLines, { expectGen: gen, tailBytes: budget, alignFloor: plan.floorLine }));
+                if (!page) return null;
+                fillBytes += page.bytes;
+                return { lines: page.lines, bytes: page.bytes, last: page.trimmed };
+            } catch (err: any) {
+                opts.log("history", `background history load failed: ${err?.message ?? String(err)}`, "warn");
+                return null;
+            }
+        },
+        stopped: () => !s.mounted,
+        holding: () => opts.fillPaused?.() === true || msSinceLastInput() < FILL_QUIET_MS,
+        idle: whenIdle,
+        wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    });
+    const took = Math.round(performance.now() - began);
+    opts.log("history", `background fill ${out.outcome}: ${out.pages} pages, ${out.lines} lines, ${out.bytes} bytes in ${took} ms`);
+    markAgentOpen(opts.blockId, "rest_loaded", { rest_pages: out.pages, rest_lines: out.lines });
+    logAgentOpenRest(opts.blockId, out.outcome, { pages: out.pages, lines: out.lines, bytes: out.bytes, ms: took });
+    // The history is as loaded as it will be: tool chunks the pane held for tools it still lacks are dropped.
+    endHistoryLoad(opts.blockId);
+}
+
+/** Restore from the agent's saved snapshot; true when that finished the open (or the pane closed), false to read the transcript. */
+async function restoreFromSnapshot(opts: UseHistoryPaginationOptions, s: HistoryState): Promise<boolean> {
+    try {
+        const stateResp = await RpcApi.AgentSessionReadCommand(TabRpcClient, {
+            definition_id: opts.definitionId,
+        }, { timeout: 5000 });
+        if (!s.mounted) return true;
+        if (stateResp.content) {
+            const snapshot = JSON.parse(stateResp.content);
+
+            // --- Schema v2: overlay only, reconstruct nodes from NDJSON ---
+            // Taken only for a SAME-BLOCK reopen with a usable high-water mark:
+            //
+            //  - hwm>0: `writeSnapshotNow` defaults hwm=0 when the line-count RPC
+            //    fails at write time; treating hwm=0 as "empty session" would
+            //    render a blank pane and hide on-disk history, so hwm<=0 falls
+            //    through to the NDJSON replay (which re-derives the count).
+            //  - sourceBlockId === opts.blockId: the durable NDJSON history is
+            //    per-block, but the snapshot is agent-anchored (shared across all
+            //    of an agent's blocks). When a *new* block opens for the same
+            //    agent (cross-block "structural continuation"), this block's own
+            //    output is empty, so we must NOT read it as if it were the source.
+            //    Cross-block continuation needs a unified per-agent log; until
+            //    that lands (follow-up to PR #1361) we fall through to NDJSON
+            //    replay on this block rather than restore a fragmented/blank view.
+            const hasUsableHwm = (snapshot?.schemaVersion ?? 0) >= SNAPSHOT_SCHEMA_VERSION_V2
+                && typeof snapshot.highWaterMark === "number"
+                && snapshot.highWaterMark > 0;
+            const sourceMatchesThisBlock = typeof snapshot.sourceBlockId !== "string"
+                || snapshot.sourceBlockId === ""
+                || snapshot.sourceBlockId === opts.blockId;
+            // A genuine cross-block continuation (a NEW block opened for the same
+            // agent definition, after the block that wrote this snapshot) can also
+            // take the fast path below when a definitionId is available: `Blockfile
+            // LineCountCommand`/`BlockfileReadRangeCommand` resolve to the agent's
+            // GLOBAL output zone by THIS block's own `agentId` meta
+            // (`global_output_source`, server/app_api/mod.rs) — not by the
+            // snapshot's recorded sourceBlockId — so scoping those reads to
+            // opts.blockId already returns the full cross-block history. Without a
+            // definitionId there's no way to resolve the write-side mirror, so that
+            // case still falls through to NDJSON replay below. Closes #1397.
+            const v2SameBlock = hasUsableHwm && (sourceMatchesThisBlock || !!opts.definitionId);
+            if (v2SameBlock) {
+                // NOT calling setSnapshotIsForeignBlock(true) here, even when the
+                // snapshot isn't sourced from this exact block: that flag means
+                // "this pane has no real continuity, never let it write" — true
+                // for the legacy fallback below (no definitionId, falls through to
+                // NDJSON on an empty block), but no longer true here. This branch
+                // just successfully restored the FULL history via the global zone
+                // (widenedHighWaterMark's probe) and applied the snapshot's
+                // documentState overlay (applySnapshotOverlay), so this pane's
+                // live state now correctly reflects the ongoing conversation —
+                // exactly like a same-block reopen. Suppressing writes here
+                // would silently stop persisting collapsed/pinned nodes, scroll
+                // position and filter for every cross-block continuation.
+                await restoreV2Snapshot(opts, s, snapshot);
+                return true;
+            }
+            if ((snapshot?.schemaVersion ?? 0) >= SNAPSHOT_SCHEMA_VERSION_V2) noteUnusedV2Snapshot(opts, s, snapshot);
+
+            // --- Schema v1: nodes[] embedded (legacy fast path) ---
+            if (snapshot?.schemaVersion === SNAPSHOT_SCHEMA_VERSION_V1 && Array.isArray(snapshot.nodes)) {
+                restoreV1Snapshot(opts, s, snapshot);
+                return true;
+            }
+
+            opts.log(
+                "history",
+                `snapshot schema mismatch (got v${snapshot?.schemaVersion}); falling back to NDJSON replay`,
+                "warn",
+            );
+        }
+    } catch (err: any) {
+        // Most common: snapshot doesn't exist yet — silent fall-through.
+        // Anything else logs but still falls through to NDJSON.
+        const reason = err?.message ?? String(err);
+        if (!/not\s*found|no\s*such|enoent/i.test(reason)) {
+            opts.log("history", `snapshot read failed: ${reason}; falling back to NDJSON replay`, "warn");
+        }
+        if (!s.mounted) return true;
+    }
+    return false;
+}
+
+async function restoreV2Snapshot(opts: UseHistoryPaginationOptions, s: HistoryState, snapshot: any): Promise<void> {
+    const hwm = await widenedHighWaterMark(opts, s, snapshot);
+    if (hwm === null) return;
+    const windowStart = Math.max(0, hwm - RESTORE_WINDOW_LINES);
+    const tailTurns = opts.restoreTurns?.();
+    const tailBytes = opts.restoreBytes?.();
+    const rangeResp = await RpcApi.BlockfileReadRangeCommand(TabRpcClient, {
+        block_id: opts.blockId,
+        filename: "output",
+        offset: windowStart,
+        limit: hwm - windowStart,
+        ...(tailTurns ? { tail_turns: tailTurns } : {}),
+        ...(tailBytes ? { tail_bytes: tailBytes } : {}),
+    }, { timeout: 30_000 });
+    if (!s.mounted) return;
+    // Where the returned lines start: the backend trims to
+    // the last `tail_turns` turns and to `tail_bytes`, and
+    // says where they begin (an older srv ignores both
+    // fields and returns the window).
+    const readStart = typeof rangeResp.offset === "number" ? rangeResp.offset : windowStart;
+    markAgentOpen(opts.blockId, "history_read", { history_lines: rangeResp.lines?.length ?? 0 });
+    const parsed = parseHistoryLines(rangeResp.lines ?? [], opts.outputFormat(), opts.agentName?.(), rangeResp.stamps, parseOptsAt(opts, rangeResp, readStart));
+    const { nodes } = parsed;
+    markAgentOpen(opts.blockId, "parsed");
+    batch(() => opts.model.dispatchDoc({ type: "HistoryRestored", fromSnapshot: true, nodes }));
+    // Right after the dispatch, before anything else can
+    // run: live records must land after these nodes.
+    opts.transcriptSettle?.settle(historyPin(readStart, rangeResp));
+    // Hydrate the composer strip's context meter from the
+    // resumed conversation's last main-agent call instead of
+    // leaving it blank until the first live turn — see
+    // docs/plans/PLAN_PANE_REOPEN_SESSION_RESUME_AND_STATS_BAR_2026_07_10.md.
+    seedContextFromHistory(opts.model, parsed);
+    // Apply DocumentState + pane overlay via caller callback.
+    applySnapshotOverlay(opts, snapshot);
+    const ds = snapshot.documentState;
+    // Trust the backend's reported total over the snapshot's hwm:
+    // `rangeResp.total` is the line count the backend can actually
+    // serve (clamped to its ring-buffer window), so load-older never
+    // asks for offsets below the floor. See the invariant at the
+    // NDJSON replay path below.
+    const available = typeof rangeResp.total === "number" ? rangeResp.total : hwm;
+    const clampedStart = Math.min(readStart, available);
+    s.setHistoryOffset(clampedStart);
+    s.setHistoryTotal(available);
+    opts.log(
+        "history",
+        `v2 restore: ${nodes.length} nodes from lines [${clampedStart}, ${available})` +
+        (clampedStart > 0 ? ` (${clampedStart} older lines available via load-older)` : "") +
+        (ds?.collapsedNodeIds?.length ? `, ${ds.collapsedNodeIds.length} collapsed` : ""),
+    );
+    opts.model.dispatchPane({ type: "InitReady", at: Date.now(), historyDamaged: rangeResp.history_damaged });
+    opts.onHistoryReady?.();
+}
+
+/** The stored mark, widened to the live count when another block wrote it; null when the pane closed meanwhile. */
+async function widenedHighWaterMark(opts: UseHistoryPaginationOptions, s: HistoryState, snapshot: any): Promise<number | null> {
+    // needsHwmWidening: true whenever the stored highWaterMark was NOT
+    // captured by this exact block's own local line count — covers BOTH
+    // the agent-anchored case (sourceBlockId is "" /missing) AND a
+    // genuine cross-block continuation (sourceBlockId is a different
+    // concrete block id). Deliberately NOT `!sourceMatchesThisBlock`:
+    // that flag treats agent-anchored as "matches", which would skip
+    // this widening probe for the common same-block-reopen-after-
+    // agent-anchored-write case and let a stale highWaterMark cap
+    // restored history — reagent P1, caught after the first fix.
+    const needsHwmWidening = snapshot.sourceBlockId !== opts.blockId;
+    // The stored highWaterMark was written by something other than
+    // THIS exact block's own local line count and can be far smaller
+    // than the global zone (e.g. hwm=15 from a short accidental session
+    // while the real conversation has 5000+ lines). Re-derive the live
+    // count via line_count, which transparently returns the global-zone
+    // total. Only take the larger value so a genuinely new/short agent
+    // (hwm=5, live=5) isn't widened.
+    let hwm: number = snapshot.highWaterMark;
+    if (needsHwmWidening) {
+        try {
+            const liveCount = await RpcApi.BlockfileLineCountCommand(TabRpcClient, {
+                block_id: opts.blockId,
+                filename: "output",
+            }, { timeout: 5000 });
+            if (!s.mounted) return null;
+            const liveHwm = liveCount?.count ?? 0;
+            if (liveHwm > hwm) {
+                opts.log("history", `v2 cross-channel: hwm ${hwm} → ${liveHwm} (global zone)`);
+                hwm = liveHwm;
+            }
+        } catch {
+            // soft fail — proceed with stored hwm
+        }
+    }
+    return hwm;
+}
+
+/** A v2 snapshot the fast path skipped: say why, and mark a foreign block's pane so it never writes. */
+function noteUnusedV2Snapshot(opts: UseHistoryPaginationOptions, s: HistoryState, snapshot: any): void {
+    // v2+ snapshot we deliberately didn't fast-path (v2SameBlock was
+    // false above): either hwm<=0 (write-time count failure), or a
+    // cross-block continuation with no definitionId to resolve the
+    // global zone through (legacy/picker callers only — #1397's fix
+    // covers every definitionId-bearing caller above). Don't render
+    // empty — fall through to NDJSON replay on this block.
+    const crossBlock = typeof snapshot.sourceBlockId === "string"
+        && snapshot.sourceBlockId !== ""
+        && snapshot.sourceBlockId !== opts.blockId;
+    if (crossBlock) {
+        // Mark this pane as a transient cross-block viewer so the
+        // caller suppresses snapshot writes — otherwise it would
+        // clobber the agent-anchored snapshot that still references
+        // the block holding the real conversation.
+        s.setSnapshotIsForeignBlock(true);
+    }
+    opts.log(
+        "history",
+        crossBlock
+            ? "v2 snapshot is from another block and no definitionId is available to resolve it; falling back to NDJSON replay"
+            : "v2 snapshot has no usable highWaterMark; falling back to NDJSON replay",
+        "warn",
+    );
+}
+
+function restoreV1Snapshot(opts: UseHistoryPaginationOptions, s: HistoryState, snapshot: any): void {
+    batch(() => opts.model.dispatchDoc({ type: "HistoryRestored", fromSnapshot: true, nodes: snapshot.nodes }));
+    // A v1 snapshot has no line positions.
+    opts.transcriptSettle?.settle(null);
+    const offset = typeof snapshot.historyOffset === "number" && snapshot.historyOffset >= 0
+        ? snapshot.historyOffset
+        : 0;
+    s.setHistoryOffset(offset);
+    s.setHistoryTotal(typeof snapshot.highWaterMark === "number" ? snapshot.highWaterMark : snapshot.nodes.length);
+    opts.log(
+        "history",
+        `v1 restore: ${snapshot.nodes.length} nodes from snapshot ` +
+            `(savedAt=${snapshot.savedAt ?? "unknown"}, loadOlder offset=${offset})`,
+    );
+    opts.model.dispatchPane({ type: "InitReady", at: Date.now() });
+    opts.onHistoryReady?.();
+}
+
+// The usual open: the count, then the newest page. A retriable failure
+// gets a few more tries before the pane gives up; giving up shows
+// HistoryLoadFailedBanner instead of an empty pane with no word why.
+async function loadUsualHistory(opts: UseHistoryPaginationOptions, s: HistoryState): Promise<void> {
+    for (let attempt = 0; ; attempt++) {
+        try {
+            const countResp = await RpcApi.BlockfileLineCountCommand(TabRpcClient, {
+                block_id: opts.blockId,
+                filename: "output",
+            }, { timeout: 5000 });
+            if (!s.mounted) return;
+
+            const total = countResp?.count ?? 0;
+            if (total === 0) {
+                opts.transcriptSettle?.settle("empty");
+                opts.model.dispatchPane({
+                    type: "InitReady",
+                    at: Date.now(),
+                    historyDamaged: countResp?.history_damaged,
+                });
+                opts.onHistoryReady?.();
+                return;
+            }
+
+            const offset = Math.max(0, total - PAGE_SIZE);
+            const limit = total - offset;
+
+            const rangeResp = await RpcApi.BlockfileReadRangeCommand(TabRpcClient, {
                 block_id: opts.blockId,
                 filename: "output",
                 offset,
                 limit,
-                ...(extra?.expectGen ? { expect_gen: extra.expectGen } : {}),
-                ...(tailBytes ? { tail_bytes: tailBytes } : {}),
             }, { timeout: 15000 });
+            if (!s.mounted) return;
+            markAgentOpen(opts.blockId, "history_read", { history_lines: rangeResp.lines?.length ?? 0 });
 
-        const resp = await readLines(newOffset, currentOffset - newOffset, extra?.tailBytes);
-        // The file is another generation now: these lines aren't this document's.
-        if (resp.gen_mismatch) return null;
-        let readStart = typeof resp.offset === "number" ? resp.offset : newOffset;
-        const trimmed = readStart > newOffset;
-        let lines = resp.lines ?? [];
-        let stamps = resp.stamps;
-
-        // A page of the restore window parses apart from the rows below it, and a
-        // streamed run that straddled the seam would get two ids and show as two
-        // rows; the usual open parses the window whole. So the fill's page starts at
-        // a turn start (`alignFloor` is the window's lowest line): the lines before
-        // the first one wait for the next page, and a page with none reads further
-        // back until it has one. A page the byte budget cut was already placed at a
-        // turn start by srv, and the window's own top is as the usual open leaves it.
-        if (extra?.alignFloor !== undefined && !trimmed) {
-            let first = lines.findIndex(startsAtTurn);
-            while (first < 0 && readStart > extra.alignFloor) {
-                const more = Math.min(maxLines, readStart - extra.alignFloor);
-                const prev = await readLines(readStart - more, more);
-                if (prev.gen_mismatch) return null;
-                lines = [...(prev.lines ?? []), ...lines];
-                stamps = stamps && prev.stamps ? [...prev.stamps, ...stamps] : undefined;
-                readStart -= more;
-                first = lines.findIndex(startsAtTurn);
+            const parsed = parseHistoryLines(rangeResp.lines ?? [], opts.outputFormat(), opts.agentName?.(), rangeResp.stamps, parseOptsAt(opts, rangeResp, rangeResp.offset ?? offset));
+            const { nodes } = parsed;
+            markAgentOpen(opts.blockId, "parsed");
+            if (nodes.length > 0) {
+                batch(() => opts.model.dispatchDoc({ type: "HistoryLoaded", nodes }));
             }
-            if (first > 0) {
-                lines = lines.slice(first);
-                stamps = stamps?.slice(first);
-                readStart += first;
-            }
-        }
-
-        const parsed = parseHistoryLines(lines, opts.outputFormat(), opts.agentName?.(), stamps, parseOptsAt(resp, readStart));
-        const newNodes = parsed.nodes;
-        if (newNodes.length > 0) {
-            // batch() ensures HistoryLoaded's documentAtom write is not a
-            // standalone runUpdates frame that could interleave with a
-            // concurrent RAF StreamFlush if both land in the same browser
-            // task. Without batch(), two independent documentAtom writes
-            // can race to trigger <Index> reconcileArrays from separate
-            // frames → replaceChild NotFoundError.
-            // (SPEC_REPLACECHILD_CRASH_FULL_ANALYSIS_AND_FIX_2026-06-06.md §3.2)
-            // The fill's rows are above the screen and collapsed: their results
-            // would unload in the next pass, so they arrive unloaded.
-            batch(() => opts.model.dispatchDoc({ type: "HistoryLoaded", nodes: newNodes, unloadResults: extra?.alignFloor !== undefined }));
-        }
-        if (!contextSeeded && (parsed.lastContext || Object.keys(parsed.reportedContextWindows).length > 0)) {
-            contextSeeded = true;
+            opts.transcriptSettle?.settle(historyPin(offset, rangeResp));
+            // See the v2-restore branch above for rationale.
             seedContextFromHistory(opts.model, parsed);
-        }
 
-        setHistoryOffset(readStart);
-        return { lines: lines.length, bytes: linesBytes(lines), nodes: newNodes.length, trimmed };
-    };
+            // `resp.total` from the backend is the actual available
+            // line count clamped to the event ring buffer window —
+            // NOT the all-time session:line_count meta. Use it so
+            // the frontend never asks for offsets the backend can't
+            // serve.
+            const available = rangeResp.total ?? total;
+            s.setHistoryOffset(offset);
+            s.setHistoryTotal(available);
 
-    /**
-     * Load the previous page of history and prepend to the document.
-     * Called by AgentDocumentView when the user scrolls near the top.
-     * Idempotent at the start-of-history boundary (returns immediately
-     * if `historyOffset === 0`). Guarded against concurrent re-entry.
-     */
-    const loadOlder = async (): Promise<void> => {
-        if (historyOffset() === 0) return; // already at the beginning
-        if (loadingOlder()) return;
-
-        setLoadingOlder(true);
-        try {
-            const page = await exclusive(() => fetchOlderPage(OLDER_PAGE_LINES));
-            if (page && page.nodes > 0) noteOlderHistoryLoaded(opts.blockId);
-            opts.log("history", `loaded ${page?.nodes ?? 0} older messages (offset ${historyOffset()})`);
+            opts.log("history", `loaded ${nodes.length} of ${available} previous messages`);
+            opts.model.dispatchPane({
+                type: "InitReady",
+                at: Date.now(),
+                historyDamaged: rangeResp.history_damaged || countResp?.history_damaged,
+            });
+            opts.onHistoryReady?.();
+            return;
         } catch (err: any) {
-            opts.log("history", `failed to load older messages: ${err?.message ?? String(err)}`, "warn");
-        } finally {
-            setLoadingOlder(false);
+            if (!s.mounted) return;
+            const reason = err?.message ?? String(err);
+            const wait = HISTORY_RETRY_MS[attempt];
+            if (wait !== undefined && isRetriableHistoryError(reason)) {
+                opts.log("history", `could not load history (${reason}); trying again in ${wait} ms`, "warn");
+                await new Promise((resolve) => setTimeout(resolve, wait));
+                if (!s.mounted) return;
+                continue;
+            }
+            failHistoryLoad(opts, reason);
+            return;
         }
-    };
+    }
+}
 
-    // Initial load — async, non-blocking, fires immediately on mount.
-    // Reads the latest PAGE_SIZE lines and prepends them. Dedupes by id
-    // against any live events that may have arrived in the meantime
-    // during a reconnect (where in-flight turns can briefly appear in
-    // both the persisted ring buffer and the live stream).
-    onMount(() => {
-        // Mounted guard (codex P2 on PR #742). If the pane is closed
-        // while either RPC round-trip is in flight, AgentPresentationView
-        // unregisters the pane-state slot in its own onCleanup, and any
-        // post-await `dispatchPane` below would throw because the
-        // store rejects dispatches against unregistered panes. Track
-        // mounted via a closure flag and bail before each post-await
-        // dispatch. Both the success path (InitReady + HistoryLoaded)
-        // and the error path (InitFailed) need the guard.
-        let mounted = true;
-        onCleanup(() => {
-            mounted = false;
-        });
-
-        // Schema v2: apply DocumentState + pane overlay via the caller's callback.
-        const applySnapshotOverlay = (snapshot: any): void => {
-            const ds = snapshot.documentState;
-            if (!ds || !opts.onSnapshotOverlay) return;
-            const restoredHeld: string[] = Array.isArray(ds.heldOpenNodeIds)
-                ? ds.heldOpenNodeIds.filter((id: unknown): id is string => typeof id === "string").slice(-MAX_SAVED_HELD)
-                : [];
-            opts.onSnapshotOverlay({
-                documentState: {
-                    collapsedNodes: new Set<string>(ds.collapsedNodeIds ?? []),
-                    pinnedNodes: new Set<string>(ds.pinnedNodeIds ?? []),
-                    // What the pane had open when it was last hidden or closed
-                    // (a few ids at most, `MAX_SAVED_HELD`); nothing for a
-                    // snapshot without them, so restored history renders collapsed.
-                    heldOpenNodes: new Set<string>(restoredHeld),
-                    restoredHeldNodes: restoredHeld.length > 0 ? new Set<string>(restoredHeld) : undefined,
-                    scrollPosition: typeof ds.scrollPosition === "number" ? ds.scrollPosition : 0,
-                    filter: ds.filter ?? DEFAULT_FILTER_STATE,
-                },
-                detailsOpen: snapshot.paneState?.detailsOpen,
-            });
-        };
-
-        // First screen (SPEC_AGENT_OPEN_FIRST_SCREEN_THEN_REST_2026_10_19.md): one
-        // small read paints the newest ~64 KB and lets the user send at once; the
-        // rest of the restore window fills in afterwards, a page at a time, on
-        // idle. True when the pane opened this way; false: open the usual way
-        // (srv has no open tail for this file, or a snapshot only that path
-        // restores from).
-        const openFirstScreen = async (): Promise<boolean> => {
-            // Gave up on the first screen: the usual open runs next. `fallback_at` says when, `fallback` why.
-            const fallBack = (why: string): false => {
-                markAgentOpen(opts.blockId, "fallback_at", { fallback: why });
-                return false;
-            };
-            // A pane that was scrolled up goes back to its row once its history has
-            // loaded, and that row may be older than a first screen.
-            if (hasScrolledUpMemo(opts.blockId)) return fallBack("scrolled_up");
-            // Claude transcripts only: its turn starts are what a seam can safely sit at.
-            // The format may not be known yet; it is checked again after the read.
-            const format = opts.outputFormat();
-            if (format && format !== CLAUDE_FORMAT) return fallBack("format");
-            const tailTurns = opts.restoreTurns?.();
-            const tail = await readOpenTail({
-                block_id: opts.blockId,
-                filename: "output",
-                tail_bytes: OPEN_TAIL_BYTES,
-                ...(opts.definitionId ? { definition_id: opts.definitionId } : {}),
-                ...(tailTurns ? { tail_turns: tailTurns } : {}),
-            });
-            if (!mounted) return true;
-            markAgentOpen(opts.blockId, "first_screen_attempt", { tail_lines: tail?.lines.length ?? 0 });
-            if (!tail) return fallBack("no_tail");
-            if (opts.outputFormat() !== CLAUDE_FORMAT) return fallBack("format");
-            // The older part parses on its own later. A first screen that starts inside a
-            // long response would show it as two rows once that part arrives, so such a
-            // slice isn't used: the usual open parses it whole.
-            if (tail.start_line > 0 && !startsAtTurn(tail.lines[0])) {
-                opts.log("history", "first screen starts mid-turn; opening the usual way");
-                return fallBack("mid_turn");
-            }
-
-            let snapshot: any;
-            if (tail.snapshot) {
-                try {
-                    snapshot = JSON.parse(tail.snapshot);
-                } catch {
-                    snapshot = undefined;
-                }
-            }
-            const schema: number = snapshot?.schemaVersion ?? 0;
-            // A v1 snapshot carries its nodes: the usual path restores from it.
-            if (schema === SNAPSHOT_SCHEMA_VERSION_V1 && Array.isArray(snapshot.nodes)) return fallBack("v1_snapshot");
-
-            // Nothing here may leave the pane waiting: before the first dispatch the
-            // usual open can still run; after it, fail open as that path does.
-            let dispatched = false;
-            try {
-                markAgentOpen(opts.blockId, "history_read", { history_lines: tail.lines.length });
-                const parsed = parseHistoryLines(tail.lines, opts.outputFormat(), opts.agentName?.(), tail.stamps, parseOptsAt(tail, tail.start_line));
-                markAgentOpen(opts.blockId, "parsed");
-
-                // The same decisions the v2 restore makes below.
-                const hasUsableHwm = schema >= SNAPSHOT_SCHEMA_VERSION_V2 && typeof snapshot.highWaterMark === "number" && snapshot.highWaterMark > 0;
-                const sourceMatchesThisBlock =
-                    typeof snapshot?.sourceBlockId !== "string" || snapshot.sourceBlockId === "" || snapshot.sourceBlockId === opts.blockId;
-                const restored = hasUsableHwm && (sourceMatchesThisBlock || !!opts.definitionId);
-                if (schema >= SNAPSHOT_SCHEMA_VERSION_V2 && !restored && !sourceMatchesThisBlock) setSnapshotIsForeignBlock(true);
-
-                if (restored) {
-                    batch(() => opts.model.dispatchDoc({ type: "HistoryRestored", fromSnapshot: true, nodes: parsed.nodes }));
-                } else if (parsed.nodes.length > 0) {
-                    batch(() => opts.model.dispatchDoc({ type: "HistoryLoaded", nodes: parsed.nodes }));
-                }
-                dispatched = true;
-                // Live records resume at the slice's end line: earlier ones are on
-                // screen, later ones arrive as events (or as a gap the cursor reads).
-                opts.transcriptSettle?.settle(tail.end_line === 0 ? "empty" : { stream: tail.stream, gen: tail.gen, next: tail.end_line });
-                seedContextFromHistory(opts.model, parsed);
-                contextSeeded = !!parsed.lastContext || Object.keys(parsed.reportedContextWindows).length > 0;
-                if (restored) applySnapshotOverlay(snapshot);
-
-                setHistoryOffset(tail.start_line);
-                setHistoryTotal(tail.total_lines);
-                opts.log(
-                    "history",
-                    `first screen: ${parsed.nodes.length} nodes from lines [${tail.start_line}, ${tail.end_line}) of ${tail.total_lines}` +
-                        (tail.start_line > 0 ? ` (${tail.start_line} older lines to fill)` : ""),
-                );
-                markAgentOpen(opts.blockId, "first_screen");
-                opts.model.dispatchPane({ type: "InitReady", at: Date.now(), historyDamaged: tail.history_damaged });
-                opts.onHistoryReady?.();
-
-                const sliceBytes =
-                    typeof tail.start_byte === "number" && typeof tail.end_byte === "number"
-                        ? tail.end_byte - tail.start_byte
-                        : linesBytes(tail.lines);
-                void fillRest(
-                    tail.gen,
-                    planFill({
-                        startLine: tail.start_line,
-                        endLine: tail.end_line,
-                        sliceBytes,
-                        windowLines: RESTORE_WINDOW_LINES,
-                        restoreBytes: opts.restoreBytes?.(),
-                    }),
-                    tailTurns !== undefined,
-                );
-            } catch (err: any) {
-                if (!mounted) return true;
-                const reason = err?.message ?? String(err);
-                if (!dispatched) {
-                    opts.log("history", `first screen failed (${reason}); opening the usual way`, "warn");
-                    return fallBack("error");
-                }
-                opts.log("history", `first screen failed after painting: ${reason}`, "warn");
-                opts.transcriptSettle?.settle(null);
-                opts.model.dispatchPane({ type: "InitFailed", at: Date.now(), reason });
-                opts.onHistoryReady?.();
-            }
-            return true;
-        };
-
-        // The rest of the restore window, below the first screen: pages on idle,
-        // paused while the user is active or the pane hidden, ended when it closes.
-        // With a turn cap set, the feed keeps few turns and the first screen plus
-        // scrolling up is enough.
-        const fillRest = async (gen: string, plan: ReturnType<typeof planFill>, turnCapped: boolean): Promise<void> => {
-            const began = performance.now();
-            if (!plan || turnCapped) {
-                markAgentOpen(opts.blockId, "rest_loaded", { rest_pages: 0 });
-                endHistoryLoad(opts.blockId);
-                return;
-            }
-            let fillBytes = 0;
-            const out = await runHistoryFill({
-                plan,
-                pageLines: OLDER_PAGE_LINES,
-                offset: historyOffset,
-                page: async (maxLines) => {
-                    try {
-                        const budget = Number.isFinite(plan.budgetBytes) ? Math.max(1, plan.budgetBytes - fillBytes) : undefined;
-                        const page = await exclusive(() => fetchOlderPage(maxLines, { expectGen: gen, tailBytes: budget, alignFloor: plan.floorLine }));
-                        if (!page) return null;
-                        fillBytes += page.bytes;
-                        return { lines: page.lines, bytes: page.bytes, last: page.trimmed };
-                    } catch (err: any) {
-                        opts.log("history", `background history load failed: ${err?.message ?? String(err)}`, "warn");
-                        return null;
-                    }
-                },
-                stopped: () => !mounted,
-                holding: () => opts.fillPaused?.() === true || msSinceLastInput() < FILL_QUIET_MS,
-                idle: whenIdle,
-                wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-            });
-            const took = Math.round(performance.now() - began);
-            opts.log("history", `background fill ${out.outcome}: ${out.pages} pages, ${out.lines} lines, ${out.bytes} bytes in ${took} ms`);
-            markAgentOpen(opts.blockId, "rest_loaded", { rest_pages: out.pages, rest_lines: out.lines });
-            logAgentOpenRest(opts.blockId, out.outcome, { pages: out.pages, lines: out.lines, bytes: out.bytes, ms: took });
-            // The history is as loaded as it will be: tool chunks the pane held for tools it still lacks are dropped.
-            endHistoryLoad(opts.blockId);
-        };
-
-        // Init lifecycle (issue #728 gap 1): dispatch InitStart before the
-        // fetch, InitReady on success, InitFailed on error. The reducer
-        // gates TurnStart on initPhase.kind !== "InitPending" so we don't
-        // accept sends while history is still loading.
-        // Soft variant — cascade-during-dispatch could dispose the pane
-        // before this fires; retro 2026-05-23 (agent-pane cascade →
-        // replaceChild quick-win).
-        opts.model.dispatchPane({ type: "InitStart" });
-        markAgentOpen(opts.blockId, "history_start");
-        (async () => {
-            let firstScreen = false;
-            try {
-                firstScreen = await openFirstScreen();
-            } catch (err: any) {
-                // Before anything was painted: the usual open still works.
-                opts.log("history", `first screen failed (${err?.message ?? String(err)}); opening the usual way`, "warn");
-            }
-            if (firstScreen) return;
-            // Fast path: try the reducer-state snapshot first. If it exists
-            // and the schema version matches, restore wholesale and skip
-            // the lossy 200-line NDJSON replay. Spec
-            // docs/specs/SPEC_AGENT_PANE_STATE_PERSISTENCE_2026_05_15.md §4.4.
-            //
-            // Option E (PR #1007 backend, this PR frontend): when a
-            // `definitionId` is available, read from the agent-anchored
-            // session zone (`agent:<defId>:current`) so continuation is
-            // structural — any new pane for the same agent definition
-            // picks up where the last one left off. When the caller
-            // didn't pass `definitionId` (legacy / picker), skip the
-            // fast path and fall straight through to the NDJSON replay.
-            // P2 fix on #1008 reagent: prior version threw an exception
-            // purely for control flow into the catch arm — clean code
-            // path but emitted a stack on every legacy mount. Use an
-            // explicit early-skip instead.
-            if (opts.definitionId) {
-              try {
-                const stateResp = await RpcApi.AgentSessionReadCommand(TabRpcClient, {
-                    definition_id: opts.definitionId,
-                }, { timeout: 5000 });
-                if (!mounted) return;
-                if (stateResp.content) {
-                    const snapshot = JSON.parse(stateResp.content);
-
-                    // --- Schema v2: overlay only, reconstruct nodes from NDJSON ---
-                    // Taken only for a SAME-BLOCK reopen with a usable high-water mark:
-                    //
-                    //  - hwm>0: `writeSnapshotNow` defaults hwm=0 when the line-count RPC
-                    //    fails at write time; treating hwm=0 as "empty session" would
-                    //    render a blank pane and hide on-disk history, so hwm<=0 falls
-                    //    through to the NDJSON replay (which re-derives the count).
-                    //  - sourceBlockId === opts.blockId: the durable NDJSON history is
-                    //    per-block, but the snapshot is agent-anchored (shared across all
-                    //    of an agent's blocks). When a *new* block opens for the same
-                    //    agent (cross-block "structural continuation"), this block's own
-                    //    output is empty, so we must NOT read it as if it were the source.
-                    //    Cross-block continuation needs a unified per-agent log; until
-                    //    that lands (follow-up to PR #1361) we fall through to NDJSON
-                    //    replay on this block rather than restore a fragmented/blank view.
-                    const hasUsableHwm = (snapshot?.schemaVersion ?? 0) >= SNAPSHOT_SCHEMA_VERSION_V2
-                        && typeof snapshot.highWaterMark === "number"
-                        && snapshot.highWaterMark > 0;
-                    const sourceMatchesThisBlock = typeof snapshot.sourceBlockId !== "string"
-                        || snapshot.sourceBlockId === ""
-                        || snapshot.sourceBlockId === opts.blockId;
-                    // A genuine cross-block continuation (a NEW block opened for the same
-                    // agent definition, after the block that wrote this snapshot) can also
-                    // take the fast path below when a definitionId is available: `Blockfile
-                    // LineCountCommand`/`BlockfileReadRangeCommand` resolve to the agent's
-                    // GLOBAL output zone by THIS block's own `agentId` meta
-                    // (`global_output_source`, server/app_api/mod.rs) — not by the
-                    // snapshot's recorded sourceBlockId — so scoping those reads to
-                    // opts.blockId already returns the full cross-block history. Without a
-                    // definitionId there's no way to resolve the write-side mirror, so that
-                    // case still falls through to NDJSON replay below. Closes #1397.
-                    const v2SameBlock = hasUsableHwm && (sourceMatchesThisBlock || !!opts.definitionId);
-                    if (v2SameBlock) {
-                        // NOT calling setSnapshotIsForeignBlock(true) here, even when the
-                        // snapshot isn't sourced from this exact block: that flag means
-                        // "this pane has no real continuity, never let it write" — true
-                        // for the legacy fallback below (no definitionId, falls through to
-                        // NDJSON on an empty block), but no longer true here. This branch
-                        // just successfully restored the FULL history via the global zone
-                        // (needsHwmWidening's probe below) and applied the snapshot's
-                        // documentState overlay (below), so this pane's live state now
-                        // correctly reflects the ongoing conversation — exactly like a
-                        // same-block reopen. Permanently suppressing writes here was
-                        // reagent's P1 finding on this PR: it silently stopped persisting
-                        // collapsed/pinned nodes, scroll position, and filter for every
-                        // successful cross-block continuation.
-                        //
-                        // needsHwmWidening: true whenever the stored highWaterMark was NOT
-                        // captured by this exact block's own local line count — covers BOTH
-                        // the agent-anchored case (sourceBlockId is "" /missing) AND a
-                        // genuine cross-block continuation (sourceBlockId is a different
-                        // concrete block id). Deliberately NOT `!sourceMatchesThisBlock`:
-                        // that flag treats agent-anchored as "matches", which would skip
-                        // this widening probe for the common same-block-reopen-after-
-                        // agent-anchored-write case and let a stale highWaterMark cap
-                        // restored history — reagent P1, caught after the first fix.
-                        const needsHwmWidening = snapshot.sourceBlockId !== opts.blockId;
-                        // The stored highWaterMark was written by something other than
-                        // THIS exact block's own local line count and can be far smaller
-                        // than the global zone (e.g. hwm=15 from a short accidental session
-                        // while the real conversation has 5000+ lines). Re-derive the live
-                        // count via line_count, which transparently returns the global-zone
-                        // total. Only take the larger value so a genuinely new/short agent
-                        // (hwm=5, live=5) isn't widened.
-                        let hwm: number = snapshot.highWaterMark;
-                        if (needsHwmWidening) {
-                            try {
-                                const liveCount = await RpcApi.BlockfileLineCountCommand(TabRpcClient, {
-                                    block_id: opts.blockId,
-                                    filename: "output",
-                                }, { timeout: 5000 });
-                                if (!mounted) return;
-                                const liveHwm = liveCount?.count ?? 0;
-                                if (liveHwm > hwm) {
-                                    opts.log("history", `v2 cross-channel: hwm ${hwm} → ${liveHwm} (global zone)`);
-                                    hwm = liveHwm;
-                                }
-                            } catch {
-                                // soft fail — proceed with stored hwm
-                            }
-                        }
-                        const windowStart = Math.max(0, hwm - RESTORE_WINDOW_LINES);
-                        const tailTurns = opts.restoreTurns?.();
-                        const tailBytes = opts.restoreBytes?.();
-                        const rangeResp = await RpcApi.BlockfileReadRangeCommand(TabRpcClient, {
-                            block_id: opts.blockId,
-                            filename: "output",
-                            offset: windowStart,
-                            limit: hwm - windowStart,
-                            ...(tailTurns ? { tail_turns: tailTurns } : {}),
-                            ...(tailBytes ? { tail_bytes: tailBytes } : {}),
-                        }, { timeout: 30_000 });
-                        if (!mounted) return;
-                        // Where the returned lines start: the backend trims to
-                        // the last `tail_turns` turns and to `tail_bytes`, and
-                        // says where they begin (an older srv ignores both
-                        // fields and returns the window).
-                        const readStart = typeof rangeResp.offset === "number" ? rangeResp.offset : windowStart;
-                        markAgentOpen(opts.blockId, "history_read", { history_lines: rangeResp.lines?.length ?? 0 });
-                        const parsed = parseHistoryLines(rangeResp.lines ?? [], opts.outputFormat(), opts.agentName?.(), rangeResp.stamps, parseOptsAt(rangeResp, readStart));
-                        const { nodes } = parsed;
-                        markAgentOpen(opts.blockId, "parsed");
-                        batch(() => opts.model.dispatchDoc({ type: "HistoryRestored", fromSnapshot: true, nodes }));
-                        // Right after the dispatch, before anything else can
-                        // run: live records must land after these nodes.
-                        opts.transcriptSettle?.settle(historyPin(readStart, rangeResp));
-                        // Hydrate the composer strip's context meter from the
-                        // resumed conversation's last main-agent call instead of
-                        // leaving it blank until the first live turn — see
-                        // docs/plans/PLAN_PANE_REOPEN_SESSION_RESUME_AND_STATS_BAR_2026_07_10.md.
-                        seedContextFromHistory(opts.model, parsed);
-                        // Apply DocumentState + pane overlay via caller callback.
-                        applySnapshotOverlay(snapshot);
-                        const ds = snapshot.documentState;
-                        // Trust the backend's reported total over the snapshot's hwm:
-                        // `rangeResp.total` is the line count the backend can actually
-                        // serve (clamped to its ring-buffer window), so load-older never
-                        // asks for offsets below the floor. See the invariant at the
-                        // NDJSON replay path below.
-                        const available = typeof rangeResp.total === "number" ? rangeResp.total : hwm;
-                        const clampedStart = Math.min(readStart, available);
-                        setHistoryOffset(clampedStart);
-                        setHistoryTotal(available);
-                        opts.log(
-                            "history",
-                            `v2 restore: ${nodes.length} nodes from lines [${clampedStart}, ${available})` +
-                            (clampedStart > 0 ? ` (${clampedStart} older lines available via load-older)` : "") +
-                            (ds?.collapsedNodeIds?.length ? `, ${ds.collapsedNodeIds.length} collapsed` : ""),
-                        );
-                        opts.model.dispatchPane({ type: "InitReady", at: Date.now(), historyDamaged: rangeResp.history_damaged });
-                        opts.onHistoryReady?.();
-                        return;
-                    }
-                    if ((snapshot?.schemaVersion ?? 0) >= SNAPSHOT_SCHEMA_VERSION_V2) {
-                        // v2+ snapshot we deliberately didn't fast-path (v2SameBlock was
-                        // false above): either hwm<=0 (write-time count failure), or a
-                        // cross-block continuation with no definitionId to resolve the
-                        // global zone through (legacy/picker callers only — #1397's fix
-                        // covers every definitionId-bearing caller above). Don't render
-                        // empty — fall through to NDJSON replay on this block.
-                        const crossBlock = typeof snapshot.sourceBlockId === "string"
-                            && snapshot.sourceBlockId !== ""
-                            && snapshot.sourceBlockId !== opts.blockId;
-                        if (crossBlock) {
-                            // Mark this pane as a transient cross-block viewer so the
-                            // caller suppresses snapshot writes — otherwise it would
-                            // clobber the agent-anchored snapshot that still references
-                            // the block holding the real conversation.
-                            setSnapshotIsForeignBlock(true);
-                        }
-                        opts.log(
-                            "history",
-                            crossBlock
-                                ? "v2 snapshot is from another block and no definitionId is available to resolve it; falling back to NDJSON replay"
-                                : "v2 snapshot has no usable highWaterMark; falling back to NDJSON replay",
-                            "warn",
-                        );
-                    }
-
-                    // --- Schema v1: nodes[] embedded (legacy fast path) ---
-                    if (snapshot?.schemaVersion === SNAPSHOT_SCHEMA_VERSION_V1 && Array.isArray(snapshot.nodes)) {
-                        batch(() => opts.model.dispatchDoc({ type: "HistoryRestored", fromSnapshot: true, nodes: snapshot.nodes }));
-                        // A v1 snapshot has no line positions.
-                        opts.transcriptSettle?.settle(null);
-                        const offset = typeof snapshot.historyOffset === "number" && snapshot.historyOffset >= 0
-                            ? snapshot.historyOffset
-                            : 0;
-                        setHistoryOffset(offset);
-                        setHistoryTotal(typeof snapshot.highWaterMark === "number" ? snapshot.highWaterMark : snapshot.nodes.length);
-                        opts.log(
-                            "history",
-                            `v1 restore: ${snapshot.nodes.length} nodes from snapshot ` +
-                                `(savedAt=${snapshot.savedAt ?? "unknown"}, loadOlder offset=${offset})`,
-                        );
-                        opts.model.dispatchPane({ type: "InitReady", at: Date.now() });
-                        opts.onHistoryReady?.();
-                        return;
-                    }
-
-                    opts.log(
-                        "history",
-                        `snapshot schema mismatch (got v${snapshot?.schemaVersion}); falling back to NDJSON replay`,
-                        "warn",
-                    );
-                }
-              } catch (err: any) {
-                // Most common: snapshot doesn't exist yet — silent fall-through.
-                // Anything else logs but still falls through to NDJSON.
-                const reason = err?.message ?? String(err);
-                if (!/not\s*found|no\s*such|enoent/i.test(reason)) {
-                    opts.log("history", `snapshot read failed: ${reason}; falling back to NDJSON replay`, "warn");
-                }
-                if (!mounted) return;
-              }
-            }  // end if (opts.definitionId)
-            // The usual open: the count, then the newest page. A retriable failure
-            // gets a few more tries before the pane gives up; giving up shows
-            // HistoryLoadFailedBanner instead of an empty pane with no word why.
-            for (let attempt = 0; ; attempt++) {
-            try {
-                const countResp = await RpcApi.BlockfileLineCountCommand(TabRpcClient, {
-                    block_id: opts.blockId,
-                    filename: "output",
-                }, { timeout: 5000 });
-                if (!mounted) return;
-
-                const total = countResp?.count ?? 0;
-                if (total === 0) {
-                    opts.transcriptSettle?.settle("empty");
-                    opts.model.dispatchPane({
-                        type: "InitReady",
-                        at: Date.now(),
-                        historyDamaged: countResp?.history_damaged,
-                    });
-                    opts.onHistoryReady?.();
-                    return;
-                }
-
-                const offset = Math.max(0, total - PAGE_SIZE);
-                const limit = total - offset;
-
-                const rangeResp = await RpcApi.BlockfileReadRangeCommand(TabRpcClient, {
-                    block_id: opts.blockId,
-                    filename: "output",
-                    offset,
-                    limit,
-                }, { timeout: 15000 });
-                if (!mounted) return;
-                markAgentOpen(opts.blockId, "history_read", { history_lines: rangeResp.lines?.length ?? 0 });
-
-                const parsed = parseHistoryLines(rangeResp.lines ?? [], opts.outputFormat(), opts.agentName?.(), rangeResp.stamps, parseOptsAt(rangeResp, rangeResp.offset ?? offset));
-                const { nodes } = parsed;
-                markAgentOpen(opts.blockId, "parsed");
-                if (nodes.length > 0) {
-                    batch(() => opts.model.dispatchDoc({ type: "HistoryLoaded", nodes }));
-                }
-                opts.transcriptSettle?.settle(historyPin(offset, rangeResp));
-                // See the v2-restore branch above for rationale.
-                seedContextFromHistory(opts.model, parsed);
-
-                // `resp.total` from the backend is the actual available
-                // line count clamped to the event ring buffer window —
-                // NOT the all-time session:line_count meta. Use it so
-                // the frontend never asks for offsets the backend can't
-                // serve.
-                const available = rangeResp.total ?? total;
-                setHistoryOffset(offset);
-                setHistoryTotal(available);
-
-                opts.log("history", `loaded ${nodes.length} of ${available} previous messages`);
-                opts.model.dispatchPane({
-                    type: "InitReady",
-                    at: Date.now(),
-                    historyDamaged: rangeResp.history_damaged || countResp?.history_damaged,
-                });
-                opts.onHistoryReady?.();
-                return;
-            } catch (err: any) {
-                if (!mounted) return;
-                const reason = err?.message ?? String(err);
-                const wait = HISTORY_RETRY_MS[attempt];
-                if (wait !== undefined && isRetriableHistoryError(reason)) {
-                    opts.log("history", `could not load history (${reason}); trying again in ${wait} ms`, "warn");
-                    await new Promise((resolve) => setTimeout(resolve, wait));
-                    if (!mounted) return;
-                    continue;
-                }
-                // Non-fatal — fresh session or backend not ready yet.
-                // Surface the failure to the reducer so it can gate
-                // turn-start and the UI can render an error state, then
-                // flip to ready so the user can still send (best-effort).
-                opts.log("history", `could not load history: ${reason}`, "warn");
-                opts.transcriptSettle?.settle(null);
-                // Surface the failure for diagnostics. The reducer's
-                // TurnStart guard treats `InitFailed` as fail-open (only
-                // `InitPending` blocks sends), so no follow-up InitReady
-                // is needed — the user can still send.
-                opts.model.dispatchPane({
-                    type: "InitFailed",
-                    at: Date.now(),
-                    reason,
-                });
-                opts.onHistoryReady?.();
-                return;
-            }
-            }
-        })();
+/** Give up on the history: the pane opens empty and can still send. */
+function failHistoryLoad(opts: UseHistoryPaginationOptions, reason: string): void {
+    // Non-fatal — fresh session or backend not ready yet.
+    // Surface the failure to the reducer so it can gate
+    // turn-start and the UI can render an error state, then
+    // flip to ready so the user can still send (best-effort).
+    opts.log("history", `could not load history: ${reason}`, "warn");
+    opts.transcriptSettle?.settle(null);
+    // Surface the failure for diagnostics. The reducer's
+    // TurnStart guard treats `InitFailed` as fail-open (only
+    // `InitPending` blocks sends), so no follow-up InitReady
+    // is needed — the user can still send.
+    opts.model.dispatchPane({
+        type: "InitFailed",
+        at: Date.now(),
+        reason,
     });
-
-    return {
-        historyOffset,
-        historyTotal,
-        loadingOlder,
-        loadOlder,
-        snapshotIsForeignBlock,
-    };
+    opts.onHistoryReady?.();
 }

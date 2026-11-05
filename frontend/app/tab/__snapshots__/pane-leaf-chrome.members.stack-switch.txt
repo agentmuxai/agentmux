@@ -1,0 +1,44 @@
+Block mount a1 wrapper#1 hoisted=true preview=false
+Block mount t1 wrapper#2 hoisted=true preview=false
+expectAgentMount a1 :: view=agent active=true mounted=true minimized=false stack=3
+agentMountSettled h1
+agentMountSettled t1
+setBlockMinimized a1 false
+setBlockMinimized h1 false
+setBlockMinimized t1 false
+setKeepAliveBlockDormant a1 false
+Block a1 memberActive=true
+Block a1 set its vm
+setKeepAliveBlockDormant t1 true
+Block t1 memberActive=false
+Block t1 set its vm
+renderPaneChrome by vm of a1
+dom chrome=1 shell=0 blocks=["a1","t1"] slots=["a1[dormant=null vis=inherit op=1 pe=auto]","t1[dormant= vis=hidden op=0 pe=none]"]
+chrome sees vm of a1
+-- switch to h1
+Block mount h1 wrapper#3 hoisted=true preview=false
+Block t1 memberActive=false
+setKeepAliveBlockDormant a1 true
+Block a1 memberActive=false
+setKeepAliveBlockDormant t1 true
+setKeepAliveBlockDormant h1 false
+Block h1 memberActive=true
+Block h1 set its vm
+dom chrome=1 shell=0 blocks=["a1","h1","t1"] slots=["a1[dormant= vis=hidden op=0 pe=none]","h1[dormant=null vis=inherit op=1 pe=auto]","t1[dormant= vis=hidden op=0 pe=none]"]
+chrome sees vm of h1
+-- switch to t1
+Block unmount h1
+setKeepAliveBlockDormant h1 false
+Block a1 memberActive=false
+Block t1 memberActive=true
+setKeepAliveBlockDormant a1 true
+setKeepAliveBlockDormant t1 false
+dom chrome=1 shell=0 blocks=["a1","t1"] slots=["a1[dormant= vis=hidden op=0 pe=none]","t1[dormant=null vis=inherit op=1 pe=auto]"]
+chrome sees vm of t1
+-- switch to a1
+setKeepAliveBlockDormant a1 false
+Block a1 memberActive=true
+Block t1 memberActive=false
+setKeepAliveBlockDormant t1 true
+dom chrome=1 shell=0 blocks=["a1","t1"] slots=["a1[dormant=null vis=inherit op=1 pe=auto]","t1[dormant= vis=hidden op=0 pe=none]"]
+chrome sees vm of a1

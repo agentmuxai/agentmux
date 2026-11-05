@@ -1,0 +1,8 @@
+diag sync urlAtom="https://example.com/" addressBar="https://example.com/" focused=false willUpdate=false
+listen browser-pane-shortcut
+rpc ListBookmarks
+model navigate https://docs.example/
+diag sync urlAtom="https://example.com/" addressBar="https://docs.example/" focused=false willUpdate=true
+diag sync urlAtom="https://example.com/" addressBar="https://example.com/" focused=false willUpdate=false
+pane navigate block-1 https://docs.example/
+value=https://example.com/

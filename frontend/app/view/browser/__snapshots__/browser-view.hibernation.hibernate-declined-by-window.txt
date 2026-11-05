@@ -1,0 +1,16 @@
+diag view-mount window_label=main initial-urlAtom="https://example.com/page"
+register pane
+diag [hibernate] stays awake reason="kept awake" asked=hidden
+tryHibernate -> "kept awake"
+diag [hibernate] stays awake reason="no page" asked=hidden
+tryHibernate -> "no page"
+diag [hibernate] stays awake reason="local address" asked=hidden
+tryHibernate -> "local address"
+diag [hibernate] stays awake reason="site kept awake" asked=hidden
+tryHibernate -> "site kept awake"
+diag [hibernate] stays awake reason="popup windows open" asked=hidden
+tryHibernate -> "popup windows open"
+diag [hibernate] stays awake reason="an agent drives it" asked=hidden
+tryHibernate -> "an agent drives it"
+diag [hibernate] stays awake reason="an agent used it recently" asked=hidden
+tryHibernate -> "an agent used it recently"

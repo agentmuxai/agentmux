@@ -5,7 +5,8 @@
 PR #4677. Phase 1 (observed servers) and Phase 2a (In use now) shipped in
 PR #4683 (with #4685). Phase 2b's catalog half ("Not loaded by") is PR #4701;
 its startup-card half is deferred (§4). Phase 3: ACP agents got the servers in
-#4893 and Codex `exec` turns get them as `-c` overrides (§5); Gemini is next.
+#4893, Codex `exec` turns get them as `-c` overrides and Gemini turns as a settings
+file (§5).
 **Author:** QTest@narko
 **Grounded in:** [`docs/reports/REPORT_CONNECTORS_MCP_VS_AGENT_RUNTIME_2026_10_10.md`](../reports/REPORT_CONNECTORS_MCP_VS_AGENT_RUNTIME_2026_10_10.md)
 (the investigation and history). File references are as of `main` at
@@ -211,7 +212,22 @@ order is pinned down, with a contract test of it.
   forwarded and literal variables and nothing else. Not yet: container agents,
   the dormant app-server path (`thread/start` takes a `config` object), and sse
   servers (Codex takes none).
-- **Gemini:** settings `mcpServers` (not started).
+- **Gemini:** a Gemini turn on the host gets a per-agent settings file, written under srv's
+  data folder (`gemini-mcp/<block>.json`, temporary file and rename) from the same
+  `.mcp.json`, and launched with `GEMINI_CLI_SYSTEM_SETTINGS_PATH` pointing at it. Gemini
+  merges its `mcpServers` with the folder's `.gemini/settings.json` and the user's, so
+  nothing the person set up is replaced. stdio servers keep `command` (resolved), `args`
+  and `env`; http becomes `httpUrl` and sse `url`, with literal headers. Gemini hands a
+  server none of the variables named like a key or token unless the server's `env` asks
+  for them, and expands `${VAR}` in a server's `env` itself, so a reference stays a
+  reference, and `agentmux` asks for every `AGENTMUX_*` variable the agent was launched
+  with by reference (no key is copied into the file; a value in `.mcp.json` is replaced by
+  the reference). A header is expanded against the stripped environment, so a server with
+  a variable in a header, or in a command, argument or url, is left out and named in the
+  log. A turn that already has `GEMINI_CLI_SYSTEM_SETTINGS_PATH` set keeps it.
+  Checked against Gemini CLI 0.62.0: the system file's servers load beside the project's,
+  and a referenced `AGENTMUX_` key reaches the server while an unreferenced one does not.
+  Not yet: container agents.
 
 - Optional name-only discovery in the account's Claude config and Codex
   `config.toml` (D3).

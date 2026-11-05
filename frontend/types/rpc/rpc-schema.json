@@ -3666,6 +3666,25 @@
     }
   },
   {
+    "command": "github.installations",
+    "request": "agentmux_srv::identity::github_installs::GithubInstallationsReq",
+    "requestName": "GithubInstallationsReq",
+    "requestTs": {
+      "imports": [
+        "GithubInstallationsReq"
+      ],
+      "name": "GithubInstallationsReq"
+    },
+    "response": "agentmux_srv::identity::github_installs::GithubInstallations",
+    "responseName": "GithubInstallations",
+    "responseTs": {
+      "imports": [
+        "GithubInstallations"
+      ],
+      "name": "GithubInstallations"
+    }
+  },
+  {
     "command": "globalmemory:diff",
     "request": "agentmux_srv::backend::rpc_types::bundle::CommandGlobalMemoryDiffData",
     "requestName": "CommandGlobalMemoryDiffData",

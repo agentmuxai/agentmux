@@ -355,6 +355,7 @@ partial list.
 | [`SPEC_FLEET_BULK_STOP_CROSS_CHANNEL_2026_08_22`](SPEC_FLEET_BULK_STOP_CROSS_CHANNEL_2026_08_22.md) | SPEC: `FleetBulkStop` reaches cross-channel targets; LAN/WAN deliberately deferred |
 | [`SPEC_FLOATING_PANE_EDGE_RESIZE_2026_05_29`](SPEC_FLOATING_PANE_EDGE_RESIZE_2026_05_29.md) | SPEC: Floating-pane edge-resize (Win32) |
 | [`SPEC_FLOATING_PANE_REDOCK_BUTTON_2026_10_15`](SPEC_FLOATING_PANE_REDOCK_BUTTON_2026_10_15.md) | Spec: A Redock button in the floating pane's header |
+| [`SPEC_FLOATING_PANE_REDOCK_TO_ORIGIN_2026_11_03`](SPEC_FLOATING_PANE_REDOCK_TO_ORIGIN_2026_11_03.md) | Spec: Redock puts a floating pane back where it was torn from (best effort), else to the right as today |
 | [`SPEC_GLOBAL_MEMORY_LIST_SYSTEM_ROWS_2026_10_02`](SPEC_GLOBAL_MEMORY_LIST_SYSTEM_ROWS_2026_10_02.md) | SPEC: `GlobalMemoryList` lists the system rows too, flagged and read-only |
 | [`SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24`](SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md) | SPEC: Global Memory "system" tier — an AgentMux-controlled, highest-priority entry |
 | [`SPEC_GLOBAL_MEMORY_UNIFY_SYSTEM_AND_ORDINARY_2026_09_15`](SPEC_GLOBAL_MEMORY_UNIFY_SYSTEM_AND_ORDINARY_2026_09_15.md) | Spec: Global Memory — unify "system" and "ordinary" into one Memory list (postmortem + refactor plan) |
@@ -661,6 +662,7 @@ partial list.
 | [`SPEC_BROWSER_PANE_POPUPS_ADOPTED_2026_10_08`](SPEC_BROWSER_PANE_POPUPS_ADOPTED_2026_10_08.md) | SPEC: Popups from a browser pane stay in AgentMux, and an agent can drive them |
 | [`SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09`](SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09.md) | SPEC: Home and Profile buttons in the browser pane's toolbar, with Incognito and named profiles |
 | [`SPEC_BROWSER_PANE_THIN_BAR_AND_MENUS_IN_PANE_2026_10_18`](SPEC_BROWSER_PANE_THIN_BAR_AND_MENUS_IN_PANE_2026_10_18.md) | SPEC: The browser pane's thin bar puts Bookmarks on the right with a line between its rows, and its menus stay inside the pane |
+| [`SPEC_BROWSER_RETAKE_AND_COMMANDEER_2026_11_04`](SPEC_BROWSER_RETAKE_AND_COMMANDEER_2026_11_04.md) | SPEC: an agent retakes a browser pane, and takes one it did not open (2026-11-04) |
 | [`SPEC_BROWSER_WEB_TERMINAL_TYPING_2026_10_23`](SPEC_BROWSER_WEB_TERMINAL_TYPING_2026_10_23.md) | SPEC: On a site the person has granted, an agent runs freely in a web terminal, and Enter, Space and uploads work |
 | [`SPEC_BUILD_CACHE_CLEANUP_2026_10_26`](SPEC_BUILD_CACHE_CLEANUP_2026_10_26.md) | Spec: Build-cache cleanup and a low-disk warning |
 | [`SPEC_BUILD_SLOT_ENFORCEMENT_2026_10_20`](SPEC_BUILD_SLOT_ENFORCEMENT_2026_10_20.md) | Spec: The build slot — one heavy build or test at a time on a machine, enforced for agents' cargo |
@@ -741,6 +743,7 @@ partial list.
 | [`SPEC_LAYOUT_FILES_2026_09_25`](SPEC_LAYOUT_FILES_2026_09_25.md) | SPEC: Layout files — "Layouts → Save layout…" and the `agentmux.layout` file format |
 | [`SPEC_LINUX_PACKAGES_XZ_2026_10_14`](SPEC_LINUX_PACKAGES_XZ_2026_10_14.md) | Spec: compress the Linux deb, rpm and portable tarball with xz |
 | [`SPEC_LINUX_PACKAGE_UPGRADE_AND_REPOSITORY_2026_10_24`](SPEC_LINUX_PACKAGE_UPGRADE_AND_REPOSITORY_2026_10_24.md) | Spec: upgrading a .deb or .rpm install from the app, and an apt/dnf repository |
+| [`SPEC_LONG_RUNNING_ACTIVITY_ANIMATIONS_2026_11_02`](SPEC_LONG_RUNNING_ACTIVITY_ANIMATIONS_2026_11_02.md) | Spec: one ASCII animation per kind of long-running work |
 | [`SPEC_LONG_RUNNING_SHELL_PINNED_DOCK_2026_06_15`](SPEC_LONG_RUNNING_SHELL_PINNED_DOCK_2026_06_15.md) | SPEC: Pinned Activity Dock — Unified Long-Running Activities |
 | [`SPEC_MARKDOWN_CODE_ON_SHIKI_AND_REDUNDANT_LIBRARIES_2026_10_21`](SPEC_MARKDOWN_CODE_ON_SHIKI_AND_REDUNDANT_LIBRARIES_2026_10_21.md) | Spec: code in markdown on shiki, and the frontend libraries we can drop |
 | [`SPEC_MCP_INTEGRATION_PARITY_ABLETON_PILOT_2026_07_08`](SPEC_MCP_INTEGRATION_PARITY_ABLETON_PILOT_2026_07_08.md) | Spec: MCP integration parity with Claude Desktop / Cursor, piloted on Ableton MCP |
@@ -751,6 +754,7 @@ partial list.
 | [`SPEC_MINIMIZE_MERGES_INTO_EXPANDED_NEIGHBOUR_2026_10_30`](SPEC_MINIMIZE_MERGES_INTO_EXPANDED_NEIGHBOUR_2026_10_30.md) | Minimizing a pane next to an expanded pane puts its tabs in that pane |
 | [`SPEC_MOTION_PRIMITIVES_2026_10_29`](SPEC_MOTION_PRIMITIVES_2026_10_29.md) | Motion primitives: one shared set of reusable animations on top of the motion policy and tokens |
 | [`SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15`](SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15.md) | SPEC: two motion tiers, one motion policy, and a DRY pass over the stylesheets |
+| [`SPEC_MULTI_LANGUAGE_AGENTMUX_2026_11_03`](SPEC_MULTI_LANGUAGE_AGENTMUX_2026_11_03.md) | Spec: Multi-language AgentMux, for an international audience |
 | [`SPEC_MUXAPI_TOOL_CONSOLIDATION_2026_10_15`](SPEC_MUXAPI_TOOL_CONSOLIDATION_2026_10_15.md) | SPEC: MuxAPI in fourteen tools: one per family, with actions |
 | [`SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29`](SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29.md) | Spec: multi-tier discovery + remote API invocation over muxbus |
 | [`SPEC_MUXSH_CLI_2026_09_16`](SPEC_MUXSH_CLI_2026_09_16.md) | SPEC: `muxsh` — a terminal-side pane-opener for MuxAPI |
@@ -762,6 +766,7 @@ partial list.
 | [`SPEC_NODEJS_24_LTS_STANDARDIZATION_2026_09_15`](SPEC_NODEJS_24_LTS_STANDARDIZATION_2026_09_15.md) | Node.js 24 LTS standardization across agentmuxai repos |
 | [`SPEC_NO_WINDOW_SPAWN_AND_META_ROW_TYPE_SCALE_DRY_2026_10_01`](SPEC_NO_WINDOW_SPAWN_AND_META_ROW_TYPE_SCALE_DRY_2026_10_01.md) | Spec: DRY the no-window spawn flag, and the meta-row type scale |
 | [`SPEC_OFFLINE_RESILIENCE_2026_10_20`](SPEC_OFFLINE_RESILIENCE_2026_10_20.md) | SPEC: Stay in control of every agent when the internet drops, and recover by itself |
+| [`SPEC_ONE_COMMAND_INSTALL_ALL_PLATFORMS_2026_11_01`](SPEC_ONE_COMMAND_INSTALL_ALL_PLATFORMS_2026_11_01.md) | Spec: install AgentMux with one copyable command on Windows, macOS and Linux |
 | [`SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24`](SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md) | SPEC: OS notification system (native toasts) + tray re-enablement |
 | [`SPEC_PANE_CLOSING_INDICATOR_AND_FASTER_CLOSE_2026_10_28`](SPEC_PANE_CLOSING_INDICATOR_AND_FASTER_CLOSE_2026_10_28.md) | A pane shows it is closing, and a close stops waiting on srv |
 | [`SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20`](SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20.md) | SPEC — Consolidate pane loading into one readiness system |

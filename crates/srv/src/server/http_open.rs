@@ -14,7 +14,7 @@ use super::*;
 /// so the frontend renders the pane. Body is `CommandPaneOpenData`.
 pub(super) async fn handle_pane_open(
     State(state): State<AppState>,
-    grant: Option<axum::Extension<crate::backend::container_credential::ContainerGrant>>,
+    grant: Option<axum::Extension<crate::backend::container::credential::ContainerGrant>>,
     caller: Option<axum::Extension<super::caller::Caller>>,
     Json(mut req): Json<crate::backend::rpc_types::CommandPaneOpenData>,
 ) -> impl IntoResponse {

@@ -11,23 +11,22 @@ use std::sync::Arc;
 #[cfg(unix)]
 use libc;
 
-use portable_pty::{native_pty_system, CommandBuilder};
+use portable_pty::CommandBuilder;
 use tokio::sync::mpsc;
 
 use super::super::{
     BlockControllerRuntimeStatus, BlockInputUnion, Controller, META_KEY_CMD_ENV, STATUS_DONE,
-    STATUS_RUNNING,
 };
 #[cfg(unix)]
 use super::controller::KILL_GRACE_SECS;
 use super::controller::{ShellController, SHELL_INPUT_CH_SIZE};
 use super::file_ops::handle_append_block_file;
-use super::pty::{
-    PTY_CHANNEL_CAPACITY, PTY_COALESCE_MAX_BYTES,
-};
+use super::pty::{PTY_CHANNEL_CAPACITY, PTY_COALESCE_MAX_BYTES};
+use super::spawn_command::SpawnPlan;
+use super::start_steps::{is_agent_pane, program_name, RemotePlan};
+use super::wait_task::ExitParts;
 use super::translation::accumulate_and_translate;
 use crate::backend::obj::{self, MetaMapType};
-use crate::backend::shellexec::ShellProc;
 use crate::backend::mps;
 
 /// One PTY read's worth of already-OSC-cleaned output, on its way from the
@@ -104,7 +103,7 @@ fn flush_pty_batch(
 /// A standalone fn rather than inlined into its `tokio::spawn` call site so
 /// it can be driven directly in a test with a synthetic channel and no real
 /// PTY — see `pty_output_flusher_tests` below.
-async fn run_pty_output_flusher(
+pub(super) async fn run_pty_output_flusher(
     mut rx: mpsc::Receiver<PtyReadChunk>,
     broker: Option<Arc<mps::Broker>>,
     block_id: String,
@@ -301,20 +300,20 @@ fn is_global_cmd_env_injectable(key: &str) -> bool {
 /// the global settings and the block's own metadata. See
 /// [`cmd_env_overrides`].
 #[derive(Debug)]
-struct CmdEnvOverrides {
+pub(super) struct CmdEnvOverrides {
     /// `(key, value)` pairs in application order: global settings first,
     /// block metadata last. Applied one by one, so a later entry for the same
     /// key wins. Kept as a list rather than merged into a map because
     /// `CommandBuilder` matches env keys case-insensitively on Windows: a
     /// block's `PATH` must still override a global `Path`.
-    vars: Vec<(String, String)>,
+    pub(super) vars: Vec<(String, String)>,
     /// Whether the block's own `cmd:env` sets `AGENTMUX_AGENT_ID`. When it
     /// does not, the inherited agent-identity vars are stripped.
     block_sets_agent_id: bool,
 }
 
 impl CmdEnvOverrides {
-    fn apply_to(&self, c: &mut CommandBuilder) {
+    pub(super) fn apply_to(&self, c: &mut CommandBuilder) {
         for (k, v) in &self.vars {
             c.env(k, v);
         }
@@ -342,7 +341,7 @@ impl CmdEnvOverrides {
 /// ([`ShellController::live_settings`]). The spawn once read a freshly built
 /// default config instead, whose `cmd_env` is always empty, so the global
 /// setting never reached any shell.
-fn cmd_env_overrides(
+pub(super) fn cmd_env_overrides(
     settings: &crate::backend::wconfig::SettingsType,
     block_meta: &MetaMapType,
 ) -> CmdEnvOverrides {
@@ -376,49 +375,8 @@ fn cmd_env_overrides(
 impl ShellController {
     /// Apply `cmd:env` to an interactive shell's command: the live global
     /// settings, the block's own (an agent's current identity in), the strip.
-    fn apply_cmd_env(&self, c: &mut CommandBuilder, block_meta: &MetaMapType) {
+    pub(super) fn apply_cmd_env(&self, c: &mut CommandBuilder, block_meta: &MetaMapType) {
         cmd_env_overrides(&self.live_settings(), &self.with_agent_identity(block_meta)).apply_to(c);
-    }
-
-    /// The process a `cmd` pane runs: `cmd` itself when it has `cmd:args` or
-    /// `cmd:interactive`, otherwise `cmd` through the platform shell. Either
-    /// way with the pane's `cmd:env`, as an interactive shell gets it: a pane
-    /// running a provider CLI's login needs the account's config directory.
-    ///
-    /// Spawned directly, an npm `.cmd` shim on Windows is resolved to what it
-    /// runs: the shim itself hangs under ConPTY (`resolve_cli_spawn_target`).
-    /// One that can't be read is refused, rather than started into a pane
-    /// that would never respond.
-    fn command_process(
-        &self,
-        cmd_str: &str,
-        cmd_args: &[String],
-        interactive: bool,
-        block_meta: &MetaMapType,
-    ) -> Result<CommandBuilder, String> {
-        let mut c = if !cmd_args.is_empty() || interactive {
-            // Spawned directly (no shell wrapper), so args pass through intact.
-            let (program, prefix) = agentmux_common::resolve_cli_spawn_target(cmd_str).ok_or_else(|| {
-                format!(
-                    "can't run {cmd_str}: it's a command wrapper AgentMux can't read, and run as it is it would hang; \
-                     reinstall the tool, or run its own executable"
-                )
-            })?;
-            let mut c = CommandBuilder::new(&program);
-            c.args(&prefix);
-            c.args(cmd_args);
-            c
-        } else if cfg!(windows) {
-            let mut c = CommandBuilder::new("cmd.exe");
-            c.args(["/C", cmd_str]);
-            c
-        } else {
-            let mut c = CommandBuilder::new("/bin/sh");
-            c.args(["-c", cmd_str]);
-            c
-        };
-        self.apply_cmd_env(&mut c, block_meta);
-        Ok(c)
     }
 
     /// Ends a start that was refused before anything ran: the pane is done,
@@ -458,31 +416,7 @@ impl Controller for ShellController {
             return Ok(());
         }
 
-        // A pane on a connection AgentMux cannot run must not quietly get a
-        // local shell under a remote name: it gets no shell, and its connection
-        // overlay says why (SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md).
-        // WSL runs on Windows (P1); SSH wherever the system `ssh` is (P2). The
-        // test-only mock factory keeps its own path.
-        if self.conn_factory.lock().unwrap().is_none() {
-            let conn = Self::get_conn_name(&block_meta);
-            match crate::backend::remote::ConnTarget::parse(&conn) {
-                Ok(target) if target.is_local() => {}
-                #[cfg(windows)]
-                Ok(crate::backend::remote::ConnTarget::Wsl(_)) => {}
-                Ok(crate::backend::remote::ConnTarget::Ssh(_))
-                    if crate::backend::remote::ssh::binary().is_some() => {}
-                Ok(crate::backend::remote::ConnTarget::Ssh(_)) => {
-                    return Err(crate::backend::remote::ssh::missing_binary_message());
-                }
-                Ok(target) => {
-                    return Err(format!(
-                        "connection {} is not available yet: this version of AgentMux runs local terminals only",
-                        target.name()
-                    ));
-                }
-                Err(e) => return Err(format!("connection {conn:?}: {e}")),
-            }
-        }
+        self.check_connection_available(&block_meta)?;
 
         // Try to acquire run lock
         if !self.try_lock_run() {
@@ -492,102 +426,14 @@ impl Controller for ShellController {
         // Get connection info
         let conn_name = Self::get_conn_name(&block_meta);
 
-        // Update status to running.
-        {
-            let mut inner = self.inner.lock().unwrap();
-            Self::set_status(&mut inner, STATUS_RUNNING);
-            inner.conn_name = conn_name.clone();
+        let input_rx = self.mark_running(&conn_name);
+
+        // The test-only mock connection factory: a synchronous connection, no PTY.
+        if self.conn_factory.lock().unwrap().is_some() {
+            return self.run_mock_connection(conn_name.clone(), &block_meta);
         }
 
-        // Create input channel. Unbounded: input must never be silently
-        // dropped on burst (the paste-truncation bug). See SHELL_INPUT_CH_SIZE.
-        let (input_tx, input_rx) = mpsc::unbounded_channel();
-        {
-            let mut inner = self.inner.lock().unwrap();
-            inner.input_tx = Some(input_tx);
-            inner.input_seq_next = 0;
-            inner.input_seq_buf.clear();
-        }
-
-        // Publish "running" only AFTER `input_tx` exists, so the event is a
-        // truthful readiness signal: a frontend that resizes the PTY the instant
-        // it sees "running" will not hit `send_input`'s "controller is not
-        // running" guard (which fires while `input_tx` is None). The channel is
-        // unbounded, so a resize enqueued before the input task spawns is
-        // buffered, not lost.
-        // See docs/analysis/AGENT_PANE_PTY_RESIZE_RACE_2026_06_16.md.
-        self.publish_status();
-
-        // Check if we have a conn_factory (test/mock path)
-        let has_factory = self.conn_factory.lock().unwrap().is_some();
-
-        if has_factory {
-            // Mock path: use ConnInterface factory (synchronous, for tests)
-            let conn_result = {
-                let factory = self.conn_factory.lock().unwrap();
-                factory.as_ref().unwrap()(&conn_name, &block_meta)
-            };
-
-            let mut conn = match conn_result {
-                Ok(c) => c,
-                Err(e) => {
-                    let mut inner = self.inner.lock().unwrap();
-                    Self::set_status(&mut inner, STATUS_DONE);
-                    inner.proc_exit_code = -1;
-                    inner.input_tx = None;
-                    self.unlock_run();
-                    return Err(format!("failed to create connection: {e}"));
-                }
-            };
-
-            if let Err(e) = conn.start() {
-                let mut inner = self.inner.lock().unwrap();
-                Self::set_status(&mut inner, STATUS_DONE);
-                inner.proc_exit_code = -1;
-                inner.input_tx = None;
-                self.unlock_run();
-                return Err(format!("failed to start process: {e}"));
-            }
-
-            let mut shell_proc = ShellProc::new(conn_name, conn);
-            let _done_rx = shell_proc.take_done_rx();
-            let exit_code = shell_proc.wait_and_signal();
-
-            {
-                let mut inner = self.inner.lock().unwrap();
-                inner.proc_exit_code = exit_code;
-                Self::set_status(&mut inner, STATUS_DONE);
-                inner.input_tx = None;
-            }
-            self.publish_status();
-            self.unlock_run();
-            return Ok(());
-        }
-
-        // Real PTY path.
-        //
-        // Open the PTY at the size the frontend computed from the pane (passed
-        // as `rtopts.termsize` on the resync), so the agent CLI and its tools
-        // wrap correctly from the very first byte. The earlier code always
-        // opened at a fixed 200 cols and relied on a post-spawn resize RPC to
-        // correct it — but that RPC races controller startup and could fail
-        // outright, leaving output wrapped at 200 all session. Seeding the size
-        // here removes that race; `pty_size_from_rt_opts` falls back to the
-        // historical 25x200 when no size was supplied (e.g. programmatic
-        // spawns). See docs/analysis/AGENT_PANE_PTY_RESIZE_RACE_2026_06_16.md.
-        let pty_system = native_pty_system();
-        let pty_size = self.spawn_pty_size(&rt_opts);
-
-        let pair = pty_system.openpty(pty_size).map_err(|e| {
-            tracing::error!(block_id = %self.block_id, error = %e, "failed to open PTY");
-            let mut inner = self.inner.lock().unwrap();
-            Self::set_status(&mut inner, STATUS_DONE);
-            inner.proc_exit_code = -1;
-            inner.input_tx = None;
-            self.unlock_run();
-            format!("failed to open PTY: {e}")
-        })?;
-        tracing::info!(block_id = %self.block_id, rows = pty_size.rows, cols = pty_size.cols, "PTY opened");
+        let pair = self.open_pty(&rt_opts)?;
 
         // Determine shell command
         let cmd_str = Self::get_cmd_str(&block_meta);
@@ -599,366 +445,38 @@ impl Controller for ShellController {
         // deliberately does not fall back to global settings.
         let agent_id_for_jekt: Option<String> = resolve_agent_id_for_jekt(&block_meta);
 
-        // Close-on-exit (SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md §10-11):
-        // resolved from `block_meta` now, while it's still in scope, for
-        // the wait/cleanup task below to act on once the process actually
-        // exits. See `effective_close_on_exit`'s own doc comment for the
-        // per-controller-type default. (`should_close_on_exit_force` is
-        // deliberately NOT read here — see its own doc comment for why no
-        // call site uses it.)
-        //
-        // Forced off for a SUB-block — a block whose `parentoref` names
-        // another BLOCK (`block:<id>`): an agent's composer-drawer shell
-        // (`AgentShellSubblock.tsx`, via `createsubblock`) or a
-        // `PtyShellCreate`-spawned headless shell. Those are not
-        // independent panes, and closing one via
-        // `sagas::delete_block::run` leaves the parent's own
-        // `term:shellsubblockid` pointer dangling (a field that saga knows
-        // nothing about), after which the drawer's own "attach or create"
-        // logic silently recreates a fresh shell — reproducing the
-        // original respawn loop by a different route (§11).
-        //
-        // A TOP-LEVEL pane's `parentoref` names its owning TAB
-        // (`tab:<id>`, set by `wcore::block`/`persist_subscriber`) — NOT
-        // empty. Checking `!parentoref.is_empty()` here (as the first cut
-        // of §11 did) therefore disabled close-on-exit for *every* pane,
-        // including the plain `Terminal` widget this feature exists for —
-        // the regression the reporter hit as "still hangs" (§12). Match
-        // on the `block:` prefix specifically, the same discriminator
-        // `websocket.rs`'s `strip_prefix("block:")` already uses.
-        let is_sub_block = self
-            .mstore
-            .as_ref()
-            .and_then(|store| store.get::<obj::Block>(&self.block_id).ok().flatten())
-            .map(|b| b.parentoref.starts_with("block:"))
-            .unwrap_or(false);
-        let close_on_exit = Self::effective_close_on_exit(&block_meta, &self.controller_type) && !is_sub_block;
+        let close_on_exit = self.closes_on_exit(&block_meta);
         let close_on_exit_delay_ms = Self::close_on_exit_delay_ms(&block_meta);
 
-        // Detect agent pane: cmd contains a known agent CLI or has AGENTMUX_AGENT_ID set.
-        // Computed here (before spawn) rather than after so the commit-aware admission
-        // gate below can use it; also reused post-spawn to set `inner.is_agent_pane`.
-        let is_agent = agent_id_for_jekt.is_some()
-            || cmd_str.to_lowercase().contains("claude")
-            || cmd_str.to_lowercase().contains("codex")
-            || cmd_str.to_lowercase().contains("gemini")
-            || cmd_str.to_lowercase().contains("qwen");
+        let is_agent = is_agent_pane(&cmd_str, agent_id_for_jekt.is_some());
 
-        // Pillar 3 — commit-aware admission control, extended to the interactive
-        // agent pane. The drone Agent block's one-shot spawn (`agents::runner::
-        // run_agent`) already refuses to start another `claude.exe` when system
-        // commit headroom is below the reserve, to avoid tipping the box into a
-        // Chromium OOM abort (0xE0000008). That gate covered only the drone path;
-        // this interactive PTY spawn is the OTHER (likely more common) place a
-        // fresh agent CLI process gets started, and previously had no protection
-        // at all. Reuse the same pure decision + reserve lookup here, gated on
-        // `is_agent` so plain shell/cmd panes are unaffected — only a new
-        // claude/codex/gemini/qwen process is refused under commit pressure.
-        // See SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29.md, PR #1853.
         if is_agent {
-            if let Err(e) = crate::agents::runner::admit_spawn(
-                crate::backend::sysinfo::available_commit_gb(),
-                crate::agents::runner::agent_commit_reserve_gb(),
-            ) {
-                tracing::warn!(
-                    block_id = %self.block_id,
-                    cmd = %cmd_str,
-                    error = %e,
-                    "admission gate: refusing interactive agent spawn under commit pressure"
-                );
-                return self.refuse_start(format!(
-                    "memory full — not enough memory to start a new agent right now, free up memory and try again ({e})"
-                ));
+            if let Some(refusal) = self.agent_spawn_refusal(&cmd_str) {
+                return self.refuse_start(refusal);
             }
         }
 
-        // A WSL pane runs `wsl.exe -d <distro>` (Windows only; the guard above
-        // refuses it elsewhere). Its cwd is a path inside the distro, passed as
-        // `--cd`, never set as the Windows working directory below.
-        let wsl_distro = match crate::backend::remote::ConnTarget::parse(&conn_name) {
-            Ok(crate::backend::remote::ConnTarget::Wsl(d)) if cfg!(windows) => Some(d),
-            _ => None,
-        };
-        // An SSH pane runs the system `ssh` (remote::ssh). Its cwd is a path on
-        // the remote host, handed to the remote shell, never set here. An
-        // agent's (its PtyShell, marked below) needs one that forces askpass.
-        let ssh_plan = match crate::backend::remote::ConnTarget::parse(&conn_name) {
-            Ok(crate::backend::remote::ConnTarget::Ssh(dest)) => {
-                let agents = !obj::meta_get_string(
-                    &block_meta,
-                    crate::backend::remote::askpass::META_KEY_AGENT_BLOCK,
-                    "",
-                )
-                .is_empty();
-                if agents {
-                    crate::backend::remote::ssh::binary()
-                } else {
-                    crate::backend::remote::ssh::binary_for_user()
-                }
-                .map(|path| (path, dest))
-            }
-            _ => None,
-        };
-        // An agent's SSH PtyShell (`http_pty_shell.rs` marks it): a secret for
-        // its ssh's prompts, revoked when this shell's wait task ends.
-        let askpass_secret = ssh_plan.as_ref().and_then(|_| {
-            let agent_block = obj::meta_get_string(&block_meta, crate::backend::remote::askpass::META_KEY_AGENT_BLOCK, "");
-            (!agent_block.is_empty()).then(|| {
-                crate::backend::remote::askpass::grant(crate::backend::remote::askpass::AskpassGrant {
-                    agent_block_id: agent_block,
-                    agent: obj::meta_get_string(&block_meta, crate::backend::remote::askpass::META_KEY_AGENT, ""),
-                    connection: conn_name.clone(),
-                    user_pane: false,
-                })
-            })
-        });
-        let askpass_guard = askpass_secret.clone().map(crate::backend::remote::askpass::Revoke);
+        let RemotePlan { wsl_distro, ssh_plan, askpass_secret, askpass_guard } = self.remote_plan(&conn_name, &block_meta);
         let container = self.mstore.as_ref().and_then(|s| super::container_pane::container_for(s, &self.block_id));
         let pane_cwd = obj::meta_get_string(&block_meta, super::super::META_KEY_CMD_CWD, "");
-        let mut cmd = if let Some(distro) = &wsl_distro {
-            let plan = crate::backend::remote::wsl::launch(distro, &cmd_str, &cmd_args, &pane_cwd);
-            tracing::info!(block_id = %self.block_id, distro = %distro, args = ?plan.args, "wsl spawn path");
-            let mut c = CommandBuilder::new("wsl.exe");
-            c.args(plan.args.iter().map(String::as_str));
-            c.env("TERM", "xterm-256color");
-            c.env("COLORTERM", "truecolor");
-            c.env("TERM_PROGRAM", "agentmux");
-            c.env("AGENTMUX_BLOCKID", &self.block_id);
-            c.env("AGENTMUX_TABID", &self.tab_id);
-            c.env("AGENTMUX_VERSION", env!("CARGO_PKG_VERSION"));
-            // Configured cmd:env (global, then the block's), as a local
-            // interactive shell gets it, and listed in WSLENV so it crosses.
-            let overrides = cmd_env_overrides(&self.live_settings(), &self.with_agent_identity(&block_meta));
-            overrides.apply_to(&mut c);
-            c.env(
-                "WSLENV",
-                crate::backend::remote::wsl::wslenv_with(
-                    &std::env::var("WSLENV").unwrap_or_default(),
-                    overrides.vars.iter().map(|(k, _)| k.as_str()),
-                ),
-            );
-            c
-        } else if let Some((ssh_path, dest)) = &ssh_plan {
-            let what = (cmd_str.as_str(), cmd_args.as_slice(), pane_cwd.as_str());
-            super::ssh_pane::command(ssh_path, dest, what, askpass_secret.as_deref(), &self.auth_key, &self.block_id)
-        } else if let Some(name) = &container {
-            super::container_pane::command(name, &self.block_id, &super::super::cmd_env_of(&block_meta))
-        } else if !cmd_str.is_empty() && (!cmd_args.is_empty() || interactive) {
-            // Direct spawn: cmd:args provided or cmd:interactive set.
-            // Spawn the CLI directly (no sh -c wrapper) so args are passed correctly.
-            tracing::info!(block_id = %self.block_id, cmd = %cmd_str, args = ?cmd_args, "direct spawn path");
-            match self.command_process(&cmd_str, &cmd_args, interactive, &block_meta) {
-                Ok(c) => c,
-                Err(e) => return self.refuse_start(e),
-            }
-        } else if !cmd_str.is_empty() {
-            // "cmd" controller: run a specific command string via shell wrapper
-            tracing::info!(block_id = %self.block_id, cmd = %cmd_str, "shell-wrapped spawn path");
-            match self.command_process(&cmd_str, &cmd_args, interactive, &block_meta) {
-                Ok(c) => c,
-                Err(e) => return self.refuse_start(e),
-            }
-        } else {
-            // "shell" controller: the block's or the default shell, with AgentMux integration (backend::shells).
-            let (shell_path, shell_opts) = crate::backend::shells::for_block(&self.block_id, &block_meta, &self.live_settings());
-            let shell_path = shell_path.display().to_string();
-
-            let shell_type = crate::backend::shellintegration::detect_shell_type(&shell_path);
-
-            // Deploy shell integration scripts under the user's home rather than
-            // AGENTMUX_DATA_HOME.  MSIX packages virtualise writes to %LocalAppData%,
-            // so files written by the packaged backend aren't visible to child
-            // processes (pwsh, bash, etc.) spawned via ConPTY.  The home dir is never
-            // virtualised, so the scripts are always reachable at their literal path.
-            //
-            // The path is keyed per instance: this runs on EVERY shell spawn, so an
-            // unkeyed home-global dir let two concurrently-running versions rewrite
-            // each other's scripts indefinitely (I6).  See `integration_base`.
-            let shell_home = crate::backend::shellintegration::integration_base();
-            crate::backend::shellintegration::deploy_scripts(&shell_home);
-
-            tracing::info!(block_id = %self.block_id, shell = %shell_path, shell_type = ?shell_type, "interactive shell path");
-
-            let mut c = CommandBuilder::new(&shell_path);
-
-
-            // Apply shell-specific startup args (--rcfile, -File, etc.)
-            let startup = crate::backend::shellintegration::get_shell_startup(shell_type, &shell_home);
-            let integration = startup.as_ref().map(|s| s.extra_args.as_slice()).unwrap_or_default();
-            c.args(crate::backend::shells::with_user_opts(integration, &shell_opts));
-            for (k, v) in startup.iter().flat_map(|s| &s.env_vars) {
-                c.env(k, v);
-            }
-
-            // Inject terminal capability env vars into the PTY environment.
-            // ConPTY on Windows fully supports VT/ANSI sequences, so set TERM
-            // on all platforms. Without this, CLI tools (e.g. Claude Code) use
-            // different Unicode width tables, causing ANSI color offset on Windows.
-            c.env("TERM", "xterm-256color");
-            c.env("COLORTERM", "truecolor");
-            c.env("TERM_PROGRAM", "agentmux");
-            c.env("AGENTMUX_BLOCKID", &self.block_id);
-            c.env("AGENTMUX_TABID", &self.tab_id);
-            c.env("AGENTMUX_VERSION", env!("CARGO_PKG_VERSION"));
-
-            // Inject log directory so agents can find logs without guessing.
-            // Always ~/.agentmux/logs/ — matches both host and sidecar.
-            let log_dir = dirs::home_dir()
-                .unwrap_or_default()
-                .join(".agentmux")
-                .join("logs");
-            c.env("AGENTMUX_LOG_DIR", log_dir.to_string_lossy().as_ref());
-
-            // AGENTMUX_LOCAL_URL / AGENTMUX_AUTH_KEY: injected below, applied
-            // to ALL THREE branches (not just this one) — see that comment
-            // for why.
-
-            // Wire AgentMux-managed tool dirs into the agent's PATH.
-            //
-            // Two stores, two precedence rules:
-            //
-            //   • Bundled store (`<exe_dir>/tools/bin`) ships the app's OWN
-            //     version-locked binaries — notably `agentmux-bashwrap`, the
-            //     streaming hook that MUST match the running build. It is
-            //     PREPENDED so it wins over any stale copy elsewhere on the
-            //     system PATH. A stale system-PATH `agentmux-bashwrap` (from a
-            //     leftover portable) silently shadowed the fixed one and
-            //     reintroduced the exit-130 bug — see
-            //     docs/retro/RETRO_BASHWRAP_STALE_BUNDLE_2026_06_13.md. The
-            //     bundled jq/rg winning too is intended: agents get the app's
-            //     curated, deterministic tool versions regardless of host.
-            //
-            //   • User-managed store (`~/.agentmux/tools/bin`) holds tools the
-            //     user installed via /tools. APPENDED so the user's own system
-            //     PATH still wins for those.
-            {
-                let current_path = std::env::var("PATH").unwrap_or_default();
-                let mut bundled: Option<std::path::PathBuf> = None;
-
-                // Bundled store — prepended (app-owned, version-locked).
-                if let Some(bundled_bin) = crate::backend::tool_store::bundled_tools_dir() {
-                    if bundled_bin.exists() {
-                        // Guardrail: log which agentmux-bashwrap the agent will
-                        // actually run. A stale system-PATH copy silently
-                        // shadowing the bundled one is exactly the exit-130
-                        // trap (RETRO_BASHWRAP_STALE_BUNDLE_2026_06_13.md); this
-                        // one line makes "which binary?" answerable at a glance
-                        // (cross-check the version with `agentmux-bashwrap
-                        // --version`).
-                        let bashwrap_exe = if cfg!(windows) {
-                            "agentmux-bashwrap.exe"
-                        } else {
-                            "agentmux-bashwrap"
-                        };
-                        let bw = bundled_bin.join(bashwrap_exe);
-                        if bw.exists() {
-                            tracing::info!(
-                                target: "agent-tools",
-                                path = %bw.display(),
-                                "agent bashwrap: bundled (version-locked, prepended to PATH)"
-                            );
-                        } else {
-                            tracing::warn!(
-                                target: "agent-tools",
-                                dir = %bundled_bin.display(),
-                                "agent bashwrap: bundled store present but agentmux-bashwrap MISSING — agent will resolve via system PATH (risk of a stale copy; see RETRO_BASHWRAP_STALE_BUNDLE_2026_06_13.md)"
-                            );
-                        }
-                        bundled = Some(bundled_bin.clone());
-                    } else {
-                        tracing::warn!(
-                            target: "agent-tools",
-                            "agent bashwrap: no bundled tools dir — agent will resolve agentmux-bashwrap via system PATH (risk of a stale copy; see RETRO_BASHWRAP_STALE_BUNDLE_2026_06_13.md)"
-                        );
-                    }
-                }
-
-                // User-managed store — after the system PATH, which still wins.
-                let user = crate::backend::tool_store::user_tools_dir().filter(|d| d.exists());
-                if let Some(path) = crate::backend::tool_store::compose_tools_path(
-                    &current_path,
-                    bundled.as_deref(),
-                    user.as_deref(),
-                    crate::backend::tool_store::UserToolsPrecedence::AfterExisting,
-                ) {
-                    c.env("PATH", path);
-                }
-            }
-
-            // cmd:env: global settings (lowest priority), then the block's
-            // own metadata (highest), then the agent-identity strip. The
-            // settings come from the live config — see `cmd_env_overrides`.
-            self.apply_cmd_env(&mut c, &block_meta);
-
-            c
+        let mut cmd = match self.build_command(
+            &block_meta,
+            &SpawnPlan {
+                cmd_str: &cmd_str,
+                cmd_args: &cmd_args,
+                interactive,
+                wsl_distro: wsl_distro.as_deref(),
+                ssh_plan: ssh_plan.as_ref(),
+                askpass_secret: askpass_secret.as_deref(),
+                container: container.as_deref(),
+                pane_cwd: &pane_cwd,
+            },
+        ) {
+            Ok(c) => c,
+            Err(e) => return self.refuse_start(e),
         };
 
-        // Propagate this instance's local API endpoint + auth key to ALL
-        // THREE branches above, not just the interactive shell — same "don't
-        // half-fix it" lesson as the sanitize_pty_command call below (muxreview
-        // P0 on PR #3326). `muxsh`/`muxspect`/`muxopen`/`muxlog` — meant for
-        // a human to run from inside a plain Terminal-widget pane, the same
-        // role Wave Terminal's `wsh` played — need both to authenticate
-        // against this instance's REST API; without them they fail with
-        // "AGENTMUX_LOCAL_URL / AGENTMUX_AUTH_KEY not set" even when run from
-        // a pane AgentMux itself opened, which is exactly the case they're
-        // documented to support (SPEC_MUXSH_FULL_COLLECTION_2026_09_16.md).
-        //
-        // AGENTMUX_LOCAL_URL is set by main.rs after binding and never
-        // scrubbed from this process's own env, so it can be read straight
-        // back (absent in test/mock contexts — graceful no-op). AUTH_KEY
-        // cannot be read the same way: config.rs deliberately removes it
-        // from this process's own environment right after startup (PR #801),
-        // so it has to be threaded in explicitly via `self.auth_key` instead
-        // — the same value agent panes already receive via their own
-        // `PersistentSpawnConfig`/`SubprocessSpawnConfig` env_vars.
-        if let Ok(local_url) = std::env::var("AGENTMUX_LOCAL_URL") {
-            cmd.env("AGENTMUX_LOCAL_URL", &local_url);
-        }
-        if !self.auth_key.is_empty() {
-            cmd.env("AGENTMUX_AUTH_KEY", &self.auth_key);
-        }
-
-        // Applied to ALL THREE branches above, not just the interactive shell.
-        // The direct-spawn branch launches agent CLIs and the shell-wrapped `cmd`
-        // branch can launch anything; both inherited the full instance identity
-        // while this lived inside the third branch (ReAgent P0 on PR #3326).
-        crate::backend::pane_env::sanitize_pty_command(&mut cmd);
-        // An agent's PtyShell carries the agent's plain-`gh` guard (set by
-        // `http_pty_shell.rs`): the agent types into this shell, so `gh` here
-        // must not act as the user. Every branch, after the sanitizer; a WSL
-        // shell's WSLENV already lists GH_CONFIG_DIR as a distro path.
-        let gh_guard = obj::meta_get_string(
-            &block_meta,
-            crate::backend::gh_guard::META_KEY_PTYSHELL_GH_CONFIG_DIR,
-            "",
-        );
-        if !gh_guard.is_empty() {
-            cmd.env(crate::backend::gh_guard::GH_CONFIG_DIR, &gh_guard);
-        }
-        // Its publish-guard hooks too (`backend::publish_guard`). A host path,
-        // so a WSL shell, whose WSLENV doesn't list these, is unaffected.
-        let hooks = obj::meta_get_string(
-            &block_meta,
-            crate::backend::publish_guard::META_KEY_PTYSHELL_GIT_HOOKS_PATH,
-            "",
-        );
-        if !hooks.is_empty() {
-            // On top of the GIT_CONFIG_* entries this shell already has (the
-            // process env plus cmd:env), so none of them is overwritten.
-            let entries = crate::backend::publish_guard::git_config_entries(
-                |k| cmd.get_env(k).and_then(|v| v.to_str()).map(str::to_string),
-                "core.hooksPath",
-                &hooks,
-            );
-            for (key, value) in entries {
-                cmd.env(key, value);
-            }
-        }
-        // Identity M4a: a terminal pane never carries a token. No counter —
-        // most panes are not agents — but an agent CLI that registers from
-        // this block shows in the live gauge.
-        crate::backend::identity_spawn::record_spawn(&self.block_id, false, None);
+        self.apply_pane_env(&mut cmd, &block_meta);
 
         // Working directory: the pane's own, else (a local shell) the user's
         // home, not srv's own working directory.
@@ -968,53 +486,12 @@ impl Controller for ShellController {
             cmd.cwd(&cwd);
         }
 
-        // Program name for the UI, captured before `cmd` is consumed by the
-        // spawn. The process tracker can't supply it: it deliberately omits
-        // each block's root process (#3430), and for this sub-block the root
-        // IS the shell.
-        let prog_name = cmd
-            .get_argv()
-            .first()
-            .map(|p| {
-                std::path::Path::new(p)
-                    .file_stem()
-                    .map(|s| s.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| p.to_string_lossy().into_owned())
-            })
-            .unwrap_or_default();
+        let prog_name = program_name(&cmd);
 
-        if is_agent {
-            crate::backend::process_tracker::registry::place_pty_spawn(&self.block_id, &mut cmd);
-        }
-        let mut child = pair.slave.spawn_command(cmd).map_err(|e| {
-            tracing::error!(block_id = %self.block_id, error = %e, cmd = %cmd_str, "spawn failed");
-            let mut inner = self.inner.lock().unwrap();
-            Self::set_status(&mut inner, STATUS_DONE);
-            inner.proc_exit_code = -1;
-            inner.input_tx = None;
-            self.unlock_run();
-            format!("failed to spawn command: {e}")
-        })?;
-        tracing::info!(block_id = %self.block_id, "process spawned successfully");
+        let mut child = self.spawn_child(&pair, cmd, &cmd_str, is_agent)?;
 
-        // Register PID and record spawn metadata.
         let spawn_ts_ms = agentmux_common::time::now_ms();
-        {
-            let mut inner = self.inner.lock().unwrap();
-            if let Some(pid) = child.process_id() {
-                super::super::pidregistry::register(&self.block_id, pid);
-                if is_agent {
-                    crate::backend::process_tracker::registry::track_spawned_agent(&self.block_id, pid);
-                } else {
-                    crate::backend::process_tracker::registry::track_spawned(&self.block_id, pid);
-                }
-                inner.child_pid = Some(pid);
-            }
-            inner.spawn_ts_ms = Some(spawn_ts_ms);
-            inner.shell_name = prog_name.clone();
-            inner.is_agent_pane = is_agent;
-            inner.agent_id = agent_id_for_jekt.clone();
-        }
+        self.record_spawn(child.process_id(), is_agent, &prog_name, agent_id_for_jekt.clone(), spawn_ts_ms);
 
         // Re-publish now that the spawn metadata exists. The `running` status
         // above goes out BEFORE the PTY child is created, so it carries no
@@ -1024,244 +501,38 @@ impl Controller for ShellController {
         // means this snapshot is also what a later subscriber gets replayed.
         self.publish_status();
 
-        // Auto-register with jekt if AGENTMUX_AGENT_ID was set in the block env.
-        // This maps agent_id → block_id in the ReactiveHandler so jekt can deliver
-        // messages directly to this PTY without a separate /agentmux/reactive/register call.
+        // Auto-register with jekt if AGENTMUX_AGENT_ID was set in the block env, so jekt can deliver
+        // to this PTY without a separate register call.
         if let Some(ref agent_id) = agent_id_for_jekt {
-            // Identity M2: a PTY pane has no `db_agents` row, so no UID —
-            // registered by name only, counted (spec §4.4.1 row 4).
-            match crate::backend::reactive::get_global_handler()
-                .register_agent_full(
-                    agent_id,
-                    &self.block_id,
-                    Some(&self.tab_id),
-                    0,
-                    None,
-                    None,
-                    "registration.no_uid.shell_pane",
-                )
-            {
-                Ok(()) => {
-                    tracing::info!(
-                        block_id = %self.block_id,
-                        agent_id = %agent_id,
-                        "jekt: auto-registered"
-                    );
-                    // Also write to cross-instance file registry, and its
-                    // host-global sibling (Tier 2b, issue #1916) — this
-                    // auto-register path bypasses the HTTP register handler
-                    // entirely, so it needs its own mirror call too.
-                    if let Ok(local_url) = std::env::var("AGENTMUX_LOCAL_URL") {
-                        let data_dir = crate::backend::base::get_mux_data_dir();
-                        crate::backend::reactive::registry::write(
-                            &data_dir,
-                            agent_id,
-                            &local_url,
-                            &self.block_id,
-                        );
-                        crate::backend::reactive::registry::write_shared_from_env(
-                            agent_id,
-                            &local_url,
-                            &self.block_id,
-                        );
-                    }
-                }
-                Err(e) => tracing::warn!(
-                    block_id = %self.block_id,
-                    agent_id = %agent_id,
-                    error = %e,
-                    "jekt: auto-register failed"
-                ),
-            }
+            self.register_agent_with_jekt(agent_id);
         }
-        tracing::info!(
-            block_id = %self.block_id,
-            mstore_present = self.mstore.is_some(),
-            event_bus_present = self.event_bus.is_some(),
-            "[dnd-debug] pre-seed state after spawn"
-        );
+        self.seed_cmd_cwd(&cwd, remote);
 
-        // Seed cmd:cwd in block meta immediately after spawn so drag-and-drop works
-        // before the shell emits its first OSC 7 (or for shells without integration).
-        // Not for an SSH, WSL or container pane: its cwd is a path on the other side, and
-        // this machine's directory would be sent there on the next launch.
-        if let Some(store) = self.mstore.as_ref().filter(|_| !remote) {
-            let effective_cwd = cwd.clone(); // spawn_cwd: never empty for a local shell
-            tracing::debug!(block_id = %self.block_id, cwd = %effective_cwd, "seeding cmd:cwd");
-            if !effective_cwd.is_empty() {
-                let oref_str = format!("block:{}", self.block_id);
-                let mut meta_update = MetaMapType::new();
-                meta_update.insert(
-                    super::super::META_KEY_CMD_CWD.to_string(),
-                    serde_json::Value::String(effective_cwd),
-                );
-                // Only set if not already populated — don't clobber a restored session CWD
-                match store.must_get::<crate::backend::obj::Block>(&self.block_id) {
-                    Ok(block) if obj::meta_get_string(&block.meta, super::super::META_KEY_CMD_CWD, "").is_empty() => {
-                        match crate::backend::wcore::object_meta::update_object_meta(store, &oref_str, &meta_update) {
-                            Ok(()) => {
-                                // Re-read updated block and broadcast obj:update so the
-                                // frontend Jotai atom refreshes (update_object_meta only writes
-                                // to SQLite — it does NOT send a WebSocket event on its own).
-                                if let Ok(updated_block) = store.must_get::<crate::backend::obj::Block>(&self.block_id) {
-                                    if let Some(ref event_bus) = self.event_bus {
-                                        let update = obj::MuxObjUpdate {
-                                            updatetype: "update".into(),
-                                            otype: "block".into(),
-                                            oid: self.block_id.clone(),
-                                            obj: Some(obj::mux_obj_to_value(&updated_block)),
-                                        };
-                                        event_bus.broadcast_event(&crate::backend::eventbus::EventBus::typed_ws_event::<crate::backend::mps_events::MuxObjUpdated>(&update, oref_str.clone()));
-                                        tracing::info!(block_id = %self.block_id, "cmd:cwd seeded and broadcast to frontend");
-                                    } else {
-                                        tracing::warn!(block_id = %self.block_id, "cmd:cwd written to store but no event_bus to broadcast — frontend won't update");
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                tracing::warn!(block_id = %self.block_id, error = %e, "failed to seed cmd:cwd in store");
-                            }
-                        }
-                    }
-                    Ok(_) => {
-                        tracing::debug!(block_id = %self.block_id, "cmd:cwd already set, skipping seed");
-                    }
-                    Err(e) => {
-                        tracing::warn!(block_id = %self.block_id, error = %e, "failed to read block for cmd:cwd seed");
-                    }
-                }
-            }
-        }
+        let (reader, writer) = self.take_pty_io(&pair, &mut child)?;
 
-        // Get reader/writer from master
-        let reader = pair.master.try_clone_reader().map_err(|e| {
-            let _ = child.kill();
-            let mut inner = self.inner.lock().unwrap();
-            Self::set_status(&mut inner, STATUS_DONE);
-            inner.proc_exit_code = -1;
-            inner.input_tx = None;
-            self.unlock_run();
-            format!("failed to clone PTY reader: {e}")
-        })?;
-
-        let writer = pair.master.take_writer().map_err(|e| {
-            let _ = child.kill();
-            let mut inner = self.inner.lock().unwrap();
-            Self::set_status(&mut inner, STATUS_DONE);
-            inner.proc_exit_code = -1;
-            inner.input_tx = None;
-            self.unlock_run();
-            format!("failed to take PTY writer: {e}")
-        })?;
-
-        // Spawn PTY read task (blocking I/O → spawn_blocking) + a companion
-        // coalescing flusher (async task). Split in two, connected by an
-        // mpsc channel, so the actual OS-level `read()` loop's blocking
-        // semantics are untouched (this file supports both Unix and
-        // Windows PTYs and that boundary is not something to risk getting
-        // subtly wrong per-platform) while the expensive per-chunk work —
-        // file write, WebSocket broadcast, OSC/translation — is batched.
-        // See docs/reports/REPORT_RENDERER_CPU_UNBATCHED_PTY_OUTPUT_2026_09_11.md.
-        let block_id_read = self.block_id.clone();
-        let block_id_flush = self.block_id.clone();
-        let broker_read = self.broker.clone();
-        let broker_flush = self.broker.clone();
-        let inner_read = self.inner.clone();
-        let filestore_flush = self.filestore.clone();
-        let is_agent_read = is_agent;
-        let is_agent_flush = is_agent;
-        // Bounded (reagentx P1 on PR #3206) — see PTY_CHANNEL_CAPACITY's own
-        // doc comment for why: an unbounded channel here would let a
-        // sustained fast producer grow queued memory without limit if the
-        // flusher ever falls behind the read rate.
-        let (pty_tx, pty_rx) = mpsc::channel::<PtyReadChunk>(PTY_CHANNEL_CAPACITY);
-        // Kept for the post-exit flush barrier (see the wait/cleanup task).
-        //
-        // A WEAK sender, emphatically not a clone. ReAgent P1 (round 3) on PR
-        // #3261: an mpsc channel closes only once EVERY `Sender` is dropped, so
-        // a strong clone held by the wait task keeps the channel open for as
-        // long as that task lives — which is precisely across the window where
-        // the task waits for the flusher to end. `flusher_handle` could then
-        // never resolve, on any platform, making the "prefer true EOF" fast
-        // path dead code and silently applying the fallback's residual race to
-        // every exit everywhere. An earlier revision of this very comment
-        // claimed a clone "does NOT keep the channel open"; that was simply
-        // wrong.
-        //
-        // `WeakSender` does not count towards keeping the channel alive, and
-        // `upgrade()` returning `None` is itself the answer the barrier wants:
-        // the channel is closed, so everything in it was drained.
-        let barrier_tx: tokio::sync::mpsc::WeakSender<PtyReadChunk> = pty_tx.downgrade();
-
-        super::pty_tasks::spawn_pty_reader(reader, pty_tx, inner_read, broker_read, is_agent_read, block_id_read);
-
-        // Coalescing flusher: batches whatever chunks the read loop above
-        // has already queued (bounded by PTY_COALESCE_MAX_BYTES, and never
-        // waiting for more to arrive) before doing the
-        // actual file write + broadcast + translation — once per batch
-        // instead of once per (up to 4KB) PTY read. A standalone fn (not
-        // inlined into the spawn) so it can be driven directly in tests
-        // with a synthetic channel, no real PTY required.
-        //
-        // Handle kept (reagentx P1 on PR #3206, third round): the wait
-        // task below must await this before publishing STATUS_DONE — see
-        // its own comment for why.
-        let flusher_handle = tokio::spawn(run_pty_output_flusher(
-            pty_rx,
-            broker_flush,
-            block_id_flush,
-            filestore_flush,
-            is_agent_flush,
-        ));
+        let (flusher_handle, barrier_tx) = self.start_output(reader, is_agent);
 
         // Spawn input task (routes input channel → PTY writer + resize + signals)
         // Owns writer and master — dropping them closes the PTY, causing child to exit.
         let master = pair.master;
         super::pty_tasks::spawn_input_task(writer, master, input_rx);
 
-        // Spawn wait task (monitors process exit)
-        let inner_wait = Arc::clone(&self.inner);
-        let block_id_wait = self.block_id.clone();
-        let tab_id_wait = self.tab_id.clone();
-        let agent_id_wait = agent_id_for_jekt.clone();
-        let broker_wait = self.broker.clone();
-        // An SSH pane holds its connection open from here to the wait task's
-        // pane_ended (ssh_pane). Counted only now, after every step that can
-        // still fail and return, so each start has exactly one end.
+        // The exit watcher reaps the child and tears the pane down (`wait_task`).
+        // An SSH pane holds its connection open from here to its end (ssh_pane); counted only
+        // now, after every step that can still fail and return, so each start has exactly one end.
         if ssh_plan.is_some() {
             crate::backend::remote::link::pane_started(&conn_name, false);
         }
-        let filestore_note = self.filestore.clone();
-        let ssh_wait = ssh_plan
-            .as_ref()
-            .map(|(_, dest)| (conn_name.clone(), dest.destination.clone()));
-        // Moved into the wait task: the secret lives exactly as long as the shell.
-        let askpass_guard_wait = askpass_guard;
-        // For the agent-lease release below: clearing the `term:agentlockuntil`
-        // meta copy (not just the in-memory registry) needs both, since that
-        // is what the frontend's own gate reads.
-        let mstore_wait = self.mstore.clone();
-        let event_bus_wait = self.event_bus.clone();
-        let run_lock = Arc::clone(&self.run_lock);
-        // Reaps the child and tears the pane down; see `wait_task`.
-        super::wait_task::ExitWatch {
+        self.exit_watch(ExitParts {
             child,
-            askpass_guard: askpass_guard_wait,
-            ssh: ssh_wait,
-            inner: inner_wait,
+            askpass_guard,
+            ssh: ssh_plan.as_ref().map(|(_, dest)| (conn_name.clone(), dest.destination.clone())),
+            agent_id: agent_id_for_jekt.clone(),
             close_on_exit,
             close_on_exit_delay_ms,
-            block_id: block_id_wait,
-            tab_id: tab_id_wait,
-            agent_id: agent_id_wait,
-            broker: broker_wait,
-            filestore: filestore_note,
-            mstore: mstore_wait,
-            event_bus: event_bus_wait,
-            run_lock,
             flusher_handle,
             barrier_tx,
-        }
+        })
         .spawn();
 
         // Return immediately — PTY tasks run in background

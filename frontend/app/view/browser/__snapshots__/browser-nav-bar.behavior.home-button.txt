@@ -1,0 +1,10 @@
+diag sync urlAtom="https://example.com/" addressBar="https://example.com/" focused=false willUpdate=false
+listen browser-pane-shortcut
+title=Home: https://agentmux.ai
+model navigate https://agentmux.ai
+diag sync urlAtom="https://example.com/" addressBar="https://agentmux.ai" focused=false willUpdate=true
+diag sync urlAtom="https://example.com/" addressBar="https://example.com/" focused=false willUpdate=false
+pane navigate block-1 https://agentmux.ai
+title=Home: https://example.com/
+model navigate https://example.com/
+pane navigate block-1 https://example.com/

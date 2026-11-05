@@ -423,32 +423,10 @@ async fn route_command(
                 .map_err(|e| format!("tear_off_pool_promote join error: {}", e))?
         }
         "pool_window_ready" => commands::drag::pool_window_ready(state, args),
-        "start_tab_drag_tracking" => {
-            // spawn_blocking — blocks briefly (~ms) on the hook thread's
-            // install-ready channel, same rationale as
-            // tear_off_sc_move_handshake below.
-            let state_clone = state.clone();
-            let args_clone = args.clone();
-            tokio::task::spawn_blocking(move || {
-                commands::drag::start_tab_drag_tracking(&state_clone, &args_clone)
-            })
-            .await
-            .map_err(|e| format!("start_tab_drag_tracking join error: {}", e))?
-        }
-        "stop_tab_drag_tracking" => {
-            // spawn_blocking too, matching start_tab_drag_tracking above —
-            // macOS's stop_active_hook_session now blocks on a lock shared
-            // with start (reagent PR #2310 P1: without serializing them, a
-            // fast drag-then-release could have this run — and no-op, since
-            // ACTIVE_HOOK_RUNLOOP isn't set yet — before start's spawned
-            // hook thread finishes CGEventTapCreate, leaving a zombie hook
-            // alive). Running that (bounded, but real) block on an async
-            // worker thread instead of the blocking pool would be its own
-            // problem.
-            tokio::task::spawn_blocking(commands::drag::stop_tab_drag_tracking)
-                .await
-                .map_err(|e| format!("stop_tab_drag_tracking join error: {}", e))?
-        }
+        "start_tab_drag_tracking" => commands::drag::start_tab_drag_tracking_blocking(state, args).await,
+        "stop_tab_drag_tracking" => commands::drag::stop_tab_drag_tracking_blocking().await,
+        "live_follow_begin" => commands::live_follow::begin_blocking(state, args).await,
+        "live_follow_end" => commands::live_follow::end(),
         "pane_pool_window_ready" => commands::drag::pane_pool_window_ready(state, args),
         "tear_off_sc_move_handshake" => {
             // Wrap in spawn_blocking — the handler polls state.browsers

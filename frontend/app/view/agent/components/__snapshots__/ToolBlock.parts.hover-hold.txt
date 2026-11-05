@@ -1,0 +1,10 @@
+pinned: agent-tool-panel agent-tool-panel--flow
+unpinned with the pointer in: agent-tool-panel agent-tool-panel--flow
+pointer left: agent-tool-panel agent-tool-panel--hidden
+content-first, open: agent-tool-panel agent-tool-panel--flow
+content-first, collapsed with the pointer in: agent-tool-panel agent-tool-panel--hidden
+toggle collapse
+closed row, pointer in: agent-tool-block collapsed success / agent-tool-panel agent-tool-panel--hidden
+toggle pin
+click reached the transcript row
+(a click on the panel stops there; one on the summary goes on)

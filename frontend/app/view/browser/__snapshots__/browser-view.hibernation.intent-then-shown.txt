@@ -1,0 +1,8 @@
+diag view-mount window_label=main initial-urlAtom="https://example.com/page"
+register pane
+diag [hibernate] wake-start why=intent visible=false
+diag [hibernate] wake-loaded ms=420 why=intent visible=false
+-- shown
+diag [hibernate] wake-shown-ready ms=420
+model.endSleep 420
+probe shown: rect.asleep=false drag.unavailable=false pane.visible=true pane.asleep=false pane.frozen=false hiddenSince=null

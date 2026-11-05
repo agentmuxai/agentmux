@@ -1,0 +1,30 @@
+## granted timers=1
+bypass={
+ "expires_at": 1793707240000,
+ "origins": [
+  "https://a.example"
+ ]
+}
+## 15 s timers=1
+bypass={
+ "expires_at": 1793707240000,
+ "origins": [
+  "https://a.example"
+ ]
+}
+## 45 s: expired timers=1
+bypass="<undefined>"
+## paused: stands still timers=1
+bypass={
+ "expires_at": 1793707201000,
+ "origins": [],
+ "paused_left": 5000
+}
+## malformed timers=0
+bypass="<undefined>"
+## origins not a list timers=0
+bypass="<undefined>"
+## revoked timers=0
+bypass="<undefined>"
+## disposed timers=0
+bypass="<undefined>"

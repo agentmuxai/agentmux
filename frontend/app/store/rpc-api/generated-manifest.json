@@ -676,6 +676,10 @@
             "method": "GithubConnectionCommand"
         },
         {
+            "command": "github.installations",
+            "method": "GithubInstallationsCommand"
+        },
+        {
             "command": "globalmemory:diff",
             "method": "GlobalMemoryDiffCommand"
         },

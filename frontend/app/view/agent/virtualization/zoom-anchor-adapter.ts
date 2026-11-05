@@ -12,7 +12,7 @@
 
 import { useZoomAnchor, type ZoomAnchorAdapter, type ZoomPoint } from "@/app/store/zoom-anchor";
 import { elementOf, glyphRect, inside, textPositionAt, TOLERANCE_PX } from "@/app/store/zoom-anchor-dom";
-import type { FollowScroll } from "../scroll/follow-scroll";
+import type { FollowScroll } from "../../../scroll/follow-scroll";
 import { scrollTranscriptBy, scrollTranscriptTo } from "../scroll/one-way-flow";
 import type { AgentDocumentVirtualListProps } from "./AgentDocumentVirtualList";
 

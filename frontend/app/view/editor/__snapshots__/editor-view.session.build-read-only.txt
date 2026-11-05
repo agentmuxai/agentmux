@@ -1,0 +1,3 @@
+rpc ReadEditorFile {"path":"/home/u/plain.txt"}
+rpc WatchEditorFile {"path":"/home/u/plain.txt","block_id":"session<n>"}
+read-only: true

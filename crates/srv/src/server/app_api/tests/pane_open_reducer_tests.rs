@@ -3051,7 +3051,7 @@ async fn a_container_agents_browser_open_gets_its_own_incognito_jar() {
     let (agent, auth) = signed_agent_on(&state, &own);
     *state.host_ipc.lock().await = Some(crate::server::state::HostIpc { port: 1, token: "host-ipc-token".into() });
     let app = crate::server::build_router(state.clone());
-    let token = crate::backend::container_credential::token_for_block(&own, Some(&agent));
+    let token = crate::backend::container::credential::token_for_block(&own, Some(&agent));
 
     let open = |key: String, extra: serde_json::Value| {
         let app = app.clone();

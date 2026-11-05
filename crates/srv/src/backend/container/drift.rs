@@ -7,7 +7,7 @@
 //! would be lost. [`ContainerManager::update_container`] does that, on request.
 
 use super::{ContainerError, ContainerManager};
-use crate::backend::container_image::is_agent_base_image;
+use crate::backend::container::image::is_agent_base_image;
 
 /// Held shared by every turn that runs in a container, and exclusively while the container is
 /// being updated: a turn cannot start inside an update, and an update cannot start under a turn.

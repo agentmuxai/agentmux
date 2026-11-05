@@ -894,6 +894,11 @@ jobs:
       # (SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md).
       - name: File size ratchet
         run: node scripts/check-file-sizes.mjs
+      # A view that fetches over RPC on mount needs a live source (a domain store, an srv event, a
+      # poll) so it updates when the data changes; the list of views that don't yet only shrinks
+      # (docs/reports/REPORT_REACTIVE_COVERAGE_AUDIT_2026_11_03.md).
+      - name: Reactive coverage ratchet
+        run: node scripts/check-reactive-coverage.mjs
       # Every source file that reaches the account-wide shared/ folder is declared in
       # docs/shared-paths.json, with what it shares, its gate and its lock.
       - name: Shared paths are declared
@@ -946,11 +951,25 @@ jobs:
       - name: cef-verify self-test
         run: bash scripts/cef-verify.test.sh
 
+      # The Linux CEF runtime's glibc floor check (use_sysroot=true; 0.60.14 needed GLIBC_2.43).
+      - name: glibc floor self-test
+        run: bash scripts/cef-build/verify-glibc-floor.test.sh
+
+      # The Linux CEF runtime archive a build downloads must match the hash in cef-runtime-pins.sh.
+      - name: runtime archive check self-test
+        run: bash scripts/cef-build/verify-runtime-archive.test.sh
+
       # `task dev` refuses a Vite port Chromium won't load pages from (6000 and
       # friends); this is the list and the checks behind that.
       # docs/specs/SPEC_DEV_VITE_UNSAFE_PORT_GUARD_2026_10_02.md
       - name: vite-port self-test
         run: bash scripts/vite-port.test.sh
+
+      # The .deb's Depends and the .rpm's Requires come from scripts/linux-package-deps.list,
+      # and the build refuses a staged tree that needs a system library the list lacks. A
+      # minimal install without one cannot start; this is the script that guards it.
+      - name: linux-package-deps self-test
+        run: bash scripts/linux-package-deps.test.sh
 
       # `task dev` on Windows deletes its old dist/cef-dev-<epoch> builds, but
       # only ones no process runs from (rm -rf on a live one deletes the helper

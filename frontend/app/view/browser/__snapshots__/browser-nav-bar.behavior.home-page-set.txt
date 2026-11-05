@@ -1,0 +1,6 @@
+diag sync urlAtom="https://example.com/" addressBar="https://example.com/" focused=false willUpdate=false
+listen browser-pane-shortcut
+rpc ListBookmarks
+rpc SetBrowserStartPage {"url":"https://example.com/"}
+rpc ListBookmarks
+rows=["This Is Your Home Page","Bookmark This Page","No bookmarks yet"]

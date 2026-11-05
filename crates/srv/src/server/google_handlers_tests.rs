@@ -315,3 +315,33 @@ async fn changing_the_level_or_turning_off_leaves_no_older_grant_on_the_same_ema
     assert_eq!(grant(&state, "def-1", ask("off")).await.0, StatusCode::OK);
     assert_eq!((held("acc-1"), held("acc-9")), (None, None));
 }
+
+async fn disconnect(state: &AppState, as_agent: Option<&str>, body: serde_json::Value) -> (StatusCode, serde_json::Value) {
+    let body = Json(serde_json::from_value::<DisconnectBody>(body).unwrap());
+    body_of(handle_google_disconnect(State(state.clone()), as_agent.and_then(agent), body).await).await
+}
+
+#[tokio::test]
+async fn a_disconnect_needs_an_agent_and_a_connected_account() {
+    let state = state_with_two_accounts().await;
+    let (status, _) = disconnect(&state, None, json!({ "account": "me@example.com" })).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "an unattributed caller is refused");
+    let (status, body) = disconnect(&state, Some("def-1"), json!({ "account": "nobody@example.com" })).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let why = body["error"].as_str().unwrap();
+    assert!(why.contains("no connected Google account nobody@example.com") && why.contains("me@example.com, work@example.org"), "{why}");
+    assert!(state.identity_store.identity_get("acc-1").unwrap().is_some(), "nothing was removed");
+}
+
+#[test]
+fn the_notice_of_a_grant_names_who_did_what_to_whom() {
+    use crate::backend::google::Service;
+    assert_eq!(
+        grant_notice("Naki-2", "Agent5", Service::Calendar, Some(GrantLevel::Read), "me@example.com"),
+        "Naki-2 gave Agent5 Calendar read on me@example.com"
+    );
+    assert_eq!(
+        grant_notice("Naki-2", "Naki-2", Service::Gmail, None, "me@example.com"),
+        "Naki-2 turned off Gmail for Naki-2 on me@example.com"
+    );
+}

@@ -6,7 +6,7 @@
 //! "Compacting…".
 //!
 //! `/agentmux/wps/publish` is a generic relay: it republishes an undeclared event to any scope,
-//! so a container token is refused there (`container_credential`). This route takes one event,
+//! so a container token is refused there (`container::credential`). This route takes one event,
 //! `compaction_started`, for one scope, the container's own `block:<id>`, and only as the typed
 //! [`CompactionStarted`]. A request that is not a container's, names another event or scope, or
 //! is not a `CompactionStarted` never reaches the broker. It is the host's publish with the
@@ -22,7 +22,7 @@ use serde_json::json;
 use agentmux_common::api_types::WpsPublishRequest;
 use agentmux_common::client_events::CompactionStarted;
 
-use crate::backend::container_credential::ContainerGrant;
+use crate::backend::container::credential::ContainerGrant;
 use crate::server::AppState;
 
 /// The largest request body: the three small fields of a `CompactionStarted`, with its envelope.
@@ -105,7 +105,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_container_reports_its_own_compaction_only() {
-        let mine = crate::backend::container_credential::token_for_block("cs-block-a", None);
+        let mine = crate::backend::container::credential::token_for_block("cs-block-a", None);
         let own = ["block:cs-block-a"];
         let (status, _) = post(&mine, body("compaction_started", &own, started()).to_string()).await;
         assert_eq!(status, StatusCode::OK);
@@ -127,7 +127,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_request_over_the_cap_is_413() {
-        let mine = crate::backend::container_credential::token_for_block("cs-block-big", None);
+        let mine = crate::backend::container::credential::token_for_block("cs-block-big", None);
         let mut big = started();
         big["sessionId"] = json!("x".repeat(MAX_BODY_BYTES));
         let (status, _) = post(&mine, body("compaction_started", &["block:cs-block-big"], big).to_string()).await;
@@ -139,14 +139,14 @@ mod tests {
         // The instance key is not a container: this route is theirs alone.
         let (status, _) = post("test-secret-key", body("compaction_started", &["block:b"], started()).to_string()).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
-        assert!(!crate::backend::container_credential::container_route_allowed("/agentmux/wps/publish"));
-        assert!(crate::backend::container_credential::container_route_allowed("/api/v1/agent/compaction-started"));
+        assert!(!crate::backend::container::credential::container_route_allowed("/agentmux/wps/publish"));
+        assert!(crate::backend::container::credential::container_route_allowed("/api/v1/agent/compaction-started"));
     }
 
     #[tokio::test]
     async fn the_start_reaches_the_panes_live_subscribers_and_is_not_kept() {
         let state = crate::server::tests::test_state();
-        let token = crate::backend::container_credential::token_for_block("cs-block-live", None);
+        let token = crate::backend::container::credential::token_for_block("cs-block-live", None);
         let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let sink = seen.clone();
         state.broker.add_observer(std::sync::Arc::new(move |e: &crate::backend::mps::MuxEvent| {

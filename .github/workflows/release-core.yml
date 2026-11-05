@@ -385,6 +385,9 @@ jobs:
         run: |
           mkdir -p dist-flat
           find release-artifacts -type f \( -name "*.7z" -o -name "*.exe" -o -name "*.msix" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.xz" \) -exec cp {} dist-flat/ \;
+          # The install scripts are release assets too, so the signed manifest covers them
+          # (docs/specs/SPEC_ONE_COMMAND_INSTALL_ALL_PLATFORMS_2026_11_01.md).
+          for f in install.sh install.ps1; do if [ -f "scripts/install/$f" ]; then cp "scripts/install/$f" dist-flat/; fi; done
           ls -l dist-flat/
 
       # The agent image this release pushed, by the digest of what was pushed: the app pulls
@@ -506,6 +509,9 @@ jobs:
         run: |
           mkdir -p dist-flat
           find release-artifacts -type f \( -name "*.7z" -o -name "*.exe" -o -name "*.msix" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.xz" \) -exec cp {} dist-flat/ \;
+          # The install scripts are release assets too, so the signed manifest covers them
+          # (docs/specs/SPEC_ONE_COMMAND_INSTALL_ALL_PLATFORMS_2026_11_01.md).
+          for f in install.sh install.ps1; do if [ -f "scripts/install/$f" ]; then cp "scripts/install/$f" dist-flat/; fi; done
           echo "--- Release artifacts ---"
           ls -lh dist-flat/
 

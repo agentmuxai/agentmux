@@ -48,11 +48,10 @@ const lightBlock = base.slice(lightIndex);
 
 const NAMES = ["keyword", "name", "function", "constant", "plain", "type", "operator", "comment", "string", "invalid"];
 
-// The text colours are 4.5:1 or better on a light page. One Dark's are not all
-// that high on a dark one (its comment grey is the lowest, deliberately
-// brightened from the original), so the dark bar is the 3:1 of large and
-// non-body text, which the current palette clears on every dark theme.
-const BAR = { light: 4.5, dark: 3 };
+// Code is body text, so both palettes clear 4.5:1 on every theme of their polarity. The dark palette is
+// One Dark's with its keyword, name and comment colours lightened until the dimmest dark surfaces
+// (Gruvbox, Monokai, Nord, Dracula) reach the bar; the hues are unchanged.
+const BAR = { light: 4.5, dark: 4.5 };
 
 const themes = readdirSync(new URL("../../themes/", import.meta.url))
     .filter((f) => f.endsWith(".scss") && f !== "index.scss")

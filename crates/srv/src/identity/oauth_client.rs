@@ -810,6 +810,8 @@ async fn finish<S: TokenSecrets>(ctx: &FlowCtx, secrets: &S, json: &serde_json::
         }
         return Err(format!("persist failed: {e}"));
     }
+    // Windows show the account at once, whoever started the connect (the panel, an agent).
+    crate::identity::accounts_changed::announce();
     Ok(OAuthStatus::Success { account_id, granted_scopes: granted, missing_scopes: missing, email })
 }
 

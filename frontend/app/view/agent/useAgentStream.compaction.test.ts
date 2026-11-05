@@ -64,8 +64,8 @@ describe("the fill is not hidden by a memory re-injection turn", () => {
     // runs. The card was shown before that turn, so its fill goes through the
     // raw queue (#4405).
     it("fills through rawQueue, not the hiding queue", () => {
-        const src = readFileSync(join(process.cwd(), "frontend/app/view/agent/useAgentStream.ts"), "utf8");
-        expect(src).toMatch(/fillCompactionCard\(awaitingCompactionSize, usage\.input, rawQueue\)/);
+        const src = readFileSync(join(process.cwd(), "frontend/app/view/agent/stream-pipeline.ts"), "utf8");
+        expect(src).toMatch(/fillCompactionCard\(st\.awaitingCompactionSize, usage\.input, deps\.rawQueue\)/);
         expect(src).not.toMatch(/fillCompactionCard\([^)]*, queue\)/);
     });
 });

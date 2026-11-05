@@ -1,5 +1,108 @@
 # AgentMux Version History
 
+## 0.60.15 — 2026-11-04
+
+- Browser wait takes until_state (load or idle) and settles the page when given nothing; snapshot: true after an action reads the settled page; click, fill, select and check say where the page is now
+- feat(swarm): an agent sets its own one-line status with Presence status; the Swarm row and work.goal show it first, a task claim writes the task's title, an old line shows muted with its age
+- An agent stopped to make room for another's start now tells its leader, and My Agents and the Swarm show a stopped agent that cannot start as "can't start" with the reason
+- Move the background-task outcome tracker into agent-model so the store no longer imports from the agent view (#21064)
+- Move the agent instance handlers out of inline closures into named functions with direct tests
+- srv: a shell pane's exit watcher is its own task type in its own file, out of the 1,265-line ShellController::start (no behaviour change)
+- srv: a shell pane's PTY reader and input task are their own functions, out of ShellController::start (no behaviour change)
+- refactor(srv): the updater modules are grouped in backend/update
+- The MCP server card, Swarm fleet toolbar, Supervisor chip and browser Home right-click menus use the kit Menu (ui ratchet, task #85)
+- Shutting an agent down and replacing a pane with Shortcuts now ask inside that pane only, not over the whole window; a test keeps new window-wide dialogs from creeping back
+- A document tab can only be dropped on another Editor's tab bar and never makes a new pane, and dragging an image in the viewer does nothing
+- New app icon: flat and hard-edged (square tile, four square blocks, no gradients) in a dark and a light version, redrawn at every size from SVG sources
+- A widget-bar, More-menu, palette or shortcut click on a single-pane view focuses it only on the current tab; with it on another tab it opens a new pane here and never switches tabs
+- Move the Drone handlers out of inline closures into named functions with direct tests
+- Scroll-follow: a scroll event left by the follower's own write no longer re-attaches a pane right after a wheel-up; adds the live follow-soak harness
+- The app's own marks now match the new icon: the startup splash (pre-splash and the native launcher splash), the loading spinner, the empty-pane logo and the empty tab show the four blocks instead of the old brain
+- One audience tag for srv routes, catalog MCP servers and Operator Config entries; the container route table is generated from it and refuses exactly what it did before
+- refactor(srv): the widget modules are grouped in backend/widget
+- srv: how a shell pane's command and environment are built is its own set of functions, out of ShellController::start (no behaviour change)
+- The Codex review check says when Codex answered a request with "Something went wrong" and, if muxreview has stopped asking, how to ask again
+- Dates and relative times follow your language and regional format: the update check, the input-history search, notifications, history storage and LAN peers no longer show fixed English wording or a US date order
+- Move the Files pane fs handlers out of inline closures into named functions with direct tests
+- The browser Bookmarks and Profile menus use the kit Menu, which now takes element icons, a trailing mark, a second label line, in-pane placement and scrolls when taller than the window (ui ratchet, task #85)
+- Move the MuxBus sign-in and status handlers out of inline closures into named functions with direct tests
+- Move the scroll-follow controller, wiring and binding to frontend/app/scroll so the install log view no longer imports from the agent view (#21064)
+- An agent's browser pane opens above the agent, splitting its space in half, unless the agent says where
+- Move the Memory bundle handlers out of inline closures into named functions with direct tests
+- srv: what a shell pane does right after its process starts (recording it, registering it with jekt, seeding its directory) is its own set of functions, out of ShellController::start (no behaviour change)
+- Move the shell stop, status and exec handlers out of inline closures into named functions with direct tests
+- Fix main: the new /api/v1/agent/status route gets its audience
+- The three window-chrome menus left outside the kit's Menu are allowlisted with a reason each, and the menus rule is a hard zero everywhere else (ui ratchet, task #85)
+- The Swarm status, remote and fleet badges use the kit Tag (ui ratchet, task #85)
+- An agent's request to use a Vault entry, or to add one, is asked as a card in that agent's own pane (with its countdown) instead of a window-wide prompt
+- Connectors: an account shows the moment it connects, is reconnected, loses its sign-in or gets an agent grant, whoever started it (an agent's Google connect included)
+- The memory history, bundle, context delivery, agent list, window and question-panel badges use the kit Tag (ui ratchet, task #85)
+- Connectors: adding an account (any provider) and signing in to AgentMux open in the same caret-topped section under their tile or card, not in a dialog over the pane
+- A new agent no longer gets an empty bundle of its own, and a one-time cleanup removes the empty "— ABF" bundles nothing points at; how often bundles are exported and imported is now counted
+- refactor(srv): the container modules are grouped in backend/container
+- The attachment number, shell-lock, account agent and ambient narration badges use the kit Tag; the rest are marked as not tags (ui ratchet, task #85)
+- The follow-soak harness no longer reports a pane as stuck when its wheel rested on a tool's own scroll box
+- The UI primitives check treats hand-drawn tags as a hard zero: a new badge, chip or pill rule must use Tag or carry a tag: fixed reason
+- Swarm: the Broadcast dock is split into smaller parts (the auto-growing box, the clock and the recent list); no change on screen
+- Name the native-memory handlers (agent:memory list, read, write, adoption, claims, history, diff, revert) and test them directly (finding 5)
+- Agents: a Google grant adds the Calendar, Drive or Gmail tool to the agent's tools at once, because the MCP server now tells the client the tool list changed (it never did, so clients kept the list they had at connect)
+- Agent pane: useAgentStream hands its memory re-injection setup, tool-output noting and shared-zone poll to their own files; no behaviour change
+- Agent pane: the composer's paste, voice, focus and placeholder wiring move out of AgentFooter into hooks; no behaviour change
+- srv: the checks and plans a shell pane makes before its PTY opens (connection available, mock connection, close on exit, memory gate, WSL and SSH) are their own functions, out of ShellController::start (no behaviour change)
+- Status bar: the instance panel's open-window row, opacity slider, closed-window list and floating-pane naming move out of InstancePanel; no change on screen
+- Dragging a pane or a pane tab shows exactly where every pane will sit after the drop: the ghost is the moved pane's real new rect and a dashed outline marks every other pane's
+- Editor: the file tree's right-click menu, the empty state and the language server's path and status helpers move out of EditorViewComponent; no change on screen
+- Windows: a pane tab torn off into a floating pane opens in front with focus instead of behind the window it came from
+- Gemini agents now get AgentMux's own MCP server and the catalog servers, as a per-agent settings file
+- Redock puts a floating pane back where it was torn from when that place can still be found (beside its old neighbour, or as a tab of its pane); otherwise it goes to the main window's active tab as before
+- Dragging a pane tab over another pane's tab bar shows a dashed ghost tab where it will land (#21881)
+- Split the Files pane's toolbar, Places and footer out of FilesView (no visible change)
+- Split the browser pane's attention banner and popup notes out of BrowserViewInner (no visible change)
+- The window recycle runs saves that the agent view registers, instead of importing the agent view's modules
+- Split the History reader's header text, transcript cursor and shared-zone poll out of AgentHistoryView (no visible change)
+- Agent pane: a "↓ New activity" pill appears over the transcript when you have scrolled up and new content has arrived below; clicking it follows the bottom again
+- Split the Editor's Markdown toolbar and preview, error panel, language-server banner and status chip out of EditorViewComponent (no visible change)
+- Add createDomainStore, a shared live store for view data, and a ratchet that stops views fetching once on mount and listening to nothing
+- srv: opening and wiring a shell pane's PTY (running status, open, spawn, reader and writer, output flusher) is its own set of functions, out of ShellController::start (no behaviour change)
+- Split the Files pane's right-click menus and agent mention/attach code out of FilesView (no visible change)
+- Groundwork for translating AgentMux: a language setting (app:locale, default: follow the system), the translation runtime with English fallback per string, and checks for translated dictionaries; no language ships yet
+- Long-running work shows its own animation by kind: building, testing, sending, receiving, installing, searching, deploying, delegated work, compacting, waiting and held each get a 3-cell ASCII animation in the activity list, the Working row and the Swarm chip; the rotating slash stays the sign of the agent's turn
+- Add tests for the composer strip's measured row layout
+- install.sh: one command installs AgentMux on Linux and macOS (apt/dnf/zypper repository, Homebrew once the cask exists, or a signed-manifest-checked download); shipped as a release asset
+- Split the agent pane's transcript, view popover, composer region and launch/sign-in wiring out of AgentPresentationView (no visible change)
+- Split the composer strip into slot builders and layout functions
+- Google: an agent can disconnect a Google account (Google revokes first, same code as the window's delete), the windows show a notice when an agent grants, ungrants or disconnects, and a Google call that finishes after its grant was turned off or its account disconnected returns no content
+- Split the HTTP route table builder into named route groups and test what each router serves (finding 5)
+- Swarm: an agent's row is split into its card header, its lines and its click handling, with its markup pinned by snapshots
+- Pane frame: the connection upkeep and the body right-click menu move out of the frame component, with its markup and wiring pinned by tests
+- Pane tab strip: the cross-pane drop zone, the width animation and the wheel/touch input move out of the strip component, with its markup pinned by snapshots
+- The Linux .deb and .rpm now declare the system libraries and the glibc version the app needs, so a minimal system installs what is missing or refuses the install with a reason
+- An agent can retake a browser pane the person took over once they press Give back in its header, and Browser handoff_status says what became of a hand-off whose call it lost
+- Move the WebSocket connection's command registration into named handlers and small register groups (finding 5)
+- Pin the agent pane's command hook (slash-command context, picker, /btw, send paths, held flush, recall, stop, !commands) with characterisation tests before it is split
+- Split the agent pane's command hook (useAgentCommands, 910 lines) into named state, refresh, send, delivery and held-flush functions, same behaviour
+- Split agent.open into named steps (pick, admit, CLI, args, env, meta, block, controller) and test them directly (finding 5)
+- LAN: a second instance on one host announces its own mDNS host name, the dev proxy takes a free port when 8090 is held, and a missing watch folder is no longer a warning
+- Pane tab strip: a tab pill's drag, click, flash and progress handling move out of the strip file into pane-tab-pill, with the pills' markup pinned by snapshots
+- Split the agent turn into named steps (spawn base, env gate, attachments, controller dispatch, reactive registration) and test them directly (finding 5)
+- Agent pane: the activity dock row shows the whole summary up to the stats on its right (elapsed time, counts), and no longer shows a shell's or tool's last output line
+- Agent transcript: the error, compaction, memory, day, session, resume and CLI-notice rows move out of DocumentRow into their own components, with their markup pinned by snapshots
+- Split the pane chrome shell into focused hooks (strip reveal, locate flash, tab descriptions, colors, header tail, rename, handlers, drops); no change to what the pane header does or looks like
+- Split the agent launch into its steps (content, folder, environment, color, block meta, instance row, account link); no change to how an agent launches
+- Split the agent stream's line pipeline out of useAgentStream (frame intercepts, usage, session end, tool events); no change to how the stream is read
+- Windows: the window and taskbar icon now follow the Windows theme (dark icon in dark mode, light icon in light mode) and switch live when the theme changes
+- Tear-off fixes: a torn-off window tab comes to the front, floaters stay inside the monitor's work area, and Escape during a pane drag is honoured
+- Split the agent composer into its state, actions and key handlers; no change to what the composer does
+- Text in the status colours and the dark editor palette now pass AA contrast on every theme, with a test that keeps stylesheets on the status text tokens
+- Pin the agent pane's history loader (usual open, v1 and v2 snapshots, first screen, background fill, scroll-up pages) with characterisation tests before it is split
+- Split the browser pane view: its sleep and wake logic and its loading overlay move into hooks, with the view pinned by ordered-log tests
+- Split the agent pane's history loader (useHistoryPagination, 678 lines) into state, older-page, first-screen, fill, snapshot and usual-open functions, same behaviour
+- Split the browser pane model's constructor into projections, memos and event subscriptions, with its subscriptions and derived atoms pinned by ordered-log tests
+- The camera and microphone permission prompt, and the question before stopping a capture, now cover only the browser pane they are about instead of the whole window.
+- Pin NativeMemoryManager's out-of-order replies, event refetches, agent switching, debounce cleanup and create-row props with tests before it is split
+- Split the Memory pane's Personal section (NativeMemoryManager, 648 lines) into state, subscription, refetch and view functions, same behaviour
+- Pin AgentShellSubblock's terminal options, live font and scroll updates, overlay fade, agent-lock expiry, exit handling and overtaken attaches with tests before it is split
+
 ## 0.60.14 — 2026-11-03
 
 - A settings.json key with a wrong-typed or out-of-range value now uses its default and is reported with its line, and every other key still applies

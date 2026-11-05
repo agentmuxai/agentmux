@@ -254,6 +254,16 @@ events! {
     AgentHistoryChanged: "agenthistory:changed" => (),
     /// A named agent was hidden.
     NamedAgentsChanged: "namedagents:changed" => (),
+    /// An agent was hidden from, or shown to, the paired devices (`viewer.agent-hidden`).
+    AgentHiddenChanged: "agenthidden:changed" => (),
+    /// A paired device was revoked, or its send grant changed (pairing has `viewer:paired`).
+    ViewerDevicesChanged: "viewerdevices:changed" => (),
+    /// A pinned sender was adopted or forgotten (`pins.adopt`, `pins.forget`).
+    PinsChanged: "pins:changed" => (),
+    /// A standing browser grant was added, changed or revoked.
+    BrowserGrantsChanged: "browsergrants:changed" => (),
+    /// A browser profile was created, changed or deleted.
+    BrowserProfilesChanged: "browserprofiles:changed" => (),
     /// The skills installed for an agent changed.
     AgentSkillsChanged: "agentskills:changed" => (),
     /// Memory entries changed.
@@ -264,6 +274,8 @@ events! {
     McpChanged: "mcp:changed" => (),
     /// The provider accounts changed.
     IdentityAccountsChanged: "identityaccounts:changed" => (),
+    /// An agent changed a Google account (a grant, a disconnect): a notice naming it, asking nothing.
+    GoogleNotice: "google:notice" => crate::identity::accounts_changed::GoogleNoticeEvent,
     /// Scheduled jobs changed.
     CronChanged: super::mps::EVENT_CRON_CHANGED => (),
     /// The run ledger, or Pause all, changed (the Warden Jobs tab).

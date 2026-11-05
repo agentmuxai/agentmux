@@ -1,0 +1,43 @@
+Block mount a1 wrapper#1 hoisted=true preview=false
+expectAgentMount a1 :: view=agent active=true mounted=true minimized=false stack=1
+setBlockMinimized a1 false
+setKeepAliveBlockDormant a1 false
+Block a1 memberActive=true
+Block a1 set its vm
+renderPaneChrome by vm of a1
+-- push a2
+Block mount a2 wrapper#2 hoisted=true preview=false
+expectAgentMount a1 :: view=agent active=true mounted=true minimized=false stack=2
+expectAgentMount a2 :: view=agent active=false mounted=true minimized=false stack=2
+setBlockMinimized a1 false
+setBlockMinimized a2 false
+setKeepAliveBlockDormant a2 true
+Block a2 memberActive=false
+Block a2 set its vm
+dom chrome=1 shell=0 blocks=["a1","a2"] slots=["a1[dormant=null vis=inherit op=1 pe=auto]","a2[dormant= vis=hidden op=0 pe=none]"]
+-- close a2
+Block unmount a2
+setKeepAliveBlockDormant a2 false
+expectAgentMount a1 :: view=agent active=true mounted=true minimized=false stack=1
+setBlockMinimized a1 false
+dom chrome=1 shell=0 blocks=["a1"] slots=["a1[dormant=null vis=inherit op=1 pe=auto]"]
+-- a2 comes back
+Block mount a2 wrapper#3 hoisted=true preview=false
+expectAgentMount a1 :: view=agent active=true mounted=true minimized=false stack=2
+expectAgentMount a2 :: view=agent active=false mounted=true minimized=false stack=2
+setBlockMinimized a1 false
+setBlockMinimized a2 false
+setKeepAliveBlockDormant a2 true
+Block a2 memberActive=false
+Block a2 set its vm
+dom chrome=1 shell=0 blocks=["a1","a2"] slots=["a1[dormant=null vis=inherit op=1 pe=auto]","a2[dormant= vis=hidden op=0 pe=none]"]
+chrome sees vm of a1
+-- unmount
+Block unmount a1
+setKeepAliveBlockDormant a1 false
+Block unmount a2
+setKeepAliveBlockDormant a2 false
+setBlockMinimized a1 false
+setBlockMinimized a2 false
+agentMountForgotten a1
+agentMountForgotten a2

@@ -11,10 +11,13 @@ import { acceptAppUpdate, APP_UPDATE_EVENT } from "./app-update";
 import { acceptConnectivity, CONNECTIVITY_EVENT } from "./connectivity";
 import { openModal } from "./modalmodel";
 import { muxEventSubscribe, onMuxEvent } from "./mps";
+import { acceptGoogleNotice } from "./google-notice";
 import { acceptSigninLink } from "./signin-link";
 
 export function initUiEventSubs(initOpts: AgentMuxInitOpts) {
     onMuxEvent(WpsEvent.SigninLink, (link) => acceptSigninLink(link));
+    // An agent changed a Google account (srv `identity::accounts_changed`).
+    onMuxEvent(WpsEvent.GoogleNotice, (notice) => acceptGoogleNotice(notice));
     // A service's reachability changed (srv `connectivity`).
     onMuxEvent(CONNECTIVITY_EVENT, (status) => acceptConnectivity(status));
     // A newer release, or none (srv `update::check`).

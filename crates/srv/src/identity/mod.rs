@@ -29,6 +29,7 @@
 //! is deferred.
 
 pub mod account_email;
+pub mod accounts_changed;
 pub mod account_numbering;
 pub mod auth_diag;
 pub mod auth_patterns;
@@ -39,6 +40,7 @@ pub mod credential_watch;
 pub mod foreign_dir;
 pub mod aws_broker;
 pub mod github_connect;
+pub mod github_installs;
 pub mod gh_agent_token;
 pub mod github_hooks;
 pub mod github_tokens;

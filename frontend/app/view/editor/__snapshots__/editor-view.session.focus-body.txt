@@ -1,0 +1,17 @@
+rpc ReadEditorFile {"path":"/home/u/a.ts"}
+rpc WatchEditorFile {"path":"/home/u/a.ts","block_id":"session<n>"}
+lsp#1 new typescript /home/u/a.ts
+lsp#1 start
+lsp#1 didOpen /home/u/a.ts typescript "export const a = 1;\n"
+diagnostics wired to lsp#1
+run editor:focusTree -> true
+from the tree, text: codemirror
+rpc ReadEditorFile {"path":"/home/u/notes.md"}
+rpc WatchEditorFile {"path":"/home/u/notes.md","block_id":"session<n>"}
+diagnostics of lsp#1 unwired
+lsp#1 state unsubscribed
+lsp#1 dispose
+run editor:focusTree -> true
+from the tree, markdown preview: editor-preview-content
+run editor:focusTree -> true
+from the tree, markdown source: codemirror

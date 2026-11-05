@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use reqwest::{Client, Url};
 
-use crate::backend::container_image::{parse_bearer_challenge, parse_image_ref};
+use crate::backend::container::image::{parse_bearer_challenge, parse_image_ref};
 use crate::backend::rpc_types::ContainerImageAccess;
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(6);

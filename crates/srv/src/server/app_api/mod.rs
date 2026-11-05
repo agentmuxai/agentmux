@@ -38,6 +38,10 @@ pub(crate) mod agent_block;
 pub(crate) mod agent_reconcile;
 pub(crate) mod agent_config_render;
 pub(crate) mod agent_open;
+mod agent_open_steps;
+#[cfg(test)]
+#[path = "tests/agent_open_steps_tests.rs"]
+mod agent_open_steps_tests;
 pub(crate) mod agent_open_many;
 pub(crate) mod agent_open_remote;
 /// Re-exported for `server/mod.rs`'s `POST /api/v1/agent/open` handler (the

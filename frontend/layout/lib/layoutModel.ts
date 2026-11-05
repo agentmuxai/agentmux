@@ -10,6 +10,7 @@ import { atomWithThrottle, boundNumber, createSignalAtom, SignalAtom } from "@/u
 import type { Properties as CSSProperties } from "csstype";
 import { createEffect, createMemo, createRoot, getOwner, on, runWithOwner, Owner } from "solid-js";
 import { chipDropRect } from "./chipPlaceholder";
+import { createPlacementPreview, type FutureLayout } from "./futureLayout";
 import { getLayoutStateAtomFromTab } from "./layoutAtom";
 import { findNode, withDerivedNodeIds } from "./layoutNode";
 import { computeMoveNode } from "./layoutTree";
@@ -274,6 +275,10 @@ export class LayoutModel {
      * CSS properties for the placeholder element.
      */
     placeholderTransform: () => CSSProperties;
+    /** The layout the pending drag action leaves: the ghost is its moved pane's rect (futureLayout.ts). */
+    futureLayout: () => FutureLayout | undefined;
+    /** Outlines of every other pane's rect in that layout, while a drop is previewed. */
+    placementWireframe: () => { id: string; style: CSSProperties }[];
     /**
      * CSS properties for the overlay container.
      */
@@ -577,10 +582,10 @@ export class LayoutModel {
                 )
             );
 
-            this.placeholderTransform = createMemo<CSSProperties>(() => {
-                const pendingAction = this.pendingTreeAction.throttledValueAtom();
-                return this.getPlaceholderTransform(pendingAction);
-            });
+            ({ futureLayout: this.futureLayout, placementWireframe: this.placementWireframe } = createPlacementPreview(this));
+            this.placeholderTransform = createMemo<CSSProperties>(() =>
+                this.getPlaceholderTransform(this.pendingTreeAction.throttledValueAtom())
+            );
 
             this.initializeFromMuxObject();
         });
@@ -761,6 +766,15 @@ export class LayoutModel {
      * Helper function for the placeholderTransform memo, which computes the new transform value when the pending action changes.
      */
     private getPlaceholderTransform(pendingAction: LayoutTreeAction): CSSProperties {
+        // Where the drop leaves the moved pane: the pending action run by the drop's own reducer on a copy
+        // (futureLayout.ts). The half-of-the-target math below stays only for an action that cannot be run.
+        const future = this.futureLayout();
+        const moved = future?.rects[future.movedId];
+        return moved ? setTransform(moved) : this.staticGhostTransform(pendingAction);
+    }
+
+    /** The ghost for an action that cannot be run on a copy: half of the target's rect, as it stands now. */
+    private staticGhostTransform(pendingAction: LayoutTreeAction): CSSProperties {
         if (pendingAction) {
             switch (pendingAction.type) {
                 case LayoutTreeActionType.Move: {

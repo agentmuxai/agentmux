@@ -1,0 +1,23 @@
+open: open=true dormant=false
+Markdown write: <div class="agent-tool-panel-actions">
+<div class="ui-tooltip-anchor">
+<button aria-label="Open in editor" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button agent-tool-open-in-editor">
+<i aria-hidden="true" class="fa-solid fa-file-lines">
+</i>
+</button>
+</div>
+</div>
+
+dormant: open=false dormant=true
+closing: open=false
+closed: body gone; (no actions)
+Markdown read: <div class="agent-tool-panel-actions">
+<div class="ui-tooltip-anchor">
+<button aria-label="Open in editor" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button agent-tool-open-in-editor">
+<i aria-hidden="true" class="fa-solid fa-file-lines">
+</i>
+</button>
+</div>
+</div>
+
+outside an agent pane: <div class="agent-tool-panel-actions"></div>

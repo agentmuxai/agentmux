@@ -1,0 +1,9 @@
+diag view-mount window_label=main initial-urlAtom="https://example.com/page"
+register pane
+-- shown
+diag [hibernate] wake-start why=show visible=true
+diag [hibernate] card-shown
+-- hidden again mid-wake
+diag [hibernate] card-hidden after=900
+-- shown again
+diag [hibernate] card-shown

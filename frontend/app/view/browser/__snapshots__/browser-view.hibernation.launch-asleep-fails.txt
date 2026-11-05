@@ -1,0 +1,6 @@
+diag view-mount window_label=main initial-urlAtom="https://example.com/page"
+diag [hibernate] launch-asleep
+model.hibernate launch memory=undefined
+register pane
+probe mounted: rect.asleep=true drag.unavailable=true pane.visible=false pane.asleep=true pane.frozen=false hiddenSince=1793707200000
+probe after failure: rect.asleep=false drag.unavailable=true pane.visible=false pane.asleep=false pane.frozen=false hiddenSince=1793707200000

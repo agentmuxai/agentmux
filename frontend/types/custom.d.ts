@@ -143,7 +143,11 @@ declare global {
         /** Answer a browser pane's banner: a hand-off (`done`) or an approval
          *  (`approve`), or `cancel`. Relayed by the host, which srv trusts and
          *  agents can't impersonate. SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §5.6. */
-        decideBrowserAttention(blockId: string, id: string, decision: "done" | "approve" | "approve_always" | "cancel"): Promise<void>;
+        decideBrowserAttention(
+            blockId: string,
+            id: string,
+            decision: "done" | "approve" | "approve_always" | "cancel" | "give_back",
+        ): Promise<void>;
         /** The person's Bypass (`on`) or End bypass in an agent-driven browser
          *  pane's header. `agent` and `origins` are what the confirmation
          *  showed: srv grants only if they still hold, else rejects with why.
@@ -698,15 +702,33 @@ declare global {
          *  `tabdrag:merge-direct`. No-op on non-Windows. */
         startTabDragTracking: (args: {
             sourceWindowLabel: string;
-            tabId: string;
-            sourceWsId: string;
-            isLastTab: boolean;
+            tabId?: string;
+            sourceWsId?: string;
+            isLastTab?: boolean;
+            /** A pane or pane-tab drag: the hook only reports Escape (`tabdrag:escape-pressed`). */
+            escapeOnly?: boolean;
         }) => Promise<void>;
         /** Belt-and-suspenders hook teardown at dragend — the hook
          *  self-uninstalls on mouseup/ESC, but a leaked WH_MOUSE_LL hook
          *  degrades every mouse event on the system, so dragend calls
          *  this unconditionally. Idempotent. */
         stopTabDragTracking: () => Promise<void>;
+        /** Windows: the picture of the source window that follows the cursor once a window-tab drag is
+         *  below the tab strip (live_follow.rs). The sizes and offsets are DIP. */
+        liveFollowBegin: (args: {
+            sourceWindowLabel: string;
+            /** Base64 JPEG of the window. */
+            picture: string;
+            windowWidth: number;
+            windowHeight: number;
+            /** Cursor to the window's top-left. */
+            offsetX: number;
+            offsetY: number;
+            /** The viewport y below which the picture shows. */
+            tearLineY: number;
+        }) => Promise<void>;
+        /** Drop the picture now. Idempotent. */
+        liveFollowEnd: () => Promise<void>;
         setDragCursor: () => Promise<void>;
         restoreDragCursor: () => Promise<void>;
         releaseDragCapture: () => Promise<void>;

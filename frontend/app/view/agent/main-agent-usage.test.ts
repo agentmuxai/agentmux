@@ -67,7 +67,7 @@ describe("useAgentStream reads usage only through mainAgentUsage", () => {
     // The stream handler is too large to run here, so pin the wiring: usage and
     // the model id come from mainAgentUsage, never from a raw message_start
     // read inline (which is how a subagent's usage got into the context meter).
-    const src = readFileSync(join(process.cwd(), "frontend/app/view/agent/useAgentStream.ts"), "utf8");
+    const src = readFileSync(join(process.cwd(), "frontend/app/view/agent/stream-pipeline.ts"), "utf8");
 
     it("calls it", () => {
         expect(src).toMatch(/mainAgentUsage\(rawEvent\)/);
@@ -147,8 +147,8 @@ describe("the context meter is fed only per-call usage (source pins)", () => {
     const read = (rel: string) => readFileSync(join(process.cwd(), rel), "utf8");
 
     it("the live stream counts each call once (message_start and its assistant frames share an id)", () => {
-        const src = read("frontend/app/view/agent/useAgentStream.ts");
-        expect(src).toMatch(/usage\.messageId === lastUsageMessageId/);
+        const src = read("frontend/app/view/agent/stream-pipeline.ts");
+        expect(src).toMatch(/usage\.messageId === st\.lastUsageMessageId/);
         expect(src).toMatch(/type: "ContextWindowsReported"/);
         expect(src).toMatch(/type: "ContextInvalidated", reason: "fresh_session"/);
     });
@@ -163,10 +163,10 @@ describe("the context meter is fed only per-call usage (source pins)", () => {
     });
 
     it("the strip never falls back to a provider-wide window", () => {
-        const src = read("frontend/app/view/agent/agent-view.tsx");
-        expect(src).not.toMatch(/provider\(\)\?\.contextWindow/);
-        expect(src).toMatch(/useContextReading\(model\.blockId, paneModel, block\)/);
-        expect(src).toMatch(/contextTokens=\{contextReading\(\)\?\.tokens \?\? null\}/);
+        const parts = ["agent-view.tsx", "agent-view-foundation.ts", "agent-view-layout.tsx"].map((f) => read(`frontend/app/view/agent/${f}`));
+        for (const src of parts) expect(src).not.toMatch(/provider\(\)\?\.contextWindow/);
+        expect(parts[1]).toMatch(/useContextReading\(model\.blockId, paneModel, block\)/);
+        expect(parts[2]).toMatch(/contextTokens=\{context\.reading\(\)\?\.tokens \?\? null\}/);
         expect(read("frontend/app/view/agent/hooks/useContextReading.ts")).toMatch(/plausibleReading\(context\(\)\)/);
     });
 });

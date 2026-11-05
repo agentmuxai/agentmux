@@ -172,7 +172,7 @@ export const TIPS: TipRow[] = [
         gesture: "middleclick",
         where: "on a pane, document or editor tab",
         label: "Close the tab",
-        source: { file: "frontend/app/element/PaneTabStrip.tsx", anchor: "e.button === 1" },
+        source: { file: "frontend/app/element/pane-tab-pill.tsx", anchor: "e.button === 1" },
     },
     {
         id: "tab:preview:dblclick",
@@ -271,7 +271,7 @@ export const TIPS: TipRow[] = [
         gesture: "mod+click",
         where: "in an editor",
         label: "Add another cursor",
-        source: { file: "frontend/app/view/editor/editor-view.tsx", anchor: "basicSetup," },
+        source: { file: "frontend/app/view/editor/editor-codemirror.ts", anchor: "basicSetup," },
     },
     {
         id: "editor:blockSelect",
@@ -279,7 +279,7 @@ export const TIPS: TipRow[] = [
         gesture: "alt+drag",
         where: "in an editor",
         label: "Make a column (block) selection",
-        source: { file: "frontend/app/view/editor/editor-view.tsx", anchor: "basicSetup," },
+        source: { file: "frontend/app/view/editor/editor-codemirror.ts", anchor: "basicSetup," },
     },
     {
         id: "editor:nextMatch",
@@ -287,7 +287,7 @@ export const TIPS: TipRow[] = [
         gesture: "mod+key:D",
         where: "in an editor",
         label: "Select the next match of the selected text",
-        source: { file: "frontend/app/view/editor/editor-view.tsx", anchor: "basicSetup," },
+        source: { file: "frontend/app/view/editor/editor-codemirror.ts", anchor: "basicSetup," },
     },
 
     // ── Files ──
@@ -297,7 +297,7 @@ export const TIPS: TipRow[] = [
         gesture: "mod+click / shift+click",
         where: "on rows in the Files pane",
         label: "Add or remove one row / select a range",
-        source: { file: "frontend/app/view/files/files-view.tsx", anchor: "e.shiftKey" },
+        source: { file: "frontend/app/view/files/files-view-pointer.ts", anchor: "e.shiftKey" },
     },
     {
         // Not on macOS: Spotlight takes ⌘Space and the input-source switch ⌃Space
@@ -308,7 +308,7 @@ export const TIPS: TipRow[] = [
         where: "in the Files list",
         label: "Add or remove the focused row without moving it",
         os: ["win32", "linux"],
-        source: { file: "frontend/app/view/files/files-view.tsx", anchor: 'e.key === " " && isMod(e)' },
+        source: { file: "frontend/app/view/files/files-view-keys.ts", anchor: 'e.key === " " && isMod(e)' },
     },
     {
         id: "files:keys",
@@ -316,7 +316,7 @@ export const TIPS: TipRow[] = [
         gesture: "key:Space / key:/ / key:Backspace",
         where: "in the Files list",
         label: "Preview the file / filter / go back; typing a name jumps to it",
-        source: { file: "frontend/app/view/files/files-view.tsx", anchor: "new TypeAhead()" },
+        source: { file: "frontend/app/view/files/files-view-state.ts", anchor: "new TypeAhead()" },
     },
     {
         id: "files:folder:middleclick",
@@ -324,7 +324,7 @@ export const TIPS: TipRow[] = [
         gesture: "middleclick",
         where: "on a folder in the Files pane",
         label: "Open it in a new tab",
-        source: { file: "frontend/app/view/files/files-view.tsx", anchor: "Middle-click a folder: open it in a new tab." },
+        source: { file: "frontend/app/view/files/files-view-parts.tsx", anchor: "Middle-click a folder: open it in a new tab." },
     },
     {
         id: "files:path:dblclick",
@@ -332,7 +332,7 @@ export const TIPS: TipRow[] = [
         gesture: "dblclick",
         where: "on the Files pane's folder path",
         label: "Type a path",
-        source: { file: "frontend/app/view/files/files-view.tsx", anchor: "startEditingPath" },
+        source: { file: "frontend/app/view/files/files-view-state.ts", anchor: "startEditingPath" },
     },
     {
         id: "files:drag",
@@ -340,7 +340,7 @@ export const TIPS: TipRow[] = [
         gesture: "drag / drop",
         where: "Files rows onto a pane, or files onto the list",
         label: "Send files to an agent, editor or terminal pane; dropping copies here, or into the folder under the pointer",
-        source: { file: "frontend/app/view/files/files-view.tsx", anchor: "registerFileDropTarget(model.blockId" },
+        source: { file: "frontend/app/view/files/files-view-drag.ts", anchor: "registerFileDropTarget(model.blockId" },
     },
 
     // ── Editor viewers ──
@@ -370,7 +370,7 @@ export const TIPS: TipRow[] = [
         gesture: "key:Escape",
         where: "in the agent's message box",
         label: "Clear it ({key:mod+z} brings it back); in an empty box, interrupt the agent",
-        source: { file: "frontend/app/view/agent/components/AgentFooter.tsx", anchor: "textarea is empty → send SIGINT" },
+        source: { file: "frontend/app/view/agent/components/composer-keys.ts", anchor: "empty, send SIGINT" },
     },
     {
         id: "agent:up",
@@ -386,7 +386,7 @@ export const TIPS: TipRow[] = [
         gesture: "key:Tab / key:→",
         where: "in an empty message box",
         label: "Accept the suggested next prompt",
-        source: { file: "frontend/app/view/agent/components/AgentFooter.tsx", anchor: "Ghost-text next-prompt suggestion" },
+        source: { file: "frontend/app/view/agent/components/composer-keys.ts", anchor: "Ghost-text next-prompt suggestion" },
     },
     {
         id: "agent:slash",

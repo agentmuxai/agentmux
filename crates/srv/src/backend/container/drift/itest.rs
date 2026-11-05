@@ -6,7 +6,7 @@
 
 use super::*;
 use crate::backend::container::ContainerMountSpec;
-use crate::backend::container_image::versioned_agent_image;
+use crate::backend::container::image::versioned_agent_image;
 
 #[tokio::test]
 #[ignore]

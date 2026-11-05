@@ -228,7 +228,7 @@ pub(crate) fn for_agent_pane(
     meta: &mut MetaMapType,
     (agent_id, allowed, requested, from_container): (&str, Option<&[String]>, Option<&str>, bool),
 ) -> Result<String, String> {
-    meta.insert(crate::server::browser_owner::OWNER_META_KEY.to_string(), json!(agent_id));
+    meta.extend(crate::server::browser_owner::driver_meta(agent_id));
     crate::server::browser_allowlist::mirror(meta, allowed);
     for_agent_open(state, meta, requested, from_container)?;
     Ok(browsing_as(meta))

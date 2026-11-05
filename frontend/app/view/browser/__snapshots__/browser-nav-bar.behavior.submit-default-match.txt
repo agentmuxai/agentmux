@@ -1,0 +1,11 @@
+diag sync urlAtom="https://example.com/" addressBar="https://example.com/" focused=false willUpdate=false
+listen browser-pane-shortcut
+diag input-focus value="https://example.com/" relatedTarget=null
+reclaimWindowFocus main
+diag sync urlAtom="https://example.com/" addressBar="localhost:3000" focused=true willUpdate=false
+autocomplete block-1 "localhost:3000" suggest=true
+diag input-submit value="localhost:3000"
+diag input-submit chosen=url-what-you-typed url="http://localhost:3000/"
+model navigate http://localhost:3000/
+diag sync urlAtom="https://example.com/" addressBar="http://localhost:3000/" focused=true willUpdate=false
+pane navigate block-1 http://localhost:3000/

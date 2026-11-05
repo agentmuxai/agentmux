@@ -11,7 +11,7 @@
 //! Platform support (cross-platform, matches SPEC_CONTAINER_PANE_SUPPORT_2026_06_11.md):
 //!   - `DOCKER_HOST` when set (unix, tcp with or without TLS, https, npipe), else the sockets
 //!     Docker, Podman, Colima and OrbStack leave in their usual places; the first that answers a
-//!     ping is used (`container_runtime.rs`).
+//!     ping is used (`container/runtime.rs`).
 //!   - Windows: named pipe `//./pipe/docker_engine`
 //!
 //! Independence boundary: this module has no dependency on any other project's container code.
@@ -26,6 +26,17 @@ mod mounts;
 pub(crate) use self::mounts::container_memory_dir;
 mod pull;
 mod reap;
+pub mod argv;
+pub mod cli;
+pub mod credential;
+pub mod image;
+pub mod listener;
+pub mod routes;
+pub mod runtime;
+#[cfg(test)]
+mod listener_itest;
+#[cfg(test)]
+mod turn_itest;
 pub use self::pull::{StartEvent, StartObserver};
 
 use std::collections::HashMap;
@@ -36,7 +47,6 @@ use tokio::sync::Mutex;
 use futures_util::StreamExt as _;
 use bollard::Docker;
 
-use crate::backend::container_runtime;
 use self::mount_source::fold_mount_source;
 use self::mounts::{agent_home_mounts, host_name_for_new_container};
 use bollard::container::{
@@ -45,10 +55,10 @@ use bollard::container::{
 };
 use bollard::exec::{CreateExecOptions, StartExecOptions, StartExecResults};
 use bollard::models::{ContainerInspectResponse, HostConfig, Mount, MountTypeEnum};
-use crate::backend::container_cli::{
+use crate::backend::container::cli::{
     check_says_present, install_failure_detail, reap_argv, reap_says_gone, CliInstall, InstallLimits,
 };
-use crate::backend::container_image::{CONTAINER_CLI_DIR,
+use crate::backend::container::image::{CONTAINER_CLI_DIR,
     cli_install_failure_message, docker_error_message, docker_unreachable_message,
     looks_like_daemon_unreachable, pull_failure_message, PullFailure,
 };
@@ -293,7 +303,7 @@ pub enum ContainerError {
     #[error("Docker is not available on this host: {0}")]
     NotAvailable(String),
     /// No container runtime answered; the text says where it looked and why each place failed
-    /// ([`container_runtime::Missing::message`]).
+    /// ([`runtime::Missing::message`]).
     #[error("{0}")]
     NoRuntime(String),
     /// The image could not be downloaded. `detail` is the daemon's own text,
@@ -352,12 +362,12 @@ impl ContainerManager {
         Ok(Self::with_docker(docker, None))
     }
 
-    /// Connect to the runtime [`container_runtime`] finds: `DOCKER_HOST`, else the first socket
+    /// Connect to the runtime [`runtime`] finds: `DOCKER_HOST`, else the first socket
     /// of rootless Docker, Podman, Docker Desktop, Colima, OrbStack or the system that answers a
     /// ping. `Err` says where it looked and why each place failed.
     pub async fn connect_detected() -> Result<Self, ContainerError> {
-        let env = container_runtime::Env::from_process();
-        match container_runtime::connect(&env).await {
+        let env = runtime::Env::from_process();
+        match runtime::connect(&env).await {
             Ok(found) => {
                 let label = found.label();
                 tracing::info!(runtime = %label, "container runtime found");
@@ -1385,11 +1395,11 @@ impl ContainerManager {
                 );
             }
         }
-        crate::backend::container_listener::ensure_bound(&self.inner.docker).await;
+        crate::backend::container::listener::ensure_bound(&self.inner.docker).await;
     }
 }
 
-pub use crate::backend::container_runtime::ContainerRuntimeHandle;
+pub use crate::backend::container::runtime::ContainerRuntimeHandle;
 
 /// What a collected exec produced.
 struct ExecOutcome {

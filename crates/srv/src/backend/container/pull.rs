@@ -11,7 +11,7 @@ mod pinned;
 
 use super::{ContainerError, ContainerManager};
 use crate::backend::agent_image_digest::{pin_for_running_version, Pin, DEVELOPER_IMAGE_NAME, IMAGE_NAME};
-use crate::backend::container_image::{
+use crate::backend::container::image::{
     classify_pull_error, floating_image_for, is_legacy_agent_image, is_versioned_agent_image, versioned_agent_image, versioned_developer_image, PullFailure,
     DEFAULT_AGENT_IMAGE,
 };
@@ -147,8 +147,8 @@ pub struct PullLimits {
 impl Default for PullLimits {
     fn default() -> Self {
         Self {
-            stall: std::time::Duration::from_secs(crate::backend::container_image::PULL_STALL_SECS),
-            total: std::time::Duration::from_secs(crate::backend::container_image::PULL_TOTAL_SECS),
+            stall: std::time::Duration::from_secs(crate::backend::container::image::PULL_STALL_SECS),
+            total: std::time::Duration::from_secs(crate::backend::container::image::PULL_TOTAL_SECS),
         }
     }
 }

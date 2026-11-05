@@ -44,15 +44,15 @@
     }
 
     &--warning > .fa-solid {
-        color: var(--warning-color);
+        color: var(--warning-text-color);
     }
 
     &--danger > .fa-solid {
-        color: var(--error-color);
+        color: var(--error-text-color);
     }
 
     &--success > .fa-solid {
-        color: var(--success-color);
+        color: var(--success-text-color);
     }
 }
 

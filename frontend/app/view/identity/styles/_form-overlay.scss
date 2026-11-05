@@ -183,3 +183,11 @@
         flex: 1 1 auto;
     }
 }
+
+// The form in a section of its own (Connectors' add section) rather than the pane's overlay.
+.identity-form.identity-form--inline {
+    width: 100%;
+    height: auto;
+    border-left: 0;
+    background: transparent;
+}

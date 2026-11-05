@@ -4,6 +4,7 @@
 // PaneSizeBadge — bottom-left `WxH` overlay during pane resize.
 // Spec: SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md.
 
+// tag: fixed - a hard-cornered mono readout over the pane while it is dragged, not a label on a card
 .pane-size-badge {
     position: absolute;
     left: var(--space-2);

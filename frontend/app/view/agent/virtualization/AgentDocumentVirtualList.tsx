@@ -28,7 +28,8 @@
  * the state into the DOM but never reads it back.
  */
 
-import { batch, createEffect, createMemo, createSignal, onCleanup, onMount, Show, untrack, type Accessor, type JSX } from "solid-js";
+import { Button } from "@/app/element/ui";
+import { batch, createEffect, createMemo, createSignal, onCleanup, onMount, Show, untrack, type Accessor, type JSX, type Setter } from "solid-js";
 import { trail } from "@/log/render-trail";
 import { shouldReduceMotion } from "@/app/motion/motion";
 import { Key } from "@/util/keyed";
@@ -43,8 +44,8 @@ import {
 import { DocumentRow } from "./DocumentRow";
 import { attachOneWayRecorder, noteOneWay, sampleOneWayFrame } from "../scroll/one-way-recorder";
 import { OneWayFlow, scrollTranscriptTo } from "../scroll/one-way-flow";
-import { createFollowScroll, type FollowScroll } from "../scroll/follow-scroll";
-import { createFollowLog, NO_SCROLL_INPUT, type ScrollInput } from "../scroll/follow-wiring";
+import { createFollowScroll, type FollowScroll } from "../../../scroll/follow-scroll";
+import { createFollowLog, NO_SCROLL_INPUT, type ScrollInput } from "../../../scroll/follow-wiring";
 import { estimateNode, estimateNodeForState, previewCapPx } from "./renderers";
 import { currentExpansion } from "./expansion-source";
 import type { AgentViewState } from "./state";
@@ -235,6 +236,12 @@ interface ListState {
     syncOverflowState: (geo?: ScrollGeometry) => void;
     dispatchScrollMargin: () => void;
     loadOlderFrom: (scrollTop: number) => void;
+    fillOlder: () => void;
+    // Set when the list unmounts: a frame still pending from a fill must not ask for another page.
+    disposed: boolean;
+    // A fill pass gave up with the content still short: the reader is offered "Load earlier messages".
+    fillStalled: Accessor<boolean>;
+    setFillStalled: Setter<boolean>;
     jumpToBottom: (reason?: string) => void;
     scrollToNode: (nodeId: string, offsetPx?: number) => void;
 }
@@ -249,7 +256,11 @@ interface RowRendering {
 }
 
 function createListState(props: AgentDocumentVirtualListProps): ListState {
+    const [fillStalled, setFillStalled] = createSignal(false);
     const s = {
+        fillStalled,
+        setFillStalled,
+        disposed: false,
         scrollRef: undefined as unknown as HTMLDivElement,
         virtualContainerRef: undefined,
         streamingBufferRef: undefined,
@@ -313,13 +324,25 @@ function useFollowController(props: AgentDocumentVirtualListProps, s: ListState)
                     s.oneWayFlow.jumpToBottom(cause === "jump-to-bottom:sent" || cause === "jump-to-bottom:queued-turn");
                 },
                 loadOlder: (geo) => s.loadOlderFrom(geo.scrollTop), // perf:allow-layout-read — the batch's stored geometry, not a DOM read
+                fillOlder: () => s.fillOlder(),
+                fillStalled: (stalled) => s.setFillStalled(stalled),
                 transition: s.followLog.project,
                 hasOlderHistory: () => !!props.onLoadOlder && (props.hasOlderHistory?.() ?? true),
                 loadingOlder: () => s.loadingOlderInFlight || !!props.loadingOlder?.(),
                 released: () => s.oneWayFlow.recheckSoon(),
             },
         );
-        onCleanup(() => s.follow?.dispose());
+        onCleanup(() => {
+            s.disposed = true;
+            s.follow?.dispose();
+        });
+    });
+    // Older history becoming available (the first screen has painted) or a page landing changes what a short
+    // pane can do with no size change to say so: ask again.
+    createEffect(() => {
+        props.hasOlderHistory?.();
+        props.loadingOlder?.();
+        untrack(() => s.follow?.checkFill());
     });
 }
 
@@ -781,6 +804,7 @@ function useScrollObservers(props: AgentDocumentVirtualListProps, s: ListState):
             s.syncOverflowState(geo);
             // The follow controller sees the content too. OneWayFlow pins, from its own observer.
             if (s.follow && geo) s.follow.observed("content", geo);
+            if (geo) props.viewState.noteContentHeight(geo.scrollHeight); // perf:allow-layout-read — the value observedGeometry() read just above, not a second read
         });
         if (s.virtualContainerRef) ro.observe(s.virtualContainerRef);
         if (s.streamingBufferRef) ro.observe(s.streamingBufferRef);
@@ -924,6 +948,33 @@ function createHandleScrollNow(props: AgentDocumentVirtualListProps, s: ListStat
     return handleScrollNow;
 }
 
+function defineFillOlder(props: AgentDocumentVirtualListProps, s: ListState): void {
+    /**
+     * Page in older history for a pane too short to scroll. No anchor: the reader hasn't scrolled, and the
+     * pane keeps following the bottom as the page lands above the rows (capturing an anchor would detach it).
+     */
+    s.fillOlder = (): void => {
+        s.loadingOlderInFlight = true;
+        const landed = (): void => {
+            // Two frames: the page's rows are laid out and observed in the first, and the next check reads
+            // that geometry, so a short pane takes its pages one at a time, not all at once.
+            requestAnimationFrame(() =>
+                requestAnimationFrame(() => {
+                    s.loadingOlderInFlight = false;
+                    if (!s.disposed) s.follow?.checkFill();
+                })
+            );
+        };
+        let page: Promise<void> | undefined;
+        try {
+            page = props.onLoadOlder?.();
+        } catch {
+            // The flag is cleared below all the same; the pass's page count bounds the retries.
+        }
+        (page ?? Promise.resolve()).then(landed, landed);
+    };
+}
+
 function defineLoadOlder(props: AgentDocumentVirtualListProps, s: ListState): void {
     /** Capture the topmost visible row as an anchor, page in older history, restore the anchor. */
     s.loadOlderFrom = (scrollTop: number): void => {
@@ -1019,6 +1070,7 @@ function defineLoadOlder(props: AgentDocumentVirtualListProps, s: ListState): vo
 function useScrollHandling(props: AgentDocumentVirtualListProps, s: ListState): () => void {
     const handleScrollNow = createHandleScrollNow(props, s);
     defineLoadOlder(props, s);
+    defineFillOlder(props, s);
 
     // One-way-flow recorder (opt-in, `__agentmuxOneWay.enable()`): checks every
     // painted frame for content moving down or blank space taken back while
@@ -1354,7 +1406,8 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
 
     // Render: scroll container holds the virtualized head and the streaming buffer. Nothing renders
     // above the rows: the "Loading older messages" banner that used to sit here pushed the rows down
-    // by its height every time a scroll-up page loaded.
+    // by its height every time a scroll-up page loaded. The "Load earlier messages" button is the
+    // exception only in markup: it is a zero-height sticky box, so it takes no room.
     return (
         <div
             class="agent-document"
@@ -1363,6 +1416,20 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             data-follow-state={props.viewState.stickToBottom() ? "following" : "detached"}
             data-show-cover={rows.showCovered() || undefined}
         >
+            <Show when={s.fillStalled() && props.viewState.stickToBottom()}>
+                <div class="agent-load-earlier">
+                    <Button
+                        tone="accent"
+                        density="compact"
+                        onClick={() => {
+                            s.follow?.restartFill();
+                            s.fillOlder();
+                        }}
+                    >
+                        Load earlier messages
+                    </Button>
+                </div>
+            </Show>
             <VirtualizedHead props={props} s={s} rows={rows} />
             <StreamingBuffer props={props} s={s} animateEnabled={animateEnabled} />
         </div>

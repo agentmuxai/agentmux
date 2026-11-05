@@ -1,11 +1,10 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { UnseenTurnsDot } from "@/app/block/UnseenTurnsDot";
-import { createMemo, createSignal, createEffect, onCleanup, untrack, For, Show, type Accessor, type JSX } from "solid-js";
+import { createMemo, createSignal, untrack, For, Show, type Accessor, type JSX } from "solid-js";
 import type { SwarmViewModel, AgentTreeNode, ActiveSubagent, ActiveShell, ActiveCron, WorkflowDispatch, DispatchActivityEntry, TodoItem } from "./swarm-model";
 import { subagentDisplayLabel, subagentRowKey, subagentToolDetail, workflowRetireSignal, AUTO_RETIRE_DELAY_MS } from "./swarm-model";
-import { LOCAL_PROVIDER_UNKNOWN, REMOTE_PROVIDER_UNKNOWN, SwarmProviderIcon } from "./swarm-provider-icon";
+import { REMOTE_PROVIDER_UNKNOWN, SwarmProviderIcon } from "./swarm-provider-icon";
 import { Button, IconButton } from "@/app/element/ui";
 import AnsiLine from "@/element/ansiline";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -17,35 +16,31 @@ import type { LayoutModel } from "@/layout/lib/layoutModel";
 import { requestSubagentName } from "./subagent-naming";
 import { useTick } from "@/app/hook/useTick";
 import { longRunningToolRows, type LongRunningToolRow } from "./swarm-longrunning";
-import { formatCompactNumber } from "@/util/format-count";
 import { formatElapsedClock, formatTimeLeft } from "@/util/format-time";
-import { HeldTaskChip } from "@/app/view/kanban/kanban-held";
-import { revealBlock } from "@/app/util/reveal-block";
-import { openAgentInActiveTab } from "@/app/store/agent-runtime-live";
-import { agentUidOfBlockMeta, isParkedMeta, PARKED_ROW_TITLE } from "./swarm-open-parked";
+import { PARKED_ROW_TITLE } from "./swarm-open-parked";
 import { phaseToDisplayStatus, type AgentDisplayStatus } from "./swarm-display-status";
-import { BuildSlotNote, LongToolNote, RowStateNotes, UnavailableChip } from "./swarm-row-notes";
-import { RegistrationBadge, stopReceivingItems, useRegistrationFlag } from "./swarm-row-registration";
+import { UnavailableChip } from "./swarm-row-notes";
+import { stopReceivingItems, useRegistrationFlag } from "./swarm-row-registration";
 import { AgentStatusChip } from "./swarm-status-chip";
-import { unavailableLineText, unavailableOfMeta, unavailableTitle } from "@/app/store/agent-unavailable";
+import { unavailableOfMeta } from "@/app/store/agent-unavailable";
 import { BackgroundTaskBucket, SubagentBackgroundTasks, visibleBackgroundTasks } from "./swarm-background-tasks";
 import type { BackgroundTaskView } from "@/app/store/rpc-api";
 import { swarmRowColors } from "./swarm-row-colors";
-import { lastActiveLabel, lastActiveMs, lastActiveTitle } from "./swarm-last-active";
-import { formatLineAge, isAwaitingUser, isMutedLine, lineAt, swarmLineTooltip, type SwarmLine } from "@/app/store/swarm-line";
-import { setSupervisorMode, SupervisorBucket, SupervisorChip, supervisorRows } from "./swarm-supervisor";
+import { lastActiveLabel, lastActiveMs } from "./swarm-last-active";
+import { isAwaitingUser } from "@/app/store/swarm-line";
+import { SupervisorBucket, supervisorRows } from "./swarm-supervisor";
 import { subagentStatus } from "@/app/store/agent-status";
 import { remoteAgentKey } from "./swarm-fleet-targets";
 import { remoteSeatInfo } from "./swarm-seat-groups";
 import { remoteChip, remoteLine, seenAgo, type RemoteRow } from "./swarm-remote";
 import { Tag } from "@/app/element/ui/Tag";
-import { SwarmSeatBadge, SwarmSeatPill } from "./swarm-seats";
+import { SwarmSeatPill } from "./swarm-seats";
 import { Highlight } from "./swarm-filter-bar";
 import { highlightWords } from "./swarm-filter-state";
 import "./swarm-view.scss";
-import { scaledMs } from "@/app/motion/motion";
-import { DURATION_EMPHASIS_MS } from "@/app/motion/tokens";
 import { tip } from "@/app/element/tip";
+import { AgentCardHead, AgentCardLines } from "./swarm-agent-card";
+import { useAgentRowActivation, useSummaryFlash } from "./swarm-agent-row-hooks";
 
 /** The block shown in the focused pane — for a multi-tab pane, its active
  *  tab. Reactive to tab switches inside the pane, not just pane focus. */
@@ -199,12 +194,6 @@ export function countdownSecondsRemaining(model: SwarmViewModel, rowKey: string,
 
 // ── Agent root row ───────────────────────────────────────────────────────
 
-const fmtCtx = formatCompactNumber;
-
-/** How long a changed summary keeps its flash class: the flash runs for
- *  --duration-emphasis, scaled, and the class stays 100 ms longer. */
-const summaryFlashMs = () => scaledMs(DURATION_EMPHASIS_MS) + 100;
-
 /** What identifies an agent's row across rebuilds of the tree. */
 export function agentRowKey(node: AgentTreeNode): string {
     return node.blockId ?? `name:${node.agentName}`;
@@ -223,15 +212,18 @@ export function AgentRowHost(props: {
     return <AgentRow node={node} focusedBlockId={props.focusedBlockId} model={props.model} rowKey={props.rowKey} />;
 }
 
-/** The row's line, with how old it is once the agent's own line has gone stale (it counts on with the row's tick). */
-function LineText(props: { line: SwarmLine; words: readonly string[]; now: number }): JSX.Element {
+/** The checkbox that adds the agent to a fleet action (SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md).
+ *  stopPropagation so checking it doesn't also focus the card's own agent pane. */
+function AgentSelectCheckbox(props: { node: Accessor<AgentTreeNode>; model: SwarmViewModel }): JSX.Element {
     return (
-        <>
-            <Highlight text={props.line.text} words={props.words} />
-            <Show when={lineAt(props.line, props.now).stale && props.line.setAt}>
-                {(setAt) => <span class="swarm-activity-age"> · {formatLineAge(props.now - setAt())}</span>}
-            </Show>
-        </>
+        <input
+            type="checkbox"
+            class="swarm-agent-select-checkbox"
+            checked={props.model.isSelected(props.node().blockId!)}
+            onClick={(e) => e.stopPropagation()}
+            onChange={() => props.model.toggleSelected(props.node().blockId!)}
+            title="Select for a fleet action (broadcast/stop)"
+        />
     );
 }
 
@@ -265,13 +257,11 @@ export function AgentRow({
         node().blockId ? MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", node().blockId))()?.meta : undefined
     );
     const rowColors = createMemo(() => swarmRowColors(blockMeta(), isLightThemeActive()));
-    // Computed HERE, not inside LongRunningBucket, so it can feed `totalRows`
-    // below (reagent P1 on PR #2862). Left in the bucket, an agent whose only
-    // active work was a promoted Bash/sleep call had `hasChildren() === false`
-    // -> no expand chevron -> collapsed by default -> the children container's
-    // `Show when={!collapsed()}` never rendered the bucket at all. That is the
-    // single most common case for this feature, so the bucket was invisible
-    // exactly when it mattered.
+    // The long-running rows are computed here, not inside LongRunningBucket, so they feed `totalRows`
+    // below. Left in the bucket, an agent whose only active work was a promoted Bash/sleep call had
+    // `hasChildren() === false`: no expand chevron, collapsed by default, and the children container's
+    // `Show when={!collapsed()}` never rendered the bucket at all. That is the single most common case
+    // for this feature, so the bucket was invisible exactly when it mattered.
     //
     // Ticks in the view rather than the model because promotion is time-based:
     // the list changes with the clock, not only with backend events.
@@ -311,71 +301,16 @@ export function AgentRow({
         agentChildRowCount(node(), longRunningRows().length, ownBackgroundRows().length, supervisorDecisions().length)
     );
     const hasChildren = createMemo(() => totalRows() > 0);
-
-    const [summaryFlash, setSummaryFlash] = createSignal(false);
-    let flashTimer: ReturnType<typeof setTimeout> | undefined;
-    let prevSummary: string | null = untrack(() => node().activitySummary); // don't flash existing summary on mount
-    createEffect(() => {
-        const summary = node().activitySummary;
-        if (summary && summary !== prevSummary) {
-            clearTimeout(flashTimer);
-            setSummaryFlash(true);
-            flashTimer = setTimeout(() => setSummaryFlash(false), summaryFlashMs());
-        }
-        prevSummary = summary;
-    });
-    onCleanup(() => clearTimeout(flashTimer));
-
+    const summaryFlash = useSummaryFlash(node);
+    const activation = useAgentRowActivation(node, blockMeta);
+    // What srv flags for this agent's registration (another instance claiming it, a refused jekt).
+    const registrationFlag = useRegistrationFlag(() => node().blockId);
     // Rows are `user-select: none` (swarm-view.scss) for the drag/click UX,
     // so unlike a normal text pane there's no way to select-and-Copy — the
     // pane body's generic Copy-on-selection context menu (block/pane-
     // actions.ts) can never fire anything here. This is the only way to
     // copy an agent's name or block id out of Swarm. The sub-rows below use the
     // same helper. See docs/specs/REPORT_CONTEXT_MENU_GAP_AUDIT_2026_08_07.md.
-    // A click is lost when the pressed element is replaced before the button comes
-    // up, so a mouse press selects the agent at once and the click that follows
-    // does nothing more. Touch and pen keep to click: a touch can turn into a scroll.
-    // Keyboard: Enter or Space on the focused card.
-    let pressSelected = false;
-    const selectAgent = () => {
-        const blockId = untrack(() => node().blockId);
-        if (blockId) void revealBlock(blockId, { source: "swarm" });
-    };
-    // An agent that runs with no pane has nothing to focus: the click opens its pane in the active tab,
-    // attached to the running session. One open at a time (a double click is one open), and the parked
-    // mark is read when the click lands, so a pane that appeared meanwhile (another window) is focused.
-    const isParked = () => isParkedMeta(blockMeta());
-    const [opening, setOpening] = createSignal(false);
-    const [openRefused, setOpenRefused] = createSignal("");
-    const openParked = async () => {
-        if (opening()) return;
-        const agentId = agentUidOfBlockMeta(untrack(blockMeta));
-        if (!agentId) {
-            selectAgent();
-            return;
-        }
-        setOpenRefused("");
-        setOpening(true);
-        try {
-            const why = await openAgentInActiveTab({ agent_id: agentId, name: untrack(() => node().agentName) });
-            if (why) setOpenRefused(why);
-        } finally {
-            setOpening(false);
-        }
-    };
-    const activateAgent = () => {
-        if (untrack(isParked)) void openParked();
-        else selectAgent();
-    };
-    // Only controls INSIDE this card count: closest() also walks ancestors, and
-    // the Swarm root above every card has a tabindex, so an unbounded match would
-    // always hit it and skip the guard entirely.
-    const pressedOnControl = (e: { target: EventTarget | null; currentTarget: Element }) => {
-        const control = (e.target as Element | null)?.closest("input, button, select, textarea, a[href], [tabindex]");
-        return !!control && control !== e.currentTarget && e.currentTarget.contains(control);
-    };
-    // What srv flags for this agent's registration (another instance claiming it, a refused jekt).
-    const registrationFlag = useRegistrationFlag(() => node().blockId);
     const handleAgentRowContextMenu = (e: MouseEvent) => {
         showCopyContextMenu(
             [
@@ -400,185 +335,35 @@ export function AgentRow({
                     "--swarm-agent-active-border": rowColors().active,
                     "--swarm-agent-hover-border": rowColors().hover,
                 }}
-                // Selecting an agent focuses ITS pane (switching tabs if it's
-                // a background tab in a multi-tab pane — focusBlock already
-                // handles that), not the Swarm pane itself. stopPropagation
-                // is required: without it this click bubbles to the Swarm
-                // block's own generic click-to-focus (block.tsx's
-                // handleBlockClick) and immediately re-steals focus back to
-                // Swarm (SPEC_SWARM_ROW_AGENT_COLOR_AND_SELECT_TO_FOCUS_2026_09_25.md
-                // §2.3). Clicking the header/empty area (not a row) still
-                // reaches that handler unchanged, which is the desired
-                // "selects the pane" behavior for non-agent-entry clicks.
-                onClick={(e) => {
-                    e.stopPropagation();
-                    // A mouse press already selected the agent (onPointerDown below).
-                    if (pressSelected) {
-                        pressSelected = false;
-                        return;
-                    }
-                    // A control inside the card (a chip, a link) does its own thing; it does not open the pane.
-                    if (untrack(isParked) && pressedOnControl(e)) return;
-                    activateAgent();
-                }}
-                // ...and the Swarm pane must not flash selected first. The
-                // Swarm root is focusable (tabIndex={-1}), so a press anywhere
-                // inside it moves DOM focus there on MOUSEDOWN, before this
-                // click runs; that focusin bubbles to PaneChrome / BlockFrame,
-                // which select the Swarm pane, and the click then hands focus to
-                // the agent's pane — a highlight-unhighlight blink. Cancelling
-                // mousedown's default keeps focus where it is until the click
-                // picks the agent's pane. Only the agent card does this: the
-                // header and empty space still focus (select) the Swarm pane.
-                // Focusable controls inside the card (the fleet checkbox) are
-                // left alone: they need real focus (Space toggles a focused
-                // checkbox), and pressing one is a Swarm action, not "select
-                // this agent" (Codex P2 on #3955).
-                // SPEC_SWARM_ROW_AGENT_COLOR_AND_SELECT_TO_FOCUS_2026_09_25.md §2.3.
-                onPointerDown={(e) => {
-                    pressSelected = false;
-                    if (e.pointerType !== "mouse" || e.button !== 0 || pressedOnControl(e)) return;
-                    if ((e.target as Element | null)?.closest(".swarm-agent-expand-icon")) return;
-                    pressSelected = true;
-                    activateAgent();
-                }}
-                onKeyDown={(e) => {
-                    if (e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ")) return;
-                    e.preventDefault();
-                    e.stopPropagation();
-                    activateAgent();
-                }}
+                onClick={activation.onClick}
+                onPointerDown={activation.onPointerDown}
+                onKeyDown={activation.onKeyDown}
                 role="button"
                 tabIndex={0}
-                onMouseDown={(e) => {
-                    if (pressedOnControl(e)) return;
-                    e.preventDefault();
-                }}
+                onMouseDown={activation.onMouseDown}
                 onContextMenu={handleAgentRowContextMenu}
-                {...tip(isParked() ? `${node().agentName}: ${PARKED_ROW_TITLE}` : node().agentName)}
+                {...tip(activation.isParked() ? `${node().agentName}: ${PARKED_ROW_TITLE}` : node().agentName)}
             >
-                <div class="swarm-agent-row">
-                    {/* Fleet control selection (SPEC_MULTI_AGENT_FLEET_CONTROL_
-                        2026_08_20.md) — only a block with a real blockId can be
-                        a bulk-action target. stopPropagation so checking it
-                        doesn't also focus the card's own agent pane. */}
-                    <Show when={node().blockId} fallback={<span class="swarm-agent-select-spacer" />}>
-                        <input
-                            type="checkbox"
-                            class="swarm-agent-select-checkbox"
-                            checked={model.isSelected(node().blockId!)}
-                            onClick={(e) => e.stopPropagation()}
-                            onChange={() => model.toggleSelected(node().blockId!)}
-                            title="Select for a fleet action (broadcast/stop)"
-                        />
-                    </Show>
-                    {/* Chevron only when there's a subtree to collapse; a
-                        fixed-width spacer otherwise so labels stay aligned
-                        across rows with and without children. Its own click
-                        handler now that the enclosing card's click focuses
-                        the agent's pane instead of toggling collapse
-                        (SPEC_SWARM_ROW_AGENT_COLOR_AND_SELECT_TO_FOCUS_2026_09_25.md
-                        §2.3) — stopPropagation so collapsing doesn't also
-                        move focus. */}
-                    <Show
-                        when={hasChildren()}
-                        fallback={<span class="swarm-agent-expand-spacer" />}
-                    >
-                        <i
-                            class={`fa-solid fa-${collapsed() ? "chevron-right" : "chevron-down"} swarm-agent-expand-icon`}
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                if (node().blockId) model.toggleAgentCollapsed(node().blockId);
-                            }}
-                        />
-                    </Show>
-                    <span class="swarm-agent-icon">
-                        <SwarmProviderIcon provider={node().agentProvider} unknownTitle={LOCAL_PROVIDER_UNKNOWN} />
-                    </span>
-                    <span class="swarm-agent-label">
-                        <Highlight text={node().agentName} words={highlightWords(model, "name")} />
-                    </span>
-                    <SwarmSeatBadge meta={blockMeta()} />
-                    {/* Running with no pane (closing its pane, tab or window parked it): the same
-                        mark My Agents puts on its row; a click on the row opens its pane. */}
-                    <Show when={isParked()}>
-                        <Tag tone="ok" title="Running with no pane. Click to open.">
-                            No pane
-                        </Tag>
-                    </Show>
-                    {/* Turns this agent didn't get from you that finished
-                        unseen: the same mark as its pane header (UnseenTurnsDot). */}
-                    <Show when={node().blockId}>{(blockId) => <UnseenTurnsDot blockId={blockId()} />}</Show>
-                    <Show when={collapsed() && hasChildren()}>
-                        <span class="swarm-agent-collapsed-count">{totalRows()}</span>
-                    </Show>
-                    <Show when={node().contextTokens != null}>
-                        <span class="swarm-ctx-size">{fmtCtx(node().contextTokens!)}</span>
-                    </Show>
-                    <Show when={lastActiveText()}>
-                        <span class="swarm-last-active" {...tip(lastActiveTitle(lastActive()))}>
-                            {lastActiveText()}
-                        </span>
-                    </Show>
-                    <LongToolNote rows={longRunningRows} live={() => node().agentStatus === "running"} now={rowNow} />
-                    <BuildSlotNote blockId={node().blockId} now={rowNow} />
-                    <RowStateNotes meta={blockMeta()} />
-                    <RegistrationBadge flag={registrationFlag} />
-                    <Show
-                        when={unavailable()}
-                        fallback={
-                            <AgentStatusChip
-                                status={displayStatus()}
-                                awaitingUser={isAwaitingUser(blockMeta(), node().agentStatus)}
-                                blockId={node().blockId}
-                            />
-                        }
-                    >
-                        {(u) => <UnavailableChip unavailable={u()} now={rowNow} />}
-                    </Show>
-                    <Show when={node().blockId}>
-                        {(blockId) => (
-                            <SupervisorChip
-                                meta={blockMeta()}
-                                live={node().agentStatus === "running"}
-                                onSet={(mode) => setSupervisorMode(blockId(), mode)}
-                            />
-                        )}
-                    </Show>
-                </div>
-                {/* Never empty: the generated title, or a fallback shown muted
-                    with a tooltip saying it is one (store/swarm-line.ts). */}
-                <div
-                    classList={{
-                        "swarm-activity-summary": true,
-                        "swarm-activity-summary--flash": summaryFlash(),
-                        "swarm-activity-summary--fallback": isMutedLine(node().line, rowNow()) || unavailable() !== null,
-                    }}
-                    {...tip(unavailable() ? unavailableTitle(unavailable()!) : swarmLineTooltip(node().line, rowNow()))}
-                >
-                    {/* An agent that can't start a turn says so ahead of any title. Read from the
-                        row's tick, like the chip, so the words go when the reset passes. */}
-                    {unavailable() ? (
-                        unavailableLineText(unavailable()!, rowNow())
-                    ) : (
-                        <LineText line={node().line} words={highlightWords(model, "work")} now={rowNow()} />
-                    )}
-                </div>
-                {/* The Kanban task this agent is on, which opens it on the Kanban pane (SPEC_WARDEN_KANBAN_2026_10_20.md §6.14). */}
-                <Show when={node().blockId}>{(blockId) => <HeldTaskChip blockId={blockId()} />}</Show>
-                {/* The literal call in flight, next to the Haiku paraphrase
-                    above it. Deliberately OUTSIDE the collapsed() guard: it is
-                    one line, it is the most perishable thing on the card, and
-                    a collapsed agent is exactly when you want to know what it
-                    is doing without expanding it. */}
-                <Show when={node().currentTool}>
-                    <div class="swarm-current-tool">
-                        <i class="fa-solid fa-bolt swarm-current-tool-icon" />
-                        <span class="swarm-current-tool-name">{node().currentTool}</span>
-                    </div>
-                </Show>
+                <AgentCardHead
+                    node={node}
+                    model={model}
+                    blockMeta={blockMeta}
+                    collapsed={collapsed}
+                    hasChildren={hasChildren}
+                    totalRows={totalRows}
+                    isParked={activation.isParked}
+                    lastActive={lastActive}
+                    lastActiveText={lastActiveText}
+                    longRunningRows={longRunningRows}
+                    registrationFlag={registrationFlag}
+                    unavailable={unavailable}
+                    displayStatus={displayStatus}
+                    rowNow={rowNow}
+                    selectBox={<AgentSelectCheckbox node={node} model={model} />}
+                />
+                <AgentCardLines node={node} model={model} unavailable={unavailable} summaryFlash={summaryFlash} rowNow={rowNow} />
             </div>
-            <Show when={openRefused()}>
+            <Show when={activation.openRefused()}>
                 {(why) => (
                     <div class="swarm-stopped__error" role="alert">
                         {why()}

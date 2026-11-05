@@ -1,0 +1,35 @@
+Bash: <div class="agent-node-peek-overlay">
+<div class="agent-node-peek-tooltip-meta">
+<span class="agent-node-peek-tooltip-tokens">~6 tok (est.)</span>
+</div>
+<div class="agent-node-peek-tooltip-body" data-tool="bash">
+<span class="agent-node-peek-tooltip-tool">Bash</span> <span class="agent-shell-command">
+<span class="sh-program">ls</span> <span class="sh-flag">-la</span>
+</span>
+</div>
+</div>
+
+Bash, after leaving: gone
+Read a path: <div class="agent-node-peek-overlay">
+<div class="agent-node-peek-tooltip-meta">
+<span class="agent-node-peek-tooltip-tokens">~7 tok (est.)</span>
+</div>
+<div class="agent-node-peek-tooltip-body" data-tool="read">
+<span class="agent-node-peek-tooltip-tool">Read</span> /a/b.ts</div>
+</div>
+
+Read a path, after leaving: gone
+an MCP tool: <div class="agent-node-peek-overlay">
+<div class="agent-node-peek-tooltip-meta">
+<span class="agent-node-peek-tooltip-tokens">~3 tok (est.)</span>
+</div>
+</div>
+
+an MCP tool, after leaving: gone
+nothing to show: <div class="agent-node-peek-overlay">
+<div class="agent-node-peek-tooltip-meta">
+<span class="agent-node-peek-tooltip-tokens">~1 tok (est.)</span>
+</div>
+</div>
+
+nothing to show, after leaving: gone

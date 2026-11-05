@@ -1,0 +1,146 @@
+{
+  "ok": true,
+  "nodejsError": null,
+  "launchError": null,
+  "calls": [
+    {
+      "cmd": "ResolvePrereqs",
+      "data": {
+        "tools": [
+          "node",
+          "npm"
+        ]
+      }
+    },
+    {
+      "cmd": "ResolveCli",
+      "data": {
+        "provider_id": "claude",
+        "cli_command": "claude",
+        "npm_package": "@anthropic-ai/claude-code",
+        "pinned_version": "2.1.288",
+        "windows_install_command": "irm https://claude.ai/install.ps1 | iex",
+        "unix_install_command": "curl -fsSL https://claude.ai/install.sh | bash",
+        "block_id": "block-1",
+        "notice_block_id": "block-1",
+        "agent_id": "agent-1"
+      },
+      "opts": {
+        "timeout": 300000
+      }
+    },
+    {
+      "cmd": "GetAllAgentContent",
+      "data": {
+        "agent_id": "agent-1"
+      }
+    },
+    {
+      "cmd": "EnsureProviderAuthDir",
+      "data": {
+        "provider_id": "claude"
+      }
+    },
+    {
+      "cmd": "WriteAgentConfig",
+      "data": {
+        "working_dir": "/srv/home/agents/korp",
+        "files": [],
+        "render_from_agent": true,
+        "instance_name": "Korp",
+        "auto_allocate": false,
+        "agent_type": "host",
+        "agent_id": "agent-1"
+      }
+    },
+    {
+      "cmd": "CreateAgentInstance",
+      "data": {
+        "definition_id": "agent-1",
+        "block_id": "block-1",
+        "instance_name": "Korp",
+        "working_directory": "/srv/home/agents/korp"
+      }
+    },
+    {
+      "cmd": "SetMeta",
+      "data": {
+        "oref": "block:block-1",
+        "meta": {
+          "agentId": "agent-1",
+          "agentProvider": "claude",
+          "agentOutputFormat": "claude-stream-json",
+          "agentName": "Korp",
+          "agentIcon": "robot",
+          "agentMode": "host",
+          "agent:provider_flags": "",
+          "agent:container_image": null,
+          "agent:container_volumes": null,
+          "agent:container_command": null,
+          "controller": "persistent",
+          "cmd": "/cli/claude",
+          "cmd:args": [
+            "--input-format",
+            "stream-json",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--include-partial-messages",
+            "--exclude-dynamic-system-prompt-sections",
+            "--replay-user-messages",
+            "--permission-prompt-tool",
+            "stdio",
+            "--permission-mode",
+            "default",
+            "--model",
+            "sonnet",
+            "--effort",
+            "high"
+          ],
+          "cmd:cwd": "/srv/home/agents/korp",
+          "cmd:env": {
+            "CLAUDECODE": "",
+            "GH_CONFIG_DIR": "/srv/home/config/gh-korp",
+            "AGENTMUX_AGENT_ID": "korp",
+            "AGENTMUX_AGENT_SLUG": "korp",
+            "AGENTMUX_INSTANCE_SLUG": "korp",
+            "AGENTMUX_AGENT_DISPLAY": "Korp",
+            "GIT_AUTHOR_NAME": "Korp",
+            "GIT_AUTHOR_EMAIL": "korp@agents.local",
+            "GIT_COMMITTER_NAME": "Korp",
+            "GIT_COMMITTER_EMAIL": "korp@agents.local",
+            "CLAUDE_CONFIG_DIR": "/shared/providers/claude"
+          },
+          "agent:resume_flag": "--resume",
+          "agent:resume_strategy": "flag",
+          "agent:session_id_field": "session_id",
+          "agent:prompt_arg_flag": "",
+          "agent:sessionid": "",
+          "agent:runtime": {
+            "permissionMode": "bypass",
+            "model": "sonnet",
+            "effort": "high"
+          },
+          "term:zoom": 1.25,
+          "frame:activebordercolor": "#336699",
+          "agentInstanceId": "inst-1"
+        }
+      }
+    },
+    {
+      "cmd": "ControllerResync",
+      "data": {
+        "tabid": "tab-static",
+        "blockid": "block-1",
+        "forcerestart": true
+      }
+    }
+  ],
+  "logs": [
+    "trace: cli",
+    "info: Launching agent definition Korp (claude)",
+    "trace: config",
+    "focus requested: block-1",
+    "trace: committed"
+  ]
+}

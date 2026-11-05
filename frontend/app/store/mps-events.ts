@@ -170,6 +170,7 @@ export const WpsEvent = {
     MemoriesChanged: "memories:changed",
     OpenFloatingPane: "openfloatingpane",
     SigninLink: "identity:signinlink",
+    GoogleNotice: "google:notice",
     ProcessBrokerTrackedBlocksChanged: "processbroker:tracked-blocks-changed",
     SkillsChanged: "skills:changed",
     SubagentAbandoned: "subagent:abandoned",
@@ -197,6 +198,12 @@ export const WpsEvent = {
     NotificationRetract: "notification:retract",
     ToolChunk: "tool_chunk",
     ViewerPaired: "viewer:paired",
+    /** The wake-ups for the Settings panels that list data (domain-store.ts): reload what you show. */
+    AgentHiddenChanged: "agenthidden:changed",
+    BrowserGrantsChanged: "browsergrants:changed",
+    BrowserProfilesChanged: "browserprofiles:changed",
+    PinsChanged: "pins:changed",
+    ViewerDevicesChanged: "viewerdevices:changed",
     /** What srv knows about newer AgentMux releases (crates/srv/src/backend/update/check.rs). */
     AppUpdateStatus: "app:updatestatus",
     /** Agents' requests to upgrade AgentMux, waiting for the user (crates/srv/src/backend/upgrade_request.rs). */

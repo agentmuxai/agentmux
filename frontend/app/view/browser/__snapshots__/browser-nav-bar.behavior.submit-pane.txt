@@ -1,0 +1,16 @@
+diag sync urlAtom="https://example.com/" addressBar="https://example.com/" focused=false willUpdate=false
+listen browser-pane-shortcut
+diag input-focus value="https://example.com/" relatedTarget=null
+reclaimWindowFocus main
+diag sync urlAtom="https://example.com/" addressBar="first.example" focused=true willUpdate=false
+autocomplete block-1 "first.example" suggest=true
+diag input-submit value="first.example"
+model navigate https://first.example
+diag sync urlAtom="https://example.com/" addressBar="https://first.example" focused=true willUpdate=false
+createPane https://first.example
+diag sync urlAtom="https://example.com/" addressBar="second.example" focused=true willUpdate=false
+autocomplete block-1 "second.example" suggest=true
+diag input-submit value="second.example"
+model navigate https://second.example
+diag sync urlAtom="https://example.com/" addressBar="https://second.example" focused=true willUpdate=false
+pane navigate block-1 https://second.example

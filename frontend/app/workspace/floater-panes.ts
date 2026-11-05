@@ -62,14 +62,16 @@ export function floaterPaneBlockId(tabId: string): string | undefined {
 }
 
 /** `RedockFloatingPane` for one floater pane: all of its tabs go, in order. A
- *  one-tab pane makes exactly the call it always did. */
+ *  one-tab pane makes exactly the call it always did. `toOrigin` (the Redock button) asks srv to put the
+ *  pane back where it was torn from, with `target` as the fallback. */
 export function redockFloaterPane(
     pane: FloaterPane,
     source: { tabId: string; workspaceId: string },
     target: { tabId: string; workspaceId: string },
-    ghost?: { blockId?: string | null; dir?: number | null; asTab?: boolean }
+    ghost?: { blockId?: string | null; dir?: number | null; asTab?: boolean },
+    toOrigin?: boolean
 ) {
-    if (pane.members.length < 2) {
+    if (pane.members.length < 2 && !toOrigin) {
         if (ghost?.asTab) {
             // Joins the hovered pane's tabs instead of becoming a pane of its own.
             return WorkspaceService.RedockFloatingPane(
@@ -111,6 +113,7 @@ export function redockFloaterPane(
         ghost?.dir ?? null,
         ghost?.asTab ?? false,
         pane.members,
-        pane.activeBlockId
+        pane.activeBlockId,
+        ...(toOrigin ? [true] : [])
     );
 }

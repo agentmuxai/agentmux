@@ -1,0 +1,8 @@
+diag sync urlAtom="https://example.com/" addressBar="https://example.com/" focused=false willUpdate=false
+listen browser-pane-shortcut
+ignored active=false
+diag shortcut-focus-address
+reclaimWindowFocus main
+diag input-focus value="https://example.com/" relatedTarget=null
+reclaimWindowFocus main
+active=true sel=0-20

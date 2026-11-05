@@ -215,6 +215,7 @@ pub(crate) fn upsert(state: &AppState, agent: &str, sites: &[String], powers: &[
         bypass::end_standing(state, &row.id, "you changed what it may do");
     }
     tracing::info!(agent = %row.agent, origins = ?row.origins, powers = ?row.powers, "[browser-standing] a standing grant was set");
+    state.broker.publish_event::<crate::backend::mps_events::BrowserGrantsChanged>(&(), vec![], 0);
     Ok(row)
 }
 
@@ -245,6 +246,7 @@ pub(crate) fn set_powers(state: &AppState, id: &str, powers: &[String]) -> Resul
         row
     };
     bypass::end_standing(state, &row.id, "you changed what it may do");
+    state.broker.publish_event::<crate::backend::mps_events::BrowserGrantsChanged>(&(), vec![], 0);
     Ok(row)
 }
 
@@ -264,6 +266,7 @@ pub(crate) fn revoke(state: &AppState, id: &str) -> bool {
     };
     if removed {
         bypass::end_standing(state, id, "you revoked it");
+        state.broker.publish_event::<crate::backend::mps_events::BrowserGrantsChanged>(&(), vec![], 0);
         tracing::info!(row = %id, "[browser-standing] a standing grant was revoked");
     }
     removed

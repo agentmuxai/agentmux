@@ -22,9 +22,11 @@ No image tools needed: the script reads the rectangles from the SVGs and draws t
 
 - Linux: `assets/linux/icons/hicolor/<size>/apps/agentmux.png` (16 to 512), the dark icon.
 - Windows: `crates/cef/resources/win/agentmux.ico` (16, 24, 32, 48, 64, 256), the dark icon, used by the exe, the launcher, srv and mcp.
+- Windows, the light one: `crates/cef/resources/win/agentmux-light.ico` (same sizes), embedded in the host as resource 2 beside the dark one (resource 1). The window and taskbar icon follow the Windows theme: dark while Windows is dark, this one while it is light, switching live (`crates/cef/src/client/window_icon.rs`). The exe's own icon, in Explorer, stays the dark one.
 - The frontend's `frontend/app/asset/agentmux-icon.png` (256), and the tray and notification PNGs `assets/favicon-{71,150,300}x*.png`.
 - MSIX (`packaging/msix/assets/`): the Store and tile logos, and `Square44x44Logo.targetsize-N_altform-unplated.png` (dark tile) and `..._altform-lightunplated.png` (light tile) for the taskbar. Windows picks the light-taskbar one when the taskbar is light.
 - macOS: `assets/macos/agentmux-1024.png`, the four blocks on Apple's rounded template (an 824 px rounded square with corner radius 185 on a 1024 canvas, so the Dock's spacing holds). `scripts/package-macos.sh` builds `AgentMux.icns` from it. macOS rounds the tile itself, so a square tile would sit wrong in the Dock; the blocks stay square. `crates/launcher/resources/menubar-template.png` is the blocks alone, black on transparent (macOS colours a template image from its alpha).
+- The mark the app draws for itself, the four blocks alone with no tile: `frontend/app/asset/logo-mark.svg` (the loading spinner, the empty-pane logo, the empty tab), `crates/launcher/resources/brain.png` (the native splash on Windows, macOS and Linux; 256 x 256 RGBA, the size `build.rs` reads, and it keeps its old file name so the Rust code is untouched), and, by hand, the inline SVG in `index.html`'s `#startup-loading` (a test keeps it equal to `logo-mark.svg`).
 - The web set, `assets/icon/web/` (for the landing and docs sites, which live in other repos): `favicon.svg` (the dark icon, and the light one when the browser is in dark mode, since its tab strip is dark), `favicon-32.png` and `favicon-32-dark-mode.png`, `apple-touch-icon-180.png`, `favicon.ico`. Use them as:
 
 ```html
@@ -32,3 +34,8 @@ No image tools needed: the script reads the rectangles from the SVGs and draws t
 <link rel="icon" href="/favicon.ico" sizes="48x48">  <!-- Safari and others without SVG favicons -->
 <link rel="apple-touch-icon" href="/apple-touch-icon-180.png">
 ```
+
+## Record
+
+- 2026-11-03, Agent1@narko: the operator picked variant 1 (mono, dark tile) as the app icon everywhere and variant 5 (mono, light, with an edge) only where a platform switches on the theme by itself (the SVG favicon, the Store's light-taskbar assets). Sources and every raster landed in #6358.
+- 2026-11-04, Agent1@narko: the app's own marks (pre-splash, native splash, loading spinner, empty-pane logo, empty tab) draw the four blocks instead of the old brain. Still open: the Windows window and taskbar icon following the theme (a Rust host change, needs a Windows agent), and a check of the MSIX light-taskbar assets on a real package (Area54).

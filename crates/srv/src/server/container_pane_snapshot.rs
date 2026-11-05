@@ -380,7 +380,7 @@ mod tests {
         meta.insert("cmd:cwd".to_string(), serde_json::json!(tmp.path().to_string_lossy()));
         let mut block = crate::backend::obj::Block { oid: uuid::Uuid::new_v4().to_string(), meta, ..Default::default() };
         state.mstore.insert(&mut block).unwrap();
-        let token = crate::backend::container_credential::token_for_block(&block.oid, Some("agent-tok"));
+        let token = crate::backend::container::credential::token_for_block(&block.oid, Some("agent-tok"));
         let app = crate::server::build_router(state);
         let call = |key: String, body: &'static str| {
             let app = app.clone();

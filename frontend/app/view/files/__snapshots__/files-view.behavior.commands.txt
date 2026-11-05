@@ -1,0 +1,60 @@
+model.setSelection({"names":["b.txt"],"focus":"b.txt","anchor":"b.txt"})
+model.goBack()
+files:back -> true
+model.goForward()
+files:forward -> true
+model.goUp()
+files:up -> true
+model.setRenaming("b.txt")
+files:rename -> true
+model.refresh()
+files:refresh -> true
+model.trash(["<b.txt>"])
+files:trash -> true
+model.setSelection({"names":["src","a.md","b.txt","pic.png","run.exe"],"focus":"b.txt","anchor":"b.txt"})
+files:selectAll -> true
+model.undo()
+files:undo -> true
+model.copyToClipboard("copy", ["<src>","<a.md>","<b.txt>","<pic.png>","<run.exe>"])
+files:copy -> true
+model.copyToClipboard("cut", ["<src>","<a.md>","<b.txt>","<pic.png>","<run.exe>"])
+files:cut -> true
+model.paste()
+files:paste -> true
+model.createNew("dir")
+files:newFolder -> true
+openFolderInNewTab(["b1","/home/a",null])
+files:newTabHere -> true
+model.setSelection({"names":["src","b.txt"],"focus":"b.txt","anchor":"src"})
+openFolderInNewTab(["b1","/home/a/src",null])
+openInEditor(/home/a/b.txt)
+files:openInNewTab -> true
+files:rename -> true
+files:deletePermanently -> true
+dialog: Delete 2 items permanently?This can't be undone: it skips the Trash. Folders are deleted with everything in them.CancelDelete permanently
+model.deletePermanently(["<src>","<b.txt>"])
+model.setSelection({"names":[]})
+files:deletePermanently -> true
+dialog with nothing selected: false
+closeOwnTab(b1)
+files:closeTab -> true
+closeOwnTab(b1)
+files:closeTab -> true
+model.setStatus({"text":"This is the pane's only tab. Use the pane's × to close it.","tone":"info"}, 3000)
+closeOwnTab(b1)
+files:closeTab -> true
+model.setStatus({"text":"Couldn't close this tab: boom","tone":"error"})
+model.setSelection({"names":["b.txt"],"focus":"b.txt","anchor":"b.txt"})
+model.copyToClipboard("copy", ["<b.txt>"])
+files:copy -> true
+model.setStatus({"text":"Couldn't copy to the clipboard","tone":"error"})
+model.copyToClipboard("copy", ["<b.txt>"])
+files:copy -> true
+clipboard writes: ["/home/a/src\n/home/a/a.md\n/home/a/b.txt\n/home/a/pic.png\n/home/a/run.exe","/home/a/b.txt","/home/a/b.txt"]
+mentionInAgent(["<b.txt>"])
+files:mention -> true
+files:editPath -> true
+path box open: true focused=true
+files:filter -> true
+filter box open: true focused=true
+files:nope -> false

@@ -19,6 +19,7 @@
 import { createEffect, onCleanup, untrack, type Accessor } from "solid-js";
 import { getBlockMetaKeyAtom } from "@/app/store/block-atom-cache";
 import { registerRecycleBlocker } from "@/app/store/recycle-blockers";
+import { registerReloadSaver } from "@/app/store/recycle-savers";
 import { readSession, writeSession } from "../reload-persistence";
 
 const KEY = "agentmux:scroll:";
@@ -86,6 +87,11 @@ export function saveScrollMemos(): void {
 }
 
 if (typeof window !== "undefined") window.addEventListener("pagehide", saveScrollMemos);
+
+registerReloadSaver(() => {
+    saveScrollMemos();
+    return null;
+});
 
 /**
  * Whether `blockId` has a saved position that isn't "at the bottom": a row to

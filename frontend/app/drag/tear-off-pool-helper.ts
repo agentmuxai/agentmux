@@ -20,6 +20,7 @@
 import type { getApi } from "@/store/global";
 import { Logger } from "@/util/logger";
 import { inheritAppearanceInto, markWindowOpen } from "@/app/store/window-appearance";
+import { endLiveFollow } from "./live-follow";
 
 type Api = ReturnType<typeof getApi>;
 
@@ -168,6 +169,7 @@ export async function openTearOffWindow(
             snapshot,
         );
         inheritAppearanceInto(label, mark);
+        endLiveFollow(api);
         return { label, pooled: true };
     } catch (poolErr) {
         Logger.warn("dnd:cross", "pool promote failed, cold-pathing", {
@@ -175,6 +177,7 @@ export async function openTearOffWindow(
         });
         const label = await api.openWindowAtPosition(screenX, screenY, newWsId, width, height, tabAnchorX, tabAnchorY);
         inheritAppearanceInto(label, mark);
+        endLiveFollow(api);
         return { label, pooled: false };
     }
 }

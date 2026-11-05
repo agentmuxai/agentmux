@@ -1,0 +1,10 @@
+diag sync urlAtom="https://example.com/" addressBar="https://example.com/" focused=false willUpdate=false
+listen browser-pane-shortcut
+diag input-mousedown value="https://example.com/"
+reclaimWindowFocus main
+diag input-focus value="https://example.com/" relatedTarget=null
+reclaimWindowFocus main
+diag input-blur value="https://example.com/" relatedTarget=null now-active=body
+diag input-focus value="https://example.com/" relatedTarget=null
+reclaimWindowFocus main
+diag input-blur value="https://example.com/" relatedTarget=button.other now-active=button.other

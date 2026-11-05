@@ -170,6 +170,13 @@
     }
   },
   {
+    "event": "agenthidden:changed",
+    "payloadTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
     "event": "agenthistory:changed",
     "payloadTs": {
       "imports": [],
@@ -361,12 +368,26 @@
     }
   },
   {
+    "event": "browsergrants:changed",
+    "payloadTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
     "event": "browserpauseall",
     "payloadTs": {
       "imports": [
         "BrowserPauseAll"
       ],
       "name": "BrowserPauseAll"
+    }
+  },
+  {
+    "event": "browserprofiles:changed",
+    "payloadTs": {
+      "imports": [],
+      "name": "null"
     }
   },
   {
@@ -499,6 +520,15 @@
         "FsOpEvent"
       ],
       "name": "FsOpEvent"
+    }
+  },
+  {
+    "event": "google:notice",
+    "payloadTs": {
+      "imports": [
+        "GoogleNoticeEvent"
+      ],
+      "name": "GoogleNoticeEvent"
     }
   },
   {
@@ -719,6 +749,13 @@
     }
   },
   {
+    "event": "pins:changed",
+    "payloadTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
     "event": "processbroker:status-changed",
     "payloadTs": {
       "imports": [
@@ -917,6 +954,13 @@
         "ViewerPairedEvent"
       ],
       "name": "ViewerPairedEvent"
+    }
+  },
+  {
+    "event": "viewerdevices:changed",
+    "payloadTs": {
+      "imports": [],
+      "name": "null"
     }
   },
   {

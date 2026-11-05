@@ -458,7 +458,12 @@ class WorkspaceServiceType {
     // redocks all of them. `blockId` is the first member, which lands as the
     // pane; the rest land as its tabs in order; `activeBlockId` ends visible.
     //
-    // @returns { redocked: true, block_id, target_tab_id } (and object updates)
+    // `toOrigin`: the Redock button. Put the pane back where it was torn from when that place can still be found
+    // (beside its old neighbour, or as a tab of its pane); the target named above is then only the fallback.
+    // `placed` says which: "stack", "neighbour" or "fallback". A drag redock leaves `toOrigin` off.
+    // SPEC_FLOATING_PANE_REDOCK_TO_ORIGIN_2026_11_03.md
+    //
+    // @returns { redocked: true, block_id, target_tab_id, target_workspace_id, placed } (and object updates)
     RedockFloatingPane(
         blockId: string,
         sourceTabId: string,
@@ -470,7 +475,14 @@ class WorkspaceServiceType {
         asTab?: boolean,
         members?: string[],
         activeBlockId?: string,
-    ): Promise<{ redocked: boolean; block_id?: string; target_tab_id?: string }> {
+        toOrigin?: boolean,
+    ): Promise<{
+        redocked: boolean;
+        block_id?: string;
+        target_tab_id?: string;
+        target_workspace_id?: string;
+        placed?: "stack" | "neighbour" | "fallback";
+    }> {
         return MOS.callBackendService("workspace", "RedockFloatingPane", Array.from(arguments))
     }
 }

@@ -1,0 +1,20 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Three fixed monospace cells, so a frame never shifts the text beside it.
+.activity-animation {
+    display: inline-block;
+    flex-shrink: 0;
+    width: 3ch;
+    white-space: pre;
+    text-align: left;
+    font-family: var(--font-mono);
+    font-weight: 600;
+    line-height: 1;
+    color: currentColor;
+}
+
+.activity-animation-tip {
+    display: inline-flex;
+    flex-shrink: 0;
+}

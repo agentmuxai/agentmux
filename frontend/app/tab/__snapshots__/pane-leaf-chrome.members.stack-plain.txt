@@ -1,0 +1,18 @@
+Block mount h1 wrapper#1 hoisted=true preview=false
+agentMountSettled h1
+agentMountSettled s1
+setBlockMinimized h1 false
+setBlockMinimized s1 false
+Block h1 memberActive=true
+leaf setActiveViewModel h1
+Block h1 set its vm
+renderPaneChrome by vm of h1
+dom chrome=1 shell=0 blocks=["h1"] slots=[]
+Block mount s1 wrapper#2 hoisted=true preview=false
+Block unmount h1
+leaf setActiveViewModel null
+Block s1 memberActive=true
+leaf setActiveViewModel s1
+Block s1 set its vm
+dom chrome=1 shell=0 blocks=["s1"] slots=[]
+chrome sees vm of s1

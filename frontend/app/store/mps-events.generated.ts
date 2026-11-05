@@ -39,6 +39,7 @@ import type { DockClearEvent } from "@/types/rpc/DockClearEvent";
 import type { EventsDroppedEvent } from "@/types/rpc/EventsDroppedEvent";
 import type { FilesChangedEvent } from "@/types/rpc/FilesChangedEvent";
 import type { FsOpEvent } from "@/types/rpc/FsOpEvent";
+import type { GoogleNoticeEvent } from "@/types/rpc/GoogleNoticeEvent";
 import type { IncidentEvent } from "@/types/rpc/IncidentEvent";
 import type { InputHistoryChangedEvent } from "@/types/rpc/InputHistoryChangedEvent";
 import type { InstallChunkEvent } from "@/types/rpc/InstallChunkEvent";
@@ -115,6 +116,7 @@ export type MuxEventPayloads = {
   "agentcontent:changed": null;
   agentcontextusage: AgentContextUsageEvent;
   agentfailure: AgentFailure;
+  "agenthidden:changed": null;
   "agenthistory:changed": null;
   agentruntime: AgentRuntimeEvent;
   "agents:changed": null;
@@ -134,7 +136,9 @@ export type MuxEventPayloads = {
   "block:reveal": BlockRevealEvent;
   blockfile: WSFileEventData;
   blockstats: TimeSeriesData;
+  "browsergrants:changed": null;
   browserpauseall: BrowserPauseAll;
+  "browserprofiles:changed": null;
   btw_answer_chunk: BtwAnswerChunkEvent;
   compaction_started: CompactionStarted;
   config: ConfigEvent;
@@ -149,6 +153,7 @@ export type MuxEventPayloads = {
   "editor:file_changed": PathChangedEvent;
   "files:changed": FilesChangedEvent;
   "files:op": FsOpEvent;
+  "google:notice": GoogleNoticeEvent;
   "identity:no-direct-links": NoDirectLinksEvent;
   "identity:signinlink": SigninLinkEvent;
   "identityaccounts:changed": null;
@@ -174,6 +179,7 @@ export type MuxEventPayloads = {
   openfloatingpane: OpenFloatingPaneEvent;
   output: ProtocolFrame;
   "pane:agentopened": PaneAgentOpenedEvent;
+  "pins:changed": null;
   "processbroker:status-changed": ProcessStatus;
   "processbroker:tracked-blocks-changed": null;
   remoteschange: null;
@@ -197,6 +203,7 @@ export type MuxEventPayloads = {
   userattention: UserAttentionEvent;
   vault: VaultEvent;
   "viewer:paired": ViewerPairedEvent;
+  "viewerdevices:changed": null;
   "waveobj:batchedupdates": MuxObjBatch;
   "waveobj:update": MuxObjUpdate;
   widgetpackages: WidgetPackagesEvent;
@@ -231,6 +238,7 @@ export const TYPED_MUX_EVENTS = [
   "agentcontent:changed",
   "agentcontextusage",
   "agentfailure",
+  "agenthidden:changed",
   "agenthistory:changed",
   "agentruntime",
   "agents:changed",
@@ -250,7 +258,9 @@ export const TYPED_MUX_EVENTS = [
   "block:reveal",
   "blockfile",
   "blockstats",
+  "browsergrants:changed",
   "browserpauseall",
+  "browserprofiles:changed",
   "btw_answer_chunk",
   "compaction_started",
   "config",
@@ -265,6 +275,7 @@ export const TYPED_MUX_EVENTS = [
   "editor:file_changed",
   "files:changed",
   "files:op",
+  "google:notice",
   "identity:no-direct-links",
   "identity:signinlink",
   "identityaccounts:changed",
@@ -290,6 +301,7 @@ export const TYPED_MUX_EVENTS = [
   "openfloatingpane",
   "output",
   "pane:agentopened",
+  "pins:changed",
   "processbroker:status-changed",
   "processbroker:tracked-blocks-changed",
   "remoteschange",
@@ -313,6 +325,7 @@ export const TYPED_MUX_EVENTS = [
   "userattention",
   "vault",
   "viewer:paired",
+  "viewerdevices:changed",
   "waveobj:batchedupdates",
   "waveobj:update",
   "widgetpackages",
@@ -329,18 +342,23 @@ export function isNoPayloadMuxEvent(eventType: string): boolean {
 
 const NO_PAYLOAD_MUX_EVENTS: ReadonlySet<string> = new Set([
   "agentcontent:changed",
+  "agenthidden:changed",
   "agenthistory:changed",
   "agents:changed",
   "agentskills:changed",
+  "browsergrants:changed",
+  "browserprofiles:changed",
   "cron_changed",
   "drones:changed",
   "identityaccounts:changed",
   "mcp:changed",
   "memories:changed",
   "namedagents:changed",
+  "pins:changed",
   "processbroker:tracked-blocks-changed",
   "remoteschange",
   "skills:changed",
+  "viewerdevices:changed",
   "workqueue:changed",
 ]);
 
