@@ -1,40 +1,47 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Hamburger (☰) button. Top-level (un-nested) so the same rule applies
-// whether the button is rendered inside `.tab-bar` (Windows/Linux) or as a
-// direct child of `.window-header` (macOS far-right). Moved here from
-// tabbar.scss when the menu was extracted into <HamburgerMenu>.
+// The menu button: the AgentMux mark that opens the app menu (the class names keep the old "hamburger", from
+// when it was three bars). Top-level (un-nested) so the same rules apply whether the button is rendered inside
+// `.tab-bar` (Windows/Linux) or as a direct child of `.window-header` (macOS far-right).
+//
+// Two boxes, one job each:
+//   .hamburger-anchor  the flex item in its bar (FlyoutMenu's anchor div, `anchorClass`): its size, its place
+//                      in the row and its spacing from the neighbours.
+//   .hamburger-btn     fills the anchor and centres the mark in it; the colour and its states.
+// The anchor spans the header's whole band, the same way the window controls do (window-controls.win32.scss):
+// `.window-header` keeps `--space-1-5` of padding above the tab bar (the drag gutter), so a box that is only
+// as tall as the tab bar would centre the mark in the lower part of the band. Pulling the anchor up by the
+// gutter and growing it by the same amount makes centring in the anchor centre the mark in the band, with no
+// per-platform nudge.
 
 @use "../mixins.scss";
 
-.hamburger-btn {
-    flex-shrink: 0;
-    @include mixins.flex-center;
+.hamburger-anchor {
+    flex: none;
+    // Up to the band's top edge (out of the gutter), down to the band's bottom edge less the 1px line the tabs
+    // sit on (`--snap-chrome`): 32 of the band's 33px, which a 20px mark centres in on whole pixels.
+    align-self: flex-start;
+    margin: calc(-1 * var(--space-1-5)) 4px 0;
     width: 28px;
-    height: 27px;
+    height: calc(100% + var(--space-1-5) - var(--snap-chrome));
+    -webkit-app-region: no-drag;
+    cursor: default;
+}
+
+// macOS: pinned to the far right of the title bar, after the action widgets. More room on the window-frame side.
+.hamburger-anchor--right {
+    margin-right: 8px;
+}
+
+.hamburger-btn {
+    @include mixins.flex-center;
+    width: 100%;
+    height: 100%;
     @include mixins.button-reset;
     color: var(--brand-mark-color);
     -webkit-app-region: no-drag;
     cursor: default;
-    align-self: center;
-    // Windows/Linux left-of-tabs placement: manually tuned against a live
-    // task dev instance (three rounds: geometric center alone read too
-    // high, +1px still wasn't enough, +2px was) — independent of macOS's
-    // `--right` placement below, which has its own separate manual tuning
-    // history and is not derived from or related to this value. The two
-    // platforms sit in different contexts (different neighboring elements,
-    // different margins) and are tuned independently, not from one shared
-    // formula.
-    position: relative;
-    top: calc(var(--space-1-5) / -2 + 2px);
-    // Left-of-tabs placement (Windows/Linux): symmetric 4px margin on both
-    // sides so the whitespace left of the hamburger matches the right (which
-    // also clears the leading .tab-separator → icon · 10px · 1px sep · 10px ·
-    // label). Vertical symmetry comes from the icon SVG (centered bars).
-    // The `--right` (macOS) variant overrides both margins below.
-    margin-left: 4px;
-    margin-right: 4px;
 
     // Toward the text colour, so the mark brightens on a dark theme and deepens on a light one.
     &:hover {
@@ -47,23 +54,8 @@
 
     // Inline SVG (the AgentMux mark; before it, three bars in place of the fa-bars icon font). Icon fonts
     // rasterize each glyph at its own fractional size; SVG rectangles fill uniformly and scale predictably
-    // with parent zoom. The 20 px mark sits in a 27 px button: the 3px bottom margin makes the free space
-    // 4px, so the mark's top edge is at a whole 2px, not 3.5 (the 28 px width gives a whole 4px each side).
-    // 3px, not the 1px that centres it in the button: the button itself sits low in the bar (the `top`
-    // below was tuned for the old 23 px glyph), and the operator saw the mark 1px low.
+    // with parent zoom.
     svg {
         display: block;
-        margin-bottom: 3px;
-    }
-
-    // macOS: pinned to the far right of the title bar, after the action
-    // widgets. Add breathing room so it doesn't sit flush against the
-    // window's right frame.
-    &--right {
-        margin-left: 4px;
-        margin-right: 8px;
-        // 3px optical alignment nudge vs. the other title-bar icons.
-        position: relative;
-        top: -3px;
     }
 }

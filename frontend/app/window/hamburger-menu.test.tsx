@@ -134,11 +134,12 @@ vi.mock("@/app/store/keymodel-nav", () => ({
 // The real FlyoutMenu positions a floating panel, which jsdom can't lay out.
 // Capture the items it is given; it renders item.shortcut verbatim.
 vi.mock("@/app/element/flyoutmenu", () => ({
-    FlyoutMenu: (props: { items: MenuItem[]; closeRef?: (close: () => void) => void; children?: unknown }) => {
+    FlyoutMenu: (props: { items: MenuItem[]; anchorClass?: string; closeRef?: (close: () => void) => void; children?: unknown }) => {
         h.menu.items = props.items;
         h.menu.live = () => props.items;
         props.closeRef?.(h.menu.close);
-        return props.children;
+        // The real one wraps its trigger in this anchor div.
+        return <div class={`menu-anchor ${props.anchorClass ?? ""}`}>{props.children as never}</div>;
     },
 }));
 
@@ -546,6 +547,15 @@ describe("the menu button's glyph", () => {
     });
 
     afterEach(() => cleanup());
+
+    it("is a button inside one anchor box that is the flex item in its bar; the button has no placement of its own", () => {
+        const anchor = button().parentElement!;
+        expect(anchor.classList.contains("menu-anchor")).toBe(true);
+        expect(anchor.classList.contains("hamburger-anchor")).toBe(true);
+        expect(anchor.classList.contains("hamburger-anchor--right")).toBe(false);
+        expect(button().getAttribute("style")).toBeNull();
+        expect(button().className).toBe("hamburger-btn");
+    });
 
     it("keeps its title, is one button, and draws the glyph for the eye only", () => {
         expect(button().getAttribute("title")).toBe("Menu");

@@ -58,6 +58,8 @@ const HIDDEN_FLOATING_STYLE = "position:absolute;left:0px;top:0px;visibility:hid
 type MenuProps = {
     items: MenuItem[];
     className?: string;
+    /** An extra class on the anchor `<div>` around the trigger: the box that is the flex item in its bar. */
+    anchorClass?: string;
     placement?: Placement;
     /**
      * Mirror the menu for a right-anchored (left-opening) placement: items are
@@ -245,7 +247,7 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
         <>
             <div
                 ref={(el) => { referenceEl = el; }}
-                class="menu-anchor"
+                class={clsx("menu-anchor", props.anchorClass)}
                 data-drag-region="false"
                 onPointerDown={() => {
                     // Pre-warm pane freeze-frames ~100ms before the click

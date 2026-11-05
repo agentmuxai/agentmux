@@ -246,6 +246,7 @@ export function HamburgerMenu(props: HamburgerMenuProps): JSX.Element {
 
     return (
         <FlyoutMenu
+            anchorClass={atRight() ? "hamburger-anchor hamburger-anchor--right" : "hamburger-anchor"}
             items={menuItems()}
             placement={atRight() ? "bottom-end" : "bottom-start"}
             mirrored={atRight()}
@@ -256,7 +257,6 @@ export function HamburgerMenu(props: HamburgerMenuProps): JSX.Element {
         >
             <button
                 class="hamburger-btn"
-                classList={{ "hamburger-btn--right": atRight() }}
                 title="Menu"
                 data-drag-region="false"
             >
