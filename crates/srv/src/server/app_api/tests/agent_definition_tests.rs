@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! `Agents update`, `fork`, `bundles`, `hide` and `unhide`, through the handlers.
+//! `Agents update`, `bundles`, `hide` and `unhide`, through the handlers.
 
 use super::*;
 use crate::backend::reactive::handler::get_global_handler;
@@ -82,20 +82,6 @@ async fn a_request_without_an_agent_token_is_refused() {
     let (status, body) = update_call(&state, None, json!({ "agent": target.slug, "icon": "x" })).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
     assert_eq!(state.mstore.agent_def_get(&target.id).unwrap().unwrap().icon, target.icon);
-}
-
-#[tokio::test]
-async fn a_fork_is_a_new_agent_that_records_its_parent() {
-    let state = test_state();
-    let (me, parent) = (agent(&state, "Lead"), agent(&state, "Parent"));
-    let req = json!({ "agent": parent.slug, "label": "Parent B" });
-    let (status, body) = body_of(handle_agent_fork(State(state.clone()), caller_of(Some(&me)), Json(serde_json::from_value(req).unwrap())).await).await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    let fork = state.mstore.agent_def_get(body["agent_id"].as_str().unwrap()).unwrap().unwrap();
-    assert_eq!(fork.parent_id, parent.id);
-    assert_eq!(body["name"], "Parent B");
-    assert_ne!(fork.id, parent.id);
-    assert!(audited(&me).iter().any(|e| e.success && e.reason.as_deref().is_some_and(|r| r.contains("forked"))));
 }
 
 #[tokio::test]

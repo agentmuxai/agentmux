@@ -39,7 +39,6 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "set_seat", tool: "AgentSetSeat", rename: &[] },
     Act { action: "rename", tool: "AgentRename", rename: &[] },
     Act { action: "update", tool: "AgentUpdate", rename: &[] },
-    Act { action: "fork", tool: "AgentFork", rename: &[] },
     Act { action: "bundles", tool: "AgentBundles", rename: &[] },
     Act { action: "hide", tool: "AgentHide", rename: &[] },
     Act { action: "unhide", tool: "AgentUnhide", rename: &[] },
@@ -91,7 +90,6 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 "AgentSetSeat" => set_seats(cx, &args).await,
                 "AgentRename" => rename_agent(cx, &args).await,
                 "AgentUpdate" => definition_action(cx, "update", &args).await,
-                "AgentFork" => definition_action(cx, "fork", &args).await,
                 "AgentBundles" => definition_action(cx, "bundles", &args).await,
                 "AgentHide" => definition_action(cx, "hide", &args).await,
                 "AgentUnhide" => definition_action(cx, "unhide", &args).await,
@@ -578,9 +576,9 @@ const DEFINITION_FIELDS: &[&str] = &["description", "icon", "auto_start", "resta
 /// My Agents, as `env_set` refuses the same.
 const OPERATOR_FIELDS: &[&str] = &["shell", "provider_flags", "working_directory", "model_vendor_base_url"];
 
-/// `update`, `fork`, `bundles`, `hide` and `unhide`: srv acts on the definition of the agent in `agent` (a picker
+/// `update`, `bundles`, `hide` and `unhide`: srv acts on the definition of the agent in `agent` (a picker
 /// template in `template` for hide and unhide) as the agent this process's token names, and records it under
-/// that agent (`/api/v1/agent/{update,fork,bundles,hide,unhide}`).
+/// that agent (`/api/v1/agent/{update,bundles,hide,unhide}`).
 async fn definition_action(cx: &ToolCtx<'_>, action: &str, args: &Value) -> Result<String> {
     require_agent_env(cx.local_url, cx.auth_key, cx.block_id)?;
     let need = |key: &str| str_arg(args, key).ok_or_else(|| anyhow::anyhow!("missing required parameter: {key}"));
@@ -597,7 +595,6 @@ async fn definition_action(cx: &ToolCtx<'_>, action: &str, args: &Value) -> Resu
             }
             body
         }
-        "fork" => json!({ "agent": need("agent")?, "label": str_arg(args, "label") }),
         "bundles" => json!({ "agent": need("agent")?, "bundle_ids": args.get("bundle_ids").filter(|v| !v.is_null()) }),
         _ => json!({ "template": need("template")? }),
     };
@@ -774,7 +771,7 @@ mod tests {
 
     #[test]
     fn the_definition_actions_are_picked_with_their_arguments() {
-        for (action, tool) in [("update", "AgentUpdate"), ("fork", "AgentFork"), ("bundles", "AgentBundles"), ("hide", "AgentHide"), ("unhide", "AgentUnhide")] {
+        for (action, tool) in [("update", "AgentUpdate"), ("bundles", "AgentBundles"), ("hide", "AgentHide"), ("unhide", "AgentUnhide")] {
             let (act, _) = pick("Agents", ACTS, &json!({ "action": action, "agent": "pulse", "template": "t" })).unwrap();
             assert_eq!(act.tool, tool, "{action}");
         }
@@ -798,7 +795,7 @@ mod tests {
         let loops = LoopRegistry::default();
         let counter = std::sync::atomic::AtomicU64::new(0);
         let cx = ToolCtx { local_url: "http://127.0.0.1:1", auth_key: "k", block_id: "b", client: &client, loops: &loops, loop_counter: &counter };
-        for (action, missing) in [("update", "agent"), ("fork", "agent"), ("bundles", "agent"), ("hide", "template"), ("unhide", "template")] {
+        for (action, missing) in [("update", "agent"), ("bundles", "agent"), ("hide", "template"), ("unhide", "template")] {
             let e = call("Agents", &json!({ "action": action }), &cx).await.unwrap_err().to_string();
             assert!(e.contains(&format!("missing required parameter: {missing}")), "{action}: {e}");
         }

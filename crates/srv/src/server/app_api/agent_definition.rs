@@ -1,10 +1,10 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! `Agents update`, `fork`, `bundles`, `hide` and `unhide` (`POST /api/v1/agent/{update,fork,bundles,hide,unhide}`):
-//! an agent edits an agent's definition, forks it, sets its Bundles list and hides or shows a picker template
-//! without the operator's window, by the code the window's `updateagent`, `forkagentdefinition`,
-//! `setagentbundles` and `agentdefhide`/`agentdefunhide` run.
+//! `Agents update`, `bundles`, `hide` and `unhide` (`POST /api/v1/agent/{update,bundles,hide,unhide}`):
+//! an agent edits an agent's definition, sets its Bundles list and hides or shows a picker template
+//! without the operator's window, by the code the window's `updateagent`, `setagentbundles` and
+//! `agentdefhide`/`agentdefunhide` run.
 //!
 //! - update: only the fields given change, and only ones that say how the agent is listed or when it runs:
 //!   description, icon, auto_start, restart_on_crash and idle_timeout_minutes. What decides what an agent runs, or
@@ -12,7 +12,6 @@
 //!   model_vendor_base_url) is not taken, as `env_set` refuses the same: the operator sets those in My Agents. The
 //!   name has its own action (`rename`), the provider is fixed when an agent is made, and environment variables,
 //!   accounts, container settings and the seat have their own actions.
-//! - fork: a copy of the definition under a new name that records its parent. The conversation is not copied.
 //! - bundles: with `bundle_ids`, replaces the agent's picked bundles, in order; without, reads them.
 //! - hide, unhide: a seeded picker template; an agent you made is removed with `delete`.
 //!
@@ -46,13 +45,6 @@ pub(crate) struct UpdateRequest {
     auto_start: Option<bool>,
     restart_on_crash: Option<bool>,
     idle_timeout_minutes: Option<i64>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub(crate) struct ForkRequest {
-    agent: String,
-    /// The fork's name; empty or absent picks "Name #N".
-    label: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -130,24 +122,6 @@ fn update(state: &AppState, req: &UpdateRequest) -> Result<(String, Vec<&'static
     Ok((target.agent_id, changed))
 }
 
-fn fork(state: &AppState, req: &ForkRequest) -> Result<Value, Refusal> {
-    let target = target_of(state, &req.agent)?;
-    let label = req.label.as_deref().map(str::trim).unwrap_or_default();
-    if label.chars().count() > 64 || label.chars().any(char::is_control) {
-        return Err(bad("label is at most 64 characters on one line"));
-    }
-    let cmd = crate::backend::rpc_types::CommandForkAgentDefinitionData { source_id: target.agent_id.clone(), branch_label: label.to_string() };
-    let fork = crate::server::agent_handlers::template::fork_agent_definition(state, cmd)
-        .map_err(|e| refuse(StatusCode::CONFLICT, format!("Agents fork: {e}")))?;
-    Ok(json!({
-        "agent_id": fork.id,
-        "slug": fork.slug,
-        "name": if fork.branch_label.is_empty() { &fork.name } else { &fork.branch_label },
-        "parent_id": target.agent_id,
-        "note": "a new agent with the parent's definition; it has not run and has none of the parent's conversation; start it with Agents start",
-    }))
-}
-
 fn bundles(state: &AppState, req: &BundlesRequest) -> Result<Value, Refusal> {
     let target = target_of(state, &req.agent)?;
     let internal = |e: crate::backend::storage::error::StoreError| refuse(StatusCode::INTERNAL_SERVER_ERROR, format!("Agents bundles: {e}"));
@@ -220,17 +194,6 @@ pub(crate) async fn handle_agent_update(State(state): State<AppState>, caller: O
         let (agent_id, changed) = update(s, &req)?;
         let note = format!("changed {} of {agent_id}", changed.join(", "));
         Ok((json!({ "agent_id": agent_id, "changed": changed, "note": "a running agent keeps what it launched with until it is launched again" }), note))
-    })
-    .await
-}
-
-pub(crate) async fn handle_agent_fork(State(state): State<AppState>, caller: Option<Extension<Caller>>, Json(req): Json<ForkRequest>) -> Response {
-    let caller = caller.map(|Extension(c)| c);
-    let named = req.agent.trim().to_string();
-    run(&state, caller.as_ref(), "fork", named, move |s| {
-        let body = fork(s, &req)?;
-        let note = format!("forked {} as {}", body["parent_id"], body["agent_id"]);
-        Ok((body, note))
     })
     .await
 }

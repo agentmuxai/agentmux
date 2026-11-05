@@ -82,7 +82,7 @@ pub(super) const PLUMBING: &[&str] = &[
 pub(super) const HANDLER: &[&str] = &[
     "POST /agentmux/reactive/inject", "POST /agentmux/reactive/inject-files", "POST /api/v1/agent/env",
     "POST /api/v1/agent/seats", "POST /api/v1/agent/rename", "POST /api/v1/agent/migrate-ids",
-    "POST /api/v1/agent/update", "POST /api/v1/agent/fork", "POST /api/v1/agent/bundles", "POST /api/v1/agent/hide",
+    "POST /api/v1/agent/update", "POST /api/v1/agent/bundles", "POST /api/v1/agent/hide",
     "POST /api/v1/agent/unhide",
 ];
 
