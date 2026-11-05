@@ -6,97 +6,67 @@
 // tree's toolbar, shown again by the button leading the document bar.
 // Spec: docs/specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md
 
-import { createEffect, createSignal, on, onCleanup, onMount, Show, untrack, type JSX } from "solid-js";
-import { ContextMenu, type ContextMenuItem } from "@/app/components/context-menu";
+import { createSignal, onCleanup, onMount, Show, type Accessor, type JSX } from "solid-js";
+import { ContextMenu } from "@/app/components/context-menu";
 import { ConfirmDialog } from "@/app/components/confirm-dialog";
-import { docTabAction, docTabKeyAction, runDocTabAction } from "@/app/doc-tabs/doc-tabs-controller";
 import { DocTabStrip } from "@/app/doc-tabs/DocTabStrip";
-import { EditorView, basicSetup } from "codemirror";
-import { Compartment, EditorState, type Extension } from "@codemirror/state";
-import { keymap } from "@codemirror/view";
-import { search, openSearchPanel } from "@codemirror/search";
-import { lintGutter } from "@codemirror/lint";
-import { editorTheme, isLightPolarity } from "./editor-theme";
+import type { DocTabsModel } from "@/app/doc-tabs/doc-tabs-controller";
+import type { EditorBuffer } from "@/app/store/editor-pane-state-store";
+import { IconButton } from "@/app/element/ui";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { settingsAtom } from "@/store/global";
-import { focusManager, giveBlockFocus } from "@/app/store/focusManager";
-import { userIsTypingElsewhereIn } from "./editor-focus-guard";
-import type { EditorViewModel } from "./editor-model";
-import { cursorAtLine } from "./open-at-line";
-import { IconButton } from "@/app/element/ui";
-import { bodyFocusTarget } from "./editor-body-focus";
 import { TextViewerSwitch, ViewerHost } from "./viewers/viewer-host";
 import { SaveAsInput } from "./editor-save-as-input";
-import { EDITOR_STATE_FIELDS, editorDocTabs, provideEditorStates, takeMovedEditorState, trackSave } from "./editor-doc-tabs";
+import { editorDocTabs } from "./editor-doc-tabs";
 import { registerDocTabDropZone } from "@/app/doc-tabs/doc-tab-hosts";
 import { FileTree } from "./file-tree";
-import { LspClient, type LspState } from "./lsp/lsp-client";
-import { lspDiagnosticsExtension } from "./lsp/lsp-extensions";
-import { isLspSupportedLanguage } from "./lsp/install-hints";
-import { writeText as clipboardWriteText } from "@/util/clipboard";
 import "./editor-view.scss";
-import { codeMirrorKeys, keyLabel, paneCommandFor } from "@/app/keybindings";
-import { keybindingsVersion } from "@/app/keybindings/registry";
-import { noteResolved, registerPaneCommandRunner } from "@/app/keybindings/app-api";
+import { keyLabel } from "@/app/keybindings";
 import { OpenFromRemoteModal } from "./open-from-remote-modal";
 import { EditorEmptyState } from "./EditorEmptyState";
 import { EditorErrorPanel, EditorLspBanner, EditorLspStatusChip, EditorMarkdownPreview, EditorModeToolbar } from "./EditorPanels";
-import { decodeFileUri, workspaceCovers } from "./editor-lsp-paths";
-import { lspBannerShows, lspStatusChipText } from "./editor-lsp-status";
-import { buildTreeContextMenuItems, type ConfirmRequest } from "./editor-tree-menu";
-import { chromeZoomAtom } from "@/app/store/chrome-zoom";
-import { isOverChrome } from "@/app/store/chrome-zoom-target";
-import { usePaneZoomWheel } from "@/app/store/zoom";
-import { useZoomAnchor } from "@/app/store/zoom-anchor";
-import { editorZoomAnchor } from "./editor-zoom-anchor";
-import { contentZoomOf, hasContentZoom } from "./viewers/content-zoom";
+import { lspStatusChipText } from "./editor-lsp-status";
+import type { EditorViewModel } from "./editor-model";
 import { tip } from "@/app/element/tip";
-
-// ── Language loader ─────────────────────────────────────────────────────────
-// Lazy-load language extensions to keep initial bundle small.
-
-async function loadLanguage(lang: string): Promise<Extension | null> {
-    try {
-        switch (lang) {
-            case "typescript":
-            case "javascript": {
-                const { javascript } = await import("@codemirror/lang-javascript");
-                return javascript({ typescript: lang === "typescript", jsx: true });
-            }
-            case "python": {
-                const { python } = await import("@codemirror/lang-python");
-                return python();
-            }
-            case "rust": {
-                const { rust } = await import("@codemirror/lang-rust");
-                return rust();
-            }
-            case "html": {
-                const { html } = await import("@codemirror/lang-html");
-                return html();
-            }
-            case "css": {
-                const { css } = await import("@codemirror/lang-css");
-                return css();
-            }
-            case "json": {
-                const { json } = await import("@codemirror/lang-json");
-                return json();
-            }
-            case "markdown": {
-                const { markdown } = await import("@codemirror/lang-markdown");
-                return markdown();
-            }
-            default:
-                return null;
-        }
-    } catch {
-        return null;
-    }
-}
+import type { LspState } from "./lsp/lsp-client";
+import type { CmHandle } from "./editor-cm-handle";
+import { CodeMirrorSession } from "./editor-codemirror";
+import {
+    createSaveAs,
+    focusEditorBody,
+    useEditorCommands,
+    useEditorKeys,
+    useFocusRegion,
+    type EditorShows,
+} from "./editor-commands";
+import { copyToClipboard, useLspBanner, useTreeMenu, type TreeMenu } from "./editor-tree-state";
+import { previewResizeHandler, treeResizeHandler, useEditorZoom } from "./editor-zoom-resize";
 
 // ── Editor View Component ───────────────────────────────────────────────────
+
+/**
+ * The handful of shortcuts worth surfacing on the empty editor, in this
+ * platform's notation. Not Save: there is nothing to save until a file is open.
+ */
+function editorEmptyShortcuts(): { keys: string[]; label: string }[] {
+    return [
+        { keys: [keyLabel("mod+f")], label: "Find" },
+        { keys: [keyLabel("mod+shift+v")], label: "Toggle .md preview" },
+        { keys: [keyLabel("mod+="), keyLabel("mod+-")], label: "Zoom" },
+    ];
+}
+
+/**
+ * Load file-tree roots from the backend: $HOME (auto-expanded) plus every
+ * reachable drive/mount (sibling roots, collapsed).
+ */
+function loadTreeRoots(model: EditorViewModel): void {
+    void RpcApi.GetEditorRootsCommand(TabRpcClient, {}).then((res) => {
+        if (res?.home) {
+            void model.treeModel.setRootsAndLoad(res.home, res.drives ?? []);
+        }
+    });
+}
 
 export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Element {
     const model = props.model;
@@ -109,749 +79,46 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
     // container mounts, seeding the preview reliably.
     const [containerRef, setContainerRef] = createSignal<HTMLDivElement>();
     let rootRef: HTMLDivElement | undefined;
-    let cmView: EditorView | null = null;
+    const root = () => rootRef;
+    const cm: CmHandle = { view: null };
 
-    // The handful of shortcuts worth surfacing on the empty editor, in this
-    // platform's notation. Not Save: there is nothing to save until a file is open.
-    const emptyShortcuts: { keys: string[]; label: string }[] = [
-        { keys: [keyLabel("mod+f")], label: "Find" },
-        { keys: [keyLabel("mod+shift+v")], label: "Toggle .md preview" },
-        { keys: [keyLabel("mod+="), keyLabel("mod+-")], label: "Zoom" },
-    ];
+    const emptyShortcuts = editorEmptyShortcuts();
 
-    // ── Markdown rendered/source view ────────────────────────────────────────
-    // Live CodeMirror doc text for the active tab — the markdown preview binds
-    // to this, NOT model.contentAtom(): that memo only recomputes on file
-    // load / tab change (onContentChange deliberately doesn't bump it on
-    // keystrokes), so it would render stale pre-edit text. We seed liveDoc
-    // whenever CM is (re)built or restored, and update it on every doc change.
+    // Live CodeMirror doc text for the active tab — the markdown preview binds to this, NOT
+    // model.contentAtom(): that memo only recomputes on file load / tab change (onContentChange
+    // deliberately doesn't bump it on keystrokes), so it would render stale pre-edit text. It is
+    // seeded whenever CM is (re)built or restored, and updated on every doc change.
     const [liveDoc, setLiveDoc] = createSignal("");
     // Markdown's preview, and CodeMirror itself, belong to the text viewer:
     // an image or a PDF tab shows its own viewer (viewers/viewer-host.tsx).
     const showsText = (): boolean => model.activeViewer() === "text";
     const isMarkdown = (): boolean => showsText() && model.languageAtom() === "markdown";
+    const shows: EditorShows = { showsText, isMarkdown };
 
     // The pane's tabs on the shared strip and keys (PLAN_EDITOR_ON_SHARED_DOC_TABS).
     const docTabs = editorDocTabs(model);
+    const saveAs = createSaveAs(model);
+    const focus = useFocusRegion(root);
+    const runEditorCommand = useEditorCommands({ model, cm, root, docTabs, ...shows, focusRegion: focus.focusRegion, triggerSaveAs: saveAs.triggerSaveAs });
+    const { contentZoomed, rootZoom } = useEditorZoom(model, cm, root);
+    useEditorKeys(root, docTabs, runEditorCommand);
 
-    // The editor's own commands, run by its keys and by MuxAPI's
-    // RunCommand alike. False when the command doesn't apply right now.
-    const runEditorCommand = (command: string): boolean => {
-        const tabAction = docTabAction(command);
-        if (tabAction) {
-            runDocTabAction(tabAction, docTabs);
-            return true;
-        }
-        switch (command) {
-            // Find → CodeMirror's native find panel (find/replace, regex,
-            // case, whole-word). Only in source view — in rendered markdown
-            // there's nothing editable to search. See
-            // docs/specs/SPEC_EDITOR_AND_APP_FIND_2026_06_17.md.
-            case "editor:find":
-                if (!cmView || model.editorMode() === "preview") return false;
-                openSearchPanel(cmView);
-                return true;
-            // Toggle between preview and source modes.
-            case "editor:togglePreview":
-                if (!isMarkdown()) return false;
-                model.toggleEditorMode();
-                return true;
-            case "editor:save":
-                if (model.activeTabAtom()?.isScratch) {
-                    triggerSaveAs();
-                } else {
-                    void trackSave(model, model.activeIdAtom(), model.saveFile());
-                }
-                return true;
-            // Phase 1: Save As is only implemented for scratch tabs.
-            case "editor:saveAs":
-                if (!model.activeTabAtom()?.isScratch) return false;
-                triggerSaveAs();
-                return true;
-            // From the editor body to the tree, showing it if it's hidden,
-            // and back. A remote editor has no tree.
-            case "editor:focusTree":
-                if (model.connection()) return false;
-                if (focusRegion() === "tree") {
-                    focusEditorBody();
-                } else {
-                    if (!model.treeExpandedAtom()) void model.toggleTreeExpanded();
-                    rootRef?.querySelector<HTMLElement>('.file-tree [role="treeitem"][tabindex="0"]')?.focus();
-                }
-                return true;
-        }
-        return false;
-    };
-    onCleanup(registerPaneCommandRunner(model.blockId, runEditorCommand));
-
-    // Which of the tree and the editor body has the keyboard: its column
-    // gets an accent line along the top (spec §6).
-    const [focusRegion, setFocusRegion] = createSignal<"tree" | "body" | null>(null);
-    const trackFocusRegion = (e: FocusEvent) => {
-        const target = e.target as Element;
-        setFocusRegion(target.closest(".editor-tree-column") ? "tree" : target.closest(".editor-main-column") ? "body" : null);
-    };
-    const leaveFocusRegion = (e: FocusEvent) => {
-        if (!rootRef?.contains(e.relatedTarget as Node | null)) setFocusRegion(null);
-    };
-
-    /** The keyboard to the editor body: the text, else the viewer showing the file. */
-    const focusEditorBody = () => {
-        const textShown = showsText() && !(isMarkdown() && model.editorMode() === "preview");
-        if (cmView && textShown) {
-            cmView.focus();
-            return;
-        }
-        const body = rootRef ? bodyFocusTarget(rootRef) : null;
-        if (body) body.focus({ preventScroll: true });
-        else giveBlockFocus(model.blockId);
-    };
-
-    // A viewer that zooms its own content (a PDF) takes the pane's zoom, and the Editor's chrome around
-    // it follows chrome zoom, as the browser pane's bar does (SPEC_ZOOM_ANCHOR_AND_AUDIT §10). Text
-    // takes it on the whole pane, as CSS `zoom` on .editor-view (below).
-    const contentZoomed = () => hasContentZoom(model.activeViewer());
-    const rootZoom = () => (contentZoomed() ? chromeZoomAtom() : model.zoomAtom());
-    // Ctrl+scroll zoom, before CodeMirror's own wheel handling. Over the chrome of a content-zoomed
-    // viewer it is left to the window's handler, which steps chrome zoom.
-    usePaneZoomWheel(() => rootRef, () => model.blockId, undefined, (ev) => !(contentZoomed() && isOverChrome(ev.target as HTMLElement)));
-    // What is under the pointer stays under it across a zoom: CodeMirror's scroller moves by how far
-    // that character moved (SPEC_ZOOM_ANCHOR_AND_AUDIT_2026_10_29.md §4.3); a viewer's content by its own.
-    const textAnchor = editorZoomAnchor({ view: () => cmView, zoom: model.zoomAtom });
-    const contentHandle = () => (contentZoomed() ? contentZoomOf(model.blockId) : undefined);
-    useZoomAnchor({
-        blockId: model.blockId,
-        zoom: model.zoomAtom,
-        scroller: () => (contentHandle() ? contentHandle()!.scroller() : cmView?.scrollDOM),
-        following: () => false,
-        adapter: {
-            capture: (point) => {
-                const handle = contentHandle();
-                const token = handle ? handle.adapter.capture(point) : textAnchor.capture(point);
-                return token == null ? null : { handle, token };
-            },
-            restore: ({ handle, token }) => (handle ? handle.adapter.restore(token) : textAnchor.restore(token as never)),
-        },
-    });
-
-    onMount(() => {
-        if (!rootRef) return;
-
-        // Editor-pane key handling, capture phase. We intercept here so the
-        // app-wide Cmd/Ctrl+F binding (keymodel.ts → universal block-search,
-        // which the editor doesn't implement) never swallows these — and so a
-        // single deterministic path handles them regardless of CM focus state.
-        const handleEditorKeys = (ev: KeyboardEvent) => {
-            const mod = ev.ctrlKey || ev.metaKey;
-            if (!mod) return;
-            // Document-tab keys (SPEC_DOCUMENT_TABS §4.3), before CodeMirror
-            // sees them. A text box (Save As, a tree rename) keeps its own.
-            const tabKey = docTabKeyAction(ev);
-            if (tabKey && !(ev.target instanceof HTMLInputElement || ev.target instanceof HTMLTextAreaElement)) {
-                ev.preventDefault();
-                ev.stopPropagation();
-                runDocTabAction(tabKey, docTabs);
-                return;
-            }
-            // The editor's keys are the `editor:*` rows of the shortcut table.
-            // Save and Save As are CodeMirror keys (saveKeymap below).
-            const command = paneCommandFor(ev, "editor");
-            if ((command === "editor:find" || command === "editor:togglePreview" || command === "editor:focusTree") && runEditorCommand(command)) {
-                ev.preventDefault();
-                ev.stopPropagation();
-            }
-        };
-        rootRef.addEventListener("keydown", handleEditorKeys, { capture: true });
-        onCleanup(() => rootRef?.removeEventListener("keydown", handleEditorKeys, { capture: true }));
-    });
-
-    // ── LSP integration (Phase 1 — diagnostics for TS/JS) ────────────
-    // One LspClient per (pane, file) — replaced when the file changes
-    // or the language switches. Diagnostics flow through a Compartment
-    // so they can be reconfigured without rebuilding CodeMirror.
-    let lspClient: LspClient | null = null;
-    let lspDiagUnsub: (() => void) | null = null;
-    let lspStateUnsub: (() => void) | null = null;
-    let lspChangeDebounce: ReturnType<typeof setTimeout> | null = null;
-    const [lspState, setLspState] = createSignal<LspState | null>(null);
-    const lintCompartment = new Compartment();
-    // Word wrap toggle (right-click menu → editor-model.ts's
-    // getBodyContextMenuItems). Reconfigured live on toggle (see the
-    // createEffect below) and resynced on every tab switch — it's a
-    // pane-wide setting, not per-tab, so a stale per-tab CodeMirror-state
-    // snapshot (cmStates) must not be allowed to reintroduce an old value.
-    const wordWrapCompartment = new Compartment();
-    // The Save keys come from the shortcut table and follow live changes to
-    // the user's keybindings (createEffect below), like word wrap does.
-    const saveKeysCompartment = new Compartment();
-    // CodeMirror's light/dark base styles follow the app theme's polarity,
-    // which can change while tabs are open (and their saved states hold the
-    // old one), so it is resynced like the two above.
-    const themeCompartment = new Compartment();
-    const themeExtension = (): Extension => editorTheme(isLightPolarity());
-    const polarityObserver = new MutationObserver(() => {
-        cmView?.dispatch({ effects: themeCompartment.reconfigure(themeExtension()) });
-    });
-    polarityObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme-polarity"] });
-    onCleanup(() => polarityObserver.disconnect());
-
-    // Keys from the shortcut table (`editor:save`, `editor:saveAs`).
-    const saveKeymap = (): Extension =>
-        keymap.of([
-            ...codeMirrorKeys("editor:save").map((key) => ({
-                key,
-                run: () => {
-                    const ran = runEditorCommand("editor:save");
-                    if (ran) noteResolved("editor:save", "editor");
-                    return ran;
-                },
-            })),
-            ...codeMirrorKeys("editor:saveAs").map((key) => ({
-                key,
-                run: () => {
-                    // False for non-scratch tabs, so the key isn't swallowed
-                    // and the OS default (or a future handler) can still see it.
-                    // Noted only when it applied, or PressKeys counts a key
-                    // that did nothing as resolved.
-                    const ran = runEditorCommand("editor:saveAs");
-                    if (ran) noteResolved("editor:saveAs", "editor");
-                    return ran;
-                },
-            })),
-        ]);
-
-    const teardownLsp = async (): Promise<void> => {
-        if (lspChangeDebounce) {
-            clearTimeout(lspChangeDebounce);
-            lspChangeDebounce = null;
-        }
-        if (lspDiagUnsub) {
-            lspDiagUnsub();
-            lspDiagUnsub = null;
-        }
-        if (lspStateUnsub) {
-            lspStateUnsub();
-            lspStateUnsub = null;
-        }
-        const old = lspClient;
-        lspClient = null;
-        setLspState(null);
-        if (old) {
-            await old.dispose();
-        }
-    };
-
-    const startLspIfSupported = async (
-        filePath: string,
-        language: string,
-        content: string,
-    ): Promise<void> => {
-        // Bail early on unsupported language or master kill switch — but
-        // tear down any client carried over from the previous file first.
-        // Otherwise a non-LSP file leaves the prior client (and its
-        // server-side refcount) alive, debounced didChange calls keep
-        // firing, and the status chip/banner still reflect the old file.
-        if (!isLspSupportedLanguage(language) || settingsAtom()?.["editor:lsp.enabled"] === false) {
-            await teardownLsp();
-            return;
-        }
-
-        // Reuse the existing client when only the file changed (same language
-        // AND the new file lives under the server's workspace root). The
-        // refcount-sharing design relies on this — tearing down per-file
-        // would defeat it and respawn the server every navigation. The
-        // diagnostics extension is re-wired because setupEditor rebuilt cmView.
-        const existing = lspClient;
-        if (
-            existing &&
-            existing.language === language &&
-            existing.getState().kind === "ready" &&
-            workspaceCovers(existing.getWorkspaceRoot(), filePath)
-        ) {
-            // Cancel any pending didChange from the OUTGOING file. The
-            // debounced callback reads model.filePathAtom() at fire time, so
-            // a stale tick would send the previous file's text under the new
-            // file's URI and desync the server until the next keystroke.
-            if (lspChangeDebounce) {
-                clearTimeout(lspChangeDebounce);
-                lspChangeDebounce = null;
-            }
-            const prevUri = existing.getOpenedFileUri();
-            if (prevUri) {
-                // Best-effort close of the previous file.
-                void existing.didClose(decodeFileUri(prevUri));
-            }
-            await existing.didOpen(filePath, content, language);
-            if (cmView) {
-                if (lspDiagUnsub) lspDiagUnsub();
-                const [ext, unsub] = lspDiagnosticsExtension(cmView, existing);
-                lspDiagUnsub = unsub;
-                cmView.dispatch({ effects: lintCompartment.reconfigure(ext) });
-            }
-            return;
-        }
-
-        await teardownLsp();
-
-        const client = new LspClient(language, filePath);
-        lspClient = client;
-        lspStateUnsub = client.onStateChange(setLspState);
-
-        const ok = await client.start();
-        if (!ok) {
-            // Status is "missing" or "crashed" — banner takes over from here.
-            return;
-        }
-        await client.didOpen(filePath, content, language);
-        if (cmView && lspClient === client) {
-            const [ext, unsub] = lspDiagnosticsExtension(cmView, client);
-            lspDiagUnsub = unsub;
-            cmView.dispatch({ effects: lintCompartment.reconfigure(ext) });
-        }
-    };
-
-    // Per-tab CodeMirror state cache — preserves cursor, selection, scroll,
-    // undo history across tab switches. Populated on tab switch (snapshot of
-    // outgoing), cleared on TabClosed via the slice event subscription
-    // wired below.
-    const cmStates = new Map<string, EditorState>();
-    let activeTabIdForCm: string | null = null;
-    // A tab moving to another Editor takes its state from here: the live one
-    // for the tab in front, the saved one for the rest (editor-doc-tabs.ts).
-    onCleanup(provideEditorStates(model, (tabId) => (tabId === activeTabIdForCm ? cmView?.state : cmStates.get(tabId))));
-
-    // Guards setupEditor against concurrent invocation. It is async and awaits
-    // `loadLanguage()` BETWEEN destroying the previous view and constructing
-    // the new one, so two calls that both start before either constructs will
-    // both find `cmView === null`, both skip the destroy, and both append an
-    // EditorView to the same container — leaving one orphaned: alive, in the
-    // DOM, holding its own listeners and able to take focus, but referenced by
-    // nothing and therefore never destroyed.
-    //
-    // The effect below calls it on `containerRef` mount and again when
-    // `loading` flips, ~2ms apart, so this happened on every file open.
-    //
-    // Separate defect from the first-keystroke discard fixed in
-    // editor-model.ts (a live trace showed a single view id there, so this
-    // race was not that bug) — but a real one, and cheap to close.
-    let setupGeneration = 0;
-
-    // Build or rebuild CodeMirror when the active tab changes
-    const setupEditor = async (content: string, language: string, readOnly: boolean) => {
-        const container = containerRef();
-        if (!container) return;
-        const gen = ++setupGeneration;
-        const tabId = untrack(model.activeIdAtom);
-
-        // Destroy previous instance
-        if (cmView) {
-            cmView.destroy();
-            cmView = null;
-            model.cmViewRef.current = null;
-        }
-
-        const extensions: Extension[] = [
-            basicSetup,
-            themeCompartment.of(themeExtension()),
-            search(),
-            // lintGutter installs the lint state field that backs the inline
-            // diagnostic underlines (LSP pushes via setDiagnostics). We keep
-            // it for that field but hide its gutter column in CSS — there's
-            // no debugger/breakpoint margin, so the numbers sit tight to code.
-            lintGutter(),
-            lintCompartment.of([]),
-            wordWrapCompartment.of(model.wordWrapAtom() ? [EditorView.lineWrapping] : []),
-            EditorView.updateListener.of((update) => {
-                if (update.docChanged) {
-                    const content = update.state.doc.toString();
-                    model.onContentChange(content);
-                    setLiveDoc(content); // keep the markdown preview in sync
-                    // Debounced LSP didChange — Phase 1 ships full-sync,
-                    // which is the simplest and works on every server.
-                    if (lspChangeDebounce) clearTimeout(lspChangeDebounce);
-                    lspChangeDebounce = setTimeout(() => {
-                        if (lspClient && lspClient.getState().kind === "ready") {
-                            void lspClient.didChange(model.filePathAtom(), content);
-                        }
-                    }, 250);
-                }
-            }),
-            // Ctrl+S → save; on scratch tabs triggers Save As instead.
-            // Ctrl+Shift+S → Save As for scratch tabs only (Phase 1; non-scratch Save As is Phase 2).
-            saveKeysCompartment.of(saveKeymap()),
-        ];
-
-        if (readOnly) {
-            extensions.push(EditorState.readOnly.of(true));
-        }
-
-        // Load language extension
-        const langExt = await loadLanguage(language);
-        if (langExt) extensions.push(langExt);
-
-        // A later setupEditor() started while we awaited loadLanguage().
-        // Constructing now would append a SECOND EditorView to this container
-        // and orphan one of them (see setupGeneration above) — the newer call
-        // owns the view.
-        if (gen !== setupGeneration) return;
-        // Defensive: any view present now was constructed during our await, so
-        // drop it rather than stack another on top.
-        if (cmView) {
-            cmView.destroy();
-            cmView = null;
-            model.cmViewRef.current = null;
-        }
-
-        // A tab moved in from another Editor brings its undo history and
-        // selection (editor-doc-tabs.ts), rebuilt here with this view's own
-        // extensions. Taken only now, past the superseded check above, so a
-        // superseded build leaves it for the next one.
-        const moved = tabId ? takeMovedEditorState(model, tabId) : undefined;
-        let state: EditorState | undefined;
-        // Only when it is the text shown: a clean tab is read fresh on
-        // arrival, and its file may have changed meanwhile.
-        if (moved !== undefined && (moved as { doc?: unknown }).doc === content) {
-            try {
-                state = EditorState.fromJSON(moved, { extensions }, EDITOR_STATE_FIELDS);
-            } catch {
-                state = undefined; // its text is still `content`
-            }
-        }
-        cmView = new EditorView({
-            state: state ?? EditorState.create({ doc: content, extensions }),
-            parent: container,
-        });
-        // The extensions were built before the language loaded; the theme may
-        // have changed polarity since (a state moved in from another editor
-        // carries its own too).
-        cmView.dispatch({ effects: themeCompartment.reconfigure(themeExtension()) });
-        setLiveDoc(content); // seed preview from the freshly-built doc
-        // giveFocus() (focusManager.ts's shared pane-selection contract)
-        // was a stub returning false until this ref existed — see
-        // SPEC_PANE_SELECT_AUTOFOCUS_2026_09_22.md §3a. Runs on every
-        // (re)build, not just the pane's initial mount, so switching the
-        // in-pane file-tab strip re-lands the caret too, not only opening
-        // the pane fresh.
-        //
-        // But "every rebuild" includes the external-file-reload path — the
-        // effect below is reactive on model.contentAtom() on purpose — and
-        // claimFocusOnMount() only knows block-level focus, which stays true
-        // while the user types in this pane's OWN file tree. Without the
-        // guard, a reload landing mid-keystroke there yanked the caret into
-        // CodeMirror (ReAgent P1 on PR #3519; the spec's §5 constraint 1).
-        // Focus that was in the now-destroyed CodeMirror has already fallen
-        // back to <body>, so the guard never blocks restoring it.
-        model.cmViewRef.current = cmView;
-        // Opened at a line (pane.open's `line`): the cursor goes there once.
-        const openAt = model.takeOpenAtLine(model.filePathAtom());
-        if (openAt) cmView.dispatch(cursorAtLine(cmView.state, openAt));
-        if (!userIsTypingElsewhereIn(rootRef, document.activeElement)) {
-            focusManager.claimFocusOnMount(model.blockId, () => model.giveFocus());
-        }
-    };
-
-    onMount(() => {
-        // Load file-tree roots from backend: $HOME (auto-expanded) +
-        // every reachable drive/mount (sibling roots, collapsed).
-        void RpcApi.GetEditorRootsCommand(TabRpcClient, {}).then((res) => {
-            if (res?.home) {
-                void model.treeModel.setRootsAndLoad(res.home, res.drives ?? []);
-            }
-        });
-
-        const content = model.contentAtom();
-        const lang = model.languageAtom();
-        const readOnly = model.readOnlyAtom();
-        if (content || model.filePathAtom()) {
-            setLiveDoc(content); // seed before async setupEditor to avoid a blank preview
-            void setupEditor(content, lang, readOnly);
-        }
-    });
-
-    // Resize-handle drag — tracks global mousemove until release so the user
-    // can drag past the handle without losing the grip. Live updates the
-    // tree-width signal; persists once on mouseup.
-    const handleResizeMouseDown = (e: MouseEvent) => {
-        e.preventDefault();
-        const startX = e.clientX;
-        const startWidth = model.treeWidthAtom();
-        const onMove = (ev: MouseEvent) => {
-            // document mousemove coords are in viewport CSS pixels; divide by
-            // zoom so the delta maps correctly to local CSS pixels inside the
-            // zoomed .editor-view element.
-            model.setTreeWidth(startWidth + (ev.clientX - startX) / rootZoom());
-        };
-        const onUp = () => {
-            document.removeEventListener("mousemove", onMove);
-            document.removeEventListener("mouseup", onUp);
-            document.body.style.cursor = "";
-            document.body.style.userSelect = "";
-            void model.commitTreeWidth();
-        };
-        document.body.style.cursor = "col-resize";
-        document.body.style.userSelect = "none";
-        document.addEventListener("mousemove", onMove);
-        document.addEventListener("mouseup", onUp);
-    };
-
-    // Preview-panel resize — drag up = taller, drag down = shorter.
-    const handlePreviewResizeMouseDown = (e: MouseEvent) => {
-        e.preventDefault();
-        const startY = e.clientY;
-        const startH = model.previewHeightAtom();
-        const onMove = (ev: MouseEvent) => {
-            model.setPreviewHeight(startH + (startY - ev.clientY) / rootZoom());
-        };
-        const onUp = () => {
-            document.removeEventListener("mousemove", onMove);
-            document.removeEventListener("mouseup", onUp);
-            document.body.style.cursor = "";
-            document.body.style.userSelect = "";
-            void model.commitPreviewHeight();
-        };
-        document.body.style.cursor = "row-resize";
-        document.body.style.userSelect = "none";
-        document.addEventListener("mousemove", onMove);
-        document.addEventListener("mouseup", onUp);
-    };
-
-    // Rebuild CodeMirror on tab change. Tracks activeIdAtom (not just
-    // filePathAtom) so we get a unique trigger per tab — multiple tabs
-    // could share the same path in pathological cases, but each has its own
-    // id. The outgoing tab's state is snapshotted into cmStates BEFORE the
-    // rebuild so we can restore it on the next switch back.
-    createEffect(() => {
-        const activeId = model.activeIdAtom(); // reactive: tab change
-        const loading = model.loadingAtom(); // reactive: wait for content
-        // Reactive on purpose (codex P1 on PR #3260): an external file change
-        // to a CLEAN active tab replaces the buffer and bumps _contentVersion,
-        // but leaves the tab already-loaded — so `loading` does not move and,
-        // once it is properly memoized, no longer re-runs this effect. Before
-        // that memoization the rebuild happened by accident, via loadingAtom
-        // subscribing to the whole tab object. Track the content itself so the
-        // reload path keeps working on purpose rather than as a side effect;
-        // without it the pane would show stale text and a later save could
-        // overwrite the external change.
-        //
-        // Safe against the bug this PR fixes: onContentChange() deliberately
-        // does NOT bump _contentVersion on keystrokes ("CodeMirror is the
-        // source of truth for the live buffer"), so typing cannot re-trigger
-        // this. And _maybeReloadTabs never clobbers a dirty tab, so this only
-        // fires for buffers the user has not edited.
-        model.contentAtom();
-        // A tab in another viewer (an image, a video) has no CodeMirror
-        // buffer: keep the outgoing text tab's state for when it comes back,
-        // and leave CodeMirror as it is, hidden.
-        if (model.activeViewer() !== "text") {
-            untrack(() => {
-                if (activeTabIdForCm && cmView) cmStates.set(activeTabIdForCm, cmView.state);
-                activeTabIdForCm = null;
-            });
-            return;
-        }
-        // containerRef() is reactive: when the body <Show> mounts the container
-        // after content loads, this effect re-runs and proceeds (fixes the
-        // first-open blank-preview race).
-        if (!activeId || loading || !containerRef()) return;
-
-        untrack(() => {
-            const path = model.filePathAtom();
-            const content = model.contentAtom();
-            const lang = model.languageAtom();
-            const readOnly = model.readOnlyAtom();
-
-            // Snapshot outgoing tab's CodeMirror state for cursor/scroll/
-            // undo preservation. Skipped on first mount (no prevId).
-            if (activeTabIdForCm && activeTabIdForCm !== activeId && cmView) {
-                cmStates.set(activeTabIdForCm, cmView.state);
-            }
-            activeTabIdForCm = activeId;
-
-            // If we have a saved state for this tab, restore via setState
-            // on the existing cmView (no destroy). Otherwise build fresh.
-            // Invalidate the cached snapshot when this tab's content was
-            // reloaded underneath us (reagent P1 x2 on PR #3260).
-            //
-            // cmStates is only ever cleared on TabClosed, so a tab switched
-            // away from and back still holds the EditorState captured at that
-            // switch. On an external file change the restore branch below would
-            // put that stale buffer back and `return` — never reaching
-            // setupEditor() with the freshly-read content — which is precisely
-            // the "stale text, later save clobbers the external change" case
-            // the contentAtom dependency above exists to prevent.
-            // Repro: open A, switch to B, switch back to A, modify A on disk.
-            //
-            // Compare the SNAPSHOT against the content, not the live cmView:
-            // `activeTabIdForCm` is reassigned a few lines above, so a
-            // "same tab?" guard here is always true, and at this point cmView
-            // still holds the OUTGOING tab's state. Comparing that against the
-            // incoming tab's content differs on every ordinary switch, which
-            // would delete the very snapshot about to be restored and break
-            // cursor/scroll/undo restoration for all clean tabs.
-            //
-            // Guarded on !dirty so it can never discard the user's own edits: a
-            // dirty buffer legitimately differs from the on-disk content, and
-            // _maybeReloadTabs never reloads a dirty tab anyway. Both reads are
-            // inside untrack(), so neither adds a dependency.
-            let saved = cmStates.get(activeId);
-            if (saved && !model.dirtyAtom() && saved.doc.toString() !== content) {
-                cmStates.delete(activeId);
-                saved = undefined;
-            }
-            if (saved && cmView) {
-                cmView.setState(saved);
-                // Resync the pane-wide word-wrap setting — the restored state
-                // was snapshotted with whatever wrap value was active *at
-                // that time*, which may be stale if the user toggled it via
-                // another tab since.
-                cmView.dispatch({
-                    effects: [
-                        wordWrapCompartment.reconfigure(model.wordWrapAtom() ? [EditorView.lineWrapping] : []),
-                        saveKeysCompartment.reconfigure(saveKeymap()),
-                        themeCompartment.reconfigure(themeExtension()),
-                    ],
-                });
-                setLiveDoc(saved.doc.toString()); // seed preview from restored doc
-                // Re-wire LSP for the now-active file's content.
-                void startLspIfSupported(path, lang, content);
-                return;
-            }
-            setLiveDoc(content); // seed before async setupEditor to avoid a blank preview
-            void setupEditor(content, lang, readOnly).then(() => {
-                void startLspIfSupported(path, lang, content);
-            });
-        });
-    });
-
-    // Live-toggle word wrap (right-click menu → model.toggleWordWrap()) on
-    // whichever tab is currently showing, without rebuilding CodeMirror.
-    createEffect(() => {
-        const wrap = model.wordWrapAtom();
-        if (!cmView) return;
-        cmView.dispatch({ effects: wordWrapCompartment.reconfigure(wrap ? [EditorView.lineWrapping] : []) });
-    });
-
-    // Follow live changes to the user's keybindings without rebuilding CodeMirror.
-    createEffect(
-        on(
-            keybindingsVersion,
-            () => cmView?.dispatch({ effects: saveKeysCompartment.reconfigure(saveKeymap()) }),
-            { defer: true }
-        )
-    );
+    const session = new CodeMirrorSession({ model, cm, root, container: containerRef, setLiveDoc, runEditorCommand });
+    session.watchPolarity();
+    session.provideStates();
+    onMount(() => loadTreeRoots(model));
+    session.mountInitial();
+    session.useLiveEffects();
 
     // An Editor tab from another pane, dropped anywhere on this one, joins it.
     onMount(() => {
         if (rootRef) onCleanup(registerDocTabDropZone(rootRef, "editor", model.blockId));
     });
+    session.watchTabClose();
 
-    // Clear cached CodeMirror state when its tab closes, so re-opening
-    // the same file later starts fresh (matches user expectation —
-    // closed-then-reopened ≠ "still has unsaved changes").
-    const unsubSliceEvents = model.onSliceEvent((event) => {
-        if (event.type === "TabClosed") {
-            cmStates.delete(event.tabId);
-            // The tab in front left. It isn't the outgoing tab to snapshot
-            // when the next one shows: a tab moved to another pane keeps its
-            // id, and a snapshot taken now would come back over its newer
-            // text if it is moved back.
-            if (activeTabIdForCm === event.tabId) activeTabIdForCm = null;
-        }
-    });
-
-    onCleanup(() => {
-        void teardownLsp();
-        unsubSliceEvents();
-        cmStates.clear();
-        cmView?.destroy();
-        cmView = null;
-        model.cmViewRef.current = null;
-    });
-
-    // ── Save As flow (scratch tabs) ───────────────────────────────────
-    const [saveAsTabId, setSaveAsTabId] = createSignal<string | null>(null);
-
-    const triggerSaveAs = () => {
-        const tab = model.activeTabAtom();
-        if (tab?.isScratch) setSaveAsTabId(tab.id);
-    };
-
-    const handleSaveAsConfirm = async (path: string) => {
-        const tabId = saveAsTabId();
-        setSaveAsTabId(null);
-        if (path) await trackSave(model, tabId, model.saveFileAs(path));
-    };
-
-    // ── File-tree context menu ────────────────────────────────────────
-    const [ctxMenu, setCtxMenu] = createSignal<{ items: ContextMenuItem[]; x: number; y: number } | null>(null);
-    const [renamingPath, setRenamingPath] = createSignal<string | null>(null);
-    const [newEntry, setNewEntry] = createSignal<{ parentPath: string; kind: "file" | "dir" } | null>(null);
-    const [deleteConfirm, setDeleteConfirm] = createSignal<ConfirmRequest | null>(null);
-
-    // Closing a tab with unsaved changes asks first.
-    model.confirmDirtyClose = (tab, discard) =>
-        setDeleteConfirm({
-            title: `Close "${tab.displayName || tab.filePath.split(/[/\\]/).pop()}" without saving?`,
-            message: "Your changes to this file will be lost.",
-            confirmLabel: "Discard changes",
-            onConfirm: discard,
-        });
-    onCleanup(() => {
-        model.confirmDirtyClose = null;
-    });
-
-    const buildContextMenuItems = (path: string | null, isDir: boolean): ContextMenuItem[] =>
-        buildTreeContextMenuItems(
-            model,
-            { startNewEntry: (parentPath, kind) => setNewEntry({ parentPath, kind }), startRename: setRenamingPath, confirm: setDeleteConfirm, copy: copyToClipboard },
-            path,
-            isDir,
-        );
-
-    const handleTreeContextMenu = (path: string | null, isDir: boolean, e: MouseEvent) => {
-        setCtxMenu({ items: buildContextMenuItems(path, isDir), x: e.clientX, y: e.clientY });
-    };
-
-    const handleRenameConfirm = async (path: string, newName: string) => {
-        setRenamingPath(null);
-        await model.renameFile(path, newName);
-    };
-
-    const handleNewEntryConfirm = async (parentPath: string, name: string, kind: "file" | "dir") => {
-        setNewEntry(null);
-        try {
-            if (kind === "file") await model.createFile(parentPath, name);
-            else await model.createDir(parentPath, name);
-        } catch {
-            // Error already logged in model; tree will re-sync on next refresh.
-        }
-    };
-
-    // ── LSP install banner state ──────────────────────────────────────
-    // Dismissed-for-session list keyed by language. Allows the operator
-    // to silence the banner per session; it returns on next launch if the
-    // binary is still missing.
-    const [dismissedLanguages, setDismissedLanguages] = createSignal<Set<string>>(new Set());
-    const lspBannerVisible = (): boolean => lspBannerShows(lspState(), dismissedLanguages());
-    const dismissBanner = (language: string) => {
-        const next = new Set(dismissedLanguages());
-        next.add(language);
-        setDismissedLanguages(next);
-    };
-    const copyToClipboard = (text: string) => {
-        // Route through the CEF clipboard wrapper — navigator.clipboard is
-        // blocked under CEF's Permissions-Policy. See SPEC_UNIFIED_CLIPBOARD_2026_05_18.md §3.3.
-        void clipboardWriteText(text).catch(() => {
-            // Clipboard might not be available — silently ignore
-        });
-    };
-    const statusChipText = (): string => lspStatusChipText(lspState(), model.languageAtom());
+    const tree = useTreeMenu(model);
+    const banner = useLspBanner(session.lsp.lspState);
     const showTreeButton = () => !model.treeExpandedAtom() && !model.connection();
-
-    const statusChipKind = (): string => {
-        const s = lspState();
-        return s?.kind ?? "none";
-    };
 
     return (
         <div
@@ -860,8 +127,8 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
             classList={{ "editor-view--tree-collapsed": !model.treeExpandedAtom() }}
             data-zoom-scope={contentZoomed() ? "chrome" : undefined}
             style={{ zoom: rootZoom() }}
-            onFocusIn={trackFocusRegion}
-            onFocusOut={leaveFocusRegion}
+            onFocusIn={focus.trackFocusRegion}
+            onFocusOut={focus.leaveFocusRegion}
         >
             <Show when={model.openFromRemoteAtom() && rootRef}>
                 <OpenFromRemoteModal
@@ -873,79 +140,114 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                 />
             </Show>
             <Show when={model.treeExpandedAtom()}>
-                <div
-                    class="editor-tree-column editor-region"
-                    classList={{ "editor-region--focused": focusRegion() === "tree" }}
-                    style={{
-                        width: `${model.treeWidthAtom()}px`,
-                        flex: `0 0 ${model.treeWidthAtom()}px`,
-                    }}
-                >
-                    <FileTree
-                        model={model.treeModel}
-                        activeFilePath={model.filePathAtom()}
-                        showHidden={model.showHiddenAtom()}
-                        onFileClick={(path) => void model.openFilePreview(path)}
-                        onFileDblClick={(path) => void model.openFile(path)}
-                        onToggleHidden={() => void model.toggleShowHidden()}
-                        onHideTree={() => void model.toggleTreeExpanded()}
-                        onContextMenu={handleTreeContextMenu}
-                        renamingPath={renamingPath()}
-                        onRenameConfirm={(path, name) => void handleRenameConfirm(path, name)}
-                        onRenameCancel={() => setRenamingPath(null)}
-                        newEntry={newEntry()}
-                        onNewEntryConfirm={(parent, name, kind) => void handleNewEntryConfirm(parent, name, kind)}
-                        onNewEntryCancel={() => setNewEntry(null)}
-                        onStartRename={(path) => setRenamingPath(path)}
-                        onFocusEditor={focusEditorBody}
-                    />
-                </div>
-                <div
-                    class="editor-tree-resize-handle"
-                    onMouseDown={handleResizeMouseDown}
-                    {...tip("Drag to resize file tree", { label: true })}
+                <EditorTreeColumn
+                    model={model}
+                    tree={tree}
+                    focusRegion={focus.focusRegion}
+                    onResize={treeResizeHandler(model, rootZoom)}
+                    onFocusEditor={() => focusEditorBody(model, cm, root, shows)}
                 />
             </Show>
+            <EditorMainColumn
+                model={model}
+                docTabs={docTabs}
+                saveAs={saveAs}
+                shows={shows}
+                focusRegion={focus.focusRegion}
+                lspState={session.lsp.lspState}
+                banner={banner}
+                liveDoc={liveDoc}
+                setContainerRef={setContainerRef}
+                emptyShortcuts={emptyShortcuts}
+                showTreeButton={showTreeButton}
+                onPreviewResize={previewResizeHandler(model, rootZoom)}
+            />
+            <EditorDialogs tree={tree} />
+        </div>
+    );
+}
 
+/** The file tree beside the document, and the handle that resizes it. */
+function EditorTreeColumn(props: {
+    model: EditorViewModel;
+    tree: TreeMenu;
+    focusRegion: Accessor<"tree" | "body" | null>;
+    onResize: (e: MouseEvent) => void;
+    onFocusEditor: () => void;
+}): JSX.Element {
+    const { model, tree } = props;
+    return (
+        <>
+            <div
+                class="editor-tree-column editor-region"
+                classList={{ "editor-region--focused": props.focusRegion() === "tree" }}
+                style={{
+                    width: `${model.treeWidthAtom()}px`,
+                    flex: `0 0 ${model.treeWidthAtom()}px`,
+                }}
+            >
+                <FileTree
+                    model={model.treeModel}
+                    activeFilePath={model.filePathAtom()}
+                    showHidden={model.showHiddenAtom()}
+                    onFileClick={(path) => void model.openFilePreview(path)}
+                    onFileDblClick={(path) => void model.openFile(path)}
+                    onToggleHidden={() => void model.toggleShowHidden()}
+                    onHideTree={() => void model.toggleTreeExpanded()}
+                    onContextMenu={tree.handleTreeContextMenu}
+                    renamingPath={tree.renamingPath()}
+                    onRenameConfirm={(path, name) => void tree.handleRenameConfirm(path, name)}
+                    onRenameCancel={() => tree.setRenamingPath(null)}
+                    newEntry={tree.newEntry()}
+                    onNewEntryConfirm={(parent, name, kind) => void tree.handleNewEntryConfirm(parent, name, kind)}
+                    onNewEntryCancel={() => tree.setNewEntry(null)}
+                    onStartRename={(path) => tree.setRenamingPath(path)}
+                    onFocusEditor={props.onFocusEditor}
+                />
+            </div>
+            <div
+                class="editor-tree-resize-handle"
+                onMouseDown={props.onResize}
+                {...tip("Drag to resize file tree", { label: true })}
+            />
+        </>
+    );
+}
+
+/** The document column: the tab bar, the notices, and the body (CodeMirror, a viewer or the empty state). */
+function EditorMainColumn(props: {
+    model: EditorViewModel;
+    docTabs: DocTabsModel<EditorBuffer>;
+    saveAs: ReturnType<typeof createSaveAs>;
+    shows: EditorShows;
+    focusRegion: Accessor<"tree" | "body" | null>;
+    lspState: Accessor<LspState | null>;
+    banner: ReturnType<typeof useLspBanner>;
+    liveDoc: Accessor<string>;
+    setContainerRef: (el: HTMLDivElement) => void;
+    emptyShortcuts: { keys: string[]; label: string }[];
+    showTreeButton: () => boolean;
+    onPreviewResize: (e: MouseEvent) => void;
+}): JSX.Element {
+    const { model, docTabs, saveAs, banner } = props;
+    const { showsText, isMarkdown } = props.shows;
+    const lspState = props.lspState;
+    const statusChipText = (): string => lspStatusChipText(lspState(), model.languageAtom());
+    const statusChipKind = (): string => {
+        const s = lspState();
+        return s?.kind ?? "none";
+    };
+    return (
+        <>
             {/* The focus line only says something beside the tree. */}
             <div
                 class="editor-main-column"
                 classList={{
                     "editor-region": model.treeExpandedAtom(),
-                    "editor-region--focused": model.treeExpandedAtom() && focusRegion() === "body",
+                    "editor-region--focused": model.treeExpandedAtom() && props.focusRegion() === "body",
                 }}
             >
-                <DocTabStrip
-                    ctl={docTabs}
-                    docType="editor"
-                    blockId={model.blockId}
-                    show={() => showTreeButton() || docTabs.tabs().length > 0}
-                    leading={
-                        // While the tree is hidden, the button that shows it
-                        // leads the document bar (the tree's own toolbar hides
-                        // it). An editor on a remote host has no tree.
-                        <Show when={showTreeButton()}>
-                            <IconButton
-                                icon="folder-tree"
-                                label="Show file tree"
-                                density="compact"
-                                class="editor-tree-toggle"
-                                onClick={() => void model.toggleTreeExpanded()}
-                            />
-                        </Show>
-                    }
-                    tooltipOf={(t) => t.payload.filePath}
-                    addTitle={`New scratch buffer (${keyLabel("ctrl+t")})`}
-                    // Not while its Save As box is open: the drag would take
-                    // the box's text selection.
-                    canDrag={(t) => saveAsTabId() !== t.id}
-                    tabClass={(t) => ({ "editor-tab--saveas": saveAsTabId() === t.id })}
-                    renderLabel={(t) =>
-                        saveAsTabId() === t.id ? (
-                            <SaveAsInput onConfirm={(path) => void handleSaveAsConfirm(path)} onCancel={() => setSaveAsTabId(null)} />
-                        ) : undefined
-                    }
-                />
+                <EditorTabBar model={model} docTabs={docTabs} saveAs={saveAs} showTreeButton={props.showTreeButton} />
 
                 <Show when={isMarkdown() && model.tabsAtom().length > 0}>
                     <EditorModeToolbar model={model} />
@@ -955,12 +257,10 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                     <div class="editor-loading">Loading...</div>
                 </Show>
 
-                {/* Full-pane error panel when a file failed to load (e.g.
-                    invalid path, permission denied, binary). Replaces the
-                    CodeMirror body for the active tab while the error sticks.
-                    Operational errors that occur with content already loaded
-                    (e.g. save failures) still surface via the top banner
-                    below. */}
+                {/* Full-pane error panel when a file failed to load (invalid path, permission
+                    denied, binary): replaces the CodeMirror body for the active tab while the
+                    error sticks. Errors with content already loaded (save failures) still show
+                    in the top banner below. */}
                 <Show when={model.errorAtom() && model.activeTabAtom() && !model.activeTabAtom()?.contentLoaded}>
                     <EditorErrorPanel model={model} />
                 </Show>
@@ -971,43 +271,19 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
 
                 {/* LSP install banner — appears when the language server's binary
                     isn't on PATH. Dismissable per session via the X button. */}
-                <Show when={lspBannerVisible()}>
-                    <EditorLspBanner state={lspState} onDismiss={dismissBanner} onCopy={copyToClipboard} />
+                <Show when={banner.lspBannerVisible()}>
+                    <EditorLspBanner state={lspState} onDismiss={banner.dismissBanner} onCopy={copyToClipboard} />
                 </Show>
 
-                <Show
-                    when={
-                        model.filePathAtom() &&
-                        !model.loadingAtom() &&
-                        // Don't render CodeMirror when the active tab failed
-                        // to load — the centered error panel takes the body.
-                        !(model.errorAtom() && model.activeTabAtom() && !model.activeTabAtom()?.contentLoaded)
-                    }
-                    fallback={<EditorEmptyState shortcuts={emptyShortcuts} onOpenFromRemote={() => model.setOpenFromRemote(true)} showTreeHint={showTreeButton} />}
-                >
-                    <div class="editor-body-wrap">
-                        <Show when={!showsText()} fallback={<TextViewerSwitch model={model} />}>
-                            <ViewerHost model={model} />
-                        </Show>
-                        <div
-                            class="editor-codemirror"
-                            ref={setContainerRef}
-                            style={{
-                                display: !showsText() || (isMarkdown() && model.editorMode() === "preview") ? "none" : undefined,
-                            }}
-                        />
-                        <Show when={isMarkdown() && model.editorMode() === "split"}>
-                            <div
-                                class="editor-preview-divider"
-                                onMouseDown={handlePreviewResizeMouseDown}
-                                {...tip("Drag to resize preview", { label: true })}
-                            />
-                        </Show>
-                        <Show when={isMarkdown() && model.editorMode() !== "source"}>
-                            <EditorMarkdownPreview model={model} text={liveDoc} />
-                        </Show>
-                    </div>
-                </Show>
+                <EditorBody
+                    model={model}
+                    shows={props.shows}
+                    liveDoc={props.liveDoc}
+                    setContainerRef={props.setContainerRef}
+                    emptyShortcuts={props.emptyShortcuts}
+                    showTreeButton={props.showTreeButton}
+                    onPreviewResize={props.onPreviewResize}
+                />
 
                 {/* LSP status chip — bottom-of-pane indicator. Only shown when
                     there's an active client (i.e. an LSP-supported file is open). */}
@@ -1015,31 +291,131 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                     <EditorLspStatusChip kind={statusChipKind()} text={statusChipText()} />
                 </Show>
             </div>
+        </>
+    );
+}
 
+/** The document tab bar; while the tree is hidden, the button that shows it leads the bar. */
+function EditorTabBar(props: {
+    model: EditorViewModel;
+    docTabs: DocTabsModel<EditorBuffer>;
+    saveAs: ReturnType<typeof createSaveAs>;
+    showTreeButton: () => boolean;
+}): JSX.Element {
+    const { model, docTabs, saveAs } = props;
+    return (
+        <DocTabStrip
+            ctl={docTabs}
+            docType="editor"
+            blockId={model.blockId}
+            show={() => props.showTreeButton() || docTabs.tabs().length > 0}
+            leading={
+                // While the tree is hidden, the button that shows it
+                // leads the document bar (the tree's own toolbar hides
+                // it). An editor on a remote host has no tree.
+                <Show when={props.showTreeButton()}>
+                    <IconButton
+                        icon="folder-tree"
+                        label="Show file tree"
+                        density="compact"
+                        class="editor-tree-toggle"
+                        onClick={() => void model.toggleTreeExpanded()}
+                    />
+                </Show>
+            }
+            tooltipOf={(t) => t.payload.filePath}
+            addTitle={`New scratch buffer (${keyLabel("ctrl+t")})`}
+            // Not while its Save As box is open: the drag would take
+            // the box's text selection.
+            canDrag={(t) => saveAs.saveAsTabId() !== t.id}
+            tabClass={(t) => ({ "editor-tab--saveas": saveAs.saveAsTabId() === t.id })}
+            renderLabel={(t) =>
+                saveAs.saveAsTabId() === t.id ? (
+                    <SaveAsInput onConfirm={(path) => void saveAs.handleSaveAsConfirm(path)} onCancel={() => saveAs.setSaveAsTabId(null)} />
+                ) : undefined
+            }
+        />
+    );
+}
+
+/** The document body: CodeMirror or a viewer with the Markdown preview beside it, or the empty state. */
+function EditorBody(props: {
+    model: EditorViewModel;
+    shows: EditorShows;
+    liveDoc: Accessor<string>;
+    setContainerRef: (el: HTMLDivElement) => void;
+    emptyShortcuts: { keys: string[]; label: string }[];
+    showTreeButton: () => boolean;
+    onPreviewResize: (e: MouseEvent) => void;
+}): JSX.Element {
+    const { model } = props;
+    const { showsText, isMarkdown } = props.shows;
+    return (
+        <Show
+            when={
+                model.filePathAtom() &&
+                !model.loadingAtom() &&
+                // Don't render CodeMirror when the active tab failed
+                // to load — the centered error panel takes the body.
+                !(model.errorAtom() && model.activeTabAtom() && !model.activeTabAtom()?.contentLoaded)
+            }
+            fallback={<EditorEmptyState shortcuts={props.emptyShortcuts} onOpenFromRemote={() => model.setOpenFromRemote(true)} showTreeHint={props.showTreeButton} />}
+        >
+            <div class="editor-body-wrap">
+                <Show when={!showsText()} fallback={<TextViewerSwitch model={model} />}>
+                    <ViewerHost model={model} />
+                </Show>
+                <div
+                    class="editor-codemirror"
+                    ref={props.setContainerRef}
+                    style={{
+                        display: !showsText() || (isMarkdown() && model.editorMode() === "preview") ? "none" : undefined,
+                    }}
+                />
+                <Show when={isMarkdown() && model.editorMode() === "split"}>
+                    <div
+                        class="editor-preview-divider"
+                        onMouseDown={props.onPreviewResize}
+                        {...tip("Drag to resize preview", { label: true })}
+                    />
+                </Show>
+                <Show when={isMarkdown() && model.editorMode() !== "source"}>
+                    <EditorMarkdownPreview model={model} text={props.liveDoc} />
+                </Show>
+            </div>
+        </Show>
+    );
+}
+
+/** The file tree's context menu and the confirmation dialog, above everything. */
+function EditorDialogs(props: { tree: TreeMenu }): JSX.Element {
+    const { tree } = props;
+    return (
+        <>
             {/* File-tree context menu — rendered via Portal above everything */}
-            <Show when={ctxMenu()}>
+            <Show when={tree.ctxMenu()}>
                 {(menu) => (
                     <ContextMenu
                         items={menu().items}
                         x={menu().x}
                         y={menu().y}
-                        onClose={() => setCtxMenu(null)}
+                        onClose={() => tree.setCtxMenu(null)}
                     />
                 )}
             </Show>
 
             {/* Delete confirmation modal — replaces window.confirm() */}
-            <Show when={deleteConfirm()}>
+            <Show when={tree.deleteConfirm()}>
                 {(dc) => (
                     <ConfirmDialog
                         title={dc().title}
                         message={dc().message}
                         confirmLabel={dc().confirmLabel ?? "Delete"}
-                        onConfirm={() => { dc().onConfirm(); setDeleteConfirm(null); }}
-                        onCancel={() => setDeleteConfirm(null)}
+                        onConfirm={() => { dc().onConfirm(); tree.setDeleteConfirm(null); }}
+                        onCancel={() => tree.setDeleteConfirm(null)}
                     />
                 )}
             </Show>
-        </div>
+        </>
     );
 }

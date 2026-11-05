@@ -1,0 +1,9 @@
+diag sync urlAtom="https://example.com/" addressBar="https://example.com/" focused=false willUpdate=false
+listen browser-pane-shortcut
+rpc ListBookmarks
+rpc SetBookmarks [{"id":"00000000-0000-4000-8000-000000000001","title":"Example Domain","url":"https://example.com/","favicon_url":"https://example.com/favicon.ico","created_at":1800000000000}]
+rpc ListBookmarks
+rows=["Set as Home Page","Remove Bookmark","Example Domain"]
+rpc SetBookmarks []
+rpc ListBookmarks
+rows=["Set as Home Page","Bookmark This Page","No bookmarks yet"]

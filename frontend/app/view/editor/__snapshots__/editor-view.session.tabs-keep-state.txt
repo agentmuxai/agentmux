@@ -1,0 +1,40 @@
+rpc ReadEditorFile {"path":"/home/u/a.ts"}
+rpc WatchEditorFile {"path":"/home/u/a.ts","block_id":"session<n>"}
+lsp#1 new typescript /home/u/a.ts
+lsp#1 start
+lsp#1 didOpen /home/u/a.ts typescript "export const a = 1;\n"
+diagnostics wired to lsp#1
+rpc ReadEditorFile {"path":"/home/u/b.ts"}
+rpc WatchEditorFile {"path":"/home/u/b.ts","block_id":"session<n>"}
+lsp#1 didClose /home/u/a.ts
+lsp#1 didOpen /home/u/b.ts typescript "export const b = 2;\n"
+diagnostics of lsp#1 unwired
+diagnostics wired to lsp#1
+probe b, caret set: doc="export const b = 2;\n" caret=3 dirty=false views=1 tab=null
+lsp#1 didClose /home/u/b.ts
+lsp#1 didOpen /home/u/a.ts typescript "export const a = 1;\n"
+diagnostics of lsp#1 unwired
+diagnostics wired to lsp#1
+probe a: caret kept: doc="export const a = 1;\n" caret=7 dirty=false views=1 tab=null
+lsp#1 didClose /home/u/a.ts
+lsp#1 didOpen /home/u/b.ts typescript "export const b = 2;\n"
+diagnostics of lsp#1 unwired
+diagnostics wired to lsp#1
+probe b: caret kept: doc="export const b = 2;\n" caret=3 dirty=false views=1 tab=null
+lsp#1 didClose /home/u/b.ts
+lsp#1 didOpen /home/u/a.ts typescript "export const a = 1;\n"
+diagnostics of lsp#1 unwired
+diagnostics wired to lsp#1
+probe a again: doc="export const a = 1;\n" caret=7 dirty=false views=1 tab=null
+probe a edited: doc="// edit\nexport const a = 1;\n" caret=8 dirty=true views=1 tab=null
+lsp#1 didClose /home/u/a.ts
+lsp#1 didOpen /home/u/b.ts typescript "export const b = 2;\n"
+diagnostics of lsp#1 unwired
+diagnostics wired to lsp#1
+probe b: doc="export const b = 2;\n" caret=3 dirty=false views=1 tab=null
+lsp#1 didClose /home/u/b.ts
+lsp#1 didOpen /home/u/a.ts typescript "// edit\nexport const a = 1;\n"
+diagnostics of lsp#1 unwired
+diagnostics wired to lsp#1
+probe back on a: doc="// edit\nexport const a = 1;\n" caret=8 dirty=true views=1 tab=null
+probe a after undo: doc="export const a = 1;\n" caret=7 dirty=true views=1 tab=null

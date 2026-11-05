@@ -6,27 +6,30 @@
  *
  * Spec: `docs/specs/SPEC_BROWSER_PANE_CAMERA_ACCESS_2026_09_01.md` §3.5.
  *
- * # Why this lives in the main window's DOM
+ * # Why it is AgentMux's DOM, not the page's
  *
  * The pane asking for permission is arbitrary web content on a native surface.
- * Rendering the prompt inside that pane would let the page draw something that
- * looks exactly like it — the classic permission-spoofing shape. The host emits
- * this event to the DOM of the window that *owns* the pane (not to the pane's
- * page, and not unconditionally to "main" — a torn-off pane lives in its
- * floating window), so the prompt is AgentMux chrome the page cannot reach,
- * draw over, or click for the user.
+ * Rendering the prompt from the page would let it draw something that looks
+ * exactly like it — the classic permission-spoofing shape. The host emits this
+ * event to the DOM of the window that *owns* the pane (not to the pane's page,
+ * and not unconditionally to "main" — a torn-off pane lives in its floating
+ * window), and the prompt is a pane modal drawn by AgentMux over that one pane
+ * (the native surface is clipped for it): chrome the page cannot reach, draw
+ * over, or click for the user, and it covers the pane that asked, not the
+ * whole window.
  *
  * # Deny is the default everywhere
  *
  * `destructive` puts initial focus on Cancel and makes Allow the non-default
- * action. Dismissal (Escape, backdrop) denies. If this component never mounts
- * or never answers, the host's own timeout denies. There is no path where
- * silence becomes permission.
+ * action. Dismissal (Escape, backdrop) denies, and so does closing the pane. If
+ * this component never mounts or never answers, the host's own timeout denies.
+ * There is no path where silence becomes permission.
  */
 
-import { createSignal, onCleanup, onMount, Show } from "solid-js";
+import { onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 import { ConfirmModal } from "@/element/confirm-modal";
+import { openPaneModal, type PaneRequestHandle, type PaneRequestProps } from "@/app/store/pane-requests";
 import { getApi } from "@/util/app-api";
 
 /** Mirrors `cef_media_access_permission_types_t`. */
@@ -34,6 +37,9 @@ const DEVICE_AUDIO_CAPTURE = 1 << 0;
 const DEVICE_VIDEO_CAPTURE = 1 << 1;
 const DESKTOP_AUDIO_CAPTURE = 1 << 2;
 const DESKTOP_VIDEO_CAPTURE = 1 << 3;
+
+/** How long the host waits before it denies on its own (`PROMPT_TIMEOUT_MS`, crates/cef media_prompt.rs). */
+const HOST_TIMEOUT_MS = 60_000;
 
 interface PermissionRequest {
     requestId: number;
@@ -83,26 +89,80 @@ export function displayOrigin(origin: string): string {
     }
 }
 
+/** The question, drawn over the one pane that asked it. */
+function MediaPermissionAsk(props: { req: PermissionRequest; onAnswer: (allow: boolean) => void } & PaneRequestProps): JSX.Element {
+    return (
+        <ConfirmModal
+            open={true}
+            scope="pane"
+            // Attributed to the SITE, not to AgentMux — the user is
+            // deciding about the page, and a prompt that reads like an
+            // app prompt trains people to accept them.
+            title={question(props.req)}
+            description="This page is running in a browser pane. While it is capturing, an indicator appears with a Stop button."
+            confirmLabel="Allow"
+            cancelLabel="Don't allow"
+            destructive={true}
+            onConfirm={() => props.onAnswer(true)}
+            onCancel={() => props.onAnswer(false)}
+        />
+    );
+}
+
+const question = (req: PermissionRequest): string =>
+    `${displayOrigin(req.origin)} wants to use your ${describeRequestedDevices(req.requested)}`;
+
+interface Asking {
+    requestId: number;
+    handle: PaneRequestHandle;
+    timer: ReturnType<typeof setTimeout>;
+}
+
+/** Listens for the host's requests; renders nothing itself (each prompt is a modal in its pane). */
 export function PaneMediaPermissionPrompt(): JSX.Element {
-    const [request, setRequest] = createSignal<PermissionRequest | null>(null);
+    // The open prompt of each pane: panes ask independently, but one pane has one question at a time.
+    const asking = new Map<string, Asking>();
+
+    /** Ends pane `blockId`'s prompt `requestId` with `allow` (a no-op if it already ended). */
+    const finish = (blockId: string, requestId: number, allow: boolean) => {
+        const cur = asking.get(blockId);
+        if (!cur || cur.requestId !== requestId) return;
+        asking.delete(blockId);
+        clearTimeout(cur.timer);
+        cur.handle.close();
+        void respond(requestId, allow);
+    };
 
     onMount(() => {
         let dispose: (() => void) | undefined;
-        void getApi().listen<PermissionRequest>("pane-media-permission-request", (payload) => {
-            if (!payload || typeof payload.requestId !== "number") return;
-            // One prompt at a time. A second request while one is open would
-            // otherwise replace it, and the user's click would land on a
-            // different question than the one they read. The displaced request
-            // is denied immediately rather than left parked.
-            const current = request();
-            if (current) {
-                void respond(current.requestId, false);
-            }
-            setRequest(payload);
+        void getApi().listen<PermissionRequest>("pane-media-permission-request", (req) => {
+            if (!req || typeof req.requestId !== "number" || typeof req.blockId !== "string") return;
+            // A second request from the same pane would otherwise replace the open one, and the
+            // user's click would land on a different question than the one they read. The displaced
+            // request is denied immediately rather than left parked.
+            const open = asking.get(req.blockId);
+            if (open) finish(req.blockId, open.requestId, false);
+            const deny = () => finish(req.blockId, req.requestId, false);
+            asking.set(req.blockId, {
+                requestId: req.requestId,
+                handle: openPaneModal(
+                    req.blockId,
+                    MediaPermissionAsk,
+                    { req, onAnswer: (allow: boolean) => finish(req.blockId, req.requestId, allow) },
+                    // Closing the pane with the question open denies it.
+                    { source: "media-permission", text: question(req), onGone: deny }
+                ),
+                // The host has denied by now: take the stale question away rather than leave it for
+                // a pane that was out of sight.
+                timer: setTimeout(deny, HOST_TIMEOUT_MS),
+            });
         }).then((d) => {
             dispose = d;
         });
-        onCleanup(() => dispose?.());
+        onCleanup(() => {
+            dispose?.();
+            for (const [blockId, a] of [...asking]) finish(blockId, a.requestId, false);
+        });
     });
 
     const respond = async (requestId: number, allow: boolean) => {
@@ -115,31 +175,5 @@ export function PaneMediaPermissionPrompt(): JSX.Element {
         }
     };
 
-    const answer = (allow: boolean) => {
-        const req = request();
-        if (!req) return;
-        setRequest(null);
-        void respond(req.requestId, allow);
-    };
-
-    return (
-        <Show when={request()}>
-            {(req) => (
-                <ConfirmModal
-                    open={true}
-                    scope="window"
-                    // Attributed to the SITE, not to AgentMux — the user is
-                    // deciding about the page, and a prompt that reads like an
-                    // app prompt trains people to accept them.
-                    title={`${displayOrigin(req().origin)} wants to use your ${describeRequestedDevices(req().requested)}`}
-                    description="This page is running in a browser pane. While it is capturing, an indicator appears with a Stop button."
-                    confirmLabel="Allow"
-                    cancelLabel="Don't allow"
-                    destructive={true}
-                    onConfirm={() => answer(true)}
-                    onCancel={() => answer(false)}
-                />
-            )}
-        </Show>
-    );
+    return null;
 }

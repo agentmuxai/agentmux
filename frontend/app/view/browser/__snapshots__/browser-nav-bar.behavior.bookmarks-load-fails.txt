@@ -1,0 +1,6 @@
+diag sync urlAtom="https://example.com/" addressBar="https://example.com/" focused=false willUpdate=false
+listen browser-pane-shortcut
+rpc ListBookmarks
+bookmarks button title="Bookmarks: Failed to load bookmarks: disk unavailable" error=true
+rpc ListBookmarks
+bookmarks button title="Bookmarks" error=false

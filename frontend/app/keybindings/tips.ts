@@ -271,7 +271,7 @@ export const TIPS: TipRow[] = [
         gesture: "mod+click",
         where: "in an editor",
         label: "Add another cursor",
-        source: { file: "frontend/app/view/editor/editor-view.tsx", anchor: "basicSetup," },
+        source: { file: "frontend/app/view/editor/editor-codemirror.ts", anchor: "basicSetup," },
     },
     {
         id: "editor:blockSelect",
@@ -279,7 +279,7 @@ export const TIPS: TipRow[] = [
         gesture: "alt+drag",
         where: "in an editor",
         label: "Make a column (block) selection",
-        source: { file: "frontend/app/view/editor/editor-view.tsx", anchor: "basicSetup," },
+        source: { file: "frontend/app/view/editor/editor-codemirror.ts", anchor: "basicSetup," },
     },
     {
         id: "editor:nextMatch",
@@ -287,7 +287,7 @@ export const TIPS: TipRow[] = [
         gesture: "mod+key:D",
         where: "in an editor",
         label: "Select the next match of the selected text",
-        source: { file: "frontend/app/view/editor/editor-view.tsx", anchor: "basicSetup," },
+        source: { file: "frontend/app/view/editor/editor-codemirror.ts", anchor: "basicSetup," },
     },
 
     // ── Files ──

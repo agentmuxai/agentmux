@@ -43,6 +43,7 @@ import {
     cropRectInImage,
     MAX_SNAPSHOT_CHARS,
     paneDragCandidate,
+    peekWindowTabSnapshot,
     prewarmTearOffSnapshot,
     prewarmWindowTabSnapshot,
     resetTearOffSnapshotForTests,
@@ -229,6 +230,23 @@ describe("tear-off snapshot", () => {
 });
 
 describe("window-tab snapshot", () => {
+    it("shows the picture to the live follow without taking it from the tear-off", async () => {
+        prewarmWindowTabSnapshot("t1");
+        expect(await peekWindowTabSnapshot("t1", 500)).toBe(btoa("full-viewport"));
+        expect(await peekWindowTabSnapshot("t1", 500)).toBe(btoa("full-viewport"));
+        expect(await takeWindowTabSnapshot("t1")).toBe(btoa("full-viewport"));
+    });
+
+    it("has no picture for another tab, or none held, or one that is not ready in the wait", async () => {
+        expect(await peekWindowTabSnapshot("t1", 10)).toBeUndefined();
+        prewarmWindowTabSnapshot("t1");
+        expect(await peekWindowTabSnapshot("t2", 10)).toBeUndefined();
+        resetTearOffSnapshotForTests();
+        shots.next = new Promise(() => {});
+        prewarmWindowTabSnapshot("t1");
+        expect(await peekWindowTabSnapshot("t1", 10)).toBeUndefined();
+    });
+
     it("hands over the whole viewport, uncropped", async () => {
         prewarmWindowTabSnapshot("t1");
         expect(await takeWindowTabSnapshot("t1")).toBe(btoa("full-viewport"));

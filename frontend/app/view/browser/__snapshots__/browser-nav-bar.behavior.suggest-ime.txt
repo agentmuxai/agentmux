@@ -1,0 +1,12 @@
+diag sync urlAtom="https://example.com/" addressBar="https://example.com/" focused=false willUpdate=false
+listen browser-pane-shortcut
+diag input-focus value="https://example.com/" relatedTarget=null
+reclaimWindowFocus main
+diag sync urlAtom="https://example.com/" addressBar="ni" focused=true willUpdate=false
+-- composing
+state value="ni" sel=2-2 rows=[]
+diag sync urlAtom="https://example.com/" addressBar="你" focused=true willUpdate=false
+autocomplete block-1 "你" suggest=true
+diag sync urlAtom="https://example.com/" addressBar="你hub.com" focused=true willUpdate=false
+-- committed
+state value="你hub.com" sel=1-8 rows=["github.com"]

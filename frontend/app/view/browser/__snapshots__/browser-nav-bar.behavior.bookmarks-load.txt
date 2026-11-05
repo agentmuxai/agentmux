@@ -1,0 +1,7 @@
+diag sync urlAtom="https://example.com/" addressBar="https://example.com/" focused=false willUpdate=false
+listen browser-pane-shortcut
+rpc ListBookmarks
+loading rows=["Loading…"]
+loaded rows=["Set as Home Page","Bookmark This Page","Docs","https://plain.example/"]
+rpc ListBookmarks
+reopened rows=["Set as Home Page","Bookmark This Page","Docs","https://plain.example/"] sameImg=true

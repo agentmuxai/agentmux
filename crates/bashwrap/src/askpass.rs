@@ -29,6 +29,7 @@ const SUBCOMMANDS: &[&str] = &[
     "git-credential",
     "github-token",
     "github-owner-tag",
+    "github-text-guard",
     "git-hook",
     "git-env",
     "help",

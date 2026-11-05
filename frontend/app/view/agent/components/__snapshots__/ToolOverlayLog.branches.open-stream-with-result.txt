@@ -1,0 +1,2 @@
+open stream: html=""
+closed stream: text="all doneExit code: 0"

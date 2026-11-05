@@ -1,0 +1,9 @@
+log not open: (no live tail)
+no chunks yet: <span class="agent-tool-live-tail agent-tool-live-tail--waiting">0s…</span>
+after 3 s: <span class="agent-tool-live-tail agent-tool-live-tail--waiting">3s…</span>
+only a system chunk: <span class="agent-tool-live-tail agent-tool-live-tail--waiting">10s…</span>
+clock stepped back: <span class="agent-tool-live-tail agent-tool-live-tail--waiting">0s…</span>
+no stamp: <span class="agent-tool-live-tail agent-tool-live-tail--waiting">0s…</span>
+stdout then stderr: <span class="agent-tool-live-tail" data-hover-tip="latest stream output (3 chunks)" aria-description="latest stream output (3 chunks)">→ oops</span>
+newest output wins: <span class="agent-tool-live-tail" data-hover-tip="latest stream output (3 chunks)" aria-description="latest stream output (3 chunks)">→ oops</span>
+a new chunk: <span class="agent-tool-live-tail" data-hover-tip="latest stream output (2 chunks)" aria-description="latest stream output (2 chunks)">→ second</span>

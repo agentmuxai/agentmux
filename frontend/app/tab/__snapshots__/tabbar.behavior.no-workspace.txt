@@ -1,0 +1,7 @@
+createTearOffTabAtRelease
+useTabDragAndDrop tearOff=function
+createScrollEdges
+useTabTearOffEvents
+registerTabCloseRequestHandler
+dom root=undefined hamburger=0 separators=0 fill=0 scroll="undefined" drag=undefined modal=none
+tabs []

@@ -1,0 +1,26 @@
+rpc ReadEditorFile {"path":"/home/u/a.ts"}
+rpc WatchEditorFile {"path":"/home/u/a.ts","block_id":"session<n>"}
+lsp#1 new typescript /home/u/a.ts
+lsp#1 start
+lsp#1 didOpen /home/u/a.ts typescript "export const a = 1;\n"
+diagnostics wired to lsp#1
+rpc ReadEditorFile {"path":"/home/u/b.ts"}
+rpc WatchEditorFile {"path":"/home/u/b.ts","block_id":"session<n>"}
+lsp#1 didClose /home/u/a.ts
+lsp#1 didOpen /home/u/b.ts typescript "export const b = 2;\n"
+diagnostics of lsp#1 unwired
+diagnostics wired to lsp#1
+lsp#1 didClose /home/u/b.ts
+lsp#1 didOpen /home/u/a.ts typescript "export const a = 1;\n"
+diagnostics of lsp#1 unwired
+diagnostics wired to lsp#1
+lsp#1 didChange /home/u/a.ts "xexport const a = 1;\n"
+dialog: Close "a.ts" without saving?Your changes to this file will be lost.CancelDiscard changes
+buttons: ["","","","","","","","Cancel","Discard changes"]
+probe after cancel: doc="xexport const a = 1;\n" caret=1 dirty=true views=1 tab=null
+lsp#1 didClose /home/u/a.ts
+lsp#1 didOpen /home/u/b.ts typescript "export const b = 2;\n"
+rpc UnwatchEditorFile {"path":"/home/u/a.ts","block_id":"session<n>"}
+diagnostics of lsp#1 unwired
+diagnostics wired to lsp#1
+probe after discard: doc="export const b = 2;\n" caret=0 dirty=false views=1 tab=null

@@ -1,0 +1,4 @@
+diag sync urlAtom="https://example.com/" addressBar="https://example.com/" focused=false willUpdate=false
+listen browser-pane-shortcut
+hidden bar=true
+shown bar=true

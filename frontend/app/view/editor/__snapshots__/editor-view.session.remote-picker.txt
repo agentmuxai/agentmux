@@ -1,0 +1,4 @@
+picker before: false
+picker: <div class="stub-remote" data-current=""><button class="stub-remote-open"></button><button class="stub-remote-close"></button></div>
+openFromRemote=[["host1","/srv/x.ts"]]
+picker after close: false flag=false

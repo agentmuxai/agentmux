@@ -1,0 +1,13 @@
+rpc ReadEditorFile {"path":"/home/u/a.ts"}
+rpc WatchEditorFile {"path":"/home/u/a.ts","block_id":"session<n>"}
+lsp#1 new typescript /home/u/a.ts
+lsp#1 start
+lsp#1 didOpen /home/u/a.ts typescript "export const a = 1;\n"
+diagnostics wired to lsp#1
+tree item focused first: ""
+run editor:focusTree -> true
+active: treeitem region class: editor-tree-column editor-region editor-region--focused
+run editor:focusTree -> true
+active after second: in editor=true
+run editor:focusTree -> true
+tree shown again: true

@@ -1,0 +1,66 @@
+api getAboutModalDetails
+api getWindowLabel
+popover class=instance-panel role=dialog label=AgentMux instance panel placement=top-end width=320px
+ListClosedWindows
+PlaceWindowSlots ["w1","w2"]
+console.debug [wave-panel] windowId=win1 label=main idx=0 displayName=<none> workspaceName=Main Space → name="Main Space"
+console.debug [wave-panel] windowId=win1 label=main idx=0 displayName=<none> workspaceName=Main Space → name="Main Space"
+PlaceWindowSlots ["w1","w2"]
+<div class="instance-panel-header">
+<div class="instance-panel-row instance-panel-row-meta">
+<span class="instance-panel-label">Version</span>
+<span class="instance-panel-value">v0.60.1</span>
+<div class="ui-tooltip-anchor">
+<button aria-label="Copy version" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button instance-panel-copy">
+<i aria-hidden="true" class="fa-solid fa-copy">
+</i>
+</button>
+</div>
+</div>
+<div class="instance-panel-row instance-panel-row-meta">
+<span class="instance-panel-label">Channel</span>
+<span class="instance-panel-value instance-panel-mono">stable</span>
+<div class="ui-tooltip-anchor">
+<button aria-label="Copy channel" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button instance-panel-copy">
+<i aria-hidden="true" class="fa-solid fa-copy">
+</i>
+</button>
+</div>
+</div>
+<div class="instance-panel-row instance-panel-row-meta">
+<span class="instance-panel-label">Commit</span>
+<span class="instance-panel-value instance-panel-mono">abc1234</span>
+<div class="ui-tooltip-anchor">
+<button aria-label="Copy commit hash" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button instance-panel-copy">
+<i aria-hidden="true" class="fa-solid fa-copy">
+</i>
+</button>
+</div>
+</div>
+<div class="instance-panel-row instance-panel-row-meta">
+<span class="instance-panel-label">CEF</span>
+<span class="instance-panel-value instance-panel-mono">152.0.1</span>
+<div class="ui-tooltip-anchor">
+<button aria-label="Copy CEF version" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button instance-panel-copy">
+<i aria-hidden="true" class="fa-solid fa-copy">
+</i>
+</button>
+</div>
+</div>
+<div class="instance-panel-row instance-panel-row-meta">
+<span class="instance-panel-label">Runtime</span>
+<span class="instance-panel-value instance-panel-mono">darwin · arm64</span>
+</div>
+<div class="instance-panel-row instance-panel-row-meta">
+<span class="instance-panel-label">Build Time</span>
+<span class="instance-panel-value instance-panel-mono">Nov 3, 2026 09:05 UTC</span>
+</div>
+</div>
+copy "version: v0.60.1"
+clicked Copy version
+copy "stable"
+clicked Copy channel
+copy "abc1234"
+clicked Copy commit hash
+copy "152.0.1"
+clicked Copy CEF version

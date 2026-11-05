@@ -1,0 +1,23 @@
+Block mount a1 wrapper#1 hoisted=true preview=false
+Block mount a2 wrapper#2 hoisted=true preview=false
+expectAgentMount a1 :: view=agent active=true mounted=true minimized=false stack=2
+expectAgentMount a2 :: view=agent active=false mounted=true minimized=false stack=2
+setBlockMinimized a1 false
+setBlockMinimized a2 false
+setKeepAliveBlockDormant a1 false
+Block a1 memberActive=true
+Block a1 set its vm
+setKeepAliveBlockDormant a2 true
+Block a2 memberActive=false
+Block a2 set its vm
+renderPaneChrome by vm of a1
+-- hide the pane
+Block a1 memberActive=false
+Block a2 memberActive=false
+-- show the pane, switch to a2
+Block a1 memberActive=true
+Block a2 memberActive=false
+setKeepAliveBlockDormant a2 false
+setKeepAliveBlockDormant a1 true
+Block a1 memberActive=false
+Block a2 memberActive=true

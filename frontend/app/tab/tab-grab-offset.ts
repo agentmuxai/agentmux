@@ -32,3 +32,21 @@ export function setTabGrabOffset(offset: TabGrabOffset | null): void {
 export function getTabGrabOffset(): TabGrabOffset | null {
     return current;
 }
+
+/**
+ * From the cursor to the outer top-left of the window a torn-off tab opens, in DIP: the grab offset in the
+ * tab, plus where the first tab sits in the window (its rect and the window's chrome). The window opens at
+ * the cursor minus this, so the grabbed tab stays under the cursor. Null until a drag has set the grab offset
+ * or while the strip has no tab. The release and the live follow (tab-live-follow.ts) both place by it.
+ */
+export function tabAnchorOffset(tabBarScroll: Element | null | undefined): TabGrabOffset | null {
+    const grab = current;
+    const firstTabRect = tabBarScroll?.querySelector(".tab-drop-wrapper")?.getBoundingClientRect();
+    if (!grab || !firstTabRect) return null;
+    const chromeBorderX = Math.max(0, window.outerWidth - window.innerWidth) / 2;
+    const chromeBorderY = Math.max(0, window.outerHeight - window.innerHeight - chromeBorderX);
+    return {
+        x: grab.x + firstTabRect.left + chromeBorderX,
+        y: grab.y + firstTabRect.top + chromeBorderY,
+    };
+}

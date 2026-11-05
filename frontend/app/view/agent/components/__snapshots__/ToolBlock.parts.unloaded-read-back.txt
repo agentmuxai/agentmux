@@ -1,0 +1,7 @@
+load
+while loading: <div class="agent-tool-result-unloaded">Loading result…</div>
+failed: <div class="agent-tool-result-unloaded">This result is no longer available in the pane. Open History to see it.</div>
+loads so far: 1
+closed: loads=1
+load
+reopened: loads=2 <div class="agent-tool-result-unloaded">Loading result…</div>

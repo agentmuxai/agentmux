@@ -1,0 +1,7 @@
+Block mount b1 wrapper#1 hoisted=false preview=false
+agentMountSettled b1
+setBlockMinimized b1 false
+Block b1 memberActive=true
+leaf setActiveViewModel b1
+Block b1 set its vm
+dom chrome=0 shell=0 blocks=["b1"] slots=[]

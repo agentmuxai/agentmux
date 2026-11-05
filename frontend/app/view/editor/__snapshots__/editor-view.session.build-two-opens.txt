@@ -1,0 +1,7 @@
+rpc ReadEditorFile {"path":"/home/u/a.ts"}
+rpc ReadEditorFile {"path":"/home/u/b.ts"}
+lsp#1 new typescript /home/u/b.ts
+lsp#1 start
+lsp#1 didOpen /home/u/b.ts typescript "export const b = 2;\n"
+diagnostics wired to lsp#1
+probe after two opens: doc="export const b = 2;\n" caret=0 dirty=false views=1 tab=null

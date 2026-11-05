@@ -1,0 +1,21 @@
+api getAboutModalDetails
+api getWindowLabel
+popover class=instance-panel role=dialog label=AgentMux instance panel placement=top-end width=320px
+ListClosedWindows
+PlaceWindowSlots ["w1","w2"]
+console.debug [wave-panel] windowId=win1 label=main idx=0 displayName=<none> workspaceName=Main Space → name="Main Space"
+console.debug [wave-panel] windowId=win1 label=main idx=0 displayName=<none> workspaceName=Main Space → name="Main Space"
+PlaceWindowSlots ["w1","w2"]
+a other key: false
+F2 opens: Default Workspace
+F2 and a double-click while editing keep the text: Typed
+clicks and a key inside the input: Typed
+Escape: false
+RenameUserWorkspace "By Enter"
+Enter: false
+RenameUserWorkspace "By blur"
+blur: false
+unchanged name: no save
+same name with spaces: no save
+RenameUserWorkspace "Refused"
+console.error [InstancePanel] workspace rename failed: rename refused

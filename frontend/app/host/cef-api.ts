@@ -583,6 +583,12 @@ function crossWindowDragApi() {
         stopTabDragTracking: async () => {
             await invokeCommand("stop_tab_drag_tracking");
         },
+        liveFollowBegin: async (args) => {
+            await invokeCommand("live_follow_begin", args);
+        },
+        liveFollowEnd: async () => {
+            await invokeCommand("live_follow_end");
+        },
     } satisfies Partial<AppApi>;
 }
 

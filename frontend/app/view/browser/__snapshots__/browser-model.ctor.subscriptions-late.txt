@@ -1,0 +1,75 @@
+diag [browser-pane:diag][ctor-bl vm=<id>] viewmodel-constructed
+diag [browser-pane:diag][ctor-bl] ctor meta.url=""
+diag [browser-pane:diag][ctor-bl vm=<id>] vm-favicon-memo-eval value=""
+listen browser-pane-title-change
+listen browser-pane-favicon-urls
+listen browser-pane-nav-state
+listen browser-pane-clicked
+listen browser-pane-close-requested
+listen browser-pane-notice
+listen pane-download-update
+diag [browser-pane:diag][ctor-bl vm=<id>] dispatch type=OpenTab src=ctor-open-initial-tab
+diag [browser-pane:diag][ctor-bl vm=<id>] state-write key=tabs value-len=1
+diag [browser-pane:diag][ctor-bl vm=<id>] state-write key=activeTabId value="<uuid>"
+diag [browser-pane:diag][ctor-bl vm=<id>] state-write key=url value="https://agentmux.ai"
+diag [browser-pane:diag][ctor-bl vm=<id>] state-write key=title value="agentmux.ai"
+diag [browser-pane:diag][ctor-bl vm=<id>] state-write key=faviconUrl value="https://agentmux.ai/favicon.ico"
+diag [browser-pane:diag][ctor-bl vm=<id>] vm-favicon-memo-eval value="https://agentmux.ai/favicon.ico"
+diag [browser-pane:diag][ctor-bl vm=<id>] state-write key=loading value=true
+diag [browser-pane:diag][ctor-bl vm=<id>] navigate(url="https://agentmux.ai") closed=false
+diag [browser-pane:diag][ctor-bl vm=<id>] dispatch type=Navigate src=navigate
+diag [browser-pane:diag][ctor-bl vm=<id>] state-write key=tabs value-len=1
+ctx.setMeta {"url":"https://agentmux.ai"}
+-- subscriptions pending; dispose
+diag [browser-pane:diag][ctor-bl vm=<id>] dispose
+diag [browser-pane:diag][ctor-bl vm=<id>] dispatch type=Disposed src=dispose
+diag [browser-pane:diag][ctor-bl vm=<id>] state-write key=closed value=true
+diag [browser-pane:diag][ctor-bl vm=<id>] sub-registered name=browser-pane-title-change
+unsub browser-pane-title-change
+diag [browser-pane:diag][ctor-bl vm=<id>] sub-registered name=browser-pane-favicon-urls
+unsub browser-pane-favicon-urls
+diag [browser-pane:diag][ctor-bl vm=<id>] sub-registered name=browser-pane-nav-state
+unsub browser-pane-nav-state
+diag [browser-pane:diag][ctor-bl vm=<id>] sub-registered name=browser-pane-clicked
+unsub browser-pane-clicked
+unsub browser-pane-close-requested
+unsub browser-pane-notice
+unsub pane-download-update
+-- a second model whose subscriptions resolve while open
+diag [browser-pane:diag][ctor-bl vm=<id>] viewmodel-constructed
+diag [browser-pane:diag][ctor-bl] ctor meta.url=""
+diag [browser-pane:diag][ctor-bl vm=<id>] vm-favicon-memo-eval value=""
+listen browser-pane-title-change
+listen browser-pane-favicon-urls
+listen browser-pane-nav-state
+listen browser-pane-clicked
+listen browser-pane-close-requested
+listen browser-pane-notice
+listen pane-download-update
+diag [browser-pane:diag][ctor-bl vm=<id>] dispatch type=OpenTab src=ctor-open-initial-tab
+diag [browser-pane:diag][ctor-bl vm=<id>] state-write key=tabs value-len=1
+diag [browser-pane:diag][ctor-bl vm=<id>] state-write key=activeTabId value="<uuid>"
+diag [browser-pane:diag][ctor-bl vm=<id>] state-write key=url value="https://agentmux.ai"
+diag [browser-pane:diag][ctor-bl vm=<id>] state-write key=title value="agentmux.ai"
+diag [browser-pane:diag][ctor-bl vm=<id>] state-write key=faviconUrl value="https://agentmux.ai/favicon.ico"
+diag [browser-pane:diag][ctor-bl vm=<id>] vm-favicon-memo-eval value="https://agentmux.ai/favicon.ico"
+diag [browser-pane:diag][ctor-bl vm=<id>] state-write key=loading value=true
+diag [browser-pane:diag][ctor-bl vm=<id>] navigate(url="https://agentmux.ai") closed=false
+diag [browser-pane:diag][ctor-bl vm=<id>] dispatch type=Navigate src=navigate
+diag [browser-pane:diag][ctor-bl vm=<id>] state-write key=tabs value-len=1
+ctx.setMeta {"url":"https://agentmux.ai"}
+diag [browser-pane:diag][ctor-bl vm=<id>] sub-registered name=browser-pane-title-change
+diag [browser-pane:diag][ctor-bl vm=<id>] sub-registered name=browser-pane-favicon-urls
+diag [browser-pane:diag][ctor-bl vm=<id>] sub-registered name=browser-pane-nav-state
+diag [browser-pane:diag][ctor-bl vm=<id>] sub-registered name=browser-pane-clicked
+-- dispose
+diag [browser-pane:diag][ctor-bl vm=<id>] dispose
+diag [browser-pane:diag][ctor-bl vm=<id>] dispatch type=Disposed src=dispose
+diag [browser-pane:diag][ctor-bl vm=<id>] state-write key=closed value=true
+unsub browser-pane-nav-state
+unsub browser-pane-clicked
+unsub browser-pane-close-requested
+unsub browser-pane-title-change
+unsub browser-pane-favicon-urls
+unsub browser-pane-notice
+unsub pane-download-update

@@ -1,0 +1,4 @@
+cursor while dragging: col-resize select=none
+width change: 40
+cursor after: "" select="" commits=1
+width change after release: 40

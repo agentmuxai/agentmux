@@ -1,0 +1,8 @@
+diag sync urlAtom="" addressBar="" focused=false willUpdate=false
+listen browser-pane-shortcut
+openMenuAt [{"label":"Set this page as Home","enabled":false}]
+diag sync urlAtom="https://example.com/" addressBar="" focused=false willUpdate=true
+diag sync urlAtom="https://example.com/" addressBar="https://example.com/" focused=false willUpdate=false
+openMenuAt [{"label":"Set this page as Home","enabled":true}]
+rpc SetBrowserStartPage {"url":"https://example.com/"}
+openMenuAt [{"label":"Set this page as Home","enabled":false}]

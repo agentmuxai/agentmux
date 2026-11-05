@@ -1,0 +1,65 @@
+api getAboutModalDetails
+api getWindowLabel
+popover class=instance-panel role=dialog label=AgentMux instance panel placement=top-end width=320px
+ListClosedWindows
+PlaceWindowSlots ["w1","w2"]
+console.debug [wave-panel] windowId=win1 label=main idx=0 displayName=<none> workspaceName=Main Space → name="Main Space"
+console.debug [wave-panel] windowId=win1 label=main idx=0 displayName=<none> workspaceName=Main Space → name="Main Space"
+PlaceWindowSlots ["w1","w2"]
+UpdateObjectMeta window:win2 {"window:displayname":"Saved on exit"}
+-- blank
+api getAboutModalDetails
+api getWindowLabel
+popover class=instance-panel role=dialog label=AgentMux instance panel placement=top-end width=320px
+ListClosedWindows
+PlaceWindowSlots ["w1","w2"]
+console.debug [wave-panel] windowId=win1 label=main idx=0 displayName=<none> workspaceName=Main Space → name="Main Space"
+console.debug [wave-panel] windowId=win1 label=main idx=0 displayName=<none> workspaceName=Main Space → name="Main Space"
+PlaceWindowSlots ["w1","w2"]
+-- a very long name
+api getAboutModalDetails
+api getWindowLabel
+popover class=instance-panel role=dialog label=AgentMux instance panel placement=top-end width=320px
+ListClosedWindows
+PlaceWindowSlots ["w1","w2"]
+console.debug [wave-panel] windowId=win1 label=main idx=0 displayName=<none> workspaceName=Main Space → name="Main Space"
+console.debug [wave-panel] windowId=win1 label=main idx=0 displayName=<none> workspaceName=Main Space → name="Main Space"
+PlaceWindowSlots ["w1","w2"]
+UpdateObjectMeta window:win2 {"window:displayname":"<400 x>"}
+-- the window goes first
+api getAboutModalDetails
+api getWindowLabel
+popover class=instance-panel role=dialog label=AgentMux instance panel placement=top-end width=320px
+ListClosedWindows
+PlaceWindowSlots ["w1","w2"]
+console.debug [wave-panel] windowId=win1 label=main idx=0 displayName=<none> workspaceName=Main Space → name="Main Space"
+console.debug [wave-panel] windowId=win1 label=main idx=0 displayName=<none> workspaceName=Main Space → name="Main Space"
+PlaceWindowSlots ["w1","w2"]
+console.debug [wave-panel] windowId=win1 label=main idx=0 displayName=<none> workspaceName=Main Space → name="Main Space"
+console.debug [wave-panel] windowId=win1 label=main idx=0 displayName=<none> workspaceName=Main Space → name="Main Space"
+ListClosedWindows
+-- the window's id goes first
+api getAboutModalDetails
+api getWindowLabel
+popover class=instance-panel role=dialog label=AgentMux instance panel placement=top-end width=320px
+ListClosedWindows
+PlaceWindowSlots ["w1","w2"]
+console.debug [wave-panel] windowId=win1 label=main idx=0 displayName=<none> workspaceName=Main Space → name="Main Space"
+console.debug [wave-panel] windowId=win1 label=main idx=0 displayName=<none> workspaceName=Main Space → name="Main Space"
+PlaceWindowSlots ["w1"]
+PlaceWindowSlots ["w1","w2"]
+console.debug [wave-panel] windowId=win1 label=main idx=0 displayName=<none> workspaceName=Main Space → name="Main Space"
+console.debug [wave-panel] windowId=win1 label=main idx=0 displayName=<none> workspaceName=Main Space → name="Main Space"
+ListClosedWindows
+-- a refused save
+api getAboutModalDetails
+api getWindowLabel
+popover class=instance-panel role=dialog label=AgentMux instance panel placement=top-end width=320px
+ListClosedWindows
+PlaceWindowSlots ["w1","w2"]
+console.debug [wave-panel] windowId=win1 label=main idx=0 displayName=<none> workspaceName=Main Space → name="Main Space"
+console.debug [wave-panel] windowId=win1 label=main idx=0 displayName=<none> workspaceName=Main Space → name="Main Space"
+PlaceWindowSlots ["w1"]
+PlaceWindowSlots ["w1","w2"]
+UpdateObjectMeta window:win2 {"window:displayname":"Refused"}
+console.error [InstancePanel] rename failed: meta refused

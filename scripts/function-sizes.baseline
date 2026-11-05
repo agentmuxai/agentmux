@@ -71,7 +71,7 @@
 119 crates/cef/src/floating_pane.rs::CreatePanePoolWindowWin32Task::Task::execute
 152 crates/cef/src/floating_pane.rs::create_popup
 142 crates/cef/src/floating_pane.rs::floating_pane_wndproc
-1178 crates/cef/src/ipc.rs::route_command
+1156 crates/cef/src/ipc.rs::route_command
 130 crates/cef/src/launcher_ipc/mod.rs::apply_event_to_shadow
 259 crates/cef/src/launcher_ipc/mod.rs::connect_to_launcher
 209 crates/cef/src/launcher_ipc/mod.rs::connect_to_launcher#2
@@ -382,8 +382,6 @@
 118 frontend/app/element/markdown-incremental.ts::findSafeSplitPoint
 176 frontend/app/element/markdown-media.tsx::LocalAV
 113 frontend/app/element/markdown-util.ts::transformBlocks
-599 frontend/app/element/markdown.tsx::Markdown
-116 frontend/app/element/markdown.tsx::renderedMarkdown
 257 frontend/app/element/modal.tsx::Modal
 217 frontend/app/element/quicktips.tsx::QuickTips
 180 frontend/app/element/search.tsx::SearchComponent
@@ -405,7 +403,7 @@
 121 frontend/app/notification/notificationitem.tsx::NotificationItem
 148 frontend/app/notification/sound/sound-service.ts::installSoundService
 111 frontend/app/platform/pane-overlay.ts::flushClip
-159 frontend/app/scroll/follow-scroll.ts::createFollowScroll
+158 frontend/app/scroll/follow-scroll.ts::createFollowScroll
 175 frontend/app/selection/selection-effects.ts::createSelectionRunner
 104 frontend/app/selection/selection-machine.ts::transition
 139 frontend/app/statusbar/BackendStatus.tsx::BackendStatus
@@ -413,7 +411,6 @@
 197 frontend/app/statusbar/CpuCoresPopover.tsx::CpuCoresPopover
 140 frontend/app/statusbar/HostPopover.tsx::HostPopover
 277 frontend/app/statusbar/HostPopover.tsx::HostPopoverPanel
-521 frontend/app/statusbar/InstancePanel.tsx::InstancePanel
 318 frontend/app/statusbar/MaintenanceSection.tsx::MaintenanceSection
 169 frontend/app/statusbar/PairDevicePanel.tsx::PairDevicePanel
 171 frontend/app/statusbar/SystemStats.tsx::SystemStats
@@ -424,14 +421,12 @@
 103 frontend/app/store/agent-pane-state/reducer-failure.ts::onCompactionStarted
 122 frontend/app/store/agent-pane-state/reducer-lifecycle.ts::onReconcileTurnActive
 112 frontend/app/store/agent-pane-state/reducer-lifecycle.ts::onStreamFlushObserved
-304 frontend/app/tab/droppable-tab.tsx::DroppableTab
-424 frontend/app/tab/pane-leaf-chrome.tsx::PaneLeafChrome
+301 frontend/app/tab/droppable-tab.tsx::DroppableTab
 111 frontend/app/tab/tab-reorder.ts::onDrop
 335 frontend/app/tab/tab-reorder.ts::useTabDragAndDrop
 351 frontend/app/tab/tab-tearoff-events.ts::useTabTearOffEvents
 179 frontend/app/tab/tab-tearoff-rpc.ts::requestTearOff
 228 frontend/app/tab/tab.tsx::Tab
-414 frontend/app/tab/tabbar.tsx::TabBar
 215 frontend/app/tab/tabcontent.tsx::TabContent
 134 frontend/app/util/select-trace.ts::createSelectTrace
 119 frontend/app/util/submenu-hover.ts::createSubmenuHover
@@ -467,8 +462,6 @@
 120 frontend/app/view/agent/components/AgentSessionNotices.tsx::AgentSessionNotices
 239 frontend/app/view/agent/components/AgentSessionStats.tsx::AgentSessionStats
 126 frontend/app/view/agent/components/AgentShellInfoPanel.tsx::AgentShellInfoPanel
-637 frontend/app/view/agent/components/AgentShellSubblock.tsx::AgentShellSubblock
-259 frontend/app/view/agent/components/AgentShellSubblock.tsx::attachShell
 148 frontend/app/view/agent/components/BtwOverlay.tsx::BtwOverlay
 130 frontend/app/view/agent/components/HiddenTemplatesSection.tsx::HiddenTemplatesSection
 195 frontend/app/view/agent/components/InAppLoginPanel.tsx::InAppLoginPanel
@@ -481,8 +474,6 @@
 147 frontend/app/view/agent/components/PersistentShellBlock.tsx::PersistentShellBlock
 130 frontend/app/view/agent/components/SeatRosterImport.tsx::SeatRosterImport
 108 frontend/app/view/agent/components/SlashCommandPicker.tsx::SlashCommandPicker
-529 frontend/app/view/agent/components/ToolBlock.tsx::ToolBlock
-377 frontend/app/view/agent/components/ToolOverlayLog.tsx::ToolOverlayLog
 250 frontend/app/view/agent/components/agent-picker-launch.ts::createPickerLaunch
 130 frontend/app/view/agent/components/agent-picker-templates.ts::createTemplates
 154 frontend/app/view/agent/components/composer-row-layout.ts::computeComposerRows
@@ -502,8 +493,6 @@
 420 frontend/app/view/agent/hooks/useAgentFailure.ts::useAgentFailure
 137 frontend/app/view/agent/hooks/useAgentQuestions.ts::handleAnswer
 271 frontend/app/view/agent/hooks/useAgentQuestions.ts::useAgentQuestions
-113 frontend/app/view/agent/hooks/useHistoryPagination.ts::openFirstScreen
-678 frontend/app/view/agent/hooks/useHistoryPagination.ts::useHistoryPagination
 266 frontend/app/view/agent/hooks/useLiveFeedRollOff.ts::useLiveFeedRollOff
 172 frontend/app/view/agent/hooks/usePaneReveal.ts::usePaneReveal
 121 frontend/app/view/agent/hooks/usePtyWidth.ts::usePtyWidth
@@ -524,9 +513,7 @@
 166 frontend/app/view/agent/virtualization/DocumentRow.tsx::DocumentNodeBody
 116 frontend/app/view/agent/virtualization/held-release.ts::useScrolledOffRelease
 195 frontend/app/view/audit/audit-manager.tsx::AuditManager
-424 frontend/app/view/browser/browser-model.ts::BrowserViewModel::constructor
 103 frontend/app/view/browser/browser-model.ts::BrowserViewModel::getBodyContextMenuItems
-603 frontend/app/view/browser/browser-nav-bar.tsx::BrowserNavBar
 101 frontend/app/view/browser/browser-profile-menu.tsx::BrowserProfileButton
 267 frontend/app/view/browser/driven-by-strip.tsx::DrivenByStrip
 141 frontend/app/view/browser/use-browser-auth.ts::useBrowserAuth
@@ -538,8 +525,6 @@
 360 frontend/app/view/bundle/components/BundleImportPreviewModal.tsx::BundleImportPreviewModalPanel
 432 frontend/app/view/drone/drone-view.tsx::Canvas
 285 frontend/app/view/editor/editor-model.ts::EditorViewModel::constructor
-945 frontend/app/view/editor/editor-view.tsx::EditorViewComponent
-112 frontend/app/view/editor/editor-view.tsx::setupEditor
 190 frontend/app/view/editor/file-tree.tsx::FileTree
 155 frontend/app/view/editor/file-tree.tsx::TreeNode
 276 frontend/app/view/editor/viewers/image/image-viewer.tsx::ImageViewer
@@ -562,7 +547,6 @@
 126 frontend/app/view/native-memory/MemoryAdoptionPanel.tsx::MemoryAdoptionPanel
 112 frontend/app/view/native-memory/NativeMemoryCreate.tsx::NativeMemoryCreate
 150 frontend/app/view/native-memory/NativeMemoryFileView.tsx::NativeMemoryFileView
-648 frontend/app/view/native-memory/native-memory-manager.tsx::NativeMemoryManager
 154 frontend/app/view/remotes/remotes-view.tsx::Detail
 240 frontend/app/view/settings/sections/advanced-section.tsx::AdvancedSection
 189 frontend/app/view/settings/sections/agent-site-grants.tsx::AgentSiteGrants
@@ -618,11 +602,10 @@
 180 frontend/app/view/warden-jobs/job-update-diff.tsx::JobUpdateDiff
 253 frontend/app/view/warden-jobs/jobs-history.tsx::JobHistory
 137 frontend/app/view/warden-jobs/warden-jobs-manager.tsx::WardenJobsManager
-579 frontend/app/window/action-widgets.tsx::ActionWidgets
 223 frontend/app/window/hamburger-menu.tsx::HamburgerMenu
 157 frontend/app/window/hamburger-menu.tsx::menuItems
 233 frontend/app/window/more-dropdown.tsx::MoreDropdown
-110 frontend/app/window/pane-media-capture-indicator.tsx::PaneMediaCaptureIndicator
+107 frontend/app/window/pane-media-capture-indicator.tsx::PaneMediaCaptureIndicator
 112 frontend/app/window/pinned-widget-flyout.tsx::PinnedWidgetFlyout
 117 frontend/app/window/titlebar-context-menu.tsx::TitleBarContextMenu
 128 frontend/app/window/use-widget-bar-responsive.ts::useWidgetBarResponsive

@@ -1,0 +1,11 @@
+diag sync urlAtom="https://example.com/" addressBar="https://example.com/" focused=false willUpdate=false
+listen browser-pane-shortcut
+diag input-focus value="https://example.com/" relatedTarget=null
+reclaimWindowFocus main
+diag sync urlAtom="https://example.com/" addressBar="broken.example" focused=true willUpdate=false
+autocomplete block-1 "broken.example" suggest=true
+diag input-submit value="broken.example"
+model navigate https://broken.example
+diag sync urlAtom="https://example.com/" addressBar="https://broken.example" focused=true willUpdate=false
+pane navigate block-1 https://broken.example
+model onError Navigation failed: Error: gone

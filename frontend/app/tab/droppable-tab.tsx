@@ -33,6 +33,7 @@ import { stackMovePlan } from "@/layout/lib/stackMembers";
 import { getApi } from "@/store/global";
 import { fireAndForget } from "@/util/util";
 import { setTabGrabOffset } from "./tab-grab-offset";
+import { armWindowTabDrag } from "./tab-live-follow";
 import { prewarmWindowTabSnapshot } from "@/app/drag/tearoff-snapshot";
 import { hoverTabPill, leaveTabPill, pressTabPill } from "@/app/view/browser/hibernation";
 
@@ -215,18 +216,15 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
                 // tabdrag:merge-direct to it. No-op off-Windows. If the
                 // drag later crosses the tear-off threshold, the SC_MOVE
                 // handshake's own hook install supersedes this session.
-                fireAndForget(async () => {
-                    try {
-                        await getApi().startTabDragTracking({
-                            sourceWindowLabel: windowLabel,
-                            tabId: props.tabId,
-                            sourceWsId: props.workspaceId,
-                            isLastTab: props.allTabCount === 1,
-                        });
-                    } catch (e) {
-                        Logger.warn("dnd", "startTabDragTracking failed", { error: String(e) });
-                    }
-                });
+                fireAndForget(() =>
+                    armWindowTabDrag({
+                        tabId: props.tabId,
+                        workspaceId: props.workspaceId,
+                        windowLabel,
+                        isLastTab: props.allTabCount === 1,
+                        tabEl: tabWrapRef,
+                    })
+                );
                 Logger.info("dnd", "tab-drag started", {
                     tabId: props.tabId,
                     workspaceId: props.workspaceId,

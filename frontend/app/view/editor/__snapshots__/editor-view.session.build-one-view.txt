@@ -1,0 +1,5 @@
+probe empty: doc=null caret=null dirty=false views=0 tab=null
+rpc ReadEditorFile {"path":"/home/u/plain.txt"}
+rpc WatchEditorFile {"path":"/home/u/plain.txt","block_id":"session<n>"}
+probe opened: doc="plain text\n" caret=0 dirty=false views=1 tab=null
+body has focus in editor: false

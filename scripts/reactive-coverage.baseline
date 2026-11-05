@@ -11,7 +11,6 @@ frontend/app/view/agent/components/AgentCreatePanel.tsx
 frontend/app/view/agent/components/InputHistorySearch.tsx
 frontend/app/view/agent/components/use-runtime-choice.ts
 frontend/app/view/agent/hooks/useHistoryPagination.ts
-frontend/app/view/browser/browser-nav-bar.tsx
 frontend/app/view/bundle-summary.tsx
 frontend/app/view/bundle/components/BundleImportPreviewModal.tsx
 frontend/app/view/bundle/components/BundleImportSelectModal.tsx

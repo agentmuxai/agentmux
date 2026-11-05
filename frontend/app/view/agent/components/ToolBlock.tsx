@@ -39,104 +39,19 @@
  *   reset on the next render cycle.
  */
 
-import { IconButton } from "@/app/element/ui";
-import { useTick } from "@/app/hook/useTick";
-import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
-import { formatExactTime, formatTimeAgo } from "@/util/format-time";
 import clsx from "clsx";
-import { Show, createEffect, createMemo, createSignal, onCleanup, untrack, type JSX } from "solid-js";
-import { useNodePeek } from "../hooks/useNodePeek";
-import type { AgentDispatch } from "../../swarm/swarm-model";
-import { OpenInEditorButton } from "../agent-open-in-editor";
+import { Show, createMemo, type JSX } from "solid-js";
 import type { ToolNode } from "../../../agent-model/types";
 import { AnsweredQuestionMessage } from "./AnsweredQuestionMessage";
-import { createBodyMount } from "./body-mount";
-import { useAgentDormant } from "../agent-dormancy";
-import { takeBodyHeight } from "../body-height-cache";
-import { PeekOverlay } from "./PeekOverlay";
-import { PeekMetaRow } from "./PeekMetaRow";
-import { ShellTokens } from "./shell-highlight/ShellCommand";
-import { ToolBlockOverlay } from "./ToolBlockOverlay";
-import { hasAuthoredSummary, toolHeaderParts } from "./tool-header";
-import { markdownPreviewPath } from "./tool-renderers/builtins";
-import { TOOL_STATUS } from "../../../agent-model/tool-status";
-import { mcpDisplayName, toolNameOf, toolPill } from "../../../agent-model/tool-descriptors";
-import { rowDisclosure } from "../virtualization/disclosure";
-import { arrivedLive } from "../virtualization/live-arrival";
-import { useToolResultLoader } from "../tool-result-loader";
-import { tip } from "@/app/element/tip";
-
-/**
- * Ref callback that plays a one-shot fade-in animation ONLY on a genuine
- * Solid-level mount of the element (i.e. when the enclosing `<Show>`
- * flips true because the tool's status actually changed). A persistent
- * CSS `animation:` on the selector itself would ALSO retrigger on any
- * unrelated `display:none` <-> visible toggle — e.g. `.agent-tool-result-
- * pill`'s `@container` breakpoint at 600px (`_responsive.scss`) applies
- * regardless of tool status, so resizing the pane across that width would
- * replay the fade-in on every already-completed, unrelated tool call
- * (reagent P2 on PR #1975). A ref only fires once, at real DOM insertion.
- *
- * The `classList.add` is deferred a microtask: `ref` callbacks fire at
- * element CREATION, before Solid's own effect for this element's dynamic
- * `class={...}` expression has run (that effect sets `el.className`
- * wholesale, not via `classList`) — mutating classList synchronously in
- * the ref gets immediately clobbered by that later assignment. Deferring
- * past the current synchronous render lets Solid's class effect finish
- * first, so this addition survives.
- */
-function fadeInOnMount(el: HTMLElement): void {
-    queueMicrotask(() => {
-        el.classList.add("agent-tool-fade-in-once");
-        el.addEventListener("animationend", () => el.classList.remove("agent-tool-fade-in-once"), {
-            once: true,
-        });
-    });
-}
-
-function ToolElapsedTicker(props: { startMs: number }): JSX.Element {
-    const tick = useTick(1000);
-    // `startMs` is wall-clock, so a backwards system-clock step (NTP
-    // correction, manual set, VM resume) mid-tool-call makes this negative —
-    // and this ticker exists specifically for calls long-running enough to
-    // need one, which is exactly when a step has time to land. Rendered raw it
-    // would print e.g. "-1717984694s…" in the transcript and Activity Dock,
-    // the same class of bug as PR #2831 (status-bar uptime) and #2832 (sysinfo
-    // chart), both traced to one real clock step on this machine.
-    //
-    // `formatElapsedCompact`/`formatElapsedClock` in `util/format-time` already
-    // clamp for the same reason; this call site simply never routed through
-    // them. Clamping rather than hiding: a stalled-looking "0s…" is honest
-    // about having lost the reference point, where a negative is just wrong.
-    const elapsed = createMemo(() => (tick(), Math.max(0, Math.floor((Date.now() - props.startMs) / 1000))));
-    return <>{elapsed()}s…</>;
-}
-
-interface ToolBlockProps {
-    node: ToolNode;
-    /** User has clicked to pin this tool block open. */
-    pinned: boolean;
-    /**
-     * Held expanded after completing live on screen (`documentState.heldOpenNodes`).
-     * Set by `onHoldOpen` on completion; cleared by the pane's scroll-off scan
-     * once the row leaves the top — the scroll-driven replacement for the old
-     * 3 s post-completion timer.
-     */
-    heldOpen?: boolean;
-    /** Toggle the pinned state (called on click of the collapsed row). */
-    onTogglePin: () => void;
-    /** Mark this tool held-open — called once on its active→inactive transition. */
-    onHoldOpen?: () => void;
-    /** Content-first tools (agent-model/tool-descriptors.ts) only: the user collapsed
-     *  it (`documentState.collapsedNodes`). They're expanded by default. */
-    userCollapsed?: boolean;
-    /** Content-first tools only: toggle `userCollapsed` (the header click). */
-    onToggleCollapse?: () => void;
-    /** Ordinal-matched live dispatch for an Agent/Task/Workflow tool call —
-     *  see `activity/dispatch-correlation.ts`. Undefined when no confident
-     *  match was found, or for any other tool kind. */
-    dispatchMatch?: AgentDispatch;
-}
+import { toolHeaderParts } from "./tool-header";
+import { ToolPanel, ToolPeekOverlay, ToolSummary } from "./tool-block-parts";
+import {
+    useHoldOpenOnFinish,
+    useToolDisclosure,
+    useToolPeek,
+    useUnloadedResult,
+    type ToolBlockProps,
+} from "./tool-block-state";
 
 // The tool preview used to carry its OWN Ctrl+wheel zoom here — a local
 // `previewFontScale` signal applied as `font-size: N%` on the overlay-log
@@ -163,281 +78,42 @@ interface ToolBlockProps {
 // Ctrl+wheel over a preview now simply zooms the pane, which already
 // scales previews correctly, hardcoded pixels included.
 
+// A resolved AskUserQuestion renders as a user message instead of the generic collapsed tool row —
+// it substantively IS user input. Guarded on `answerText` (not just tool+status) so transcripts
+// answered before this field existed keep the old rendering instead of showing an empty body. See
+// SPEC_ASK_USER_QUESTION_HISTORY_STYLING_2026_08_17.md.
+const isAnsweredQuestion = (node: ToolNode): boolean =>
+    node.toolName === "AskUserQuestion" && node.status === "success" && node.answerText != null;
+
+// A declined AskUserQuestion (Cancel button / Escape) — reuses the existing "denied" ToolNode
+// status (already a full first-class status: icon, fail-terminal auto-collapse, STATUS_LABEL)
+// rather than adding a new one, since it is the correct semantic fit: a rejected permission
+// request, not an orphaned/force-terminated one ("canceled" is reserved for that — see the sibling
+// status and useAgentQuestions.ts). Scoped by toolName so this can never collide with a real
+// tool-permission denial (a different, unrelated feature — the tool:decision path). Gated on
+// `questionText` the same way isAnsweredQuestion gates on `answerText`: a transcript denied before
+// this field existed falls back to the generic collapsed row instead of showing an empty body.
+const isCancelledQuestion = (node: ToolNode): boolean =>
+    node.toolName === "AskUserQuestion" && node.status === "denied" && node.questionText != null;
+
 export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
-    // Drives the peek tooltip's live "time ago" text (§2.3 of
-    // SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md). Unconditional, same
-    // low-cost precedent as ToolElapsedTicker above — not gated on whether
-    // the tooltip is actually open, since Tooltip doesn't expose that state
-    // to its caller.
-    const peekTick = useTick(1000);
-
-    // A tool stays expanded after completing live until its row scrolls off the
-    // top — the "post-completion hold" now lives in `documentState.heldOpenNodes`
-    // (read via props.heldOpen) instead of a 3 s timer. Here we just detect the
-    // active → inactive TRANSITION and mark the tool held-open via onHoldOpen.
-    //
-    // Gate on a real TRANSITION (not a status-value snapshot): firing on mount
-    // for an already-completed tool would auto-expand every row of a loaded
-    // transcript (codex P1 round 2 on #988). prevNodeId guards <Index>
-    // slot-position state leakage — when a streaming-buffer cap-advance swaps the
-    // node at this slot, the old prevStatus must not seed the incoming node's
-    // transition baseline.
-    let prevStatus: ToolNode["status"] = props.node.status;
-    let prevNodeId: string = props.node.id;
-    let arrivalChecked = false;
-    const isActive = (s: ToolNode["status"]): boolean => TOOL_STATUS[s]?.active === true;
-    // A fast tool (a Read is a few ms) can start and finish inside one stream
-    // flush, so its row is first drawn already finished and there is no
-    // transition to see: it came out collapsed, sometimes. Live tool calls are
-    // stamped when the call arrives and replayed ones have no stamp
-    // (stream-parser `isReplay`), so a finished row stamped within the last few
-    // seconds is a live completion we missed, and is held like one we saw. A
-    // loaded transcript has no stamps, so it still opens collapsed
-    // (codex P1 round 2 on #988).
-    const holdIfFinishedOnArrival = (): void => {
-        const n = props.node;
-        if (isActive(n.status) || TOOL_STATUS[n.status]?.dismissed) return;
-        if (!arrivedLive(n.timestamp)) return;
-        props.onHoldOpen?.();
-    };
-    createEffect(() => {
-        const s = props.node.status;
-        const id = props.node.id;
-        if (id !== prevNodeId) {
-            prevNodeId = id;
-            prevStatus = s;
-            untrack(holdIfFinishedOnArrival);
-            return;
-        }
-        if (!arrivalChecked) {
-            arrivalChecked = true;
-            untrack(holdIfFinishedOnArrival);
-        }
-        if (isActive(prevStatus) && !isActive(s)) {
-            props.onHoldOpen?.();
-        }
-        prevStatus = s;
-    });
-
-    // Open or closed comes from the one rule every row and the virtualizer
-    // share (virtualization/disclosure.ts): pinned; auto while running or
-    // awaiting approval, and while held after finishing on screen (not for a
-    // dismissed denied/canceled tool); a finished content-first tool
-    // (WebSearch) open until the user collapses it. The props are this row's
-    // flags from documentState.
-    const disclosure = () =>
-        rowDisclosure(props.node, { pinned: props.pinned, collapsed: props.userCollapsed, held: props.heldOpen });
-    // Hover-to-peek was removed in SPEC_TOOL_HOVER_CONSOLIDATION_2026_05_28
-    // — expansion is now driven exclusively by pin + active-state auto-
-    // expand. The user-visible "three popups on hover" (browser title
-    // tooltip + larger log panel + fast expand/collapse animation)
-    // collapsed into a single in-flow panel.
-    //
-    // Exception: if the user's mouse is inside an already-expanded block,
-    // we hold it open until they leave so a scroll-off collapse can't fold it
-    // mid-read.
-    const [userHolding, setUserHolding] = createSignal(false);
-    const expanded = () => disclosure().open || userHolding();
-    // The preview at three times its usual height, toggled from its top-right
-    // actions (SPEC_AGENT_PANE_TOOL_PEEK_ON_LINE_AND_MD_OPEN_IN_EDITOR_2026_10_11.md §3).
-    const [tall, setTall] = createSignal(false);
-    // Whether the preview scrolls (ToolOverlayLog reports it). The toggle is for
-    // seeing more of a preview that is cut off, so a preview that fits has none,
-    // unless it is already tall: that one has to be able to shrink back.
-    const [scrolls, setScrolls] = createSignal(false);
-    const showHeightToggle = () => tall() || scrolls();
-    // The panel's body (full tool output: diffs, file previews, Bash output,
-    // all highlighted with shiki) mounts while the panel is open and for a
-    // short linger after it closes, so the collapse transition runs on the
-    // real content; then it goes, and opening again builds it again. A row
-    // that is never opened never builds it: restoring history used to
-    // highlight every collapsed Edit/Read/Bash row on mount
-    // (SPEC_AGENT_OPEN_LATENCY_2026_09_27.md F4: shiki + its wasm ≈ 94 ms of
-    // one open). It used to stay forever once opened — and every live tool
-    // call opens while it runs — so a session kept every tool's full output
-    // (SPEC_TOOL_BODY_UNMOUNT_ON_COLLAPSE_2026_10_12.md).
-    const bodyMounted = createBodyMount(expanded);
-    // Whether the body's output can be seen now: the panel is open and the
-    // pane isn't dormant (a hidden pane-stack member, or a window tab not
-    // displayed). While it can't, the body keeps showing what it showed
-    // instead of building new output (ToolOverlayLog's `open`): with a dozen
-    // agents streaming, panes on hidden tabs built more tool output than the
-    // visible ones (SPEC_AGENT_PANE_STREAM_FRAME_BUDGET_2026_10_13.md §2.3).
-    // The body stays mounted, so the row keeps its height and nothing moves
-    // when the pane is shown again; it catches up then.
-    const dormant = useAgentDormant();
-    const bodyShowing = (): boolean => expanded() && !dormant();
-    // The body is gone, and with it the box that reported; the next one reports afresh.
-    createEffect(() => {
-        if (!bodyMounted()) setScrolls(false);
-    });
-    // The header click flips whichever set the rule says this row uses:
-    // collapsedNodes for an open-by-default (content-first) tool, else the pin.
-    const onHeaderClick = () =>
-        disclosure().toggle === "collapse" ? props.onToggleCollapse?.() : props.onTogglePin();
-
-    // A result unloaded from memory still counts as present; opening the row
-    // reads it back from the transcript
-    // (SPEC_AGENT_PANE_TOOL_RESULT_UNLOADING_2026_10_01.md §3.4).
-    const hasResult = (): boolean => props.node.result != null || props.node.resultUnloaded != null;
-    const loadResult = useToolResultLoader();
-    let panelEl: HTMLDivElement | undefined;
-    /** The result body's height when its text last left memory; 0 if unknown. */
-    let unloadedBodyPx = 0;
-    const [loadState, setLoadState] = createSignal<"idle" | "loading" | "failed">("idle");
-    // Not while the pane is hidden: a hidden pane's held rows stay open but may
-    // have their text unloaded (useLiveFeedRollOff), and read it back on show.
-    createEffect(() => {
-        if (dormant() || !expanded() || !props.node.resultUnloaded || !loadResult || untrack(loadState) !== "idle") return;
-        setLoadState("loading");
-        void loadResult(props.node).then((ok) => setLoadState(ok ? "idle" : "failed"));
-    });
-    // A failed read is retried the next time the row is opened, including one
-    // that failed after the row was closed.
-    createEffect(() => {
-        if (!expanded() && loadState() === "failed") setLoadState("idle");
-    });
-
-    // Result pill — compact inline summary shown at medium+ pane widths
-    // (visible only via CSS container query; always rendered so the
-    // DOM is stable when the pane is resized through the breakpoint).
-    const resultPill = (): { label: string; variant: string } | null => {
-        const s = props.node.status;
-
-        // Agent/Task/Workflow: prefer the live ordinal-matched dispatch
-        // status (see activity/dispatch-correlation.ts) over the tool
-        // call's own status. Deliberately bypasses the running/no-result
-        // gate below — the whole point is showing progress WHILE the
-        // subagent/workflow is still running, long before the parent's own
-        // tool_use resolves.
-        if (props.node.tool === "Agent" || props.node.tool === "Task" || props.node.tool === "Workflow") {
-            const d = props.dispatchMatch;
-            if (d) {
-                if (d.status === "running") {
-                    return d.kind === "workflow"
-                        ? { label: `${d.members_done}/${d.member_count}`, variant: "agent-running" }
-                        : { label: "running", variant: "agent-running" };
-                }
-                return { label: "done", variant: "agent" };
-            }
-            // No confident match — fall back to today's static, result-gated behavior.
-            if (s === "running" || s === "pending_approval" || !hasResult()) return null;
-            return s === "success" ? { label: "done", variant: "agent" } : null;
-        }
-
-        if (TOOL_STATUS[s].active || !hasResult()) return null;
-        // An unloaded result keeps the pill it had (tool-result-unload.ts).
-        if (props.node.resultUnloaded) return props.node.resultUnloaded.pill;
-        return toolPill(props.node);
-    };
-
-    // Two render modes — `flow` when the panel is visible (auto-expand
-    // or pinned), `hidden` otherwise. The hover-only `overlay` mode is
-    // gone with the hover trigger.
-    const panelMode = (): "hidden" | "flow" => (expanded() ? "flow" : "hidden");
-
-    const statusIcon = (): string => TOOL_STATUS[props.node.status]?.icon || "•";
-
-    // Header parts, composed from the node's fields rather than the `summary`
-    // baked at parse time — see tool-header.ts. The hover tooltip's bare
-    // command/detail text is the same `detail`, so the two never drift out of
-    // sync; it's read by the raw tool name, so a WebSearch (coarse kind
-    // "Other") has one. Empty (and so not shown) when there's nothing
-    // tool-kind-specific to show; shown regardless of expand state
-    // (SPEC_AGENT_PANE_HOVER_CLOSE_FOCUS_REFINEMENTS_2026_09_23.md §1).
+    useHoldOpenOnFinish(props);
+    const view = useToolDisclosure(props);
+    const unloaded = useUnloadedResult(props, view);
+    // Header parts, composed from the node's fields rather than the `summary` baked at parse time —
+    // see tool-header.ts. Empty (and so not shown) when there's nothing tool-kind-specific to show.
     const header = createMemo(() => toolHeaderParts(props.node));
-    const cmdText = () => header().detail;
-    // A Bash command is shown with shell colours in the row and the popover
-    // (SPEC_AGENT_PANE_BASH_HIGHLIGHTING_2026_10_04.md §3.7).
-    const isBash = () => props.node.tool.toLowerCase() === "bash";
-    // A path or a command is cut from the left in the row, keeping its end in view.
-    const cutFromStart = () => header().detailIsPath || (isBash() && header().detail !== "");
-    // The tool's name in front of its argument in the peek popover ("Bash ls",
-    // "Read /a/b.ts"): the row shows an icon instead, so the popover names it.
-    // MCP tools read "server · tool", not their raw mcp__server__tool name.
-    // SPEC_PEEK_PANEL_META_ROW_AND_MONO_COMMAND_2026_09_27.md §4.3.
-    const peekToolName = () => {
-        const name = toolNameOf(props.node);
-        return mcpDisplayName(name) ?? name;
-    };
-    const authoredSummary = () => hasAuthoredSummary(props.node);
-
-    // Peek-tooltip time + estimate lines (SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md
-    // §2.3). Real API-reported token/cost data doesn't exist per-tool-call
-    // today (see SPEC_PER_NODE_TOKEN_ACCOUNTING_2026_08_03.md for the real,
-    // Claude-only derivation planned as a follow-up) — this is a client-side
-    // chars÷4 estimate, always labeled "(est.)".
-    //
-    // isPeeking tracks REAL hover state over the tooltip anchor (set by the
-    // wrapping span below). reagent P2 on PR #2392: peekTimeText used to
-    // read peekTick() unconditionally, so every mounted ToolBlock — every
-    // completed tool row in a whole transcript — subscribed to the shared 1s
-    // ticker forever, not just the one actually being hovered right now.
-    // Short-circuiting before peekTick() means only genuinely-hovered rows
-    // subscribe.
-    const { isPeeking, panelVisible: peekPanelVisible, rowEl: peekRowEl, setRowEl: setPeekRowEl, handlePeekEnter, handlePeekLeave } = useNodePeek();
-    const peekTimeText = createMemo(() => {
-        if (!peekPanelVisible()) return null;
-        peekTick(); // re-run every second so "ago" stays live while hovered
-        const ts = props.node.timestamp;
-        if (ts == null) return null;
-        return `${formatExactTime(ts)} · ${formatTimeAgo(ts)}`;
-    });
-    const peekEstimateText = createMemo(() => {
-        const text = JSON.stringify(props.node.params ?? {}) + JSON.stringify(props.node.result ?? "");
-        const count = estimateTokenCount(text) + (props.node.resultUnloaded?.tokens ?? 0);
-        return count > 0 ? `~${formatCompactNumber(count)} tok (est.)` : null;
-    });
-    // Raw-data existence check for showing the overlay at all — deliberately
-    // NOT reading peekTimeText()/peekEstimateText() themselves, since
-    // peekTimeText is gated behind peekPanelVisible() (only resolves to a
-    // real value once the panel is showing). Using the ticking memos here would
-    // make the show-check circularly depend on hover having already begun,
-    // defeating its own purpose of deciding whether hover should open
-    // anything in the first place.
-    const hasAnyPeekContent = createMemo(
-        () => cmdText() !== "" || props.node.timestamp != null || peekEstimateText() != null
-    );
-
-    // Peek overlay — Portal-rendered (see PeekOverlay.tsx's doc comment for
-    // why: each virtualized row is its own CSS stacking context, so a plain
-    // `position: absolute` child can never paint above a LATER row no
-    // matter its z-index — confirmed live via CDP, the next row's own
-    // content painted over it). Rendered outside the row's
-    // subtree by PeekOverlay (see its doc comment).
-    // Timer/signal state lives in the shared useNodePeek() hook above.
-
-    // A resolved AskUserQuestion renders as a user message instead of the
-    // generic collapsed tool row below — it substantively IS user input.
-    // Guarded on `answerText` (not just tool+status) so transcripts
-    // answered before this field existed keep the old rendering instead of
-    // showing an empty body. See SPEC_ASK_USER_QUESTION_HISTORY_STYLING_2026_08_17.md.
-    const isAnsweredQuestion = () =>
-        props.node.toolName === "AskUserQuestion" && props.node.status === "success" && props.node.answerText != null;
-
-    // A declined AskUserQuestion (Cancel button / Escape) — reuses the
-    // existing "denied" ToolNode status (already a full first-class status:
-    // icon, fail-terminal auto-collapse, STATUS_LABEL) rather than adding a
-    // new one, since it is the correct semantic fit: a rejected permission
-    // request, not an orphaned/force-terminated one ("canceled" is reserved
-    // for that — see the sibling status and useAgentQuestions.ts). Scoped by
-    // toolName so this can never collide with a real tool-permission denial
-    // (a different, unrelated feature — the tool:decision path). Gated on
-    // `questionText` the same way isAnsweredQuestion() gates on `answerText`:
-    // a transcript denied before this field existed falls back to the
-    // generic collapsed row instead of showing an empty body.
-    const isCancelledQuestion = () =>
-        props.node.toolName === "AskUserQuestion" && props.node.status === "denied" && props.node.questionText != null;
+    const peek = useToolPeek(props, header);
 
     return (
         <Show
-            when={!isAnsweredQuestion() && !isCancelledQuestion()}
-            fallback={<AnsweredQuestionMessage node={props.node} cancelled={isCancelledQuestion()} />}
+            when={!isAnsweredQuestion(props.node) && !isCancelledQuestion(props.node)}
+            fallback={<AnsweredQuestionMessage node={props.node} cancelled={isCancelledQuestion(props.node)} />}
         >
             <div
                 class={clsx("agent-tool-block", {
-                    collapsed: !expanded(),
-                    expanded: expanded(),
+                    collapsed: !view.expanded(),
+                    expanded: view.expanded(),
                     pinned: props.pinned,
                     running: props.node.status === "running",
                     success: props.node.status === "success",
@@ -456,238 +132,13 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                 data-tool-name={props.node.toolName?.toLowerCase()}
                 // Hold an open, pin-toggled (panel) tool while the mouse is anywhere in it.
                 onMouseEnter={() => {
-                    if (disclosure().open && disclosure().toggle === "pin") setUserHolding(true);
+                    if (view.disclosure().open && view.disclosure().toggle === "pin") view.setUserHolding(true);
                 }}
-                onMouseLeave={() => setUserHolding(false)}
+                onMouseLeave={() => view.setUserHolding(false)}
             >
-                {/* The peek belongs to the tool call's line, anywhere on it, but
-                    not to its expanded output: a peek over the output covered
-                    the text being read or selected
-                    (SPEC_AGENT_PANE_TOOL_PEEK_ON_LINE_AND_MD_OPEN_IN_EDITOR_2026_10_11.md §1).
-                    The anchor moves with the handlers, so the panel is placed
-                    against, and bridged from, the line. */}
-                <div
-                    ref={setPeekRowEl}
-                    class="agent-tool-summary"
-                    onClick={onHeaderClick}
-                    onMouseEnter={handlePeekEnter}
-                    onMouseLeave={handlePeekLeave}
-                >
-                    <span class="agent-tool-status-icon">{statusIcon()}</span>
-                    <span class="agent-tool-name-peek-anchor">
-                        <Show
-                            when={!authoredSummary()}
-                            fallback={<span class="agent-tool-name">{props.node.summary}</span>}
-                        >
-                            {/* One text run (no whitespace between spans) so
-                                the row's textContent reads "🌐 solid docs". */}
-                            <span class="agent-tool-name" classList={{ "agent-tool-name--cut-start": cutFromStart() }}>
-                                <span class="agent-tool-icon">{header().icon}</span>
-                                <Show when={header().label}>
-                                    {" "}
-                                    <span class="agent-tool-label">{header().label}</span>
-                                </Show>
-                                {/* A Read's lines come before the path: the path is the part
-                                    that gets ellipsized, and the range is what you scan for. */}
-                                <Show when={!authoredSummary() && header().range}>
-                                    {" "}
-                                    <span class="agent-tool-range">{header().range}</span>
-                                </Show>
-                                <Show when={header().detail}>
-                                    {" "}
-                                    <Show
-                                        when={isBash()}
-                                        fallback={
-                                            <Show
-                                                when={header().detailIsPath}
-                                                fallback={<span class="agent-tool-detail">{header().detail}</span>}
-                                            >
-                                                {/* Cut from the left so the file name stays: the span runs
-                                                    right-to-left for the ellipsis, the <bdi> keeps the path
-                                                    itself reading left to right. */}
-                                                <span class="agent-tool-detail agent-tool-detail--cut-start">
-                                                    <bdi>{header().detail}</bdi>
-                                                </span>
-                                            </Show>
-                                        }
-                                    >
-                                        {/* A command is cut from the left too, so its end (the
-                                            part that differs between calls) stays in view. */}
-                                        <span class="agent-tool-detail agent-shell-inline agent-tool-detail--cut-start">
-                                            <bdi>
-                                                <ShellTokens command={header().detail} />
-                                            </bdi>
-                                        </span>
-                                    </Show>
-                                </Show>
-                            </span>
-                        </Show>
-                    </span>
-                    {/* Composed headers only: an authored summary already
-                        carries the note (the muxspect force-cancel writes
-                        both, for any tool — AskUserQuestion included). */}
-                    <Show when={!authoredSummary() && props.node.statusNote}>
-                        <span class="agent-tool-status-note">{props.node.statusNote}</span>
-                    </Show>
-                    <Show when={props.node.duration}>
-                        <span class="agent-tool-duration">({props.node.duration.toFixed(1)}s)</span>
-                    </Show>
-                    <Show when={resultPill() != null}>
-                        <span ref={fadeInOnMount} class={`agent-tool-result-pill pill-${resultPill()?.variant}`}>
-                            {resultPill()?.label}
-                        </span>
-                    </Show>
-                    {/* Live-tail: while streaming, show the last stdout/stderr
-                    line so the user can watch real output without opening
-                    the overlay. Skips kind:"system" chunks — those are
-                    bashwrap internals ("[bashwrap] starting: N chars", PTY
-                    ready, etc.) and are not useful here. If no stdout/stderr
-                    has arrived yet (e.g. during a `sleep` prefix), show an
-                    elapsed timer instead so the user knows it's alive. */}
-                    <Show when={props.node.log?.open === true}>
-                        {(() => {
-                            const chunks = props.node.log?.chunks ?? [];
-                            // Walk backwards — find the last real output chunk
-                            let lastOutput: { kind: string; content: string } | undefined;
-                            for (let i = chunks.length - 1; i >= 0; i--) {
-                                const c = chunks[i];
-                                if (c.kind === "stdout" || c.kind === "stderr") {
-                                    lastOutput = c;
-                                    break;
-                                }
-                            }
-                            if (lastOutput) {
-                                return (
-                                    <span
-                                        class="agent-tool-live-tail"
-                                        {...tip(`latest stream output (${chunks.length} chunks)`)}
-                                    >
-                                        {/* U+2192 (→), not U+21B3 (↳) — see
-                                            SPEC_ACTIVITY_DOCK_TITLE_WIDTH_AND_TAIL_GLYPH_2026_09_05.md §3.1. */}
-                                        → {lastOutput.content}
-                                    </span>
-                                );
-                            }
-                            // No stdout/stderr yet — show elapsed time
-                            return (
-                                <span class="agent-tool-live-tail agent-tool-live-tail--waiting">
-                                    <ToolElapsedTicker startMs={props.node.timestamp ?? Date.now()} />
-                                </span>
-                            );
-                        })()}
-                    </Show>
-                </div>
-                {/* Peek overlay — SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md,
-                see PeekOverlay.tsx. Every line shows
-                regardless of expand state: time/estimate since
-                REPORT_TOOL_CALL_PEEK_SUPPRESSED_WHEN_EXPANDED_2026_09_04.md,
-                and the command line since
-                SPEC_AGENT_PANE_HOVER_CLOSE_FOCUS_REFINEMENTS_2026_09_23.md §1
-                — the expanded panel doesn't reliably show the full call
-                (Bash's only appears once the result lands; most tools never
-                show all their params), and the header stays truncated. */}
-                <PeekOverlay show={isPeeking() && hasAnyPeekContent()} rowEl={peekRowEl}>
-                    <PeekMetaRow time={peekTimeText()} tokens={peekEstimateText()} />
-                    <Show when={cmdText()}>
-                        <div class="agent-node-peek-tooltip-body" data-tool={props.node.tool.toLowerCase()}>
-                            <span class="agent-node-peek-tooltip-tool">{peekToolName()}</span>{" "}
-                            <Show when={isBash()} fallback={cmdText()}>
-                                <span class="agent-shell-command">
-                                    <ShellTokens command={cmdText()} embedded />
-                                </span>
-                            </Show>
-                        </div>
-                    </Show>
-                </PeekOverlay>
-                {/* Panel — three render modes per `panelMode()`:
-                 *
-                 *   hidden  → `.agent-tool-panel--hidden` (off).
-                 *   flow    → in-flow under the summary (default DOM
-                 *             layout — pinned / running / post-hold).
-                 *   overlay → absolute positioning above OR below the
-                 *             summary so a hover near the pane's bottom
-                 *             expands upward instead of being clipped.
-                 *
-                 * Always rendered in the DOM so CSS transitions can
-                 * animate the off→on shift; `inert` + `aria-hidden`
-                 * remove it from the focus/a11y tree when hidden.
-                 */}
-                <div
-                    ref={panelEl}
-                    class={clsx("agent-tool-panel", {
-                        "agent-tool-panel--hidden": panelMode() === "hidden",
-                        "agent-tool-panel--flow": panelMode() === "flow",
-                        "agent-tool-panel--tall": tall() && panelMode() === "flow",
-                    })}
-                    // Codex P2 on #988: with the always-rendered markup, the
-                    // collapsed panel was visually hidden via max-height /
-                    // opacity but still in the focusable + a11y tree, so
-                    // keyboard users could tab into action buttons that
-                    // aren't visible. `inert` removes the entire subtree
-                    // from focus + accessibility while collapsed (Chrome 102+,
-                    // supported in the bundled CEF runtime).
-                    inert={!expanded()}
-                    aria-hidden={!expanded()}
-                    onClick={(e) => e.stopPropagation()}
-                >
-                    <Show when={bodyMounted()}>
-                        <Show when={markdownPreviewPath(props.node) || showHeightToggle()}>
-                            <div class="agent-tool-panel-actions">
-                                <Show when={markdownPreviewPath(props.node)}>
-                                    {(path) => <OpenInEditorButton path={path()} />}
-                                </Show>
-                                <Show when={showHeightToggle()}>
-                                    <IconButton
-                                        class="agent-tool-panel-height"
-                                        icon={tall() ? "compress" : "expand"}
-                                        label={tall() ? "Shorter preview" : "Taller preview"}
-                                        density="compact"
-                                        // The label says the state; no aria-pressed on top.
-                                        onClick={(e: MouseEvent) => {
-                                            e.stopPropagation();
-                                            setTall(!tall());
-                                        }}
-                                    />
-                                </Show>
-                            </div>
-                        </Show>
-                        <Show
-                            when={!props.node.resultUnloaded}
-                            fallback={
-                                // As tall as the body it stands in for, so a held row
-                                // whose text left memory in a hidden pane doesn't
-                                // shrink and move the rows below it while it reads back.
-                                <div
-                                    class="agent-tool-result-unloaded"
-                                    style={unloadedBodyPx > 0 ? { "min-height": `${unloadedBodyPx}px` } : undefined}
-                                >
-                                    {loadState() === "failed"
-                                        ? "This result is no longer available in the pane. Open History to see it."
-                                        : "Loading result…"}
-                                </div>
-                            }
-                        >
-                            {(() => {
-                                // Its height just before the result unloads (the old
-                                // nodes are still in place when this branch is disposed).
-                                // Only when the result is what left: the row going away (scrolled out, rolled off) needs no
-                                // height. The unload pass reads every open body's height first (body-height-cache.ts), so this
-                                // is not a layout per row; reading here is for an unload that did not go through it.
-                                onCleanup(() => {
-                                    if (!props.node.resultUnloaded) return;
-                                    const known = takeBodyHeight(props.node.id);
-                                    if (known !== undefined) {
-                                        unloadedBodyPx = known;
-                                        return;
-                                    }
-                                    const body = panelEl?.querySelector<HTMLElement>(".agent-tool-overlay");
-                                    unloadedBodyPx = body?.offsetHeight ?? 0; // perf:allow-layout-read — an unload outside the batched pass
-                                });
-                                return <ToolBlockOverlay node={props.node} dispatchMatch={props.dispatchMatch} open={bodyShowing()} dormant={dormant()} onOverflowChange={setScrolls} />;
-                            })()}
-                        </Show>
-                    </Show>
-                </div>
+                <ToolSummary node={props.node} header={header} dispatchMatch={props.dispatchMatch} peek={peek} view={view} />
+                <ToolPeekOverlay node={props.node} header={header} peek={peek} />
+                <ToolPanel node={props.node} dispatchMatch={props.dispatchMatch} view={view} unloaded={unloaded} />
             </div>
         </Show>
     );

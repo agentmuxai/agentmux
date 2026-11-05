@@ -5,12 +5,14 @@ import { describe, expect, it } from "vitest";
 
 import {
     DETACHED,
+    FILL_SCREENS,
     FOLLOWING,
     NEAR_TOP_PX,
     REATTACH_PX,
     followReducer,
     followStateLabel,
     intentOf,
+    needsOlderFill,
     suspended,
     type FollowEffect,
     type FollowEvent,
@@ -392,6 +394,13 @@ describe("followReducer — invariants", () => {
         { type: "BecameZeroSize" },
         { type: "BecameSized" },
         { type: "Reset" },
+        {
+            type: "FillCheck",
+            geo: { scrollTop: 0, scrollHeight: 312, clientHeight: 300 },
+            hasOlderHistory: true,
+            loadingOlder: false,
+        },
+        { type: "FillCheck", geo: BOTTOM, hasOlderHistory: true, loadingOlder: false },
     ];
 
     it("I1: only a user gesture leaves FOLLOWING", () => {
@@ -412,6 +421,20 @@ describe("followReducer — invariants", () => {
                 if (!r.effects.some((x) => x.type === "LoadOlder")) continue;
                 expect(e.type === "Scroll" && e.user).toBe(true);
                 expect(r.state).toBe(DETACHED);
+            }
+        }
+    });
+
+    it("I5: FillOlder only from a FillCheck of a short pane with older history, only while FOLLOWING, and it changes nothing", () => {
+        for (const s of ALL_STATES) {
+            for (const e of EVENTS) {
+                const r = followReducer(s, e);
+                if (!r.effects.some((x) => x.type === "FillOlder")) continue;
+                expect(e.type).toBe("FillCheck");
+                expect(s).toBe(FOLLOWING);
+                expect(r.state).toBe(s);
+                expect(r.effects).toEqual([{ type: "FillOlder" }]);
+                if (e.type === "FillCheck") expect(needsOlderFill(e.geo, e.hasOlderHistory, e.loadingOlder)).toBe(true);
             }
         }
     });
@@ -453,5 +476,50 @@ describe("followStateLabel / intentOf", () => {
     it("label every state, and a suspended pane's intent is what it goes back to", () => {
         expect(ALL_STATES.map(followStateLabel)).toEqual(["following", "detached", "suspended", "suspended"]);
         expect(ALL_STATES.map(intentOf)).toEqual(["FOLLOWING", "DETACHED", "FOLLOWING", "DETACHED"]);
+    });
+});
+
+describe("FillCheck", () => {
+    const check = (geo: ScrollGeometry, hasOlderHistory = true, loadingOlder = false): FollowEvent => ({
+        type: "FillCheck",
+        geo,
+        hasOlderHistory,
+        loadingOlder,
+    });
+    const short = (scrollHeight: number, clientHeight = 300): ScrollGeometry => ({
+        scrollTop: 0,
+        scrollHeight,
+        clientHeight,
+    });
+
+    it("asks for older history when a following pane is shorter than two viewports", () => {
+        expect(followReducer(FOLLOWING, check(short(312)))).toEqual({
+            state: FOLLOWING,
+            effects: [{ type: "FillOlder" }],
+        });
+        expect(followReducer(FOLLOWING, check(short(0)))).toEqual({
+            state: FOLLOWING,
+            effects: [{ type: "FillOlder" }],
+        });
+    });
+
+    it("the target is FILL_SCREENS viewports: 599 px of 300 asks, 600 doesn't", () => {
+        expect(FILL_SCREENS).toBe(2);
+        expect(types(followReducer(FOLLOWING, check(short(599))).effects)).toEqual(["FillOlder"]);
+        expect(types(followReducer(FOLLOWING, check(short(600))).effects)).toEqual([]);
+        expect(types(followReducer(FOLLOWING, check(short(1200, 600))).effects)).toEqual([]);
+        expect(types(followReducer(FOLLOWING, check(short(1199, 600))).effects)).toEqual(["FillOlder"]);
+    });
+
+    it("asks for nothing without older history, while a page is loading, or with no viewport", () => {
+        expect(followReducer(FOLLOWING, check(short(312), false)).effects).toEqual([]);
+        expect(followReducer(FOLLOWING, check(short(312), true, true)).effects).toEqual([]);
+        expect(followReducer(FOLLOWING, check(short(312, 0))).effects).toEqual([]);
+    });
+
+    it("asks for nothing from a pane the reader has left, or one that is hidden", () => {
+        for (const s of [DETACHED, suspended("FOLLOWING"), suspended("DETACHED")]) {
+            expect(followReducer(s, check(short(312)))).toEqual({ state: s, effects: [] });
+        }
     });
 });

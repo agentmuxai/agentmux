@@ -544,6 +544,8 @@ mod tests {
             installation_status: installation.to_string(),
             link_status: link.to_string(),
             verified_at_ms: 0,
+            visible_count: 0,
+            linked_at_ms: 0,
         }
     }
 

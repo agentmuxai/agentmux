@@ -1,0 +1,14 @@
+rpc ReadEditorFile {"path":"/home/u/notes.md"}
+rpc WatchEditorFile {"path":"/home/u/notes.md","block_id":"session<n>"}
+key {"key":"f","code":"KeyF","ctrlKey":true} -> prevented=true
+key {"key":"V","code":"KeyV","shiftKey":true,"ctrlKey":true} -> prevented=false
+resolved editor:find editor
+key {"key":"f","code":"KeyF","metaKey":true} -> prevented=false
+resolved editor:togglePreview editor
+key {"key":"V","code":"KeyV","shiftKey":true,"metaKey":true} -> prevented=true
+mode: source
+resolved doctab:next doctabs
+key {"key":"Tab","code":"Tab","ctrlKey":true} -> prevented=true
+resolved doctab:next doctabs
+key {"key":"Tab","code":"Tab","ctrlKey":true} -> prevented=false
+active tab: undefined

@@ -14,6 +14,7 @@
  * scrollTop per path (I3).
  */
 
+import { createFillPass } from "./fill-pass";
 import {
     FOLLOWING,
     followReducer,
@@ -52,6 +53,13 @@ export interface FollowScrollHost {
     transition(from: FollowState, to: FollowState, cause: string, detail?: string): void;
     hasOlderHistory(): boolean;
     loadingOlder(): boolean;
+    /**
+     * Page in older history because the content is too short to scroll into. Called for a FillOlder
+     * effect only (I5), at most FILL_MAX_PAGES times in a row.
+     */
+    fillOlder?(geo: ScrollGeometry): void;
+    /** A fill pass ended short (`true`: it hit FILL_MAX_PAGES with the content still short) or started again (`false`). */
+    fillStalled?(stalled: boolean): void;
     /** The user let go of a pointer held on the transcript. */
     released?(): void;
     now?(): number;
@@ -67,6 +75,13 @@ export interface FollowScroll extends ScrollInput {
      * should pin now (it is the pin's only caller for resizes).
      */
     observed(kind: "content" | "viewport", geo: ScrollGeometry): boolean;
+    /**
+     * Whether the last observed geometry still needs older history to scroll into, and loads it.
+     * For the moments the geometry hasn't changed: a page landed, or history became available.
+     */
+    checkFill(): void;
+    /** Begin a new fill pass (the reader asked for more after one gave up). */
+    restartFill(): void;
     /** Geometry after one of our own scrollTop writes. */
     noteGeometry(geo: ScrollGeometry): void;
     /** A scroll batch. `user` comes from `windowOpen()` / `pointerHeld()` when the batch ran. */
@@ -91,6 +106,7 @@ export function createFollowScroll(
     let scrollbarHeld = false;
     /** The last press in the document was on this transcript: scoped scroll keys go to it. */
     let pointerInside = false;
+    const fill = createFillPass(host);
 
     /** Runs the reducer; returns true if it asked for a pin the caller makes itself. */
     const dispatch = (event: FollowEvent, pinViaHost: boolean): boolean => {
@@ -100,12 +116,16 @@ export function createFollowScroll(
         for (const effect of result.effects) {
             if (effect.type === "Transition") host.transition(effect.from, effect.to, effect.cause, effect.detail);
             else if (effect.type === "LoadOlder") host.loadOlder(lastGeo());
+            else if (effect.type === "FillOlder") fill.run(lastGeo());
             else if (pinViaHost) host.pin(effect.cause);
             else pin = true;
         }
         return pin;
     };
 
+    const checkFill = (): void => {
+        dispatch(fillCheck(lastGeo(), host), true);
+    };
     const lastGeo = (): ScrollGeometry => last ?? { scrollTop: 0, scrollHeight: 0, clientHeight: 0 };
     const escape = (cause: EscapeCause): void => {
         dispatch({ type: "UserEscape", cause, geo: lastGeo() }, true);
@@ -168,16 +188,15 @@ export function createFollowScroll(
         escape("selection");
     };
 
-    const passive: AddEventListenerOptions = { passive: true, capture: true };
-    scroller.addEventListener("wheel", onWheel, passive);
-    scroller.addEventListener("touchstart", onTouch, passive);
-    scroller.addEventListener("touchmove", onTouch, passive);
-    scroller.addEventListener("pointerdown", onPointerDown, passive);
-    window.addEventListener("pointerup", onPointerUp, passive);
-    window.addEventListener("pointercancel", onPointerUp, passive);
-    document.addEventListener("pointerdown", onDocPointerDown, passive);
-    document.addEventListener("keydown", onKey, passive);
-    document.addEventListener("selectionchange", onSelectionChange);
+    const removeListeners = listenForGestures(scroller, {
+        onWheel,
+        onTouch,
+        onPointerDown,
+        onPointerUp,
+        onDocPointerDown,
+        onKey,
+        onSelectionChange,
+    });
 
     return {
         state: () => state,
@@ -191,9 +210,13 @@ export function createFollowScroll(
                 return false;
             }
             last = geo;
-            if (state.kind === "SUSPENDED") return dispatch({ type: "BecameSized" }, false);
-            return dispatch({ type: kind === "content" ? "ContentResized" : "ViewportResized", geo }, false);
+            fill.observed(geo);
+            const pin = dispatch(resizeEvent(state, kind, geo), false);
+            checkFill();
+            return pin;
         },
+        checkFill,
+        restartFill: fill.restart,
         noteGeometry(geo) {
             last = geo;
         },
@@ -221,18 +244,55 @@ export function createFollowScroll(
             dispatch({ type: "JumpToNode", nodeId }, true);
         },
         reset() {
+            fill.restart();
             dispatch({ type: "Reset" }, true);
         },
-        dispose() {
-            scroller.removeEventListener("wheel", onWheel, passive);
-            scroller.removeEventListener("touchstart", onTouch, passive);
-            scroller.removeEventListener("touchmove", onTouch, passive);
-            scroller.removeEventListener("pointerdown", onPointerDown, passive);
-            window.removeEventListener("pointerup", onPointerUp, passive);
-            window.removeEventListener("pointercancel", onPointerUp, passive);
-            document.removeEventListener("pointerdown", onDocPointerDown, passive);
-            document.removeEventListener("keydown", onKey, passive);
-            document.removeEventListener("selectionchange", onSelectionChange);
-        },
+        dispose: removeListeners,
     };
+}
+
+interface GestureHandlers {
+    onWheel(e: WheelEvent): void;
+    onTouch(): void;
+    onPointerDown(e: PointerEvent): void;
+    onPointerUp(): void;
+    onDocPointerDown(e: Event): void;
+    onKey(e: KeyboardEvent): void;
+    onSelectionChange(): void;
+}
+
+/** Listens for the gestures that decide whether the reader has left the bottom; returns the removal. */
+function listenForGestures(scroller: HTMLElement, on: GestureHandlers): () => void {
+    const passive: AddEventListenerOptions = { passive: true, capture: true };
+    scroller.addEventListener("wheel", on.onWheel, passive);
+    scroller.addEventListener("touchstart", on.onTouch, passive);
+    scroller.addEventListener("touchmove", on.onTouch, passive);
+    scroller.addEventListener("pointerdown", on.onPointerDown, passive);
+    window.addEventListener("pointerup", on.onPointerUp, passive);
+    window.addEventListener("pointercancel", on.onPointerUp, passive);
+    document.addEventListener("pointerdown", on.onDocPointerDown, passive);
+    document.addEventListener("keydown", on.onKey, passive);
+    document.addEventListener("selectionchange", on.onSelectionChange);
+    return () => {
+        scroller.removeEventListener("wheel", on.onWheel, passive);
+        scroller.removeEventListener("touchstart", on.onTouch, passive);
+        scroller.removeEventListener("touchmove", on.onTouch, passive);
+        scroller.removeEventListener("pointerdown", on.onPointerDown, passive);
+        window.removeEventListener("pointerup", on.onPointerUp, passive);
+        window.removeEventListener("pointercancel", on.onPointerUp, passive);
+        document.removeEventListener("pointerdown", on.onDocPointerDown, passive);
+        document.removeEventListener("keydown", on.onKey, passive);
+        document.removeEventListener("selectionchange", on.onSelectionChange);
+    };
+}
+
+/** What a ResizeObserver observation means to a pane in `state`: sized again, or the content or viewport changed. */
+function resizeEvent(state: FollowState, kind: "content" | "viewport", geo: ScrollGeometry): FollowEvent {
+    if (state.kind === "SUSPENDED") return { type: "BecameSized" };
+    return { type: kind === "content" ? "ContentResized" : "ViewportResized", geo };
+}
+
+/** The check for older history to fill a short pane with, at `geo`. */
+function fillCheck(geo: ScrollGeometry, host: FollowScrollHost): FollowEvent {
+    return { type: "FillCheck", geo, hasOlderHistory: host.hasOlderHistory(), loadingOlder: host.loadingOlder() };
 }
