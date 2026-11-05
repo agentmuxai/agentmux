@@ -388,8 +388,6 @@
 116 frontend/app/hook/useVoiceInput.ts::createWebSpeechVoiceSession
 109 frontend/app/hook/useWindowDrag.win32.ts::installJsDragListener
 302 frontend/app/hook/whisperVoiceEngine.ts::createWhisperVoiceSession
-220 frontend/app/host/js-context-menu.ts::renderItems
-366 frontend/app/host/js-context-menu.ts::showJsContextMenu
 105 frontend/app/init/error-display.ts::showStartupError
 138 frontend/app/modals/command-palette.tsx::CommandPaletteModal
 209 frontend/app/modals/conntypeahead.tsx::ChangeConnectionBlockModal
