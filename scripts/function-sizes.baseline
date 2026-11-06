@@ -130,7 +130,6 @@
 222 crates/procstats/examples/memtree.rs::main
 144 crates/remote/src/daemon.rs::attach
 162 crates/remote/src/serve.rs::handle
-347 crates/srv/src/agents/failure.rs::classify
 116 crates/srv/src/agents/runner.rs::run_agent_with_bin
 105 crates/srv/src/ambient/cli.rs::invoke_haiku
 124 crates/srv/src/ambient/digest.rs::extract_digest_parts
