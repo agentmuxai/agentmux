@@ -44,6 +44,8 @@ export interface UseInSessionSearchOptions {
      * function without a scroll target.
      */
     jumpTo?: (nodeId: string) => void;
+    /** Called when the search ends (the bar closes), after its matches are cleared. */
+    onClose?: () => void;
 }
 
 export interface UseInSessionSearch {
@@ -128,6 +130,7 @@ export function useInSessionSearch(opts: UseInSessionSearchOptions): UseInSessio
         setVisible(false);
         setMatches([]);
         setCurrentIndex(-1);
+        opts.onClose?.();
     };
 
     return {
