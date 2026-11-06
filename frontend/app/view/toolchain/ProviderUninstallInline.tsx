@@ -47,27 +47,32 @@ export const ProviderUninstallInline = (props: ProviderUninstallInlineProps): JS
         }
     };
     return (
-        <div class="toolchain-detail-row">
-            <Show
-                when={asking()}
-                fallback={
-                    <Button onClick={() => setAsking(true)} disabled={busy()}>
-                        Uninstall
-                    </Button>
-                }
-            >
-                <span class="toolchain-detail-note">
+        <>
+            {/* The question is its own line, so Remove and Cancel stay together under it. */}
+            <Show when={asking()}>
+                <p class="toolchain-detail-note">
                     Remove AgentMux's copy of {props.label}? Your own copy and your sign-in are not touched.
-                </span>
-                <Button tone="accent" onClick={() => void remove()} disabled={busy()}>
-                    Remove
-                </Button>
-                <Button onClick={() => setAsking(false)} disabled={busy()}>
-                    Cancel
-                </Button>
+                </p>
             </Show>
+            <div class="toolchain-detail-row">
+                <Show
+                    when={asking()}
+                    fallback={
+                        <Button onClick={() => setAsking(true)} disabled={busy()}>
+                            Uninstall
+                        </Button>
+                    }
+                >
+                    <Button tone="accent" onClick={() => void remove()} disabled={busy()}>
+                        Remove
+                    </Button>
+                    <Button onClick={() => setAsking(false)} disabled={busy()}>
+                        Cancel
+                    </Button>
+                </Show>
+            </div>
             <Show when={error()}>{(msg) => <p class="toolchain-detail-note">{msg()}</p>}</Show>
-        </div>
+        </>
     );
 };
 

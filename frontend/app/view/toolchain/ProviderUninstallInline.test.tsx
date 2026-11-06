@@ -29,7 +29,10 @@ describe("ProviderUninstallInline", () => {
     it("asks first, and a Cancel removes nothing", () => {
         mount();
         fireEvent.click(screen.getByRole("button", { name: "Uninstall" }));
-        expect(screen.getByText(/Remove AgentMux's copy of goose\?/)).toBeInTheDocument();
+        const question = screen.getByText(/Remove AgentMux's copy of goose\?/);
+        // The question is its own line; Remove and Cancel share the row under it.
+        expect(question.closest(".toolchain-detail-row")).toBeNull();
+        expect(screen.getByRole("button", { name: "Remove" }).parentElement).toBe(screen.getByRole("button", { name: "Cancel" }).parentElement);
         fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
         expect(h.uninstall).not.toHaveBeenCalled();
         expect(screen.getByRole("button", { name: "Uninstall" })).toBeInTheDocument();

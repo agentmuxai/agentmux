@@ -528,7 +528,8 @@ function nothingMatches(s: ToolchainState): boolean {
 function toolActions(row: ToolRow): JSX.Element {
     return (
         <>
-            <Show when={!row.loading && !row.found && row.installUrl}>
+            {/* A CLI AgentMux installs has its own Install in the details; this one opens a web page. */}
+            <Show when={!row.loading && !row.found && row.installUrl && !row.installable}>
                 <Button density="compact" icon="arrow-up-right-from-square" onClick={() => open(row.installUrl)}>
                     Install
                 </Button>

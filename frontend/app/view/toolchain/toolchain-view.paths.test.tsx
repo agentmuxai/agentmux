@@ -666,12 +666,11 @@ describe("a card's actions and details", () => {
         expect(h.openExternal).toHaveBeenLastCalledWith("https://git-scm.com/");
     });
 
-    it("sends a missing agent CLI to its docs page, which is also its install page", async () => {
+    it("gives a missing agent CLI that AgentMux installs a Docs button and no web-page Install (its Install is in the details)", async () => {
         await mount();
-        fireEvent.click(within(card("codex")).getByRole("button", { name: "Install" }));
-        expect(h.openExternal).toHaveBeenLastCalledWith("https://platform.openai.com/docs/codex");
+        expect(within(card("codex")).queryByRole("button", { name: "Install" })).toBeNull();
         fireEvent.click(within(card("codex")).getByRole("button", { name: "Docs" }));
-        expect(h.openExternal).toHaveBeenCalledTimes(2);
+        expect(h.openExternal).toHaveBeenCalledTimes(1);
         expect(h.openExternal).toHaveBeenLastCalledWith("https://platform.openai.com/docs/codex");
     });
 
