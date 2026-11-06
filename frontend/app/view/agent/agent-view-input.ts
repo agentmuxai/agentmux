@@ -19,6 +19,7 @@ import { useAgentKeyboard } from "./hooks/useAgentKeyboard";
 import { useInSessionSearch } from "./hooks/useInSessionSearch";
 import { usePtyWidth } from "./hooks/usePtyWidth";
 import { useScrollToNode } from "./hooks/useScrollToNode";
+import { createSearchReveal } from "./search-reveal";
 
 export function usePaneInput(p: { found: PaneFoundation; model: AgentViewModel; shown: ReturnType<typeof useShownDocument>; late: PaneLate }) {
     const { found, model, late } = p;
@@ -28,10 +29,18 @@ export function usePaneInput(p: { found: PaneFoundation; model: AgentViewModel; 
     // Jump command as a signal: AgentDocumentView reacts and scrolls inside its own container (hooks/useScrollToNode.ts).
     const scroll = useScrollToNode();
 
+    // A match inside a run the pane's view hides opens that run until the search ends (search-reveal.ts).
+    const reveal = createSearchReveal({
+        shown: p.shown.shownDocument,
+        setPins: (update) => found.agentAtoms().documentStateAtom[1]((prev) => ({ ...prev, pinnedNodes: update(prev.pinnedNodes) })),
+        jumpTo: scroll.jumpTo,
+    });
+
     // In-session search over the loaded document slice: matches, navigation, highlight.
     const search = useInSessionSearch({
         document: paneModel.document,
-        jumpTo: scroll.jumpTo,
+        jumpTo: reveal.jumpTo,
+        onClose: reveal.release,
     });
 
     // Pane-scoped Ctrl+F: a second press closes the bar and clears the state (hooks/useAgentKeyboard.ts).

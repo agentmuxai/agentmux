@@ -19,7 +19,7 @@ pub(super) fn get_object_by_oref(store: &Store, oref_str: &str) -> Result<serde_
     }
 
     // Use raw JSON read to avoid strict struct deserialization issues
-    // (e.g. layout leaforder with embedded BlockDef objects).
+    // (e.g. a layout row carrying fields the struct no longer has).
     // This matches Go's generic map-based GetObject behavior.
     store
         .get_raw(&oref.otype, &oref.oid)

@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * An agent asking to drive a native app, as a prompt in every window
- * (docs/specs/SPEC_DESKTOP_DRIVING_2026_10_20.md §5.4).
+ * An agent asking to drive a native app, as a card in its own pane, or a prompt in every window when the
+ * request names no pane (docs/specs/SPEC_DESKTOP_DRIVING_2026_10_20.md §5.4;
+ * docs/specs/SPEC_PANE_MODALS_NOT_WINDOW_MODALS_2026_11_02.md row 4).
  *
  * srv holds each request (`app:desktop` event, `app.desktop` RPC) while the
  * agent's `Desktop` call waits. The answer goes to srv the one way an approval
@@ -17,6 +18,7 @@ import { Modal } from "@/app/element/modal";
 import { ModalBody, ModalFooter, ModalHeader } from "@/app/element/modal-parts";
 import { Button } from "@/app/element/ui";
 import { modalsModel, type ModalCloseProps } from "@/app/store/modalmodel";
+import { paneRequests, type PaneRequestHandle } from "@/app/store/pane-requests";
 import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { getApi } from "@/util/app-api";
@@ -24,8 +26,9 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { DesktopGrantView } from "@/types/rpc/DesktopGrantView";
 import type { DesktopRequest } from "@/types/rpc/DesktopRequest";
+import { DesktopRequestCard, type DesktopChoice } from "./desktop-request-card";
 
-export type DesktopChoice = "timed" | "session" | "deny";
+export type { DesktopChoice };
 
 const [requests, setRequests] = createSignal<DesktopRequest[]>([]);
 const [grants, setGrants] = createSignal<DesktopGrantView[]>([]);
@@ -34,6 +37,26 @@ const [grants, setGrants] = createSignal<DesktopGrantView[]>([]);
 export { requests as desktopRequests };
 /** The apps agents may drive right now, as srv last said. */
 export { grants as desktopGrants };
+
+/** Sends the answer to srv through the host, the one way an approval can, and drops the request from the list. */
+async function decideRequest(r: DesktopRequest, choice: DesktopChoice): Promise<void> {
+    await getApi().approvals.decideDesktop!(r.id, choice);
+    setRequests((list) => list.filter((x) => x.id !== r.id));
+}
+
+// The card sits in every window's registry and shows in the one that has the pane; srv's attention event for
+// the pane gives the tone and the notification.
+function showCard(r: DesktopRequest): PaneRequestHandle {
+    return paneRequests.push(r.block_id, {
+        source: "desktop",
+        Component: DesktopRequestCard,
+        props: { request: r, decide: (choice: DesktopChoice) => decideRequest(r, choice) },
+        summary: `${r.agent}: control ${r.app}`,
+        waits: false,
+        // The pane was closed with the question open: No.
+        onGone: () => void decideRequest(r, "deny").catch(() => {}),
+    });
+}
 
 function DesktopRequestPrompt(props: { request: DesktopRequest } & ModalCloseProps): JSX.Element {
     const r = props.request;
@@ -44,8 +67,7 @@ function DesktopRequestPrompt(props: { request: DesktopRequest } & ModalClosePro
     });
     const decide = async (choice: DesktopChoice) => {
         try {
-            await getApi().approvals.decideDesktop!(r.id, choice);
-            setRequests((list) => list.filter((x) => x.id !== r.id));
+            await decideRequest(r, choice);
             props.close();
         } catch (e) {
             setError(e instanceof Error ? e.message : String(e));
@@ -81,12 +103,13 @@ function DesktopRequestPrompt(props: { request: DesktopRequest } & ModalClosePro
 
 let started = false;
 
-/** Follow srv's desktop requests and open a prompt for each new one. Call once. */
+/** Follow srv's desktop requests and ask for each new one. Call once. */
 export function startDesktopRequests(): void {
     // Only a host that can relay the answer can show the prompt.
     if (started || typeof getApi()?.approvals?.decideDesktop !== "function") return;
     started = true;
-    const shown = new Set<string>();
+    // What asks for each request: its pane's card, or null for the window prompt.
+    const shown = new Map<string, PaneRequestHandle | null>();
     // An event is newer than the first fetch: once one arrives, the fetch's
     // answer is stale and is dropped.
     let sawEvent = false;
@@ -99,11 +122,18 @@ export function startDesktopRequests(): void {
         createEffect(
             on(requests, (list) => {
                 const live = new Set(list.map((r) => r.id));
-                for (const id of [...shown]) if (!live.has(id)) shown.delete(id);
+                for (const [id, card] of [...shown]) {
+                    if (live.has(id)) continue;
+                    card?.close();
+                    shown.delete(id);
+                }
                 for (const r of list) {
                     if (shown.has(r.id)) continue;
-                    shown.add(r.id);
-                    modalsModel.openModal(DesktopRequestPrompt, { request: r });
+                    if (r.block_id) shown.set(r.id, showCard(r));
+                    else {
+                        shown.set(r.id, null);
+                        modalsModel.openModal(DesktopRequestPrompt, { request: r });
+                    }
                 }
             })
         )

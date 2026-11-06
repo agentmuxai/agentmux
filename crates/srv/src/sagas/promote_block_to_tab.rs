@@ -19,7 +19,7 @@
 //   point since step 2 failed).
 // * Step 1 fails → nothing to compensate.
 //
-// Layout setup (rootnode + leaforder for the new tab) and SetActiveTab
+// Layout setup (the rootnode for the new tab) and SetActiveTab
 // stay in the RPC handler post-saga; auto-close empty source tab too.
 
 use agentmux_common::ipc::{Command, Event};
