@@ -5,9 +5,9 @@
 // and a timer. One store serves the window (the status bar, My Agents and the Swarm read it), so
 // srv is asked once and each agent's event is followed once.
 
-import { reopenParkedWhereItWas } from "@/app/store/agent-parked";
-import { atoms, MOS } from "@/app/store/global";
 import { noteOpenedByPerson } from "@/app/store/agent-open-note";
+import { reopenParkedWhereItWas, type ParkedReopenDeps } from "@/app/store/agent-parked";
+import { atoms, MOS } from "@/app/store/global";
 import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -45,17 +45,19 @@ export function sharedAgentRuntime(): AgentRuntimeStore {
  *  list's Open take. A parked agent whose workspace still exists is shown there instead, in a window with its
  *  pane focused (store/agent-parked.ts). Resolves to why srv refused, for the caller to say (the agent is open
  *  elsewhere, or its provider can't run here). */
-export async function openAgentInActiveTab(agent: Pick<AgentRuntime, "agent_id" | "name">): Promise<string | undefined> {
+export async function openAgentInActiveTab(
+    agent: Pick<AgentRuntime, "agent_id" | "name">
+): Promise<string | undefined> {
     // Before the call: the pane can mount before srv answers. The agent opens with its update.
     noteOpenedByPerson(agent.agent_id);
     try {
-        const blockId = sharedAgentRuntime().rows().find((r) => r.agent_id === agent.agent_id)?.block_id;
-        if (await reopenParkedWhereItWas(blockId, parkedDeps)) return undefined;
-        await RpcApi.AgentOpenCommand(TabRpcClient, {
-            agent_id: agent.agent_id,
-            tab_id: atoms.activeTabId(),
-            focus: true,
-        });
+        const blockId = sharedAgentRuntime()
+            .rows()
+            .find((r) => r.agent_id === agent.agent_id)?.block_id;
+        const open = (tabId: string) =>
+            RpcApi.AgentOpenCommand(TabRpcClient, { agent_id: agent.agent_id, tab_id: tabId, focus: true });
+        if (await reopenParkedWhereItWas(blockId, parkedDeps(open))) return undefined;
+        await open(atoms.activeTabId());
         return undefined;
     } catch (e) {
         console.warn(`[agent-runtime] opening ${agent.name} failed`, e);
@@ -63,18 +65,27 @@ export async function openAgentInActiveTab(agent: Pick<AgentRuntime, "agent_id" 
     }
 }
 
-const parkedDeps = {
+/** What reopening a parked agent reads and does; `open` is agent.open for this agent in the given tab. */
+const parkedDeps = (open: (tabId: string) => Promise<unknown>): ParkedReopenDeps => ({
     // A parked agent's block is the one this window is least likely to have: load it rather than read an empty cache.
-    blockMeta: async (blockId: string) => {
+    blockMeta: async (blockId) => {
         const oref = MOS.makeORef("block", blockId);
         return (MOS.getObjectValue<Block>(oref) ?? (await MOS.reloadMuxObject<Block>(oref)))?.meta;
     },
-    // Quiet: a workspace that is gone is not an error here, the pane opens in the active tab instead.
-    reveal: async (blockId: string) => {
+    tabExists: async (tabId) => {
+        const { loadObject } = await import("@/app/util/reveal-block");
+        return (await loadObject<Tab>("tab", tabId)) != null;
+    },
+    // A parked block is in no tab: attaching it to its old tab is what makes it a pane there.
+    attach: async (tabId) => {
+        await open(tabId);
+    },
+    // Quiet: the workspace is shown or opened by this, and a failure is not an error here: the pane opens in the active tab.
+    reveal: async (blockId) => {
         const { revealBlock } = await import("@/app/util/reveal-block");
         return (await revealBlock(blockId, { source: "open", quiet: true })).ok;
     },
-};
+});
 
 /** Start an agent that has no pane, headless: its process runs and its session resumes, and it gets a
  *  row of its own in the Swarm. Resolves to why srv refused (a terminal-tier CLI can't run without a

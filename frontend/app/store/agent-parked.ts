@@ -17,16 +17,29 @@ export function isParkedMeta(meta: Record<string, unknown> | undefined): boolean
 export interface ParkedReopenDeps {
     /** The block meta of `blockId`; loads the block when this window has not got it yet. */
     blockMeta: (blockId: string) => Promise<Record<string, unknown> | undefined>;
-    /** Show the block wherever it is; whether it was shown. */
+    /** Whether `tabId` still exists (a deleted workspace takes its tabs with it). */
+    tabExists: (tabId: string) => Promise<boolean>;
+    /** Put the agent's pane back in `tabId`: a parked block is in no tab, so there is nothing to show until it is. */
+    attach: (tabId: string) => Promise<void>;
+    /** Show the block wherever it is, opening a window on its workspace when none shows it; whether it was shown. */
     reveal: (blockId: string) => Promise<boolean>;
 }
 
+/** The block meta srv sets on a parked block: the tab it was parked from. */
+export const PARKED_FROM_TAB_META = "agent:parkedFromTab";
+
 /**
- * Reopen a parked agent's pane where it was: true when its block is parked and its workspace could still show
- * it (a window is promoted on the workspace and the pane focused). False when the agent has no block, the
- * block is not parked (the caller's own path handles it), or the workspace or tab is gone.
+ * Reopen a parked agent's pane where it was. A parked block is in no tab, so it is put back in the tab it was
+ * parked from (`agent:parkedFromTab`) and shown: in the window that has the workspace, or in a new one opened on
+ * it, with the pane focused. True when that happened. False when the agent has no block, the block is not parked
+ * (the caller's own path handles it), or the tab is gone with its workspace.
  */
 export async function reopenParkedWhereItWas(blockId: string | undefined, deps: ParkedReopenDeps): Promise<boolean> {
-    if (!blockId || !isParkedMeta(await deps.blockMeta(blockId))) return false;
+    if (!blockId) return false;
+    const meta = await deps.blockMeta(blockId);
+    const tabId = meta?.[PARKED_FROM_TAB_META];
+    if (!isParkedMeta(meta) || typeof tabId !== "string" || tabId === "" || !(await deps.tabExists(tabId)))
+        return false;
+    await deps.attach(tabId);
     return deps.reveal(blockId);
 }
