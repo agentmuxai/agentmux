@@ -62,6 +62,38 @@ interface AgentPickerProps {
     model: AgentViewModel;
 }
 
+/** The note under the harness list: what AgentMux installs itself, and the exceptions
+ * (SPEC_AGENT_CLI_ISOLATION_NOTE_2026_10_18.md §4.1). They are the catalog's providers
+ * AgentMux does not install, so the note can't drift from what it actually installs. */
+const ManagedCliNote = (props: { exceptions: Array<{ docsUrl?: string; displayName: string }> }): JSX.Element => (
+    <p class="agent-picker-templates-hint" data-testid="agent-templates-managed-note">
+        AgentMux installs and runs its own copy of each agent CLI, kept apart from any you installed
+        yourself, and keeps each agent's login and settings in its own folders.
+        <Show when={props.exceptions.length > 0}>
+            {" "}
+            The exceptions use the copy on your PATH, so install them yourself first:{" "}
+            <For each={props.exceptions}>
+                {(p, i) => (
+                    <>
+                        {i() > 0 ? ", " : ""}
+                        <a
+                            href={p.docsUrl}
+                            onClick={(e) => {
+                                e.preventDefault();
+                                getApi().openExternal(p.docsUrl);
+                            }}
+                        >
+                            {p.displayName}
+                        </a>
+                    </>
+                )}
+            </For>
+            .
+        </Show>{" "}
+        This isolates the tools, not what an agent can do on your computer.
+    </p>
+);
+
 export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     // Filter-bar query (SPEC_AGENT_PICKER_FILTER_SEARCH_2026_08_17.md) —
     // narrows MyAgentsList only, not the template grid below it (Q1,
@@ -168,35 +200,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                             Each card is a <strong>harness</strong> (the CLI that runs the agent, e.g. Claude Code,
                             Codex) — you'll pick which <strong>model</strong> it uses next.
                         </p>
-                        {/* SPEC_AGENT_CLI_ISOLATION_NOTE_2026_10_18.md §4.1. The exceptions are
-                            the catalog's providers with no npm package, so the note can't
-                            drift from what AgentMux actually installs. */}
-                        <p class="agent-picker-templates-hint" data-testid="agent-templates-managed-note">
-                            AgentMux installs and runs its own copy of each agent CLI, kept apart from any you installed
-                            yourself, and keeps each agent's login and settings in its own folders.
-                            <Show when={templates.userInstalledProviders().length > 0}>
-                                {" "}
-                                The exceptions use the copy on your PATH, so install them yourself first:{" "}
-                                <For each={templates.userInstalledProviders()}>
-                                    {(p, i) => (
-                                        <>
-                                            {i() > 0 ? ", " : ""}
-                                            <a
-                                                href={p.docsUrl}
-                                                onClick={(e) => {
-                                                    e.preventDefault();
-                                                    getApi().openExternal(p.docsUrl);
-                                                }}
-                                            >
-                                                {p.displayName}
-                                            </a>
-                                        </>
-                                    )}
-                                </For>
-                                .
-                            </Show>{" "}
-                            This isolates the tools, not what an agent can do on your computer.
-                        </p>
+                        <ManagedCliNote exceptions={templates.userInstalledProviders()} />
                         <AgentCardFilters
                             cards={templates.filterableCards()}
                             selected={templates.cardFilters()}
