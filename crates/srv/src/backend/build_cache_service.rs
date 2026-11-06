@@ -250,6 +250,18 @@ fn in_workspace(workspace: &Path, clone: &Path) -> bool {
     same_path(workspace, clone) || inside(workspace, clone)
 }
 
+/// The stewards, each once: an agent with panes in two folders is listed twice by `local_agents`,
+/// and a critical note would start two turns for it.
+pub fn stewards(agents: &[LocalAgent]) -> Vec<&LocalAgent> {
+    let mut out: Vec<&LocalAgent> = Vec::new();
+    for a in agents.iter().filter(|a| a.steward) {
+        if !out.iter().any(|o| o.target == a.target) {
+            out.push(a);
+        }
+    }
+    out
+}
+
 fn folder_line(s: &bc::TargetSize, owner: Option<&str>) -> String {
     let who = owner.map_or(String::new(), |o| format!(" [{o}]"));
     format!("- {} : {} ({} of it incremental){who}", s.clone.display(), bc::human(s.target_bytes), bc::human(s.incremental_bytes))
@@ -415,7 +427,7 @@ fn disk_check(mstore: &Store, policy: &Policy) {
             delivered += 1;
         }
     }
-    for steward in agents.iter().filter(|a| a.steward) {
+    for steward in stewards(&agents) {
         attempted += 1;
         if tell(steward, level, &steward_note(policy, level, free, total, &agents, &per_clone)) {
             delivered += 1;
@@ -563,6 +575,14 @@ mod tests {
         assert!(all.contains("owner in brackets"), "{all}");
         let w2 = owner_note(&p, Level::Warning, 43 * GB, 440 * GB, &agents[1], &per_clone);
         assert!(w2.contains("- /a/w2 :"), "a clone that is the workspace itself counts as in it: {w2}");
+    }
+
+    #[test]
+    fn a_steward_with_panes_in_two_folders_is_told_once() {
+        let agents = vec![agent("clamk", "/a/clamk", true), agent("w1", "/a/w1", false), agent("clamk", "/a/clamk-2", true)];
+        let who: Vec<&str> = stewards(&agents).into_iter().map(|a| a.target.as_str()).collect();
+        assert_eq!(who, ["clamk"]);
+        assert!(stewards(&[agent("w1", "/a/w1", false)]).is_empty());
     }
 
     #[test]
