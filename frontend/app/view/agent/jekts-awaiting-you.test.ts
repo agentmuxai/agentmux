@@ -35,6 +35,16 @@ describe("jektsAwaitingYou", () => {
         expect(jektsAwaitingYou([text(), waiting, user()], none, 0)).toEqual([]);
     });
 
+    it("keeps waiting through a turn the pane wrote itself, and ends on a Swarm broadcast copy", () => {
+        const waiting = jekt();
+        const turn = (over: object): DocumentNode => ({ ...user(), ...over }) as DocumentNode;
+        const supervisor = turn({ supervisor: { mode: "steady", n: 1, of: 3 } });
+        expect(jektsAwaitingYou([waiting, supervisor], none, 0)).toEqual([waiting]);
+        expect(jektsAwaitingYou([waiting, turn({ isStartup: true })], none, 0)).toEqual([waiting]);
+        expect(jektsAwaitingYou([waiting, turn({ system: true })], none, 0)).toEqual([waiting]);
+        expect(jektsAwaitingYou([waiting, turn({ broadcast: { recipients: 3 } })], none, 0)).toEqual([]);
+    });
+
     it("is not one that only informs: sensitive from a proven sender, or a lower tier", () => {
         expect(jektsAwaitingYou([jekt({ escalate: "none" })], none, 0)).toEqual([]);
         expect(jektsAwaitingYou([jekt({ escalate: undefined })], none, 0)).toEqual([]);

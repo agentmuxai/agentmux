@@ -34,6 +34,13 @@ export function needsConfirmation(node: DocumentNode): node is JektMessageNode {
 export const dismissalKey = (node: JektMessageNode): string => node.msgId || node.id;
 
 /**
+ * A turn the person sent. The pane also writes `user_message` nodes the person did not: the start-up document and
+ * a Swarm Supervisor continuation. They confirm nothing. A Swarm broadcast copy is the person's words, so it counts.
+ */
+const isFromPerson = (node: DocumentNode): boolean =>
+    node.type === "user_message" && !node.supervisor && !node.system && !node.isStartup;
+
+/**
  * The jekts waiting on the person, oldest first: those after the person's last message in `nodes`, delivered since
  * `since`, not dismissed. Reads from the end and stops at the person's message, so a long transcript costs the
  * length of its tail.
@@ -46,7 +53,7 @@ export function jektsAwaitingYou(
     const out: JektMessageNode[] = [];
     for (let i = nodes.length - 1; i >= 0; i--) {
         const node = nodes[i];
-        if (node.type === "user_message") break;
+        if (isFromPerson(node)) break;
         if (needsConfirmation(node) && deliveredAt(node) >= since && !dismissed.has(dismissalKey(node))) out.push(node);
     }
     return out.reverse();
