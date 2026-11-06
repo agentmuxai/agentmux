@@ -12,6 +12,11 @@
     border-radius: var(--radius-md);
 }
 
+// The filter row lines up with the action row above it and the cards below.
+.skill-app-filter {
+    padding: var(--space-2) var(--space-2) 0;
+}
+
 .skill-app-title {
     margin: 0;
     font-size: var(--text-sm);
@@ -28,6 +33,13 @@
     padding-left: var(--space-3);
     font-size: var(--text-xs);
     color: var(--main-text-color);
+
+    li {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: var(--space-1);
+    }
 }
 
 .skill-app-muted {
@@ -36,4 +48,9 @@
 
 .skill-app-warn {
     color: var(--warning-text-color);
+}
+
+// Routes are in order, best first: show the numbers.
+.skill-app-list--ordered {
+    list-style: decimal;
 }

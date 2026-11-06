@@ -46,6 +46,10 @@ export function recordsFor(app: SkillApp, platform: string): VerifiedRecord[] {
  * followed by a fail means the skill stopped working. A pass elsewhere is said, not counted.
  */
 export function appStatus(app: SkillApp, platform: string): AppStatus {
+    // A skill for another platform's app is not "untested here": it does not apply here.
+    if (app.platforms.length > 0 && !app.platforms.includes(platform)) {
+        return { tone: "idle", label: `for ${app.platforms.join(", ")} only` };
+    }
     const here = recordsFor(app, platform);
     const last = here[here.length - 1];
     if (last) {
@@ -87,9 +91,9 @@ export function fileSize(bytes: number): string {
     return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`;
 }
 
-/** A script's state in the detail: stage 4 adds approval, so until then it is stored and not given to an agent. */
+/** A script's state in the detail: stage 4 adds approval, so until then it is stored and not given to an agent (the pill's tooltip says so). */
 export function scriptState(f: { script: boolean; approved: boolean }): string | null {
-    return f.script ? (f.approved ? "approved" : "not approved: never given to an agent") : null;
+    return f.script ? (f.approved ? "approved" : "not approved") : null;
 }
 
 /** The tone a pill takes for a status (a status dot says "idle" where a pill says "neutral"). */
