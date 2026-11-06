@@ -190,12 +190,20 @@ async function openCreateForm(session) {
     throw new Error("the new-agent panel for Claude Code didn't open");
 }
 
+/** Scroll the element `selector` names to the middle of its scroller, so a click on it lands. */
+async function scrollIntoView(session, selector) {
+    await session.evaluate(`document.querySelector(${JSON.stringify(selector)})?.scrollIntoView({ block: "center" })`);
+    await session.wait(150);
+}
+
 /** Creates agent `name` from the Claude Code template, on this computer, and
  *  waits for it to launch; returns its pane, maximized unless `maximized` is
  *  false (for a shot of the whole tab). `settled` false skips waiting for a
  *  signed-in, idle agent (for an agent that can't start). */
 export async function createAgent(session, name, { settled = true, maximized = true } = {}) {
     const pane = await openCreateForm(session);
+    // The form is taller than a 1280x800 window: bring each control into view before it is clicked.
+    await scrollIntoView(session, `${pane} [data-testid="create-from-template-name-input"]`);
     await session.clickSelector(`${pane} [data-testid="create-from-template-name-input"]`);
     await session.typeText(name);
     // Docker on the capturing machine makes the form default to a container.
@@ -211,6 +219,7 @@ export async function createAgent(session, name, { settled = true, maximized = t
     const create = await session.evaluate(`(() => {
         const b = [...document.querySelectorAll(${JSON.stringify(`${pane} button`)})].find((e) => e.offsetParent && e.innerText.trim() === "Create and start" && !e.disabled);
         if (!b) return null;
+        b.scrollIntoView({ block: "center" });
         const r = b.getBoundingClientRect();
         return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
     })()`);
