@@ -64,8 +64,21 @@ fn finished(state: &AppState, job_id: &str, infra_status: &str, cost: f64, ago_m
     ledger_of(state).store().job_run_insert(&run).unwrap();
 }
 
+/// Waits out the first seconds after local midnight. "Today" starts at local midnight, and the runs a test
+/// makes start a second ago, so a test that counts today's spend fails when it starts within a second of the
+/// date change (it did, at 00:00:00 UTC).
+async fn settle_past_midnight() {
+    const MARGIN_MS: i64 = 5_000;
+    let now = now_ms();
+    let since_midnight = now - crate::backend::jobs::caps::local_day_start_ms(now);
+    if since_midnight < MARGIN_MS {
+        tokio::time::sleep(std::time::Duration::from_millis((MARGIN_MS - since_midnight) as u64)).await;
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn the_list_shows_each_job_with_its_runs_spend_and_whether_it_is_failing() {
+    settle_past_midnight().await;
     let (state, _) = state();
     job(&state, "jobs-a", "uid-a");
     job(&state, "jobs-b", "uid-a");

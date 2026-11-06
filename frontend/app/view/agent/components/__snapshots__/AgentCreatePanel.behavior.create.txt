@@ -1,0 +1,48 @@
+== probe not answered
+<div>
+  <section class="agent-create-panel" data-testid="agent-create-panel" aria-label="New Codex agent">
+    <header class="agent-create-panel-header">
+      <h3 class="agent-create-panel-title">
+        "New"
+        "Codex"
+        "agent"
+    <p class="agent-create-panel-text">
+      "Checking what"
+      "Codex"
+      "needs…"
+  call probePrereqs [false]
+  call ListIdentityAccounts [{}]
+== create
+<div>
+  <section class="agent-create-panel" data-testid="agent-create-panel" aria-label="New Codex agent">
+    <header class="agent-create-panel-header">
+      <h3 class="agent-create-panel-title">
+        "New"
+        "Codex"
+        "agent"
+    <div data-testid="agent-create-form" data-template="Codex" data-runtime="host" data-deciding="false">
+      <button>
+        "form-cancel"
+      <button>
+        "form-busy"
+      <button>
+        "form-created"
+== form callbacks
+<div>
+  <section class="agent-create-panel" data-testid="agent-create-panel" aria-label="New Codex agent">
+    <header class="agent-create-panel-header">
+      <h3 class="agent-create-panel-title">
+        "New"
+        "Codex"
+        "agent"
+    <div data-testid="agent-create-form" data-template="Codex" data-runtime="host" data-deciding="false">
+      <button>
+        "form-cancel"
+      <button>
+        "form-busy"
+      <button>
+        "form-created"
+  call onClose []
+  call onCreated [{"id":"a1"}]
+  call onBusyChange [true]
+  form onCreated

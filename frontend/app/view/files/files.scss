@@ -20,6 +20,13 @@
     overflow: hidden;
     // Narrow panes drop Places first (§5.1).
     container-type: inline-size;
+
+    // The list view's column widths: the pane sets its own on .files-list when a divider has been dragged
+    // (files-columns.ts); Name takes what is left until then.
+    --files-w-modified: 110px;
+    --files-w-size: 72px;
+    --files-w-kind: 90px;
+    --files-flex-name: 1;
 }
 
 // ── Toolbar ─────────────────────────────────────────────────────────────────
@@ -214,6 +221,7 @@
     border-bottom: 1px solid var(--border-color);
 
     .ui-button.files-cell {
+        position: relative;
         --ui-fg: var(--secondary-text-color);
         --ui-fg-hover: var(--main-text-color);
         --ui-bg-hover: transparent;
@@ -230,7 +238,7 @@
 
     .ui-button.files-col-name {
         gap: 6px;
-        flex: 1;
+        flex: var(--files-flex-name);
         min-width: 120px;
     }
 
@@ -238,6 +246,32 @@
         @container (max-width: 520px) {
             display: none;
         }
+    }
+}
+
+// The divider on a column header's right edge (files-column-resizer.tsx).
+.files-col-resizer {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 7px;
+    height: 100%;
+    cursor: col-resize;
+    touch-action: none;
+
+    &::after {
+        content: "";
+        position: absolute;
+        top: 25%;
+        bottom: 25%;
+        right: 0;
+        width: 1px;
+        background: var(--border-color);
+    }
+
+    &:hover::after,
+    &--active::after {
+        background: var(--accent-color);
     }
 }
 
@@ -255,18 +289,18 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    flex: 1;
+    flex: var(--files-flex-name);
     min-width: 120px;
 }
 
 .files-col-modified {
-    width: 110px;
+    width: var(--files-w-modified);
     flex-shrink: 0;
     color: var(--secondary-text-color);
 }
 
 .files-col-size {
-    width: 72px;
+    width: var(--files-w-size);
     flex-shrink: 0;
     text-align: right;
     color: var(--secondary-text-color);
@@ -274,7 +308,7 @@
 }
 
 .files-col-kind {
-    width: 90px;
+    width: var(--files-w-kind);
     flex-shrink: 0;
     color: var(--secondary-text-color);
 
@@ -401,6 +435,23 @@
 }
 
 // ── Filter and preview (Phase 2a) ──────────────────────────────────────────
+
+// The filter button, while the box is shown or a filter is applied: the kit's accent tone and pressed look,
+// and a dot when the box is hidden but the list is still filtered.
+.files-filter-button {
+    position: relative;
+
+    &--applied::after {
+        content: "";
+        position: absolute;
+        top: 3px;
+        right: 3px;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--accent-color);
+    }
+}
 
 .files-filter-input {
     width: 160px;
@@ -532,35 +583,15 @@
     background: var(--accent-color);
 }
 
-.files-conflict-overlay {
-    @include mixins.fixed-fill;
-    z-index: var(--z-modal);
-    @include mixins.flex-center;
-    background: var(--modal-shadow-color);
-}
-
-.files-conflict {
-    width: min(440px, 90vw);
-    padding: 16px;
-    border: 1px solid var(--modal-border-color);
-    border-radius: var(--radius-md);
-    background: var(--modal-bg-color);
-    color: var(--main-text-color);
-    font-family: var(--font-sans);
-    font-size: var(--text-base);
-}
-
-.files-conflict-title {
-    margin-bottom: 8px;
-    font-weight: 600;
-    word-break: break-all;
+// A long name has no spaces to wrap at.
+.files-conflict-panel .modal-panel-title {
+    overflow-wrap: anywhere;
 }
 
 .files-conflict-body {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    margin-bottom: 14px;
     line-height: 1.5;
 }
 
@@ -573,12 +604,6 @@
     align-items: center;
     gap: 6px;
     cursor: pointer;
-}
-
-.files-conflict-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
 }
 
 .files-button-danger {

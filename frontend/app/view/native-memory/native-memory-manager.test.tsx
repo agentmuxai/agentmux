@@ -741,15 +741,13 @@ describe("NativeMemoryManager — reactive updates", () => {
         await screen.findByTestId("history-panel");
         reportDirty?.(true);
 
-        const confirmSpy = vi.spyOn(window, "confirm").mockReturnValueOnce(false);
         fireEvent.click(screen.getByText("← All files"));
-        expect(confirmSpy).toHaveBeenCalledTimes(1);
+        fireEvent.click(await screen.findByText("Keep editing"));
         expect(screen.getByTestId("history-panel")).toBeInTheDocument();
 
-        confirmSpy.mockReturnValueOnce(true);
         fireEvent.click(screen.getByText("← All files"));
+        fireEvent.click(await screen.findByText("Discard"));
         await waitFor(() => expect(screen.queryByTestId("history-panel")).toBeNull());
-        confirmSpy.mockRestore();
     });
 
     // Codex P2, PR #2932: refetchSelectedAgentFiles shares latestRequestId

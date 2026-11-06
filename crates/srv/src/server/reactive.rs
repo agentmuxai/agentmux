@@ -9,8 +9,7 @@ use axum::{
 use serde_json::json;
 
 use crate::backend::blockcontroller;
-use crate::backend::reactive::{AgentRegistration, InjectionRequest};
-use crate::backend::reactive::registry as agent_registry;
+use crate::backend::reactive::{registry as agent_registry, AgentRegistration, InjectionRequest};
 use crate::backend::subagent_watcher;
 use crate::backend::base;
 
@@ -747,6 +746,7 @@ async fn admit(
     if let Some(refused) = super::jekt_ack::refuse_empty_reply(state, auth_via, req) {
         return Err(refused);
     }
+    crate::backend::reactive::sent_audit::record(req);
     // An agent here out of quota or signed out would lose it in a failed turn, and a Claude
     // session gone cold should not be woken by a routine one: hold it, or refuse it where it
     // can't be held (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §5, SPEC_JEKT_HOLD_FOR_COLD_SESSIONS_

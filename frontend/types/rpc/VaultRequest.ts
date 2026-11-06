@@ -13,4 +13,9 @@ why: string, requested_ms: number,
  * The asking agent's own pane, where the person answers it; empty when
  * the agent's identity didn't verify.
  */
-block_id: string, };
+block_id: string, 
+/**
+ * The Vault the agent asked the entry to go in (its id), if it named one: the form
+ * starts on it. Empty when it didn't.
+ */
+vault: string, };

@@ -1,0 +1,37 @@
+startQuestionTimer(local, 30000ms, publish=false)
+endQuestionTimer(local, null)
+onCancel q1
+key Escape on BODY
+noteQuestionActivity(local)
+endQuestionTimer(local, null)
+onCancel q1
+key Escape on TEXTAREA[composer]
+noteQuestionActivity(local)
+key Enter on TEXTAREA[composer]
+noteQuestionActivity(local)
+key Escape on INPUT
+noteQuestionActivity(local)
+endQuestionTimer(local, null)
+onCancel q1
+key Escape on DIV
+noteQuestionActivity(local)
+endQuestionTimer(local, null)
+onCancel q1
+key Enter on INPUT
+noteQuestionActivity(local)
+key a on BODY
+noteQuestionActivity(local)
+-- after all that
+  header: The agent is asking
+  Q: ColourPick a colour
+    - Red {radio,-,recommended} name=amux-q-q1-0
+    - Blue {radio,-} name=amux-q-q1-0
+    other: ""
+  Q: ToppingsPick toppings
+    - Ham (Recommended) {checkbox,-,recommended} name=amux-q-q1-1
+    - Egg {checkbox,-} name=amux-q-q1-1
+    - Cheese (recommended) {checkbox,-,recommended} name=amux-q-q1-1
+    other: ""
+  Q: ExtraAnything else
+    other: ""
+  buttons: Cancel | Accept Recommended | Submit answer (disabled)

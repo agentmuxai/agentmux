@@ -441,6 +441,7 @@ fn service_shell_and_vault_routes() -> Router<AppState> {
         // one, and an entry whose value the Vault makes. Never a value back;
         // the person's writes come only from the host, below.
         .route("/api/v1/vault", get(super::vault_handlers::handle_vault_list))
+        .route("/api/v1/vault/list", post(super::vault_handlers::handle_vault_list_for))
         .route("/api/v1/vault/generate", post(super::vault_handlers::handle_vault_generate))
         .route("/api/v1/vault/rotate", post(super::vault_rotate::handle_vault_rotate))
         .route("/api/v1/vault/request", post(super::vault_handlers::handle_vault_request))
@@ -881,7 +882,12 @@ fn browser_control_routes() -> Router<AppState> {
 fn agent_definition_routes() -> Router<AppState> {
     Router::new()
         .route("/api/v1/agent/seats", post(app_api::agent_seats::handle_agent_seats))
+        .route("/api/v1/agent/migrate-ids", post(app_api::agent_migrate_ids::handle_agent_migrate_ids))
         .route("/api/v1/agent/rename", post(app_api::agent_rename::handle_agent_rename))
+        .route("/api/v1/agent/update", post(app_api::agent_definition::handle_agent_update))
+        .route("/api/v1/agent/bundles", post(app_api::agent_definition::handle_agent_bundles))
+        .route("/api/v1/agent/hide", post(app_api::agent_definition::handle_agent_hide))
+        .route("/api/v1/agent/unhide", post(app_api::agent_definition::handle_agent_unhide))
 }
 
 /// Google connectors for agents: srv makes the call with the account's token, for an agent with a

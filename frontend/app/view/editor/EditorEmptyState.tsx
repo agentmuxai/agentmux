@@ -6,7 +6,7 @@ import { EmptyPaneLogo } from "@/app/element/EmptyPaneLogo";
 import { Button } from "@/app/element/ui";
 
 /**
- * Empty-editor state — faded brain mark + the best few shortcuts. Shown in the main column whenever no
+ * Empty-editor state — faded logo + the best few shortcuts. Shown in the main column whenever no
  * file is open (replaces the old path input; the file tree is the way to open files).
  */
 export function EditorEmptyState(props: {

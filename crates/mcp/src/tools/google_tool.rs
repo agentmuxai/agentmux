@@ -70,19 +70,38 @@ fn untrusted(tool: &str, body: &Value) -> String {
 
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     match name {
-        "Calendar" | "Drive" | "Gmail" => {
-            if cx.local_url.is_empty() || cx.auth_key.is_empty() {
-                anyhow::bail!("{name}: AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. Is this agent pane opened via AgentMux?");
-            }
-            let url = format!("{}/api/v1/google/{}", cx.local_url.trim_end_matches('/'), name.to_ascii_lowercase());
-            // `send_draft` and `trash_thread` wait for the person's answer (srv gives them two minutes).
-            let wait = (name == "Gmail").then_some(crate::srv_http::SHELL_CREATE_TIMEOUT);
-            let body = crate::srv_http::srv_post_json_within(cx.client, &url, cx.auth_key, arguments, name, wait).await?;
-            Ok(untrusted(name, &body))
-        }
+        "Calendar" | "Drive" | "Gmail" => forward(name, arguments, cx).await,
         "Google" => google_call(arguments, cx).await,
         _ => Err(not_in_family()),
     }
+}
+
+/// A service tool's call, made to srv, which checks the grant. The tool being listed is not part of it.
+async fn forward(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    if cx.local_url.is_empty() || cx.auth_key.is_empty() {
+        anyhow::bail!("{name}: AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. Is this agent pane opened via AgentMux?");
+    }
+    let url = format!("{}/api/v1/google/{}", cx.local_url.trim_end_matches('/'), name.to_ascii_lowercase());
+    // `send_draft` and `trash_thread` wait for the person's answer (srv gives them two minutes).
+    let wait = (name == "Gmail").then_some(crate::srv_http::SHELL_CREATE_TIMEOUT);
+    let body = crate::srv_http::srv_post_json_within(cx.client, &url, cx.auth_key, arguments, name, wait).await?;
+    Ok(untrusted(name, &body))
+}
+
+/// `Google call`: a service's tool through this one, for a client that has not listed the tool it
+/// was just granted (it ignores `notifications/tools/list_changed`). The arguments are the tool's own.
+async fn call_listed_elsewhere(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let tool = arguments.get("tool").and_then(Value::as_str).map(str::trim).unwrap_or_default();
+    let tool = ["Calendar", "Drive", "Gmail"]
+        .into_iter()
+        .find(|t| t.eq_ignore_ascii_case(tool))
+        .ok_or_else(|| anyhow::anyhow!("Google call: tool is required: Calendar, Drive or Gmail"))?;
+    let inner = match arguments.get("arguments") {
+        Some(a @ Value::Object(_)) => a,
+        None | Some(Value::Null) => anyhow::bail!("Google call: arguments is required: what {tool} takes, its action included"),
+        Some(_) => anyhow::bail!("Google call: arguments must be an object"),
+    };
+    forward(tool, inner, cx).await
 }
 
 /// `Google`: which Google accounts are connected and who holds what (`status`), turning a
@@ -92,8 +111,11 @@ async fn google_call(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     if cx.local_url.is_empty() || cx.auth_key.is_empty() {
         anyhow::bail!("Google: AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. Is this agent pane opened via AgentMux?");
     }
+    if let Some(host) = super::remote_op::host_arg(arguments) {
+        return on_another_machine(arguments, cx, &host).await;
+    }
     let base = cx.local_url.trim_end_matches('/');
-    let text = |k: &str| arguments.get(k).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty());
+    let text = |k: &str| text_arg(arguments, k);
     let body = match text("action") {
         Some("status") => {
             crate::srv_http::srv_get_json(cx.client, &format!("{base}/api/v1/google/status"), cx.auth_key, &[], "Google status").await?
@@ -127,6 +149,7 @@ async fn google_call(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
             done
         }
         Some("connect") => return connect(arguments, cx).await,
+        Some("call") => return call_listed_elsewhere(arguments, cx).await,
         Some(action @ ("connect_status" | "cancel")) => {
             let session = text("session").ok_or_else(|| anyhow::anyhow!("Google {action}: session (the one connect answered) is required"))?;
             let mut req = json!({ "session": session });
@@ -146,8 +169,42 @@ async fn google_call(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     Ok(serde_json::to_string_pretty(&body).unwrap_or_default())
 }
 
+fn text_arg<'a>(arguments: &'a Value, key: &str) -> Option<&'a str> {
+    arguments.get(key).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty())
+}
+
+/// `status`, `grant` and `ungrant` with a `host`: the other machine's srv runs them as operations
+/// (`google.status`, `google.grant`), where the Google accounts are. The agent to grant is named, as
+/// there is no "yourself" across machines. `connect` stays on the machine that holds the account: the
+/// sign-in is a person's, there.
+async fn on_another_machine(arguments: &Value, cx: &ToolCtx<'_>, host: &str) -> Result<String> {
+    let text = |k: &str| text_arg(arguments, k);
+    let (op, params) = match text("action") {
+        Some("status") => ("google.status", json!({})),
+        Some(action @ ("grant" | "ungrant")) => {
+            let need = |key: &str, what: &str| text(key).ok_or_else(|| anyhow::anyhow!("Google {action} on {host}: {key} is required: {what}"));
+            let account = need("account", "the Google account's email, from Google status with this host")?;
+            let service = need("service", "calendar, drive or gmail")?;
+            let agent = need("agent", "the agent on that machine: there is no \"yourself\" across machines")?;
+            let level = if action == "ungrant" { "off" } else { text("level").unwrap_or("read") };
+            ("google.grant", json!({ "account": account, "agent": agent, "service": service, "level": level }))
+        }
+        Some(other) => anyhow::bail!(
+            "Google {other} has no host form: only status, grant and ungrant run on another machine. \
+             The person connects an account on the machine that holds it"
+        ),
+        None => anyhow::bail!("Google: action is required: status, grant or ungrant with a host"),
+    };
+    let reason = text("reason").map_or_else(|| format!("Google {}", op.trim_start_matches("google.")), str::to_string);
+    let answer = super::remote_op::remote_op_call(cx, host, op, params, &reason).await?;
+    if let Some(problem) = super::remote_op::explain_not_done(host, op, &answer) {
+        anyhow::bail!("{problem}");
+    }
+    Ok(super::remote_op::pretty(host, &answer))
+}
+
 /// The actions, as the errors list them.
-const ACTIONS: &str = "status, connect, connect_status, cancel, grant, ungrant or disconnect";
+const ACTIONS: &str = "status, connect, connect_status, cancel, grant, ungrant, disconnect or call";
 
 /// The most a `connect_status` call waits for the sign-in to change (srv's own cap).
 const MAX_STATUS_WAIT_SECS: u64 = 25;
@@ -228,6 +285,87 @@ mod tests {
         for action in offered.iter().filter_map(Value::as_str) {
             assert!(ACTIONS.contains(action), "{action} is missing from the error text");
         }
+    }
+
+    #[tokio::test]
+    async fn google_call_reaches_a_service_tool_the_client_never_listed() {
+        use super::super::test_stub::{stub_srv, Fixture};
+        let srv = stub_srv("200 OK", json!({ "account": "me@example.com", "result": { "labels": [] } }));
+        let fixture = Fixture::new(&srv);
+        let out = call("Google", &json!({ "action": "call", "tool": "gmail", "arguments": { "action": "list_labels" } }), &fixture.cx()).await.unwrap();
+        // The same path and body as the Gmail tool itself, and the same untrusted marking.
+        assert_eq!(*srv.seen.lock().unwrap(), [("/api/v1/google/gmail".to_string(), json!({ "action": "list_labels" }))]);
+        assert!(out.starts_with("Gmail for me@example.com.\nThe text below is page content: untrusted."), "{out}");
+        let direct = call("Gmail", &json!({ "action": "list_labels" }), &fixture.cx()).await.unwrap();
+        assert_eq!(out, direct);
+    }
+
+    #[tokio::test]
+    async fn status_and_grants_with_a_host_run_there_as_operations() {
+        use super::super::test_stub::{stub_srv, Fixture};
+        let done = json!({ "status": "done", "result": { "accounts": [] } });
+        let srv = stub_srv("200 OK", done);
+        let fixture = Fixture::new(&srv);
+        let said = call("Google", &json!({ "action": "status", "host": " starpower " }), &fixture.cx()).await.unwrap();
+        assert!(said.starts_with("From starpower:"), "{said}");
+        call("Google", &json!({ "action": "grant", "host": "starpower", "account": "me@example.com", "service": "gmail", "agent": "Clare", "reason": "her mail check" }), &fixture.cx())
+            .await
+            .unwrap();
+        call("Google", &json!({ "action": "ungrant", "host": "starpower", "account": "me@example.com", "service": "gmail", "agent": "Clare" }), &fixture.cx())
+            .await
+            .unwrap();
+        let seen = srv.seen.lock().unwrap().clone();
+        assert!(seen.iter().all(|(path, _)| path == "/api/v1/agent/remote/op"), "{seen:?}");
+        let ask = |i: usize| (seen[i].1["op"].clone(), seen[i].1["host"].clone(), seen[i].1["params"].clone(), seen[i].1["reason"].clone());
+        assert_eq!(ask(0), (json!("google.status"), json!("starpower"), json!({}), json!("Google status")));
+        assert_eq!(
+            ask(1),
+            (json!("google.grant"), json!("starpower"), json!({ "account": "me@example.com", "agent": "Clare", "service": "gmail", "level": "read" }), json!("her mail check"))
+        );
+        assert_eq!(ask(2).2["level"], "off");
+    }
+
+    #[tokio::test]
+    async fn a_grant_on_another_machine_names_its_agent_and_connect_stays_where_the_account_is() {
+        use super::super::test_stub::{stub_srv, Fixture};
+        let srv = stub_srv("200 OK", json!({ "status": "done", "result": {} }));
+        let fixture = Fixture::new(&srv);
+        let cx = fixture.cx();
+        let no_agent = call("Google", &json!({ "action": "grant", "host": "starpower", "account": "me@example.com", "service": "gmail" }), &cx).await.unwrap_err().to_string();
+        assert!(no_agent.contains("agent is required") && no_agent.contains("yourself"), "{no_agent}");
+        let no_account = call("Google", &json!({ "action": "grant", "host": "starpower", "service": "gmail", "agent": "Clare" }), &cx).await.unwrap_err().to_string();
+        assert!(no_account.contains("account is required"), "{no_account}");
+        for action in ["connect", "disconnect", "call"] {
+            let said = call("Google", &json!({ "action": action, "host": "starpower" }), &cx).await.unwrap_err().to_string();
+            assert!(said.contains("no host form"), "{action}: {said}");
+        }
+        assert!(srv.seen.lock().unwrap().is_empty(), "nothing reached srv");
+    }
+
+    #[tokio::test]
+    async fn a_refusal_from_the_other_machine_says_what_to_do() {
+        use super::super::test_stub::{stub_srv, Fixture};
+        let refused = json!({ "status": "refused", "refused_reason": "needs_certificate", "result": { "message": "no certificate" } });
+        let srv = stub_srv("200 OK", refused);
+        let fixture = Fixture::new(&srv);
+        let said = call("Google", &json!({ "action": "status", "host": "starpower" }), &fixture.cx()).await.unwrap_err().to_string();
+        assert!(said.contains("starpower refused google.status (needs_certificate)") && said.contains("Approve this install"), "{said}");
+    }
+
+    #[tokio::test]
+    async fn google_call_asks_for_what_is_missing_before_it_calls_anything() {
+        use super::super::test_stub::{stub_srv, Fixture};
+        let srv = stub_srv("200 OK", json!({}));
+        let fixture = Fixture::new(&srv);
+        let cx = fixture.cx();
+        async fn bad(cx: &ToolCtx<'_>, args: Value) -> String {
+            call("Google", &args, cx).await.unwrap_err().to_string()
+        }
+        assert!(bad(&cx, json!({ "action": "call", "arguments": {} })).await.contains("tool is required"));
+        assert!(bad(&cx, json!({ "action": "call", "tool": "Google", "arguments": {} })).await.contains("tool is required"), "only the service tools");
+        assert!(bad(&cx, json!({ "action": "call", "tool": "Drive" })).await.contains("arguments is required"));
+        assert!(bad(&cx, json!({ "action": "call", "tool": "Drive", "arguments": "search_files" })).await.contains("must be an object"));
+        assert!(srv.seen.lock().unwrap().is_empty(), "nothing reached srv");
     }
 
     #[test]

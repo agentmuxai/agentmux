@@ -175,30 +175,54 @@ pub(crate) fn own_outcome(now: Value, block: &str) -> Value {
     own
 }
 
-/// Folds each waited-on target into `Stop agents`' shape: closed (or already
-/// gone) → `succeeded`; kept by the user or failed → `failed`, with the kept
-/// ones also listed in `kept_by_user`. A target srv refused up front is already
-/// in `failed`.
-pub(crate) fn merge_bulk_stop_outcomes(pending: Value, outcomes: Vec<(String, Value)>) -> Value {
-    let mut succeeded = pending["succeeded"].as_array().cloned().unwrap_or_default();
-    let mut failed = pending["failed"].as_array().cloned().unwrap_or_default();
-    let mut kept = Vec::new();
-    for (block, now) in outcomes {
-        match now["status"].as_str().unwrap_or("") {
-            "shut_down" | "superseded" | "proceeding" => succeeded.push(json!(block)),
-            "kept_by_user" => {
-                failed.push(json!({ "id": block, "error": "the user kept it running" }));
-                kept.push(json!(block));
-            }
-            "failed" => failed.push(json!({ "id": block, "error": now["error"].as_str().unwrap_or("stop failed") })),
-            _ => failed.push(json!({ "id": block, "error": "no answer from the user's override window" })),
+/// What `Stop pane` and `Stop agents` say instead of waiting for the user's window: the call returns
+/// at once, srv runs the window, and the agent is told by one `[AgentMux]` note only if the user keeps
+/// what it asked to close or the close fails.
+pub(crate) fn pending_note(secs: u64) -> String {
+    format!("Not closed yet: the user has {secs} s to keep it running, and it closes after that unless they do. Don't wait or poll: you get one [AgentMux] note only if they keep it or the close fails.")
+}
+
+/// The windows a stop opened, one per request id (several targets can share one): their targets and
+/// when each closes unless the user keeps it. `pending` is srv's list of {block_id, request_id,
+/// deadline_ms?}; `fallback_deadline_ms` is the answer's own deadline, for an entry without one.
+pub(crate) fn pending_windows(pending: &[Value], fallback_deadline_ms: Option<i64>, now_ms: i64) -> Vec<Value> {
+    let mut windows: Vec<(String, Vec<String>, Option<i64>)> = Vec::new();
+    for p in pending {
+        let id = p["request_id"].as_str().unwrap_or_default().to_string();
+        let block = p["block_id"].as_str().unwrap_or_default().to_string();
+        let deadline = p["deadline_ms"].as_i64().or(fallback_deadline_ms);
+        match windows.iter_mut().find(|w| w.0 == id) {
+            Some(w) => w.1.push(block),
+            None => windows.push((id, vec![block], deadline)),
         }
     }
-    json!({
-        "succeeded": succeeded,
-        "failed": failed,
-        "kept_by_user": kept,
-    })
+    windows
+        .into_iter()
+        .map(|(id, targets, deadline)| {
+            let mut w = json!({ "id": id, "targets": targets });
+            if let Some(at) = deadline {
+                w["closes_at"] = json!(at);
+                w["closes_in_s"] = json!(((at - now_ms).max(0) + 999) / 1000);
+            }
+            w
+        })
+        .collect()
+}
+
+/// `Stop pane` on another pane: srv's 202 answer, as the agent sees it. A request that joined a
+/// shutdown already under way (`via` is not a pane close) says whose it is and that the pane may
+/// outlive it.
+pub(crate) fn close_pane_pending(block: &str, body: &Value, now_ms: i64) -> String {
+    let entry = json!({ "block_id": block, "request_id": body["request_id"], "deadline_ms": body["deadline_ms"] });
+    // A browser pane's window is shorter than the 30 s of the rest: say what srv set.
+    let secs = body["deadline_ms"].as_i64().map_or(30, |d| ((d - now_ms).max(0) as u64).div_ceil(1000));
+    let mut note = pending_note(secs);
+    if let Some(via) = body["via"].as_str().filter(|v| !matches!(*v, "ClosePane" | "Browser close")).map(public_stop) {
+        let by = body["by"].as_str().unwrap_or("another agent");
+        note.push_str(&format!(" It joined {by}'s {via}, already under way, which may leave the pane itself open: check Pane layout."));
+    }
+    let out = json!({ "status": "pending", "pending": pending_windows(&[entry], None, now_ms), "note": note });
+    serde_json::to_string_pretty(&out).unwrap_or_else(|_| out.to_string())
 }
 
 /// The `note` of a `Stop agents` result: what srv said (a passed `signal` or

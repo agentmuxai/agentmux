@@ -1,0 +1,77 @@
+startQuestionTimer(local, 30000ms, publish=false)
+-- counting
+  header: The agent is asking | +1 more | Auto-selects recommended in 30s [agent-question-panel-countdown]
+  Q: ColourPick a colour
+    - Red {radio,-,recommended} name=amux-q-q1-0
+    - Blue {radio,-} name=amux-q-q1-0
+    other: ""
+  Q: ToppingsPick toppings
+    - Ham (Recommended) {checkbox,-,recommended} name=amux-q-q1-1
+    - Egg {checkbox,-} name=amux-q-q1-1
+    - Cheese (recommended) {checkbox,-,recommended} name=amux-q-q1-1
+    other: ""
+  Q: ExtraAnything else
+    other: ""
+  buttons: Cancel | Accept Recommended | Submit answer (disabled)
+-- 21s in
+  header: The agent is asking | +1 more | Auto-selects recommended in 9s [agent-question-panel-countdown agent-question-panel-countdown--warning]
+  Q: ColourPick a colour
+    - Red {radio,-,recommended} name=amux-q-q1-0
+    - Blue {radio,-} name=amux-q-q1-0
+    other: ""
+  Q: ToppingsPick toppings
+    - Ham (Recommended) {checkbox,-,recommended} name=amux-q-q1-1
+    - Egg {checkbox,-} name=amux-q-q1-1
+    - Cheese (recommended) {checkbox,-,recommended} name=amux-q-q1-1
+    other: ""
+  Q: ExtraAnything else
+    other: ""
+  buttons: Cancel | Accept Recommended | Submit answer (disabled)
+-- answered one by hand
+  header: The agent is asking | +1 more | Auto-selects recommended in 9s [agent-question-panel-countdown agent-question-panel-countdown--warning]
+  Q: ColourPick a colour
+    - Red {radio,checked,recommended} name=amux-q-q1-0
+    - Blue {radio,-} name=amux-q-q1-0
+    other: ""
+  Q: ToppingsPick toppings
+    - Ham (Recommended) {checkbox,-,recommended} name=amux-q-q1-1
+    - Egg {checkbox,-} name=amux-q-q1-1
+    - Cheese (recommended) {checkbox,-,recommended} name=amux-q-q1-1
+    other: ""
+  Q: ExtraAnything else
+    other: ""
+  buttons: Cancel | Accept Recommended | Submit answer (disabled)
+onAnswer {"tool_use_id":"q1","answers":[{"header":"Colour","selected":["Red"]},{"header":"Toppings","selected":["Ham (Recommended)","Cheese (recommended)"]},{"header":"Extra","selected":[],"other":"No option was available to auto-select"}],"answers_map":{"Pick a colour":"Red","Pick toppings":["Ham (Recommended)","Cheese (recommended)"],"Anything else":"No option was available to auto-select"},"answer_text":"Colour: Red\nToppings: Ham (Recommended), Cheese (recommended)\nExtra: Other: No option was available to auto-select","autoFilledCount":2,"autoTimeoutMs":30000}
+-- the timeout fired
+  header: The agent is asking | +1 more
+  Q: ColourPick a colour
+    - Red {radio,checked,recommended} name=amux-q-q1-0
+    - Blue {radio,-} name=amux-q-q1-0
+    other: ""
+  Q: ToppingsPick toppings
+    - Ham (Recommended) {checkbox,checked,recommended} name=amux-q-q1-1
+    - Egg {checkbox,-} name=amux-q-q1-1
+    - Cheese (recommended) {checkbox,checked,recommended} name=amux-q-q1-1
+    other: ""
+  Q: ExtraAnything else
+    other: "No option was available to auto-select"
+  buttons: Cancel | Accept Recommended | Submit answer
+startQuestionTimer(local, 30000ms, publish=false)
+-- the next question
+  header: The agent is asking | Auto-selects recommended in 30s [agent-question-panel-countdown]
+  Q: ColourPick a colour
+    - Red {radio,-} name=amux-q-q2-0
+    - Blue (Recommended) / Calmer {radio,-,recommended} name=amux-q-q2-0
+    other: ""
+  buttons: Cancel | Accept Recommended | Submit answer (disabled)
+onAnswer {"tool_use_id":"q2","answers":[{"header":"Colour","selected":["Blue (Recommended)"]}],"answers_map":{"Pick a colour":"Blue (Recommended)"},"answer_text":"Colour: Blue (Recommended)","autoFilledCount":1,"autoTimeoutMs":30000}
+-- and it times out too
+  header: The agent is asking
+  Q: ColourPick a colour
+    - Red {radio,-} name=amux-q-q2-0
+    - Blue (Recommended) / Calmer {radio,checked,recommended} name=amux-q-q2-0
+    other: ""
+  buttons: Cancel | Accept Recommended | Submit answer
+endQuestionTimer(local, {"publish":false})
+-- nothing pending
+  (no panel)

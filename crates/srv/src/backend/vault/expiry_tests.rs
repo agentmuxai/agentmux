@@ -136,9 +136,10 @@ fn the_rotation_task_goes_to_the_agent_that_made_the_value() {
         fields: Default::default(),
         rules: Default::default(),
         expires: Some("2026-12-01".into()),
+        vault: None,
     };
     let made = generate_entry(&s, req, "agent2-6").unwrap();
-    let listed = list_for_agent(&s).unwrap();
+    let listed = list_for_agent(&s, None).unwrap();
     assert_eq!(listed[0].expires.as_deref(), Some("2026-12-01"), "an agent sees the date, no secret");
     send(&s, Some(&work), day("2026-11-30")).unwrap();
     let filed = tasks(&work);
@@ -160,6 +161,7 @@ fn a_much_used_key_is_still_reminded_once_and_its_maker_still_known() {
         fields: Default::default(),
         rules: Default::default(),
         expires: Some("2026-12-01".into()),
+        vault: None,
     };
     let made = generate_entry(&s, req, "agent2-6").unwrap();
     for _ in 0..600 {
@@ -228,6 +230,7 @@ fn an_entry_made_again_under_a_deleted_ones_id_inherits_none_of_its_reminders() 
         fields: Default::default(),
         rules: Default::default(),
         expires: Some("2026-11-20".into()),
+        vault: None,
     };
     let old = generate_entry(&s, req, "agent2-6").unwrap();
     send(&s, Some(&work), day("2026-11-10")).unwrap();
@@ -252,6 +255,7 @@ fn a_value_the_person_put_in_is_theirs_to_rotate() {
         fields: Default::default(),
         rules: Default::default(),
         expires: Some("2026-11-20".into()),
+        vault: None,
     };
     let made = generate_entry(&s, req, "agent2-6").unwrap();
     let change = |date: &str, value: Option<&str>| EntryChange {

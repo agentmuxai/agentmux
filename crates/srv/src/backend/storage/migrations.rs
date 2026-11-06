@@ -1441,6 +1441,7 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         "ALTER TABLE db_jekt_held ADD COLUMN hold_reason TEXT NOT NULL DEFAULT ''",
         // A held WAN message's verdict, kept for its replay (no bump: an older build ignores it).
         "ALTER TABLE db_jekt_held ADD COLUMN wan_json TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE db_agent_native_memory ADD COLUMN last_seen_mtime_ms INTEGER NOT NULL DEFAULT 0", // a table made before this column
     ] {
         if let Err(e) = conn.execute_batch(stmt) {
             let msg = e.to_string();
@@ -1768,6 +1769,7 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
         // v12: identity M4c-1 — the actor's UID beside each actor name.
         "ALTER TABLE db_cron_jobs ADD COLUMN created_by_uid TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE db_bundle_versions ADD COLUMN written_by_uid TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE db_agent_native_memory ADD COLUMN last_seen_mtime_ms INTEGER NOT NULL DEFAULT 0", // a table made before this column
     ].iter().chain(super::cron::JOB_TABLES.iter()) {
         if let Err(e) = conn.execute_batch(stmt) {
             let msg = e.to_string();
@@ -2245,7 +2247,8 @@ pub fn run_identity_store_schema(conn: &Connection) -> Result<(), StoreError> {
         "ALTER TABLE db_work_queue ADD COLUMN created_by_uid TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE db_cron_jobs ADD COLUMN created_by_uid TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE db_bundle_versions ADD COLUMN written_by_uid TEXT NOT NULL DEFAULT ''",
-    ].iter().chain(super::cron::JOB_TABLES.iter()) {
+        "ALTER TABLE db_agent_native_memory ADD COLUMN last_seen_mtime_ms INTEGER NOT NULL DEFAULT 0", // a table made before this column
+    ].iter().chain(super::cron::JOB_TABLES.iter()).chain(super::vault::VAULT_ALTERS.iter()) {
         if let Err(e) = conn.execute_batch(stmt) {
             let msg = e.to_string();
             if !msg.contains("duplicate column") {

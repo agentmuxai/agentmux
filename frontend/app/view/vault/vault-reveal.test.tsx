@@ -25,6 +25,7 @@ const card: VaultEntryInfo = {
     kind: "card",
     section: "cards",
     label: "Company card",
+    vault_id: "personal",
     fields: {},
     tags: [],
     parts_set: ["number", "cvc"],

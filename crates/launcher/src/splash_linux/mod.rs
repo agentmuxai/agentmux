@@ -4,7 +4,7 @@
 //! Session-aware Linux startup splash.
 //!
 //! The launcher is up in milliseconds; `agentmux-cef` *is* the multi-second cold
-//! start (CEF init + GPU channel + page load). This paints a pulsing brain logo
+//! start (CEF init + GPU channel + page load). This paints a pulsing logo
 //! over a dark backdrop in that gap — the Linux analogue of `splash.rs` (Win32)
 //! and `splash_mac.rs` (Cocoa).
 //!

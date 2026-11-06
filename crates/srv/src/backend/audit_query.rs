@@ -7,11 +7,14 @@
 //! first, a page at a time: the file is read from its end, so a page costs what it returns, not the file's size.
 //!
 //! An entry holds no message text: the audit file keeps a hash and a length, and the preview a CLI-native line also
-//! holds is not copied. Tool calls and thoughts are not recorded anywhere yet, so asking for them says so.
+//! holds is not copied. Tool calls, turn ends and thoughts come from the activity day files (`audit_activity`), and are
+//! given only when asked for by kind.
 
+mod activity;
 mod jekt_file;
 pub mod message_stats;
 mod ordered;
+mod provenance;
 mod segments;
 mod totals;
 
@@ -30,9 +33,14 @@ pub const KIND_AGENT_END: &str = "agent_end";
 pub const KIND_TOOL: &str = "tool";
 pub const KIND_THOUGHT: &str = "thought";
 
-/// Kinds with entries to give.
-const RECORDED: [&str; 5] = [KIND_JEKT, KIND_ACTION, KIND_REGISTRY, KIND_AGENT_START, KIND_AGENT_END];
-const NOT_RECORDED: [&str; 2] = [KIND_TOOL, KIND_THOUGHT];
+pub const KIND_TURN: &str = "turn";
+
+/// The kinds asked for when none is named: what the list showed before tool calls were indexed.
+const DEFAULT_KINDS: [&str; 5] = [KIND_JEKT, KIND_ACTION, KIND_REGISTRY, KIND_AGENT_START, KIND_AGENT_END];
+/// Every kind with entries to give.
+const RECORDED: [&str; 8] = [KIND_JEKT, KIND_ACTION, KIND_REGISTRY, KIND_AGENT_START, KIND_AGENT_END, KIND_TOOL, KIND_TURN, KIND_THOUGHT];
+/// Kinds nothing records.
+const NOT_RECORDED: [&str; 0] = [];
 const DEFAULT_LIMIT: usize = 50;
 const MAX_LIMIT: usize = 200;
 
@@ -53,6 +61,9 @@ pub struct Sources<'a> {
     pub jekt_file: Option<&'a Path>,
     /// This srv's own audit file, where it kept its rows while it did not use the shared folder.
     pub own_file: Option<&'a Path>,
+    /// The folder of the shared activity day files, and of this srv's own (see `audit_activity`).
+    pub activity_dir: Option<&'a Path>,
+    pub own_activity_dir: Option<&'a Path>,
     pub segments: Option<&'a FileStore>,
     pub ctx: Ctx<'a>,
 }
@@ -67,36 +78,46 @@ pub(crate) fn same_agent(a: &str, b: &str) -> bool {
     !a.is_empty() && a == b
 }
 
-/// Where in the query a page stopped, in each store: the last entry given from it, and for an audit file where
-/// reading starts again. (The stores' entries are not in one sequence, so one position for all would repeat
-/// or lose entries.)
+/// Where a page stopped in one store: the last entry given from it, and where reading it carries on from (for an
+/// audit file the byte its lines end at, for an activity folder `YYYY-MM-DD:<byte>`).
+#[derive(Default, Clone)]
+struct Place {
+    last: Option<(u64, String)>,
+    resume: Option<String>,
+}
+
+/// The stores of a page, in the order a cursor lists them.
+const LEDGER: usize = 0;
+const SHARED: usize = 1;
+const OWN: usize = 2;
+const ACTIVITY: usize = 3;
+const OWN_ACTIVITY: usize = 4;
+const STORES: usize = 5;
+
+/// Where in the query a page stopped, in each store. (The stores' entries are not in one sequence, so one position
+/// for all would repeat or lose entries.)
+#[derive(Default)]
 struct Cursor {
-    ledger: Option<(u64, String)>,
-    jekt: Option<(u64, String)>,
-    jekt_end: Option<u64>,
-    own: Option<(u64, String)>,
-    own_end: Option<u64>,
+    places: [Place; STORES],
 }
 
 impl Cursor {
     fn encode(&self) -> String {
-        let pair = |p: &Option<(u64, String)>| p.as_ref().map_or(("-".to_string(), String::new()), |(ts, id)| (ts.to_string(), id.clone()));
-        let (lts, lid) = pair(&self.ledger);
-        let (jts, jid) = pair(&self.jekt);
-        let (ots, oid) = pair(&self.own);
-        let end = |e: Option<u64>| e.map_or("-".to_string(), |e| e.to_string());
-        format!("4|{lts}|{lid}|{jts}|{jid}|{}|{ots}|{oid}|{}", end(self.jekt_end), end(self.own_end))
+        let mut out = "5".to_string();
+        for p in &self.places {
+            let (ts, id) = p.last.as_ref().map_or(("-".to_string(), String::new()), |(ts, id)| (ts.to_string(), id.clone()));
+            out.push_str(&format!("|{ts}|{id}|{}", p.resume.as_deref().unwrap_or("-")));
+        }
+        out
     }
 
     fn decode(text: &str) -> Result<Self, String> {
         let bad = || "audit.query: that cursor isn't one this query gave".to_string();
-        // Version 3 had no file of the srv's own.
-        let mut parts = text.splitn(9, '|');
+        let mut parts = text.split('|');
         let version = parts.next();
-        if version != Some("3") && version != Some("4") {
-            return Err(bad());
-        }
-        let pair = |parts: &mut std::str::SplitN<'_, char>| -> Result<Option<(u64, String)>, String> {
+        let mut cursor = Self::default();
+        // A position is a time and an id, "-" when the store had given nothing.
+        let last = |parts: &mut std::str::Split<'_, char>| -> Result<Option<(u64, String)>, String> {
             let ts = parts.next().ok_or_else(bad)?;
             let id = parts.next().ok_or_else(bad)?.to_string();
             if ts == "-" {
@@ -105,20 +126,43 @@ impl Cursor {
                 Ok(Some((ts.parse().map_err(|_| bad())?, id)))
             }
         };
-        let (ledger, jekt) = (pair(&mut parts)?, pair(&mut parts)?);
-        let end = |parts: &mut std::str::SplitN<'_, char>| -> Result<Option<u64>, String> {
+        let end = |parts: &mut std::str::Split<'_, char>| -> Result<Option<String>, String> {
             match parts.next().ok_or_else(bad)? {
                 "-" => Ok(None),
-                n => Ok(Some(n.parse().map_err(|_| bad())?)),
+                n => Ok(Some(n.to_string())),
             }
         };
-        let jekt_end = end(&mut parts)?;
-        if version == Some("3") {
-            return Ok(Self { ledger, jekt, jekt_end, own: None, own_end: None });
+        match version {
+            Some("5") => {
+                for place in cursor.places.iter_mut() {
+                    place.last = last(&mut parts)?;
+                    place.resume = end(&mut parts)?;
+                }
+            }
+            // Versions 3 and 4 listed the ledger and the shared file (a position, then the byte), and 4 also the srv's own file.
+            Some(v @ ("3" | "4")) => {
+                cursor.places[LEDGER].last = last(&mut parts)?;
+                cursor.places[SHARED].last = last(&mut parts)?;
+                cursor.places[SHARED].resume = end(&mut parts)?;
+                if v == "4" {
+                    cursor.places[OWN].last = last(&mut parts)?;
+                    cursor.places[OWN].resume = end(&mut parts)?;
+                }
+            }
+            _ => return Err(bad()),
         }
-        let own = pair(&mut parts)?;
-        let own_end = end(&mut parts)?;
-        Ok(Self { ledger, jekt, jekt_end, own, own_end })
+        // A byte in a cursor from this query is a number; anything else is not ours.
+        for (i, place) in cursor.places.iter().enumerate() {
+            let ok = match (i, place.resume.as_deref()) {
+                (_, None) => true,
+                (ACTIVITY | OWN_ACTIVITY, Some(r)) => r.split_once(':').is_some_and(|(_, byte)| byte.parse::<u64>().is_ok()),
+                (_, Some(r)) => r.parse::<u64>().is_ok(),
+            };
+            if !ok {
+                return Err(bad());
+            }
+        }
+        Ok(cursor)
     }
 }
 
@@ -134,10 +178,10 @@ impl Filter {
     fn of(req: &AuditQueryReq) -> Result<Self, String> {
         let kinds: HashSet<String> = match &req.kinds {
             Some(kinds) if !kinds.is_empty() => kinds.iter().map(|k| k.trim().to_lowercase()).collect(),
-            _ => RECORDED.iter().map(|k| k.to_string()).collect(),
+            _ => DEFAULT_KINDS.iter().map(|k| k.to_string()).collect(),
         };
         if let Some(unknown) = kinds.iter().find(|k| !RECORDED.contains(&k.as_str()) && !NOT_RECORDED.contains(&k.as_str())) {
-            return Err(format!("audit.query: unknown kind '{unknown}'; the kinds are jekt, action, registry, agent_start, agent_end, tool and thought"));
+            return Err(format!("audit.query: unknown kind '{unknown}'; the kinds are jekt, action, registry, agent_start, agent_end, tool, turn and thought"));
         }
         Ok(Self {
             agent: req.agent_id.as_deref().map(str::trim).filter(|a| !a.is_empty()).map(str::to_string),
@@ -214,6 +258,7 @@ fn from_audit_in(prefix: char, at: u64, e: &AuditLogEntry, ctx: &Ctx) -> AuditEn
         reason: e.reason.clone(),
         cost: None,
         links: AuditLinks::default(),
+        provenance: provenance::of(e),
     };
     match e.event_kind.as_str() {
         "register" | "unregister" | "swept" => AuditEntry {
@@ -244,6 +289,14 @@ fn from_audit_in(prefix: char, at: u64, e: &AuditLogEntry, ctx: &Ctx) -> AuditEn
                 ..blank
             }
         }
+        // The sender's half of a message: a row of its own, and joined to the receiver's by the query.
+        crate::backend::reactive::sent_audit::SENT => AuditEntry {
+            kind: KIND_JEKT.to_string(),
+            from: from.map(|f| end_of(f, ts_ms, None, ctx)),
+            to: Some(end_of(&e.target_agent, ts_ms, None, ctx)),
+            summary: format!("{who} → {to}: sent, {} bytes", e.message_length),
+            ..blank
+        },
         other => {
             let cli = other == "cli_native";
             let status = if !e.success {
@@ -280,27 +333,68 @@ fn file_stream<'a>(
     filter: &'a Filter,
     after: Option<(u64, String)>,
     end: Option<u64>,
-) -> ordered::Ordered<'a> {
+) -> ordered::Ordered<'a, AuditLogEntry> {
     let wants_any = [KIND_JEKT, KIND_ACTION, KIND_REGISTRY].iter().any(|k| filter.kinds.contains(*k));
     let lines: Box<dyn Iterator<Item = _>> = match path.filter(|_| wants_any) {
-        Some(path) => Box::new(jekt_file::entries(path, end)),
+        Some(path) => Box::new(jekt_file::entries::<AuditLogEntry>(path, end)),
         None => Box::new(std::iter::empty()),
     };
-    ordered::Ordered::new(lines, move |at, e| from_audit_in(prefix, at, e, &src.ctx), move |e| filter.keep(e), filter.since, after)
+    ordered::Ordered::new(lines, |e: &AuditLogEntry| e.timestamp, move |at, e| from_audit_in(prefix, at, e, &src.ctx), move |e| filter.keep(e), filter.since, after)
 }
 
-/// A store's place in the merge of a page.
-enum Pick {
-    Ledger,
-    Shared,
-    Own,
+/// A store in the merge of a page: the next entry it would give, newest first.
+trait Store {
+    fn peek(&mut self) -> Option<&AuditEntry>;
+    fn pop(&mut self) -> Option<AuditEntry>;
+    /// Where the next page carries on from in this store; `previous` is where this page started.
+    fn resume(&self, previous: Option<&str>) -> Option<String>;
+}
+
+impl Store for ordered::Ordered<'_, AuditLogEntry> {
+    fn peek(&mut self) -> Option<&AuditEntry> {
+        ordered::Ordered::peek(self)
+    }
+    fn pop(&mut self) -> Option<AuditEntry> {
+        ordered::Ordered::pop(self)
+    }
+    fn resume(&self, previous: Option<&str>) -> Option<String> {
+        ordered::Ordered::resume(self, previous.and_then(|p| p.parse().ok())).map(|b| b.to_string())
+    }
+}
+
+impl Store for activity::DayStream<'_> {
+    fn peek(&mut self) -> Option<&AuditEntry> {
+        activity::DayStream::peek(self)
+    }
+    fn pop(&mut self) -> Option<AuditEntry> {
+        activity::DayStream::pop(self)
+    }
+    fn resume(&self, previous: Option<&str>) -> Option<String> {
+        activity::DayStream::resume(self, previous)
+    }
+}
+
+/// The segment ledger's entries, already sorted newest first and cut at the cursor.
+struct LedgerStore(std::iter::Peekable<std::vec::IntoIter<AuditEntry>>);
+
+impl Store for LedgerStore {
+    fn peek(&mut self) -> Option<&AuditEntry> {
+        self.0.peek()
+    }
+    fn pop(&mut self) -> Option<AuditEntry> {
+        self.0.next()
+    }
+    fn resume(&self, _: Option<&str>) -> Option<String> {
+        None
+    }
 }
 
 /// A page of the Audit.
-pub fn query(src: &Sources, req: &AuditQueryReq) -> Result<AuditQueryResult, String> {
+pub fn query<'a>(src: &'a Sources<'a>, req: &AuditQueryReq) -> Result<AuditQueryResult, String> {
     let filter = Filter::of(req)?;
     let limit = (req.limit.map_or(DEFAULT_LIMIT, |l| l as usize)).clamp(1, MAX_LIMIT);
-    let cursor = req.cursor.as_deref().map(Cursor::decode).transpose()?;
+    let cursor = req.cursor.as_deref().map(Cursor::decode).transpose()?.unwrap_or_default();
+    let place = |i: usize| cursor.places[i].clone();
 
     // The ledger is small: every start and end, newest first, those past the cursor dropped.
     let mut ledger: Vec<AuditEntry> = if filter.kinds.contains(KIND_AGENT_START) || filter.kinds.contains(KIND_AGENT_END) {
@@ -308,45 +402,54 @@ pub fn query(src: &Sources, req: &AuditQueryReq) -> Result<AuditQueryResult, Str
     } else {
         Vec::new()
     };
-    let past = cursor.as_ref().and_then(|c| c.ledger.clone());
+    let past = place(LEDGER).last;
     ledger.retain(|e| filter.keep(e) && past.as_ref().is_none_or(|(ts, id)| (e.ts_ms, e.id.as_str()) < (*ts, id.as_str())));
     ledger.sort_by(|a, b| (b.ts_ms, &b.id).cmp(&(a.ts_ms, &a.id)));
-    let mut ledger = ledger.into_iter().peekable();
-    let mut jekts = file_stream(src.jekt_file, 'j', src, &filter, cursor.as_ref().and_then(|c| c.jekt.clone()), cursor.as_ref().and_then(|c| c.jekt_end));
-    let mut owns = file_stream(src.own_file, 'o', src, &filter, cursor.as_ref().and_then(|c| c.own.clone()), cursor.as_ref().and_then(|c| c.own_end));
+
+    let end_of = |i: usize| place(i).resume.and_then(|r| r.parse().ok());
+    let wants_activity = [KIND_TOOL, KIND_TURN, KIND_THOUGHT].iter().any(|k| filter.kinds.contains(*k));
+    let dir = |d: Option<&'a Path>| d.filter(|_| wants_activity);
+    // In the order of the cursor's places.
+    let mut stores: [Box<dyn Store + '_>; STORES] = [
+        Box::new(LedgerStore(ledger.into_iter().peekable())),
+        Box::new(file_stream(src.jekt_file, 'j', src, &filter, place(SHARED).last, end_of(SHARED))),
+        Box::new(file_stream(src.own_file, 'o', src, &filter, place(OWN).last, end_of(OWN))),
+        Box::new(activity::DayStream::new(dir(src.activity_dir), 's', &filter, &src.ctx, place(ACTIVITY).last, place(ACTIVITY).resume.as_deref())),
+        Box::new(activity::DayStream::new(dir(src.own_activity_dir), 'o', &filter, &src.ctx, place(OWN_ACTIVITY).last, place(OWN_ACTIVITY).resume.as_deref())),
+    ];
 
     let mut entries: Vec<AuditEntry> = Vec::new();
-    let mut ledger_last = past;
-    let mut jekt_last = cursor.as_ref().and_then(|c| c.jekt.clone());
-    let mut own_last = cursor.as_ref().and_then(|c| c.own.clone());
+    let mut joiner = provenance::Joiner::default();
+    let mut last: [Option<(u64, String)>; STORES] = std::array::from_fn(|i| place(i).last);
     let mut more = false;
     loop {
         // The newest entry waiting in any store goes next.
-        let key = |e: Option<&AuditEntry>| e.map(|e| (e.ts_ms, e.id.clone()));
-        let waiting = [(Pick::Ledger, key(ledger.peek())), (Pick::Shared, key(jekts.peek())), (Pick::Own, key(owns.peek()))];
-        let newest = waiting.into_iter().filter_map(|(p, k)| k.map(|k| (p, k))).reduce(|best, next| if next.1 > best.1 { next } else { best });
-        let Some((pick, _)) = newest else { break };
-        if entries.len() == limit {
+        let mut newest: Option<(usize, (u64, String))> = None;
+        for (i, store) in stores.iter_mut().enumerate() {
+            if let Some(e) = store.peek() {
+                let key = (e.ts_ms, e.id.clone());
+                if newest.as_ref().is_none_or(|(_, best)| key > *best) {
+                    newest = Some((i, key));
+                }
+            }
+        }
+        let Some((i, _)) = newest else { break };
+        // A full page still takes the sender's half of a message it holds the other half of.
+        if entries.len() == limit && !stores[i].peek().is_some_and(|e| joiner.completes(e)) {
             more = true;
             break;
         }
-        let entry = match pick {
-            Pick::Ledger => ledger.next().inspect(|e| ledger_last = Some((e.ts_ms, e.id.clone()))),
-            Pick::Shared => jekts.pop().inspect(|e| jekt_last = Some((e.ts_ms, e.id.clone()))),
-            Pick::Own => owns.pop().inspect(|e| own_last = Some((e.ts_ms, e.id.clone()))),
-        };
-        entries.extend(entry);
+        if let Some(entry) = stores[i].pop() {
+            last[i] = Some((entry.ts_ms, entry.id.clone()));
+            joiner.push(&mut entries, entry);
+        }
     }
     let next_cursor = more.then(|| {
-        let c = cursor.as_ref();
-        Cursor {
-            ledger: ledger_last,
-            jekt: jekt_last,
-            jekt_end: jekts.resume(c.and_then(|c| c.jekt_end)),
-            own: own_last,
-            own_end: owns.resume(c.and_then(|c| c.own_end)),
+        let mut next = Cursor::default();
+        for i in 0..STORES {
+            next.places[i] = Place { last: last[i].clone(), resume: stores[i].resume(cursor.places[i].resume.as_deref()) };
         }
-        .encode()
+        next.encode()
     });
     let not_recorded = NOT_RECORDED.iter().filter(|k| filter.kinds.contains(**k)).map(|k| k.to_string()).collect();
     let totals = req.totals.unwrap_or(false).then(|| totals::of(src, &filter));

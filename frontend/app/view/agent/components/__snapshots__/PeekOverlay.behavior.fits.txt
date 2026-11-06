@@ -1,0 +1,12 @@
+[mounted] panel={position: fixed; left: 800px; top: 200px; transform: translateX(-100%); max-width: 700px; min-width: 0px; max-height: 0px;} outside=false hidden=null class="agent-node-peek-overlay" bridge=- afterLeave=-
+advance 20ms
+autoUpdate #1 registered (row rowA)
+[registered] panel={position: fixed; left: 800px; top: 200px; transform: translateX(-100%); max-width: 700px; min-width: 0px; max-height: 0px;} outside=false hidden=null class="agent-node-peek-overlay" bridge=- afterLeave=-
+row mousemove y=215
+[pointer at 215] panel={position: fixed; left: 800px; top: 227px; transform: translateX(-100%); max-width: 700px; min-width: 0px; max-height: 40px;} outside=false hidden=null class="agent-node-peek-overlay" bridge=- afterLeave=-
+row mousemove y=222
+[pointer at 222] panel={position: fixed; left: 800px; top: 234px; transform: translateX(-100%); max-width: 700px; min-width: 0px; max-height: 40px;} outside=false hidden=null class="agent-node-peek-overlay" bridge=- afterLeave=-
+autoUpdate #1 disposed
+[show off] panel=- bridge=- afterLeave=-
+advance 2000ms
+[long after] panel=- bridge=- afterLeave=-

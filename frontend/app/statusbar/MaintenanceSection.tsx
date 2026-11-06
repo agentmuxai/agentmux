@@ -9,9 +9,12 @@ import {
     checkForUpdate,
     loadAppUpdate,
     recordStoreNone,
+    setStoreStayed,
     releaseDownload,
+    releaseNotesUrl,
     startAppUpdateDownload,
     storeAnswer,
+    storeFallbackLine,
     storeOfferLine,
     upgradeAndRestart,
     upgradeUnderWay,
@@ -23,13 +26,10 @@ import { createSignal, For, onMount, Show, type JSX } from "solid-js";
 import "./_maintenance-section.scss";
 import { Button } from "@/app/element/ui";
 import { tip } from "@/app/element/tip";
+import { StoreUpdateNotes } from "./StoreUpdateNotes";
 
 // The host opens exactly this link (`external_url_allowed` in the CEF host).
 const MS_STORE_PAGE_URL = "ms-windows-store://pdp/?productid=9P9QCXNNCRK3";
-
-// What's new: the release's own page on GitHub, or the list of releases when the version isn't known.
-const releasesPageUrl = (version: string | null | undefined): string =>
-    version ? `https://github.com/agentmuxai/agentmux/releases/tag/v${version}` : "https://github.com/agentmuxai/agentmux/releases";
 
 // What to do with a Store install older than the release's upgrade floor.
 const STORE_MOVE_OFF_URL = "https://docs.agentmux.ai/installation/#moving-off-the-microsoft-store-build";
@@ -113,10 +113,11 @@ export const MaintenanceSection = (): JSX.Element => {
         setStoreNote(null);
         setStoreBusy(true);
         try {
-            const result = await getApi()?.approvals?.storeUpdate?.().catch(() => undefined);
+            setStoreStayed(null);
+            const result = await getApi()?.approvals?.storeUpdate?.(release()?.version).catch(() => undefined);
             if (result?.outcome === "none" && release()) recordStoreNone(release()!.version);
             if (!result || result.outcome === "fallback") {
-                if (result?.message) setStoreNote(result.message);
+                setStoreNote(storeFallbackLine(result?.message));
                 void openLink(MS_STORE_PAGE_URL);
             } else {
                 setStoreNote(result.message);
@@ -183,7 +184,7 @@ export const MaintenanceSection = (): JSX.Element => {
                         <span class="maintenance-row-text">
                             {storeLine() ?? (updaterVersion() ? `v${updaterVersion()} is out` : "Update available")}
                         </span>
-                        <Button density="compact" class="maintenance-btn" onClick={() => void openLink(releasesPageUrl(updaterVersion()))}>
+                        <Button density="compact" class="maintenance-btn" onClick={() => void openLink(releaseNotesUrl(updaterVersion()))}>
                             What's new
                         </Button>
                         <Show when={!storeBelowFloor() && storeOffers()}>
@@ -320,12 +321,11 @@ export const MaintenanceSection = (): JSX.Element => {
             <Show when={startError()}>
                 <div class="maintenance-row-text maintenance-row-text--error">{startError()}</div>
             </Show>
-            <Show when={storeBusy()}>
-                <div class="maintenance-row-text maintenance-row-text--dim">Asking the Microsoft Store to install the update…</div>
-            </Show>
-            <Show when={storeNote()}>
-                <div class="maintenance-row-text maintenance-row-text--dim">{storeNote()}</div>
-            </Show>
+            <StoreUpdateNotes
+                closesFor={viaStore() && !storeBelowFloor() && storeOffers() && updaterStatus() === "available" ? updaterVersion() : null}
+                busy={storeBusy()}
+                note={storeNote()}
+            />
             {/* Check for update, always: nothing checks on its own, and a new
                 check replaces the release on offer (not while a download or
                 restart into it is under way). A `task dev` build, which

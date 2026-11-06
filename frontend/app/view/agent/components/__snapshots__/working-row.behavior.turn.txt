@@ -1,0 +1,112 @@
+before mount (timers: 0)
+== +0ms idle, nothing to show (timers: 1)
+-
+== +0ms live, nothing typed (timers: 4)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "|"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+  <div class="agent-working-row-right">
+    "0s"
+== +89ms 3 characters (timers: 4)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "|"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+      "Fix"
+  <div class="agent-working-row-right">
+    "0s"
+== +389ms half (timers: 4)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "\"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+      "Fix the login"
+  <div class="agent-working-row-right">
+    "0s"
+== +2389ms whole (timers: 3)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "\"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+      "Fix the login redirect loop"
+  <div class="agent-working-row-right">
+    "2s"
+== +3389ms requesting tokens (timers: 3)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "|"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+      "Fix the login redirect loop"
+  <div class="agent-working-row-right">
+    "↑ 300 tokens  ·  3s"
+== +4389ms output counting (timers: 3)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "|"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+      "Fix the login redirect loop"
+  <div class="agent-working-row-right">
+    "↓ 1.2k tokens  ·  4s"
+== +5389ms output never shown going down (timers: 3)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "|"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+      "Fix the login redirect loop"
+  <div class="agent-working-row-right">
+    "↓ 900 tokens  ·  5s"
+== +35389ms 30s: a new phrase (timers: 3)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "-"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+      "Fix the login redirect loop"
+  <div class="agent-working-row-right">
+    "↓ 900 tokens  ·  35s"
+== +35501ms a new summary types out (timers: 4)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "\"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+      "Revi"
+  <div class="agent-working-row-right">
+    "↓ 900 tokens  ·  35s"
+== +37501ms and finishes (timers: 3)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "|"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+      "Review the diff"
+  <div class="agent-working-row-right">
+    "↓ 900 tokens  ·  37s"
+== +37501ms worked (timers: 1)
+<span class="agent-working-row agent-working-row--worked">
+  <span class="agent-working-row-left">
+    "✓ Worked  ·  42s  ·  2.4k tokens"
+  <span class="agent-working-row-right">
+    <span class="agent-working-row-secondary">
+      "$0.123  ·  3 steps"
+== +37501ms worked, short, no figures (timers: 1)
+<span class="agent-working-row agent-working-row--worked">
+  <span class="agent-working-row-left">
+    "✓ Worked  ·  1s"
+  <span class="agent-working-row-right">
+== +37501ms worked, no duration (timers: 1)
+<span class="agent-working-row agent-working-row--worked">
+  <span class="agent-working-row-left">
+    "✓ Worked  ·  10 tokens"
+  <span class="agent-working-row-right">
+== +37501ms no stats: nothing (timers: 1)
+-
+after unmount (timers: 0)

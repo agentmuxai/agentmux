@@ -63,26 +63,6 @@ fn stop_agents_notes_say_what_no_longer_applies_and_which_target_kept_its_pane()
     assert!(quiet.get("note").is_none());
 }
 
-#[test]
-fn bulk_stop_folds_each_users_answer_into_succeeded_and_failed() {
-    let pending = serde_json::json!({
-        "status": "pending_user_override",
-        "succeeded": ["x"],
-        "failed": [{ "id": "gone", "error": "NOT_RUNNING" }],
-        "aborted_early": false,
-    });
-    let out = merge_bulk_stop_outcomes(pending, vec![
-        ("a".into(), serde_json::json!({ "status": "shut_down" })),
-        ("b".into(), serde_json::json!({ "status": "kept_by_user" })),
-        ("c".into(), serde_json::json!({ "status": "failed", "error": "boom" })),
-    ]);
-    assert_eq!(out["succeeded"], serde_json::json!(["x", "a"]));
-    assert_eq!(out["kept_by_user"], serde_json::json!(["b"]));
-    let failed: Vec<&str> = out["failed"].as_array().unwrap().iter().map(|f| f["id"].as_str().unwrap()).collect();
-    assert_eq!(failed, vec!["gone", "b", "c"]);
-    assert!(out.get("status").is_none(), "the usual FleetActionResult shape");
-}
-
 /// Several agents are one window: the request's status is for all of them, so each target takes its own
 /// answer from the per-agent `outcomes`; a request for one agent has none and answers as itself.
 #[test]
@@ -100,21 +80,53 @@ fn a_batch_answers_each_target_from_its_own_outcome() {
     assert_eq!(own_outcome(settled.clone(), "c")["error"], "boom");
     let single = serde_json::json!({ "status": "kept_by_user" });
     assert_eq!(own_outcome(single.clone(), "a"), single);
-    let out = merge_bulk_stop_outcomes(
-        serde_json::json!({ "succeeded": [], "failed": [] }),
-        ["a", "b", "c"].map(|b| (b.to_string(), own_outcome(settled.clone(), b))).into(),
-    );
-    assert_eq!(out["succeeded"], serde_json::json!(["a"]));
-    assert_eq!(out["kept_by_user"], serde_json::json!(["b"]));
 }
 
 #[test]
-fn stop_warns_it_can_take_30_seconds() {
+fn stop_says_it_returns_at_once_and_what_it_sends_later() {
     let v: Value = serde_json::from_str(STOP_TOOL).unwrap();
-    assert!(v["description"].as_str().unwrap().contains("at least 30 seconds"));
+    let text = v["description"].as_str().unwrap();
+    assert!(text.contains("returns at once") && text.contains("one [AgentMux] note"), "{text}");
+    assert!(!text.contains("at least 30 seconds"), "it no longer blocks: {text}");
+}
+
+#[test]
+fn a_stop_answers_with_one_window_per_request_and_when_it_closes() {
+    let pending = vec![
+        serde_json::json!({ "block_id": "a", "request_id": "r1", "effect": "close_tab", "deadline_ms": 130_000 }),
+        serde_json::json!({ "block_id": "b", "request_id": "r1", "effect": "close_tab", "deadline_ms": 130_000 }),
+        serde_json::json!({ "block_id": "c", "request_id": "r2", "effect": "close_tab" }),
+    ];
+    let windows = pending_windows(&pending, Some(140_500), 100_000);
+    assert_eq!(windows.len(), 2, "a and b share a window: {windows:?}");
+    assert_eq!(windows[0], serde_json::json!({ "id": "r1", "targets": ["a", "b"], "closes_at": 130_000, "closes_in_s": 30 }));
+    assert_eq!(windows[1]["targets"], serde_json::json!(["c"]));
+    assert_eq!(windows[1]["closes_at"], 140_500, "an entry without its own deadline takes the answer's");
+    assert_eq!(windows[1]["closes_in_s"], 41, "rounded up");
+}
+
+#[test]
+fn stop_pane_answers_pending_and_says_who_it_joined() {
+    let own = serde_json::json!({ "status": "pending_user_override", "request_id": "r9", "by": "me", "via": "ClosePane", "deadline_ms": 130_000 });
+    let said: Value = serde_json::from_str(&close_pane_pending("blk", &own, 100_000)).unwrap();
+    assert_eq!(said["status"], "pending");
+    assert_eq!(said["pending"][0], serde_json::json!({ "id": "r9", "targets": ["blk"], "closes_at": 130_000, "closes_in_s": 30 }));
+    assert!(said["note"].as_str().unwrap().contains("one [AgentMux] note") && !said["note"].as_str().unwrap().contains("joined"), "{said}");
+    let theirs = serde_json::json!({ "request_id": "r9", "by": "Korp", "via": "FleetBulkStop", "deadline_ms": 130_000 });
+    let said: Value = serde_json::from_str(&close_pane_pending("blk", &theirs, 100_000)).unwrap();
+    assert!(said["note"].as_str().unwrap().contains("joined Korp's Stop agents"), "{said}");
 }
 
 
+
+/// A browser pane's window is 10 s, and the note says what srv set, not a fixed 30.
+#[test]
+fn stop_pane_says_the_window_srv_set() {
+    let browser = serde_json::json!({ "request_id": "r9", "by": "me", "via": "ClosePane", "deadline_ms": 110_000 });
+    let said: Value = serde_json::from_str(&close_pane_pending("blk", &browser, 100_000)).unwrap();
+    assert_eq!(said["pending"][0]["closes_in_s"], 10);
+    assert!(said["note"].as_str().unwrap().contains("the user has 10 s to keep it"), "{said}");
+}
 
 /// Stop's `self` keeps QuitSelf's warning and its required quote; that it
 /// takes no target is checked in stop_tool's own tests.

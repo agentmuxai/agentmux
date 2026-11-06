@@ -38,10 +38,15 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "env_set", tool: "AgentEnvSet", rename: &[] },
     Act { action: "set_seat", tool: "AgentSetSeat", rename: &[] },
     Act { action: "rename", tool: "AgentRename", rename: &[] },
+    Act { action: "update", tool: "AgentUpdate", rename: &[] },
+    Act { action: "bundles", tool: "AgentBundles", rename: &[] },
+    Act { action: "hide", tool: "AgentHide", rename: &[] },
+    Act { action: "unhide", tool: "AgentUnhide", rename: &[] },
     Act { action: "update_container", tool: "AgentUpdateContainer", rename: &[] },
     Act { action: "message_stats", tool: "AgentMessageStats", rename: &[] },
     Act { action: "set_container_limits", tool: "AgentSetContainerLimits", rename: &[] },
     Act { action: "container_caches", tool: "AgentContainerCaches", rename: &[] },
+    Act { action: "migrate_ids", tool: "AgentMigrateIds", rename: &[] },
 ];
 
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
@@ -84,10 +89,15 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 "AgentEnvSet" => env(cx, "set", &args).await,
                 "AgentSetSeat" => set_seats(cx, &args).await,
                 "AgentRename" => rename_agent(cx, &args).await,
+                "AgentUpdate" => definition_action(cx, "update", &args).await,
+                "AgentBundles" => definition_action(cx, "bundles", &args).await,
+                "AgentHide" => definition_action(cx, "hide", &args).await,
+                "AgentUnhide" => definition_action(cx, "unhide", &args).await,
                 "AgentUpdateContainer" => update_container(cx, &args).await,
                 "AgentMessageStats" => message_stats(cx, &args).await,
                 "AgentSetContainerLimits" => set_container_limits(cx, &args).await,
                 "AgentContainerCaches" => container_caches(cx, &args).await,
+                "AgentMigrateIds" => migrate_ids(cx, &args).await,
                 _ => history::call(act.tool, &args, cx).await,
             };
             let result = result.map_err(|e| anyhow::anyhow!(public_params(&format!("{e:#}"), act.rename)));
@@ -509,6 +519,33 @@ async fn set_seats(cx: &ToolCtx<'_>, args: &Value) -> Result<String> {
     Ok(serde_json::to_string_pretty(&body)?)
 }
 
+/// `migrate_ids`: the agent id update, one step at a time (`/api/v1/agent/migrate-ids`). `step` is `plan`
+/// (the default; changes nothing), `stop`, `apply` or `rollback` (the latest finished run); srv acts as the agent this process's token
+/// names and records every step but `plan` under it.
+async fn migrate_ids(cx: &ToolCtx<'_>, args: &Value) -> Result<String> {
+    require_agent_env(cx.local_url, cx.auth_key, cx.block_id)?;
+    let step = str_arg(args, "step").unwrap_or_else(|| "plan".to_string());
+    let mut body = json!({ "step": step });
+    if let Some(choices) = args.get("choices").filter(|v| v.is_array()) {
+        body["choices"] = choices.clone();
+    }
+    let url = format!("{}/api/v1/agent/migrate-ids", cx.local_url.trim_end_matches('/'));
+    let resp = cx
+        .client
+        .post(&url)
+        .header(AUTH_KEY_HEADER, cx.auth_key)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    let status = resp.status();
+    let answer: Value = resp.json().await.unwrap_or(Value::Null);
+    if !status.is_success() {
+        anyhow::bail!("Agents migrate_ids: {}", answer["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("srv answered {status}: {answer}")));
+    }
+    Ok(serde_json::to_string_pretty(&answer)?)
+}
+
 /// `rename`: the agent in `agent` gets the displayed name in `name`, by srv as the agent this process's token
 /// names, which records it under that agent (`/api/v1/agent/rename`).
 async fn rename_agent(cx: &ToolCtx<'_>, args: &Value) -> Result<String> {
@@ -530,6 +567,52 @@ async fn rename_agent(cx: &ToolCtx<'_>, args: &Value) -> Result<String> {
         anyhow::bail!("{}", body["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("Agents rename: srv answered {status}: {body}")));
     }
     Ok(serde_json::to_string_pretty(&body)?)
+}
+
+/// The fields `update` may change (`/api/v1/agent/update`); the name, provider, environment, accounts and
+/// seat have their own actions.
+const DEFINITION_FIELDS: &[&str] = &["description", "icon", "auto_start", "restart_on_crash", "idle_timeout_minutes"];
+/// What decides what an agent runs, where its traffic goes or which project files it reads: the operator's to set in
+/// My Agents, as `env_set` refuses the same.
+const OPERATOR_FIELDS: &[&str] = &["shell", "provider_flags", "working_directory", "model_vendor_base_url"];
+
+/// `update`, `bundles`, `hide` and `unhide`: srv acts on the definition of the agent in `agent` (a picker
+/// template in `template` for hide and unhide) as the agent this process's token names, and records it under
+/// that agent (`/api/v1/agent/{update,bundles,hide,unhide}`).
+async fn definition_action(cx: &ToolCtx<'_>, action: &str, args: &Value) -> Result<String> {
+    require_agent_env(cx.local_url, cx.auth_key, cx.block_id)?;
+    let need = |key: &str| str_arg(args, key).ok_or_else(|| anyhow::anyhow!("missing required parameter: {key}"));
+    let body = match action {
+        "update" => {
+            if let Some(field) = OPERATOR_FIELDS.iter().find(|f| args.get(**f).is_some_and(|v| !v.is_null())) {
+                anyhow::bail!("Agents update does not take {field}: shell, provider_flags, working_directory and model_vendor_base_url decide what an agent runs, where its traffic goes and which project files it reads, so the operator sets them in My Agents");
+            }
+            let mut body = json!({ "agent": need("agent")? });
+            for field in DEFINITION_FIELDS {
+                if let Some(v) = args.get(*field).filter(|v| !v.is_null()) {
+                    body[*field] = v.clone();
+                }
+            }
+            body
+        }
+        "bundles" => json!({ "agent": need("agent")?, "bundle_ids": args.get("bundle_ids").filter(|v| !v.is_null()) }),
+        _ => json!({ "template": need("template")? }),
+    };
+    let url = format!("{}/api/v1/agent/{action}", cx.local_url.trim_end_matches('/'));
+    let resp = cx
+        .client
+        .post(&url)
+        .header(AUTH_KEY_HEADER, cx.auth_key)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    let status = resp.status();
+    let answer: Value = resp.json().await.unwrap_or(Value::Null);
+    if !status.is_success() {
+        anyhow::bail!("{}", answer["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("Agents {action}: srv answered {status}: {answer}")));
+    }
+    Ok(serde_json::to_string_pretty(&answer)?)
 }
 
 /// `start`, `stop` and `detach`: srv acts on the agent in `agent` as the agent this process's token
@@ -684,6 +767,38 @@ mod tests {
             assert_eq!((act.tool, args), (tool, json!({ "agent": "korp" })));
         }
         assert_eq!(capitalised("start"), "Start");
+    }
+
+    #[test]
+    fn the_definition_actions_are_picked_with_their_arguments() {
+        for (action, tool) in [("update", "AgentUpdate"), ("bundles", "AgentBundles"), ("hide", "AgentHide"), ("unhide", "AgentUnhide")] {
+            let (act, _) = pick("Agents", ACTS, &json!({ "action": action, "agent": "pulse", "template": "t" })).unwrap();
+            assert_eq!(act.tool, tool, "{action}");
+        }
+    }
+
+    #[tokio::test]
+    async fn update_refuses_what_decides_what_runs_before_anything_is_sent() {
+        let client = reqwest::Client::new();
+        let loops = LoopRegistry::default();
+        let counter = std::sync::atomic::AtomicU64::new(0);
+        let cx = ToolCtx { local_url: "http://127.0.0.1:1", auth_key: "k", block_id: "b", client: &client, loops: &loops, loop_counter: &counter };
+        for field in ["shell", "provider_flags", "working_directory", "model_vendor_base_url"] {
+            let e = call("Agents", &json!({ "action": "update", "agent": "pulse", field: "x" }), &cx).await.unwrap_err().to_string();
+            assert!(e.contains(&format!("does not take {field}")), "{field}: {e}");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_definition_actions_need_their_target_before_anything_is_sent() {
+        let client = reqwest::Client::new();
+        let loops = LoopRegistry::default();
+        let counter = std::sync::atomic::AtomicU64::new(0);
+        let cx = ToolCtx { local_url: "http://127.0.0.1:1", auth_key: "k", block_id: "b", client: &client, loops: &loops, loop_counter: &counter };
+        for (action, missing) in [("update", "agent"), ("bundles", "agent"), ("hide", "template"), ("unhide", "template")] {
+            let e = call("Agents", &json!({ "action": action }), &cx).await.unwrap_err().to_string();
+            assert!(e.contains(&format!("missing required parameter: {missing}")), "{action}: {e}");
+        }
     }
 
     #[test]

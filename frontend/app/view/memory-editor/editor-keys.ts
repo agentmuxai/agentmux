@@ -1,15 +1,23 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { PaneConfirm } from "@/app/element/create-confirm";
+
 export interface MemoryEditorKeyHandlers {
     /** Is an editor open right now? Keys are ignored otherwise. */
     isEditing: () => boolean;
     isDirty: () => boolean;
     onSave: () => void;
     onCancel: () => void;
-    /** Injectable for tests; defaults to `window.confirm`. */
-    confirm?: (message: string) => boolean;
+    /** Asks before a dirty draft is thrown away; a view passes `askDiscard(its createConfirm())`. */
+    confirm: (message: string) => boolean | Promise<boolean>;
 }
+
+/** The "Discard your unsaved changes?" question, drawn in the pane by the view's `createConfirm()`. */
+export const askDiscard =
+    (c: Pick<PaneConfirm, "ask">) =>
+    (message: string): Promise<boolean> =>
+        c.ask({ title: message, confirmLabel: "Discard", cancelLabel: "Keep editing" });
 
 /**
  * Keyboard contract for every memory editor surface
@@ -36,10 +44,13 @@ export function handleMemoryEditorKeyDown(e: KeyboardEvent, h: MemoryEditorKeyHa
 
 /** Cancel an edit, asking first when the draft is dirty — Esc and the
  *  Cancel button share this so they can't disagree. Returns whether it
- *  cancelled. */
-export function requestCancel(h: Pick<MemoryEditorKeyHandlers, "isDirty" | "onCancel" | "confirm">): boolean {
-    const confirmFn = h.confirm ?? ((m: string) => window.confirm(m));
-    if (h.isDirty() && !confirmFn("Discard your unsaved changes?")) return false;
-    h.onCancel();
-    return true;
+ *  cancelled (a promise of it when the answer is asked in the pane). */
+export function requestCancel(h: Pick<MemoryEditorKeyHandlers, "isDirty" | "onCancel" | "confirm">): boolean | Promise<boolean> {
+    const finish = (ok: boolean): boolean => {
+        if (ok) h.onCancel();
+        return ok;
+    };
+    if (!h.isDirty()) return finish(true);
+    const answer = h.confirm("Discard your unsaved changes?");
+    return typeof answer === "boolean" ? finish(answer) : answer.then(finish);
 }

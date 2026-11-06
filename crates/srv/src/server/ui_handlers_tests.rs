@@ -7,18 +7,18 @@
 use super::{prune_old_screenshots, BROWSER_DEFAULT_SPLIT, SCREENSHOT_RETENTION};
 use crate::server::app_api::pane::resolve_placement;
 use crate::server::service::layout_intents::Placement;
-use agentmux_common::SplitPosition::Before;
+use agentmux_common::SplitPosition::After;
 
-/// A browser an agent opens without saying where goes above the agent, each with half of the
-/// space the agent had; an explicit "up" keeps the layout's default size.
+/// A browser an agent opens without saying where goes below the agent, each with half of the
+/// space the agent had; an explicit "down" keeps the layout's default size.
 #[test]
-fn an_agents_browser_opens_above_it_taking_half_its_space() {
+fn an_agents_browser_opens_below_it_taking_half_its_space() {
     assert_eq!(
         resolve_placement(Some(BROWSER_DEFAULT_SPLIT), Some("agent-block"), false),
-        Placement::Split { target_block_id: "agent-block".into(), horizontal: false, position: Before, size_fraction: Some(0.5), focused: false }
+        Placement::Split { target_block_id: "agent-block".into(), horizontal: false, position: After, size_fraction: Some(0.5), focused: false }
     );
     assert!(matches!(
-        resolve_placement(Some("up"), Some("agent-block"), false),
+        resolve_placement(Some("down"), Some("agent-block"), false),
         Placement::Split { horizontal: false, size_fraction: None, .. }
     ));
 }

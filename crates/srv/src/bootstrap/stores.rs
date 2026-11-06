@@ -4,6 +4,8 @@
 //! Split out of the single-file bootstrap module unchanged (SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md §4.3).
 
 use super::*;
+use super::store_attach::*;
+use super::store_boot::*;
 
 /// Step 2: Parse CLI args and build config. Dispatches the `migrate`
 /// subcommand (and exits) before touching AUTH_KEY-gated config.
@@ -108,587 +110,41 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     base::set_version(version);
     base::set_build_time(build_time);
 
-    // Before anything is created: a data folder of its own must not mean the real shared folder.
-    super::shared_root::guard_shared_folder(&config.data_home, version);
-
-    // Set up data directory (uses AGENTMUX_DATA_HOME or default)
-    if !config.data_home.as_os_str().is_empty() {
-        std::env::set_var("AGENTMUX_DATA_HOME", &config.data_home);
-    }
-    if !config.config_home.as_os_str().is_empty() {
-        std::env::set_var("AGENTMUX_CONFIG_HOME", &config.config_home);
-    }
-    if !config.app_path.is_empty() {
-        std::env::set_var("AGENTMUX_APP_PATH", &config.app_path);
-    }
-
-    base::ensure_mux_data_dir().unwrap_or_else(|e| {
-        tracing::error!("Failed to ensure data dir: {}", e);
-        std::process::exit(1);
-    });
-    // One srv per set of databases, however it was started (headless already
-    // took this in `headless::prepare_env`; that makes this a no-op).
-    base::acquire_data_dir_lock(&base::get_mux_data_dir()).unwrap_or_else(|e| {
-        tracing::error!("{e}");
-        eprintln!("agentmux-srv: {e}");
-        std::process::exit(1);
-    });
-    base::ensure_mux_db_dir().unwrap_or_else(|e| {
-        tracing::error!("Failed to ensure db dir: {}", e);
-        std::process::exit(1);
-    });
-    // What this srv can do, beside the lock that names its pid, for a fork
-    // slug migration's precondition (`slug_migration::stamp`).
-    crate::backend::slug_migration::stamp::write(&base::get_mux_data_dir());
-
-    // Startup diagnostics. `home` is the folder this instance's whole data lives under: the real
-    // ~/.agentmux unless `AGENTMUX_HOME_OVERRIDE` names another (`task dev` always does).
-    let home_override = std::env::var_os("AGENTMUX_HOME_OVERRIDE").filter(|v| !v.is_empty());
-    tracing::info!(
-        data_dir = %base::get_mux_data_dir().display(),
-        db_dir = %base::get_mux_db_dir().display(),
-        app_path = %config.app_path,
-        instance_id = %config.instance_id,
-        secret_store = crate::identity::secret_store::backend_name(),
-        home = %home_override.as_ref().map(|h| h.to_string_lossy().into_owned()).unwrap_or_else(|| {
-            agentmux_common::data_paths::agentmux_root().map(|p| p.display().to_string()).unwrap_or_default()
-        }),
-        home_isolated = home_override.is_some(),
-        "backend directories initialized"
-    );
-
-    // Apply any pending migrations in-process before opening stores.
-    // This ensures 0011_shared_store_backfill (and any future Global migrations)
-    // have run before id_store binds to the shared store — avoiding apparent data
-    // loss on first boot after an upgrade. Fast-path: no-op when already current.
-    //
-    // id_store binding below checks shared_store.migration_is_applied("0011_shared_store_backfill")
-    // directly rather than a coarse migration_ok flag: if an early migration (e.g.
-    // 0011) succeeds but a later one fails, the shared store is already backfilled
-    // and safe to use — falling back to per-channel would strand writes made this
-    // session when the later migration succeeds on next boot.
+    prepare_data_dir(config, version);
     let mux_data_dir = base::get_mux_data_dir();
-
-    // Open databases
     let db_dir = base::get_mux_db_dir();
+    gate_or_prepare_data(&mux_data_dir, &db_dir);
 
-    let code_version = std::env::var("AGENTMUX_VERSION")
-        .unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_string());
-    // Under a supervisor that prepares data (the launcher sets
-    // AGENTMUX_SUPERVISOR_PREPARES=1), srv never copies, snapshots or migrates
-    // at boot (SPEC_FAST_STARTUP_UPGRADE_OWNS_MIGRATIONS_AND_UPDATES_2026_09_15
-    // §10, S1c). A read-only check runs before anything writes the stores; if
-    // the data needs preparing, srv says why and exits, and the launcher runs
-    // `migrate --prepare` and starts it again. Elsewhere (headless srv,
-    // `task dev:standalone`) srv still prepares in-process.
-    let supervised =
-        std::env::var(agentmux_common::srv_stderr::SUPERVISOR_PREPARES_ENV).as_deref() == Ok("1");
-    if supervised {
-        if let Some(reason) = crate::boot_timing::time("data_gate", || migrations::data_needs_preparing(&mux_data_dir, &code_version)) {
-            tracing::info!("startup: data needs preparing, exiting for the launcher: {reason}");
-            eprintln!("{}", agentmux_common::srv_stderr::needs_prepare_line(&reason));
-            std::process::exit(agentmux_common::srv_stderr::NEEDS_PREPARE_EXIT);
-        }
-    } else {
-        prepare_in_process(&mux_data_dir, &db_dir, &code_version);
-    }
-
-    let mstore_raw = crate::boot_timing::time("open_objects_db", || Store::open(&db_dir.join("objects.db"))).unwrap_or_else(|e| {
-        tracing::error!("Failed to open object store: {}", e);
-        std::process::exit(1);
-    });
-    // Attach the cross-version named-agent registry. Falls back to a
-    // disabled registry when the shared home can't be resolved (CI,
-    // unusual envs); mutations still hit SQLite, just don't mirror.
-    // See docs/specs/SPEC_SHARED_AGENT_REGISTRY_2026_05_12.md.
-    if let Some(root) = registry::resolve_shared_registry_dir() {
-        match crate::boot_timing::time("open_agent_registry", || registry::Registry::open(root.clone())) {
-            Ok(reg) => {
-                tracing::info!(root = %root.display(), "registry: shared agent registry attached");
-                // Best-effort catch-up pass, run every startup (not just the
-                // one-shot m0010 migration): fills session_id for any agent
-                // record that still lacks one, e.g. one named after m0010
-                // already ran. Idempotent — skips records that already carry
-                // a non-empty session_id. Without this, an agent created
-                // after the migration ran would never get a resumable
-                // session_id in the registry, so a cross-tab/cross-restart
-                // open would silently orphan its conversation (the still-open
-                // half of docs/retro/retro-cross-channel-conversation-continuity-regression-2026-06-16.md).
-                if let Some(shared_dir) = root.parent().and_then(|p| p.parent()) {
-                    let filled = crate::boot_timing::time("registry_session_backfill", || {
-                        backend::session_backfill::backfill_session_ids(&reg, shared_dir)
-                    });
-                    if filled > 0 {
-                        tracing::info!(filled, "registry: backfilled session_id for cross-channel resume (startup pass)");
-                    }
-                }
-                mstore_raw.set_registry(Arc::new(reg));
-                if let Some(base) = std::env::var_os("AGENTMUX_AGENTS_DIR") {
-                    if !base.is_empty() {
-                        mstore_raw
-                            .set_registry_agents_base(std::path::PathBuf::from(base));
-                    }
-                }
-            }
-            Err(e) => tracing::warn!(
-                root = %root.display(),
-                error = %e,
-                "registry: failed to open shared agent registry — SQLite remains authoritative"
-            ),
-        }
-    } else {
-        tracing::warn!("registry: could not resolve shared registry dir — mirror disabled");
-    }
-    // Attach the GLOBAL (cross-channel) agent-definition store. Sibling of the
-    // instance registry above — since P0.3b both live under ~/.agentmux/shared/
-    // (definitions/ and registry/), so user agents created in one channel are
-    // visible in every channel. Best-effort: disabled when the shared dir can't
-    // be resolved. See SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md (P0.2/P0.3).
-    // Captured for the transcript backfill below (after the global transcript
-    // store opens): the user-agent definition ids to seed conversations for.
-    let mut backfill_def_ids: Vec<String> = Vec::new();
-    if let Some(def_dir) = registry::resolve_shared_definitions_dir() {
-        match crate::boot_timing::time("open_definition_store", || registry::DefinitionStore::open(def_dir.clone())) {
-            Ok(def_store) => {
-                // Capture user-agent ids for the transcript backfill (below).
-                backfill_def_ids = crate::boot_timing::time("def_store_list_active", || {
-                    def_store
-                        .list_active()
-                        .map(|v| v.into_iter().map(|r| r.data.id).collect())
-                        .unwrap_or_default()
-                });
-                mstore_raw.set_def_registry(Arc::new(def_store));
-                tracing::info!(dir = %def_dir.display(), "def registry: global definition store attached");
-                // New slugs are checked against every channel's and version's
-                // objects.db too, the root the fork slug migration reads.
-                match backend::slug_migration::Home::from_env() {
-                    Ok(home) => mstore_raw.set_slug_home(home),
-                    Err(e) => tracing::warn!(error = %e, "agent slugs: other channels' agents can't be checked; only the shared definitions are"),
-                }
-                // This channel's copy of every agent's former slugs, in step
-                // with the shared records (SPEC_FORK_SLUG_MIGRATION_2026_10_22.md Phase 1).
-                if let Err(e) = mstore_raw.agent_former_slugs_sync_from_shared() {
-                    tracing::warn!(error = %e, "former slugs: not copied from the shared definitions");
-                }
-            }
-            Err(e) => tracing::warn!(
-                dir = %def_dir.display(),
-                error = %e,
-                "def registry: failed to open global definition store — definitions stay channel-local"
-            ),
-        }
-    } else {
-        tracing::warn!("def registry: could not resolve shared definitions dir — global definitions disabled");
-    }
-    // Both host-global trees are attached now, so they can be reconciled
-    // against each other. Best-effort catch-up pass run every startup, same
-    // shape as the session_id backfill above: drops instance records whose
-    // definition is tombstoned, which the picker would otherwise keep
-    // rendering as an iconless "(missing definition)" row — a deleted agent
-    // whose card never went away. New deletes sweep the registry themselves
-    // (`Store::agent_def_delete`); this is for the orphans already on disk.
-    if let (Some(reg), Some(defs)) = (
-        mstore_raw.shared_agent_registry(),
-        mstore_raw.shared_def_registry(),
-    ) {
-        let pruned = backend::registry_reconcile::prune_tombstoned_instance_records(&reg, &defs);
-        if pruned > 0 {
-            tracing::info!(pruned, "registry: dropped instance records for deleted agents (startup pass)");
-        }
-    }
-    // Identity M4a: token → UID for request attribution, on this channel's
-    // object store only (spec §6.5.3).
-    match crate::boot_timing::time("attach_token_index", || mstore_raw.attach_token_index()) {
-        Ok(_) => tracing::info!("identity: agent token index attached"),
-        Err(e) => tracing::warn!(error = %e, "identity: agent token index unavailable — requests stay unattributed"),
-    }
-    // W3-S (SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md §2.2): the channel-wide
-    // WAN identity store. Opened and its instance minted here, once, so srv
-    // signs every WAN jekt as the same instance. Best-effort and never
-    // redirected: if the file can't be opened or the instance can't be
-    // minted, WAN signing is simply off for this process, and its WAN jekts
-    // go unsigned (`TRUST=network-claimed` at the receiver).
-    match backend::storage::wan_identity::resolve_wan_identity_path() {
-        Some(path) => match crate::boot_timing::time("open_wan_db", || backend::storage::wan_identity::WanIdentityStore::open(&path)).and_then(|store| {
-            let instance = store.instance_ensure(&crate::backend::reactive::registry::local_host_label())?;
-            Ok((store, instance))
-        }) {
-            Ok((store, instance)) => {
-                tracing::info!(
-                    path = %path.display(),
-                    instance = %instance.instance_id,
-                    host_hint = %instance.host_hint,
-                    "wan identity: store attached"
-                );
-                let store = Arc::new(store);
-                backend::storage::wan_identity::install_global(store.clone());
-                mstore_raw.set_wan_identity(store);
-            }
-            Err(e) => tracing::warn!(
-                path = %path.display(),
-                error = %e,
-                "wan identity: store unavailable — WAN jekt signing is off for this process"
-            ),
-        },
-        None => tracing::warn!("wan identity: channel dir unresolved — WAN jekt signing is off for this process"),
-    }
+    let mstore_raw = open_objects_db(&db_dir);
+    attach_agent_registry(&mstore_raw);
+    let backfill_def_ids = attach_definition_store(&mstore_raw);
+    reconcile_registries(&mstore_raw);
+    attach_token_index_and_wan_identity(&mstore_raw);
     let mstore = Arc::new(mstore_raw);
     // Identity M4a: lets spawn sites tell a row-backed block from a row-less
     // one when the environment carries no UID.
     backend::identity_spawn::attach_row_store(mstore.clone());
-    let filestore = Arc::new(crate::boot_timing::time("open_filestore_db", || FileStore::open(&db_dir.join("filestore.db"))).unwrap_or_else(|e| {
-        tracing::error!("Failed to open file store: {}", e);
-        std::process::exit(1);
-    }));
-    // GLOBAL transcript store — backs the `agent:<defId>:current` zone so a
-    // conversation loads when the agent is opened from any build/channel
-    // (finishes the cross-channel arc #1387–#1396). A second FileStore over an
-    // independent SQLite/WAL file is safe alongside the per-channel one. This is
-    // best-effort: if the shared root can't be resolved, or the store can't be
-    // opened, we log and fall back to the per-channel `filestore` (global
-    // transcripts disabled) — never fatal, unlike the per-channel store above.
-    // See `docs/analysis/ANALYSIS_CROSS_CHANNEL_CONVERSATION_HISTORY_2026_06_14.md`.
-    let global_transcript_store: Option<Arc<FileStore>> =
-        match registry::resolve_shared_transcripts_dir() {
-            Some(dir) => {
-                if let Err(e) = std::fs::create_dir_all(&dir) {
-                    tracing::warn!(dir = %dir.display(), error = %e, "global transcripts: failed to create dir — disabled, falling back to per-channel store");
-                    None
-                } else {
-                    let path = dir.join("filestore.db");
-                    // Give freed space back, if the Storage view asked and no other srv
-                    // runs (SPEC_HISTORY_STORE_RECLAIM_SPACE_2026_10_23 §4), then hold the
-                    // gate shared while opening, so an srv starting meanwhile waits. The
-                    // rewrite takes longer than a supervisor's ESTART wait (about 40 s for
-                    // 3.6 GB), so it says so first, as a migration does, and the splash
-                    // shows it as a step.
-                    {
-                        use crate::backend::storage::filestore::{reclaim, repair};
-                        reclaim::recover_if_alone(&reclaim::Paths::for_db(&path));
-                        // A store the last run found damaged is rebuilt first, from what reads, if no
-                        // other srv runs; the damaged file is kept beside it.
-                        if repair::needs_start(&path) {
-                            eprintln!("{}", agentmux_common::srv_stderr::migrating_line("repairing-history", 1));
-                            crate::boot_timing::step("repair-history", "Repairing the history database", || {
-                                repair::run_at_start(
-                                    &path,
-                                    crate::backend::transcript::framer::other_srv,
-                                    restore_repaired_history,
-                                    agentmux_common::time::now_ms_u64(),
-                                )
-                            });
-                        }
-                        if reclaim::requested(&path) {
-                            eprintln!("{}", agentmux_common::srv_stderr::migrating_line("reclaiming-history", 1));
-                            crate::boot_timing::step("reclaim-history", "Giving back history disk space", || {
-                                reclaim::run_at_start(&path, crate::backend::transcript::framer::other_srv, agentmux_common::time::now_ms_u64())
-                            });
-                        }
-                    }
-                    let gate = crate::backend::storage::filestore::reclaim::gate_shared(&path);
-                    let opened = crate::boot_timing::time("open_transcripts_db", || FileStore::open_global_transcripts(&path).inspect_err(super::shared_guard::note_open_failure));
-                    drop(gate);
-                    match opened {
-                        Ok(fs) => {
-                            tracing::info!(dir = %dir.display(), "global transcripts: store attached");
-                            // This srv reads compressed frames (transcript::framer).
-                            crate::backend::transcript::framer::mark_reader(&dir);
-                            Some(Arc::new(fs))
-                        }
-                        Err(e) => {
-                            tracing::warn!(dir = %dir.display(), error = %e, "global transcripts: failed to open store — disabled, falling back to per-channel store");
-                            None
-                        }
-                    }
-                }
-            }
-            None => {
-                tracing::warn!("global transcripts: could not resolve shared transcripts dir — disabled, falling back to per-channel store");
-                None
-            }
-        };
-    // GLOBAL shared store — accounts, bundles, drone
-    // definitions, MuxBus credentials. Best-effort: disabled when the shared
-    // root can't be resolved. Falls back to mstore so behavior is unchanged
-    // from today. See SPEC_GLOBAL_IDENTITY_MEMORY_DRONE_2026_06_24.md.
-    let shared_store: Option<Arc<Store>> = match registry::resolve_shared_store_path() {
-        Some(path) => {
-            // Ensure the parent dir (shared/) exists before opening.
-            let parent = path.parent().unwrap_or_else(|| path.as_path());
-            if let Err(e) = std::fs::create_dir_all(parent) {
-                tracing::warn!(path = %path.display(), error = %e, "shared store: failed to create dir — disabled");
-                None
-            } else {
-                match crate::boot_timing::time("open_shared_store", || Store::open_shared(&path).inspect_err(super::shared_guard::note_open_failure)) {
-                    Ok(s) => {
-                        let reason = agentmux_common::isolated_auth_reason();
-                        if reason.is_isolated() {
-                            tracing::info!(path = %path.display(), reason = reason.as_str(), "shared store: attached (ISOLATED — channel-scoped)");
-                        } else {
-                            tracing::info!(path = %path.display(), reason = reason.as_str(), "shared store: attached");
-                        }
-                        Some(Arc::new(s))
-                    }
-                    Err(e) => {
-                        tracing::warn!(path = %path.display(), error = %e, "shared store: failed to open — identity/memory/drone/muxbus stay per-channel");
-                        None
-                    }
-                }
-            }
-        }
-        None => {
-            tracing::warn!("shared store: could not resolve shared store path — disabled");
-            None
-        }
-    };
-    // id_store: routes identity/memory/drone/muxbus ops to the shared store when
-    // available AND the shared-store backfill migration has been applied.
-    // Checking the specific migration (not a coarse migration_ok flag) avoids
-    // a split-brain when 0011 succeeded but a later migration failed: the shared
-    // store is already backfilled, so using per-channel would strand writes made
-    // this session once the later migration succeeds on next boot.
-    let id_store: Arc<Store> = match shared_store.as_ref() {
-        Some(ss) if ss.migration_is_applied("0011_shared_store_backfill") => ss.clone(),
-        Some(_) => {
-            tracing::warn!("id_store: 0011_shared_store_backfill not yet applied — using per-channel store");
-            mstore.clone()
-        }
-        None => mstore.clone(),
-    };
-
-    // Shared auth: carry what earlier per-channel (isolated) builds kept to
-    // themselves into the shared store, once and without touching the sources
-    // (SPEC_SHARED_AUTH_ACROSS_CHANNELS_2026_10_03.md). Only when this channel
-    // really runs on the shared store; an isolated one never reads another's.
-    if !agentmux_common::isolated_auth_enabled() {
-        if let (Some(ss), Some(path)) = (shared_store.as_ref(), registry::resolve_shared_store_path()) {
-            if Arc::ptr_eq(ss, &id_store) {
-                crate::boot_timing::time("adoption_scan", || crate::adoption::run_at_boot(ss, &path));
-            }
-        }
-    }
-
-    // Permanently-global identity store (agent→account links, memory
-    // bundles, drone definitions, muxbus/agent M2M credentials, native
-    // memory, cron jobs) — see
-    // docs/specs/SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md. Deliberately NOT
-    // gated by isolated_auth_enabled() at all, unlike shared_store above:
-    // none of this store's tables have a legitimate per-channel-isolation
-    // use case. Best-effort, same fallback-to-mstore terms as id_store —
-    // a resolution/open failure degrades to today's per-channel behavior
-    // rather than being fatal.
-    let identity_store: Arc<Store> = match registry::resolve_identity_store_path() {
-        Some(path) => {
-            let parent = path.parent().unwrap_or(path.as_path());
-            if let Err(e) = std::fs::create_dir_all(parent) {
-                tracing::warn!(path = %path.display(), error = %e, "identity store: failed to create dir — falling back to per-channel store");
-                mstore.clone()
-            } else {
-                match crate::boot_timing::time("open_identity_store", || Store::open_identity_store(&path).inspect_err(super::shared_guard::note_open_failure)) {
-                    Ok(s) => {
-                        tracing::info!(path = %path.display(), "identity store: attached (always global)");
-                        // An agent's LAN signing key is the host's, not this channel's: a channel switch
-                        // must not change the key LAN peers have pinned.
-                        match backend::storage::host_lan_keys::HostLanKeys::open(&path) {
-                            Ok(keys) => mstore.set_host_lan_keys(Arc::new(keys)),
-                            Err(e) => tracing::warn!(error = %e, "LAN keys: the host key table did not open, this channel keeps its own keys"),
-                        }
-                        Arc::new(s)
-                    }
-                    Err(e) => {
-                        tracing::warn!(path = %path.display(), error = %e, "identity store: failed to open — falling back to per-channel store");
-                        mstore.clone()
-                    }
-                }
-            }
-        }
-        None => {
-            tracing::warn!("identity store: could not resolve path — falling back to per-channel store");
-            mstore.clone()
-        }
-    };
+    let filestore = open_filestore(&db_dir);
+    let global_transcript_store = open_global_transcripts();
+    let shared_store = open_shared_store();
+    let id_store = pick_id_store(&shared_store, &mstore);
+    adopt_earlier_auth(&shared_store, &id_store);
+    let identity_store = open_identity_store(&mstore);
     let (work_store, cron_store) = open_work_store(&identity_store, shared_store.clone(), &db_dir);
     // #3603: memory resolution finds the account an agent is linked to (the
     // directory its spawn runs Claude in) through these, read-only.
-    crate::server::native_memory_handlers::attach_identity_stores(id_store.clone(), identity_store.clone());
+    crate::server::native_memory_handlers::attach_identity_stores(
+        id_store.clone(),
+        identity_store.clone(),
+    );
     // Which agents get GitHub tokens from AgentMux Cloud's broker is decided by the accounts here.
     crate::identity::github_tokens::attach_store(id_store.clone());
-
-    // Install the process-global handle so the block-controller stdout-reader
-    // hot path can mirror agent `output` into the global zone without threading
-    // the store through `resync_controller` and every controller constructor.
-    // Which Global Memory entries follow the fleet (task #12439, section 4.6): the
-    // entries that exist now stay on this machine, so create the table before anything new is written.
-    if let Err(e) = id_store.bundle_scope_ensure() {
-        tracing::warn!(error = %e, "Global Memory scope table: could not create it");
-    }
-    // Global Memory's own record (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md
-    // §2.1.6): write-through from id_store, attached before this start's
-    // seeding so seeded entries keep their seeder's attribution.
-    let global_memory_recorder = global_transcript_store
-        .as_ref()
-        .map(|fs| crate::backend::memory::global_record::attach(fs.clone(), id_store.clone()));
-    if let Some(ref fs) = global_transcript_store {
-        crate::backend::agent_session::set_global_transcript_store(fs.clone());
-        // Heal global snapshots poisoned before the normalize-on-mirror fix: a
-        // channel-local `sourceBlockId` mirrored into the global zone makes a
-        // cross-channel open render empty (the read fallback can't anchor a block
-        // that doesn't exist in the opening channel). Idempotent + cheap. See
-        // docs/retro/retro-legacy-agent-history-cross-channel-2026-06-16.md.
-        let healed = crate::boot_timing::time("transcript_snapshot_heal", || {
-            backend::agent_session::heal_global_snapshot_source_block_ids(fs, &backfill_def_ids)
-        });
-        if healed > 0 {
-            tracing::info!(healed, "global transcripts: healed poisoned snapshot sourceBlockIds");
-        }
-    }
-
-    // Saga durability — see SPEC_SAGA_DURABILITY_2026-05-01.md.
-    // Backed by its own SQLite file (`sagas.db`) so saga writes
-    // commit independently of the mstore connection. Failure here
-    // is fatal: without the log, a srv crash mid-saga leaves
-    // unrecoverable state divergence.
-    let saga_log = Arc::new(
-        crate::boot_timing::time("open_sagas_db", || crate::sagas::log::SagaLog::open(&db_dir.join("sagas.db"))).unwrap_or_else(|e| {
-            tracing::error!("Failed to open saga log: {}", e);
-            std::process::exit(1);
-        }),
-    );
-    // Seed `saga_id_alloc` from the highest persisted saga_id so
-    // restarts don't reuse IDs from prior runs (reagent P1 + codex
-    // P1 PR #631). With this seed + the plain INSERT (no OR REPLACE)
-    // in `start_saga`, ID collisions become impossible by
-    // construction.
-    let saga_id_seed = crate::boot_timing::time("saga_id_seed_scan", || saga_log.max_saga_id()).unwrap_or_else(|e| {
-        tracing::warn!(
-            "[saga] failed to read MAX(saga_id) for allocator seed: {} — defaulting to 0; ID collisions on restart possible until next successful query",
-            e
-        );
-        0
-    });
-    if saga_id_seed > 0 {
-        tracing::info!(
-            "[saga] seeded saga_id_alloc from durable log: next saga_id = {}",
-            saga_id_seed + 1
-        );
-    }
-
-    // The user's workspace (SPEC_WORKSPACES_2026_10_23.md §4.2): Default
-    // Workspace, or a new version's copy of the previous version's. Before the
-    // initial data, which a copied workspace with windows replaces.
-    let opened_workspace = crate::server::service::user_workspace::prepare_at_startup(
-        &mstore,
-        crate::server::service::session_other_builds::ScanRoots::live().as_ref(),
-    );
-    // Bootstrap data (creates Client/Window/Workspace/Tab on first launch)
-    let first_launch = wcore::ensure_initial_data(&mstore).unwrap_or_else(|e| {
-        tracing::error!("Failed to ensure initial data: {}", e);
-        std::process::exit(1);
-    });
-    if first_launch {
-        tracing::info!("First launch: created initial data");
-        // Its window may offer a layout another build saved.
-        crate::server::service::session_other_builds::remember_first_launch_default(&mstore);
-    }
-    // A window whose close a quit outran: the session record restores it.
-    crate::server::service::forget_windows_left_by_quit(&mstore);
-    crate::server::service::user_workspace::adopt_current(&mstore, opened_workspace);
-
-    // Seed ~/.agentmux/.gitignore so accidental git operations inside the
-    // data directory (e.g. an agent running `git init` or `git clone` in its
-    // cwd) don't stage anything by default. Idempotent — written once per
-    // install; we don't overwrite an existing user-customized file.
-    if let Some(home) = dirs::home_dir() {
-        let data_dir = home.join(".agentmux");
-        if data_dir.is_dir() {
-            let gitignore = data_dir.join(".gitignore");
-            if !gitignore.exists() {
-                let _ = std::fs::write(&gitignore, "*\n!.gitignore\n");
-            }
-        }
-    }
-
-    // Session recovery (Phase 4.2): scan for agent blocks that still have
-    // `session:active_pid` from a previous run — those sessions were killed
-    // by a crash/reboot. Transfer to `session:was_interrupted` so the
-    // frontend can show a reconnect banner.
-    let orphan_count = backend::blockcontroller::session_recovery::scan_orphans(&mstore);
-    if orphan_count > 0 {
-        tracing::info!(
-            orphan_count = orphan_count,
-            "session_recovery: flagged {} interrupted sessions for user reconnect",
-            orphan_count
-        );
-        backend::blockcontroller::session_recovery::note_interrupted(
-            &base::get_mux_data_dir(),
-            orphan_count,
-            std::env::var(agentmux_common::incidents::RESTART_ID_ENV).ok().as_deref(),
-        );
-    }
-
-    // Auto-seed agent definitions on first launch (or empty DB)
-    crate::boot_timing::time("agent_auto_seed", || backend::agent_seed::auto_seed_on_startup(&mstore));
-
-    // Keep AgentMux's own Operator Config (is_system=1 Global Memory) in
-    // sync with the shipped manifest on every startup — not a one-time
-    // seed, since stale Operator Config content would mislead an agent
-    // rather than merely being absent. See
-    // docs/specs/SPEC_SYSTEM_TIER_GLOBAL_MEMORY_SEEDING_2026_09_15.md.
-    //
-    // Seeded into id_store, NOT mstore: Global Memory reads/writes
-    // (agent_open.rs's bundle_list_global, bundle.rs's handlers via
-    // state.id_store) all route through id_store, which points at the
-    // shared store once 0011_shared_store_backfill has run and only falls
-    // back to mstore before that. Seeding mstore directly would leave these
-    // rows invisible under the normal shared-store configuration once that
-    // migration has applied. Codex P1, PR #3244.
-    backend::operator_config_seed::auto_seed_on_startup(&id_store);
-    // Then record whatever the record doesn't have yet: the baseline the
-    // first time, and what older builds changed since.
-    if let Some(ref recorder) = global_memory_recorder {
-        recorder.sync_all();
-    }
-
-    // No starter Skills are seeded: migrations::m0015_seed_starter_skills is
-    // retired, and 0041 removed the ones it had left in existing catalogs.
-    // The skills AgentMux ships are a different thing: a few, each created once and then the
-    // user's (`backend::builtin_skills`).
-    backend::builtin_skills::seed_on_startup(&identity_store);
-
-    // Gap-repair (backfilling a db_agent_definitions row missing its
-    // db_agents mirror) is gone as of the definition flip: every
-    // agent_def_* write lands on db_agents directly now, so that gap can no
-    // longer open. Removing the per-boot pass was required, not optional —
-    // once agent_def_delete/instance_delete stopped also clearing
-    // db_agent_definitions, a repair pass still reading it would have
-    // resurrected every deleted agent on the next boot.
-
-    // Let the cross-instance agent registry publish each agent's Ed25519
-    // PUBLIC key alongside its entry, so a peer instance in a *different
-    // channel* can verify that agent's jekts — the one same-machine tier that
-    // had no verification path at all before
-    // `SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md`. Host-tier's HMAC key is
-    // symmetric and deliberately NOT published (spec §5).
-    //
-    // Installed here rather than next to `init_local_auth_key` in
-    // `load_config` because that runs before any store is open, and this is a
-    // per-agent lookup rather than a process constant. Registry writes before
-    // this point simply publish an empty key, which readers treat as "cannot
-    // check."
-    crate::backend::reactive::registry::init_jekt_public_key_resolver({
-        let mstore = mstore.clone();
-        move |agent_id| mstore.agent_lan_public_key_load(agent_id).ok().flatten()
-    });
-    // Identity M4d-5: the block's agent UID and that UID's public key, beside
-    // the name-keyed one.
-    crate::backend::reactive::registry::init_uid_key_resolver({
-        let mstore = mstore.clone();
-        move |block_id| {
-            let uid = mstore.instance_get_active_for_block(block_id).ok().flatten()?.id;
-            let key = mstore.agent_uid_lan_public_key_load(&uid).ok().flatten()?;
-            Some((uid, key))
-        }
-    });
+    let global_memory_recorder =
+        attach_global_memory(&id_store, &global_transcript_store, &backfill_def_ids);
+    let (saga_log, saga_id_seed) = open_saga_log(&db_dir);
+    ensure_initial_data(&mstore);
+    recover_and_seed(&mstore, &id_store, &identity_store, &global_memory_recorder);
+    install_key_resolvers(&mstore);
 
     Stores {
         mstore,
@@ -707,7 +163,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
 /// After a repair of the shared store (`filestore::repair`): put back, from the per-channel copies of
 /// it, the conversation of each agent whose zone lost rows. Runs inside the repair, before the store
 /// is opened for use.
-fn restore_repaired_history(fs: &FileStore, zones: &[String]) {
+pub(super) fn restore_repaired_history(fs: &FileStore, zones: &[String]) {
     let Some(home) = registry::resolve_global_shared_root().and_then(|shared| shared.parent().map(std::path::Path::to_path_buf)) else { return };
     let stats = crate::backend::transcript_backfill::restore_damaged(&home, fs, zones);
     tracing::info!(?stats, "history repair: conversations put back from the per-channel copies");
@@ -744,7 +200,7 @@ fn open_work_store(
 /// What an unsupervised srv does before opening its stores: copy a previous
 /// version's data forward, snapshot, and run pending migrations (the same
 /// work `agentmux-srv migrate --prepare` does for the launcher).
-fn prepare_in_process(mux_data_dir: &std::path::Path, db_dir: &std::path::Path, code_version: &str) {
+pub(super) fn prepare_in_process(mux_data_dir: &std::path::Path, db_dir: &std::path::Path, code_version: &str) {
     // Before the pending-migration count below, which opens the shared store and so runs its schema setup.
     if let Err(e) = migrations::refuse_if_real_home_would_move() {
         tracing::error!("startup: refusing to start: {}", e);

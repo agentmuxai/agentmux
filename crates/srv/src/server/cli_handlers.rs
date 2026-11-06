@@ -763,6 +763,20 @@ fn pi_lists_models(success: bool, stdout: &str, stderr: &str) -> bool {
     success && !stdout.contains("No models available") && !stderr.contains("No models available")
 }
 
+/// A probe (`--version`, the auth check) must not start the CLI's own update: agy 1.5 replaces itself on any
+/// run, which held a probe for the length of a 200 MB download and, from a windowless srv, could open a
+/// console of its own. Updating stays with the agent runs and the user's own terminal.
+fn quiet_probe(cmd: &mut tokio::process::Command, cli_path: &str) {
+    if is_agy(cli_path) {
+        cmd.env("AGY_CLI_DISABLE_AUTO_UPDATE", "1");
+    }
+}
+
+fn is_agy(cli_path: &str) -> bool {
+    let stem = std::path::Path::new(cli_path).file_stem().and_then(|s| s.to_str());
+    stem.is_some_and(|s| s.eq_ignore_ascii_case("agy"))
+}
+
 /// Run the provider auth-check CLI against `auth_env` and parse the verdict.
 /// Returns `(authenticated, email, auth_method, raw_output)`. Extracted so the
 /// stale-credential self-heal can re-run the exact same check after refreshing.
@@ -796,6 +810,7 @@ async fn run_auth_check(
         for (k, v) in auth_env {
             check_cmd.env(k, v);
         }
+        quiet_probe(&mut check_cmd, program);
         // Null stdin: prevents the CLI from blocking on interactive first-run
         // prompts (onboarding, theme selection) that only appear on a TTY.
         check_cmd.stdin(std::process::Stdio::null());
@@ -1090,6 +1105,7 @@ async fn probe_cli_version(cli_path: &str) -> Option<String> {
             // Version probe — same reasoning as the auth check above.
             crate::backend::pane_env::sanitize_external_command(&mut c);
             c.arg("--version").stdin(std::process::Stdio::null());
+            quiet_probe(&mut c, cli_path);
             c.output()
         },
     ).await;
@@ -1150,6 +1166,24 @@ fn prune_result(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn agy_probes_run_without_the_clis_own_update() {
+        assert!(super::is_agy("/home/x/.local/bin/agy"));
+        assert!(super::is_agy("/home/x/.local/bin/AGY"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn agy_exe_on_windows_is_found_by_its_name() {
+        assert!(super::is_agy("C:\\Users\\x\\AppData\\Local\\agy\\bin\\agy.exe"));
+    }
+
+    #[test]
+    fn other_clis_are_left_alone() {
+        assert!(!super::is_agy("/usr/bin/claude"));
+        assert!(!super::is_agy("/opt/tools/agyx"));
+    }
+
 
     /// The one lookup decides npm vs PATH from the registry: an npm provider's
     /// CLI on PATH is not "found" (a launch would never run it), while a

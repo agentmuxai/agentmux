@@ -47,7 +47,7 @@ function outerWidth(el: HTMLElement): number {
 /**
  * The tab bar's width with every tab at its natural width: tabs plus separators,
  * the fill's minimum width after the last tab, and anything else in the tab bar
- * (the hamburger on Windows/Linux; the window's grip is in the status area now).
+ * (the AgentMux logo on Windows/Linux; the window's grip is in the status area now).
  * Read from the same inline `--tab-natural-width` and CSS variables the layout uses.
  */
 function measureTabStrip(tabBar: HTMLElement, tabScroll: HTMLElement): { naturalPx: number } {
@@ -65,7 +65,7 @@ function measureTabStrip(tabBar: HTMLElement, tabScroll: HTMLElement): { natural
     for (const sep of tabScroll.querySelectorAll<HTMLElement>(":scope > .tab-separator")) separators += outerWidth(sep);
     const fill = tabScroll.querySelector<HTMLElement>(":scope > .tab-bar-fill");
     const gutter = fill ? px(getComputedStyle(fill).minWidth, DRAG_GUTTER_FALLBACK_PX) : DRAG_GUTTER_FALLBACK_PX;
-    // Everything in the tab bar that isn't the scrolling strip (the hamburger).
+    // Everything in the tab bar that isn't the scrolling strip (the AgentMux logo).
     const rest = Math.max(0, tabBar.clientWidth - tabScroll.offsetWidth);
     const fixed = rest + separators + gutter;
     return { naturalPx: fixed + natural };

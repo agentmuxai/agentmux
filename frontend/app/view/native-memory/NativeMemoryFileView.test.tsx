@@ -24,6 +24,8 @@ vi.mock("@/app/store/rpc-api", () => ({
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
+import { ModalLayer } from "@/app/element/ModalLayer";
+import { createConfirm } from "@/app/element/create-confirm";
 import { NativeMemoryFileView } from "./NativeMemoryFileView";
 
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -34,8 +36,12 @@ const [nonce, setNonce] = createSignal(0);
 const bump = () => setNonce((n) => n + 1);
 
 function mount(onDirtyChange?: (d: boolean) => void) {
+    const confirm = createConfirm();
     return render(() => (
-        <NativeMemoryFileView agentId="a1" filename="MEMORY.md" refreshNonce={nonce} onDirtyChange={onDirtyChange} />
+        <ModalLayer scope="pane">
+            <confirm.Dialog />
+            <NativeMemoryFileView agentId="a1" filename="MEMORY.md" refreshNonce={nonce} onDirtyChange={onDirtyChange} confirm={confirm} />
+        </ModalLayer>
     ));
 }
 
@@ -108,14 +114,16 @@ describe("NativeMemoryFileView", () => {
         expect(writeMock.mock.calls[1][1]).toMatchObject({ content: "v3", base_sha256: sha("v2") });
     });
 
-    test("Esc on a dirty draft asks before discarding", async () => {
+    test("Esc on a dirty draft asks in the pane before discarding: Keep editing keeps it, Discard drops it", async () => {
         mount();
         await startEditing();
         fireEvent.input(textarea()!, { target: { value: "dirty" } });
-        const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
         fireEvent.keyDown(textarea()!, { key: "Escape" });
-        expect(confirmSpy).toHaveBeenCalledTimes(1);
+        fireEvent.click(await screen.findByText("Keep editing"));
         expect(textarea()?.value).toBe("dirty");
+        fireEvent.keyDown(textarea()!, { key: "Escape" });
+        fireEvent.click(await screen.findByText("Discard"));
+        await waitFor(() => expect(textarea()).toBeNull());
     });
 
     test("reports dirtiness to the manager (which guards Back)", async () => {

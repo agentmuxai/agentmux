@@ -149,34 +149,60 @@ pub(crate) fn refresh_for_replay(
     true
 }
 
+/// Who owns an agent's own browser profile: its uid, which a rename keeps, else (an agent srv does not know by
+/// a uid) the name it calls itself.
+pub(crate) fn profile_owner(state: &AppState, agent: &str) -> String {
+    state.reactive_handler.get_agent(agent).and_then(|a| a.uid).unwrap_or_else(|| agent.to_string())
+}
+
+/// May the agent `owner` (see [`profile_owner`]) browse as `p`: its own profile, or one the user lets agents use.
+fn agent_may_use(p: &BrowserProfile, owner: &str) -> bool {
+    p.agents_allowed || p.owner_agent.as_deref() == Some(owner)
+}
+
 /// The identity an agent's `OpenBrowser` asked for by `profile` browses as:
-/// none (Personal) for "personal" or nothing; a fresh Incognito jar for
-/// "incognito", always allowed since it gives the agent less, not more; and a
-/// named profile (by name, any case, or id) only when the user switched on
-/// "Agents may use it" for it in Settings → Browser (profiles spec §5).
-pub(crate) fn identity_for_agent(requested: &str, profiles: &[BrowserProfile]) -> Result<Option<String>, String> {
+/// its own profile for nothing, "" or "own" (made by srv before this, see
+/// `app_api::browser_profiles::ensure_agent_profile`); none (Personal) for
+/// "personal"; a fresh Incognito jar for "incognito", always allowed since it gives
+/// the agent less, not more; and a named profile (by name, any case, or id): the
+/// agent's own, or one the user switched on "Agents may use it" for in Settings →
+/// Browser (docs/specs/SPEC_AGENT_OWN_BROWSER_PROFILE_2026_11_04.md).
+pub(crate) fn identity_for_agent(owner: &str, requested: &str, profiles: &[BrowserProfile]) -> Result<Option<String>, String> {
     let requested = requested.trim();
-    if requested.is_empty() || requested.eq_ignore_ascii_case("personal") {
+    if requested.eq_ignore_ascii_case("personal") {
         return Ok(None);
     }
     if requested.eq_ignore_ascii_case("incognito") {
         return Ok(Some(format!("incognito:{}", uuid::Uuid::new_v4())));
     }
+    if requested.is_empty() || requested.eq_ignore_ascii_case("own") {
+        return match profiles.iter().find(|p| p.owner_agent.as_deref() == Some(owner)) {
+            Some(p) => Ok(Some(format!("profile:{}", p.id))),
+            None => Err("your own browser profile couldn't be made (the browser profiles can't be read or written); ask for \"incognito\" meanwhile".to_string()),
+        };
+    }
     let allowed = || {
-        let names: Vec<&str> = profiles.iter().filter(|p| p.agents_allowed).map(|p| p.name.as_str()).collect();
+        let names: Vec<&str> = profiles.iter().filter(|p| agent_may_use(p, owner)).map(|p| p.name.as_str()).collect();
         if names.is_empty() {
             "none".to_string()
         } else {
             names.join(", ")
         }
     };
-    let Some(p) = profiles.iter().find(|p| p.name.eq_ignore_ascii_case(requested) || p.id == requested) else {
+    // The agent's own profile first, then the user's, then another agent's.
+    let named = |p: &&BrowserProfile| p.name.eq_ignore_ascii_case(requested) || p.id == requested;
+    let found = profiles.iter().filter(named).min_by_key(|p| match p.owner_agent.as_deref() {
+        Some(o) if o == owner => 0,
+        None => 1,
+        Some(_) => 2,
+    });
+    let Some(p) = found else {
         return Err(format!(
-            "there is no browser profile called {requested:?}. Use \"incognito\", or a profile the user lets agents use: {}",
+            "there is no browser profile called {requested:?}. Use \"incognito\", or a profile you may use: {}",
             allowed()
         ));
     };
-    if !p.agents_allowed {
+    if !agent_may_use(p, owner) {
         return Err(format!(
             "the user hasn't let agents use the browser profile {:?}: they can switch on \"Agents may use it\" for it in Settings → Browser. Use \"incognito\", or a profile agents may use: {}",
             p.name,
@@ -187,29 +213,50 @@ pub(crate) fn identity_for_agent(requested: &str, profiles: &[BrowserProfile]) -
 }
 
 /// What a container agent's `profile` asks for, once its defaults are applied. A container agent exists
-/// to be isolated from the user's own sign-ins, so with nothing asked it gets an Incognito jar of its
-/// own, never Personal; it browses as a named profile only when the user lets agents use that profile
+/// to be isolated from the user's own sign-ins, so with nothing asked it gets its own profile, never
+/// Personal; it browses as another named profile only when the user lets agents use that profile
 /// (the check `identity_for_agent` makes for every agent).
-fn requested_by_container(requested: Option<&str>) -> Result<Option<&str>, String> {
+fn requested_by_container(requested: Option<&str>) -> Result<&str, String> {
     match requested.map(str::trim) {
-        None | Some("") => Ok(Some("incognito")),
+        None | Some("") => Ok("own"),
         Some(r) if r.eq_ignore_ascii_case("personal") => Err(
-            "a container agent doesn't browse as the user's Personal profile: it has Incognito by default, or a profile the user \
+            "a container agent doesn't browse as the user's Personal profile: it has its own profile by default, or a profile the user \
              lets agents use (Settings → Browser → \"Agents may use it\")"
                 .to_string(),
         ),
-        Some(r) => Ok(Some(r)),
+        Some(r) => Ok(r),
     }
 }
 
+/// Whether `requested` (an `OpenBrowser` `profile`) asks for the agent's own profile, which srv makes the first time.
+pub(crate) fn asks_for_own(agent_id: &str, requested: Option<&str>) -> bool {
+    match requested.map(str::trim) {
+        None | Some("") => true,
+        Some(r) => r.eq_ignore_ascii_case("own") || r.eq_ignore_ascii_case(agent_id),
+    }
+}
+
+/// The `profile` an agent's open is carried out with. With none asked for, the agent browses as its own: made here,
+/// the first time. If it can't be made (the shared folder is given up to an older srv), a fresh Incognito jar, never
+/// the user's Personal.
+pub(crate) async fn requested_or_own(state: &AppState, agent_id: &str, requested: Option<&str>) -> Option<String> {
+    if asks_for_own(agent_id, requested) {
+        let owner = profile_owner(state, agent_id);
+        if let Err(e) = crate::server::app_api::browser_ensure_agent_profile(state, &owner, agent_id).await {
+            tracing::warn!(agent_id = %agent_id, error = %e, "[ui-automation] browser open: no own profile; Incognito instead");
+            return Some("incognito".to_string());
+        }
+    }
+    requested.map(str::to_string)
+}
+
 /// `OpenBrowser`'s `profile`: give the agent's new tab the identity it asked
-/// for, checked like any new tab (the platform, the Incognito cap). A container agent's default is
-/// Incognito ([`requested_by_container`]).
-pub(crate) fn for_agent_open(state: &AppState, meta: &mut MetaMapType, requested: Option<&str>, from_container: bool) -> Result<(), String> {
-    let requested = if from_container { requested_by_container(requested)? } else { requested };
-    let Some(requested) = requested else { return Ok(()) };
+/// for, checked like any new tab (the platform, the Incognito cap). With nothing asked, every agent, native
+/// or container, browses as its own profile ([`requested_by_container`] for the container's other rules).
+pub(crate) fn for_agent_open(state: &AppState, meta: &mut MetaMapType, owner: &str, requested: Option<&str>, from_container: bool) -> Result<(), String> {
+    let requested = if from_container { requested_by_container(requested)? } else { requested.unwrap_or("own") };
     let profiles = crate::server::app_api::browser_profiles_list()?;
-    if let Some(identity) = identity_for_agent(requested, &profiles)? {
+    if let Some(identity) = identity_for_agent(owner, requested, &profiles)? {
         meta.insert(IDENTITY_META_KEY.to_string(), json!(identity));
         check_new_tab(state, meta)?;
     }
@@ -230,17 +277,20 @@ pub(crate) fn for_agent_pane(
 ) -> Result<String, String> {
     meta.extend(crate::server::browser_owner::driver_meta(agent_id));
     crate::server::browser_allowlist::mirror(meta, allowed);
-    for_agent_open(state, meta, requested, from_container)?;
-    Ok(browsing_as(meta))
+    let owner = profile_owner(state, agent_id);
+    for_agent_open(state, meta, &owner, requested, from_container)?;
+    // "own": the agent's own profile, which is what an agent should be told apart from the user's.
+    let own = format!("profile:{}", crate::backend::browser_profiles_store::agent_profile_id(&owner));
+    Ok(if identity_of(meta) == Some(own.as_str()) { "own".to_string() } else { browsing_as(meta) })
 }
 
 /// An agent opening a browser tab some other way (`pane.open`, the HTTP pane
-/// open) with a `browser:identity`: a named profile only if agents may use it.
-pub(crate) fn check_agent_may_use(meta: &MetaMapType) -> Result<(), String> {
+/// open) with a `browser:identity`: a named profile only if it is the agent's own or agents may use it.
+pub(crate) fn check_agent_may_use(meta: &MetaMapType, owner: &str) -> Result<(), String> {
     let Some(id) = identity_of(meta).and_then(profile_id) else { return Ok(()) };
     let profiles = crate::server::app_api::browser_profiles_list()?;
     match profiles.iter().find(|p| p.id == id) {
-        Some(p) if p.agents_allowed => Ok(()),
+        Some(p) if agent_may_use(p, owner) => Ok(()),
         Some(p) => Err(format!("the user hasn't let agents use the browser profile {:?}", p.name)),
         None => Err(format!("there is no browser profile {id:?}")),
     }
@@ -249,64 +299,98 @@ pub(crate) fn check_agent_may_use(meta: &MetaMapType) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::browser_profiles_store::agent_profile_id;
 
     fn profile(id: &str, name: &str, agents_allowed: bool) -> BrowserProfile {
-        BrowserProfile { id: id.into(), name: name.into(), color: "#3b82f6".into(), created_at: 0, agents_allowed }
+        BrowserProfile { id: id.into(), name: name.into(), color: "#3b82f6".into(), created_at: 0, agents_allowed, owner_agent: None }
     }
 
-    /// The pane a container agent opens with no `profile` carries an Incognito identity of its own and says so; a native
-    /// agent's carries none (Personal) and says that.
+    fn agents_own(agent_id: &str) -> BrowserProfile {
+        BrowserProfile { owner_agent: Some(agent_id.into()), ..profile(&agent_profile_id(agent_id), agent_id, false) }
+    }
+
+    /// A pane asked for as Incognito carries a jar of its own and says so, a new one each time; Personal is not one a
+    /// container agent can ask for. (With nothing asked, the agent's own profile: `an_agent_with_no_profile_...`.)
     #[tokio::test]
-    async fn a_pane_with_no_profile_browses_in_the_jar_its_agent_kind_gets() {
+    async fn a_pane_asked_for_incognito_browses_in_a_jar_of_its_own() {
         let state = crate::server::tests::test_state();
-        let mut container = MetaMapType::new();
-        let said = for_agent_pane(&state, &mut container, ("kcont", None, None, true)).unwrap();
-        assert_eq!(said, "incognito");
-        assert!(identity_of(&container).is_some_and(is_incognito), "{container:?}");
+        let mut first = MetaMapType::new();
+        assert_eq!(for_agent_pane(&state, &mut first, ("kcont", None, Some("incognito"), true)).unwrap(), "incognito");
+        assert!(identity_of(&first).is_some_and(is_incognito), "{first:?}");
         let mut other = MetaMapType::new();
-        assert_eq!(for_agent_pane(&state, &mut other, ("kcont", None, None, true)).unwrap(), "incognito");
-        assert_ne!(identity_of(&container), identity_of(&other), "each pane gets a jar of its own");
-        let mut native = MetaMapType::new();
-        assert_eq!(for_agent_pane(&state, &mut native, ("lark", None, None, false)).unwrap(), "personal");
-        assert!(identity_of(&native).is_none());
-        // Personal is not one a container agent can ask for.
+        assert_eq!(for_agent_pane(&state, &mut other, ("lark", None, Some("incognito"), false)).unwrap(), "incognito");
+        assert_ne!(identity_of(&first), identity_of(&other), "each pane gets a jar of its own");
         let mut asked = MetaMapType::new();
         assert!(for_agent_pane(&state, &mut asked, ("kcont", None, Some("Personal"), true)).is_err());
         assert!(identity_of(&asked).is_none());
     }
 
+    /// With no `profile`, a native and a container agent alike browse as the profile of their own, the same one every
+    /// time, and not as each other's; Personal and Incognito stay what they are asked for.
+    #[test]
+    fn an_agent_with_no_profile_browses_as_its_own_the_same_one_every_time() {
+        let (lark, kcont) = (agents_own("lark"), agents_own("kcont"));
+        let ps = [profile("p-work", "Work", true), lark.clone(), kcont.clone()];
+        let (lark_id, kcont_id) = (agent_profile_id("lark"), agent_profile_id("kcont"));
+        for asked in ["", "  ", "own", "Own", "lark", lark_id.as_str()] {
+            assert_eq!(identity_for_agent("lark", asked, &ps), Ok(Some(format!("profile:{lark_id}"))), "{asked:?}");
+        }
+        assert_eq!(identity_for_agent("kcont", "", &ps), Ok(Some(format!("profile:{kcont_id}"))));
+        assert_eq!(identity_for_agent("lark", "Personal", &ps), Ok(None), "Personal only when asked for");
+        assert_eq!(requested_by_container(None), Ok("own"));
+        // Another agent's profile is not offered, and not resolvable, until the user lets agents use it.
+        let refused = identity_for_agent("lark", "kcont", &ps).unwrap_err();
+        assert!(refused.contains("hasn't let agents use") && refused.contains("lark") && refused.contains("Work"), "{refused}");
+        let shared = BrowserProfile { agents_allowed: true, ..kcont };
+        assert_eq!(identity_for_agent("lark", "kcont", &[lark.clone(), shared]), Ok(Some(format!("profile:{kcont_id}"))));
+        // Its own profile is found before a user's profile of the same name.
+        let clash = profile("p-lark", "lark", true);
+        assert_eq!(identity_for_agent("lark", "lark", &[clash, lark]), Ok(Some(format!("profile:{lark_id}"))));
+        // No profile made yet (the profiles can't be written): it says so rather than browsing as Personal.
+        assert!(identity_for_agent("lark", "", &[profile("p-work", "Work", true)]).unwrap_err().contains("couldn't be made"));
+        assert!(asks_for_own("lark", None) && asks_for_own("lark", Some("Lark")) && !asks_for_own("lark", Some("incognito")));
+    }
+
+    #[test]
+    fn an_agent_may_open_its_own_profile_by_pane_open_and_not_anothers() {
+        // `check_agent_may_use` reads the profile file; the rule it applies is `agent_may_use`.
+        let (mine, theirs) = (agents_own("lark"), agents_own("kcont"));
+        assert!(agent_may_use(&mine, "lark") && !agent_may_use(&theirs, "lark"));
+        assert!(agent_may_use(&BrowserProfile { agents_allowed: true, ..theirs }, "lark"));
+        assert!(!agent_may_use(&profile("p-bank", "Bank", false), "lark"));
+    }
+
     #[test]
     fn a_container_agent_browses_in_its_own_jar_unless_a_shared_profile_is_asked_for() {
-        // Nothing asked: Incognito, not the user's Personal profile.
-        assert_eq!(requested_by_container(None), Ok(Some("incognito")));
-        assert_eq!(requested_by_container(Some("  ")), Ok(Some("incognito")));
+        // Nothing asked: its own profile, not the user's Personal profile.
+        assert_eq!(requested_by_container(None), Ok("own"));
+        assert_eq!(requested_by_container(Some("  ")), Ok("own"));
         // Personal asked for by name is refused, with the way out.
         let refused = requested_by_container(Some("Personal")).unwrap_err();
-        assert!(refused.contains("Incognito") && refused.contains("Agents may use it"), "{refused}");
+        assert!(refused.contains("its own profile") && refused.contains("Agents may use it"), "{refused}");
         // A named profile still goes through the usual check, which lets in only shared ones.
-        assert_eq!(requested_by_container(Some("Work")), Ok(Some("Work")));
+        assert_eq!(requested_by_container(Some("Work")), Ok("Work"));
         let ps = [profile("p-work", "Work", true), profile("p-bank", "Bank", false)];
-        assert_eq!(identity_for_agent("Work", &ps), Ok(Some("profile:p-work".into())));
-        assert!(identity_for_agent("Bank", &ps).is_err());
-        // The default really is a fresh jar.
-        let jar = identity_for_agent("incognito", &ps).unwrap().unwrap();
+        assert_eq!(identity_for_agent("kcont", "Work", &ps), Ok(Some("profile:p-work".into())));
+        assert!(identity_for_agent("kcont", "Bank", &ps).is_err());
+        // Incognito really is a fresh jar.
+        let jar = identity_for_agent("kcont", "incognito", &ps).unwrap().unwrap();
         assert!(is_incognito(&jar));
     }
 
     #[test]
     fn an_agent_gets_personal_incognito_or_a_profile_it_is_allowed() {
         let ps = [profile("p-work", "Work", true), profile("p-bank", "Bank", false)];
-        assert_eq!(identity_for_agent("", &ps), Ok(None));
-        assert_eq!(identity_for_agent("Personal", &ps), Ok(None));
-        let a = identity_for_agent("incognito", &ps).unwrap().unwrap();
-        let b = identity_for_agent("Incognito", &ps).unwrap().unwrap();
+        assert_eq!(identity_for_agent("lark", "Personal", &ps), Ok(None));
+        let a = identity_for_agent("lark", "incognito", &ps).unwrap().unwrap();
+        let b = identity_for_agent("lark", "Incognito", &ps).unwrap().unwrap();
         assert!(is_incognito(&a) && is_incognito(&b) && a != b, "a fresh jar each time");
-        assert_eq!(identity_for_agent("work", &ps), Ok(Some("profile:p-work".into())));
-        assert_eq!(identity_for_agent("p-work", &ps), Ok(Some("profile:p-work".into())));
-        let refused = identity_for_agent("Bank", &ps).unwrap_err();
+        assert_eq!(identity_for_agent("lark", "work", &ps), Ok(Some("profile:p-work".into())));
+        assert_eq!(identity_for_agent("lark", "p-work", &ps), Ok(Some("profile:p-work".into())));
+        let refused = identity_for_agent("lark", "Bank", &ps).unwrap_err();
         assert!(refused.contains("hasn't let agents use") && refused.contains("Work"), "{refused}");
         assert!(refused.contains("\"Agents may use it\" for it in Settings → Browser") && !refused.contains("  "), "{refused}");
-        let unknown = identity_for_agent("Nope", &ps).unwrap_err();
+        let unknown = identity_for_agent("lark", "Nope", &ps).unwrap_err();
         assert!(unknown.contains("no browser profile") && !unknown.contains("Bank"), "{unknown}");
     }
 

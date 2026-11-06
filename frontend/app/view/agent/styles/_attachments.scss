@@ -417,29 +417,24 @@ $gap: 6px;
     }
 }
 
-// ── Preview (portalled to <body>, so not under .agent-view) ────────────
+// ── Preview (a pane modal: drawn over the pane it is in, by the modal layer, so not under .agent-view) ───
 .agent-attachment-lightbox {
-    @include mixins.fixed-fill;
-    z-index: var(--z-modal);
-    @include mixins.flex-center;
-    // A dimming scrim reads the same in every theme.
-    background: rgb(0 0 0 / 72%);
+    // The modal panel is the frame (border, background, radius, scroll): a preview larger than the pane
+    // scrolls inside it.
+    &__panel {
+        overflow: auto;
+    }
 
     &__dialog {
         display: flex;
         flex-direction: column;
-        max-width: 92vw;
-        max-height: 92vh;
-        overflow: hidden;
-        border: 1px solid var(--border-color);
-        border-radius: var(--radius-lg);
-        background: var(--modal-bg-color);
+        max-width: 100%;
         outline: none;
     }
 
     &__image {
         @include mixins.flex-center;
-        min-width: 320px;
+        min-width: min(320px, 100%);
         min-height: 200px;
 
         img {
@@ -520,10 +515,13 @@ $gap: 6px;
         }
     }
 
+    // In a narrow pane the bar wraps (the name keeps what room it has and truncates) rather than pushing Next
+    // and Close past the pane's edge.
     &__bar {
         display: flex;
+        flex-wrap: wrap;
         align-items: center;
-        gap: 12px;
+        gap: 4px 12px;
         padding: 8px 10px;
         border-top: 1px solid var(--border-color);
         font-size: var(--text-sm);
@@ -531,6 +529,7 @@ $gap: 6px;
 
     &__title {
         display: flex;
+        flex: 1 1 120px;
         gap: 6px;
         min-width: 0;
         @include mixins.truncate;
@@ -549,6 +548,7 @@ $gap: 6px;
     &__actions {
         display: flex;
         align-items: center;
+        flex-shrink: 0;
         gap: 8px;
         margin-left: auto;
 

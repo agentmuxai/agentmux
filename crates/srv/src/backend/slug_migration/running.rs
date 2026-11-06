@@ -21,7 +21,7 @@ use agentmux_common::slug::{agent_route_name, file_stem};
 /// A registration whose srv is alive, from `<dir>/<name>.json`.
 pub(super) fn registration(dir: &Path, name: &str) -> Option<AgentEntry> {
     let entry: AgentEntry = serde_json::from_slice(&std::fs::read(dir.join(format!("{}.json", file_stem(name)))).ok()?).ok()?;
-    pid_alive(entry.pid).then_some(entry)
+    entry.srv_alive().then_some(entry)
 }
 
 /// The live entries filed under `name` in the cross-channel registry.
@@ -32,7 +32,7 @@ pub(super) fn shared_entries(home: &Home, name: &str) -> Vec<AgentEntry> {
         .flatten()
         .filter(|f| f.path().extension().and_then(|e| e.to_str()) == Some("json"))
         .filter_map(|f| serde_json::from_slice::<AgentEntry>(&std::fs::read(f.path()).ok()?).ok())
-        .filter(|e| pid_alive(e.pid))
+        .filter(AgentEntry::srv_alive)
         .collect()
 }
 

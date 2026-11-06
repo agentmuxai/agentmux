@@ -42,15 +42,15 @@ describe("swarmPaneTab", () => {
         expect(swarmPaneTab.sections?.items.map((s) => s.id)).toEqual(["supervisor", "broadcast"]);
     });
 
-    it("is named by the selected section", () => {
+    it("is named Swarm whichever sections are open", () => {
         const [meta, setMeta] = createSignal<Record<string, unknown>>({});
         createRoot((dispose) => {
             const inst = create({ blockId: "w1", meta } as any);
-            expect(inst.liveTitle!().text).toBe("Swarm · Supervisor");
+            expect(inst.liveTitle!().text).toBe("Swarm");
             setMeta({ "swarm:section": "broadcast" });
-            expect(inst.liveTitle!().text).toBe("Swarm · Broadcast");
+            expect(inst.liveTitle!().text).toBe("Swarm");
             setMeta({ "swarm:section": "nope" });
-            expect(inst.liveTitle!().text).toBe("Swarm · Supervisor");
+            expect(inst.liveTitle!().text).toBe("Swarm");
             dispose();
         });
     });

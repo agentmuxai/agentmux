@@ -8,6 +8,7 @@
 import { onMount, Show, type JSX } from "solid-js";
 
 import { useMuxBusStatus } from "@/app/view/accounts/AgentMuxConnectPanel";
+import { t } from "@/app/i18n/i18n";
 import { MuxBusSignInChoices } from "@/app/view/accounts/muxbus-sign-in-choices";
 import { MuxBusSignOutButton } from "@/app/view/accounts/muxbus-sign-out";
 import { muxbusDelivery, muxbusDeliveryLine, muxbusOffersSignIn } from "@/store/muxbus-delivery";
@@ -44,8 +45,8 @@ export function MuxBusSignIn(): JSX.Element {
                         identityProviders={muxbus.identityProviders()}
                         loading={muxbus.loading()}
                         disabled={!muxbus.isConfigured()}
-                        label="Sign in"
-                        cancelLabel="Cancel sign-in"
+                        label={t("signin.signIn")}
+                        cancelLabel={t("signin.cancel")}
                         onSignIn={(provider) => void muxbus.connect(provider)}
                         onCancel={() => void muxbus.cancel()}
                     />

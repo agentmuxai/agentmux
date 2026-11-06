@@ -766,7 +766,7 @@ async function initMuxWrap(initOpts: AgentMuxInitOpts) {
         // mount cascade to settle, then reveal atomically" treatment.
         // This covers:
         //   - Cold app start (the first window in the user's session)
-        //   - "New Window" from the hamburger menu (each opens its
+        //   - "New Window" from the AgentMux logo menu (each opens its
         //     own bootstrap → initMuxWrap)
         //   - Any future window-spawning path that reuses initMux
         //
@@ -1138,8 +1138,8 @@ async function initMux(initOpts: AgentMuxInitOpts) {
     void import("@/app/block/upgrade-requests").then((m) => m.startUpgradeRequests());
     // An agent's request to drive a native app opens a prompt here.
     void import("@/app/block/desktop-requests").then((m) => m.startDesktopRequests());
-    // An agent's request for a Vault entry opens a prompt here.
-    void import("@/app/view/vault/vault-request-prompts").then((m) => m.startVaultRequestPrompts());
+    // An agent's Vault requests are cards in its pane, and the Vault pane lists them all.
+    void import("@/app/view/agent/components/vault-request-card/vault-request-cards").then((m) => m.startVaultRequestCards());
     // srv's calls to action (browser, SSH consent, widget installs) join the
     // waiting tone and notification.
     void import("@/app/notification/waiting-for-you").then((m) => m.installWaitingForYou());

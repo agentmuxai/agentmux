@@ -1,5 +1,131 @@
 # AgentMux Version History
 
+## 0.60.17 — 2026-11-05
+
+- The Swarm's Broadcast and Supervise are two sections that open on their own, the list is one list with a labelled part per host, and the sections and the list scroll as one container with a single scrollbar
+- AgentMux now checks for a newer release by itself (a minute after start, then every few hours), downloads and verifies it in the background, and the status bar offers Restart to update. Nothing installs until you restart. Turn it off with update:auto: false, or keep the check and skip the download with update:autodownload: false.
+- An agent's Vault requests no longer open window-wide prompts: the Vault pane lists every pending request with its countdown, a parked agent's My agents row and the status bar show what it waits on, and you can deny all of one agent's requests at once
+- Every agent's Browser open now defaults to a profile of its own, named after it and kept between panes, restarts and upgrades, so its sign-ins stay; Settings → Browser lists agents' profiles apart from yours
+- Jobs: the list test no longer fails when it starts within a second of local midnight
+- Agents no longer have a bundle of their own: a bundle holds only what agents share, and any existing one moves into the agent's Bundles list
+- The Files pane's name-conflict question and the attachment preview now appear over their own pane instead of the whole window.
+- Settings > Agents > Outdated agent ids reads the plan again when it comes back into view, and an agent can run the agent id update with Agents migrate_ids
+- Tooltips, the hover labels on titled buttons, the tab colour panel and the editor tree's context menu now scale with chrome zoom.
+- Host log: a line every five minutes for each renderer (app windows and browser panes) with its role, origin and private memory
+- Add characterisation tests for the Kanban task drawer
+- Toasts and dialogs follow chrome zoom: the toast stack and every window, tab and pane dialog scale with the title bar and status bar, and stay in the window at any zoom.
+- fix(store): after a Microsoft Store update Windows opens the launcher again (the tray, srv and the host come back together), not the host alone; a Store install that completed keeps its note for the next start
+- The Audit can list agents' tool calls, turn ends and thoughts (asked for by kind), indexed from the transcript as it is written
+- The app-wide right-click menu and its submenus follow chrome zoom: each level is an unzoomed shell around a zoomed body, and submenus are no longer nested in the row that opens them.
+- Store update: a Store that never answers the update check or listing is told as that after 60 s, and an install that falls back to the Store page says so in the update panel
+- The AgentMux Cloud sign-in screens read their text from the translation dictionary (no change in English); groundwork for translating them
+- A browser pane's title given by an agent now goes when the pane moves to another site, so the page's own title shows
+- Google call: an agent whose client never lists a just-granted Calendar, Drive or Gmail tool can use it through the Google tool
+- Memory > Skills shows the skills as cards, and the Bundles tab no longer has a standing blue accent
+- Google: an agent can read Google status and turn a Google service on or off on another machine over remote operations (google.status, google.grant)
+- Memory > Bundles shows bundles as cards, and an open bundle shows its Instructions and Skills as cards by category
+- Split the Kanban task drawer into a state object and one component per part
+- An agent's Browser pane now opens below the agent, and closing a browser pane gives its user 10 seconds to keep it instead of 30
+- A check that stops new untranslatable text appearing in screens that have started to use the translation dictionary; no change to the app
+- Agents can update, set the Bundles list of, and hide or show the picker templates of, agents with the Agents tool
+- Update solid-js to 1.9.18, which brings seroval 1.6.12 (fixes two seroval advisories), and the zod patch release
+- The new four-block logo replaces the old brain everywhere it still showed: the README opens with it (alpha warning right below), the launcher splash image is logo.png, Mux Code's provider logo is the mark, and the unused brain artwork is deleted
+- Cover the agent failure hook's seed, countdown, Take over, copy and verdict paths with tests
+- Split useAgentFailure into a state object and one function per concern
+- Cover the agent controller status hook's launch, login, bind and recheck paths with tests
+- Split useAgentControllerStatus into a context object and one function per concern
+- Add characterisation tests for the turn-lifecycle hook (finalizeTurn, grace and stop-fallback timers, watchdog)
+- Split useTurnLifecycle into a state object and small functions, behaviour unchanged
+- Internal: srv's store opening at startup (open_stores_and_migrate) split into named steps (no behaviour change)
+- The Vault can hold several Vaults on one computer: each entry belongs to one, and the person decides which agents may use each (agents see only the entries of Vaults open to them)
+- Audit: each row says which computer, channel and version wrote it and how it travelled; a sent message is logged at hand-off and joined to its delivery by message id
+- Internal: srv's background startup (spawn_background_subsystems) split into named steps (no behaviour change)
+- Fix the native memory mirror failing on an existing install: a store made before last_seen_mtime_ms gets the column
+- Internal: the persistent agent controller's spawn_process split into named steps (no behaviour change)
+- Add characterisation tests for the new-agent create form (payload, busy state, keys, runtime handed in, model follow)
+- The Vault's "Got it" button now stands out in the highlight colour
+- Split the new-agent create form into hooks and small field components, behaviour unchanged
+- A new Antigravity agent no longer leaves the pane black with the logo: the create panel stopped remounting while it checked the sign-in, and the version and sign-in checks no longer start the CLI's own update
+
+## 0.60.16 — 2026-11-05
+
+- feat(browser-pane): Windows can host browser panes as CEF Views overlays in the window's own compositor (AGENTMUX_PANE_BACKEND=views), opt-in
+- Split the Editor view into a CodeMirror session, a language server session, command and key handlers, zoom and resize handles and tree-menu state, with the view pinned by ordered-log tests
+- Delete, stop and update confirmations in the Swarm, Settings, Accounts and MCP panes now cover only their own pane instead of the whole window or tab.
+- refactor(agent): split AgentShellSubblock into a state object and small named functions, same behaviour
+- Fix the Editor losing the first character typed into a file: the first edit no longer rebuilds the view from disk
+- Dragging a window tab out of its strip on Windows now shows the window you are about to create following the cursor, and it opens where you let go
+- An agent's gh command that sends text to GitHub (a pull request, issue or comment body, release notes, an API field) is refused when the text holds a credential, naming where and what kind and never the text
+- Split the agent pane's ToolBlock row into state hooks and view parts, with no change to how a tool row looks or behaves
+- Settings > Accounts lists the AgentMux GitHub App installations a connected GitHub account is linked to, and lets you install the App on repositories, check for new installations, and unlink one
+- fix(agent): a freshly opened agent pane too short to scroll now loads older history until it can scroll, instead of waiting for a scroll nobody can make
+- Split the instance panel's About rows, workspace heading, floating panes, footer and window rows into their own parts, and drop its unused double-click delay request
+- Split the browser nav bar into address, bookmarks and shortcut hooks and parts, with a behavior test pinning the address bar, suggestions, shortcuts and bookmarks
+- Split the pane leaf into state hooks and a members renderer, with a test pinning its mount watch, dormant and minimized flags, and per-tab ViewModel slots
+- test(markdown): pin Markdown's input, TOC, tables, diagrams, frozen prefix, open tail and render-error path before the split
+- Split Markdown's 599-line component and its 116-line render memo into a state object and named functions; behaviour unchanged
+- Split the window tab strip into list, select and close hooks and parts, with a test pinning the optimistic select and close, the confirm modal and the pinned-tab migration
+- Characterise the widget bar (ActionWidgets): pinned slots, More dropdown, group flyouts, item menus and measuring mirrors, before its split
+- Split the tool overlay log into branch, scroll-follow and height-FLIP hooks, with a test pinning its open-stream, node-swap and no-ResizeObserver corners
+- Split ActionWidgets' 579-line component into a state object and named functions; behaviour unchanged
+- agent pane: AgentPresentationView is split into hook groups and a layout, behaviour unchanged
+- A limited, agent-owned browser pane keeps its site limit and its owner when the AgentMux server restarts
+- Closing a pane that has busy agents, or a browser page that would ask to leave, now asks inside its tab instead of over the whole window.
+- Claude agents no longer load the claude.ai account's connectors (Gmail, Calendar, Drive, Docs) by default, since AgentMux has its own Google tools; the new setting agent:claudeaiconnectors turns them back on
+- Dragging a pane out of its window on Windows now shows the pane following the cursor, and it opens where you let go
+- Agent pane: a message queued while the agent is mid-turn now shows its image attachments in the queue
+- Connecting Google shows no client fields: AgentMux's own client is used, services Google hasn't approved yet show Coming soon, and the server refuses them for agents too
+- The Linux build runs on older distributions again: the bundled browser engine is rebuilt against a glibc 2.31 floor (Ubuntu 22.04, Debian 12 and Fedora 41 and up), and the build checks the downloaded runtime against its pinned hash
+- Characterise the Toolchain pane (ToolchainView): row probes, shared capability rows, latest-version cache, Refresh, install panel, filter, widgets and ports, environment, before its split
+- Settings panels for hidden agents, pinned senders, agent site grants, paired devices and browser profiles update when the data changes, without reopening
+- Internal: reactive::deliver's forwarding tiers moved into their own module (no behaviour change)
+- Settings › Appearance gets a Language picker (shown once a translation ships) and the page language follows it; dates and relative times use the chosen language's format
+- A Microsoft Store install asks the Store itself before offering an update and says plainly when the Store doesn't have it yet; explanatory lines in the Maintenance panel wrap instead of ending in an ellipsis; the 'other machines can't see this one' LAN warning clears once a peer has reached this machine; LAN peers say how they are installed and when they run no agents; an unconfirmed cloud-relay message is reported to its sender after 30 minutes
+- Files pane: FilesView is split into hook groups, rows and a layout, behaviour unchanged
+- The drone list updates when a drone is saved elsewhere, and the Vault's Kept by AgentMux tab reads again each time it is shown
+- Delete, discard and remove confirmations in the Editor, Files, Bundles, Global Memory and Personal Memory panes now appear inside their own pane instead of freezing the whole window with a native dialog.
+- Agent history: AgentHistoryView is split into a reader state and hook groups, behaviour unchanged
+- A srv that does not use the shared folder keeps its audit rows in its own file, and the Audit lists them
+- An agent's request to install a widget now appears as a card in that agent's own pane instead of a prompt in every window.
+- Split ToolchainView into a state object and named functions, with no change in behaviour
+- Split AgentRuntimeDropup into a state object, hook groups and view parts (527 lines to under 100), covered by recorded behavior snapshots
+- Split AgentQuestionPanel into a state object, hook groups and view parts (427-line function to under 100), covered by recorded behavior snapshots
+- Split AgentDecisionPanel into a state object, hook groups and view parts (364-line function to under 100), with a behavior test it did not have
+- Files pane: the filter button is a coloured toggle that also hides the box on an outside click (a filter with text stays applied and says so), and list columns resize by dragging their dividers (#23839)
+- Split PeekOverlay into a state object, hook groups and helpers (366-line function to under 100), covered by recorded behavior snapshots
+- A block the layout already holds is never placed a second time (opening it shows its pane), and a stored layout that holds one block twice shows it once (#23913)
+- A Microsoft Store update now reopens AgentMux after the Store closes it to install, says first that it will close, and says afterwards whether it updated or stayed on the old version
+- Add tests for the pane frame's header, colours, stats badge, drag preview, connection bar and modal
+- Dragging a pane over the layout keeps the drop ghost steady at pane borders and diagonals instead of flickering between candidates
+- Split the pane frame component into a state object and named functions, with no change in behaviour
+- The menu button in the title bar is now the AgentMux logo, in the theme's primary colour and sharp at every chrome zoom, instead of the three-bar hamburger icon; "hamburger" is now "AgentMux logo menu" across the code and scripts.
+- Add tests for which provider, container choice, names, runtime and catch-up request an agent launch decides
+- Split AgentViewModel.launchAgentDefinition into three stages, with no change in behaviour
+- Split BundleManagerBody into an actions group and list, detail and form parts (414-line function to under 100), covered by recorded behavior snapshots
+- Internal: srv's startup sequence (app_main) split into named bootstrap steps (no behaviour change)
+- Stopping an agent removes every registration file filed for it, and a registration whose process id another program reused no longer counts as running
+- Stop pane and Stop agents return at once with the pending close; the 30 s keep-running window runs in AgentMux, which sends one note only if the user keeps it or the close fails
+- Add tests for which block a document row draws for each kind of node and what it hands the block
+- Split McpManager into a state object, an actions group and view parts, pinned by a behavior test; no visible change.
+- Split DocumentNodeBody into a state object and message and inline row render functions
+- Split the bundle import preview panel into a state object, actions and view parts, pinned by a behavior test; no visible change.
+- Split the Working row into a state object, hook groups and view parts, pinned by a behavior test; no visible change.
+- Add tests for the JS context menu: row kinds, close and focus paths, placement and submenu hover wiring
+- Split AgentCreatePanel into a state object, hook groups and view parts, pinned by a behavior test; no visible change.
+- Split showJsContextMenu into a state object and functions for dismissal, row rendering, submenu wiring, placement and live update
+- Split ClaudeLoginPanel into a state object, a session runner and view parts, pinned by a behavior test; no visible change.
+- Add tests for the Whisper voice engine: availability, microphone refusals, both capture modes, silence cuts, posting and stopping
+- Split createWhisperVoiceSession into a state object and functions for posting, silence cuts, both capture modes, starting and stopping
+- The logo menu, the More menu, a widget's flyout and the title bar's right-click menu now scale with chrome zoom, like the buttons that open them.
+- Split the Editor's PdfViewer into a state object, load, actions, effects and view parts, with a behavior test pinning it (no change to what it does)
+- Characterisation tests for the Settings Recording section: engine rows, model picker, path checks, microphone picker and the mic test
+- Split RecordingSection into a mic-test state object, a device list and row components; no behaviour change
+- A Select given its options as children now shows its saved value from the first render, so Settings > Recording's Engine, Model and Input device no longer open on their first option.
+- Characterisation tests for the Jobs editor: loading, template list and approval, busy and failure states of Save and Dry run
+- Split JobEditor into a state object, handlers and components for the template list, form and actions; no behaviour change
+- Characterisation tests for Memory, Skills: list, details, edit form, import and check for changes, matrix and who gets a skill
+- Split SkillManager into a state object, module functions and one component per part; no behaviour change
+
 ## 0.60.15 — 2026-11-04
 
 - Browser wait takes until_state (load or idle) and settles the page when given nothing; snapshot: true after an action reads the settled page; click, fill, select and check say where the page is now

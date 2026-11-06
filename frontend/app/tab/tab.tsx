@@ -11,7 +11,6 @@ import { Button as UiButton } from "@/element/ui";
 import { fireAndForget } from "@/util/util";
 import clsx from "clsx";
 import { createEffect, createSignal, onCleanup, onMount, Show, on } from "solid-js";
-import { Portal } from "solid-js/web";
 import type { JSX } from "solid-js";
 import { PaletteSwatches } from "@/app/components/palette-swatches";
 import { flashElement, onActivityFlash } from "@/app/notification/activity-flash";
@@ -20,7 +19,7 @@ import { isLightThemeActive } from "../block/pane-identity";
 import { ObjectService } from "../store/services";
 import { makeORef, useMuxObjectValue } from "../store/mos";
 import { measureTabWidth } from "./tab-measure";
-import { Z_TRANSIENT } from "../zindex";
+import { AnchoredPopover } from "@/app/element/anchored-popover";
 import "./tab.scss";
 import { renameRequest } from "./tab-rename-request";
 
@@ -45,54 +44,36 @@ interface TabContextPanelProps {
     onClose: (e?: MouseEvent) => void;
 }
 
-const TabContextPanel = (props: TabContextPanelProps): JSX.Element => {
-    let panelRef!: HTMLDivElement;
-
-    onMount(() => {
-        const handleClickOutside = (e: MouseEvent) => {
-            if (panelRef && !panelRef.contains(e.target as Node)) {
-                props.onClose();
-            }
-        };
-        const handleKeyDown = (e: KeyboardEvent) => {
-            if (e.key === "Escape") props.onClose();
-        };
-        document.addEventListener("mousedown", handleClickOutside);
-        document.addEventListener("keydown", handleKeyDown);
-        onCleanup(() => {
-            document.removeEventListener("mousedown", handleClickOutside);
-            document.removeEventListener("keydown", handleKeyDown);
-        });
-    });
-
-    const style = (): JSX.CSSProperties => ({
-        position: "fixed",
-        top: `${props.anchor.bottom + 4}px`,
-        left: `${props.anchor.left}px`,
-        "z-index": Z_TRANSIENT,
-    });
-
-    return (
-        <Portal>
-            <div ref={panelRef!} class="tab-context-panel" style={style()} data-pane-overlay>
-                <PaletteSwatches
-                    label="Tab color"
-                    value={props.currentColor ?? null}
-                    noneLabel="No color"
-                    onSelect={(slot) => props.onColorSelect(slot ? slot.hex : null)}
-                />
-                <div class="tab-context-actions">
-                    <UiButton density="compact" icon="pen" class="tab-context-btn" onClick={() => { props.onRename(); props.onClose(); }}>
-                        Rename
-                    </UiButton>
-                    <UiButton density="compact" icon="xmark" class="tab-context-btn tab-context-btn-close" onClick={() => props.onClose()}>
-                        Close menu
-                    </UiButton>
-                </div>
-            </div>
-        </Portal>
-    );
-};
+const TabContextPanel = (props: TabContextPanelProps): JSX.Element => (
+    // AnchoredPopover places it under the tab (a fixed rect), follows chrome zoom, cuts the hole in any browser
+    // pane behind it, and dismisses it on an outside press or Esc.
+    <AnchoredPopover
+        anchor={props.anchor}
+        placement="bottom-start"
+        gutter={4}
+        fitHeight
+        hideUntilPlaced
+        overlayKeys
+        shellClass="anchored-popover--menu"
+        class="tab-context-panel"
+        onDismiss={() => props.onClose()}
+    >
+        <PaletteSwatches
+            label="Tab color"
+            value={props.currentColor ?? null}
+            noneLabel="No color"
+            onSelect={(slot) => props.onColorSelect(slot ? slot.hex : null)}
+        />
+        <div class="tab-context-actions">
+            <UiButton density="compact" icon="pen" class="tab-context-btn" onClick={() => { props.onRename(); props.onClose(); }}>
+                Rename
+            </UiButton>
+            <UiButton density="compact" icon="xmark" class="tab-context-btn tab-context-btn-close" onClick={() => props.onClose()}>
+                Close menu
+            </UiButton>
+        </div>
+    </AnchoredPopover>
+);
 
 interface TabProps {
     id: string;

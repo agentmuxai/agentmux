@@ -30,6 +30,10 @@ fn no_links() -> Ctx<'static> {
 }
 
 fn add(sum: &mut AuditTotals, e: &crate::backend::rpc_types::AuditEntry) {
+    // The sender's half of a message is the same row as the receiver's in the list: it is not counted twice.
+    if e.provenance.as_ref().is_some_and(|p| p.sent_only == Some(true)) {
+        return;
+    }
     sum.entries += 1;
     if let Some(cost) = &e.cost {
         sum.input += cost.input;

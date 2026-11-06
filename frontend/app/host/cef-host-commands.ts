@@ -265,8 +265,9 @@ export const cefApprovals: ApprovalHostApi = {
         await invokeCommand("widget_approval_decide", { id, hash, decision: approve ? "approve" : "cancel", signer: signer ?? "" });
     },
     appUpdate: (action, now) => invokeCommand("app_update_action", { action, now: now ?? false }),
-    storeUpdate: () => invokeCommand("store_update_install", {}),
+    storeUpdate: (version?: string) => invokeCommand("store_update_install", { version }),
     storeUpdateCheck: () => invokeCommand("store_update_check", {}),
+    storeUpdateCameBack: () => invokeCommand("store_update_came_back", {}),
     decideUpgrade: async (id, version, accept) => {
         await invokeCommand("upgrade_request_decide", { id, version, accept });
     },

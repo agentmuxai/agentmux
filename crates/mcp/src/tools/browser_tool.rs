@@ -140,7 +140,7 @@ async fn close(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&req).send().await.map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
     let status = resp.status();
     if status.as_u16() == 202 {
-        // The pane's user has 30 s to keep it; wait for their answer.
+        // The pane's user has 10 s to keep it; wait for their answer.
         let body: Value = resp.json().await.unwrap_or(Value::Null);
         let now = await_shutdown(client, local_url, auth_key, body["request_id"].as_str().unwrap_or_default(), true).await;
         return close_pane_outcome(pane, &now);

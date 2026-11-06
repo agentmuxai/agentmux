@@ -682,7 +682,7 @@ pub fn registered_in_another_channel(shared_dir: &std::path::Path, uid: &str, ch
     !uid.is_empty()
         && crate::backend::reactive::registry::list_all_shared(shared_dir)
             .iter()
-            .any(|e| e.uid == uid && e.channel != channel && crate::backend::reactive::registry::pid_alive(e.pid))
+            .any(|e| e.uid == uid && e.channel != channel && e.srv_alive())
 }
 
 /// The job's next fire time after `slot_ms`: when a pending fire for that

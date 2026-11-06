@@ -1,0 +1,370 @@
+== not installed: install step
+<div>
+  <section class="agent-create-panel" data-testid="agent-create-panel" aria-label="New Codex agent">
+    <header class="agent-create-panel-header">
+      <h3 class="agent-create-panel-title">
+        "New"
+        "Codex"
+        "agent"
+      <ol class="agent-create-steps" data-testid="agent-create-steps">
+        <li class="agent-create-step agent-create-step--current" aria-current="step">
+          "Install"
+        <li class="agent-create-step">
+          "Create"
+    <div class="agent-create-install" data-testid="agent-create-npm-install">
+      <p class="agent-create-panel-text">
+        "Codex"
+        "isn't installed yet. AgentMux installs its own copy, kept apart from any you installed yourself. It needs an internet connection, and keeps going if you close this."
+      <div class="install-view">
+        <ol class="install-steps" aria-label="Install steps">
+          <li class="install-step" data-status="pending">
+            <span class="install-step-icon" role="img" aria-label="Not started">
+              "○"
+            <span class="install-step-label">
+              "Check requirements"
+          <li class="install-step" data-status="pending">
+            <span class="install-step-icon" role="img" aria-label="Not started">
+              "○"
+            <span class="install-step-label">
+              "Download packages"
+          <li class="install-step" data-status="pending">
+            <span class="install-step-icon" role="img" aria-label="Not started">
+              "○"
+            <span class="install-step-label">
+              "Set up files"
+          <li class="install-step" data-status="pending">
+            <span class="install-step-icon" role="img" aria-label="Not started">
+              "○"
+            <span class="install-step-label">
+              "Run setup scripts"
+          <li class="install-step" data-status="pending">
+            <span class="install-step-icon" role="img" aria-label="Not started">
+              "○"
+            <span class="install-step-label">
+              "Check Codex is installed"
+        <details class="install-details">
+          <summary>
+            "Details"
+          <div class="install-details-toolbar">
+            <button type="button" class="ui-button ui-tone-quiet ui-density-compact" disabled="">
+              "Copy all"
+          <div class="install-log" role="log" aria-label="Install output">
+            <div class="install-log-spacer">
+              <div class="install-log-window">
+      <div class="agent-create-actions">
+        <button type="button" class="ui-button ui-tone-neutral">
+          "Cancel"
+        <button data-testid="agent-create-install-start" type="button" class="ui-button ui-tone-accent">
+          "Install now"
+  call probePrereqs [false]
+  call ListIdentityAccounts [{}]
+== running
+<div>
+  <section class="agent-create-panel" data-testid="agent-create-panel" aria-label="New Codex agent">
+    <header class="agent-create-panel-header">
+      <h3 class="agent-create-panel-title">
+        "New"
+        "Codex"
+        "agent"
+      <ol class="agent-create-steps" data-testid="agent-create-steps">
+        <li class="agent-create-step agent-create-step--current" aria-current="step">
+          "Install"
+        <li class="agent-create-step">
+          "Create"
+    <div class="agent-create-install" data-testid="agent-create-npm-install">
+      <p class="agent-create-panel-text">
+        "Codex"
+        "isn't installed yet. AgentMux installs its own copy, kept apart from any you installed yourself. It needs an internet connection, and keeps going if you close this."
+      <div class="install-view">
+        <ol class="install-steps" aria-label="Install steps">
+          <li class="install-step" data-status="active" aria-current="step">
+            <span class="install-step-icon" role="img" aria-label="In progress">
+              "◐"
+            <span class="install-step-label">
+              "Check requirements"
+          <li class="install-step" data-status="pending">
+            <span class="install-step-icon" role="img" aria-label="Not started">
+              "○"
+            <span class="install-step-label">
+              "Download packages"
+          <li class="install-step" data-status="pending">
+            <span class="install-step-icon" role="img" aria-label="Not started">
+              "○"
+            <span class="install-step-label">
+              "Set up files"
+          <li class="install-step" data-status="pending">
+            <span class="install-step-icon" role="img" aria-label="Not started">
+              "○"
+            <span class="install-step-label">
+              "Run setup scripts"
+          <li class="install-step" data-status="pending">
+            <span class="install-step-icon" role="img" aria-label="Not started">
+              "○"
+            <span class="install-step-label">
+              "Check Codex is installed"
+        <details class="install-details">
+          <summary>
+            "Details"
+          <div class="install-details-toolbar">
+            <button type="button" class="ui-button ui-tone-quiet ui-density-compact" disabled="">
+              "Copy all"
+          <div class="install-log" role="log" aria-label="Install output">
+            <div class="install-log-spacer">
+              <div class="install-log-window">
+      <div class="agent-create-actions">
+        <button data-testid="agent-create-install-cancel" type="button" class="ui-button ui-tone-neutral">
+          "Cancel install"
+  call onClose []
+  call InstallStart [{"providerId":"codex"}]
+== downloading
+<div>
+  <section class="agent-create-panel" data-testid="agent-create-panel" aria-label="New Codex agent">
+    <header class="agent-create-panel-header">
+      <h3 class="agent-create-panel-title">
+        "New"
+        "Codex"
+        "agent"
+      <ol class="agent-create-steps" data-testid="agent-create-steps">
+        <li class="agent-create-step agent-create-step--current" aria-current="step">
+          "Install"
+        <li class="agent-create-step">
+          "Create"
+    <div class="agent-create-install" data-testid="agent-create-npm-install">
+      <p class="agent-create-panel-text">
+        "Codex"
+        "isn't installed yet. AgentMux installs its own copy, kept apart from any you installed yourself. It needs an internet connection, and keeps going if you close this."
+      <div class="install-view">
+        <ol class="install-steps" aria-label="Install steps">
+          <li class="install-step" data-status="done">
+            <span class="install-step-icon" role="img" aria-label="Done">
+              "✓"
+            <span class="install-step-label">
+              "Check requirements"
+          <li class="install-step" data-status="active" aria-current="step">
+            <span class="install-step-icon" role="img" aria-label="In progress">
+              "◐"
+            <span class="install-step-label">
+              "Download packages"
+            <span class="install-step-hint">
+              "1 fetched"
+            <span class="install-step-subline">
+              "Downloading chalk"
+          <li class="install-step" data-status="pending">
+            <span class="install-step-icon" role="img" aria-label="Not started">
+              "○"
+            <span class="install-step-label">
+              "Set up files"
+          <li class="install-step" data-status="pending">
+            <span class="install-step-icon" role="img" aria-label="Not started">
+              "○"
+            <span class="install-step-label">
+              "Run setup scripts"
+          <li class="install-step" data-status="pending">
+            <span class="install-step-icon" role="img" aria-label="Not started">
+              "○"
+            <span class="install-step-label">
+              "Check Codex is installed"
+        <details class="install-details">
+          <summary>
+            "Details"
+          <div class="install-details-toolbar">
+            <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
+              "Copy all"
+          <div class="install-log" role="log" aria-label="Install output">
+            <div class="install-log-spacer">
+              <div class="install-log-window">
+                <div class="install-log-line" data-tone="normal">
+                  "npm http fetch GET 200 https://registry.npmjs.org/chalk/-/chalk-4.1.2.tgz 12ms"
+      <div class="agent-create-actions">
+        <button data-testid="agent-create-install-cancel" type="button" class="ui-button ui-tone-neutral">
+          "Cancel install"
+== failed
+<div>
+  <section class="agent-create-panel" data-testid="agent-create-panel" aria-label="New Codex agent">
+    <header class="agent-create-panel-header">
+      <h3 class="agent-create-panel-title">
+        "New"
+        "Codex"
+        "agent"
+      <ol class="agent-create-steps" data-testid="agent-create-steps">
+        <li class="agent-create-step agent-create-step--current" aria-current="step">
+          "Install"
+        <li class="agent-create-step">
+          "Create"
+    <div class="agent-create-install" data-testid="agent-create-npm-install">
+      <p class="agent-create-panel-text">
+        "Codex"
+        "isn't installed yet. AgentMux installs its own copy, kept apart from any you installed yourself. It needs an internet connection, and keeps going if you close this."
+      <div class="install-view">
+        <ol class="install-steps" aria-label="Install steps">
+          <li class="install-step" data-status="done">
+            <span class="install-step-icon" role="img" aria-label="Done">
+              "✓"
+            <span class="install-step-label">
+              "Check requirements"
+          <li class="install-step" data-status="failed">
+            <span class="install-step-icon" role="img" aria-label="Failed">
+              "✗"
+            <span class="install-step-label">
+              "Download packages"
+            <span class="install-step-hint">
+              "1 fetched"
+            <span class="install-step-subline">
+              "Something went wrong while running "Download packages"."
+          <li class="install-step" data-status="pending">
+            <span class="install-step-icon" role="img" aria-label="Not started">
+              "○"
+            <span class="install-step-label">
+              "Set up files"
+          <li class="install-step" data-status="pending">
+            <span class="install-step-icon" role="img" aria-label="Not started">
+              "○"
+            <span class="install-step-label">
+              "Run setup scripts"
+          <li class="install-step" data-status="pending">
+            <span class="install-step-icon" role="img" aria-label="Not started">
+              "○"
+            <span class="install-step-label">
+              "Check Codex is installed"
+        <details class="install-details" open="">
+          <summary>
+            "Details"
+          <div class="install-details-toolbar">
+            <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
+              "Copy all"
+          <div class="install-log" role="log" aria-label="Install output">
+            <div class="install-log-spacer">
+              <div class="install-log-window">
+                <div class="install-log-line" data-tone="normal">
+                  "npm http fetch GET 200 https://registry.npmjs.org/chalk/-/chalk-4.1.2.tgz 12ms"
+                <div class="install-log-line" data-tone="error">
+                  "Install failed: npm exited Some(1)"
+      <div class="agent-create-actions">
+        <button type="button" class="ui-button ui-tone-neutral">
+          "Close"
+        <button type="button" class="ui-button ui-tone-accent">
+          "Retry"
+  call InstallCancel [{"sessionId":"sess-1"}]
+== retrying
+<div>
+  <section class="agent-create-panel" data-testid="agent-create-panel" aria-label="New Codex agent">
+    <header class="agent-create-panel-header">
+      <h3 class="agent-create-panel-title">
+        "New"
+        "Codex"
+        "agent"
+      <ol class="agent-create-steps" data-testid="agent-create-steps">
+        <li class="agent-create-step agent-create-step--current" aria-current="step">
+          "Install"
+        <li class="agent-create-step">
+          "Create"
+    <div class="agent-create-install" data-testid="agent-create-npm-install">
+      <p class="agent-create-panel-text">
+        "Codex"
+        "isn't installed yet. AgentMux installs its own copy, kept apart from any you installed yourself. It needs an internet connection, and keeps going if you close this."
+      <div class="install-view">
+        <ol class="install-steps" aria-label="Install steps">
+          <li class="install-step" data-status="active" aria-current="step">
+            <span class="install-step-icon" role="img" aria-label="In progress">
+              "◐"
+            <span class="install-step-label">
+              "Check requirements"
+          <li class="install-step" data-status="pending">
+            <span class="install-step-icon" role="img" aria-label="Not started">
+              "○"
+            <span class="install-step-label">
+              "Download packages"
+          <li class="install-step" data-status="pending">
+            <span class="install-step-icon" role="img" aria-label="Not started">
+              "○"
+            <span class="install-step-label">
+              "Set up files"
+          <li class="install-step" data-status="pending">
+            <span class="install-step-icon" role="img" aria-label="Not started">
+              "○"
+            <span class="install-step-label">
+              "Run setup scripts"
+          <li class="install-step" data-status="pending">
+            <span class="install-step-icon" role="img" aria-label="Not started">
+              "○"
+            <span class="install-step-label">
+              "Check Codex is installed"
+        <details class="install-details" open="">
+          <summary>
+            "Details"
+          <div class="install-details-toolbar">
+            <button type="button" class="ui-button ui-tone-quiet ui-density-compact" disabled="">
+              "Copy all"
+          <div class="install-log" role="log" aria-label="Install output">
+            <div class="install-log-spacer">
+              <div class="install-log-window">
+      <div class="agent-create-actions">
+        <button data-testid="agent-create-install-cancel" type="button" class="ui-button ui-tone-neutral">
+          "Cancel install"
+  call onClose []
+  call InstallStart [{"providerId":"codex"}]
+== done: the re-check has not caught up
+<div>
+  <section class="agent-create-panel" data-testid="agent-create-panel" aria-label="New Codex agent">
+    <header class="agent-create-panel-header">
+      <h3 class="agent-create-panel-title">
+        "New"
+        "Codex"
+        "agent"
+      <ol class="agent-create-steps" data-testid="agent-create-steps">
+        <li class="agent-create-step agent-create-step--current" aria-current="step">
+          "Install"
+        <li class="agent-create-step">
+          "Create"
+    <div class="agent-create-install" data-testid="agent-create-npm-install">
+      <p class="agent-create-panel-text">
+        "Codex"
+        "isn't installed yet. AgentMux installs its own copy, kept apart from any you installed yourself. It needs an internet connection, and keeps going if you close this."
+      <div class="install-view">
+        <ol class="install-steps" aria-label="Install steps">
+          <li class="install-step" data-status="done">
+            <span class="install-step-icon" role="img" aria-label="Done">
+              "✓"
+            <span class="install-step-label">
+              "Check requirements"
+          <li class="install-step" data-status="done">
+            <span class="install-step-icon" role="img" aria-label="Done">
+              "✓"
+            <span class="install-step-label">
+              "Download packages"
+            <span class="install-step-hint">
+              "1 packages"
+          <li class="install-step" data-status="done">
+            <span class="install-step-icon" role="img" aria-label="Done">
+              "✓"
+            <span class="install-step-label">
+              "Set up files"
+          <li class="install-step" data-status="skipped">
+            <span class="install-step-icon" role="img" aria-label="Skipped">
+              "–"
+            <span class="install-step-label">
+              "Run setup scripts"
+            <span class="install-step-hint">
+              "none needed"
+          <li class="install-step" data-status="done">
+            <span class="install-step-icon" role="img" aria-label="Done">
+              "✓"
+            <span class="install-step-label">
+              "Check Codex is installed"
+        <details class="install-details" open="">
+          <summary>
+            "Details"
+          <div class="install-details-toolbar">
+            <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
+              "Copy all"
+          <div class="install-log" role="log" aria-label="Install output">
+            <div class="install-log-spacer">
+              <div class="install-log-window">
+                <div class="install-log-line" data-tone="normal">
+                  "added 1 package in 1s"
+      <div class="agent-create-actions">
+        <button type="button" class="ui-button ui-tone-neutral">
+          "Close"
+        <button data-testid="agent-create-install-continue" type="button" class="ui-button ui-tone-accent">
+          "Continue"
+  call recheckInstalled []

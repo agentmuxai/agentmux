@@ -12,10 +12,11 @@
  */
 
 import { createEffect, createMemo, on, onCleanup, Show, untrack, type JSX } from "solid-js";
+import { createConfirm, type PaneConfirm } from "@/app/element/create-confirm";
 import { Markdown } from "@/app/element/markdown";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import type { Bundle, GlobalMemoryVersionMeta } from "@/app/store/rpc-api";
-import { handleMemoryEditorKeyDown, requestCancel } from "@/app/view/memory-editor/editor-keys";
+import { askDiscard, handleMemoryEditorKeyDown, requestCancel } from "@/app/view/memory-editor/editor-keys";
 import { MemoryConflictBanner } from "@/app/view/memory-editor/MemoryConflictBanner";
 import { MemoryContent } from "@/app/view/memory-editor/MemoryContent";
 import { MemoryHistory } from "@/app/view/memory-editor/MemoryHistory";
@@ -42,7 +43,7 @@ const REACH_OPTIONS: { value: GlobalMemoryReach; label: string; title: string }[
 const draftText = (v: GlobalMemoryDraft) => `# ${v.name}\n\n${v.instructions}`;
 
 /** Name field + editor bar shared by an existing entry and a new one. */
-function EditorBar(props: { model: GlobalBundleViewModel; isNew: boolean }): JSX.Element {
+function EditorBar(props: { model: GlobalBundleViewModel; isNew: boolean; confirm: PaneConfirm }): JSX.Element {
     const draft = props.model.draft;
     const value = () => draft.draftAtom() ?? { name: "", instructions: "" };
     return (
@@ -66,6 +67,7 @@ function EditorBar(props: { model: GlobalBundleViewModel; isNew: boolean }): JSX
                         requestCancel({
                             isDirty: draft.dirtyAtom,
                             onCancel: () => (props.isNew ? props.model.close() : draft.cancel()),
+                            confirm: askDiscard(props.confirm),
                         })
                     }
                     title="Cancel (Esc)"
@@ -96,7 +98,7 @@ function EditorBar(props: { model: GlobalBundleViewModel; isNew: boolean }): JSX
  *  history selection). If the entry is deleted while open, the last-known
  *  copy stays on screen: a dirty draft gets the "deleted" banner instead of
  *  vanishing with the view. */
-function EntryView(props: { model: GlobalBundleViewModel; id: string }): JSX.Element {
+function EntryView(props: { model: GlobalBundleViewModel; id: string; confirm: PaneConfirm }): JSX.Element {
     const model = props.model;
     const draft = model.draft;
     const id = props.id;
@@ -167,8 +169,8 @@ function EntryView(props: { model: GlobalBundleViewModel; id: string }): JSX.Ele
                             tone="danger"
                             class="memory-editor-btn is-danger"
                             title="Remove this memory from Global Memory"
-                            onClick={() => {
-                                if (!window.confirm(`Remove "${entry().name}" from Global Memory?`)) return;
+                            onClick={async () => {
+                                if (!(await props.confirm.ask({ title: `Remove "${entry().name}" from Global Memory?`, confirmLabel: "Remove" }))) return;
                                 void (isSystem() ? model.removeSystem(id) : model.remove(id));
                             }}
                         >
@@ -177,7 +179,7 @@ function EntryView(props: { model: GlobalBundleViewModel; id: string }): JSX.Ele
                     </div>
                 }
             >
-                <EditorBar model={model} isNew={false} />
+                <EditorBar model={model} isNew={false} confirm={props.confirm} />
             </Show>
             <Show when={draft.errorAtom()}>
                 <div class="memory-editor-error">{draft.errorAtom()}</div>
@@ -212,24 +214,25 @@ function EntryView(props: { model: GlobalBundleViewModel; id: string }): JSX.Ele
         />
     );
 
-    return <PinnedEditorLayout surface={SURFACE} top={top} bottom={bottom} onKeyDown={(e) => keys(e, model)} />;
+    return <PinnedEditorLayout surface={SURFACE} top={top} bottom={bottom} onKeyDown={(e) => keys(e, model, props.confirm)} />;
 }
 
-function keys(e: KeyboardEvent, model: GlobalBundleViewModel) {
+function keys(e: KeyboardEvent, model: GlobalBundleViewModel, confirm: PaneConfirm) {
     const draft = model.draft;
     handleMemoryEditorKeyDown(e, {
         isEditing: draft.editingAtom,
         isDirty: draft.dirtyAtom,
         onSave: () => void model.save(),
         onCancel: () => (model.viewAtom()?.kind === "new" ? model.close() : draft.cancel()),
+        confirm: askDiscard(confirm),
     });
 }
 
-function NewEntryView(props: { model: GlobalBundleViewModel }): JSX.Element {
+function NewEntryView(props: { model: GlobalBundleViewModel; confirm: PaneConfirm }): JSX.Element {
     const draft = props.model.draft;
     const top = (
         <>
-            <EditorBar model={props.model} isNew={true} />
+            <EditorBar model={props.model} isNew={true} confirm={props.confirm} />
             <Show when={draft.errorAtom()}>
                 <div class="memory-editor-error">{draft.errorAtom()}</div>
             </Show>
@@ -246,7 +249,7 @@ function NewEntryView(props: { model: GlobalBundleViewModel }): JSX.Element {
             placeholder="Markdown injected into every agent's startup instructions file under a # [Workspace] heading."
         />
     );
-    return <PinnedEditorLayout surface={SURFACE} top={top} bottom={bottom} onKeyDown={(e) => keys(e, props.model)} />;
+    return <PinnedEditorLayout surface={SURFACE} top={top} bottom={bottom} onKeyDown={(e) => keys(e, props.model, props.confirm)} />;
 }
 
 /** Read-only reference display of the CLAUDE.md in the isolated config dir a
@@ -303,6 +306,7 @@ function PreviewView(props: { model: GlobalBundleViewModel }): JSX.Element {
 }
 
 export function GlobalMemoryFullView(props: { model: GlobalBundleViewModel }): JSX.Element {
+    const confirm = createConfirm();
     // Keyed on kind AND entry id, so opening a different entry remounts —
     // but a list refresh (same view) never does.
     const viewKey = () => {
@@ -311,26 +315,29 @@ export function GlobalMemoryFullView(props: { model: GlobalBundleViewModel }): J
         return v.kind === "entry" ? `entry:${v.id}` : v.kind;
     };
     return (
-        <Show when={viewKey()} keyed>
-            {(key) => {
-                switch (key) {
-                    case "new":
-                        return <NewEntryView model={props.model} />;
-                    case "claude-config":
-                        return <ClaudeConfigView model={props.model} />;
-                    case "preview":
-                        return <PreviewView model={props.model} />;
-                    default:
-                        return (
-                            <Show
-                                when={untrack(props.model.openEntryAtom)}
-                                fallback={<p class="memory-content-status">This memory no longer exists.</p>}
-                            >
-                                <EntryView model={props.model} id={key.slice("entry:".length)} />
-                            </Show>
-                        );
-                }
-            }}
-        </Show>
+        <>
+            <confirm.Dialog />
+            <Show when={viewKey()} keyed>
+                {(key) => {
+                    switch (key) {
+                        case "new":
+                            return <NewEntryView model={props.model} confirm={confirm} />;
+                        case "claude-config":
+                            return <ClaudeConfigView model={props.model} />;
+                        case "preview":
+                            return <PreviewView model={props.model} />;
+                        default:
+                            return (
+                                <Show
+                                    when={untrack(props.model.openEntryAtom)}
+                                    fallback={<p class="memory-content-status">This memory no longer exists.</p>}
+                                >
+                                    <EntryView model={props.model} id={key.slice("entry:".length)} confirm={confirm} />
+                                </Show>
+                            );
+                    }
+                }}
+            </Show>
+        </>
     );
 }

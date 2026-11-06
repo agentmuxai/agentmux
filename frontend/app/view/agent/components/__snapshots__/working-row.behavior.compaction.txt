@@ -1,0 +1,136 @@
+== +0ms compacting, default estimate (timers: 6)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "|"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+  <span class="agent-working-row-operation">
+    <div class="activity-animation-tip">
+      <span aria-hidden="true" class="activity-animation" data-bucket="compact">
+        "< >"
+    <span>
+      "Compacting 0s"
+  <div class="agent-working-row-right">
+    "0s / ~1m 15s"
+  <span class="agent-working-row-progress" role="progressbar" aria-label="Estimated compaction progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-valuetext="About 0 percent, estimated">
+    <span class="agent-working-row-progress-fill" style="width: 0%;">
+tooltip: ["Estimate: a compaction usually takes about a minute. Claude Code doesn't report compaction progress."]
+== +21000ms 20s in (timers: 4)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "\"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+      "Compacting…"
+  <span class="agent-working-row-operation">
+    <div class="activity-animation-tip">
+      <span aria-hidden="true" class="activity-animation" data-bucket="compact">
+        "<#>"
+    <span>
+      "Compacting 21s"
+  <div class="agent-working-row-right">
+    "21s / ~1m 15s"
+  <span class="agent-working-row-progress" role="progressbar" aria-label="Estimated compaction progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="28" aria-valuetext="About 28 percent, estimated">
+    <span class="agent-working-row-progress-fill" style="width: 28.000000000000004%;">
+== +141000ms over the estimate (timers: 4)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "\"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+      "Compacting…"
+  <span class="agent-working-row-operation">
+    <div class="activity-animation-tip">
+      <span aria-hidden="true" class="activity-animation" data-bucket="compact">
+        "<#>"
+    <span>
+      "Compacting 2m 21s"
+  <div class="agent-working-row-right">
+    "2m 21s · longer than usual"
+  <span class="agent-working-row-progress is-over" role="progressbar" aria-label="Estimated compaction progress" aria-valuemin="0" aria-valuemax="100" aria-valuetext="Taking longer than the estimate">
+    <span class="agent-working-row-progress-fill" style="width: 95%;">
+== +142000ms compaction over (timers: 3)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "\"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+      "Ship it"
+  <div class="agent-working-row-right">
+    "2m 22s"
+== +142000ms compacting, estimate from history (timers: 7)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "\"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+  <span class="agent-working-row-operation">
+    <div class="activity-animation-tip">
+      <span aria-hidden="true" class="activity-animation" data-bucket="compact">
+        "<#>"
+    <span>
+      "Compacting 0s"
+  <div class="agent-working-row-right">
+    "0s / ~32s"
+  <span class="agent-working-row-progress" role="progressbar" aria-label="Estimated compaction progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-valuetext="About 0 percent, estimated">
+    <span class="agent-working-row-progress-fill" style="width: 0%;">
+tooltip: ["Estimate from your earlier compactions. Claude Code doesn't report compaction progress."]
+== +158000ms halfway (timers: 4)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "|"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+      "Compacting…"
+  <span class="agent-working-row-operation">
+    <div class="activity-animation-tip">
+      <span aria-hidden="true" class="activity-animation" data-bucket="compact">
+        "<:>"
+    <span>
+      "Compacting 16s"
+  <div class="agent-working-row-right">
+    "16s / ~32s"
+  <span class="agent-working-row-progress" role="progressbar" aria-label="Estimated compaction progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50" aria-valuetext="About 50 percent, estimated">
+    <span class="agent-working-row-progress-fill" style="width: 50%;">
+== +158000ms reconnecting takes over: no bar (timers: 5)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "|"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+  <span class="agent-working-row-operation">
+    <div class="activity-animation-tip">
+      <span aria-hidden="true" class="activity-animation" data-bucket="compact">
+        "<:>"
+    <span>
+      "Compacting 16s"
+  <div class="agent-working-row-right">
+    "4s"
+== +163000ms reconnecting alone, not loading (timers: 2)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "-"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+      "Reconnecting…"
+  <div class="agent-working-row-right">
+    "9s"
+== +164000ms nothing (timers: 1)
+-
+== +166000ms compacting while not loading (timers: 4)
+<span class="agent-working-row agent-working-row--loading">
+  <span aria-hidden="true" class="agent-spinner-ascii">
+    "|"
+  <span class="agent-working-row-left">
+    <span class="agent-working-row-primary">
+      "Compacting…"
+  <span class="agent-working-row-operation">
+    <div class="activity-animation-tip">
+      <span aria-hidden="true" class="activity-animation" data-bucket="compact">
+        "< >"
+    <span>
+      "Compacting 2s"
+  <div class="agent-working-row-right">
+    "2s / ~40s"
+  <span class="agent-working-row-progress" role="progressbar" aria-label="Estimated compaction progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="5" aria-valuetext="About 5 percent, estimated">
+    <span class="agent-working-row-progress-fill" style="width: 5%;">

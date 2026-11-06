@@ -151,7 +151,7 @@ function AppSettingsUpdater() {
     // The window's native opacity (whole-window alpha). Only this window's
     // resolved value moves it, so a settings change can't override a
     // window's own opacity, and a reload restores it. Through the same store
-    // as the status bar slider and the hamburger, so all three agree. It
+    // as the status bar slider and the AgentMux logo, so all three agree. It
     // replaces the old setWindowTransparency call, which applied the
     // channel's opacity to every window. Waits for the host label, which
     // the store addresses windows by.

@@ -22,7 +22,8 @@ fn register_pane_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 crate::server::browser_identity::check_new_tab(&state, meta)?;
                 // An agent browses as a named profile only if the user lets it.
                 if !ctx.agent_id.is_empty() {
-                    crate::server::browser_identity::check_agent_may_use(meta)?;
+                    let owner = crate::server::browser_identity::profile_owner(&state, &ctx.agent_id);
+                    crate::server::browser_identity::check_agent_may_use(meta, &owner)?;
                 }
             }
             open_pane(&state, cmd).await
@@ -232,6 +233,16 @@ pub(super) async fn open_pane_floating(
     })
 }
 
+/// The title the opener gave the pane. A browser pane also records the address it was opened at, so it keeps
+/// the title only while it stays on that site (frontend/app/view/browser/given-title.ts).
+fn add_title(meta: &mut MetaMapType, cmd: &CommandPaneOpenData) {
+    let Some(title) = cmd.title.as_deref().filter(|s| !s.is_empty()) else { return };
+    meta.insert("frame:title".to_string(), json!(title));
+    if let Some(url) = cmd.url.as_deref().filter(|s| !s.is_empty()).filter(|_| cmd.view == "browser") {
+        meta.insert("frame:title_url".to_string(), json!(url));
+    }
+}
+
 /// Build the metadata map for a pane.open request, validating required args.
 pub(crate) fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, String> {
     let mut meta = MetaMapType::new();
@@ -318,9 +329,7 @@ pub(crate) fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, 
         }
     }
 
-    if let Some(title) = cmd.title.as_deref().filter(|s| !s.is_empty()) {
-        meta.insert("frame:title".to_string(), json!(title));
-    }
+    add_title(&mut meta, cmd);
 
     // The connection the pane works on, for the views that have one; media
     // reads this computer's files only.
@@ -541,7 +550,7 @@ pub(super) async fn maybe_reuse_editor_pane(
 
 /// Translate `split_direction` + `split_reference_block_id` into a placement:
 /// a split of the reference block's pane, or the first free slot when either
-/// is missing. A direction ending in `:half` (`up:half`) gives the new pane exactly half of the
+/// is missing. A direction ending in `:half` (`down:half`) gives the new pane exactly half of the
 /// reference pane's space; without it the new pane takes the layout's default size.
 pub(crate) fn resolve_placement(
     direction: Option<&str>,
@@ -805,18 +814,24 @@ pub(crate) async fn close_pane_as(
         return (StatusCode::CONFLICT, json!({ "error": err }));
     }
 
-    // Its user has 30 s to keep it (§6.5), whoever's pane it is. A pane the
-    // caller is in is no exception: closing it would end the caller without
-    // QuitSelf's check, and any other agent stacked in it with no window.
+    // Its user has 30 s to keep it (§6.5; 10 s for a browser pane, which holds no conversation), whoever's pane it
+    // is. A pane the caller is in is no exception: closing it would end the caller without QuitSelf's check, and
+    // any other agent stacked in it with no window.
     let reason = reason.unwrap_or_default().to_string();
-    let pending = crate::sagas::pending_shutdown::request(
+    let window = crate::sagas::pending_shutdown::close_window(state, &pane_block_ids);
+    let pending = crate::sagas::pending_shutdown::request_within(
         state,
         &target_block_id,
         &caller_agent_id,
         via,
         &reason,
         crate::sagas::pending_shutdown::Action::ClosePane { block_ids: pane_block_ids },
+        window,
     );
+    // `Stop pane` doesn't wait for the window: it is told by a note if the user keeps the pane.
+    if via == "ClosePane" {
+        crate::sagas::pending_shutdown::tell_when_settled(state, &pending.request_id, &caller_agent_id, via);
+    }
     state.reactive_handler.log_fleet_action_audit(
         Some(&caller_agent_id),
         &target_agent,
@@ -850,6 +865,10 @@ mod close_pane_tests {
     /// `sagas::delete_block::tests::seed` — duplicated rather than shared
     /// across modules (both are small, private `#[cfg(test)]` helpers).
     async fn seed(state: &AppState) -> (String, String) {
+        seed_with(state, serde_json::Value::Null).await
+    }
+
+    async fn seed_with(state: &AppState, meta: serde_json::Value) -> (String, String) {
         let ws_evs = dispatch_apply(state, Command::CreateWorkspace { name: "w".into() }).await;
         let ws_id = ws_evs
             .iter()
@@ -872,7 +891,7 @@ mod close_pane_tests {
             .unwrap();
         let blk_evs = dispatch_apply(
             state,
-            Command::CreateBlock { tab_id: tab_id.clone(), meta: serde_json::Value::Null },
+            Command::CreateBlock { tab_id: tab_id.clone(), meta },
         )
         .await;
         let block_id = blk_evs
@@ -991,6 +1010,28 @@ mod close_pane_tests {
         assert!(entry.success);
         let reason = entry.reason.as_deref().unwrap_or_default();
         assert!(reason.starts_with("shut_down") && reason.contains("verifying the fix"), "{reason}");
+    }
+
+    /// A browser pane has no conversation to lose: its user has 10 s to keep it, an agent's or any other pane 30 s.
+    #[tokio::test]
+    async fn a_browser_pane_close_gives_its_user_ten_seconds() {
+        let state = test_state();
+        let (caller_tab, caller_block) = seed(&state).await;
+        let caller_id = format!("close-browser-caller-{}", uuid::Uuid::new_v4());
+        state.reactive_handler.register_agent(&caller_id, &caller_block, Some(&caller_tab)).unwrap();
+        let (_, browser) = seed_with(&state, json!({ "view": "browser" })).await;
+        let resp = handle_close_pane(
+            axum::extract::State(state.clone()),
+            None,
+            axum::Json(ClosePaneRequest { auth: sign_auth(&state, &caller_id), block_id: Some(browser.clone()), reason: None }),
+        )
+        .await
+        .into_response();
+        assert_eq!(resp.status(), axum::http::StatusCode::ACCEPTED);
+        let body = body_json(resp).await;
+        assert!((9_000..=10_000).contains(&body["wait_at_least_ms"].as_u64().unwrap()), "{body}");
+        let request_id = body["request_id"].as_str().unwrap().to_string();
+        assert_eq!(crate::sagas::pending_shutdown::keep(&state, &browser, &request_id), "kept_by_user");
     }
 
     #[tokio::test]

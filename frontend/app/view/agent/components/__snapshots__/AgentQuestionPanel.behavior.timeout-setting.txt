@@ -1,0 +1,49 @@
+startQuestionTimer(local, 5000ms, publish=false)
+-- 5s configured
+  header: The agent is asking | Auto-selects recommended in 5s [agent-question-panel-countdown agent-question-panel-countdown--critical]
+  Q: ColourPick a colour
+    - Red {radio,-} name=amux-q-q1-0
+    - Blue (Recommended) / Calmer {radio,-,recommended} name=amux-q-q1-0
+    other: ""
+  buttons: Cancel | Accept Recommended | Submit answer (disabled)
+onAnswer {"tool_use_id":"q1","answers":[{"header":"Colour","selected":["Blue (Recommended)"]}],"answers_map":{"Pick a colour":"Blue (Recommended)"},"answer_text":"Colour: Blue (Recommended)","autoFilledCount":1,"autoTimeoutMs":5000}
+startQuestionTimer(local, 30000ms, publish=false)
+setting = 0
+-- a new question
+  header: The agent is asking | Auto-selects recommended in 30s [agent-question-panel-countdown]
+  Q: ColourPick a colour
+    - Red {radio,-} name=amux-q-q-0-0
+    - Blue (Recommended) / Calmer {radio,-,recommended} name=amux-q-q-0-0
+    other: ""
+  buttons: Cancel | Accept Recommended | Submit answer (disabled)
+onAnswer {"tool_use_id":"q-0","answers":[{"header":"Colour","selected":["Blue (Recommended)"]}],"answers_map":{"Pick a colour":"Blue (Recommended)"},"answer_text":"Colour: Blue (Recommended)","autoFilledCount":1,"autoTimeoutMs":30000}
+startQuestionTimer(local, 30000ms, publish=false)
+setting = -3
+-- a new question
+  header: The agent is asking | Auto-selects recommended in 30s [agent-question-panel-countdown]
+  Q: ColourPick a colour
+    - Red {radio,-} name=amux-q-q--3-0
+    - Blue (Recommended) / Calmer {radio,-,recommended} name=amux-q-q--3-0
+    other: ""
+  buttons: Cancel | Accept Recommended | Submit answer (disabled)
+onAnswer {"tool_use_id":"q--3","answers":[{"header":"Colour","selected":["Blue (Recommended)"]}],"answers_map":{"Pick a colour":"Blue (Recommended)"},"answer_text":"Colour: Blue (Recommended)","autoFilledCount":1,"autoTimeoutMs":30000}
+startQuestionTimer(local, 30000ms, publish=false)
+setting = "soon"
+-- a new question
+  header: The agent is asking | Auto-selects recommended in 30s [agent-question-panel-countdown]
+  Q: ColourPick a colour
+    - Red {radio,-} name=amux-q-q-soon-0
+    - Blue (Recommended) / Calmer {radio,-,recommended} name=amux-q-q-soon-0
+    other: ""
+  buttons: Cancel | Accept Recommended | Submit answer (disabled)
+onAnswer {"tool_use_id":"q-soon","answers":[{"header":"Colour","selected":["Blue (Recommended)"]}],"answers_map":{"Pick a colour":"Blue (Recommended)"},"answer_text":"Colour: Blue (Recommended)","autoFilledCount":1,"autoTimeoutMs":30000}
+startQuestionTimer(local, 30000ms, publish=false)
+setting = undefined
+-- a new question
+  header: The agent is asking | Auto-selects recommended in 30s [agent-question-panel-countdown]
+  Q: ColourPick a colour
+    - Red {radio,-} name=amux-q-q-undefined-0
+    - Blue (Recommended) / Calmer {radio,-,recommended} name=amux-q-q-undefined-0
+    other: ""
+  buttons: Cancel | Accept Recommended | Submit answer (disabled)
+onAnswer {"tool_use_id":"q-undefined","answers":[{"header":"Colour","selected":["Blue (Recommended)"]}],"answers_map":{"Pick a colour":"Blue (Recommended)"},"answer_text":"Colour: Blue (Recommended)","autoFilledCount":1,"autoTimeoutMs":30000}

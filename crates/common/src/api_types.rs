@@ -1111,14 +1111,14 @@ pub struct UiBrowserDialogsRequest {
 }
 
 /// `POST /api/v1/ui/browser/open` — backs `OpenBrowser`. Opens a browser
-/// pane above the caller's own pane and records the caller as its owner
+/// pane below the caller's own pane and records the caller as its owner
 /// (SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §3).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UiBrowserOpenRequest {
     #[serde(flatten)]
     pub auth: UiAutomationAuth,
     pub url: String,
-    /// `right`, `left`, `up` or `down`, relative to the caller's pane. Left out, the pane opens above
+    /// `right`, `left`, `up` or `down`, relative to the caller's pane. Left out, the pane opens below
     /// the caller's, taking half of its space.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub split: Option<String>,
@@ -1129,9 +1129,9 @@ pub struct UiBrowserOpenRequest {
     /// (SPEC_BROWSER_PANE_ALLOWED_ORIGINS_2026_10_09.md).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub allowed_origins: Option<Vec<String>>,
-    /// Browse as `"incognito"` (a fresh jar of its own) or a named browser
-    /// profile the user lets agents use; absent: Personal
-    /// (SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09.md §5).
+    /// Browse as `"incognito"` (a fresh jar of its own), `"personal"` (the user's own sign-ins; not for a container
+    /// agent) or a named browser profile the user lets agents use; absent: the agent's own profile, made the first
+    /// time (SPEC_AGENT_OWN_BROWSER_PROFILE_2026_11_04.md; SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09.md §5).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile: Option<String>,
 }

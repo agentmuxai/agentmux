@@ -11,10 +11,9 @@
  * (SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md §5).
  */
 
-import { Portal } from "solid-js/web";
-import { Match, Show, Switch, createEffect, createResource, onCleanup, onMount } from "solid-js";
+import { Match, Show, Switch, createEffect, createResource } from "solid-js";
 import { Button, IconButton } from "@/app/element/ui";
-import { usePaneOverlay } from "@/app/platform/pane-overlay";
+import { Modal } from "@/app/element/modal";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { formatBytes } from "@/util/format-bytes";
@@ -44,10 +43,6 @@ interface Props {
 
 export function AttachmentLightbox(props: Props) {
     let dialogRef: HTMLDivElement | undefined;
-    let backdropRef: HTMLDivElement | undefined;
-    // Native browser panes paint above the HTML renderer; register the
-    // backdrop so they clip around it (as modal.tsx does).
-    usePaneOverlay(() => backdropRef, { keys: true });
     const item = () => props.items[Math.min(props.index, props.items.length - 1)];
     // The transcript only knows ids and names; fetch the details on demand.
     const [fetched] = createResource(
@@ -83,142 +78,137 @@ export function AttachmentLightbox(props: Props) {
         }
     };
 
-    onMount(() => dialogRef?.focus());
     createEffect(() => {
         if (props.items.length === 0) props.onClose();
     });
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    onCleanup(() => (document.body.style.overflow = prevOverflow));
 
     return (
-        <Portal>
-            <div ref={backdropRef} class="agent-attachment-lightbox" onClick={() => props.onClose()}>
-                <div
-                    ref={dialogRef}
-                    class="agent-attachment-lightbox__dialog"
-                    role="dialog"
-                    aria-modal="true"
-                    aria-label={`${kind() === "image" ? "Image" : "File"} ${item()?.number}: ${item()?.name}`}
-                    tabIndex={-1}
-                    onKeyDown={onKeyDown}
-                    onClick={(e) => e.stopPropagation()}
-                >
-                    <div class="agent-attachment-lightbox__image">
-                        <Switch
-                            fallback={
-                                <FileDetails
-                                    name={item()?.name ?? ""}
-                                    kind={kind()}
-                                    info={info()}
-                                />
-                            }
-                        >
-                            <Match when={item()?.error}>
-                                <span class="agent-attachment-lightbox__missing">{missing()}</span>
-                            </Match>
-                            <Match when={item()?.pending}>
-                                <span class="agent-attachment-lightbox__missing">Processing…</span>
-                            </Match>
-                            <Match when={!item()?.id}>
-                                <span class="agent-attachment-lightbox__missing">{missing()}</span>
-                            </Match>
-                            <Match when={isPicture(kind())}>
-                                <Show
-                                    when={url()}
-                                    fallback={
-                                        <span class="agent-attachment-lightbox__missing">
-                                            {url() === null ? missing() : "Loading…"}
-                                        </span>
-                                    }
-                                >
-                                    <img src={url()!} alt={item()?.name ?? ""} />
-                                </Show>
-                            </Match>
-                            <Match when={kind() === "text"}>
-                                <Show
-                                    when={preview() != null}
-                                    fallback={
-                                        <span class="agent-attachment-lightbox__missing">
-                                            {preview() === null ? missing() : "Loading…"}
-                                        </span>
-                                    }
-                                >
-                                    <div class="agent-attachment-lightbox__text">
-                                        <pre>{preview()}</pre>
-                                        <Show when={info() && info()!.bytes > previewBytes() + 1}>
-                                            <span class="note">
-                                                The first lines. The agent gets the whole file.
-                                            </span>
-                                        </Show>
-                                    </div>
-                                </Show>
-                            </Match>
-                        </Switch>
-                    </div>
-                    <div class="agent-attachment-lightbox__bar">
-                        <span class="agent-attachment-lightbox__title" {...tip(item()?.name)}>
-                            <span class="num">{item()?.number}</span>
-                            {item()?.name}
-                        </span>
-                        <Show when={info()}>
-                            {(i) => (
-                                <span class="agent-attachment-lightbox__meta">
-                                    <Show
-                                        when={kind() === "image"}
-                                        fallback={
-                                            <>
-                                                {kindLabel(kind())} · {formatBytes(i().bytes)}
-                                            </>
-                                        }
-                                    >
-                                        {i().width}×{i().height} · {formatBytes(i().bytes)}
-                                        <span class="sent">
-                                            {" "}
-                                            · sent as {i().send_width}×{i().send_height}, {formatBytes(i().send_bytes)}
-                                            {i().first_frame_only ? " (first frame)" : ""}
+        // A pane modal: it covers the pane the attachment is in (Escape and a click outside close it), not
+        // the window. The arrows are this dialog's own keys.
+        <Modal
+            open={true}
+            scope="pane"
+            size="fit"
+            panelClass="agent-attachment-lightbox__panel"
+            onClose={props.onClose}
+            ariaLabel={`${kind() === "image" ? "Image" : "File"} ${item()?.number}: ${item()?.name}`}
+            initialFocus={() => dialogRef ?? null}
+        >
+            <div ref={dialogRef} class="agent-attachment-lightbox__dialog" tabIndex={-1} onKeyDown={onKeyDown}>
+                <div class="agent-attachment-lightbox__image">
+                    <Switch
+                        fallback={
+                            <FileDetails
+                                name={item()?.name ?? ""}
+                                kind={kind()}
+                                info={info()}
+                            />
+                        }
+                    >
+                        <Match when={item()?.error}>
+                            <span class="agent-attachment-lightbox__missing">{missing()}</span>
+                        </Match>
+                        <Match when={item()?.pending}>
+                            <span class="agent-attachment-lightbox__missing">Processing…</span>
+                        </Match>
+                        <Match when={!item()?.id}>
+                            <span class="agent-attachment-lightbox__missing">{missing()}</span>
+                        </Match>
+                        <Match when={isPicture(kind())}>
+                            <Show
+                                when={url()}
+                                fallback={
+                                    <span class="agent-attachment-lightbox__missing">
+                                        {url() === null ? missing() : "Loading…"}
+                                    </span>
+                                }
+                            >
+                                <img src={url()!} alt={item()?.name ?? ""} />
+                            </Show>
+                        </Match>
+                        <Match when={kind() === "text"}>
+                            <Show
+                                when={preview() != null}
+                                fallback={
+                                    <span class="agent-attachment-lightbox__missing">
+                                        {preview() === null ? missing() : "Loading…"}
+                                    </span>
+                                }
+                            >
+                                <div class="agent-attachment-lightbox__text">
+                                    <pre>{preview()}</pre>
+                                    <Show when={info() && info()!.bytes > previewBytes() + 1}>
+                                        <span class="note">
+                                            The first lines. The agent gets the whole file.
                                         </span>
                                     </Show>
-                                </span>
-                            )}
-                        </Show>
-                        <span class="agent-attachment-lightbox__actions">
-                            <Show when={props.items.length > 1}>
-                                <IconButton
-                                    icon="chevron-left"
-                                    label={`Previous ${noun()}`}
-                                    tooltip={false}
-                                    title="Previous (←)"
-                                    onClick={() => go(-1)}
-                                />
-                                <span class="pos">
-                                    {Math.min(props.index, props.items.length - 1) + 1} / {props.items.length}
-                                </span>
-                                <IconButton
-                                    icon="chevron-right"
-                                    label={`Next ${noun()}`}
-                                    tooltip={false}
-                                    title="Next (→)"
-                                    onClick={() => go(1)}
-                                />
+                                </div>
                             </Show>
-                            <Show when={props.onRemove}>
-                                <Button tone="danger" onClick={() => props.onRemove!(item()!.key)}>
-                                    Remove
-                                </Button>
-                            </Show>
+                        </Match>
+                    </Switch>
+                </div>
+                <div class="agent-attachment-lightbox__bar">
+                    <span class="agent-attachment-lightbox__title" {...tip(item()?.name)}>
+                        <span class="num">{item()?.number}</span>
+                        {item()?.name}
+                    </span>
+                    <Show when={info()}>
+                        {(i) => (
+                            <span class="agent-attachment-lightbox__meta">
+                                <Show
+                                    when={kind() === "image"}
+                                    fallback={
+                                        <>
+                                            {kindLabel(kind())} · {formatBytes(i().bytes)}
+                                        </>
+                                    }
+                                >
+                                    {i().width}×{i().height} · {formatBytes(i().bytes)}
+                                    <span class="sent">
+                                        {" "}
+                                        · sent as {i().send_width}×{i().send_height}, {formatBytes(i().send_bytes)}
+                                        {i().first_frame_only ? " (first frame)" : ""}
+                                    </span>
+                                </Show>
+                            </span>
+                        )}
+                    </Show>
+                    <span class="agent-attachment-lightbox__actions">
+                        <Show when={props.items.length > 1}>
                             <IconButton
-                                icon="xmark"
-                                label="Close preview"
+                                icon="chevron-left"
+                                label={`Previous ${noun()}`}
                                 tooltip={false}
-                                title="Close (Esc)"
-                                onClick={() => props.onClose()}
+                                title="Previous (←)"
+                                onClick={() => go(-1)}
                             />
-                        </span>
-                    </div>
+                            <span class="pos">
+                                {Math.min(props.index, props.items.length - 1) + 1} / {props.items.length}
+                            </span>
+                            <IconButton
+                                icon="chevron-right"
+                                label={`Next ${noun()}`}
+                                tooltip={false}
+                                title="Next (→)"
+                                onClick={() => go(1)}
+                            />
+                        </Show>
+                        <Show when={props.onRemove}>
+                            <Button tone="danger" onClick={() => props.onRemove!(item()!.key)}>
+                                Remove
+                            </Button>
+                        </Show>
+                        <IconButton
+                            icon="xmark"
+                            label="Close preview"
+                            tooltip={false}
+                            title="Close (Esc)"
+                            onClick={() => props.onClose()}
+                        />
+                    </span>
                 </div>
             </div>
-        </Portal>
+        </Modal>
     );
 }
 

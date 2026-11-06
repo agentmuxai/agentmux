@@ -1,0 +1,29 @@
+advance 20ms
+autoUpdate #1 registered (row row-z2)
+row mousemove y=215
+[zoom 2] panel={position: fixed; left: 400px; top: 113.5px; transform: translateX(-100%); max-width: 350px; min-width: 0px; max-height: 20px; zoom: 2;} outside=false hidden=null class="agent-node-peek-overlay" bridge=- afterLeave=-
+autoUpdate #1 disposed
+advance 20ms
+autoUpdate #2 registered (row row-z0.5)
+row mousemove y=215
+[zoom 0.5] panel={position: fixed; left: 1600px; top: 454px; transform: translateX(-100%); max-width: 1400px; min-width: 600px; max-height: 80px; zoom: 0.5;} outside=false hidden=null class="agent-node-peek-overlay" bridge=- afterLeave=-
+autoUpdate #2 disposed
+advance 20ms
+autoUpdate #3 registered (row row-z1)
+row mousemove y=215
+[zoom 1] panel={position: fixed; left: 800px; top: 227px; transform: translateX(-100%); max-width: 700px; min-width: 0px; max-height: 40px;} outside=false hidden=null class="agent-node-peek-overlay" bridge=- afterLeave=-
+autoUpdate #3 disposed
+advance 20ms
+autoUpdate #4 registered (row row-zabc)
+row mousemove y=215
+[zoom abc] panel={position: fixed; left: 800px; top: 227px; transform: translateX(-100%); max-width: 700px; min-width: 0px; max-height: 40px;} outside=false hidden=null class="agent-node-peek-overlay" bridge=- afterLeave=-
+autoUpdate #4 disposed
+advance 20ms
+autoUpdate #5 registered (row row-z-3)
+row mousemove y=215
+[zoom -3] panel={position: fixed; left: 800px; top: 227px; transform: translateX(-100%); max-width: 700px; min-width: 0px; max-height: 40px;} outside=false hidden=null class="agent-node-peek-overlay" bridge=- afterLeave=-
+autoUpdate #5 disposed
+advance 20ms
+autoUpdate #6 registered (row row-z0)
+row mousemove y=215
+[zoom 0] panel={position: fixed; left: 800px; top: 227px; transform: translateX(-100%); max-width: 700px; min-width: 0px; max-height: 40px;} outside=false hidden=null class="agent-node-peek-overlay" bridge=- afterLeave=-

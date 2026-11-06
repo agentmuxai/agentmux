@@ -64,7 +64,8 @@ export function createOAuthClientState(svc: OAuthServiceInfo, clientIdHint?: str
     void load();
 
     const saved = () => info()?.saved === true;
-    const showFields = () => loaded() && (changing() || (!saved() && needsByo(svc, info()?.builtinAvailable)));
+    const showFields = () =>
+        loaded() && !svc.hidesClient && (changing() || (!saved() && needsByo(svc, info()?.builtinAvailable)));
 
     const forget = async () => {
         setForgetting(true);
@@ -122,6 +123,49 @@ export function createOAuthClientState(svc: OAuthServiceInfo, clientIdHint?: str
 
 type ClientView = ReturnType<typeof createOAuthClientState>["view"];
 
+/** A provider that shows no client fields, in a build with no client of AgentMux's own and none saved:
+ *  nothing to type and nothing to press (Phase B spec §9). Unknown until srv has answered. */
+export function clientUnavailable(svc: OAuthServiceInfo, info: AccountOAuthClientInfo | null): boolean {
+    return svc.hidesClient === true && info != null && !info.saved && !info.builtinAvailable;
+}
+
+/** The client, then Connect (or why there is none) and Cancel. */
+export function ConnectRow(props: {
+    client: ReturnType<typeof createOAuthClientState>;
+    unavailable: boolean;
+    busy: boolean;
+    label: string;
+    reconnect: boolean;
+    onConnect: () => void;
+    onCancel?: () => void;
+}): JSX.Element {
+    return (
+        <>
+            <OAuthClientSection client={props.client} />
+            <Show when={props.unavailable}>
+                <div class="oauth-byo-note">ⓘ {props.label} isn't available in this version of AgentMux yet.</div>
+            </Show>
+            <div class="identity-key-actions">
+                <Show when={!props.unavailable}>
+                    <Button
+                        tone="accent"
+                        class="identity-btn identity-btn-primary"
+                        disabled={props.busy || !props.client.state.loaded()}
+                        onClick={props.onConnect}
+                    >
+                        {props.busy ? "Starting…" : props.reconnect ? "Reconnect" : `Connect ${props.label}`}
+                    </Button>
+                </Show>
+                <Show when={props.onCancel}>
+                    <Button class="identity-btn identity-btn-secondary" onClick={() => props.onCancel?.()}>
+                        Cancel
+                    </Button>
+                </Show>
+            </div>
+        </>
+    );
+}
+
 export function OAuthClientSection(props: { client: ReturnType<typeof createOAuthClientState> }): JSX.Element {
     const s = props.client.state;
     const v: ClientView = props.client.view;
@@ -130,7 +174,7 @@ export function OAuthClientSection(props: { client: ReturnType<typeof createOAut
             <Show when={v.error()}>
                 <div class="identity-form-error">{v.error()}</div>
             </Show>
-            <Show when={v.saved() && !v.changing()}>
+            <Show when={v.saved() && !v.changing() && !v.svc.hidesClient}>
                 <div class="oauth-saved-client">
                     <span>Using your saved client</span>
                     <code class="oauth-client-id">{s.info()?.clientId}</code>

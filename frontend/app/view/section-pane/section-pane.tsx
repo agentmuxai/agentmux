@@ -21,8 +21,6 @@ export interface PaneSection<Id extends string> {
     label: string;
     icon: string;
     tooltip?: string;
-    /** A standing accent on the section's icon (Bundles, for ABF). */
-    highlight?: boolean;
     /** Given the pane, for a section that needs its block (Remotes). */
     component: (pane: SectionPaneModel<Id>) => JSX.Element;
 }
@@ -115,7 +113,6 @@ export function SectionPaneView<Id extends string>(props: { model: SectionPaneMo
                         label: item.label,
                         icon: item.icon,
                         tooltip: item.tooltip,
-                        class: item.highlight ? "is-abf-highlight" : undefined,
                     }))}
                     value={section()}
                     onChange={(id) => model.selectSection(id)}

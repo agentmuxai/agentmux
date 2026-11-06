@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useWindowDrag } from "@/app/hook/useWindowDrag.platform";
-import { HamburgerMenu } from "@/app/window/hamburger-menu";
+import { LogoMenu } from "@/app/window/logo-menu";
 import { isMacOS } from "@/util/platformutil";
 import type { JSX } from "solid-js";
 import { Show } from "solid-js";
@@ -85,12 +85,12 @@ function TabBar(props: TabBarProps): JSX.Element {
 
     return (
         <div class="tab-bar" {...dragProps}>
-            {/* Windows/Linux: hamburger sits at the LEFT of the tab strip.
+            {/* Windows/Linux: AgentMux logo sits at the LEFT of the tab strip.
                 On macOS it's rendered at the far right of the window header
                 instead (see window-header.tsx) so it clears the native
                 traffic-light controls. */}
             <Show when={!isMacOS()}>
-                <HamburgerMenu />
+                <LogoMenu />
             </Show>
             <TabStripScroll
                 setScrollRef={(el) => (tabBarScrollRef = el)}

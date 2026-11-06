@@ -740,6 +740,8 @@ declare global {
         /** Legacy "Pane Color" pick, an HSL hue 0–360, read as the slot nearest it; no longer written. */
         "frame:hue"?: number | null;
         "frame:title"?: string;
+        /** The address a browser pane was opened at, with a title its opener gave it; the title goes when the pane moves to another site. */
+        "frame:title_url"?: string;
         "frame:icon"?: string;
         /** A pane tab's last real name and favicon from its view, so the tab reads the same before it is clicked (pane-tab-persist.ts). */
         "pane:label"?: string;
@@ -831,6 +833,8 @@ declare global {
         "files:sidebar"?: boolean;
         "files:preview"?: boolean;
         "files:view"?: string;
+        // The list view's dragged column widths in px, by column (files-columns.ts).
+        "files:colwidths"?: { name?: number; modified?: number; size?: number; kind?: number };
         "term:localshellpath"?: string;
         "term:localshellopts"?: string[];
         "term:scrollback"?: number;
@@ -945,6 +949,8 @@ declare global {
         "shortcuts:from"?: string;
         "memory:section"?: "global" | "personal" | "skills" | "bundles";
         "swarm:section"?: "supervisor" | "broadcast";
+        /** The Swarm sections that are open, Broadcast and Supervise (swarm-section.ts). */
+        "swarm:open"?: ("supervisor" | "broadcast")[];
         "warden:section"?: "jobs";
         /** A Kanban task to open in the drawer, set by a link from elsewhere (a Swarm row's task chip) and cleared once opened. Read by the Kanban pane. */
         "kanban:open"?: string | null;
@@ -1067,6 +1073,10 @@ declare global {
         "app:dismissarchitecturewarning"?: boolean;
         "app:defaultnewblock"?: string;
         "app:showoverlayblocknums"?: boolean;
+        /** Check for a newer release in the background (absent = on). */
+        "update:auto"?: boolean;
+        /** Download and stage a newer release by itself (absent = on). */
+        "update:autodownload"?: boolean;
         "term:*"?: boolean;
         "term:fontsize"?: number;
         "term:fontfamily"?: string;

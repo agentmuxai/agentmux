@@ -266,7 +266,7 @@ fn an_import_is_all_or_nothing() {
     wipe(&s);
     let preview = inspect(&s, &path, Some(PASS)).unwrap();
     // One of the incoming ids is taken by a row written after the preview.
-    let row = VaultRow { id: "card-company-card".into(), kind: "note".into(), label: "x".into(), fields: "{}".into(), tags: "[]".into(), sealed: vec![1], created_at: 1, updated_at: 1, last_used_at: 0 };
+    let row = VaultRow { id: "card-company-card".into(), kind: "note".into(), label: "x".into(), fields: "{}".into(), tags: "[]".into(), sealed: vec![1], created_at: 1, updated_at: 1, last_used_at: 0, vault_id: "personal".into() };
     // The writer takes the file's id only when it's free, so it picks another: nothing fails…
     s.vault_insert(&row).unwrap();
     assert_eq!(commit(&s, &preview.token, Duplicates::Skip).unwrap().added, 3);

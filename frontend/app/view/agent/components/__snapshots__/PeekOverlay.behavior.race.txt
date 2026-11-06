@@ -1,0 +1,9 @@
+advance 500ms
+[left before the frame] panel=- bridge=- afterLeave=-
+advance 20ms
+autoUpdate #1 registered (row rowA)
+[shown again] panel={position: fixed; left: 800px; top: 200px; transform: translateX(-100%); max-width: 700px; min-width: 0px; max-height: 0px;} outside=false hidden=null class="agent-node-peek-overlay" bridge=- afterLeave=-
+row mousemove y=230
+autoUpdate #1 disposed
+advance 100ms
+[hidden] panel=- bridge=- afterLeave=-

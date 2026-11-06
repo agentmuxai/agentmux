@@ -296,8 +296,8 @@ const leave = (el: Element, related: Element) => {
 };
 const aux = (el: Element, button: number) => fireEvent(el, new MouseEvent("auxclick", { bubbles: true, cancelable: true, button }));
 const flush = () => new Promise<void>((r) => setTimeout(r, 0));
-const dialog = () => document.body.querySelector(".confirm-dialog");
-const dialogButton = (label: string) => [...document.body.querySelectorAll(".confirm-dialog button")].find((b) => b.textContent === label) as HTMLElement;
+const dialog = () => document.body.querySelector(".modal-panel");
+const dialogButton = (label: string) => [...document.body.querySelectorAll(".modal-panel button")].find((b) => b.textContent === label) as HTMLElement;
 const menuLabels = () => [...document.body.querySelectorAll(".ctx-menu .ctx-menu-label")].map((e) => e.textContent);
 const select = (v: Mounted, ...names: string[]) => v.model.setSelection({ names: new Set(names), focus: names[names.length - 1], anchor: names[0] });
 
@@ -708,6 +708,154 @@ describe("FilesView path and filter", () => {
         await v.model.navigate(`${HOME}/src`);
         log(`box=${!!v.q(".files-filter-input")}`);
         await expect(out()).toMatchFileSnapshot(snap("filter"));
+    });
+});
+
+describe("FilesView filter button and column dividers", () => {
+    const button = (v: Mounted) => v.container.querySelector(".files-filter-button") as HTMLElement;
+    const box = (v: Mounted) => v.q(".files-filter-input") as HTMLInputElement | null;
+    const type = (v: Mounted, text: string) => {
+        const input = box(v)!;
+        input.value = text;
+        fireEvent.input(input);
+    };
+    const pointer = (el: Element, type: string, clientX = 0) => el.dispatchEvent(new MouseEvent(type, { bubbles: true, clientX }));
+
+    it("the filter button toggles the box, and says so", async () => {
+        const v = mount();
+        await settled(v);
+        expect(box(v)).toBeNull();
+        expect(button(v).getAttribute("aria-pressed")).toBe("false");
+        fireEvent.click(button(v));
+        await flush();
+        expect(box(v)).not.toBeNull();
+        expect(document.activeElement).toBe(box(v));
+        expect(button(v).getAttribute("aria-pressed")).toBe("true");
+        fireEvent.click(button(v));
+        await flush();
+        expect(box(v)).toBeNull();
+        expect(button(v).getAttribute("aria-pressed")).toBe("false");
+    });
+
+    it("hiding the box keeps the filter applied, and the button says so; showing it again shows the same text", async () => {
+        const v = mount();
+        await settled(v);
+        fireEvent.click(button(v));
+        await flush();
+        type(v, "a");
+        const filtered = rowNames(v);
+        fireEvent.click(button(v));
+        await flush();
+        expect(box(v)).toBeNull();
+        expect(v.model.filter()).toBe("a");
+        expect(rowNames(v)).toEqual(filtered);
+        expect(button(v).className).toContain("files-filter-button--applied");
+        expect(button(v).getAttribute("aria-pressed")).toBe("true");
+        expect(button(v).getAttribute("aria-label")).toBe('Filter: "a" (click to edit)');
+        fireEvent.click(button(v));
+        await flush();
+        expect(box(v)!.value).toBe("a");
+        expect(button(v).className).not.toContain("files-filter-button--applied");
+        // Escape clears the text and hides the box.
+        key(box(v)!, "Escape");
+        await flush();
+        expect(box(v)).toBeNull();
+        expect(v.model.filter()).toBe("");
+        expect(button(v).className).not.toContain("files-filter-button--applied");
+    });
+
+    it("a press outside the box and the button hides the box and keeps the filter", async () => {
+        const v = mount();
+        await settled(v);
+        fireEvent.click(button(v));
+        await flush();
+        type(v, "a");
+        pointer(box(v)!, "pointerdown");
+        pointer(button(v), "pointerdown");
+        expect(box(v)).not.toBeNull();
+        pointer(v.list(), "pointerdown");
+        await flush();
+        expect(box(v)).toBeNull();
+        expect(v.model.filter()).toBe("a");
+        expect(button(v).className).toContain("files-filter-button--applied");
+        // With the box hidden nothing listens for presses any more: a press elsewhere changes nothing.
+        pointer(v.list(), "pointerdown");
+        expect(v.model.filter()).toBe("a");
+    });
+
+    it("files:filter toggles the box like the button", async () => {
+        const v = mount();
+        await settled(v);
+        h.state.runner!("files:filter");
+        await flush();
+        expect(box(v)).not.toBeNull();
+        h.state.runner!("files:filter");
+        await flush();
+        expect(box(v)).toBeNull();
+    });
+
+    const modifiedDivider = (v: Mounted) => v.container.querySelector(".files-header .files-col-modified .files-col-resizer") as HTMLElement;
+    const listVar = (v: Mounted, name: string) => v.list().style.getPropertyValue(name);
+
+    it("dragging a column divider resizes the column within its limits, keeps it in meta on release, and double-click resets it", async () => {
+        const v = mount();
+        await settled(v);
+        const handle = modifiedDivider(v);
+        vi.spyOn(handle.parentElement!, "getBoundingClientRect").mockReturnValue({ width: 110 } as DOMRect);
+        pointer(handle, "pointerdown", 500);
+        pointer(handle, "pointermove", 540);
+        expect(listVar(v, "--files-w-modified")).toBe("150px");
+        // Live only: nothing written yet.
+        expect(v.ctx.meta()?.["files:colwidths"]).toBeUndefined();
+        pointer(handle, "pointermove", 0);
+        expect(listVar(v, "--files-w-modified")).toBe("60px");
+        pointer(handle, "pointermove", 560);
+        pointer(handle, "pointerup", 560);
+        expect(listVar(v, "--files-w-modified")).toBe("170px");
+        expect(v.ctx.meta()?.["files:colwidths"]).toEqual({ modified: 170 });
+        // A divider's press and click are not a sort.
+        const before = v.model.sortKey();
+        fireEvent.click(handle);
+        expect(v.model.sortKey()).toBe(before);
+        fireEvent.dblClick(handle);
+        expect(listVar(v, "--files-w-modified")).toBe("");
+        expect(v.ctx.meta()?.["files:colwidths"]).toBeUndefined();
+    });
+
+    it("keeps a released width on screen while the meta write is in flight, then lets the meta show it", async () => {
+        const v = mount();
+        await settled(v);
+        const real = v.ctx.setMeta;
+        let finish: () => void = () => {};
+        v.ctx.setMeta = (patch) => new Promise<void>((resolve) => (finish = () => resolve(real(patch))));
+        const handle = modifiedDivider(v);
+        vi.spyOn(handle.parentElement!, "getBoundingClientRect").mockReturnValue({ width: 110 } as DOMRect);
+        pointer(handle, "pointerdown", 500);
+        pointer(handle, "pointermove", 560);
+        pointer(handle, "pointerup", 560);
+        // Released, but the meta has not changed yet: the column does not snap back.
+        expect(v.ctx.meta()?.["files:colwidths"]).toBeUndefined();
+        expect(listVar(v, "--files-w-modified")).toBe("170px");
+        finish();
+        await flush();
+        expect(v.ctx.meta()?.["files:colwidths"]).toEqual({ modified: 170 });
+        expect(listVar(v, "--files-w-modified")).toBe("170px");
+        // The same for a reset: the column's own width at once, not the old one until the meta follows.
+        fireEvent.dblClick(handle);
+        expect(listVar(v, "--files-w-modified")).toBe("");
+        expect(v.ctx.meta()?.["files:colwidths"]).toEqual({ modified: 170 });
+        finish();
+        await flush();
+        expect(v.ctx.meta()?.["files:colwidths"]).toBeUndefined();
+        expect(listVar(v, "--files-w-modified")).toBe("");
+    });
+
+    it("draws a pane's stored column widths, and ignores ones that are not numbers", async () => {
+        const v = mount({ "files:colwidths": { size: 100, kind: "wide", name: 300 } });
+        await settled(v);
+        expect(listVar(v, "--files-w-size")).toBe("100px");
+        expect(listVar(v, "--files-w-kind")).toBe("");
+        expect(listVar(v, "--files-flex-name")).toBe("0 0 300px");
     });
 });
 

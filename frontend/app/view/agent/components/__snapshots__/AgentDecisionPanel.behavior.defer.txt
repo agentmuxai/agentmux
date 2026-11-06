@@ -1,0 +1,42 @@
+key Escape on TEXTAREA[composer]
+-- Escape in the composer is left alone
+  panel [agent-decision-panel agent-decision-panel--high-risk] role=dialog aria=Permission decision required tabindex=-1
+  header: Decision required | 1 more queued | high-risk
+  meta: Tool / bash / Target / rm -rf build
+  preview: -
+  scope Once / Just this one call {checked,active} name=agent-decision-scope-<uid>
+  scope Session / Until this pane closes {-} name=agent-decision-scope-<uid>
+  scope Project / This repo, future runs {-} name=agent-decision-scope-<uid>
+  scope Global / Everywhere, future runs {-} name=agent-decision-scope-<uid>
+  buttons: Allow[pressed=false](title: Hold Shift while clicking, or press Enter twice (high-risk confirm)) | Deny + feedback | Defer
+key Escape on BODY
+onDefer
+-- Escape on the body minimizes
+  minimized [ui-button ui-tone-danger ui-button--row agent-decision-panel-minimized] "⚠Decision pending — bash (2 total)click to decide" aria=Re-open decision prompt
+-- re-opened from the bar
+  panel [agent-decision-panel agent-decision-panel--high-risk] role=dialog aria=Permission decision required tabindex=-1
+  header: Decision required | 1 more queued | high-risk
+  meta: Tool / bash / Target / rm -rf build
+  preview: -
+  scope Once / Just this one call {checked,active} name=agent-decision-scope-<uid>
+  scope Session / Until this pane closes {-} name=agent-decision-scope-<uid>
+  scope Project / This repo, future runs {-} name=agent-decision-scope-<uid>
+  scope Global / Everywhere, future runs {-} name=agent-decision-scope-<uid>
+  buttons: Allow[pressed=false](title: Hold Shift while clicking, or press Enter twice (high-risk confirm)) | Deny + feedback | Defer
+key Escape on DIV
+onDefer
+-- Escape inside the panel minimizes
+  minimized [ui-button ui-tone-danger ui-button--row agent-decision-panel-minimized] "⚠Decision pending — bash (2 total)click to decide" aria=Re-open decision prompt
+onDefer
+-- the Defer button minimizes
+  minimized [ui-button ui-tone-danger ui-button--row agent-decision-panel-minimized] "⚠Decision pending — bash (2 total)click to decide" aria=Re-open decision prompt
+-- a new head request re-opens it
+  panel [agent-decision-panel] role=dialog aria=Permission decision required tabindex=-1
+  header: Decision required
+  meta: Tool / bash / Target / rm -rf build
+  preview: -
+  scope Once / Just this one call {checked,active} name=agent-decision-scope-<uid>
+  scope Session / Until this pane closes {-} name=agent-decision-scope-<uid>
+  scope Project / This repo, future runs {-} name=agent-decision-scope-<uid>
+  scope Global / Everywhere, future runs {-} name=agent-decision-scope-<uid>
+  buttons: Allow(title: Allow this tool call) | Deny + feedback | Defer

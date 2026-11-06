@@ -29,6 +29,8 @@ afterEach(() => {
 });
 
 const panel = () => document.body.querySelector<HTMLElement>("[data-pane-overlay]");
+/** The panel itself: the body inside the shell that is placed, which carries the chrome zoom and the fade. */
+const body = () => panel()!.firstElementChild as HTMLElement;
 const over = (el: Element) => el.dispatchEvent(new Event("pointerover", { bubbles: true }));
 const settle = (ms: number) => vi.advanceTimersByTimeAsync(ms);
 
@@ -176,11 +178,11 @@ describe("the delegated tooltip", () => {
         expect(el.getAttribute("title")).toBe("");
         await settle(20);
         expect(panel()!.textContent).toBe("Save");
-        expect(panel()!.style.opacity).toBe("0");
+        expect(body().style.opacity).toBe("0");
         await settle(60);
-        expect(panel()!.style.opacity).toBe("1");
+        expect(body().style.opacity).toBe("1");
         expect(panel()!.style.left).toBe("7px");
-        expect(panel()!.getAttribute("role")).toBe("tooltip");
+        expect(body().getAttribute("role")).toBe("tooltip");
     });
 
     it("uses the nearest titled ancestor when the pointer is over a child", async () => {
@@ -207,13 +209,13 @@ describe("the delegated tooltip", () => {
         over(one);
         await settle(20);
         // The first one is still within its 40 ms rest: a cold start waits.
-        expect(panel()!.style.opacity).toBe("0");
+        expect(body().style.opacity).toBe("0");
         await settle(100);
         over(two);
         await settle(20);
         expect(document.body.querySelectorAll("[data-pane-overlay]")).toHaveLength(1);
         expect(panel()!.textContent).toBe("Two");
-        expect(panel()!.style.opacity).toBe("1");
+        expect(body().style.opacity).toBe("1");
     });
 
     it("closes when something is pressed", async () => {

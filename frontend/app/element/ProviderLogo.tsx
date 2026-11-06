@@ -28,12 +28,19 @@ import deepseekColorSvg from "@lobehub/icons-static-svg/icons/deepseek-color.svg
 import plandexUrl from "@/app/element/icons/plandex.png?url";
 import piUrl from "@/app/element/icons/pi.svg?url";
 import aiderUrl from "@/app/element/icons/aider.svg?url";
-import brainSvg from "@/app/asset/logo-brain.svg?raw";
+import markSvg from "@/app/asset/logo-mark.svg?raw";
 import agentmuxIconUrl from "@/app/asset/agentmux-icon.png?url";
 import type { JSX } from "solid-js";
 import { uniquifySvgIds } from "@/util/svg-ids";
 
 // Inlined SVGs need unique ids per copy: see uniquifySvgIds (@/util/svg-ids).
+
+// Mux Code wears AgentMux's own mark, the four blocks. The source SVG has a viewBox only, and its blocks
+// sit inside a margin (64..448 of 512) that the lobehub icons don't have, so crop the viewBox to the blocks
+// and give it the 1em size the wrapper's font-size drives.
+const MUX_CODE_MARK = markSvg
+    .replace("viewBox=\"0 0 512 512\"", "viewBox=\"64 64 384 384\"")
+    .replace("<svg ", '<svg width="1em" height="1em" ');
 
 export interface ProviderLogoProps {
     provider: string;
@@ -82,7 +89,7 @@ export const ProviderLogo = (props: ProviderLogoProps): JSX.Element => {
         // marks, and Muse has no mark of its own to use.
         if (p === "aider") return { png: aiderUrl };
 
-        if (p === "muxcode" || p === "mux-code" || p === "mux_code") return { html: brainSvg };
+        if (p === "muxcode" || p === "mux-code" || p === "mux_code") return { html: MUX_CODE_MARK };
 
         // AgentMux's own brand mark — the app's block-tile icon (same mark as
         // the taskbar/favicon icon, assets/linux/icons/hicolor/*/apps/agentmux.png).

@@ -314,7 +314,8 @@ pub fn lookup(data_dir: &Path, agent_id: &str) -> Option<AgentEntry> {
 ///
 /// An entry is considered stale if `updated_at` is older than `max_age_ms`.
 /// The default is 4 hours — well beyond any reasonable agent session.
-/// Entries are also removed if their JSON is malformed.
+/// Entries are also removed if their JSON is malformed, or if the srv that
+/// wrote them is gone (its pid dead, or reused by another program).
 pub fn cleanup_stale(data_dir: &Path, max_age_ms: u64) {
     let dir = agents_dir(data_dir);
     let Ok(entries) = std::fs::read_dir(&dir) else { return };
@@ -329,7 +330,9 @@ pub fn cleanup_stale(data_dir: &Path, max_age_ms: u64) {
             continue;
         };
         match serde_json::from_str::<AgentEntry>(&content) {
-            Ok(agent) if agent.updated_at >= cutoff => {} // still fresh
+            // Fresh, and the srv that wrote it is still running: a pid reused by another program
+            // would otherwise keep a stopped agent's entry alive.
+            Ok(agent) if agent.updated_at >= cutoff && agent.srv_alive() => {}
             _ => {
                 let _ = std::fs::remove_file(&path);
             }
@@ -406,6 +409,34 @@ pub(crate) fn pid_alive(pid: u32) -> bool {
         sysinfo::ProcessRefreshKind::nothing(),
     );
     sys.process(target).is_some()
+}
+
+/// Whether the srv that wrote an entry at `written_ms` is still running. A live pid alone proves
+/// nothing: once the srv exits, any program can be given its pid, and a record left behind then
+/// reads as "running". The process must also have started no later than the entry was last
+/// written (the same rule `process_identity::srv_alive` applies to claims).
+pub(crate) fn pid_alive_since(pid: u32, written_ms: u64) -> bool {
+    let target = sysinfo::Pid::from(pid as usize);
+    let mut sys = sysinfo::System::new();
+    sys.refresh_processes_specifics(
+        sysinfo::ProcessesToUpdate::Some(&[target]),
+        true,
+        sysinfo::ProcessRefreshKind::nothing(),
+    );
+    sys.process(target).is_some_and(|p| started_no_later_than(p.start_time(), written_ms))
+}
+
+/// A process that started at `started_secs` can be the one that wrote at `written_ms`: it began no
+/// later than the write, give or take the two clocks' rounding.
+pub(crate) fn started_no_later_than(started_secs: u64, written_ms: u64) -> bool {
+    started_secs <= written_ms / 1000 + crate::backend::process_identity::START_SLACK_SECS
+}
+
+impl AgentEntry {
+    /// Whether the srv that wrote this entry is still running (see [`pid_alive_since`]).
+    pub fn srv_alive(&self) -> bool {
+        pid_alive_since(self.pid, self.updated_at)
+    }
 }
 
 /// Grace period during which a forward failure against a live-process entry
@@ -631,6 +662,61 @@ pub fn remove_shared_from_env_if_nonce(agent_id: &str, expected_nonce: u64) {
     }
 }
 
+/// Whether `entry` is one this srv wrote for `block_id` that a stopping spawn may remove: any entry
+/// of the block, whatever name it is filed under, unless a newer spawn wrote it (a nonce that is
+/// neither 0, "not recorded", nor `only_nonce`). `None` removes whatever nonce it has.
+fn block_entry_is_removable(entry: &AgentEntry, block_id: &str, only_nonce: Option<u64>) -> bool {
+    entry.block_id == block_id
+        && entry.pid == std::process::id()
+        && only_nonce.is_none_or(|n| entry.registration_nonce == 0 || entry.registration_nonce == n)
+}
+
+/// Remove every per-channel entry registered for `block_id`, under any name: the agent's slug, a
+/// former slug, or its display name's route (an entry written during a turn is filed under the
+/// block's current name, not the one its spawn registered). A removal keyed on one name leaves the
+/// others behind, and a stopped agent then reads as running. Returns how many files it removed.
+pub fn remove_for_block(data_dir: &Path, block_id: &str, only_nonce: Option<u64>) -> usize {
+    let _guard = REGISTRY_OP_LOCK.lock().unwrap();
+    remove_matching_in(&agents_dir(data_dir), block_id, only_nonce)
+}
+
+/// [`remove_for_block`] for this channel's entries in the host-global shared registry, which files
+/// them `<shared_dir>/<name>/<channel>.json`.
+pub fn remove_shared_for_block(shared_dir: &Path, block_id: &str, channel: &str, only_nonce: Option<u64>) -> usize {
+    let _guard = REGISTRY_OP_LOCK.lock().unwrap();
+    let Ok(dirs) = std::fs::read_dir(shared_dir) else { return 0 };
+    let mut removed = 0;
+    for dir in dirs.flatten().filter(|d| d.path().is_dir()) {
+        let path = dir.path().join(format!("{}.json", sanitize_path_component(channel)));
+        if read_entry_file(&path).is_some_and(|e| block_entry_is_removable(&e, block_id, only_nonce)) {
+            removed += usize::from(std::fs::remove_file(&path).is_ok());
+            let _ = std::fs::remove_dir(dir.path());
+        }
+    }
+    removed
+}
+
+/// Convenience wrapper over [`remove_shared_for_block`] — see [`write_shared_from_env`].
+pub fn remove_shared_for_block_from_env(block_id: &str, only_nonce: Option<u64>) -> usize {
+    crate::registry::resolve_shared_reactive_dir()
+        .map_or(0, |shared_dir| remove_shared_for_block(&shared_dir, block_id, &local_channel_id(), only_nonce))
+}
+
+fn remove_matching_in(dir: &Path, block_id: &str, only_nonce: Option<u64>) -> usize {
+    let Ok(files) = std::fs::read_dir(dir) else { return 0 };
+    let mut removed = 0;
+    for file in files.flatten() {
+        let path = file.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        if read_entry_file(&path).is_some_and(|e| block_entry_is_removable(&e, block_id, only_nonce)) {
+            removed += usize::from(std::fs::remove_file(&path).is_ok());
+        }
+    }
+    removed
+}
+
 /// Every channel's shared entry that published a key for `uid` (identity
 /// M4d-6). Scans the whole registry: entries are filed by name, and one UID
 /// live in several channels has an entry, and a key, in each.
@@ -699,7 +785,7 @@ pub fn cleanup_stale_shared(shared_dir: &Path, max_age_ms: u64) {
                 continue;
             }
             let keep = read_entry_file(&channel_path)
-                .map(|e| e.updated_at >= cutoff && pid_alive(e.pid))
+                .map(|e| e.updated_at >= cutoff && e.srv_alive())
                 .unwrap_or(false);
             if !keep {
                 let _ = std::fs::remove_file(&channel_path);
@@ -952,6 +1038,78 @@ mod shared_tests {
         let found = lookup_all_shared(dir.path(), "agentx");
         assert_eq!(found[0].channel, "dev-b");
         assert_eq!(found[1].channel, "dev-a");
+    }
+
+    /// A turn files an entry under the block's current name with no nonce; a spawn's own removal is keyed on
+    /// the name and nonce it registered by. A stop must still leave nothing for the block.
+    #[test]
+    fn remove_for_block_clears_every_name_but_a_newer_spawns() {
+        let dir = tempfile::tempdir().unwrap();
+        let url = "http://127.0.0.1:9001";
+        write_with_nonce(dir.path(), "loap-loap-2-loap-3", url, "blk", 7);
+        write_with_nonce(dir.path(), "Loap-3", url, "blk", 0);
+        write_with_nonce(dir.path(), "newer", url, "blk", 9);
+        write_with_nonce(dir.path(), "other", url, "blk2", 0);
+        assert_eq!(remove_for_block(dir.path(), "blk", Some(7)), 2);
+        assert!(lookup(dir.path(), "loap-loap-2-loap-3").is_none());
+        assert!(lookup(dir.path(), "loap-3").is_none());
+        assert!(lookup(dir.path(), "newer").is_some(), "a newer spawn's entry survives");
+        assert!(lookup(dir.path(), "other").is_some(), "another block's entry survives");
+        assert_eq!(remove_for_block(dir.path(), "blk", None), 1, "an unconditional removal takes it too");
+        assert!(lookup(dir.path(), "other").is_some());
+    }
+
+    #[test]
+    fn remove_for_block_leaves_an_entry_another_srv_wrote() {
+        let dir = tempfile::tempdir().unwrap();
+        write_with_nonce(dir.path(), "peer", "http://127.0.0.1:9001", "blk", 0);
+        let mut entry = lookup(dir.path(), "peer").unwrap();
+        entry.pid = u32::MAX;
+        write_entry_file(&agent_path(dir.path(), "peer"), &entry);
+        assert_eq!(remove_for_block(dir.path(), "blk", None), 0);
+        assert!(lookup(dir.path(), "peer").is_some());
+    }
+
+    #[test]
+    fn remove_shared_for_block_clears_every_name_in_this_channel_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let url = "http://127.0.0.1:9001";
+        write_shared_with_nonce(dir.path(), "loap-loap-2-loap-3", url, "blk", "stable", 7);
+        write_shared_with_nonce(dir.path(), "Loap-3", url, "blk", "stable", 0);
+        write_shared_with_nonce(dir.path(), "loap-3", url, "blk", "dev-a", 0);
+        write_shared_with_nonce(dir.path(), "other", url, "blk2", "stable", 0);
+        assert_eq!(remove_shared_for_block(dir.path(), "blk", "stable", Some(7)), 2);
+        assert!(lookup_all_shared(dir.path(), "loap-loap-2-loap-3").is_empty());
+        assert_eq!(lookup_all_shared(dir.path(), "loap-3").len(), 1, "the other channel's entry survives");
+        assert_eq!(lookup_all_shared(dir.path(), "other").len(), 1);
+        assert!(!shared_agent_dir(dir.path(), "loap-loap-2-loap-3").exists(), "its emptied directory goes too");
+    }
+
+    #[test]
+    fn a_pid_a_program_took_after_the_srv_exited_is_not_that_srv() {
+        // Rounding either way is allowed; a start well after the write is another process.
+        assert!(started_no_later_than(100, 100_000));
+        assert!(started_no_later_than(103, 100_000));
+        assert!(!started_no_later_than(200, 100_000));
+        // This process is alive now, so an entry it wrote just now is its own, and one written an hour ago
+        // (before it started) is a pid it has since been given.
+        let now = now_unix_millis();
+        assert!(pid_alive_since(std::process::id(), now));
+        assert!(!pid_alive_since(std::process::id(), now - 3_600_000));
+        assert!(!pid_alive_since(u32::MAX, now));
+    }
+
+    #[test]
+    fn cleanup_stale_drops_an_entry_whose_pid_was_reused() {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "kept", "http://127.0.0.1:9001", "b1");
+        write(dir.path(), "reused", "http://127.0.0.1:9002", "b2");
+        let mut reused = lookup(dir.path(), "reused").unwrap();
+        reused.updated_at = now_unix_millis() - 3_600_000;
+        write_entry_file(&agent_path(dir.path(), "reused"), &reused);
+        cleanup_stale(dir.path(), 4 * 60 * 60 * 1000);
+        assert!(lookup(dir.path(), "kept").is_some());
+        assert!(lookup(dir.path(), "reused").is_none());
     }
 
     #[test]

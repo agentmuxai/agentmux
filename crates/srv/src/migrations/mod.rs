@@ -94,6 +94,7 @@ mod m0043_rotate_container_agent_keys;
 mod m0044_warden_split;
 mod m0045_palette_snap;
 mod m0046_remove_empty_agent_bundles;
+mod m0047_agents_drop_own_bundle;
 mod backup;
 mod gate;
 mod prepare;
@@ -281,4 +282,5 @@ static REGISTRY: &[&(dyn Migration + Sync)] = &[
     &m0044_warden_split::M0044WardenSplit,
     &m0045_palette_snap::M0045PaletteSnap,
     &m0046_remove_empty_agent_bundles::M0046RemoveEmptyAgentBundles,
+    &m0047_agents_drop_own_bundle::M0047AgentsDropOwnBundle,
 ];

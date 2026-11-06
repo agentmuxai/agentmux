@@ -3,7 +3,7 @@
 
 /**
  * FlyoutMenu closes when a leaf item is clicked, unless the item sets
- * `keepOpen` — the hamburger's Theme and Opacity choices, so the user can
+ * `keepOpen` — the AgentMux logo's Theme and Opacity choices, so the user can
  * try several in a row. An outside click still closes it either way.
  */
 
@@ -30,6 +30,18 @@ function open() {
 
 describe("FlyoutMenu", () => {
     afterEach(() => cleanup());
+
+    it("draws the menu, and a submenu, in AnchoredPopover's zoomed body so they scale with the chrome", () => {
+        render(() => (
+            <FlyoutMenu items={[{ label: "Parent", subItems: [{ label: "Child" }] }]}>
+                <button type="button">Open menu</button>
+            </FlyoutMenu>
+        ));
+        open();
+        const body = document.querySelector(".menu")!;
+        expect(body.classList.contains("anchored-popover-body--chrome-zoom")).toBe(true);
+        expect(body.parentElement!.classList.contains("anchored-popover")).toBe(true);
+    });
 
     it("closes after a plain item is clicked", () => {
         const onClick = vi.fn();
@@ -163,9 +175,9 @@ describe("FlyoutMenu", () => {
         open();
         await new Promise((r) => requestAnimationFrame(() => r(null)));
         await new Promise((r) => setTimeout(r, 0));
-        expect(document.querySelector<HTMLElement>(".menu")!.style.visibility).not.toBe("hidden");
+        expect(document.querySelector<HTMLElement>(".anchored-popover")!.style.visibility).not.toBe("hidden");
         fireEvent.mouseDown(document.body);
         open();
-        expect(document.querySelector<HTMLElement>(".menu")!.style.visibility).toBe("hidden");
+        expect(document.querySelector<HTMLElement>(".anchored-popover")!.style.visibility).toBe("hidden");
     });
 });
