@@ -924,3 +924,31 @@ describe("swarm supervisor continuation", () => {
         }
     });
 });
+
+describe("jekt ESCALATE marker", () => {
+    const marker = (tail: string) =>
+        `[JEKT:FROM=a TO=b TIER=sensitive DELIVERY=wan TRUST=network-claimed${tail} MSGID=1 PRIORITY=normal TS=1783386012]\nbody\n[/JEKT]`;
+    const parsed = (tail: string) =>
+        new ClaudeCodeStreamParser().parseStreamEvent({ type: "user_message", message: marker(tail) }) as import("../../agent-model/types").JektMessageNode;
+
+    test("is kept on the node: required, or none for a proven sender", () => {
+        expect(parsed(" ESCALATE=required").escalate).toBe("required");
+        expect(parsed(" ESCALATE=none").escalate).toBe("none");
+    });
+
+    test("is absent from an older marker, and from anything else it might say", () => {
+        expect(parsed("").escalate).toBeUndefined();
+        expect(parsed(" ESCALATE=maybe").escalate).toBeUndefined();
+    });
+});
+
+describe("a jekt read back from stored history", () => {
+    const stored = `[JEKT:FROM=a TO=b TIER=sensitive DELIVERY=wan TRUST=network-claimed ESCALATE=required MSGID=1 PRIORITY=normal TS=1783386012]\nbody\n[/JEKT]`;
+    const read = (isReplay: boolean) =>
+        new ClaudeCodeStreamParser({ isReplay }).parseStreamEvent({ type: "user_message", message: stored }) as import("../../agent-model/types").JektMessageNode;
+
+    test("is marked replayed, whatever time it is given, so it never waits on the person", () => {
+        expect(read(true).replayed).toBe(true);
+        expect(read(false).replayed).toBeUndefined();
+    });
+});

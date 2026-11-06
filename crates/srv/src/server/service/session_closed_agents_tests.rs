@@ -296,3 +296,60 @@ async fn trying_the_reopen_again_leaves_the_agents_that_are_back_in_place() {
         .is_some_and(|root| crate::backend::layout::find_leaf_containing_block(root, &t.agent).is_some());
     assert!(has_leaf, "its pane is still in the layout");
 }
+
+/// A workspace switch closes the open workspace like a window close does as far as its agents go: they
+/// are parked and keep running, the saved record of the workspace names them, and switching back puts
+/// the same agents on the same blocks in their tabs.
+#[tokio::test]
+async fn switching_workspace_parks_its_agents_and_switching_back_puts_them_back() {
+    use crate::server::service::user_workspace_switch::{tests::workspace_rpc, wait_for_switch};
+    let state = fresh_state().await;
+    set_always_available(&state, true);
+    let main = open_window(&state, "main", false).await;
+    add_user_pane(&state, &main.workspaceid, "term").await;
+    let tab = first_tab(&state, &main.workspaceid);
+    let agent = seed_agent_block(&state, &tab, "ag-switch").await;
+    register_stub(&agent, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING, false);
+    let default_id = user_workspace::current_id(&state.mstore).unwrap();
+
+    let ret = workspace_rpc(&state, "CreateUserWorkspace", vec![json!("Workspace 2"), json!(main.oid)]).await;
+    assert!(ret.success, "{:?}", ret.error);
+    wait_for_switch().await;
+
+    assert_eq!(in_tab(&state, &agent).await.as_deref(), Some(""), "the agent is parked, in no tab");
+    assert_eq!(parked_meta(&state, &agent), (true, tab.clone()));
+    assert!(blockcontroller::get_controller(&agent).is_some(), "the switch did not stop its process");
+    let left: Value = serde_json::from_str(&state.mstore.user_workspace_get(&default_id).unwrap().unwrap().record.unwrap()).unwrap();
+    let entry = crate::server::service::session_windows::windows_of(&left)
+        .into_iter()
+        .find(|w| workspace_of(w) == Some(main.workspaceid.as_str()))
+        .expect("the left workspace's record holds the window");
+    assert_eq!(parked_of(&entry), vec![agent.clone()], "the record names the parked agent");
+
+    let ret = workspace_rpc(&state, "SwitchUserWorkspace", vec![json!(default_id), json!(main.oid)]).await;
+    assert!(ret.success, "{:?}", ret.error);
+    wait_for_switch().await;
+
+    assert_eq!(in_tab(&state, &agent).await.as_deref(), Some(tab.as_str()), "back in its tab");
+    assert!(block_ids(&state, &main.workspaceid).contains(&agent), "on the same block");
+    assert!(!parked_meta(&state, &agent).0, "no longer parked");
+    assert!(blockcontroller::get_controller(&agent).is_some(), "still running");
+}
+
+/// With the setting off a switch parks nothing, as before.
+#[tokio::test]
+async fn with_the_setting_off_a_switch_parks_no_agent() {
+    use crate::server::service::user_workspace_switch::{tests::workspace_rpc, wait_for_switch};
+    let state = fresh_state().await;
+    set_always_available(&state, false);
+    let main = open_window(&state, "main", false).await;
+    add_user_pane(&state, &main.workspaceid, "term").await;
+    let tab = first_tab(&state, &main.workspaceid);
+    let agent = seed_agent_block(&state, &tab, "ag-off-switch").await;
+
+    let ret = workspace_rpc(&state, "CreateUserWorkspace", vec![json!("Workspace 2"), json!(main.oid)]).await;
+    assert!(ret.success, "{:?}", ret.error);
+    wait_for_switch().await;
+
+    assert_eq!(in_tab(&state, &agent).await.as_deref(), Some(tab.as_str()), "left in its tab, not parked");
+}

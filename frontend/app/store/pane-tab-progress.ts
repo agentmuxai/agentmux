@@ -23,7 +23,7 @@ import { MOS } from "@/app/store/global";
 import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { BlockService } from "@/app/store/services";
-import { rankAgentStatus } from "@/app/store/agent-status";
+import { META_AWAITING_CONFIRM, rankAgentStatus } from "@/app/store/agent-status";
 import { unavailableOfMeta } from "@/app/store/agent-unavailable";
 import { createMemo, createRoot, createSignal, onCleanup, type Accessor } from "solid-js";
 
@@ -55,6 +55,7 @@ export function progressOf(facts: ProgressFacts): PaneTabProgress | null {
     const status = rankAgentStatus({
         live,
         needsYou: facts.meta?.[META_AWAITING_USER] === true,
+        confirmPending: facts.meta?.[META_AWAITING_CONFIRM] === true,
         unavailable: unavailable?.reason ?? null,
     });
     if (status.kind === "needs-you") return { state: "waiting", text: "Waiting for you" };

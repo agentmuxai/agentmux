@@ -415,7 +415,7 @@
 228 frontend/app/tab/tab.tsx::Tab
 185 frontend/app/tab/tabcontent.tsx::TabContent
 134 frontend/app/util/select-trace.ts::createSelectTrace
-119 frontend/app/util/submenu-hover.ts::createSubmenuHover
+104 frontend/app/util/submenu-hover.ts::createSubmenuHover
 104 frontend/app/view/accounts/GoogleServicesSection.tsx::GoogleServicesSection
 287 frontend/app/view/accounts/OAuthConnectPanel.tsx::OAuthConnectPanel
 130 frontend/app/view/accounts/accounts-manager.tsx::AccountsManager
@@ -560,7 +560,7 @@
 137 frontend/app/view/warden-jobs/warden-jobs-manager.tsx::WardenJobsManager
 218 frontend/app/window/logo-menu.tsx::LogoMenu
 157 frontend/app/window/logo-menu.tsx::menuItems
-197 frontend/app/window/more-dropdown.tsx::MoreDropdown
+190 frontend/app/window/more-dropdown.tsx::MoreDropdown
 107 frontend/app/window/pane-media-capture-indicator.tsx::PaneMediaCaptureIndicator
 117 frontend/app/window/titlebar-context-menu.tsx::TitleBarContextMenu
 128 frontend/app/window/use-widget-bar-responsive.ts::useWidgetBarResponsive

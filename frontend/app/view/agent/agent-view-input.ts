@@ -17,6 +17,7 @@ import type { useShownDocument } from "./agent-view-transcript";
 import { useAgentDropAttach } from "./hooks/useAgentDropAttach";
 import { useAgentKeyboard } from "./hooks/useAgentKeyboard";
 import { useInSessionSearch } from "./hooks/useInSessionSearch";
+import { useJektsAwaitingYou } from "./hooks/useJektsAwaitingYou";
 import { usePtyWidth } from "./hooks/usePtyWidth";
 import { useScrollToNode } from "./hooks/useScrollToNode";
 import { createSearchReveal } from "./search-reveal";
@@ -35,6 +36,9 @@ export function usePaneInput(p: { found: PaneFoundation; model: AgentViewModel; 
         setPins: (update) => found.agentAtoms().documentStateAtom[1]((prev) => ({ ...prev, pinnedNodes: update(prev.pinnedNodes) })),
         jumpTo: scroll.jumpTo,
     });
+
+    // A sensitive jekt that waits on the person: a card above the composer and a wait for the pane (jekts-awaiting-you.ts).
+    useJektsAwaitingYou({ blockId: model.blockId, getDocument: p.shown.getDocument, jumpTo: scroll.jumpTo });
 
     // In-session search over the loaded document slice: matches, navigation, highlight.
     const search = useInSessionSearch({

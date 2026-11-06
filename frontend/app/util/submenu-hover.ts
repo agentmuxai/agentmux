@@ -76,6 +76,15 @@ export interface SubmenuHoverController {
      * leave closes normally like any hover-opened submenu.
      */
     openNow(): void;
+    /**
+     * A peer row at this level was entered (call with the entering pointer's position). Closes the submenu
+     * at once, as close() does, unless the pointer is still inside the safe triangle from where it left this
+     * trigger toward the open submenu: then it is on its way in, so the close waits until the pointer leaves
+     * the triangle or the safety timeout, and `settled` runs then. Returns true when the close was held (and
+     * `settled` will run), false when it closed now (or was not open) and the caller proceeds itself. The
+     * pointer reaching the submenu, or a forced close, drops `settled`.
+     */
+    closeForPeer(pointer: { clientX: number; clientY: number } | undefined, settled?: () => void): boolean;
     /** Tear down all timers/listeners. Call on unmount / menu close. */
     dispose(): void;
 }
@@ -84,6 +93,8 @@ interface Point {
     x: number;
     y: number;
 }
+
+type Pointer = { clientX: number; clientY: number };
 
 function sign(p1: Point, p2: Point, p3: Point): number {
     return (p1.x - p3.x) * (p2.y - p3.y) - (p2.x - p3.x) * (p1.y - p3.y);
@@ -100,29 +111,107 @@ function pointInTriangle(pt: Point, v1: Point, v2: Point, v3: Point): boolean {
 }
 
 /**
+ * How far the triangle's base reaches past the submenu's edge, along that edge. A hand heading for the far end of
+ * the submenu in a straight line runs along the triangle's edge, and a pixel of wobble puts it outside; the margin
+ * keeps that path inside while a pointer that leaves sideways, straight up or straight down is still far outside.
+ */
+const TRIANGLE_BASE_MARGIN_PX = 16;
+
+/**
  * The safe triangle: apex at the point the cursor left the trigger row, base
- * along whichever submenu edge faces that point. Submenus in this app always
+ * along whichever submenu edge faces that point (a little longer than the
+ * edge, by `TRIANGLE_BASE_MARGIN_PX`). Submenus in this app always
  * open to the left or right of their trigger (never above/below), so the
  * near edge is picked by horizontal side; the vertical fallback covers any
  * future top/bottom placement without needing a second code path.
  */
 function isInsideSafeTriangle(apex: Point, cursor: Point, submenuRect: DOMRect): boolean {
+    const m = TRIANGLE_BASE_MARGIN_PX;
     let corner1: Point;
     let corner2: Point;
     if (apex.x <= submenuRect.left) {
-        corner1 = { x: submenuRect.left, y: submenuRect.top };
-        corner2 = { x: submenuRect.left, y: submenuRect.bottom };
+        corner1 = { x: submenuRect.left, y: submenuRect.top - m };
+        corner2 = { x: submenuRect.left, y: submenuRect.bottom + m };
     } else if (apex.x >= submenuRect.right) {
-        corner1 = { x: submenuRect.right, y: submenuRect.top };
-        corner2 = { x: submenuRect.right, y: submenuRect.bottom };
+        corner1 = { x: submenuRect.right, y: submenuRect.top - m };
+        corner2 = { x: submenuRect.right, y: submenuRect.bottom + m };
     } else if (apex.y <= submenuRect.top) {
-        corner1 = { x: submenuRect.left, y: submenuRect.top };
-        corner2 = { x: submenuRect.right, y: submenuRect.top };
+        corner1 = { x: submenuRect.left - m, y: submenuRect.top };
+        corner2 = { x: submenuRect.right + m, y: submenuRect.top };
     } else {
-        corner1 = { x: submenuRect.left, y: submenuRect.bottom };
-        corner2 = { x: submenuRect.right, y: submenuRect.bottom };
+        corner1 = { x: submenuRect.left - m, y: submenuRect.bottom };
+        corner2 = { x: submenuRect.right + m, y: submenuRect.bottom };
     }
     return pointInTriangle(cursor, apex, corner1, corner2);
+}
+
+type SubmenuEl = { getBoundingClientRect(): DOMRect };
+
+/** The submenu's rect, or null while it has no geometry yet (display:none reports a zero rect). */
+function usableRect(el: SubmenuEl | null): DOMRect | null {
+    const rect = el?.getBoundingClientRect();
+    return rect && rect.width > 0 && rect.height > 0 ? rect : null;
+}
+
+/**
+ * One close attempt. Leaving the safe triangle from `begin`'s origin toward the submenu, or `timeoutMs`
+ * passing with no mouse move inside it (a stalled mousemove must never leave the submenu open forever;
+ * a slow crossing that keeps moving is not stalled), calls `onExpire` and then the `settle` callback of a
+ * peer close that was held for it. `cancel` drops the attempt and that callback.
+ */
+function createCloseTracker(getRect: () => DOMRect | null, timeoutMs: number, onExpire: () => void) {
+    let origin: Point | null = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let tracking = false;
+    let settle: (() => void) | null = null;
+
+    const cancel = () => {
+        if (tracking) {
+            document.removeEventListener("mousemove", onMove);
+            tracking = false;
+        }
+        if (timer !== null) {
+            clearTimeout(timer);
+            timer = null;
+        }
+        origin = null;
+        settle = null;
+    };
+    const expire = () => {
+        const settled = settle;
+        onExpire();
+        settled?.();
+    };
+    function onMove(e: MouseEvent): void {
+        const rect = getRect();
+        if (!origin || !rect) return;
+        if (!isInsideSafeTriangle(origin, { x: e.clientX, y: e.clientY }, rect)) return expire();
+        restartTimer();
+    }
+    function restartTimer(): void {
+        if (timer !== null) clearTimeout(timer);
+        timer = setTimeout(expire, timeoutMs);
+    }
+    return {
+        cancel,
+        /** Start (or restart) the window from where the pointer left. */
+        begin(from: Point, onSettle?: () => void) {
+            cancel();
+            origin = from;
+            settle = onSettle ?? null;
+            if (getRect()) {
+                tracking = true;
+                document.addEventListener("mousemove", onMove);
+            }
+            restartTimer();
+        },
+        /** A window is already running: swap its callback. False when none is running. */
+        replaceSettle(onSettle?: () => void): boolean {
+            if (timer === null) return false;
+            settle = onSettle ?? null;
+            return true;
+        },
+    };
 }
 
 export function createSubmenuHover(opts: SubmenuHoverOptions): SubmenuHoverController {
@@ -132,10 +221,11 @@ export function createSubmenuHover(opts: SubmenuHoverOptions): SubmenuHoverContr
 
     let isOpen = false;
     let openTimer: ReturnType<typeof setTimeout> | null = null;
-    let closeTimer: ReturnType<typeof setTimeout> | null = null;
-    let submenuEl: { getBoundingClientRect(): DOMRect } | null = null;
-    let leaveOrigin: Point | null = null;
-    let tracking = false;
+    let submenuEl: SubmenuEl | null = null;
+    // Where the pointer last left the trigger while open, kept even when leaving does not close (closeOnLeave
+    // false): the apex of the triangle a peer row entered on the way to the submenu is judged against.
+    let triggerLeaveOrigin: Point | null = null;
+    const tracker = createCloseTracker(() => usableRect(submenuEl), closeSafetyTimeoutMs, () => doClose());
 
     const clearOpenTimer = () => {
         if (openTimer !== null) {
@@ -144,53 +234,21 @@ export function createSubmenuHover(opts: SubmenuHoverOptions): SubmenuHoverContr
         }
     };
 
-    /** Cancel any in-flight close attempt (timer and/or polygon tracking). Does not affect isOpen. */
-    const cancelPendingClose = () => {
-        if (tracking) {
-            document.removeEventListener("mousemove", handleTrackedMouseMove);
-            tracking = false;
-        }
-        if (closeTimer !== null) {
-            clearTimeout(closeTimer);
-            closeTimer = null;
-        }
-        leaveOrigin = null;
-    };
-
     const doClose = () => {
-        cancelPendingClose();
+        tracker.cancel();
+        triggerLeaveOrigin = null;
         if (!isOpen) return;
         isOpen = false;
         opts.onClose();
     };
 
-    function handleTrackedMouseMove(e: MouseEvent): void {
-        if (!leaveOrigin) return;
-        const rect = submenuEl?.getBoundingClientRect();
-        if (!rect || rect.width <= 0 || rect.height <= 0) return;
-        const cursor = { x: e.clientX, y: e.clientY };
-        if (!isInsideSafeTriangle(leaveOrigin, cursor, rect)) {
-            doClose();
-        }
-    }
-
     /** Shared by onTriggerLeave/onSubmenuLeave: start (or restart) the close-intent window. */
-    const beginCloseIntent = (e: { clientX: number; clientY: number }) => {
-        cancelPendingClose();
-        leaveOrigin = { x: e.clientX, y: e.clientY };
-        const rect = submenuEl?.getBoundingClientRect();
-        if (rect && rect.width > 0 && rect.height > 0) {
-            tracking = true;
-            document.addEventListener("mousemove", handleTrackedMouseMove);
-        }
-        // Absolute backstop either way — a stalled/undetected mousemove must
-        // never leave the submenu open forever.
-        closeTimer = setTimeout(doClose, closeSafetyTimeoutMs);
-    };
+    const beginCloseIntent = (e: Pointer) => tracker.begin({ x: e.clientX, y: e.clientY });
 
     return {
         onTriggerEnter() {
-            cancelPendingClose();
+            tracker.cancel();
+            triggerLeaveOrigin = null;
             if (isOpen || openTimer !== null) return;
             openTimer = setTimeout(() => {
                 openTimer = null;
@@ -201,13 +259,15 @@ export function createSubmenuHover(opts: SubmenuHoverOptions): SubmenuHoverContr
 
         onTriggerLeave(e) {
             clearOpenTimer();
-            if (!isOpen || !closeOnLeave) return;
-            beginCloseIntent(e);
+            if (!isOpen) return;
+            triggerLeaveOrigin = { x: e.clientX, y: e.clientY };
+            if (closeOnLeave) beginCloseIntent(e);
         },
 
         onSubmenuEnter() {
             // Arrived — no more approach to protect, stays open until onSubmenuLeave.
-            cancelPendingClose();
+            tracker.cancel();
+            triggerLeaveOrigin = null;
         },
 
         onSubmenuLeave(e) {
@@ -224,9 +284,23 @@ export function createSubmenuHover(opts: SubmenuHoverOptions): SubmenuHoverContr
             doClose();
         },
 
+        closeForPeer(pointer, settled) {
+            const rect = usableRect(submenuEl);
+            const origin = triggerLeaveOrigin;
+            const at = pointer && { x: pointer.clientX, y: pointer.clientY };
+            if (!isOpen || !origin || !rect || !at || !isInsideSafeTriangle(origin, at, rect)) {
+                clearOpenTimer();
+                doClose();
+                return false;
+            }
+            if (!tracker.replaceSettle(settled)) tracker.begin(origin, settled);
+            return true;
+        },
+
         openNow() {
             clearOpenTimer();
-            cancelPendingClose();
+            tracker.cancel();
+            triggerLeaveOrigin = null;
             if (isOpen) return;
             isOpen = true;
             opts.onOpen();
@@ -252,8 +326,32 @@ export interface PeerRegistry {
      * since this module stays framework-agnostic.
      */
     register(key: string, hover: SubmenuHoverController): () => void;
-    /** Force-close every registered peer except `key`. */
-    closeOthers(key: string): void;
+    /**
+     * Close every registered peer except `key`. With the entering pointer's position and `then`, a peer whose
+     * submenu the pointer is still heading for stays open a moment (see closeForPeer) and `then` runs once
+     * every held peer has closed, or at once when none was held: the entering row opens its own submenu from it.
+     */
+    closeOthers(key: string, pointer?: { clientX: number; clientY: number }, then?: () => void): void;
+}
+
+/**
+ * closeOthers for a plain list of controllers (one menu level): closes every peer but `self`, holding the one
+ * the pointer is crossing toward, and runs `then` when none is held any more.
+ */
+export function closePeers(
+    peers: Iterable<SubmenuHoverController>,
+    self: SubmenuHoverController | null,
+    pointer?: { clientX: number; clientY: number },
+    then?: () => void
+): void {
+    let held = 0;
+    const settle = () => {
+        if (--held === 0) then?.();
+    };
+    for (const peer of peers) {
+        if (peer !== self && peer.closeForPeer(pointer, settle)) held++;
+    }
+    if (held === 0) then?.();
 }
 
 /**
@@ -273,10 +371,13 @@ export function createPeerRegistry(): PeerRegistry {
             peers.set(key, hover);
             return () => peers.delete(key);
         },
-        closeOthers(key) {
-            for (const [k, h] of peers) {
-                if (k !== key) h.close();
-            }
+        closeOthers(key, pointer, then) {
+            closePeers(
+                [...peers].filter(([k]) => k !== key).map(([, h]) => h),
+                null,
+                pointer,
+                then
+            );
         },
     };
 }
