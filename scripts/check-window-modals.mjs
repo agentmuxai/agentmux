@@ -37,7 +37,7 @@ export const KEEP = new Map([
     ["frontend/app/window/workspaces.ts", { openModal: 7, why: "switch, create, rename, pick, delete and import a workspace: the whole window" }],
     ["frontend/app/tab/tab-close-confirm-modal.tsx", { windowScope: 1, why: "closing a tab is asked from the tab bar, outside any pane's lock; it ends agents in every pane of the tab" }],
     ["frontend/app/block/upgrade-requests.tsx", { openModal: 1, confirmModal: 1, why: "an app upgrade restarts every agent" }],
-    ["frontend/app/block/desktop-requests.tsx", { openModal: 1, why: "TODO(#18805 row 4): an agent's desktop-control request becomes a card in its pane" }],
+    ["frontend/app/block/desktop-requests.tsx", { openModal: 1, why: "a desktop-control request that names no pane; one from an agent is a card in its pane" }],
     ["frontend/app/block/widget-install-requests.tsx", { openModal: 1, confirmModal: 1, why: "an install request with no agent pane (Settings, the CLI) has no pane to ask in; one from an agent is a card" }],
     ["frontend/app/store/open-command-palette.ts", { openModal: 1, why: "the command palette is an app-wide launcher" }],
     ["frontend/app/window/logo-menu.tsx", { openModal: 1, why: "the command palette entry of the logo menu" }],
