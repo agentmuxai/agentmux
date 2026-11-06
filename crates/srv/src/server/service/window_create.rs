@@ -569,6 +569,10 @@ pub(crate) async fn create_default_contents(
 }
 
 #[cfg(test)]
+#[path = "window_create_tests.rs"]
+mod create_tests;
+
+#[cfg(test)]
 mod create_window_seed_tests {
     use super::super::window::handle_window_service;
     use crate::backend::obj::{Block, LayoutState, Tab};
