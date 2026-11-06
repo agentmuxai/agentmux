@@ -167,15 +167,6 @@ function TemplatesTier(part: { s: AgentPickerState; props: AgentPickerProps }): 
                     )}
                 />
             </div>
-            {/* Phase 2 (Q2 Decision Y): collapsible
-                "Hidden templates" section, lazy-loaded so
-                it doesn't add work when no templates are
-                hidden. Sits under the templates tier so
-                hide + unhide live in the same surface
-                (CLAUDE.md notes that the AgentMux logo menu's
-                Settings entry just opens settings.json,
-                so there's no separate settings panel to
-                host this in). */}
         </>
     );
 }
