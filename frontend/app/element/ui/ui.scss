@@ -303,6 +303,17 @@
         }
     }
 
+    // Icon-only and still more tabs than the width holds: they wrap onto more rows, each keeping its
+    // icon's width (the tab's padding gives way), instead of shrinking into one another.
+    > .ui-tabs--icon-only {
+        flex-wrap: wrap;
+
+        > .ui-tooltip-anchor {
+            flex: 1 0 0;
+            min-width: calc(var(--ui-icon-size) + 4px + var(--space-1));
+        }
+    }
+
     .ui-tab-label {
         overflow: hidden;
         text-overflow: ellipsis;

@@ -246,7 +246,7 @@ pub(crate) fn installable_provider(
     }
     let provider = crate::backend::providers::get_provider(provider_id)
         .ok_or_else(|| format!("{provider_id:?} is not a known agent CLI"))?;
-    if provider.npm_package.is_empty() && crate::backend::cli_download::download_spec(provider.id).is_none() {
+    if provider.npm_package.is_empty() && !crate::backend::cli_download::is_managed_install(provider.id) {
         return Err(format!("provider {} is not installed by AgentMux (no npm package or download)", provider.id));
     }
     Ok(provider)
@@ -372,9 +372,13 @@ fn manifest_version(manifest: &std::path::Path) -> Option<String> {
 }
 
 fn installed_bin_in(dir: &std::path::Path, cli_command: &str) -> Option<std::path::PathBuf> {
-    let download = crate::backend::cli_download::download_bin(dir, cli_command);
-    if download.is_file() {
-        return Some(download);
+    for managed in [
+        crate::backend::cli_download::download_bin(dir, cli_command),
+        crate::backend::cli_uv::venv_bin(dir, cli_command),
+    ] {
+        if managed.is_file() {
+            return Some(managed);
+        }
     }
     let bin_dir = dir.join("node_modules").join(".bin");
     let candidates: &[&str] = if cfg!(windows) {
@@ -679,28 +683,30 @@ fn spawn_install_task(
                 return;
             }
         }
-        // A release download, not an npm package (`backend::cli_download`).
-        if let Some(spec) = crate::backend::cli_download::download_spec(&provider_id) {
-            let res = run_download_install(spec, &cli_command, &broker, (&session_id, &scope), &mut cancel_rx).await;
+        // A release download or a uv venv, not an npm package (`backend::cli_download`, `backend::cli_uv`).
+        if crate::backend::cli_download::is_managed_install(&provider_id) {
+            let res = run_download_install(&provider_id, &cli_command, &broker, (&session_id, &scope), &mut cancel_rx).await;
             emit_done(&broker, res.is_ok(), res.err());
             registry.drop_session(&session_id);
             registry.release_provider(&provider_id);
             return;
         }
-        if let Err(e) = std::fs::create_dir_all(&provider_dir) {
-            // The disk-full / permission-denied / path-not-found cases
-            // route to the typed catalog so the frontend renders a
-            // friendly "Device out of space" message instead of the
-            // raw OS error. Other IO kinds fall through to Legacy.
-            let err = agentmux_common::AgentMuxError::from_io_with_path(
-                provider_dir.display().to_string(),
-                e,
-            );
-            emit_done_typed(&broker, err);
-            registry.drop_session(&session_id);
-            registry.release_provider(&provider_id);
-            return;
-        }
+        // Makes the folder too, with the public registry and an empty npm config (cli_install.rs).
+        let isolation = match crate::backend::cli_install::npm_isolation_args(&provider_dir) {
+            Ok(isolation) => isolation,
+            Err(e) => {
+                // Disk-full, permission-denied and path-not-found go to the typed catalog so the
+                // frontend shows a friendly message, not the raw OS error; other kinds stay Legacy.
+                let err = agentmux_common::AgentMuxError::from_io_with_path(
+                    provider_dir.display().to_string(),
+                    e,
+                );
+                emit_done_typed(&broker, err);
+                registry.drop_session(&session_id);
+                registry.release_provider(&provider_id);
+                return;
+            }
+        };
         let provider_dir_str = provider_dir.to_string_lossy().to_string();
 
         // The pinned package plus any companions (pi-acp's `pi`): one npm run,
@@ -731,9 +737,7 @@ fn spawn_install_task(
                 "--legacy-peer-deps=false".to_string(),
             ])
             .collect();
-        // AgentMux's own packages come from the public registry whatever the
-        // machine's .npmrc routes their scope to (cli_install.rs).
-        npm_args.extend(crate::backend::cli_install::npm_registry_args(&npm_package));
+        npm_args.extend(isolation);
 
         emit_line(
             &broker,
@@ -868,7 +872,7 @@ fn spawn_install_task(
 /// pinned file, check its hash, unpack, publish. Output lines go to the
 /// session; `install.cancel` stops the transfer and removes the partial dir.
 async fn run_download_install(
-    spec: &'static crate::backend::cli_download::DownloadSpec,
+    provider_id: &str,
     cli_command: &str,
     broker: &Arc<Broker>,
     (session_id, scope): (&str, &str),
@@ -883,7 +887,7 @@ async fn run_download_install(
         );
     };
     let stop = std::sync::atomic::AtomicBool::new(false);
-    let run = crate::backend::cli_download::install_into(&paths, spec, cli_command, &on_line, &stop);
+    let run = crate::backend::cli_download::install_managed_into(&paths, provider_id, cli_command, &on_line, &stop);
     tokio::pin!(run);
     let outcome = tokio::select! {
         r = &mut run => r,
@@ -1186,6 +1190,27 @@ mod installed_version_tests {
         std::fs::write(manifest(&shared), "not json").unwrap();
         assert_eq!(installed_version_in(&shared, pkg), None);
     }
+
+    /// A uv venv install (Aider, Kimi) is an install too, or `install.start`
+    /// rebuilds a finished one and `install.check` loses its version (#6618).
+    #[test]
+    fn a_uv_venv_and_a_release_download_count_as_installed() {
+        use super::installed_dir_among;
+        let tmp = tempfile::tempdir().unwrap();
+        let (venv, download, empty) = (tmp.path().join("venv"), tmp.path().join("dl"), tmp.path().join("none"));
+        for (dir, bin) in [
+            (&venv, crate::backend::cli_uv::venv_bin(&venv, "aider")),
+            (&download, crate::backend::cli_download::download_bin(&download, "goose")),
+        ] {
+            std::fs::create_dir_all(bin.parent().unwrap()).unwrap();
+            std::fs::write(&bin, "").unwrap();
+            assert!(dir.exists());
+        }
+        std::fs::create_dir_all(&empty).unwrap();
+        assert_eq!(installed_dir_among(vec![empty.clone(), venv.clone()], "aider"), Some(venv));
+        assert_eq!(installed_dir_among(vec![empty.clone(), download.clone()], "goose"), Some(download));
+        assert_eq!(installed_dir_among(vec![empty], "aider"), None);
+    }
 }
 
 #[cfg(test)]
@@ -1214,14 +1239,24 @@ mod registry_only_tests {
         assert!(seen > 0);
     }
 
+    /// Every provider with no npm package is installed by AgentMux's own download or uv install, so
+    /// each one is accepted here (the refusal for one that is not has no provider to try it on).
     #[test]
-    fn an_id_outside_the_registry_or_without_a_package_is_refused() {
+    fn every_provider_with_no_npm_package_is_installed_by_a_download_or_uv() {
+        let mut seen = 0;
+        for p in crate::backend::providers::all_providers().filter(|p| p.npm_package.is_empty()) {
+            assert!(crate::backend::cli_download::is_managed_install(p.id), "{} has no npm package and no managed install", p.id);
+            assert!(installable_provider(p.id).is_ok(), "{}", p.id);
+            seen += 1;
+        }
+        assert!(seen >= 6);
+    }
+
+    #[test]
+    fn an_id_outside_the_registry_is_refused() {
         for id in ["", "no-such-agent", "left-pad", "../claude", "claude/../../x", "@scope/pkg", "claude ", "C:\\x"] {
             assert!(installable_provider(id).is_err(), "{id:?}");
         }
-        let path_only = crate::backend::providers::all_providers().find(|p| p.npm_package.is_empty() && crate::backend::cli_download::download_spec(p.id).is_none()).expect("a provider AgentMux does not install");
-        let err = installable_provider(path_only.id).unwrap_err();
-        assert!(err.contains("not installed by AgentMux"), "{err}");
     }
 
     #[tokio::test]
@@ -1244,18 +1279,6 @@ mod registry_only_tests {
         assert!(resp.error.contains("not a known agent CLI"), "{resp:?}");
         assert!(state.install_sessions.sessions.lock().is_empty(), "no session was started");
         assert!(state.install_sessions.active_providers.lock().is_empty(), "nothing was claimed");
-    }
-
-    #[tokio::test]
-    async fn install_start_refuses_a_provider_that_has_no_package_of_its_own() {
-        let state = crate::server::tests::test_state();
-        let (engine, mut out) = WshRpcEngine::new();
-        register_install_handlers(&engine, &state);
-        let path_only = crate::backend::providers::all_providers().find(|p| p.npm_package.is_empty() && crate::backend::cli_download::download_spec(p.id).is_none()).expect("a path-only provider").id;
-        let resp = start(&engine, &mut out, serde_json::json!({ "providerId": path_only, "npmPackage": "left-pad" })).await;
-        assert!(resp.data.is_none(), "{resp:?}");
-        assert!(resp.error.contains("not installed by AgentMux"), "{resp:?}");
-        assert!(state.install_sessions.active_providers.lock().is_empty());
     }
 
     #[tokio::test]

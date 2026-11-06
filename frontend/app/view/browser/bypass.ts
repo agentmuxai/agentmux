@@ -42,10 +42,24 @@ export function minutesLabel(m: number): string {
     return m >= 60 ? `${m / 60} hour${m === 60 ? "" : "s"}` : `${m} min`;
 }
 
-/** Does a grant (or a request for one) carry the terminal power? */
+/** Does a grant (or a request for one) carry the terminal power, either form? */
 export function hasTerminalPower(powers: readonly string[] | undefined): boolean {
-    return !!powers?.includes("terminal");
+    return !!powers?.includes("terminal") || !!powers?.includes("terminal_ask");
 }
+
+/** Does the terminal power ask the person about each line? The stricter form wins when both are there. */
+export function asksEachLine(powers: readonly string[] | undefined): boolean {
+    return !!powers?.includes("terminal_ask");
+}
+
+/** What the strip says about the terminal power, led by a space: nothing when the grant has none. */
+export function terminalNote(powers: readonly string[] | undefined): string {
+    if (asksEachLine(powers)) return " and it types in the terminal, asking you before each line runs";
+    return hasTerminalPower(powers) ? " and it runs commands in the terminal" : "";
+}
+
+/** The longest a line is shown before "Show all": a longer one can't be run until it has been read in full. */
+export const LINE_PREVIEW_CHARS = 300;
 
 /** A site for display: its host, without the scheme. */
 export function siteLabel(origin: string): string {

@@ -26,17 +26,16 @@ pub(super) static ANTIGRAVITY: ProviderConfig = ProviderConfig {
     // agy reads neither ANTIGRAVITY_FORCE_FILE_STORAGE nor
     // ANTIGRAVITY_CONFIG_DIR (neither string is in agy.exe); it signs in once
     // per machine. The frontend's `authType: "cli-managed"` binds no account.
-    auth_extra_env: &[],
+    // The pinned copy must not replace itself with a newer build.
+    auth_extra_env: &[("AGY_CLI_DISABLE_AUTO_UPDATE", "true")],
     unset_env: &[],
-    // Not on npm: `agy` is a native binary that Google's own installer
-    // (https://antigravity.google/cli/install.ps1, and its `.sh` twin) puts
-    // in place and then keeps up to date itself. The old
-    // `@google/antigravity-cli` pin never existed, so every install of it
-    // failed. With no package this is a PATH CLI like Kimi: launch finds it
-    // on PATH or in the installer's own folder (`known_install_paths`), else
-    // shows the install command.
+    // Not on npm: `agy` is a native binary. AgentMux downloads the pinned build
+    // itself (`cli_download::SPECS`; Google's server lists only the latest, so
+    // the build current on 2026-11-06 is the pin), and a copy the user
+    // installed is still found on PATH or in `known_install_paths`. The old
+    // `@google/antigravity-cli` pin never existed, so every install of it failed.
     npm_package: "",
-    pinned_version: "",
+    pinned_version: "1.5.2",
     base_url_env_var: None,
     supported_vendors: &["google"],
     // INFERRED, not independently doc-confirmed: Antigravity CLI's own

@@ -1,0 +1,41 @@
+rpc ListAllAgentIdentities
+subscribeAccountChanges
+subscribe agentidentities:changed:claude-agent
+ClaudeLoginPanel opened existingAccountId=undefined linkTarget={"agentDefinitionId":"claude-agent"} staleAliasProvider=undefined scope=pane
+-- opened
+<div>
+  <div class="identity-pane">
+    <div class="identity-pane-detail">
+      <div class="identity-pane-readonly">
+        <h2 class="identity-pane-name">
+          "Claude Agent"
+        <h3 class="identity-pane-section-title">
+          "Linked accounts"
+        <table class="identity-pane-bindings">
+          <thead>
+            <tr>
+              <th>
+                "Provider"
+              <th>
+                "Account"
+              <th>
+                "Status"
+              <th>
+          <tbody>
+            <tr>
+              <td>
+                "GitHub"
+              <td>
+                "ACC-GH"
+              <td>
+                <span class="identity-pane-status">
+                  <span aria-hidden="true" class="identity-pane-status-dot is-valid">
+                  <span class="identity-pane-status-label">
+                    "Valid"
+              <td>
+        <div class="identity-pane-empty-hint">
+          <button type="button" class="ui-button ui-tone-accent identity-btn identity-btn-primary">
+            "Connect Anthropic account"
+    <div data-login-panel="">
+      <button>
+        "close login"

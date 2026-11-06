@@ -146,7 +146,7 @@ declare global {
         decideBrowserAttention(
             blockId: string,
             id: string,
-            decision: "done" | "approve" | "approve_always" | "cancel" | "give_back",
+            decision: "done" | "approve" | "approve_always" | "approve_ask" | "cancel" | "give_back",
         ): Promise<void>;
         /** The person's Bypass (`on`) or End bypass in an agent-driven browser
          *  pane's header. `agent` and `origins` are what the confirmation

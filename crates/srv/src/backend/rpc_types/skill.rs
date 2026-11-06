@@ -194,6 +194,12 @@ pub struct SkillImportItem {
     pub existing_id: String,
     pub existing_description: String,
     pub existing_content: String,
+    /// For a computer-use skill: its manifest, the files beside `SKILL.md` (scripts are not approved) and its pass records.
+    #[serde(default)]
+    pub app: Option<crate::backend::storage::skill_app::SkillApp>,
+    /// The content hash of that folder; the commit sends it back and writes what was previewed. Empty for a plain skill.
+    #[serde(default)]
+    pub app_hash: String,
 }
 
 /// Result of `skill.catalog.import_preview`.
@@ -216,6 +222,9 @@ pub struct SkillImportCommitItem {
     /// The catalog skill to update; empty to create one.
     #[serde(default)]
     pub existing_id: String,
+    /// The `app_hash` the preview gave a computer-use skill; empty for a plain one.
+    #[serde(default)]
+    pub app_hash: String,
 }
 
 /// `skill.catalog.import_commit` — window-scoped. Write the approved skills into the catalog and

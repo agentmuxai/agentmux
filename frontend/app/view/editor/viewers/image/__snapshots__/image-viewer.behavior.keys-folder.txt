@@ -1,0 +1,32 @@
+bar props ["viewer","options","onReopenWith"] ["image","text"] viewer=image
+bytes source {"path":"C:/pics/a.png","revision":0}
+ResizeObserver created
+ResizeObserver observe
+parent saw keydown
+onStep -1
+key "[" prevented=true
+parent saw keydown
+onStep 1
+key "]" prevented=true
+parent saw keydown
+key "b" prevented=true
+parent saw keydown
+key "+" prevented=false
+parent saw keydown
+key "0" prevented=false
+parent saw keydown
+key "]" {"ctrlKey":true} prevented=false
+parent saw keydown
+key "]" {"metaKey":true} prevented=false
+parent saw keydown
+key "b" {"altKey":true} prevented=false
+steps [-1,1]
+ResizeObserver disconnect
+bar props ["viewer","options","onReopenWith"] ["image","text"] viewer=image
+bytes source {"path":"C:/pics/a.png","revision":0}
+ResizeObserver created
+ResizeObserver observe
+parent saw keydown (no onStep)
+key "[" prevented=false
+parent saw keydown (no onStep)
+key "+" prevented=true

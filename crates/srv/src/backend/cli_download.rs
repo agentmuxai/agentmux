@@ -34,6 +34,8 @@ const MAX_EXE_BYTES: u64 = 600 * 1024 * 1024;
 pub enum Archive {
     Zip,
     TarGz,
+    /// The download is the program itself (`exe_in_archive` is empty).
+    Raw,
 }
 
 /// One downloadable file for one platform.
@@ -116,6 +118,206 @@ pub static SPECS: &[DownloadSpec] = &[DownloadSpec {
             exe_in_archive: "goose",
         },
     ],
+},
+// xAI publishes no checksum for Grok, so these were taken once on 2026-11-06
+// from x.ai itself (the Windows x64 one matched a download made the day
+// before) and are the pin: a changed file fails the install. The Windows
+// builds are Authenticode-signed (X.AI LLC). The installer's extras
+// (`grove*` and a MinGit on Windows) are not fetched: grove falls back to the
+// git on PATH.
+DownloadSpec {
+    provider_id: "grok",
+    version: "1.0.52",
+    url_prefix: "https://x.ai/cli/grok-1.0.52-",
+    assets: &[
+        Asset {
+            os: "windows",
+            arch: "x86_64",
+            url: "https://x.ai/cli/grok-1.0.52-windows-x86_64.exe",
+            sha256: "47a5becb08dd0e51f34b60b34eb866086af7f392666f821b350a45f6736ed0cb",
+            size: 169_355_080,
+            archive: Archive::Raw,
+            exe_in_archive: "",
+        },
+        Asset {
+            os: "windows",
+            arch: "aarch64",
+            url: "https://x.ai/cli/grok-1.0.52-windows-aarch64.exe",
+            sha256: "d92cb91801638dab1854b9108510a632b7aabc54147d6dd08b5babf8392c3389",
+            size: 144_085_832,
+            archive: Archive::Raw,
+            exe_in_archive: "",
+        },
+        Asset {
+            os: "macos",
+            arch: "aarch64",
+            url: "https://x.ai/cli/grok-1.0.52-macos-aarch64",
+            sha256: "c2caa9895dd763297a75e8fb6077e175d9c5304c53903e52cff8891a1384bbb9",
+            size: 172_237_072,
+            archive: Archive::Raw,
+            exe_in_archive: "",
+        },
+        Asset {
+            os: "macos",
+            arch: "x86_64",
+            url: "https://x.ai/cli/grok-1.0.52-macos-x86_64",
+            sha256: "b3f1fa34d88b96cbf471005ef777028abfe7288fe61ff9876629f0bbc2cfe8a5",
+            size: 185_857_856,
+            archive: Archive::Raw,
+            exe_in_archive: "",
+        },
+        Asset {
+            os: "linux",
+            arch: "x86_64",
+            url: "https://x.ai/cli/grok-1.0.52-linux-x86_64",
+            sha256: "1668414b047e1050a96d25fe17dfc3efe63190fbf66d8cc1c3de8633caf50d11",
+            size: 188_326_752,
+            archive: Archive::Raw,
+            exe_in_archive: "",
+        },
+        Asset {
+            os: "linux",
+            arch: "aarch64",
+            url: "https://x.ai/cli/grok-1.0.52-linux-aarch64",
+            sha256: "fc32410b6883c15a39b9f33ec04a6bfb7d070b383e5dbad7efbc48c787e5050d",
+            size: 160_670_952,
+            archive: Archive::Raw,
+            exe_in_archive: "",
+        },
+    ],
+},
+// Meta's own manifest for this build lists a SHA-256 and size per platform; they are
+// copied here, so this is not trust on first use. The binary is the one the vendor's
+// launcher would fetch, run directly: the launcher's hourly self-update never runs,
+// and `MUSE_NO_AUTO_UPDATE=1` is set besides. The Windows build is Authenticode-signed
+// (Meta Platforms, Inc.).
+DownloadSpec {
+    provider_id: "muse",
+    version: "1.4.7-R6101.1",
+    url_prefix: "https://lookaside.facebook.com/lookaside/muse/download/?channel=muse&version=1.4.7-R6101.1&file=",
+    assets: &[
+        Asset {
+            os: "windows",
+            arch: "x86_64",
+            url: "https://lookaside.facebook.com/lookaside/muse/download/?channel=muse&version=1.4.7-R6101.1&file=muse-x86-windows.exe",
+            sha256: "2d1ac7af0a9ea77643cb8690eee70f52f0f8476c46b194f143c831f481aea59d",
+            size: 467_174_136,
+            archive: Archive::Raw,
+            exe_in_archive: "",
+        },
+        Asset {
+            os: "windows",
+            arch: "aarch64",
+            url: "https://lookaside.facebook.com/lookaside/muse/download/?channel=muse&version=1.4.7-R6101.1&file=muse-aarch64-windows.exe",
+            sha256: "6580be6e5ab03b7a1e3ebe427b50693f6adce4e52ea808c5ea87ba07ccac2b9f",
+            size: 427_460_856,
+            archive: Archive::Raw,
+            exe_in_archive: "",
+        },
+        Asset {
+            os: "macos",
+            arch: "aarch64",
+            url: "https://lookaside.facebook.com/lookaside/muse/download/?channel=muse&version=1.4.7-R6101.1&file=muse-aarch64-macos",
+            sha256: "87ff5a31b63e30b6ac04d3e8298285517e753c126fb6f3aee80accf28c4562f1",
+            size: 358_892_272,
+            archive: Archive::Raw,
+            exe_in_archive: "",
+        },
+        Asset {
+            os: "macos",
+            arch: "x86_64",
+            url: "https://lookaside.facebook.com/lookaside/muse/download/?channel=muse&version=1.4.7-R6101.1&file=muse-x86-macos",
+            sha256: "6d766da6601a0aae8bd22294c0854970286e1b9ade3009f0d0289b7875a10c58",
+            size: 380_381_680,
+            archive: Archive::Raw,
+            exe_in_archive: "",
+        },
+        Asset {
+            os: "linux",
+            arch: "x86_64",
+            url: "https://lookaside.facebook.com/lookaside/muse/download/?channel=muse&version=1.4.7-R6101.1&file=muse-x86-linux",
+            sha256: "36e3dac91f56c15572b95be55d70ee9fd9685cd9ab49f747bab4746c8d7c2518",
+            size: 363_518_168,
+            archive: Archive::Raw,
+            exe_in_archive: "",
+        },
+        Asset {
+            os: "linux",
+            arch: "aarch64",
+            url: "https://lookaside.facebook.com/lookaside/muse/download/?channel=muse&version=1.4.7-R6101.1&file=muse-aarch64-linux",
+            sha256: "48db3c7468cd4f401eff9b415fb7e0cdfe0351fb1730649ceae2a0f766e23b85",
+            size: 325_916_776,
+            archive: Archive::Raw,
+            exe_in_archive: "",
+        },
+    ],
+},
+// Google serves only the latest build through its manifests, so the URL of the build
+// current on 2026-11-06 is pinned (an older build, 1.5.1, still downloaded a day after
+// it was replaced). Each file's SHA-512 matched Google's manifest when taken; the
+// SHA-256 here is of the same file. Linux uses the static musl builds. The Windows
+// build is Authenticode-signed (Google LLC). Where the vendor's installer would run
+// `agy install` to edit shell profiles, nothing is run here.
+DownloadSpec {
+    provider_id: "antigravity",
+    version: "1.5.2",
+    url_prefix: "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.2-4951595792859136/",
+    assets: &[
+        Asset {
+            os: "windows",
+            arch: "x86_64",
+            url: "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.2-4951595792859136/windows-x64/cli_windows_x64.exe",
+            sha256: "3f6f64a331fcd75c4ea3a25f89fdb0a9192feaa6e49bb828510b65dc0030b61e",
+            size: 222_561_944,
+            archive: Archive::Raw,
+            exe_in_archive: "",
+        },
+        Asset {
+            os: "windows",
+            arch: "aarch64",
+            url: "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.2-4951595792859136/windows-arm/cli_windows_arm64.exe",
+            sha256: "ab49a39c1fc2496093d7d4486c03f3813a9982401834e4593c93b68b68a44300",
+            size: 211_127_448,
+            archive: Archive::Raw,
+            exe_in_archive: "",
+        },
+        Asset {
+            os: "macos",
+            arch: "aarch64",
+            url: "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.2-4951595792859136/darwin-arm/cli_mac_arm64.tar.gz",
+            sha256: "c3f56b381c4755cdd02e5de67373c24788b2a2aeade156756b4419b67253bd0c",
+            size: 64_486_606,
+            archive: Archive::TarGz,
+            exe_in_archive: "antigravity",
+        },
+        Asset {
+            os: "macos",
+            arch: "x86_64",
+            url: "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.2-4951595792859136/darwin-x64/cli_mac_x64.tar.gz",
+            sha256: "fe99ebacc6bd46b4bf2d85c718420b28b699210cf7c2e3055242e2dad7a1beb3",
+            size: 70_102_814,
+            archive: Archive::TarGz,
+            exe_in_archive: "antigravity",
+        },
+        Asset {
+            os: "linux",
+            arch: "x86_64",
+            url: "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.2-4951595792859136/linux-x64-musl/cli_linux_x64_musl.tar.gz",
+            sha256: "6671806b8e68b0c3cfb87ae99675a9b037b33d9d4cf556fc633a35d198bebf5c",
+            size: 72_824_890,
+            archive: Archive::TarGz,
+            exe_in_archive: "antigravity",
+        },
+        Asset {
+            os: "linux",
+            arch: "aarch64",
+            url: "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.2-4951595792859136/linux-arm-musl/cli_linux_arm64_musl.tar.gz",
+            sha256: "f83f4246f5de84f5d966564bd844a65895cb015439eb55a82293fc0ab7c81e78",
+            size: 66_759_805,
+            archive: Archive::TarGz,
+            exe_in_archive: "antigravity",
+        },
+    ],
 }];
 
 /// The download install for `provider_id`, if AgentMux has one.
@@ -156,6 +358,8 @@ pub enum DownloadError {
     HashMismatch { expected: String, actual: String },
     Unpack(String),
     NotRunnable(PathBuf),
+    /// A helper program (uv) failed; carries its last output lines.
+    Tool(String),
     Mark(PathBuf, std::io::Error),
     Cancelled,
 }
@@ -184,6 +388,7 @@ impl std::fmt::Display for DownloadError {
             DownloadError::NotRunnable(p) => {
                 write!(f, "the installed program does not run: {}", p.display())
             }
+            DownloadError::Tool(e) => write!(f, "{e}"),
             DownloadError::Mark(d, e) => {
                 write!(f, "cannot mark the CLI install complete at {}: {e}", d.display())
             }
@@ -192,31 +397,62 @@ impl std::fmt::Display for DownloadError {
     }
 }
 
-/// Install `provider_id`'s pinned release, **async**: take the cross-instance
+/// Whether AgentMux installs `provider_id` itself without npm: a release
+/// download (goose) or a hash-locked Python venv through uv (Aider, Kimi).
+pub fn is_managed_install(provider_id: &str) -> bool {
+    download_spec(provider_id).is_some() || crate::backend::cli_uv::uv_spec(provider_id).is_some()
+}
+
+/// The pin a managed install of `provider_id` is keyed by.
+fn managed_version(provider_id: &str) -> Option<&'static str> {
+    download_spec(provider_id)
+        .map(|s| s.version)
+        .or_else(|| crate::backend::cli_uv::uv_spec(provider_id).map(|s| s.version))
+}
+
+/// Install `provider_id`'s pinned copy, **async**: take the cross-instance
 /// lock (blocking, off the runtime), reuse a finished install another instance
 /// made while this one waited, otherwise clear leftovers and install.
 /// `resolvecli`'s path; `install.start` polls the lock itself (it must stay
-/// cancellable) and calls [`install_into`] once it holds it.
-pub async fn install_download_cli(
+/// cancellable) and calls [`install_managed_into`] once it holds it.
+pub async fn install_managed_cli(
     paths: &DataPaths,
     provider_id: &str,
     on_line: &(dyn Fn(&'static str, &str) + Sync),
     cancel: &AtomicBool,
 ) -> Result<InstallOutcome, DownloadError> {
-    let spec = download_spec(provider_id).ok_or_else(|| DownloadError::NoSource(provider_id.to_string()))?;
+    let version = managed_version(provider_id).ok_or_else(|| DownloadError::NoSource(provider_id.to_string()))?;
     let provider = crate::backend::providers::get_provider(provider_id)
         .ok_or_else(|| DownloadError::NoSource(provider_id.to_string()))?;
-    let (lock_paths, id, pin) = (paths.clone(), provider.id.to_string(), spec.version.to_string());
+    let (lock_paths, id, pin) = (paths.clone(), provider.id.to_string(), version.to_string());
     let _guard = tokio::task::spawn_blocking(move || cli_install::lock_install(&lock_paths, &id, &pin))
         .await
         .map_err(|e| DownloadError::Lock(std::io::Error::other(e)))?
         .map_err(DownloadError::Lock)?;
-    let dir = cli_install::install_dir(paths, provider.id, spec.version);
+    let dir = cli_install::install_dir(paths, provider.id, version);
     if cli_install::is_valid_install(&dir, provider.cli_command) {
-        return Ok(InstallOutcome::AlreadyInstalled(download_bin(&dir, provider.cli_command)));
+        if let Some(bin) = cli_install::installed_bin(&dir, provider.cli_command) {
+            return Ok(InstallOutcome::AlreadyInstalled(bin));
+        }
     }
     cli_install::clear_unless_valid(&dir, provider.cli_command).map_err(|e| DownloadError::Clear(dir.clone(), e))?;
-    install_into(paths, spec, provider.cli_command, on_line, cancel).await
+    install_managed_into(paths, provider.id, provider.cli_command, on_line, cancel).await
+}
+
+/// Install into the install dir; the caller holds the lock and has cleared
+/// leftovers. A failure removes the partial dir, so nothing unmarked is left.
+pub async fn install_managed_into(
+    paths: &DataPaths,
+    provider_id: &str,
+    cli_command: &str,
+    on_line: &(dyn Fn(&'static str, &str) + Sync),
+    cancel: &AtomicBool,
+) -> Result<InstallOutcome, DownloadError> {
+    if let Some(spec) = crate::backend::cli_uv::uv_spec(provider_id) {
+        return crate::backend::cli_uv::install_into(paths, spec, cli_command, on_line, cancel).await;
+    }
+    let spec = download_spec(provider_id).ok_or_else(|| DownloadError::NoSource(provider_id.to_string()))?;
+    install_into(paths, spec, cli_command, on_line, cancel).await
 }
 
 /// Download, verify, unpack and publish into the install dir. The caller holds
@@ -241,7 +477,7 @@ pub async fn install_into(
     result
 }
 
-async fn install_asset(
+pub(crate) async fn install_asset(
     dir: &Path,
     spec: &DownloadSpec,
     asset: &Asset,
@@ -260,13 +496,11 @@ async fn install_asset(
         .await
         .map_err(|e| DownloadError::Unpack(e.to_string()))??;
     let _ = std::fs::remove_file(&archive);
-    let probe = bin.to_string_lossy().into_owned();
-    let version = tokio::task::spawn_blocking(move || {
-        crate::backend::tool_store::probe_version(&probe, &Some("--version".to_string()))
-    })
-    .await
-    .ok()
-    .flatten();
+    let (probe, id) = (bin.clone(), spec.provider_id);
+    let version = tokio::task::spawn_blocking(move || cli_install::probe_installed(&probe, id))
+        .await
+        .ok()
+        .flatten();
     let Some(version) = version else {
         return Err(DownloadError::NotRunnable(bin));
     };
@@ -350,6 +584,7 @@ fn extract_exe(archive: &Path, kind: Archive, exe_in_archive: &str, out: &Path) 
     let found = match kind {
         Archive::Zip => copy_from_zip(file, exe_in_archive, &part),
         Archive::TarGz => copy_from_tar_gz(file, exe_in_archive, &part),
+        Archive::Raw => copy_capped(&mut { file }, &part).map(|()| true),
     };
     let found = found.inspect_err(|_| {
         let _ = std::fs::remove_file(&part);

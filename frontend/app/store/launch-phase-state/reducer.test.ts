@@ -479,6 +479,16 @@ describe("launch-phase-state: other commands", () => {
         expect(update(state, { type: "ControllerHealthy" }, NOW).state).toBe(state);
     });
 
+    it("a live turn on a provider with no sign-in check clears the notice but does not claim the login works", () => {
+        // Muse Code: a turn opens when the message is sent, and the pane can still say "not signed in".
+        const from = { ...initialState(), canRetry: true, authNotice: "x", authStatus: "unknown" as const };
+        const { state } = run([{ type: "ControllerHealthy", provesAuth: false }], from);
+        expect(state).toMatchObject({ canRetry: false, authNotice: null, authStatus: "unknown" });
+        expect(update(state, { type: "ControllerHealthy", provesAuth: false }, NOW).state).toBe(state);
+        // A confirmed login is still confirmed.
+        expect(run([{ type: "ControllerHealthy", provesAuth: false }], { ...initialState(), authStatus: "authenticated" as const }).state.authStatus).toBe("authenticated");
+    });
+
     it("AuthUrlSet / AuthNoticeSet set their field", () => {
         const { state } = run([
             { type: "AuthUrlSet", url: "https://u" },

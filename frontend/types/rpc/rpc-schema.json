@@ -7187,6 +7187,25 @@
     }
   },
   {
+    "command": "toolchain.install_vendor_cli",
+    "request": "agentmux_srv::server::vendor_install_handlers::VendorInstallReq",
+    "requestName": "VendorInstallReq",
+    "requestTs": {
+      "imports": [
+        "VendorInstallReq"
+      ],
+      "name": "VendorInstallReq"
+    },
+    "response": "agentmux_srv::server::vendor_install_handlers::VendorInstallStarted",
+    "responseName": "VendorInstallStarted",
+    "responseTs": {
+      "imports": [
+        "VendorInstallStarted"
+      ],
+      "name": "VendorInstallStarted"
+    }
+  },
+  {
     "command": "toolchain.prune",
     "request": "core::option::Option<agentmux_srv::backend::rpc_types::toolchain::ToolchainPruneReq>",
     "requestName": "core::option::Option<agentmux_srv::backend::rpc_types::toolchain::ToolchainPruneReq>",
@@ -7222,6 +7241,25 @@
         "ResolveInstallCommandResult"
       ],
       "name": "ResolveInstallCommandResult"
+    }
+  },
+  {
+    "command": "toolchain.vendor_install_info",
+    "request": "agentmux_srv::server::vendor_install_handlers::VendorInstallReq",
+    "requestName": "VendorInstallReq",
+    "requestTs": {
+      "imports": [
+        "VendorInstallReq"
+      ],
+      "name": "VendorInstallReq"
+    },
+    "response": "agentmux_srv::server::vendor_install_handlers::VendorInstallInfo",
+    "responseName": "VendorInstallInfo",
+    "responseTs": {
+      "imports": [
+        "VendorInstallInfo"
+      ],
+      "name": "VendorInstallInfo"
     }
   },
   {

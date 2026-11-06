@@ -1,0 +1,18 @@
+-- loaded, own client
+  call AccountOAuthClientGet [{"provider":"google"}]
+<div>
+  <div class="oauth-connect">
+    <div class="identity-key-actions">
+      <button type="button" class="ui-button ui-tone-accent identity-btn identity-btn-primary">
+        "Connect Google"
+      <button type="button" class="ui-button ui-tone-neutral identity-btn identity-btn-secondary">
+        "Cancel"
+-- after Cancel
+  call onCancel []
+<div>
+  <div class="oauth-connect">
+    <div class="identity-key-actions">
+      <button type="button" class="ui-button ui-tone-accent identity-btn identity-btn-primary">
+        "Connect Google"
+      <button type="button" class="ui-button ui-tone-neutral identity-btn identity-btn-secondary">
+        "Cancel"

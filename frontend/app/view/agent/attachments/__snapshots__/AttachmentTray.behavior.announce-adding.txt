@@ -1,0 +1,70 @@
+-- adding two
+   focus: body
+<div>
+  <div class="agent-attachment-tray">
+    <div class="agent-attachment-tray__header">
+      <span class="agent-attachment-tray__processing">
+        <span class="text">
+          "Processing"
+          "2"
+          "of"
+          "4"
+          "·"
+          "2.0 MB"
+          "of"
+          "2.0 MB"
+        <span class="agent-attachment-tray__bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-label="Processing images" aria-valuenow="100">
+          <span class="fill" style="width: 100%;">
+        <button type="button" class="ui-button ui-tone-quiet ui-button--link">
+          "Cancel"
+      <span class="agent-attachment-tray__header-actions">
+        <button type="button" class="ui-button ui-tone-quiet ui-button--link">
+          "Clear"
+    <ul class="agent-attachment-tray__tiles" aria-label="Attached images: 4">
+      <li class="stub-tile" data-key="k1" data-number="1" data-status="ready" data-kind="image" data-flash="no" data-caption="no" data-progress="1">
+        <button class="agent-attachment-tile__main">
+          "pic1.png"
+        <button class="stub-remove" aria-label="Remove pic1.png">
+      <li class="stub-tile" data-key="k2" data-number="2" data-status="ready" data-kind="image" data-flash="no" data-caption="no" data-progress="1">
+        <button class="agent-attachment-tile__main">
+          "pic2.png"
+        <button class="stub-remove" aria-label="Remove pic2.png">
+      <li class="stub-tile" data-key="k3" data-number="3" data-status="processing" data-kind="image" data-flash="no" data-caption="no" data-progress="1">
+        <button class="agent-attachment-tile__main">
+          "pic3.png"
+        <button class="stub-remove" aria-label="Remove pic3.png">
+      <li class="stub-tile" data-key="k4" data-number="4" data-status="processing" data-kind="image" data-flash="no" data-caption="no" data-progress="1">
+        <button class="agent-attachment-tile__main">
+          "pic4.png"
+        <button class="stub-remove" aria-label="Remove pic4.png">
+  <span class="sr-only" aria-live="polite">
+    "Adding 2 images."
+-- ready
+   focus: body
+<div>
+  <div class="agent-attachment-tray">
+    <div class="agent-attachment-tray__header">
+      <span class="agent-attachment-tray__summary is-ok">
+        "4 images · 4.0 MB / 1.0 GB"
+      <span class="agent-attachment-tray__header-actions">
+        <button type="button" class="ui-button ui-tone-quiet ui-button--link">
+          "Clear"
+    <ul class="agent-attachment-tray__tiles" aria-label="Attached images: 4">
+      <li class="stub-tile" data-key="k1" data-number="1" data-status="ready" data-kind="image" data-flash="no" data-caption="no" data-progress="1">
+        <button class="agent-attachment-tile__main">
+          "pic1.png"
+        <button class="stub-remove" aria-label="Remove pic1.png">
+      <li class="stub-tile" data-key="k2" data-number="2" data-status="ready" data-kind="image" data-flash="no" data-caption="no" data-progress="1">
+        <button class="agent-attachment-tile__main">
+          "pic2.png"
+        <button class="stub-remove" aria-label="Remove pic2.png">
+      <li class="stub-tile" data-key="k3" data-number="3" data-status="ready" data-kind="image" data-flash="no" data-caption="no" data-progress="1">
+        <button class="agent-attachment-tile__main">
+          "pic3.png"
+        <button class="stub-remove" aria-label="Remove pic3.png">
+      <li class="stub-tile" data-key="k4" data-number="4" data-status="ready" data-kind="image" data-flash="no" data-caption="no" data-progress="1">
+        <button class="agent-attachment-tile__main">
+          "pic4.png"
+        <button class="stub-remove" aria-label="Remove pic4.png">
+  <span class="sr-only" aria-live="polite">
+    "4 images ready."

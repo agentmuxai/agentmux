@@ -60,7 +60,7 @@ vi.mock("./activity/useAttachedTaskAxis", () => ({ useAttachedTaskAxis: h.hook("
 vi.mock("./btw", () => ({ askSideQuestion: (...a: unknown[]) => h.fns.askSide(...a) }));
 vi.mock("./quick-fork", () => ({ quickForkAgent: (...a: unknown[]) => h.fns.quickFork(...a) }));
 vi.mock("./open-history-tab", () => ({ openOrFocusHistoryTab: (...a: unknown[]) => h.fns.openHistory(...a) }));
-vi.mock("./providers", () => ({ getProvider: (key: string) => (key === "unknown" ? undefined : { id: "claude", displayName: "Claude" }) }));
+vi.mock("./providers", () => ({ getProvider: (key: string) => (key === "unknown" ? undefined : { id: "claude", displayName: "Claude", authCheckCommand: ["auth", "status"] }) }));
 vi.mock("./render-dormant", () => ({ useRenderDormant: h.hook("useRenderDormant", () => () => false) }));
 vi.mock("./sign-in-notice", () => ({ createSignInNotice: h.hook("createSignInNotice", () => ({ answered: () => {}, needed: () => {}, bound: () => {} })) }));
 vi.mock("./system-notification", () => ({ createSystemNotifier: h.hook("createSystemNotifier", () => () => {}) }));

@@ -1,0 +1,50 @@
+-- confirm
+  call AccountOAuthClientGet [{"provider":"github"}]
+  call AccountOAuthStart [{"provider":"github","name":"work"}]
+<div>
+  <div class="oauth-connect">
+    <div class="oauth-flow-status">
+      <div class="oauth-confirm-user" role="alert">
+        <div class="oauth-error-title">
+          "Connect a different GitHub account?"
+        <div>
+          "This AgentMux account is connected to GitHub as"
+          <b>
+            "@"
+            "old"
+          ", and you just authorized"
+          <b>
+            "@"
+            "new"
+          ". Replacing it ends the repositories shared as @"
+          "old"
+          "; you can install on the new account's repositories afterwards."
+        <div class="identity-key-actions">
+          <button type="button" class="ui-button ui-tone-accent identity-btn identity-btn-primary">
+            "Replace with @"
+            "new"
+          <button type="button" class="ui-button ui-tone-neutral identity-btn identity-btn-secondary">
+            "Keep @"
+            "old"
+-- replaced
+  call AccountOAuthStart [{"provider":"github","name":"work","replaceGithubUser":true}]
+  call openLink ["https://github.com/login/oauth/authorize?x"]
+<div>
+  <div class="oauth-connect">
+    <div class="oauth-flow-status">
+      <div class="oauth-waiting">
+        "Waiting for browser authorization…"
+        <a class="oauth-link" href="#">
+          "Reopen browser ↗"
+      <div class="identity-key-actions">
+        <button type="button" class="ui-button ui-tone-neutral identity-btn identity-btn-secondary">
+          "Cancel"
+-- kept
+  call AccountOAuthStart [{"provider":"github","name":"work"}]
+  call AccountOAuthCancel [{"sessionId":"s2"}]
+  call AccountOAuthCancel [{"sessionId":"s1"}]
+<div>
+  <div class="oauth-connect">
+    <div class="identity-key-actions">
+      <button type="button" class="ui-button ui-tone-accent identity-btn identity-btn-primary">
+        "Connect GitHub"

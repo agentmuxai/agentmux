@@ -1,0 +1,5 @@
+rpc AppUpdateStatus
+openLink https://github.com/agentmuxai/agentmux/releases/tag/v1.2.3
+host installAppUpdate
+rpc AppUpdateStatus
+host installAppUpdate

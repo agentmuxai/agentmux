@@ -88,12 +88,12 @@ export function useAuthHealth(opts: {
     paneModel: PaneStateAndDispatch;
     status: {
         canRetry: Accessor<boolean>;
-        notifyControllerHealthy: () => void;
+        notifyControllerHealthy: (provesAuth?: boolean) => void;
         recheckAuthAfterBind: () => Promise<boolean>;
     };
     refreshLinkedAccountId: () => Promise<void>;
     deps?: Partial<AuthHealthDeps>;
-}): { declareAuthHealthy: () => void } {
+}): { declareAuthHealthy: (provesAuth?: boolean) => void } {
     const { paneModel } = opts;
     const deps: AuthHealthDeps = {
         failureCode: () => paneSnapshot(opts.blockId)?.failure?.data.code,
@@ -109,8 +109,8 @@ export function useAuthHealth(opts: {
     // happens to be showing isn't silently wiped. Shared by two independent
     // proofs of health: a live controllerstatus event showing an active turn
     // (below), and a verified auth re-check after an external bind (below).
-    const declareAuthHealthy = () => {
-        opts.status.notifyControllerHealthy();
+    const declareAuthHealthy = (provesAuth?: boolean) => {
+        opts.status.notifyControllerHealthy(provesAuth);
         if (deps.failureCode() === "auth") {
             clearFailure(paneModel, { reason: "recovered", onlyCode: "auth", system: true });
         }

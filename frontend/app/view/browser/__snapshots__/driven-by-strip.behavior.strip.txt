@@ -1,0 +1,134 @@
+-- no entries
+<div>
+  <div class="browser-driven-by browser-driven-by--ended" role="status">
+    <i class="fa-solid fa-list" aria-hidden="true">
+    <div class="browser-driven-by-message">
+      <span>
+        <b>
+          "The agent"
+        "'s actions here"
+    <div class="browser-driven-by-actions">
+      <button title="What The agent did in this pane" type="button" class="ui-button ui-tone-neutral ui-density-compact browser-actions-log-button" aria-pressed="false">
+        "Log ("
+        "0"
+        ")"
+-- two entries
+<div>
+  <div class="browser-driven-by browser-driven-by--ended" role="status">
+    <i class="fa-solid fa-list" aria-hidden="true">
+    <div class="browser-driven-by-message">
+      <span>
+        <b>
+          "Posa"
+        "'s actions here"
+    <div class="browser-driven-by-actions">
+      <button title="What Posa did in this pane" type="button" class="ui-button ui-tone-neutral ui-density-compact browser-actions-log-button" aria-pressed="false">
+        "Log ("
+        "2"
+        ")"
+-- open
+<div>
+  <div class="browser-driven-by browser-driven-by--ended" role="status">
+    <i class="fa-solid fa-list" aria-hidden="true">
+    <div class="browser-driven-by-message">
+      <span>
+        <b>
+          "Posa"
+        "'s actions here"
+    <div class="browser-driven-by-actions">
+      <button title="What Posa did in this pane" type="button" class="ui-button ui-tone-neutral ui-density-compact browser-actions-log-button" aria-pressed="true">
+        "Log ("
+        "2"
+        ")"
+  <div class="browser-action-log" role="log" aria-label="What Posa did in this pane">
+    <div class="browser-action-log-head">
+      <span>
+        "What"
+        <b>
+          "Posa"
+        "did here, newest first"
+      <button type="button" class="ui-button ui-tone-neutral ui-density-compact">
+        "Close"
+    <ol class="browser-action-log-list">
+      <li class="browser-action-log-row">
+        <span class="browser-action-log-time">
+          "t2"
+        <span class="browser-action-log-kind">
+          "click"
+        <span class="browser-action-log-target">
+          "Submit"
+        <span class="browser-action-log-how">
+          "done"
+        <span class="browser-action-log-url" data-hover-tip="https://github.com/agentmuxai/agentmux?tab=issues" aria-description="https://github.com/agentmuxai/agentmux?tab=issues">
+          "github.com/agentmuxai/agentmux"
+      <li class="browser-action-log-row">
+        <span class="browser-action-log-time">
+          "t1"
+        <span class="browser-action-log-kind">
+          "click"
+        <span class="browser-action-log-target">
+          "Submit"
+        <span class="browser-action-log-how">
+          "done"
+        <span class="browser-action-log-url" data-hover-tip="https://github.com/agentmuxai/agentmux?tab=issues" aria-description="https://github.com/agentmuxai/agentmux?tab=issues">
+          "github.com/agentmuxai/agentmux"
+-- last entry without an agent
+<div>
+  <div class="browser-driven-by browser-driven-by--ended" role="status">
+    <i class="fa-solid fa-list" aria-hidden="true">
+    <div class="browser-driven-by-message">
+      <span>
+        <b>
+          "The agent"
+        "'s actions here"
+    <div class="browser-driven-by-actions">
+      <button title="What The agent did in this pane" type="button" class="ui-button ui-tone-neutral ui-density-compact browser-actions-log-button" aria-pressed="true">
+        "Log ("
+        "2"
+        ")"
+  <div class="browser-action-log" role="log" aria-label="What The agent did in this pane">
+    <div class="browser-action-log-head">
+      <span>
+        "What"
+        <b>
+          "The agent"
+        "did here, newest first"
+      <button type="button" class="ui-button ui-tone-neutral ui-density-compact">
+        "Close"
+    <ol class="browser-action-log-list">
+      <li class="browser-action-log-row">
+        <span class="browser-action-log-time">
+          "t2"
+        <span class="browser-action-log-kind">
+          "click"
+        <span class="browser-action-log-target">
+          "Submit"
+        <span class="browser-action-log-how">
+          "done"
+        <span class="browser-action-log-url" data-hover-tip="https://github.com/agentmuxai/agentmux?tab=issues" aria-description="https://github.com/agentmuxai/agentmux?tab=issues">
+          "github.com/agentmuxai/agentmux"
+      <li class="browser-action-log-row">
+        <span class="browser-action-log-time">
+          "t1"
+        <span class="browser-action-log-kind">
+          "click"
+        <span class="browser-action-log-target">
+          "Submit"
+        <span class="browser-action-log-how">
+          "done"
+        <span class="browser-action-log-url" data-hover-tip="https://github.com/agentmuxai/agentmux?tab=issues" aria-description="https://github.com/agentmuxai/agentmux?tab=issues">
+          "github.com/agentmuxai/agentmux"
+-- closed
+<div>
+  <div class="browser-driven-by browser-driven-by--ended" role="status">
+    <i class="fa-solid fa-list" aria-hidden="true">
+    <div class="browser-driven-by-message">
+      <span>
+        <b>
+          "The agent"
+        "'s actions here"
+    <div class="browser-driven-by-actions">
+      <button title="What The agent did in this pane" type="button" class="ui-button ui-tone-neutral ui-density-compact browser-actions-log-button" aria-pressed="false">
+        "Log ("
+        "2"
+        ")"

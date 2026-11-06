@@ -29,6 +29,8 @@ pub(crate) mod identity_handlers;
 pub mod install_handlers;
 mod lsp_handlers;
 mod system_install_handlers;
+mod vendor_install_catalog;
+mod vendor_install_handlers;
 mod messagebus;
 // pub(crate): muxbus::cloud_subscriber (the WAN delivery path) calls
 // resolve_transcript_request_tier_fields directly — see that function's
@@ -129,6 +131,7 @@ pub(crate) mod browser_powers;
 pub(crate) mod browser_pause_all;
 pub(crate) mod browser_standing;
 pub(crate) mod browser_terminal;
+pub(crate) mod browser_terminal_line;
 pub(crate) mod browser_uploads;
 pub(crate) mod host_http;
 pub(crate) mod operator_proof;

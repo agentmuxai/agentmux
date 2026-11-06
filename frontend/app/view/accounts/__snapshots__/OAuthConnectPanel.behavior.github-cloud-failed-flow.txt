@@ -1,0 +1,19 @@
+-- failed with the question
+  call AccountOAuthClientGet [{"provider":"github"}]
+  call AccountOAuthStart [{"provider":"github","name":"work"}]
+  call AccountOAuthPoll [{"sessionId":"s1"}]
+  call openLink ["https://accounts.google.com/o/oauth2/v2/auth?x"]
+<div>
+  <div class="oauth-connect">
+    <div class="oauth-flow-status">
+      <div data-testid="cloud-sign-in">
+        "Sign in to AgentMux Cloud to connect GitHub"
+      <div class="identity-key-actions">
+        <button type="button" class="ui-button ui-tone-neutral identity-btn identity-btn-secondary">
+          "Try again"
+-- signed in
+<div>
+  <div class="oauth-connect">
+    <div class="identity-key-actions">
+      <button type="button" class="ui-button ui-tone-accent identity-btn identity-btn-primary">
+        "Connect GitHub"

@@ -14,7 +14,7 @@ import type { useAgentCommands } from "./hooks/useAgentCommands";
 export interface PaneLate {
     commands: ReturnType<typeof useAgentCommands>;
     retryLastTurn: () => void;
-    declareAuthHealthy: () => void;
+    declareAuthHealthy: (provesAuth?: boolean) => void;
     /** The root element, assigned during render; read by the PTY width, file drop and launch term-size hooks. */
     root: HTMLDivElement | undefined;
     /** The list's scrollToBottom, assigned once AgentDocumentView mounts: the composer's onTyping and useAgentCommands' onSent call it. */

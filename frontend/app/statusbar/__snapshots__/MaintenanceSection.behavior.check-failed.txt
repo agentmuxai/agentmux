@@ -1,0 +1,27 @@
+rpc AppUpdateStatus
+-- development build
+<div>
+  <div class="instance-panel-section-title">
+    "Maintenance"
+  <div class="maintenance-update-row">
+    <span class="maintenance-row-text maintenance-row-text--dim">
+      "Development build. The latest release is v0.59.28."
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+      "View"
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+      "Check for update"
+openLink https://github.com/agentmuxai/agentmux/releases/tag/v0.59.28
+rpc AppUpdateCheck
+-- check failed
+<div>
+  <div class="instance-panel-section-title">
+    "Maintenance"
+  <div class="maintenance-update-row">
+    <span class="maintenance-row-text maintenance-row-text--dim">
+      "Development build. The latest release is v0.59.28."
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+      "View"
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+      "Check for update"
+  <div class="maintenance-row-text maintenance-row-text--error">
+    "GitHub can't be reached"

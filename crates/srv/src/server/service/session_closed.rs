@@ -204,6 +204,34 @@ fn set_parked(store: &Store, ws_id: &str, parked: &[String]) {
     });
 }
 
+/// Name the agent blocks a switch parked on the window entry for `ws_id` in the saved record of user
+/// workspace `row_id`, so that opening the workspace again reattaches them (`restore_all`). The record
+/// was saved before the close parked them; nothing else rewrites it until the workspace is open again.
+fn mark_parked_in_record(store: &Store, row_id: &str, ws_id: &str, parked: &[String]) {
+    if parked.is_empty() {
+        return;
+    }
+    let Ok(Some(row)) = store.user_workspace_get(row_id) else { return };
+    let Some(mut record) = row.record.as_deref().and_then(|r| serde_json::from_str::<Value>(r).ok()) else { return };
+    let mut marked = false;
+    let mut mark = |window: &mut Value| {
+        if workspace_of(window) == Some(ws_id) {
+            window["parked"] = json!(parked);
+            marked = true;
+        }
+    };
+    match record.get_mut("windows").and_then(|v| v.as_array_mut()) {
+        Some(windows) if !windows.is_empty() => windows.iter_mut().for_each(&mut mark),
+        _ => mark(&mut record),
+    }
+    if !marked {
+        return;
+    }
+    if let Err(e) = store.user_workspace_save_record(row_id, &record.to_string(), now_ms()) {
+        tracing::warn!(error = %e, workspace_id = %ws_id, "session_closed: couldn't note the parked agents on the left workspace's record");
+    }
+}
+
 /// The block ids a closed window's entry names as parked at its close.
 pub(crate) fn parked_of(entry: &Value) -> Vec<String> {
     entry
@@ -258,7 +286,12 @@ pub(crate) fn quit_under_way(store: &Store) -> bool {
 /// `unlisted` is the close that ends the session (it emptied
 /// `Client.windowids`) and a workspace switch's closes. Contents with nothing
 /// of the user's in them are deleted instead.
-pub(crate) async fn keep_workspace(state: &AppState, ws_id: String, window: Value, unlisted: bool) {
+///
+/// `left_for_switch` is the user workspace a switch is leaving: that close is unlisted, but its agents
+/// are parked like a listed window's (closing parks, Stop is the only stop), and the saved record of
+/// that workspace names them so switching back reattaches them ([`mark_parked_in_record`]). The close
+/// that ends the session still stops its agents.
+pub(crate) async fn keep_workspace(state: &AppState, ws_id: String, window: Value, unlisted: bool, left_for_switch: Option<&str>) {
     if !worth_keeping(&state.mstore, &ws_id) {
         super::window_close::close_workspace(state, ws_id).await;
         return;
@@ -270,21 +303,26 @@ pub(crate) async fn keep_workspace(state: &AppState, ws_id: String, window: Valu
     if listed {
         remember(&state.mstore, &ws_id, window, now_ms());
     }
+    let parks = listed || left_for_switch.is_some();
     tracing::info!(
         workspace_id = %ws_id,
         listed,
         "CloseWindow: keeping the window's contents (its agents {}; {})",
-        if listed { "keep running" } else { "stop" },
+        if parks { "keep running" } else { "stop" },
         if listed { "a closed window of the workspace" } else { "it opens again with its workspace" }
     );
     let st = state.clone();
+    let left_for_switch = left_for_switch.map(str::to_string);
     let done = crate::sagas::agent_teardown::detached(async move {
         let _guard = guard;
         let block_ids = super::window_close::store_block_ids(&st.mstore, &ws_id);
-        // Only a window that stays listed leaves its agents running: one that ends the session or
-        // switches workspace opens again with its panes, and its agents are stopped for that.
-        let parked = if listed { crate::sagas::park_agents::park_window_agents(&st, &ws_id, &block_ids).await } else { Vec::new() };
+        // A window that stays listed, or one a switch leaves, keeps its agents running (parked); only the
+        // close that ends the session stops them, for the next launch to resume.
+        let parked = if parks { crate::sagas::park_agents::park_window_agents(&st, &ws_id, &block_ids).await } else { Vec::new() };
         set_parked(&st.mstore, &ws_id, &parked);
+        if let Some(from) = &left_for_switch {
+            mark_parked_in_record(&st.mstore, from, &ws_id, &parked);
+        }
         let stopping = crate::sagas::park_agents::not_parked(&block_ids, &parked);
         crate::sagas::agent_teardown::run_many(&st, &stopping, crate::sagas::agent_teardown::Policy::close()).await;
         // Lifts each block's respawn guard; the blocks stay, so nothing is purged.

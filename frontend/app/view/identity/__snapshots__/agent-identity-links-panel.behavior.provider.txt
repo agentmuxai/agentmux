@@ -1,0 +1,73 @@
+rpc ListAllAgentIdentities
+subscribeAccountChanges
+rpc GetBundle mem-1
+subscribe agentidentities:changed:bundle-agent
+-- bundle says claude
+<div>
+  <div class="identity-pane">
+    <div class="identity-pane-detail">
+      <div class="identity-pane-readonly">
+        <h2 class="identity-pane-name">
+          "Bundle Agent"
+        <h3 class="identity-pane-section-title">
+          "Linked accounts"
+        <div class="identity-pane-empty-hint">
+          <p>
+            "This agent has no linked accounts yet. Link one from its launch dialog."
+        <div class="identity-pane-empty-hint">
+          <button type="button" class="ui-button ui-tone-accent identity-btn identity-btn-primary">
+            "Connect Anthropic account"
+unsubscribe agentidentities:changed:bundle-agent
+unsubscribeAccountChanges
+rpc ListAllAgentIdentities
+subscribeAccountChanges
+rpc GetBundle mem-1
+subscribe agentidentities:changed:bundle-agent
+-- bundle says codex
+<div>
+  <div class="identity-pane">
+    <div class="identity-pane-detail">
+      <div class="identity-pane-readonly">
+        <h2 class="identity-pane-name">
+          "Bundle Agent"
+        <h3 class="identity-pane-section-title">
+          "Linked accounts"
+        <div class="identity-pane-empty-hint">
+          <p>
+            "This agent has no linked accounts yet. Link one from its launch dialog."
+unsubscribe agentidentities:changed:bundle-agent
+unsubscribeAccountChanges
+rpc ListAllAgentIdentities
+subscribeAccountChanges
+rpc GetBundle mem-1
+subscribe agentidentities:changed:bundle-agent
+-- bundle says nothing
+<div>
+  <div class="identity-pane">
+    <div class="identity-pane-detail">
+      <div class="identity-pane-readonly">
+        <h2 class="identity-pane-name">
+          "Bundle Agent"
+        <h3 class="identity-pane-section-title">
+          "Linked accounts"
+        <div class="identity-pane-empty-hint">
+          <p>
+            "This agent has no linked accounts yet. Link one from its launch dialog."
+unsubscribe agentidentities:changed:bundle-agent
+unsubscribeAccountChanges
+rpc ListAllAgentIdentities
+subscribeAccountChanges
+rpc GetBundle mem-1
+subscribe agentidentities:changed:bundle-agent
+-- bundle fails
+<div>
+  <div class="identity-pane">
+    <div class="identity-pane-detail">
+      <div class="identity-pane-readonly">
+        <h2 class="identity-pane-name">
+          "Bundle Agent"
+        <h3 class="identity-pane-section-title">
+          "Linked accounts"
+        <div class="identity-pane-empty-hint">
+          <p>
+            "This agent has no linked accounts yet. Link one from its launch dialog."

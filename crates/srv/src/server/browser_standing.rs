@@ -427,6 +427,20 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_row_that_asks_for_each_line_makes_a_grant_that_asks() {
+        let state = crate::server::tests::test_state();
+        let (agent, url, pane) = ("ask-row-agent", "https://ask-row.example.com/x", "ask-row-pane");
+        let id = {
+            let mut s = store();
+            s.path = None;
+            upsert_in(&mut s.rows, agent, &sites(&["ask-row.example.com"]), &["terminal_ask".to_string()], false, 1).unwrap().id
+        };
+        let g = activate_at(&state, pane, agent, url).unwrap();
+        assert!(g.asks_each_line() && g.allows_terminal());
+        revoke(&state, &id);
+    }
+
+    #[tokio::test]
     async fn stop_holds_off_the_standing_grant_until_the_person_turns_it_on_again() {
         let state = crate::server::tests::test_state();
         let (agent, url, pane) = ("stop-test-agent", "https://stop-test.example.com/x", "stop-test-pane");

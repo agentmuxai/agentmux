@@ -266,6 +266,9 @@ const MenuRows = (props: MenuRowsProps): JSX.Element => {
             {(item, index) => {
                 const key = props.parentKey === null ? `${index()}` : `${props.parentKey}-${index()}`;
                 const isActive = () => props.hoveredItems.includes(key);
+                // Whether the pointer is on this row: a held peer close (below) opens this row's own submenu
+                // once it ends, only if the pointer is still here.
+                let pointerOnRow = false;
 
                 // One hover-intent controller per row that has a submenu,
                 // for the lifetime of this row in the list (disposed when
@@ -291,12 +294,19 @@ const MenuRows = (props: MenuRowsProps): JSX.Element => {
                     onMouseEnter: (event: MouseEvent) => {
                         props.handleMouseEnterItem(event, props.parentKey, index(), item);
                         // An explicit new selection at this level closes any
-                        // other open peer submenu right away — no triangle to
-                        // protect toward a row the cursor isn't heading for.
-                        peers.closeOthers(key);
-                        hover?.onTriggerEnter();
+                        // other open peer submenu right away, unless the cursor
+                        // is still crossing the safe triangle toward it: then it
+                        // closes once the cursor leaves the triangle, and this
+                        // row's own submenu opens after that.
+                        pointerOnRow = true;
+                        peers.closeOthers(key, event, () => {
+                            if (pointerOnRow) hover?.onTriggerEnter();
+                        });
                     },
-                    onMouseLeave: (event: MouseEvent) => hover?.onTriggerLeave(event),
+                    onMouseLeave: (event: MouseEvent) => {
+                        pointerOnRow = false;
+                        hover?.onTriggerLeave(event);
+                    },
                     onClick: (e: MouseEvent) => props.handleOnClick(e, item),
                 };
 

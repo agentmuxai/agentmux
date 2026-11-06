@@ -36,7 +36,7 @@ impl State {
     pub(crate) fn of_answer(a: crate::server::browser_attention::Answer) -> State {
         use crate::server::browser_attention::Answer;
         match a {
-            Answer::Yes | Answer::YesAlways => State::Done,
+            Answer::Yes | Answer::YesAlways | Answer::YesAsking => State::Done,
             Answer::Cancelled => State::Cancelled,
             Answer::TimedOut => State::TimedOut,
         }

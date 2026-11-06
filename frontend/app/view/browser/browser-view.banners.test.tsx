@@ -88,6 +88,18 @@ describe("the attention banner", () => {
         ["notice", att({ kind: "notice", url: "https://blocked.example/y", origin: "https://blocked.example", sites: ["https://a.example", "https://b.example"], why: "It is not on the list.", allow: true })],
         ["bypass", att({ kind: "bypass", agent: "Korp", origins: ["https://a.example", "https://b.example"], minutes: 90 })],
         ["bypass-terminal", att({ kind: "bypass", agent: "Korp", origins: ["https://a.example"], minutes: 60, powers: ["terminal"], local: false })],
+        ["bypass-terminal-ask", att({ kind: "bypass", agent: "Korp", origins: ["https://a.example"], minutes: 60, powers: ["terminal_ask"], local: false })],
+        [
+            "line",
+            att({
+                kind: "line",
+                agent: "Korp",
+                origin: "https://shell.example",
+                reason: "list the buckets",
+                line: "user@host:~$ gsutil ls",
+                rows: ["user@host:~$ gsutil ls"],
+            }),
+        ],
         ["dialog-alert", att({ kind: "dialog", dialogKind: "alert", origin: "https://a.example", message: "Saved!" })],
         ["dialog-leave", att({ kind: "dialog", dialogKind: "beforeunload", origin: "https://a.example", agent: "Korp", message: "Leave this page?" })],
         [
@@ -116,6 +128,39 @@ describe("the attention banner", () => {
         expect(buttons.map((b) => b.textContent?.trim())).toEqual(["Allow auto-approve", "Always for Korp on this site", "No"]);
         for (const b of buttons) fireEvent.click(b);
         expect(v.calls).toEqual(["resolve approve", "resolve approve_always", "resolve cancel"]);
+    });
+
+    it("asks for each terminal line, and sends Run it or Don't run", () => {
+        const v = mount({ attention: att({ kind: "line", agent: "Korp", origin: "https://shell.example", line: "$ ls", rows: ["$ ls"] }) });
+        const buttons = [...v.container.querySelectorAll(".browser-attention-actions button")];
+        expect(buttons.map((b) => b.textContent?.trim())).toEqual(["Run it", "Don't run"]);
+        for (const b of buttons) fireEvent.click(b);
+        expect(v.calls).toEqual(["resolve approve", "resolve cancel"]);
+    });
+
+    it("keeps Run it off until a long line has been shown in full", () => {
+        const line = `echo ${"a".repeat(400)}`;
+        const v = mount({ attention: att({ kind: "line", agent: "Korp", origin: "https://shell.example", line, long: true, rows: [] }) });
+        const button = (label: string) =>
+            [...v.container.querySelectorAll(".browser-attention-actions button")].find((b) => b.textContent?.trim().startsWith(label)) as HTMLButtonElement;
+        expect(button("Run it").disabled).toBe(true);
+        expect(v.container.querySelector(".browser-attention-line")?.textContent).toHaveLength(301);
+        fireEvent.click(button("Show all"));
+        expect(button("Run it").disabled).toBe(false);
+        expect(v.container.querySelector(".browser-attention-line")?.textContent).toBe(line);
+    });
+
+    it("lets the person allow the terminal while seeing each line", () => {
+        const v = mount({ attention: att({ kind: "bypass", agent: "Korp", origins: ["https://a.example"], minutes: 60, powers: ["terminal"], local: false }) });
+        const buttons = [...v.container.querySelectorAll(".browser-attention-actions button")];
+        expect(buttons.map((b) => b.textContent?.trim())).toEqual([
+            "Allow auto-approve",
+            "Allow, but show me each line",
+            "Always for Korp on this site",
+            "No",
+        ]);
+        fireEvent.click(buttons[1]);
+        expect(v.calls).toEqual(["resolve approve_ask"]);
     });
 
     it("a notice offers Back, which the model can refuse", () => {

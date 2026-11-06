@@ -1,0 +1,132 @@
+rpc AppUpdateStatus
+-- host updater up-to-date no version
+<div>
+  <div class="instance-panel-section-title">
+    "Maintenance"
+  <div class="maintenance-update-row">
+    <span class="maintenance-row-text maintenance-row-text--dim">
+      "Not checked for updates yet"
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+      "Check for update"
+rpc AppUpdateStatus
+-- host updater checking no version
+<div>
+  <div class="instance-panel-section-title">
+    "Maintenance"
+  <div class="maintenance-update-row">
+    <span class="maintenance-row-text maintenance-row-text--dim">
+      "Not checked for updates yet"
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+      "Check for update"
+rpc AppUpdateStatus
+-- host updater available 1.2.3
+<div>
+  <div class="instance-panel-section-title">
+    "Maintenance"
+    <span class="maintenance-badge">
+      "↓ 1.2.3"
+  <div class="maintenance-update-row">
+    <span class="maintenance-icon maintenance-icon--update">
+      "↓"
+    <span class="maintenance-row-text">
+      "v1.2.3 is out"
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+      "What's new"
+    <button type="button" class="ui-button ui-tone-accent ui-density-compact maintenance-btn maintenance-btn--primary">
+      "Download"
+  <div class="maintenance-update-row">
+    <span class="maintenance-row-text maintenance-row-text--dim">
+      "Not checked for updates yet"
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+      "Check for update"
+rpc AppUpdateStatus
+-- host updater available no version
+<div>
+  <div class="instance-panel-section-title">
+    "Maintenance"
+    <span class="maintenance-badge">
+      "↓ update"
+  <div class="maintenance-update-row">
+    <span class="maintenance-icon maintenance-icon--update">
+      "↓"
+    <span class="maintenance-row-text">
+      "Update available"
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+      "What's new"
+    <button type="button" class="ui-button ui-tone-accent ui-density-compact maintenance-btn maintenance-btn--primary">
+      "Download"
+  <div class="maintenance-update-row">
+    <span class="maintenance-row-text maintenance-row-text--dim">
+      "Not checked for updates yet"
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+      "Check for update"
+rpc AppUpdateStatus
+-- host updater downloading 1.2.3
+<div>
+  <div class="instance-panel-section-title">
+    "Maintenance"
+    <span class="maintenance-badge">
+      "↓ …"
+  <div class="maintenance-update-row">
+    <span class="maintenance-icon maintenance-icon--working">
+      "↓"
+    <span class="maintenance-row-text maintenance-row-text--dim">
+      "Downloading…"
+  <div class="maintenance-update-row">
+    <span class="maintenance-row-text maintenance-row-text--dim">
+      "Not checked for updates yet"
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+      "Check for update"
+rpc AppUpdateStatus
+-- host updater ready 1.2.3
+<div>
+  <div class="instance-panel-section-title">
+    "Maintenance"
+    <span class="maintenance-badge">
+      "↑ ready"
+  <div class="maintenance-update-row">
+    <span class="maintenance-icon maintenance-icon--update">
+      "↑"
+    <span class="maintenance-row-text">
+      "v1.2.3 ready"
+    <button type="button" class="ui-button ui-tone-accent ui-density-compact maintenance-btn maintenance-btn--primary">
+      "Restart"
+  <div class="maintenance-update-row">
+    <span class="maintenance-row-text maintenance-row-text--dim">
+      "Not checked for updates yet"
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+      "Check for update"
+rpc AppUpdateStatus
+-- host updater ready no version
+<div>
+  <div class="instance-panel-section-title">
+    "Maintenance"
+    <span class="maintenance-badge">
+      "↑ ready"
+  <div class="maintenance-update-row">
+    <span class="maintenance-icon maintenance-icon--update">
+      "↑"
+    <span class="maintenance-row-text">
+      "Ready to install"
+    <button type="button" class="ui-button ui-tone-accent ui-density-compact maintenance-btn maintenance-btn--primary">
+      "Restart"
+  <div class="maintenance-update-row">
+    <span class="maintenance-row-text maintenance-row-text--dim">
+      "Not checked for updates yet"
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+      "Check for update"
+rpc AppUpdateStatus
+-- host updater error no version
+<div>
+  <div class="instance-panel-section-title">
+    "Maintenance"
+  <div class="maintenance-update-row">
+    <span class="maintenance-icon maintenance-icon--error">
+      "✗"
+    <span class="maintenance-row-text maintenance-row-text--error">
+      "Update failed"
+  <div class="maintenance-update-row">
+    <span class="maintenance-row-text maintenance-row-text--dim">
+      "Not checked for updates yet"
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+      "Check for update"

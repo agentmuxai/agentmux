@@ -187,7 +187,7 @@ async fn close_unshown_workspace(state: &AppState, window_id: &str, ws_id: Strin
         super::session_closed::forget(store, &ws_id);
         close_workspace(state, ws_id).await;
     } else {
-        super::session_closed::keep_workspace(state, ws_id, closing.placement, will_empty_windowids).await;
+        super::session_closed::keep_workspace(state, ws_id, closing.placement, will_empty_windowids, None).await;
     }
 }
 

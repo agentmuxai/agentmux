@@ -45,6 +45,9 @@ pub(crate) enum Kind {
     /// The page's own confirm or "Leave site?" box
     /// (SPEC_BROWSER_PANE_NATIVE_DIALOGS_2026_10_17.md §5).
     Dialog,
+    /// The agent typed a line in a web terminal and the person's grant says to
+    /// ask before Enter (SPEC_BROWSER_WEB_TERMINAL_TYPING_2026_10_23.md §4.4).
+    Line,
     /// Why a navigation the pane stopped didn't load. Nothing waits on it:
     /// it doesn't pause the agent's tools or time out.
     Notice,
@@ -58,6 +61,7 @@ impl Kind {
             Kind::Navigation => "navigation",
             Kind::Bypass => "bypass",
             Kind::Dialog => "dialog",
+            Kind::Line => "line",
             Kind::Notice => "notice",
         }
     }
@@ -81,6 +85,7 @@ impl Kind {
             Kind::Dialog => format!(
                 "the page in pane {pane:?} is showing its own question (a confirm or \"Leave site?\" box) and the user is being asked to answer it"
             ),
+            Kind::Line => format!("pane {pane:?} is showing the user the terminal line you typed and waiting for Run it or Don't run"),
             // Never pauses anything (`waiting_on_user`); named for completeness.
             Kind::Notice => format!("pane {pane:?} is showing the user why a navigation stopped"),
         };
@@ -98,6 +103,10 @@ pub(crate) enum Answer {
     /// "Always for this agent on this site", which writes a standing row
     /// (`browser_standing`). Only that request takes it ([`resolve`]).
     YesAlways,
+    /// Allow, but ask about each terminal line: the person answered an
+    /// auto-approve request that asked for the terminal with its stricter form.
+    /// Only that request takes it ([`resolve`]).
+    YesAsking,
     Cancelled,
     TimedOut,
 }
@@ -107,6 +116,7 @@ impl Answer {
         match decision {
             "done" | "approve" => Some(Answer::Yes),
             "approve_always" => Some(Answer::YesAlways),
+            "approve_ask" => Some(Answer::YesAsking),
             "cancel" => Some(Answer::Cancelled),
             _ => None,
         }
@@ -199,6 +209,9 @@ pub(crate) fn resolve(id: &str, block_id: &str, answer: Answer) -> Result<(), St
     let tx = match map.get_mut(id) {
         Some(p) if p.block_id == block_id && answer == Answer::YesAlways && p.kind != Kind::Bypass => {
             return Err("only an auto-approve request can be answered with Always".to_string());
+        }
+        Some(p) if p.block_id == block_id && answer == Answer::YesAsking && p.kind != Kind::Bypass => {
+            return Err("only an auto-approve request can be answered with Allow, asking for each line".to_string());
         }
         Some(p) if p.block_id == block_id => p.tx.take(),
         Some(_) => return Err("that request belongs to another pane".to_string()),
@@ -591,6 +604,18 @@ pub(crate) mod tests {
         assert!(resolve("attn-test-6", "pane-g", Answer::Yes).is_ok());
         pending().lock().unwrap().remove("attn-test-5");
         pending().lock().unwrap().remove("attn-test-6");
+    }
+
+    #[test]
+    fn only_an_auto_approve_request_takes_allow_but_ask_for_each_line() {
+        let _a = park("attn-test-ask-1", "pane-ask", Kind::Approval);
+        let e = resolve("attn-test-ask-1", "pane-ask", Answer::YesAsking).unwrap_err();
+        assert!(e.contains("auto-approve"), "{e}");
+        pending().lock().unwrap().remove("attn-test-ask-1");
+        let _b = park("attn-test-ask-2", "pane-ask", Kind::Bypass);
+        assert!(resolve("attn-test-ask-2", "pane-ask", Answer::YesAsking).is_ok());
+        pending().lock().unwrap().remove("attn-test-ask-2");
+        assert_eq!(Answer::parse("approve_ask"), Some(Answer::YesAsking));
     }
 
     #[test]

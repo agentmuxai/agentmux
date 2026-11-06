@@ -1,0 +1,59 @@
+bar props ["viewer","options","onReopenWith"] ["image","text"] viewer=image
+bytes source {"path":"C:/pics/a.png","revision":0}
+ResizeObserver created
+ResizeObserver observe
+-- no bytes yet
+<div>
+  <div class="editor-viewer image-viewer">
+    <div class="bar" data-facts="[\"2.0 KB\",\"PNG\"]">
+      <button title="Fit to the pane (0)" type="button" class="ui-button ui-tone-neutral ui-density-compact" aria-pressed="true">
+        "Fit"
+      <button title="Actual size (1)" type="button" class="ui-button ui-tone-neutral ui-density-compact">
+        "100%"
+      <div class="ui-tooltip-anchor">
+        <button aria-label="Background: checker (B)" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button">
+          <i aria-hidden="true" class="fa-solid fa-chess-board">
+    <div tabindex="0" aria-label="Image" class="image-viewer-content image-viewer-bg-checker">
+      <div class="editor-viewer-message">
+        "Loading…"
+-- bytes arrived, not decoded
+<div>
+  <div class="editor-viewer image-viewer">
+    <div class="bar" data-facts="[\"2.0 KB\",\"PNG\"]">
+      <button title="Fit to the pane (0)" type="button" class="ui-button ui-tone-neutral ui-density-compact" aria-pressed="true">
+        "Fit"
+      <button title="Actual size (1)" type="button" class="ui-button ui-tone-neutral ui-density-compact">
+        "100%"
+      <div class="ui-tooltip-anchor">
+        <button aria-label="Background: checker (B)" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button">
+          <i aria-hidden="true" class="fa-solid fa-chess-board">
+    <div tabindex="0" aria-label="Image" class="image-viewer-content image-viewer-bg-checker">
+      <img class="image-viewer-img" style="transition: opacity var(--duration-quick) ease; opacity: 0; transform: translate(0px, 0px) scale(1);" draggable="false" alt="C:/pics/a.png" src="blob:one">
+-- decoded
+<div>
+  <div class="editor-viewer image-viewer">
+    <div class="bar" data-facts="[\"2.0 KB\",\"PNG\"]">
+      <button title="Fit to the pane (0)" type="button" class="ui-button ui-tone-neutral ui-density-compact" aria-pressed="true">
+        "Fit"
+      <button title="Actual size (1)" type="button" class="ui-button ui-tone-neutral ui-density-compact">
+        "100%"
+      <span class="image-viewer-percent" aria-label="Zoom">
+        "40%"
+      <div class="ui-tooltip-anchor">
+        <button aria-label="Background: checker (B)" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button">
+          <i aria-hidden="true" class="fa-solid fa-chess-board">
+    <div tabindex="0" aria-label="Image" class="image-viewer-content image-viewer-bg-checker">
+      <img class="image-viewer-img" style="transition: opacity var(--duration-quick) ease; opacity: 1; transform: translate(0px, 0px) scale(1);" draggable="false" alt="C:/pics/a.png" src="blob:one">
+-- a new image, not decoded
+<div>
+  <div class="editor-viewer image-viewer">
+    <div class="bar" data-facts="[\"2.0 KB\",\"PNG\"]">
+      <button title="Fit to the pane (0)" type="button" class="ui-button ui-tone-neutral ui-density-compact" aria-pressed="true">
+        "Fit"
+      <button title="Actual size (1)" type="button" class="ui-button ui-tone-neutral ui-density-compact">
+        "100%"
+      <div class="ui-tooltip-anchor">
+        <button aria-label="Background: checker (B)" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button">
+          <i aria-hidden="true" class="fa-solid fa-chess-board">
+    <div tabindex="0" aria-label="Image" class="image-viewer-content image-viewer-bg-checker">
+      <img class="image-viewer-img" style="transition: opacity var(--duration-quick) ease; opacity: 0; transform: translate(0px, 0px) scale(1);" draggable="false" alt="C:/pics/a.png" src="blob:two">

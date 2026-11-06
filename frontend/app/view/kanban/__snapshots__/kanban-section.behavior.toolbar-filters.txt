@@ -1,0 +1,77 @@
+subscribe accountavailability
+subscribe workqueue:changed
+rpc KanbanList
+subscribe agents:changed
+board#1 mounted
+all: {"tasks":["w1","w2","w3","w4","w5","w6"],"untracked":["Korp"],"agents":3,"now":"number","holdingCamper":"w3","holdingKorp":null,"reviewLimit":0,"reviewTotal":2,"colors":{"u-gone":"#112233"},"narrow":false,"collapsed":[]}
+find #4: {"tasks":["w4"],"untracked":["Korp"],"agents":3,"now":"number","holdingCamper":"w3","holdingKorp":null,"reviewLimit":0,"reviewTotal":2,"colors":{"u-gone":"#112233"},"narrow":false,"collapsed":[]}
+repository a5af/other: {"tasks":["w4","w6"],"untracked":["Korp"],"agents":3,"now":"number","holdingCamper":"w3","holdingKorp":null,"reviewLimit":0,"reviewTotal":2,"colors":{"u-gone":"#112233"},"narrow":false,"collapsed":[]}
+reports to AgentX: {"tasks":["w3"],"untracked":[],"agents":3,"now":"number","holdingCamper":"w3","holdingKorp":null,"reviewLimit":0,"reviewTotal":2,"colors":{"u-gone":"#112233"},"narrow":false,"collapsed":[]}
+reports to the operator: {"tasks":[],"untracked":[],"agents":3,"now":"number","holdingCamper":"w3","holdingKorp":null,"reviewLimit":0,"reviewTotal":2,"colors":{"u-gone":"#112233"},"narrow":false,"collapsed":[]}
+untracked off: {"tasks":["w1","w2","w3","w4","w5","w6"],"untracked":[],"agents":3,"now":"number","holdingCamper":"w3","holdingKorp":null,"reviewLimit":0,"reviewTotal":2,"colors":{"u-gone":"#112233"},"narrow":false,"collapsed":[]}
+-- toolbar
+<div class="kanban-container">
+<div class="warden-manager-body kanban">
+<div class="kanban-toolbar">
+<span class="ui-filter">
+<i aria-hidden="true" class="fa-solid fa-magnifying-glass ui-search-icon">
+</i>
+<input type="text" class="ui-filter-input" data-pane-focus="" placeholder="Find a task, #number, agent or repository" aria-label="Find a task">
+</span>
+<select class="ui-input ui-density-compact" aria-label="Repository">
+<option value="">All repositories</option>
+<option value="a5af/other">a5af/other</option>
+<option value="agentmuxai/agentmux">agentmuxai/agentmux</option>
+</select>
+<select class="ui-input ui-density-compact kanban-toolbar__reports" aria-label="Reports to">
+<option value="">Reports to anyone</option>
+<option value="operator">Reports to the operator</option>
+<option value="lead:u-agentx">Reports to AgentX</option>
+</select>
+<label class="kanban-toolbar__switch" data-hover-tip="One row of columns per repository" aria-description="One row of columns per repository">
+<button type="button" role="switch" class="ui-switch ui-density-compact" aria-checked="false" aria-label="Lanes by repository">
+<span class="ui-switch-thumb">
+</span>
+</button>Lanes</label>
+<label class="kanban-toolbar__switch" data-hover-tip="Agents working without a task show as dashed cards in In progress" aria-description="Agents working without a task show as dashed cards in In progress">
+<button type="button" role="switch" class="ui-switch ui-density-compact" aria-checked="false" aria-label="Show untracked work">
+<span class="ui-switch-thumb">
+</span>
+</button>Untracked</label>
+<label class="kanban-toolbar__switch" data-hover-tip="An agent with tasks waiting in its Kanban backlog gets a note after 2 minutes idle, once each time it goes idle" aria-description="An agent with tasks waiting in its Kanban backlog gets a note after 2 minutes idle, once each time it goes idle">
+<button type="button" role="switch" class="ui-switch ui-density-compact" aria-checked="false" aria-label="Remind idle agents of their backlog">
+<span class="ui-switch-thumb">
+</span>
+</button>Reminders</label>
+<button type="button" class="ui-button ui-tone-accent ui-density-compact">
+<i aria-hidden="true" class="fa-solid fa-plus">
+</i>New task</button>
+<div class="ui-tooltip-anchor">
+<button aria-label="Refresh" type="button" class="ui-button ui-tone-quiet ui-icon-button">
+<i aria-hidden="true" class="fa-solid fa-rotate">
+</i>
+</button>
+</div>
+</div>
+<div class="kanban-strip" aria-label="Agents">
+<button title="Camper: working. Drop a waiting task here to start it on Camper; click to open it." type="button" class="ui-button ui-tone-quiet ui-density-compact kanban-strip__agent">
+<span class="stub-chip">Camper</span>
+</button>
+<button title="Korp: waiting. Drop a waiting task here to start it on Korp; click to open it." type="button" class="ui-button ui-tone-quiet ui-density-compact kanban-strip__agent">
+<span class="stub-chip">Korp</span>
+</button>
+<button title="Idle: idle. Drop a waiting task here to start it on Idle; click to open it." type="button" class="ui-button ui-tone-quiet ui-density-compact kanban-strip__agent">
+<span class="stub-chip">Idle</span>
+</button>
+</div>
+<div class="stub-board" data-id="1">
+<pre>{"tasks":["w1","w2","w3","w4","w5","w6"],"untracked":[],"agents":3,"now":"number","holdingCamper":"w3","holdingKorp":null,"reviewLimit":0,"reviewTotal":2,"colors":{"u-gone":"#112233"},"narrow":false,"collapsed":[]}</pre>
+<button class="stub-board-open">
+</button>
+<button class="stub-board-agent">
+</button>
+<button class="stub-board-toggle">
+</button>
+</div>
+</div>
+</div>

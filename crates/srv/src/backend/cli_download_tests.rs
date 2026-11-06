@@ -104,11 +104,15 @@ fn every_download_names_a_registered_provider_its_pin_and_a_well_formed_asset_pe
         for a in spec.assets {
             assert!(seen.insert((a.os, a.arch)), "{}: duplicate {} {}", spec.provider_id, a.os, a.arch);
             assert!(a.url.starts_with(spec.url_prefix), "{}", a.url);
-            assert!(a.url.contains(&format!("/v{}/", spec.version)), "{}: the url names another version", a.url);
+            assert!(a.url.contains(spec.version), "{}: the url names another version", a.url);
             assert_eq!(a.sha256.len(), 64, "{}", a.url);
             assert!(a.sha256.chars().all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)), "{}", a.url);
             assert!(a.size > 1_000_000, "{}", a.url);
-            assert!(!a.exe_in_archive.is_empty() && !a.exe_in_archive.contains("..") && !a.exe_in_archive.starts_with('/'));
+            if a.archive == Archive::Raw {
+                assert!(a.exe_in_archive.is_empty(), "{}: a raw download has no path inside", a.url);
+            } else {
+                assert!(!a.exe_in_archive.is_empty() && !a.exe_in_archive.contains("..") && !a.exe_in_archive.starts_with('/'));
+            }
         }
         // Every platform AgentMux ships on, except where the vendor has no build.
         for (os, arch) in [("windows", "x86_64"), ("macos", "aarch64"), ("macos", "x86_64"), ("linux", "x86_64"), ("linux", "aarch64")] {
@@ -118,8 +122,8 @@ fn every_download_names_a_registered_provider_its_pin_and_a_well_formed_asset_pe
 }
 
 #[test]
-fn only_a_registered_provider_has_a_download_and_goose_does() {
-    assert!(download_spec("goose").is_some());
+fn only_a_registered_provider_has_a_download_and_goose_and_grok_do() {
+    assert!(download_spec("goose").is_some() && download_spec("grok").is_some());
     for id in ["claude", "../goose", "", "goose "] {
         assert!(download_spec(id).is_none(), "{id:?}");
     }
@@ -209,6 +213,54 @@ fn the_executable_is_taken_from_a_zip_and_nothing_else_is_written() {
     assert_eq!(std::fs::read(&out).unwrap(), b"MZ-program");
     let names: Vec<_> = std::fs::read_dir(out.parent().unwrap()).unwrap().map(|e| e.unwrap().file_name()).collect();
     assert_eq!(names.len(), 1, "only the program is written: {names:?}");
+}
+
+/// A probe must be able to turn a CLI's self-update off: the child sees the extra environment.
+#[test]
+fn the_install_probe_passes_its_environment_to_the_program() {
+    let dir = tempfile::tempdir().unwrap();
+    let prog = if cfg!(windows) {
+        let p = dir.path().join("p.cmd");
+        std::fs::write(&p, "@echo off\r\necho %AGM_PROBE_VAR%\r\n").unwrap();
+        p
+    } else {
+        let p = dir.path().join("p");
+        std::fs::write(&p, "#!/bin/sh\necho \"$AGM_PROBE_VAR\"\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        p
+    };
+    let got = crate::backend::tool_store::probe_version_with_env(&prog.to_string_lossy(), &Some("--version".into()), &[("AGM_PROBE_VAR", "9.8.7")]);
+    assert_eq!(got.as_deref(), Some("9.8.7"));
+}
+
+#[test]
+fn the_providers_that_update_themselves_get_their_switch_on_the_install_probe() {
+    for (id, var) in [("antigravity", "AGY_CLI_DISABLE_AUTO_UPDATE"), ("muse", "MUSE_NO_AUTO_UPDATE"), ("grok", "GROK_DISABLE_AUTOUPDATER")] {
+        let p = crate::backend::providers::get_provider(id).unwrap();
+        assert!(p.auth_extra_env.iter().any(|(k, _)| *k == var), "{id} does not set {var}");
+    }
+}
+
+#[test]
+fn a_raw_download_is_the_program_and_nothing_else_is_written() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("download.part");
+    std::fs::write(&src, b"ELF-program").unwrap();
+    let out = dir.path().join("bin").join("grok");
+    std::fs::create_dir_all(out.parent().unwrap()).unwrap();
+    extract_exe(&src, Archive::Raw, "", &out).unwrap();
+    assert_eq!(std::fs::read(&out).unwrap(), b"ELF-program");
+    let names: Vec<_> = std::fs::read_dir(out.parent().unwrap()).unwrap().map(|e| e.unwrap().file_name()).collect();
+    assert_eq!(names.len(), 1, "only the program is written: {names:?}");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(std::fs::metadata(&out).unwrap().permissions().mode() & 0o111, 0o111, "runnable");
+    }
 }
 
 #[test]

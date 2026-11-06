@@ -1,0 +1,14 @@
+-- blocked on reconnect
+  call AccountOAuthClientGet [{"provider":"google"}]
+  call AccountOAuthStart [{"provider":"google","accountId":"acc-1"}]
+<div>
+  <div class="oauth-connect">
+    <div class="oauth-flow-status">
+      <div class="identity-form-error" role="alert">
+        <div class="oauth-error-title">
+          "Blocked by your organization"
+        "blocked by your organization: a google Workspace administrator doesn't allow this app (admin_policy_enforced). Ask the administrator to allow it, or use a Workspace internal client."
+      <div class="identity-key-actions">
+        <button type="button" class="ui-button ui-tone-neutral identity-btn identity-btn-secondary">
+          "Try again"
+  note acc-1 {"blocked":"blocked by your organization: a google Workspace administrator doesn't allow this app (admin_policy_enforced). Ask the administrator to allow it, or use a Workspace internal client."}

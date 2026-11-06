@@ -1069,6 +1069,8 @@ pub struct UiBrowserTerminalRequest {
     /// How long to wait for output, in seconds (default 5, at most 60).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_seconds: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 /// `POST /api/v1/ui/browser/end_bypass` — backs Browser's `end_bypass`: the

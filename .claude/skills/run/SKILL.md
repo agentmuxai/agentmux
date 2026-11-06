@@ -70,7 +70,18 @@ AGENTMUX_VITE_PORT=$(bash scripts/vite-port.sh pick) task dev TITLE="<your-agent
 ```
 
 `pick` returns the first port from 5300 up that nothing is listening on **and
-that Chromium will load pages from**. The second condition is not optional: the
+that Chromium will load pages from**, and it **claims** that port for your clone
+(a folder under `~/.agentmux/dev-port-claims`, kept for two hours or until the run
+exits), so another agent's `pick` or `task dev` at the same moment cannot get it.
+A port that is merely free is not reserved: `task dev` can wait most of an hour for
+the shared build slot, and runs it releases together start Vite in the same second
+(that is how two agents' windows once loaded one Vite, see
+[`docs/retro/RETRO_DEV_VITE_PORT_RACE_COUPLED_INSTANCES_2026_11_06.md`](../../../docs/retro/RETRO_DEV_VITE_PORT_RACE_COUPLED_INSTANCES_2026_11_06.md)).
+Run `task dev` right after `pick`, and if it says another dev run claimed the port,
+pick again. `task dev` also refuses to start the window unless the Vite that answers
+on the port is its own (it prints `[dev] instance: owner …, commit …`).
+
+The Chromium port list is not optional: the
 dev window is a Chromium window, and Chromium refuses certain ports outright
 (`ERR_UNSAFE_PORT`) — 6000 (X11), 6665–6669 (IRC), 5060/5061 (SIP), 4045, 2049
 and a few others. A dev instance pointed at one of them starts, Vite answers

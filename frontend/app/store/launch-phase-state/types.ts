@@ -134,8 +134,11 @@ export type LaunchPhaseCommand =
     | { type: "CancelReset" }
     | { type: "AuthUrlSet"; url: string | null }
     | { type: "AuthNoticeSet"; notice: string | null }
-    /** Independent proof the controller is running on a good credential. */
-    | { type: "ControllerHealthy" }
+    /**
+     * Independent proof the controller is running. `provesAuth: false` (a live turn on a provider with no
+     * sign-in check) clears a stale retry notice but does not claim the credential works.
+     */
+    | { type: "ControllerHealthy"; provesAuth?: boolean }
     | { type: "Disposed" };
 
 export type LaunchPhaseEvent =

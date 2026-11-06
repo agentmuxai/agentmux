@@ -772,6 +772,7 @@ partial list.
 | [`SPEC_NODEJS_24_LTS_STANDARDIZATION_2026_09_15`](SPEC_NODEJS_24_LTS_STANDARDIZATION_2026_09_15.md) | Node.js 24 LTS standardization across agentmuxai repos |
 | [`SPEC_NO_WINDOW_SPAWN_AND_META_ROW_TYPE_SCALE_DRY_2026_10_01`](SPEC_NO_WINDOW_SPAWN_AND_META_ROW_TYPE_SCALE_DRY_2026_10_01.md) | Spec: DRY the no-window spawn flag, and the meta-row type scale |
 | [`SPEC_OFFLINE_RESILIENCE_2026_10_20`](SPEC_OFFLINE_RESILIENCE_2026_10_20.md) | SPEC: Stay in control of every agent when the internet drops, and recover by itself |
+| [`SPEC_ONE_CLICK_VENDOR_CLI_INSTALL_2026_10_20`](SPEC_ONE_CLICK_VENDOR_CLI_INSTALL_2026_10_20.md) | SPEC: One-click install for the vendor-installed agent CLIs |
 | [`SPEC_ONE_COMMAND_INSTALL_ALL_PLATFORMS_2026_11_01`](SPEC_ONE_COMMAND_INSTALL_ALL_PLATFORMS_2026_11_01.md) | Spec: install AgentMux with one copyable command on Windows, macOS and Linux |
 | [`SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24`](SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md) | SPEC: OS notification system (native toasts) + tray re-enablement |
 | [`SPEC_PACKS_2026_11_05`](SPEC_PACKS_2026_11_05.md) | SPEC: Computer-use skills: per-application knowledge for computer use (Word, Excel, Ableton Live, WaveLab, Blender first) |
@@ -1125,6 +1126,7 @@ partial list.
 | [`SPEC_COMPOSER_STRIP_AND_HOST_POLISH_2026_06_25`](SPEC_COMPOSER_STRIP_AND_HOST_POLISH_2026_06_25.md) | Spec: Composer Strip Polish + Context Compaction Indicator + Host Type Coloring |
 | [`SPEC_COMPOSER_STRIP_LAYOUT_MIC_CENTER_MODEL_DEFAULTS_2026_07_10`](SPEC_COMPOSER_STRIP_LAYOUT_MIC_CENTER_MODEL_DEFAULTS_2026_07_10.md) | SPEC: Composer-strip layout fixes, mic vertical centering, curated model defaults |
 | [`SPEC_COMPOSER_UX_POLISH_2026_04_15`](SPEC_COMPOSER_UX_POLISH_2026_04_15.md) | Spec: Composer UX Polish — controls above input, Claude-style status line |
+| [`SPEC_COMPUTER_USE_SKILLS_PRACTICE_VOICEMEETER_CANTABILE_2026_11_05`](SPEC_COMPUTER_USE_SKILLS_PRACTICE_VOICEMEETER_CANTABILE_2026_11_05.md) | SPEC: Practice time for building computer-use skills, and two new ones: Voicemeeter and Cantabile |
 | [`SPEC_CONSOLIDATE_FORGE_IDENTITY_INTO_AGENT_2026_04_13`](SPEC_CONSOLIDATE_FORGE_IDENTITY_INTO_AGENT_2026_04_13.md) | SPEC — Consolidate Forge + Identity into the Agent Pane |
 | [`SPEC_CONTAINER_PANE_SUPPORT_2026_06_11`](SPEC_CONTAINER_PANE_SUPPORT_2026_06_11.md) | SPEC: Container Pane Support |
 | [`SPEC_CONTEXT_VISIBILITY_2026_06_17`](SPEC_CONTEXT_VISIBILITY_2026_06_17.md) | SPEC: Context & Token Visibility — what we can show the user, and how |

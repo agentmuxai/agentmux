@@ -114,6 +114,24 @@ fn form_leaves_the_site(ask: &serde_json::Value, page_origin: &str) -> bool {
     agentmux_common::allowed_origins::target_origin(action).as_deref() != Some(page_origin)
 }
 
+/// The answer to a request that was granted.
+fn granted(g: &bypass::Grant) -> Response {
+    (
+        StatusCode::OK,
+        Json(json!({ "ok": true, "data": {
+            "answer": "granted", "origins": g.origins, "minutes": g.minutes, "powers": browser_powers::names(&g.powers),
+            "minutes_left": g.minutes_left(), "expires_at": g.expires_at_ms, "always": g.standing.is_some(),
+        } })),
+    )
+        .into_response()
+}
+
+/// Is `block_id` a browser pane?
+fn is_browser_pane(state: &AppState, block_id: &str) -> bool {
+    let block = state.mstore.get::<crate::backend::obj::Block>(block_id).ok().flatten();
+    block.is_some_and(|b| b.meta.get("view").and_then(|v| v.as_str()) == Some("browser"))
+}
+
 /// `POST /api/v1/ui/browser/request_bypass` — backs Browser's `request_bypass`
 /// (SPEC_BROWSER_PANE_BYPASS_2026_10_16.md §6): a banner asks the person to
 /// let this agent act without asking first, on the site the pane shows, for a
@@ -134,30 +152,14 @@ pub(crate) async fn handle_ui_browser_request_bypass(
         Ok(p) => p,
         Err(e) => return err_response(StatusCode::BAD_REQUEST, e),
     };
-    let granted = |g: &bypass::Grant| {
-        (
-            StatusCode::OK,
-            Json(json!({ "ok": true, "data": {
-                "answer": "granted", "origins": g.origins, "minutes": g.minutes, "powers": browser_powers::names(&g.powers),
-                "minutes_left": g.minutes_left(), "expires_at": g.expires_at_ms, "always": g.standing.is_some(),
-            } })),
-        )
-            .into_response()
-    };
     // A grant already there answers a request for what it carries. One that
     // lacks a power the agent now asks for is not widened by asking: the
     // person is shown the banner for the larger set.
-    if let Some(g) = bypass::active_for(&pane, &agent).filter(|g| powers.iter().all(|p| g.allows(*p))) {
+    if let Some(g) = bypass::active_for(&pane, &agent).filter(|g| powers.iter().all(|p| g.satisfies(*p))) {
         return granted(&g);
     }
     let (banner_at, in_window) = banner_for(&block_id);
-    let is_browser = state
-        .mstore
-        .get::<crate::backend::obj::Block>(&banner_at)
-        .ok()
-        .flatten()
-        .is_some_and(|b| b.meta.get("view").and_then(|v| v.as_str()) == Some("browser"));
-    if !is_browser || crate::server::browser_owner::owner_of(&pane).is_none() {
+    if !is_browser_pane(&state, &banner_at) || crate::server::browser_owner::owner_of(&pane).is_none() {
         return err_response(
             StatusCode::BAD_REQUEST,
             "Browser's request_auto_approve action needs a browser pane you opened: pass the `pane` its open action returned".to_string(),
@@ -169,7 +171,7 @@ pub(crate) async fn handle_ui_browser_request_bypass(
     };
     // The person's standing grant for this agent on this site answers at once,
     // with no banner, and a No from before doesn't count against it.
-    if let Some(g) = crate::server::browser_standing::activate_at(&state, &pane, &agent, &url).filter(|g| powers.iter().all(|p| g.allows(*p))) {
+    if let Some(g) = crate::server::browser_standing::activate_at(&state, &pane, &agent, &url).filter(|g| powers.iter().all(|p| g.satisfies(*p))) {
         return granted(&g);
     }
     if let Some(left) = bypass::cooling_down(&pane) {
@@ -216,11 +218,17 @@ pub(crate) async fn handle_ui_browser_request_bypass(
     let answer_was = answer;
     let answer = match answer {
         // A Take over while the banner was up wins over an Allow after it.
-        Answer::Yes | Answer::YesAlways if crate::server::browser_owner::owner_of(&pane) != owner_before => {
+        Answer::Yes | Answer::YesAlways | Answer::YesAsking if crate::server::browser_owner::owner_of(&pane) != owner_before => {
             return err_response(StatusCode::FORBIDDEN, "the user took over this pane, so auto-approve wasn't turned on".to_string());
         }
         Answer::Yes => {
             crate::server::browser_standing::resume(&pane);
+            return granted(&bypass::grant(&state, &pane, &agent, origins, powers, minutes, How::Approved));
+        }
+        // Allowed for the time, but each terminal line asks first.
+        Answer::YesAsking => {
+            crate::server::browser_standing::resume(&pane);
+            let powers = browser_powers::asking_each_line(&powers);
             return granted(&bypass::grant(&state, &pane, &agent, origins, powers, minutes, How::Approved));
         }
         // "Always for this agent on this site": the sites the banner named

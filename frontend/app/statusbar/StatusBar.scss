@@ -15,15 +15,12 @@
 @use "../mixins.scss";
 
 .status-bar {
-    // Responsive 2-row wrap (§4.4 of SPEC_STATUSBAR_TOKEN_USAGE).
-    // When the left + right groups can't share one row (narrow window
-    // or zoom-in), the right group falls to the next row. `flex-wrap`
-    // does the work; `min-height: 22px` keeps the visual rhythm of
-    // the single-row layout; each group's `align-self` anchors it
-    // to its side of the bar so justification survives the wrap.
+    // One row at any width or zoom. When the left and right groups can't share it, the bar
+    // sheds its lowest-priority items (element/width-fit.ts sets `data-fit`; the tier rules are
+    // at the end of this block) instead of wrapping onto a second row.
     display: flex;
     flex-direction: row;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     align-items: center;
     justify-content: space-between;
     min-height: 22px;
@@ -53,7 +50,6 @@
         align-items: center;
         gap: var(--space-1);
         flex: 0 1 auto;
-        align-self: flex-start;
         min-height: 22px;
     }
 
@@ -73,15 +69,57 @@
         align-items: center;
         gap: var(--space-1);
         flex: 0 1 auto;
-        align-self: flex-end;
         min-height: 22px;
-        // When the row can't hold both groups, the right group wraps.
-        // `margin-left: auto` keeps it flush right in the new row so
-        // the "justification preserved on both rows" rule holds. On a
-        // single row the explicit `justify-content: space-between` on
-        // the parent still does the work.
         margin-left: auto;
     }
+
+    // An item and the separator before it, shown or hidden together.
+    .status-bar-slot {
+        display: contents;
+    }
+
+    // Fit tiers: each one hides everything the lower ones do. A slot says its tier in `data-drop-at`
+    // (StatusBar.tsx); system-stats drops its readouts, lowest value first, with the separator before each (the whole
+    // item goes at the last tier, through its slot).
+    @for $tier from 1 through 4 {
+        &[data-fit="#{$tier}"] {
+            @for $at from 1 through $tier {
+                .status-bar-slot[data-drop-at="#{$at}"] {
+                    display: none;
+                }
+            }
+        }
+    }
+
+    &[data-fit="1"],
+    &[data-fit="2"],
+    &[data-fit="3"],
+    &[data-fit="4"] {
+        .stat-net,
+        .stat-disk,
+        .stat-separator:has(+ .stat-net),
+        .stat-separator:has(+ .stat-disk) {
+            display: none;
+        }
+    }
+
+    &[data-fit="2"],
+    &[data-fit="3"],
+    &[data-fit="4"] {
+        .stat-commit,
+        .stat-separator:has(+ .stat-commit) {
+            display: none;
+        }
+    }
+
+    &[data-fit="3"],
+    &[data-fit="4"] {
+        .stat-watch-disk,
+        .stat-separator:has(+ .stat-watch-disk) {
+            display: none;
+        }
+    }
+
 
     .status-bar-item {
         display: flex;
