@@ -387,15 +387,18 @@ pub fn use_file_store(dir: PathBuf) -> Result<(), String> {
         .map_err(|_| "the secret store was already chosen".to_string())
 }
 
-/// Where an isolated instance keeps its secrets: files under its own shared folder, or `None` when it is not
+/// Where an isolated instance keeps its secrets: files under its own shared folder, or `None` only when it is not
 /// isolated (no `AGENTMUX_HOME_OVERRIDE`) or the keychain was asked for (`AGENTMUX_SECRET_STORE=keychain`, for a
 /// test of the keychain itself).
 fn isolated_secrets_dir(home_override: Option<&std::ffi::OsStr>, store: Option<&str>, shared_dir: Option<PathBuf>) -> Option<PathBuf> {
-    home_override.filter(|h| !h.is_empty())?;
+    let home = home_override.filter(|h| !h.is_empty())?;
     if store.is_some_and(|s| s.trim().eq_ignore_ascii_case("keychain")) {
         return None;
     }
-    shared_dir.map(|d| d.join("secrets"))
+    // The launcher's folders when it exported them; else the override's own `shared`: an instance started with only the
+    // override is isolated all the same, and never falls back to the keychain.
+    let shared = shared_dir.unwrap_or_else(|| PathBuf::from(home).join("shared"));
+    Some(shared.join("secrets"))
 }
 
 /// An isolated instance (started with `AGENTMUX_HOME_OVERRIDE`, as `task dev` always is) keeps its secrets in files
@@ -752,7 +755,7 @@ mod tests {
         assert_eq!(isolated_secrets_dir(over, Some(" Keychain "), shared.clone()), None, "a test of the keychain asks for it");
         assert_eq!(isolated_secrets_dir(None, None, shared.clone()), None, "the person's own instance keeps the keychain");
         assert_eq!(isolated_secrets_dir(Some(OsStr::new("")), None, shared.clone()), None, "an empty override is none");
-        assert_eq!(isolated_secrets_dir(over, None, None), None, "no shared folder to put them in");
+        assert_eq!(isolated_secrets_dir(over, None, None), Some(PathBuf::from("/iso").join("shared").join("secrets")), "started with only the override: its own shared folder");
     }
 
     #[test]
