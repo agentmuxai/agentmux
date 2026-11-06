@@ -310,6 +310,10 @@ pub struct InstallState {
     pub install_url: String,
     #[serde(default)]
     pub expires_at_ms: i64,
+    /// The broker is set up for a one-trip first connect: GitHub's callback after the install page goes to
+    /// the cloud relay. False (or absent, from an older broker) until then.
+    #[serde(default)]
+    pub one_trip: bool,
 }
 
 /// What a revalidation did.

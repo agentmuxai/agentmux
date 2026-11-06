@@ -18,9 +18,14 @@ use sha2::{Digest, Sha256};
 /// Where the relay's hosted page is, and where GitHub is told to send the browser.
 pub const CALLBACK_PATH: &str = "/github-callback";
 
+/// An address on the relay, whether or not its base ends in a slash.
+fn relay_url(relay_base: &str, path: &str) -> String {
+    format!("{}{path}", relay_base.trim_end_matches('/'))
+}
+
 /// The address the install page's callback lands on.
 pub fn callback_uri(relay_base: &str) -> String {
-    format!("{}{CALLBACK_PATH}", relay_base.trim_end_matches('/'))
+    relay_url(relay_base, CALLBACK_PATH)
 }
 
 /// The relay's key for a trip: the SHA-256 hex of the install `state`.
@@ -69,7 +74,7 @@ pub fn parse_poll(status: u16, body: &Value) -> Polled {
 /// Tell the relay a trip is coming, before the browser opens (a flow nobody registered is refused).
 pub async fn register(http: &reqwest::Client, relay_base: &str, key: &str) -> Result<(), String> {
     let reply = http
-        .post(format!("{relay_base}/api/login-relay/github"))
+        .post(relay_url(relay_base, "/api/login-relay/github"))
         .json(&serde_json::json!({ "key": key }))
         .send()
         .await
@@ -83,7 +88,7 @@ pub async fn register(http: &reqwest::Client, relay_base: &str, key: &str) -> Re
 
 /// Ask the relay once. A network error or a server error reads as "not yet": the caller asks again.
 pub async fn poll_once(http: &reqwest::Client, relay_base: &str, key: &str) -> Polled {
-    let Ok(reply) = http.get(format!("{relay_base}/api/login-relay/github/{key}")).send().await else {
+    let Ok(reply) = http.get(relay_url(relay_base, &format!("/api/login-relay/github/{key}"))).send().await else {
         return Polled::Pending;
     };
     let status = reply.status().as_u16();
@@ -103,11 +108,27 @@ mod tests {
     }
 
     #[test]
+    fn a_base_with_a_trailing_slash_gives_the_same_addresses() {
+        for base in ["https://muxbus.example.test", "https://muxbus.example.test/"] {
+            assert_eq!(relay_url(base, "/api/login-relay/github"), "https://muxbus.example.test/api/login-relay/github");
+        }
+    }
+
+    #[test]
     fn the_key_is_the_sha256_hex_of_the_state_and_never_the_state() {
         assert_eq!(relay_key("abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
         let state = "kJ3-Gh_7xQ0aBcDeFgHiJkLmNoPqRsTuVwXyZ012345";
         assert!(!relay_key(state).contains(state));
         assert_eq!(relay_key(state).len(), 64);
+    }
+
+    #[test]
+    fn a_broker_that_does_not_say_it_is_ready_for_a_trip_is_not_one() {
+        use crate::muxbus::github_broker::InstallState;
+        let older: InstallState = serde_json::from_value(json!({ "state": "s", "install_url": "https://github.com/apps/x" })).unwrap();
+        assert!(!older.one_trip);
+        let ready: InstallState = serde_json::from_value(json!({ "state": "s", "install_url": "https://github.com/apps/x", "one_trip": true })).unwrap();
+        assert!(ready.one_trip);
     }
 
     #[test]

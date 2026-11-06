@@ -1004,7 +1004,7 @@ struct BrokerLeg {
 /// The broker's leg of a connect: the code and its PKCE verifier become the person's
 /// grant, or the question of whether another GitHub user may replace the account's.
 async fn broker_exchange(ctx: &FlowCtx, code: &str, verifier: &str, redirect_uri: &str, replace: bool) -> OAuthStatus {
-    use crate::muxbus::github_broker::{self, BrokerError};
+    use crate::muxbus::github_broker;
     let who = match github_broker::caller(&ctx.mstore).await {
         Ok(who) => who,
         // A sign-in that lapsed since the connect began is the same question as none. The other
@@ -1043,41 +1043,52 @@ async fn first_connect_in_one_trip(ctx: &FlowCtx) -> bool {
     matches!(github_broker::installations(http(), &who).await, Ok(links) if links.is_empty())
 }
 
+/// How an install trip ended.
+enum TripEnd {
+    /// Nothing was started, so the usual authorize-page flow goes on.
+    NotATrip,
+    /// The person cancelled; nothing was written.
+    Cancelled,
+    Ended(OAuthStatus),
+}
+
 /// A first GitHub connect through the broker is one trip to GitHub's install page, not two. Whether this
 /// was one, and so the whole flow: `false` leaves the usual authorize-page flow to go on.
 async fn run_first_connect_trip(ctx: &FlowCtx, sid: &str, stop: &mut StopSignal, broker: Option<&BrokerLeg>) -> bool {
     if !broker.is_some_and(|leg| !leg.replace) || !first_connect_in_one_trip(ctx).await {
         return false;
     }
-    if let Some(status) = install_trip(ctx, sid, stop).await {
-        manager().set_status(sid, status);
+    match install_trip(ctx, sid, stop).await {
+        TripEnd::NotATrip => false,
+        TripEnd::Cancelled => true,
+        TripEnd::Ended(status) => {
+            manager().set_status(sid, status);
+            true
+        }
     }
-    true
 }
 
 /// The one-trip first connect: the install page opens instead of the authorize page, GitHub's callback
 /// lands on the cloud relay (which the broker's `state` ties to this account), and the code that comes
-/// back is the person's grant. The installation GitHub reports is then linked. `None`: it was cancelled.
-async fn install_trip(ctx: &FlowCtx, sid: &str, stop: &mut StopSignal) -> Option<OAuthStatus> {
+/// back is the person's grant. The installation GitHub reports is then linked. Whatever goes wrong before
+/// the browser opens (the broker or the relay can't be reached, or isn't set up for a trip) is no trip:
+/// the usual flow goes on, as it did before.
+async fn install_trip(ctx: &FlowCtx, sid: &str, stop: &mut StopSignal) -> TripEnd {
     use crate::identity::github_trip::{self, Polled};
     use crate::muxbus::github_broker;
-    let fail = |error: String| Some(OAuthStatus::Failed { error });
-    let who = match github_broker::caller(&ctx.mstore).await {
-        Ok(who) => who,
-        Err(e) if e.needs_sign_in() => return fail(NEEDS_CLOUD_SIGN_IN.to_string()),
-        Err(e) => return fail(e.to_string()),
-    };
+    let fail = |error: String| TripEnd::Ended(OAuthStatus::Failed { error });
+    let Ok(who) = github_broker::caller(&ctx.mstore).await else { return TripEnd::NotATrip };
     let issued = match github_broker::installation_state(http(), &who).await {
-        Ok(issued) => issued,
-        Err(e) => return fail(e.to_string()),
+        // The broker says when it is set up for a trip (GitHub's callback goes to the relay): until then it
+        // would be a page that never answers.
+        Ok(issued) if issued.one_trip && super::github_installs::is_install_page(&issued.install_url) => issued,
+        _ => return TripEnd::NotATrip,
     };
-    if !super::github_installs::is_install_page(&issued.install_url) {
-        return fail("AgentMux Cloud gave an install page that isn't GitHub's: not opening it".to_string());
-    }
-    let relay_base = crate::muxbus::relay::rest_base_url();
+    let relay_base = crate::muxbus::relay::rest_base_url().trim_end_matches('/').to_string();
     let key = github_trip::relay_key(&issued.state);
     if let Err(e) = github_trip::register(http(), &relay_base, &key).await {
-        return fail(e);
+        tracing::warn!(target: "identity", error = %e, "identity.github: no one-trip connect, using the authorize page");
+        return TripEnd::NotATrip;
     }
     manager().set_status(sid, OAuthStatus::UrlAvailable { auth_url: issued.install_url.clone() });
     if ctx.open_system_browser {
@@ -1085,7 +1096,7 @@ async fn install_trip(ctx: &FlowCtx, sid: &str, stop: &mut StopSignal) -> Option
     }
     let (code, installation_id) = loop {
         tokio::select! {
-            _ = stop.stopped() => return None,
+            _ = stop.stopped() => return TripEnd::Cancelled,
             _ = tokio::time::sleep(Duration::from_secs(1)) => {}
         }
         match github_trip::poll_once(http(), &relay_base, &key).await {
@@ -1097,7 +1108,7 @@ async fn install_trip(ctx: &FlowCtx, sid: &str, stop: &mut StopSignal) -> Option
     };
     // From here the flow writes the account: a cancel that already happened wins.
     if !manager().begin_commit(sid) {
-        return None;
+        return TripEnd::Cancelled;
     }
     let redirect_uri = github_trip::callback_uri(&relay_base);
     let grant = github_broker::exchange_trip_code(http(), &who, &code, &issued.state, &redirect_uri, false).await;
@@ -1109,7 +1120,7 @@ async fn install_trip(ctx: &FlowCtx, sid: &str, stop: &mut StopSignal) -> Option
             tracing::warn!(target: "identity", error = %e, installation_id, "identity.github: the one-trip connect's installation wasn't linked");
         }
     }
-    Some(status)
+    TripEnd::Ended(status)
 }
 
 fn start_code_flow(ctx: FlowCtx, broker: Option<BrokerLeg>, picker: bool) -> Result<(String, OAuthStatus), String> {
