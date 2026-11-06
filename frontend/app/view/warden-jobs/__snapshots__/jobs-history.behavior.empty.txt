@@ -1,0 +1,56 @@
+loadRuns j1 before=- limit=50
+-- no runs, paused, no owner
+<div>
+  <section class="warden-jobs-history" aria-label="Runs of Nightly build">
+    <header class="warden-jobs-history-head">
+      <div class="warden-jobs-history-title">
+        <strong>
+          "Nightly build"
+        <span class="ui-pill ui-pill--warn">
+          "Paused"
+      <div class="warden-jobs-actions">
+        <button title="Run it once now" type="button" class="ui-button ui-tone-neutral ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-play">
+          "Run now"
+        <button type="button" class="ui-button ui-tone-neutral ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-play">
+          "Resume"
+        <button type="button" class="ui-button ui-tone-danger ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-trash">
+          "Delete"
+        <button type="button" class="ui-button ui-tone-neutral ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-pen">
+          "Edit"
+        <button type="button" class="ui-button ui-tone-neutral ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-clone">
+          "Clone"
+        <button title="What it would do, starting nothing" type="button" class="ui-button ui-tone-neutral ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-vial">
+          "Dry run"
+        <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-xmark">
+          "Close"
+    <div class="warden-section-stub">
+      "No runs yet."
+loadRuns j1 before=- limit=50
+-- ended, no actions
+<div>
+  <section class="warden-jobs-history" aria-label="Runs of Nightly build">
+    <header class="warden-jobs-history-head">
+      <div class="warden-jobs-history-title">
+        <strong>
+          "Nightly build"
+        <span class="ui-pill ui-pill--neutral">
+          "Ended"
+        <span class="warden-manager-dim">
+          "by"
+          "Builder"
+        <span class="warden-manager-dim">
+          "→"
+          "Builder"
+      <div class="warden-jobs-actions">
+        <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-xmark">
+          "Close"
+    <div class="warden-section-stub">
+      "No runs yet."

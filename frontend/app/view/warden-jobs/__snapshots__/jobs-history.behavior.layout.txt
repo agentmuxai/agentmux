@@ -1,0 +1,147 @@
+loadRuns j1 before=- limit=50
+-- mixed runs
+<div>
+  <section class="warden-jobs-history" aria-label="Runs of Nightly build">
+    <header class="warden-jobs-history-head">
+      <div class="warden-jobs-history-title">
+        <strong>
+          "Nightly build"
+        <span class="ui-pill ui-pill--ok">
+          "Active"
+        <span class="warden-manager-dim">
+          "by"
+          "Builder"
+        <span class="warden-manager-dim">
+          "→"
+          "Builder"
+      <div class="warden-jobs-actions">
+        <button title="Run it once now" type="button" class="ui-button ui-tone-neutral ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-play">
+          "Run now"
+        <button type="button" class="ui-button ui-tone-neutral ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-pause">
+          "Pause"
+        <button type="button" class="ui-button ui-tone-danger ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-trash">
+          "Delete"
+        <button type="button" class="ui-button ui-tone-neutral ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-pen">
+          "Edit"
+        <button type="button" class="ui-button ui-tone-neutral ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-clone">
+          "Clone"
+        <button title="What it would do, starting nothing" type="button" class="ui-button ui-tone-neutral ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-vial">
+          "Dry run"
+        <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-user">
+          "Open owner"
+        <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-xmark">
+          "Close"
+    <table class="warden-manager-table warden-jobs-runs">
+      <thead>
+        <tr>
+          <th>
+            "When"
+          <th>
+            "Run"
+          <th>
+            "Took"
+          <th>
+            "Summary"
+          <th>
+            "Cost"
+          <th>
+            "Account"
+          <th>
+            "Links"
+      <tbody>
+        <tr>
+          <td data-hover-tip="L863940000" aria-description="L863940000">
+            "1m ago"
+            <span class="warden-manager-dim">
+              "·"
+              "Run now"
+          <td>
+            <span class="ui-pill ui-pill--ok" title="ok">
+              "ok"
+          <td class="warden-jobs-num">
+            "0s"
+          <td class="warden-jobs-summary">
+            "Did it"
+          <td class="warden-jobs-num">
+            "$0.42"
+          <td class="warden-manager-dim">
+            "acct-1"
+          <td class="warden-jobs-links">
+        <tr>
+          <td data-hover-tip="L863880000" aria-description="L863880000">
+            "2m ago"
+            <span class="warden-manager-dim">
+              "·"
+              "catch-up"
+          <td>
+            <span class="ui-pill ui-pill--accent" title="running">
+              "running"
+          <td class="warden-jobs-num">
+          <td class="warden-jobs-summary">
+          <td class="warden-jobs-num">
+          <td class="warden-manager-dim">
+            "claude"
+          <td class="warden-jobs-links">
+        <tr>
+          <td data-hover-tip="L1000" aria-description="L1000">
+            "9d ago"
+          <td>
+            <span class="ui-pill ui-pill--neutral" title="skipped: paused (×4)">
+              "skipped"
+            <span class="warden-jobs-reason">
+              "paused"
+            <span class="warden-manager-dim">
+              "×"
+              "4"
+          <td class="warden-jobs-num">
+          <td class="warden-jobs-summary">
+          <td class="warden-jobs-num">
+          <td class="warden-manager-dim">
+          <td class="warden-jobs-links">
+        <tr data-failed="true">
+          <td data-hover-tip="L1000" aria-description="L1000">
+            "9d ago"
+          <td>
+            <span class="ui-pill ui-pill--error" title="failed: timed out">
+              "failed"
+            <span class="warden-jobs-reason">
+              "run cap reached"
+          <td class="warden-jobs-num">
+            "0s"
+          <td class="warden-jobs-summary">
+          <td class="warden-jobs-num">
+            "$1.50 (shared turn)"
+          <td class="warden-manager-dim">
+          <td class="warden-jobs-links">
+        <tr>
+          <td data-hover-tip="L1000" aria-description="L1000">
+            "9d ago"
+          <td>
+            <span class="ui-pill ui-pill--warn" title="finished with findings">
+              "findings"
+          <td class="warden-jobs-num">
+            "0s"
+          <td class="warden-jobs-summary">
+            "<b>not markup</b>"
+          <td class="warden-jobs-num">
+          <td class="warden-manager-dim">
+          <td class="warden-jobs-links">
+        <tr data-failed="true">
+          <td data-hover-tip="L1000" aria-description="L1000">
+            "9d ago"
+          <td>
+            <span class="ui-pill ui-pill--error" title="missed">
+              "missed"
+          <td class="warden-jobs-num">
+          <td class="warden-jobs-summary">
+          <td class="warden-jobs-num">
+          <td class="warden-manager-dim">
+          <td class="warden-jobs-links">

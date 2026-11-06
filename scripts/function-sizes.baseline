@@ -193,7 +193,7 @@
 110 crates/srv/src/backend/resume_preflight.rs::preflight
 157 crates/srv/src/backend/rpc/engine.rs::WshRpcEngine::handle_request
 270 crates/srv/src/backend/service.rs::get_method_meta
-244 crates/srv/src/backend/shell_node.rs::ShellNodeRunner::run
+238 crates/srv/src/backend/shell_node.rs::ShellNodeRunner::run
 111 crates/srv/src/backend/slug_migration/plan.rs::holder_of
 138 crates/srv/src/backend/spawn_env/build.rs::build_persistent_spawn_env
 129 crates/srv/src/backend/storage/agents/definition.rs::Store::agent_def_find_or_insert
@@ -310,7 +310,6 @@
 110 crates/srv/src/server/remote_ops/receive.rs::receive
 130 crates/srv/src/server/service/host_ipc.rs::handle_register
 277 crates/srv/src/server/service/misc.rs::handle_misc_service
-431 crates/srv/src/server/service/object.rs::handle_object_service
 115 crates/srv/src/server/service/session_other_builds.rs::restore
 132 crates/srv/src/server/service/tab_lifecycle.rs::handle_create_tab
 118 crates/srv/src/server/service/tab_move.rs::handle_move_block_to_tab
@@ -477,7 +476,6 @@
 101 frontend/app/view/editor/viewers/viewer-host.tsx::ViewerFor
 152 frontend/app/view/files/files-preview.tsx::FilesPreview
 118 frontend/app/view/global-bundle/GlobalMemoryFullView.tsx::EntryView
-253 frontend/app/view/global-bundle/global-bundle-manager.tsx::GlobalBundleManager
 147 frontend/app/view/history/history-agents.tsx::HistoryAgents
 165 frontend/app/view/identity/identity-accounts-tab.tsx::AccountDetailPanel
 229 frontend/app/view/kanban/kanban-board.tsx::KanbanBoard
@@ -532,7 +530,6 @@
 102 frontend/app/view/warden-jobs/job-editor-fields.tsx::WhatSection
 146 frontend/app/view/warden-jobs/job-template-approval.tsx::TemplateApproval
 180 frontend/app/view/warden-jobs/job-update-diff.tsx::JobUpdateDiff
-253 frontend/app/view/warden-jobs/jobs-history.tsx::JobHistory
 137 frontend/app/view/warden-jobs/warden-jobs-manager.tsx::WardenJobsManager
 218 frontend/app/window/logo-menu.tsx::LogoMenu
 157 frontend/app/window/logo-menu.tsx::menuItems
