@@ -4,7 +4,7 @@
 **Status:** active — P1 (catalog and gateway) in PR #6662; P2 to P5 not started. Approved by the operator 2026-11-06 ("greenlight 27458"; the recommendations in section 12 are the decisions). Verified 2026-11-06.
 **Author:** Agent5@narko, for AgentX's lane
 **Read from:** `origin/main` at `1a79691b0` (v0.60.18). Web facts read the same day are marked.
-**Builds on:** `docs/reports/REPORT_AGENTSKY_PARITY_AND_MODEL_SWITCHING_2026_11_05.md` (#24714: one agent, one id, one history), PR #6555 (`Agents` create/update/bundles).
+**Builds on:** the AgentSky parity and model switching report of 2026-11-05 (task #24714, kept outside the repo: one agent, one id, one history), PR #6555 (`Agents` create/update/bundles).
 **Related:** `SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md`, `SPEC_PROVIDER_MODELS_EFFORT_GENERALIZATION_2026-06-14.md`, `SPEC_CONTAINER_AGENT_AWS_CREDENTIALS_2026_10_31.md`
 
 ## 1. The ask, and the answer in one page
