@@ -35,7 +35,7 @@ guide/write-a-skill/    # the guide (the one skill the app also ships)
 publishers.json         # publisher -> public key, as in the widget catalog
 verification/           # records from test machines (§6)
 scripts/build.mjs       # validate, then write index.json and the zips
-LICENSE  README.md  CONTRIBUTING.md  .github/CODEOWNERS  .github/workflows/
+LICENSE  README.md  CONTRIBUTING.md  .github/workflows/
 ```
 
 - **Folder name = skill name = `<publisher>-<id>`** (`agentmux-word`). The Agent Skills spec requires the folder to match `name`, and this keeps the repo readable by any Agent Skills client (`skills/` is where `anthropics/skills` and `figma/mcp-server-guide` keep theirs). It is also how skills from different publishers avoid a clash: two publishers can each have a `word`.
@@ -61,7 +61,7 @@ Memory > Skills (SPEC_PACKS §8) gets a **Browse** view, built like Settings > W
 
 | Phase | Builds | Done when |
 |---|---|---|
-| **P1: the repo** | Create `agentmuxai/skills`; move the six folders; `publishers.json`, `build.mjs`, the Pages workflow, `CODEOWNERS`, `CONTRIBUTING.md`; sign the AgentMux skills | a pull request that breaks a rule fails CI; the index builds and signs; `npx skills add agentmuxai/skills` finds the folders (to be tried; not verified) |
+| **P1: the repo** | Create `agentmuxai/skills`; move the six folders; `publishers.json`, `build.mjs`, the Pages workflow, `CONTRIBUTING.md`; sign the AgentMux skills | a pull request that breaks a rule fails CI; the index builds and signs; `npx skills add agentmuxai/skills` finds the folders (to be tried; not verified) |
 | **P2: srv** | The generic catalog client, `app_skills.catalog` and `.install`, `PACK_CATALOG_KEYS`; `skill.sig` verification (SPEC_PACKS §5); publisher pins | a catalog skill installs as `needs_approval` with its fingerprint; a tampered zip is refused (tests) |
 | **P3: Browse** | The Browse view, Install and Update, the verification summary, "From the AgentMux catalog" prompt line | the five skills install from Browse in a task dev build |
 
@@ -74,13 +74,15 @@ P2 and P3 need SPEC_PACKS stages 2 to 4 (skill storage, Memory > Skills, script 
 - **CI on every pull request** (`scripts/build.mjs`, no dependencies, like the widget catalog's), failing the PR on:
   - **Format:** `computer-use.json` (schema `computer-use-skill/v1`) and `test.json` validate; folder name = `SKILL.md` `name` = `<publisher>-<id>`; the Agent Skills limits (name 64, description 1024, `SKILL.md` under 500 lines); every file named in `computer-use.json` exists; script hashes in `scripts` match; the version increased if the skill changed.
   - **Signature:** `skill.sig` matches the files and the key `publishers.json` lists for that publisher (a different key for a known publisher fails).
-  - **Secrets and typed passwords:** a scan flags (a) a `type` step or script that writes a value into a password, token or key field, (b) reads of credential stores (`cmdkey`, Windows Credential Manager, the Keychain `security` tool, `secret-tool`, browser profile databases, `.env` and `.aws` files), (c) literal tokens and private keys. A flag fails the check; a maintainer can clear a false positive with a recorded override in the PR. This is pattern matching, so it catches carelessness, not a determined author; that is why the next rule exists.
+  - **Secrets and typed passwords:** a scan flags (a) a `type` step or script that writes a value into a password, token or key field, (b) reads of credential stores (`cmdkey`, Windows Credential Manager, the Keychain `security` tool, `secret-tool`, browser profile databases, `.env` and `.aws` files), (c) literal tokens and private keys. A flag fails the check; the reviewer can clear a false positive with a recorded override in the PR. This is pattern matching, so it catches carelessness, not a determined author; that is why the next rule exists.
   - **Network and size:** a script that calls the network must say so in `computer-use.json` `scripts[].needs`, and the origin is shown in the prompt; per-file and per-skill size limits like the widget catalog's.
-  - **Content rules (§7):** a licence-header scan for copied vendor text, and no image or icon files other than the skill's own.
-- **Scripts need a human.** `CODEOWNERS` requires an AgentMux maintainer's review for any change under `scripts/`, any `mcp` entry, and `publishers.json`. A new network origin or a credential-store read gets a closer look, as with widgets. A text-only change needs one review.
-- **Never merged on CI alone,** same as the widget catalog: "A maintainer reads every submission."
+  - **Content rules (§7):** a licence-header scan for copied vendor text, and no image files except the reference crops of `SPEC_PACKS_2026_11_05.md` §3.1: PNG only, under `references/`, each listed in `computer-use.json` `references` with its tags, within the size, pixel and count limits, with no metadata chunks (CI re-encodes and compares). The review opens every crop, because no scan can see a name or a path in a picture.
+- **Scripts get extra scrutiny.** A change under `scripts/`, any `mcp` entry, and a change to `publishers.json` get a closer look in review, as with widgets, and so does a new network origin or a credential-store read. There is no maintainers team and no CODEOWNERS file (operator, via AgentY, 2026-11-06: "why is a team needed?"; every agent is the same GitHub App, so a team would only rubber-stamp). The gates are real ones: muxreview's approval, the required `check` and `dco` checks, signing in a protected release workflow, and the person's approval of each script when they install a skill (SPEC_PACKS §5).
+- **Never merged on CI alone:** a pull request needs muxreview's approval as well as `check` and `dco`.
 
 ## 5. Who signs, and what the app shows
+
+**The catalog key (set up 2026-11-06).** The private half is held by the release workflow and outside the repository. The public half, which the app pins in `PACK_CATALOG_KEYS` (P2), is `VBSn+oh9qB6bnv+BoGifqfwqDXTh3BPIsQb/8RMg+Do=`, fingerprint `DU3S-53XD-CITH-4F4Q`. Branch protection on `main`: pull requests only, `check` and `dco` required, one approval, linear history, no force push. The catalog is published with GitHub Pages from the release workflow.
 
 - **Computer-use skills AgentMux publishes** are signed with the AgentMux publisher key, the one already listed as `agentmux` in the widget catalog's `publishers.json`, so a person who has pinned `agentmux` for widgets sees "the same key as your other agentmux items". The private half is held outside the repository, as the widget catalog key is; this spec does not say where.
 - **Community skills** are signed with their author's key, registered in `publishers.json` in the author's first PR (`npx -p @agentmuxai/widget-sdk agentmux-widget keygen` and `sign` already do this for widgets; the build adds a `skill` mode with the domain tag `agentmux-skill-sig-v1`).
@@ -92,7 +94,7 @@ P2 and P3 need SPEC_PACKS stages 2 to 4 (skill storage, Memory > Skills, script 
 CI cannot run Word or Live (no desktop, no licence), and a green build must not suggest otherwise. The records come from machines that have the app, and are shown next to the skill.
 
 - **Where:** `verification/<publisher>-<id>/<skill version>.json` in the repo, a list of `{ skillVersion, appVersion, platform, date, route, result: pass | fail, notes, evidenceSha256 }`. `build.mjs` folds a summary into each index entry, so Browse shows "Passed on Word 16.0 and Excel 16.0 · Windows · skill 1.2.0 · 2026-11-06" or "Not yet tested at 1.3.0".
-- **Who adds them:** a test machine, by PR, after running the skill's `test.json` (SPEC_PACKS §7). `CODEOWNERS` requires a maintainer on `verification/`, so a contributor cannot self-certify their own skill.
+- **Who adds them:** a test machine, by PR, after running the skill's `test.json` (SPEC_PACKS §7). A record is reviewed in the pull request like any other change, so a contributor cannot self-certify their own skill.
 - **Not copied from the local run as is.** The local `verified` records carry `runner: Manoz@Area54`. A public record says `runner: "AgentMux test machine"` (or `"community"` with a GitHub handle), with no host, user or path. The evidence is a SHA-256 of the screenshot, never the screenshot.
 - **The installed copy keeps its own records** in `verified.json` (outside the hash), appended by a local run (SPEC_PACKS §7). Catalog records and local records show side by side: "passed elsewhere" and "passed here".
 - **A record is not a guarantee.** It says a test passed on that app version on that day. A newer installed app is still **drift** (SPEC_PACKS §8, §10.3).
@@ -102,7 +104,7 @@ CI cannot run Word or Live (no desktop, no licence), and a green build must not 
 These go in `CONTRIBUTING.md` and are partly checked by CI (§4).
 
 - **Our own words.** No copied vendor documentation, manuals, help pages or release notes. Facts (a shortcut, a COM class, an API name) are fine; the prose is the contributor's. A computer-use skill points to the vendor's documentation by link and says what to look for.
-- **App names only to name the app,** in plain text ("Works with Ableton Live 12"). No vendor logos, icons, screenshots of vendor UI, or wording that suggests the vendor endorses the skill. Skill files use no vendor trademark as the skill's own name beyond naming the app.
+- **App names only to name the app,** in plain text ("Works with Ableton Live 12"). No vendor logos or icons, no screenshots copied from anywhere, and no wording that suggests the vendor endorses the skill. The one picture allowed is a **reference crop** (SPEC_PACKS §3.1): our own capture, taken on an AgentMux test machine, of one control or one small region (at most 800 by 600 pixels, 100 KB, 40 per skill), tagged with the app version, platform, theme and scale. It shows functional UI only. It never shows user content (a project, file or track name, document text, audio or media, a recent-files list), a user or account name, a licence or serial, a path or machine name, a notification, another window, or the vendor's logo, splash, About or licence dialog, artwork or skin. Whether a vendor's terms allow crops of its UI is checked per app like the automation terms, and an app whose terms forbid it gets none (open question 5 of SPEC_PACKS). Skill files use no vendor trademark as the skill's own name beyond naming the app.
 - **Nothing about AgentMux's private systems:** no internal hostnames, machine names, paths, account or agent identifiers, infrastructure, logs, or unfixed weaknesses in AgentMux. A known, published vulnerability in a third-party tool may be named (the Blender skill names a CVE so the agent avoids that route); an undisclosed one may not.
 - **No secrets, ever,** and no instruction that has an agent type a password (SPEC_PACKS §5: a computer-use skill tells the agent to ask the person).
 - **Licensing of what a script uses:** a script may call an app's own scripting interface; it may not bundle the app, a vendor SDK, or a binary.
@@ -111,7 +113,7 @@ These go in `CONTRIBUTING.md` and are partly checked by CI (§4).
 
 - No automatic installs or updates; no paid or rated skills.
 - No trusted code from a computer-use skill: a computer-use skill grants nothing, and `Desktop` grants stay per app and per time (SPEC_PACKS §5).
-- No skill for an app whose vendor's terms forbid automation: a maintainer checks the terms before listing one.
+- No skill for an app whose vendor's terms forbid automation: the review checks the terms before a skill for that app is listed.
 - No CI that runs the apps. Verification is by machines that have them (§6).
 
 ## 9. Open questions
@@ -119,6 +121,6 @@ These go in `CONTRIBUTING.md` and are partly checked by CI (§4).
 1. **Rename.** If #1631's name is accepted, the repo becomes `agentmuxai/computer-use-skills` (or stays `skills` as a short URL); the decision is the operator's and changes only labels.
 2. **`npx skills add agentmuxai/skills`.** I believe the `skills` CLI finds folders under `skills/` (the layout `anthropics/skills` and Figma use), but I did not verify which directories it scans. P1's done-when tests it.
 3. **A Claude Code marketplace file.** Adding `.claude-plugin/marketplace.json` would let Claude Code users install skills as plugins (the way Adobe's repo does). That is useful but a second distribution path to keep signed and in step; I would add it after P3, if asked.
-4. **Where the AgentMux publisher key is signed from.** CI cannot hold the key (a PR from a fork must not reach it), so AgentMux skills are signed by a maintainer's release step; how that step is run is for the platform lead, not this spec.
+4. **Where the AgentMux publisher key is signed from.** CI cannot hold the key (a PR from a fork must not reach it), so AgentMux skills are signed by a protected release workflow that holds the catalog key; how that step is run is for the platform lead, not this spec.
 
 Agent: Manoz@Area54

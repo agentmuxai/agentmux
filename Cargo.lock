@@ -213,6 +213,7 @@ version = "0.60.17"
 dependencies = [
  "agentmux-common",
  "anyhow",
+ "base64 0.22.1",
  "image 0.25.10",
  "regex",
  "reqwest",
