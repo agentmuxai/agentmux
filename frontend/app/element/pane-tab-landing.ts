@@ -19,8 +19,8 @@ export const LANDING_BOUNCE_MS = 400;
  *  than per-strip: a cross-pane drop re-renders the pill in the destination
  *  strip (mounting it fresh there), so the flag has to be readable by
  *  whichever strip ends up rendering it. The pane is part of the identity
- *  because one block can have pills in several strips: agent fork lineages
- *  show blocks from OTHER panes as extra tabs (`PaneChromeModel.extraTabs`),
+ *  because one block can have pills in several strips: a view type may show
+ *  blocks from OTHER panes as extra tabs (`PaneChromeModel.extraTabs`),
  *  and only the pill in the pane it actually landed in should bounce (Codex
  *  P2 on #3694). Only header strips set it.
  *  SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md §3.4. */

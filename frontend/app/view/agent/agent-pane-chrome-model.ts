@@ -3,17 +3,9 @@
 
 // Split out of agent-view.tsx (SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md §3.5 step 1).
 
-import { getOpenBlockIdsForDefinition } from "@/app/store/agent-pane-state-store";
-import { MOS } from "@/app/store/global";
-import { revealBlock } from "@/app/util/reveal-block";
 import { setActiveBlockInStack, type NodeModel } from "@/layout/index";
 import { findNode } from "@/layout/lib/layoutNode";
-import { createMemo } from "solid-js";
-import { agentModels } from "./agent-models";
 import { closeAgentTab } from "./close-agent-tab";
-import { useOpenDefinitionMap } from "./components/AgentPicker";
-import { forkPills } from "./fork/fork-set";
-import { useForkSet } from "./fork/useForkSet";
 
 /**
  * Chrome half of the agent pane — the header, tab strip and progress-bar
@@ -46,7 +38,7 @@ import { useForkSet } from "./fork/useForkSet";
  * Everything the old `AgentPaneChrome` component rendered around the
  * content (root box, focus ring, header row, ErrorBoundary) is the shared
  * chrome's job now; what stays here is only what is genuinely agent's:
- * its tab model (fork lineage merged with this pane's own stack, rename,
+ * its tab model (this pane's own stack, rename,
  * per-pane zoom) and the below-header slot its turn-progress bar portals
  * into. That slot is a generic capability — any view type can take it.
  */
@@ -76,77 +68,23 @@ export function buildAgentPaneChromeModel(anchorBlockId: string, nodeModel: Node
     // (layout/lib/types.ts).
     const activeBlockId = () => nodeModel.activeBlockId?.() ?? anchorBlockId;
 
-    // Block-scoped reads (agentId) must track the
-    // CURRENTLY ACTIVE member, not `anchorBlockId` (frozen to whichever
-    // ViewModel instance first rendered this chrome) — getMuxObjectAtom
-    // inside a memo, not useMuxObjectValue, the same reactive-oref pattern
-    // PR #3134 already established for BlockFrame_Header
-    // (frontend/app/store/mos.ts's own doc comments explain why).
-    const activeBlockData = createMemo(() => MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", activeBlockId()))());
-    const agentId = () => activeBlockData()?.meta?.["agentId"];
-
-    // Fork tabs: conversations sharing this one's `parent_id` lineage that
-    // are open in ANOTHER top-level pane of this pane's own window tab, shown
-    // as extra pills (PaneChrome dedupes them against this pane's own stack)
-    // so cross-pane fork-switching keeps working.
-    const [openDefinitions] = useOpenDefinitionMap();
-    // ReAgent P2: reads the active tab's OWN agentDefinitions
-    // (agent-model.ts) instead of calling useAgentDefinitions() again here
-    // — that would be a second, independent RPC + agents:changed
-    // subscription for the same pane, on top of the one AgentBlockContent
-    // already owns. Found by block id (agent-models.ts): the host's view
-    // model is only an adapter once the agent is a native pane tab.
-    const forks = useForkSet({
-        definitions: () => agentModels.get(activeBlockId())?.agentDefinitions() ?? [],
-        openBlockByDef: openDefinitions,
-        activeDefinitionId: () => agentId() ?? "",
-    });
-    // Same "switchable" filter AgentPresentationView used to apply: a fork
-    // with no open blockId anywhere can't be jumped to, so it isn't offered.
-    const switchableForks = createMemo(() => forks().filter((f) => f.isActive || !!f.blockId));
-
-    // Forks open in ANOTHER pane of this window tab appear as extra pills
-    // after this pane's own stack members (`forkPills`): each fork's block in
-    // this tab, out of every block its definition is open in. `getNodeByBlockId`
-    // reads `leafs()`, so the pills follow this tab's layout.
-    const extraTabs = () =>
-        forkPills(switchableForks(), (f) =>
-            [f.blockId, ...getOpenBlockIdsForDefinition(f.definitionId)].find((b) => !!b && !!layoutModel.getNodeByBlockId(b)),
-        );
-
-    // Activating a tab has two cases, both "switch," neither "create": (1)
-    // the target block already lives in THIS pane's own block-stack — swap
-    // the active member in place; (2) a fork open as its own separate
-    // top-level pane of this window tab — reveal it via revealBlock,
-    // same as the picker's "Switch to existing" flow already does.
+    // A tab of this strip is a member of this pane's own block-stack, so
+    // activating one swaps the active member in place. A block of another pane
+    // is never offered here: one agent block is one pane, and drawing another
+    // pane's block as a tab made two panes look like one group (#27069, #23913).
     const handleTabSwitch = (targetBlockId: string) => {
         if (targetBlockId === activeBlockId()) return;
         const node = getOwnNode();
         if (!node) return;
         const stack = node.data?.blockStack?.length ? node.data.blockStack : [activeBlockId()];
-        if (stack.includes(targetBlockId)) {
-            // No reveal gate: reaching this branch at all requires
-            // node.data.blockStack.length > 1 (otherwise `stack` above is
-            // just [activeBlockId()], and targetBlockId !== activeBlockId()
-            // already ruled out targetBlockId matching it) — the
-            // precondition for a second pill to exist to click at all.
-            // AgentPaneChrome is mounted for the whole pane's life and
-            // never remounts on a switch, so there is nothing for a gate to
-            // hide: only the inner <Block> rebuilds, and that is already
-            // covered by its own ready-gate cross-fade.
-            // See SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md.
-            setActiveBlockInStack(layoutModel, node.id, targetBlockId);
-        } else {
-            // Another pane — switch it to the fork if it's a background tab
-            // there (refocusNode only focused the pane).
-            void revealBlock(targetBlockId, { source: "pane-tab", localOnly: true });
-        }
+        // No reveal gate: AgentPaneChrome is mounted for the whole pane's life and never remounts on a
+        // switch; only the inner <Block> rebuilds, and that is already covered by its own ready-gate
+        // cross-fade. See SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md.
+        if (stack.includes(targetBlockId)) setActiveBlockInStack(layoutModel, node.id, targetBlockId);
     };
     // × on a tab (also middle-click, via PaneTabStrip's onMouseDown).
-    // closeAgentTab resolves the block's OWNING node — for a stack member
-    // that's this pane, for a cross-pane fork tab it's that other pane — and
-    // closes it like closeBlockInStack does (pop it out and activate the
-    // neighbor; last member closes the pane), with one exception: the last
+    // closeAgentTab closes the block like closeBlockInStack does (pop it out
+    // and activate the neighbor; last member closes the pane), with one exception: the last
     // tab of THIS pane holding a loaded agent is swapped for a fresh My
     // Agents tab instead of closing the pane
     // (SPEC_AGENT_PANE_HOVER_CLOSE_FOCUS_REFINEMENTS_2026_09_23.md §2).
@@ -164,12 +102,7 @@ export function buildAgentPaneChromeModel(anchorBlockId: string, nodeModel: Node
     // and hands it to whichever view model is active (PaneChrome.tsx), so an
     // agent tab in a pane that started as another view type gets it too.
     return {
-        extraTabs,
-        // Both return true ("handled"): an agent tab may live in a
-        // DIFFERENT pane (a fork open as its own top-level pane), so
-        // activating/closing it isn't necessarily this pane's own stack
-        // operation — handleTabSwitch/handleTabClose resolve the owning
-        // node themselves.
+        // Both return true ("handled"): the strip's tabs are this pane's own stack members.
         onActivate: (id: string) => {
             handleTabSwitch(id);
             return true;
