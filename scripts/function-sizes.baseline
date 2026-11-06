@@ -211,7 +211,6 @@
 143 crates/srv/src/backend/storage/filestore/offset_ops.rs::FileStore::write_at
 125 crates/srv/src/backend/storage/migrations.rs::run_filestore_migrations
 306 crates/srv/src/backend/storage/migrations.rs::run_identity_store_schema
-913 crates/srv/src/backend/storage/migrations.rs::run_object_schema
 232 crates/srv/src/backend/storage/migrations.rs::run_shared_store_schema
 310 crates/srv/src/backend/storage/muxbus.rs::Store::muxbus_load_tokens
 403 crates/srv/src/backend/subagent_watcher/jsonl.rs::SubagentWatcher::process_jsonl_change
