@@ -29,6 +29,7 @@ pub mod persistent;
 mod persistent_resume;
 pub mod pidregistry;
 mod prompt_record;
+mod resync_steps;
 pub mod process_tree;
 pub mod session_agent;
 pub mod session_recovery;
@@ -944,10 +945,9 @@ pub fn resync_controller(
     config: Option<Arc<crate::backend::wconfig::ConfigState>>,
 ) -> Result<(), String> {
     let block_id = &block.oid;
-    let block_meta = &block.meta;
 
     // Get controller type from block meta
-    let controller_type = super::obj::meta_get_string(block_meta, META_KEY_CONTROLLER, "");
+    let controller_type = super::obj::meta_get_string(&block.meta, META_KEY_CONTROLLER, "");
 
     if controller_type.is_empty() {
         // No controller type = web/static block, nothing to manage
@@ -958,20 +958,7 @@ pub fn resync_controller(
         return Err(format!("resync_controller: block {block_id} is closing"));
     }
 
-    // Container agents (agentMode == "container") require a subprocess controller for
-    // per-turn docker exec. Persistent is incompatible. Override any stale "persistent"
-    // value that may have been written before this invariant was enforced at creation time.
-    let runtime = super::runtime_adapter::RuntimeKind::of_block_meta(block_meta).adapter();
-    let controller_type =
-        if !runtime.accepts_persistent_controller() && controller_type == BLOCK_CONTROLLER_PERSISTENT {
-            tracing::warn!(
-                block_id = %block_id,
-                "container agent has persistent controller in meta — overriding to subprocess"
-            );
-            BLOCK_CONTROLLER_SUBPROCESS.to_string()
-        } else {
-            controller_type
-        };
+    let controller_type = resync_steps::effective_controller_type(block, controller_type);
 
     tracing::info!(
         block_id = %block_id,
@@ -982,258 +969,29 @@ pub fn resync_controller(
         "[dnd-debug] resync_controller entry"
     );
 
-    // Check if existing controller needs to be replaced
-    let existing = get_controller(block_id);
-    if let Some(ref ctrl) = existing {
-        let needs_replace = if ctrl.controller_type() != controller_type || force {
-            true // Type changed or forced restart
-        } else {
-            let status = ctrl.get_runtime_status();
-            // Check if connection changed
-            let new_conn = super::obj::meta_get_string(block_meta, META_KEY_CONNECTION, "local");
-            status.shellprocconnname != new_conn
-        };
-
-        // A forced resync that lands mid-turn on a persistent agent must NOT
-        // tear the controller down: doing so kills the CLI process with the
-        // user's in-flight message already written to its stdin, and nothing
-        // replays it — `stop_process` records a `StopRequested` (which the
-        // resume machine reads as an explicit user stop and so suppresses the
-        // retry), the old controller's queue is discarded with it, and the
-        // replacement "spawns on first message", i.e. does nothing. The turn
-        // vanished with no response and no error. Diagnosed live on AgentX,
-        // 2026-08-28.
-        //
-        // Instead the controller restarts itself the moment the turn ends,
-        // picking up the new `cmd:args` (rebuilt from block meta at spawn) on
-        // the next message. Nothing is lost by waiting: model/effort flags are
-        // baked in at spawn, so they could never have applied to the turn
-        // already running.
-        //
-        // Scoped to a runtime-config tweak: the controller must be persistent
-        // now AND still be persistent afterwards. A controller-TYPE change is a
-        // genuine replacement that has to happen immediately, even mid-turn.
-        //
-        // Checking only the EXISTING type was a real bug (reagent P2): the
-        // container-agent override a few lines above rewrites `controller_type`
-        // persistent -> subprocess, so a forced resync landing mid-turn on such
-        // a block would have deferred and silently kept the persistent
-        // controller — the exact incompatibility that override exists to
-        // correct, and the opposite of what this comment claims.
-        if needs_replace
-            && is_runtime_config_only_replace(ctrl.controller_type(), &controller_type, force)
-        {
-            if let Some(p) = ctrl
-                .as_any()
-                .downcast_ref::<persistent::PersistentSubprocessController>()
-            {
-                if p.request_restart_when_idle() {
-                    return Ok(());
-                }
-            }
-        }
-
-        if needs_replace {
-            // stop_for_replace + remove_controller_entry_only, NOT stop +
-            // delete_controller: a session restart/resync must not tear
-            // down the block's shared process tracker — only the old
-            // controller's own CLI process should die. See
-            // docs/specs/SPEC_BACKGROUND_TASK_TEARDOWN_SURVIVAL_2026_08_20.md.
-            let _ = crate::sagas::agent_teardown::replace_now(ctrl.as_ref());
-            remove_controller_entry_only(block_id);
-        } else {
-            // Existing controller is fine, just check if it needs starting
-            let status = ctrl.get_runtime_status();
-            tracing::info!(
-                block_id = %block_id,
-                status = %status.shellprocstatus,
-                "[dnd-debug] existing controller — skipping spawn (no cmd:cwd seed)"
-            );
-            if status.shellprocstatus == STATUS_INIT {
-                refresh_agent_skill_files(block_meta, &mstore, &identity_store);
-                return ctrl.start(block_meta.clone(), rt_opts, force);
-            }
-            if status.shellprocstatus == STATUS_DONE {
-                if respawn_if_done {
-                    refresh_agent_skill_files(block_meta, &mstore, &identity_store);
-                    return ctrl.start(block_meta.clone(), rt_opts, force);
-                }
-                return Err(RESYNC_ERR_ALREADY_EXITED.to_string());
-            }
-            return Ok(());
+    let ctx = resync_steps::ResyncCtx {
+        block,
+        tab_id,
+        rt_opts,
+        force,
+        respawn_if_done,
+        broker,
+        event_bus,
+        mstore,
+        filestore,
+        id_store,
+        identity_store,
+        registry,
+        boot_id,
+        auth_key,
+        config,
+    };
+    if let Some(ctrl) = get_controller(block_id) {
+        if let Some(result) = ctx.resync_existing(&ctrl, &controller_type) {
+            return result;
         }
     }
-
-    // Create new controller
-    refresh_agent_skill_files(block_meta, &mstore, &identity_store);
-    match controller_type.as_str() {
-        // A durable SSH pane: the shell lives in the helper's session on the
-        // host, reached over ssh (durable_ssh.rs). Same `shell` type and
-        // connection name as the meta says, so a resync keeps it.
-        BLOCK_CONTROLLER_SHELL
-            if durable_mode::wants(
-                block_meta,
-                config.as_ref().map(|c| c.get_full_config()).as_deref(),
-            ) =>
-        {
-            // When the user declines the helper, the pane restarts as a plain
-            // SSH terminal: the same resync, forced, which then finds the
-            // pane no longer durable (durable_mode::wants).
-            let fallback: durable_ssh::Fallback = {
-                let (block_id, tab_id, rt_opts) = (block_id.to_string(), tab_id.to_string(), rt_opts.clone());
-                let (broker, event_bus, mstore, filestore) =
-                    (broker.clone(), event_bus.clone(), mstore.clone(), filestore.clone());
-                let (id_store, identity_store, registry) = (id_store.clone(), identity_store.clone(), registry.clone());
-                let (boot_id, auth_key, config) = (boot_id.clone(), auth_key.to_string(), config.clone());
-                Arc::new(move || {
-                    let Some(block) = mstore.as_ref().and_then(|s| s.get::<Block>(&block_id).ok().flatten()) else {
-                        return false;
-                    };
-                    // Still durable: a restart would only start the same
-                    // durable controller again. Leave the pane stopped.
-                    if durable_mode::wants(&block.meta, config.as_ref().map(|c| c.get_full_config()).as_deref()) {
-                        tracing::warn!(block_id = %block_id, "durable ssh: still durable, not falling back");
-                        return false;
-                    }
-                    if let Err(e) = resync_controller(
-                        &block,
-                        &tab_id,
-                        rt_opts.clone(),
-                        true,
-                        true,
-                        broker.clone(),
-                        event_bus.clone(),
-                        mstore.clone(),
-                        filestore.clone(),
-                        id_store.clone(),
-                        identity_store.clone(),
-                        registry.clone(),
-                        boot_id.clone(),
-                        &auth_key,
-                        config.clone(),
-                    ) {
-                        tracing::warn!(block_id = %block_id, error = %e, "durable ssh: plain terminal fallback failed");
-                        return false;
-                    }
-                    true
-                })
-            };
-            let ctrl = Arc::new(durable_ssh::DurableSshController::new(
-                block_id.to_string(),
-                broker,
-                event_bus,
-                mstore,
-                filestore,
-                auth_key.to_string(),
-                config.clone(),
-                Some(fallback),
-            ));
-            register_controller(block_id, ctrl.clone());
-            ctrl.start(block_meta.clone(), rt_opts, force)
-        }
-        BLOCK_CONTROLLER_SHELL | BLOCK_CONTROLLER_CMD => {
-            let ctrl = shell::ShellController::new(
-                controller_type.clone(),
-                tab_id.to_string(),
-                block_id.to_string(),
-                broker,
-                event_bus,
-                mstore,
-                filestore,
-                auth_key.to_string(),
-            )
-            .with_config(config);
-            let ctrl = Arc::new(ctrl);
-            register_controller(block_id, ctrl.clone());
-            let result = ctrl.start(block_meta.clone(), rt_opts, force);
-            // codex P2 on PR #3219: ShellController::new starts with
-            // is_agent_pane: false and start() only sets it (synchronously,
-            // before returning — shell/lifecycle.rs's start()) after actually
-            // spawning. register_controller's notification above therefore
-            // fired before list_agent_panes()'s is_agent() filter would have
-            // included this block; notify again now that start() has run so
-            // the classified state gets an authoritative announcement too,
-            // instead of depending solely on a proxy event or the poll.
-            notify_tracked_blocks_changed();
-            result
-        }
-        BLOCK_CONTROLLER_SUBPROCESS => {
-            let ctrl = subprocess::SubprocessController::new(
-                tab_id.to_string(),
-                block_id.to_string(),
-                broker,
-                event_bus,
-                mstore,
-                filestore,
-                registry,
-                boot_id,
-            );
-            let ctrl = Arc::new(ctrl);
-            ctrl.set_self_ref();
-            register_controller(block_id, ctrl.clone());
-            let result = ctrl.start(block_meta.clone(), rt_opts, force);
-            notify_tracked_blocks_changed();
-            result
-        }
-        BLOCK_CONTROLLER_PERSISTENT => {
-            let ctrl = persistent::PersistentSubprocessController::new(
-                tab_id.to_string(),
-                block_id.to_string(),
-                broker,
-                event_bus,
-                mstore,
-                filestore,
-            )
-            .with_identity_stores(id_store, identity_store, auth_key.to_string())
-            // One live instance per agent (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24).
-            .with_agent_lease_store(registry, boot_id);
-            let ctrl = Arc::new(ctrl);
-            ctrl.set_self_ref();
-            register_controller(block_id, ctrl.clone());
-            let result = ctrl.start(block_meta.clone(), rt_opts, force);
-            notify_tracked_blocks_changed();
-            result
-        }
-        BLOCK_CONTROLLER_ACP => {
-            let ctrl = acp::AcpController::new(
-                tab_id.to_string(),
-                block_id.to_string(),
-                broker,
-                event_bus,
-                mstore,
-                filestore,
-            )
-            .with_auth_key(auth_key.to_string());
-            let ctrl = Arc::new(ctrl);
-            register_controller(block_id, ctrl.clone());
-            let result = ctrl.start(block_meta.clone(), rt_opts, force);
-            notify_tracked_blocks_changed();
-            result
-        }
-        BLOCK_CONTROLLER_MSP => {
-            let ctrl = msp::MspController::new(block_id.to_string(), broker, event_bus, mstore, filestore)
-                .with_auth_key(auth_key.to_string());
-            let ctrl = Arc::new(ctrl);
-            register_controller(block_id, ctrl.clone());
-            let result = ctrl.start(block_meta.clone(), rt_opts, force);
-            notify_tracked_blocks_changed();
-            result
-        }
-        BLOCK_CONTROLLER_APP_SERVER => {
-            let ctrl = app_server_controller::AppServerController::new(
-                block_id.to_string(),
-                broker,
-                event_bus,
-                mstore,
-                filestore,
-            );
-            let ctrl = Arc::new(ctrl);
-            ctrl.set_self_ref();
-            register_controller(block_id, ctrl.clone());
-            ctrl.start(block_meta.clone(), rt_opts, force)
-        }
-        _ => Err(format!("unknown controller type: {controller_type}")),
-    }
+    ctx.create_and_start(&controller_type)
 }
 
 /// Publish a controller status event via MPS broker. The sole publish point

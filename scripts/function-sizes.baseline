@@ -152,7 +152,6 @@
 115 crates/srv/src/backend/blockcontroller/core.rs::persist_last_failure
 217 crates/srv/src/backend/blockcontroller/durable_ssh.rs::Run::attach_once
 217 crates/srv/src/backend/blockcontroller/durable_ssh.rs::Run::run
-329 crates/srv/src/backend/blockcontroller/mod.rs::resync_controller
 158 crates/srv/src/backend/blockcontroller/msp.rs::MspController::spawn_process
 319 crates/srv/src/backend/blockcontroller/persistent/eager_resume.rs::PersistentSubprocessController::try_eager_resume_as
 104 crates/srv/src/backend/blockcontroller/persistent/input.rs::PersistentSubprocessController::send_user_message_with_images_from
