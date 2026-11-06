@@ -25,6 +25,8 @@ export const AGENT_VIEW_SOURCES: readonly string[] = [
     "activity/useAttachedTaskAxis.ts",
     "components/AgentShellDrawer.tsx",
     "components/AgentBottomPanels.tsx",
+    "components/agent-bottom-panels-state.ts",
+    "components/agent-bottom-panels-parts.tsx",
     "failure/useAccountBinding.ts",
     "failure/useAgentAccountBinding.ts",
     "failure/useAuthHealth.ts",
