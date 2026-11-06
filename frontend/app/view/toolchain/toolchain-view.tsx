@@ -28,6 +28,7 @@ import { ensureCapability, getCapability, isAvailable, watchCapability } from "@
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { SystemToolInstallInline } from "./SystemToolInstallInline";
 import { CliDiskSpace } from "./CliDiskSpace";
+import { ProviderUpdateInline } from "./ProviderUpdateInline";
 import { toolNotes, toolStatus, widgetStatus } from "./toolchain-status";
 import { WidgetPortField } from "./WidgetPortField";
 import "./toolchain-view.scss";
@@ -547,6 +548,7 @@ function toolCard(s: ToolchainState, key: string): JSX.Element {
                         aria-label={`${row().label}, ${status().label}`}
                         icon={<i class={rowIconClass(row().icon, row().brandIcon)} />}
                         title={row().label}
+                        tooltip={row().label}
                         subtitle={status().subtitle}
                         meta={notes().map((n) => (
                             <span {...tip(n.title)}>{n.text}</span>
@@ -564,6 +566,13 @@ function toolCard(s: ToolchainState, key: string): JSX.Element {
     );
 }
 
+/** The pin to update to: set for an installed agent CLI that AgentMux installs and that is behind it. */
+function updatablePin(row: ToolRow): string | undefined {
+    if (row.kind !== "provider" || !row.npmPackage || !row.found) return undefined;
+    const drift = rowDrift(row);
+    return drift.drift === "behind-pin" ? drift.pinned : undefined;
+}
+
 function toolDetail(s: ToolchainState, key: string): JSX.Element {
     return (
         <Show when={toolByKey(s, key)}>
@@ -576,6 +585,9 @@ function toolDetail(s: ToolchainState, key: string): JSX.Element {
                     <For each={toolNotes(row(), rowDrift(row())).filter((n) => n.title)}>
                         {(n) => <p class="toolchain-detail-note">{n.title}</p>}
                     </For>
+                    <Show when={updatablePin(row())}>
+                        {(pin) => <ProviderUpdateInline providerId={row().id} pinned={pin()} />}
+                    </Show>
                     <Show when={row().loading}>
                         <p class="toolchain-detail-note">Looking for {row().label} on this machine…</p>
                     </Show>
@@ -640,6 +652,7 @@ function widgetCard(s: ToolchainState, key: string): JSX.Element {
                         aria-label={`${row().label}, ${status().label}`}
                         icon={<i class={rowIconClass(row().icon)} />}
                         title={row().label}
+                        tooltip={row().label}
                         subtitle={status().subtitle}
                         status={{ tone: status().tone, label: status().label }}
                         selected={s.openKey() === key}
@@ -777,7 +790,7 @@ export function ToolchainView(props: { zoom?: () => number } = {}): JSX.Element 
                     deliberately excluded, so this never nags about something
                     they cannot fix. */}
                 <Show when={s.behindCount() > 0}>
-                    <Pill tone="warn" icon="circle-up" title="Reinstall from each row to move to the version AgentMux validates against">
+                    <Pill tone="warn" icon="circle-up" title="Open a tool that offers Update to move it to the version AgentMux validates against">
                         {s.behindCount()} {s.behindCount() === 1 ? "tool is" : "tools are"} behind
                     </Pill>
                 </Show>

@@ -112,6 +112,19 @@ fn vault_agents(body: &Value) -> Result<vault::vaults::VaultAgents, String> {
     }
 }
 
+/// `import_commit`: writes what the person previewed. `vault` (a name or an id) is where the new entries go;
+/// Personal when left out.
+fn import_commit(store: &crate::backend::storage::store::Store, body: &Value) -> Result<(Value, bool), String> {
+    let token = body.get("token").and_then(Value::as_str).unwrap_or("");
+    let duplicates: vault::transfer::Duplicates = serde_json::from_value(body.get("duplicates").cloned().unwrap_or(json!("skip")))
+        .map_err(|_| "duplicates is skip, replace or keep_both".to_string())?;
+    let vault = match body.get("vault").and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty()) {
+        Some(v) => vault::vaults::resolve(store, v, None)?.id,
+        None => crate::backend::storage::vault::PERSONAL_VAULT.to_string(),
+    };
+    Ok((json!({ "result": vault::transfer::commit(store, token, duplicates, &vault)? }), true))
+}
+
 /// The host ops on Vaults and on an entry's earlier values.
 fn entry_ops(store: &crate::backend::storage::store::Store, op: &str, body: &Value) -> Result<(Value, bool), String> {
     let s = |k: &str| body.get(k).and_then(Value::as_str).unwrap_or("").to_string();
@@ -129,6 +142,11 @@ fn entry_ops(store: &crate::backend::storage::store::Store, op: &str, body: &Val
         }
         "move_entry" => {
             vault::vaults::move_entry(store, &s("id"), &s("vault_id"))?;
+            Ok((json!({}), true))
+        }
+        // The Vault a browser profile saves its sign-ins to and offers them from.
+        "signin_vault" => {
+            vault::vaults::set_signin_vault(store, &s("profile"), &s("vault_id"))?;
             Ok((json!({}), true))
         }
         // An entry's earlier values, and putting one back (spec §4.4 of the generate spec).
@@ -157,6 +175,7 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
                     json!({
                         "entries": entries,
                         "vaults": vault::vaults::list(&store)?,
+                        "signin_vaults": vault::vaults::signin_vaults(&store)?,
                         "problem": problem,
                         "requests": requests::requests().list(),
                         "uses": vault::uses::uses().list(),
@@ -201,7 +220,7 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
                 vault::delete(&store, id)?;
                 Ok((json!({}), true))
             }
-            "vault_create" | "vault_update" | "vault_delete" | "move_entry" | "versions" | "restore" => entry_ops(&store, &op, &body),
+            "vault_create" | "vault_update" | "vault_delete" | "move_entry" | "signin_vault" | "versions" | "restore" => entry_ops(&store, &op, &body),
             "decline_request" => {
                 let id = body.get("request_id").and_then(Value::as_str).unwrap_or("");
                 if let Some(req) = requests::requests().get(id) {
@@ -322,13 +341,7 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
                     Err(vault::transfer::InspectError::Other(why)) => Err(why),
                 }
             }
-            "import_commit" => {
-                let token = body.get("token").and_then(Value::as_str).unwrap_or("");
-                let duplicates: vault::transfer::Duplicates = serde_json::from_value(body.get("duplicates").cloned().unwrap_or(json!("skip")))
-                    .map_err(|_| "duplicates is skip, replace or keep_both".to_string())?;
-                let result = vault::transfer::commit(&store, token, duplicates)?;
-                Ok((json!({ "result": result }), true))
-            }
+            "import_commit" => import_commit(&store, &body),
             "import_cancel" => {
                 vault::transfer::cancel(body.get("token").and_then(Value::as_str).unwrap_or(""));
                 Ok((json!({}), false))

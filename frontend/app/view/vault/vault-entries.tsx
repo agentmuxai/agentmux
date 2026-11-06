@@ -17,7 +17,8 @@ import { EXPIRING_SOON_DAYS, expiryOf, formatWhen } from "./vault-format";
 import { SECTION_LABELS, vaultKind } from "./vault-kinds";
 import { ensureBrowserProfiles, profileById } from "@/app/view/browser/browser-profiles";
 import { EntryGrants } from "./vault-entry-grants";
-import { deleteEntry, revokeGrant, vaultEntries, vaultLoading } from "./vault-store";
+import { deleteEntry, revokeGrant, vaultEntries, vaultList, vaultLoading } from "./vault-store";
+import { vaultNameOf, VaultMoveDialog } from "./vault-vaults";
 
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
 import { tip } from "@/app/element/tip";
@@ -54,15 +55,36 @@ export function expiringSoon(e: VaultEntryInfo, now = new Date()): boolean {
     return x !== null && x.days <= EXPIRING_SOON_DAYS;
 }
 
-export function VaultEntries(props: { section: VaultSection }): JSX.Element {
+/** An entry's plain details, the Vault it is in (when the list shows more than one), and its expiry. */
+function EntryDetails(props: { entry: VaultEntryInfo; showVault: boolean }): JSX.Element {
+    return (
+        <>
+            {entryDetails(props.entry)}
+            <Show when={props.showVault && vaultList().length > 1}>
+                <div class="vault-in-vault">in {vaultNameOf(props.entry.vault_id)}</div>
+            </Show>
+            <Show when={expiryOf(props.entry.fields.expires)}>
+                {(x) => (
+                    <div class={x().warn ? "vault-expiry vault-expiry-warn" : "vault-expiry"} {...tip(props.entry.fields.expires)}>
+                        {x().text}
+                    </div>
+                )}
+            </Show>
+        </>
+    );
+}
+
+/** `vault` narrows the list to one Vault (its id); empty shows every Vault's entries. */
+export function VaultEntries(props: { section: VaultSection; vault?: string }): JSX.Element {
     const [filter, setFilter] = createSignal("");
     const [soonOnly, setSoonOnly] = createSignal(false);
     const [form, setForm] = createSignal<VaultFormTarget | null>(null);
     const [deleting, setDeleting] = createSignal<VaultEntryInfo | null>(null);
     const [revealing, setRevealing] = createSignal<VaultEntryInfo | null>(null);
     const [versionsOf, setVersionsOf] = createSignal<VaultEntryInfo | null>(null);
+    const [moving, setMoving] = createSignal<VaultEntryInfo | null>(null);
     const [error, setError] = createSignal<string | null>(null);
-    const inSection = createMemo(() => (vaultEntries() ?? []).filter((e) => e.section === props.section));
+    const inSection = createMemo(() => (vaultEntries() ?? []).filter((e) => e.section === props.section && (!props.vault || e.vault_id === props.vault)));
     const dated = createMemo(() => inSection().some((e) => expiryOf(e.fields.expires) !== null));
     const rows = createMemo(() => inSection().filter((e) => entryMatches(e, filter()) && (!soonOnly() || !dated() || expiringSoon(e))));
     const total = createMemo(() => inSection().length);
@@ -99,7 +121,7 @@ export function VaultEntries(props: { section: VaultSection }): JSX.Element {
                         Expiring soon
                     </Button>
                 </Show>
-                <Button tone="accent" density="compact" icon="plus" onClick={() => setForm({ mode: "new", section: props.section })}>
+                <Button tone="accent" density="compact" icon="plus" onClick={() => setForm({ mode: "new", section: props.section, vault: props.vault })}>
                     Add
                 </Button>
             </div>
@@ -142,20 +164,16 @@ export function VaultEntries(props: { section: VaultSection }): JSX.Element {
                                     </td>
                                     <td>{vaultKind(e.kind)?.label ?? e.kind}</td>
                                     <td class="warden-manager-dim">
-                                        {entryDetails(e)}
-                                        <Show when={expiryOf(e.fields.expires)}>
-                                            {(x) => (
-                                                <div class={x().warn ? "vault-expiry vault-expiry-warn" : "vault-expiry"} {...tip(e.fields.expires)}>
-                                                    {x().text}
-                                                </div>
-                                            )}
-                                        </Show>
+                                        <EntryDetails entry={e} showVault={!props.vault} />
                                     </td>
                                     <td class="warden-manager-mono">{e.tail ? `•••• ${e.tail}` : "••••"}</td>
                                     <td class="warden-manager-dim">{formatWhen(e.updated_at)}</td>
                                     <td class="vault-actions">
                                         <IconButton icon="eye" label="Show or copy" density="compact" onClick={() => setRevealing(e)} />
                                         <IconButton icon="pen" label="Change" density="compact" onClick={() => setForm({ mode: "edit", entry: e })} />
+                                        <Show when={vaultList().length > 1}>
+                                            <IconButton icon="folder-open" label="Move to another Vault" density="compact" onClick={() => setMoving(e)} />
+                                        </Show>
                                         <Show when={e.versions > 0}>
                                             <IconButton icon="rotate-left" label="Earlier values" density="compact" onClick={() => setVersionsOf(e)} />
                                         </Show>
@@ -169,6 +187,7 @@ export function VaultEntries(props: { section: VaultSection }): JSX.Element {
             </Show>
             <Show when={form()}>{(target) => <VaultEntryForm target={target()} onClose={() => setForm(null)} />}</Show>
             <Show when={revealing()}>{(entry) => <VaultRevealDialog entry={entry()} onClose={() => setRevealing(null)} />}</Show>
+            <Show when={moving()}>{(entry) => <VaultMoveDialog entry={entry()} onClose={() => setMoving(null)} />}</Show>
             <Show when={versionsOf()}>{(entry) => <VaultVersionsDialog entry={entry()} onClose={() => setVersionsOf(null)} />}</Show>
             <Show when={deleting()}>
                 {(e) => (
