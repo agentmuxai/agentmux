@@ -32,6 +32,7 @@ import { PreviewLines } from "../components/PreviewLines";
 import { awaitingYou, dismissAwaiting } from "../hooks/useJektsAwaitingYou";
 import { proseDoc, rawDoc } from "../preview-text/docs";
 import { scrollMessagesTo } from "../scroll/one-way-flow";
+import { createNarrow, publishHeaderButton } from "./messages-overlay";
 import "./messages-panel.scss";
 import {
     applyFilter,
@@ -84,13 +85,44 @@ export function MessagesPanel(props: MessagesPanelProps): JSX.Element {
 
 function MessagesDock(props: MessagesPanelProps): JSX.Element {
     const model = createMessagesModel(props);
+    const { controls } = props;
+    let dock: HTMLDivElement | undefined;
+    const narrow = createNarrow(
+        () => dock?.parentElement,
+        () => props.zoom
+    );
+    publishHeaderButton(
+        props.blockId,
+        narrow,
+        model.unread,
+        () => model.waiting().length > 0,
+        () => controls.setOverlayOpen(!controls.overlayOpen())
+    );
+    // Wide: the column or its rail beside the conversation. Narrow: the column over it, only while it is opened.
     return (
-        <div class="messages-dock" style={{ zoom: props.zoom }}>
+        <div
+            ref={dock}
+            class="messages-dock"
+            classList={{
+                "messages-dock--overlay": narrow(),
+                "messages-dock--idle": narrow() && !controls.overlayOpen(),
+            }}
+            style={{ zoom: props.zoom }}
+        >
             <Show
-                when={props.controls.state().open}
-                fallback={<MessagesRail model={model} onOpen={() => props.controls.patch({ open: true })} />}
+                when={narrow()}
+                fallback={
+                    <Show
+                        when={controls.state().open}
+                        fallback={<MessagesRail model={model} onOpen={() => controls.patch({ open: true })} />}
+                    >
+                        <MessagesColumn {...props} model={model} onClose={() => controls.patch({ open: false })} />
+                    </Show>
+                }
             >
-                <MessagesColumn {...props} model={model} />
+                <Show when={controls.overlayOpen()}>
+                    <MessagesColumn {...props} model={model} onClose={() => controls.setOverlayOpen(false)} />
+                </Show>
             </Show>
         </div>
     );
@@ -204,7 +236,7 @@ function createListBehaviour(
     };
 }
 
-function MessagesColumn(props: MessagesPanelProps & { model: Model }): JSX.Element {
+function MessagesColumn(props: MessagesPanelProps & { model: Model; onClose: () => void }): JSX.Element {
     const { model, controls } = props;
     const [filter, setFilter] = createSignal<MessagesFilter>("all");
     const [opened, setOpened] = createSignal<ReadonlySet<string>>(new Set());
@@ -255,7 +287,7 @@ function MessagesColumn(props: MessagesPanelProps & { model: Model }): JSX.Eleme
                     </Show>
                 </>
             }
-            onClose={() => controls.patch({ open: false })}
+            onClose={props.onClose}
         >
             <Show when={model.waiting().length > 0}>
                 <NeedsYou

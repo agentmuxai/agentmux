@@ -41,6 +41,7 @@ const jekt = (over: Partial<JektMessageNode> = {}): JektMessageNode => ({
 function controlsFor(initial: Partial<MessagesState> = {}) {
     const [state, setState] = createSignal<MessagesState>({ ...DEFAULT_MESSAGES_STATE, enabled: true, ...initial });
     const [request, setRequest] = createSignal<{ nodeId: string; seq: number } | null>(null);
+    const [overlayOpen, setOverlayOpen] = createSignal(false);
     let seq = 0;
     const controls: MessagesPanelControls = {
         state,
@@ -49,6 +50,8 @@ function controlsFor(initial: Partial<MessagesState> = {}) {
         clearRequest: () => setRequest(null),
         showInPanel: (nodeId) => setRequest({ nodeId, seq: ++seq }),
         stubbed: () => false,
+        overlayOpen,
+        setOverlayOpen,
     };
     return controls;
 }
