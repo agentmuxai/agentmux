@@ -9,11 +9,11 @@
  * ends the install check is forgotten and the row looks again.
  */
 
-import { Show, type JSX } from "solid-js";
+import { onCleanup, Show, type JSX } from "solid-js";
 
 import { Button } from "@/app/element/ui";
 import { InstallProgress } from "@/element/install/InstallProgress";
-import { agentInstallSession } from "@/app/view/agent/install-sessions";
+import { agentInstallSession, watchAgentInstall } from "@/app/view/agent/install-sessions";
 import "./SystemToolInstallInline.scss";
 
 interface ProviderUpdateInlineProps {
@@ -24,6 +24,8 @@ interface ProviderUpdateInlineProps {
 
 export const ProviderUpdateInline = (props: ProviderUpdateInlineProps): JSX.Element => {
     const session = () => agentInstallSession(props.providerId);
+    // This card shows the run, so its end needs no "is installed, create the agent" toast.
+    onCleanup(watchAgentInstall(props.providerId));
     return (
         <Show
             when={session().state() !== "idle"}
@@ -44,9 +46,12 @@ export const ProviderUpdateInline = (props: ProviderUpdateInlineProps): JSX.Elem
                           : "Failed"}
                 </div>
                 <InstallProgress session={session()} kind="provider-cli" />
-                <Show when={session().state() === "failed"}>
+                {/* A run that ended is no reason to hide the way to run it again: the row may still be behind. */}
+                <Show when={session().state() === "failed" || session().state() === "done"}>
                     <div>
-                        <Button onClick={() => void session().start()}>Retry</Button>
+                        <Button onClick={() => void session().start()}>
+                            {session().state() === "failed" ? "Retry" : "Update again"}
+                        </Button>
                     </div>
                 </Show>
             </div>
