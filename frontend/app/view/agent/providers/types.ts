@@ -74,6 +74,10 @@ export interface ProviderDefinition {
     authCheckCommand: string[];  // e.g. ["auth", "status", "--json"]
     authLoginCommand: string[];  // e.g. ["auth", "login"]
     npmPackage: string;          // npm package name for local install
+    // AgentMux downloads this CLI's pinned release itself (not an npm package):
+    // srv's registry (`backend/cli_download.rs`) names the file and its hash, the
+    // client only asks. With `npmPackage` empty this is what makes Install appear.
+    managedInstall?: boolean;
     // Packages installed with `npmPackage`, in the same npm run and dir (Pi's
     // pi-acp adapter runs the `pi` package). Display only: srv adds them from
     // its own registry (`ProviderConfig::companion_npm_packages`).
