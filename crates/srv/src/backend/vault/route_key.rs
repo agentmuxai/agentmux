@@ -36,14 +36,25 @@ fn due(agent: &str, route: &str, now: i64) -> bool {
     due
 }
 
-/// The `api-key` entry whose label starts with `label_prefix` (case does not matter), and its value.
-pub fn for_route(store: &Store, label_prefix: &str, agent: &str, route: &str) -> Result<RouteKey, String> {
+/// The `api-key` entry whose label starts with `label_prefix` (case does not matter).
+fn entry_for(store: &Store, label_prefix: &str) -> Result<crate::backend::storage::vault::VaultRow, String> {
     let prefix = label_prefix.to_lowercase();
-    let rows = store.vault_list().map_err(|e| e.to_string())?;
-    let row = rows
+    store
+        .vault_list()
+        .map_err(|e| e.to_string())?
         .into_iter()
         .find(|r| r.kind == "api-key" && r.label.to_lowercase().starts_with(&prefix))
-        .ok_or_else(|| format!("the Vault has no api-key entry labelled \"{label_prefix}\""))?;
+        .ok_or_else(|| format!("the Vault has no api-key entry labelled \"{label_prefix}\""))
+}
+
+/// Whether the Vault has the entry, without opening it.
+pub fn present(store: &Store, label_prefix: &str) -> bool {
+    entry_for(store, label_prefix).is_ok()
+}
+
+/// The entry's value, and its label.
+pub fn for_route(store: &Store, label_prefix: &str, agent: &str, route: &str) -> Result<RouteKey, String> {
+    let row = entry_for(store, label_prefix)?;
     let kind = kinds::kind(&row.kind).ok_or_else(|| format!("entry {} has an unknown kind", row.id))?;
     let key = seal::key(false)?;
     let parts = seal::open(&key, &row.id, &row.sealed)?;
@@ -61,6 +72,21 @@ pub fn for_route(store: &Store, label_prefix: &str, agent: &str, route: &str) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_key_is_present_when_an_api_key_entry_has_the_label() {
+        crate::backend::vault::seal::use_test_key();
+        let store = Store::open_in_memory().unwrap();
+        store.apply_identity_schema_for_tests().unwrap();
+        assert!(!present(&store, "OpenRouter API key"));
+        let other: crate::backend::vault::NewEntry = serde_json::from_value(serde_json::json!({ "kind": "note", "label": "OpenRouter API key", "parts": { "text": "x" } })).unwrap();
+        crate::backend::vault::create(&store, other).unwrap();
+        assert!(!present(&store, "OpenRouter API key"), "a note is not an api-key entry");
+        let key: crate::backend::vault::NewEntry = serde_json::from_value(serde_json::json!({ "kind": "api-key", "label": "openrouter api key (shared)", "parts": { "value": "sk-test" } })).unwrap();
+        crate::backend::vault::create(&store, key).unwrap();
+        assert!(present(&store, "OpenRouter API key"), "case and a longer label do not matter");
+        assert_eq!(&**for_route(&store, "OpenRouter API key", "rk-present", "openrouter").unwrap().value, "sk-test");
+    }
 
     #[test]
     fn a_use_is_written_down_once_per_window() {

@@ -54,6 +54,7 @@ pub(crate) mod agent_migrate_ids;
 pub(crate) mod agent_seats;
 pub(crate) mod agent_rename;
 pub(crate) mod agent_definition;
+pub(crate) mod agent_routes;
 pub(crate) mod agent_history_reclaim;
 pub(crate) mod agent_spawn;
 // pub(crate): `server/mod.rs`'s `/agentmux/agent/stop` handler (the

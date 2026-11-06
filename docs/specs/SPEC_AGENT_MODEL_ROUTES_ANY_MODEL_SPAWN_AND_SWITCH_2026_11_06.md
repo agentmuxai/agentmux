@@ -1,7 +1,7 @@
 # Spec: an agent is a harness, a model route and a key: spawn on any model and switch the model in place
 
 **Date:** 2026-11-06 (task #27458; the build follows it)
-**Status:** active — P1 (catalog and gateway) in PR #6662; P2 to P5 not started. Approved by the operator 2026-11-06 ("greenlight 27458"; the recommendations in section 12 are the decisions). Verified 2026-11-06.
+**Status:** active — P1 (catalog and gateway) in PR #6662; P2 (spawn, create, update and routes) in the PR after it; P3 to P5 not started. Approved by the operator 2026-11-06 ("greenlight 27458"; the recommendations in section 12 are the decisions). Verified 2026-11-06.
 **Author:** Agent5@narko, for AgentX's lane
 **Read from:** `origin/main` at `1a79691b0` (v0.60.18). Web facts read the same day are marked.
 **Builds on:** the AgentSky parity and model switching report of 2026-11-05 (task #24714, kept outside the repo: one agent, one id, one history), PR #6555 (`Agents` create/update/bundles).

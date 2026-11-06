@@ -42,8 +42,6 @@ fn of_worker(n: usize, error: SpawnError) -> SpawnError {
 
 /// Check every worker without making anything.
 async fn plan(state: &AppState, leader: &Leader, specs: &[SpawnWorkerSpec]) -> Result<Vec<Planned>, SpawnError> {
-    let provider = state.id_store.resolve_effective_provider_id(&leader.def);
-    let leader_runtime = state.mstore.agent_last_runtime_get(&leader.def.id).unwrap_or_default();
     let existing: std::collections::HashSet<String> =
         state.mstore.agent_def_list().unwrap_or_default().into_iter().map(|d| d.name.to_lowercase()).collect();
     let mut given = std::collections::HashSet::new();
@@ -63,10 +61,9 @@ async fn plan(state: &AppState, leader: &Leader, specs: &[SpawnWorkerSpec]) -> R
                 return Err(refuse(StatusCode::CONFLICT, format!("INVALID_ARG: worker {n}: an agent named {name:?} already exists, or is named twice in this call")));
             }
         }
-        let mut runtime = worker_runtime(&provider, &leader_runtime, spec.model.as_deref(), spec.effort.as_deref())
-            .map_err(|e| refuse(StatusCode::BAD_REQUEST, format!("INVALID_ARG: worker {n}: {e}")))?;
+        let (provider, mut runtime) = route::choose(state, leader, &spec.route, spec.model.as_deref(), spec.effort.as_deref()).map_err(|e| of_worker(n, e))?;
         runtime.placement = container::decide_here(state, &spec.container, &leader.def, &leader.def).await.map_err(|e| of_worker(n, e))?;
-        let account = choose_account(state, leader, &provider, spec.account.as_deref()).map_err(|e| of_worker(n, e))?;
+        let account = route::account(state, leader, &provider, &runtime, spec.account.as_deref()).map_err(|e| of_worker(n, e))?;
         planned.push(Planned { name: name.map(str::to_string), brief: brief.to_string(), runtime, account });
     }
     Ok(planned)
@@ -80,7 +77,11 @@ pub(super) fn consent_message_many(leader: &str, planned: &[Planned]) -> String 
             let who = p.name.as_deref().map_or_else(|| "a new agent".to_string(), |n| one_line(n, 60));
             let on = p.runtime.model.as_deref().map(|m| format!(" on {}", one_line(m, 40))).unwrap_or_default();
             let on = format!("{on}{}", p.runtime.placement.describe());
-            format!("• {who}{on}, account {}: {}", one_line(&p.account.label, 60), one_line(&p.brief, 140))
+            let paid_by = match &p.runtime.route {
+                Some(r) if p.account.id.is_empty() => format!("on the {} route, model {}, billed to its Vault key", r.route, r.model),
+                _ => format!("account {}", one_line(&p.account.label, 60)),
+            };
+            format!("• {who}{on}, {paid_by}: {}", one_line(&p.brief, 140))
         })
         .collect();
     format!(
@@ -192,7 +193,7 @@ pub(super) async fn spawn_many(
             block_id: opened.block_id,
             tab_id: opened.tab_id,
             provider: opened.provider,
-            model: p.runtime.model,
+            route: p.runtime.route.as_ref().map(|c| c.route.clone()), model: p.runtime.route.map(|c| c.model).or(p.runtime.model),
             effort: p.runtime.effort,
             account: p.account.label,
             account_id: p.account.id,

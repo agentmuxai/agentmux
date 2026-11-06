@@ -541,3 +541,29 @@ pub(super) fn recheck_agent_not_deleted(mstore: &Store, instance: &AgentInstance
 
     Ok(())
 }
+
+/// Whether the agent runs on a model route (`model_gateway`): it is billed to the route's key and signs in nowhere, so the
+/// account gate does not apply to it.
+pub(super) fn on_model_route(mstore: &Store, instance: &AgentInstance) -> bool {
+    crate::backend::model_gateway::launch::choice_of(mstore, &instance.definition_id).is_some()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_agent_is_on_a_model_route_once_its_definition_has_one() {
+        let store = Store::open_in_memory().unwrap();
+        let mut def = crate::backend::storage::agents::test_agent_def("def-route", "Routed", "claude", "host", 1, "");
+        store.agent_def_insert(&mut def).unwrap();
+        let instance = AgentInstance {
+            id: "inst-route".into(), definition_id: "def-route".into(), parent_instance_id: String::new(), block_id: "b".into(), session_id: String::new(),
+            status: crate::backend::storage::store::InstanceStatus::Running.as_str().to_string(), github_context: String::new(), started_at: 0, ended_at: 0, created_at: 0,
+            identity_id: String::new(), memory_id: String::new(), instance_name: String::new(), working_directory: String::new(), display_hidden: false,
+        };
+        assert!(!on_model_route(&store, &instance));
+        crate::backend::model_gateway::launch::set_choice(&store, "def-route", "claude", "openrouter", "").unwrap();
+        assert!(on_model_route(&store, &instance));
+    }
+}

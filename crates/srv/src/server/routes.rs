@@ -488,6 +488,7 @@ fn agent_api_routes() -> Router<AppState> {
         .route("/api/v1/agent/container/caches", post(app_api::container_caches::handle_container_caches))
         // A leader's own workers and how each is doing (§3.4).
         .route("/api/v1/agent/workers", post(app_api::agent_spawn::handle_agent_workers))
+        .route("/api/v1/agent/routes", post(app_api::agent_routes::handle_agent_routes))
         // Start, stop or detach an agent (`Agents start`, `stop`, `detach`); a stop of another agent waits for the person's override window.
         .route("/api/v1/agent/start", post(app_api::agent_lifecycle::handle_agent_start))
         .route("/api/v1/agent/stop", post(app_api::agent_lifecycle::handle_agent_stop))

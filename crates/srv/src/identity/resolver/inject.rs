@@ -508,6 +508,7 @@ pub fn inject_identity_env_with_broker(
         }
     };
 
+    if steps::on_model_route(&mstore, &instance) { return Ok(()); }
     // Step 2: identity_id check (an empty or blank one is logged, not a bypass).
     steps::warn_on_blank_identity(&instance, block_id);
 
