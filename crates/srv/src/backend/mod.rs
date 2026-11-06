@@ -75,6 +75,7 @@ pub mod providers;
 pub mod cli_download;
 pub mod cli_install;
 pub mod cli_prune;
+pub mod cli_uv;
 pub mod cli_notice;
 pub mod startup_files;
 pub mod confined_read;
@@ -131,7 +132,9 @@ pub mod continuity_state;
 /// Skills that ship with AgentMux, seeded into the catalog once.
 pub mod builtin_skills;
 /// Reading a skill from a folder, a git repository or a URL, for import.
+pub mod computer_use_skill;
 pub mod skill_import;
+pub mod skill_slugs;
 /// What of Personal Memory fits in a delivery, and what the agent is told about the rest.
 pub mod shellexec;
 pub mod transcript;

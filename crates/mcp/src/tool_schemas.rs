@@ -452,11 +452,11 @@ pub(crate) const IDENTITY_TOOL: &str = r#"{
 /// Skills: the skill catalog, for an agent that manages it.
 pub(crate) const SKILLS_TOOL: &str = r#"{
   "name": "Skills",
-  "description": "The skill catalog (what Memory > Skills shows a person). Every call takes an action. list: every catalog skill without its text: id, name, skill_type, trigger, description, bound_count and who gets it. get: one skill in full (skill_id). upsert: create a skill (name, and content, description, skill_type: agent-skill, the default, is a SKILL.md an agent loads when it fits; prompt is a slash command with a trigger) or edit one (skill_id; what you leave out stays). A new skill reaches the agents created after it. delete: remove a skill (skill_id). bind and unbind: give a skill to an agent or take it away (skill_id, and target, an agent's id from Agents list; yourself when absent). reach: who gets a skill without a bind: all_agents (every agent, the ones to come too) and new_agents (every agent created from now on). A change reaches an agent's files at its next launch. Changes are recorded as you; a skill is guidance every agent it reaches will follow, so write what you would be glad for them to follow. Only catalog skills; an agent's private skills are not here.",
+  "description": "The skill catalog (what Memory > Skills shows a person). Every call takes an action. list: every catalog skill without its text: id, name, skill_type, trigger, description, bound_count and who gets it. get: one skill in full (skill_id); a computer-use skill (per-application knowledge for driving an app) also lists the files beside its text, and get with file reads one of them: a reference file or script as text, a reference crop as a path to open as an image, with the app version it was taken at. upsert: create a skill (name, and content, description, skill_type: agent-skill, the default, is a SKILL.md an agent loads when it fits; prompt is a slash command with a trigger) or edit one (skill_id; what you leave out stays). A new skill reaches the agents created after it. delete: remove a skill (skill_id). bind and unbind: give a skill to an agent or take it away (skill_id, and target, an agent's id from Agents list; yourself when absent). reach: who gets a skill without a bind: all_agents (every agent, the ones to come too) and new_agents (every agent created from now on). A change reaches an agent's files at its next launch. Changes are recorded as you; a skill is guidance every agent it reaches will follow, so write what you would be glad for them to follow. record: write down a test of a computer-use skill (skill_id, skill_version as installed, app_version, platform, result pass or fail, and route, notes, evidence_sha256 of the output or screenshot, never the evidence itself); the same record twice is kept once. Only catalog skills; an agent's private skills are not here.",
   "inputSchema": {
     "type": "object",
     "properties": {
-      "action":      { "type": "string", "enum": ["list", "get", "upsert", "delete", "bind", "unbind", "reach"], "description": "What to do" },
+      "action":      { "type": "string", "enum": ["list", "get", "upsert", "delete", "bind", "unbind", "reach", "record"], "description": "What to do" },
       "skill_id":    { "type": "string", "description": "get, delete, bind, unbind, reach: the skill's id, from list; upsert: the skill to edit (absent: a new one)" },
       "name":        { "type": "string", "description": "upsert: the skill's name (required for a new one)" },
       "description": { "type": "string", "description": "upsert: when an agent should use it (the line a model reads to decide)" },
@@ -465,7 +465,17 @@ pub(crate) const SKILLS_TOOL: &str = r#"{
       "trigger":     { "type": "string", "description": "upsert, prompt skills: the slash command" },
       "target":      { "type": "string", "description": "bind, unbind: the agent's id from Agents list; yourself when absent" },
       "all_agents":  { "type": "boolean", "description": "reach: every agent gets it, the ones to come too" },
-      "new_agents":  { "type": "boolean", "description": "reach: every agent created from now on gets it" }
+      "new_agents":  { "type": "boolean", "description": "reach: every agent created from now on gets it" },
+      "file":        { "type": "string", "description": "get, a computer-use skill: a file beside its text, by the path get lists under app.files" },
+      "skill_version": { "type": "string", "description": "record: the skill's installed version" },
+      "app_version": { "type": "string", "description": "record: the version of the app the test ran on" },
+      "platform":    { "type": "string", "enum": ["windows", "macos", "linux"], "description": "record: where the test ran" },
+      "result":      { "type": "string", "enum": ["pass", "fail"], "description": "record: what the skill's test found" },
+      "route":       { "type": "string", "enum": ["api", "mcp", "shortcuts", "desktop"], "description": "record: which rung of the ladder the test used" },
+      "date":        { "type": "string", "description": "record: YYYY-MM-DD; today when absent" },
+      "runner":      { "type": "string", "description": "record: who ran it; your agent id when absent. Never a host or user name" },
+      "notes":       { "type": "string", "description": "record: what you saw, short" },
+      "evidence_sha256": { "type": "string", "description": "record: SHA-256 of the output file or screenshot, 64 hex digits" }
     },
     "required": ["action"]
   }

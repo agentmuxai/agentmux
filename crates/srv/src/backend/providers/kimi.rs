@@ -3,6 +3,9 @@
 
 use super::{ProviderConfig, ControllerType};
 
+// kimi: the Python `kimi-cli`, archived upstream (1.52.0 is its last release and
+// what the flags below were checked against). AgentMux installs that pin itself
+// through uv (`backend/cli_uv.rs`); the live product, Kimi Code CLI, is a separate task.
 pub(super) static KIMI: ProviderConfig = ProviderConfig {
     id: "kimi",
     cli_command: "kimi",
@@ -28,7 +31,7 @@ pub(super) static KIMI: ProviderConfig = ProviderConfig {
     auth_extra_env: &[],
     unset_env: &[],
     npm_package: "",
-    pinned_version: "",
+    pinned_version: "1.52.0",
     base_url_env_var: None,
     supported_vendors: &["moonshot"],
     // Confirmed absence: docs/specs/KIMI_PROVIDER_INTEGRATION_SPEC.md

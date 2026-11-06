@@ -18,7 +18,10 @@ pub(super) struct Tiers<'a> {
     forwarded_req: InjectionRequest,
     same_host_req: InjectionRequest,
     same_host_tier: &'a str,
-    /// A candidate that was alive but did not take it: the target is not absent, so not held.
+    /// Whether any forwarding tier found the target alive elsewhere. A target that is alive but
+    /// refused is not "absent" and is never held here (durable jekt spec §2.1, condition 3); a
+    /// same-host entry whose process is dead — every entry after an srv restart, which changes its
+    /// port — is not a candidate, so the first message after a restart is held.
     candidate_seen: bool,
     /// A candidate an older build registered can't take files (spec §3.4).
     files_too_old: bool,
@@ -94,6 +97,7 @@ impl<'a> Tiers<'a> {
         self.relay_or_hold(replay).await
     }
 
+    /// Tier 2a: same host, a different sidecar of this channel (file registry → HTTP loopback).
     async fn same_host_sidecar(&mut self) -> Option<serde_json::Value> {
         let (state, req) = (self.state, self.req);
         let data_dir = base::get_mux_data_dir();

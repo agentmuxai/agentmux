@@ -323,6 +323,8 @@ pub struct SkillCatalogItem {
     pub new_agents: bool,
     /// Where it was imported from (`skill_source`); `None` for one written by hand.
     pub source: Option<super::skill_source::SkillSource>,
+    /// The manifest, files and pass records, for a computer-use skill (`skill_app`); `None` for a plain one.
+    pub app: Option<super::skill_app::SkillApp>,
 }
 
 /// `bundle_skill_list`'s response shape — mirrors `SkillListItem`, but
@@ -426,14 +428,14 @@ impl Store {
     /// SPEC_V1_MCP_SKILLS_PRIMITIVES_2026_06_30.md §8 ("used by N agents"),
     /// tracked as gap #2 of #1960.
     pub fn skill_list_global(&self, catalog: &Store) -> Result<Vec<SkillCatalogItem>, StoreError> {
-        let (reach, sources) = (catalog.skill_reach_map()?, catalog.skill_source_map()?);
+        let (reach, sources, apps) = (catalog.skill_reach_map()?, catalog.skill_source_map()?, catalog.skill_app_map()?);
         Ok(self
             .managed_list_global::<Skill>(catalog)?
             .into_iter()
             .map(|(skill, bound_count)| {
                 let r = reach.get(&skill.id).copied().unwrap_or_default();
-                let source = sources.get(&skill.id).cloned();
-                SkillCatalogItem { skill, bound_count, all_agents: r.all_agents, new_agents: r.new_agents_since > 0, source }
+                let (source, app) = (sources.get(&skill.id).cloned(), apps.get(&skill.id).cloned());
+                SkillCatalogItem { skill, bound_count, all_agents: r.all_agents, new_agents: r.new_agents_since > 0, source, app }
             })
             .collect())
     }
@@ -472,10 +474,8 @@ impl Store {
     /// bundle-level). Returns true if deleted.
     pub fn skill_delete(&self, catalog: &Store, id: &str) -> Result<bool, StoreError> {
         let deleted = self.managed_delete::<Skill>(catalog, id)?;
-        // Its reach goes with it.
-        catalog.skill_reach_forget(id)?;
-        catalog.skill_source_forget(id)?;
-        catalog.skill_optout_forget(id)?;
+        // Its reach, source, computer-use files and opt-outs go with it.
+        catalog.skill_catalog_forget(id)?;
         Ok(deleted)
     }
 
