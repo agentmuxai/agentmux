@@ -856,6 +856,8 @@ fn register_skill_catalog_import_commit(engine: &Arc<WshRpcEngine>, state: &AppS
                         .and_then(|_| identity_store.skill_source_set(&skill.id, &source, now))
                         .and_then(|_| match &bundle {
                             Some(b) => crate::backend::computer_use_skill::install(&identity_store, &skill.id, b, now),
+                            // A plain skill re-imported over an app skill carries no folder: drop the old one.
+                            None if existing.is_some() => identity_store.skill_app_forget(&skill.id),
                             None => Ok(()),
                         });
                     match written {
