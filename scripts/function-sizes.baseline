@@ -387,7 +387,6 @@
 128 frontend/app/statusbar/BackendStatus.tsx::BackendStatusPanel
 197 frontend/app/statusbar/CpuCoresPopover.tsx::CpuCoresPopover
 140 frontend/app/statusbar/HostPopover.tsx::HostPopover
-277 frontend/app/statusbar/HostPopover.tsx::HostPopoverPanel
 169 frontend/app/statusbar/PairDevicePanel.tsx::PairDevicePanel
 171 frontend/app/statusbar/SystemStats.tsx::SystemStats
 219 frontend/app/statusbar/TokenBreakdownPopover.tsx::TokenBreakdownPopover

@@ -1,0 +1,2 @@
+popover placement=top-end role=dialog aria-label="Host info" class="status-bar-popover host-popover" anchor=trigger
+onClose
