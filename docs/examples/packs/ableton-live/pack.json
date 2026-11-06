@@ -1,0 +1,56 @@
+{
+  "schema": "pack/v1",
+  "id": "ableton-live",
+  "name": "Ableton Live",
+  "version": "0.1.0",
+  "changelog": [
+    {
+      "version": "0.1.0",
+      "date": "2026-11-05",
+      "by": "Manoz@Area54",
+      "change": "first version, from documentation, unverified"
+    }
+  ],
+  "app": {
+    "vendor": "Ableton",
+    "executables": {
+      "windows": [
+        "Live.exe"
+      ],
+      "macos": [
+        "Live"
+      ],
+      "linux": []
+    },
+    "titleHints": [
+      "Ableton Live"
+    ],
+    "versions": {
+      "supported": ">=10",
+      "tested": []
+    }
+  },
+  "platforms": [
+    "windows",
+    "macos"
+  ],
+  "ladder": [
+    {
+      "kind": "mcp",
+      "note": "AbletonMCP: a Remote Script in Live plus an MCP server over a local socket"
+    },
+    {
+      "kind": "shortcuts",
+      "note": "Live's keyboard shortcuts (Live 12 manual)"
+    },
+    {
+      "kind": "desktop",
+      "note": "clicks in Live's own windows only; plug-in windows are pixels only"
+    }
+  ],
+  "mcp": {
+    "catalogId": "ableton-live",
+    "note": "the preloaded entry in frontend/app/view/mcp/mcp-preload-catalog.ts (command uvx ableton-mcp); pin the version when installing"
+  },
+  "verified": []
+}

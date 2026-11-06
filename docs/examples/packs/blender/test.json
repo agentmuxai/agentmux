@@ -1,0 +1,14 @@
+{
+  "pack": "blender",
+  "requires": ["Blender installed (any platform)", "python3 for check_png.py"],
+  "task": "Add a cube, give it a red material, render one 160x120 frame to a PNG in your own workspace, and check the file. No Desktop control is needed.",
+  "steps": [
+    "blender --background --factory-startup -noaudio --python-exit-code 1 --python pack_test.py -- <out.png>",
+    "python check_png.py <out.png> 160 120"
+  ],
+  "verify": [
+    "blender exits 0 and prints 'pack-test rendered'",
+    "check_png.py prints ok: a PNG, 160 by 120, over 1000 bytes"
+  ],
+  "record": "append {packVersion, appVersion, platform, date, runner, route, result, notes} to pack.json verified"
+}

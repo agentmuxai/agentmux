@@ -1,0 +1,35 @@
+{
+  "schema": "pack/v1",
+  "id": "blender",
+  "name": "Blender",
+  "version": "0.1.0",
+  "changelog": [
+    { "version": "0.1.0", "date": "2026-11-05", "by": "Manoz@Area54", "change": "first version" }
+  ],
+  "app": {
+    "vendor": "Blender Foundation",
+    "executables": { "windows": ["blender.exe"], "macos": ["Blender"], "linux": ["blender"] },
+    "titleHints": ["Blender"],
+    "versions": { "supported": ">=4.2", "tested": ["5.2.3"] }
+  },
+  "platforms": ["windows", "macos", "linux"],
+  "ladder": [
+    { "kind": "api", "note": "headless Python: blender --background --python (bpy)" },
+    { "kind": "mcp", "note": "BlenderMCP add-on, only a pinned version the person approved (CVE-2026-10688 in execute_blender_code)" },
+    { "kind": "shortcuts", "note": "default keymap, remappable" },
+    { "kind": "desktop", "note": "clicks, with zoom; Blender draws its own widgets" }
+  ],
+  "mcp": null,
+  "verified": [
+    {
+      "packVersion": "0.1.0",
+      "appVersion": "5.2.3",
+      "platform": "windows",
+      "date": "2026-11-05",
+      "runner": "Manoz@Area54",
+      "route": "api",
+      "result": "pass",
+      "notes": "pack_test.py: exit 0 in about 4 s, 160x120 PNG of 9229 bytes, check_png.py ok"
+    }
+  ]
+}
