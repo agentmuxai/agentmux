@@ -1,0 +1,101 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// The Shortcuts pane: a column of three rows, the filter, the tiles and the hints. Only the
+// tiles' row scrolls, so the filter and the hints keep rows of their own and never sit over a
+// tile, whatever the pane's shape or zoom. The tiles are a fixed size and wrap, so the pane's
+// zoom (`zoom` on `.shortcuts-view`, set by the view) makes them, their icons and their labels
+// bigger and the grid fit fewer to a row; the rest scroll.
+
+// The tile's edge, the gap between tiles, and the icon's size, all at 100% zoom.
+$tile: 104px;
+$gap: 12px;
+
+.shortcuts-view {
+    // Sized by the pane, not by what is in it, and named for the queries below.
+    container: shortcuts / size;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
+    overflow: hidden;
+}
+
+.shortcuts-top {
+    position: relative;
+    z-index: 1;
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 12px 12px 8px;
+}
+
+.shortcuts-scroll {
+    position: relative;
+    z-index: 1;
+    flex: 1 1 0;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    padding: 4px 12px 12px;
+}
+
+.shortcuts-grid {
+    display: grid;
+    // As many tiles to a row as fit; in a pane narrower than a tile, one tile as wide as the pane.
+    grid-template-columns: repeat(auto-fit, minmax(min(#{$tile}, 100%), #{$tile}));
+    gap: $gap;
+    justify-content: center;
+    align-content: start;
+}
+
+.shortcuts-tile {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    aspect-ratio: 1;
+    min-width: 0;
+    padding: 8px;
+    overflow: hidden;
+    cursor: pointer;
+}
+
+.shortcuts-tile-icon {
+    font-size: 28px;
+    line-height: 1;
+}
+
+.shortcuts-tile-label {
+    width: 100%;
+    margin-top: 6px;
+    font-size: 11px;
+    line-height: 16px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.shortcuts-hints {
+    position: relative;
+    z-index: 1;
+    flex: none;
+    padding: 4px 12px 10px;
+}
+
+// Too short for the hints and a few tiles both: the tiles keep the room.
+@container shortcuts (max-height: 240px) {
+    .shortcuts-hints {
+        display: none;
+    }
+}
+
+// Too narrow for the hints to read as a line.
+@container shortcuts (max-width: 200px) {
+    .shortcuts-hints {
+        display: none;
+    }
+}
