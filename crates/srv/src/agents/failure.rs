@@ -708,6 +708,10 @@ pub fn open_in_other_pane_holder(text: &str) -> Option<String> {
 }
 
 #[cfg(test)]
+#[path = "failure_order_tests.rs"]
+mod order_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
