@@ -348,9 +348,7 @@ impl ProcessWaiter {
     /// Deregister from muxbus so later sends fall through to the lower tiers instead of resolving to
     /// a dead block. Mirrors the shell controller's exit path.
     fn deregister_from_muxbus(&self) {
-        // lower tiers instead of resolving to a dead block. Mirrors
-        // the shell controller's exit path. This exact process's
-        // resources are gone either way; if a retry/fallback
+        // This exact process's resources are gone either way; if a retry/fallback
         // respawn has ALREADY re-registered, the guards below
         // leave its fresh registration in place.
         // All removals are compare-and-remove keyed on this
@@ -661,7 +659,7 @@ impl ProcessWaiter {
         if record.is_current_generation {
             // Notify the turn-activity tracker of the exit —
             // shared `Arc<TurnActivityTracker>` across
-            // generations, gated the same way as the
+            // generations, gated the same way as in
             // `on_exited`.
             self.health.set_exited(-1);
             self.deregister_from_muxbus();
@@ -809,7 +807,7 @@ impl ProcessWaiter {
                 // ProcessExited arm never produces this effect
                 // (see SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md
                 // §2.1) — but matched defensively, same as
-                // `FireRetry` above, rather than assumed. Reuses
+                // the `FireRetry` arm in this match, rather than assumed. Reuses
                 // the same "append this line" path as every
                 // other variant here.
                 persistent_resume::ResumeEffect::EmitSessionOutcome {
