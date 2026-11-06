@@ -53,6 +53,37 @@ describe("createSearchReveal (a search match inside a hidden run, #10718)", () =
         expect(jumpTo).toHaveBeenCalledExactlyOnceWith("a");
     });
 
+    it("drops a waiting jump when a newer match was asked for", () => {
+        const jumpTo = vi.fn();
+        const waiting: (() => void)[] = [];
+        const reveal = createSearchReveal({
+            shown: () => [run("hidden-run:a", ["a"]), run("hidden-run:c", ["c"])],
+            setPins: () => {},
+            jumpTo,
+            afterOpen: (jump) => waiting.push(jump),
+        });
+        reveal.jumpTo("a");
+        reveal.jumpTo("c");
+        reveal.jumpTo("on-screen");
+        waiting.forEach((jump) => jump());
+        expect(jumpTo.mock.calls).toEqual([["on-screen"]]);
+    });
+
+    it("drops a waiting jump when the search ends before the run is laid out", () => {
+        const jumpTo = vi.fn();
+        let layout: () => void = () => {};
+        const reveal = createSearchReveal({
+            shown: () => [run("hidden-run:a", ["a"])],
+            setPins: () => {},
+            jumpTo,
+            afterOpen: (jump) => (layout = jump),
+        });
+        reveal.jumpTo("a");
+        reveal.release();
+        layout();
+        expect(jumpTo).not.toHaveBeenCalled();
+    });
+
     it("leaves a run the person already opened alone, also when the search closes", () => {
         const { reveal, pins } = setup([run("hidden-run:a", ["a"], true)], ["hidden-run:a"]);
         reveal.jumpTo("a");

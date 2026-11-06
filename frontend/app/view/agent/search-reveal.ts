@@ -25,17 +25,24 @@ const afterTwoFrames = (jump: () => void) => requestAnimationFrame(() => request
 
 export function createSearchReveal(opts: SearchRevealOptions) {
     const opened = new Set<string>();
+    // Bumped by every jump and by the search ending: a jump waiting for layout that finds it changed is stale
+    // (a newer match was asked for, or the run is closed again) and does nothing.
+    let latest = 0;
     return {
         jumpTo(nodeId: string): void {
+            const mine = ++latest;
             const run = opts.shown().find((n) => n.type === "hidden_run" && !n.open && n.hiddenIds.includes(nodeId));
             if (!run) return opts.jumpTo(nodeId);
             // The row has no place in the list until its run is open and laid out: a jump now would find none.
             opened.add(run.id);
             opts.setPins((pins) => new Set(pins).add(run.id));
-            (opts.afterOpen ?? afterTwoFrames)(() => opts.jumpTo(nodeId));
+            (opts.afterOpen ?? afterTwoFrames)(() => {
+                if (mine === latest) opts.jumpTo(nodeId);
+            });
         },
         /** The search ended: close the runs it opened. */
         release(): void {
+            latest++;
             if (opened.size === 0) return;
             const ids = [...opened];
             opened.clear();
