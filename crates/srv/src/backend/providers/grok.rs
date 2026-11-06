@@ -3,10 +3,10 @@
 
 use super::{ControllerType, ProviderConfig};
 
-// Grok Build (xAI): `grok agent stdio` speaks ACP over stdio. Not on npm: the
-// user installs it with xAI's installer (the install hint), and srv finds it
-// on PATH or in `known_install_paths`. Checked against 1.0.52 on 2026-10-14
-// (SPEC_NINE_NEW_HARNESSES_2026_10_14.md §7.5).
+// Grok Build (xAI): `grok agent stdio` speaks ACP over stdio. Not on npm: AgentMux
+// downloads the pinned release itself (`cli_download::SPECS`), and a copy the user
+// installed is still found on PATH or in `known_install_paths`. Checked against
+// 1.0.52 on 2026-10-14 (SPEC_NINE_NEW_HARNESSES_2026_10_14.md §7.5).
 pub(super) static GROK: ProviderConfig = ProviderConfig {
     id: "grok",
     cli_command: "grok",

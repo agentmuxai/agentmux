@@ -34,6 +34,8 @@ const MAX_EXE_BYTES: u64 = 600 * 1024 * 1024;
 pub enum Archive {
     Zip,
     TarGz,
+    /// The download is the program itself (`exe_in_archive` is empty).
+    Raw,
 }
 
 /// One downloadable file for one platform.
@@ -114,6 +116,73 @@ pub static SPECS: &[DownloadSpec] = &[DownloadSpec {
             size: 50_389_197,
             archive: Archive::TarGz,
             exe_in_archive: "goose",
+        },
+    ],
+},
+// xAI publishes no checksum for Grok, so these were taken once on 2026-11-06
+// from x.ai itself (the Windows x64 one matched a download made the day
+// before) and are the pin: a changed file fails the install. The Windows
+// builds are Authenticode-signed (X.AI LLC). The installer's extras
+// (`grove*` and a MinGit on Windows) are not fetched: grove falls back to the
+// git on PATH.
+DownloadSpec {
+    provider_id: "grok",
+    version: "1.0.52",
+    url_prefix: "https://x.ai/cli/grok-1.0.52-",
+    assets: &[
+        Asset {
+            os: "windows",
+            arch: "x86_64",
+            url: "https://x.ai/cli/grok-1.0.52-windows-x86_64.exe",
+            sha256: "47a5becb08dd0e51f34b60b34eb866086af7f392666f821b350a45f6736ed0cb",
+            size: 169_355_080,
+            archive: Archive::Raw,
+            exe_in_archive: "",
+        },
+        Asset {
+            os: "windows",
+            arch: "aarch64",
+            url: "https://x.ai/cli/grok-1.0.52-windows-aarch64.exe",
+            sha256: "d92cb91801638dab1854b9108510a632b7aabc54147d6dd08b5babf8392c3389",
+            size: 144_085_832,
+            archive: Archive::Raw,
+            exe_in_archive: "",
+        },
+        Asset {
+            os: "macos",
+            arch: "aarch64",
+            url: "https://x.ai/cli/grok-1.0.52-macos-aarch64",
+            sha256: "c2caa9895dd763297a75e8fb6077e175d9c5304c53903e52cff8891a1384bbb9",
+            size: 172_237_072,
+            archive: Archive::Raw,
+            exe_in_archive: "",
+        },
+        Asset {
+            os: "macos",
+            arch: "x86_64",
+            url: "https://x.ai/cli/grok-1.0.52-macos-x86_64",
+            sha256: "b3f1fa34d88b96cbf471005ef777028abfe7288fe61ff9876629f0bbc2cfe8a5",
+            size: 185_857_856,
+            archive: Archive::Raw,
+            exe_in_archive: "",
+        },
+        Asset {
+            os: "linux",
+            arch: "x86_64",
+            url: "https://x.ai/cli/grok-1.0.52-linux-x86_64",
+            sha256: "1668414b047e1050a96d25fe17dfc3efe63190fbf66d8cc1c3de8633caf50d11",
+            size: 188_326_752,
+            archive: Archive::Raw,
+            exe_in_archive: "",
+        },
+        Asset {
+            os: "linux",
+            arch: "aarch64",
+            url: "https://x.ai/cli/grok-1.0.52-linux-aarch64",
+            sha256: "fc32410b6883c15a39b9f33ec04a6bfb7d070b383e5dbad7efbc48c787e5050d",
+            size: 160_670_952,
+            archive: Archive::Raw,
+            exe_in_archive: "",
         },
     ],
 }];
@@ -384,6 +453,7 @@ fn extract_exe(archive: &Path, kind: Archive, exe_in_archive: &str, out: &Path) 
     let found = match kind {
         Archive::Zip => copy_from_zip(file, exe_in_archive, &part),
         Archive::TarGz => copy_from_tar_gz(file, exe_in_archive, &part),
+        Archive::Raw => copy_capped(&mut { file }, &part).map(|()| true),
     };
     let found = found.inspect_err(|_| {
         let _ = std::fs::remove_file(&part);

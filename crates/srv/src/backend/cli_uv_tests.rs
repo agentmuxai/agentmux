@@ -91,6 +91,7 @@ fn the_pinned_uv_has_a_well_formed_asset_per_platform_and_is_not_a_provider() {
         assert!(a.size > 1_000_000, "{}", a.url);
         match a.archive {
             Archive::Zip => assert_eq!(a.exe_in_archive, "uv.exe"),
+            Archive::Raw => panic!("uv ships in an archive: {}", a.url),
             Archive::TarGz => assert!(a.exe_in_archive.ends_with("/uv") && !a.exe_in_archive.contains(".."), "{}", a.exe_in_archive),
         }
     }
