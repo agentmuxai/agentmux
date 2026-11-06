@@ -248,7 +248,9 @@ pub(crate) async fn handle_policy(
         .map(|w| {
             let blocked = gate::blocked_reason(&w.app, &w.title, &p.added, &p.allowed);
             let granted = blocked.is_none() && gate::with_gate(|g| g.has_grant(agent, &block_id, &gate::app_key(&w.app), now));
-            json!({ "id": w.id, "blocked": blocked, "granted": granted })
+            // The skill for this app, if the catalog has one: a pointer for the agent to read, never a grant.
+            let skill = crate::backend::computer_use_skill::skill_for_executable(&state.identity_store, "windows", &w.app);
+            json!({ "id": w.id, "blocked": blocked, "granted": granted, "skill": skill })
         })
         .collect();
     Json(json!({ "enabled": p.enabled, "windows": windows })).into_response()
