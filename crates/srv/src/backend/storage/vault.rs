@@ -207,7 +207,7 @@ pub fn activity_hash(prev: &str, r: &VaultActivityRow) -> String {
     for n in [r.seq, r.at, r.version] {
         put(&n.to_le_bytes());
     }
-    for t in [&r.entry_id, &r.actor_kind, &r.actor, &r.host, &r.action, &r.target, &r.outcome, &r.reason, &r.refs] {
+    for t in [&r.entry_id, &r.entry_label, &r.actor_kind, &r.actor, &r.host, &r.action, &r.target, &r.outcome, &r.reason, &r.refs] {
         put(t.as_bytes());
     }
     hex::encode(h.finalize())

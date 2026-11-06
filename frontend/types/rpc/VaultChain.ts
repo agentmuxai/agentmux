@@ -21,6 +21,11 @@ before_chain: number,
  */
 broken_at: number | null, 
 /**
+ * Whether the newest line was compared with the place the keychain keeps for it. False when the keychain
+ * couldn't be read or holds none yet: lines removed from the end of the record would not be seen.
+ */
+head_checked: boolean, 
+/**
  * What is wrong with it, in a sentence; empty when intact.
  */
 problem: string, };

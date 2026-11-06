@@ -44,7 +44,8 @@ export function chainNote(c: VaultChain | undefined): string {
     if (!c) return "";
     if (!c.intact) return `The record has been changed: line ${c.broken_at} — ${c.problem}.`;
     const before = c.before_chain > 0 ? `; ${c.before_chain} older ${c.before_chain === 1 ? "line was" : "lines were"} made before checking began` : "";
-    return `Each line follows the one before it (${c.checked} checked${before}). This is evidence for you, not proof against someone who holds both this computer's database and its keychain.`;
+    const head = c.head_checked ? "" : " The copy of the newest line kept in the keychain could not be checked, so lines removed from the end would not show.";
+    return `Each line follows the one before it (${c.checked} checked${before}).${head} This is evidence for you, not proof against someone who holds both this computer's database and its keychain.`;
 }
 
 function HistoryRow(props: { row: VaultActivity; showHost: boolean }): JSX.Element {
@@ -85,7 +86,7 @@ export function VaultHistoryDialog(props: { entryId: string; label: string; onCl
         <Modal open={true} scope="pane" onClose={props.onClose} size="lg" panelClass="vault-form vault-history">
             <ModalHeader title={`History of ${props.label}`} description="Every change and every use, newest first. A row never holds a value." />
             <ModalBody>
-                <div class="vault-bar" role="group" aria-label="Show">
+                <div class="vault-history-filters" role="group" aria-label="Show">
                     <For each={FILTERS}>
                         {(f) => (
                             <Button density="compact" pressed={filter() === f.id} onClick={() => setFilter(f.id)}>

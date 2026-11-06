@@ -190,7 +190,7 @@ fn the_chain_holds_and_each_row_carries_the_one_before() {
 
 #[test]
 fn changing_removing_or_slipping_in_a_row_is_found_at_the_right_one() {
-    let edits: [(&str, &str, i64); 4] = [
+    let edits: [(&str, &str, i64); 5] = [
         ("an edited row", "UPDATE db_vault_activity SET actor = 'someone' WHERE seq = 3", 3),
         ("a removed row", "DELETE FROM db_vault_activity WHERE seq = 3", 4),
         (
@@ -199,6 +199,7 @@ fn changing_removing_or_slipping_in_a_row_is_found_at_the_right_one() {
             50,
         ),
         ("a rewritten reason", "UPDATE db_vault_activity SET reason = 'it was fine' WHERE seq = 5", 5),
+        ("a renamed entry", "UPDATE db_vault_activity SET entry_label = 'Something else' WHERE seq = 2", 2),
     ];
     for (what, sql, at) in edits {
         let (s, _) = busy_store();
@@ -216,7 +217,9 @@ fn the_head_in_the_keychain_finds_what_the_table_alone_cannot() {
     let rows = s.vault_activity_all().unwrap();
     let last = rows.last().unwrap();
     let head = Head { seq: last.seq, hash: last.hash.clone() };
-    assert!(history::verify_chain(&rows, Some(&head)).intact);
+    let held = history::verify_chain(&rows, Some(&head));
+    assert!(held.intact && held.head_checked);
+    assert!(!history::verify_chain(&rows, None).head_checked, "without the keychain's copy the chain says the head wasn't compared");
     assert!(history::verify_chain(&rows, Some(&Head { seq: last.seq - 2, hash: rows[rows.len() - 3].hash.clone() })).intact, "the head may lag");
 
     // The newest rows were deleted: the rest still chains, but the head's row is gone.

@@ -137,6 +137,9 @@ pub struct VaultChain {
     /// The first line found wrong, when not intact.
     #[ts(type = "number | null")]
     pub broken_at: Option<i64>,
+    /// Whether the newest line was compared with the place the keychain keeps for it. False when the keychain
+    /// couldn't be read or holds none yet: lines removed from the end of the record would not be seen.
+    pub head_checked: bool,
     /// What is wrong with it, in a sentence; empty when intact.
     pub problem: String,
 }
@@ -150,7 +153,7 @@ pub struct Head {
 
 /// Walks `rows` (oldest first) and says whether the chain holds, and whether `head` is a row in it.
 pub fn verify_chain(rows: &[VaultActivityRow], head: Option<&Head>) -> VaultChain {
-    let mut out = VaultChain { intact: true, checked: 0, before_chain: 0, broken_at: None, problem: String::new() };
+    let mut out = VaultChain { intact: true, checked: 0, before_chain: 0, broken_at: None, head_checked: head.is_some(), problem: String::new() };
     let mut prev = String::new();
     let mut broke = |out: &mut VaultChain, seq: i64, problem: &str| {
         out.intact = false;
