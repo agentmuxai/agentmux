@@ -1,0 +1,120 @@
+rpc AppUpdateStatus
+-- waiting for 2 agents
+<div>
+  <div class="instance-panel-section-title">
+    "Maintenance"
+    <span class="maintenance-badge">
+      "↑ ready"
+  <div class="maintenance-update-row">
+    <span class="maintenance-icon maintenance-icon--working">
+      "↑"
+    <span class="maintenance-row-text maintenance-row-text--dim">
+      "Waiting for 2 agents to finish…"
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+      "Restart now"
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+      "Cancel"
+  <div class="maintenance-row-text maintenance-row-text--warn">
+    "The restart also stops what agents left running:"
+  <div class="maintenance-row-text maintenance-row-text--dim">
+    "a dev server (pane 3)"
+  <div class="maintenance-row-text maintenance-row-text--dim">
+    "a watcher"
+  <div class="maintenance-update-row">
+    <span class="maintenance-row-text maintenance-row-text--dim">
+      "Checked <time>"
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn" disabled="">
+      "Check again"
+host appUpdate restart now=true
+host appUpdate cancel
+-- cancel refused
+<div>
+  <div class="instance-panel-section-title">
+    "Maintenance"
+    <span class="maintenance-badge">
+      "↑ ready"
+  <div class="maintenance-update-row">
+    <span class="maintenance-icon maintenance-icon--working">
+      "↑"
+    <span class="maintenance-row-text maintenance-row-text--dim">
+      "Waiting for 2 agents to finish…"
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+      "Restart now"
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+      "Cancel"
+  <div class="maintenance-row-text maintenance-row-text--warn">
+    "The restart also stops what agents left running:"
+  <div class="maintenance-row-text maintenance-row-text--dim">
+    "a dev server (pane 3)"
+  <div class="maintenance-row-text maintenance-row-text--dim">
+    "a watcher"
+  <div class="maintenance-row-text maintenance-row-text--error">
+    "the launcher is busy"
+  <div class="maintenance-update-row">
+    <span class="maintenance-row-text maintenance-row-text--dim">
+      "Checked <time>"
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn" disabled="">
+      "Check again"
+rpc AppUpdateStatus
+-- waiting for 1
+<div>
+  <div class="instance-panel-section-title">
+    "Maintenance"
+    <span class="maintenance-badge">
+      "↑ ready"
+  <div class="maintenance-update-row">
+    <span class="maintenance-icon maintenance-icon--working">
+      "↑"
+    <span class="maintenance-row-text maintenance-row-text--dim">
+      "Waiting for 1 agent to finish…"
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+      "Restart now"
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+      "Cancel"
+  <div class="maintenance-update-row">
+    <span class="maintenance-row-text maintenance-row-text--dim">
+      "Checked <time>"
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn" disabled="">
+      "Check again"
+rpc AppUpdateStatus
+-- waiting for none
+<div>
+  <div class="instance-panel-section-title">
+    "Maintenance"
+    <span class="maintenance-badge">
+      "↑ ready"
+  <div class="maintenance-update-row">
+    <span class="maintenance-icon maintenance-icon--working">
+      "↑"
+    <span class="maintenance-row-text maintenance-row-text--dim">
+      "Restarting soon…"
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+      "Restart now"
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+      "Cancel"
+  <div class="maintenance-update-row">
+    <span class="maintenance-row-text maintenance-row-text--dim">
+      "Checked <time>"
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn" disabled="">
+      "Check again"
+rpc AppUpdateStatus
+-- restarting
+<div>
+  <div class="instance-panel-section-title">
+    "Maintenance"
+    <span class="maintenance-badge">
+      "↑ ready"
+  <div class="maintenance-update-row">
+    <span class="maintenance-icon maintenance-icon--working">
+      "↑"
+    <span class="maintenance-row-text maintenance-row-text--dim">
+      "Restarting: answer the AgentMux dialog (No cancels)"
+  <div class="maintenance-row-text maintenance-row-text--warn">
+    "The restart also stops what agents left running:"
+  <div class="maintenance-row-text maintenance-row-text--dim">
+    "a watcher"
+  <div class="maintenance-update-row">
+    <span class="maintenance-row-text maintenance-row-text--dim">
+      "Checked <time>"
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn" disabled="">
+      "Check again"

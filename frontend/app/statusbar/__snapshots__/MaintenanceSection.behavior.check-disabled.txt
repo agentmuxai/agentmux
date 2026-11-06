@@ -1,0 +1,27 @@
+rpc AppUpdateStatus
+-- never checked
+<div>
+  <div class="instance-panel-section-title">
+    "Maintenance"
+  <div class="maintenance-update-row">
+    <span class="maintenance-row-text maintenance-row-text--dim">
+      "Not checked for updates yet"
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+      "Check for update"
+rpc AppUpdateStatus
+-- download under way
+<div>
+  <div class="instance-panel-section-title">
+    "Maintenance"
+    <span class="maintenance-badge">
+      "↓ …"
+  <div class="maintenance-update-row">
+    <span class="maintenance-icon maintenance-icon--working">
+      "↓"
+    <span class="maintenance-row-text maintenance-row-text--dim">
+      "Downloading v0.59.27… 25%"
+  <div class="maintenance-update-row">
+    <span class="maintenance-row-text maintenance-row-text--dim">
+      "Checked <time>"
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn" disabled="">
+      "Check again"
