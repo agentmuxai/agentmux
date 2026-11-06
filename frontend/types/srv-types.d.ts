@@ -1247,6 +1247,7 @@ declare global {
         "attachments:retentiondays"?: number;
         "agent:askquestiontimeoutms"?: number;
         "agent:compactat"?: number;
+        "cli:usepath"?: string[];
         "agent:subagentmodel"?: string;
         "agent:exploremodel"?: string;
         "agent:compacthints"?: boolean;

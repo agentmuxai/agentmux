@@ -1077,6 +1077,15 @@
           "description": "The context size, in tokens, at which Claude agents compact automatically. AgentMux writes Claude Code's autoCompactWindow (this plus 33,000, between 100,000 and 1,000,000) into each Claude config dir it prepares, unless a person set their own value there; it takes effect when each agent next starts. 0 leaves Claude Code's own point, about 967,000 on a 1M window. See docs/specs/SPEC_AGENT_SELF_COMPACTION_2026_10_23.md §3.1.",
           "x-section": "Agents"
         },
+        "cli:usepath": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Agent CLIs to run from your own copy on PATH instead of the one AgentMux installs and pins, by provider id (for example goose). Off for every CLI by default: AgentMux runs only its own copy and never touches yours. Set it from a CLI's row in Toolchain (Use the CLI on my PATH). See docs/specs/SPEC_ISOLATED_INSTALL_FOR_NON_NPM_CLIS_2026_11_05.md §3.",
+          "x-section": "Agents"
+        },
         "agent:subagentmodel": {
           "type": "string",
           "default": "sonnet",

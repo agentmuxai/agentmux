@@ -439,6 +439,12 @@
     // on a 1M window. See docs/specs/SPEC_AGENT_SELF_COMPACTION_2026_10_23.md §3.1.
     // "agent:compactat": 600000,
 
+    // Agent CLIs to run from your own copy on PATH instead of the one AgentMux installs and
+    // pins, by provider id (for example goose). Off for every CLI by default: AgentMux runs
+    // only its own copy and never touches yours. Set it from a CLI's row in Toolchain (Use the
+    // CLI on my PATH). See docs/specs/SPEC_ISOLATED_INSTALL_FOR_NON_NPM_CLIS_2026_11_05.md §3.
+    // "cli:usepath": [],
+
     // The model Claude agents' general-purpose sub-agents run on: sonnet, haiku, opus, a model
     // ID, or inherit to leave Claude Code's own (the agent's model). AgentMux sets
     // CLAUDE_CODE_SUBAGENT_MODEL when an agent starts, so a sub-agent that names its own model,
