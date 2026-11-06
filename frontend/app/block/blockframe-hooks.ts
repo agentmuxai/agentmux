@@ -5,7 +5,9 @@
 
 import { createEffect, onCleanup, onMount, type Accessor } from "solid-js";
 import { openMenuAt } from "@/app/element/ui";
+import { useWidthFit } from "@/app/element/width-fit";
 import { getBlockComponentModel } from "@/app/store/block-component-registry";
+import { chromeZoomAtom } from "@/app/store/chrome-zoom";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getApi } from "@/util/app-api";
@@ -20,6 +22,16 @@ export function minimizeToHeader(nodeModel: NodeModel): (() => void) | undefined
         return undefined;
     }
     return () => nodeModel.toggleMinimize({ chip: true });
+}
+
+/**
+ * A narrow pane's header sheds its tab strip's last sliver, then its view's extra end buttons, then
+ * its window controls (the grip's menu has them), so Close stays in the pane: `data-fit` "tabs",
+ * "trim", then "min", which mixins.scss's header layout turns into what is hidden. Fitted again when
+ * the header or its end controls change size, and when the chrome zoom does.
+ */
+export function useHeaderFit(getHeader: () => HTMLElement | undefined): void {
+    useWidthFit(getHeader, ["tabs", "trim", "min"], (el) => [...el.querySelectorAll(".block-frame-end-icons")], chromeZoomAtom);
 }
 
 /**

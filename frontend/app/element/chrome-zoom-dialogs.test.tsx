@@ -89,11 +89,11 @@ describe("toasts and chrome zoom", () => {
         expect([stack().style.right, stack().style.bottom]).toEqual(["87px", "51px"]);
     });
 
-    it("keeps clear of the status bar however tall it is, since it wraps to two rows at a narrow width and high zoom", () => {
+    it("keeps clear of the status bar however tall it is", () => {
         // The usual bottom gap is one row of the bar times the zoom; the bar itself is marked, so a taller bar moves
         // the stack up instead of being covered.
         const bar = readFileSync(join(__dirname, "../statusbar/StatusBar.tsx"), "utf8");
-        expect(bar).toMatch(/<div class="status-bar" data-toast-avoid>/);
+        expect(bar).toMatch(/<div class="status-bar" data-toast-avoid ref=/);
     });
 
     it("opens at the current zoom's gaps when the zoom changed while no toast showed", () => {
