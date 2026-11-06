@@ -1118,3 +1118,7 @@ mod transcript_rpc_tests;
 #[cfg(test)]
 #[path = "blockfile_handler_tests.rs"]
 mod handler_tests;
+
+#[cfg(test)]
+#[path = "blockfile_read_range_tests.rs"]
+mod read_range_tests;
