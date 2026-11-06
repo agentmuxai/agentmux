@@ -37,10 +37,6 @@ export function JektNeedsYouCard(props: JektNeedsYouProps & PaneRequestProps): J
         <section class="jekt-needs-you-card" aria-label={`A message from ${sender()} needs you`}>
             <h3 class="jekt-needs-you-title">A sensitive message from {sender()} needs you</h3>
             <div class="jekt-needs-you-body">
-                <p>
-                    The agent will not act on it until you confirm in your own conversation here. A reply from another
-                    agent does not count.
-                </p>
                 <p class="jekt-needs-you-trust" data-proven={proven(props.jekt.trust)}>
                     {proven(props.jekt.trust)
                         ? `Sender proven (${props.jekt.trust})`
@@ -49,6 +45,10 @@ export function JektNeedsYouCard(props: JektNeedsYouProps & PaneRequestProps): J
                 <Show when={props.earlier > 0}>
                     <p class="jekt-needs-you-more">{`${props.earlier} earlier ${props.earlier === 1 ? "message waits" : "messages wait"} too.`}</p>
                 </Show>
+                <p>
+                    The agent will not act on it until you confirm in your own conversation here. A reply from another
+                    agent does not count.
+                </p>
             </div>
             <div class="jekt-needs-you-actions">
                 <Button
