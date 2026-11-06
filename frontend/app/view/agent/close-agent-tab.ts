@@ -16,9 +16,9 @@
  *
  * Every other case is unchanged: a non-last tab closes and activates its
  * neighbor, a picker tab (no agentId) that is the last tab closes the pane,
- * and a fork pill that lives in ANOTHER pane closes that fork the ordinary
- * way (closing that pane if it was its only tab) — the picker fallback only
- * applies to the pane the × was clicked in.
+ * and a block that lives in ANOTHER pane (the strip does not offer one) closes
+ * the ordinary way — the picker fallback only applies to the pane the ×
+ * was clicked in.
  *
  * The busy-agent close confirmation (`beforeNodeDelete`) is asked BEFORE the
  * picker tab is added, and the close then skips asking again. Asking after
@@ -107,7 +107,7 @@ async function swapForPickerAndClose(layoutModel: LayoutModel, nodeId: string, b
 }
 
 function shouldReturnToPicker(node: { id: string; data?: TabLayoutData }, ownNodeId: string, blockId: string): boolean {
-    if (node.id !== ownNodeId) return false; // a fork pill owned by another pane
+    if (node.id !== ownNodeId) return false; // a block owned by another pane
     const stack = node.data?.blockStack?.length ? node.data.blockStack : [node.data?.blockId];
     if (stack.length > 1) return false;
     const meta = MOS.getObjectValue<Block>(MOS.makeORef("block", blockId))?.meta;
