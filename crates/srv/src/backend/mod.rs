@@ -200,6 +200,7 @@ pub mod task_media;
 /// The wake at an out-of-quota agent's reset (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §7).
 pub mod limit_wake;
 /// Which model a Claude agent's sub-agents run on (SPEC_SUBAGENT_MODELS_2026_10_25.md).
+pub mod model_gateway;
 pub mod subagent_model;
 /// An agent accepting or sending back a task in Review.
 pub mod kanban_delegate;

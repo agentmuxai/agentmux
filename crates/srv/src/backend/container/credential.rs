@@ -185,7 +185,20 @@ pub fn container_exec_env(block_id: &str, env_vars: &HashMap<String, String>) ->
     // On Linux a container cannot reach srv's loopback; when srv listens on the agents network's
     // gateway that is where the container is pointed.
     crate::backend::container::listener::point_env_at_listener(&mut out);
+    point_gateway_at_srv(&mut out);
     out
+}
+
+/// A model-route agent's `ANTHROPIC_BASE_URL` names srv's gateway at the host's address; in a container it
+/// names the address `AGENTMUX_LOCAL_URL` now holds, which the container can reach.
+fn point_gateway_at_srv(env: &mut [(String, String)]) {
+    let prefix = crate::backend::model_gateway::PATH_PREFIX;
+    let Some(local) = env.iter().find(|(k, _)| k == "AGENTMUX_LOCAL_URL").map(|(_, v)| v.trim_end_matches('/').to_string()) else { return };
+    if let Some((_, url)) = env.iter_mut().find(|(k, v)| k == "ANTHROPIC_BASE_URL" && v.contains(prefix)) {
+        if let Some(at) = url.find(prefix) {
+            *url = format!("{local}{}", &url[at..]);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -312,6 +325,22 @@ mod tests {
             !out.keys().any(|k| k.ends_with("_JEKT_KEY") || k.ends_with("_LAN_KEY") || k.ends_with("_WAN_KEY")),
             "and no signing key"
         );
+    }
+
+    #[test]
+    fn a_model_route_agents_gateway_address_is_one_the_container_can_reach() {
+        let env: HashMap<String, String> = [
+            ("AGENTMUX_LOCAL_URL", "http://host.docker.internal:7"),
+            ("ANTHROPIC_BASE_URL", "http://127.0.0.1:7/api/v1/model/openrouter"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+        let out: HashMap<_, _> = container_exec_env("cc-block-route", &env).into_iter().collect();
+        assert_eq!(out["ANTHROPIC_BASE_URL"], "http://host.docker.internal:7/api/v1/model/openrouter");
+        let own: HashMap<String, String> = [("ANTHROPIC_BASE_URL".to_string(), "https://proxy.example/anthropic".to_string())].into_iter().collect();
+        let own: HashMap<_, _> = container_exec_env("cc-block-own", &own).into_iter().collect();
+        assert_eq!(own["ANTHROPIC_BASE_URL"], "https://proxy.example/anthropic", "an address that is not the gateway is left alone");
     }
 
     #[test]

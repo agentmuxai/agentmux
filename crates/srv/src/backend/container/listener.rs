@@ -79,6 +79,19 @@ pub fn check(peer: IpAddr, subnet: Option<&Subnet>, token: Option<&str>, path: &
     Ok(())
 }
 
+/// [`check`] for the model gateway's paths, where the harness sends its gateway token as a bearer
+/// credential rather than the container token in `X-AuthKey`. The same network rule applies.
+pub fn check_gateway(peer: IpAddr, subnet: Option<&Subnet>, headers: &axum::http::HeaderMap) -> Result<(), (StatusCode, String)> {
+    let Some(subnet) = subnet else {
+        return Err((StatusCode::SERVICE_UNAVAILABLE, "the container listener is not set up".to_string()));
+    };
+    if !subnet.contains(peer) {
+        return Err((StatusCode::FORBIDDEN, "not from the agents network".to_string()));
+    }
+    let granted = crate::backend::model_gateway::request::bearer_token(headers).is_some_and(|t| crate::backend::model_gateway::token::grant_for(&t).is_some());
+    if granted { Ok(()) } else { Err((StatusCode::UNAUTHORIZED, "unauthorized".to_string())) }
+}
+
 /// `router` as the container listener serves it: every request is [`check`]ed first, against the
 /// subnet `subnet()` gives at that moment.
 pub fn layer(router: Router, subnet: impl Fn() -> Option<Subnet> + Clone + Send + Sync + 'static) -> Router {
@@ -87,7 +100,9 @@ pub fn layer(router: Router, subnet: impl Fn() -> Option<Subnet> + Clone + Send 
         async move {
             let peer = req.extensions().get::<ConnectInfo<SocketAddr>>().map(|c| c.0.ip());
             let token = req.headers().get(agentmux_common::AUTH_KEY_HEADER).and_then(|v| v.to_str().ok());
+            let gateway = req.uri().path().starts_with(crate::backend::model_gateway::PATH_PREFIX);
             let verdict = match peer {
+                Some(peer) if gateway => check_gateway(peer, subnet().as_ref(), req.headers()),
                 Some(peer) => check(peer, subnet().as_ref(), token, req.uri().path()),
                 None => Err((StatusCode::FORBIDDEN, "unknown peer".to_string())),
             };
@@ -307,6 +322,26 @@ mod tests {
             check(ip(d("172_30_0_7")), None, Some(&token), "/agentmux/discovery").unwrap_err().0,
             StatusCode::SERVICE_UNAVAILABLE
         );
+    }
+
+    #[test]
+    fn a_gateway_token_is_accepted_as_a_bearer_credential_from_the_agents_network_only() {
+        use axum::http::{HeaderMap, HeaderValue};
+        let gateway = crate::backend::model_gateway::token::token_for("cl-gw-agent", "cl-gw-def", "openrouter");
+        let container = crate::backend::container::credential::token_for_block("cl-gw-block", None);
+        let s = subnet();
+        let bearer = |token: &str| {
+            let mut h = HeaderMap::new();
+            h.insert("authorization", HeaderValue::from_str(&format!("Bearer {token}")).unwrap());
+            h
+        };
+        assert!(check_gateway(ip(d("172_30_0_7")), Some(&s), &bearer(&gateway)).is_ok());
+        assert_eq!(check_gateway(ip(d("172_30_0_7")), Some(&s), &bearer(&container)).unwrap_err().0, StatusCode::UNAUTHORIZED, "a container token is not a gateway token");
+        assert_eq!(check_gateway(ip(d("172_30_0_7")), Some(&s), &HeaderMap::new()).unwrap_err().0, StatusCode::UNAUTHORIZED);
+        assert_eq!(check_gateway(ip("127.0.0.1"), Some(&s), &bearer(&gateway)).unwrap_err().0, StatusCode::FORBIDDEN);
+        assert_eq!(check_gateway(ip(d("172_30_0_7")), None, &bearer(&gateway)).unwrap_err().0, StatusCode::SERVICE_UNAVAILABLE);
+        // And it opens nothing else: a gateway token in X-AuthKey is no container token.
+        assert_eq!(check(ip(d("172_30_0_7")), Some(&s), Some(&gateway), "/agentmux/discovery").unwrap_err().0, StatusCode::UNAUTHORIZED);
     }
 
     async fn call(router: &Router, peer: &str, key: Option<&str>, path: &str) -> StatusCode {

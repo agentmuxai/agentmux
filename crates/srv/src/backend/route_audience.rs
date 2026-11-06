@@ -160,6 +160,7 @@ pub const ROUTES: &[(Match, Audience)] = &[
     (Match::Route("/agentmux/stream-file/*path"), Audience::Everyone),
     (Match::Route("/agentmux/widget-files/:id/:hash/:key/*path"), Audience::Everyone),
     (Match::Route("/agentmux/widget-sdk/:file"), Audience::Everyone),
+    (Match::Route("/api/v1/model/:route/*tail"), Audience::Everyone),
     (Match::Route("/agentmux/work"), Audience::Everyone),
     (Match::Route("/agentmux/work/:id/accept"), Audience::Everyone),
     (Match::Route("/agentmux/work/:id/ask"), Audience::Everyone),

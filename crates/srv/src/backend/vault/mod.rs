@@ -19,6 +19,7 @@ pub mod kdbx_names;
 pub mod kinds;
 pub mod plain_export;
 pub mod requests;
+pub mod route_key;
 pub mod scrub;
 pub mod seal;
 pub mod signins;
@@ -212,7 +213,7 @@ fn new_id_besides(store: &Store, kind: &str, label: &str, taken: &[String]) -> R
 }
 
 /// The actions that use an entry's value: one of an expired entry says so.
-const USES: &[&str] = &["filled a web form", signins::SIGNED_IN, "ran a command", "revealed", "copied"];
+const USES: &[&str] = &["filled a web form", signins::SIGNED_IN, "ran a command", "revealed", "copied", route_key::USED];
 
 /// Adds a line to the activity log; a failure to is logged, not raised.
 pub fn record(store: &Store, entry_id: &str, entry_label: &str, actor: &str, action: &str, target: &str, outcome: &str) {
