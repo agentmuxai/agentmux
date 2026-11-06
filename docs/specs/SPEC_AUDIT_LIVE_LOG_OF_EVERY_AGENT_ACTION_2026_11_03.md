@@ -26,9 +26,9 @@ So the data for "everything" is already written; the Audit has to *index* it, no
 
 ### 3.1 Live
 
-- srv publishes a broker event `AuditEntry` carrying the new row (the same `AuditEntry` shape `audit.query` returns), whenever a row is created. The view subscribes; the 5 s poll stays only as the catch-up after a reconnect (`audit.query` with `since_ms` = the newest row held).
+- srv publishes a broker event `audit:changed` whenever a row is written. **As built (PR 2a), it carries no row:** a row's links need the app's live state (names, panes) and its id is a file offset, so a pushed row could differ from the same row listed. The view asks `audit.query` for the newest page when it hears the event (at most twice a second), and again after a reconnect and every 30 s (agent starts and ends come from the transcript store, which does not announce them).
 - The view is a **live tail**: at the newest row it follows new ones; once you scroll back it stops following and a pill says "N new" (jump to newest). A Pause button freezes the list and counts the same way. Filters (agent, kinds, text) apply to live rows too.
-- Bursts (a tool-heavy agent can make 10 calls a second) are batched: one event per 100 ms carrying the rows of that window.
+- Bursts (a tool-heavy agent can make 10 calls a second) are batched: one event per 100 ms for the rows of that window.
 
 ### 3.2 Everything: the sources
 
@@ -106,6 +106,8 @@ So the answer to "do we have a method": no. The design:
 5. **Other channels and peers are asked, not read from a shared file.** Another channel on this machine is asked over loopback with its `local_url` and key from the host-global registry, exactly as the Swarm reads other channels (`swarm_remote::channel_statuses`), so a channel that stays out of the shared folder is still reachable. A LAN peer is asked on demand with a typed read-only `audit.query` over the signed remote-op route (`/agentmux/remote/op`, where the signature authorizes the request, never the key alone), answered only when the peer's owner turned on `audit:sharewithpaired` (default off, like `tower:sharewithpaired`). The answer is the same rows, scrubbed the same way (summaries, never message text). A peer's rows are fetched, shown and forgotten here; they are never relayed through the cloud, and the cloud carries no audit rows at all. A cloud message is logged locally at both ends, with tier cloud, which needs nothing more. The live tail covers this channel by push; other channels and peers refresh every 5 to 10 seconds while their scope is shown.
 
 ## 4. Build: five PRs
+
+**PR 2 is two PRs:** 2a is the live tail (the `audit:changed` event, Pause, the "N new" pill, the Turns chip, catch-up after a reconnect); 2b is the scope control (This channel / This machine) and the host / channel sections.
 
 **Built so far:** PR 0 merged (#6483). PR 1 is built in two parts: 1a merged (#6543), the activity index and the `tool`, `turn` and `thought` kinds in `audit.query` (section 3.2); 1b, the provenance fields, the `sent` row and the join by `msg_id` (3.6.1, 3.6.2). In 1b the entry's fields are in one `provenance` block (`host`, `channel`, `version`, `tier`, `trust`, `msg_id`, and on a joined row `sent_ms`); the file keeps the handler's `wan`, which the entry names `cloud`. The `sent` row is written where a caller on this computer hands a message to srv (host tier, not forwarded), straight to the file and not the in-memory ring; a peer's, another channel's or the cloud's message has none here, its sender wrote it. The join is per page, and a full page still takes the `sent` half of a message it holds the other half of. The duplicate key `(host, channel, ts_ms, msg_id, kind, outcome)` is added with the first second reader (PR 3), since until then no line is read twice. The totals count only the receiver's lines, so a joined message is one entry. Tool, turn and thought rows are given only when asked for by kind, so the list the Audit shows today does not change until PR 2.
 
