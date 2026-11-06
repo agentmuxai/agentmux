@@ -7,7 +7,7 @@
  * container is a probe that records what it receives.
  */
 
-import { cleanup, render } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -61,6 +61,14 @@ describe("an incoming jekt's row with the Messages panel", () => {
         const fns = mount(jekt, panel(true, showInPanel), state({ pinnedNodes: new Set(["n1"]) }));
         expect(seen.props?.collapsed).toBe(true);
         seen.props?.onToggle();
+        expect(showInPanel).toHaveBeenCalledWith("n1");
+        expect(fns.onTogglePin).not.toHaveBeenCalled();
+    });
+
+    it("answers the e key the same way: it opens the message in the panel, and flips nothing", () => {
+        const showInPanel = vi.fn();
+        const fns = mount(jekt, panel(true, showInPanel));
+        fireEvent.keyDown(document.querySelector(".agent-document-row")!, { key: "e" });
         expect(showInPanel).toHaveBeenCalledWith("n1");
         expect(fns.onTogglePin).not.toHaveBeenCalled();
     });

@@ -74,18 +74,25 @@ function createMessagesModel(props: MessagesPanelProps) {
 }
 
 export function MessagesPanel(props: MessagesPanelProps): JSX.Element {
-    const model = createMessagesModel(props);
+    // The model is made only while the panel is on: a pane that has not turned it on does none of its work.
     return (
         <Show when={props.controls.state().enabled}>
-            <div class="messages-dock" style={{ zoom: props.zoom }}>
-                <Show
-                    when={props.controls.state().open}
-                    fallback={<MessagesRail model={model} onOpen={() => props.controls.patch({ open: true })} />}
-                >
-                    <MessagesColumn {...props} model={model} />
-                </Show>
-            </div>
+            <MessagesDock {...props} />
         </Show>
+    );
+}
+
+function MessagesDock(props: MessagesPanelProps): JSX.Element {
+    const model = createMessagesModel(props);
+    return (
+        <div class="messages-dock" style={{ zoom: props.zoom }}>
+            <Show
+                when={props.controls.state().open}
+                fallback={<MessagesRail model={model} onOpen={() => props.controls.patch({ open: true })} />}
+            >
+                <MessagesColumn {...props} model={model} />
+            </Show>
+        </div>
     );
 }
 
@@ -126,17 +133,27 @@ function MessagesRail(props: { model: Model; onOpen: () => void }): JSX.Element 
 function markSeenWhenRead(model: Model, controls: MessagesPanelControls): () => void {
     createEffect(() => {
         if (model.unread() === 0) return;
-        const timer = setTimeout(() => {
-            if (document.hasFocus()) controls.patch({ seen: Date.now() });
-        }, SEEN_AFTER_MS);
-        onCleanup(() => clearTimeout(timer));
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        // An unfocused window waits for its focus, then counts the moment again.
+        const arm = () => {
+            timer = setTimeout(() => {
+                if (document.hasFocus()) controls.patch({ seen: Date.now() });
+                else window.addEventListener("focus", arm, { once: true });
+            }, SEEN_AFTER_MS);
+        };
+        arm();
+        onCleanup(() => {
+            clearTimeout(timer);
+            window.removeEventListener("focus", arm);
+        });
     });
     return () => controls.patch({ seen: Date.now() });
 }
 
 /**
  * How the list moves: it follows the tail while the reader is at it, counts what arrived below while the reader is
- * up the list, and scrolls to a message the conversation asked for. Every move goes through scrollMessagesTo.
+ * up the list (arrivals: the pane's messages, not what a filter shows), and scrolls to a message the conversation
+ * asked for. Every move goes through scrollMessagesTo.
  */
 function createListBehaviour(
     getList: () => HTMLElement | undefined,
@@ -160,6 +177,8 @@ function createListBehaviour(
             () => controls.request(),
             (req) => {
                 if (!req) return;
+                // Handled once: a column that mounts again (closed to the rail, then reopened) must not replay it.
+                controls.clearRequest();
                 onRequested(req.nodeId);
                 queueMicrotask(() => {
                     const list = getList();
@@ -210,7 +229,7 @@ function MessagesColumn(props: MessagesPanelProps & { model: Model }): JSX.Eleme
     const markAllRead = markSeenWhenRead(model, controls);
     const moves = createListBehaviour(
         () => list,
-        () => visible().length,
+        () => model.messages().length,
         controls,
         (nodeId) => {
             setFilter("all");

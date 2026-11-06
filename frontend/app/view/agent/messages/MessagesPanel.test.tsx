@@ -5,16 +5,18 @@ import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const waitingNow = vi.hoisted(() => ({ ids: [] as string[] }));
+const waitingNow = vi.hoisted(() => ({ ids: [] as string[], reads: 0 }));
 const dismissed = vi.fn();
 vi.mock("../hooks/useJektsAwaitingYou", () => ({
-    awaitingYou: (_blockId: string, nodes: readonly { id: string }[]) =>
-        nodes.filter((n) => waitingNow.ids.includes(n.id)),
+    awaitingYou: (_blockId: string, nodes: readonly { id: string }[]) => {
+        waitingNow.reads++;
+        return nodes.filter((n) => waitingNow.ids.includes(n.id));
+    },
     dismissAwaiting: (...a: unknown[]) => dismissed(...a),
 }));
 
 import type { DocumentNode, JektMessageNode } from "@/app/agent-model/node-types";
-import { MessagesPanel } from "./MessagesPanel";
+import { MessagesPanel, SEEN_AFTER_MS } from "./MessagesPanel";
 import { DEFAULT_MESSAGES_STATE, type MessagesPanelControls, type MessagesState } from "./messages-state";
 
 let n = 0;
@@ -44,6 +46,7 @@ function controlsFor(initial: Partial<MessagesState> = {}) {
         state,
         patch: (c) => setState((s) => ({ ...s, ...c })),
         request,
+        clearRequest: () => setRequest(null),
         showInPanel: (nodeId) => setRequest({ nodeId, seq: ++seq }),
         stubbed: () => false,
     };
@@ -69,9 +72,12 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
     scrolled.mockClear();
     cleanup();
     waitingNow.ids = [];
+    waitingNow.reads = 0;
     dismissed.mockClear();
 });
 
@@ -152,6 +158,51 @@ describe("MessagesPanel", () => {
         // The list is moved to the row once it is drawn (through the one scroll writer).
         await Promise.resolve();
         expect(scrolled).toHaveBeenCalled();
+    });
+
+    it("does none of its work while the pane's setting is off, and starts when it is turned on", () => {
+        const controls = controlsFor({ enabled: false });
+        mount([jekt(), jekt()], controls);
+        expect(waitingNow.reads).toBe(0);
+        controls.patch({ enabled: true });
+        expect(waitingNow.reads).toBeGreaterThan(0);
+    });
+
+    it("does not replay a stub's request when the panel is closed to the rail and opened again", () => {
+        const a = jekt();
+        const b = jekt();
+        const { controls, view } = mount([a, b]);
+        controls.showInPanel(b.id);
+        expect(openRows(view)).toBe(1);
+        controls.patch({ open: false });
+        controls.patch({ open: true });
+        expect(openRows(view)).toBe(0);
+    });
+
+    it("counts only arrivals as new, not the rows a filter brings back", () => {
+        const old = jekt({ timestamp: 1_000 });
+        const fresh = jekt({ timestamp: 50_000 });
+        const { view } = mount([old, fresh], controlsFor({ seen: 20_000 }));
+        const list = view.container.querySelector(".messages-panel__list") as HTMLElement;
+        // The reader is up the list: 500 px of content in a 100 px window, at the top.
+        Object.defineProperty(list, "scrollHeight", { value: 500, configurable: true });
+        Object.defineProperty(list, "clientHeight", { value: 100, configurable: true });
+        fireEvent.scroll(list);
+        fireEvent.change(screen.getByLabelText("Show"), { target: { value: "unread" } });
+        fireEvent.change(screen.getByLabelText("Show"), { target: { value: "all" } });
+        expect(screen.queryByText(/ new$/)).toBeNull();
+    });
+
+    it("counts the moment as seen after the window gains focus, if it was unfocused when the time came", () => {
+        vi.useFakeTimers();
+        const focus = vi.spyOn(document, "hasFocus").mockReturnValue(false);
+        const { controls } = mount([jekt(), jekt()]);
+        vi.advanceTimersByTime(SEEN_AFTER_MS + 10);
+        expect(controls.state().seen).toBe(0);
+        focus.mockReturnValue(true);
+        window.dispatchEvent(new Event("focus"));
+        vi.advanceTimersByTime(SEEN_AFTER_MS + 10);
+        expect(controls.state().seen).toBeGreaterThan(0);
     });
 
     it("follows new messages into the list", () => {

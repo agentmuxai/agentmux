@@ -39,6 +39,8 @@ export interface MessagesPanelControls {
     patch: (changes: Partial<MessagesState>) => void;
     /** The message the person asked to see in the panel (a click on its stub in the conversation). */
     request: Accessor<{ nodeId: string; seq: number } | null>;
+    /** The panel has acted on the request: forget it, so a panel that mounts again does not repeat it. */
+    clearRequest: () => void;
     /** Open the panel on a message. */
     showInPanel: (nodeId: string) => void;
     /** Whether a row of the conversation is shown as a stub that opens the panel. */
@@ -59,6 +61,7 @@ export function createMessagesPanelControls(
         state,
         patch,
         request,
+        clearRequest: () => setRequest(null),
         showInPanel: (nodeId) => {
             if (!state().open) patch({ open: true });
             setRequest({ nodeId, seq: ++seq });

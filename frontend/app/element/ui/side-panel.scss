@@ -39,7 +39,11 @@
 .ui-side-panel--docked {
     position: relative;
     z-index: auto;
-    flex: none;
+    // Its width is a wish: the column it sits in may be narrower (the Messages dock is at most 45% of the pane), and
+    // the panel then shrinks with it instead of pushing past it.
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 100%;
     width: var(--side-panel-width, 320px);
     box-shadow: none;
 }
