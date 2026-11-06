@@ -156,6 +156,8 @@ pub enum DownloadError {
     HashMismatch { expected: String, actual: String },
     Unpack(String),
     NotRunnable(PathBuf),
+    /// A helper program (uv) failed; carries its last output lines.
+    Tool(String),
     Mark(PathBuf, std::io::Error),
     Cancelled,
 }
@@ -184,6 +186,7 @@ impl std::fmt::Display for DownloadError {
             DownloadError::NotRunnable(p) => {
                 write!(f, "the installed program does not run: {}", p.display())
             }
+            DownloadError::Tool(e) => write!(f, "{e}"),
             DownloadError::Mark(d, e) => {
                 write!(f, "cannot mark the CLI install complete at {}: {e}", d.display())
             }
@@ -192,31 +195,62 @@ impl std::fmt::Display for DownloadError {
     }
 }
 
-/// Install `provider_id`'s pinned release, **async**: take the cross-instance
+/// Whether AgentMux installs `provider_id` itself without npm: a release
+/// download (goose) or a hash-locked Python venv through uv (Aider, Kimi).
+pub fn is_managed_install(provider_id: &str) -> bool {
+    download_spec(provider_id).is_some() || crate::backend::cli_uv::uv_spec(provider_id).is_some()
+}
+
+/// The pin a managed install of `provider_id` is keyed by.
+fn managed_version(provider_id: &str) -> Option<&'static str> {
+    download_spec(provider_id)
+        .map(|s| s.version)
+        .or_else(|| crate::backend::cli_uv::uv_spec(provider_id).map(|s| s.version))
+}
+
+/// Install `provider_id`'s pinned copy, **async**: take the cross-instance
 /// lock (blocking, off the runtime), reuse a finished install another instance
 /// made while this one waited, otherwise clear leftovers and install.
 /// `resolvecli`'s path; `install.start` polls the lock itself (it must stay
-/// cancellable) and calls [`install_into`] once it holds it.
-pub async fn install_download_cli(
+/// cancellable) and calls [`install_managed_into`] once it holds it.
+pub async fn install_managed_cli(
     paths: &DataPaths,
     provider_id: &str,
     on_line: &(dyn Fn(&'static str, &str) + Sync),
     cancel: &AtomicBool,
 ) -> Result<InstallOutcome, DownloadError> {
-    let spec = download_spec(provider_id).ok_or_else(|| DownloadError::NoSource(provider_id.to_string()))?;
+    let version = managed_version(provider_id).ok_or_else(|| DownloadError::NoSource(provider_id.to_string()))?;
     let provider = crate::backend::providers::get_provider(provider_id)
         .ok_or_else(|| DownloadError::NoSource(provider_id.to_string()))?;
-    let (lock_paths, id, pin) = (paths.clone(), provider.id.to_string(), spec.version.to_string());
+    let (lock_paths, id, pin) = (paths.clone(), provider.id.to_string(), version.to_string());
     let _guard = tokio::task::spawn_blocking(move || cli_install::lock_install(&lock_paths, &id, &pin))
         .await
         .map_err(|e| DownloadError::Lock(std::io::Error::other(e)))?
         .map_err(DownloadError::Lock)?;
-    let dir = cli_install::install_dir(paths, provider.id, spec.version);
+    let dir = cli_install::install_dir(paths, provider.id, version);
     if cli_install::is_valid_install(&dir, provider.cli_command) {
-        return Ok(InstallOutcome::AlreadyInstalled(download_bin(&dir, provider.cli_command)));
+        if let Some(bin) = cli_install::installed_bin(&dir, provider.cli_command) {
+            return Ok(InstallOutcome::AlreadyInstalled(bin));
+        }
     }
     cli_install::clear_unless_valid(&dir, provider.cli_command).map_err(|e| DownloadError::Clear(dir.clone(), e))?;
-    install_into(paths, spec, provider.cli_command, on_line, cancel).await
+    install_managed_into(paths, provider.id, provider.cli_command, on_line, cancel).await
+}
+
+/// Install into the install dir; the caller holds the lock and has cleared
+/// leftovers. A failure removes the partial dir, so nothing unmarked is left.
+pub async fn install_managed_into(
+    paths: &DataPaths,
+    provider_id: &str,
+    cli_command: &str,
+    on_line: &(dyn Fn(&'static str, &str) + Sync),
+    cancel: &AtomicBool,
+) -> Result<InstallOutcome, DownloadError> {
+    if let Some(spec) = crate::backend::cli_uv::uv_spec(provider_id) {
+        return crate::backend::cli_uv::install_into(paths, spec, cli_command, on_line, cancel).await;
+    }
+    let spec = download_spec(provider_id).ok_or_else(|| DownloadError::NoSource(provider_id.to_string()))?;
+    install_into(paths, spec, cli_command, on_line, cancel).await
 }
 
 /// Download, verify, unpack and publish into the install dir. The caller holds
@@ -241,7 +275,7 @@ pub async fn install_into(
     result
 }
 
-async fn install_asset(
+pub(crate) async fn install_asset(
     dir: &Path,
     spec: &DownloadSpec,
     asset: &Asset,
