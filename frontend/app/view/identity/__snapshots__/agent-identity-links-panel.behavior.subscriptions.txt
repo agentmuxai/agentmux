@@ -1,0 +1,44 @@
+rpc ListAllAgentIdentities
+subscribeAccountChanges
+subscribe agentidentities:changed:claude-agent
+-- handlers: ["agentidentities:changed:claude-agent"]
+unsubscribe agentidentities:changed:claude-agent
+subscribe agentidentities:changed:codex-agent
+-- handlers: ["agentidentities:changed:codex-agent"]
+-- codex-agent
+<div>
+  <div class="identity-pane">
+    <div class="identity-pane-detail">
+      <div class="identity-pane-readonly">
+        <h2 class="identity-pane-name">
+          "Codex Agent"
+        <h3 class="identity-pane-section-title">
+          "Linked accounts"
+        <table class="identity-pane-bindings">
+          <thead>
+            <tr>
+              <th>
+                "Provider"
+              <th>
+                "Account"
+              <th>
+                "Status"
+              <th>
+          <tbody>
+            <tr>
+              <td>
+                "GitHub"
+              <td>
+                "ACC-GH"
+              <td>
+                <span class="identity-pane-status">
+                  <span aria-hidden="true" class="identity-pane-status-dot is-valid">
+                  <span class="identity-pane-status-label">
+                    "Valid"
+              <td>
+unsubscribe agentidentities:changed:codex-agent
+-- handlers: []
+subscribe agentidentities:changed:claude-agent
+unsubscribe agentidentities:changed:claude-agent
+unsubscribeAccountChanges
+-- handlers: []

@@ -1,0 +1,3 @@
+rpc ListAllAgentIdentities
+subscribeAccountChanges
+login panel present: false
