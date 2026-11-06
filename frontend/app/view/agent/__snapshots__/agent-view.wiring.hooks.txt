@@ -41,7 +41,7 @@ useAuthHealth({agentDefinitionId,blockId,paneModel,refreshLinkedAccountId,status
 useFailureRow({account,log,model,offline,paneModel,retryLastTurn,send,status})
 useHeldMessageDelivery({flushHeldMessages,flushPendingControllerRefresh,hasHeldMessages,paneModel})
 useScrollToNode()
-useInSessionSearch({document,jumpTo})
+useInSessionSearch({document,jumpTo,onClose})
 useAgentKeyboard({blockId,onCycleView,onFollowDefaultView,onToggleSearch})
 useAgentDropAttach({blockId,rootRef})
 usePtyWidth({blockId,elementRef,log})

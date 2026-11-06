@@ -108,7 +108,7 @@ hasHeldMessages: same
 flushHeldMessages: same
 commands.flushPendingControllerRefresh()
 > search, keyboard and scrolling
-jumpTo: same
+jumpTo: DIFFERENT
 document: same
 search.setVisible(true)
 search.close()

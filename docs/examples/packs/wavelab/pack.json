@@ -1,0 +1,56 @@
+{
+  "schema": "pack/v1",
+  "id": "wavelab",
+  "name": "WaveLab",
+  "version": "0.1.0",
+  "changelog": [
+    {
+      "version": "0.1.0",
+      "date": "2026-11-05",
+      "by": "Manoz@Area54",
+      "change": "first version, from documentation, unverified"
+    }
+  ],
+  "app": {
+    "vendor": "Steinberg",
+    "executables": {
+      "windows": [
+        "WaveLabPro.exe",
+        "WaveLabElements.exe"
+      ],
+      "macos": [],
+      "linux": []
+    },
+    "titleHints": [
+      "WaveLab"
+    ],
+    "versions": {
+      "supported": null,
+      "tested": []
+    }
+  },
+  "platforms": [
+    "windows"
+  ],
+  "ladder": [
+    {
+      "kind": "api",
+      "note": "ActiveX/COM scripting (VBScript or JScript); the ProgID changes per version"
+    },
+    {
+      "kind": "api",
+      "note": "WaveLab's own ECMAScript scripts, and the Batch Processor"
+    },
+    {
+      "kind": "shortcuts",
+      "note": "user-remappable: read File > Preferences > Shortcuts first"
+    },
+    {
+      "kind": "desktop",
+      "note": "clicks with zoom; dense UI"
+    }
+  ],
+  "mcp": null,
+  "executablesNote": "The executable names are a guess from the product names and must be confirmed from the installed files before the pack is verified.",
+  "verified": []
+}

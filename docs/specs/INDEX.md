@@ -772,6 +772,7 @@ partial list.
 | [`SPEC_OFFLINE_RESILIENCE_2026_10_20`](SPEC_OFFLINE_RESILIENCE_2026_10_20.md) | SPEC: Stay in control of every agent when the internet drops, and recover by itself |
 | [`SPEC_ONE_COMMAND_INSTALL_ALL_PLATFORMS_2026_11_01`](SPEC_ONE_COMMAND_INSTALL_ALL_PLATFORMS_2026_11_01.md) | Spec: install AgentMux with one copyable command on Windows, macOS and Linux |
 | [`SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24`](SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md) | SPEC: OS notification system (native toasts) + tray re-enablement |
+| [`SPEC_PACKS_2026_11_05`](SPEC_PACKS_2026_11_05.md) | SPEC: Computer-use skills: per-application knowledge for computer use (Word, Excel, Ableton Live, WaveLab, Blender first) |
 | [`SPEC_PANE_CLOSING_INDICATOR_AND_FASTER_CLOSE_2026_10_28`](SPEC_PANE_CLOSING_INDICATOR_AND_FASTER_CLOSE_2026_10_28.md) | A pane shows it is closing, and a close stops waiting on srv |
 | [`SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20`](SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20.md) | SPEC — Consolidate pane loading into one readiness system |
 | [`SPEC_PANE_MODALS_NOT_WINDOW_MODALS_2026_11_02`](SPEC_PANE_MODALS_NOT_WINDOW_MODALS_2026_11_02.md) | Spec: pane modals, not window modals, for sign-in and OAuth; an audit of every window modal (2026-11-02) |
@@ -799,6 +800,7 @@ partial list.
 | [`SPEC_SHARED_PERCEPTUAL_PALETTE_16_2026_11_01`](SPEC_SHARED_PERCEPTUAL_PALETTE_16_2026_11_01.md) | SPEC: one shared 16-colour palette, evenly spaced by human perception, for panes, agents, tabs, windows and browser profiles |
 | [`SPEC_SHORTCUTS_PANE_FOR_SPLITS_2026_10_28`](SPEC_SHORTCUTS_PANE_FOR_SPLITS_2026_10_28.md) | The Shortcuts pane: a split opens tiles for every pane type and widget, last used first |
 | [`SPEC_SIGNED_UPDATE_CHECKSUMS_2026_10_25`](SPEC_SIGNED_UPDATE_CHECKSUMS_2026_10_25.md) | Signed checksums for update downloads |
+| [`SPEC_SKILLS_REPOSITORY_2026_11_05`](SPEC_SKILLS_REPOSITORY_2026_11_05.md) | SPEC: A public computer-use skill repository, `agentmuxai/skills`, installed on demand |
 | [`SPEC_SRV_INFO_ON_CONNECT_2026_10_09`](SPEC_SRV_INFO_ON_CONNECT_2026_10_09.md) | SPEC: srv describes itself on every connect (`srvinfo`) |
 | [`SPEC_SRV_MALLOC_ARENA_CAP_2026_10_18`](SPEC_SRV_MALLOC_ARENA_CAP_2026_10_18.md) | Spec: srv caps glibc's malloc arenas at two (Linux only) |
 | [`SPEC_SRV_PROCESS_LISTING_WITHOUT_THREADS_2026_10_18`](SPEC_SRV_PROCESS_LISTING_WITHOUT_THREADS_2026_10_18.md) | Spec: srv's process listings stop reading every thread (Linux CPU) |
