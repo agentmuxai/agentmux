@@ -161,7 +161,6 @@
 110 crates/srv/src/backend/blockcontroller/persistent/queue.rs::PersistentSubprocessController::send_message_with_images_from
 197 crates/srv/src/backend/blockcontroller/persistent/resume_retry.rs::PersistentSubprocessController::retry_after_resume_failure
 155 crates/srv/src/backend/blockcontroller/persistent/segments.rs::PersistentSubprocessController::apply_resume_gate_with
-790 crates/srv/src/backend/blockcontroller/persistent/stdout_reader.rs::PersistentSubprocessController::run_stdout_reader
 292 crates/srv/src/backend/blockcontroller/persistent_resume.rs::update
 151 crates/srv/src/backend/blockcontroller/shell/file_ops.rs::handle_append_block_file
 162 crates/srv/src/backend/blockcontroller/shell/indexing.rs::build_output_idx_from
