@@ -541,7 +541,6 @@ declare global {
         rootnode?: any;
         magnifiednodeid?: string;
         focusednodeid?: string;
-        leaforder?: LeafOrderEntry[];
         pendingbackendactions?: LayoutActionData[];
     };
 

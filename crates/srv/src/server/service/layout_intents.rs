@@ -96,7 +96,6 @@ fn roll_back(
         new_tree: old.rootnode.clone(),
         correlation_id: String::new(),
         slices: Some(LayoutClientSlices {
-            leaforder: old.leaforder.as_ref().and_then(|v| serde_json::to_value(v).ok()),
             focused_node_id: old.focusednodeid.clone(),
             magnified_node_id: old.magnifiednodeid.clone(),
             pending_backend_actions: old.pendingbackendactions.as_ref().and_then(|v| serde_json::to_value(v).ok()),

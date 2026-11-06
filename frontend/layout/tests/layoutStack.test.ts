@@ -64,7 +64,6 @@ function makeLayoutStateSignal(oid: string): SignalAtom<LayoutState> {
         rootnode: undefined,
         magnifiednodeid: undefined,
         focusednodeid: undefined,
-        leaforder: undefined,
         pendingbackendactions: undefined,
     });
     const atom = () => get();
