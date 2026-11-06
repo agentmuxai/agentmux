@@ -20,7 +20,7 @@ export function createPanelState(props: AgentCreatePanelProps) {
     const provider = () => getProvider(providerId() ?? props.template.provider);
     const name = () => getCliCatalogEntry(providerId() ?? props.template.provider)?.displayName ?? props.template.name;
     /** AgentMux doesn't install this CLI: the user installs it with its own installer. */
-    const userInstalled = () => !!provider() && !provider()!.npmPackage;
+    const userInstalled = () => !!provider() && !provider()!.npmPackage && !provider()!.managedInstall;
 
     // Native or Container, decided before the form: the two host steps below only apply to Native.
     const runtime = useRuntimeChoice(props.template, props.draft, () => providerId() ?? props.template.provider);

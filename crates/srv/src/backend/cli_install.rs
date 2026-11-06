@@ -130,7 +130,15 @@ pub fn mark_complete(dir: &Path, version: &str) -> std::io::Result<()> {
 /// still there. A marker alone isn't enough — a finished install can lose its
 /// shim later (corruption, antivirus cleanup).
 pub fn is_valid_install(dir: &Path, cli_command: &str) -> bool {
-    is_complete(dir) && npm_bin(dir, cli_command).is_file()
+    is_complete(dir) && installed_bin(dir, cli_command).is_some()
+}
+
+/// The CLI inside an install dir: an npm shim, or the program a release
+/// download unpacked (`cli_download`). One provider has one kind.
+pub fn installed_bin(dir: &Path, cli_command: &str) -> Option<PathBuf> {
+    [npm_bin(dir, cli_command), crate::backend::cli_download::download_bin(dir, cli_command)]
+        .into_iter()
+        .find(|b| b.is_file())
 }
 
 /// Under the install lock, before (re)installing into `dir`: unless it holds
@@ -159,8 +167,7 @@ pub fn find_installed(
     let shared = shared_cli_dir(paths, provider_id, pinned_version)
         .filter(|d| is_complete(d))
         .inspect(|d| crate::backend::cli_prune::record_use(d, std::time::SystemTime::now()))
-        .map(|d| npm_bin(&d, cli_command))
-        .filter(|b| b.is_file());
+        .and_then(|d| installed_bin(&d, cli_command));
     shared.or_else(|| {
         let legacy = npm_bin(&legacy_cli_dir(paths, provider_id), cli_command);
         legacy.is_file().then_some(legacy)
