@@ -38,8 +38,8 @@ The operator saw the agent pane tell them to install Goose themselves and asked 
 ## 4. What the person sees
 
 - The agent pane's install hint (today `CliMissingOnPath`, AMX-CLI-004) becomes the **Install** button the npm CLIs have (AMX-CLI-001): progress lines, failure text with the expected and the actual hash, **Uninstall** (removes `<shared>/cli/<provider>/<pin>/`, nothing else). A provider that cannot be installed (legal hold, §7) keeps today's hint.
-- Toolchain's card for each of the six shows the installed pin, its source and size, "update available", Install and Uninstall.
-- The agent picker note that lists the six as exceptions goes away; the docs page and `catalog.ts` hints are updated in the PR that makes each one installable.
+- Toolchain's row for each agent CLI shows the installed version and its source, "update available", Install (when AgentMux has no copy) and Uninstall (when the running copy is AgentMux's; two clicks, and srv refuses while an agent uses it). Built in PR 5c: `install.uninstall` removes only `<shared>/cli/<provider>/<pin>/`, under the install lock, and never the person's own copy or an agent's sign-in. The disk-space section already shows size.
+- The agent picker note no longer lists exceptions (PR 5c); the `catalog.ts` hints were updated in each PR that made a CLI installable. The public docs site is its own repo and follows separately.
 
 ## 5. Windows, macOS, Linux
 
@@ -105,7 +105,8 @@ The operator saw the agent pane tell them to install Goose themselves and asked 
 | 4 | **antigravity** and **muse** (after the terms check): built, §8c | 1–2 days |
 | 5a | npm hardening (§8): the public registry and an empty npm config for every install | built |
 | 5b | the strict lookup order and the "Use the CLI on my PATH" setting (§3) | built |
-| 5c | Toolchain Install and Uninstall (§4), docs and picker note, container route for all | 1–2 days |
+| 5c | Toolchain Install and Uninstall (§4), the picker note and catalog hints: built (`install.uninstall`, `backend/cli_uninstall.rs`) | built |
+| 5d | the container route for the six that are not on npm (§2 last column): a pinned, hash-checked download or hashed `uv` install into the per-agent volume | 1–2 days |
 
 **Tests:** hash mismatch refused and the partial removed; truncated and oversize download; a zip with `..` or an absolute path; two instances installing at once (the lock); a stale folder without the marker is cleared; the lookup order (own copy, then PATH only on request); `installable_provider` refuses an unknown id and a caller-sent URL; a registry test that every `Download` provider has an asset for each OS it claims and every hash is the right length. Live: a real install of each on Windows (Area54), macOS (Clare) and Linux (Maricon), then an agent turn.
 

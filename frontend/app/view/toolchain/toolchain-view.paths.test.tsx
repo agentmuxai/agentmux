@@ -85,9 +85,12 @@ vi.mock("./SystemToolInstallInline", () => ({
 }));
 vi.mock("./CliDiskSpace", () => ({ CliDiskSpace: () => <div data-testid="cli-disk-space" /> }));
 vi.mock("./ProviderUpdateInline", () => ({
-    ProviderUpdateInline: (p: { providerId: string; pinned: string }) => (
-        <div data-testid="provider-update">{`${p.providerId} -> ${p.pinned}`}</div>
+    ProviderUpdateInline: (p: { providerId: string; pinned: string; mode?: string }) => (
+        <div data-testid={p.mode === "install" ? "provider-install" : "provider-update"}>{`${p.providerId} -> ${p.pinned}`}</div>
     ),
+}));
+vi.mock("./ProviderUninstallInline", () => ({
+    ProviderUninstallInline: (p: { providerId: string }) => <div data-testid="provider-uninstall">{p.providerId}</div>,
 }));
 
 import { ToolchainView } from "./toolchain-view";
@@ -583,7 +586,7 @@ describe("the count of tools that are behind", () => {
 
 describe("updating a tool that is behind its pin", () => {
     it("offers the update in the details of an installed npm CLI that is behind, to the pin", async () => {
-        h.installed.codex = { installed: true, version: "0.0.1" };
+        h.installed.codex = { installed: true, version: "0.0.1", source: "local_install" };
         await mount();
         await screen.findByText("1 tool is behind");
         expect(screen.queryByTestId("provider-update")).toBeNull();
@@ -600,9 +603,54 @@ describe("updating a tool that is behind its pin", () => {
         expect(screen.queryByTestId("provider-update")).toBeNull();
     });
 
+    it("offers no update for the copy the person chose to run from their PATH", async () => {
+        h.installed.codex = { installed: true, version: "0.0.1", source: "system_path" };
+        await mount();
+        fireEvent.click(card("codex"));
+        await screen.findByText("Use the CLI on my PATH");
+        expect(screen.queryByTestId("provider-update")).toBeNull();
+    });
+
     it("names a card in its tooltip, since its title can be cut short", async () => {
         await mount();
         expect(card("claude")).toHaveAttribute("title", expect.stringMatching(/Claude/));
+    });
+});
+
+describe("installing and removing AgentMux's own copy of an agent CLI", () => {
+    it("offers Install for a CLI AgentMux installs and has no copy of, npm or download", async () => {
+        await mount();
+        fireEvent.click(card("claude"));
+        expect((await screen.findByTestId("provider-install")).textContent).toBe("claude -> 2.1.288");
+        fireEvent.click(card("claude"));
+        fireEvent.click(card("goose"));
+        expect((await screen.findByTestId("provider-install")).textContent).toMatch(/^goose -> \d/);
+        expect(screen.queryByTestId("provider-uninstall")).toBeNull();
+    });
+
+    it("offers Uninstall, not Install, for AgentMux's own copy", async () => {
+        h.installed.goose = { installed: true, version: "1.54.0", source: "local_install" };
+        await mount();
+        fireEvent.click(card("goose"));
+        expect((await screen.findByTestId("provider-uninstall")).textContent).toBe("goose");
+        expect(screen.queryByTestId("provider-install")).toBeNull();
+    });
+
+    it("offers neither for the copy the person chose to run from their PATH", async () => {
+        h.installed.goose = { installed: true, version: "1.54.0", source: "system_path" };
+        await mount();
+        fireEvent.click(card("goose"));
+        await screen.findByText("Use the CLI on my PATH");
+        expect(screen.queryByTestId("provider-uninstall")).toBeNull();
+        expect(screen.queryByTestId("provider-install")).toBeNull();
+    });
+
+    it("says a missing copy is AgentMux's own, and that a copy on PATH is not used unless asked", async () => {
+        await mount();
+        fireEvent.click(card("goose"));
+        expect(
+            await screen.findByText(/AgentMux's own copy of .* is not installed\. A copy on your PATH is not used unless "Use the CLI on my PATH" is on\./)
+        ).toBeInTheDocument();
     });
 });
 
@@ -618,12 +666,11 @@ describe("a card's actions and details", () => {
         expect(h.openExternal).toHaveBeenLastCalledWith("https://git-scm.com/");
     });
 
-    it("sends a missing agent CLI to its docs page, which is also its install page", async () => {
+    it("gives a missing agent CLI that AgentMux installs a Docs button and no web-page Install (its Install is in the details)", async () => {
         await mount();
-        fireEvent.click(within(card("codex")).getByRole("button", { name: "Install" }));
-        expect(h.openExternal).toHaveBeenLastCalledWith("https://platform.openai.com/docs/codex");
+        expect(within(card("codex")).queryByRole("button", { name: "Install" })).toBeNull();
         fireEvent.click(within(card("codex")).getByRole("button", { name: "Docs" }));
-        expect(h.openExternal).toHaveBeenCalledTimes(2);
+        expect(h.openExternal).toHaveBeenCalledTimes(1);
         expect(h.openExternal).toHaveBeenLastCalledWith("https://platform.openai.com/docs/codex");
     });
 
@@ -661,7 +708,7 @@ describe("a card's actions and details", () => {
     it("shows no installer command for an agent CLI, whether npm or AgentMux installs it", async () => {
         await mount();
         open(card("claude"));
-        await screen.findByText("Not found on this machine's PATH.");
+        await screen.findByText(/AgentMux's own copy of .* is not installed/);
         expect(screen.queryByText("Install command")).toBeNull();
         // Installed by AgentMux itself (goose, Aider, Kimi, Grok, Muse, Antigravity): no installer command to copy.
         open(card("grok"));
@@ -711,11 +758,14 @@ describe("installing a missing tool from the card", () => {
             open(card(id));
             expect(await screen.findByRole("button", { name: "Install it for me" })).toBeInTheDocument();
         }
-        for (const id of ["uv", "ollama", "claude"]) {
+        for (const id of ["uv", "ollama"]) {
             open(card(id));
             await screen.findByText("Not found on this machine's PATH.");
             expect(screen.queryByRole("button", { name: "Install it for me" })).toBeNull();
         }
+        open(card("claude"));
+        await screen.findByText(/AgentMux's own copy of .* is not installed/);
+        expect(screen.queryByRole("button", { name: "Install it for me" })).toBeNull();
     });
 
     it("does not offer it for a tool that is found", async () => {

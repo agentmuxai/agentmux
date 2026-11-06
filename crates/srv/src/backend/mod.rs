@@ -75,6 +75,7 @@ pub mod providers;
 pub mod cli_download;
 pub mod cli_install;
 pub mod cli_prune;
+pub mod cli_uninstall;
 pub mod cli_uv;
 pub mod cli_notice;
 pub mod startup_files;
