@@ -520,7 +520,7 @@ pub(super) fn seed_identity_blank_bundle(conn: &Connection) -> Result<(), StoreE
 /// Additive columns on the identity store, added after its tables were first created.
 pub(super) fn add_identity_store_columns(conn: &Connection) -> Result<(), StoreError> {
     // Additive columns added after this store's tables were first created —
-    // same idempotent pattern as add_shared_store_columns's ALTER loop.
+    // same idempotent pattern as add_shared_store_columns: both go through apply_additive_columns.
     apply_additive_columns(conn, [
         // db_bundles.is_system: see OBJECT_SCHEMA_VERSION's v27 doc comment.
         "ALTER TABLE db_bundles ADD COLUMN is_system INTEGER NOT NULL DEFAULT 0",
