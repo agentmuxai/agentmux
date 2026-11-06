@@ -476,7 +476,6 @@
 101 frontend/app/view/editor/viewers/viewer-host.tsx::ViewerFor
 152 frontend/app/view/files/files-preview.tsx::FilesPreview
 118 frontend/app/view/global-bundle/GlobalMemoryFullView.tsx::EntryView
-253 frontend/app/view/global-bundle/global-bundle-manager.tsx::GlobalBundleManager
 147 frontend/app/view/history/history-agents.tsx::HistoryAgents
 165 frontend/app/view/identity/identity-accounts-tab.tsx::AccountDetailPanel
 229 frontend/app/view/kanban/kanban-board.tsx::KanbanBoard
