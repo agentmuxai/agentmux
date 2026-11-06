@@ -288,6 +288,8 @@ events! {
     TrackedBlocksChanged: crate::broker::process::EVENT_TRACKED_BLOCKS_CHANGED => (),
     /// The work queue changed.
     WorkQueueChanged: "workqueue:changed" => (),
+    /// An Audit row was written (`audit_live`): at most one event per 100 ms; a pane asks `audit.query` for the newest rows.
+    AuditChanged: "audit:changed" => (),
 }
 
 per_id_events! {

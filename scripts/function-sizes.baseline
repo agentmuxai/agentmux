@@ -484,7 +484,7 @@
 116 frontend/app/view/agent/stream-parser.ts::ClaudeCodeStreamParser::eventToNode
 232 frontend/app/view/agent/useAgentStream.ts::useAgentStream
 116 frontend/app/view/agent/virtualization/held-release.ts::useScrolledOffRelease
-195 frontend/app/view/audit/audit-manager.tsx::AuditManager
+132 frontend/app/view/audit/audit-manager.tsx::AuditManager
 103 frontend/app/view/browser/browser-model.ts::BrowserViewModel::getBodyContextMenuItems
 101 frontend/app/view/browser/browser-profile-menu.tsx::BrowserProfileButton
 267 frontend/app/view/browser/driven-by-strip.tsx::DrivenByStrip

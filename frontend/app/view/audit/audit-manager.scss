@@ -19,6 +19,13 @@
     gap: var(--space-1);
 }
 
+.audit-live-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+}
+
 .audit-totals {
     font-size: 0.85em;
     color: var(--secondary-text-color);

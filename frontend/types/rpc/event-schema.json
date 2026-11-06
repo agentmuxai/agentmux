@@ -323,6 +323,13 @@
     }
   },
   {
+    "event": "audit:changed",
+    "payloadTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
     "event": "background-task-updated",
     "payloadTs": {
       "imports": [

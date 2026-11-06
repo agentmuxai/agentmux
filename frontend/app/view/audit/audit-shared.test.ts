@@ -7,11 +7,14 @@ import type { AuditEntry } from "@/types/rpc/AuditEntry";
 import {
     buildRequest,
     costLabel,
+    countNew,
     DEFAULT_KINDS,
     emptyFilter,
     entryLinks,
     isFailure,
+    newPillLabel,
     requestKinds,
+    reuseRows,
     totalsLabel,
 } from "./audit-shared";
 
@@ -91,5 +94,29 @@ describe("wording", () => {
         expect(isFailure(entry({ summary: "a → b: failed (no pane), 10 bytes" }))).toBe(true);
         expect(isFailure(entry({ kind: "registry", summary: "failed: register" }))).toBe(false);
         expect(isFailure(entry({}))).toBe(false);
+    });
+});
+
+
+describe("what is new since the list was read", () => {
+    it("counts the newest page's entries the list does not hold", () => {
+        const shown = [entry({ id: "a" }), entry({ id: "b" })];
+        expect(countNew(shown, [entry({ id: "c" }), entry({ id: "a" }), entry({ id: "b" })])).toBe(1);
+        expect(countNew(shown, shown)).toBe(0);
+        expect(countNew(shown, [])).toBe(0);
+    });
+
+    it("says 'at least' for a full page, since the rest is not asked for", () => {
+        expect(newPillLabel(3)).toBe("3 new");
+        expect(newPillLabel(50)).toBe("50+ new");
+    });
+
+    it("keeps the object of a row that did not change, and takes the one that did", () => {
+        const a = entry({ id: "a" });
+        const b = entry({ id: "b", summary: "sent" });
+        const next = reuseRows([a, b], [entry({ id: "n" }), { ...a }, { ...b, summary: "delivered" }]);
+        expect(next[1]).toBe(a);
+        expect(next[2].summary).toBe("delivered");
+        expect(next[0].id).toBe("n");
     });
 });

@@ -24,6 +24,7 @@ export const KIND_CHIPS: { kind: string; label: string }[] = [
     { kind: "agent_start", label: "Starts" },
     { kind: "agent_end", label: "Ends" },
     { kind: "tool", label: "Tool calls" },
+    { kind: "turn", label: "Turns" },
     { kind: "thought", label: "Thoughts" },
 ];
 
@@ -73,6 +74,29 @@ export function buildRequest(filter: AuditFilter, now: number, cursor?: string, 
         ...(cursor ? { cursor } : {}),
         ...(totals ? { totals: true } : {}),
     };
+}
+
+/** How many entries of `fresh` (the newest page) the list shown does not hold. */
+export function countNew(shown: readonly AuditEntry[], fresh: readonly AuditEntry[]): number {
+    const seen = new Set(shown.map((e) => e.id));
+    return fresh.filter((e) => !seen.has(e.id)).length;
+}
+
+/**
+ * `next` with the object of `previous` kept for every row that did not change, so a list that is read again
+ * every few moments redraws only the rows that are new or different.
+ */
+export function reuseRows(previous: readonly AuditEntry[], next: readonly AuditEntry[]): AuditEntry[] {
+    const before = new Map(previous.map((e) => [e.id, e]));
+    return next.map((e) => {
+        const old = before.get(e.id);
+        return old && JSON.stringify(old) === JSON.stringify(e) ? old : e;
+    });
+}
+
+/** The pill that jumps to the newest entries: a full page of them is "at least", since the rest is not asked for. */
+export function newPillLabel(count: number): string {
+    return count >= AUDIT_PAGE ? `${AUDIT_PAGE}+ new` : `${count} new`;
 }
 
 /** A row's failure shows in its colour; srv words a failed jekt or action as "failed" in the summary. */

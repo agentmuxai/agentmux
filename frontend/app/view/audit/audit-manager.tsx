@@ -3,26 +3,19 @@
 //
 // The Audit pane: one list, newest first, of every jekt, fleet and pane action, registration and agent start
 // and end, read from `audit.query` a page at a time with filters, and below it what agents did with the
-// person's secrets (vault-secrets.tsx).
+// person's secrets (vault-secrets.tsx). The list and how new entries reach it are audit-list.ts.
 
 import { createEffect, createMemo, createSignal, For, on, onCleanup, Show, untrack, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
 
 import { Button, FilterInput, Select } from "@/app/element/ui";
-import { RpcApi } from "@/app/store/rpc-api";
-import { TabRpcClient } from "@/app/store/rpc-util";
 import { VaultSecrets } from "@/app/view/vault/vault-secrets";
-import { pollWhileVisible, WARDEN_REFRESH_MS } from "@/app/view/warden-shared/warden-shared";
-import type { AuditEntry } from "@/types/rpc/AuditEntry";
-import type { AuditQueryReq } from "@/types/rpc/AuditQueryReq";
-import type { AuditQueryResult } from "@/types/rpc/AuditQueryResult";
-import type { AuditTotals } from "@/types/rpc/AuditTotals";
+import { createAuditList } from "./audit-list";
 import { AuditRow } from "./audit-row";
 import {
-    AUDIT_PAGE,
-    buildRequest,
     emptyFilter,
     KIND_CHIPS,
+    newPillLabel,
     notRecordedNote,
     RANGES,
     totalsLabel,
@@ -35,8 +28,6 @@ import "./audit-manager.scss";
 
 const TYPING_PAUSE_MS = 250;
 
-const fetchAuditPage = (req: AuditQueryReq): Promise<AuditQueryResult> => RpcApi.AuditQueryCommand(TabRpcClient, req);
-
 export const AuditManager = (props: { paneBlockId: string; visible?: boolean; agent?: string }): JSX.Element => {
     const [filter, setFilter] = createSignal<AuditFilter>(emptyFilter(props.agent ?? ""));
     // What is typed in the two text boxes shows at once; the filter (and so a query, which makes srv rescan the
@@ -44,67 +35,16 @@ export const AuditManager = (props: { paneBlockId: string; visible?: boolean; ag
     const [agentText, setAgentText] = createSignal(untrack(filter).agent);
     const [searchText, setSearchText] = createSignal(untrack(filter).text);
     let typing: ReturnType<typeof setTimeout> | undefined;
-    const [entries, setEntries] = createSignal<AuditEntry[]>([]);
-    const [cursor, setCursor] = createSignal<string | undefined>();
-    const [totals, setTotals] = createSignal<AuditTotals | null>(null);
-    const [notRecorded, setNotRecorded] = createSignal<string[]>([]);
-    const [error, setError] = createSignal<string | null>(null);
-    const [loading, setLoading] = createSignal(true);
-    const [loadingMore, setLoadingMore] = createSignal(false);
+    const list = createAuditList(filter, () => props.visible ?? true);
+    let feed: HTMLUListElement | undefined;
     const tick = useTick(1000);
     const now = createMemo(() => (tick(), Date.now()));
-
-    // The newest request wins: a slow answer for an earlier filter is dropped.
-    let seq = 0;
-    // The filter changed while the pane was hidden: the list shown is for the old one until it is shown again.
-    let stale = false;
-    // A first-page request in flight: a periodic refresh waits for it, so a slow answer isn't superseded every
-    // five seconds and never shown. A filter change still supersedes it.
-    let refreshing = false;
-
-    const loadFirst = async (quiet = false) => {
-        const mine = ++seq;
-        refreshing = true;
-        if (!quiet) setLoading(true);
-        try {
-            const res = await fetchAuditPage(buildRequest(untrack(filter), Date.now(), undefined, true));
-            if (mine !== seq) return;
-            setEntries(res.entries);
-            setCursor(res.next_cursor);
-            setTotals(res.totals ?? null);
-            setNotRecorded(res.not_recorded);
-            setError(null);
-        } catch (e) {
-            if (mine === seq) setError(String(e));
-        } finally {
-            if (mine === seq) {
-                setLoading(false);
-                refreshing = false;
-            }
-        }
+    const jumpToNewest = () => {
+        list.showNewest();
+        feed?.scrollIntoView?.({ block: "start" });
     };
 
-    const loadMore = async () => {
-        const next = cursor();
-        if (!next || loadingMore()) return;
-        // Taking a number of its own drops a first-page refresh still in flight, which would overwrite what this adds.
-        const mine = ++seq;
-        refreshing = false;
-        setLoadingMore(true);
-        try {
-            const res = await fetchAuditPage(buildRequest(untrack(filter), Date.now(), next));
-            if (mine !== seq) return;
-            const seen = new Set(entries().map((e) => e.id));
-            setEntries([...entries(), ...res.entries.filter((e) => !seen.has(e.id))]);
-            setCursor(res.next_cursor);
-        } catch (e) {
-            if (mine === seq) setError(String(e));
-        } finally {
-            setLoadingMore(false);
-        }
-    };
-
-    // A new filter, or the pane's `audit:agent` changing (the Swarm's "Audit for this agent"), starts over.
+    // The pane's `audit:agent` changing (the Swarm's "Audit for this agent") sets the filter, which starts the list over.
     createEffect(
         on(
             () => props.agent,
@@ -116,34 +56,6 @@ export const AuditManager = (props: { paneBlockId: string; visible?: boolean; ag
             { defer: true }
         )
     );
-    createEffect(
-        on(
-            filter,
-            () => {
-                // Whatever is loading, and the cursor of the old list, belongs to the old filter.
-                seq++;
-                refreshing = false;
-                setCursor(undefined);
-                if (props.visible ?? true) void loadFirst();
-                else stale = true;
-            },
-            { defer: true }
-        )
-    );
-
-    // Newest entries arrive on their own while the pane is shown and nothing older has been loaded; once
-    // you have scrolled back, the list stays where it is until the filter changes.
-    pollWhileVisible(
-        () => {
-            if (untrack(loadingMore) || refreshing) return;
-            if (stale || untrack(entries).length <= AUDIT_PAGE) {
-                stale = false;
-                void loadFirst(true);
-            }
-        },
-        () => props.visible ?? true
-    );
-
     const set = (patch: Partial<AuditFilter>) => setFilter({ ...filter(), ...patch });
     const typed = () => {
         if (typing !== undefined) clearTimeout(typing);
@@ -158,8 +70,8 @@ export const AuditManager = (props: { paneBlockId: string; visible?: boolean; ag
         if (!kinds.delete(kind)) kinds.add(kind);
         set({ kinds });
     };
-    const empty = () => entries().length === 0;
-    const unrecorded = () => notRecorded().filter((k) => filter().kinds.has(k));
+    const empty = () => list.entries().length === 0;
+    const unrecorded = () => list.notRecorded().filter((k) => filter().kinds.has(k));
 
     return (
         <div class="warden-manager-body">
@@ -205,30 +117,46 @@ export const AuditManager = (props: { paneBlockId: string; visible?: boolean; ag
                     )}
                 </For>
             </div>
-            <Show when={totals()}>{(t) => <div class="audit-totals">{totalsLabel(t())}</div>}</Show>
+            <div class="audit-live-bar">
+                <Button
+                    tone="quiet"
+                    density="compact"
+                    icon={list.paused() ? "play" : "pause"}
+                    pressed={list.paused()}
+                    onClick={() => (list.paused() ? jumpToNewest() : list.setPaused(true))}
+                >
+                    {list.paused() ? "Resume" : "Pause"}
+                </Button>
+                <Show when={list.newCount() > 0}>
+                    <Button tone="accent" density="compact" icon="arrow-up" onClick={jumpToNewest}>
+                        {newPillLabel(list.newCount())}
+                    </Button>
+                </Show>
+                <Show when={list.totals()}>{(t) => <span class="audit-totals">{totalsLabel(t())}</span>}</Show>
+            </div>
             <Show when={unrecorded().length > 0}>
                 <div class="warden-manager-summary">{notRecordedNote(unrecorded())}</div>
             </Show>
-            <Show when={error()}>
-                <div class="warden-manager-error">⚠ {error()}</div>
+            <Show when={list.error()}>
+                <div class="warden-manager-error">⚠ {list.error()}</div>
             </Show>
             <Show
                 when={!empty()}
-                fallback={<div class="warden-section-stub">{loading() ? "Loading…" : "No entries match."}</div>}
+                fallback={<div class="warden-section-stub">{list.loading() ? "Loading…" : "No entries match."}</div>}
             >
-                <ul class="audit-feed">
-                    <For each={entries()}>{(entry) => <AuditRow entry={entry} now={now()} paneBlockId={props.paneBlockId} />}</For>
+                <ul class="audit-feed" ref={feed}>
+                    <For each={list.entries()}>{(entry) => <AuditRow entry={entry} now={now()} paneBlockId={props.paneBlockId} />}</For>
                 </ul>
-                <Show when={cursor()}>
+                <Show when={list.cursor()}>
                     <div class="audit-more">
-                        <Button tone="quiet" density="compact" icon="arrow-down" busy={loadingMore()} onClick={() => void loadMore()}>
+                        <Button tone="quiet" density="compact" icon="arrow-down" busy={list.loadingMore()} onClick={() => void list.loadMore()}>
                             Show older
                         </Button>
                     </div>
                 </Show>
             </Show>
             <VaultSecrets visible={props.visible} />
-            <div class="warden-manager-footnote">Refreshes every {WARDEN_REFRESH_MS / 1000}s while you are at the newest entries.</div>
+            <div class="warden-manager-footnote">New entries appear as they are written while you are at the newest ones.</div>
         </div>
     );
 };

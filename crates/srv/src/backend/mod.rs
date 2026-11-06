@@ -121,6 +121,7 @@ pub mod continuity;
 pub mod continuity_relocate;
 pub mod continuity_segments;
 pub mod audit_activity;
+pub mod audit_live;
 pub mod audit_query;
 pub mod memory;
 pub mod agent_bundle_sidecar;
