@@ -1,0 +1,25 @@
+AgentAuthPanel.onDismissAuthNotice([])
+status.setAuthNotice(null)
+AgentAuthPanel.onCancelLogin([])
+status.cancelLogin()
+AgentAuthPanel.onUseTerminal([])
+status.useTerminalInstead()
+AgentDecisionPanel.onDecide(["tool-1","allow"])
+onDecide ran ["tool-1","allow"]
+  -> "decided"
+AgentDecisionPanel.onDefer([])
+log(agent, Decision minimized)
+AgentQuestionPanel.onAnswer(["q-1","yes"])
+onAnswer ran ["q-1","yes"]
+AgentQuestionPanel.onCancel(["q-1"])
+onCancel ran ["q-1"]
+AgentDisconnectedBanner.onReconnect([])
+paneModel.dispatchPane({"type":"StreamSubscribe","at":1700000000000}, user)
+ApiRetryRow.onStop([])
+onStop ran
+HeldInputPanel.onSendNow([])
+offline.sendNow()
+HeldInputPanel.onCancel([])
+offline.cancel()
+HeldInputPanel.onDismissNotice(["n-1"])
+offline.dismissNotice(n-1)

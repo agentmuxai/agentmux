@@ -412,7 +412,6 @@
 111 frontend/app/view/agent/commands/global/login.ts::runLogin
 213 frontend/app/view/agent/components/ActivityDock.tsx::ActivityDock
 223 frontend/app/view/agent/components/ActivityRow.tsx::ActivityRow
-270 frontend/app/view/agent/components/AgentBottomPanels.tsx::AgentBottomPanels
 200 frontend/app/view/agent/components/AgentCard.tsx::AgentCard
 160 frontend/app/view/agent/components/AgentContainerLimitsPanel.tsx::AgentContainerLimitsPanel
 116 frontend/app/view/agent/components/AgentDocumentView.tsx::AgentDocumentView
@@ -525,7 +524,6 @@
 131 frontend/app/view/vault/vault-entries.tsx::VaultEntries
 172 frontend/app/view/vault/vault-entry-form.tsx::VaultEntryForm
 264 frontend/app/view/vault/vault-export.tsx::VaultExportDialog
-284 frontend/app/view/vault/vault-import.tsx::VaultImportDialog
 136 frontend/app/view/vault/vault-reveal.tsx::VaultRevealDialog
 104 frontend/app/view/vault/vault-secrets.tsx::VaultSecrets
 105 frontend/app/view/warden-jobs/job-dry-run.tsx::JobDryRun

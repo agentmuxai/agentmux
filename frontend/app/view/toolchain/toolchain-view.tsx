@@ -29,6 +29,7 @@ import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { SystemToolInstallInline } from "./SystemToolInstallInline";
 import { CliDiskSpace } from "./CliDiskSpace";
 import { ProviderUpdateInline } from "./ProviderUpdateInline";
+import { UsePathToggle } from "./UsePathToggle";
 import { toolNotes, toolStatus, widgetStatus } from "./toolchain-status";
 import { WidgetPortField } from "./WidgetPortField";
 import "./toolchain-view.scss";
@@ -587,6 +588,15 @@ function toolDetail(s: ToolchainState, key: string): JSX.Element {
                     </For>
                     <Show when={updatablePin(row())}>
                         {(pin) => <ProviderUpdateInline providerId={row().id} pinned={pin()} />}
+                    </Show>
+                    <Show when={row().kind === "provider"}>
+                        <UsePathToggle
+                            providerId={row().id}
+                            onChanged={() => {
+                                const idx = s.rows.findIndex((r) => r.id === row().id);
+                                if (idx !== -1) void probe(s, idx, { force: true });
+                            }}
+                        />
                     </Show>
                     <Show when={row().loading}>
                         <p class="toolchain-detail-note">Looking for {row().label} on this machine…</p>
