@@ -3,13 +3,15 @@
 
 /**
  * Whether a newer AgentMux release exists, as srv learns it from GitHub
- * Releases (crates/srv/src/backend/update/check.rs), only when the user clicks
- * Check for update or an agent asks: `app.update-status` when a window opens,
+ * Releases (crates/srv/src/backend/update/check.rs), which srv asks in the
+ * background (`update/auto.rs`) and when the user clicks Check for update or an
+ * agent asks: `app.update-status` when a window opens,
  * kept current by the `app:updatestatus` event. The status-bar chip and the
  * version panel's Maintenance section read it.
  * docs/specs/SPEC_UPGRADE_FOR_USERS_AND_AGENTS_2026_10_15.md §3.
  */
 
+import { pushNotification } from "@/app/store/flash-notifications";
 import { createEffect, createSignal, onCleanup } from "solid-js";
 
 import { WpsEvent } from "@/app/store/mps-events";
@@ -64,8 +66,8 @@ export function viaStore(s: AppUpdateStatus | null = appUpdate()): boolean {
     return s?.install === "windows-store";
 }
 
-/** What the Store itself said about `version`: `asking` until it answers; `unknown` carries why it couldn't be asked. */
-export type StoreOffer = { version: string; state: "asking" | "available" | "none" | "unknown"; message: string };
+/** What the Store itself said about `version`: `asking` until it answers; `no_answer` when it never did; `unknown` carries why it couldn't be asked. */
+export type StoreOffer = { version: string; state: "asking" | "available" | "none" | "no_answer" | "unknown"; message: string };
 
 const [storeOffer, setStoreOffer] = createSignal<StoreOffer | null>(null);
 
@@ -113,7 +115,36 @@ export function storeOfferLine(version: string | null | undefined, offer: StoreO
     const released = `v${version} is released.`;
     if (!offer || offer.state === "asking") return `${released} Asking the Microsoft Store whether it has it…`;
     if (offer.state === "none") return `${released} The Microsoft Store is still reviewing it.`;
+    if (offer.state === "no_answer") return `${released} The Microsoft Store didn't answer; try again later.`;
     return `${released} Couldn't ask the Microsoft Store whether it has it${offer.message ? ` (${offer.message})` : ""}.`;
+}
+
+/** What the Store's last install left (host: store_restart): the app came back `updated`, or `stayed` on the version it was closed on. */
+export type StoreCameBack = { state: "none" | "updated" | "stayed"; from: string; target: string };
+const [storeStayed, setStoreStayed] = createSignal<StoreCameBack | null>(null);
+export { storeStayed, setStoreStayed };
+
+/** Said when the install fell back to the Store page: `why` is the host's reason, when it gave one. */
+export const storeFallbackLine = (why?: string): string => `${why ? `${why} ` : ""}Opened the Microsoft Store page to finish the update.`;
+
+/** Said before the Store is asked to install: it closes the app to swap the package. */
+export const storeClosesLine = (version: string): string => `The Store closes AgentMux while it installs v${version}, then opens it again.`;
+
+/** Said when the app is back on the version the Store closed it on: the install did not happen. */
+export const storeStayedLine = (s: StoreCameBack): string =>
+    `The Store closed AgentMux to install v${s.target}, but this is still v${s.from}. Try Update in the Store again, or install it from the Microsoft Store app.`;
+
+/** At start: say how the Store's last install ended, when one was under way. */
+export async function loadStoreCameBack(): Promise<void> {
+    const r = await getApi()?.approvals?.storeUpdateCameBack?.().catch(() => undefined);
+    if (!r || r.state === "none") return;
+    const note = { id: "store-update-came-back", timestamp: new Date().toISOString() };
+    if (r.state === "updated") {
+        pushNotification({ ...note, icon: "fa-circle-check", title: "AgentMux updated", message: `Updated to v${r.target} through the Microsoft Store.`, type: "update", expiration: Date.now() + 10000 });
+        return;
+    }
+    setStoreStayed(r);
+    pushNotification({ ...note, icon: "fa-triangle-exclamation", title: "The update did not install", message: storeStayedLine(r), type: "warning", persistent: true });
 }
 
 /** The Store certifies a release hours after GitHub publishes it: how often to ask again while it hasn't listed it. */
@@ -158,6 +189,40 @@ export function checkedAt(ms: number, now: Date = new Date()): string {
 export function releaseDownload(s: AppUpdateStatus | null = appUpdate()): DownloadStatus | null {
     const d = s?.download;
     return d && s?.latest && d.version === s.latest ? d : null;
+}
+
+/** What's new: the release's own page on GitHub, or the list of releases when the version isn't known. */
+export function releaseNotesUrl(version: string | null | undefined): string {
+    return version
+        ? `https://github.com/agentmuxai/agentmux/releases/tag/v${version}`
+        : "https://github.com/agentmuxai/agentmux/releases";
+}
+
+/**
+ * The newer release once it is downloaded, verified and staged (srv does this by
+ * itself, `update/auto.rs`): ready to restart into, or a restart under way.
+ * Null while it is still downloading, failed, or has no download.
+ */
+export function stagedRelease(
+    s: AppUpdateStatus | null = appUpdate(),
+): { version: string; state: "ready" | "waiting" | "restarting"; waitingFor: number } | null {
+    const d = availableRelease(s) ? releaseDownload(s) : null;
+    if (!d || (d.state !== "ready" && d.state !== "waiting" && d.state !== "restarting")) return null;
+    return { version: d.version, state: d.state, waitingFor: d.waiting_for ?? 0 };
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * How long the staged release has gone unclicked, for the chip's colour: the
+ * "warm" step after 2 days of the release being out, the "hot" step after 4
+ * (Chrome's relaunch icon steps at 2, 4 and 7 days). Nothing nags earlier.
+ */
+export function stagedUrgency(s: AppUpdateStatus | null = appUpdate(), nowMs: number = Date.now()): "calm" | "warm" | "hot" {
+    const published = s?.published_at ? Date.parse(s.published_at) : NaN;
+    if (!Number.isFinite(published)) return "calm";
+    const age = nowMs - published;
+    return age >= 4 * DAY_MS ? "hot" : age >= 2 * DAY_MS ? "warm" : "calm";
 }
 
 /**

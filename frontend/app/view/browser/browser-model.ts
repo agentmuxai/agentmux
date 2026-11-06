@@ -25,6 +25,7 @@ import { browserStartPageAtom } from "@/store/config-signals";
 import { refocusNode } from "@/app/store/block-component-registry";
 import { createEffect, createMemo, createRoot, createSignal, onCleanup, type Accessor } from "solid-js";
 import { originCovered, pageOrigin } from "./bypass";
+import { titleMetaFor } from "./given-title";
 import {
     applyDownloadUpdate,
     DONE_ROW_MS,
@@ -662,7 +663,7 @@ export class BrowserViewModel {
         // here would bypass dispatchLoadingChanged's debounce hold (layer 3).
         // Persist the real URL to block meta so pane restore lands
         // on the last page, not whatever was passed at create time.
-        this.ctx.setMeta({ url: payload.url }).catch(() => {});
+        this.ctx.setMeta({ url: payload.url, ...titleMetaFor(this.meta(), payload.url) }).catch(() => {});
     }
 
     /** Clicks, close requests, notices and downloads of this pane's page. */
@@ -799,7 +800,7 @@ export class BrowserViewModel {
         // Persist the requested URL to block meta immediately so a quick
         // pane restore before load_end still has something. The nav-state
         // event will overwrite this with the post-redirect final URL.
-        this.ctx.setMeta({ url: normalized }).catch(() => {});
+        this.ctx.setMeta({ url: normalized, ...titleMetaFor(this.meta(), normalized) }).catch(() => {});
     }
 
     goBack(): void {

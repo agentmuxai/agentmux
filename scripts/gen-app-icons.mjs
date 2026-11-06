@@ -276,11 +276,11 @@ export function outputs(root = ROOT) {
     png("crates/launcher/resources/menubar-template.png", drawMenubarGlyph());
 
     // The mark the app draws for itself, blocks only: the web views' SVG, and the launcher's splash PNG
-    // (256 x 256, RGBA, the size build.rs reads; the file keeps its old name, brain.png, so no Rust changes).
+    // (256 x 256, RGBA, the size build.rs reads).
     out.push({ path: "frontend/app/asset/logo-mark.svg", bytes: Buffer.from(markSvg(dark)) });
     const mark = canvas(256, 256);
     for (const r of markRects(dark)) fillRect(mark, r.x / 2, r.y / 2, r.w / 2, r.h / 2, r.fill);
-    png("crates/launcher/resources/brain.png", mark);
+    png("crates/launcher/resources/logo.png", mark);
 
     // The favicon set for the landing and docs sites (their repos take these files).
     const web = "assets/icon/web";

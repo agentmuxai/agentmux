@@ -26,6 +26,12 @@ fn audit_entry(ts: u64, from: &str, to: &str) -> AuditLogEntry {
         wan: None,
         cli_native: None,
         turn: None,
+        host: None,
+        channel: None,
+        version: None,
+        tier: None,
+        trust: None,
+        msg_id: None,
     }
 }
 
@@ -77,7 +83,7 @@ impl World {
         let uid = |slug: &str| Some(format!("uid-{slug}"));
         let pane = |slug: &str| (slug == "korp").then(|| "live-korp".to_string());
         let exists = |b: &str| b == "block-Maricon-2";
-        let src = Sources { own_file: None, jekt_file: Some(&self.jekts), segments: Some(&self.store), ctx: Ctx { slug_of_uid: &slug, uid_of_slug: &uid, pane_of_agent: &pane, block_exists: &exists } };
+        let src = Sources { own_file: None, activity_dir: None, own_activity_dir: None, jekt_file: Some(&self.jekts), segments: Some(&self.store), ctx: Ctx { slug_of_uid: &slug, uid_of_slug: &uid, pane_of_agent: &pane, block_exists: &exists } };
         query(&src, &req)
     }
 
@@ -140,7 +146,7 @@ fn a_name_the_registry_does_not_know_gets_no_history_button() {
     let uid = |slug: &str| (slug == "korp").then(|| "uid-korp".to_string());
     let pane = |_: &str| None;
     let exists = |_: &str| false;
-    let src = Sources { own_file: None, jekt_file: Some(&world.jekts), segments: Some(&world.store), ctx: Ctx { slug_of_uid: &slug, uid_of_slug: &uid, pane_of_agent: &pane, block_exists: &exists } };
+    let src = Sources { own_file: None, activity_dir: None, own_activity_dir: None, jekt_file: Some(&world.jekts), segments: Some(&world.store), ctx: Ctx { slug_of_uid: &slug, uid_of_slug: &uid, pane_of_agent: &pane, block_exists: &exists } };
     let entry = query(&src, &AuditQueryReq::default()).unwrap().entries.remove(0);
     assert!(entry.from.unwrap().links.history.is_some());
     assert!(entry.to.unwrap().links.history.is_none(), "the reader opens an agent by UID: with none there is nothing to open");
@@ -207,12 +213,12 @@ fn agent_starts_and_ends_merge_in_by_time_with_their_byte_and_reason() {
 }
 
 #[test]
-fn tool_calls_and_thoughts_are_said_not_to_be_recorded() {
+fn tool_turn_and_thought_rows_are_asked_for_by_kind_and_none_are_not_an_error() {
+    // No activity files here: asking for the kinds answers an empty list, and nothing is "not recorded" any more.
     let world = World::new(&many());
-    let got = world.run(AuditQueryReq { kinds: Some(vec!["tool".into(), "thought".into()]), ..Default::default() }).unwrap();
+    let got = world.run(AuditQueryReq { kinds: Some(vec!["tool".into(), "turn".into(), "thought".into()]), ..Default::default() }).unwrap();
     assert!(got.entries.is_empty());
-    assert_eq!(got.not_recorded, ["tool", "thought"]);
-    assert!(world.run(AuditQueryReq::default()).unwrap().not_recorded.is_empty());
+    assert!(got.not_recorded.is_empty());
 }
 
 #[test]
@@ -242,7 +248,7 @@ fn a_bad_cursor_or_kind_is_refused_and_a_missing_file_is_an_empty_audit() {
     let slug = |_: &str| None;
     let none = |_: &str| None;
     let exists = |_: &str| false;
-    let src = Sources { own_file: None, jekt_file: Some(Path::new("/nonexistent/jekt-audit.jsonl")), segments: None, ctx: Ctx { slug_of_uid: &slug, uid_of_slug: &none, pane_of_agent: &none, block_exists: &exists } };
+    let src = Sources { own_file: None, activity_dir: None, own_activity_dir: None, jekt_file: Some(Path::new("/nonexistent/jekt-audit.jsonl")), segments: None, ctx: Ctx { slug_of_uid: &slug, uid_of_slug: &none, pane_of_agent: &none, block_exists: &exists } };
     assert!(query(&src, &AuditQueryReq::default()).unwrap().entries.is_empty());
 }
 
@@ -429,6 +435,8 @@ impl TwoFiles {
         let src = Sources {
             jekt_file: self.shared.as_deref(),
             own_file: self.own.as_deref(),
+            activity_dir: None,
+            own_activity_dir: None,
             segments: None,
             ctx: Ctx { slug_of_uid: &slug, uid_of_slug: &uid, pane_of_agent: &none, block_exists: &exists },
         };
@@ -501,4 +509,217 @@ fn totals_add_the_two_files() {
     let two = TwoFiles::new(Some(&[audit_entry(1_000, "Korp", "Opaz")]), Some(&[audit_entry(2_000, "Opaz", "Korp")]));
     let got = two.run(AuditQueryReq { totals: Some(true), ..Default::default() }).unwrap().totals.unwrap();
     assert_eq!((got.entries, got.input), (2, 200));
+}
+
+// ── activity rows (tool, turn, thought)
+
+use crate::backend::audit_activity::ActivityRow;
+
+fn activity_row(ts: u64, kind: &str, summary: &str) -> ActivityRow {
+    ActivityRow {
+        ts,
+        kind: kind.into(),
+        agent: "u1".into(),
+        block: "block-Maricon-2".into(),
+        zone: "agent:u1:current".into(),
+        byte: Some(ts),
+        summary: summary.into(),
+        tool: (kind == "tool").then(|| "Bash".to_string()),
+        outcome: None,
+        ms: None,
+        cost: None,
+        channel: Some("dev".into()),
+    }
+}
+
+/// A folder of activity day files, and optionally a jekt audit file beside them.
+struct Activity {
+    _dir: tempfile::TempDir,
+    activity_dir: std::path::PathBuf,
+    jekts: Option<std::path::PathBuf>,
+}
+
+impl Activity {
+    fn new(rows: &[ActivityRow], jekts: Option<&[AuditLogEntry]>) -> Self {
+        let dir = tempfile::tempdir().unwrap();
+        let activity_dir = dir.path().join("audit");
+        std::fs::create_dir_all(&activity_dir).unwrap();
+        let mut days: std::collections::BTreeMap<String, String> = Default::default();
+        for r in rows {
+            let day = chrono::DateTime::from_timestamp_millis(r.ts as i64).unwrap().format("%Y-%m-%d").to_string();
+            days.entry(day).or_default().push_str(&format!("{}\n", serde_json::to_string(r).unwrap()));
+        }
+        for (day, text) in days {
+            std::fs::write(activity_dir.join(format!("activity-{day}.jsonl")), text).unwrap();
+        }
+        let jekts = jekts.map(|e| write(&activity_dir, e));
+        Self { _dir: dir, activity_dir, jekts }
+    }
+
+    fn run(&self, req: AuditQueryReq) -> Result<AuditQueryResult, String> {
+        let slug = |uid: &str| (uid == "u1").then(|| "maricon-2".to_string());
+        let uid = |slug: &str| Some(format!("uid-{slug}"));
+        let none = |_: &str| None;
+        let exists = |b: &str| b == "block-Maricon-2";
+        let src = Sources {
+            jekt_file: self.jekts.as_deref(),
+            own_file: None,
+            activity_dir: Some(&self.activity_dir),
+            own_activity_dir: None,
+            segments: None,
+            ctx: Ctx { slug_of_uid: &slug, uid_of_slug: &uid, pane_of_agent: &none, block_exists: &exists },
+        };
+        query(&src, &req)
+    }
+}
+
+const DAY_MS: u64 = 86_400_000;
+/// 2023-11-14 22:13:20 UTC: a few seconds on is still that day, and a day on is the next.
+const T0: u64 = 1_700_000_000_000;
+
+fn kinds(k: &[&str]) -> Option<Vec<String>> {
+    Some(k.iter().map(|s| s.to_string()).collect())
+}
+
+#[test]
+fn activity_rows_come_only_when_asked_for_by_kind_and_carry_their_links() {
+    let a = Activity::new(&[activity_row(T0, "tool", "Bash cargo test"), activity_row(T0 + 1_000, "turn", "turn ended (success)")], Some(&[audit_entry(T0 + 500, "Korp", "Opaz")]));
+    let default = a.run(AuditQueryReq::default()).unwrap().entries;
+    assert_eq!(default.len(), 1, "the default list is what it was: no tool or turn rows");
+    assert_eq!(default[0].kind, "jekt");
+
+    let got = a.run(AuditQueryReq { kinds: kinds(&["tool", "turn", "thought"]), ..Default::default() }).unwrap().entries;
+    assert_eq!(got.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>(), vec!["turn", "tool"]);
+    let tool = &got[1];
+    assert_eq!((tool.agent_id.as_deref(), tool.summary.as_str()), (Some("maricon-2"), "Bash cargo test"));
+    let history = tool.links.history.as_ref().unwrap();
+    assert_eq!((history.definition_id.as_deref(), history.zone.as_deref(), history.at_byte, history.at_ms), (Some("u1"), Some("agent:u1:current"), Some(T0), T0));
+    assert_eq!(tool.links.pane.as_ref().unwrap().block_id, "block-Maricon-2");
+    assert!(tool.id.starts_with("as2023-11-14:"), "an activity id names its folder and day: {}", tool.id);
+}
+
+#[test]
+fn activity_rows_merge_with_jekts_and_the_agent_and_text_filters_apply() {
+    let a = Activity::new(
+        &[activity_row(T0, "tool", "Bash git status"), activity_row(T0 + 2_000, "tool", "Read /a.rs")],
+        Some(&[audit_entry(T0 + 1_000, "Korp", "Maricon-2")]),
+    );
+    let all = a.run(AuditQueryReq { kinds: kinds(&["tool", "jekt"]), ..Default::default() }).unwrap().entries;
+    assert_eq!(all.iter().map(|e| e.ts_ms).collect::<Vec<_>>(), vec![T0 + 2_000, T0 + 1_000, T0]);
+    let one = a.run(AuditQueryReq { kinds: kinds(&["tool"]), text: Some("GIT status".into()), ..Default::default() }).unwrap().entries;
+    assert_eq!(one.len(), 1);
+    assert_eq!(a.run(AuditQueryReq { kinds: kinds(&["tool"]), agent_id: Some("opaz".into()), ..Default::default() }).unwrap().entries.len(), 0);
+    assert_eq!(a.run(AuditQueryReq { kinds: kinds(&["tool"]), agent_id: Some("Maricon-2".into()), ..Default::default() }).unwrap().entries.len(), 2);
+}
+
+#[test]
+fn pages_follow_each_other_across_day_files_and_the_jekt_file_without_repeating_or_skipping() {
+    // Three days of rows, jekts in between: a page boundary falls inside a day and between days.
+    let rows: Vec<ActivityRow> = (0..90).map(|n| activity_row(T0 + (n % 3) * DAY_MS + (n / 3) * 10, "tool", &format!("Bash {n}"))).collect();
+    let jekts: Vec<AuditLogEntry> = (0..20).map(|n| audit_entry(T0 + DAY_MS + n * 7, "Korp", "Opaz")).collect();
+    let a = Activity::new(&rows, Some(&jekts));
+    let req = |cursor: Option<String>, limit| AuditQueryReq { kinds: kinds(&["tool", "jekt"]), limit: Some(limit), cursor, ..Default::default() };
+    let whole = a.run(req(None, 200)).unwrap().entries;
+    assert_eq!(whole.len(), 110);
+    assert!(whole.windows(2).all(|w| (w[0].ts_ms, &w[0].id) > (w[1].ts_ms, &w[1].id)), "newest first, no repeat");
+
+    let (mut seen, mut cursor, mut pages) = (Vec::new(), None, 0);
+    loop {
+        let page = a.run(req(cursor.clone(), 17)).unwrap();
+        seen.extend(ids(&page.entries));
+        pages += 1;
+        match page.next_cursor {
+            Some(next) => cursor = Some(next),
+            None => break,
+        }
+    }
+    assert_eq!(pages, 7);
+    assert_eq!(seen, ids(&whole));
+}
+
+#[test]
+fn a_window_that_starts_after_a_day_does_not_read_it() {
+    let a = Activity::new(&[activity_row(T0, "tool", "old"), activity_row(T0 + 2 * DAY_MS, "tool", "new")], None);
+    let got = a.run(AuditQueryReq { kinds: kinds(&["tool"]), since_ms: Some(T0 + DAY_MS), ..Default::default() }).unwrap().entries;
+    assert_eq!(got.iter().map(|e| e.summary.as_str()).collect::<Vec<_>>(), vec!["new"]);
+}
+
+#[test]
+fn a_cursor_with_a_bad_activity_position_is_refused() {
+    let a = Activity::new(&[], None);
+    // Five stores, each a time, an id and a place: the last two are the activity folders', which name a day and a byte.
+    let empty = ["-||-"; 3].join("|");
+    let bad_ones = [format!("5|{empty}|-||-|-||x"), format!("5|{empty}|-||2026-11-05:notabyte|-||-"), "5|-||-".to_string(), "6|-||-".to_string()];
+    for bad in bad_ones {
+        assert!(a.run(AuditQueryReq { cursor: Some(bad.clone()), ..Default::default() }).is_err(), "{bad}");
+    }
+}
+
+// ── provenance, and the two halves of a message
+
+fn half(ts: u64, msg: &str, sent: bool) -> AuditLogEntry {
+    AuditLogEntry {
+        event_kind: if sent { "sent" } else { "delivery" }.into(),
+        outcome: sent.then(|| "sent".to_string()),
+        msg_id: Some(msg.into()),
+        request_id: msg.into(),
+        tier: Some("host".into()),
+        trust: (!sent).then(|| "host-verified".to_string()),
+        host: Some("narko".into()),
+        channel: Some("dev".into()),
+        version: Some("0.60.16".into()),
+        ..audit_entry(ts, "Korp", "Opaz")
+    }
+}
+
+#[test]
+fn the_sent_and_delivered_lines_of_a_message_are_one_row_with_both_times_and_a_page_boundary_does_not_split_it() {
+    let mut lines = Vec::new();
+    for n in 0..30u64 {
+        lines.push(half(1_000 + n * 10, &format!("m{n}"), true));
+        lines.push(half(1_003 + n * 10, &format!("m{n}"), false));
+    }
+    let world = World::new(&lines);
+    let whole = world.all(AuditQueryReq::default());
+    assert_eq!(whole.len(), 30, "one row for each message");
+    for e in &whole {
+        let p = e.provenance.as_ref().unwrap();
+        assert_eq!((p.sent_ms, p.sent_only, p.tier.as_deref(), p.trust.as_deref()), (Some(e.ts_ms - 3), None, Some("host"), Some("host-verified")));
+        assert_eq!((p.host.as_deref(), p.channel.as_deref(), p.version.as_deref()), (Some("narko"), Some("dev"), Some("0.60.16")));
+    }
+    let (mut seen, mut cursor) = (Vec::new(), None);
+    loop {
+        let page = world.run(AuditQueryReq { limit: Some(7), cursor: cursor.clone(), ..Default::default() }).unwrap();
+        seen.extend(ids(&page.entries));
+        match page.next_cursor {
+            Some(next) => cursor = Some(next),
+            None => break,
+        }
+    }
+    assert_eq!(seen, ids(&whole), "no row repeated, none lost, none split from its other half");
+}
+
+#[test]
+fn a_sent_line_with_no_delivery_is_a_row_marked_other_end_not_seen_and_is_not_counted_in_the_totals() {
+    let world = World::new(&[half(1_000, "alone", true), half(2_000, "both", true), half(2_002, "both", false)]);
+    let got = world.run(AuditQueryReq { totals: Some(true), ..Default::default() }).unwrap();
+    assert_eq!(got.entries.len(), 2);
+    let alone = got.entries.iter().find(|e| e.provenance.as_ref().unwrap().msg_id.as_deref() == Some("alone")).unwrap();
+    assert_eq!(alone.provenance.as_ref().unwrap().sent_only, Some(true));
+    assert!(alone.summary.contains("sent"), "{}", alone.summary);
+    assert_eq!(got.totals.unwrap().entries, 1, "only the receiver's lines are counted, so a message is one entry and a lone sent line none");
+}
+
+#[test]
+fn old_lines_read_as_before_and_say_their_tier_only_where_they_prove_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("jekt-audit.jsonl");
+    let old = r#"{"timestamp":1000,"source_agent":"Korp","target_agent":"Opaz","block_id":"b","message_hash":"h","message_length":3,"success":true,"request_id":"r1","channel":"dev"}
+{"timestamp":2000,"source_agent":"Korp","target_agent":"Opaz","block_id":"b","message_hash":"h","message_length":3,"success":true,"request_id":"r2","wan":{"verified":true}}
+"#;
+    std::fs::write(&path, old).unwrap();
+    let world = World { _dir: dir, jekts: path, store: FileStore::open_in_memory().unwrap() };
+    let got = world.all(AuditQueryReq::default());
+    let tiers: Vec<_> = got.iter().map(|e| e.provenance.as_ref().map(|p| (p.tier.clone(), p.tier_inferred, p.channel.clone()))).collect();
+    assert_eq!(tiers, vec![Some((Some("cloud".to_string()), Some(true), None)), Some((None, None, Some("dev".to_string())))]);
 }

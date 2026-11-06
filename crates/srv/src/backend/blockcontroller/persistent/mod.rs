@@ -122,7 +122,6 @@ fn next_registration_nonce() -> u64 {
     NEXT_REGISTRATION_NONCE.fetch_add(1, Ordering::Relaxed) + 1
 }
 
-
 /// Should a spawn that attached NO `--resume` disclose itself as a fresh
 /// start (subject to the caller also confirming prior history actually
 /// exists — see `has_prior_transcript`)?
@@ -1585,6 +1584,7 @@ mod resume_retry;
 mod segments;
 pub(crate) use resume_retry::pane_history_session_id;
 mod spawn;
+mod spawn_steps;
 mod status;
 mod stderr_reader;
 mod stdout_reader;

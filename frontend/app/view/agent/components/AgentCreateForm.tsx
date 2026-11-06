@@ -125,19 +125,15 @@ export function friendlySubmitError(message: string, typedName: string): string 
     return message;
 }
 
-export const AgentCreateForm = (props: AgentCreateFormProps): JSX.Element => {
-    const draft = props.draft;
-    const [accountId, setAccountId] = createSignal("");
-    const [allAccounts, setAllAccounts] = createSignal<Account[]>([]);
-    // The account list has been fetched (or failed to): Create waits for it,
-    // since the first account is used without a field to show it.
-    const [accountsReady, setAccountsReady] = createSignal(false);
-    const [bundles, setBundles] = createSignal<Bundle[]>([]);
-    const [submitting, setSubmitting] = createSignal(false);
-    const [error, setError] = createSignal<string | null>(null);
-    createEffect(() => props.onBusyChange?.(submitting()));
-    onCleanup(() => props.onBusyChange?.(false));
 
+/** What the form's pieces read from the form: the template, the draft, and whether it is creating. */
+interface FieldProps {
+    draft: CreateDraft;
+    submitting: Accessor<boolean>;
+}
+
+/** The provider the template resolves to, and what depends on it: the custom endpoint and the model. */
+function useProviderChoice(props: AgentCreateFormProps, draft: CreateDraft) {
     // Through the same resolver `agentdefcreatefromtemplate` uses for the
     // clone's provider server-side (template.rs), so this form offers
     // accounts, models and endpoint support for the provider that actually
@@ -148,10 +144,6 @@ export const AgentCreateForm = (props: AgentCreateFormProps): JSX.Element => {
     // account field to correct it, so Create waits for this (`canSubmit`).
     const [resolvedTemplateProviderId] = createResource(() => props.template, resolveEffectiveLaunchProvider);
     const effectiveProviderId = () => resolvedTemplateProviderId() ?? props.template.provider;
-
-    // Derived, not filtered once at fetch time, so it reacts whichever of the
-    // account fetch and the provider resolution lands first (#2596).
-    const accounts = createMemo(() => allAccounts().filter((a) => a.provider === effectiveProviderId()));
 
     // Only providers that declare `baseUrlEnvVar` (currently just claude) can
     // be redirected to a custom endpoint; the backend rejects an override for
@@ -186,17 +178,12 @@ export const AgentCreateForm = (props: AgentCreateFormProps): JSX.Element => {
         draft.modelTouched = true;
         draft.setModel(v);
     };
+    return { resolvedTemplateProviderId, effectiveProviderId, supportsCustomEndpoint, modelOptions, pickModel };
+}
 
-    // ── Runtime (host vs container) ────────────────────────────────
-    // Decided here, when instantiating the template (a template is
-    // runtime-agnostic). The container is offered only when the CLI can run
-    // in one and Docker is reachable. The panel decides it before this form
-    // (its Tools and Install steps are host steps) and hands the answer in.
-    const runtime = props.runtime ?? useRuntimeChoice(props.template, draft, effectiveProviderId);
-    const { containerSupported, canPickContainer, imageAccess, pickRuntime } = runtime;
-
-    // The developer image is checked the same way, once it is chosen: a refusal or a missing image is told
-    // before Create, not by a container that never starts.
+/** The developer image is checked the same way, once it is chosen: a refusal or a missing image is told
+ *  before Create, not by a container that never starts. */
+function useDeveloperImageAccess(draft: CreateDraft, canPickContainer: Accessor<boolean>): Accessor<ContainerImageState> {
     const [developerAccess, setDeveloperAccess] = createSignal<ContainerImageState>(undefined);
     let developerCheckStarted = false;
     createEffect(() => {
@@ -211,6 +198,21 @@ export const AgentCreateForm = (props: AgentCreateFormProps): JSX.Element => {
             }
         })();
     });
+    return developerAccess;
+}
+
+/** The account and bundle lists, and the account the agent is created with. */
+function useAccountsAndBundles(effectiveProviderId: Accessor<string>) {
+    const [accountId, setAccountId] = createSignal("");
+    const [allAccounts, setAllAccounts] = createSignal<Account[]>([]);
+    // The account list has been fetched (or failed to): Create waits for it,
+    // since the first account is used without a field to show it.
+    const [accountsReady, setAccountsReady] = createSignal(false);
+    const [bundles, setBundles] = createSignal<Bundle[]>([]);
+
+    // Derived, not filtered once at fetch time, so it reacts whichever of the
+    // account fetch and the provider resolution lands first (#2596).
+    const accounts = createMemo(() => allAccounts().filter((a) => a.provider === effectiveProviderId()));
 
     // Accounts and bundles. An empty account ("No auth") is allowed: the agent
     // can be created before any account exists, and the launch gate asks for
@@ -240,27 +242,45 @@ export const AgentCreateForm = (props: AgentCreateFormProps): JSX.Element => {
     createEffect(() => {
         setAccountId(accounts()[0]?.id ?? "");
     });
+    return { accountId, accountsReady, realBundles };
+}
 
+interface SubmitState {
+    props: AgentCreateFormProps;
+    draft: CreateDraft;
+    submitting: Accessor<boolean>;
+    setSubmitting: Setter<boolean>;
+    setError: Setter<string | null>;
+    resolvedTemplateProviderId: { loading: boolean };
+    accountId: Accessor<string>;
+    accountsReady: Accessor<boolean>;
+    modelOptions: Accessor<{ value: string }[]>;
+    supportsCustomEndpoint: Accessor<boolean>;
+}
+
+/** Create: when it is allowed, what it sends and hands on, and Enter in a single-line field. */
+function useSubmit(s: SubmitState) {
+    const { props, draft } = s;
     const canSubmit = () =>
         draft.name().trim().length > 0
         && draft.name().trim().length <= 200
-        && accountsReady()
-        && !resolvedTemplateProviderId.loading
-        && !submitting();
+        && s.accountsReady()
+        && !s.resolvedTemplateProviderId.loading
+        && !s.submitting();
 
     const submit = async () => {
         if (!canSubmit()) return;
         const name = draft.name().trim();
         const agentType = draft.runtime();
         const bundleIds = draft.bundleIds();
-        const model = modelOptions().length > 0 ? draft.model() : "";
-        setSubmitting(true);
-        setError(null);
+        const model = s.modelOptions().length > 0 ? draft.model() : "";
+        s.setSubmitting(true);
+        s.setError(null);
         try {
             const resp = await RpcApi.AgentDefCreateFromTemplateCommand(TabRpcClient, {
                 template_id: props.template.id,
                 name,
-                identity_id: accountId(),
+                identity_id: s.accountId(),
                 // Only echoed back, for the launch's record of a bundle (first
                 // pick); the agent still gets a fresh bundle of its own.
                 memory_id: bundleIds[0] ?? "",
@@ -268,7 +288,7 @@ export const AgentCreateForm = (props: AgentCreateFormProps): JSX.Element => {
                 // Persisted on the new definition so later launches use it.
                 agent_type: agentType,
                 // Always sent: the form always has a concrete value.
-                model_vendor_base_url: supportsCustomEndpoint() ? draft.modelVendorBaseUrl().trim() : "",
+                model_vendor_base_url: s.supportsCustomEndpoint() ? draft.modelVendorBaseUrl().trim() : "",
                 // Only the developer image is asked for; otherwise the agent keeps its template's image.
                 container_image: containerImageForChoice(agentType, draft.containerImage()),
             });
@@ -282,9 +302,9 @@ export const AgentCreateForm = (props: AgentCreateFormProps): JSX.Element => {
                 slug: resp.slug,
             });
         } catch (e) {
-            setError(friendlySubmitError((e as Error)?.message ?? String(e), name));
+            s.setError(friendlySubmitError((e as Error)?.message ?? String(e), name));
         } finally {
-            setSubmitting(false);
+            s.setSubmitting(false);
         }
     };
 
@@ -295,160 +315,244 @@ export const AgentCreateForm = (props: AgentCreateFormProps): JSX.Element => {
             void submit();
         }
     };
+    return { canSubmit, submit, onKeyDown };
+}
+
+const NameField = (props: FieldProps & { onKeyDown: (e: KeyboardEvent) => void }): JSX.Element => (
+    <label class="agent-create-form-field">
+        <span class="agent-create-form-label">Name</span>
+        <TextInput
+            class="agent-create-form-input"
+            autofocus
+            placeholder="Choose a name"
+            value={props.draft.name()}
+            onInput={(e) => props.draft.setName(e.currentTarget.value)}
+            onKeyDown={props.onKeyDown}
+            maxlength={200}
+            disabled={props.submitting()}
+            data-testid="create-from-template-name-input"
+        />
+        <span class="agent-create-form-note">
+            Name it for its job, like Reviewer or Docs writer, so you can tell your agents apart.
+        </span>
+    </label>
+);
+
+const RuntimeField = (props: FieldProps & { template: AgentDefinition; runtime: RuntimeChoice }): JSX.Element => {
+    const { containerSupported, canPickContainer, imageAccess, pickRuntime } = props.runtime;
+    return (
+        <label class="agent-create-form-field">
+            <span class="agent-create-form-label">Runtime</span>
+            <Select
+                class="agent-create-form-input"
+                value={props.draft.runtime()}
+                onChange={(v) => pickRuntime(v as "host" | "container")}
+                disabled={props.submitting()}
+                data-testid="create-from-template-runtime-select"
+            >
+                <option value="host">Native (runs on this computer)</option>
+                <option value="container" disabled={!canPickContainer()}>
+                    Container (runs in Docker)
+                    {canPickContainer() ? "" : " — Docker not detected"}
+                </option>
+            </Select>
+            <span class="agent-create-form-note" data-testid="create-from-template-runtime-note">
+                Container: runs in Docker, sandboxed. Native: runs on this computer with your files and tools.
+            </span>
+            <Show when={containerSupported() && containerImageNote(imageAccess())}>
+                {(note) => (
+                    <span class="agent-create-form-note" data-testid="create-from-template-image-note">
+                        {note()}
+                    </span>
+                )}
+            </Show>
+            <Show when={!containerSupported()}>
+                <span class="agent-create-form-note">{props.template.name} can only run as a Native agent.</span>
+            </Show>
+        </label>
+    );
+};
+
+const ContainerImageField = (props: FieldProps & { developerAccess: Accessor<ContainerImageState> }): JSX.Element => (
+    <label class="agent-create-form-field">
+        <span class="agent-create-form-label">Container image</span>
+        <Select
+            class="agent-create-form-input"
+            value={props.draft.containerImage()}
+            onChange={(v) => props.draft.setContainerImage(v as ContainerImageChoice)}
+            disabled={props.submitting()}
+            data-testid="create-from-template-image-select"
+        >
+            <option value="standard">Standard (the agent and its tools)</option>
+            <option value="developer">Developer (also builds software)</option>
+        </Select>
+        <span class="agent-create-form-note" data-testid="create-from-template-image-choice-note">
+            {props.draft.containerImage() === "developer"
+                ? "Adds Rust, a C toolchain, go-task and a headless display, so the agent can build and run projects (about 660 MB to download, on top of the standard image)."
+                : "The smallest image: the agent, git, GitHub CLI and Python."}
+        </span>
+        <Show when={props.draft.containerImage() === "developer" && developerImageNote(props.developerAccess())}>
+            {(note) => (
+                <span class="agent-create-form-note" data-testid="create-from-template-developer-image-note">
+                    {note()}
+                </span>
+            )}
+        </Show>
+    </label>
+);
+
+const ModelField = (
+    props: FieldProps & { template: AgentDefinition; modelOptions: Accessor<{ value: string; label: string }[]>; pickModel: (v: string) => void },
+): JSX.Element => (
+    <label class="agent-create-form-field">
+        <span class="agent-create-form-label">Model</span>
+        <Select
+            class="agent-create-form-input"
+            value={props.draft.model()}
+            onChange={(v) => props.pickModel(v)}
+            disabled={props.submitting()}
+            data-testid="create-from-template-model-select"
+        >
+            <For each={props.modelOptions()}>{(m) => <option value={m.value}>{m.label}</option>}</For>
+        </Select>
+        <span class="agent-create-form-note">
+            Which model {props.template.name} runs with. Changeable later from the agent pane's runtime
+            picker.
+        </span>
+    </label>
+);
+
+const VendorField = (props: FieldProps & { providerId: Accessor<string>; onKeyDown: (e: KeyboardEvent) => void }): JSX.Element => (
+    <label class="agent-create-form-field">
+        <span class="agent-create-form-label">Model Vendor / Custom Endpoint</span>
+        <TextInput
+            class="agent-create-form-input"
+            placeholder={`Default (${PROVIDERS[props.providerId()]?.baseUrlEnvVar})`}
+            value={props.draft.modelVendorBaseUrl()}
+            onInput={(e) => props.draft.setModelVendorBaseUrl(e.currentTarget.value)}
+            onKeyDown={props.onKeyDown}
+            disabled={props.submitting()}
+            data-testid="create-from-template-vendor-base-url-input"
+        />
+        <span class="agent-create-form-note">
+            Redirect this agent's harness at a custom API endpoint (e.g. a proxy or alternate model
+            backend) instead of the default vendor. Leave blank to use the default.
+        </span>
+    </label>
+);
+
+const BundlesField = (props: FieldProps & { bundles: Accessor<Bundle[]> }): JSX.Element => (
+    // Several controls, so a group, not a <label>. Starts empty: the
+    // agent gets Global Memory and its own bundle.
+    <div class="agent-create-form-field" role="group" aria-labelledby="create-from-template-bundles-label">
+        <span class="agent-create-form-label" id="create-from-template-bundles-label">
+            Bundles
+        </span>
+        <BundleListEditor
+            bundles={props.bundles()}
+            value={props.draft.bundleIds()}
+            onChange={props.draft.setBundleIds}
+            disabled={props.submitting()}
+            testId="create-from-template-bundles"
+        />
+        <span class="agent-create-form-note">
+            In order: when two bundles name the same skill, the first wins.
+        </span>
+    </div>
+);
+
+const FormActions = (props: {
+    submitting: Accessor<boolean>;
+    canSubmit: () => boolean;
+    error: Accessor<string | null>;
+    onCancel: () => void;
+    onSubmit: () => void;
+}): JSX.Element => (
+    <>
+        <Show when={props.error()}>
+            <div class="agent-create-form-error" role="alert" data-testid="create-from-template-error">
+                {props.error()}
+            </div>
+        </Show>
+        <div class="agent-create-actions">
+            <Button tone="neutral" onClick={() => props.onCancel()} disabled={props.submitting()}>
+                Cancel
+            </Button>
+            <Button
+                tone="accent"
+                busy={props.submitting()}
+                onClick={() => props.onSubmit()}
+                disabled={!props.canSubmit()}
+                data-testid="create-from-template-submit"
+            >
+                {props.submitting() ? "Creating…" : "Create and start"}
+            </Button>
+        </div>
+    </>
+);
+
+export const AgentCreateForm = (props: AgentCreateFormProps): JSX.Element => {
+    const draft = props.draft;
+    const [submitting, setSubmitting] = createSignal(false);
+    const [error, setError] = createSignal<string | null>(null);
+    createEffect(() => props.onBusyChange?.(submitting()));
+    onCleanup(() => props.onBusyChange?.(false));
+
+    const provider = useProviderChoice(props, draft);
+    // ── Runtime (host vs container) ────────────────────────────────
+    // Decided here, when instantiating the template (a template is
+    // runtime-agnostic). The container is offered only when the CLI can run
+    // in one and Docker is reachable. The panel decides it before this form
+    // (its Tools and Install steps are host steps) and hands the answer in.
+    const runtime = props.runtime ?? useRuntimeChoice(props.template, draft, provider.effectiveProviderId);
+    const developerAccess = useDeveloperImageAccess(draft, runtime.canPickContainer);
+    const lists = useAccountsAndBundles(provider.effectiveProviderId);
+    const { canSubmit, submit, onKeyDown } = useSubmit({
+        props,
+        draft,
+        submitting,
+        setSubmitting,
+        setError,
+        resolvedTemplateProviderId: provider.resolvedTemplateProviderId,
+        accountId: lists.accountId,
+        accountsReady: lists.accountsReady,
+        modelOptions: provider.modelOptions,
+        supportsCustomEndpoint: provider.supportsCustomEndpoint,
+    });
 
     return (
         <div class="agent-create-form" data-testid="agent-create-form">
-            <Show when={modelOptions().length > 0}>
+            <Show when={provider.modelOptions().length > 0}>
                 <p class="agent-create-form-hint">
                     {props.template.name} is the <strong>harness</strong>, the CLI tool that runs this agent. Pick which{" "}
                     <strong>model</strong> it uses below; the harness stays the same either way.
                 </p>
             </Show>
-            <label class="agent-create-form-field">
-                <span class="agent-create-form-label">Name</span>
-                <TextInput
-                    class="agent-create-form-input"
-                    autofocus
-                    placeholder="Choose a name"
-                    value={draft.name()}
-                    onInput={(e) => draft.setName(e.currentTarget.value)}
-                    onKeyDown={onKeyDown}
-                    maxlength={200}
-                    disabled={submitting()}
-                    data-testid="create-from-template-name-input"
+            <NameField draft={draft} submitting={submitting} onKeyDown={onKeyDown} />
+            <RuntimeField draft={draft} submitting={submitting} template={props.template} runtime={runtime} />
+            <Show when={isContainerRuntime(draft.runtime()) && runtime.containerSupported()}>
+                <ContainerImageField draft={draft} submitting={submitting} developerAccess={developerAccess} />
+            </Show>
+            <Show when={provider.modelOptions().length > 0}>
+                <ModelField
+                    draft={draft}
+                    submitting={submitting}
+                    template={props.template}
+                    modelOptions={provider.modelOptions}
+                    pickModel={provider.pickModel}
                 />
-                <span class="agent-create-form-note">
-                    Name it for its job, like Reviewer or Docs writer, so you can tell your agents apart.
-                </span>
-            </label>
-            <label class="agent-create-form-field">
-                <span class="agent-create-form-label">Runtime</span>
-                <Select
-                    class="agent-create-form-input"
-                    value={draft.runtime()}
-                    onChange={(v) => pickRuntime(v as "host" | "container")}
-                    disabled={submitting()}
-                    data-testid="create-from-template-runtime-select"
-                >
-                    <option value="host">Native (runs on this computer)</option>
-                    <option value="container" disabled={!canPickContainer()}>
-                        Container (runs in Docker)
-                        {canPickContainer() ? "" : " — Docker not detected"}
-                    </option>
-                </Select>
-                <span class="agent-create-form-note" data-testid="create-from-template-runtime-note">
-                    Container: runs in Docker, sandboxed. Native: runs on this computer with your files and tools.
-                </span>
-                <Show when={containerSupported() && containerImageNote(imageAccess())}>
-                    {(note) => (
-                        <span class="agent-create-form-note" data-testid="create-from-template-image-note">
-                            {note()}
-                        </span>
-                    )}
-                </Show>
-                <Show when={!containerSupported()}>
-                    <span class="agent-create-form-note">{props.template.name} can only run as a Native agent.</span>
-                </Show>
-            </label>
-            <Show when={isContainerRuntime(draft.runtime()) && containerSupported()}>
-                <label class="agent-create-form-field">
-                    <span class="agent-create-form-label">Container image</span>
-                    <Select
-                        class="agent-create-form-input"
-                        value={draft.containerImage()}
-                        onChange={(v) => draft.setContainerImage(v as ContainerImageChoice)}
-                        disabled={submitting()}
-                        data-testid="create-from-template-image-select"
-                    >
-                        <option value="standard">Standard (the agent and its tools)</option>
-                        <option value="developer">Developer (also builds software)</option>
-                    </Select>
-                    <span class="agent-create-form-note" data-testid="create-from-template-image-choice-note">
-                        {draft.containerImage() === "developer"
-                            ? "Adds Rust, a C toolchain, go-task and a headless display, so the agent can build and run projects (about 660 MB to download, on top of the standard image)."
-                            : "The smallest image: the agent, git, GitHub CLI and Python."}
-                    </span>
-                    <Show when={draft.containerImage() === "developer" && developerImageNote(developerAccess())}>
-                        {(note) => (
-                            <span class="agent-create-form-note" data-testid="create-from-template-developer-image-note">
-                                {note()}
-                            </span>
-                        )}
-                    </Show>
-                </label>
             </Show>
-            <Show when={modelOptions().length > 0}>
-                <label class="agent-create-form-field">
-                    <span class="agent-create-form-label">Model</span>
-                    <Select
-                        class="agent-create-form-input"
-                        value={draft.model()}
-                        onChange={(v) => pickModel(v)}
-                        disabled={submitting()}
-                        data-testid="create-from-template-model-select"
-                    >
-                        <For each={modelOptions()}>{(m) => <option value={m.value}>{m.label}</option>}</For>
-                    </Select>
-                    <span class="agent-create-form-note">
-                        Which model {props.template.name} runs with. Changeable later from the agent pane's runtime
-                        picker.
-                    </span>
-                </label>
+            <Show when={provider.supportsCustomEndpoint()}>
+                <VendorField draft={draft} submitting={submitting} providerId={provider.effectiveProviderId} onKeyDown={onKeyDown} />
             </Show>
-            <Show when={supportsCustomEndpoint()}>
-                <label class="agent-create-form-field">
-                    <span class="agent-create-form-label">Model Vendor / Custom Endpoint</span>
-                    <TextInput
-                        class="agent-create-form-input"
-                        placeholder={`Default (${PROVIDERS[effectiveProviderId()]?.baseUrlEnvVar})`}
-                        value={draft.modelVendorBaseUrl()}
-                        onInput={(e) => draft.setModelVendorBaseUrl(e.currentTarget.value)}
-                        onKeyDown={onKeyDown}
-                        disabled={submitting()}
-                        data-testid="create-from-template-vendor-base-url-input"
-                    />
-                    <span class="agent-create-form-note">
-                        Redirect this agent's harness at a custom API endpoint (e.g. a proxy or alternate model
-                        backend) instead of the default vendor. Leave blank to use the default.
-                    </span>
-                </label>
-            </Show>
-            {/* Several controls, so a group, not a <label>. Starts empty: the
-                agent gets Global Memory and its own bundle. */}
-            <div class="agent-create-form-field" role="group" aria-labelledby="create-from-template-bundles-label">
-                <span class="agent-create-form-label" id="create-from-template-bundles-label">
-                    Bundles
-                </span>
-                <BundleListEditor
-                    bundles={realBundles()}
-                    value={draft.bundleIds()}
-                    onChange={draft.setBundleIds}
-                    disabled={submitting()}
-                    testId="create-from-template-bundles"
-                />
-                <span class="agent-create-form-note">
-                    In order: when two bundles name the same skill, the first wins.
-                </span>
-            </div>
-            <Show when={error()}>
-                <div class="agent-create-form-error" role="alert" data-testid="create-from-template-error">
-                    {error()}
-                </div>
-            </Show>
-            <div class="agent-create-actions">
-                <Button tone="neutral" onClick={() => props.onCancel()} disabled={submitting()}>
-                    Cancel
-                </Button>
-                <Button
-                    tone="accent"
-                    busy={submitting()}
-                    onClick={() => void submit()}
-                    disabled={!canSubmit()}
-                    data-testid="create-from-template-submit"
-                >
-                    {submitting() ? "Creating…" : "Create and start"}
-                </Button>
-            </div>
+            <BundlesField draft={draft} submitting={submitting} bundles={lists.realBundles} />
+            <FormActions
+                submitting={submitting}
+                canSubmit={canSubmit}
+                error={error}
+                onCancel={() => props.onCancel()}
+                onSubmit={() => void submit()}
+            />
         </div>
     );
 };

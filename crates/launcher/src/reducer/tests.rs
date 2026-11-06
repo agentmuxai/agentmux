@@ -1907,7 +1907,7 @@ fn opened_at_ms_preserved_on_duplicate_open() {
 #[test]
 fn hidden_since_open_drift_fires_at_most_once_per_window() {
     // Drift-storm regression guard. The smoke crash on v0.33.685
-    // ("New Window" from hamburger after a tear-off) was 170
+    // ("New Window" from AgentMux logo after a tear-off) was 170
     // identical HiddenSinceOpen events in 1s for the same label,
     // exhausting the renderer's V8 stack. Cap fires once per window
     // per session — subscribers still see the signal, no storm.

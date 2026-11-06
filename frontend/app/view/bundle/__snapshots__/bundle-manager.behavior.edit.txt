@@ -1,0 +1,31 @@
+ListBundlesCommand
+-- edit form
+  showing: detail
+  back: "Bundles"
+  form: Edit Bundle
+    input bundle-view-input value="Review kit" required ph="e.g. Claude-coder"
+    input bundle-view-input value="Reviews" ph="Short label shown in the launch picker"
+    select bundle-view-input value="claude"
+    textarea bundle-view-textarea value="Review it" ph="System prompt. The agent's soul."
+    by-provider: by provider: {}
+    buttons: Validate | Cancel | Save
+    helps: 5
+-- cancelled: the read-only view is back
+  showing: detail
+  back: "Bundles"
+  readonly: Review kit | Reviews | -
+  instructions: Review it / 9 characters
+  actions: Edit | Delete skills=skills for b1
+-- back from the form
+  showing: list
+  back: -
+  - — Blank (vanilla CLI) — / - / - {ui-card is-muted bundle-card}
+  - Global kit [GlobalInjected into all agents at launch] / For all / GlobalInjected into all agents at launch {ui-card bundle-card}
+  - Review kit / Reviews / claude {ui-card bundle-card}
+-- back from a new form
+  showing: list
+  back: -
+  - — Blank (vanilla CLI) — / - / - {ui-card is-muted bundle-card}
+  - Global kit [GlobalInjected into all agents at launch] / For all / GlobalInjected into all agents at launch {ui-card bundle-card}
+  - Review kit / Reviews / claude {ui-card bundle-card}
+edit button for blank: -

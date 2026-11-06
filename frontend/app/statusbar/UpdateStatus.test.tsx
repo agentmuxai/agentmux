@@ -12,6 +12,7 @@ const updateDownload = vi.fn();
 const upgradeRestart = vi.fn();
 const upgradeCancel = vi.fn();
 const storeCheck = vi.fn();
+const cameBack = vi.fn();
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         AppUpdateStatusCommand: (...a: unknown[]) => updateStatus(...a),
@@ -26,6 +27,7 @@ vi.mock("@/util/app-api", () => ({
             appUpdate: (action: string, now?: boolean) =>
                 action === "download" ? updateDownload() : action === "restart" ? upgradeRestart(now) : upgradeCancel(),
             storeUpdateCheck: () => storeCheck(),
+            storeUpdateCameBack: () => cameBack(),
         },
     }),
 }));
@@ -44,7 +46,17 @@ vi.mock("@/store/global", async (importOriginal) => {
     };
 });
 
-import { acceptAppUpdate, appUpdate, availableRelease, forgetStoreOffer, releaseDownload } from "@/app/store/app-update";
+import {
+    acceptAppUpdate,
+    appUpdate,
+    availableRelease,
+    forgetStoreOffer,
+    releaseDownload,
+    setStoreStayed,
+    stagedRelease,
+    stagedUrgency,
+} from "@/app/store/app-update";
+import { notifications, setNotifications } from "@/app/store/flash-notifications";
 import { MaintenanceSection } from "./MaintenanceSection";
 import { UpdateStatus } from "./UpdateStatus";
 
@@ -75,6 +87,9 @@ beforeEach(() => {
     installAppUpdate.mockReset();
     storeUpdate.mockReset().mockResolvedValue({ outcome: "fallback", message: "" });
     storeCheck.mockReset().mockResolvedValue({ state: "available", message: "" });
+    cameBack.mockReset().mockResolvedValue({ state: "none", from: "", target: "" });
+    setStoreStayed(null);
+    setNotifications([]);
     forgetStoreOffer();
     revealInFileExplorer.mockReset().mockResolvedValue(undefined);
     acceptAppUpdate({ state: "unknown", current: "0.59.26", checked_ms: 0, install: "unknown", can_download: false });
@@ -112,6 +127,95 @@ describe("UpdateStatus chip", () => {
         expect(opened).toHaveBeenCalledTimes(1);
         expect(installAppUpdate).not.toHaveBeenCalled();
         window.removeEventListener("agentmux:open-version-panel", opened);
+    });
+});
+
+describe("UpdateStatus chip, once srv has staged the release by itself", () => {
+    it("shows no chip while the release is still downloading: there is nothing to click", async () => {
+        updateStatus.mockResolvedValue(download("downloading"));
+        render(() => <UpdateStatus />);
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(screen.queryByText("Update to 0.59.27")).toBeNull();
+        expect(screen.queryByText("Restart to update")).toBeNull();
+        cleanup();
+        updateStatus.mockResolvedValue(download("unpacking"));
+        render(() => <UpdateStatus />);
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(screen.queryByText("Restart to update")).toBeNull();
+    });
+
+    it("reads Restart to update, and the click opens What's new / Later / Restart now without restarting", async () => {
+        updateStatus.mockResolvedValue(download("ready", { folder: "C:/apps/x" }));
+        render(() => <UpdateStatus />);
+        fireEvent.click(await screen.findByText("Restart to update"));
+        expect(await screen.findByText("AgentMux 0.59.27 is ready")).toBeTruthy();
+        expect(upgradeRestart).not.toHaveBeenCalled();
+        expect(screen.getByRole("button", { name: "What's new" })).toBeTruthy();
+        fireEvent.click(screen.getByRole("button", { name: "What's new" }));
+        expect(openLink).toHaveBeenCalledWith("https://github.com/agentmuxai/agentmux/releases/tag/v0.59.27");
+        fireEvent.click(screen.getByRole("button", { name: "Later" }));
+        expect(screen.queryByText("AgentMux 0.59.27 is ready")).toBeNull();
+        // The chip stays: Later is not a dismissal of the update.
+        expect(screen.getByText("Restart to update")).toBeTruthy();
+    });
+
+    it("Restart now asks for the same restart as the version panel, through the host", async () => {
+        updateStatus.mockResolvedValue(download("ready", { folder: "C:/apps/x" }));
+        upgradeRestart.mockResolvedValue(download("waiting", { folder: "C:/apps/x", waiting_for: 2 }));
+        render(() => <UpdateStatus />);
+        fireEvent.click(await screen.findByText("Restart to update"));
+        fireEvent.click(await screen.findByRole("button", { name: "Restart now" }));
+        expect(upgradeRestart).toHaveBeenCalledWith(false);
+        // Agents are mid-turn: the panel says so and offers to stop waiting or go anyway.
+        expect(await screen.findByText("Waiting for 2 agents to finish their turn.")).toBeTruthy();
+        fireEvent.click(screen.getByRole("button", { name: "Restart anyway" }));
+        expect(upgradeRestart).toHaveBeenLastCalledWith(true);
+        expect(installAppUpdate).not.toHaveBeenCalled();
+    });
+
+    it("says why a restart that was refused did not start", async () => {
+        updateStatus.mockResolvedValue(download("ready", { folder: "C:/apps/x" }));
+        upgradeRestart.mockRejectedValue(new Error("an upgrade is already under way"));
+        render(() => <UpdateStatus />);
+        fireEvent.click(await screen.findByText("Restart to update"));
+        fireEvent.click(await screen.findByRole("button", { name: "Restart now" }));
+        expect(await screen.findByText("an upgrade is already under way")).toBeTruthy();
+    });
+
+    it("a release srv found but could not stage still opens the version panel", async () => {
+        updateStatus.mockResolvedValue(download("failed", { error: "disk full" }));
+        const opened = vi.fn();
+        window.addEventListener("agentmux:open-version-panel", opened);
+        render(() => <UpdateStatus />);
+        fireEvent.click(await screen.findByText("Update to 0.59.27"));
+        expect(opened).toHaveBeenCalledTimes(1);
+        window.removeEventListener("agentmux:open-version-panel", opened);
+    });
+});
+
+describe("staged release helpers", () => {
+    it("stagedRelease is the release once it is ready, waiting or restarting, never before", () => {
+        expect(stagedRelease(download("ready") as never)).toEqual({ version: "0.59.27", state: "ready", waitingFor: 0 });
+        expect(stagedRelease(download("waiting", { waiting_for: 3 }) as never)?.waitingFor).toBe(3);
+        expect(stagedRelease(download("restarting") as never)?.state).toBe("restarting");
+        for (const state of ["downloading", "unpacking", "failed"]) expect(stagedRelease(download(state) as never)).toBeNull();
+        expect(stagedRelease(PORTABLE as never)).toBeNull();
+        // A download of an older release is not this release staged.
+        expect(stagedRelease({ ...download("ready"), latest: "0.59.28" } as never)).toBeNull();
+    });
+
+    it("the chip warms after 2 days of the release being out and again after 4", () => {
+        const published = "2026-11-01T00:00:00Z";
+        const at = (days: number) => Date.parse(published) + days * 24 * 60 * 60 * 1000;
+        const s = { ...download("ready"), published_at: published } as never;
+        expect(stagedUrgency(s, at(1.9))).toBe("calm");
+        expect(stagedUrgency(s, at(2))).toBe("warm");
+        expect(stagedUrgency(s, at(3.9))).toBe("warm");
+        expect(stagedUrgency(s, at(4))).toBe("hot");
+        // No publish date: nothing nags.
+        expect(stagedUrgency(download("ready") as never, at(30))).toBe("calm");
     });
 });
 
@@ -377,6 +481,15 @@ describe("Maintenance on a Microsoft Store install", () => {
         expect(screen.queryByText("Update to 0.59.27")).toBeNull();
     });
 
+    it("when the Store never answers: says so plainly and offers nothing", async () => {
+        storeCheck.mockResolvedValue({ state: "no_answer", message: "" });
+        updateStatus.mockResolvedValue(STORE);
+        render(() => <MaintenanceSection />);
+        expect(await screen.findByText("v0.59.27 is released. The Microsoft Store didn't answer; try again later.")).toBeTruthy();
+        expect(screen.queryByRole("button", { name: "Update in the Store" })).toBeNull();
+        expect(screen.queryByText("Update to 0.59.27")).toBeNull();
+    });
+
     it("a host whose Store call throws is the same: unknown, nothing offered", async () => {
         storeCheck.mockRejectedValue(new Error("host went away"));
         updateStatus.mockResolvedValue(STORE);
@@ -413,9 +526,47 @@ describe("Maintenance on a Microsoft Store install", () => {
         }
     });
 
+    it("says before the click that the Store closes AgentMux and opens it again", async () => {
+        updateStatus.mockResolvedValue(STORE);
+        render(() => <MaintenanceSection />);
+        await screen.findByRole("button", { name: "Update in the Store" });
+        expect(screen.getByText("The Store closes AgentMux while it installs v0.59.27, then opens it again.")).toBeTruthy();
+    });
+
+    it("passes the release being installed to the host, so a restart can tell what it came back from", async () => {
+        updateStatus.mockResolvedValue(STORE);
+        render(() => <MaintenanceSection />);
+        fireEvent.click(await screen.findByRole("button", { name: "Update in the Store" }));
+        await vi.waitFor(() => expect(storeUpdate).toHaveBeenCalledWith("0.59.27"));
+    });
+
+    it("on a start that came back updated, tells the person once", async () => {
+        cameBack.mockResolvedValue({ state: "updated", from: "0.59.26", target: "0.59.27" });
+        render(() => <UpdateStatus />);
+        await vi.waitFor(() => expect(notifications().map((n) => n.message)).toContain("Updated to v0.59.27 through the Microsoft Store."));
+        expect(notifications()).toHaveLength(1);
+    });
+
+    it("on a start that stayed on the old version, says the install did not happen, in a toast and in the panel", async () => {
+        cameBack.mockResolvedValue({ state: "stayed", from: "0.59.26", target: "0.59.27" });
+        updateStatus.mockResolvedValue(STORE);
+        render(() => (
+            <>
+                <UpdateStatus />
+                <MaintenanceSection />
+            </>
+        ));
+        const line = "The Store closed AgentMux to install v0.59.27, but this is still v0.59.26. Try Update in the Store again, or install it from the Microsoft Store app.";
+        expect(await screen.findByText(line)).toBeTruthy();
+        expect(notifications().some((n) => n.message === line && n.persistent)).toBe(true);
+        // Trying again clears it.
+        fireEvent.click(await screen.findByRole("button", { name: "Update in the Store" }));
+        await vi.waitFor(() => expect(screen.queryByText(line)).toBeNull());
+    });
+
     it("asks the Store to install it first, and opens the Store page only when the Store can't", async () => {
         updateStatus.mockResolvedValue(STORE);
-        storeUpdate.mockResolvedValue({ outcome: "installed", message: "The Store installed the update. AgentMux restarts to finish it." });
+        storeUpdate.mockResolvedValue({ outcome: "installed", message: "The Store installed the update. Open AgentMux again to use it." });
         render(() => <MaintenanceSection />);
         fireEvent.click(await screen.findByRole("button", { name: "Update in the Store" }));
         expect(await screen.findByText(/The Store installed the update/)).toBeTruthy();
@@ -434,15 +585,17 @@ describe("Maintenance on a Microsoft Store install", () => {
 
     it("falls back to the Store page, saying why, when the API refuses or throws", async () => {
         updateStatus.mockResolvedValue(STORE);
-        storeUpdate.mockResolvedValue({ outcome: "fallback", message: "Couldn't ask the Store to install it (no Store context); opening the Store page instead." });
+        storeUpdate.mockResolvedValue({ outcome: "fallback", message: "Couldn't ask the Store to install it (no Store context)." });
         render(() => <MaintenanceSection />);
         fireEvent.click(await screen.findByRole("button", { name: "Update in the Store" }));
-        expect(await screen.findByText(/opening the Store page instead/)).toBeTruthy();
+        expect(await screen.findByText("Couldn't ask the Store to install it (no Store context). Opened the Microsoft Store page to finish the update.")).toBeTruthy();
         expect(openLink).toHaveBeenCalledWith("ms-windows-store://pdp/?productid=9P9QCXNNCRK3");
         openLink.mockReset();
         storeUpdate.mockRejectedValue(new Error("host went away"));
         fireEvent.click(screen.getByRole("button", { name: "Update in the Store" }));
         await vi.waitFor(() => expect(openLink).toHaveBeenCalledWith("ms-windows-store://pdp/?productid=9P9QCXNNCRK3"));
+        // With no reason to give, the line still says the page was opened.
+        expect(await screen.findByText("Opened the Microsoft Store page to finish the update.")).toBeTruthy();
     });
 
     it("a Store install below the upgrade floor is not sent anywhere: the Store can't make the intermediate step", async () => {

@@ -1,0 +1,26 @@
+== inline, running
+<body>
+  <div>
+    <div class="accounts-chooser accounts-chooser--inline">
+      <div data-testid="inapp" data-provider-id="claude" data-provider-label="Anthropic" data-phase="starting" data-auth-url="">
+        <button>
+          "inapp-cancel"
+        <button>
+          "inapp-terminal"
+  call ResolveCliCommand [{},{"provider_id":"claude","cli_command":"claude","npm_package":"@anthropic-ai/claude-code","pinned_version":"2.1.288","windows_install_command":"irm https://claude.ai/install.ps1 | iex","unix_install_command":"curl -fsSL https://claude.ai/install.sh | bash"},{"timeout":120000}]
+  call ensureProviderAuthDir ["claude"]
+  run provider=claude cliPath=/usr/bin/claude authEnv={"CLAUDE_CONFIG_DIR":"/tmp/claude-auth"} existingAccountId=acc-1 linkTarget={"agentDefinitionId":"agent-1","blockId":"b1"} skipTier1=false awaitTier1Completion=true
+  console warn [login-window] reserve failed: Cannot read properties of undefined (reading 'reserveExternalWindow')
+== inline, signed in
+<body>
+  <div>
+    <div class="accounts-chooser accounts-chooser--inline">
+      <div class="accounts-chooser-modes">
+        <div class="oauth-byo-note">
+          "✓ Signed in to Anthropic."
+        <div class="identity-key-actions">
+          <button type="button" class="ui-button ui-tone-accent identity-btn identity-btn-primary">
+            "Done"
+  call ListAgentIdentities [{},{"agent_id":"agent-1"}]
+  call UnlinkAgentIdentity [{},{"agent_id":"agent-1","provider":"claude-code","silent":true}]
+  call refreshAccountCache []

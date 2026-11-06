@@ -6,7 +6,7 @@
  *  drawn from srv's record in the pane that asked, answered through the host,
  *  gone when srv's list drops them, never taking the composer's focus. */
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { UseRequest } from "@/types/rpc/UseRequest";
@@ -15,6 +15,8 @@ import type { VaultRequest } from "@/types/rpc/VaultRequest";
 vi.mock("@/app/store/mps", () => ({ onMuxEvent: () => () => {} }));
 vi.mock("@/app/notification/waiting-for-you", () => ({ startWaitingForYou: vi.fn(), endWaitingForYou: vi.fn() }));
 vi.mock("@/app/store/global", async (orig) => ({ ...(await orig<object>()), MOS: { getMuxObjectAtom: () => () => ({ oid: "pane" }) } }));
+const openedAt = vi.hoisted(() => vi.fn(async (_id?: string) => {}));
+vi.mock("@/app/view/vault/open-vault", () => ({ openVault: vi.fn(async () => {}), openVaultAt: openedAt }));
 
 let uses: UseRequest[] = [];
 let requests: VaultRequest[] = [];
@@ -27,7 +29,9 @@ vi.mock("@/util/app-api", () => ({ getApi: () => ({ approvals: { vault } }) }));
 import { __resetPaneRequests, paneRequests } from "@/app/store/pane-requests";
 import { PaneRequestDock } from "@/app/view/agent/pane-requests/PaneRequestDock";
 import { refreshVault } from "@/app/view/vault/vault-store";
-import { askedInPane } from "@/app/view/vault/vault-use-prompts";
+import { VaultRequestsList } from "@/app/view/vault/vault-requests-list";
+import { VaultRequestsStatus } from "@/app/statusbar/VaultRequestsStatus";
+import { VaultRowAsks } from "./vault-row-asks";
 import { startVaultRequestCards } from "./vault-request-cards";
 
 const PANE = "agent-pane-1";
@@ -62,6 +66,7 @@ const request = (over: Partial<VaultRequest> = {}): VaultRequest => ({
     why: "run the migrations",
     requested_ms: Date.now(),
     block_id: PANE,
+    vault: "",
     ...over,
 });
 const calls = (op: string) => vault.mock.calls.filter((c) => c[0] === op).map((c) => c[1] ?? {});
@@ -179,9 +184,76 @@ describe("an agent's Vault requests as cards in its pane", () => {
         expect(deny.nextElementSibling).toBe(yeses);
     });
 
-    it("leaves a request with no pane to the window's prompt", () => {
-        expect(askedInPane(use())).toBe(true);
-        expect(askedInPane(use({ block_id: "" }))).toBe(false);
-        expect(askedInPane(request({ block_id: "" }))).toBe(false);
+    it("denies all from an agent waiting on more than one, uses and asks for entries alike, whatever the agent's case", async () => {
+        uses = [use(), use({ id: "use-2", entry_label: "Stripe key" })];
+        requests = [request({ agent: "builder" })];
+        await refreshVault();
+        render(() => <PaneRequestDock blockId={PANE} />);
+        fireEvent.click(await screen.findByRole("button", { name: /^Deny all 3 from builder$/i }));
+        await waitFor(() => expect(calls("answer_use")).toEqual(expect.arrayContaining([{ id: "use-1", decision: "deny" }, { id: "use-2", decision: "deny" }])));
+        await waitFor(() => expect(calls("decline_request")).toEqual([{ request_id: "req-1" }]));
+    });
+
+    it("asks a request with no pane on screen in the Vault pane's list, not in any pane", async () => {
+        uses = [use({ block_id: "", entry_label: "Parked token" })];
+        requests = [request({ block_id: "", label: "Parked URL" })];
+        await refreshVault();
+        expect(paneRequests.of("")).toHaveLength(0);
+        render(() => <VaultRequestsList onFill={vi.fn()} focused={() => "req-1"} />);
+        const list = await screen.findByRole("region", { name: "Agents' requests" });
+        expect(list.textContent).toContain("Builder wants to run a command with your value");
+        expect(list.textContent).toContain("Parked URL");
+        expect([...list.querySelectorAll(".is-focused")].map((e) => (e as HTMLElement).dataset.request), "the one Answer sent the person to").toEqual(["req-1"]);
+        fireEvent.click(within(list).getByRole("button", { name: "Deny" }));
+        await waitFor(() => expect(calls("answer_use")).toEqual([{ id: "use-1", decision: "deny" }]));
+    });
+
+    it("keeps what the person typed in the Vault pane's list when srv's lists refresh", async () => {
+        const typed = () => use({ block_id: "", needs_value: true, goes_ahead: false, command: "", origin: "https://irs.gov", field: "SSN", kind: "ssn" });
+        uses = [typed()];
+        await refreshVault();
+        render(() => <VaultRequestsList onFill={vi.fn()} />);
+        const item = await screen.findByRole("group");
+        const field = item.querySelector('input[type="password"]') as HTMLInputElement;
+        fireEvent.input(field, { target: { value: "987-65-4321" } });
+        // Another agent asks: srv sends both lists again, as fresh objects.
+        uses = [typed(), use({ id: "use-2", agent: "Other", block_id: "" })];
+        await refreshVault();
+        await waitFor(() => expect(screen.getAllByRole("group")).toHaveLength(2));
+        expect(screen.getAllByRole("group")[0], "the same item, not a new one").toBe(item);
+        expect((item.querySelector('input[type="password"]') as HTMLInputElement).value).toBe("987-65-4321");
+    });
+
+    it("follows the countdown to the next parked request when the first is answered", async () => {
+        uses = [use({ block_id: "", deadline_ms: Date.now() + 5_000 }), use({ id: "use-2", block_id: "", entry_label: "Second", deadline_ms: Date.now() + 30_000 })];
+        await refreshVault();
+        render(() => <VaultRowAsks agent="builder" />);
+        const line = await screen.findByTestId("vault-row-asks");
+        expect(line.textContent).toMatch(/goes ahead in 0:0[45]/);
+        uses = [uses[1]];
+        await refreshVault();
+        await waitFor(() => expect(line.textContent).toMatch(/Second · goes ahead in 0:(29|30)/));
+    });
+
+    it("shows a parked agent's request on its My agents row and counts it in the status bar", async () => {
+        uses = [use({ block_id: "", entry_label: "Parked token" }), use({ id: "use-2" })];
+        await refreshVault();
+        render(() => (
+            <>
+                <VaultRowAsks agent="builder" />
+                <VaultRequestsStatus />
+            </>
+        ));
+        const line = await screen.findByTestId("vault-row-asks");
+        expect(line.hasAttribute("data-operator-only")).toBe(true);
+        expect(line.textContent).toMatch(/Waiting for you in the Vault: Parked token · goes ahead in 0:(29|30)/);
+        expect(line.textContent, "the one in its pane is asked there").not.toContain("1 more");
+        const status = screen.getByRole("button", { name: /1 Vault request waits/ });
+        expect(status.textContent).toContain("1 Vault request");
+        fireEvent.click(within(line).getByRole("button", { name: "Answer" }));
+        fireEvent.click(status);
+        expect(openedAt.mock.calls, "both open the Vault on the parked request").toEqual([["use-1"], ["use-1"]]);
+        fireEvent.click(within(line).getByRole("button", { name: "Deny" }));
+        await waitFor(() => expect(calls("answer_use")).toEqual([{ id: "use-1", decision: "deny" }]));
     });
 });

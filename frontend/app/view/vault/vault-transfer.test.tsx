@@ -18,6 +18,7 @@ const entry = (id: string, label: string, kind: string, section: VaultEntryInfo[
     kind,
     section,
     label,
+    vault_id: "personal",
     fields: {},
     tags: [],
     parts_set: ["value"],

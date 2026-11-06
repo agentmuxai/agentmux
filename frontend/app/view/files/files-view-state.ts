@@ -11,6 +11,7 @@ import type { ContextMenuItem } from "@/app/components/context-menu";
 import { holdPaneContent, trackPaneContent } from "@/app/store/pane-content-holds";
 import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import { createEffect, createSignal, on, onCleanup } from "solid-js";
+import { createColumnWidths } from "./files-columns";
 import type { FilesModel } from "./files-model";
 import { TypeAhead } from "./typeahead";
 
@@ -23,6 +24,7 @@ interface FilesRefs {
     pathInput?: HTMLInputElement;
     crumbs?: HTMLElement;
     filterInput?: HTMLInputElement;
+    filterButton?: HTMLElement;
 }
 
 export function useFilesLocal(model: FilesModel, ctx: PaneTabHostContext) {
@@ -46,11 +48,28 @@ export function useFilesLocal(model: FilesModel, ctx: PaneTabHostContext) {
             refs.filterInput?.select();
         });
     };
+    // Escape: clear the filter and hide the box.
     const closeFilter = (): void => {
         model.setFilter("");
         setFilterOpen(false);
         refs.list?.focus();
     };
+    // Hide the box and keep what it says applied (the toolbar button shows that a filter is on).
+    const hideFilter = (): void => {
+        setFilterOpen(false);
+    };
+    const toggleFilter = (): void => (filterOpen() ? hideFilter() : openFilter());
+    // A press outside the box and the button hides the box, while it is shown.
+    createEffect(() => {
+        if (!filterOpen()) return;
+        const onPress = (e: Event): void => {
+            const target = e.target;
+            if (target instanceof Node && (refs.filterInput?.contains(target) || refs.filterButton?.contains(target))) return;
+            hideFilter();
+        };
+        document.addEventListener("pointerdown", onPress, true);
+        onCleanup(() => document.removeEventListener("pointerdown", onPress, true));
+    });
     // Navigating clears the filter (the model does); close the box with it.
     createEffect(
         on(model.path, () => {
@@ -89,7 +108,8 @@ export function useFilesLocal(model: FilesModel, ctx: PaneTabHostContext) {
         viewWidth, setViewWidth,
         editingPath, setEditingPath,
         filterOpen,
-        openFilter, closeFilter,
+        openFilter, closeFilter, hideFilter, toggleFilter,
+        columns: createColumnWidths(ctx),
         menu, setMenu,
         confirm, setConfirm,
         typeahead,

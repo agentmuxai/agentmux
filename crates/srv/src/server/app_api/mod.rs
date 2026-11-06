@@ -50,8 +50,10 @@ pub(crate) mod agent_open_remote;
 /// serialization. See REPORT_AGENT_OPEN_API_GAP_2026_09_06.md.
 pub(crate) use agent_open::open_agent_impl;
 /// The `Agents` `spawn` action's route (SPEC_AGENT_WORKERS_2026_10_15.md).
+pub(crate) mod agent_migrate_ids;
 pub(crate) mod agent_seats;
 pub(crate) mod agent_rename;
+pub(crate) mod agent_definition;
 pub(crate) mod agent_history_reclaim;
 pub(crate) mod agent_spawn;
 // pub(crate): `server/mod.rs`'s `/agentmux/agent/stop` handler (the
@@ -113,6 +115,7 @@ mod bookmarks;
 mod browser_profiles;
 mod browser_grants;
 mod pins;
+pub(crate) use browser_profiles::ensure_agent_profile as browser_ensure_agent_profile;
 pub(crate) use browser_profiles::list as browser_profiles_list;
 mod layout;
 mod other_build_layouts;

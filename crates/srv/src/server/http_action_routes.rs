@@ -81,7 +81,9 @@ pub(super) const PLUMBING: &[&str] = &[
 /// Recorded by the route's own handler when it goes through; a refusal is recorded by the layer.
 pub(super) const HANDLER: &[&str] = &[
     "POST /agentmux/reactive/inject", "POST /agentmux/reactive/inject-files", "POST /api/v1/agent/env",
-    "POST /api/v1/agent/seats", "POST /api/v1/agent/rename",
+    "POST /api/v1/agent/seats", "POST /api/v1/agent/rename", "POST /api/v1/agent/migrate-ids",
+    "POST /api/v1/agent/update", "POST /api/v1/agent/bundles", "POST /api/v1/agent/hide",
+    "POST /api/v1/agent/unhide",
 ];
 
 /// Answers a question or carries a stream; nothing it changes is kept.
@@ -98,7 +100,7 @@ pub(super) const NEVER: &[&str] = &[
     "POST /api/v1/shell/status", "POST /api/v1/ui/browser/actions", "POST /api/v1/ui/browser/dialogs",
     "POST /api/v1/ui/browser/find", "POST /api/v1/ui/browser/focus_info", "POST /api/v1/ui/browser/handoff_status", "POST /api/v1/ui/browser/snapshot",
     "POST /api/v1/ui/browser/wait_for", "POST /api/v1/ui/query", "POST /api/v1/ui/record", "POST /api/v1/ui/screenshot",
-    "POST /api/v1/ui/shortcuts/list", "POST /webhook/whatsapp",
+    "POST /api/v1/ui/shortcuts/list", "POST /api/v1/vault/list", "POST /webhook/whatsapp",
 ];
 
 /// How `route` (`"METHOD /template"`) is recorded; `None` for a route in no list.

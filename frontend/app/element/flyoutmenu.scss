@@ -64,11 +64,11 @@
 }
 
 // Mirrored layout for right-anchored (left-opening) menus — e.g. the macOS
-// far-right hamburger. Items run right-to-left: icon on the right, label
+// far-right AgentMux logo. Items run right-to-left: icon on the right, label
 // right-aligned, shortcut/chevron on the left, and the submenu chevron flips
 // to point LEFT (the direction the submenu opens). Best practice for
 // edge-anchored menus; scoped to .menu--mirrored so standard menus are
-// unaffected. See window/hamburger-menu.tsx + the `mirrored` prop on FlyoutMenu.
+// unaffected. See window/logo-menu.tsx + the `mirrored` prop on FlyoutMenu.
 .menu--mirrored {
     align-items: flex-end;
 

@@ -23,3 +23,16 @@
     min-height: 0;
     overflow-y: auto;
 }
+
+// A list of kit Cards (Skills, Bundles): an actions row over the grid.
+.primitive-card-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1-5);
+    padding: var(--space-2);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.primitive-card-body {
+    padding: var(--space-2);
+}

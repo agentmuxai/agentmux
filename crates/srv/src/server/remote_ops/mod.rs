@@ -16,6 +16,7 @@ pub(crate) mod agent_ops;
 pub(crate) mod app_ops;
 mod disk_ops;
 pub(crate) mod fleet_sync;
+mod google_ops;
 pub(crate) mod identity_ops;
 pub(crate) mod memory;
 pub(crate) mod op;
@@ -169,6 +170,10 @@ pub(crate) fn lookup(op: &str) -> Option<Op> {
         "identity.signin.start" => Op::write(|state, caller, params| Box::pin(signin_ops::start(state, caller, params))),
         "identity.signin.notice" => Op::write(|state, caller, params| Box::pin(signin_ops::notice(state, caller, params))),
         "identity.signin.finish" => Op::write(|state, caller, params| Box::pin(signin_ops::finish(state, caller, params))),
+        // The Google accounts connected here and who holds what (emails: personal data), and turning a
+        // service on or off for an agent here. `connect` has no remote form: the sign-in is the person's.
+        "google.status" => Op::read_personal(|state, caller, params| Box::pin(google_ops::status(state, caller, params))),
+        "google.grant" => Op::write(|state, caller, params| Box::pin(google_ops::grant(state, caller, params))),
         "agents.start" => Op::write(|state, caller, params| Box::pin(agent_ops::start(state, caller, params))),
         "agents.open" => Op::write(|state, caller, params| Box::pin(agent_ops::open(state, caller, params))),
         "agents.stop" => Op::write(|state, caller, params| Box::pin(agent_ops::stop(state, caller, params))),

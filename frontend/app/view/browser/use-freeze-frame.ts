@@ -16,7 +16,7 @@ export interface FreezeFrame {
 
 // ── Freeze-frame while airspace-hidden (macOS/Linux only) ──────────
 //
-// When a DOM overlay (hamburger menu, modal, …) intersects this pane, the
+// When a DOM overlay (AgentMux logo menu, modal, …) intersects this pane, the
 // host hides the ENTIRE native pane surface — there is no SetWindowRgn-style
 // hole punch off Windows — which exposes the bare placeholder and reads as
 // the pane "going black". Instead, capture the pane's last rendered frame

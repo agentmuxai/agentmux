@@ -53,6 +53,7 @@ pub const AGENT_ENV: &[EnvSpec] = &[
     spec("GIT_COMMITTER_EMAIL", Everywhere, "git identity: the agent's id"),
     // Switches the agent CLI reads.
     spec("CLAUDE_CODE_HARBOR_KITE", Everywhere, "cli_messaging's gate for the CLI"),
+    spec("ENABLE_CLAUDEAI_MCP_SERVERS", Everywhere, "claudeai_connectors' switch for the CLI"),
     spec("CLAUDE_CODE_SUBAGENT_MODEL", Everywhere, "the model the CLI's subagents use"),
     // GitHub through the broker: the same hand-off in a container, where the image finds the hooks.
     spec("AGENTMUX_GITHUB_BROKER", Everywhere, "tells the shell wrappers to ask srv for a GitHub token"),

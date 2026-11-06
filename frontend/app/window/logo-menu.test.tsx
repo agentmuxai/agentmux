@@ -1,0 +1,604 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * The AgentMux logo menu's shortcut labels must be the bindings keymodel.ts
+ * actually registers. They used to be hand-written, and three were wrong:
+ * "Ctrl+T" for New Tab on Windows/Linux (the binding is Cmd:t, i.e. Alt+T),
+ * "⌘⇧N" for New Window on macOS and "⌘P" for Command Palette on macOS (both
+ * bindings use Ctrl, which is Control on macOS too).
+ *
+ * These tests run the real registerGlobalKeys and the real key dispatcher
+ * (appHandleKeyDown). Only the actions at the edges are mocked, so a label
+ * that stops matching its binding fails here.
+ */
+
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import logoMark from "@/app/asset/logo-mark.svg?raw";
+import { cleanup, render } from "@solidjs/testing-library";
+import { createRoot, createSignal } from "solid-js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const h = vi.hoisted(() => {
+    const createTab = vi.fn();
+    const openNewWindow = vi.fn(() => Promise.resolve());
+    const openModal = vi.fn();
+    const CommandPaletteModal = () => null;
+    const store = {
+        atoms: { modalOpen: () => false, isTermMultiInput: () => false, client: () => null },
+        getAllBlockComponentModels: () => [],
+        getApi: () => ({
+            openNewWindow,
+            setKeyboardChordMode: vi.fn(),
+            toggleDevtools: vi.fn(),
+            openExternal: vi.fn(),
+            closeWindow: vi.fn(() => Promise.resolve()),
+        }),
+        setControlShiftDelayAtom: vi.fn(),
+        setIsTermMultiInput: vi.fn(),
+        // A test can swap in a reactive source (`settings.read`).
+        settingsAtom: () => settings.read(),
+    };
+    const settings = { read: (): Record<string, unknown> => ({}) };
+    const caps = { multiWindow: true };
+    // This window's resolved theme and opacity, and the drag in progress
+    // (window-appearance.ts / window-opacity-store.ts). A test can swap in
+    // reactive sources.
+    const win = {
+        theme: (): string => "default",
+        opacity: (): number => 1,
+        live: (): number | undefined => undefined,
+        setTheme: vi.fn((_: string) => Promise.resolve()),
+        setOpacity: vi.fn(),
+    };
+    // ☰ → Workspaces: the list srv gave, and the actions (workspaces.ts).
+    const workspaces = {
+        list: [] as { id: string; name: string; current: boolean }[],
+        refresh: vi.fn(() => Promise.resolve([])),
+    };
+    const actions = {
+        newWorkspace: vi.fn(),
+        switchWorkspace: vi.fn(),
+        importWorkspace: vi.fn(),
+        exportWorkspace: vi.fn(),
+        renameWorkspacePrompt: vi.fn(),
+        deleteWorkspacePrompt: vi.fn(),
+    };
+    // Dev mode (store/dev-mode.ts); a test can swap in a reactive source.
+    const dev = { read: (): boolean => false };
+    const registry = { getBlockComponentModel: () => null, getFocusedBlockId: () => null, openOrFocusPaneByView: vi.fn() };
+    return { registry, dev, workspaces, actions, createTab, openNewWindow, openModal, CommandPaletteModal, store, settings, caps, win, menu: { items: [] as MenuItem[], live: (): MenuItem[] => [], close: vi.fn() } };
+});
+
+// keymodel.ts imports the store as "@/app/store/global", the menu as "@/store/global".
+vi.mock("@/app/store/tab-actions", () => ({ createTab: h.createTab }));
+vi.mock("@/app/store/block-layout-actions", () => ({ replaceBlock: vi.fn() }));
+vi.mock("@/app/store/block-component-registry", () => h.registry);
+vi.mock("@/app/store/global", () => h.store);
+vi.mock("@/store/global", () => h.store);
+vi.mock("@/app/store/modalmodel", () => ({
+    modalsModel: { hasOpenModals: () => false, closeTopModal: vi.fn() },
+    openModal: h.openModal,
+}));
+vi.mock("@/app/modals/command-palette", () => ({ CommandPaletteModal: h.CommandPaletteModal }));
+vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { SetConfigCommand: vi.fn() } }));
+vi.mock("@/app/store/dev-mode", () => ({ devModeOn: () => h.dev.read() }));
+vi.mock("@/app/store/window-appearance", () => ({
+    currentWindowLabel: () => "win-a",
+    currentWindowTheme: () => h.win.theme(),
+    currentWindowOpacity: () => h.win.opacity(),
+    setCurrentWindowTheme: h.win.setTheme,
+    openNewWindowFromHere: () => h.openNewWindow(),
+}));
+vi.mock("@/app/store/window-opacity-store", () => ({
+    liveWindowOpacity: () => h.win.live(),
+    setWindowOpacityFor: h.win.setOpacity,
+}));
+vi.mock("@/app/store/window-identity", () => ({ windowId: () => "w-a" }));
+vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
+vi.mock("@/app/store/user-workspace", () => ({
+    refreshWorkspaceList: h.workspaces.refresh,
+    workspaceList: () => h.workspaces.list,
+    workspaceName: () => "Default Workspace",
+}));
+vi.mock("./workspaces", () => h.actions);
+vi.mock("@/app/store/command-registry", () => ({ commandRegistry: { run: vi.fn(() => false) } }));
+vi.mock("@/app/hook/useVoiceInput", () => ({ getVoiceSession: vi.fn() }));
+vi.mock("@/util/host-caps", () => ({
+    hostHas: (cap: string) => (cap === "multiWindow" ? h.caps.multiWindow : cap === "windowTransparency"),
+}));
+vi.mock("@/app/store/zoom", () => ({ zoomIn: vi.fn(), zoomOut: vi.fn(), zoomReset: vi.fn() }));
+vi.mock("@/layout/index", () => ({
+    getLayoutModelForStaticTab: () => ({ focusedNode: () => null }),
+    NavigateDirection: { Up: 0, Right: 1, Down: 2, Left: 3 },
+}));
+vi.mock("@/app/store/keymodel-blockcreate", () => ({
+    handleCmdN: vi.fn(),
+    handleSplitHorizontal: vi.fn(),
+    handleSplitVertical: vi.fn(),
+}));
+vi.mock("@/app/store/keymodel-nav", () => ({
+    cyclePaneFocus: vi.fn(),
+    genericClose: vi.fn(),
+    getFocusedBlockInStaticTab: () => null,
+    globalRefocus: vi.fn(),
+    globalRefocusWithTimeout: vi.fn(),
+    handleCmdI: vi.fn(),
+    simpleCloseStaticTab: vi.fn(),
+    switchBlockByBlockNum: vi.fn(),
+    switchBlockInDirection: vi.fn(),
+    switchTab: vi.fn(),
+    switchTabAbs: vi.fn(),
+}));
+// The real FlyoutMenu positions a floating panel, which jsdom can't lay out.
+// Capture the items it is given; it renders item.shortcut verbatim.
+vi.mock("@/app/element/flyoutmenu", () => ({
+    FlyoutMenu: (props: { items: MenuItem[]; anchorClass?: string; closeRef?: (close: () => void) => void; children?: unknown }) => {
+        h.menu.items = props.items;
+        h.menu.live = () => props.items;
+        props.closeRef?.(h.menu.close);
+        // The real one wraps its trigger in this anchor div.
+        return <div class={`menu-anchor ${props.anchorClass ?? ""}`}>{props.children as never}</div>;
+    },
+}));
+
+import { formatCommand } from "@/app/keybindings/registry";
+import { registerGlobalKeys } from "@/app/store/keymodel";
+import { appHandleKeyDown, keyCommands } from "@/app/store/keymodel-dispatch";
+import { adaptFromReactOrNativeKeyEvent, setKeyUtilPlatform } from "@/util/keyutil";
+import { setPlatform } from "@/util/platformutil";
+import { closeLogoMenu, LogoMenu } from "./logo-menu";
+
+type Platform = "darwin" | "win32" | "linux";
+type Keys = { key: string; code: string; ctrlKey?: boolean; altKey?: boolean; shiftKey?: boolean; metaKey?: boolean };
+
+const ITEMS: {
+    label: string;
+    command: string;
+    shown: Record<Platform, string>;
+    // The physical keys a user presses after reading the label.
+    press: Record<Platform, Keys>;
+    // The action both the menu item and the key binding must perform.
+    action: () => ReturnType<typeof vi.fn>;
+    // A label this item used to show, which no longer fires the binding.
+    oldLabel?: { platforms: Platform[]; keys: Keys };
+}[] = [
+    {
+        label: "New Tab",
+        command: "tab:new",
+        shown: { darwin: "⌘T", win32: "Ctrl+Shift+T", linux: "Ctrl+Shift+T" },
+        press: {
+            darwin: { key: "t", code: "KeyT", metaKey: true },
+            win32: { key: "T", code: "KeyT", ctrlKey: true, shiftKey: true },
+            linux: { key: "T", code: "KeyT", ctrlKey: true, shiftKey: true },
+        },
+        action: () => h.createTab,
+        // Alt+T is the shell's transpose-words (report §11.2).
+        oldLabel: { platforms: ["win32", "linux"], keys: { key: "t", code: "KeyT", altKey: true } },
+    },
+    {
+        label: "New Window",
+        command: "window:new",
+        shown: { darwin: "⇧⌘N", win32: "Ctrl+Shift+N", linux: "Ctrl+Shift+N" },
+        press: {
+            darwin: { key: "N", code: "KeyN", metaKey: true, shiftKey: true },
+            win32: { key: "N", code: "KeyN", ctrlKey: true, shiftKey: true },
+            linux: { key: "N", code: "KeyN", ctrlKey: true, shiftKey: true },
+        },
+        action: () => h.openNewWindow,
+        oldLabel: { platforms: ["darwin"], keys: { key: "N", code: "KeyN", ctrlKey: true, shiftKey: true } },
+    },
+    {
+        label: "Command Palette",
+        command: "view:command-palette",
+        shown: { darwin: "⇧⌘P", win32: "Ctrl+Shift+P", linux: "Ctrl+Shift+P" },
+        press: {
+            darwin: { key: "P", code: "KeyP", metaKey: true, shiftKey: true },
+            win32: { key: "P", code: "KeyP", ctrlKey: true, shiftKey: true },
+            linux: { key: "P", code: "KeyP", ctrlKey: true, shiftKey: true },
+        },
+        action: () => h.openModal,
+        oldLabel: { platforms: ["darwin"], keys: { key: "p", code: "KeyP", ctrlKey: true } },
+    },
+];
+
+function menuItem(label: string): MenuItem {
+    const item = h.menu.items.find((it) => it.label === label);
+    expect(item, `menu item "${label}"`).toBeDefined();
+    return item;
+}
+
+function pressKeys(keys: Keys): boolean {
+    return appHandleKeyDown(adaptFromReactOrNativeKeyEvent(new KeyboardEvent("keydown", keys)));
+}
+
+describe.each(["darwin", "win32", "linux"] as Platform[])("AgentMux logo menu shortcut labels on %s", (platform) => {
+    beforeEach(() => {
+        setKeyUtilPlatform(platform);
+        setPlatform(platform);
+        keyCommands.clear();
+        registerGlobalKeys();
+        h.menu.items = [];
+        render(() => <LogoMenu />);
+        vi.clearAllMocks();
+    });
+
+    afterEach(() => {
+        cleanup();
+        setKeyUtilPlatform("darwin");
+        setPlatform("darwin");
+    });
+
+    describe.each(ITEMS)("$label", (spec) => {
+        it("shows the command's shortcut from the shortcut table", () => {
+            const mac = platform === "darwin" ? "mac" : "other";
+            expect(keyCommands.has(spec.command), `keymodel handles ${spec.command}`).toBe(true);
+            expect(menuItem(spec.label).shortcut).toBe(formatCommand(spec.command, mac));
+            expect(menuItem(spec.label).shortcut).toBe(spec.shown[platform]);
+        });
+
+        it("pressing the keys on the label does what clicking the item does", async () => {
+            const action = spec.action();
+            expect(pressKeys(spec.press[platform])).toBe(true);
+            // The palette is loaded when it is asked for (open-command-palette.ts), so its key lands a tick later.
+            await vi.waitFor(() => expect(action).toHaveBeenCalledTimes(1));
+
+            menuItem(spec.label).onClick(new MouseEvent("click"));
+            expect(action).toHaveBeenCalledTimes(2);
+            expect(action.mock.calls[1]).toEqual(action.mock.calls[0]);
+        });
+
+        if (spec.oldLabel?.platforms.includes(platform)) {
+            it("the label it used to show does not fire the action", () => {
+                pressKeys(spec.oldLabel.keys);
+                expect(spec.action()).not.toHaveBeenCalled();
+            });
+        }
+    });
+
+    it("shows a shortcut on exactly the items that have one", () => {
+        const shown = h.menu.items.filter((item) => item.shortcut);
+        expect(shown.map((item) => item.label)).toEqual(["New Tab", "New Window", "Command Palette"]);
+    });
+
+    // SPEC_WORKSPACES_2026_10_23.md §3: these open from the widget bar instead.
+    it("leaves out the panes the widget bar opens", () => {
+        const labels = h.menu.items.map((item) => item.label);
+        for (const gone of ["Settings", "Connectors", "Memory", "Toolchain"]) {
+            expect(labels).not.toContain(gone);
+        }
+    });
+
+    it("still opens Settings from its shortcut", () => {
+        const comma = platform === "darwin" ? { metaKey: true } : { ctrlKey: true };
+        expect(pressKeys({ key: ",", code: "Comma", ...comma })).toBe(true);
+        expect(h.registry.openOrFocusPaneByView).toHaveBeenCalledTimes(1);
+    });
+});
+
+// SPEC_HOST_API_SEAM_2026_09_26.md: on a host without multiWindow there is no
+// "New Window" item, and its key isn't taken, so it reaches the terminal.
+describe("on a host without multiWindow", () => {
+    beforeEach(() => {
+        h.caps.multiWindow = false;
+        setKeyUtilPlatform("win32");
+        setPlatform("win32");
+        keyCommands.clear();
+        registerGlobalKeys();
+        h.menu.items = [];
+        render(() => <LogoMenu />);
+        vi.clearAllMocks();
+    });
+
+    afterEach(() => {
+        cleanup();
+        h.caps.multiWindow = true;
+        setKeyUtilPlatform("darwin");
+        setPlatform("darwin");
+    });
+
+    it("leaves New Window out of the menu", () => {
+        const labels = h.menu.items.map((i) => i.label);
+        expect(labels).not.toContain("New Window");
+        expect(labels).toContain("New Tab");
+    });
+
+    it("declines Ctrl+Shift+N without opening a window", () => {
+        expect(pressKeys({ key: "N", code: "KeyN", ctrlKey: true, shiftKey: true })).toBe(false);
+        expect(h.openNewWindow).not.toHaveBeenCalled();
+    });
+});
+
+// SPEC_WORKSPACES_2026_10_23.md §3.2: ☰ → Workspaces replaces Layouts, in
+// its place after Opacity.
+describe("Workspaces entry", () => {
+    const workspaces = () => h.menu.items.find((i) => i.label === "Workspaces");
+    const sub = (label: string) => workspaces()?.subItems?.find((i) => i.label === label);
+
+    afterEach(() => {
+        h.workspaces.list = [];
+        cleanup();
+    });
+
+    it("sits after Opacity, with New, Open, Import, Export, Rename and Delete", () => {
+        render(() => <LogoMenu />);
+        const labels = h.menu.items.map((i) => i.label);
+        expect(labels).not.toContain("Layouts");
+        const at = labels.indexOf("Workspaces");
+        expect(at).toBe(labels.indexOf("Opacity") + 1);
+        expect(h.menu.items[at + 1].divider).toBe(true);
+        expect(workspaces()?.subItems?.map((i) => i.label)).toEqual([
+            "New Workspace…",
+            "Open Workspace",
+            "Import…",
+            "Export…",
+            "",
+            "Rename workspace…",
+            "Delete workspace…",
+        ]);
+        const all = JSON.stringify(workspaces()?.subItems?.map((i) => i.label));
+        for (const gone of ["Save layout…", "Open layout…", "Restore layout from another build…"]) {
+            expect(all).not.toContain(gone);
+        }
+    });
+
+    it("asks srv for the workspaces when it mounts", () => {
+        h.workspaces.refresh.mockClear();
+        render(() => <LogoMenu />);
+        expect(h.workspaces.refresh).toHaveBeenCalledTimes(1);
+    });
+
+    it("Open Workspace lists every workspace, the open one checked, and opens one when chosen", async () => {
+        h.workspaces.list = [
+            { id: "b", name: "Reviews", current: true },
+            { id: "a", name: "Default Workspace", current: false },
+        ];
+        render(() => <LogoMenu />);
+        const open = sub("Open Workspace")?.subItems ?? [];
+        expect(open.map((i) => [i.label, i.checked])).toEqual([
+            ["Reviews", true],
+            ["Default Workspace", false],
+        ]);
+        open[1].onClick?.(new MouseEvent("click"));
+        await vi.waitFor(() => expect(h.actions.switchWorkspace).toHaveBeenCalledWith(h.workspaces.list[1]));
+    });
+
+    it("Open Workspace shows the open one before srv has answered", () => {
+        render(() => <LogoMenu />);
+        expect(sub("Open Workspace")?.subItems?.map((i) => [i.label, i.checked])).toEqual([["Default Workspace", true]]);
+    });
+
+    it("each item runs its action", async () => {
+        render(() => <LogoMenu />);
+        const runs: [string, keyof typeof h.actions][] = [
+            ["New Workspace…", "newWorkspace"],
+            ["Import…", "importWorkspace"],
+            ["Export…", "exportWorkspace"],
+            ["Rename workspace…", "renameWorkspacePrompt"],
+            ["Delete workspace…", "deleteWorkspacePrompt"],
+        ];
+        for (const [label, action] of runs) {
+            sub(label)?.onClick?.(new MouseEvent("click"));
+            await vi.waitFor(() => expect(h.actions[action]).toHaveBeenCalledTimes(1));
+        }
+    });
+});
+
+// Theme and Opacity stay open while the user tries values (REPORT_THEME_MENU_
+// RUNTIME_PANEL_TOOL_PREVIEW_TWEAKS_2026_10_07.md §1). A choice moves only the
+// checkmark: rebuilding the items would remount the open submenu under the
+// cursor, so the item list must survive a settings change.
+describe("Theme and Opacity", () => {
+    const sub = (label: string) => h.menu.items.find((i) => i.label === label)?.subItems ?? [];
+
+    it("keep the menu open; Workspaces' items close it", () => {
+        render(() => <LogoMenu />);
+        expect(sub("Theme").length).toBeGreaterThan(1);
+        expect(sub("Theme").every((i) => i.keepOpen === true)).toBe(true);
+        expect(sub("Opacity").every((i) => i.keepOpen === true)).toBe(true);
+        expect(sub("Workspaces").some((i) => i.keepOpen)).toBe(false);
+        cleanup();
+    });
+
+    it("move the checkmark when this window's theme changes, without rebuilding the items", () => {
+        const [theme, setTheme] = createSignal("default");
+        h.win.theme = theme;
+        createRoot((dispose) => {
+            render(() => <LogoMenu />);
+            const before = h.menu.items;
+            expect(sub("Theme").filter((i) => i.checked)).toHaveLength(1);
+
+            setTheme("__none__");
+            expect(h.menu.items).toBe(before);
+            expect(sub("Theme").filter((i) => i.checked)).toHaveLength(0);
+            dispose();
+        });
+        h.win.theme = () => "default";
+        cleanup();
+    });
+});
+
+// SPEC_PER_WINDOW_THEME_AND_OPACITY_2026_10_12: both submenus act on this
+// window only, never on the setting every window reads.
+describe("Theme and Opacity are this window's", () => {
+    const sub = (label: string) => h.menu.items.find((i) => i.label === label)?.subItems ?? [];
+
+    afterEach(() => {
+        h.win.setTheme.mockClear();
+        h.win.setOpacity.mockClear();
+        h.win.live = () => undefined;
+        h.win.opacity = () => 1;
+    });
+
+    it("a theme sets this window's theme, not the setting", async () => {
+        const { RpcApi } = await import("@/app/store/rpc-api");
+        render(() => <LogoMenu />);
+        const dracula = sub("Theme").find((i) => i.label !== sub("Theme")[0].label)!;
+        dracula.onClick!(undefined as never);
+        await Promise.resolve();
+        expect(h.win.setTheme).toHaveBeenCalledTimes(1);
+        expect(RpcApi.SetConfigCommand).not.toHaveBeenCalled();
+        cleanup();
+    });
+
+    it("an opacity sets and stores this window's opacity, through the slider's setter", async () => {
+        const { RpcApi } = await import("@/app/store/rpc-api");
+        render(() => <LogoMenu />);
+        sub("Opacity").find((i) => i.label === "70%")!.onClick!(undefined as never);
+        expect(h.win.setOpacity).toHaveBeenCalledWith({ label: "win-a", windowId: "w-a" }, 0.7, "commit");
+        expect(RpcApi.SetConfigCommand).not.toHaveBeenCalled();
+        cleanup();
+    });
+
+    it("the check follows this window's opacity, and a slider drag in progress", () => {
+        const [live, setLive] = createSignal<number | undefined>(undefined);
+        h.win.opacity = () => 0.8;
+        h.win.live = live;
+        createRoot((dispose) => {
+            render(() => <LogoMenu />);
+            const checked = () => sub("Opacity").filter((i) => i.checked).map((i) => i.label);
+            expect(checked()).toEqual(["80%"]);
+            setLive(0.55);
+            expect(checked()).toEqual(["55%"]);
+            // Between steps: the nearest step is checked.
+            setLive(0.72);
+            expect(checked()).toEqual(["70%"]);
+            dispose();
+        });
+        cleanup();
+    });
+});
+
+describe("closeLogoMenu", () => {
+    afterEach(() => cleanup());
+
+    it("closes a mounted AgentMux logo, and nothing once it is unmounted", () => {
+        const { unmount } = render(() => <LogoMenu position="right" />);
+        h.menu.close.mockClear();
+        closeLogoMenu();
+        expect(h.menu.close).toHaveBeenCalledTimes(1);
+
+        unmount();
+        h.menu.close.mockClear();
+        closeLogoMenu();
+        expect(h.menu.close).not.toHaveBeenCalled();
+    });
+});
+
+// SPEC_DEV_MODE_SETTING_2026_10_28.md §4.1: DevTools is a dev-mode item.
+describe("DevTools follows dev mode", () => {
+    const labels = () => h.menu.items.map((item) => item.label);
+
+    afterEach(() => {
+        h.dev.read = () => false;
+        cleanup();
+    });
+
+    it("is not in the menu while dev mode is off", () => {
+        createRoot((dispose) => {
+            render(() => <LogoMenu />);
+            expect(labels()).not.toContain("DevTools");
+            expect(labels()).toContain("Command Palette");
+            expect(labels()).toContain("Online Docs");
+            dispose();
+        });
+    });
+
+    it("is in the menu, between Command Palette and Online Docs, while it is on", () => {
+        h.dev.read = () => true;
+        createRoot((dispose) => {
+            render(() => <LogoMenu />);
+            const at = labels().indexOf("DevTools");
+            expect(at).toBeGreaterThan(-1);
+            expect(labels()[at - 1]).toBe("Command Palette");
+            expect(labels()[at + 1]).toBe("Online Docs");
+            dispose();
+        });
+    });
+
+    it("appears when dev mode is turned on, and Theme is not rebuilt by anything else", () => {
+        const [on, setOn] = createSignal(false);
+        const [theme, setTheme] = createSignal("default");
+        h.dev.read = on;
+        h.win.theme = theme;
+        createRoot((dispose) => {
+            render(() => <LogoMenu />);
+            expect(labels()).not.toContain("DevTools");
+            const before = h.menu.live();
+            setTheme("__none__");
+            expect(h.menu.live()).toBe(before);
+            setOn(true);
+            expect(h.menu.live()).not.toBe(before);
+            expect(h.menu.live().map((item) => item.label)).toContain("DevTools");
+            dispose();
+        });
+        h.win.theme = () => "default";
+    });
+});
+
+// The menu button shows the AgentMux mark (the app icon's four blocks), not three bars.
+describe("the menu button's glyph", () => {
+    const button = () => document.querySelector<HTMLButtonElement>(".logo-menu-btn")!;
+
+    beforeEach(() => {
+        h.menu.items = [];
+        render(() => <LogoMenu />);
+    });
+
+    afterEach(() => cleanup());
+
+    it("is a button inside one anchor box that is the flex item in its bar; the button has no placement of its own", () => {
+        const anchor = button().parentElement!;
+        expect(anchor.classList.contains("menu-anchor")).toBe(true);
+        expect(anchor.classList.contains("logo-menu-anchor")).toBe(true);
+        expect(anchor.classList.contains("logo-menu-anchor--right")).toBe(false);
+        expect(button().getAttribute("style")).toBeNull();
+        expect(button().className).toBe("logo-menu-btn");
+    });
+
+    it("keeps its title, is one button, and draws the glyph for the eye only", () => {
+        expect(button().getAttribute("title")).toBe("Menu");
+        const svg = button().querySelector("svg")!;
+        expect(svg.getAttribute("aria-hidden")).toBe("true");
+        expect(svg.getAttribute("fill")).toBe("currentColor");
+    });
+
+    it("is the app icon's four blocks on a 5 x 5 grid of 4 px cells: 20 px, so every edge is on a whole pixel", () => {
+        const svg = button().querySelector("svg")!;
+        expect([svg.getAttribute("width"), svg.getAttribute("height"), svg.getAttribute("viewBox")]).toEqual(["20", "20", "0 0 5 5"]);
+        const drawn = [...svg.querySelectorAll("rect")].map((r) => ["x", "y", "width", "height"].map((a) => Number(r.getAttribute(a))));
+        expect(drawn).toHaveLength(4);
+        for (const rect of drawn) for (const v of rect) expect(Number.isInteger(v)).toBe(true);
+        // The shape of frontend/app/asset/logo-mark.svg (its blocks span 384 units; 32 to a grid unit, 12 units
+        // across) with every edge moved to the nearest of the 5 cells.
+        const cells = (n: number) => Math.round(((n / 32 - 2) * 5) / 12);
+        const mark = [...logoMark.matchAll(/<rect x="(\d+)" y="(\d+)" width="(\d+)" height="(\d+)"/g)].map((m) => {
+            const [x, y, w, h] = m.slice(1).map(Number);
+            return [cells(x), cells(y), cells(x + w) - cells(x), cells(y + h) - cells(y)];
+        });
+        expect(drawn).toEqual(mark);
+    });
+
+    it("sizes its cell in whole device pixels at any chrome zoom, so no edge of the mark drifts against another", () => {
+        const scss = readFileSync(join(process.cwd(), "frontend/app/window/logo-menu.scss"), "utf8");
+        expect(scss).toMatch(/--mark-cell: max\(var\(--snap-chrome\), round\(nearest, 4px, var\(--snap-chrome\)\)\);/);
+        expect(scss).toMatch(/width: calc\(5 \* var\(--mark-cell\)\);/);
+        expect(scss).toMatch(/height: calc\(5 \* var\(--mark-cell\)\);/);
+    });
+
+    it("leaves an even number of device pixels around the mark, so centring it never lands on half a pixel (1x at 150%)", () => {
+        const scss = readFileSync(join(process.cwd(), "frontend/app/window/logo-menu.scss"), "utf8");
+        // The anchor is the mark plus twice a whole number of device pixels (round(down, ..., --snap-chrome)).
+        expect(scss).toMatch(
+            /\.logo-menu-anchor \{[^}]*height: calc\(\s*5 \* var\(--mark-cell\) \+ 2 \* round\(down, calc\(\(100% \+ var\(--space-1-5\) - var\(--snap-chrome\) - 5 \* var\(--mark-cell\)\) \/ 2\), var\(--snap-chrome\)\)\s*\);/,
+        );
+    });
+
+    it("takes its colour from the theme's primary colour, as the three bars did, brighter on hover", () => {
+        const scss = readFileSync(join(process.cwd(), "frontend/app/window/logo-menu.scss"), "utf8");
+        expect(scss).toMatch(/\.logo-menu-btn \{[^}]*color: var\(--accent-color\);/);
+        expect(scss).toMatch(/&:hover \{\s*color: color-mix\(in srgb, var\(--accent-color\), white 25%\);/);
+        expect(scss).not.toMatch(/brand-mark/);
+    });
+});

@@ -2,16 +2,22 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-.notification-bubbles {
+// The stack is an unzoomed shell placed in real pixels (notificationbubbles.tsx); the body inside it
+// carries chrome zoom and every visual style, as AnchoredPopover does.
+.notification-bubbles-body {
+    zoom: var(--zoomfactor);
     display: flex;
     width: 380px;
     flex-direction: column;
     align-items: flex-start;
     row-gap: var(--space-2);
     // Expanded (+N more) the stack can outgrow a short window: it scrolls
-    // rather than running off the top, where a toast can't be read or closed.
-    max-height: calc(100vh - 80px);
+    // rather than running off the top, where a toast can't be read or closed. The window's height is in
+    // real pixels, the body's lengths are zoomed.
+    max-height: calc((100vh - 80px * var(--zoomfactor)) / var(--zoomfactor));
     overflow-y: auto;
+    // The scrollbar of an expanded stack takes room from the fixed 380px width: no sideways scrolling for it.
+    overflow-x: hidden;
 }
 
 // "+N more": the toasts past the first few, shown on click.

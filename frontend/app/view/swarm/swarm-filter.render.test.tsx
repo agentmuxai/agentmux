@@ -17,7 +17,6 @@ vi.mock("@/app/store/contextmenu", () => ({ ContextMenuModel: { showContextMenu:
 import { BroadcastDock } from "./swarm-broadcast";
 import { Highlight, SwarmFilterBar, SwarmFilterEmpty } from "./swarm-filter-bar";
 import { FILTER_APPLY_MS, FILTER_PERSIST_MS, actionableKeys, filterActive, hiddenByFilter, highlightWords, useSwarmFilter, type SwarmFilterState } from "./swarm-filter-state";
-import { FleetToolbar } from "./swarm-fleet-toolbar";
 import { SwarmSelectToggle } from "./swarm-select-toggle";
 import type { AgentTreeNode, SwarmViewModel } from "./swarm-model";
 
@@ -43,7 +42,7 @@ interface Rig {
     container: HTMLElement;
 }
 
-/** The bar and the toolbar over one model, as the Swarm pane wires them. */
+/** The bar, Select all and the composer over one model, as the Swarm pane wires them. */
 function rig(rows: [string, AgentTreeNode][], opts: { meta?: Record<string, unknown>; stopped?: { name: string }[] } = {}): Rig {
     const [keyed, setKeyed] = createSignal<readonly (readonly [string, AgentTreeNode])[]>(rows);
     const [selected, setSelectedSignal] = createSignal<Set<string>>(new Set());
@@ -80,7 +79,6 @@ function rig(rows: [string, AgentTreeNode][], opts: { meta?: Record<string, unkn
                 <SwarmFilterBar filter={filter} />
                 <SwarmFilterEmpty filter={filter} />
                 <SwarmSelectToggle model={model} ids={shownSelectable} />
-                <FleetToolbar model={model} allBlockIds={shownSelectable} />
                 <BroadcastDock model={model} agents={{ tree: () => keyed().map(([, n]) => n) }} />
             </>
         );
@@ -211,7 +209,7 @@ describe("a row never leaves under the cursor", () => {
 });
 
 describe("selection and the fleet actions with a filter on", () => {
-    const toolbar = (r: Rig) => r.container.querySelector(".swarm-fleet-toolbar")?.textContent ?? "";
+    const stats = (r: Rig) => r.container.querySelector(".swarm-select-toggle__stats")?.textContent ?? "";
     const toggle = (r: Rig) => r.container.querySelector(".swarm-select-toggle")!.textContent ?? "";
 
     it("Select all selects the shown agents only, and says how many; Select none leaves the hidden ones ticked", () => {
@@ -242,7 +240,7 @@ describe("selection and the fleet actions with a filter on", () => {
         expect(hiddenByFilter(r.model)).toEqual(new Set(["b"]));
         expect(actionableKeys(r.model, r.model.selectedBlockIdsAtom())).toEqual(["a"]);
         expect(r.model.selectedBlockIdsAtom()).toEqual(new Set(["a", "b"]));
-        expect(toolbar(r)).toContain("2 selected · 1 hidden by the filter, not included");
+        expect(stats(r)).toContain("2 selected · 1 hidden by the filter, not included");
         // Broadcast says the same, and sends to the shown one only.
         expect(r.container.querySelector(".swarm-broadcast-actions")!.textContent).toContain("Send to 1");
         expect(r.container.querySelector(".swarm-broadcast-actions")!.textContent).toContain("1 hidden by the filter, not included");
@@ -256,7 +254,7 @@ describe("selection and the fleet actions with a filter on", () => {
         r.filter.clear();
         expect(hiddenByFilter(r.model).size).toBe(0);
         expect(actionableKeys(r.model, r.model.selectedBlockIdsAtom()).sort()).toEqual(["a", "b"]);
-        expect(toolbar(r)).not.toContain("hidden by the filter");
+        expect(stats(r)).not.toContain("hidden by the filter");
     });
 });
 

@@ -1,0 +1,21 @@
+registerContentZoom blk-1 scroller=pdf-viewer-container
+setZoomStepRatio blk-1 1.25
+setZoomMax blk-1 15
+loadPdfjs
+new PDFViewer container=pdf-viewer-container viewer=pdfViewer textLayerMode=1 annotationMode=2 maxCanvasPixels=33554432 signal=true aborted=false
+linkService.setViewer
+fetchMediaBlob /docs/a.pdf signal=true
+getDocument #1 data=Uint8Array(8) safe=true
+viewer.setDocument pages=5
+linkService.setDocument pages=5 base=null
+viewer.currentScaleValue = page-width
+onOpenLink https://example.com/x
+click https://example.com/x: prevented=true
+onOpenLink http://example.com/y
+click http://example.com/y: prevented=true
+click mailto:a@b.c: prevented=true
+click javascript:alert(1): prevented=true
+click #page=3: prevented=false
+onOpenLink http://localhost:3000/
+click : prevented=true
+click plain: prevented=false

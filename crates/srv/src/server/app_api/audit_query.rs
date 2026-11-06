@@ -5,6 +5,7 @@
 //! Audit is the operator's view of every agent, so a connection registered as an agent is refused.
 
 use super::*;
+use std::path::Path;
 use crate::backend::audit_query::{self, Ctx, Sources};
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -32,6 +33,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let src = Sources {
                     jekt_file: file.as_deref(),
                     own_file: own.as_deref(),
+                    activity_dir: file.as_deref().and_then(Path::parent),
+                    own_activity_dir: own.as_deref().and_then(Path::parent),
                     segments: state.global_transcript_store.as_deref(),
                     ctx: Ctx { slug_of_uid: &slug_of_uid, uid_of_slug: &uid_of_slug, pane_of_agent: &pane_of_agent, block_exists: &block_exists },
                 };

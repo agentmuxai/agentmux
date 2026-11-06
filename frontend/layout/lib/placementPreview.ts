@@ -10,6 +10,8 @@
  */
 
 import { chipOverChipDirection } from "./chipPlaceholder";
+import { DEFAULT_TRACKER, DropIntentTracker } from "./dropIntentTracker";
+import { dragState } from "./tilelayout-drag-state";
 import { clampCrossTabDirection } from "./crossTabDrag";
 import type { LayoutModel } from "./layoutModel";
 import { DropDirection, LayoutTreeActionType, type LayoutNode, type LayoutTreeComputeMoveNodeAction } from "./types";
@@ -69,13 +71,82 @@ export function showPlacement(
     return compute;
 }
 
-/** `placementDirection` and `showPlacement` in one step, for a drag that previews as it moves. */
+/** What a model's drag is steadied by: its tracker, the latest input per hovered pane, and the dwell timer. */
+interface Steadying {
+    tracker: DropIntentTracker;
+    cross: boolean;
+    inputs: Map<string, PlacementInput>;
+    timer?: ReturnType<typeof setTimeout>;
+}
+
+const steadying = new WeakMap<LayoutModel, Steadying>();
+/** The models with a drag being steadied, so the end of a drag can reset the destination tab's too. */
+const steadied = new Set<LayoutModel>();
+
+function steadyingOf(model: LayoutModel, cross: boolean): Steadying {
+    const have = steadying.get(model);
+    if (have && have.cross === cross) return have;
+    if (have) clearTimeout(have.timer);
+    // A pane from another tab arms at once: its drop record is taken with every sample.
+    const config = cross ? { ...DEFAULT_TRACKER, dwellMs: 0 } : DEFAULT_TRACKER;
+    const made = { tracker: new DropIntentTracker(config), cross, inputs: new Map<string, PlacementInput>() };
+    steadying.set(model, made);
+    steadied.add(model);
+    return made;
+}
+
+/** The drag is over: the next one starts from nothing, and no waiting candidate shows a ghost after the drop. */
+export function resetDropIntent(model: LayoutModel): void {
+    const have = steadying.get(model);
+    if (!have) return;
+    clearTimeout(have.timer);
+    steadying.delete(model);
+    steadied.delete(model);
+}
+
+/**
+ * Clear the ghost. A candidate still waiting must not bring it back, so its timer goes too; `reset` also drops
+ * the armed candidate (the pointer is over the dragged pane itself, where there is none).
+ */
+export function clearPlacement(model: LayoutModel, reset = false): void {
+    if (reset) resetDropIntent(model);
+    else clearTimeout(steadying.get(model)?.timer);
+    model.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
+}
+
+/** The drag is over, in whichever tab it was steadied (a pane dragged to another tab has two). */
+export function resetAllDropIntent(): void {
+    for (const model of [...steadied]) resetDropIntent(model);
+}
+
+/**
+ * `placementDirection` and `showPlacement` in one step, for a drag that previews as it moves. The ghost
+ * follows the steadied candidate (dropIntentTracker.ts), which can be another pane's than the one the
+ * pointer is over: `targetId` says which, and is what a caller records a drop against.
+ */
 export function previewPlacement(
     model: LayoutModel,
     input: PlacementInput
-): { direction: DropDirection | undefined; compute: LayoutTreeComputeMoveNodeAction } {
-    const direction = placementDirection(model, input);
-    return { direction, compute: showPlacement(model, input, direction) };
+): { direction: DropDirection | undefined; compute: LayoutTreeComputeMoveNodeAction; targetId: string } {
+    const raw = { targetId: input.targetId, direction: placementDirection(model, input) };
+    const held = steadyingOf(model, !!input.foreignNode);
+    clearTimeout(held.timer);
+    held.inputs.set(input.targetId, input);
+    const now = performance.now();
+    const { armed, flushAt } = held.tracker.step(input.draggedId, input.offset.x, input.offset.y, now, raw);
+    if (flushAt !== undefined) {
+        held.timer = setTimeout(() => showWaiting(model, held, input.draggedId), Math.max(0, flushAt - now));
+    }
+    const shown = held.inputs.get(armed.targetId) ?? input;
+    return { direction: armed.direction, compute: showPlacement(model, shown, armed.direction), targetId: armed.targetId };
+}
+
+/** The dwell ran out with no new sample: show the candidate that was waiting. */
+function showWaiting(model: LayoutModel, held: Steadying, draggedId: string): void {
+    if (dragState.nodeId !== draggedId) return;
+    const armed = held.tracker.armWaiting();
+    const shown = armed && held.inputs.get(armed.targetId);
+    if (armed && shown) showPlacement(model, shown, armed.direction);
 }
 
 /** The side of the hovered pane a direction puts the new pane on; undefined for the centre and for none. */

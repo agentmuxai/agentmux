@@ -1,0 +1,103 @@
+key p on BODY
+key Enter on BODY
+onDecide {"request_id":"a","outcome":"allow","scope":"project"}
+-- after Enter on a low-risk request
+  panel [agent-decision-panel] role=dialog aria=Permission decision required tabindex=-1
+  header: Decision required
+  meta: Tool / bash / Target / rm -rf build
+  preview: -
+  scope Once / Just this one call {-} name=agent-decision-scope-<uid>
+  scope Session / Until this pane closes {-} name=agent-decision-scope-<uid>
+  scope Project / This repo, future runs {checked,active} name=agent-decision-scope-<uid>
+  scope Global / Everywhere, future runs {-} name=agent-decision-scope-<uid>
+  buttons: Allow(title: Allow this tool call) | Deny + feedback | Defer
+-- a high-risk request
+  panel [agent-decision-panel agent-decision-panel--high-risk] role=dialog aria=Permission decision required tabindex=-1
+  header: Decision required | high-risk
+  meta: Tool / bash / Target / rm -rf build
+  preview: -
+  scope Once / Just this one call {checked,active} name=agent-decision-scope-<uid>
+  scope Session / Until this pane closes {-} name=agent-decision-scope-<uid>
+  scope Project / This repo, future runs {-} name=agent-decision-scope-<uid>
+  scope Global / Everywhere, future runs {-} name=agent-decision-scope-<uid>
+  buttons: Allow[pressed=false](title: Hold Shift while clicking, or press Enter twice (high-risk confirm)) | Deny + feedback | Defer
+key Enter on BODY
+-- first Enter arms it
+  panel [agent-decision-panel agent-decision-panel--high-risk agent-decision-panel--armed] role=dialog aria=Permission decision required tabindex=-1
+  header: Decision required | high-risk
+  meta: Tool / bash / Target / rm -rf build
+  preview: -
+  scope Once / Just this one call {checked,active} name=agent-decision-scope-<uid>
+  scope Session / Until this pane closes {-} name=agent-decision-scope-<uid>
+  scope Project / This repo, future runs {-} name=agent-decision-scope-<uid>
+  scope Global / Everywhere, future runs {-} name=agent-decision-scope-<uid>
+  buttons: Press again to allow[pressed=true](title: Hold Shift while clicking, or press Enter twice (high-risk confirm)) | Deny + feedback | Defer
+key Enter on BODY
+onDecide {"request_id":"b","outcome":"allow","scope":"once"}
+-- second Enter allows
+  panel [agent-decision-panel agent-decision-panel--high-risk] role=dialog aria=Permission decision required tabindex=-1
+  header: Decision required | high-risk
+  meta: Tool / bash / Target / rm -rf build
+  preview: -
+  scope Once / Just this one call {checked,active} name=agent-decision-scope-<uid>
+  scope Session / Until this pane closes {-} name=agent-decision-scope-<uid>
+  scope Project / This repo, future runs {-} name=agent-decision-scope-<uid>
+  scope Global / Everywhere, future runs {-} name=agent-decision-scope-<uid>
+  buttons: Allow[pressed=false](title: Hold Shift while clicking, or press Enter twice (high-risk confirm)) | Deny + feedback | Defer
+key Enter on BODY
+-- armed, 499ms later
+  panel [agent-decision-panel agent-decision-panel--high-risk agent-decision-panel--armed] role=dialog aria=Permission decision required tabindex=-1
+  header: Decision required | high-risk
+  meta: Tool / bash / Target / rm -rf build
+  preview: -
+  scope Once / Just this one call {checked,active} name=agent-decision-scope-<uid>
+  scope Session / Until this pane closes {-} name=agent-decision-scope-<uid>
+  scope Project / This repo, future runs {-} name=agent-decision-scope-<uid>
+  scope Global / Everywhere, future runs {-} name=agent-decision-scope-<uid>
+  buttons: Press again to allow[pressed=true](title: Hold Shift while clicking, or press Enter twice (high-risk confirm)) | Deny + feedback | Defer
+-- armed, 500ms later: disarmed
+  panel [agent-decision-panel agent-decision-panel--high-risk] role=dialog aria=Permission decision required tabindex=-1
+  header: Decision required | high-risk
+  meta: Tool / bash / Target / rm -rf build
+  preview: -
+  scope Once / Just this one call {checked,active} name=agent-decision-scope-<uid>
+  scope Session / Until this pane closes {-} name=agent-decision-scope-<uid>
+  scope Project / This repo, future runs {-} name=agent-decision-scope-<uid>
+  scope Global / Everywhere, future runs {-} name=agent-decision-scope-<uid>
+  buttons: Allow[pressed=false](title: Hold Shift while clicking, or press Enter twice (high-risk confirm)) | Deny + feedback | Defer
+key Enter on BODY
+onDecide {"request_id":"c","outcome":"allow","scope":"once"}
+-- a shift click allows at once
+  panel [agent-decision-panel agent-decision-panel--high-risk] role=dialog aria=Permission decision required tabindex=-1
+  header: Decision required | high-risk
+  meta: Tool / bash / Target / rm -rf build
+  preview: -
+  scope Once / Just this one call {checked,active} name=agent-decision-scope-<uid>
+  scope Session / Until this pane closes {-} name=agent-decision-scope-<uid>
+  scope Project / This repo, future runs {-} name=agent-decision-scope-<uid>
+  scope Global / Everywhere, future runs {-} name=agent-decision-scope-<uid>
+  buttons: Allow[pressed=false](title: Hold Shift while clicking, or press Enter twice (high-risk confirm)) | Deny + feedback | Defer
+key Enter on TEXTAREA[composer]
+-- Enter in the composer is left to the composer
+  panel [agent-decision-panel] role=dialog aria=Permission decision required tabindex=-1
+  header: Decision required
+  meta: Tool / bash / Target / rm -rf build
+  preview: -
+  scope Once / Just this one call {checked,active} name=agent-decision-scope-<uid>
+  scope Session / Until this pane closes {-} name=agent-decision-scope-<uid>
+  scope Project / This repo, future runs {-} name=agent-decision-scope-<uid>
+  scope Global / Everywhere, future runs {-} name=agent-decision-scope-<uid>
+  buttons: Allow(title: Allow this tool call) | Deny + feedback | Defer
+onDecide {"request_id":"d","outcome":"allow","scope":"once"}
+key Enter on DIV
+onDecide {"request_id":"d","outcome":"allow","scope":"once"}
+-- Allow button and Enter inside the panel
+  panel [agent-decision-panel] role=dialog aria=Permission decision required tabindex=-1
+  header: Decision required
+  meta: Tool / bash / Target / rm -rf build
+  preview: -
+  scope Once / Just this one call {checked,active} name=agent-decision-scope-<uid>
+  scope Session / Until this pane closes {-} name=agent-decision-scope-<uid>
+  scope Project / This repo, future runs {-} name=agent-decision-scope-<uid>
+  scope Global / Everywhere, future runs {-} name=agent-decision-scope-<uid>
+  buttons: Allow(title: Allow this tool call) | Deny + feedback | Defer

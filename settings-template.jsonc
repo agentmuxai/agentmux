@@ -122,6 +122,16 @@
     // -- App --
 
     // "app:showoverlayblocknums": true,
+    // Check for a newer AgentMux release in the background (a minute after start, then every
+    // few hours). Set false and AgentMux asks GitHub only when you or an agent does (Check for
+    // update).
+    // "update:auto": true,
+
+    // Download and verify a newer release in the background once one is found, so the status
+    // bar offers Restart to update. Nothing is installed until you restart. Set false to
+    // download only when you click Download.
+    // "update:autodownload": true,
+
     // Show an AgentMux icon in the system tray / menu bar while AgentMux is running. On by
     // default. Always shown while app:runinbackground is on (a process that keeps running must
     // show an icon). Read by agentmux-launcher at startup, so a change applies at the NEXT
@@ -525,6 +535,11 @@
     // Leave the Claude CLI's own cross-session messaging on for Claude agents. Off, agents
     // message each other through AgentMux only.
     // "agent:climessaging": false,
+
+    // Load the signed-in claude.ai account's connectors (Gmail, Calendar, Drive, Docs) into
+    // Claude agents. Off, agents use AgentMux's own Google tools, which the person turns on per
+    // agent in Connectors. Takes effect at an agent's next launch.
+    // "agent:claudeaiconnectors": false,
 
     // Minutes of quiet after which an agent's session counts as cold: a message that can wait
     // is then held until the agent is next active, so it does not start a turn that pays for

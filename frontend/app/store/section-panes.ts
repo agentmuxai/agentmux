@@ -42,7 +42,6 @@ export const MEMORY_SECTIONS: PaneSections<MemorySection> = {
             label: "Bundles",
             icon: "layer-group",
             tooltip: "Bundles: instructions and skills to give any agent; imports Agent Bundle Format (ABF) files",
-            highlight: true,
         },
     ],
 };

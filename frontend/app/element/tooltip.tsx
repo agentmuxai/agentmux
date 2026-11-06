@@ -2,18 +2,10 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useHiddenTabMarker } from "@/app/platform/pane-overlay";
+import { AnchoredPopover } from "@/app/element/anchored-popover";
 import { cn } from "@/util/util";
-import {
-    autoUpdate,
-    computePosition,
-    flip,
-    offset,
-    shift,
-    type Placement,
-} from "@floating-ui/dom";
+import type { Placement } from "@floating-ui/dom";
 import { createEffect, createSignal, JSX, onCleanup, Show } from "solid-js";
-import { Portal } from "solid-js/web";
 import type { Properties as CSSProperties } from "csstype";
 import { isPrimaryButtonDown, onPrimaryButtonRelease } from "@/app/util/pointer-drag-state";
 import { claimOpen, forgetOpen, HIDE_DELAY_MS, releaseOpen, SHOW_DELAY_MS, isWarm, type OpenTip } from "./tooltip-timing";
@@ -44,8 +36,6 @@ interface TooltipProps {
 }
 
 function TooltipInner(props: TooltipProps): JSX.Element {
-    // Portal-mounted: drop its pane hole while its window tab is hidden (pane-overlay.ts).
-    const hiddenTab = useHiddenTabMarker();
     const placement: Placement = props.placement ?? "top";
     const forceOpen = () => props.forceOpen ?? false;
     const immediate = () => props.immediate ?? false;
@@ -57,11 +47,8 @@ function TooltipInner(props: TooltipProps): JSX.Element {
     // Whether the panel has been placed at least once since it opened. `immediate`
     // keeps it invisible until then, so it cannot show at the unpositioned corner.
     const [isPositioned, setIsPositioned] = createSignal(false);
-    const [floatingStyle, setFloatingStyle] = createSignal("position:absolute;left:0px;top:0px");
 
     let referenceEl: HTMLElement | null = null;
-    let floatingEl: HTMLElement | null = null;
-    let cleanupAutoUpdate: (() => void) | null = null;
     let showTimeout: ReturnType<typeof setTimeout> | null = null;
     let hideTimeout: ReturnType<typeof setTimeout> | null = null;
 
@@ -79,31 +66,6 @@ function TooltipInner(props: TooltipProps): JSX.Element {
             setIsVisible(false);
             setIsPositioned(false);
         },
-    };
-
-    const updatePosition = async () => {
-        if (!referenceEl || !floatingEl) return;
-        const pos = await computePosition(referenceEl, floatingEl, {
-            placement,
-            middleware: [offset(10), flip(), shift({ padding: 12 })],
-        });
-        setFloatingStyle(`position:absolute;left:${pos.x}px;top:${pos.y}px`);
-        setIsPositioned(true);
-    };
-
-    const registerFloating = (el: HTMLElement) => {
-        floatingEl = el;
-        // Defer autoUpdate to next frame so the Portal has time to insert the
-        // floating element into the DOM before floating-ui traverses ancestors.
-        requestAnimationFrame(() => {
-            if (referenceEl instanceof Element && floatingEl instanceof Element) {
-                cleanupAutoUpdate?.();
-                // Place it now rather than waiting for autoUpdate's first pass, so an
-                // `immediate` tooltip is visible one frame after hover, not later.
-                void updatePosition();
-                cleanupAutoUpdate = autoUpdate(referenceEl, floatingEl, updatePosition);
-            }
-        });
     };
 
     // Raw pointer-over state, tracked unconditionally (even while
@@ -194,7 +156,6 @@ function TooltipInner(props: TooltipProps): JSX.Element {
 
     onCleanup(() => {
         clearTimeouts();
-        cleanupAutoUpdate?.();
         forgetOpen(self);
     });
 
@@ -211,19 +172,24 @@ function TooltipInner(props: TooltipProps): JSX.Element {
                 {props.children}
             </div>
             <Show when={isOpen()}>
-                <Portal>
-                    <div
-                        ref={registerFloating}
-                        style={`${floatingStyle()};opacity:${isVisible() && isPositioned() ? 1 : 0};transition:${immediate() ? "none" : "opacity var(--duration-instant) var(--ease-out)"}`}
-                        class={cn(
-                            "bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl z-[var(--z-tooltip)]"
-                        )}
-                        data-pane-overlay
-                        data-window-tab-hidden={hiddenTab()}
-                    >
-                        {props.content}
-                    </div>
-                </Portal>
+                {/* AnchoredPopover places it, follows chrome zoom (the tooltip is the size of the bar it hangs
+                    from) and cuts the hole in any native pane behind it; hidden until placed, so an `immediate`
+                    tooltip never shows at the corner. */}
+                <AnchoredPopover
+                    anchor={referenceEl}
+                    placement={placement}
+                    gutter={10}
+                    hideUntilPlaced
+                    onShown={() => setIsPositioned(true)}
+                    shellClass="anchored-popover--tooltip"
+                    class={cn("bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl")}
+                    style={{
+                        opacity: isVisible() && isPositioned() ? 1 : 0,
+                        transition: immediate() ? "none" : "opacity var(--duration-instant) var(--ease-out)",
+                    }}
+                >
+                    {props.content}
+                </AnchoredPopover>
             </Show>
         </>
     );

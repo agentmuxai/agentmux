@@ -30,6 +30,7 @@ static CONFIG: OnceLock<Arc<ConfigState>> = OnceLock::new();
 
 /// Attach the live settings (bootstrap), so [`SETTING_CLI_MESSAGING`] is read at each launch.
 pub fn install_config(config: Arc<ConfigState>) {
+    super::claudeai_connectors::install_config(Arc::clone(&config));
     let _ = CONFIG.set(config);
 }
 
@@ -55,6 +56,8 @@ pub fn apply_for_spawn(env_vars: &mut HashMap<String, String>, block_meta: &Meta
     let provider = if provider.is_empty() { "claude" } else { provider };
     let on = CONFIG.get().is_some_and(|c| enabled(&c.get_settings().extra));
     apply(env_vars, provider, on);
+    // The other switch the CLI reads at launch (the claude.ai connectors) is set at the same point.
+    super::claudeai_connectors::apply_for_spawn(env_vars, provider);
 }
 
 /// Whether a volume source is a host folder the CLI keeps its sessions' sockets in, or inside one:

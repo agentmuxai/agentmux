@@ -644,3 +644,47 @@ fn m4c1_actor_uid_columns_on_fresh_and_upgraded_stores() {
         );
     }
 }
+
+/// The native-memory mirror's table as releases before `last_seen_mtime_ms` created it. The column
+/// was added to the `CREATE TABLE IF NOT EXISTS` in each schema, which does nothing for a table that
+/// exists, so 0.60.16 logged "has no column named last_seen_mtime_ms" on every mirror write.
+const OLD_NATIVE_MEMORY_TABLE: &str = "CREATE TABLE db_agent_native_memory (
+    agent_id TEXT NOT NULL, filename TEXT NOT NULL, content TEXT NOT NULL,
+    metadata_type TEXT NOT NULL DEFAULT '', size_bytes INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER NOT NULL DEFAULT 0, last_seen_path TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (agent_id, filename));";
+
+#[test]
+fn every_schema_adds_last_seen_mtime_ms_to_an_older_native_memory_table() {
+    let runs: [(&str, fn(&Connection) -> Result<(), StoreError>); 3] = [
+        ("objects.db", run_object_schema),
+        ("store.db", run_shared_store_schema),
+        ("identity-store.db", run_identity_store_schema),
+    ];
+    for (name, run) in runs {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(OLD_NATIVE_MEMORY_TABLE).unwrap();
+        conn.execute("INSERT INTO db_agent_native_memory (agent_id, filename, content) VALUES ('a', 'f.md', 'kept')", []).unwrap();
+        assert!(!column_exists(&conn, "db_agent_native_memory", "last_seen_mtime_ms"), "{name}: the fixture is the old shape");
+        run(&conn).unwrap();
+        assert!(column_exists(&conn, "db_agent_native_memory", "last_seen_mtime_ms"), "{name}: the column is added");
+        run(&conn).unwrap();
+        let (content, mtime): (String, i64) =
+            conn.query_row("SELECT content, last_seen_mtime_ms FROM db_agent_native_memory WHERE agent_id = 'a'", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!((content.as_str(), mtime), ("kept", 0), "{name}: an existing row is kept, with an unknown time");
+    }
+}
+
+/// The failing path itself: an existing shared store opened by this build, then a mirror write.
+#[test]
+fn an_existing_shared_store_takes_a_native_memory_mirror_write() {
+    let file = tempfile::NamedTempFile::new().unwrap();
+    {
+        let conn = Connection::open(file.path()).unwrap();
+        conn.execute_batch(OLD_NATIVE_MEMORY_TABLE).unwrap();
+    }
+    let store = crate::backend::storage::store::Store::open_shared(file.path()).unwrap();
+    store.agent_native_memory_upsert("agent-1", "note.md", "text", Some("project"), "C:/mem/note.md", 4, 1234).unwrap();
+    let meta = store.agent_native_memory_list_meta("agent-1").unwrap();
+    assert_eq!((meta.len(), meta[0].last_seen_mtime_ms), (1, 1234));
+}

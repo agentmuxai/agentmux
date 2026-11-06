@@ -1,12 +1,10 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { assertMenuInPaintableArea } from "@/app/util/menu-position";
+import { AnchoredPopover, pointAnchor } from "@/app/element/anchored-popover";
 import { menuIconClass } from "@/app/util/menu-icons";
-import { useHiddenTabMarker, usePaneOverlay } from "@/app/platform/pane-overlay";
 import clsx from "clsx";
 import { createSignal, For, JSX, onCleanup, onMount, Show } from "solid-js";
-import { Portal } from "solid-js/web";
 
 import "./popover-menu.scss";
 
@@ -42,7 +40,7 @@ export type PopoverMenuItem = PopoverMenuActionItem | PopoverMenuSeparator | Pop
 
 interface PopoverMenuProps {
     items: PopoverMenuItem[];
-    /** Cursor position in client px. Clamped to viewport on mount. */
+    /** Cursor position in client px. The menu opens there, and flips or shifts to stay in the window. */
     pos: { x: number; y: number };
     onClose: () => void;
 }
@@ -50,70 +48,36 @@ interface PopoverMenuProps {
 // ── Main component ─────────────────────────────────────────────────────────
 
 const PopoverMenu = (props: PopoverMenuProps): JSX.Element => {
-    // Portal-mounted: drop its pane hole while its window tab is hidden (pane-overlay.ts).
-    const hiddenTab = useHiddenTabMarker();
-    const [menuEl, setMenuEl] = createSignal<HTMLDivElement | null>(null);
-    const [left, setLeft] = createSignal(props.pos.x);
-    const [top, setTop]   = createSignal(props.pos.y);
-
-    // Required: cuts a transparent clip through any CEF browser-pane HWND
-    // behind this popover so the DOM renders above native pane content.
-    usePaneOverlay(menuEl, { keys: true });
-
-    const registerMenu = (el: HTMLDivElement) => {
-        setMenuEl(el);
-        requestAnimationFrame(() => {
-            if (!(el instanceof Element)) return;
-            const r = el.getBoundingClientRect();
-            setLeft(Math.min(props.pos.x, window.innerWidth  - r.width  - 8));
-            setTop( Math.min(props.pos.y, window.innerHeight - r.height - 8));
-            // Dev-only guard: logs if the menu falls outside the paintable area.
-            assertMenuInPaintableArea(el, "popover-menu");
-        });
-    };
-
     const close = () => props.onClose();
 
-    const handleMouseDown = (e: MouseEvent) => {
-        const t = e.target as Node;
-        if (menuEl()?.contains(t)) return;
-        close();
-    };
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-        if (e.key === "Escape") close();
-    };
+    // The cursor is a point (a zero-size rect) AnchoredPopover places the menu at, without a gap. It
+    // follows chrome zoom, cuts the hole in any browser pane behind it and dismisses on an outside press
+    // or Esc. Starts hidden and is shown once placed.
+    const point = pointAnchor(props.pos.x, props.pos.y);
 
     const handleVisibilityChange = () => {
         if (document.hidden) close();
     };
 
-    onMount(() => {
-        document.addEventListener("mousedown",        handleMouseDown, true);
-        document.addEventListener("keydown",          handleKeyDown);
-        document.addEventListener("visibilitychange", handleVisibilityChange);
-    });
-
-    onCleanup(() => {
-        document.removeEventListener("mousedown",        handleMouseDown, true);
-        document.removeEventListener("keydown",          handleKeyDown);
-        document.removeEventListener("visibilitychange", handleVisibilityChange);
-    });
+    onMount(() => document.addEventListener("visibilitychange", handleVisibilityChange));
+    onCleanup(() => document.removeEventListener("visibilitychange", handleVisibilityChange));
 
     return (
-        <Portal mount={document.body}>
-            <div
-                ref={registerMenu}
-                class="menu popover-menu"
-                style={{ position: "fixed", left: `${left()}px`, top: `${top()}px` }}
-                data-pane-overlay
-                data-window-tab-hidden={hiddenTab()}
-            >
-                <For each={props.items}>
-                    {(item) => <PopoverMenuItemRenderer item={item} onClose={close} />}
-                </For>
-            </div>
-        </Portal>
+        <AnchoredPopover
+            anchor={point}
+            placement="bottom-start"
+            gutter={0}
+            fitHeight
+            hideUntilPlaced
+            overlayKeys
+            shellClass="anchored-popover--menu"
+            class="menu popover-menu"
+            onDismiss={close}
+        >
+            <For each={props.items}>
+                {(item) => <PopoverMenuItemRenderer item={item} onClose={close} />}
+            </For>
+        </AnchoredPopover>
     );
 };
 

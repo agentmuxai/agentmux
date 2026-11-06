@@ -130,8 +130,8 @@ async fn an_imported_skill_is_what_was_previewed_and_reaches_only_its_bundles_ag
 
     let agent_on = |id: &str, bundle: &str| {
         let mut def = test_agent_def(id, id, "claude", "host", 1, "");
-        def.memory_id = bundle.to_string();
         state.mstore.agent_def_insert(&mut def).unwrap();
+        state.mstore.agent_bundles_set(id, &[bundle.to_string()]).unwrap();
     };
     let other: crate::backend::storage::bundles::Bundle = serde_json::from_value(serde_json::json!({
         "id": "other-bundle", "name": "Other", "mcp_servers": "[]", "skills": "[]",

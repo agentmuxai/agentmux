@@ -116,7 +116,7 @@
 // border, border-radius, box-shadow, and overflow for this element.
 .modal-panel.accounts-chooser {
     width: 320px;
-    max-width: calc(100vw - 32px);
+    max-width: calc((100vw - 32px) / var(--zoomfactor));
 }
 
 // An OAuth account's card: the line saying what stopped it or what the

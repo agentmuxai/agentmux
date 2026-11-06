@@ -17,7 +17,7 @@ mod template;
 mod template_create;
 mod template_image;
 mod fork_history;
-mod fork_slugs;
+pub(crate) mod fork_slugs;
 // Builds a fork's and a worker's definition ("Fork, spawn and worker" above).
 pub(crate) use template::copy_definition;
 pub(crate) use template_create::create_from_template;

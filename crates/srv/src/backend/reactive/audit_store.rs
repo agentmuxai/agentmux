@@ -63,6 +63,8 @@ pub fn install_for_this_srv() {
         }
         None => tracing::warn!("jekt audit: no shared directory and no channel directory; not kept in a file"),
     }
+    // The index of what agents do goes beside it.
+    crate::backend::audit_activity::install_for_this_srv();
 }
 
 /// Start recording to `path` for the rest of this process. The first call wins.
@@ -111,15 +113,23 @@ pub(super) fn spawn_writer(
 }
 
 fn write_line(file: &mut std::fs::File, channel_name: &str, entry: &AuditLogEntry) -> std::io::Result<()> {
-    let mut value = serde_json::to_value(entry).map_err(std::io::Error::other)?;
-    if let Some(map) = value.as_object_mut() {
-        map.insert("channel".to_string(), serde_json::Value::String(channel_name.to_string()));
-    }
-    let mut line = serde_json::to_vec(&value).map_err(std::io::Error::other)?;
+    let mut line = serde_json::to_vec(&stamped(entry, channel_name)).map_err(std::io::Error::other)?;
     line.push(b'\n');
     // One write call per line, so lines from several instances don't interleave.
     file.write_all(&line)?;
     file.flush()
+}
+
+/// `entry` with where it is written from: this computer, the channel and the srv's version. Whatever the entry said
+/// of them is replaced: a row is written by the srv that recorded it.
+fn stamped(entry: &AuditLogEntry, channel_name: &str) -> AuditLogEntry {
+    static HOST: OnceLock<String> = OnceLock::new();
+    AuditLogEntry {
+        host: Some(HOST.get_or_init(super::registry::local_host_label).clone()),
+        channel: Some(channel_name.to_string()),
+        version: Some(env!("CARGO_PKG_VERSION").to_string()),
+        ..entry.clone()
+    }
 }
 
 /// The entries in the file at `path`, oldest first; lines that don't parse are skipped.
@@ -154,6 +164,12 @@ mod tests {
             wan: None,
             cli_native: None,
             turn: None,
+            host: None,
+            channel: None,
+            version: None,
+            tier: None,
+            trust: None,
+            msg_id: None,
         }
     }
 

@@ -77,6 +77,7 @@ fn entries_of(slug: &str, segment: &Segment, archives: &[u64], ctx: &Ctx) -> Vec
         reason: None,
         cost: None,
         links: link(start.started_at_ms, start.byte_start),
+        provenance: None,
     }];
     if let (Some(at), Some(why)) = (segment.ended_at_ms, segment.end_reason) {
         let word = reason_word(why);
@@ -92,6 +93,7 @@ fn entries_of(slug: &str, segment: &Segment, archives: &[u64], ctx: &Ctx) -> Vec
             reason: Some(word),
             cost: None,
             links: link(at, segment.byte_end),
+            provenance: None,
         });
     }
     out

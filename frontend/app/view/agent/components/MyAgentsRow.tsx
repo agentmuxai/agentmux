@@ -19,6 +19,7 @@ import { AgentRuntimeChip } from "./AgentRuntimeChip";
 import { noPreviewText } from "./my-agents-list-text";
 import type { MyAgentsListProps } from "./MyAgentsList";
 import { RuntimeBadge } from "./RuntimeBadge";
+import { VaultRowAsks } from "./vault-request-card/vault-row-asks";
 import { parseRuntimeKind } from "@/util/runtime-kind";
 
 export interface MyAgentsRowProps {
@@ -140,6 +141,7 @@ export const MyAgentsRow = (props: MyAgentsRowProps): JSX.Element => {
                 >
                     <span class="agent-recent-sessions-preview">{row.preview}</span>
                 </Show>
+                <VaultRowAsks agent={noPane() ? list.runtimeOf?.(row.definition_id)?.agent_id : undefined} />
                 <Show when={row.node_count > 0}>
                     <span class="agent-recent-sessions-line3">
                         <span class="agent-recent-sessions-nodes">

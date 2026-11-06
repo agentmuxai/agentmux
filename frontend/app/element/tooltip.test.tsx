@@ -17,6 +17,8 @@
  * that effect to have run.
  */
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { autoUpdate, computePosition } from "@floating-ui/dom";
@@ -25,11 +27,16 @@ import { Tooltip } from "./tooltip";
 import * as pointerDragState from "@/app/util/pointer-drag-state";
 
 vi.mock("@floating-ui/dom", () => ({
-    autoUpdate: vi.fn(() => vi.fn()),
+    // The real autoUpdate places the panel at once; AnchoredPopover places it only through it.
+    autoUpdate: vi.fn((_reference: unknown, _floating: unknown, update: () => void) => {
+        update();
+        return vi.fn();
+    }),
     computePosition: vi.fn(() => Promise.resolve({ x: 0, y: 0 })),
     flip: vi.fn(() => ({})),
     offset: vi.fn(() => ({})),
     shift: vi.fn(() => ({})),
+    size: vi.fn(() => ({})),
 }));
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -103,6 +110,10 @@ describe("Tooltip", () => {
     });
 });
 
+/** The panel's placement lives on the shell AnchoredPopover places, its opacity and fade on the body inside it. */
+const styleOf = (shell: Element | null): string =>
+    `${shell?.getAttribute("style") ?? ""};${shell?.firstElementChild?.getAttribute("style") ?? ""}`;
+
 /** A tooltip is hovered inside dialogs, popovers and menus, so it takes the tooltip layer, not a number of its own. */
 describe("Tooltip layer", () => {
     afterEach(cleanup);
@@ -115,9 +126,13 @@ describe("Tooltip layer", () => {
         ));
         fireEvent.mouseEnter(screen.getByText("anchor").parentElement!);
         await tick();
-        const panel = screen.getByText("tip content").parentElement!;
-        expect(panel.className).toContain("z-[var(--z-tooltip)]");
-        expect(panel.className).not.toMatch(/(^|\s)z-\d+(\s|$)/);
+        const shell = screen.getByText("tip content").closest(".anchored-popover")!;
+        expect(shell.className).toContain("anchored-popover--tooltip");
+        expect(shell.className).not.toMatch(/(^|\s)z-\d+(\s|$)/);
+        // The class takes the tooltip layer, the same as the Tailwind class it replaces.
+        expect(readFileSync(join(process.cwd(), "frontend/app/element/anchored-popover.scss"), "utf8")).toMatch(
+            /\.anchored-popover--tooltip \{\s*z-index: var\(--z-tooltip\);/,
+        );
     });
 });
 
@@ -151,9 +166,9 @@ describe("Tooltip default timing", () => {
         await wait(450);
         fireEvent.mouseEnter(a);
         await tick();
-        expect(overlays()[0].getAttribute("style")).toContain("opacity: 0");
+        expect(styleOf(overlays()[0])).toContain("opacity: 0");
         await wait(100);
-        expect(overlays()[0].getAttribute("style")).toContain("opacity: 1");
+        expect(styleOf(overlays()[0])).toContain("opacity: 1");
     });
 
     it("lingers briefly after the pointer leaves, then goes", async () => {
@@ -179,7 +194,7 @@ describe("Tooltip default timing", () => {
         await vi.advanceTimersByTimeAsync(20);
         expect(screen.queryByText("first")).toBeNull();
         const second = screen.getByText("second").closest("[data-pane-overlay]") as HTMLElement;
-        expect(second.getAttribute("style")).toContain("opacity: 1");
+        expect(styleOf(second)).toContain("opacity: 1");
     });
 
     it("does not stay 'warm' for the others after an open tooltip is disabled", async () => {
@@ -202,7 +217,7 @@ describe("Tooltip default timing", () => {
         fireEvent.mouseLeave(screen.getByText("anchor-first").parentElement!);
         fireEvent.mouseEnter(screen.getByText("anchor-second").parentElement!);
         await vi.advanceTimersByTimeAsync(20);
-        expect(overlays()[0].getAttribute("style")).toContain("opacity: 0");
+        expect(styleOf(overlays()[0])).toContain("opacity: 0");
     });
 
     it("does not stay 'warm' after an immediate tooltip closed the open default one", async () => {
@@ -229,7 +244,7 @@ describe("Tooltip default timing", () => {
         fireEvent.mouseLeave(quick);
         fireEvent.mouseEnter(third);
         await vi.advanceTimersByTimeAsync(20);
-        expect(screen.getByText("third").closest("[data-pane-overlay]")!.getAttribute("style")).toContain("opacity: 0");
+        expect(styleOf(screen.getByText("third").closest("[data-pane-overlay]")!)).toContain("opacity: 0");
     });
 
     it("closes the open default tooltip when an immediate one opens, though it does not take its place", async () => {
@@ -261,7 +276,7 @@ describe("Tooltip default timing", () => {
         const [a] = two();
         fireEvent.mouseEnter(a);
         await vi.advanceTimersByTimeAsync(100);
-        expect(overlays()[0].getAttribute("style")).toContain("opacity: 1");
+        expect(styleOf(overlays()[0])).toContain("opacity: 1");
         fireEvent.mouseLeave(a);
         await vi.advanceTimersByTimeAsync(200);
         expect(overlays()).toHaveLength(0);
@@ -269,7 +284,7 @@ describe("Tooltip default timing", () => {
         vi.mocked(computePosition).mockImplementationOnce(() => new Promise(() => {}));
         fireEvent.mouseEnter(a);
         await vi.advanceTimersByTimeAsync(100);
-        expect(overlays()[0].getAttribute("style")).toContain("opacity: 0");
+        expect(styleOf(overlays()[0])).toContain("opacity: 0");
     });
 
     it("waits the short rest when no tooltip has been open lately", async () => {
@@ -278,9 +293,9 @@ describe("Tooltip default timing", () => {
         await vi.advanceTimersByTimeAsync(1000);
         fireEvent.mouseEnter(a);
         await vi.advanceTimersByTimeAsync(20);
-        expect(overlays()[0].getAttribute("style")).toContain("opacity: 0");
+        expect(styleOf(overlays()[0])).toContain("opacity: 0");
         await vi.advanceTimersByTimeAsync(40);
-        expect(overlays()[0].getAttribute("style")).toContain("opacity: 1");
+        expect(styleOf(overlays()[0])).toContain("opacity: 1");
     });
 });
 
@@ -313,15 +328,15 @@ describe("Tooltip immediate", () => {
         fireEvent.mouseEnter(screen.getByText("anchor-now").parentElement!);
         await frame();
         const now = screen.getByText("now").closest("[data-pane-overlay]") as HTMLElement;
-        expect(now.getAttribute("style")).toContain("opacity: 1");
-        expect(now.getAttribute("style")).toContain("transition: none");
+        expect(styleOf(now)).toContain("opacity: 1");
+        expect(styleOf(now)).toContain("transition: none");
         fireEvent.mouseLeave(screen.getByText("anchor-now").parentElement!);
         fireEvent.mouseEnter(screen.getByText("anchor-later").parentElement!);
         await frame();
         const later = screen.getByText("later").closest("[data-pane-overlay]") as HTMLElement;
         // The default shows after its 40 ms rest, with the short fade token.
-        expect(later.getAttribute("style")).toContain("opacity: 1");
-        expect(later.getAttribute("style")).toContain("opacity var(--duration-instant)");
+        expect(styleOf(later)).toContain("opacity: 1");
+        expect(styleOf(later)).toContain("opacity var(--duration-instant)");
     });
 
     it("is gone the moment the pointer leaves, where the default lingers for its delay", async () => {
@@ -364,10 +379,10 @@ describe("Tooltip immediate", () => {
         ));
         fireEvent.mouseEnter(screen.getByText("anchor-now").parentElement!);
         await frame();
-        expect(overlay()!.getAttribute("style")).toContain("opacity: 0");
+        expect(styleOf(overlay()!)).toContain("opacity: 0");
         place();
         await tick();
-        expect(overlay()!.getAttribute("style")).toContain("opacity: 1");
-        expect(overlay()!.getAttribute("style")).toContain("left: 5px");
+        expect(styleOf(overlay()!)).toContain("opacity: 1");
+        expect(styleOf(overlay()!)).toContain("left: 5px");
     });
 });

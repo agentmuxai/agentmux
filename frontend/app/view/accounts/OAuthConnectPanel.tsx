@@ -10,8 +10,9 @@
  * (`OAuthClientSection`), kicks the flow off and polls to completion,
  * rendering the device code / browser prompt along the way.
  *
- * Built-in public client ids aren't provisioned yet, so every provider uses
- * the user's own client, saved in the keychain after the first connect.
+ * Google and GitHub run on AgentMux's own client where the build has one (Google shows no client
+ * fields at all); the other providers use the user's own client, saved in the keychain after the
+ * first connect.
  * docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §4.2/§12.1,
  * docs/specs/SPEC_GOOGLE_CONNECTORS_GMAIL_CALENDAR_DRIVE_2026_10_14.md §7.
  */
@@ -25,7 +26,7 @@ import type { AccountProvider } from "@/app/view/identity/identity-model";
 import { PROVIDER_LABELS, refreshAccountCache } from "@/app/view/identity/identity-model";
 import { oauthInfo } from "./oauth-catalog";
 import { isBlockedError, setOAuthNote } from "./oauth-account-state";
-import { createOAuthClientState, OAuthClientSection } from "./OAuthClientSection";
+import { clientUnavailable, ConnectRow, createOAuthClientState } from "./OAuthClientSection";
 import { Button } from "@/app/element/ui";
 import { muxbusDelivery, muxbusOffersSignIn } from "@/store/muxbus-delivery";
 import { githubNeedsCloudSignIn, isNeedsCloudSignInError } from "./github-cloud-gate";
@@ -189,10 +190,12 @@ export function OAuthConnectPanel(props: OAuthConnectPanelProps): JSX.Element {
             muxbusDelivery(),
         );
 
+    const unavailable = () => clientUnavailable(info, client.state.info());
+
     // A Reconnect starts by itself once it knows it has a client to use, and, for GitHub, a Cloud sign-in.
     let autoStarted = false;
     createEffect(() => {
-        if (!props.autoStart || autoStarted || !client.state.loaded() || client.state.showFields() || needsCloud()) return;
+        if (!props.autoStart || autoStarted || !client.state.loaded() || client.state.showFields() || needsCloud() || unavailable()) return;
         autoStarted = true;
         void connect();
     });
@@ -251,22 +254,15 @@ export function OAuthConnectPanel(props: OAuthConnectPanelProps): JSX.Element {
                         </>
                     }
                 >
-                    <OAuthClientSection client={client} />
-                    <div class="identity-key-actions">
-                        <Button
-                            tone="accent"
-                            class="identity-btn identity-btn-primary"
-                            disabled={busy() || !client.state.loaded()}
-                            onClick={() => void connect()}
-                        >
-                            {busy() ? "Starting…" : props.accountId ? "Reconnect" : `Connect ${label}`}
-                        </Button>
-                        <Show when={props.onCancel}>
-                            <Button class="identity-btn identity-btn-secondary" onClick={() => props.onCancel?.()}>
-                                Cancel
-                            </Button>
-                        </Show>
-                    </div>
+                    <ConnectRow
+                        client={client}
+                        unavailable={unavailable()}
+                        busy={busy()}
+                        label={label}
+                        reconnect={!!props.accountId}
+                        onConnect={() => void connect()}
+                        onCancel={props.onCancel}
+                    />
                 </Show>
             </Show>
 

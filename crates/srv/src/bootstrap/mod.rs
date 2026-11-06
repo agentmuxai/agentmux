@@ -55,14 +55,18 @@ macro_rules! eprintln_lossy {
 mod watchers;
 mod logging;
 mod stores;
+mod store_attach;
+mod store_boot;
 mod shared_root;
 pub(crate) mod shared_guard;
 pub(crate) mod carry_forward;
 mod background;
+mod messaging_bridges;
 mod network;
 mod plumbing;
 mod shutdown;
 mod delivery;
+mod state_services;
 
 pub use watchers::*;
 pub use logging::*;
@@ -72,3 +76,4 @@ pub use network::*;
 pub use plumbing::*;
 pub use shutdown::*;
 pub use delivery::*;
+pub use state_services::*;

@@ -7,6 +7,7 @@
 
 import { onMount, Show, type JSX } from "solid-js";
 
+import { t } from "@/app/i18n/i18n";
 import { useMuxBusStatus } from "./AgentMuxConnectPanel";
 import { GITHUB_CLOUD_SIGN_IN_TEXT } from "./github-cloud-gate";
 import { MuxBusSignInChoices } from "./muxbus-sign-in-choices";
@@ -17,15 +18,13 @@ export function GithubCloudSignIn(): JSX.Element {
     return (
         <div class="oauth-cloud-signin" role="status">
             <div class="oauth-cloud-signin-text">{GITHUB_CLOUD_SIGN_IN_TEXT}</div>
-            <div class="oauth-cloud-signin-note">
-                GitHub tokens for your agents come from AgentMux Cloud, so this needs your AgentMux Cloud account.
-            </div>
+            <div class="oauth-cloud-signin-note">{t("signin.github.needsCloud")}</div>
             <MuxBusSignInChoices
                 identityProviders={muxbus.identityProviders()}
                 loading={muxbus.loading()}
                 disabled={!muxbus.isConfigured()}
-                label="Sign in"
-                cancelLabel="Cancel sign-in"
+                label={t("signin.signIn")}
+                cancelLabel={t("signin.cancel")}
                 onSignIn={(provider) => void muxbus.connect(provider)}
                 onCancel={() => void muxbus.cancel()}
             />

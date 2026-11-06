@@ -44,18 +44,18 @@
  * docs/specs/SPEC_OFFLINE_RESILIENCE_2026_10_20.md §4.3.
  */
 
-import { createEffect, createMemo, createSignal, onCleanup, onMount, type Accessor } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, onMount, type Accessor, type Setter } from "solid-js";
 import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import * as MOS from "@/app/store/mos";
 import { getBlockMetaKeyAtom } from "@/app/store/global";
 import { setBlockMeta } from "@/app/store/block-meta";
-import { addEventListener as addPaneEventListener } from "@/app/store/agent-pane-state-store";
+import { addEventListener as addPaneEventListener, type AgentPaneEvent } from "@/app/store/agent-pane-state-store";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import type { PaneFailure } from "@/app/store/agent-pane-state/types";
 import type { FailedTurnRecovery } from "../offline/failed-turn";
-import { failureToRow, isTransient, type FailureRow } from "../failure/failure-accessory";
-import { agoLabel, failureVerdict, isAccountCause, type AccountState, type FailureVerdict } from "../failure/failure-verdict";
+import { failureToRow, isTransient, type FailureActions, type FailureRow, type FailureViewState } from "../failure/failure-accessory";
+import { agoLabel, failureVerdict, isAccountCause, type AccountState, type FailureVerdict, type JudgedFailure } from "../failure/failure-verdict";
 import { forgetRefusedSend, refusedSendOf } from "../failure/refused-send";
 import { restoreRefusedSend } from "../failure/refused-send-restore";
 import { registerRecycleBlocker } from "@/app/store/recycle-blockers";
@@ -64,6 +64,7 @@ import { formatErrorReport } from "@/app/errors/error-report";
 import { sourceOf } from "@/app/store/agent-pane-state/failure-precedence";
 import type { FailureClearReason } from "@/app/store/agent-pane-state/types";
 import { clearFailure, raiseFailure } from "../failure/failure-writer";
+import type { AgentFailure } from "@/types/rpc/AgentFailure";
 
 /** How long an armed Take over waits for its confirming click. */
 export const TAKEOVER_CONFIRM_MS = 5000;
@@ -193,32 +194,41 @@ function recordedAt(f: unknown, fallback: number): number {
     return typeof at === "number" && Number.isFinite(at) && at > 0 ? at : fallback;
 }
 
-export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureResult {
-    const [expanded, setExpanded] = createSignal(false);
-    const [retrying, setRetrying] = createSignal(false);
-    const [autoRetryIn, setAutoRetryIn] = createSignal<number | null>(null);
-    // A reload doesn't re-arm the countdown (only a live failure does).
-    onCleanup(registerRecycleBlocker(() => (autoRetryIn() != null ? "a failed turn is about to be retried" : null)));
+/** Everything the hook's handlers share: view-local signals and the bookkeeping behind the countdown and the seed. */
+interface FailureHookState {
+    opts: UseAgentFailureOptions;
+    expanded: Accessor<boolean>;
+    setExpanded: Setter<boolean>;
+    retrying: Accessor<boolean>;
+    setRetrying: Setter<boolean>;
+    autoRetryIn: Accessor<number | null>;
+    setAutoRetryIn: Setter<number | null>;
     // Take over's two-step confirmation (`live_elsewhere` only). View-local,
     // like `expanded`: nothing else needs to agree on it.
-    const [takeoverArmed, setTakeoverArmed] = createSignal(false);
-    const [takingOver, setTakingOver] = createSignal(false);
-    let disarmTimer: ReturnType<typeof setTimeout> | undefined;
+    takeoverArmed: Accessor<boolean>;
+    setTakeoverArmed: Setter<boolean>;
+    takingOver: Accessor<boolean>;
+    setTakingOver: Setter<boolean>;
     // Copy error (SPEC_ERROR_COPY_EVERYWHERE_2026_09_24.md surfaces 1/2) —
     // view-local feedback, same class as `expanded`/`retrying`: presentation
     // timing nothing else needs to agree on.
-    const [copyState, setCopyState] = createSignal<"idle" | "copied" | "failed">("idle");
-    let copyResetTimer: ReturnType<typeof setTimeout> | undefined;
-
+    copyState: Accessor<"idle" | "copied" | "failed">;
+    setCopyState: Setter<"idle" | "copied" | "failed">;
     // What the failure is judged against, besides srv's account state (`opts.liveAccount`): the pane's last
     // completed turn, whether the auto-retry ladder is spent (a persisted failure read at mount has had no
     // ladder in this pane, so it starts spent), and a tick for a usage limit's reset passing.
-    const [completedTurnAt, setCompletedTurnAt] = createSignal<number | null>(null);
-    const [ladderEnded, setLadderEnded] = createSignal(false);
-    const [clockTick, setClockTick] = createSignal(0);
-
-    let countdown: ReturnType<typeof setInterval> | undefined;
-    let autoRetries = 0;
+    completedTurnAt: Accessor<number | null>;
+    setCompletedTurnAt: Setter<number | null>;
+    ladderEnded: Accessor<boolean>;
+    setLadderEnded: Setter<boolean>;
+    clockTick: Accessor<number>;
+    setClockTick: Setter<number>;
+    accountChangedAt: Accessor<number>;
+    setAccountChangedAt: Setter<number>;
+    disarmTimer: ReturnType<typeof setTimeout> | undefined;
+    copyResetTimer: ReturnType<typeof setTimeout> | undefined;
+    countdown: ReturnType<typeof setInterval> | undefined;
+    autoRetries: number;
     // Set synchronously by `doRetry` right before it clears the row, and
     // consumed (reset to false) by the `state.failure` transition-effect
     // below. Distinguishes "this hook itself cleared the failure via Retry"
@@ -227,388 +237,471 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
     // message, bypassing Retry" (a new episode — reset the budget). See the
     // effect's comment for why this replaces the previous ControllerStatus-
     // based check (reagent P1 on #1987).
-    let selfInitiatedClear = false;
+    selfInitiatedClear: boolean;
+    // True while the failure showing was read back from block meta at mount.
+    failureFromMeta: boolean;
+}
 
-    const cancelCountdown = () => {
-        if (countdown) clearInterval(countdown);
-        countdown = undefined;
-        setAutoRetryIn(null);
+function createFailureHookState(opts: UseAgentFailureOptions): FailureHookState {
+    const [expanded, setExpanded] = createSignal(false);
+    const [retrying, setRetrying] = createSignal(false);
+    const [autoRetryIn, setAutoRetryIn] = createSignal<number | null>(null);
+    const [takeoverArmed, setTakeoverArmed] = createSignal(false);
+    const [takingOver, setTakingOver] = createSignal(false);
+    const [copyState, setCopyState] = createSignal<"idle" | "copied" | "failed">("idle");
+    const [completedTurnAt, setCompletedTurnAt] = createSignal<number | null>(null);
+    const [ladderEnded, setLadderEnded] = createSignal(false);
+    const [clockTick, setClockTick] = createSignal(0);
+    const [accountChangedAt, setAccountChangedAt] = createSignal(0);
+    return {
+        opts,
+        expanded, setExpanded,
+        retrying, setRetrying,
+        autoRetryIn, setAutoRetryIn,
+        takeoverArmed, setTakeoverArmed,
+        takingOver, setTakingOver,
+        copyState, setCopyState,
+        completedTurnAt, setCompletedTurnAt,
+        ladderEnded, setLadderEnded,
+        clockTick, setClockTick,
+        accountChangedAt, setAccountChangedAt,
+        disarmTimer: undefined,
+        copyResetTimer: undefined,
+        countdown: undefined,
+        autoRetries: 0,
+        selfInitiatedClear: false,
+        failureFromMeta: false,
     };
+}
 
-    const disarmTakeover = () => {
-        if (disarmTimer) clearTimeout(disarmTimer);
-        disarmTimer = undefined;
-        setTakeoverArmed(false);
-    };
+function cancelCountdown(s: FailureHookState) {
+    if (s.countdown) clearInterval(s.countdown);
+    s.countdown = undefined;
+    s.setAutoRetryIn(null);
+}
 
-    // ReAgent P2 on #3838: copyState is "same class as expanded/retrying" per
-    // its own doc comment, so it must reset everywhere those do — otherwise
-    // a Copy click on failure A can leave a stale "Copied"/"Copy failed"
-    // label on failure B if B arrives within the 2s window.
-    const resetCopyState = () => {
-        clearTimeout(copyResetTimer);
-        copyResetTimer = undefined;
-        setCopyState("idle");
-    };
+function disarmTakeover(s: FailureHookState) {
+    if (s.disarmTimer) clearTimeout(s.disarmTimer);
+    s.disarmTimer = undefined;
+    s.setTakeoverArmed(false);
+}
 
-    const clear = (reason: FailureClearReason = "dismissed") => {
-        cancelCountdown();
-        disarmTakeover();
-        clearFailure(opts.model, { reason });
-        setExpanded(false);
-        setRetrying(false);
-        resetCopyState();
-    };
+// ReAgent P2 on #3838: copyState is "same class as expanded/retrying" per
+// its own doc comment, so it must reset everywhere those do — otherwise
+// a Copy click on failure A can leave a stale "Copied"/"Copy failed"
+// label on failure B if B arrives within the 2s window.
+function resetCopyState(s: FailureHookState) {
+    clearTimeout(s.copyResetTimer);
+    s.copyResetTimer = undefined;
+    s.setCopyState("idle");
+}
 
-    // End the failure *episode*: clear the row AND restore the auto-retry
-    // budget. Used when the user explicitly dismisses or a genuinely new turn
-    // resolves the failure — NOT by `doRetry` (an auto-retry is still part of
-    // the same episode and must keep counting toward the cap, else a
-    // persistently-throttled turn would auto-retry forever). Spec §6.
-    const endEpisode = () => {
-        autoRetries = 0;
-        clear("episode-ended");
-    };
+function clear(s: FailureHookState, reason: FailureClearReason = "dismissed") {
+    cancelCountdown(s);
+    disarmTakeover(s);
+    clearFailure(s.opts.model, { reason });
+    s.setExpanded(false);
+    s.setRetrying(false);
+    resetCopyState(s);
+}
 
-    const doRetry = () => {
-        // This turn's retry is already on its way: nothing more to send.
-        if (opts.reconnect?.retryBusy()) return;
-        cancelCountdown();
-        setRetrying(true);
-        selfInitiatedClear = true;
-        // A failed turn the recovery tracks is retried there: once, with its attachments.
-        if (!opts.reconnect?.retry()) opts.onRetry();
-        // The next turn's lifecycle clears the row (a new turn = no failure);
-        // also clear locally so the banner goes away immediately. Keep
-        // `autoRetries` — an auto-fired retry stays within the episode's cap
-        // (the transition-effect below sees `selfInitiatedClear` and skips
-        // the reset it would otherwise apply).
-        clear("retried");
-    };
+// End the failure *episode*: clear the row AND restore the auto-retry
+// budget. Used when the user explicitly dismisses or a genuinely new turn
+// resolves the failure — NOT by `doRetry` (an auto-retry is still part of
+// the same episode and must keep counting toward the cap, else a
+// persistently-throttled turn would auto-retry forever). Spec §6.
+function endEpisode(s: FailureHookState) {
+    s.autoRetries = 0;
+    clear(s, "episode-ended");
+}
 
-    const armAutoRetry = () => {
-        if (autoRetries >= AUTO_RETRY_BACKOFF_S.length) return; // capped → manual only
-        const seconds = jitteredBackoffSeconds(AUTO_RETRY_BACKOFF_S[autoRetries]);
-        autoRetries += 1;
-        const retryAt = Date.now() + seconds * 1000;
-        setAutoRetryIn(seconds);
-        countdown = setInterval(() => {
-            const left = Math.ceil((retryAt - Date.now()) / 1000);
-            if (left <= 0) {
-                doRetry();
-            } else {
-                setAutoRetryIn(left);
-            }
-        }, 1000);
-    };
+function doRetry(s: FailureHookState) {
+    // This turn's retry is already on its way: nothing more to send.
+    if (s.opts.reconnect?.retryBusy()) return;
+    cancelCountdown(s);
+    s.setRetrying(true);
+    s.selfInitiatedClear = true;
+    // A failed turn the recovery tracks is retried there: once, with its attachments.
+    if (!s.opts.reconnect?.retry()) s.opts.onRetry();
+    // The next turn's lifecycle clears the row (a new turn = no failure);
+    // also clear locally so the banner goes away immediately. Keep
+    // `autoRetries` — an auto-fired retry stays within the episode's cap
+    // (the transition-effect below sees `selfInitiatedClear` and skips
+    // the reset it would otherwise apply).
+    clear(s, "retried");
+}
 
-    onMount(() => {
-        // P1.2 — Seed from persisted block meta so the recovery banner survives
-        // tab switches and page reloads. Read once on mount; the MPS event
-        // subscription below handles live updates for the current session.
-        // (SPEC_AGENT_ERROR_FRAMEWORK_2026_06_20 §4 P1.2)
-        const mountedAt = Date.now();
-        const persistedAtom = getBlockMetaKeyAtom(opts.blockId, "agent:last_failure");
-        const pf = persistedAtom();
-        // Seed the reducer's canonical `state.failure` (not a local signal —
-        // see the module doc comment). The pane is freshly mounted here, so
-        // there's no working turn to force-end; FailureObserved's `turnWasEnded`
-        // check is false and it just records the failure.
-        //
-        // Judged before it is shown (spec §3.4): a failure whose cause is over by now is not
-        // raised at all. An account failure waits briefly for srv's state of the agent, so a healed
-        // one never flashes; a transient one has had no ladder in this pane, so it comes back as a
-        // lapsed note, not as a live retry.
-        let seedTimer: ReturnType<typeof setTimeout> | undefined;
-        // Set once the persisted failure has been judged, or overtaken by a live failure or a new turn.
-        let seeded = false;
-        const settleSeed = () => {
-            seeded = true;
-            clearTimeout(seedTimer);
-        };
-        if (pf) {
-            const at = recordedAt(pf, Date.now());
-            failureFromMeta = true;
-            const seed = () => {
-                // A live failure or a turn that began while it waited is newer than the stored one.
-                if (opts.failure()) return;
-                if (verdictOf({ data: pf, at }) === "healed") return;
-                raiseFailure(opts.model, { source: "seed", failure: pf, at, since: mountedAt });
-            };
-            if (isTransient(pf.code)) setLadderEnded(true);
-            if (isAccountCause(pf.code) && opts.liveAccount && opts.liveAccount() === "unknown") {
-                // Until srv says, or for SEED_WAIT_MS, whichever comes first.
-                const once = () => {
-                    if (seeded) return;
-                    seeded = true;
-                    seed();
-                };
-                seedTimer = setTimeout(once, SEED_WAIT_MS);
-                createEffect(() => {
-                    if (opts.liveAccount!() !== "unknown") once();
-                });
-            } else {
-                seed();
-            }
+function armAutoRetry(s: FailureHookState) {
+    if (s.autoRetries >= AUTO_RETRY_BACKOFF_S.length) return; // capped → manual only
+    const seconds = jitteredBackoffSeconds(AUTO_RETRY_BACKOFF_S[s.autoRetries]);
+    s.autoRetries += 1;
+    const retryAt = Date.now() + seconds * 1000;
+    s.setAutoRetryIn(seconds);
+    s.countdown = setInterval(() => {
+        const left = Math.ceil((retryAt - Date.now()) / 1000);
+        if (left <= 0) {
+            doRetry(s);
+        } else {
+            s.setAutoRetryIn(left);
         }
+    }, 1000);
+}
 
-        const unsubFailure = onMuxEvent(WpsEvent.AgentFailure, (f) => {
-                settleSeed();
-                cancelCountdown();
-                // A new failure never inherits an armed Take over: its row must
-                // start at the first click again (ReAgent P1 on #3742).
-                disarmTakeover();
-                setExpanded(false);
-                setRetrying(false);
-                resetCopyState();
-                // Reducer-side: records state.failure AND unconditionally ends
-                // a still-working turn — see FailureObserved's reducer case.
-                failureFromMeta = false;
-                raiseFailure(opts.model, { source: "live", failure: f, at: Date.now() });
-                // A failure that finds the ladder spent is the end of it: the row becomes the lapsed note.
-                setLadderEnded(isTransient(f.code) && autoRetries >= AUTO_RETRY_BACKOFF_S.length);
-                if (isTransient(f.code) && !opts.reconnect?.waitsForReconnect(f.code)) armAutoRetry();
-            }, MOS.makeORef("block", opts.blockId));
+/** What the mount-time seed hands the live handlers: end its wait, and drop its timer. */
+interface SeedHandle {
+    settle: () => void;
+    stop: () => void;
+}
 
-        // Restore the full auto-retry budget once the LAST turn genuinely
-        // succeeded — a later unrelated transient failure must get its own full
-        // ladder, not inherit a stale count from turns ago. `turn-ended`
-        // with outcome "completed" is the reducer's own authoritative verdict
-        // (emitted only by the real `TurnEnd` command, driven by the CLI's own
-        // session_end/result frame on stdout) — a strictly more reliable
-        // signal than the previous approach of inferring success from
-        // `ControllerStatus: done` NOT being followed by an `agentfailure`,
-        // which depended on the underlying OS process actually exiting between
-        // turns. Persistent-mode agents never do (the exact case this PR's
-        // FailureObserved fix targets), so that inference could never fire for
-        // them — reagent P1 on #1987. A failed turn goes through
-        // `FailureObserved` instead (never emits `turn-ended`), so this can
-        // never misfire on a failure.
-        const unsubTurnEnded = addPaneEventListener((blockId, event) => {
-            if (blockId !== opts.blockId) return;
-            if (event.type === "turn-started") settleSeed();
-            if (event.type === "turn-ended" && event.outcome === "completed") {
-                autoRetries = 0;
-                setCompletedTurnAt(Date.now());
-            }
-        });
-
-        onCleanup(() => {
-            clearTimeout(seedTimer);
-            unsubFailure();
-            unsubTurnEnded();
-            cancelCountdown();
-            disarmTakeover();
-            clearTimeout(copyResetTimer);
-        });
-    });
-
-    const copyError = () => {
-        const pf = opts.failure();
-        if (!pf) return;
-        const f = pf.data;
-        const metaParts: string[] = [f.code];
-        if (f.signal != null) metaParts.push(`signal ${f.signal}`);
-        else if (f.exitCode != null) metaParts.push(`exit ${f.exitCode}`);
-        if (f.retryable) metaParts.push("retryable");
-        const detailParts: string[] = [];
-        if (f.detail) detailParts.push(f.detail);
-        if (f.stderrTail) detailParts.push(f.stderrTail);
-        const report = formatErrorReport({
-            title: f.title || "Agent run failed",
-            message: metaParts.join(" · "),
-            where: `Agent failure · pane ${opts.blockId.slice(0, 8)}`,
-            details: detailParts.length > 0 ? detailParts.join("\n\n") : undefined,
-        });
-        clearTimeout(copyResetTimer);
-        void copyErrorReport(report).then((ok) => {
-            setCopyState(ok ? "copied" : "failed");
-            copyResetTimer = setTimeout(() => setCopyState("idle"), 2000);
-        });
-    };
-
-    // Reset the budget when `state.failure` clears WITHOUT this hook having
-    // initiated the clear itself — i.e. the user composed and sent a
-    // genuinely fresh message while the failure row was still showing,
-    // bypassing Retry entirely. `TurnStart` (reducer-turn.ts) unconditionally
-    // clears `state.failure` the instant that happens, which this effect
-    // observes directly. An auto-fired or manually-clicked Retry ALSO clears
-    // `state.failure` (via `clear()`), but must NOT reset the budget — same
-    // episode, still bound by the same ladder cap (`armAutoRetry`) — so `doRetry` sets
-    // `selfInitiatedClear` first; this effect consumes (and resets) that
-    // flag on every transition it observes.
+// P1.2 — Seed from persisted block meta so the recovery banner survives
+// tab switches and page reloads. Read once on mount; the MPS event
+// subscription handles live updates for the current session.
+// (SPEC_AGENT_ERROR_FRAMEWORK_2026_06_20 §4 P1.2)
+function seedStoredFailure(s: FailureHookState, verdictOf: (pf: JudgedFailure) => FailureVerdict): SeedHandle {
+    const { opts } = s;
+    const mountedAt = Date.now();
+    const persistedAtom = getBlockMetaKeyAtom(opts.blockId, "agent:last_failure");
+    const pf = persistedAtom();
+    // Seed the reducer's canonical `state.failure` (not a local signal —
+    // see the module doc comment). The pane is freshly mounted here, so
+    // there's no working turn to force-end; FailureObserved's `turnWasEnded`
+    // check is false and it just records the failure.
     //
-    // This replaces a previous ControllerStatus-based check for the same
-    // fresh-message case that fired on the backend's async `running` event —
-    // but `TurnStart` clears `state.failure` synchronously, well before that
-    // async event round-trips, so the old check never actually saw a
-    // non-null failure by the time it ran (reagent P1 on #1987: the check
-    // was dead code in practice). Watching the signal transition directly,
-    // instead of re-deriving it from a separate, slower async event, is the
-    // correct fix — and it works for persistent-mode agents too, unlike the
-    // mechanism it replaces.
-    let hadFailure = opts.failure() != null;
+    // Judged before it is shown (spec §3.4): a failure whose cause is over by now is not
+    // raised at all. An account failure waits briefly for srv's state of the agent, so a healed
+    // one never flashes; a transient one has had no ladder in this pane, so it comes back as a
+    // lapsed note, not as a live retry.
+    let seedTimer: ReturnType<typeof setTimeout> | undefined;
+    // Set once the persisted failure has been judged, or overtaken by a live failure or a new turn.
+    let seeded = false;
+    const settle = () => {
+        seeded = true;
+        clearTimeout(seedTimer);
+    };
+    if (pf) {
+        const at = recordedAt(pf, Date.now());
+        s.failureFromMeta = true;
+        const seed = () => {
+            // A live failure or a turn that began while it waited is newer than the stored one.
+            if (opts.failure()) return;
+            if (verdictOf({ data: pf, at }) === "healed") return;
+            raiseFailure(opts.model, { source: "seed", failure: pf, at, since: mountedAt });
+        };
+        if (isTransient(pf.code)) s.setLadderEnded(true);
+        if (isAccountCause(pf.code) && opts.liveAccount && opts.liveAccount() === "unknown") {
+            // Until srv says, or for SEED_WAIT_MS, whichever comes first.
+            const once = () => {
+                if (seeded) return;
+                seeded = true;
+                seed();
+            };
+            seedTimer = setTimeout(once, SEED_WAIT_MS);
+            createEffect(() => {
+                if (opts.liveAccount!() !== "unknown") once();
+            });
+        } else {
+            seed();
+        }
+    }
+    return { settle, stop: () => clearTimeout(seedTimer) };
+}
+
+function onLiveFailure(s: FailureHookState, f: AgentFailure, settleSeed: () => void) {
+    const { opts } = s;
+    settleSeed();
+    cancelCountdown(s);
+    // A new failure never inherits an armed Take over: its row must
+    // start at the first click again (ReAgent P1 on #3742).
+    disarmTakeover(s);
+    s.setExpanded(false);
+    s.setRetrying(false);
+    resetCopyState(s);
+    // Reducer-side: records state.failure AND unconditionally ends
+    // a still-working turn — see FailureObserved's reducer case.
+    s.failureFromMeta = false;
+    raiseFailure(opts.model, { source: "live", failure: f, at: Date.now() });
+    // A failure that finds the ladder spent is the end of it: the row becomes the lapsed note.
+    s.setLadderEnded(isTransient(f.code) && s.autoRetries >= AUTO_RETRY_BACKOFF_S.length);
+    if (isTransient(f.code) && !opts.reconnect?.waitsForReconnect(f.code)) armAutoRetry(s);
+}
+
+// Restore the full auto-retry budget once the LAST turn genuinely
+// succeeded — a later unrelated transient failure must get its own full
+// ladder, not inherit a stale count from turns ago. `turn-ended`
+// with outcome "completed" is the reducer's own authoritative verdict
+// (emitted only by the real `TurnEnd` command, driven by the CLI's own
+// session_end/result frame on stdout) — a strictly more reliable
+// signal than the previous approach of inferring success from
+// `ControllerStatus: done` NOT being followed by an `agentfailure`,
+// which depended on the underlying OS process actually exiting between
+// turns. Persistent-mode agents never do (the exact case this PR's
+// FailureObserved fix targets), so that inference could never fire for
+// them — reagent P1 on #1987. A failed turn goes through
+// `FailureObserved` instead (never emits `turn-ended`), so this can
+// never misfire on a failure.
+function onPaneEvent(s: FailureHookState, settleSeed: () => void, blockId: string, event: AgentPaneEvent) {
+    if (blockId !== s.opts.blockId) return;
+    if (event.type === "turn-started") settleSeed();
+    if (event.type === "turn-ended" && event.outcome === "completed") {
+        s.autoRetries = 0;
+        s.setCompletedTurnAt(Date.now());
+    }
+}
+
+function copyError(s: FailureHookState) {
+    const { opts } = s;
+    const pf = opts.failure();
+    if (!pf) return;
+    const f = pf.data;
+    const metaParts: string[] = [f.code];
+    if (f.signal != null) metaParts.push(`signal ${f.signal}`);
+    else if (f.exitCode != null) metaParts.push(`exit ${f.exitCode}`);
+    if (f.retryable) metaParts.push("retryable");
+    const detailParts: string[] = [];
+    if (f.detail) detailParts.push(f.detail);
+    if (f.stderrTail) detailParts.push(f.stderrTail);
+    const report = formatErrorReport({
+        title: f.title || "Agent run failed",
+        message: metaParts.join(" · "),
+        where: `Agent failure · pane ${opts.blockId.slice(0, 8)}`,
+        details: detailParts.length > 0 ? detailParts.join("\n\n") : undefined,
+    });
+    clearTimeout(s.copyResetTimer);
+    void copyErrorReport(report).then((ok) => {
+        s.setCopyState(ok ? "copied" : "failed");
+        s.copyResetTimer = setTimeout(() => s.setCopyState("idle"), 2000);
+    });
+}
+
+// Reset the budget when `state.failure` clears WITHOUT this hook having
+// initiated the clear itself — i.e. the user composed and sent a
+// genuinely fresh message while the failure row was still showing,
+// bypassing Retry entirely. `TurnStart` (reducer-turn.ts) unconditionally
+// clears `state.failure` the instant that happens, which this effect
+// observes directly. An auto-fired or manually-clicked Retry ALSO clears
+// `state.failure` (via `clear()`), but must NOT reset the budget — same
+// episode, still bound by the same ladder cap (`armAutoRetry`) — so `doRetry` sets
+// `selfInitiatedClear` first; this effect consumes (and resets) that
+// flag on every transition it observes.
+//
+// This replaces a previous ControllerStatus-based check for the same
+// fresh-message case that fired on the backend's async `running` event —
+// but `TurnStart` clears `state.failure` synchronously, well before that
+// async event round-trips, so the old check never actually saw a
+// non-null failure by the time it ran (reagent P1 on #1987: the check
+// was dead code in practice). Watching the signal transition directly,
+// instead of re-deriving it from a separate, slower async event, is the
+// correct fix — and it works for persistent-mode agents too, unlike the
+// mechanism it replaces.
+function watchFailureCleared(s: FailureHookState) {
+    let hadFailure = s.opts.failure() != null;
     createEffect(() => {
-        const hasFailureNow = opts.failure() != null;
-        if (hadFailure && !hasFailureNow && !selfInitiatedClear) {
-            autoRetries = 0;
+        const hasFailureNow = s.opts.failure() != null;
+        if (hadFailure && !hasFailureNow && !s.selfInitiatedClear) {
+            s.autoRetries = 0;
         }
         // Whatever cleared the row, an armed Take over belongs to that row.
-        if (!hasFailureNow) disarmTakeover();
+        if (!hasFailureNow) disarmTakeover(s);
         hadFailure = hasFailureNow;
-        selfInitiatedClear = false;
+        s.selfInitiatedClear = false;
     });
+}
 
-    // First click arms, the second (within TAKEOVER_CONFIRM_MS) runs `run`: both Take over and Move here stop
-    // the agent where it is running, so neither fires on one click.
-    const confirmed = (run: () => Promise<void>, failedTitle: string) => {
-        if (takingOver()) return;
-        if (!takeoverArmed()) {
-            setTakeoverArmed(true);
-            disarmTimer = setTimeout(disarmTakeover, TAKEOVER_CONFIRM_MS);
-            return;
-        }
-        disarmTakeover();
-        setTakingOver(true);
-        // A resend inside `run` starts a turn, which clears the failure; keep it to bring the row back.
-        const before = opts.failure();
-        run().then(
-            () => {
-                setTakingOver(false);
-                endEpisode();
-            },
-            (err: unknown) => {
-                setTakingOver(false);
-                const pf = opts.failure() ?? before;
-                if (!pf) return;
-                // Keep the row, but say why it failed: written as the row's own source, so it replaces it.
-                raiseFailure(opts.model, {
-                    source: sourceOf(pf),
-                    failure: {
-                        ...pf.data,
-                        title: failedTitle,
-                        detail: err instanceof Error ? err.message : String(err),
-                    },
-                    at: Date.now(),
-                });
-            },
-        );
-    };
-    const takeOver = (turnAttempted: boolean) => {
-        const onTakeOver = opts.onTakeOver;
-        if (onTakeOver) confirmed(() => onTakeOver(turnAttempted), "Could not take over");
-    };
-    const moveHere = () => {
-        const onMoveHere = opts.onMoveHere;
-        if (onMoveHere) confirmed(onMoveHere, "Could not move it here");
-    };
+// First click arms, the second (within TAKEOVER_CONFIRM_MS) runs `run`: both Take over and Move here stop
+// the agent where it is running, so neither fires on one click.
+function confirmed(s: FailureHookState, run: () => Promise<void>, failedTitle: string) {
+    const { opts } = s;
+    if (s.takingOver()) return;
+    if (!s.takeoverArmed()) {
+        s.setTakeoverArmed(true);
+        s.disarmTimer = setTimeout(() => disarmTakeover(s), TAKEOVER_CONFIRM_MS);
+        return;
+    }
+    disarmTakeover(s);
+    s.setTakingOver(true);
+    // A resend inside `run` starts a turn, which clears the failure; keep it to bring the row back.
+    const before = opts.failure();
+    run().then(
+        () => {
+            s.setTakingOver(false);
+            endEpisode(s);
+        },
+        (err: unknown) => {
+            s.setTakingOver(false);
+            const pf = opts.failure() ?? before;
+            if (!pf) return;
+            // Keep the row, but say why it failed: written as the row's own source, so it replaces it.
+            raiseFailure(opts.model, {
+                source: sourceOf(pf),
+                failure: {
+                    ...pf.data,
+                    title: failedTitle,
+                    detail: err instanceof Error ? err.message : String(err),
+                },
+                at: Date.now(),
+            });
+        },
+    );
+}
 
-    // The failure against what is true now (failure-verdict.ts).
-    //
-    // srv's account state can lag a failure that just arrived (the agent still reads idle for a moment
-    // after an auth failure), so for a failure that arrived in this pane the state counts only once it
-    // has changed since. A failure read back at mount is older than the pane, and the state is current.
-    let failureFromMeta = false;
-    const [accountChangedAt, setAccountChangedAt] = createSignal(0);
+function takeOver(s: FailureHookState, turnAttempted: boolean) {
+    const onTakeOver = s.opts.onTakeOver;
+    if (onTakeOver) confirmed(s, () => onTakeOver(turnAttempted), "Could not take over");
+}
+
+function moveHere(s: FailureHookState) {
+    const onMoveHere = s.opts.onMoveHere;
+    if (onMoveHere) confirmed(s, onMoveHere, "Could not move it here");
+}
+
+// The failure against what is true now (failure-verdict.ts).
+//
+// srv's account state can lag a failure that just arrived (the agent still reads idle for a moment
+// after an auth failure), so for a failure that arrived in this pane the state counts only once it
+// has changed since. A failure read back at mount is older than the pane, and the state is current.
+function watchAccount(s: FailureHookState) {
+    const { opts } = s;
     let lastAccount = opts.liveAccount?.() ?? "unknown";
     createEffect(() => {
         const now = opts.liveAccount?.() ?? "unknown";
         if (now === lastAccount) return;
         lastAccount = now;
-        setAccountChangedAt(Date.now());
+        s.setAccountChangedAt(Date.now());
     });
-    const verdictOf = (pf: { data: PaneFailure["data"]; at: number; turnAttempted?: boolean }): FailureVerdict => {
-        clockTick();
-        const stateIsCurrent = failureFromMeta || accountChangedAt() > pf.at;
-        return failureVerdict(
-            pf,
-            {
-                account: stateIsCurrent ? (opts.liveAccount?.() ?? "unknown") : "unknown",
-                completedTurnAt: completedTurnAt(),
-                ladderEnded: ladderEnded(),
-            },
-            Date.now(),
-        );
-    };
-    const verdict = createMemo((): FailureVerdict | null => {
-        const pf = opts.failure();
-        return pf ? verdictOf(pf) : null;
-    });
+}
 
-    // A usage limit ends when its reset passes, with no event to say so: look again then.
+function verdictOf(s: FailureHookState, pf: JudgedFailure): FailureVerdict {
+    s.clockTick();
+    const stateIsCurrent = s.failureFromMeta || s.accountChangedAt() > pf.at;
+    return failureVerdict(
+        pf,
+        {
+            account: stateIsCurrent ? (s.opts.liveAccount?.() ?? "unknown") : "unknown",
+            completedTurnAt: s.completedTurnAt(),
+            ladderEnded: s.ladderEnded(),
+        },
+        Date.now(),
+    );
+}
+
+// A usage limit ends when its reset passes, with no event to say so: look again then.
+function watchUsageReset(s: FailureHookState) {
     createEffect(() => {
-        const reset = opts.failure()?.data.resetsAtMs;
+        const reset = s.opts.failure()?.data.resetsAtMs;
         if (reset == null) return;
         const wait = reset - Date.now();
         if (wait <= 0 || wait > 2 ** 31 - 1) return;
-        const timer = setTimeout(() => setClockTick((n) => n + 1), wait + 1000);
+        const timer = setTimeout(() => s.setClockTick((n) => n + 1), wait + 1000);
         onCleanup(() => clearTimeout(timer));
     });
+}
+
+/** The row's view flags: what is expanded, counting down, armed or copied, and what the recovery says. */
+function rowViewState(s: FailureHookState, pf: PaneFailure, verdict: FailureVerdict | null): FailureViewState {
+    const { opts } = s;
+    return {
+        expanded: s.expanded(),
+        autoRetryIn: s.autoRetryIn(),
+        retrying: s.retrying() || (opts.reconnect?.retryBusy() ?? false),
+        // Selects the auth arm's "Log in" vs "Login Again" label and
+        // the row's accent — see failure-accessory's FailureViewState.
+        turnAttempted: pf.turnAttempted,
+        bindCandidates: opts.bindCandidates?.(),
+        takeoverArmed: s.takeoverArmed(),
+        takingOver: s.takingOver(),
+        copyState: s.copyState(),
+        reconnectHint: opts.reconnect?.reconnectHint() ?? null,
+        notSent: pf.data.code === "open_in_other_pane" ? refusedSendOf(opts.blockId)?.text : undefined,
+        verdict: verdict ?? undefined,
+        agoLabel: agoLabel(pf.at, Date.now()),
+    };
+}
+
+function dismissRow(s: FailureHookState, f: PaneFailure["data"]) {
+    const { opts } = s;
+    // Dismissed is done with: don't read a network failure back
+    // on the next mount, where it would be offered again.
+    // Network only: srv reads the usage-limit and sign-in
+    // classes to route work by account.
+    if (f.code === "network") {
+        setBlockMeta(opts.blockId, { "agent:last_failure": null }).catch(() => {});
+    }
+    // Before the row clears: a clear the recovery didn't hear
+    // about first reads as the operator's send, not a dismiss.
+    opts.reconnect?.failureDismissed();
+    // A message this pane refused for another pane has nobody to send it now: it goes
+    // back to the composer. Any other row is not about it, so a kept one is stale.
+    if (f.code === "open_in_other_pane") void restoreRefusedSend(opts.blockId);
+    else forgetRefusedSend(opts.blockId);
+    endEpisode(s);
+}
+
+/** The recovery actions the row offers, each wired to the caller's effect or to this hook's own state. */
+function rowActions(s: FailureHookState, pf: PaneFailure): FailureActions {
+    const { opts } = s;
+    const f = pf.data;
+    return {
+        retry: () => doRetry(s),
+        copyError: () => copyError(s),
+        // Forwarded the SAME `turnAttempted` the row was built from, so
+        // the button's label and its relogin() argument can never
+        // disagree about which case this is (a never-started agent must
+        // not have an old message re-sent after a successful login).
+        loginAgain: () => opts.onLoginAgain(pf.turnAttempted ?? true),
+        // Same single-source forwarding as loginAgain above.
+        loginViaTerminal: () => opts.onLoginViaTerminal(pf.turnAttempted ?? true),
+        openAccounts: opts.onOpenAccounts,
+        bindAccount: opts.onBindAccount ?? (() => {}),
+        newSession: opts.onNewSession,
+        toggleDetails: () => s.setExpanded((v) => !v),
+        dismiss: () => dismissRow(s, f),
+        takeOver: opts.onTakeOver ? () => takeOver(s, pf.turnAttempted ?? true) : undefined,
+        goThere: opts.onGoThere && f.holderBlockId ? () => opts.onGoThere!(f.holderBlockId!) : undefined,
+        moveHere: opts.onMoveHere ? () => moveHere(s) : undefined,
+    };
+}
+
+export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureResult {
+    const s = createFailureHookState(opts);
+    // A reload doesn't re-arm the countdown (only a live failure does).
+    onCleanup(registerRecycleBlocker(() => (s.autoRetryIn() != null ? "a failed turn is about to be retried" : null)));
+
+    onMount(() => {
+        const seed = seedStoredFailure(s, (pf) => verdictOf(s, pf));
+        const unsubFailure = onMuxEvent(
+            WpsEvent.AgentFailure,
+            (f) => onLiveFailure(s, f, seed.settle),
+            MOS.makeORef("block", opts.blockId),
+        );
+        const unsubTurnEnded = addPaneEventListener((blockId, event) => onPaneEvent(s, seed.settle, blockId, event));
+        onCleanup(() => {
+            seed.stop();
+            unsubFailure();
+            unsubTurnEnded();
+            cancelCountdown(s);
+            disarmTakeover(s);
+            clearTimeout(s.copyResetTimer);
+        });
+    });
+
+    watchFailureCleared(s);
+    watchAccount(s);
+    const verdict = createMemo((): FailureVerdict | null => {
+        const pf = opts.failure();
+        return pf ? verdictOf(s, pf) : null;
+    });
+    watchUsageReset(s);
 
     // A healed failure leaves without a click (spec §3.2): the cause is over, and the transcript and the
     // Swarm already show the agent working again. Silent, as the operator decided.
     createEffect(() => {
-        if (verdict() === "healed") endEpisode();
+        if (verdict() === "healed") endEpisode(s);
     });
 
     const row = (): FailureRow | null => {
         const pf = opts.failure();
         if (!pf) return null;
-        const f = pf.data;
-        return failureToRow(
-            f,
-            {
-                expanded: expanded(),
-                autoRetryIn: autoRetryIn(),
-                retrying: retrying() || (opts.reconnect?.retryBusy() ?? false),
-                // Selects the auth arm's "Log in" vs "Login Again" label and
-                // the row's accent — see failure-accessory's FailureViewState.
-                turnAttempted: pf.turnAttempted,
-                bindCandidates: opts.bindCandidates?.(),
-                takeoverArmed: takeoverArmed(),
-                takingOver: takingOver(),
-                copyState: copyState(),
-                reconnectHint: opts.reconnect?.reconnectHint() ?? null,
-                notSent: f.code === "open_in_other_pane" ? refusedSendOf(opts.blockId)?.text : undefined,
-                verdict: verdict() ?? undefined,
-                agoLabel: agoLabel(pf.at, Date.now()),
-            },
-            {
-                retry: doRetry,
-                copyError,
-                // Forwarded the SAME `turnAttempted` the row was built from, so
-                // the button's label and its relogin() argument can never
-                // disagree about which case this is (a never-started agent must
-                // not have an old message re-sent after a successful login).
-                loginAgain: () => opts.onLoginAgain(pf.turnAttempted ?? true),
-                // Same single-source forwarding as loginAgain above.
-                loginViaTerminal: () => opts.onLoginViaTerminal(pf.turnAttempted ?? true),
-                openAccounts: opts.onOpenAccounts,
-                bindAccount: opts.onBindAccount ?? (() => {}),
-                newSession: opts.onNewSession,
-                toggleDetails: () => setExpanded((v) => !v),
-                dismiss: () => {
-                    // Dismissed is done with: don't read a network failure back
-                    // on the next mount, where it would be offered again.
-                    // Network only: srv reads the usage-limit and sign-in
-                    // classes to route work by account.
-                    if (f.code === "network") {
-                        setBlockMeta(opts.blockId, { "agent:last_failure": null }).catch(() => {});
-                    }
-                    // Before the row clears: a clear the recovery didn't hear
-                    // about first reads as the operator's send, not a dismiss.
-                    opts.reconnect?.failureDismissed();
-                    // A message this pane refused for another pane has nobody to send it now: it goes
-                    // back to the composer. Any other row is not about it, so a kept one is stale.
-                    if (f.code === "open_in_other_pane") void restoreRefusedSend(opts.blockId);
-                    else forgetRefusedSend(opts.blockId);
-                    endEpisode();
-                },
-                takeOver: opts.onTakeOver ? () => takeOver(pf.turnAttempted ?? true) : undefined,
-                goThere: opts.onGoThere && f.holderBlockId ? () => opts.onGoThere!(f.holderBlockId!) : undefined,
-                moveHere: opts.onMoveHere ? moveHere : undefined,
-            },
-        );
+        return failureToRow(pf.data, rowViewState(s, pf, verdict()), rowActions(s, pf));
     };
 
     return { row, verdict };

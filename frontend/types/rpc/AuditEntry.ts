@@ -2,6 +2,7 @@
 import type { AuditCost } from "./AuditCost";
 import type { AuditEnd } from "./AuditEnd";
 import type { AuditLinks } from "./AuditLinks";
+import type { AuditProvenance } from "./AuditProvenance";
 
 /**
  * One row of the Audit.
@@ -30,4 +31,8 @@ reason?: string, cost?: AuditCost,
 /**
  * For entries about one agent; a jekt's are on `from` and `to`.
  */
-links: AuditLinks, };
+links: AuditLinks, 
+/**
+ * Where it came from and how it travelled. Absent for a row that has no such record (an agent start, a tool call).
+ */
+provenance?: AuditProvenance, };

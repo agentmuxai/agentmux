@@ -7,14 +7,9 @@
  * clipped by the responsive collapse). Extracted from action-widgets.tsx.
  */
 
-import { usePaneOverlay } from "@/app/platform/pane-overlay";
-import {
-    assertMenuInPaintableArea,
-    computeMenuPosition,
-} from "@/app/util/menu-position";
+import { AnchoredPopover } from "@/app/element/anchored-popover";
 import { createPeerRegistry, createSubmenuHover, type SubmenuHoverController } from "@/app/util/submenu-hover";
 import { makeIconClass } from "@/util/util";
-import { autoUpdate } from "@floating-ui/dom";
 import { createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 import { openWidget, widgetIconStyle } from "./action-widgets-config";
 import { PinnedWidgetFlyout } from "./pinned-widget-flyout";
@@ -61,56 +56,14 @@ const MoreDropdown = ({
      */
     isItemMenuOpen?: () => boolean;
 }): JSX.Element => {
-    let overlayEl: HTMLDivElement | undefined;
-    // Cut a transparent hole through any browser pane HWND behind this
-    // dropdown so DOM renders above the pane in this rect.
-    // See `frontend/app/platform/pane-overlay.ts`.
-    usePaneOverlay(() => overlayEl);
-
-    // Positioning routes through the shared primitive (Phase 3): anchored to
-    // the More button, preferred placement bottom-end (right-aligned, as
-    // before). flip/shift/size + the paintable-area boundary replace the old
-    // hand-rolled `window.innerWidth - rect.right` clamp.
-    const [floatingStyle, setFloatingStyle] = createSignal<JSX.CSSProperties>({
-        position: "fixed",
-        left: "0px",
-        top: "0px",
-    });
-    let cleanupAutoUpdate: (() => void) | null = null;
-
-    const registerFloating = (el: HTMLDivElement) => {
-        overlayEl = el;
+    // AnchoredPopover places it under the More button (bottom-end: right-aligned), follows chrome zoom
+    // and cuts the hole in any browser pane behind it (see `frontend/app/platform/pane-overlay.ts`).
+    const registerBody = (el: HTMLDivElement) => {
         ref?.(el);
         setSubmenuEl?.(el);
-        requestAnimationFrame(() => {
-            const anchorEl = anchor();
-            if (!(anchorEl instanceof Element) || !(el instanceof Element)) return;
-            const update = async () => {
-                const a = anchor();
-                if (!a) return;
-                // avoidNativePanes:false — this dropdown renders with
-                // `data-pane-overlay` (+ usePaneOverlay), which clips a hole
-                // through any native browser/webview pane behind it so the DOM
-                // draws on top. So it should open in place under the More button,
-                // not get pushed to the window edge into the largest pane-free
-                // rect. Matches FlyoutMenu / showJsContextMenu.
-                const pos = await computeMenuPosition(
-                    { anchor: a, placement: "bottom-end", gutter: 4, avoidNativePanes: false },
-                    el,
-                );
-                setFloatingStyle(pos.style);
-            };
-            cleanupAutoUpdate?.();
-            cleanupAutoUpdate = autoUpdate(anchorEl, el, update);
-            // Dev-only paintable-area guard (spec §6.1).
-            assertMenuInPaintableArea(el, "more-dropdown");
-        });
     };
 
-    onCleanup(() => {
-        cleanupAutoUpdate?.();
-        setSubmenuEl?.(null);
-    });
+    onCleanup(() => setSubmenuEl?.(null));
 
     const handleItemClick = (widget: WidgetConfigType, e?: MouseEvent) => {
         openWidget(widget, { forceNew: e?.shiftKey });
@@ -158,15 +111,21 @@ const MoreDropdown = ({
         });
 
     return (
-        <div
-            ref={registerFloating}
+        <AnchoredPopover
+            anchor={anchor()}
+            placement="bottom-end"
+            gutter={4}
+            hideUntilPlaced
+            onDismiss={(reason) => reason === "escape" && onClose()}
+            shellClass="anchored-popover--menu"
             class="action-widget-more-dropdown"
-            style={floatingStyle()}
-            data-pane-overlay
-            onMouseEnter={() => onSubmenuEnter?.()}
-            onMouseLeave={(e) => {
-                if (isItemMenuOpen?.()) return;
-                onSubmenuLeave?.(e);
+            ref={(el) => {
+                registerBody(el);
+                el.addEventListener("mouseenter", () => onSubmenuEnter?.());
+                el.addEventListener("mouseleave", (e) => {
+                    if (isItemMenuOpen?.()) return;
+                    onSubmenuLeave?.(e);
+                });
             }}
         >
             <For each={widgets()}>
@@ -249,7 +208,7 @@ const MoreDropdown = ({
                     );
                 }}
             </For>
-        </div>
+        </AnchoredPopover>
     );
 };
 

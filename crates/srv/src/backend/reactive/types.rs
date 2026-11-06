@@ -674,6 +674,58 @@ pub struct AuditLogEntry {
     /// (`SPEC_CHEAPER_FLEET_MESSAGING_2026_10_30.md` §7). Absent for every other entry.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn: Option<String>,
+    /// Which computer wrote the line. Stamped as it is written; old lines have none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
+    /// Which channel wrote it. Every line has had it since the file was kept; it is stamped as the line is written.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel: Option<String>,
+    /// The version of the srv that wrote it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// How it travelled: `host`, `channel`, `lan` or `wan` (the delivery tier, as the handler names it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tier: Option<String>,
+    /// How far the sender was proven: the marker's `TRUST=` label.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trust: Option<String>,
+    /// The message's id: for a jekt the same as `request_id`, named so a reader need not know. The sender's `sent` row
+    /// and the receiver's row of one message carry the same one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub msg_id: Option<String>,
+}
+
+/// An entry that says nothing: a successful delivery attempt with no names, hash or id. A constructor names what it sets.
+impl Default for AuditLogEntry {
+    fn default() -> Self {
+        Self {
+            timestamp: 0,
+            source_agent: None,
+            target_agent: String::new(),
+            block_id: String::new(),
+            message_hash: String::new(),
+            message_length: 0,
+            success: true,
+            error_message: None,
+            request_id: String::new(),
+            outcome: None,
+            reason: None,
+            event_kind: default_event_kind(),
+            evicted_block: None,
+            evicted_agent: None,
+            audit_source_uid: String::new(),
+            lan_claimed_uid: String::new(),
+            wan: None,
+            cli_native: None,
+            turn: None,
+            host: None,
+            channel: None,
+            version: None,
+            tier: None,
+            trust: None,
+            msg_id: None,
+        }
+    }
 }
 
 /// What a `cli_native` audit line adds to the ordinary entry. The entry's

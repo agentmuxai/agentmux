@@ -496,6 +496,7 @@ fn write_staged(store: &Store, incoming: &Staged, duplicates: Duplicates) -> Res
                 created_at: created,
                 updated_at: now,
                 last_used_at: 0,
+                vault_id: crate::backend::storage::vault::PERSONAL_VAULT.into(),
             });
             continue;
         }
@@ -530,6 +531,7 @@ fn write_staged(store: &Store, incoming: &Staged, duplicates: Duplicates) -> Res
             created_at: created,
             updated_at: now,
             last_used_at: 0,
+            vault_id: crate::backend::storage::vault::PERSONAL_VAULT.into(),
         });
     }
     store.vault_write_many(&inserts, &updates).map_err(|e| e.to_string())?;

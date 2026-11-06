@@ -597,3 +597,60 @@ describe("runLaunchFlow — a container agent has no host CLI", () => {
         expect(hub.resolveCli).not.toHaveBeenCalled();
     });
 });
+
+const antigravity = {
+    id: "antigravity",
+    displayName: "Antigravity (AGY)",
+    cliCommand: "agy",
+    authCheckCommand: ["models"],
+    authLoginCommand: [],
+    authType: "cli-managed",
+    authConfigDirEnvVar: "ANTIGRAVITY_CONFIG_DIR",
+} as any;
+
+describe("runLaunchFlow, a CLI that keeps its own login", () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    it("checks again before sending the pane to sign-in, and starts when the CLI then says it is signed in", async () => {
+        hub.checkCliAuth
+            .mockReset()
+            .mockResolvedValueOnce({ authenticated: false })
+            .mockResolvedValue({ authenticated: true });
+        const running = runLaunchFlow({ blockId: "block-1", provider: antigravity, log: vi.fn() });
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(await running).toBe("success");
+        expect(hub.checkCliAuth).toHaveBeenCalledTimes(2);
+    });
+
+    it("sends the pane to sign-in only after the checks keep saying it is not signed in", async () => {
+        hub.checkCliAuth.mockReset().mockResolvedValue({ authenticated: false });
+        const running = runLaunchFlow({ blockId: "block-1", provider: antigravity, log: vi.fn() });
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(await running).toBe("auth_failed");
+        expect(hub.checkCliAuth).toHaveBeenCalledTimes(3);
+    });
+
+    it("starts as for an unknown status, not as signed in, when a second check cannot be answered", async () => {
+        hub.checkCliAuth
+            .mockReset()
+            .mockResolvedValueOnce({ authenticated: false })
+            .mockRejectedValue(new Error("timeout"));
+        const results: boolean[] = [];
+        const running = runLaunchFlow({
+            blockId: "block-1",
+            provider: antigravity,
+            log: vi.fn(),
+            onAuthCheckResult: (confirmed) => results.push(confirmed),
+        });
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(await running).toBe("success");
+        expect(results).toEqual([false]);
+    });
+
+    it("does not ask again of a provider whose login is an account of its own", async () => {
+        hub.checkCliAuth.mockReset().mockResolvedValue({ authenticated: false });
+        expect(await runLaunchFlow({ blockId: "block-1", provider: claude, log: vi.fn() })).toBe("auth_failed");
+        expect(hub.checkCliAuth).toHaveBeenCalledTimes(1);
+    });
+});

@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * the toolbar's visibility and the broadcast/stop button conflict,
- * pinned through the actual `FleetToolbar` component.
+ * The Supervise section's actions (Stop, and the mode menu), pinned through the actual
+ * `SuperviseActions` component. How many are selected is beside Select all (swarm-select-toggle).
  */
 
 import { cleanup, fireEvent, render } from "@solidjs/testing-library";
@@ -17,7 +17,7 @@ vi.mock("@/app/element/confirm-modal", () => ({
 const menu = vi.hoisted(() => ({ show: vi.fn() }));
 vi.mock("@/app/element/ui/open-menu-at", async (original) => ({ ...(await original<typeof import("@/app/element/ui/open-menu-at")>()), openMenuAt: menu.show }));
 
-import { FleetToolbar } from "./swarm-fleet-toolbar";
+import { SuperviseActions } from "./swarm-fleet-toolbar";
 import type { SwarmViewModel } from "./swarm-model";
 
 afterEach(() => cleanup());
@@ -42,66 +42,34 @@ function modelStub(initialSelected: string[] = []) {
     return model;
 }
 
-describe("FleetToolbar — visibility", () => {
-    // Select all is not here any more: it sits under the filter (swarm-select-toggle.render.test.tsx).
-    it("does not render with nothing selected, and has no Select all or Select none", () => {
-        const model = modelStub([]);
-        const { container } = render(() => <FleetToolbar model={model} allBlockIds={() => ["a", "b", "c"]} />);
-        expect(container.querySelector(".swarm-fleet-toolbar")).toBeNull();
-    });
-
-    it("shows the count once something is selected, without a Select none", () => {
-        const { queryByText } = render(() => <FleetToolbar model={modelStub(["a", "b"])} allBlockIds={() => ["a", "b"]} />);
-        expect(queryByText("2 selected")).not.toBeNull();
-        expect(queryByText("Select none")).toBeNull();
-        expect(queryByText("Select all")).toBeNull();
-    });
-});
-
-describe("FleetToolbar — no Groups or Stats", () => {
-    // The Stats panel moved to the token popover's AgentMux internal row.
-    it("has neither a Groups nor a Stats button", () => {
-        const { queryByText } = render(() => <FleetToolbar model={modelStub(["a"])} allBlockIds={() => ["a"]} />);
+describe("SuperviseActions", () => {
+    it("has Stop and the mode menu, and no count, Clear, Groups, Stats or Broadcast", () => {
+        const { queryByText } = render(() => <SuperviseActions model={modelStub(["a"])} allBlockIds={() => ["a"]} />);
+        expect(queryByText("Stop 1")).not.toBeNull();
+        expect(queryByText("Mode")).not.toBeNull();
+        expect(queryByText("1 selected")).toBeNull();
+        expect(queryByText("Clear")).toBeNull();
         expect(queryByText(/Groups/)).toBeNull();
         expect(queryByText("Stats")).toBeNull();
-    });
-});
-
-describe("FleetToolbar — by section", () => {
-    it("the Supervisor section has Stop and the mode menu and no Broadcast button", () => {
-        const { queryByText } = render(() => <FleetToolbar model={modelStub(["a"])} allBlockIds={() => ["a"]} section="supervisor" />);
-        expect(queryByText("Stop 1")).not.toBeNull();
-        expect(queryByText("Supervisor")).not.toBeNull();
         expect(queryByText("Broadcast")).toBeNull();
     });
 
-    it("follows the section while it stays mounted", () => {
-        const [section, setSection] = createSignal<"supervisor" | "broadcast">("supervisor");
-        const { queryByText } = render(() => <FleetToolbar model={modelStub(["a"])} allBlockIds={() => ["a"]} section={section()} />);
-        expect(queryByText("Stop 1")).not.toBeNull();
-        setSection("broadcast");
-        expect(queryByText("Stop 1")).toBeNull();
-        expect(queryByText("Supervisor")).toBeNull();
-        setSection("supervisor");
-        expect(queryByText("Stop 1")).not.toBeNull();
-        expect(queryByText("Supervisor")).not.toBeNull();
+    it("is there with nothing selected, with both off and saying to select agents", () => {
+        const { getByText } = render(() => <SuperviseActions model={modelStub([])} allBlockIds={() => ["a"]} />);
+        const stop = getByText(/Stop 0/).closest("button")!;
+        const mode = getByText("Mode").closest("button")!;
+        expect(stop.disabled).toBe(true);
+        expect(mode.disabled).toBe(true);
+        expect(stop.title).toBe("Select agents to stop");
+        expect(mode.title).toBe("Select agents to supervise");
     });
 
-    it("the Broadcast section keeps the selection and has neither Stop nor the mode menu", () => {
-        const { queryByText } = render(() => <FleetToolbar model={modelStub(["a"])} allBlockIds={() => ["a"]} section="broadcast" />);
-        expect(queryByText("1 selected")).not.toBeNull();
-        expect(queryByText("Stop 1")).toBeNull();
-        expect(queryByText("Supervisor")).toBeNull();
-    });
-});
-
-// SPEC_SWARM_SUPERVISOR_2026_10_16.md §3.8.
-describe("FleetToolbar — Supervisor", () => {
+    // SPEC_SWARM_SUPERVISOR_2026_10_16.md §3.8.
     it("offers the three modes for the selection and sets the one picked", () => {
         menu.show.mockClear();
         const model = modelStub(["a", "b"]);
-        const { getByText } = render(() => <FleetToolbar model={model} allBlockIds={() => ["a", "b"]} />);
-        fireEvent.click(getByText("Supervisor"));
+        const { getByText } = render(() => <SuperviseActions model={model} allBlockIds={() => ["a", "b"]} />);
+        fireEvent.click(getByText("Mode"));
         expect(menu.show).toHaveBeenCalledTimes(1);
         const items = menu.show.mock.calls[0][0] as ContextMenuItem[];
         expect(items.map((i) => i.label)).toEqual([
@@ -111,10 +79,5 @@ describe("FleetToolbar — Supervisor", () => {
         ]);
         items[2].click!();
         expect(model.superviseSelection).toHaveBeenCalledWith("drive");
-    });
-
-    it("is not offered with nothing selected", () => {
-        const { queryByText } = render(() => <FleetToolbar model={modelStub([])} allBlockIds={() => ["a"]} />);
-        expect(queryByText("Supervisor")).toBeNull();
     });
 });
