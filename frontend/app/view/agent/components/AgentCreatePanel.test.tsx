@@ -39,6 +39,8 @@ vi.mock("@/app/store/rpc-api", () => ({
         InstallCheckCommand: vi.fn(),
         ToolchainResolveInstallCommandCommand: vi.fn(),
         ToolchainInstallSystemToolCommand: vi.fn(),
+        ToolchainInstallVendorCliCommand: vi.fn(),
+        ToolchainVendorInstallInfoCommand: vi.fn(async () => ({ available: false, command: "", downloadUrl: null })),
         ListIdentityAccountsCommand: vi.fn(),
         CheckCliAuthCommand: vi.fn(),
         ContainerImageCheckCommand: vi.fn(async () => ({ status: dockerForTest.image })),
@@ -601,6 +603,126 @@ describe("AgentCreatePanel — Install step, a CLI AgentMux doesn't install", ()
         await waitFor(() => expect(recheckInstalled).toHaveBeenCalledTimes(1));
         await waitFor(() => expect((screen.getByTestId("agent-create-check-again") as HTMLButtonElement).disabled).toBe(false));
         expect(screen.getByTestId("agent-create-vendor-install")).toBeInTheDocument();
+    });
+});
+
+describe("AgentCreatePanel — Install step, a CLI whose vendor installer AgentMux runs", () => {
+    const vendorTemplate = baseTemplate({ name: "Antigravity", provider: "antigravity" });
+    const srvCommand = "curl -fsSL https://srv.example.test/install.sh | bash";
+
+    beforeEach(() => {
+        vi.mocked(RpcApi.ToolchainVendorInstallInfoCommand).mockResolvedValue({
+            available: true,
+            command: srvCommand,
+            downloadUrl: "https://srv.example.test/install.sh",
+        } as any);
+    });
+    afterEach(() => {
+        vi.mocked(RpcApi.ToolchainVendorInstallInfoCommand).mockResolvedValue({ available: false, command: "", downloadUrl: null } as any);
+    });
+
+    /** Clicks Run and returns a function that delivers install_chunk events for the run. */
+    async function runVendor(): Promise<(data: Record<string, unknown>) => void> {
+        vi.mocked(RpcApi.ToolchainInstallVendorCliCommand).mockResolvedValue({ sessionId: "vendor-1" } as any);
+        fireEvent.click(await screen.findByTestId("agent-create-vendor-run-start"));
+        const send = await chunkSender("install:vendor-1");
+        return (data) => send({ sessionId: "vendor-1", ...data });
+    }
+
+    it("offers Run, with the command srv will run rather than the catalog's", async () => {
+        renderPanel({ template: vendorTemplate, installed: false });
+        await screen.findByTestId("agent-create-vendor-run");
+        expect(screen.queryByTestId("agent-create-vendor-install")).toBeNull();
+        expect(screen.queryByTestId("agent-create-npm-install")).toBeNull();
+        expect(screen.getByTestId("agent-create-vendor-command").textContent).toBe(srvCommand);
+        expect(vi.mocked(RpcApi.ToolchainVendorInstallInfoCommand).mock.calls[0][1]).toEqual({ providerId: "antigravity" });
+        expect(screen.getByText(/after you approve it/)).toBeInTheDocument();
+        expect(screen.getByText(/Antigravity's install instructions/)).toBeInTheDocument();
+        expect(trail()).toEqual(["Install", "Create"]);
+    });
+
+    it("Run sends only the provider id, never AgentMux's own installer", async () => {
+        renderPanel({ template: vendorTemplate, installed: false });
+        await runVendor();
+        expect(vi.mocked(RpcApi.ToolchainInstallVendorCliCommand).mock.calls[0][1]).toEqual({ providerId: "antigravity" });
+        expect(RpcApi.InstallStartCommand).not.toHaveBeenCalled();
+        expect(screen.getByRole("button", { name: "Cancel install" })).toBeInTheDocument();
+    });
+
+    it("moves on to Create when the run ends and the CLI is found", async () => {
+        const { recheckInstalled } = renderPanel({ template: vendorTemplate, installed: false });
+        const send = await runVendor();
+        send({ line: "$ curl -fsSL https://srv.example.test/install.sh | bash", stream: "stdout" });
+        send({ line: "SHA-256 ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", stream: "stdout" });
+        send({ line: "Found Antigravity at /home/me/.local/bin/agy", stream: "stdout" });
+        send({ op: "done", ok: true });
+        await waitFor(() => expect(recheckInstalled).toHaveBeenCalledTimes(1));
+        await screen.findByTestId("agent-create-form");
+        expect(pushNotification).not.toHaveBeenCalled();
+    });
+
+    it("stays on a finished run that srv can't see yet, with Check again and the restart row", async () => {
+        const recheckInstalled = vi.fn().mockResolvedValue(undefined);
+        const { container } = renderPanel({ template: vendorTemplate, installed: false, recheckInstalled });
+        const send = await runVendor();
+        send({ line: "$ bash /tmp/agentmux-vendor-install-x.sh", stream: "stdout" });
+        send({
+            line: 'Note: the installer finished successfully, but AgentMux\'s current session doesn\'t see "agy" yet — restart AgentMux to pick up the updated PATH.',
+            stream: "stdout",
+        });
+        send({ op: "done", ok: true });
+        await waitFor(() => expect(stepStatus(container).some(([label]) => label === "Restart AgentMux to finish")).toBe(true));
+        expect(screen.getByTestId("agent-create-check-again")).toBeInTheDocument();
+        expect(screen.queryByTestId("agent-create-install-continue")).toBeNull();
+    });
+
+    it("says nothing was run when the person doesn't approve it, and Try again asks again", async () => {
+        vi.mocked(RpcApi.ToolchainInstallVendorCliCommand).mockRejectedValueOnce(
+            new Error("toolchain.install_vendor_cli: the user declined to install Antigravity"),
+        );
+        const { recheckInstalled } = renderPanel({ template: vendorTemplate, installed: false });
+        fireEvent.click(await screen.findByTestId("agent-create-vendor-run-start"));
+        await waitFor(() => expect(screen.getAllByText("You didn't approve the install, so nothing was run.").length).toBeGreaterThan(0));
+        expect(recheckInstalled).not.toHaveBeenCalled();
+        vi.mocked(RpcApi.ToolchainInstallVendorCliCommand).mockResolvedValue({ sessionId: "vendor-1" } as any);
+        fireEvent.click(screen.getByTestId("agent-create-vendor-run-retry"));
+        await waitFor(() => expect(RpcApi.ToolchainInstallVendorCliCommand).toHaveBeenCalledTimes(2));
+    });
+
+    it("on failure says the installer may have left files, and offers Try again and the vendor's link", async () => {
+        const { container } = renderPanel({ template: vendorTemplate, installed: false });
+        const send = await runVendor();
+        send({ line: "$ bash /tmp/agentmux-vendor-install-x.sh", stream: "stdout" });
+        send({ line: "install.sh: line 12: unzip: command not found", stream: "stderr" });
+        send({ op: "done", ok: false, error: "bash exited Some(127)" });
+        await waitFor(() => expect(screen.getAllByText(/may have left files/).length).toBeGreaterThan(0));
+        expect(logRows(container).at(-1)).toEqual(["Install failed: bash exited Some(127)", "error"]);
+        expect(screen.getByTestId("agent-create-vendor-run-retry")).toBeInTheDocument();
+        expect(screen.getByText(/Antigravity's install instructions/)).toBeInTheDocument();
+    });
+
+    it("Cancel install asks srv to stop that run", async () => {
+        renderPanel({ template: vendorTemplate, installed: false });
+        await runVendor();
+        vi.mocked(RpcApi.InstallCancelCommand).mockResolvedValue({} as any);
+        fireEvent.click(screen.getByTestId("agent-create-install-cancel"));
+        await waitFor(() => expect(RpcApi.InstallCancelCommand).toHaveBeenCalled());
+        expect(vi.mocked(RpcApi.InstallCancelCommand).mock.calls[0][1]).toEqual({ sessionId: "vendor-1" });
+    });
+
+    it("keeps the copy-only step when srv has no installer of its own for this CLI", async () => {
+        vi.mocked(RpcApi.ToolchainVendorInstallInfoCommand).mockResolvedValue({ available: false, command: "", downloadUrl: null } as any);
+        renderPanel({ template: vendorTemplate, installed: false });
+        await screen.findByTestId("agent-create-vendor-install");
+        expect(screen.queryByTestId("agent-create-vendor-run")).toBeNull();
+        expect(screen.getByTestId("agent-create-vendor-command").textContent).toBe("curl -fsSL https://example.test/install.sh | bash");
+    });
+
+    it("keeps the copy-only step when asking srv fails", async () => {
+        vi.mocked(RpcApi.ToolchainVendorInstallInfoCommand).mockRejectedValue(new Error("no srv"));
+        renderPanel({ template: vendorTemplate, installed: false });
+        await screen.findByTestId("agent-create-vendor-install");
+        expect(screen.queryByTestId("agent-create-vendor-run")).toBeNull();
     });
 });
 

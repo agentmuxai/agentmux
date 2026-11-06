@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * One npm install session per provider CLI, outliving the panel that started
+ * One install session per provider CLI (npm, or the vendor's own installer for the six AgentMux
+ * doesn't install itself), outliving the panel that started
  * it (SPEC_AGENT_PICKER_INLINE_CREATE_2026_10_18.md §2.3). Closing the new-agent
  * panel under a harness card doesn't stop its install: the card shows
  * "Installing…", reopening the panel shows the same run, and when it ends with
@@ -17,6 +18,7 @@ import { createRoot, createSignal } from "solid-js";
 
 import { createInstallSession, type InstallSession } from "@/element/install/install-session";
 import { NpmStepTracker } from "@/element/install/npm-steps";
+import { VendorStepTracker } from "@/element/install/vendor-steps";
 import { pushNotification } from "@/app/store/flash-notifications";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -48,12 +50,18 @@ function entryFor(providerId: string): Entry {
         const [watchers, setWatchers] = createSignal(0);
         const listeners = new Set<(ok: boolean) => void>();
         const session = createInstallSession({
-            tracker: () => new NpmStepTracker(displayName(providerId)),
+            tracker: () =>
+                getProvider(providerId)?.npmPackage
+                    ? new NpmStepTracker(displayName(providerId))
+                    : new VendorStepTracker(displayName(providerId)),
             begin: async () => {
                 const prov = getProvider(providerId);
-                if (!prov?.npmPackage) throw new Error(`${displayName(providerId)} isn't installed by AgentMux`);
                 // srv installs its own registry's package for this id.
-                return RpcApi.InstallStartCommand(TabRpcClient, { providerId: prov.id });
+                if (prov?.npmPackage) return RpcApi.InstallStartCommand(TabRpcClient, { providerId: prov.id });
+                // The six CLIs AgentMux doesn't install into its own folder: srv runs the vendor's
+                // installer, but only once the person approves it in the approval window, and
+                // refuses a provider with no installer of its own.
+                return RpcApi.ToolchainInstallVendorCliCommand(TabRpcClient, { providerId });
             },
             cancel: (sessionId) => RpcApi.InstallCancelCommand(TabRpcClient, { sessionId }),
             // The root is never disposed; a run stops only on Cancel.
