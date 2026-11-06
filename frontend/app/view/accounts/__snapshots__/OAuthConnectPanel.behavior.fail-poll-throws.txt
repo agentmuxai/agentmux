@@ -1,0 +1,22 @@
+-- poll threw
+  call AccountOAuthClientGet [{"provider":"google"}]
+  call AccountOAuthStart [{"provider":"google"}]
+  call AccountOAuthPoll [{"sessionId":"s1"}]
+  call openLink ["https://accounts.google.com/o/oauth2/v2/auth?x"]
+<div>
+  <div class="oauth-connect">
+    <div class="oauth-flow-status">
+      <div class="identity-form-error" role="alert">
+        "srv went away"
+      <div class="identity-key-actions">
+        <button type="button" class="ui-button ui-tone-neutral identity-btn identity-btn-secondary">
+          "Try again"
+-- later: nothing more polled
+<div>
+  <div class="oauth-connect">
+    <div class="oauth-flow-status">
+      <div class="identity-form-error" role="alert">
+        "srv went away"
+      <div class="identity-key-actions">
+        <button type="button" class="ui-button ui-tone-neutral identity-btn identity-btn-secondary">
+          "Try again"

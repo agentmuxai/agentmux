@@ -1,0 +1,80 @@
+-- code shown
+  call AccountOAuthClientGet [{"provider":"github"}]
+  call AccountOAuthStart [{"provider":"github","name":"work"}]
+<div>
+  <div class="oauth-connect">
+    <div class="oauth-flow-status">
+      <div class="oauth-device">
+        <div class="oauth-device-label">
+          "Enter this code at the verification page:"
+        <div class="oauth-device-code-row">
+          <code class="oauth-device-code">
+            "ABCD-1234"
+          <button type="button" class="ui-button ui-tone-neutral identity-btn identity-btn-secondary">
+            "Copy"
+        <button type="button" class="ui-button ui-tone-accent identity-btn identity-btn-primary">
+          "Open verification page ↗"
+        <div class="oauth-waiting">
+          "Waiting for you to authorize…"
+      <div class="identity-key-actions">
+        <button type="button" class="ui-button ui-tone-neutral identity-btn identity-btn-secondary">
+          "Cancel"
+-- copied and opened
+  call openLink ["https://github.com/login/device"]
+  call writeText ["ABCD-1234"]
+<div>
+  <div class="oauth-connect">
+    <div class="oauth-flow-status">
+      <div class="oauth-device">
+        <div class="oauth-device-label">
+          "Enter this code at the verification page:"
+        <div class="oauth-device-code-row">
+          <code class="oauth-device-code">
+            "ABCD-1234"
+          <button type="button" class="ui-button ui-tone-neutral identity-btn identity-btn-secondary">
+            "Copy"
+        <button type="button" class="ui-button ui-tone-accent identity-btn identity-btn-primary">
+          "Open verification page ↗"
+        <div class="oauth-waiting">
+          "Waiting for you to authorize…"
+      <div class="identity-key-actions">
+        <button type="button" class="ui-button ui-tone-neutral identity-btn identity-btn-secondary">
+          "Cancel"
+-- polled: still waiting
+  call AccountOAuthPoll [{"sessionId":"s2"}]
+<div>
+  <div class="oauth-connect">
+    <div class="oauth-flow-status">
+      <div class="oauth-device">
+        <div class="oauth-device-label">
+          "Enter this code at the verification page:"
+        <div class="oauth-device-code-row">
+          <code class="oauth-device-code">
+            "ABCD-1234"
+          <button type="button" class="ui-button ui-tone-neutral identity-btn identity-btn-secondary">
+            "Copy"
+        <button type="button" class="ui-button ui-tone-accent identity-btn identity-btn-primary">
+          "Open verification page ↗"
+        <div class="oauth-waiting">
+          "Waiting for you to authorize…"
+      <div class="identity-key-actions">
+        <button type="button" class="ui-button ui-tone-neutral identity-btn identity-btn-secondary">
+          "Cancel"
+-- polled: success
+  call AccountOAuthPoll [{"sessionId":"s2"}]
+  call ListIdentityAccounts [{}]
+  call onConnected [{"accountId":"acc-1","missingScopes":[],"email":null}]
+<div>
+  <div class="oauth-connect">
+    <div class="oauth-flow-status">
+      <div class="identity-key-actions">
+        <button type="button" class="ui-button ui-tone-neutral identity-btn identity-btn-secondary">
+          "Cancel"
+  note acc-1 null
+-- later: nothing more polled
+<div>
+  <div class="oauth-connect">
+    <div class="oauth-flow-status">
+      <div class="identity-key-actions">
+        <button type="button" class="ui-button ui-tone-neutral identity-btn identity-btn-secondary">
+          "Cancel"

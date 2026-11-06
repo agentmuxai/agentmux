@@ -1,0 +1,9 @@
+-- unavailable
+  call AccountOAuthClientGet [{"provider":"google"}]
+<div>
+  <div class="oauth-connect">
+    <div class="oauth-byo-note">
+      "ⓘ"
+      "Google"
+      "isn't available in this version of AgentMux yet."
+    <div class="identity-key-actions">

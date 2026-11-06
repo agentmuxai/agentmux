@@ -1,0 +1,12 @@
+-- unmounted mid-flow
+  call AccountOAuthClientGet [{"provider":"google"}]
+  call AccountOAuthStart [{"provider":"google"}]
+  call AccountOAuthPoll [{"sessionId":"s1"}]
+  call AccountOAuthCancel [{"sessionId":"s1"}]
+  call openLink ["https://accounts.google.com/o/oauth2/v2/auth?x"]
+-- six seconds on
+-- unmounted after success
+  call AccountOAuthClientGet [{"provider":"google"}]
+  call AccountOAuthStart [{"provider":"google"}]
+  call ListIdentityAccounts [{}]
+  call onConnected [{"accountId":"acc-1","missingScopes":[]}]

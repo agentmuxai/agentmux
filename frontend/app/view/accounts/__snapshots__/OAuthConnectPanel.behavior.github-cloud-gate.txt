@@ -1,0 +1,18 @@
+-- signed out
+  call AccountOAuthClientGet [{"provider":"github"}]
+<div>
+  <div class="oauth-connect">
+    <div data-testid="cloud-sign-in">
+      "Sign in to AgentMux Cloud to connect GitHub"
+    <div class="identity-key-actions">
+      <button type="button" class="ui-button ui-tone-neutral identity-btn identity-btn-secondary">
+        "Cancel"
+-- signed in
+  call onCancel []
+<div>
+  <div class="oauth-connect">
+    <div class="identity-key-actions">
+      <button type="button" class="ui-button ui-tone-accent identity-btn identity-btn-primary">
+        "Connect GitHub"
+      <button type="button" class="ui-button ui-tone-neutral identity-btn identity-btn-secondary">
+        "Cancel"
