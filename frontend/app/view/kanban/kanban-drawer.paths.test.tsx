@@ -1232,7 +1232,7 @@ describe("KanbanDrawer: the history", () => {
 describe("KanbanDrawer: markup the styles and the toasts rely on", () => {
     it("carries the drawer class, and keeps toasts off the actions", () => {
         mount(task());
-        expect(screen.getByLabelText("Task 12").className).toBe("kanban-drawer");
+        expect(screen.getByLabelText("Task 12").classList.contains("kanban-drawer")).toBe(true);
         expect(actions().hasAttribute("data-toast-avoid")).toBe(true);
     });
 
@@ -1398,7 +1398,7 @@ describe("KanbanDrawer: the order of its parts", () => {
         );
         await screen.findByText("shot1.png");
         const parts = [
-            ".kanban-drawer__head",
+            ".ui-side-panel__head",
             ".kanban-drawer__facts",
             "p.kanban-drawer__reason",
             "blockquote.kanban-drawer__quote",

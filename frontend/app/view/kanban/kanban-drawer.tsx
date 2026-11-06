@@ -6,7 +6,7 @@
 
 import { createResource, createSignal, For, Show, type Accessor, type JSX, type Resource, type Setter } from "solid-js";
 
-import { Button, IconButton, Select, TextArea } from "@/app/element/ui";
+import { Button, Select, SidePanel, TextArea } from "@/app/element/ui";
 import { createBlock } from "@/app/store/block-layout-actions";
 import { openLink } from "@/app/store/misc-utils";
 import { formatAge } from "@/app/view/warden-shared/warden-shared";
@@ -173,17 +173,6 @@ function createDrawerState(props: DrawerProps): DrawerState {
         cancelBuild, setCancelBuild, openFollowers, docs, column, heldByAgent, otherAgents, specUnlocks,
         runningAgents, act, takeBack,
     };
-}
-
-function DrawerHead(props: { m: DrawerState }): JSX.Element {
-    const m = props.m;
-    return (
-        <header class="kanban-drawer__head">
-            <span class="kanban-card__num">#{m.t().card.num}</span>
-            <h3 class="kanban-drawer__title">{m.t().title}</h3>
-            <IconButton icon="xmark" label="Close" onClick={m.props.onClose} />
-        </header>
-    );
 }
 
 function DrawerFacts(props: { m: DrawerState }): JSX.Element {
@@ -530,8 +519,13 @@ function DrawerHistory(props: { m: DrawerState }): JSX.Element {
 export function KanbanDrawer(props: DrawerProps): JSX.Element {
     const m = createDrawerState(props);
     return (
-        <aside class="kanban-drawer" aria-label={`Task ${m.t().card.num}`}>
-            <DrawerHead m={m} />
+        <SidePanel
+            class="kanban-drawer"
+            label={`Task ${m.t().card.num}`}
+            lead={<span class="kanban-card__num">#{m.t().card.num}</span>}
+            title={m.t().title}
+            onClose={m.props.onClose}
+        >
             <DrawerFacts m={m} />
             <DrawerAbout m={m} />
 
@@ -542,6 +536,6 @@ export function KanbanDrawer(props: DrawerProps): JSX.Element {
             <DrawerResult m={m} />
             <DrawerActions m={m} />
             <DrawerHistory m={m} />
-        </aside>
+        </SidePanel>
     );
 }

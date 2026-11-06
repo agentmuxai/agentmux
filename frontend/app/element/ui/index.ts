@@ -33,6 +33,7 @@ export { Notice, type NoticeProps, type NoticeTone } from "./Notice";
 export { PaneBody, PaneScroll, type PaneBodyProps, type PaneScrollProps } from "./PaneBody";
 export { Pill, type PillProps, type PillTone } from "./Pill";
 export { SectionHeader, type SectionHeaderProps } from "./SectionHeader";
+export { SidePanel, type SidePanelProps } from "./SidePanel";
 export { SegmentedControl, type SegmentedControlProps, type SegmentedOption } from "./SegmentedControl";
 export { densityClass, type UiDensity, type UiTone } from "./shared";
 export { StatusDot, type StatusDotProps, type StatusTone } from "./StatusDot";
