@@ -72,6 +72,7 @@ pub mod agent_runtime;
 pub mod agent_context_usage;
 pub mod agent_api_retry;
 pub mod providers;
+pub mod cli_download;
 pub mod cli_install;
 pub mod cli_prune;
 pub mod cli_notice;

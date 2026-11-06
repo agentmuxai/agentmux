@@ -174,7 +174,7 @@ function buildToolRows(plat: ToolchainState["plat"]): ToolRow[] {
         npmPackage: p.npmPackage,
         // A CLI AgentMux doesn't install: the command of its own installer,
         // shown with a copy button while it is missing.
-        installCommand: p.npmPackage ? undefined : (plat === "windows" ? p.windowsInstallCommand : p.unixInstallCommand) || undefined,
+        installCommand: p.npmPackage || p.managedInstall ? undefined : (plat === "windows" ? p.windowsInstallCommand : p.unixInstallCommand) || undefined,
         // The version AgentMux validated. Core tools have no pin and stay
         // undefined — resolveDrift reports `unknown` for them rather than
         // claiming they're current.
