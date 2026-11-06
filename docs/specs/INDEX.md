@@ -733,7 +733,6 @@ partial list.
 | [`SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02`](SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md) | SPEC: Cross-channel jekt trust — closing the last unverifiable same-machine tier |
 | [`SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01`](SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01.md) | SPEC: jekt delivery that tells the truth — receiver state, one mailbox, receipts |
 | [`SPEC_JEKT_HOLD_FOR_COLD_SESSIONS_2026_10_25`](SPEC_JEKT_HOLD_FOR_COLD_SESSIONS_2026_10_25.md) | Spec: hold a routine message for an agent whose session has gone cold |
-| [`SPEC_JEKT_SIDE_PANEL_RESEARCH_AND_DESIGN_2026_11_04`](SPEC_JEKT_SIDE_PANEL_RESEARCH_AND_DESIGN_2026_11_04.md) | Report: incoming jekts in a collapsible panel on the right of the agent pane |
 | [`SPEC_JOBS_AND_TEMPLATES_2026_10_24`](SPEC_JOBS_AND_TEMPLATES_2026_10_24.md) | SPEC: Jobs and templates: one ledger for everything that runs by itself |
 | [`SPEC_KANBAN_ACCEPT_ON_THE_OPERATORS_WORD_2026_10_23`](SPEC_KANBAN_ACCEPT_ON_THE_OPERATORS_WORD_2026_10_23.md) | Spec: a leader accepts, or sends back, a Kanban task when the operator tells it to |
 | [`SPEC_KANBAN_AGENTS_HOLD_AND_UNHOLD_2026_10_22`](SPEC_KANBAN_AGENTS_HOLD_AND_UNHOLD_2026_10_22.md) | Spec: agents put Kanban tasks on hold and take them off hold |
@@ -927,6 +926,7 @@ partial list.
 | [`SPEC_GPU_PROCESS_MEMORY_2026_10_13`](SPEC_GPU_PROCESS_MEMORY_2026_10_13.md) | Spec: why the GPU process holds 394 MB in the field, and what stops it |
 | [`SPEC_HOST_VS_CONTAINER_AGENTS_2026_06_18`](SPEC_HOST_VS_CONTAINER_AGENTS_2026_06_18.md) | Spec: Host vs Container Agent Differentiation |
 | [`SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06`](SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md) | Spec: Make isolated auth the default for every non-`stable` channel |
+| [`SPEC_JEKT_SIDE_PANEL_RESEARCH_AND_DESIGN_2026_11_04`](SPEC_JEKT_SIDE_PANEL_RESEARCH_AND_DESIGN_2026_11_04.md) | Report: incoming jekts in a collapsible panel on the right of the agent pane |
 | [`SPEC_LAN_FIREWALL_SETUP_2026_10_01`](SPEC_LAN_FIREWALL_SETUP_2026_10_01.md) | SPEC: LAN that works on a fresh install, with no manual firewall steps |
 | [`SPEC_LAUNCHER_LINUX_PACKAGED_AND_SPLASH_2026_06_05`](SPEC_LAUNCHER_LINUX_PACKAGED_AND_SPLASH_2026_06_05.md) | SPEC: Launcher + reducer/saga parity on Linux + Linux splash |
 | [`SPEC_LAUNCHER_MACOS_DEV_INTEGRATION_2026_05_30`](SPEC_LAUNCHER_MACOS_DEV_INTEGRATION_2026_05_30.md) | SPEC: Integrating `agentmux-launcher` into macOS / Linux `task dev` |
