@@ -1,0 +1,8 @@
+set term:theme "solar"
+set term:theme null
+set term:durable true
+set term:durable false
+set term:durable null
+set conn:helper "always"
+set conn:helper "never"
+set conn:helper null
