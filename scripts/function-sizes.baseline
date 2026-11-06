@@ -146,7 +146,6 @@
 186 crates/srv/src/backend/agent_session/migrations/v1_templates.rs::move_zone
 139 crates/srv/src/backend/attachments/extract.rs::rtf_text
 137 crates/srv/src/backend/blockcontroller/acp.rs::AcpController::send_input
-518 crates/srv/src/backend/blockcontroller/acp.rs::AcpController::spawn_process
 105 crates/srv/src/backend/blockcontroller/app_server_controller.rs::AppServerController::spawn_event_loop
 224 crates/srv/src/backend/blockcontroller/app_server_protocol.rs::CodexAppServerSession::apply_incoming
 115 crates/srv/src/backend/blockcontroller/core.rs::persist_last_failure
