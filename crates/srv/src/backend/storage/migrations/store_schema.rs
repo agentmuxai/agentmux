@@ -4,10 +4,12 @@
 //! The tables, seed and additive columns of the shared store (`store.db`) and the identity store,
 //! one function each, for [`run_shared_store_schema`](super::run_shared_store_schema) and
 //! [`run_identity_store_schema`](super::run_identity_store_schema). Moved out of them without a
-//! change in behaviour. The `doc comment in migrations.rs` notes point at `OBJECT_SCHEMA_VERSION`.
+//! change in behaviour. The version notes (v4, v6 and so on) that the SQL comments below refer to are
+//! in the docs of `SHARED_STORE_SCHEMA_VERSION` and `IDENTITY_STORE_SCHEMA_VERSION` in `migrations.rs`.
 
 use super::object_schema::apply_additive_columns;
 use super::{Connection, StoreError};
+use crate::backend::storage::{cron::JOB_TABLES, vault::VAULT_ALTERS};
 
 /// The shared store's table batch.
 pub(super) const SHARED_STORE_TABLES_SQL: &str = "CREATE TABLE IF NOT EXISTS db_accounts (
@@ -113,7 +115,7 @@ pub(super) const SHARED_STORE_TABLES_SQL: &str = "CREATE TABLE IF NOT EXISTS db_
             ON db_cron_jobs(enabled);
 
         -- v4: per-agent M2M credential for muxbus Tier-4 binding (see
-        -- SHARED_STORE_SCHEMA_VERSION's doc comment above). client_secret is
+        -- the v4 note on SHARED_STORE_SCHEMA_VERSION in migrations.rs). client_secret is
         -- a Cognito app client secret, not a user password — same trust
         -- tier as MUXBUS_TOKEN in db_muxbus_credentials above, stored
         -- unencrypted in the same shared store.db for the same reason.
@@ -416,8 +418,8 @@ pub(super) const IDENTITY_STORE_TABLES_SQL: &str = "CREATE TABLE IF NOT EXISTS d
         CREATE INDEX IF NOT EXISTS idx_ids_bundle_versions_lookup
             ON db_bundle_versions(bundle_id, created_at);
 
-        -- v6: authoritative skill/MCP-server catalogs — see this constant's
-        -- v6 doc comment above. Same column shapes as run_object_schema's
+        -- v6: authoritative skill/MCP-server catalogs — see the v6 note on
+        -- IDENTITY_STORE_SCHEMA_VERSION in migrations.rs. Same column shapes as run_object_schema's
         -- copies; no ref tables here yet (Phase 3/6), so no FK targets exist
         -- to reference them from this store.
         CREATE TABLE IF NOT EXISTS db_skills (
@@ -499,7 +501,7 @@ pub(super) fn add_shared_store_columns(conn: &Connection) -> Result<(), StoreErr
         "ALTER TABLE db_cron_jobs ADD COLUMN created_by_uid TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE db_bundle_versions ADD COLUMN written_by_uid TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE db_agent_native_memory ADD COLUMN last_seen_mtime_ms INTEGER NOT NULL DEFAULT 0", // a table made before this column
-    ].iter().chain(crate::backend::storage::cron::JOB_TABLES.iter()))?;
+    ].iter().chain(JOB_TABLES.iter()))?;
     Ok(())
 }
 
@@ -531,6 +533,6 @@ pub(super) fn add_identity_store_columns(conn: &Connection) -> Result<(), StoreE
         "ALTER TABLE db_cron_jobs ADD COLUMN created_by_uid TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE db_bundle_versions ADD COLUMN written_by_uid TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE db_agent_native_memory ADD COLUMN last_seen_mtime_ms INTEGER NOT NULL DEFAULT 0", // a table made before this column
-    ].iter().chain(crate::backend::storage::cron::JOB_TABLES.iter()).chain(crate::backend::storage::vault::VAULT_ALTERS.iter()))?;
+    ].iter().chain(JOB_TABLES.iter()).chain(VAULT_ALTERS.iter()))?;
     Ok(())
 }
