@@ -42,6 +42,7 @@ pub mod aws_broker;
 pub mod github_connect;
 pub mod google_offered;
 pub mod github_installs;
+pub mod github_trip;
 pub mod gh_agent_token;
 pub mod github_hooks;
 pub mod github_tokens;

@@ -246,8 +246,8 @@ pub(crate) fn installable_provider(
     }
     let provider = crate::backend::providers::get_provider(provider_id)
         .ok_or_else(|| format!("{provider_id:?} is not a known agent CLI"))?;
-    if provider.npm_package.is_empty() {
-        return Err(format!("provider {} is not installed by AgentMux (no npm package)", provider.id));
+    if provider.npm_package.is_empty() && crate::backend::cli_download::download_spec(provider.id).is_none() {
+        return Err(format!("provider {} is not installed by AgentMux (no npm package or download)", provider.id));
     }
     Ok(provider)
 }
@@ -372,6 +372,10 @@ fn manifest_version(manifest: &std::path::Path) -> Option<String> {
 }
 
 fn installed_bin_in(dir: &std::path::Path, cli_command: &str) -> Option<std::path::PathBuf> {
+    let download = crate::backend::cli_download::download_bin(dir, cli_command);
+    if download.is_file() {
+        return Some(download);
+    }
     let bin_dir = dir.join("node_modules").join(".bin");
     let candidates: &[&str] = if cfg!(windows) {
         &[".cmd", ".exe", ""]
@@ -476,8 +480,13 @@ pub(crate) async fn install_check(req: InstallCheckReq) -> Result<InstallCheckRe
         // (one check per picker card): only meaningful when the
         // CLI is actually there, and read from that same install.
         Some(l) if l.source == crate::server::cli_handlers::CliSource::LocalInstall => {
-            resolve_installed_dir(&req.provider_id, &req.cli_command).and_then(|dir| {
-                req.npm_package.as_deref().and_then(|pkg| installed_version_in(&dir, pkg))
+            resolve_installed_dir(&req.provider_id, &req.cli_command).and_then(|dir| match req.npm_package.as_deref() {
+                Some(pkg) => installed_version_in(&dir, pkg),
+                // A release download has no package.json: its completion marker holds the pin.
+                None => std::fs::read_to_string(dir.join(crate::backend::cli_install::COMPLETE_MARKER))
+                    .ok()
+                    .map(|v| v.trim().to_string())
+                    .filter(|v| !v.is_empty()),
             })
         }
         // The user's own copy has no package.json of ours: ask it.
@@ -670,6 +679,14 @@ fn spawn_install_task(
                 return;
             }
         }
+        // A release download, not an npm package (`backend::cli_download`).
+        if let Some(spec) = crate::backend::cli_download::download_spec(&provider_id) {
+            let res = run_download_install(spec, &cli_command, &broker, (&session_id, &scope), &mut cancel_rx).await;
+            emit_done(&broker, res.is_ok(), res.err());
+            registry.drop_session(&session_id);
+            registry.release_provider(&provider_id);
+            return;
+        }
         if let Err(e) = std::fs::create_dir_all(&provider_dir) {
             // The disk-full / permission-denied / path-not-found cases
             // route to the typed catalog so the frontend renders a
@@ -845,6 +862,37 @@ fn spawn_install_task(
         registry.drop_session(&session_id);
         registry.release_provider(&provider_id);
     });
+}
+
+/// An `install.start` for a provider that is a release download: fetch the
+/// pinned file, check its hash, unpack, publish. Output lines go to the
+/// session; `install.cancel` stops the transfer and removes the partial dir.
+async fn run_download_install(
+    spec: &'static crate::backend::cli_download::DownloadSpec,
+    cli_command: &str,
+    broker: &Arc<Broker>,
+    (session_id, scope): (&str, &str),
+    cancel_rx: &mut tokio::sync::oneshot::Receiver<()>,
+) -> Result<(), String> {
+    let paths = agentmux_common::DataPaths::from_env().ok_or("cannot determine home directory")?;
+    let on_line = |_: &'static str, line: &str| {
+        broker.publish_event::<crate::backend::mps_events::InstallChunk>(
+            &InstallChunkEvent::line(session_id, line.to_string(), InstallStream::Stdout),
+            vec![scope.to_string()],
+            1024,
+        );
+    };
+    let stop = std::sync::atomic::AtomicBool::new(false);
+    let run = crate::backend::cli_download::install_into(&paths, spec, cli_command, &on_line, &stop);
+    tokio::pin!(run);
+    let outcome = tokio::select! {
+        r = &mut run => r,
+        _ = &mut *cancel_rx => {
+            stop.store(true, std::sync::atomic::Ordering::Relaxed);
+            (&mut run).await
+        }
+    };
+    outcome.map(|_| ()).map_err(|e| e.to_string())
 }
 
 /// How many lines of npm output a failed install logs.
@@ -1171,7 +1219,7 @@ mod registry_only_tests {
         for id in ["", "no-such-agent", "left-pad", "../claude", "claude/../../x", "@scope/pkg", "claude ", "C:\\x"] {
             assert!(installable_provider(id).is_err(), "{id:?}");
         }
-        let path_only = crate::backend::providers::all_providers().find(|p| p.npm_package.is_empty()).expect("a provider AgentMux does not install");
+        let path_only = crate::backend::providers::all_providers().find(|p| p.npm_package.is_empty() && crate::backend::cli_download::download_spec(p.id).is_none()).expect("a provider AgentMux does not install");
         let err = installable_provider(path_only.id).unwrap_err();
         assert!(err.contains("not installed by AgentMux"), "{err}");
     }
@@ -1203,7 +1251,7 @@ mod registry_only_tests {
         let state = crate::server::tests::test_state();
         let (engine, mut out) = WshRpcEngine::new();
         register_install_handlers(&engine, &state);
-        let path_only = crate::backend::providers::all_providers().find(|p| p.npm_package.is_empty()).expect("a path-only provider").id;
+        let path_only = crate::backend::providers::all_providers().find(|p| p.npm_package.is_empty() && crate::backend::cli_download::download_spec(p.id).is_none()).expect("a path-only provider").id;
         let resp = start(&engine, &mut out, serde_json::json!({ "providerId": path_only, "npmPackage": "left-pad" })).await;
         assert!(resp.data.is_none(), "{resp:?}");
         assert!(resp.error.contains("not installed by AgentMux"), "{resp:?}");

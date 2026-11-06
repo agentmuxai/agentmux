@@ -51,7 +51,7 @@ function entryFor(providerId: string): Entry {
             tracker: () => new NpmStepTracker(displayName(providerId)),
             begin: async () => {
                 const prov = getProvider(providerId);
-                if (!prov?.npmPackage) throw new Error(`${displayName(providerId)} isn't installed by AgentMux`);
+                if (!prov?.npmPackage && !prov?.managedInstall) throw new Error(`${displayName(providerId)} isn't installed by AgentMux`);
                 // srv installs its own registry's package for this id.
                 return RpcApi.InstallStartCommand(TabRpcClient, { providerId: prov.id });
             },
