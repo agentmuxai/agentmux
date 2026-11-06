@@ -8,7 +8,6 @@
 use super::*;
 use crate::backend::mps::{MuxEvent, EVENT_BLOCK_FILE};
 use crate::backend::storage::filestore::{FileMeta, FileOpts, FileStore};
-use base64::Engine as _;
 use serde_json::{json, Value};
 
 async fn read_range(state: &AppState, data: Value) -> Value {

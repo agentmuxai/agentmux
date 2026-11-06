@@ -241,6 +241,9 @@ pub(crate) async fn read_range(
     result
 }
 
+#[path = "blockfile_read.rs"]
+mod read_steps;
+
 async fn read_range_once(
     broker: Arc<crate::backend::mps::Broker>,
     filestore: Arc<crate::backend::storage::filestore::FileStore>,
@@ -278,39 +281,14 @@ async fn read_range_once(
     let lap = std::time::Instant::now();
     let gen_before = if transcript { db_generation(&filestore, &read_block).await } else { None };
     clock.gen_before_ms = ms_since(lap);
-    let mismatch = |gen: Option<String>| BlockfileReadRangeResult {
-        stream: Some(stream.clone()),
-        gen,
-        gen_mismatch: Some(true),
-        ..Default::default()
-    };
     if let Some(expected) = &cmd.expect_gen {
         if gen_before.as_deref() != Some(expected.as_str()) {
-            return Ok(mismatch(gen_before));
+            return Ok(read_steps::mismatch(&stream, gen_before));
         }
     }
     // A transcript's `amx` is shown only as srv signed it (`origin_sig`).
     let owner = transcript.then(|| crate::backend::transcript::origin_sig::owner_for_read(&mstore, &cmd.block_id, &read_block));
-    let finish = |mut result: BlockfileReadRangeResult, gen_after: Option<String>| {
-        if let Some(owner) = &owner {
-            crate::backend::transcript::origin_sig::vet_lines(owner, &mut result.lines);
-        }
-        if let Some(turns) = cmd.tail_turns.filter(|t| *t > 0) {
-            trim_to_last_turns(&mut result, offset as u64, turns as usize);
-        }
-        if let Some(bytes) = cmd.tail_bytes.filter(|b| *b > 0) {
-            trim_to_tail_bytes(&mut result, offset as u64, bytes as usize);
-        }
-        if gen_before.is_some() && gen_after == gen_before {
-            result.stream = Some(stream.clone());
-            result.gen = gen_before.clone();
-            result
-        } else if cmd.expect_gen.is_some() {
-            mismatch(gen_after)
-        } else {
-            result
-        }
-    };
+    let range = read_steps::RangeRead { cmd: &cmd, offset, stream, owner, gen_before };
 
     // Fast path: output.idx — a lazily-built, self-validating byte-offset
     // index of every non-blank line in `output`. It lets us seek directly
@@ -327,115 +305,12 @@ async fn read_range_once(
     //
     // Gated to non-circular files: circular `output` (terminal ring buffers)
     // drops early bytes, so absolute byte offsets wouldn't map cleanly.
-    use crate::backend::blockcontroller::shell::{extend_output_idx, read_via_index, read_via_stale_index};
     if cmd.filename == "output" {
-        // Runs on the blocking pool (#2841). A full rebuild is a
-        // streaming scan of `output`, which reaches hundreds of MB
-        // on a long-lived agent, and every index/output read below
-        // is blocking file I/O as well — none of it may occupy a
-        // Tokio runtime worker. The closure body is unchanged; only
-        // where it runs is.
-        let idx_clock = std::sync::Arc::new(std::sync::Mutex::new(IndexClock::default()));
-        let idx_result: Option<BlockfileReadRangeResult> = {
-            let filestore = filestore.clone();
-            let read_block = read_block.clone();
-            let idx_clock = idx_clock.clone();
-            let spawned = std::time::Instant::now();
-            let compute = move || -> Option<BlockfileReadRangeResult> {
-            idx_clock.lock().unwrap().queued_ms = ms_since(spawned);
-            let run = std::time::Instant::now();
-            let out_stat = filestore.stat(&read_block, "output").ok()??;
-            if out_stat.opts.circular {
-                return None; // circular files: fall back to slow path
-            }
-            // Everything the answer rests on — the index judged fresh,
-            // its entries, the output bytes they point at — comes from
-            // ONE database snapshot (Codex on #3634), never the stale
-            // per-process `stat` cache. A missing or stale index is
-            // rebuilt once, for the output as a snapshot saw it, and read
-            // again in a new snapshot; if that still doesn't match
-            // (replaced again meanwhile), the slow path below answers.
-            // A missing or stale index is brought up to date by
-            // extending it from its last line — scanning only the
-            // bytes appended since, as `line_count` did before it
-            // answered from the counter (5a-3b). A full rebuild on
-            // every read of a grown file cost seconds on a large
-            // agent zone. `extend_output_idx` still rebuilds when
-            // the index can't be a base (another generation's,
-            // shrunk, missing).
-            let read = match read_via_index(&filestore, &read_block, offset as u64, limit as u64) {
-                Some(read) => read,
-                None => {
-                    let extend = std::time::Instant::now();
-                    let extended = extend_output_idx(&filestore, &read_block);
-                    idx_clock.lock().unwrap().extend_ms = Some(ms_since(extend));
-                    // A failed extension leaves an index that
-                    // may be far behind: its prefix isn't a
-                    // stand-in for the read, so take the
-                    // whole-file path below (#4384).
-                    extended?;
-                    match read_via_index(&filestore, &read_block, offset as u64, limit as u64) {
-                        Some(read) => read,
-                        // The extension succeeded, so only an
-                        // append that landed since (an agent's
-                        // spawn writing to the transcript its pane
-                        // is opening) can make this miss: serve
-                        // the indexed prefix, a few lines short at
-                        // most, rather than read the whole file
-                        // below (docs/reports/REPORT_AGENT_OPEN_STALL_RCA_2026_10_05.md).
-                        None => {
-                            let read = read_via_stale_index(&filestore, &read_block, offset as u64, limit as u64)?;
-                            idx_clock.lock().unwrap().stale = true;
-                            read
-                        }
-                    }
-                }
-            };
-            idx_clock.lock().unwrap().run_ms = ms_since(run);
-            let total_lines = read.total;
-
-            // Empty result cases — answered from the index, no output read.
-            if read.line_offsets.is_empty() {
-                return Some(BlockfileReadRangeResult { lines: vec![], total: total_lines, ..Default::default() });
-            }
-            let raw = read.raw;
-            let text = String::from_utf8_lossy(&raw);
-            let lines: Vec<String> = text
-                .lines()
-                .filter(|l| !l.trim().is_empty())
-                .map(|l| l.to_string())
-                .collect();
-
-            // Receive-time stamps for the returned lines, from the
-            // output.tsidx sidecar in the same snapshot as the lines
-            // (`read_via_index`; only a window of the sidecar is
-            // read). Best-effort: no stamps is never a failed read.
-            // Offsets and lines must pair up one to one.
-            let stamps = read.stamps.filter(|s| s.len() == lines.len());
-
-            Some(BlockfileReadRangeResult { lines, total: total_lines, stamps, ..Default::default() })
-            };
-            // A panic in the scan must degrade to the slow path
-            // below, not fail the read — but it is logged rather
-            // than silently swallowed.
-            match tokio::task::spawn_blocking(compute).await {
-                Ok(v) => v,
-                Err(e) => {
-                    tracing::warn!(
-                        block_id = %cmd.block_id,
-                        error = %e,
-                        "blockfile:read_range: output.idx task failed; falling back"
-                    );
-                    None
-                }
-            }
-        };
-        clock.index = Some(std::mem::take(&mut *idx_clock.lock().unwrap()));
-        if let Some(result) = idx_result {
+        if let Some(result) = read_steps::indexed_window(&filestore, &read_block, &cmd.block_id, offset, limit, &mut clock).await {
             let lap = std::time::Instant::now();
             let gen_after = if transcript { db_generation(&filestore, &read_block).await } else { None };
             clock.gen_after_ms = ms_since(lap);
-            let result = finish(result, gen_after);
+            let result = range.finish(result, gen_after);
             clock.log_done(&cmd.block_id, offset, limit, "index", started, &result);
             return Ok(result);
         }
@@ -446,91 +321,9 @@ async fn read_range_once(
     //
     // If FileStore has the file and it is non-empty, read from disk.
     // Otherwise fall back to ring buffer for backward compatibility.
-    let filestore_lines = match filestore.stat(&read_block, &cmd.filename) {
-        Ok(Some(ref wf)) if wf.size > 0 => {
-            if !whole_file_read_allowed(&cmd.filename, wf.opts.circular, wf.size) {
-                tracing::warn!(
-                    block_id = %cmd.block_id,
-                    size = wf.size,
-                    total_ms = ms_since(started),
-                    "blockfile:read_range: output.idx can't serve this read and the transcript is too large to read whole; refusing"
-                );
-                return Err(format!(
-                    "blockfile:read_range: the transcript index for {} is unavailable right now; retry",
-                    cmd.block_id
-                ));
-            }
-            if wf.size >= WHOLE_FILE_WARN_BYTES {
-                tracing::warn!(
-                    block_id = %cmd.block_id,
-                    filename = %cmd.filename,
-                    size = wf.size,
-                    "blockfile:read_range: reading the whole file (no usable output.idx)"
-                );
-            }
-            match filestore.read_file(&read_block, &cmd.filename) {
-                Ok(Some(bytes)) => {
-                    let text = String::from_utf8_lossy(&bytes);
-                    let lines: Vec<String> = text.lines()
-                        .filter(|l| !l.trim().is_empty())
-                        .map(|l| l.to_string())
-                        .collect();
-                    Some(lines)
-                }
-                Ok(None) => None,
-                Err(e) => {
-                    tracing::warn!(
-                        block_id = %cmd.block_id,
-                        filename = %cmd.filename,
-                        error = %e,
-                        "blockfile:read_range: filestore read failed, falling back to ring buffer"
-                    );
-                    None
-                }
-            }
-        }
-        Ok(_) => None, // file absent or empty → fall back
-        Err(e) => {
-            tracing::warn!(
-                block_id = %cmd.block_id,
-                error = %e,
-                "blockfile:read_range: filestore stat failed, falling back to ring buffer"
-            );
-            None
-        }
-    };
-
-    let all_lines = if let Some(lines) = filestore_lines {
-        lines
-    } else {
-        // Fallback: reconstruct from MPS event ring buffer.
-        // The ring buffer holds at most MAX_PERSIST = 4096 events;
-        // older events are evicted. Offset 0 = oldest retained line.
-        let scope = format!("block:{}", cmd.block_id);
-        let events = broker.read_event_history(
-            crate::backend::mps::EVENT_BLOCK_FILE,
-            &scope,
-            usize::MAX, // broker clamps to MAX_PERSIST internally
-        );
-
-        let mut lines: Vec<String> = Vec::new();
-        for event in events {
-            let Some(ref event_data) = event.data else { continue };
-            let ev_filename = event_data.get("filename")
-                .and_then(|v| v.as_str()).unwrap_or("");
-            if ev_filename != cmd.filename {
-                continue;
-            }
-            let Some(data64) = event_data.get("data64").and_then(|v| v.as_str()) else { continue };
-            let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data64) else { continue };
-            let text = String::from_utf8_lossy(&bytes);
-            for line in text.lines() {
-                if !line.trim().is_empty() {
-                    lines.push(line.to_string());
-                }
-            }
-        }
-        lines
+    let all_lines = match read_steps::whole_file_lines(&filestore, &read_block, &cmd, started)? {
+        Some(lines) => lines,
+        None => read_steps::ring_buffer_lines(&broker, &cmd),
     };
 
     let total = all_lines.len() as u64;
@@ -545,7 +338,7 @@ async fn read_range_once(
     let lap = std::time::Instant::now();
     let gen_after = if transcript { db_generation(&filestore, &read_block).await } else { None };
     clock.gen_after_ms = ms_since(lap);
-    let result = finish(BlockfileReadRangeResult { lines, total, ..Default::default() }, gen_after);
+    let result = range.finish(BlockfileReadRangeResult { lines, total, ..Default::default() }, gen_after);
     clock.log_done(&cmd.block_id, offset, limit, "whole_file", started, &result);
     Ok(result)
 }
