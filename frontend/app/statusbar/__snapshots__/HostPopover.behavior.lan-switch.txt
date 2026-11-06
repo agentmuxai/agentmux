@@ -1,0 +1,130 @@
+popover placement=top-end role=dialog aria-label="Host info" class="status-bar-popover host-popover" anchor=trigger
+-- off
+<div>
+  <div data-popover="" role="dialog" aria-label="Host info" class="status-bar-popover host-popover" style="width: 320px;">
+    <div class="status-bar-popover-row">
+      <span style="font-weight:bold;font-size:1.05em">
+        "NARKO"
+    <div class="status-bar-popover-row">
+      <span class="status-bar-popover-label">
+        "OS"
+      <span>
+        "Windows x86_64"
+    <div class="status-bar-popover-row">
+      <span class="status-bar-popover-label">
+        "IP"
+      <span class="status-bar-popover-mono">
+        "203.0.113.20"
+    <div class="status-bar-popover-divider">
+    <div class="status-bar-popover-row">
+      <span class="status-bar-popover-label">
+        "PID"
+      <span class="status-bar-popover-mono">
+        "4242"
+    <div class="status-bar-popover-row">
+      <span class="status-bar-popover-label">
+        "Data"
+      <button style="font-size: 0.85em;" data-tip="Show in File Explorer" type="button" class="ui-button ui-tone-quiet ui-button--link status-bar-popover-mono status-bar-popover-link">
+        "C:\Users\me\.agentmux\channels\stable\data"
+    <div class="status-bar-popover-divider">
+    <div class="status-bar-popover-row">
+      <span class="status-bar-popover-label">
+        "LAN discovery"
+      <span class="status-bar-toggle" style="margin-left:auto" data-tip="Enable (may prompt Windows Firewall)">
+        <button type="button" role="switch" class="ui-switch ui-density-compact" aria-checked="false" aria-label="LAN discovery">
+          <span class="ui-switch-thumb">
+    <div data-pair-device="" data-lan="false">
+    <div class="status-bar-popover-divider">
+    <div class="status-bar-popover-row">
+      <span class="status-bar-popover-label">
+        "MuxBus Cloud"
+      <button style="margin-left: auto;" type="button" class="ui-button ui-tone-danger ui-density-compact muxbus-login-chip muxbus-login-chip-signin">
+        "Sign in"
+    <div class="status-bar-popover-divider">
+    <div class="status-bar-popover-row">
+      <span class="status-bar-popover-label">
+        "IPC"
+      <span class="status-bar-popover-mono">
+        "127.0.0.1:1"
+    <div class="status-bar-popover-row">
+      <span class="status-bar-popover-label">
+        "Backend"
+      <span class="status-bar-popover-mono">
+        "127.0.0.1:2"
+    <div class="status-bar-popover-row">
+      <span class="status-bar-popover-label">
+        "WS"
+      <span class="status-bar-popover-mono">
+        "127.0.0.1:3"
+    <div class="status-bar-popover-row">
+      <span class="status-bar-popover-label">
+        "DevTools"
+      <span class="status-bar-popover-mono">
+        "127.0.0.1:4"
+onLanToggle true
+-- on
+<div>
+  <div data-popover="" role="dialog" aria-label="Host info" class="status-bar-popover host-popover" style="width: 320px;">
+    <div class="status-bar-popover-row">
+      <span style="font-weight:bold;font-size:1.05em">
+        "NARKO"
+    <div class="status-bar-popover-row">
+      <span class="status-bar-popover-label">
+        "OS"
+      <span>
+        "Windows x86_64"
+    <div class="status-bar-popover-row">
+      <span class="status-bar-popover-label">
+        "IP"
+      <span class="status-bar-popover-mono">
+        "203.0.113.20"
+    <div class="status-bar-popover-divider">
+    <div class="status-bar-popover-row">
+      <span class="status-bar-popover-label">
+        "PID"
+      <span class="status-bar-popover-mono">
+        "4242"
+    <div class="status-bar-popover-row">
+      <span class="status-bar-popover-label">
+        "Data"
+      <button style="font-size: 0.85em;" data-tip="Show in File Explorer" type="button" class="ui-button ui-tone-quiet ui-button--link status-bar-popover-mono status-bar-popover-link">
+        "C:\Users\me\.agentmux\channels\stable\data"
+    <div class="status-bar-popover-divider">
+    <div class="status-bar-popover-row">
+      <span class="status-bar-popover-label">
+        "LAN discovery"
+      <span class="status-bar-toggle" style="margin-left:auto" data-tip="Disable">
+        <button type="button" role="switch" class="ui-switch ui-density-compact" aria-checked="true" aria-label="LAN discovery">
+          <span class="ui-switch-thumb">
+    <div class="status-bar-popover-row" style="padding-left:12px;opacity:0.5;font-size:0.85em">
+      <span>
+        "Searching for peers…"
+    <div data-pair-device="" data-lan="true">
+    <div class="status-bar-popover-divider">
+    <div class="status-bar-popover-row">
+      <span class="status-bar-popover-label">
+        "MuxBus Cloud"
+      <button style="margin-left: auto;" type="button" class="ui-button ui-tone-danger ui-density-compact muxbus-login-chip muxbus-login-chip-signin">
+        "Sign in"
+    <div class="status-bar-popover-divider">
+    <div class="status-bar-popover-row">
+      <span class="status-bar-popover-label">
+        "IPC"
+      <span class="status-bar-popover-mono">
+        "127.0.0.1:1"
+    <div class="status-bar-popover-row">
+      <span class="status-bar-popover-label">
+        "Backend"
+      <span class="status-bar-popover-mono">
+        "127.0.0.1:2"
+    <div class="status-bar-popover-row">
+      <span class="status-bar-popover-label">
+        "WS"
+      <span class="status-bar-popover-mono">
+        "127.0.0.1:3"
+    <div class="status-bar-popover-row">
+      <span class="status-bar-popover-label">
+        "DevTools"
+      <span class="status-bar-popover-mono">
+        "127.0.0.1:4"
+onLanToggle false

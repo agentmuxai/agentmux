@@ -10,61 +10,21 @@ import {
     lanDiscoveryErrorAtom,
     setLanDiscoveryErrorAtom,
     settingsAtom,
-    type LanDiscoverability,
-    type LanFirewall,
 } from "@/store/global";
-import { devModeOn } from "@/app/store/dev-mode";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { Accessor, createEffect, createSignal, onCleanup, Show, untrack, type JSX } from "solid-js";
-import { firewallMessage, resolveLanIndicator } from "./lan-indicator";
-import { LanPeerList } from "./LanPeerRow";
-import { AnchoredPopover, type PopoverAnchor } from "@/app/element/anchored-popover";
-import { useMuxBusStatus, type MuxBusController } from "@/app/view/accounts/AgentMuxConnectPanel";
+import { createEffect, createSignal, onCleanup, Show, untrack, type JSX } from "solid-js";
+import { resolveLanIndicator } from "./lan-indicator";
+import { AnchoredPopover } from "@/app/element/anchored-popover";
+import { useMuxBusStatus } from "@/app/view/accounts/AgentMuxConnectPanel";
 import { isMuxBusSessionOk, muxbusNeedsSignInAgain } from "@/app/view/accounts/muxbus-session";
-import { MuxBusSignOutButton } from "@/app/view/accounts/muxbus-sign-out";
-import { isLinux, isMacOS } from "@/util/platformutil";
 import { PairDevicePanel } from "./PairDevicePanel";
-
-import { Button, Switch } from "@/app/element/ui";
-import type { LanInstance } from "@/types/rpc/LanInstance";
+import { HostFacts, HostIdentity, LanRows, MuxBusCloud, PortRows, ProcessRows } from "./host-popover-parts";
+import { createHostPanel, type HostInfo, type HostPopoverPanelProps } from "./host-popover-state";
 
 /** Whether the host's reported name is srv's machine (names compare case-insensitively). */
 export function sameMachine(hostName: string | undefined, srvHostName: string | undefined): boolean {
     return !!hostName && !!srvHostName && hostName.toLowerCase() === srvHostName.toLowerCase();
-}
-
-type HostInfo = {
-    hostname: string;
-    os: string;
-    localIp: string;
-    version: string;
-    dataDir: string;
-    pid: number;
-    ports: {
-        ipc: string;
-        web: string;
-        ws: string;
-        devtools: string;
-    };
-};
-
-interface HostPopoverPanelProps {
-    /** The status bar trigger. */
-    anchor: PopoverAnchor;
-    onClose: () => void;
-    hostname: string;
-    hostInfo: Accessor<HostInfo | null>;
-    lanInstances: Accessor<LanInstance[]>;
-    lanCount: Accessor<number>;
-    lanDiscoveryEnabled: Accessor<boolean>;
-    lanDiscoveryError: Accessor<string | null>;
-    lanDiscoverability: Accessor<LanDiscoverability | null>;
-    lanFirewall: Accessor<LanFirewall | null>;
-    onLanToggle: (enabled: boolean) => void;
-    muxbus: MuxBusController;
-    /** `statusbar:showmuxbuscloud`: false hides the MuxBus Cloud block. Absent means shown. */
-    showMuxbusCloud?: Accessor<boolean>;
 }
 
 /**
@@ -74,24 +34,7 @@ interface HostPopoverPanelProps {
  * trigger's. Spec: SPEC_STATUS_BAR_POPOVER_AIRSPACE_CLIP_2026_08_17.md
  */
 const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
-    // Data-path link → OS file manager. Errors surface inline (a headless
-    // Linux box with no handler would otherwise look like a dead link).
-    const fileManagerLabel = () =>
-        isMacOS() ? "Reveal in Finder" : isLinux() ? "Open in file manager" : "Show in File Explorer";
-    const [openDirError, setOpenDirError] = createSignal<string | null>(null);
-    const openDataDir = async () => {
-        setOpenDirError(null);
-        try {
-            await getApi().openDataDirInFileManager();
-        } catch (e) {
-            setOpenDirError(`Couldn't open folder: ${e}`);
-        }
-    };
-
-    const muxbus = props.muxbus;
-    const showMuxbusCloud = () => props.showMuxbusCloud?.() ?? true;
-    const muxbusOk = () => isMuxBusSessionOk(muxbus.status());
-    const signInAgain = () => muxbusNeedsSignInAgain(muxbus.status());
+    const t = createHostPanel(props);
 
     // Opens upward, right-aligned to the hostname chip. Positioning, chrome zoom, dismiss
     // and the airspace cut are AnchoredPopover's.
@@ -107,134 +50,11 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
             aria-label="Host info"
             style={{ width: `${POPOVER_WIDTH}px` }}
         >
-            {/* Host Identity */}
-            <div class="status-bar-popover-row">
-                <span style={{ "font-weight": "bold", "font-size": "1.05em" }}>
-                    {props.hostInfo()?.hostname ?? props.hostname}
-                </span>
-            </div>
+            <HostIdentity p={props} />
             <Show when={props.hostInfo()}>
-                <div class="status-bar-popover-row">
-                    <span class="status-bar-popover-label">OS</span>
-                    <span>{props.hostInfo()!.os}</span>
-                </div>
-                <div class="status-bar-popover-row">
-                    <span class="status-bar-popover-label">IP</span>
-                    <span class="status-bar-popover-mono">{props.hostInfo()!.localIp}</span>
-                </div>
-
-                {/* Process Info */}
-                <div class="status-bar-popover-divider" />
-                <div class="status-bar-popover-row">
-                    <span class="status-bar-popover-label">PID</span>
-                    <span class="status-bar-popover-mono">{props.hostInfo()!.pid}</span>
-                </div>
-                <div class="status-bar-popover-row">
-                    <span class="status-bar-popover-label">Data</span>
-                    {/* The path itself is the link: click opens it in the OS file
-                        manager. The host resolves the directory from a closed
-                        target, never from this path string.
-                        Spec: SPEC_STATUSBAR_HOST_POPOVER_INSTANCE_AND_OPEN_DATA_DIR_2026_09_25.md §4 */}
-                    <Button
-                        variant="link"
-                        class="status-bar-popover-mono status-bar-popover-link"
-                        style={{ "font-size": "0.85em" }}
-                        data-tip={fileManagerLabel()}
-                        onClick={() => void openDataDir()}
-                    >
-                        {props.hostInfo()!.dataDir}
-                    </Button>
-                </div>
-                <Show when={openDirError()}>
-                    <div
-                        class="status-bar-popover-row"
-                        style={{
-                            "padding-left": "12px",
-                            "font-size": "0.85em",
-                            color: "var(--warning-text-color)",
-                        }}
-                    >
-                        <span>⚠ {openDirError()}</span>
-                    </div>
-                </Show>
-
-                {/* Network — LAN discovery toggle.
-                    Spec: docs/specs/lan-discovery-toggle.md */}
-                <div class="status-bar-popover-divider" />
-                <div class="status-bar-popover-row">
-                    <span class="status-bar-popover-label">LAN discovery</span>
-                    <span
-                        class="status-bar-toggle"
-                        data-tip={props.lanDiscoveryEnabled() ? "Disable" : "Enable (may prompt Windows Firewall)"}
-                        style={{ "margin-left": "auto" }}
-                    >
-                        <Switch
-                            density="compact"
-                            ariaLabel="LAN discovery"
-                            checked={props.lanDiscoveryEnabled()}
-                            onChange={(on) => props.onLanToggle(on)}
-                        />
-                    </span>
-                </div>
-                <Show when={props.lanDiscoveryError()}>
-                    <div
-                        class="status-bar-popover-row"
-                        style={{
-                            "padding-left": "12px",
-                            "font-size": "0.85em",
-                            color: "var(--warning-text-color)",
-                        }}
-                    >
-                        <span>⚠ {props.lanDiscoveryError()}</span>
-                    </div>
-                </Show>
-                <Show when={props.lanDiscoveryEnabled() && firewallMessage(props.lanFirewall()?.status)}>
-                    {(message) => (
-                        <div
-                            class="status-bar-popover-row"
-                            data-testid="lan-firewall"
-                            style={{
-                                "padding-left": "12px",
-                                "font-size": "0.85em",
-                                color: "var(--warning-text-color)",
-                            }}
-                        >
-                            <span>⚠ {message()}</span>
-                        </div>
-                    )}
-                </Show>
-                <Show when={props.lanDiscoveryEnabled() && props.lanDiscoverability()?.state === "undiscoverable"}>
-                    <div
-                        class="status-bar-popover-row"
-                        data-testid="lan-undiscoverable"
-                        style={{
-                            "padding-left": "12px",
-                            "font-size": "0.85em",
-                            color: "var(--warning-text-color)",
-                        }}
-                    >
-                        <span>
-                            ⚠ Other machines can't see this one, even though it may see them. Another program may be
-                            using the mDNS port (UDP 5353). AgentMux keeps retrying on its own
-                            {" "}({props.lanDiscoverability()?.rebuilds ?? 0} so far); turning LAN off and on retries at once.
-                        </span>
-                    </div>
-                </Show>
-                <Show when={props.lanDiscoveryEnabled() && props.lanCount() > 0}>
-                    <div class="status-bar-popover-row" style={{ "padding-left": "12px" }}>
-                        <span style={{ color: "var(--accent-color)" }}>◆</span>
-                        <span>{props.lanCount()} peer{props.lanCount() !== 1 ? "s" : ""}</span>
-                    </div>
-                    <LanPeerList peers={props.lanInstances()} selfHost={getHostName()} />
-                </Show>
-                <Show when={props.lanDiscoveryEnabled() && props.lanCount() === 0 && !props.lanDiscoveryError()}>
-                    <div
-                        class="status-bar-popover-row"
-                        style={{ "padding-left": "12px", opacity: "0.5", "font-size": "0.85em" }}
-                    >
-                        <span>Searching for peers…</span>
-                    </div>
-                </Show>
+                <HostFacts p={props} />
+                <ProcessRows p={props} t={t} />
+                <LanRows p={props} />
 
                 {/* Pairing a device with this computer's viewer: a QR with a
                     one-time code and the certificate's fingerprint, never the
@@ -244,108 +64,11 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
                     instance's full auth key. */}
                 <PairDevicePanel lanDiscoveryEnabled={props.lanDiscoveryEnabled} />
 
-                {/* MuxBus Cloud */}
-                <Show when={showMuxbusCloud() && muxbus.isConfigured()}>
-                    <div class="status-bar-popover-divider" />
-                    <div class="status-bar-popover-row">
-                        <span class="status-bar-popover-label">MuxBus Cloud</span>
-                        <Show
-                            when={muxbusOk()}
-                            fallback={
-                                <>
-                                    {/* A dead sign-in names the account it was for
-                                        (SPEC_CLOUD_SETTINGS_DISCOVERY_2026_09_27.md §3.5). */}
-                                    <Show when={signInAgain()}>
-                                        <span
-                                            class="status-bar-popover-mono"
-                                            style={{ "font-size": "0.85em", "margin-left": "auto" }}
-                                        >
-                                            {muxbus.status()?.email}
-                                        </span>
-                                    </Show>
-                                    <Button
-                                        tone="danger"
-                                        density="compact"
-                                        class="muxbus-login-chip muxbus-login-chip-signin"
-                                        style={{
-                                            "margin-left": signInAgain() ? "6px" : "auto",
-                                        }}
-                                        title={muxbus.loading() ? "Cancel sign-in" : undefined}
-                                        onClick={() => void (muxbus.loading() ? muxbus.cancel() : muxbus.connect())}
-                                    >
-                                        {muxbus.loading()
-                                            ? "Cancel"
-                                            : signInAgain()
-                                              ? "Sign in again"
-                                              : muxbus.status()?.connected
-                                                ? "Expired — re-login"
-                                                : "Sign in"}
-                                    </Button>
-                                </>
-                            }
-                        >
-                            <span class="status-bar-popover-mono" style={{ "font-size": "0.85em" }}>{muxbus.status()?.email}</span>
-                        </Show>
-                    </div>
-                    <Show when={isMacOS() && !muxbusOk()}>
-                        <div class="status-bar-popover-info-notice" role="status">
-                            <span class="status-bar-popover-info-notice-icon" aria-hidden="true">
-                                {"🔒"}
-                            </span>
-                            <span>
-                                macOS will ask for Keychain access after you sign in — that's
-                                AgentMux securely storing your session.
-                            </span>
-                        </div>
-                    </Show>
-                    <Show when={isLinux() && !muxbusOk()}>
-                        <div class="status-bar-popover-info-notice" role="status">
-                            <span class="status-bar-popover-info-notice-icon" aria-hidden="true">
-                                {"🔒"}
-                            </span>
-                            <span>
-                                Linux may ask for your keyring password after you sign in —
-                                that's AgentMux securely storing your session.
-                            </span>
-                        </div>
-                    </Show>
-                    <Show when={muxbusOk()}>
-                        <div class="status-bar-popover-row" style={{ "justify-content": "flex-end" }}>
-                            <MuxBusSignOutButton
-                                muxbus={muxbus}
-                                class="muxbus-popover-disconnect-btn"
-                                label="Disconnect"
-                            />
-                        </div>
-                    </Show>
-                    <Show when={muxbus.error()}>
-                        <div class="status-bar-popover-row" style={{ "font-size": "0.85em", color: "var(--warning-text-color)" }}>
-                            <span>⚠ {muxbus.error()}</span>
-                        </div>
-                    </Show>
-                </Show>
+                <MuxBusCloud p={props} t={t} />
 
                 <div class="status-bar-popover-divider" />
 
-                {/* Ports */}
-                <div class="status-bar-popover-row">
-                    <span class="status-bar-popover-label">IPC</span>
-                    <span class="status-bar-popover-mono">{props.hostInfo()!.ports.ipc}</span>
-                </div>
-                <div class="status-bar-popover-row">
-                    <span class="status-bar-popover-label">Backend</span>
-                    <span class="status-bar-popover-mono">{props.hostInfo()!.ports.web}</span>
-                </div>
-                <div class="status-bar-popover-row">
-                    <span class="status-bar-popover-label">WS</span>
-                    <span class="status-bar-popover-mono">{props.hostInfo()!.ports.ws}</span>
-                </div>
-                <Show when={devModeOn()}>
-                    <div class="status-bar-popover-row">
-                        <span class="status-bar-popover-label">DevTools</span>
-                        <span class="status-bar-popover-mono">{props.hostInfo()!.ports.devtools}</span>
-                    </div>
-                </Show>
+                <PortRows p={props} />
             </Show>
         </AnchoredPopover>
     );
