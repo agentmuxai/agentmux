@@ -25,7 +25,7 @@ $gap: 12px;
 
 .shortcuts-top {
     position: relative;
-    z-index: 1;
+    z-index: var(--z-over-content);
     flex: none;
     display: flex;
     flex-direction: column;
@@ -35,7 +35,7 @@ $gap: 12px;
 
 .shortcuts-scroll {
     position: relative;
-    z-index: 1;
+    z-index: var(--z-over-content);
     flex: 1 1 0;
     min-height: 0;
     overflow-x: hidden;
@@ -65,14 +65,14 @@ $gap: 12px;
 }
 
 .shortcuts-tile-icon {
-    font-size: 28px;
+    font-size: var(--text-3xl);
     line-height: 1;
 }
 
 .shortcuts-tile-label {
     width: 100%;
     margin-top: 6px;
-    font-size: 11px;
+    font-size: var(--text-xs);
     line-height: 16px;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -81,7 +81,7 @@ $gap: 12px;
 
 .shortcuts-hints {
     position: relative;
-    z-index: 1;
+    z-index: var(--z-over-content);
     flex: none;
     padding: 4px 12px 10px;
 }
