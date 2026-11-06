@@ -318,3 +318,80 @@
 .vault-dup {
     color: var(--warning-text-color);
 }
+
+// The Vault picker: narrows the lists to one Vault, and opens the Vaults dialog.
+.vault-picker {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    // The bottom space keeps a wrapped second line off the section tabs.
+    padding: var(--space-2) var(--space-3);
+    min-width: 0;
+
+    > :last-child {
+        margin-left: auto;
+        flex: 0 0 auto;
+    }
+}
+
+.vault-picker-choices {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-x: auto;
+}
+
+.vault-in-vault {
+    opacity: 0.8;
+}
+
+.vault-vault-list {
+    display: flex;
+    flex-direction: column;
+    margin: 0 0 var(--space-2);
+    padding: 0;
+    list-style: none;
+}
+
+.vault-vault-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-1) 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+// A long name wraps in its own space rather than squeezing the summary.
+.vault-vault-name {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    font-weight: 600;
+}
+
+.vault-vault-agents {
+    flex: 1 1 12em;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.vault-editor-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-2);
+}
+
+.vault-signin-vaults {
+    margin-top: var(--space-3);
+
+    // A long Vault name shortens in the select, so the label and select stay on one row.
+    select {
+        max-width: 14em;
+        text-overflow: ellipsis;
+    }
+
+    h4 {
+        margin: 0 0 var(--space-1);
+    }
+}

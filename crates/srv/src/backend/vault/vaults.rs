@@ -205,5 +205,22 @@ pub fn move_entry(store: &Store, entry_id: &str, vault_id: &str) -> Result<(), S
     Ok(())
 }
 
+/// Each browser profile's sign-in Vault (`personal` or `profile:<id>`) other than Personal.
+pub fn signin_vaults(store: &Store) -> Result<std::collections::BTreeMap<String, String>, String> {
+    Ok(store.signin_vaults().map_err(|e| e.to_string())?.into_iter().collect())
+}
+
+/// Sets the Vault browser profile `profile` saves its sign-ins to and offers them from. The
+/// sign-ins it already has stay in the Vault they are in: move them, or they are not offered.
+pub fn set_signin_vault(store: &Store, profile: &str, vault_id: &str) -> Result<(), String> {
+    if !super::signins::is_profile(profile) {
+        return Err(format!("{profile:?} is not a browser profile (personal, or profile:<id>)"));
+    }
+    let to = store.vault_info(vault_id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no Vault {vault_id}"))?;
+    store.signin_vault_set(profile, &to.id).map_err(|e| e.to_string())?;
+    record(store, "", &to.name, PERSON, "chose a profile's sign-in Vault", profile, "done");
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests;

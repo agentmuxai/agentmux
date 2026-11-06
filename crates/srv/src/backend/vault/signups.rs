@@ -10,7 +10,7 @@
 use std::collections::BTreeMap;
 
 use super::signins::{self, Space};
-use super::{insert, record, seal, EntryChange, NewEntry, Parts, PERSON};
+use super::{insert_in, record, seal, EntryChange, NewEntry, Parts, PERSON};
 use crate::backend::storage::store::Store;
 
 /// On a sign-in made on a sign-up form that hasn't been sent with it yet.
@@ -27,7 +27,7 @@ pub fn create(store: &Store, s: &Space, username: &str, password: &str) -> Resul
     parts.0.insert("password".to_string(), password.to_string());
     let label = signins::label_for(s);
     let entry = NewEntry { kind: "login".into(), label: label.clone(), fields, tags: vec![UNCONFIRMED.to_string()], parts };
-    let id = insert(store, entry, PERSON, "made", "on a sign-up form")?;
+    let id = insert_in(store, entry, PERSON, "made", "on a sign-up form", &signins::vault_for(store, &s.profile)?)?;
     Ok((id, label))
 }
 
