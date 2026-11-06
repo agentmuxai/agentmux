@@ -226,7 +226,7 @@ describe("Shortcuts pane: a singleton tile", () => {
     it("Enter on the chosen tile brings it back; Shift+Enter opens a new one", async () => {
         h.openViews.add("memory");
         const m = open();
-        m.gridLayout = { columns: 3, tileWidth: 90, tileHeight: 90, showLabel: true };
+        m.gridLayout = { columns: 3 };
         m.selectedIndex._set(m.filteredWidgets().findIndex((x) => x.label === "Memory"));
         m.keyDownHandler(adaptFromReactOrNativeKeyEvent({ type: "keydown", key: "Enter", code: "Enter" } as KeyboardEvent));
         await vi.waitFor(() => expect(h.openOrFocusPaneByView).toHaveBeenCalledOnce());
@@ -243,7 +243,7 @@ describe("Shortcuts pane: Escape", () => {
         config();
         h.blocks.sc = { meta: { view: "shortcuts", ...meta } };
         const m = new ShortcutsViewModel("sc");
-        m.gridLayout = { columns: 3, tileWidth: 90, tileHeight: 90, showLabel: true };
+        m.gridLayout = { columns: 3 };
         return m;
     }
 
