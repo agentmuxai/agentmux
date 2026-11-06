@@ -1,0 +1,51 @@
+-- fields
+  call AccountOAuthClientGet [{"provider":"github"}]
+<div>
+  <div class="oauth-connect">
+    <div class="oauth-byo-note">
+      "ⓘ"
+      "Create a GitHub OAuth App (Settings → Developer settings → OAuth Apps), enable “Device Flow”, and paste its Client ID below. No client secret is needed."
+      <a class="oauth-link" href="#">
+        "Open developer console ↗"
+    <div class="identity-form-field">
+      <label class="identity-form-label">
+        "Client ID"
+      <input placeholder="Iv1.0123456789abcdef" type="text" class="ui-input identity-input" value="">
+    <div class="identity-key-actions">
+      <button type="button" class="ui-button ui-tone-accent identity-btn identity-btn-primary">
+        "Connect GitHub"
+-- no name
+<div>
+  <div class="oauth-connect">
+    <div class="identity-form-error" role="alert">
+      "Enter a name first"
+    <div class="oauth-byo-note">
+      "ⓘ"
+      "Create a GitHub OAuth App (Settings → Developer settings → OAuth Apps), enable “Device Flow”, and paste its Client ID below. No client secret is needed."
+      <a class="oauth-link" href="#">
+        "Open developer console ↗"
+    <div class="identity-form-field">
+      <label class="identity-form-label">
+        "Client ID"
+      <input placeholder="Iv1.0123456789abcdef" type="text" class="ui-input identity-input" value="">
+    <div class="identity-key-actions">
+      <button type="button" class="ui-button ui-tone-accent identity-btn identity-btn-primary">
+        "Connect GitHub"
+-- no client id
+  call AccountOAuthClientGet [{"provider":"github"}]
+<div>
+  <div class="oauth-connect">
+    <div class="identity-form-error" role="alert">
+      "Client ID is required"
+    <div class="oauth-byo-note">
+      "ⓘ"
+      "Create a GitHub OAuth App (Settings → Developer settings → OAuth Apps), enable “Device Flow”, and paste its Client ID below. No client secret is needed."
+      <a class="oauth-link" href="#">
+        "Open developer console ↗"
+    <div class="identity-form-field">
+      <label class="identity-form-label">
+        "Client ID"
+      <input placeholder="Iv1.0123456789abcdef" type="text" class="ui-input identity-input" value="">
+    <div class="identity-key-actions">
+      <button type="button" class="ui-button ui-tone-accent identity-btn identity-btn-primary">
+        "Connect GitHub"

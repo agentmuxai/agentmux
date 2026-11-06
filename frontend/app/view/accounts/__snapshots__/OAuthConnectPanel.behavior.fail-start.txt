@@ -1,0 +1,31 @@
+-- start error (blocked)
+  call AccountOAuthClientGet [{"provider":"google"}]
+  call AccountOAuthStart [{"provider":"google","accountId":"acc-2"}]
+<div>
+  <div class="oauth-connect">
+    <div class="identity-form-error" role="alert">
+      <div class="oauth-error-title">
+        "Blocked by your organization"
+      "blocked by your organization: a google Workspace administrator doesn't allow this app (admin_policy_enforced). Ask the administrator to allow it, or use a Workspace internal client."
+    <div class="identity-key-actions">
+      <button type="button" class="ui-button ui-tone-accent identity-btn identity-btn-primary">
+        "Reconnect"
+  note acc-2 {"blocked":"blocked by your organization: a google Workspace administrator doesn't allow this app (admin_policy_enforced). Ask the administrator to allow it, or use a Workspace internal client."}
+-- no session
+  call AccountOAuthStart [{"provider":"google","accountId":"acc-2"}]
+<div>
+  <div class="oauth-connect">
+    <div class="identity-form-error" role="alert">
+      "Could not start the OAuth flow"
+    <div class="identity-key-actions">
+      <button type="button" class="ui-button ui-tone-accent identity-btn identity-btn-primary">
+        "Reconnect"
+-- start threw
+  call AccountOAuthStart [{"provider":"google","accountId":"acc-2"}]
+<div>
+  <div class="oauth-connect">
+    <div class="identity-form-error" role="alert">
+      "offline"
+    <div class="identity-key-actions">
+      <button type="button" class="ui-button ui-tone-accent identity-btn identity-btn-primary">
+        "Reconnect"
