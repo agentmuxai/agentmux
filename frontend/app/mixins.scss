@@ -32,6 +32,18 @@
     zoom: var(--zoomfactor);
     border-bottom: 1px solid var(--border-color);
     border-radius: var(--block-border-radius) var(--block-border-radius) 0 0;
+    // Narrow: what does not fit runs off the left edge, so Close, the last control, stays in the pane.
+    justify-content: flex-end;
+
+    // A header too narrow for its controls sheds them by priority (element/width-fit.ts sets the
+    // tier): the view's own end buttons first, then the window controls (which the grip's menu also
+    // offers) and the tab strip's last sliver. Close and the grip stay.
+    &[data-fit="trim"] .block-frame-end-extra,
+    &[data-fit="min"] .block-frame-end-extra,
+    &[data-fit="min"] .block-frame-end-icons > :not(.block-frame-default-close),
+    &[data-fit="min"] .block-frame-default-header-tabstrip {
+        display: none;
+    }
 
     // Tab pills start flush at the pane's left edge.
     &.block-frame-default-header--has-tabstrip {
