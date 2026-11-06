@@ -218,7 +218,6 @@ export function HistoryActions(part: { props: JobHistoryProps; h: JobHistoryStat
     );
 }
 
-
 /** What the dry run would do, where the stored job's vault and the agents' names are read. */
 export function HistoryDryRun(part: { h: JobHistoryState }): JSX.Element {
     const { dry, agents } = part.h;
@@ -235,34 +234,33 @@ export function HistoryDryRun(part: { h: JobHistoryState }): JSX.Element {
     );
 }
 
-
 /** The runs, newest first, and the button for the older ones. */
 export function HistoryRuns(part: { props: JobHistoryProps; h: JobHistoryState }): JSX.Element {
     const { props, h } = part;
     const { runs, more, loadOlder } = h;
     return (
-    <Show when={runs().length > 0} fallback={<div class="warden-section-stub">No runs yet.</div>}>
-        <table class="warden-manager-table warden-jobs-runs">
-            <thead>
-                <tr>
-                    <th>When</th>
-                    <th>Run</th>
-                    <th>Took</th>
-                    <th>Summary</th>
-                    <th>Cost</th>
-                    <th>Account</th>
-                    <th>Links</th>
-                </tr>
-            </thead>
-            <tbody>
-                <For each={runs()}>{(run) => <RunRow run={run} now={props.now} />}</For>
-            </tbody>
-        </table>
-        <Show when={more()}>
-            <Button density="compact" tone="quiet" onClick={() => void loadOlder()}>
-                Older runs
-            </Button>
+        <Show when={runs().length > 0} fallback={<div class="warden-section-stub">No runs yet.</div>}>
+            <table class="warden-manager-table warden-jobs-runs">
+                <thead>
+                    <tr>
+                        <th>When</th>
+                        <th>Run</th>
+                        <th>Took</th>
+                        <th>Summary</th>
+                        <th>Cost</th>
+                        <th>Account</th>
+                        <th>Links</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <For each={runs()}>{(run) => <RunRow run={run} now={props.now} />}</For>
+                </tbody>
+            </table>
+            <Show when={more()}>
+                <Button density="compact" tone="quiet" onClick={() => void loadOlder()}>
+                    Older runs
+                </Button>
+            </Show>
         </Show>
-    </Show>
     );
 }
