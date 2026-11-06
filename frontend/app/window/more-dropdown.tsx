@@ -45,6 +45,70 @@ function parentRowHover(
     };
 }
 
+type Region = { getBoundingClientRect(): DOMRect };
+
+/**
+ * The region the More button's close intent protects: the dropdown and each submenu open beside it. A pointer
+ * that leaves the dropdown for its Messengers flyout is still inside it, so the dropdown stays and the flyout
+ * opens; one that leaves both closes them.
+ */
+function createDropdownRegion(publish: ((el: Region | null) => void) | undefined) {
+    let body: HTMLElement | null = null;
+    const flyouts = new Map<string, HTMLElement>();
+    const rect = (): DOMRect => {
+        const rects = [body, ...flyouts.values()]
+            .filter((el): el is HTMLElement => !!el)
+            .map((el) => el.getBoundingClientRect());
+        const left = Math.min(...rects.map((r) => r.left));
+        const top = Math.min(...rects.map((r) => r.top));
+        const right = Math.max(...rects.map((r) => r.right));
+        const bottom = Math.max(...rects.map((r) => r.bottom));
+        return { x: left, y: top, left, top, right, bottom, width: right - left, height: bottom - top } as DOMRect;
+    };
+    return {
+        setBody(el: HTMLElement | null) {
+            body = el;
+            publish?.(el ? { getBoundingClientRect: rect } : null);
+        },
+        setFlyout(key: string, el: HTMLElement | null) {
+            if (el) flyouts.set(key, el);
+            else flyouts.delete(key);
+        },
+    };
+}
+
+/**
+ * What a row's flyout tells the row and the dropdown around it. The flyout is part of the dropdown for the More
+ * button's hover intent: entering it cancels the pending close, leaving it starts one, and while it is open the
+ * region the More button protects reaches it.
+ */
+function parentFlyoutHover(
+    key: string,
+    hover: SubmenuHoverController,
+    region: ReturnType<typeof createDropdownRegion>,
+    more: {
+        onSubmenuEnter?: () => void;
+        onSubmenuLeave?: (e: MouseEvent) => void;
+        isItemMenuOpen?: () => boolean;
+    }
+) {
+    return {
+        onSubmenuEnter: () => {
+            hover.onSubmenuEnter();
+            more.onSubmenuEnter?.();
+        },
+        onSubmenuLeave: (e: MouseEvent) => {
+            if (more.isItemMenuOpen?.()) return;
+            hover.onSubmenuLeave(e);
+            more.onSubmenuLeave?.(e);
+        },
+        setSubmenuEl: (el: HTMLDivElement | null) => {
+            hover.setSubmenuEl(el);
+            region.setFlyout(key, el);
+        },
+    };
+}
+
 const MoreDropdown = ({
     widgets,
     onClose,
@@ -74,7 +138,7 @@ const MoreDropdown = ({
      */
     onSubmenuEnter?: () => void;
     onSubmenuLeave?: (e: MouseEvent) => void;
-    setSubmenuEl?: (el: HTMLDivElement | null) => void;
+    setSubmenuEl?: (el: Region | null) => void;
     /**
      * True while the right-click item popover (pin/unpin, open-in-new-
      * window, ...) is open. A right-click's popover renders at the cursor
@@ -89,12 +153,9 @@ const MoreDropdown = ({
 }): JSX.Element => {
     // AnchoredPopover places it under the More button (bottom-end: right-aligned), follows chrome zoom
     // and cuts the hole in any browser pane behind it (see `frontend/app/platform/pane-overlay.ts`).
-    const registerBody = (el: HTMLDivElement) => {
-        ref?.(el);
-        setSubmenuEl?.(el);
-    };
-
-    onCleanup(() => setSubmenuEl?.(null));
+    const region = createDropdownRegion(setSubmenuEl);
+    const registerBody = (el: HTMLDivElement) => (ref?.(el), region.setBody(el));
+    onCleanup(() => region.setBody(null));
 
     const handleItemClick = (widget: WidgetConfigType, e?: MouseEvent) => {
         openWidget(widget, { forceNew: e?.shiftKey });
@@ -193,6 +254,11 @@ const MoreDropdown = ({
                     }
 
                     const rowHover = parentRowHover(key, parentPeers, hover, isItemMenuOpen);
+                    const flyoutHover = parentFlyoutHover(key, hover, region, {
+                        onSubmenuEnter,
+                        onSubmenuLeave,
+                        isItemMenuOpen,
+                    });
 
                     return (
                         <>
@@ -223,12 +289,7 @@ const MoreDropdown = ({
                                     anchor={() => rowEl ?? null}
                                     placement="right-start"
                                     gutter={8}
-                                    onSubmenuEnter={() => hover.onSubmenuEnter()}
-                                    onSubmenuLeave={(e) => {
-                                        if (isItemMenuOpen?.()) return;
-                                        hover.onSubmenuLeave(e);
-                                    }}
-                                    setSubmenuEl={(el) => hover.setSubmenuEl(el)}
+                                    {...flyoutHover}
                                 />
                             </Show>
                         </>
