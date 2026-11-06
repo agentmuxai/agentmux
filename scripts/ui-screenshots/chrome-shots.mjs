@@ -24,8 +24,10 @@ const VIEWPORT = SIZES.medium;
 
 const MENU = ".menu:not(.sub-menu)";
 const SUBMENU = ".menu.sub-menu";
-const CONTEXT_MENU = "#cef-context-menu-overlay > .anchored-popover > .menu:not(.sub-menu)";
-const CONTEXT_SUBMENU = "#cef-context-menu-overlay .menu.sub-menu";
+// A menu is a shell with the class `anchored-popover--menu` around its `.menu` body, whether the host draws it
+// (a right-click menu, in `#cef-context-menu-overlay`) or the kit does (a pane's + menu).
+const CONTEXT_MENU = ".anchored-popover--menu > .menu:not(.sub-menu)";
+const CONTEXT_SUBMENU = ".anchored-popover--menu > .menu.sub-menu";
 const MORE_DROPDOWN = ".action-widget-more-dropdown";
 const PALETTE = ".command-palette-panel";
 const POPOVER = ".anchored-popover";
@@ -248,6 +250,8 @@ export const shots = [
             description: "Closing a window tab asks first, since its panes close with it.",
             prep: async (session) => {
                 tab.tabId = null;
+                // Closing a tab asks only when `tab:confirmclose` is on (off by default).
+                await session.evaluate(`RpcApi.SetConfigCommand(TabRpcClient, { "tab:confirmclose": true })`);
                 await openNewTab(session, tab);
                 await session.clickSelector(`.tab[data-tab-id="${tab.tabId}"] [title="Close Tab"]`);
                 await session.wait(500);
@@ -258,6 +262,7 @@ export const shots = [
                 const cancel = await session.centerOfText(".modal-root", "Cancel");
                 if (cancel) await session.clickAt(cancel);
                 await session.wait(300);
+                await session.evaluate(`RpcApi.SetConfigCommand(TabRpcClient, { "tab:confirmclose": false })`);
                 if (tab.tabId) await closeTab(session, tab.tabId);
                 tab.tabId = null;
             },
