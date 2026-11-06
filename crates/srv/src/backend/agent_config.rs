@@ -142,13 +142,12 @@ pub fn build_config_files(
     // SKILL.md (.claude/skills/{slug}/SKILL.md, skill_type ==
     // SKILL_TYPE_AGENT_SKILL) for native Claude Code consumption.
     // ----------------------------------------------------------------
-    let mut used_skill_slugs: HashSet<String> = HashSet::new();
-    for skill in skills {
+    let slugs = crate::backend::skill_slugs::agent_skill_slugs(skills);
+    for (skill, slug) in skills.iter().zip(slugs) {
         if skill.content.is_empty() {
             continue;
         }
-        if skill.skill_type == SKILL_TYPE_AGENT_SKILL {
-            let slug = unique_skill_slug(&skill.name, &mut used_skill_slugs);
+        if let Some(slug) = slug {
             let content = expand_template(&skill.content, &template_vars);
             files.push(AgentConfigFile {
                 filename: format!(".claude/skills/{slug}/SKILL.md"),

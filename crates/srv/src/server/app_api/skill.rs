@@ -735,11 +735,37 @@ fn register_skill_catalog_import_preview(engine: &Arc<WshRpcEngine>, state: &App
                         };
                         catalog.iter().find(from_here).or_else(|| catalog.iter().find(|i| i.skill.name == c.name))
                     };
+                    // A computer-use skill is also changed when its files, manifest or version are, not only its text.
+                    let same_app = match (&c.app, existing.and_then(|e| e.app.as_ref())) {
+                        (None, None) => true,
+                        (Some(b), Some(old)) => b.content_hash == old.content_hash,
+                        _ => false,
+                    };
                     let (status, e) = match existing {
                         None => ("new", None),
-                        Some(e) if e.skill.description == c.description && e.skill.content == c.content && e.skill.name == c.name => ("same", Some(e)),
+                        Some(e) if same_app && e.skill.description == c.description && e.skill.content == c.content && e.skill.name == c.name => ("same", Some(e)),
                         Some(e) => ("changed", Some(e)),
                     };
+                    let app_hash = c.app.as_ref().map(|b| b.content_hash.clone()).unwrap_or_default();
+                    let app = c.app.as_ref().map(|b| {
+                        crate::backend::computer_use_skill::stash(b);
+                        crate::backend::storage::skill_app::SkillApp {
+                            info: b.info.clone(),
+                            files: b
+                                .files
+                                .iter()
+                                .map(|f| crate::backend::storage::skill_app::SkillFileInfo {
+                                    path: f.path.clone(),
+                                    bytes: f.image.as_ref().map_or(f.content.len(), Vec::len) as u64,
+                                    script: f.script,
+                                    approved: false,
+                                    image: f.image.is_some(),
+                                })
+                                .collect(),
+                            verified: b.verified.clone(),
+                            content_hash: b.content_hash.clone(),
+                        }
+                    });
                     items.push(SkillImportItem {
                         key: c.key,
                         name: c.name,
@@ -749,6 +775,8 @@ fn register_skill_catalog_import_preview(engine: &Arc<WshRpcEngine>, state: &App
                         existing_id: e.map(|e| e.skill.id.clone()).unwrap_or_default(),
                         existing_description: e.map(|e| e.skill.description.clone()).unwrap_or_default(),
                         existing_content: e.map(|e| e.skill.content.clone()).unwrap_or_default(),
+                        app,
+                        app_hash,
                     });
                 }
                 if items.is_empty() && warnings.is_empty() {
@@ -789,6 +817,14 @@ fn register_skill_catalog_import_commit(engine: &Arc<WshRpcEngine>, state: &AppS
                     if !seen.insert(name.to_string()) {
                         return Err(format!("{E}: two of the skills are called '{name}'; import them one at a time"));
                     }
+                    if !item.app_hash.is_empty() {
+                        // What the person saw must still be what is written: the text and name match the kept folder.
+                        match crate::backend::computer_use_skill::stashed(&item.app_hash) {
+                            Some(b) if b.name == name && b.content == item.content && b.description == item.description => {}
+                            Some(_) => return Err(format!("{E}: '{name}' differs from the folder that was previewed; preview it again")),
+                            None => return Err(format!("{E}: the preview of '{name}' has expired; preview it again")),
+                        }
+                    }
                     existing_rows.push(if item.existing_id.is_empty() {
                         None
                     } else {
@@ -813,10 +849,17 @@ fn register_skill_catalog_import_commit(engine: &Arc<WshRpcEngine>, state: &AppS
                         updated_at: now,
                     };
                     let source = SkillSource { item_key: item.key, ..req.source.clone() };
+                    let bundle = crate::backend::computer_use_skill::stashed(&item.app_hash).filter(|_| !item.app_hash.is_empty());
                     let written = identity_store
                         .skill_upsert_unique_global(&skill)
                         .and_then(|_| if existing.is_none() { identity_store.skill_set_reach(&skill.id, false, false, now) } else { Ok(()) })
-                        .and_then(|_| identity_store.skill_source_set(&skill.id, &source, now));
+                        .and_then(|_| identity_store.skill_source_set(&skill.id, &source, now))
+                        .and_then(|_| match &bundle {
+                            Some(b) => crate::backend::computer_use_skill::install(&identity_store, &skill.id, b, now),
+                            // A plain skill re-imported over an app skill carries no folder: drop the old one.
+                            None if existing.is_some() => identity_store.skill_app_forget(&skill.id),
+                            None => Ok(()),
+                        });
                     match written {
                         Ok(()) => saved.push(skill.id),
                         Err(e) => {

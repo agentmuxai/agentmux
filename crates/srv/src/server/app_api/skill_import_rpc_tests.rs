@@ -110,3 +110,36 @@ async fn a_bad_item_in_a_batch_writes_nothing() {
         assert!(!listed.contains("batch-t-"), "the earlier item must not have been written: {listed}");
     }
 }
+
+#[tokio::test]
+async fn a_plain_skill_imported_over_an_app_skill_drops_the_old_app_files() {
+    let state = crate::server::tests::test_state();
+    let src = tempfile::tempdir().unwrap();
+    let dir = src.path().join("acmeimp-wordt");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("SKILL.md"), "---\nname: acmeimp-wordt\ndescription: Use when driving Word.\n---\n\n# Word\n").unwrap();
+    std::fs::write(dir.join("test.json"), "{\"skill\":\"acmeimp.wordt\",\"task\":\"t\",\"steps\":[],\"verify\":[\"a\"]}\n").unwrap();
+    std::fs::write(
+        dir.join("computer-use.json"),
+        r#"{"schema":"computer-use-skill/v1","publisher":"acmeimp","id":"wordt","name":"Word","version":"1.0.0",
+"changelog":[{"version":"1.0.0","date":"2026-11-05","by":"x","change":"first"}],
+"app":{"vendor":"Acme","executables":{"windows":["WINWORD.EXE"]},"titleHints":["Word"],"versions":{"supported":">=16","tested":["16.0"]}},
+"platforms":["windows"],"ladder":[{"kind":"api","note":"COM"}],"mcp":null}"#,
+    )
+    .unwrap();
+    let source = folder(src.path());
+    let p = call(&state, COMMAND_SKILL_CATALOG_IMPORT_PREVIEW, json!({"source": source})).await.unwrap();
+    let item = &p["items"][0];
+    assert!(!item["app_hash"].as_str().unwrap().is_empty(), "the folder is read whole: {p}");
+    let mut with_app = commit_all(&p, &source);
+    with_app["items"][0]["app_hash"] = item["app_hash"].clone();
+    let saved = call(&state, COMMAND_SKILL_CATALOG_IMPORT_COMMIT, with_app).await.unwrap();
+    let id = saved["saved"][0].as_str().unwrap().to_string();
+    assert!(state.identity_store.skill_app_get(&id).unwrap().is_some());
+
+    // The same skill comes back as plain text: the old folder's data must not outlive it.
+    let plain = json!({"source": source, "items": [{"key": item["key"], "name": item["name"], "description": "Use when driving Word.", "content": "plain text", "existing_id": id}]});
+    call(&state, COMMAND_SKILL_CATALOG_IMPORT_COMMIT, plain).await.unwrap();
+    assert!(state.identity_store.skill_app_get(&id).unwrap().is_none());
+    assert!(state.identity_store.skill_files(&id).unwrap().is_empty());
+}
