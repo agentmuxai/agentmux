@@ -191,7 +191,7 @@ export function VaultEntries(props: { section: VaultSection; vault?: string }): 
                                         <Show when={vaultList().length > 1}>
                                             <IconButton icon="folder-open" label="Move to another Vault" density="compact" onClick={() => setMoving(e)} />
                                         </Show>
-                                        <IconButton icon="clock-rotate-left" label="History" density="compact" onClick={() => setHistoryOf(e)} />
+                                        <IconButton icon="book" label="History" density="compact" onClick={() => setHistoryOf(e)} />
                                         <Show when={e.versions > 0}>
                                             <IconButton icon="rotate-left" label="Earlier values" density="compact" onClick={() => setVersionsOf(e)} />
                                         </Show>
