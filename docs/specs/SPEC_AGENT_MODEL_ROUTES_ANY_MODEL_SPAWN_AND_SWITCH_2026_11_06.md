@@ -85,7 +85,7 @@ With the gateway (section 4) the launch environment becomes: `ANTHROPIC_BASE_URL
 
 **The simple alternative (not recommended).** Inject the key as `ANTHROPIC_AUTH_TOKEN` at launch from an `IdentityAccount`, as `ANTHROPIC_API_KEY` is today. It ships sooner and it exposes the key to the agent and its subprocesses. If chosen (D3), the entry must be an OpenRouter key made for this and capped at OpenRouter, and the Agent card must say the agent can read it.
 
-**The Vault.** The route stores the entry's id; AgentY says the OpenRouter key is being moved into the Vault under the label "OpenRouter API key (moved from the shared secret store)". Resolved by id at first use, shown by label. Three cases:
+**The Vault.** The route's key is a Vault `api-key` entry whose label starts with the route's key label ("OpenRouter API key" for OpenRouter). Resolved at each request, shown by label. Three cases:
 
 - *The entry is missing or locked:* the first request answers the pane with a Vault request card (`Vault request`, the existing card spec), the agent's turn waits as it does for any ask, and the person answers once.
 - *The upstream says the credit is out or the key is refused (402, 401):* the gateway marks the route unusable for that agent, the pane shows one card ("OpenRouter says the credit is spent"), and the agent is not retried in a loop. `agents/failure.rs` already classifies Anthropic's errors; this adds the route's.

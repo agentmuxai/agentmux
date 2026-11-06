@@ -16,12 +16,28 @@ use axum::extract::{Path, Request};
 use axum::http::{header, HeaderMap, HeaderName, StatusCode};
 use futures_util::Stream;
 use std::pin::Pin;
+use std::sync::OnceLock;
 use std::task::{Context, Poll};
+use std::time::Duration;
 
 /// The largest request body forwarded; a conversation is far below it.
 const MAX_REQUEST: usize = 64 * 1024 * 1024;
 /// Response headers that describe the upstream's framing, which this hop replaces.
 const FRAMING: &[&str] = &["content-length", "transfer-encoding", "connection", "keep-alive", "content-encoding"];
+
+/// The client for model traffic. `AppState::http_client` ends every request 10 seconds after it starts,
+/// reading the body included, which would cut off a streamed answer; this one bounds connecting and each
+/// wait for the next chunk, and puts no limit on the whole answer.
+fn gateway_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(15))
+            .read_timeout(Duration::from_secs(300))
+            .build()
+            .unwrap_or_default()
+    })
+}
 
 /// An error in the shape the harness already parses.
 fn refuse(status: StatusCode, kind: &str, message: &str) -> Response {
@@ -56,8 +72,7 @@ pub(crate) async fn handle_model_gateway(State(state): State<AppState>, Path((ro
         return refuse(StatusCode::PAYLOAD_TOO_LARGE, "request_too_large", "the request is too large");
     };
     let bytes = gw::with_served_model(&bytes, model.id, |m| route.model(m).is_some());
-    let upstream = state
-        .http_client
+    let upstream = gateway_client()
         .request(parts.method, gw::upstream_url(route, &tail, parts.uri.query()))
         .headers(gw::forwarded_headers(&parts.headers))
         .bearer_auth(key.value.as_str())
