@@ -309,11 +309,14 @@ pub fn profile_deleted(store: &Store, id: &str, name: &str, keep: bool) -> Resul
             super::delete(store, &row.id)?;
         }
     }
+    // The profile is going: it keeps no sign-in Vault of its own (reached only when every sign-in was dealt with).
+    store.signin_vault_set(&profile, PERSONAL_VAULT).map_err(|e| e.to_string())?;
     Ok(rows.len())
 }
 
-/// Moves entry `id` from `profile` to Personal, tagged. One written meanwhile is
-/// read again; one still unmoved after that is an error, so the profile stays.
+/// Moves entry `id` from `profile` to Personal, tagged, and into the Vault Personal's tabs offer sign-ins from
+/// (the entry would not be offered there otherwise). One written meanwhile is read again; one still unmoved
+/// after that is an error, so the profile stays.
 fn move_to_personal(store: &Store, id: &str, profile: &str, name: &str) -> Result<(), String> {
     for _ in 0..3 {
         let Some(row) = store.vault_get(id).map_err(|e| e.to_string())? else { return Ok(()) };
@@ -322,6 +325,10 @@ fn move_to_personal(store: &Store, id: &str, profile: &str, name: &str) -> Resul
             return Ok(());
         }
         fields.insert(PROFILE.to_string(), PERSONAL.to_string());
+        let vault = vault_for(store, PERSONAL)?;
+        if row.vault_id != vault {
+            store.vault_move_entry(&row.id, &vault).map_err(|e| e.to_string())?;
+        }
         let mut tags = tags_of(&row);
         if tags.len() < super::MAX_TAGS {
             tags.push(format!("from deleted profile {name}").chars().take(super::MAX_LABEL).collect());
