@@ -8,6 +8,7 @@
 //! per-agent token ([`token`]), and the handler (`server::model_gateway_handlers`) adds the real key
 //! upstream, streams the answer back, and counts what each agent used ([`spend`], [`usage`]).
 
+pub mod ask;
 pub mod catalog;
 pub mod launch;
 pub mod request;

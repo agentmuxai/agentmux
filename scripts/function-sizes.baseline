@@ -416,7 +416,6 @@
 231 frontend/app/view/agent/components/AgentPicker.tsx::AgentPicker
 178 frontend/app/view/agent/components/AgentSeatPanel.tsx::AgentSeatPanel
 120 frontend/app/view/agent/components/AgentSessionNotices.tsx::AgentSessionNotices
-239 frontend/app/view/agent/components/AgentSessionStats.tsx::AgentSessionStats
 126 frontend/app/view/agent/components/AgentShellInfoPanel.tsx::AgentShellInfoPanel
 148 frontend/app/view/agent/components/BtwOverlay.tsx::BtwOverlay
 130 frontend/app/view/agent/components/HiddenTemplatesSection.tsx::HiddenTemplatesSection

@@ -110,6 +110,7 @@ fn request(auth: UiAutomationAuth, brief: &str) -> SpawnAgentRequest {
         account: None,
         brief: brief.into(),
         container: Default::default(),
+        route: Default::default(),
         user_instruction: String::new(),
     }
 }
@@ -488,13 +489,13 @@ fn a_client_cannot_write_who_coaches_a_pane() {
 
 #[test]
 fn the_users_prompt_names_the_leader_the_worker_its_model_and_the_task() {
-    let m = consent_message("Loap-3", Some("Loap-4"), Some("sonnet"), &container::Placement::AsSource, &account_of(&account("a1", "me@example.com", "valid")), "Implement SPEC_X.\nReport to Loap-3.");
+    let m = consent_message("Loap-3", Some("Loap-4"), Some("sonnet"), &WorkerRuntime { placement: container::Placement::AsSource, ..Default::default() }, &account_of(&account("a1", "me@example.com", "valid")), "Implement SPEC_X.\nReport to Loap-3.");
     assert!(m.starts_with("Loap-3 wants to start a new agent, Loap-4 on sonnet, from its own instructions"), "{m}");
     assert!(m.contains("Implement SPEC_X. Report to Loap-3."), "the task, on one line: {m}");
     assert!(m.contains("It runs on the account me@example.com."), "{m}");
     assert_eq!(one_line(&"x".repeat(500), 400).chars().count(), 401);
     let boxed = container::Placement::Container(container::ContainerPlan { image: "ghcr.io/agentmuxai/agent-base:developer".into(), memory_mb: Some("8192".into()), cpus: None });
-    let m = consent_message("Loap-3", Some("Loap-4"), Some("sonnet"), &boxed, &account_of(&account("a1", "me@example.com", "valid")), "Implement SPEC_X.");
+    let m = consent_message("Loap-3", Some("Loap-4"), Some("sonnet"), &WorkerRuntime { placement: boxed, ..Default::default() }, &account_of(&account("a1", "me@example.com", "valid")), "Implement SPEC_X.");
     assert!(m.contains("Loap-4 on sonnet in a container (ghcr.io/agentmuxai/agent-base:developer), memory 8192 MB, from its own instructions"), "the prompt says it runs in a container: {m}");
 }
 
@@ -638,7 +639,7 @@ async fn with_no_account_that_can_run_nothing_is_started() {
 // ---- spawn_many (the countdown buttons spec §5) ----
 
 fn spec(name: &str, brief: &str) -> SpawnWorkerSpec {
-    SpawnWorkerSpec { name: Some(name.into()), model: None, effort: None, account: None, brief: brief.into(), container: Default::default() }
+    SpawnWorkerSpec { name: Some(name.into()), model: None, effort: None, account: None, brief: brief.into(), container: Default::default(), route: Default::default() }
 }
 
 async fn spawn_many_via_http(state: &AppState, auth: UiAutomationAuth, workers: Vec<SpawnWorkerSpec>) -> (StatusCode, serde_json::Value) {
@@ -783,7 +784,7 @@ async fn create(state: &AppState, req: CreateAgentRequest) -> (StatusCode, serde
 }
 
 fn create_request(auth: UiAutomationAuth, name: &str, template: &str) -> CreateAgentRequest {
-    CreateAgentRequest { auth, name: name.into(), template: template.into(), account: None, container: Default::default(), user_instruction: String::new() }
+    CreateAgentRequest { auth, name: name.into(), template: template.into(), account: None, container: Default::default(), model: None, route: Default::default(), user_instruction: String::new() }
 }
 
 /// With no Docker, a worker in a container is refused with the reason before the user is asked or anything is made.
@@ -936,4 +937,155 @@ async fn a_created_agent_can_be_a_native_one_from_a_container_template() {
     assert!(body["container_image"].is_null() && body["limits"].is_null());
     let made = state.mstore.agent_def_get(body["agent_id"].as_str().unwrap()).unwrap().unwrap();
     assert_eq!((made.agent_type.as_str(), made.environment.as_str()), ("host", "local"));
+}
+
+// ---- model routes (docs/specs/SPEC_AGENT_MODEL_ROUTES_ANY_MODEL_SPAWN_AND_SWITCH_2026_11_06.md) ----
+
+/// The Vault holds the OpenRouter key, as the person put it there.
+fn with_route_key(state: &AppState) {
+    crate::backend::vault::seal::use_test_key();
+    let entry: crate::backend::vault::NewEntry = serde_json::from_value(json!({ "kind": "api-key", "label": "OpenRouter API key", "parts": { "value": "sk-or-test" } })).unwrap();
+    crate::backend::vault::create(&state.identity_store, entry).unwrap();
+}
+
+fn on_route(model: Option<&str>) -> agentmux_common::api_types::RouteAsk {
+    let _ = model;
+    agentmux_common::api_types::RouteAsk { harness: None, route: Some("openrouter".into()) }
+}
+
+#[tokio::test]
+async fn a_worker_on_a_route_needs_the_key_in_the_vault_and_the_users_go_ahead_and_makes_nothing_before() {
+    let state = test_state();
+    let (def, _, _) = seed_leader(&state, "claude", "host", json!({})).await;
+    let before = definitions(&state);
+    let mut req = request(sign_auth(&state, &def.slug), "implement the spec");
+    req.model = None;
+    req.route = on_route(None);
+    let (status, body) = spawn(&state, req).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert!(body["error"].as_str().unwrap().starts_with("KEY_MISSING") && body["error"].as_str().unwrap().contains("OpenRouter API key"), "{body}");
+
+    with_route_key(&state);
+    let mut req = request(sign_auth(&state, &def.slug), "implement the spec");
+    req.model = None;
+    req.route = on_route(None);
+    let (status, body) = spawn(&state, req).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert!(body["error"].as_str().unwrap().starts_with("NOT_ALLOWED"), "the person is asked: {body}");
+    assert_eq!(definitions(&state), before);
+}
+
+#[tokio::test]
+async fn a_route_that_is_unknown_or_for_another_harness_is_refused_before_the_user_is_asked() {
+    let state = test_state();
+    with_route_key(&state);
+    let (def, _, _) = seed_leader(&state, "claude", "host", json!({})).await;
+    let mut req = request(sign_auth(&state, &def.slug), "implement the spec");
+    req.route.route = Some("nowhere".into());
+    let (status, body) = spawn(&state, req).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body["error"].as_str().unwrap().contains("openrouter"), "{body}");
+    let mut req = request(sign_auth(&state, &def.slug), "implement the spec");
+    req.route = agentmux_common::api_types::RouteAsk { harness: Some("no-such-cli".into()), route: None };
+    let (status, body) = spawn(&state, req).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body["error"].as_str().unwrap().contains("unknown harness"), "{body}");
+}
+
+#[tokio::test]
+async fn a_worker_on_a_route_has_no_account_takes_the_routes_model_and_the_approval_says_who_pays() {
+    let state = test_state();
+    with_route_key(&state);
+    let (def, _, block_id) = seed_leader(&state, "claude", "host", json!({})).await;
+    let leader = leader_in(&state, &def, &block_id);
+    let (provider, runtime) = route::choose(&state, &leader, &on_route(None), Some("deepseek/deepseek-v4-pro-0813"), None).unwrap();
+    assert_eq!(provider, "claude");
+    let choice = runtime.route.clone().unwrap();
+    assert_eq!((choice.route.as_str(), choice.model.as_str()), ("openrouter", "deepseek/deepseek-v4-pro-0813"));
+    assert!(runtime.model.is_none(), "the model is the route's, not a Claude one");
+    let account = route::account(&state, &leader, &provider, &runtime, None).unwrap();
+    assert!(account.id.is_empty(), "nothing to link");
+    let m = consent_message("Lead", Some("Helper"), None, &runtime, &account, "do it");
+    assert!(m.contains("DeepSeek V4 Pro") && m.contains("not to a plan") && !m.contains("account"), "{m}");
+    let e = route::account(&state, &leader, &provider, &runtime, Some("me@example.com")).unwrap_err();
+    assert!(e.message.contains("no account"), "{}", e.message);
+}
+
+#[tokio::test]
+async fn a_worker_inherits_its_leaders_route_unless_it_names_another_or_leaves_it() {
+    let state = test_state();
+    with_route_key(&state);
+    let (def, _, block_id) = seed_leader(&state, "claude", "host", json!({})).await;
+    crate::backend::model_gateway::launch::set_choice(&state.mstore, &def.id, "claude", "openrouter", "").unwrap();
+    let leader = leader_in(&state, &def, &block_id);
+    let none = agentmux_common::api_types::RouteAsk::default();
+    let (_, inherited) = route::choose(&state, &leader, &none, None, None).unwrap();
+    assert!(!inherited.route_asked, "the leader's own route, as it is, is not a new spend to ask about");
+    assert_eq!(inherited.route.unwrap().model, "deepseek/deepseek-v4.1-flash-1017");
+    let (_, named) = route::choose(&state, &leader, &on_route(None), None, None).unwrap();
+    assert!(named.route_asked, "a route named in the request is always put to the person, even on their own turn");
+    let (_, other_model) = route::choose(&state, &leader, &none, Some("deepseek/deepseek-v4-pro-0813"), None).unwrap();
+    assert!(other_model.route_asked, "so is a different model than the leader's");
+    let own = agentmux_common::api_types::RouteAsk { harness: None, route: Some("anthropic".into()) };
+    let (_, plain) = route::choose(&state, &leader, &own, Some("sonnet"), None).unwrap();
+    assert!(plain.route.is_none() && plain.model.as_deref() == Some("sonnet"), "the sign-in route is the harness's own");
+}
+
+#[tokio::test]
+async fn a_worker_is_given_its_harness_and_route_by_srv_and_a_client_cannot_write_the_route() {
+    let state = test_state();
+    with_route_key(&state);
+    let (def, _, block_id) = seed_leader(&state, "claude", "host", json!({})).await;
+    let leader = leader_in(&state, &def, &block_id);
+    let (_, runtime) = route::choose(&state, &leader, &on_route(None), None, None).unwrap();
+    let mut worker = crate::server::agent_handlers::copy_definition(&state.mstore, &state.id_store, &state.identity_store, &def.id, "Route Helper", false).unwrap();
+    route::apply(&state, &mut worker, &runtime).unwrap();
+    let saved = crate::backend::model_gateway::launch::choice_of(&state.mstore, &worker.id).unwrap();
+    assert_eq!((saved.route.as_str(), saved.model.as_str()), ("openrouter", "deepseek/deepseek-v4.1-flash-1017"));
+    assert!(crate::backend::model_gateway::launch::choice_of(&state.mstore, &def.id).is_none(), "the leader's own choice is not touched");
+
+    let other = agentmux_common::api_types::RouteAsk { harness: Some("codex".into()), route: None };
+    let (provider, runtime) = route::choose(&state, &leader, &other, None, None).unwrap();
+    assert_eq!(provider, "codex");
+    let mut codex = crate::server::agent_handlers::copy_definition(&state.mstore, &state.id_store, &state.identity_store, &def.id, "Codex Helper", false).unwrap();
+    route::apply(&state, &mut codex, &runtime).unwrap();
+    assert_eq!(state.mstore.agent_def_get(&codex.id).unwrap().unwrap().provider, "codex");
+
+    let e = client_may_write_content(crate::backend::model_gateway::launch::CONTENT_TYPE).unwrap_err();
+    assert!(e.contains("written only by AgentMux"), "{e}");
+}
+
+#[tokio::test]
+async fn a_created_agent_on_a_route_is_checked_against_its_templates_harness() {
+    let state = test_state();
+    with_route_key(&state);
+    let (def, _, _) = seed_leader(&state, "claude", "host", json!({})).await;
+    let template = seed_template(&state, "Route Template", "host");
+    let mut req = create_request(sign_auth(&state, &def.slug), "Route Box", &template.slug);
+    req.route = agentmux_common::api_types::RouteAsk { harness: Some("codex".into()), route: Some("openrouter".into()) };
+    let (status, body) = create(&state, req).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body["error"].as_str().unwrap().contains("name a template for codex"), "{body}");
+    let mut req = create_request(sign_auth(&state, &def.slug), "Route Box", &template.slug);
+    req.route.route = Some("openrouter".into());
+    req.model = Some("gpt-5".into());
+    let (status, body) = create(&state, req).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body["error"].as_str().unwrap().contains("does not serve"), "{body}");
+    let mut req = create_request(sign_auth(&state, &def.slug), "Route Box", &template.slug);
+    req.route.route = Some("openrouter".into());
+    let (status, body) = create(&state, req).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert!(body["error"].as_str().unwrap().starts_with("NOT_ALLOWED"), "the person is asked before anything is made: {body}");
+    let mut req = create_request(sign_auth(&state, &def.slug), "Route Box", &template.slug);
+    req.model = Some("sonnet".into());
+    let (status, body) = create(&state, req).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body["error"].as_str().unwrap().contains("needs a route"), "a model with no route is not silently dropped: {body}");
+    let mut req = create_request(sign_auth(&state, &def.slug), "Route Box", &template.slug);
+    req.model = Some("sonnet".into());
+    req.route.route = Some("anthropic".into());
+    let (status, body) = create(&state, req).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body["error"].as_str().unwrap().contains("needs a route"), "nor under the harness's own sign-in: {body}");
 }

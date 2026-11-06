@@ -26,6 +26,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::agent_lifecycle::{actor_of, audit, refuse, target_of, Actor, Refusal};
+use crate::backend::storage::AgentDefinition;
 use crate::server::caller::Caller;
 use crate::server::state::AppState;
 
@@ -45,6 +46,10 @@ pub(crate) struct UpdateRequest {
     auto_start: Option<bool>,
     restart_on_crash: Option<bool>,
     idle_timeout_minutes: Option<i64>,
+    /// `""` takes the agent off its model route (its token stops working at once); the route it is on, or only
+    /// `model`, changes its model on that route.
+    route: Option<String>,
+    model: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -74,6 +79,35 @@ fn text_field(name: &str, value: &str) -> Result<String, Refusal> {
 
 fn publish_changed(state: &AppState) {
     state.broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
+}
+
+/// `route` and `model` of `Agents update`: leave a model route (`route: ""`), or change the model on the route the agent
+/// is already on. Putting an agent onto a route spends the person's key, so that is asked of them when the agent is
+/// made or in the composer's model panel, not done by a call that names no one to ask.
+fn route_change(state: &AppState, agent: &AgentDefinition, req: &UpdateRequest) -> Result<Vec<&'static str>, Refusal> {
+    use crate::backend::model_gateway::{launch, token};
+    let current = launch::choice_of(&state.mstore, &agent.id);
+    let route = req.route.as_deref().map(str::trim);
+    let model = req.model.as_deref().map(str::trim).filter(|m| !m.is_empty());
+    if route == Some("") {
+        if model.is_some() {
+            return Err(bad("route \"\" leaves the model route; it takes no model"));
+        }
+        let Some(current) = current else { return Err(bad("the agent is not on a model route")) };
+        state.mstore.agent_content_delete(&agent.id, launch::CONTENT_TYPE).map_err(|e| refuse(StatusCode::INTERNAL_SERVER_ERROR, format!("Agents update: {e}")))?;
+        token::revoke(&agent.id, &current.route);
+        return Ok(vec!["route"]);
+    }
+    let Some(current) = current else {
+        return Err(bad("the agent is not on a model route, and putting one on a route spends the key in the Vault, which the person approves when the agent is made (Agents spawn or create with route) or in the model panel"));
+    };
+    let target = route.unwrap_or(&current.route);
+    if target != current.route {
+        return Err(bad(format!("the agent is on the {} route; moving it to {target} spends another key, which the person approves in the model panel", current.route)));
+    }
+    let harness = state.id_store.resolve_effective_provider_id(agent);
+    launch::set_choice(&state.mstore, &agent.id, &harness, target, model.unwrap_or(&current.model)).map_err(bad)?;
+    Ok(vec!["model"])
 }
 
 /// Apply the fields `req` gives to the agent's stored definition. Returns the names of the fields changed.
@@ -112,8 +146,11 @@ fn update(state: &AppState, req: &UpdateRequest) -> Result<(String, Vec<&'static
         agent.idle_timeout_minutes = minutes;
         changed.push("idle_timeout_minutes");
     }
+    if req.route.is_some() || req.model.is_some() {
+        changed.extend(route_change(state, &agent, req)?);
+    }
     if changed.is_empty() {
-        return Err(bad("nothing to change; give at least one of description, icon, auto_start, restart_on_crash, idle_timeout_minutes (name: rename; environment: env_set)"));
+        return Err(bad("nothing to change; give at least one of description, icon, auto_start, restart_on_crash, idle_timeout_minutes, route, model (name: rename; environment: env_set)"));
     }
     if !state.mstore.agent_def_update(&mut agent).map_err(internal)? {
         return Err(refuse(StatusCode::NOT_FOUND, format!("no agent '{}' on this machine", req.agent)));
