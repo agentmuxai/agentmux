@@ -8,11 +8,42 @@
  */
 
 import { AnchoredPopover } from "@/app/element/anchored-popover";
-import { createPeerRegistry, createSubmenuHover, type SubmenuHoverController } from "@/app/util/submenu-hover";
+import {
+    createPeerRegistry,
+    createSubmenuHover,
+    type PeerRegistry,
+    type SubmenuHoverController,
+} from "@/app/util/submenu-hover";
 import { makeIconClass } from "@/util/util";
 import { createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 import { openWidget, widgetIconStyle } from "./action-widgets-config";
 import { PinnedWidgetFlyout } from "./pinned-widget-flyout";
+
+/**
+ * Mouse handlers of a row that has a submenu. Crossing toward another row's open submenu holds that one
+ * (safe triangle) and opens this row's own once it is gone, if the pointer is still on the row.
+ */
+function parentRowHover(
+    key: string,
+    peers: PeerRegistry,
+    hover: SubmenuHoverController,
+    isItemMenuOpen?: () => boolean
+) {
+    let pointerOnRow = false;
+    return {
+        enter: (e: MouseEvent) => {
+            pointerOnRow = true;
+            peers.closeOthers(key, e, () => {
+                if (pointerOnRow) hover.onTriggerEnter();
+            });
+        },
+        leave: (e: MouseEvent) => {
+            pointerOnRow = false;
+            if (isItemMenuOpen?.()) return;
+            hover.onTriggerLeave(e);
+        },
+    };
+}
 
 const MoreDropdown = ({
     widgets,
@@ -148,7 +179,6 @@ const MoreDropdown = ({
                     }
 
                     let rowEl: HTMLDivElement | undefined;
-                    let pointerOnRow = false;
                     let hover = parentRowHoverControllers.get(key);
                     if (!hover) {
                         hover = createSubmenuHover({
@@ -162,24 +192,15 @@ const MoreDropdown = ({
                         parentPeers.register(key, hover);
                     }
 
+                    const rowHover = parentRowHover(key, parentPeers, hover, isItemMenuOpen);
+
                     return (
                         <>
                             <div
                                 ref={(el) => (rowEl = el)}
                                 class="action-widget-more-item"
-                                onMouseEnter={(e) => {
-                                    // Crossing toward another row's open submenu holds it (safe triangle) and
-                                    // opens this row's own once it is gone, if the pointer is still here.
-                                    pointerOnRow = true;
-                                    parentPeers.closeOthers(key, e, () => {
-                                        if (pointerOnRow) hover.onTriggerEnter();
-                                    });
-                                }}
-                                onMouseLeave={(e) => {
-                                    pointerOnRow = false;
-                                    if (isItemMenuOpen?.()) return;
-                                    hover.onTriggerLeave(e);
-                                }}
+                                onMouseEnter={rowHover.enter}
+                                onMouseLeave={rowHover.leave}
                                 onContextMenu={(e) => handleItemContextMenu(e, key)}
                             >
                                 <span class="action-widget-more-item-icon widget-icon" style={widgetIconStyle(widget)}>
