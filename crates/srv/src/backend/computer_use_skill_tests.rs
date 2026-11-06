@@ -57,7 +57,7 @@ fn a_skill_folder_is_read_with_its_manifest_body_and_files() {
 
 #[test]
 fn the_content_hash_is_the_catalogs_and_ignores_the_signature_and_pass_records() {
-    // The same definition as agentmuxai/skills scripts/lib.mjs contentHash: sha256 over "path\0sha256(file)\n", by path.
+    // The same definition as the agentmuxai/skills repo's contentHash: sha256 over "path\0sha256(file)\n", by path.
     let mut files = BTreeMap::new();
     files.insert("b.md".to_string(), b"two".to_vec());
     files.insert("a.md".to_string(), b"one".to_vec());
@@ -67,7 +67,7 @@ fn the_content_hash_is_the_catalogs_and_ignores_the_signature_and_pass_records()
         h.finalize().iter().map(|b| format!("{b:02x}")).collect::<String>()
     };
     assert_eq!(content_hash(&files), want);
-    // The value the catalog's own scripts/lib.mjs computes for these files plus a signature and a pass record.
+    // The value the catalog's own contentHash computes for these files plus a signature and a pass record.
     files.insert(SIG_FILE.to_string(), b"s".to_vec());
     files.insert(VERIFIED_FILE.to_string(), b"[]".to_vec());
     assert_eq!(content_hash(&files), "46f5d1f7e67701da2cc6000bda01c9b1f7e0795ca1756372c41c08d5cb850133");

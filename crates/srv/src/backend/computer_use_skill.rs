@@ -5,7 +5,7 @@
 //! manifest `computer-use.json`, and the text files beside them. It only reads and checks; the caller
 //! shows the person what was found and writes only what they approve.
 //!
-//! The checks are the public catalog's (agentmuxai/skills `scripts/lib.mjs`), so a folder that passes
+//! The checks are the public catalog's (the agentmuxai/skills repo, in its lib module), so a folder that passes
 //! there reads here: the folder name is `<publisher>-<id>` and equals the `SKILL.md` name, the version
 //! is semver, the last changelog entry is the current version, the ladder names only `api`, `mcp`,
 //! `shortcuts` and `desktop`, and an MCP pointer names a catalog entry, never a command. The content
