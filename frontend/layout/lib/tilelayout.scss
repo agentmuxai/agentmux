@@ -253,8 +253,8 @@
     .placement-wireframe {
         pointer-events: none;
         box-sizing: border-box;
-        border: 1px dashed var(--drop-zone-armed-border);
-        opacity: 0.55;
+        border: 1px dashed rgba(var(--accent-color-rgb), 0.45);
+        opacity: 0.8;
         transition: opacity var(--duration-quick);
 
         &.exiting {
@@ -272,10 +272,14 @@
         // the two (`rgb(65, 159, 224 / 0.2)`) is invalid CSS and the
         // declaration is ignored — fill/border would render transparent.
         // Codex P2 on PR #829.
-        background-color: var(--drop-target-bg);
-        border: 1px solid var(--drop-zone-armed-border);
+        // The landing zone has to be unmistakable at a glance: a solid accent edge, a visible fill, and
+        // the rest of the layout dimmed around it (the shadow spreads past the zone, and the layout
+        // container clips it).
+        background-color: rgba(var(--accent-color-rgb), 0.26);
+        border: 2px solid rgb(var(--accent-color-rgb));
         border-radius: 0;
         box-sizing: border-box;
+        box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.32);
         opacity: 1;
         transform: scale(1);
         transition: opacity var(--duration-quick) var(--ease-out), transform var(--duration-quick) var(--ease-out);
