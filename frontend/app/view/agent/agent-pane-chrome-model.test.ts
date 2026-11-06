@@ -17,9 +17,6 @@ const h = vi.hoisted(() => ({
     },
 }));
 
-vi.mock("@/app/store/global", () => ({
-    MOS: { getMuxObjectAtom: () => () => ({ meta: { agentId: "def-a" } }), makeORef: (t: string, id: string) => `${t}:${id}` },
-}));
 vi.mock("@/layout/index", () => ({ setActiveBlockInStack: h.setActive }));
 vi.mock("@/layout/lib/layoutNode", () => ({ findNode: () => h.leaf }));
 vi.mock("./close-agent-tab", () => ({ closeAgentTab: h.close }));

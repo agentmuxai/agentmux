@@ -3,11 +3,8 @@
 
 // Split out of agent-view.tsx (SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md §3.5 step 1).
 
-import { MOS } from "@/app/store/global";
 import { setActiveBlockInStack, type NodeModel } from "@/layout/index";
 import { findNode } from "@/layout/lib/layoutNode";
-import { createMemo } from "solid-js";
-import { agentModels } from "./agent-models";
 import { closeAgentTab } from "./close-agent-tab";
 
 /**
@@ -70,15 +67,6 @@ export function buildAgentPaneChromeModel(anchorBlockId: string, nodeModel: Node
     // is keyed on — see NodeModel.activeBlockId's own doc comment
     // (layout/lib/types.ts).
     const activeBlockId = () => nodeModel.activeBlockId?.() ?? anchorBlockId;
-
-    // Block-scoped reads (agentId) must track the
-    // CURRENTLY ACTIVE member, not `anchorBlockId` (frozen to whichever
-    // ViewModel instance first rendered this chrome) — getMuxObjectAtom
-    // inside a memo, not useMuxObjectValue, the same reactive-oref pattern
-    // PR #3134 already established for BlockFrame_Header
-    // (frontend/app/store/mos.ts's own doc comments explain why).
-    const activeBlockData = createMemo(() => MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", activeBlockId()))());
-    const agentId = () => activeBlockData()?.meta?.["agentId"];
 
     // A tab of this strip is a member of this pane's own block-stack, so
     // activating one swaps the active member in place. A block of another pane
