@@ -91,14 +91,14 @@ The signing scheme is the widget one (`SPEC_WIDGET_SHARING` §2: `skill.sig`, Ed
 
 ## 6. The MCP pointer
 
-A computer-use skill says "use catalog entry `ableton-live`" (the MCP catalog's id; its server package is `ableton-mcp`), not "run this command". The MCP tab installs and approves it as today; the pack's `verified` records say which server version they were tested with. If the entry is not installed, the pack's `SKILL.md` says to continue down the ladder, and Memory shows "plug-in not installed" (§8).
+A computer-use skill says "use catalog entry `ableton-live`" (the MCP catalog's id; its server package is `ableton-mcp`), not "run this command". The MCP tab installs and approves it as today; the skill's `verified.json` records say which server version they were tested with. If the entry is not installed, the skill's `SKILL.md` says to continue down the ladder, and Memory shows "plug-in not installed" (§8).
 
 ## 7. Proof: the test task and who runs it
 
 Each skill ships `test.json`: a short task, the steps expected, and the verify cues, for example for Word: "open a new document, type this sentence, save as `skill-test.docx` in the agent's workspace, confirm the file exists and holds the sentence". The cues are checkable without a person (a file, a window title, a script result).
 
 - **Who runs it:** an agent with `Desktop` enabled on a machine that has the app, with the person's per-app grant at that moment. Hosts with such apps are Area54 (Windows), starpower (macOS) and charlie (Linux); the platform testers (Clare, Maricon) and the host stewards are the natural runners, asked by task.
-- **Where the result goes:** a record `{ skillVersion, appVersion, platform, date, runner, route, result: pass | fail, notes, evidenceSha256 }` in the skill's `verified.json`, which is outside the content hash and the signature (a new pass must not break a signed skill). Evidence is the SHA-256 of the final screenshot or output file, never the file. The record is local to the machine that ran it and travels with the skill, marked "verified elsewhere" on the receiving machine. In the public catalog the records are `verification/<folder>/<version>.json`, with `runner` set to `AgentMux test machine` or `community:<handle>`, never a host or user name (`SPEC_PACKS_REPOSITORY_2026_11_05.md` §6). The audit log (`desktop-audit.log`) already holds every action of the run.
+- **Where the result goes:** a record `{ skillVersion, appVersion, platform, date, runner, route, result: pass | fail, notes, evidenceSha256 }` in the skill's `verified.json`, which is outside the content hash and the signature (a new pass must not break a signed skill). Evidence is the SHA-256 of the final screenshot or output file, never the file. The record is local to the machine that ran it and travels with the skill, marked "verified elsewhere" on the receiving machine. In the public catalog the records are `verification/<folder>/<version>.json`, with `runner` set to `AgentMux test machine` or `community:<handle>`, never a host or user name (`SPEC_SKILLS_REPOSITORY_2026_11_05.md` §6). The audit log (`desktop-audit.log`) already holds every action of the run.
 - **What "verified on Live 12.1" means:** at least one `pass` whose `appVersion` is 12.1.x on that platform. A newer installed version than any verified one shows as **drift** (§8), the same idea as a provider CLI behind its pin.
 - **Not claimed:** a computer-use skill with no `pass` is shown "unverified". Nothing blocks using it.
 
@@ -136,7 +136,7 @@ Memory   Global | Personal | Skills | Bundles
 - **Desktop grant** is shown read-only with a link to Settings; the switch and the grants stay where they are.
 - **Plug-in state** is the MCP entry's state from the MCP tab.
 - **Run test** starts the skill's test task as a normal task for an agent (it does not run it itself), so the grant prompt and the audit trail are the usual ones.
-- **Browse** opens the public catalog (`agentmuxai/skills`, `SPEC_PACKS_REPOSITORY_2026_11_05.md`), filtered to computer-use skills, with install and update on demand; the app ships only the "Write a computer-use skill" guide.
+- **Browse** opens the public catalog (`agentmuxai/skills`, `SPEC_SKILLS_REPOSITORY_2026_11_05.md`), filtered to computer-use skills, with install and update on demand; the app ships only the "Write a computer-use skill" guide.
 - Card states to draw and screenshot: installed and verified, drift, not found, unverified, plug-in missing, and the empty filter (with "Browse" and "New").
 
 **Alternatives rejected:**
@@ -155,7 +155,7 @@ Memory   Global | Personal | Skills | Bundles
 
 - **Draft.** An agent writes the skill from the vendor's documentation and a recorded exploration. There is no macro recorder (`Desktop` records no replay, spec §4); the "recording" is the agent's own notes of steps it verified, plus the `desktop-audit.log` lines of that session. A guide skill, "Write a computer-use skill", tells the agent the format, the ladder, and to put only steps it saw succeed into `controls.md` and `verify.md`.
 - **Review.** A person reads the skill in Memory before it is saved, with the diff view the skill importer already uses ("shows the whole text and a diff, writes only what a person approved").
-- **Share, as a file.** A computer-use skill is **self-contained**: its own folder (`computer-use.json` plus the files in §3, with `skill.sig` if signed), exported and imported on its own as one file (a zip with the extension `.skill`) from Memory > Skills ("Export", "Import"), installed from the public catalog (Browse, `SPEC_PACKS_REPOSITORY_2026_11_05.md`), and sent to a LAN peer with `Message` files. The receiving machine's import shows the skill, its scripts and its MCP pointer for approval, as widgets do (installing offers, never approves).
+- **Share, as a file.** A computer-use skill is **self-contained**: its own folder (`computer-use.json` plus the files in §3, with `skill.sig` if signed), exported and imported on its own as one file (a zip with the extension `.skill`) from Memory > Skills ("Export", "Import"), installed from the public catalog (Browse, `SPEC_SKILLS_REPOSITORY_2026_11_05.md`), and sent to a LAN peer with `Message` files. The receiving machine's import shows the skill, its scripts and its MCP pointer for approval, as widgets do (installing offers, never approves).
 - **In a bundle, by reference** (operator, 2026-11-05: "since bundles are made of instructions, memory, and skills ... I suppose packs will also become a part of a bundle?"). Yes, and it needs nothing new: a computer-use skill is a skill, so a bundle lists it in its **Skills** group through the existing `db_bundle_skills_ref`, by reference, not a copy. An agent that picks the bundle gets the skill bound to it (the same delivery as a direct bind, §4), and a computer-use skill can sit in several bundles while staying one skill with one set of verified records. The bundle detail (category card groups, Maop's task) shows it as an App skill card in the Skills group, with the existing "Add skill" and "Remove from bundle". Removing it from a bundle does not remove it from agents that have it by a direct bind.
 - **Inside an exported `.abf`, as a copy.** An exported bundle file cannot hold a reference to a skill on another machine, so a skill in it has to travel as a copy, and a computer-use skill is a folder of files where a skill today is one text body. Carrying the folder (under an optional key; whether older importers ignore unknown keys is to be checked in `bundle_import.rs`) and importing it as a real skill with its own approval is the one piece that waits for #21781 step 3, because step 3 may change the `.abf` import path. The reference form above and the `.skill` file do not wait.
 - **Version.** `skill.version` is semver; the importer keeps both versions until the person chooses, as it does for skill updates.
@@ -254,6 +254,9 @@ Separate builds (the report's D3 and D4):
 
 1. **Sibling files and `Skills get` `file`** (§4) are the one backend change a computer-use skill needs beyond data. Alternative: a v1 with everything in one `SKILL.md` (no sibling files, longer text). I recommend sibling files; the one-file form is the fallback if the launch-time writer is hard to extend.
 2. **A bundle listing computer-use skills** (§9): needs nothing new, because they are skills. Only the copy of a skill's folder inside an exported `.abf` waits for #21781 step 3, which may change the `.abf` import path; whether older importers ignore unknown keys is to be checked in `bundle_import.rs`. Read #6539 and the step 3 PR before that part.
+3. **Signing for computer-use skills:** reuse the widget key pins (one publisher identity) or a separate pin file. I recommend one.
+4. **Detecting the installed version** per platform (file version on Windows, `Info.plist` on macOS, package manager on Linux): Windows first.
+
 ## 14. Stages and rough cost
 
 My estimates, not measured.
@@ -262,7 +265,7 @@ My estimates, not measured.
 |---|---|---|
 | 1 | Skill format, `computer-use.json` (with `changelog`, `app.versions`, `verified` by skill version), the "Write a computer-use skill" guide skill, **five** computer-use skills (Word, Excel, Ableton Live, WaveLab, Blender) written as plain skills with all text in `SKILL.md`, the range-tag syntax; tests run by hand where the app exists (Blender done; Word, Excel, Ableton, WaveLab need the app installed and `Desktop` on) | 4 to 6 days, no Rust |
 | 2 | Backend: `db_app_skills` manifest, sibling-file writing at launch, `Skills get` `file`, the `skill` field in `Desktop apps`, verified-record append | 1 week, Rust, with tests |
-| 3 | Memory > Skills: the App badge and filter, App skill cards (drift, detail, Run test, Give to), with the macOS and Linux look checks and a screenshot of each card state; **Browse** with `SPEC_PACKS_REPOSITORY_2026_11_05.md` P2 and P3 | 1 week, TypeScript |
+| 3 | Memory > Skills: the App badge and filter, App skill cards (drift, detail, Run test, Give to), with the macOS and Linux look checks and a screenshot of each card state; **Browse** with `SPEC_SKILLS_REPOSITORY_2026_11_05.md` P2 and P3 | 1 week, TypeScript |
 | 4 | Script and `skill.sig` approval; the standalone `.skill` export and import | 1 week |
 | 5 | A copy of listed computer-use skills inside an exported `.abf`, after #21781 step 3 settles | a few days |
 

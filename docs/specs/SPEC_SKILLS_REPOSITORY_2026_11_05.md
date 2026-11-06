@@ -21,7 +21,7 @@
 
 ## 1. What exists, and the repo layout
 
-**Today there is no skill repository.** The five Stage 1 skills and the guide are in the app repo under `docs/examples/skills/` ([#6549](https://github.com/agentmuxai/agentmux/pull/6549)). The widget catalog is the model: one public repo, one folder per item, a publishers file, CI that builds a signed `index.json` and a zip per item, published on GitHub Pages ([README](https://github.com/agentmuxai/widgets), `scripts/build.mjs`, `.github/workflows/catalog.yml`, `publishers.json`).
+**Today there is no skill repository.** The five Stage 1 skills and the guide are in the app repo under `docs/examples/packs/` ([#6549](https://github.com/agentmuxai/agentmux/pull/6549)). The widget catalog is the model: one public repo, one folder per item, a publishers file, CI that builds a signed `index.json` and a zip per item, published on GitHub Pages ([README](https://github.com/agentmuxai/widgets), `scripts/build.mjs`, `.github/workflows/catalog.yml`, `publishers.json`).
 
 **Layout of `agentmuxai/skills`:**
 
@@ -42,7 +42,7 @@ LICENSE  README.md  CONTRIBUTING.md  .github/CODEOWNERS  .github/workflows/
 - **`computer-use.json` gains `publisher`** (`agentmux`); the skill's catalog id is `<publisher>.<id>` (`agentmux.word`), the same form as a widget id. This needs one new field in SPEC_PACKS §3; Stage 1 skills get it when they move.
 - **`verified.json` is a new file, excluded from the content hash and the signature** (like `skill.sig` and, for widgets, `widget.sig`). SPEC_PACKS §7 puts the pass records in `computer-use.json`; that would change the skill's hash, and so break its signature, every time a test passes. The records move to `verified.json`; `changelog` stays in `computer-use.json` because it is part of the version.
 - **Releases:** one git tag per skill version, `<publisher>-<id>-v<semver>` (`agentmux-word-v1.3.0`), the form `adobe/skills` uses. The version in `computer-use.json` is the source of truth; CI refuses a changed skill whose version did not increase. History of every version is the git history, which serves SPEC_PACKS §10.1 (diff and roll back) for catalog skills.
-- **What moves:** the five skills and `write-a-skill` from `docs/examples/skills/` to the new repo in the build's first step, with `Manoz@Area54` run records replaced as in §6. `docs/examples/skills/` is then deleted in the app repo, leaving a one-line pointer in `docs/`.
+- **What moves:** the five skills and `write-a-skill` from `docs/examples/packs/` to the new repo in the build's first step, with `Manoz@Area54` run records replaced as in §6. `docs/examples/packs/` is then deleted in the app repo, leaving a one-line pointer in `docs/`.
 
 **What the app still bundles: `write-a-skill` only.** It is a small text skill that a person needs before any network or catalog is available (and it is how a computer-use skill is written for a private app). It is seeded as a normal skill. Everything else is installed on demand; shipping five skills now and fifty later in the installer is the thing the operator asked to avoid.
 
