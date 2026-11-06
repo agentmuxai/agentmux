@@ -1,0 +1,210 @@
+WidgetsRescan null
+-- rescanned
+<div>
+  <div class="settings-section-body widgets-section">
+    <div data-stand="WidgetBarSettings">
+    <div class="settings-subheader">
+      "Widgets"
+    <div class="setting-row" id="setting-widgets.installed">
+      <div class="setting-devices-description">
+        "Widgets add your own kinds of pane. A widget runs only after you approve it here, and asks again whenever its files change."
+      <div class="widgets-toolbar">
+        <button type="button" class="ui-button ui-tone-neutral">
+          <i aria-hidden="true" class="fa-solid fa-plus">
+          "Install…"
+        <button type="button" class="ui-button ui-tone-neutral">
+          <i aria-hidden="true" class="fa-solid fa-rotate">
+          "Rescan"
+        <button type="button" class="ui-button ui-tone-neutral">
+          <i aria-hidden="true" class="fa-solid fa-folder-open">
+          "Open widgets folder"
+      <div class="setting-devices-description">
+        "Pick a package's widget.json, or a .zip. To write your own, start from a sample in docs/examples/widgets."
+      <div data-stand="WidgetCatalog">
+        <span data-cb="onInstalled">
+          "installed"
+      <div class="widgets-list">
+        <div class="widget-row" data-widget-id="acme.notes">
+          <div class="widget-row-head">
+            <i class="fa-solid fa-note-sticky">
+            <span class="widget-row-name">
+              "Notes"
+            <span class="widget-row-version">
+              "1.0.0"
+            <span class="widget-row-kind">
+              "sandboxed"
+            <span class="widget-row-state state-needs_approval">
+              "Waiting for your approval"
+          <div class="widget-row-description">
+            "A scratchpad"
+          <div class="widget-row-signature">
+            "Not signed"
+          <div class="widget-row-permissions">
+            "Keep its own data on this computer · Connect to https://api.github.com · Send messages to your agents. An agent acts on what it's told, so only allow this for a widget you trust."
+          <div class="widget-row-actions">
+            <button type="button" class="ui-button ui-tone-accent">
+              "Approve"
+            <button type="button" class="ui-button ui-tone-neutral">
+              <i aria-hidden="true" class="fa-solid fa-folder-open">
+              "Show folder"
+            <button type="button" class="ui-button ui-tone-danger">
+              "Uninstall"
+revealInFileExplorer "C:/Users/me/.agentmux/widgets"
+revealInFileExplorer "C:/Users/me/.agentmux/widgets/acme.notes"
+revealInFileExplorer "C:/Users/me/.agentmux/widgets/acme.notes"
+-- reveal failed
+<div>
+  <div class="settings-section-body widgets-section">
+    <div data-stand="WidgetBarSettings">
+    <div class="settings-subheader">
+      "Widgets"
+    <div class="setting-row" id="setting-widgets.installed">
+      <div class="setting-devices-description">
+        "Widgets add your own kinds of pane. A widget runs only after you approve it here, and asks again whenever its files change."
+      <div class="widgets-toolbar">
+        <button type="button" class="ui-button ui-tone-neutral">
+          <i aria-hidden="true" class="fa-solid fa-plus">
+          "Install…"
+        <button type="button" class="ui-button ui-tone-neutral">
+          <i aria-hidden="true" class="fa-solid fa-rotate">
+          "Rescan"
+        <button type="button" class="ui-button ui-tone-neutral">
+          <i aria-hidden="true" class="fa-solid fa-folder-open">
+          "Open widgets folder"
+      <div class="setting-devices-description">
+        "Pick a package's widget.json, or a .zip. To write your own, start from a sample in docs/examples/widgets."
+      <div data-stand="WidgetCatalog">
+        <span data-cb="onInstalled">
+          "installed"
+      <div class="settings-config-error" role="alert">
+        "Couldn't open C:/Users/me/.agentmux/widgets/acme.notes: no explorer"
+      <div class="widgets-list">
+        <div class="widget-row" data-widget-id="acme.notes">
+          <div class="widget-row-head">
+            <i class="fa-solid fa-note-sticky">
+            <span class="widget-row-name">
+              "Notes"
+            <span class="widget-row-version">
+              "1.0.0"
+            <span class="widget-row-kind">
+              "sandboxed"
+            <span class="widget-row-state state-needs_approval">
+              "Waiting for your approval"
+          <div class="widget-row-description">
+            "A scratchpad"
+          <div class="widget-row-signature">
+            "Not signed"
+          <div class="widget-row-permissions">
+            "Keep its own data on this computer · Connect to https://api.github.com · Send messages to your agents. An agent acts on what it's told, so only allow this for a widget you trust."
+          <div class="widget-row-actions">
+            <button type="button" class="ui-button ui-tone-accent">
+              "Approve"
+            <button type="button" class="ui-button ui-tone-neutral">
+              <i aria-hidden="true" class="fa-solid fa-folder-open">
+              "Show folder"
+            <button type="button" class="ui-button ui-tone-danger">
+              "Uninstall"
+revealInFileExplorer "C:/Users/me/.agentmux/widgets"
+-- reveal worked again
+<div>
+  <div class="settings-section-body widgets-section">
+    <div data-stand="WidgetBarSettings">
+    <div class="settings-subheader">
+      "Widgets"
+    <div class="setting-row" id="setting-widgets.installed">
+      <div class="setting-devices-description">
+        "Widgets add your own kinds of pane. A widget runs only after you approve it here, and asks again whenever its files change."
+      <div class="widgets-toolbar">
+        <button type="button" class="ui-button ui-tone-neutral">
+          <i aria-hidden="true" class="fa-solid fa-plus">
+          "Install…"
+        <button type="button" class="ui-button ui-tone-neutral">
+          <i aria-hidden="true" class="fa-solid fa-rotate">
+          "Rescan"
+        <button type="button" class="ui-button ui-tone-neutral">
+          <i aria-hidden="true" class="fa-solid fa-folder-open">
+          "Open widgets folder"
+      <div class="setting-devices-description">
+        "Pick a package's widget.json, or a .zip. To write your own, start from a sample in docs/examples/widgets."
+      <div data-stand="WidgetCatalog">
+        <span data-cb="onInstalled">
+          "installed"
+      <div class="widgets-list">
+        <div class="widget-row" data-widget-id="acme.notes">
+          <div class="widget-row-head">
+            <i class="fa-solid fa-note-sticky">
+            <span class="widget-row-name">
+              "Notes"
+            <span class="widget-row-version">
+              "1.0.0"
+            <span class="widget-row-kind">
+              "sandboxed"
+            <span class="widget-row-state state-needs_approval">
+              "Waiting for your approval"
+          <div class="widget-row-description">
+            "A scratchpad"
+          <div class="widget-row-signature">
+            "Not signed"
+          <div class="widget-row-permissions">
+            "Keep its own data on this computer · Connect to https://api.github.com · Send messages to your agents. An agent acts on what it's told, so only allow this for a widget you trust."
+          <div class="widget-row-actions">
+            <button type="button" class="ui-button ui-tone-accent">
+              "Approve"
+            <button type="button" class="ui-button ui-tone-neutral">
+              <i aria-hidden="true" class="fa-solid fa-folder-open">
+              "Show folder"
+            <button type="button" class="ui-button ui-tone-danger">
+              "Uninstall"
+WidgetsRescan null
+-- rescan failed
+<div>
+  <div class="settings-section-body widgets-section">
+    <div data-stand="WidgetBarSettings">
+    <div class="settings-subheader">
+      "Widgets"
+    <div class="setting-row" id="setting-widgets.installed">
+      <div class="setting-devices-description">
+        "Widgets add your own kinds of pane. A widget runs only after you approve it here, and asks again whenever its files change."
+      <div class="widgets-toolbar">
+        <button type="button" class="ui-button ui-tone-neutral">
+          <i aria-hidden="true" class="fa-solid fa-plus">
+          "Install…"
+        <button type="button" class="ui-button ui-tone-neutral">
+          <i aria-hidden="true" class="fa-solid fa-rotate">
+          "Rescan"
+        <button type="button" class="ui-button ui-tone-neutral">
+          <i aria-hidden="true" class="fa-solid fa-folder-open">
+          "Open widgets folder"
+      <div class="setting-devices-description">
+        "Pick a package's widget.json, or a .zip. To write your own, start from a sample in docs/examples/widgets."
+      <div data-stand="WidgetCatalog">
+        <span data-cb="onInstalled">
+          "installed"
+      <div class="settings-config-error" role="alert">
+        "srv busy"
+      <div class="widgets-list">
+        <div class="widget-row" data-widget-id="acme.notes">
+          <div class="widget-row-head">
+            <i class="fa-solid fa-note-sticky">
+            <span class="widget-row-name">
+              "Notes"
+            <span class="widget-row-version">
+              "1.0.0"
+            <span class="widget-row-kind">
+              "sandboxed"
+            <span class="widget-row-state state-needs_approval">
+              "Waiting for your approval"
+          <div class="widget-row-description">
+            "A scratchpad"
+          <div class="widget-row-signature">
+            "Not signed"
+          <div class="widget-row-permissions">
+            "Keep its own data on this computer · Connect to https://api.github.com · Send messages to your agents. An agent acts on what it's told, so only allow this for a widget you trust."
+          <div class="widget-row-actions">
+            <button type="button" class="ui-button ui-tone-accent">
+              "Approve"
+            <button type="button" class="ui-button ui-tone-neutral">
+              <i aria-hidden="true" class="fa-solid fa-folder-open">
+              "Show folder"
+            <button type="button" class="ui-button ui-tone-danger">
+              "Uninstall"
