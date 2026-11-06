@@ -1,0 +1,128 @@
+useTick 1000
+usePulseWhen
+pulse when=true on=agent-activity-row subagent running
+-- no events
+<div>
+  <div class="agent-activity-row subagent running">
+    <div class="agent-activity-summary">
+      <span class="agent-activity-sigil">
+        <span data-stand="ActivitySigil" data-activity="a1" data-glyph="◆" data-tick="0">
+      <div data-stand="Tooltip" data-content="undefined" data-disable="true" data-class="agent-activity-title">
+        "Scout"
+      <span class="agent-activity-stats">
+        <span class="agent-activity-elapsed">
+          "1m 5s"
+      <span data-cb="onClick" data-stand="IconButton:Stop" data-props="{\"icon\":\"stop\",\"tone\":\"danger\",\"density\":\"compact\",\"class\":\"agent-activity-stop\",\"tooltip\":false}">
+        "Stop"
+-- one event
+<div>
+  <div class="agent-activity-row subagent running">
+    <div class="agent-activity-summary">
+      <span class="agent-activity-sigil">
+        <span data-stand="ActivitySigil" data-activity="a1" data-glyph="◆" data-tick="0">
+      <div data-stand="Tooltip" data-content="undefined" data-disable="true" data-class="agent-activity-title">
+        "Scout"
+      <span class="agent-activity-stats">
+        <span class="agent-activity-tail">
+          "1 event"
+        <span class="agent-activity-elapsed">
+          "1m 5s"
+      <span data-cb="onClick" data-stand="IconButton:Stop" data-props="{\"icon\":\"stop\",\"tone\":\"danger\",\"density\":\"compact\",\"class\":\"agent-activity-stop\",\"tooltip\":false}">
+        "Stop"
+createDispatchDetail d1 ag1
+-- expanded, nothing yet
+<div>
+  <div class="agent-activity-row subagent running expanded">
+    <div class="agent-activity-summary">
+      <span class="agent-activity-sigil">
+        <span data-stand="ActivitySigil" data-activity="a1" data-glyph="◆" data-tick="0">
+      <div data-stand="Tooltip" data-content="undefined" data-disable="true" data-class="agent-activity-title">
+        "Scout"
+      <span class="agent-activity-stats">
+        <span class="agent-activity-tail">
+          "4 events"
+        <span class="agent-activity-elapsed">
+          "1m 5s"
+      <span data-cb="onClick" data-stand="IconButton:Stop" data-props="{\"icon\":\"stop\",\"tone\":\"danger\",\"density\":\"compact\",\"class\":\"agent-activity-stop\",\"tooltip\":false}">
+        "Stop"
+    <div class="agent-activity-log agent-tool-overlay-log">
+      <pre class="agent-tool-log-line">
+        "No activity yet"
+-- transcript
+<div>
+  <div class="agent-activity-row subagent running expanded">
+    <div class="agent-activity-summary">
+      <span class="agent-activity-sigil">
+        <span data-stand="ActivitySigil" data-activity="a1" data-glyph="◆" data-tick="0">
+      <div data-stand="Tooltip" data-content="undefined" data-disable="true" data-class="agent-activity-title">
+        "Scout"
+      <span class="agent-activity-stats">
+        <span class="agent-activity-tail">
+          "4 events"
+        <span class="agent-activity-elapsed">
+          "1m 5s"
+      <span data-cb="onClick" data-stand="IconButton:Stop" data-props="{\"icon\":\"stop\",\"tone\":\"danger\",\"density\":\"compact\",\"class\":\"agent-activity-stop\",\"tooltip\":false}">
+        "Stop"
+    <div class="agent-activity-log agent-tool-overlay-log">
+      <pre class="agent-tool-log-line">
+        "looking"
+      <pre class="agent-tool-log-line">
+        "→ Read"
+      <pre class="agent-tool-log-line">
+        "42 lines"
+      <pre class="agent-tool-log-line">
+        "✗ no such file"
+      <pre class="agent-tool-log-line">
+        "50%"
+      <pre class="agent-tool-log-line">
+        "found it"
+dispose d1
+-- collapsed
+<div>
+  <div class="agent-activity-row subagent running">
+    <div class="agent-activity-summary">
+      <span class="agent-activity-sigil">
+        <span data-stand="ActivitySigil" data-activity="a1" data-glyph="◆" data-tick="0">
+      <div data-stand="Tooltip" data-content="undefined" data-disable="true" data-class="agent-activity-title">
+        "Scout"
+      <span class="agent-activity-stats">
+        <span class="agent-activity-tail">
+          "4 events"
+        <span class="agent-activity-elapsed">
+          "1m 5s"
+      <span data-cb="onClick" data-stand="IconButton:Stop" data-props="{\"icon\":\"stop\",\"tone\":\"danger\",\"density\":\"compact\",\"class\":\"agent-activity-stop\",\"tooltip\":false}">
+        "Stop"
+createDispatchDetail d1 ag1
+dispose d1
+createDispatchDetail d2 ag2
+-- another subagent while expanded
+<div>
+  <div class="agent-activity-row subagent running expanded">
+    <div class="agent-activity-summary">
+      <span class="agent-activity-sigil">
+        <span data-stand="ActivitySigil" data-activity="a1" data-glyph="◆" data-tick="0">
+      <div data-stand="Tooltip" data-content="undefined" data-disable="true" data-class="agent-activity-title">
+        "Scout"
+      <span class="agent-activity-stats">
+        <span class="agent-activity-tail">
+          "4 events"
+        <span class="agent-activity-elapsed">
+          "1m 5s"
+      <span data-cb="onClick" data-stand="IconButton:Stop" data-props="{\"icon\":\"stop\",\"tone\":\"danger\",\"density\":\"compact\",\"class\":\"agent-activity-stop\",\"tooltip\":false}">
+        "Stop"
+    <div class="agent-activity-log agent-tool-overlay-log">
+      <pre class="agent-tool-log-line">
+        "looking"
+      <pre class="agent-tool-log-line">
+        "→ Read"
+      <pre class="agent-tool-log-line">
+        "42 lines"
+      <pre class="agent-tool-log-line">
+        "✗ no such file"
+      <pre class="agent-tool-log-line">
+        "50%"
+      <pre class="agent-tool-log-line">
+        "found it"
+dispose d2
+-- gone while expanded
+<div>
