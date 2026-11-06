@@ -56,7 +56,7 @@ pub(crate) async fn compensate_via_reducer(
 }
 
 /// SPEC_864 Phase 3 — single-writer layout seeding. Dispatch a
-/// `LayoutSetTree` (tree + focus + leaforder as client slices) and persist
+/// `LayoutSetTree` (tree + focus as client slices) and persist
 /// it inside ONE hold of the reducer mutex, so persist order equals
 /// dispatch order — the same contract as `apply_layout_intent`
 /// (`layout_intents.rs`). Replaces the wcore-direct seeders
@@ -77,12 +77,10 @@ pub(crate) async fn seed_layout_via_reducer(
     tab_id: &str,
     new_tree: agentmux_common::LayoutNode,
     focused_node_id: String,
-    leaforder: Vec<crate::backend::obj::LeafOrderEntry>,
     magnified_node_id: String,
 ) -> Result<(), String> {
     let store = &state.mstore;
     let slices = agentmux_common::LayoutClientSlices {
-        leaforder: serde_json::to_value(&leaforder).ok(),
         focused_node_id,
         magnified_node_id,
         // Fresh-tab seed: REPLACE semantics clear any stale queue.

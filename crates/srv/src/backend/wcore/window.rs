@@ -74,7 +74,6 @@ pub fn create_window_full(
                 rootnode: None,
                 magnifiednodeid: String::new(),
                 focusednodeid: String::new(),
-                leaforder: None,
                 pendingbackendactions: None,
                 meta: None,
                 ..Default::default()

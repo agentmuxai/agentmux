@@ -2079,7 +2079,7 @@ async fn update_object_refuses_reducer_owned_rows() {
 /// SPEC_864 Phase 3 — the seeders route through the reducer: after
 /// `seed_layout_via_reducer` / `setup_torn_off_block_layout`, the reducer's
 /// `TabRecord.rootnode` and `db_layout.rootnode` are the same tree (single
-/// writer), and the persisted row carries focus + leaforder.
+/// writer), and the persisted row carries focus.
 #[tokio::test]
 async fn layout_seeders_route_through_reducer_coherently() {
     use agentmux_common::ipc::{Command, Event};
@@ -2133,17 +2133,16 @@ async fn layout_seeders_route_through_reducer_coherently() {
             crate::state::BlockRecord { block_id: bid.to_string(), tab_id: tab1.clone() },
         );
     }
-    let (tree, focused, leaforder) =
+    let (tree, focused) =
         crate::backend::wcore::default_three_pane_tree("b-agent", "b-swarm", "b-sysinfo");
     crate::server::service::reducer_helpers::seed_layout_via_reducer(
-        &state, &tab1, tree, focused, leaforder, String::new(),
+        &state, &tab1, tree, focused, String::new(),
     )
     .await
     .expect("three-pane seed via reducer");
 
     let layout_oid = mstore.get::<Tab>(&tab1).unwrap().unwrap().layoutstate;
     let row = mstore.get::<LayoutState>(&layout_oid).unwrap().unwrap();
-    assert_eq!(row.leaforder.as_ref().unwrap().len(), 3);
     assert!(!row.focusednodeid.is_empty(), "focus persisted");
     {
         let s = srv_state.lock().await;
@@ -2183,7 +2182,6 @@ async fn layout_seeders_route_through_reducer_coherently() {
     let row = mstore.get::<LayoutState>(&layout_oid).unwrap().unwrap();
     let root = row.rootnode.as_ref().expect("single-leaf tree persisted");
     assert_eq!(root.data.as_ref().unwrap().block_id, "b-moved");
-    assert_eq!(row.leaforder.as_ref().unwrap()[0].blockid, "b-moved");
     {
         let s = srv_state.lock().await;
         let rec = s.tabs.get(&tab2).expect("reducer knows tab2");
@@ -2200,10 +2198,10 @@ async fn layout_seeders_route_through_reducer_coherently() {
 #[tokio::test]
 async fn layout_seed_unknown_tab_errors() {
     let state = test_state();
-    let (tree, focused, leaforder) =
+    let (tree, focused) =
         crate::backend::wcore::default_three_pane_tree("a", "b", "c");
     let err = crate::server::service::reducer_helpers::seed_layout_via_reducer(
-        &state, "ghost-tab", tree, focused, leaforder, String::new(),
+        &state, "ghost-tab", tree, focused, String::new(),
     )
     .await
     .expect_err("unknown tab must error");
@@ -2385,7 +2383,6 @@ async fn layout_stays_coherent_across_full_mutation_lifecycle() {
             new_tree: Some(acked_tree),
             correlation_id: String::new(),
             slices: Some(LayoutClientSlices {
-                leaforder: None,
                 focused_node_id: "n4".into(),
                 magnified_node_id: String::new(),
                 pending_backend_actions: None,

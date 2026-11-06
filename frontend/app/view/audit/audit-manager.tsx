@@ -36,8 +36,7 @@ export const AuditManager = (props: { paneBlockId: string; visible?: boolean; ag
     const [searchText, setSearchText] = createSignal(untrack(filter).text);
     let typing: ReturnType<typeof setTimeout> | undefined;
     const list = createAuditList(filter, () => props.visible ?? true);
-    // The pane's scrolling body: the newest entries are at its top, under the filters.
-    let body: HTMLDivElement | undefined;
+    let body: HTMLDivElement | undefined; // the pane's scrolling body: the newest entries are at its top
     const tick = useTick(1000);
     const now = createMemo(() => (tick(), Date.now()));
     const jumpToNewest = () => {
