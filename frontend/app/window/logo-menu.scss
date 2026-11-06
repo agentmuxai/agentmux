@@ -35,6 +35,15 @@
     cursor: default;
 }
 
+// Left of the tabs (Windows/Linux): the mark is a square now, so its cell is close to one too, with the same
+// room each side, and the tabs sit that much nearer the window's edge. (The menu button was three bars, wide
+// and short; its 28px cell and 4px margins were cut for that.)
+.logo-menu-anchor:not(.logo-menu-anchor--right) {
+    width: 26px;
+    margin-left: 1px;
+    margin-right: 3px;
+}
+
 // macOS: pinned to the far right of the title bar, after the action widgets. More room on the window-frame side.
 .logo-menu-anchor--right {
     margin-right: 8px;

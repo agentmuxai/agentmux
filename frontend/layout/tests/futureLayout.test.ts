@@ -11,6 +11,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createSignal } from "solid-js";
 import { LayoutModel } from "@/layout/lib/layoutModel";
 import { futureLayoutOf } from "@/layout/lib/futureLayout";
+import { pillStandIn } from "@/layout/lib/paneBodyDrop";
 import { applyLayoutAction } from "@/layout/lib/layoutIntentActions";
 import { computeMoveNode } from "@/layout/lib/layoutTree";
 import { walkNodes } from "@/layout/lib/layoutNode";
@@ -153,6 +154,36 @@ describe("the drop preview is the drop", () => {
                 expect(shown.treeState.rootNode).toEqual(modelOf(make()).treeState.rootNode);
             }
             expect(wrong).toEqual([]);
+        });
+    }
+});
+
+describe("a tab pill's ghost has an extent", () => {
+    beforeEach(() => rows.clear());
+
+    for (const [name, make] of Object.entries(TREES)) {
+        it(`${name}: the pill's stand-in is laid out as a pane, not a line, beside every pane`, () => {
+            const probe = modelOf(make());
+            const stand = pillStandIn("pill-block");
+            const thin: string[] = [];
+            let seen = 0;
+            for (const target of leafIds(make())) {
+                for (const direction of [DropDirection.Top, DropDirection.Right, DropDirection.Bottom, DropDirection.Left]) {
+                    const action = computeMoveNode(probe.treeState, {
+                        type: LayoutTreeActionType.ComputeMove,
+                        nodeId: target,
+                        nodeToMoveId: stand.id,
+                        direction,
+                        nodeToMove: stand,
+                    } as any);
+                    if (!action) continue;
+                    seen++;
+                    const ghost = futureLayoutOf(modelOf(make()), action)?.rects[stand.id];
+                    if (!ghost || ghost.width < 40 || ghost.height < 40) thin.push(`${target} ${DropDirection[direction]}: ${JSON.stringify(ghost)}`);
+                }
+            }
+            expect(seen).toBeGreaterThan(3);
+            expect(thin).toEqual([]);
         });
     }
 });
