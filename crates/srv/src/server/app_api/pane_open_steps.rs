@@ -26,24 +26,6 @@ pub(super) fn fold_media_into_editor(cmd: &mut CommandPaneOpenData) -> Result<()
 
 /// The Editor pane a `target_id` names, if any; it is only valid with an Editor open that is not floating.
 pub(super) fn named_editor_target(cmd: &CommandPaneOpenData) -> Result<Option<&str>, String> {
-    // Editor-pane reuse (SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03.md
-    // Part 2): if the calling agent already has an Editor pane open in its own
-    // tab, add the requested file as a new tab in that pane instead of always
-    // spawning another Editor pane. Gated on the explicit `reuse_editor_pane`
-    // opt-in only — NOT inferred from `meta`/`split_reference_block_id` being
-    // present, since `EditorViewModel.openToTheSide`/`openInTerminal` also set
-    // `split_reference_block_id` to their OWN block id for split placement and
-    // must not trigger reuse (reagent P1 on PR #2404 caught an earlier version
-    // of this check incorrectly reusing the calling pane itself for
-    // `openToTheSide`). Also excludes `floating` requests — those always get
-    // their own new window (codex P1 on PR #2404: this branch previously ran
-    // before the floating check below and silently swallowed floating
-    // requests into a reused docked pane).
-    //
-    // An explicit `tree_expanded` (`OpenEditor`'s `collapse_tree`) does NOT
-    // bypass reuse: a reused pane keeps its own tree state (it has no live way
-    // to take a new one), and the option only shapes a pane this call creates.
-    // Bypassing reuse made a new pane on every open of an agent that always passes it.
     // A `target_block_id` names the Editor pane to put the file in: it needs no other opt-in.
     let named = cmd.target_block_id.as_deref().map(str::trim).filter(|t| !t.is_empty());
     if named.is_some() {
@@ -59,6 +41,10 @@ pub(super) fn named_editor_target(cmd: &CommandPaneOpenData) -> Result<Option<&s
 
 /// Add the requested file as a tab of an Editor pane that is already open, when the caller asked for reuse.
 pub(super) async fn reuse_editor_pane(state: &AppState, cmd: &CommandPaneOpenData, named: Option<&str>, viewer: Option<&'static str>) -> Result<Option<PaneOpenResult>, String> {
+    // Reuse (SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03.md Part 2) needs the explicit `reuse_editor_pane`
+    // opt-in, never inferred from `split_reference_block_id`: openToTheSide and openInTerminal set it to their own block id
+    // and must not reuse (#2404). A floating open always gets its own window. An explicit `tree_expanded` does not bypass
+    // reuse: a reused pane keeps its own tree state, and bypassing made a new pane on every open of an agent that always passes it.
     if cmd.view == "editor" && (cmd.reuse_editor_pane == Some(true) || named.is_some()) && cmd.floating != Some(true) {
         if let Some(file) = cmd.file.as_deref() {
             let connection = cmd.connection.as_deref().unwrap_or("");
@@ -72,13 +58,8 @@ pub(super) async fn reuse_editor_pane(state: &AppState, cmd: &CommandPaneOpenDat
     Ok(None)
 }
 
-///
-/// Stack path (SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.3): create
-/// the block directly as a new tab of the pane holding
-/// `stack_onto_block_id`, in one reducer step, then tell the frontend with
-/// a queued `stackpush` action. Replaces `skip_placement` + a frontend
-/// push, whose gap could leave the block in no pane.
-/// Stack path: create the block as a new tab of the pane holding `target`, in one reducer step.
+/// Stack path (SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.3): create the block as a new tab of the pane holding
+/// `target`, in one reducer step, then queue a `stackpush` action for the frontend.
 pub(super) async fn open_stacked(state: &AppState, cmd: &CommandPaneOpenData, target: String, meta: MetaMapType) -> Result<PaneOpenResult, String> {
     let mstore = state.mstore.clone();
     // The new tab is the visible one unless the caller said not to take focus
@@ -123,22 +104,16 @@ pub(super) async fn open_stacked(state: &AppState, cmd: &CommandPaneOpenData, ta
         tracing::warn!(block_id = %block_id, "pane.open: stack_onto_block_id: stackpush queue failed: {e}");
     }
     tracing::info!(block_id = %block_id, target = %target, view = %cmd.view, "pane.open: block created as a pane tab");
-    return Ok(PaneOpenResult {
+    Ok(PaneOpenResult {
         block_id,
         tab_id,
         view: cmd.view.clone(),
         created: true,
-    });
+    })
 }
 
-///
-/// Skip-placement path (in-pane tabs — SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md
-/// §4.2): create the block through the reducer, same as the docked path
-/// below, but return immediately — no layout action, no tear_off_block
-/// saga. The caller attaches it to an existing pane's block-stack instead
-/// (`pushBlockOntoStack`), so it must never render docked or floating
-/// first.
-/// Skip-placement path: create the block and return at once; the caller attaches it to an existing pane.
+/// Skip-placement path (SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md §4.2): create the block through the reducer and
+/// return at once, with no layout action; the caller attaches it to an existing pane's block stack.
 pub(super) async fn open_unplaced(state: &AppState, view: String, tab_id: String, meta: MetaMapType) -> Result<PaneOpenResult, String> {
     let mstore = state.mstore.clone();
     let meta_val = serde_json::to_value(&meta)
@@ -171,27 +146,21 @@ pub(super) async fn open_unplaced(state: &AppState, view: String, tab_id: String
     }
     crate::server::service::publish_events(state, &create_events);
     tracing::info!(block_id = %block_id, view = %view, "pane.open: block created, placement skipped");
-    return Ok(PaneOpenResult {
+    Ok(PaneOpenResult {
         block_id,
         tab_id,
         view,
         created: true,
-    });
+    })
 }
 
 /// Docked path: create the block through the reducer, place it (split if asked, else appended), and tell every window.
 pub(super) async fn open_docked(state: &AppState, cmd: &CommandPaneOpenData, tab_id: String, meta: MetaMapType) -> Result<PaneOpenResult, String> {
     let mstore = state.mstore.clone();
     let event_bus = state.event_bus.clone();
-    // Create block (docked path) THROUGH THE REDUCER (#1681), not wcore-direct.
-    // A store-only `create_block` lands the block in SQLite but never in the
-    // reducer-canonical `state.blocks` map — and this RPC runs after bootstrap,
-    // which is the only time `srv_state` is hydrated from SQLite. The pane then
-    // renders fine (frontend reads SQLite) but a later TearOffBlock /
-    // RedockFloatingPane is rejected "block not found" because the saga
-    // pre-conditions check the reducer. The BlockCreated event carries meta,
-    // which apply_block_created writes to the mstore Block. Mirrors the
-    // already-correct open_pane_floating path.
+    // Create the block through the reducer (#1681), not wcore-direct: a store-only `create_block` never reaches the
+    // reducer's `state.blocks`, so a later TearOffBlock / RedockFloatingPane is rejected "block not found".
+    // Mirrors the open_pane_floating path.
     let meta_val = serde_json::to_value(&meta)
         .map_err(|e| format!("pane.open: meta serialize: {e}"))?;
     let create_events = crate::server::service::dispatch_to_reducer(
