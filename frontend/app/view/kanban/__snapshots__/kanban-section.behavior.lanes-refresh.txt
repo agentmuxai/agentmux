@@ -1,0 +1,16 @@
+subscribe accountavailability
+subscribe workqueue:changed
+rpc KanbanList
+subscribe agents:changed
+board#1 mounted
+board#1 unmounted
+board#2 mounted
+board#3 mounted
+board#4 mounted
+board#5 mounted
+-- refresh
+rpc KanbanList
+{"tasks":[],"untracked":["Korp"],"agents":3,"now":"number","holdingCamper":"w3","holdingKorp":null,"reviewLimit":0,"reviewTotal":2,"colors":{"u-gone":"#112233"},"narrow":false,"collapsed":[]}
+{"tasks":["w4","w6"],"untracked":[],"agents":3,"now":"number","holdingCamper":"w3","holdingKorp":null,"reviewLimit":0,"reviewTotal":2,"colors":{"u-gone":"#112233"},"narrow":false,"collapsed":[]}
+{"tasks":["w1","w2","w3","w8"],"untracked":[],"agents":3,"now":"number","holdingCamper":"w3","holdingKorp":null,"reviewLimit":0,"reviewTotal":2,"colors":{"u-gone":"#112233"},"narrow":false,"collapsed":[]}
+{"tasks":["w5"],"untracked":[],"agents":3,"now":"number","holdingCamper":"w3","holdingKorp":null,"reviewLimit":0,"reviewTotal":2,"colors":{"u-gone":"#112233"},"narrow":false,"collapsed":[]}

@@ -8,7 +8,7 @@
       "data": {
         "provider_id": "aider",
         "cli_command": "aider",
-        "npm_package": "",
+        "npm_package": "aider",
         "pinned_version": "0.86.2",
         "windows_install_command": "irm https://aider.chat/install.ps1 | iex",
         "unix_install_command": "curl -LsSf https://aider.chat/install.sh | sh",

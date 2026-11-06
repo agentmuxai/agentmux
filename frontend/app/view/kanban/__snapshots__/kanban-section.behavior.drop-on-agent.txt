@@ -1,0 +1,7 @@
+subscribe accountavailability
+subscribe workqueue:changed
+rpc KanbanList
+subscribe agents:changed
+board#1 mounted
+rpc KanbanAct {"action":"start","id":"w1","agent":"Korp"}
+rpc KanbanList

@@ -17,13 +17,14 @@ vi.mock("@/app/store/rpc-api", () => ({
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
 import { MAX_SAVED_HELD } from "./useHistoryPagination";
-import { flushPaneSnapshots, useSnapshotPersistence } from "./useSnapshotPersistence";
+import { saveForReload } from "@/app/store/recycle-savers";
+import { flushPaneSnapshots, unsavedPaneSnapshots, useSnapshotPersistence } from "./useSnapshotPersistence";
 import type { AgentAtoms } from "../../../agent-model/state";
 import type { DocumentNode, DocumentState } from "../../../agent-model/types";
 
 const FILTER = { showThinking: false, showSuccessfulTools: true, showFailedTools: true, showIncoming: true, showOutgoing: true };
 
-function mountPane() {
+function mountPane(blockId = "b1") {
     return createRoot((dispose) => {
         const [doc] = createSignal<DocumentNode[]>([]);
         const docStateAtom = createSignal<DocumentState>({
@@ -35,18 +36,19 @@ function mountPane() {
         } as DocumentState);
         const [detailsOpen, setDetailsOpen] = createSignal(false);
         const [hidden, setHidden] = createSignal(false);
+        const [foreign, setForeign] = createSignal(false);
         useSnapshotPersistence({
-            blockId: "b1",
+            blockId,
             definitionId: "def1",
             getAtoms: () => ({ documentStateAtom: docStateAtom }) as unknown as AgentAtoms,
             getDocument: doc,
             getDetailsOpen: detailsOpen,
-            snapshotIsForeignBlock: () => false,
+            snapshotIsForeignBlock: foreign,
             hidden,
             log: () => {},
         });
         const setDocState = docStateAtom[1];
-        return { dispose, setDocState, setDetailsOpen, setHidden };
+        return { dispose, setDocState, setDetailsOpen, setHidden, setForeign };
     });
 }
 
@@ -182,5 +184,95 @@ describe("useSnapshotPersistence: the overlay is saved, and can be flushed", () 
         await flushPaneSnapshots();
         await vi.advanceTimersByTimeAsync(0);
         expect(rpc.writeState).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe("useSnapshotPersistence: what blocks a recycle is named, and a pane with nothing of its own to save does not", () => {
+    beforeEach(() => {
+        vi.useFakeTimers();
+        rpc.lineCount.mockReset().mockResolvedValue({ count: 42 });
+        rpc.writeState.mockReset().mockResolvedValue(undefined);
+    });
+    afterEach(() => {
+        vi.useRealTimers();
+        vi.restoreAllMocks();
+    });
+
+    it("a pane that failed a write and then became a continuation pane no longer blocks the recycle", async () => {
+        // A continuation pane shows another block's history and never writes, so a failure
+        // from before it became one must not stay as "not saved" for good.
+        const pane = mountPane();
+        pane.setDocState((prev) => ({ ...prev, pinnedNodes: new Set(["n2"]) }));
+        rpc.writeState.mockRejectedValueOnce(new Error("timeout"));
+        await expect(flushPaneSnapshots()).resolves.toBe(false);
+        pane.setForeign(true);
+        await expect(flushPaneSnapshots()).resolves.toBe(true);
+        pane.dispose();
+    });
+
+    it("names the pane and the error when a write fails", async () => {
+        const pane = mountPane("blockabcdef1234");
+        pane.setDocState((prev) => ({ ...prev, pinnedNodes: new Set(["n2"]) }));
+        rpc.writeState.mockRejectedValue(new Error("FORBIDDEN: not your transcript"));
+        const problems = await unsavedPaneSnapshots();
+        expect(problems).toHaveLength(1);
+        expect(problems[0]).toContain("blockabc");
+        expect(problems[0]).toContain("write failed: FORBIDDEN: not your transcript");
+        pane.dispose();
+    });
+
+    it("names a pane whose overlay keeps changing as such, not as a failed write", async () => {
+        const pane = mountPane("blockabcdef1234");
+        pane.setDocState((prev) => ({ ...prev, pinnedNodes: new Set(["n0"]) }));
+        let n = 0;
+        // Each write is followed by another change, as if the user kept pinning rows.
+        rpc.writeState.mockImplementation(async () => {
+            n++;
+            pane.setDocState((prev) => ({ ...prev, pinnedNodes: new Set([...prev.pinnedNodes, `x${n}`]) }));
+        });
+        const problems = await unsavedPaneSnapshots();
+        expect(problems).toHaveLength(1);
+        expect(problems[0]).toContain("blockabc");
+        expect(problems[0]).toContain("kept changing");
+        expect(problems[0]).not.toContain("write failed");
+        pane.dispose();
+    });
+
+    it("lists only the panes that are not saved", async () => {
+        const good = mountPane("goodgoodgood");
+        const bad = mountPane("badbadbadbad");
+        good.setDocState((prev) => ({ ...prev, pinnedNodes: new Set(["a"]) }));
+        bad.setDocState((prev) => ({ ...prev, pinnedNodes: new Set(["b"]) }));
+        rpc.writeState.mockImplementation(async (_c: unknown, args: { content: string }) => {
+            if (JSON.parse(args.content).documentState.pinnedNodeIds[0] === "b") throw new Error("disk");
+        });
+        const problems = await unsavedPaneSnapshots();
+        expect(problems).toHaveLength(1);
+        expect(problems[0]).toContain("badbadba");
+        good.dispose();
+        bad.dispose();
+    });
+
+    it("the recycle's save keeps the reason short for the user and writes the cause to the console", async () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        const pane = mountPane("blockabcdef1234");
+        pane.setDocState((prev) => ({ ...prev, pinnedNodes: new Set(["n2"]) }));
+        rpc.writeState.mockRejectedValue(new Error("timeout"));
+        const reasons = await saveForReload();
+        expect(reasons).toContain("a pane's collapsed rows, pins or filter couldn't be saved");
+        expect(reasons.join(" ")).not.toContain("timeout");
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(String(warn.mock.calls[0][0])).toContain("[recycle]");
+        expect(String(warn.mock.calls[0][0])).toContain("write failed: timeout");
+        pane.dispose();
+    });
+
+    it("says nothing when every pane is saved", async () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        const pane = mountPane();
+        pane.setDocState((prev) => ({ ...prev, pinnedNodes: new Set(["n2"]) }));
+        expect((await saveForReload()).filter((r) => r.includes("collapsed rows"))).toEqual([]);
+        expect(warn).not.toHaveBeenCalled();
+        pane.dispose();
     });
 });

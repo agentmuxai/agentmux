@@ -450,7 +450,6 @@
 154 frontend/app/view/agent/components/composer-row-layout.ts::computeComposerRows
 114 frontend/app/view/agent/components/composer-stats-zone.tsx::useStatsZone
 257 frontend/app/view/agent/components/my-agents-list-data.ts::useMyAgentsData
-478 frontend/app/view/agent/components/my-agents-list-panels.ts::createRowPanels
 326 frontend/app/view/agent/components/shell-highlight/tokenize.ts::Scanner::scanListInner
 189 frontend/app/view/agent/failure/failure-accessory.ts::failureToRow
 168 frontend/app/view/agent/failure/useAccountBinding.ts::useAccountBinding
@@ -464,7 +463,7 @@
 172 frontend/app/view/agent/hooks/usePaneReveal.ts::usePaneReveal
 121 frontend/app/view/agent/hooks/usePtyWidth.ts::usePtyWidth
 140 frontend/app/view/agent/hooks/useShellNodeStream.ts::useShellNodeStream
-163 frontend/app/view/agent/hooks/useSnapshotPersistence.ts::useSnapshotPersistence
+137 frontend/app/view/agent/hooks/useSnapshotPersistence.ts::useSnapshotPersistence
 173 frontend/app/view/agent/hooks/useSubagentBackfillGate.ts::useSubagentBackfillGate
 185 frontend/app/view/agent/offline/offline-input.ts::createOfflineInput
 229 frontend/app/view/agent/parseHistoryLines.ts::HistoryParser::feed
@@ -498,7 +497,6 @@
 165 frontend/app/view/identity/identity-accounts-tab.tsx::AccountDetailPanel
 229 frontend/app/view/kanban/kanban-board.tsx::KanbanBoard
 168 frontend/app/view/kanban/kanban-card.tsx::KanbanCard
-289 frontend/app/view/kanban/kanban-section.tsx::KanbanSection
 143 frontend/app/view/memory-editor/MemoryHistory.tsx::MemoryHistory
 126 frontend/app/view/native-memory/MemoryAdoptionPanel.tsx::MemoryAdoptionPanel
 112 frontend/app/view/native-memory/NativeMemoryCreate.tsx::NativeMemoryCreate

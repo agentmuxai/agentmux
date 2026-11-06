@@ -1,0 +1,24 @@
+subscribe accountavailability
+subscribe workqueue:changed
+rpc KanbanList
+subscribe agents:changed
+board#1 mounted
+drawer mounted for w1
+{"task":"w1","agents":3,"now":"number"}
+pane places blk-from-drawer
+pane places blk-from-card
+pane places blk-camper
+drawer unmounted for w1
+board#1 unmounted
+unsubscribe agents:changed
+resize observer disconnected
+unsubscribe accountavailability
+unsubscribe workqueue:changed
+-- mounted alone
+subscribe accountavailability
+subscribe workqueue:changed
+rpc KanbanList
+subscribe agents:changed
+board#2 mounted
+revealBlock blk-from-card {"source":"kanban"}
+revealBlock blk-korp {"source":"kanban"}

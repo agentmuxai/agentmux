@@ -268,6 +268,8 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "not-windows: a unix-only test (cfg(unix), target_os, or a branch cfg!(windows) skips)"),
     ("crates/srv/src/backend/container/cli.rs", "\"sh\"", 2,
      "not-windows: a unix-only test (cfg(unix), target_os, or a branch cfg!(windows) skips)"),
+    ("crates/srv/src/backend/cli_uv.rs", "self.uv", 1,
+     "no-window: calls no_window()/creation_flags in this file"),
     ("crates/srv/src/backend/cli_prune.rs", "\"ps\"", 1,
      "not-windows: returns None on Windows before it spawns `ps`"),
     ("crates/srv/src/backend/cli_install.rs", "\"cmd\"", 1,
