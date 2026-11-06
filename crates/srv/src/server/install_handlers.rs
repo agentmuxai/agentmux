@@ -691,20 +691,22 @@ fn spawn_install_task(
             registry.release_provider(&provider_id);
             return;
         }
-        if let Err(e) = std::fs::create_dir_all(&provider_dir) {
-            // The disk-full / permission-denied / path-not-found cases
-            // route to the typed catalog so the frontend renders a
-            // friendly "Device out of space" message instead of the
-            // raw OS error. Other IO kinds fall through to Legacy.
-            let err = agentmux_common::AgentMuxError::from_io_with_path(
-                provider_dir.display().to_string(),
-                e,
-            );
-            emit_done_typed(&broker, err);
-            registry.drop_session(&session_id);
-            registry.release_provider(&provider_id);
-            return;
-        }
+        // Makes the folder too, with the public registry and an empty npm config (cli_install.rs).
+        let isolation = match crate::backend::cli_install::npm_isolation_args(&provider_dir) {
+            Ok(isolation) => isolation,
+            Err(e) => {
+                // Disk-full, permission-denied and path-not-found go to the typed catalog so the
+                // frontend shows a friendly message, not the raw OS error; other kinds stay Legacy.
+                let err = agentmux_common::AgentMuxError::from_io_with_path(
+                    provider_dir.display().to_string(),
+                    e,
+                );
+                emit_done_typed(&broker, err);
+                registry.drop_session(&session_id);
+                registry.release_provider(&provider_id);
+                return;
+            }
+        };
         let provider_dir_str = provider_dir.to_string_lossy().to_string();
 
         // The pinned package plus any companions (pi-acp's `pi`): one npm run,
@@ -735,9 +737,7 @@ fn spawn_install_task(
                 "--legacy-peer-deps=false".to_string(),
             ])
             .collect();
-        // AgentMux's own packages come from the public registry whatever the
-        // machine's .npmrc routes their scope to (cli_install.rs).
-        npm_args.extend(crate::backend::cli_install::npm_registry_args(&npm_package));
+        npm_args.extend(isolation);
 
         emit_line(
             &broker,

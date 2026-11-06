@@ -1,6 +1,6 @@
 # Spec: AgentMux installs its own isolated, pinned copy of all 19 agent CLIs
 
-**Status:** active — approved by the operator 2026-11-05 ("ok, lets wrap that up, lets get all the harnesses isolated"), relayed by AgentY. PR 1 (goose: `cli_download.rs`, the Install button, lookup) is #6590 (merged); PR 2 (pinned uv, Aider, Kimi) is #6618 (merged); PR 3 (Grok) is #6627 (merged); PR 4 (Antigravity, Muse) is the PR that carries this edit; PR 5 (§9) is left.
+**Status:** active — approved by the operator 2026-11-05 ("ok, lets wrap that up, lets get all the harnesses isolated"), relayed by AgentY. PR 1 (goose: `cli_download.rs`, the Install button, lookup) is #6590 (merged); PR 2 (pinned uv, Aider, Kimi) is #6618 (merged); PR 3 (Grok) is #6627 (merged); PR 4 (Antigravity, Muse) is #6631 (merged); PR 5 (§9) is split in three, 5a (npm hardening) carrying this edit.
 **Date:** 2026-11-05. Task #1571 (spec), #1572 (build). Author: Lazo. Verified against `agentmux` `main` @ `bf7e5b9863`.
 **Builds on:** `SPEC_NINE_NEW_HARNESSES_2026_10_14.md` (the six providers), `SPEC_AGENT_CLI_ISOLATION_NOTE_2026_10_18.md` (what is isolated today), `SPEC_SIGNED_UPDATE_CHECKSUMS_2026_10_25.md` (same "pinned hash, no trust in the origin" idea).
 **Research behind it:** a sourced fetch of each vendor's real distribution on 2026-11-05 (release assets, checksums, signatures, self-update switches, licences; downloads and Authenticode checks measured). Not committed.
@@ -70,7 +70,7 @@ The operator saw the agent pane tell them to install Goose themselves and asked 
 **Confirmed in the code:** `locate_provider_cli` returns AgentMux's install for an npm provider and returns `None` rather than PATH when it is missing (`cli_handlers.rs`, "never falls back to system PATH for npm-backed providers"); `install_pinned_cli` installs with `--prefix` into `<shared>/cli/<provider>/<pin>/`, no `-g`, no PATH edit; the auth folders are AgentMux's.
 
 **Gaps (from the 2026-10-18 note, still open) and the fix in the last PR:**
-- The install uses the person's `~/.npmrc` (registry, proxy, scripts policy). Fix: pass `--registry https://registry.npmjs.org/` and a `--userconfig` pointing at an empty file for every package, not only `@agentmuxai/*`.
+- ~~The install uses the person's `~/.npmrc` (registry, proxy, scripts policy).~~ **Fixed in PR 5a:** every npm install passes `--registry=https://registry.npmjs.org/` and an empty file each for `--userconfig` and `--globalconfig` (npm refuses one file as both), made in the install folder. Their registry, scope routing and scripts policy no longer apply; a proxy in the environment (`HTTPS_PROXY`) still does, but a proxy set only in `.npmrc` no longer does, so an install behind such a proxy must move it to the environment. Checked with a real `npm install` on Windows.
 - Node and npm come from the system. Said in the Install error; fetching a pinned Node is out of scope.
 - `HOME` and `PATH` are the person's; this isolates the tools, not what an agent can do. Unchanged.
 
@@ -103,7 +103,9 @@ The operator saw the agent pane tell them to install Goose themselves and asked 
 | 2 | pinned `uv`, hashed venv install: **aider**, then **kimi** (1.52.0): built, §8a | 2 days |
 | 3 | **grok** (TOFU hash, raw binary): built, §8b | 1 day |
 | 4 | **antigravity** and **muse** (after the terms check): built, §8c | 1–2 days |
-| 5 | npm hardening (§8), docs and picker note, container route for all | 1–2 days |
+| 5a | npm hardening (§8): the public registry and an empty npm config for every install | built |
+| 5b | the strict lookup order and the "Use the CLI on my PATH" setting (§3) | 1 day |
+| 5c | Toolchain Install and Uninstall (§4), docs and picker note, container route for all | 1–2 days |
 
 **Tests:** hash mismatch refused and the partial removed; truncated and oversize download; a zip with `..` or an absolute path; two instances installing at once (the lock); a stale folder without the marker is cleared; the lookup order (own copy, then PATH only on request); `installable_provider` refuses an unknown id and a caller-sent URL; a registry test that every `Download` provider has an asset for each OS it claims and every hash is the right length. Live: a real install of each on Windows (Area54), macOS (Clare) and Linux (Maricon), then an agent turn.
 
