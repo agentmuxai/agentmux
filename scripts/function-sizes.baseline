@@ -291,7 +291,6 @@
 904 crates/srv/src/server/editor_handlers.rs::register_editor_handlers
 107 crates/srv/src/server/files.rs::handle_stream_local_file
 122 crates/srv/src/server/http_health.rs::handle_discovery
-447 crates/srv/src/server/http_pty_shell.rs::handle_pty_shell_create
 238 crates/srv/src/server/http_shell.rs::create_shell
 147 crates/srv/src/server/http_shell.rs::try_attach_to_existing_shell
 146 crates/srv/src/server/http_viewer.rs::feed_stream
