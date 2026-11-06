@@ -234,6 +234,10 @@ mod tests {
         assert!(should_send(Some(&prev), level(&p, 9 * GB, total), 9 * GB, 1000 + 60), "critical is told at once, whatever the hour");
         let crit = Sent { level: Level::Critical, free: 9 * GB, at: 1000 };
         assert!(!should_send(Some(&crit), Level::Warning, 30 * GB, 1000 + 9000), "a better level is not a drop");
+        // Free space bouncing across the critical line: the record stays critical, so a dip back
+        // into it, hours later, is the same event.
+        assert!(!should_send(Some(&crit), Level::Critical, 9 * GB + GB / 2, 1000 + 5 * 3600), "back into critical at about the same free space");
+        assert!(should_send(Some(&crit), Level::Critical, 3 * GB, 1000 + 2 * 3600), "but a real further drop is told");
         assert!(!should_send(Some(&prev), Level::Ok, 90 * GB, 99999), "nothing to say when the disk is fine");
     }
 

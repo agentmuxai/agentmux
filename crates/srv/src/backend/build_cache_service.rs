@@ -383,10 +383,8 @@ fn disk_check(mstore: &Store, policy: &Policy) {
     let level = dn::level(policy, free, total);
     let prev = dn::read_sent(&marker, free);
     if !dn::should_send(prev.as_ref(), level, free, unix_now()) {
-        // A better level than the last note's is remembered, so a later worsening is told.
-        if let Some(p) = prev.filter(|p| level < p.level) {
-            dn::write_sent(&marker, &dn::Sent { level, ..p });
-        }
+        // The record keeps the worst level reached until the disk has recovered: free space that
+        // bounces across the critical line is one event, not a new wake-up each time it dips.
         return;
     }
     // The walk below reads every build folder: on a full disk, do not repeat it every check when
@@ -409,19 +407,26 @@ fn disk_check(mstore: &Store, policy: &Policy) {
     sizes.sort_by(|a, b| b.target_bytes.cmp(&a.target_bytes));
     per_clone.sort_by(|a, b| b.target_bytes.cmp(&a.target_bytes));
     let agents = local_agents(mstore);
-    let mut delivered = 0;
+    let (mut attempted, mut delivered) = (0, 0);
     // The steward gets the whole computer's summary, so an owner who is the steward is told once.
     for owner in big_owners(&sizes, &agents).iter().filter(|a| !a.steward) {
+        attempted += 1;
         if tell(owner, level, &owner_note(policy, level, free, total, owner, &per_clone)) {
             delivered += 1;
         }
     }
     for steward in agents.iter().filter(|a| a.steward) {
+        attempted += 1;
         if tell(steward, level, &steward_note(policy, level, free, total, &agents, &per_clone)) {
             delivered += 1;
         }
     }
-    if delivered > 0 {
+    if attempted == 0 {
+        // No workspace is large and no steward is here: nothing to say. That is handled, not a
+        // failure, so it is recorded and the folders are not walked again until the disk drops further.
+        tracing::info!("build cache: the disk is low but no agent has large build folders and no steward is here; nobody to tell");
+        dn::write_sent(&marker, &dn::Sent { level, free, at: unix_now() });
+    } else if delivered > 0 {
         dn::write_sent(&marker, &dn::Sent { level, free, at: unix_now() });
     } else {
         tracing::warn!("build cache: the disk is low and no agent could be told; trying again in 30 minutes");
