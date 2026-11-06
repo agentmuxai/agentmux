@@ -60,7 +60,7 @@ export function SkillAppDetail(p: { app: SkillApp }): JSX.Element {
             </p>
             <Show when={p.app.ladder.length > 0}>
                 <span class="agent-primitive-modal-field-label">Routes, best first</span>
-                <ol class="skill-app-list" aria-label="Routes">
+                <ol class="skill-app-list skill-app-list--ordered" aria-label="Routes">
                     <For each={p.app.ladder}>
                         {(step) => (
                             <li>
@@ -79,7 +79,13 @@ export function SkillAppDetail(p: { app: SkillApp }): JSX.Element {
                     {(f) => (
                         <li>
                             {f.path} <span class="skill-app-muted">{fileSize(f.bytes)}</span>
-                            <Show when={scriptState(f)}>{(s) => <Pill tone="warn">{s()}</Pill>}</Show>
+                            <Show when={scriptState(f)}>
+                                {(s) => (
+                                    <Pill tone="warn" title={f.approved ? undefined : "Never given to an agent until you approve it"}>
+                                        {s()}
+                                    </Pill>
+                                )}
+                            </Show>
                         </li>
                     )}
                 </For>
