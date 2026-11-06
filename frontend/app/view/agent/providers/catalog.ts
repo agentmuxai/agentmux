@@ -719,8 +719,9 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
     grok: {
         id: "grok",
         displayName: "Grok Build",
-        // `grok agent stdio`: ACP over stdio. Not on npm: the user installs it with
-        // xAI's installer; srv finds it. Mirrors crates/srv/src/backend/providers/grok.rs.
+        // `grok agent stdio`: ACP over stdio. Not on npm: AgentMux downloads the pinned
+        // release itself (managedInstall); the install command below is for a copy the
+        // person installs on their own. Mirrors crates/srv/src/backend/providers/grok.rs.
         cliCommand: "grok",
         defaultArgs: [],
         styledArgs: [],
@@ -735,6 +736,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         requiresLoginTty: true,
         headlessLoginUrlUnsupported: true,
         npmPackage: "",
+        managedInstall: true,
         pinnedVersion: "1.0.52",
         versionSource: { kind: "vendor", url: "https://x.ai/cli/stable" },
         docsUrl: "https://github.com/xai-org/grok-build",

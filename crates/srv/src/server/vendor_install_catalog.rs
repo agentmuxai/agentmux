@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! The install recipes of the agent CLIs that AgentMux can't install into its own folder
-//! (Antigravity, Grok Build, Muse Code): a compiled table, so what runs on
+//! (Antigravity, Muse Code): a compiled table, so what runs on
 //! the user's machine comes from srv and never from a caller
 //! (SPEC_ONE_CLICK_VENDOR_CLI_INSTALL_2026_10_20.md §4.1).
 //!
@@ -142,24 +142,6 @@ pub(crate) const VENDOR_INSTALLS: &[VendorInstall] = &[
         timeout_secs: TEN_MINUTES,
     },
     VendorInstall {
-        provider_id: "grok",
-        display: "Grok Build",
-        unix: Recipe::Script {
-            shown: "curl -fsSL https://x.ai/cli/install.sh | bash",
-            url: "https://x.ai/cli/install.sh",
-            interpreter: Interpreter::Bash,
-            env: &[],
-        },
-        windows: Recipe::Script {
-            shown: "irm https://x.ai/cli/install.ps1 | iex",
-            url: "https://x.ai/cli/install.ps1",
-            interpreter: Interpreter::PowerShell,
-            env: &[],
-        },
-        allowed_hosts: &["x.ai"],
-        timeout_secs: TEN_MINUTES,
-    },
-    VendorInstall {
         provider_id: "muse",
         display: "Muse Code",
         unix: Recipe::Script {
@@ -213,7 +195,7 @@ mod tests {
     fn the_table_covers_exactly_the_vendor_installed_clis() {
         let mut ids: Vec<&str> = VENDOR_INSTALLS.iter().map(|v| v.provider_id).collect();
         ids.sort_unstable();
-        assert_eq!(ids, ["antigravity", "grok", "muse"]);
+        assert_eq!(ids, ["antigravity", "muse"]);
     }
 
     #[test]
@@ -279,8 +261,8 @@ mod tests {
 
     #[test]
     fn the_consent_names_what_runs() {
-        let grok = vendor_install("grok").unwrap();
-        let unix = grok.recipe(Os::Unix).runs();
+        let agy = vendor_install("antigravity").unwrap();
+        let unix = agy.recipe(Os::Unix).runs();
         assert!(unix.contains("install.sh") && unix.contains("bash"), "{unix}");
     }
 

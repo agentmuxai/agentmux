@@ -467,8 +467,8 @@ mod tests {
         Ok(UserAnswer { answered, approve, ..Default::default() })
     }
 
-    fn grok() -> &'static VendorInstall {
-        vendor_install("grok").unwrap()
+    fn antigravity() -> &'static VendorInstall {
+        vendor_install("antigravity").unwrap()
     }
 
     fn plan(program: &str, args: &[&str]) -> Plan {
@@ -476,7 +476,7 @@ mod tests {
     }
 
     fn run_of(state: &AppState) -> Run {
-        let entry = grok();
+        let entry = antigravity();
         Run { entry, recipe: entry.recipe(Os::current()), out: Emitter::new(state.broker.clone(), "vendorinstall-test") }
     }
 
@@ -489,12 +489,12 @@ mod tests {
                 assert_eq!(info.download_url.is_some(), matches!(v.recipe(os), Recipe::Script { .. }), "{} {os:?}", v.provider_id);
             }
         }
-        assert_eq!(info_for("grok", Os::Unix).command, "curl -fsSL https://x.ai/cli/install.sh | bash");
+        assert_eq!(info_for("antigravity", Os::Unix).command, "curl -fsSL https://antigravity.google/cli/install.sh | bash");
     }
 
     #[test]
     fn a_provider_that_has_no_vendor_installer_is_not_available() {
-        for id in ["claude", "codex", "goose", "", "../grok", "grok "] {
+        for id in ["claude", "codex", "goose", "", "grok", "../antigravity", "antigravity "] {
             let info = info_for(id, Os::Unix);
             assert!(!info.available && info.command.is_empty() && info.download_url.is_none(), "{id:?}");
         }
@@ -502,9 +502,9 @@ mod tests {
 
     #[test]
     fn the_question_names_the_vendors_command_what_runs_and_the_missing_isolation() {
-        let q = approval_question(grok(), grok().recipe(Os::Unix));
+        let q = approval_question(antigravity(), antigravity().recipe(Os::Unix));
         assert_eq!(q["kind"], "consent");
-        assert_eq!(q["title"], "Install Grok Build");
+        assert_eq!(q["title"], "Install Antigravity");
         let message = q["message"].as_str().unwrap();
         assert!(message.contains("install.sh | bash"), "{message}");
         assert!(message.contains("then run that file with: bash"), "{message}");
@@ -514,11 +514,11 @@ mod tests {
 
     #[test]
     fn only_an_answered_yes_approves() {
-        assert!(require_approval(answer(true, true), "Grok Build").is_ok());
-        assert!(require_approval(answer(true, false), "Grok Build").unwrap_err().contains("declined"));
-        assert!(require_approval(answer(false, true), "Grok Build").unwrap_err().contains("in time"));
-        assert!(require_approval(answer(false, false), "Grok Build").is_err());
-        assert!(require_approval(Err("no AgentMux window is connected to ask the user in".into()), "Grok Build")
+        assert!(require_approval(answer(true, true), "Antigravity").is_ok());
+        assert!(require_approval(answer(true, false), "Antigravity").unwrap_err().contains("declined"));
+        assert!(require_approval(answer(false, true), "Antigravity").unwrap_err().contains("in time"));
+        assert!(require_approval(answer(false, false), "Antigravity").is_err());
+        assert!(require_approval(Err("no AgentMux window is connected to ask the user in".into()), "Antigravity")
             .unwrap_err()
             .contains("needs the user's approval"));
     }
@@ -528,9 +528,9 @@ mod tests {
     async fn with_no_window_to_ask_in_nothing_starts_and_the_claim_is_released() {
         let state = crate::server::tests::test_state();
         assert!(state.host_ipc.lock().await.is_none());
-        let err = start_install(&state, state.install_sessions.clone(), state.broker.clone(), "grok").await.unwrap_err();
+        let err = start_install(&state, state.install_sessions.clone(), state.broker.clone(), "antigravity").await.unwrap_err();
         assert!(err.contains("no AgentMux window is connected"), "{err}");
-        assert!(state.install_sessions.try_claim_system_tool(&claim_key(grok())), "the refusal let go of the claim");
+        assert!(state.install_sessions.try_claim_system_tool(&claim_key(antigravity())), "the refusal let go of the claim");
     }
 
     #[tokio::test]
@@ -543,8 +543,8 @@ mod tests {
     #[tokio::test]
     async fn a_second_request_while_one_is_pending_is_refused() {
         let state = crate::server::tests::test_state();
-        assert!(state.install_sessions.try_claim_system_tool(&claim_key(grok())));
-        let err = start_install(&state, state.install_sessions.clone(), state.broker.clone(), "grok").await.unwrap_err();
+        assert!(state.install_sessions.try_claim_system_tool(&claim_key(antigravity())));
+        let err = start_install(&state, state.install_sessions.clone(), state.broker.clone(), "antigravity").await.unwrap_err();
         assert!(err.contains("already being installed"), "{err}");
     }
 
