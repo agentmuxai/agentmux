@@ -23,6 +23,7 @@ type FakeHover = {
     onSubmenuLeave: Mock;
     setSubmenuEl: Mock;
     close: Mock;
+    closeForPeer: Mock;
     openNow: Mock;
     dispose: Mock;
 };
@@ -72,7 +73,8 @@ vi.mock("@/app/util/menu-position", () => ({
         return Promise.resolve(h.placed);
     },
 }));
-vi.mock("@/app/util/submenu-hover", () => ({
+vi.mock("@/app/util/submenu-hover", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("@/app/util/submenu-hover")>()),
     createSubmenuHover: (opts: SubmenuHoverOptions) => {
         const hover: FakeHover = {
             opts,
@@ -82,6 +84,11 @@ vi.mock("@/app/util/submenu-hover", () => ({
             onSubmenuLeave: vi.fn(),
             setSubmenuEl: vi.fn(),
             close: vi.fn(),
+            // Closes at once and holds nothing: the safe-triangle hold is covered by submenu-hover.test.ts.
+            closeForPeer: vi.fn(() => {
+                hover.close();
+                return false;
+            }),
             openNow: vi.fn(),
             dispose: vi.fn(),
         };
