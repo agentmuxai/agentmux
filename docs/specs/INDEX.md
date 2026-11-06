@@ -730,6 +730,7 @@ partial list.
 | [`SPEC_HOST_UI_THREAD_HANG_WATCHDOG_2026_08_14`](SPEC_HOST_UI_THREAD_HANG_WATCHDOG_2026_08_14.md) | SPEC: Host UI-thread hang detection, forensic dump, and auto-recovery |
 | [`SPEC_IDENTITY_STORE_SPLIT_2026_08_17`](SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md) | SPEC: Split the multi-concern shared store — permanent global identity data vs. explicitly-disposable Armory test accounts |
 | [`SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09`](SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md) | Spec: Instruction and Memory Portability |
+| [`SPEC_ISOLATED_INSTALL_FOR_NON_NPM_CLIS_2026_11_05`](SPEC_ISOLATED_INSTALL_FOR_NON_NPM_CLIS_2026_11_05.md) | Spec: AgentMux installs its own isolated, pinned copy of all 19 agent CLIs |
 | [`SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02`](SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md) | SPEC: Cross-channel jekt trust — closing the last unverifiable same-machine tier |
 | [`SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01`](SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01.md) | SPEC: jekt delivery that tells the truth — receiver state, one mailbox, receipts |
 | [`SPEC_JEKT_HOLD_FOR_COLD_SESSIONS_2026_10_25`](SPEC_JEKT_HOLD_FOR_COLD_SESSIONS_2026_10_25.md) | Spec: hold a routine message for an agent whose session has gone cold |

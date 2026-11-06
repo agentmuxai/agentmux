@@ -1,6 +1,6 @@
 # Spec: AgentMux installs its own isolated, pinned copy of all 19 agent CLIs
 
-**Status:** active — approved by the operator 2026-11-05 ("ok, lets wrap that up, lets get all the harnesses isolated"), relayed by AgentY. PR 1 (goose: `cli_download.rs`, the Install button, lookup) is built and ships with this spec; PRs 2–5 (§9) are left.
+**Status:** active — approved by the operator 2026-11-05 ("ok, lets wrap that up, lets get all the harnesses isolated"), relayed by AgentY. PR 1 (goose: `cli_download.rs`, the Install button, lookup) is #6590, which carries this spec; PRs 2–5 (§9) are left.
 **Date:** 2026-11-05. Task #1571 (spec), #1572 (build). Author: Lazo. Verified against `agentmux` `main` @ `bf7e5b9863`.
 **Builds on:** `SPEC_NINE_NEW_HARNESSES_2026_10_14.md` (the six providers), `SPEC_AGENT_CLI_ISOLATION_NOTE_2026_10_18.md` (what is isolated today), `SPEC_SIGNED_UPDATE_CHECKSUMS_2026_10_25.md` (same "pinned hash, no trust in the origin" idea).
 **Research behind it:** a sourced fetch of each vendor's real distribution on 2026-11-05 (release assets, checksums, signatures, self-update switches, licences; downloads and Authenticode checks measured). Not committed.
