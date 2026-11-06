@@ -29,7 +29,7 @@
  * tests drive it with plain signals; `useOfflineInput.ts` wires the real ones.
  */
 
-import { type Accessor, createEffect, createSignal, onCleanup, untrack } from "solid-js";
+import { type Accessor, createEffect, createSignal, onCleanup, type Setter, untrack } from "solid-js";
 import type { PaneFailure } from "@/app/store/agent-pane-state/types";
 import type { AgentFailure } from "@/types/rpc/AgentFailure";
 import type { AttachmentRef } from "@/types/rpc/AttachmentRef";
@@ -231,74 +231,99 @@ const defaultSettleMs = () => 2_000 + Math.floor(Math.random() * 3_000);
 
 const defaultClock = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
 
-export function createFailedTurnRecovery(deps: FailedTurnDeps): FailedTurnRecovery {
-    const now = deps.now ?? Date.now;
-    const clock = deps.clockTime ?? defaultClock;
-    const [turn, setTurn] = createSignal<FailedTurn | null>(null);
-    const [notices, setNotices] = createSignal<OfflineNotice[]>([]);
-    const offerId = newNoticeId();
-    let disposed = false;
-    let settleTimer: ReturnType<typeof setTimeout> | null = null;
+/** What one recovery's functions share: its inputs, the turn it tracks and its timers. */
+interface RecoveryState {
+    deps: FailedTurnDeps;
+    now: () => number;
+    clock: (ms: number) => string;
+    turn: Accessor<FailedTurn | null>;
+    setTurn: Setter<FailedTurn | null>;
+    notices: Accessor<OfflineNotice[]>;
+    setNotices: Setter<OfflineNotice[]>;
+    offerId: number;
+    disposed: boolean;
+    settleTimer: ReturnType<typeof setTimeout> | null;
     /** The API has been not checked for longer than {@link UNKNOWN_HOLD_MS}:
      *  its status isn't reaching the pane, which mustn't keep the turn
      *  waiting for good (held input stops waiting on it too). */
-    const [unknownTooLong, setUnknownTooLong] = createSignal(false);
-    let unknownTimer: ReturnType<typeof setTimeout> | null = null;
+    unknownTooLong: Accessor<boolean>;
+    setUnknownTooLong: Setter<boolean>;
+    unknownTimer: ReturnType<typeof setTimeout> | null;
     /** When the last failure this mount saw landed: a turn started before it isn't the next one's. */
-    let lastFailureAt = -Infinity;
-    onCleanup(() => {
-        disposed = true;
-        if (settleTimer) clearTimeout(settleTimer);
-        if (unknownTimer) clearTimeout(unknownTimer);
-    });
+    lastFailureAt: number;
+    /** A retry that didn't go, or whose answer never came, waits here for the pane to be idle. */
+    putBackDue: Accessor<FailedTurn | null>;
+    setPutBackDue: Setter<FailedTurn | null>;
+}
 
+function watchUnknownApi(r: RecoveryState): void {
     createEffect(() => {
-        const unknown = deps.api() === "unknown";
-        if (unknownTimer) clearTimeout(unknownTimer);
-        unknownTimer = null;
-        setUnknownTooLong(false);
-        if (unknown) unknownTimer = setTimeout(() => setUnknownTooLong(true), UNKNOWN_HOLD_MS);
+        const unknown = r.deps.api() === "unknown";
+        if (r.unknownTimer) clearTimeout(r.unknownTimer);
+        r.unknownTimer = null;
+        r.setUnknownTooLong(false);
+        if (unknown) r.unknownTimer = setTimeout(() => r.setUnknownTooLong(true), UNKNOWN_HOLD_MS);
     });
-    const answers = () => deps.api() === "online" || (deps.api() === "unknown" && unknownTooLong());
+}
 
-    const flying = () => deps.storage.mark()?.state === "sending";
-    const snapshotOf = (t: FailedTurn) => t.snapshot ?? failedTurnSnapshot(deps.document());
-    const isTurn = (t: FailedTurn | null, at: number) => t?.failure.at === at;
-    const notice = (text: string) => setNotices((list) => [...list, { id: newNoticeId(), text }]);
-    const which = (s: FailedTurnSnapshot) => (s.sentAt ? `your message from ${clock(s.sentAt)}` : "your last message");
-    /** A retry of this message is on its way, or its answer never came. */
-    const unsure = (s: FailedTurnSnapshot) => {
-        const m = deps.storage.mark();
-        return m && m.state !== "sent" && m.text === s.message?.text ? m.state : null;
-    };
+function answers(r: RecoveryState): boolean {
+    return r.deps.api() === "online" || (r.deps.api() === "unknown" && r.unknownTooLong());
+}
+
+function flying(r: RecoveryState): boolean {
+    return r.deps.storage.mark()?.state === "sending";
+}
+
+function snapshotOf(r: RecoveryState, t: FailedTurn): FailedTurnSnapshot {
+    return t.snapshot ?? failedTurnSnapshot(r.deps.document());
+}
+
+function isTurn(t: FailedTurn | null, at: number): boolean {
+    return t?.failure.at === at;
+}
+
+function notice(r: RecoveryState, text: string): void {
+    r.setNotices((list) => [...list, { id: newNoticeId(), text }]);
+}
+
+function which(r: RecoveryState, snap: FailedTurnSnapshot): string {
+    return snap.sentAt ? `your message from ${r.clock(snap.sentAt)}` : "your last message";
+}
+
+/** A retry of this message is on its way, or its answer never came. */
+function unsure(r: RecoveryState, snap: FailedTurnSnapshot): "sending" | "unknown" | null {
+    const m = r.deps.storage.mark();
+    return m && m.state !== "sent" && m.text === snap.message?.text ? m.state : null;
+}
 
     // A network failure from a tracked API starts waiting; any other failure
     // ends the wait, and so does the row going away, unless the operator's
     // own send or a retry took it (the turn is then offered, or settled).
+function watchFailure(r: RecoveryState): void {
     createEffect(() => {
-        const f = deps.failure();
-        const tracked = deps.tracked();
+        const f = r.deps.failure();
+        const tracked = r.deps.tracked();
         untrack(() => {
-            const t = turn();
+            const t = r.turn();
             if (!f) {
-                if (!t || t.offered || flying()) return;
-                if (!t.typedSince) setTurn(null);
+                if (!t || t.offered || flying(r)) return;
+                if (!t.typedSince) r.setTurn(null);
                 // Its Retry went with the row: decide again, to offer it once their message has gone.
-                else if (t.decided) setTurn({ ...t, decided: false });
+                else if (t.decided) r.setTurn({ ...t, decided: false });
                 return;
             }
-            const since = lastFailureAt;
+            const since = r.lastFailureAt;
             // One put back after a retry keeps its own, earlier time.
-            if (f.at > lastFailureAt) lastFailureAt = f.at;
+            if (f.at > r.lastFailureAt) r.lastFailureAt = f.at;
             if (f.data.code !== "network" || !tracked) {
-                setTurn(null);
+                r.setTurn(null);
                 return;
             }
             if (isTurn(t, f.at)) return;
-            const mark = deps.storage.mark();
-            const started = deps.started();
-            const snapshot = deps.ready() ? failedTurnSnapshot(deps.document()) : null;
-            setTurn({
+            const mark = r.deps.storage.mark();
+            const started = r.deps.started();
+            const snapshot = r.deps.ready() ? failedTurnSnapshot(r.deps.document()) : null;
+            r.setTurn({
                 failure: f,
                 live:
                     !!started &&
@@ -307,7 +332,7 @@ export function createFailedTurnRecovery(deps: FailedTurnDeps): FailedTurnRecove
                     started.at <= f.at &&
                     !!snapshot &&
                     snapshot.message?.text === started.content,
-                typedSince: deps.held() > 0,
+                typedSince: r.deps.held() > 0,
                 snapshot,
                 decided: false,
                 offered: false,
@@ -315,219 +340,278 @@ export function createFailedTurnRecovery(deps: FailedTurnDeps): FailedTurnRecove
             });
         });
     });
+}
 
-    /** The retry went: the turn is done with, and so is a row put back for it. */
-    const went = (t: FailedTurn, mark: RetryMark, prev: RetryMark | null, byItself: boolean) => {
-        if (isTurn(turn(), t.failure.at)) setTurn(null);
-        if (deps.failure()?.at === t.failure.at) deps.clearFailure();
-        if (prev?.text === mark.text && prev.state !== "sent") notice("Sent your message again. It may have gone once already.");
-        else if (byItself) notice(`Back online: sent ${which(snapshotOf(t))} again, since its turn failed while the API was unreachable.`);
-    };
+/** The retry went: the turn is done with, and so is a row put back for it. */
+function went(r: RecoveryState, t: FailedTurn, mark: RetryMark, prev: RetryMark | null, byItself: boolean): void {
+    if (isTurn(r.turn(), t.failure.at)) r.setTurn(null);
+    if (r.deps.failure()?.at === t.failure.at) r.deps.clearFailure();
+    if (prev?.text === mark.text && prev.state !== "sent") notice(r, "Sent your message again. It may have gone once already.");
+    else if (byItself) notice(r, `Back online: sent ${which(r, snapshotOf(r, t))} again, since its turn failed while the API was unreachable.`);
+}
 
-    /** It didn't go, or may not have: the row (or the offer) comes back with
-     *  its Retry, once the pane is idle. Putting a failure back ends a turn
-     *  that is running, and an unanswered retry's own turn may be. */
-    const [putBackDue, setPutBackDue] = createSignal<FailedTurn | null>(null);
-    const putBack = (t: FailedTurn) => setPutBackDue(t);
+/** It didn't go, or may not have: the row (or the offer) comes back with
+ *  its Retry, once the pane is idle. Putting a failure back ends a turn
+ *  that is running, and an unanswered retry's own turn may be. */
+function putBack(r: RecoveryState, t: FailedTurn): void {
+    r.setPutBackDue(t);
+}
+
+function watchPutBack(r: RecoveryState): void {
     createEffect(() => {
-        const t = putBackDue();
-        if (!t || deps.working()) return;
+        const t = r.putBackDue();
+        if (!t || r.deps.working()) return;
         untrack(() => {
-            setPutBackDue(null);
-            const cur = turn();
-            if (disposed || !isTurn(cur, t.failure.at) || cur!.offered || deps.failure()) return;
+            r.setPutBackDue(null);
+            const cur = r.turn();
+            if (r.disposed || !isTurn(cur, t.failure.at) || cur!.offered || r.deps.failure()) return;
             // Settled while the turn ran: a late answer, the transcript, or the turn completing.
-            const m = deps.storage.mark();
-            if (m?.state === "sent" && m.text === snapshotOf(t).message?.text) return;
-            deps.restoreFailure(t.failure);
+            const m = r.deps.storage.mark();
+            if (m?.state === "sent" && m.text === snapshotOf(r, t).message?.text) return;
+            r.deps.restoreFailure(t.failure);
         });
     });
+}
 
-    const isCurrent = (mark: RetryMark) => {
-        const m = deps.storage.mark();
-        return m?.at === mark.at && m.text === mark.text;
-    };
+function isCurrent(r: RecoveryState, mark: RetryMark): boolean {
+    const m = r.deps.storage.mark();
+    return m?.at === mark.at && m.text === mark.text;
+}
 
-    const settle = (t: FailedTurn, mark: RetryMark, prev: RetryMark | null, byItself: boolean, outcome: DeliveryOutcome) => {
-        // Already settled: the turn it started completed first.
-        if (!isCurrent(mark) || deps.storage.mark()?.state === "sent") return;
-        if (outcome === "accepted") {
-            deps.storage.saveMark({ ...mark, state: "sent" });
-            went(t, mark, prev, byItself);
-            return;
-        }
-        // Rejected: this one didn't go; an earlier one may have.
-        deps.storage.saveMark(outcome === "rejected" ? prev : { ...mark, state: "unknown" });
-        putBack(t);
-    };
+function settle(r: RecoveryState, t: FailedTurn, mark: RetryMark, prev: RetryMark | null, byItself: boolean, outcome: DeliveryOutcome): void {
+    // Already settled: the turn it started completed first.
+    if (!isCurrent(r, mark) || r.deps.storage.mark()?.state === "sent") return;
+    if (outcome === "accepted") {
+        r.deps.storage.saveMark({ ...mark, state: "sent" });
+        went(r, t, mark, prev, byItself);
+        return;
+    }
+    // Rejected: this one didn't go; an earlier one may have.
+    r.deps.storage.saveMark(outcome === "rejected" ? prev : { ...mark, state: "unknown" });
+    putBack(r, t);
+}
 
-    /** srv's answer after the send stopped waiting for it. */
-    const settleLate = (t: FailedTurn, mark: RetryMark, prev: RetryMark | null, byItself: boolean, ok: boolean) => {
-        if (!isCurrent(mark) || deps.storage.mark()?.state !== "unknown") return;
-        if (!ok) {
-            deps.storage.saveMark(prev);
-            return;
-        }
-        deps.storage.saveMark({ ...mark, state: "sent" });
-        went(t, mark, prev, byItself);
-    };
+/** srv's answer after the send stopped waiting for it. */
+function settleLate(r: RecoveryState, t: FailedTurn, mark: RetryMark, prev: RetryMark | null, byItself: boolean, ok: boolean): void {
+    if (!isCurrent(r, mark) || r.deps.storage.mark()?.state !== "unknown") return;
+    if (!ok) {
+        r.deps.storage.saveMark(prev);
+        return;
+    }
+    r.deps.storage.saveMark({ ...mark, state: "sent" });
+    went(r, t, mark, prev, byItself);
+}
 
-    /** Send the turn's message again, once: stored as on its way before it goes. */
-    const attempt = async (t: FailedTurn, auto: boolean): Promise<void> => {
-        const snapshot = snapshotOf(t);
-        const message = snapshot.message;
-        if (!message || flying()) return;
-        const prev = deps.storage.mark();
-        // Retrying a failed automatic retry by hand doesn't earn it another automatic one.
-        const wasAuto = prev?.text === message.text && prev.auto;
-        const mark: RetryMark = { text: message.text, at: now(), auto: auto || wasAuto, state: "sending" };
-        deps.storage.saveMark(mark);
-        const sending = { ...t, snapshot, decided: true };
-        setTurn(sending);
-        const outcome = await deps.lock.run(() =>
-            deps.deliver(message.text, message.attachments, (ok) => settleLate(sending, mark, prev, auto, ok))
-        );
-        settle(sending, mark, prev, auto, outcome);
-    };
+/** Send the turn's message again, once: stored as on its way before it goes. */
+async function attempt(r: RecoveryState, t: FailedTurn, auto: boolean): Promise<void> {
+    const snapshot = snapshotOf(r, t);
+    const message = snapshot.message;
+    if (!message || flying(r)) return;
+    const prev = r.deps.storage.mark();
+    // Retrying a failed automatic retry by hand doesn't earn it another automatic one.
+    const wasAuto = prev?.text === message.text && prev.auto;
+    const mark: RetryMark = { text: message.text, at: r.now(), auto: auto || wasAuto, state: "sending" };
+    r.deps.storage.saveMark(mark);
+    const sending = { ...t, snapshot, decided: true };
+    r.setTurn(sending);
+    const outcome = await r.deps.lock.run(() =>
+        r.deps.deliver(message.text, message.attachments, (ok) => settleLate(r, sending, mark, prev, auto, ok))
+    );
+    settle(r, sending, mark, prev, auto, outcome);
+}
 
-    const decide = (t: FailedTurn) => {
-        const snapshot = snapshotOf(t);
-        const decision = decideOnReconnect({
-            turn: snapshot,
-            typedSince: t.typedSince,
-            live: t.live,
-            autoRetryOn: deps.autoRetryOn(),
-            mark: deps.storage.mark(),
-        });
-        if (decision.kind === "retry") {
-            void attempt({ ...t, snapshot }, true);
-            return;
-        }
-        // The row still offers Retry unless the operator's own send took it;
-        // then the offer is under the composer.
-        const offered = decision.reason === "typed" && !deps.failure();
-        setTurn({ ...t, snapshot, decided: true, offered });
-    };
+function decide(r: RecoveryState, t: FailedTurn): void {
+    const snapshot = snapshotOf(r, t);
+    const decision = decideOnReconnect({
+        turn: snapshot,
+        typedSince: t.typedSince,
+        live: t.live,
+        autoRetryOn: r.deps.autoRetryOn(),
+        mark: r.deps.storage.mark(),
+    });
+    if (decision.kind === "retry") {
+        void attempt(r, { ...t, snapshot }, true);
+        return;
+    }
+    // The row still offers Retry unless the operator's own send took it;
+    // then the offer is under the composer.
+    const offered = decision.reason === "typed" && !r.deps.failure();
+    r.setTurn({ ...t, snapshot, decided: true, offered });
+}
 
-    // Decide once the API answers, the pane is idle and held messages have gone.
+// Decide once the API answers, the pane is idle and held messages have gone.
+function watchSettleDue(r: RecoveryState): void {
     createEffect(() => {
-        const t = turn();
+        const t = r.turn();
         const due =
-            !!t && !t.decided && answers() && !deps.retrying() && !deps.working() && deps.ready() && deps.held() === 0 && !flying();
-        if (settleTimer) clearTimeout(settleTimer);
-        settleTimer = null;
+            !!t && !t.decided && answers(r) && !r.deps.retrying() && !r.deps.working() && r.deps.ready() && r.deps.held() === 0 && !flying(r);
+        if (r.settleTimer) clearTimeout(r.settleTimer);
+        r.settleTimer = null;
         if (!due) return;
-        settleTimer = setTimeout(() => {
-            settleTimer = null;
-            if (!disposed && untrack(turn) === t) untrack(() => decide(t));
-        }, (deps.settleMs ?? defaultSettleMs)());
+        r.settleTimer = setTimeout(() => {
+            r.settleTimer = null;
+            if (!r.disposed && untrack(r.turn) === t) untrack(() => decide(r, t));
+        }, (r.deps.settleMs ?? defaultSettleMs)());
     });
+}
 
-    // A retry an earlier mount had on its way went: so did this failure.
+// A retry an earlier mount had on its way went: so did this failure.
+function watchPriorAttempt(r: RecoveryState): void {
     createEffect(() => {
-        const m = deps.storage.mark();
+        const m = r.deps.storage.mark();
         untrack(() => {
-            const t = turn();
-            if (t?.priorAttempt !== undefined && m?.at === t.priorAttempt && m.state === "sent") went(t, m, null, m.auto);
+            const t = r.turn();
+            if (t?.priorAttempt !== undefined && m?.at === t.priorAttempt && m.state === "sent") went(r, t, m, null, m.auto);
         });
     });
+}
 
-    // One whose answer never came, found in the transcript, did go.
+// One whose answer never came, found in the transcript, did go.
+function watchTranscript(r: RecoveryState): void {
     createEffect(() => {
-        const m = deps.storage.mark();
-        if (m?.state !== "unknown" || !deps.ready()) return;
-        const doc = deps.document();
+        const m = r.deps.storage.mark();
+        if (m?.state !== "unknown" || !r.deps.ready()) return;
+        const doc = r.deps.document();
         const found = doc.some((n) => n.type === "user_message" && n.message === m.text && typeof n.timestamp === "number" && n.timestamp >= m.at);
         if (!found) return;
         untrack(() => {
-            deps.storage.saveMark({ ...m, state: "sent" });
-            const t = turn();
-            if (t && snapshotOf(t).message?.text === m.text) went(t, m, null, false);
+            r.deps.storage.saveMark({ ...m, state: "sent" });
+            const t = r.turn();
+            if (t && snapshotOf(r, t).message?.text === m.text) went(r, t, m, null, false);
         });
     });
+}
 
-    const retry = (): boolean => {
-        const t = untrack(turn);
-        const f = untrack(deps.failure);
-        if (!t || (f && f.at !== t.failure.at)) return false;
-        if (untrack(flying)) return true;
-        if (!untrack(() => snapshotOf(t)).message) return false;
-        void untrack(() => attempt(t, false));
-        return true;
-    };
+function retry(r: RecoveryState): boolean {
+    const t = untrack(r.turn);
+    const f = untrack(r.deps.failure);
+    if (!t || (f && f.at !== t.failure.at)) return false;
+    if (untrack(() => flying(r))) return true;
+    if (!untrack(() => snapshotOf(r, t)).message) return false;
+    void untrack(() => attempt(r, t, false));
+    return true;
+}
 
-    const drop = () => {
-        setTurn(null);
-        if (!flying()) deps.storage.saveMark(null);
-    };
+function drop(r: RecoveryState): void {
+    r.setTurn(null);
+    if (!flying(r)) r.deps.storage.saveMark(null);
+}
 
-    const offerText = (t: FailedTurn) => {
-        const s = snapshotOf(t);
-        const what = which(s);
-        const base = `Back online. ${what[0].toUpperCase()}${what.slice(1)} failed while the API was unreachable; it wasn't sent again, since you wrote after it.`;
-        return unsure(s) === "unknown" ? `${base} A retry may have gone already.` : base;
-    };
+function offerText(r: RecoveryState, t: FailedTurn): string {
+    const s = snapshotOf(r, t);
+    const what = which(r, s);
+    const base = `Back online. ${what[0].toUpperCase()}${what.slice(1)} failed while the API was unreachable; it wasn't sent again, since you wrote after it.`;
+    return unsure(r, s) === "unknown" ? `${base} A retry may have gone already.` : base;
+}
 
-    /** Not decided yet, and would be retried by itself. */
-    const willRetry = (t: FailedTurn) =>
+/** Not decided yet, and would be retried by itself. */
+function willRetry(r: RecoveryState, t: FailedTurn): boolean {
+    return (
         !t.decided &&
         decideOnReconnect({
-            turn: snapshotOf(t),
+            turn: snapshotOf(r, t),
             typedSince: t.typedSince,
             live: t.live,
-            autoRetryOn: deps.autoRetryOn(),
-            mark: deps.storage.mark(),
-        }).kind === "retry";
+            autoRetryOn: r.deps.autoRetryOn(),
+            mark: r.deps.storage.mark(),
+        }).kind === "retry"
+    );
+}
 
-    const reconnectHint = (): string | null => {
-        const t = turn();
-        if (!t || t.offered) return null;
-        const state = unsure(snapshotOf(t));
-        if (state === "sending") return "sending it again";
-        if (state === "unknown") return "a retry may have gone already";
-        return willRetry(t) ? "retries by itself when the API is back" : null;
+function reconnectHint(r: RecoveryState): string | null {
+    const t = r.turn();
+    if (!t || t.offered) return null;
+    const state = unsure(r, snapshotOf(r, t));
+    if (state === "sending") return "sending it again";
+    if (state === "unknown") return "a retry may have gone already";
+    return willRetry(r, t) ? "retries by itself when the API is back" : null;
+}
+
+function offeredNotices(r: RecoveryState): OfflineNotice[] {
+    const t = r.turn();
+    const list = r.notices();
+    if (!t?.offered) return list;
+    return [...list, { id: r.offerId, text: offerText(r, t), retry: () => void retry(r), retryDisabled: flying(r) }];
+}
+
+function dismissNotice(r: RecoveryState, id: number): void {
+    if (id === r.offerId) drop(r);
+    else r.setNotices((list) => list.filter((n) => n.id !== id));
+}
+
+function typed(r: RecoveryState): void {
+    // What it did by itself is old news once the operator types.
+    r.setNotices([]);
+    const t = untrack(r.turn);
+    if (t && !t.typedSince) r.setTurn({ ...t, typedSince: true, snapshot: untrack(() => snapshotOf(r, t)) });
+    // A new message is a new turn: its failure may be retried, even
+    // if it repeats the text an earlier automatic retry sent.
+    if (untrack(r.deps.storage.mark)?.state === "sent") r.deps.storage.saveMark(null);
+}
+
+function turnCompleted(r: RecoveryState): void {
+    const m = untrack(r.deps.storage.mark);
+    const s = untrack(r.deps.started);
+    // The retry this pane started completed: it went, whatever its answer said.
+    if (m && m.state !== "sent" && s && !s.hidden && s.content === m.text && s.at >= m.at) {
+        r.deps.storage.saveMark({ ...m, state: "sent" });
+        const t = untrack(r.turn);
+        if (t && untrack(() => snapshotOf(r, t)).message?.text === m.text) untrack(() => went(r, t, m, null, m.auto));
+    }
+    // A turn that completed is done with its retry.
+    if (untrack(r.deps.storage.mark)?.state === "sent") r.deps.storage.saveMark(null);
+}
+
+function pending(r: RecoveryState): boolean {
+    const t = r.turn();
+    return flying(r) || (!!t && willRetry(r, t));
+}
+
+export function createFailedTurnRecovery(deps: FailedTurnDeps): FailedTurnRecovery {
+    const [turn, setTurn] = createSignal<FailedTurn | null>(null);
+    const [notices, setNotices] = createSignal<OfflineNotice[]>([]);
+    const [unknownTooLong, setUnknownTooLong] = createSignal(false);
+    const [putBackDue, setPutBackDue] = createSignal<FailedTurn | null>(null);
+    const r: RecoveryState = {
+        deps,
+        now: deps.now ?? Date.now,
+        clock: deps.clockTime ?? defaultClock,
+        turn,
+        setTurn,
+        notices,
+        setNotices,
+        offerId: newNoticeId(),
+        disposed: false,
+        settleTimer: null,
+        unknownTooLong,
+        setUnknownTooLong,
+        unknownTimer: null,
+        lastFailureAt: -Infinity,
+        putBackDue,
+        setPutBackDue,
     };
+    onCleanup(() => {
+        r.disposed = true;
+        if (r.settleTimer) clearTimeout(r.settleTimer);
+        if (r.unknownTimer) clearTimeout(r.unknownTimer);
+    });
+    watchUnknownApi(r);
+    watchFailure(r);
+    watchPutBack(r);
+    watchSettleDue(r);
+    watchPriorAttempt(r);
+    watchTranscript(r);
 
     return {
-        notices: () => {
-            const t = turn();
-            const list = notices();
-            if (!t?.offered) return list;
-            return [...list, { id: offerId, text: offerText(t), retry: () => void retry(), retryDisabled: flying() }];
-        },
-        dismissNotice: (id) => {
-            if (id === offerId) drop();
-            else setNotices((list) => list.filter((n) => n.id !== id));
-        },
-        waitsForReconnect: (code) => code === "network" && untrack(deps.tracked) && untrack(deps.autoRetryOn),
-        reconnectHint,
-        retry,
-        retryBusy: () => !!turn() && flying(),
-        failureDismissed: drop,
-        typed: () => {
-            // What it did by itself is old news once the operator types.
-            setNotices([]);
-            const t = untrack(turn);
-            if (t && !t.typedSince) setTurn({ ...t, typedSince: true, snapshot: untrack(() => snapshotOf(t)) });
-            // A new message is a new turn: its failure may be retried, even
-            // if it repeats the text an earlier automatic retry sent.
-            if (untrack(deps.storage.mark)?.state === "sent") deps.storage.saveMark(null);
-        },
-        turnCompleted: () => {
-            const m = untrack(deps.storage.mark);
-            const s = untrack(deps.started);
-            // The retry this pane started completed: it went, whatever its answer said.
-            if (m && m.state !== "sent" && s && !s.hidden && s.content === m.text && s.at >= m.at) {
-                deps.storage.saveMark({ ...m, state: "sent" });
-                const t = untrack(turn);
-                if (t && untrack(() => snapshotOf(t)).message?.text === m.text) untrack(() => went(t, m, null, m.auto));
-            }
-            // A turn that completed is done with its retry.
-            if (untrack(deps.storage.mark)?.state === "sent") deps.storage.saveMark(null);
-        },
-        pending: () => {
-            const t = turn();
-            return flying() || (!!t && willRetry(t));
-        },
+        notices: () => offeredNotices(r),
+        dismissNotice: (id) => dismissNotice(r, id),
+        waitsForReconnect: (code) => code === "network" && untrack(r.deps.tracked) && untrack(r.deps.autoRetryOn),
+        reconnectHint: () => reconnectHint(r),
+        retry: () => retry(r),
+        retryBusy: () => !!r.turn() && flying(r),
+        failureDismissed: () => drop(r),
+        typed: () => typed(r),
+        turnCompleted: () => turnCompleted(r),
+        pending: () => pending(r),
     };
 }
