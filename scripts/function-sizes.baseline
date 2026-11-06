@@ -330,7 +330,7 @@
 174 crates/srv/src/server/service/tear_off.rs::handle_redock_floating_pane
 110 crates/srv/src/server/service/tear_off.rs::handle_tear_off_block
 124 crates/srv/src/server/service/window_close.rs::handle_close_window
-224 crates/srv/src/server/service/window_create.rs::create_default_contents
+217 crates/srv/src/server/service/window_create.rs::create_default_contents
 301 crates/srv/src/server/service/window_create.rs::handle_create_window
 140 crates/srv/src/server/shell_secrets.rs::inject
 135 crates/srv/src/server/system_install_handlers.rs::spawn_system_install_task

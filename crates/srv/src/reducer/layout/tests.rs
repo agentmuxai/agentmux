@@ -781,7 +781,6 @@ fn layout_set_tree_with_slices_applies_focus_magnify() {
             new_tree: Some(leaf_node("n1", "b1")),
             correlation_id: "corr".into(),
             slices: Some(agentmux_common::LayoutClientSlices {
-                leaforder: None,
                 focused_node_id: "n1".into(),
                 magnified_node_id: String::new(),
                 pending_backend_actions: None,
@@ -813,7 +812,6 @@ fn layout_set_tree_none_tree_overrides_slice_focus() {
             new_tree: None,
             correlation_id: "corr".into(),
             slices: Some(agentmux_common::LayoutClientSlices {
-                leaforder: None,
                 focused_node_id: "dangling".into(),
                 magnified_node_id: "dangling".into(),
                 pending_backend_actions: None,

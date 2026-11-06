@@ -174,7 +174,7 @@ pub(crate) async fn handle_promote_block_to_tab(state: &AppState, call: &WebCall
         Err(reason) => return WebReturnType::error(reason),
     };
 
-    // Layout setup: rootnode + leaforder for the new tab so
+    // Layout setup: the rootnode for the new tab so
     // the frontend renders the moved block correctly. Same
     // helper TearOffBlock uses.
     if let Err(e) = setup_torn_off_block_layout(state, &new_tab_oid, &block_id).await {

@@ -42,7 +42,6 @@ pub fn create_tab_with_opts(
         rootnode: None,
         magnifiednodeid: String::new(),
         focusednodeid: String::new(),
-        leaforder: None,
         pendingbackendactions: None,
         meta: None,
         ..Default::default()
