@@ -25,8 +25,7 @@ use agentmux_common::ipc::Event;
 use tokio::sync::{broadcast, Mutex};
 
 use crate::backend::obj::{
-    Block, Client, LayoutActionData, LayoutState as PersistedLayoutState, LeafOrderEntry, Tab,
-    Window, Workspace,
+    Block, Client, LayoutActionData, LayoutState as PersistedLayoutState, Tab, Window, Workspace,
 };
 use crate::backend::storage::store::Store;
 use crate::backend::wcore;
@@ -315,7 +314,6 @@ fn apply_tab_created(
                 rootnode: None,
                 magnifiednodeid: String::new(),
                 focusednodeid: String::new(),
-                leaforder: None,
                 pendingbackendactions: None,
                 meta: None,
                 ..Default::default()
@@ -683,19 +681,15 @@ const NO_FOCUS_CLEAR: FocusClear = FocusClear { focused: false, magnified: false
 /// Phase E.4.B — apply a `LayoutTreeReplaced` event: write the reducer-
 /// supplied tree onto `LayoutState.rootnode`. Mirrors
 /// `reducer::layout::handle_layout_set_tree` — when the new tree is
-/// empty, also clear the focus/magnify ids (and leaforder) so they don't
-/// dangle at nodes that no longer exist.
+/// empty, also clear the focus/magnify ids so they don't dangle at nodes
+/// that no longer exist.
 ///
 /// When the event carries `slices` (a seeding `LayoutSetTree`), the rest of
-/// the row is REPLACED: leaforder / pendingbackendactions are written
-/// verbatim (absent = clear); focus/magnify strings overwrite (empty =
-/// clear). `slices: None` (tree-only events) leaves those columns
-/// untouched, except that `clear` empties a focus/magnify id the reducer
-/// dropped with the edit — leaforder is a frontend-recomputed geometry
-/// cache (`getLeafOrder` in `layoutGeometry.ts`) and is NOT read on
-/// reproject (`persist::bootstrap_state_from_mstore` reads
-/// rootnode/focus/magnify only). Idempotent: no-op (no version bump)
-/// when nothing changes.
+/// the row is REPLACED: pendingbackendactions is written verbatim (absent =
+/// clear); focus/magnify strings overwrite (empty = clear). `slices: None`
+/// (tree-only events) leaves those fields untouched, except that `clear`
+/// empties a focus/magnify id the reducer dropped with the edit. Idempotent:
+/// no-op (no version bump) when nothing changes.
 fn apply_layout_tree_replaced(
     mstore: &Store,
     tab_id: &str,
@@ -730,18 +724,10 @@ fn apply_layout_tree_replaced(
         (None, false) if clear.magnified => String::new(),
         (None, false) => layout.magnifiednodeid.clone(),
     };
-    let new_leaforder: Option<Vec<LeafOrderEntry>> = match (slices, clears) {
-        (_, true) => None,
-        (Some(s), false) => match &s.leaforder {
-            Some(v) if !v.is_null() => Some(serde_json::from_value(v.clone())?),
-            _ => None,
-        },
-        (None, false) => layout.leaforder.clone(),
-    };
     let new_pending: Option<Vec<LayoutActionData>> = match slices {
         // The pending queue is frontend-acked state, not tree geometry —
-        // an empty-tree `LayoutSetTree` still replaces it (unlike focus/leaforder,
-        // which dangle without a tree).
+        // an empty-tree `LayoutSetTree` still replaces it (unlike focus,
+        // which dangles without a tree).
         Some(s) => match &s.pending_backend_actions {
             Some(v) if !v.is_null() => Some(serde_json::from_value(v.clone())?),
             _ => None,
@@ -752,7 +738,6 @@ fn apply_layout_tree_replaced(
     let already = layout.rootnode == *new_tree
         && layout.focusednodeid == new_focused
         && layout.magnifiednodeid == new_magnified
-        && layout.leaforder == new_leaforder
         && layout.pendingbackendactions == new_pending;
     if already {
         return Ok(());
@@ -760,7 +745,6 @@ fn apply_layout_tree_replaced(
     layout.rootnode = new_tree.clone();
     layout.focusednodeid = new_focused;
     layout.magnifiednodeid = new_magnified;
-    layout.leaforder = new_leaforder;
     layout.pendingbackendactions = new_pending;
     mstore.update(&mut layout)?;
     Ok(())
@@ -1448,7 +1432,7 @@ mod tests {
             tab_id: tab.clone(),
             new_tree: Some(leaf("gone", "bg")),
             correlation_id: "seed".into(),
-            slices: Some(slices(None, focused, magnified, None)),
+            slices: Some(slices(focused, magnified, None)),
             version: 2,
         };
         let delete = |was_focused: bool, was_magnified: bool| Event::LayoutNodeDeleted {
@@ -1540,13 +1524,11 @@ mod tests {
     // ── SPEC_864 Phase 2 — client slices on LayoutTreeReplaced ─────────
 
     fn slices(
-        leaforder: Option<serde_json::Value>,
         focused: &str,
         magnified: &str,
         pending: Option<serde_json::Value>,
     ) -> agentmux_common::LayoutClientSlices {
         agentmux_common::LayoutClientSlices {
-            leaforder,
             focused_node_id: focused.into(),
             magnified_node_id: magnified.into(),
             pending_backend_actions: pending,
@@ -1562,12 +1544,7 @@ mod tests {
                 tab_id: tab.clone(),
                 new_tree: Some(leaf("n1", "b1")),
                 correlation_id: "c".into(),
-                slices: Some(slices(
-                    Some(serde_json::json!([{ "nodeid": "n1", "blockid": "b1" }])),
-                    "n1",
-                    "n1",
-                    None,
-                )),
+                slices: Some(slices("n1", "n1", None)),
                 version: 3,
             },
             &s,
@@ -1577,10 +1554,6 @@ mod tests {
         assert_eq!(layout.rootnode.unwrap().id, "n1");
         assert_eq!(layout.focusednodeid, "n1");
         assert_eq!(layout.magnifiednodeid, "n1");
-        let lo = layout.leaforder.expect("leaforder written");
-        assert_eq!(lo.len(), 1);
-        assert_eq!(lo[0].nodeid, "n1");
-        assert_eq!(lo[0].blockid, "b1");
     }
 
     #[test]
@@ -1619,7 +1592,7 @@ mod tests {
                 tab_id: tab.clone(),
                 new_tree: Some(leaf("n1", "b1")),
                 correlation_id: "c".into(),
-                slices: Some(slices(None, "n1", "", None)),
+                slices: Some(slices("n1", "", None)),
                 version: 4,
             },
             &s,
@@ -1634,7 +1607,7 @@ mod tests {
     #[test]
     fn layout_tree_replaced_without_slices_leaves_client_columns_untouched() {
         // Tree-only events (pane-tab edits, saga callers) must not clobber
-        // focus/magnify/leaforder/pending — only a slice-carrying full-row
+        // focus/magnify/pending — only a slice-carrying full-row
         // push owns those columns.
         let s = store();
         let tab = ws_tab(&s);
@@ -1644,7 +1617,6 @@ mod tests {
                 new_tree: Some(leaf("n1", "b1")),
                 correlation_id: "seed".into(),
                 slices: Some(slices(
-                    Some(serde_json::json!([{ "nodeid": "n1", "blockid": "b1" }])),
                     "n1",
                     "",
                     Some(serde_json::json!([{
@@ -1676,7 +1648,6 @@ mod tests {
         let layout = layout_of(&s, &tab);
         assert_eq!(layout.rootnode.unwrap().id, "n2", "tree replaced");
         assert_eq!(layout.focusednodeid, "n1", "focus untouched");
-        assert!(layout.leaforder.is_some(), "leaforder untouched");
         assert!(
             layout.pendingbackendactions.is_some(),
             "pending queue untouched by tree-only write"

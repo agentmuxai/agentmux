@@ -1,0 +1,57 @@
+{
+  "schema": "pack/v1",
+  "id": "word",
+  "name": "Word",
+  "version": "0.1.0",
+  "changelog": [
+    {
+      "version": "0.1.0",
+      "date": "2026-11-05",
+      "by": "Manoz@Area54",
+      "change": "first version, from documentation, unverified"
+    }
+  ],
+  "app": {
+    "vendor": "Microsoft",
+    "executables": {
+      "windows": [
+        "WINWORD.EXE"
+      ],
+      "macos": [],
+      "linux": []
+    },
+    "titleHints": [
+      " - Word"
+    ],
+    "versions": {
+      "supported": null,
+      "tested": []
+    }
+  },
+  "platforms": [
+    "windows"
+  ],
+  "ladder": [
+    {
+      "kind": "api",
+      "note": "the .docx file itself (python-docx), when Word need not be open"
+    },
+    {
+      "kind": "api",
+      "note": "Word COM object model (Word.Application), PowerShell or a Word MCP server"
+    },
+    {
+      "kind": "shortcuts",
+      "note": "Ctrl+S, F12, Alt+Q Tell Me search"
+    },
+    {
+      "kind": "desktop",
+      "note": "clicks, with a screenshot after each"
+    }
+  ],
+  "mcp": {
+    "catalogId": null,
+    "note": "WordMcp.McpServer or word-mcp-live; none is in the AgentMux MCP catalog yet"
+  },
+  "verified": []
+}

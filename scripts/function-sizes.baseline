@@ -292,7 +292,6 @@
 111 crates/srv/src/server/app_api/layout.rs::layout_open_impl
 109 crates/srv/src/server/app_api/memory.rs::memory_write_impl
 102 crates/srv/src/server/app_api/pane.rs::build_pane_meta
-300 crates/srv/src/server/app_api/pane.rs::open_pane
 161 crates/srv/src/server/app_api/pane.rs::open_pane_floating
 126 crates/srv/src/server/browser_bypass_routes.rs::handle_ui_browser_request_bypass
 133 crates/srv/src/server/browser_capture.rs::handle_browser_capture
@@ -330,7 +329,7 @@
 174 crates/srv/src/server/service/tear_off.rs::handle_redock_floating_pane
 110 crates/srv/src/server/service/tear_off.rs::handle_tear_off_block
 124 crates/srv/src/server/service/window_close.rs::handle_close_window
-224 crates/srv/src/server/service/window_create.rs::create_default_contents
+217 crates/srv/src/server/service/window_create.rs::create_default_contents
 301 crates/srv/src/server/service/window_create.rs::handle_create_window
 140 crates/srv/src/server/shell_secrets.rs::inject
 135 crates/srv/src/server/system_install_handlers.rs::spawn_system_install_task
@@ -452,7 +451,7 @@
 147 frontend/app/view/agent/components/PersistentShellBlock.tsx::PersistentShellBlock
 130 frontend/app/view/agent/components/SeatRosterImport.tsx::SeatRosterImport
 108 frontend/app/view/agent/components/SlashCommandPicker.tsx::SlashCommandPicker
-250 frontend/app/view/agent/components/agent-picker-launch.ts::createPickerLaunch
+233 frontend/app/view/agent/components/agent-picker-launch.ts::createPickerLaunch
 130 frontend/app/view/agent/components/agent-picker-templates.ts::createTemplates
 154 frontend/app/view/agent/components/composer-row-layout.ts::computeComposerRows
 114 frontend/app/view/agent/components/composer-stats-zone.tsx::useStatsZone
@@ -473,7 +472,6 @@
 140 frontend/app/view/agent/hooks/useShellNodeStream.ts::useShellNodeStream
 163 frontend/app/view/agent/hooks/useSnapshotPersistence.ts::useSnapshotPersistence
 173 frontend/app/view/agent/hooks/useSubagentBackfillGate.ts::useSubagentBackfillGate
-316 frontend/app/view/agent/memory-reinjection-controller.ts::createMemoryReinjectionController
 300 frontend/app/view/agent/offline/failed-turn.ts::createFailedTurnRecovery
 185 frontend/app/view/agent/offline/offline-input.ts::createOfflineInput
 229 frontend/app/view/agent/parseHistoryLines.ts::HistoryParser::feed

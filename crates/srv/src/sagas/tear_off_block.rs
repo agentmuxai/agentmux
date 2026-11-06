@@ -6,7 +6,7 @@
 // Migrates the reducer-state portion of `wcore::tear_off_block` to
 // a reducer-driven multi-step. The original wcore function does
 // substantial layout work (rebuilds the new tab's `LayoutState`
-// rootnode + leaforder, queues a layout-delete action on the source
+// rootnode, queues a layout-delete action on the source
 // tab's pendingbackendactions) — that's E.4 territory and stays
 // wcore-direct in the RPC handler that wraps this saga. The
 // reducer/SQLite portion is what fixes the smoke regression
