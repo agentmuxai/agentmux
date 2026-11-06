@@ -1,0 +1,9 @@
+subscribe accountavailability
+subscribe workqueue:changed
+rpc KanbanList
+subscribe agents:changed
+board#1 mounted
+pane told ["review"]
+pending: "collapsed":["review"]
+pane agrees: "collapsed":["review"]
+pane changes it on its own: "collapsed":[]

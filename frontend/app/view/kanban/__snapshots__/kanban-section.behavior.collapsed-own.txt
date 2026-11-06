@@ -1,0 +1,7 @@
+subscribe accountavailability
+subscribe workqueue:changed
+rpc KanbanList
+subscribe agents:changed
+board#1 mounted
+own, collapsed once: {"tasks":["w1","w2","w3","w4","w5","w6"],"untracked":["Korp"],"agents":3,"now":"number","holdingCamper":"w3","holdingKorp":null,"reviewLimit":0,"reviewTotal":2,"colors":{"u-gone":"#112233"},"narrow":false,"collapsed":["review"]}
+own, collapsed twice: {"tasks":["w1","w2","w3","w4","w5","w6"],"untracked":["Korp"],"agents":3,"now":"number","holdingCamper":"w3","holdingKorp":null,"reviewLimit":0,"reviewTotal":2,"colors":{"u-gone":"#112233"},"narrow":false,"collapsed":[]}
