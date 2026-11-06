@@ -390,6 +390,9 @@ pub(crate) struct WorkerRuntime {
     route: Option<crate::backend::model_gateway::launch::Choice>,
     /// What the approval says about that route and who pays.
     route_line: String,
+    /// The route was named, or differs from the leader's: the person is asked even when their own turn asked for the
+    /// worker, because their words asked for a worker and not for spending their key.
+    route_asked: bool,
     /// Its harness, when that is not its leader's.
     harness: Option<String>,
 }
@@ -730,9 +733,11 @@ async fn consent(
     user_instruction: &str,
 ) -> Result<bool, SpawnError> {
     let provenance = blockcontroller::get_controller(&leader.block_id).and_then(|c| c.turn_provenance());
-    let Err(why) = crate::sagas::self_quit::gate(provenance.as_ref(), user_instruction) else {
+    let gate = crate::sagas::self_quit::gate(provenance.as_ref(), user_instruction);
+    if gate.is_ok() && !runtime.route_asked {
         return Ok(false);
-    };
+    }
+    let why = gate.err().map_or_else(|| "a model route spends the person's key".to_string(), |w| w.as_str().to_string());
     tracing::info!(leader = %leader.def.name, why = why.as_str(), "agent.spawn: asking the user");
     let question = json!({
         "kind": "consent",

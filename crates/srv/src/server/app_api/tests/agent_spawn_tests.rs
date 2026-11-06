@@ -1020,7 +1020,12 @@ async fn a_worker_inherits_its_leaders_route_unless_it_names_another_or_leaves_i
     let leader = leader_in(&state, &def, &block_id);
     let none = agentmux_common::api_types::RouteAsk::default();
     let (_, inherited) = route::choose(&state, &leader, &none, None, None).unwrap();
+    assert!(!inherited.route_asked, "the leader's own route, as it is, is not a new spend to ask about");
     assert_eq!(inherited.route.unwrap().model, "deepseek/deepseek-v4.1-flash-1017");
+    let (_, named) = route::choose(&state, &leader, &on_route(None), None, None).unwrap();
+    assert!(named.route_asked, "a route named in the request is always put to the person, even on their own turn");
+    let (_, other_model) = route::choose(&state, &leader, &none, Some("deepseek/deepseek-v4-pro-0813"), None).unwrap();
+    assert!(other_model.route_asked, "so is a different model than the leader's");
     let own = agentmux_common::api_types::RouteAsk { harness: None, route: Some("anthropic".into()) };
     let (_, plain) = route::choose(&state, &leader, &own, Some("sonnet"), None).unwrap();
     assert!(plain.route.is_none() && plain.model.as_deref() == Some("sonnet"), "the sign-in route is the harness's own");
@@ -1072,4 +1077,9 @@ async fn a_created_agent_on_a_route_is_checked_against_its_templates_harness() {
     let (status, body) = create(&state, req).await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
     assert!(body["error"].as_str().unwrap().starts_with("NOT_ALLOWED"), "the person is asked before anything is made: {body}");
+    let mut req = create_request(sign_auth(&state, &def.slug), "Route Box", &template.slug);
+    req.model = Some("sonnet".into());
+    let (status, body) = create(&state, req).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body["error"].as_str().unwrap().contains("needs a route"), "a model with no route is not silently dropped: {body}");
 }

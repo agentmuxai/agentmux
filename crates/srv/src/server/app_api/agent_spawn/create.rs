@@ -64,6 +64,10 @@ fn pick_route(state: &AppState, req: &CreateAgentRequest, template: &AgentDefini
             return Err(refuse(StatusCode::BAD_REQUEST, format!("INVALID_ARG: the template {} runs {provider}, not {h}; name a template for {h}", template.slug)));
         }
     }
+    let routed = req.route.route.as_deref().map(str::trim).is_some_and(|r| !r.is_empty());
+    if !routed && req.model.as_deref().is_some_and(|m| !m.trim().is_empty()) {
+        return Err(refuse(StatusCode::BAD_REQUEST, "INVALID_ARG: model on create needs a route (see Agents routes); an agent on its harness's own sign-in picks its model when it runs"));
+    }
     crate::backend::model_gateway::ask::resolve(provider, req.route.route.as_deref(), req.model.as_deref(), None, route::key_present(state)).map_err(|e| {
         if e.starts_with("KEY_MISSING") { refuse(StatusCode::CONFLICT, e) } else { refuse(StatusCode::BAD_REQUEST, format!("INVALID_ARG: {e}")) }
     })
@@ -91,7 +95,7 @@ async fn create(state: &AppState, caller: Option<&crate::server::caller::Caller>
     let route_line = picked.as_ref().map(crate::backend::model_gateway::ask::consent_line).unwrap_or_default();
 
     let provenance = blockcontroller::get_controller(&leader.block_id).and_then(|c| c.turn_provenance());
-    let asked_user = if crate::sagas::self_quit::gate(provenance.as_ref(), &req.user_instruction).is_err() {
+    let asked_user = if crate::sagas::self_quit::gate(provenance.as_ref(), &req.user_instruction).is_err() || picked.is_some() {
         tracing::info!(leader = %leader.def.name, "agent.create: asking the user");
         let question = json!({
             "kind": "consent",

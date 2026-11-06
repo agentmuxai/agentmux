@@ -132,7 +132,7 @@ pub(super) async fn spawn_many(
     crate::server::agent_lifecycle::admit_batch(state, &wanted, false).await.map_err(|e| refuse(StatusCode::CONFLICT, e))?;
 
     let provenance = blockcontroller::get_controller(&leader.block_id).and_then(|c| c.turn_provenance());
-    let asked_user = if crate::sagas::self_quit::gate(provenance.as_ref(), user_instruction).is_err() {
+    let asked_user = if crate::sagas::self_quit::gate(provenance.as_ref(), user_instruction).is_err() || planned.iter().any(|p| p.runtime.route_asked) {
         tracing::info!(leader = %leader.def.name, workers = n, "agent.spawn_many: asking the user");
         let question = json!({
             "kind": "consent",

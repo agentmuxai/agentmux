@@ -44,7 +44,10 @@ pub(super) fn choose(state: &AppState, leader: &Leader, ask_route: &RouteAsk, mo
     let mut runtime = worker_runtime(&harness, &leader_runtime, if picked.is_some() { None } else { model }, effort)
         .map_err(|e| refuse(StatusCode::BAD_REQUEST, format!("INVALID_ARG: {e}")))?;
     if let Some(p) = &picked {
-        runtime.route = Some(Choice { route: p.route.id.to_string(), model: p.model.id.to_string() });
+        let choice = Choice { route: p.route.id.to_string(), model: p.model.id.to_string() };
+        let named = ask_route.route.as_deref().is_some_and(|r| !r.trim().is_empty());
+        runtime.route_asked = named || inherited.as_ref() != Some(&choice);
+        runtime.route = Some(choice);
         runtime.route_line = ask::consent_line(p);
     }
     if !same {

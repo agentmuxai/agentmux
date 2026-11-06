@@ -508,7 +508,7 @@ pub fn inject_identity_env_with_broker(
         }
     };
 
-    if steps::on_model_route(&mstore, &instance) { return Ok(()); }
+    let on_route = steps::on_model_route(&mstore, &instance);
     // Step 2: identity_id check (an empty or blank one is logged, not a bypass).
     steps::warn_on_blank_identity(&instance, block_id);
 
@@ -541,7 +541,7 @@ pub fn inject_identity_env_with_broker(
     }
 
     // Step 5: the definition-provider gate (spec §2.2 edge case).
-    steps::gate_unbound_provider(def_provider, &injector.injected_oauth, &bindings, &identity_store, &instance, &parent_template_id)?;
+    if !on_route { steps::gate_unbound_provider(def_provider, &injector.injected_oauth, &bindings, &identity_store, &instance, &parent_template_id)?; }
 
     // #3577, re-checked at the gate's own exit.
     steps::recheck_agent_not_deleted(&mstore, &instance)
