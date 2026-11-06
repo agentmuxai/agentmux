@@ -31,7 +31,12 @@ export const ProviderUninstallInline = (props: ProviderUninstallInlineProps): JS
         setBusy(true);
         setError(undefined);
         try {
-            await RpcApi.InstallUninstallCommand(TabRpcClient, { providerId: props.providerId });
+            const result = await RpcApi.InstallUninstallCommand(TabRpcClient, { providerId: props.providerId });
+            if (!result.removed) {
+                // The copy in use is an older AgentMux version's own (instances/v<version>/cli), not the shared one.
+                setError(`Nothing was removed: this copy of ${props.label} is in an older AgentMux version's folder, which Uninstall does not touch.`);
+                return;
+            }
             invalidateInstallCheck(props.providerId);
             props.onRemoved();
         } catch (e) {

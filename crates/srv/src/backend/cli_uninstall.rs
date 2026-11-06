@@ -8,7 +8,9 @@
 //!
 //! Unlike a prune this is the person's own click, so disuse is not asked; the
 //! guards that stay are the ones that protect a running agent: the install lock,
-//! and no live pane or running process using the folder.
+//! and no open pane that runs the CLI and no running process using the folder.
+//! The pane check does not depend on the process scan, which cannot run on
+//! Windows: a pane records its CLI as a bare name or as a path, so both count.
 
 use agentmux_common::DataPaths;
 
@@ -22,10 +24,19 @@ pub enum Uninstalled {
     NotInstalled,
 }
 
+/// Whether `command` (a pane's program and arguments) runs the CLI called
+/// `cli_name`, by its bare name or by a path to it.
+fn runs_cli(command: &str, cli_name: &str) -> bool {
+    let program = command.split_whitespace().next().unwrap_or("");
+    let file = program.rsplit(['/', '\\']).next().unwrap_or(program).to_ascii_lowercase();
+    let stem = [".exe", ".cmd", ".bat"].iter().find_map(|ext| file.strip_suffix(ext)).unwrap_or(&file);
+    stem == cli_name.to_ascii_lowercase()
+}
+
 /// Remove `<shared>/cli/<provider_id>/<pin>/`. `in_use` is what runs now
-/// ([`super::cli_prune::gather_in_use`]); a folder one of its commands mentions
-/// is left alone and the error says why.
-pub fn uninstall(paths: &DataPaths, provider_id: &str, pin: &str, in_use: &InUse) -> Result<Uninstalled, String> {
+/// ([`super::cli_prune::gather_in_use`]); a folder one of its commands mentions,
+/// or an open pane that runs `cli_name`, leaves it alone and the error says why.
+pub fn uninstall(paths: &DataPaths, provider_id: &str, pin: &str, cli_name: &str, in_use: &InUse) -> Result<Uninstalled, String> {
     let dir = shared_cli_dir(paths, provider_id, pin).ok_or_else(|| format!("{provider_id}@{pin} is not a safe folder name"))?;
     match std::fs::symlink_metadata(&dir) {
         Ok(m) if m.is_dir() && !m.file_type().is_symlink() => {}
@@ -38,13 +49,14 @@ pub fn uninstall(paths: &DataPaths, provider_id: &str, pin: &str, in_use: &InUse
         Ok(None) => return Err(format!("{provider_id} is being installed right now; try again when it ends")),
         Err(e) => return Err(format!("could not take the install lock for {provider_id}: {e}")),
     };
-    if in_use.mentions(&dir) {
+    if in_use.mentions(&dir) || in_use.live_commands.iter().any(|c| runs_cli(c, cli_name)) {
         return Err(format!("a running agent uses {provider_id}; close it first"));
     }
     let bytes = dir_size(&dir);
     // The marker first: a folder half removed by a crash is already "not an install".
     let _ = std::fs::remove_file(dir.join(COMPLETE_MARKER));
-    std::fs::remove_dir_all(&dir).map_err(|e| format!("could not remove {}: {e}", dir.display()))?;
+    std::fs::remove_dir_all(&dir)
+        .map_err(|e| format!("could not remove all of {}: {e}. A part may be gone; AgentMux installs it again the next time it is needed", dir.display()))?;
     Ok(Uninstalled::Removed { bytes })
 }
 
@@ -92,7 +104,7 @@ mod tests {
         let sign_in = p.shared_dir.join("identities").join("x").join("goose");
         std::fs::create_dir_all(&sign_in).unwrap();
 
-        assert_eq!(uninstall(&p, "goose", "1.54.0", &idle()), Ok(Uninstalled::Removed { bytes: 100 + "1.54.0".len() as u64 }));
+        assert_eq!(uninstall(&p, "goose", "1.54.0", "goose", &idle()), Ok(Uninstalled::Removed { bytes: 100 + "1.54.0".len() as u64 }));
         assert!(!goose.exists());
         assert!(other_pin.exists() && other_provider.exists() && sign_in.exists());
     }
@@ -100,7 +112,7 @@ mod tests {
     #[test]
     fn a_folder_that_is_not_there_is_nothing_to_do() {
         let root = tempfile::tempdir().unwrap();
-        assert_eq!(uninstall(&paths_in(root.path()), "goose", "1.54.0", &idle()), Ok(Uninstalled::NotInstalled));
+        assert_eq!(uninstall(&paths_in(root.path()), "goose", "1.54.0", "goose", &idle()), Ok(Uninstalled::NotInstalled));
     }
 
     #[test]
@@ -111,9 +123,25 @@ mod tests {
         let cmd = format!("{}{}bin{}goose acp", dir.display(), std::path::MAIN_SEPARATOR, std::path::MAIN_SEPARATOR);
         let in_use = InUse { live_commands: vec![cmd], process_commands: None };
 
-        let err = uninstall(&p, "goose", "1.54.0", &in_use).unwrap_err();
+        let err = uninstall(&p, "goose", "1.54.0", "goose", &in_use).unwrap_err();
         assert!(err.contains("close it first"), "{err}");
         assert!(dir.join(COMPLETE_MARKER).exists(), "an install left alone stays complete");
+    }
+
+    #[test]
+    fn an_open_pane_that_runs_the_cli_by_name_keeps_it_even_when_no_process_scan_ran() {
+        let root = tempfile::tempdir().unwrap();
+        let p = paths_in(root.path());
+        let dir = install(&p, "goose", "1.54.0");
+        for pane in ["goose acp", "goose", r"C:\tools\goose.exe acp", "/usr/local/bin/goose term", "GOOSE.CMD run"] {
+            let in_use = InUse { live_commands: vec![pane.into()], process_commands: None };
+            let err = uninstall(&p, "goose", "1.54.0", "goose", &in_use).unwrap_err();
+            assert!(err.contains("close it first"), "{pane}: {err}");
+            assert!(dir.exists(), "{pane}");
+        }
+        // Another CLI whose name only starts the same does not count.
+        let others = InUse { live_commands: vec!["goosed serve".into(), "claude --resume".into(), "".into()], process_commands: None };
+        assert!(matches!(uninstall(&p, "goose", "1.54.0", "goose", &others), Ok(Uninstalled::Removed { .. })));
     }
 
     #[test]
@@ -123,7 +151,7 @@ mod tests {
         let dir = install(&p, "goose", "1.54.0");
         let _held = try_lock_install(&p, "goose", "1.54.0").unwrap().expect("the lock is free");
 
-        let err = uninstall(&p, "goose", "1.54.0", &idle()).unwrap_err();
+        let err = uninstall(&p, "goose", "1.54.0", "goose", &idle()).unwrap_err();
         assert!(err.contains("being installed"), "{err}");
         assert!(dir.exists());
     }
@@ -133,7 +161,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let p = paths_in(root.path());
         for (provider, pin) in [("..", "1.0.0"), ("goose", "../x"), ("goose", ""), ("go/ose", "1.0.0")] {
-            assert!(uninstall(&p, provider, pin, &idle()).is_err(), "{provider}@{pin}");
+            assert!(uninstall(&p, provider, pin, "goose", &idle()).is_err(), "{provider}@{pin}");
         }
     }
 
@@ -148,7 +176,7 @@ mod tests {
         std::fs::create_dir_all(link.parent().unwrap()).unwrap();
         std::os::unix::fs::symlink(&real, &link).unwrap();
 
-        assert!(uninstall(&p, "goose", "1.54.0", &idle()).unwrap_err().contains("not a plain folder"));
+        assert!(uninstall(&p, "goose", "1.54.0", "goose", &idle()).unwrap_err().contains("not a plain folder"));
         assert!(real.exists());
     }
 }

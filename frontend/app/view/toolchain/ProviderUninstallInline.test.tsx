@@ -45,6 +45,16 @@ describe("ProviderUninstallInline", () => {
         expect(h.invalidate).toHaveBeenCalledWith("goose");
     });
 
+    it("says so when there was nothing of the shared copy to remove, instead of acting as if it worked", async () => {
+        h.uninstall.mockResolvedValue({ removed: false, bytes: 0 });
+        const onRemoved = mount();
+        fireEvent.click(screen.getByRole("button", { name: "Uninstall" }));
+        fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+        expect(await screen.findByText(/Nothing was removed: this copy of goose is in an older AgentMux version's folder/)).toBeInTheDocument();
+        expect(onRemoved).not.toHaveBeenCalled();
+        expect(h.invalidate).not.toHaveBeenCalled();
+    });
+
     it("shows why srv refused, and leaves the row as it was", async () => {
         h.uninstall.mockRejectedValue(new Error("a running agent uses goose; close it first"));
         const onRemoved = mount();

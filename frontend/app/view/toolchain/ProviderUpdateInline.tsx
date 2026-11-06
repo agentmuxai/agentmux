@@ -30,9 +30,12 @@ export const ProviderUpdateInline = (props: ProviderUpdateInlineProps): JSX.Elem
     const install = () => props.mode === "install";
     // This card shows the run, so its end needs no "is installed, create the agent" toast.
     onCleanup(watchAgentInstall(props.providerId));
+    // An install that finished while the row still has no copy is an old run (the copy was removed since):
+    // show the Install button again, not "Installed".
+    const showsRun = () => session().state() !== "idle" && !(install() && session().state() === "done");
     return (
         <Show
-            when={session().state() !== "idle"}
+            when={showsRun()}
             fallback={
                 <div class="toolchain-detail-row">
                     <Button tone="accent" onClick={() => void session().start()}>
@@ -46,7 +49,7 @@ export const ProviderUpdateInline = (props: ProviderUpdateInlineProps): JSX.Elem
                     {session().state() === "running"
                         ? install() ? "Installing…" : "Updating…"
                         : session().state() === "done"
-                          ? install() ? "Installed" : "Updated"
+                          ? "Updated"
                           : "Failed"}
                 </div>
                 <InstallProgress session={session()} kind="provider-cli" />
@@ -54,7 +57,7 @@ export const ProviderUpdateInline = (props: ProviderUpdateInlineProps): JSX.Elem
                 <Show when={session().state() === "failed" || session().state() === "done"}>
                     <div>
                         <Button onClick={() => void session().start()}>
-                            {session().state() === "failed" ? "Retry" : install() ? "Install again" : "Update again"}
+                            {session().state() === "failed" ? "Retry" : "Update again"}
                         </Button>
                     </div>
                 </Show>

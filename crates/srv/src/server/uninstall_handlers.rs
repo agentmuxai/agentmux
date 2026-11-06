@@ -70,10 +70,10 @@ pub(crate) async fn install_uninstall(live_commands: Vec<String>, req: Uninstall
         return Err(format!("{} has no pinned version, so AgentMux has no copy to remove", provider.id));
     }
     let paths = agentmux_common::DataPaths::from_env().ok_or_else(|| "DataPaths::from_env() failed".to_string())?;
-    let (id, pin) = (provider.id, provider.pinned_version);
+    let (id, pin, cli) = (provider.id, provider.pinned_version, provider.cli_command);
     let outcome = tokio::task::spawn_blocking(move || {
         let in_use = crate::backend::cli_prune::gather_in_use(&live_commands);
-        uninstall(&paths, id, pin, &in_use)
+        uninstall(&paths, id, pin, cli, &in_use)
     })
     .await
     .map_err(|e| format!("install.uninstall: {e}"))??;

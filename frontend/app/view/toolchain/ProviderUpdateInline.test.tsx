@@ -56,15 +56,16 @@ describe("ProviderUpdateInline", () => {
         expect(h.start).toHaveBeenCalledTimes(1);
     });
 
-    it("in install mode, says Install and Installed where the update says Update and Updated", () => {
+    it("in install mode, says Install and Installing, and offers Install again once a finished run has left no copy", () => {
         render(() => <ProviderUpdateInline providerId="goose" pinned="1.54.0" mode="install" />);
         fireEvent.click(screen.getByRole("button", { name: "Install 1.54.0" }));
         expect(h.start).toHaveBeenCalledTimes(1);
         h.setState("running");
         expect(screen.getByText("Installing…")).toBeInTheDocument();
+        // Done while the row still has no copy (it was removed after): the Install button is back, not a stale "Installed".
         h.setState("done");
-        expect(screen.getByText("Installed")).toBeInTheDocument();
-        expect(screen.getByRole("button", { name: "Install again" })).toBeInTheDocument();
+        expect(screen.queryByText("Installed")).toBeNull();
+        expect(screen.getByRole("button", { name: "Install 1.54.0" })).toBeInTheDocument();
     });
 
     it("offers Retry after a failure", () => {
