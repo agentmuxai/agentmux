@@ -9,7 +9,7 @@ winget / Homebrew / pkexec one-click install this reuses),
 consent step), [`SPEC_AGENT_INSTALL_STAGE_2026_05_17.md`](SPEC_AGENT_INSTALL_STAGE_2026_05_17.md) (`install.start`
 and the `install_chunk` stream), [`SPEC_AGENT_PICKER_INLINE_CREATE_2026_10_18.md`](SPEC_AGENT_PICKER_INLINE_CREATE_2026_10_18.md)
 (the panel under a harness card, where the button goes),
-[`SPEC_NINE_NEW_HARNESSES_2026_10_14.md`](SPEC_NINE_NEW_HARNESSES_2026_10_14.md) (goose, Grok, Aider, Muse).
+[`SPEC_NINE_NEW_HARNESSES_2026_10_14.md`](SPEC_NINE_NEW_HARNESSES_2026_10_14.md) (goose, Grok, Aider, Muse; goose is now installed by AgentMux itself, §8).
 
 ## 1. What this is
 
@@ -63,7 +63,7 @@ uninstall.
 | T2 | A caller that isn't the person (an agent in a pane, say) starts an install without the person. An agent with a shell could run `curl … \| bash` itself, but then its own CLI's permission prompt applies; an AgentMux RPC that skips that prompt would make AgentMux the way around it. | The install runs only after a user approval that srv itself checks, through a channel a pane process can't reach (§4.3). A frontend-only confirm is not enough. |
 | T3 | The vendor script, or a redirect, serves something other than the vendor's installer. | HTTPS only; an allowlist of hosts per provider, redirects included; the script is downloaded first, its SHA-256 and size are shown and logged, and *that file* is what runs. No hash pinning (it would break on every vendor release); the user is trusting the vendor, and AgentMux records what that trust ran. |
 | T4 | The installer escalates, or waits forever on a prompt. | AgentMux never elevates. stdin is closed, so a `sudo` or interactive prompt fails instead of hanging. A failure says so and shows the manual command. A timeout ends a stuck install. |
-| T5 | The installer reads AgentMux secrets from its environment. | `sanitize_external_command`, as the system-tool install does. Nothing else is added to the environment except what the catalog entry names (goose's `CONFIGURE=false`). |
+| T5 | The installer reads AgentMux secrets from its environment. | `sanitize_external_command`, as the system-tool install does. Nothing else is added to the environment except what the catalog entry names. |
 | T6 | The user can't tell what happened. | The consent step shows the exact command, the download URL and the note that this installs outside AgentMux's isolation; the log shows the hash, every line of output and the exit code; on failure the panel says the installer may have left files and links the vendor's instructions. |
 | T7 | Two installs of the same CLI at once, or no way to stop one. | One install per provider at a time; **Cancel install** kills the process tree. |
 
@@ -71,7 +71,7 @@ uninstall.
 
 ### 4.1 One catalog, in srv
 
-Move the six install recipes from `catalog.ts` into srv, next to `known_install_paths`, as a compiled table
+Move the five install recipes from `catalog.ts` into srv, next to `known_install_paths`, as a compiled table
 `VendorInstall { provider_id, unix: Recipe, windows: Recipe, docs_url, allowed_hosts }`, where `Recipe` is one of:
 
 - `Script { url, interpreter: Bash | Sh | PowerShell, env: &[(&str, &str)] }`
@@ -132,7 +132,7 @@ In the vendor-install step of the panel under the card (`AgentCreatePanel.tsx`, 
 - On success: the agent's fields follow, as after an npm install. On failure: the last lines of output, the note that
   the installer may have left files, the vendor link and **Try again**.
 
-The Toolchain pane's row for these six gets the same **Run** through the same approval.
+The Toolchain pane's row for these five gets the same **Run** through the same approval.
 
 ## 5. Tests
 
@@ -142,7 +142,7 @@ The Toolchain pane's row for these six gets the same **Run** through the same ap
   chunk; the env is sanitized; cancel kills the child; the temp file is gone after success, failure and cancel.
 - frontend: **Run** shows the server's command text (not the catalog's); the approval is required; the panel's states
   (running, cancelled, failed, installed-but-not-found, found).
-- Live, once per OS: install goose, Aider and Kimi from a clean account; check the hash line, the re-detection without
+- Live, once per OS: install Aider, Grok Build and Kimi from a clean account; check the hash line, the re-detection without
   restart, and the failure path with the network off.
 
 ## 6. Follow-ups found while writing this
