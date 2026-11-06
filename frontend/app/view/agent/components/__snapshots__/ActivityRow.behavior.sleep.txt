@@ -1,0 +1,62 @@
+useTick 1000
+usePulseWhen
+toolOutputChunks
+pulse when=true on=agent-activity-row tool running
+-- 30 s left
+<div>
+  <div class="agent-activity-row tool running">
+    <div class="agent-activity-summary">
+      <span class="agent-activity-sigil">
+        <span data-stand="ActivitySigil" data-activity="a1" data-glyph="$" data-tick="0">
+      <div data-stand="Tooltip" data-content="undefined" data-disable="true" data-class="agent-activity-title">
+        "sleep 30"
+      <span class="agent-activity-stats">
+        <span class="agent-activity-remaining">
+          "~30s left"
+        <span class="agent-activity-elapsed">
+          "0s"
+      <span data-cb="onClick" data-stand="IconButton:Stop" data-props="{\"icon\":\"stop\",\"tone\":\"danger\",\"density\":\"compact\",\"class\":\"agent-activity-stop\",\"tooltip\":false}">
+        "Stop"
+pulse when=false on=agent-activity-row tool running
+-- 10 s left
+<div>
+  <div class="agent-activity-row tool running">
+    <div class="agent-activity-summary">
+      <span class="agent-activity-sigil">
+        <span data-stand="ActivitySigil" data-activity="a1" data-glyph="$" data-tick="1">
+      <div data-stand="Tooltip" data-content="undefined" data-disable="true" data-class="agent-activity-title">
+        "sleep 30"
+      <span class="agent-activity-stats">
+        <span class="agent-activity-remaining">
+          "~10s left"
+        <span class="agent-activity-elapsed">
+          "20s"
+      <span data-cb="onClick" data-stand="IconButton:Stop" data-props="{\"icon\":\"stop\",\"tone\":\"danger\",\"density\":\"compact\",\"class\":\"agent-activity-stop\",\"tooltip\":false}">
+        "Stop"
+-- past the deadline, clamped
+<div>
+  <div class="agent-activity-row tool running">
+    <div class="agent-activity-summary">
+      <span class="agent-activity-sigil">
+        <span data-stand="ActivitySigil" data-activity="a1" data-glyph="$" data-tick="2">
+      <div data-stand="Tooltip" data-content="undefined" data-disable="true" data-class="agent-activity-title">
+        "sleep 30"
+      <span class="agent-activity-stats">
+        <span class="agent-activity-remaining">
+          "~0s left"
+        <span class="agent-activity-elapsed">
+          "45s"
+      <span data-cb="onClick" data-stand="IconButton:Stop" data-props="{\"icon\":\"stop\",\"tone\":\"danger\",\"density\":\"compact\",\"class\":\"agent-activity-stop\",\"tooltip\":false}">
+        "Stop"
+toolOutputChunks
+-- over
+<div>
+  <div class="agent-activity-row tool done">
+    <div class="agent-activity-summary">
+      <span class="agent-activity-sigil">
+        <span data-stand="ActivitySigil" data-activity="a1" data-glyph="✓" data-tick="2">
+      <div data-stand="Tooltip" data-content="undefined" data-disable="true" data-class="agent-activity-title">
+        "sleep 30"
+      <span class="agent-activity-stats">
+        <span class="agent-activity-elapsed">
+          "31s"

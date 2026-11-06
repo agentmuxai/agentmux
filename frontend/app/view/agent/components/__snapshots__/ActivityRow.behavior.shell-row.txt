@@ -1,0 +1,113 @@
+useTick 1000
+usePulseWhen
+pulse when=true on=agent-activity-row shell running
+-- running, just landed
+<div>
+  <div class="agent-activity-row shell running">
+    <div class="agent-activity-summary">
+      <span class="agent-activity-sigil">
+        <span data-stand="ActivitySigil" data-activity="a1" data-glyph="⟩" data-tick="0">
+      <div data-stand="Tooltip" data-content="undefined" data-disable="true" data-class="agent-activity-title">
+        "npm run dev"
+      <span class="agent-activity-stats">
+        <span class="agent-activity-elapsed">
+          "1m 5s"
+      <span data-cb="onClick" data-stand="IconButton:Stop" data-props="{\"icon\":\"stop\",\"tone\":\"danger\",\"density\":\"compact\",\"class\":\"agent-activity-stop\",\"tooltip\":false}">
+        "Stop"
+-- still landing
+<div>
+  <div class="agent-activity-row shell running">
+    <div class="agent-activity-summary">
+      <span class="agent-activity-sigil">
+        <span data-stand="ActivitySigil" data-activity="a1" data-glyph="⟩" data-tick="1">
+      <div data-stand="Tooltip" data-content="undefined" data-disable="true" data-class="agent-activity-title">
+        "npm run dev"
+      <span class="agent-activity-stats">
+        <span class="agent-activity-elapsed">
+          "1m 5s"
+      <span data-cb="onClick" data-stand="IconButton:Stop" data-props="{\"icon\":\"stop\",\"tone\":\"danger\",\"density\":\"compact\",\"class\":\"agent-activity-stop\",\"tooltip\":false}">
+        "Stop"
+pulse when=false on=agent-activity-row shell running
+-- landed
+<div>
+  <div class="agent-activity-row shell running">
+    <div class="agent-activity-summary">
+      <span class="agent-activity-sigil">
+        <span data-stand="ActivitySigil" data-activity="a1" data-glyph="⟩" data-tick="2">
+      <div data-stand="Tooltip" data-content="undefined" data-disable="true" data-class="agent-activity-title">
+        "npm run dev"
+      <span class="agent-activity-stats">
+        <span class="agent-activity-elapsed">
+          "1m 5s"
+      <span data-cb="onClick" data-stand="IconButton:Stop" data-props="{\"icon\":\"stop\",\"tone\":\"danger\",\"density\":\"compact\",\"class\":\"agent-activity-stop\",\"tooltip\":false}">
+        "Stop"
+-- two minutes in
+<div>
+  <div class="agent-activity-row shell running">
+    <div class="agent-activity-summary">
+      <span class="agent-activity-sigil">
+        <span data-stand="ActivitySigil" data-activity="a1" data-glyph="⟩" data-tick="3">
+      <div data-stand="Tooltip" data-content="undefined" data-disable="true" data-class="agent-activity-title">
+        "npm run dev"
+      <span class="agent-activity-stats">
+        <span class="agent-activity-elapsed">
+          "2m 6s"
+      <span data-cb="onClick" data-stand="IconButton:Stop" data-props="{\"icon\":\"stop\",\"tone\":\"danger\",\"density\":\"compact\",\"class\":\"agent-activity-stop\",\"tooltip\":false}">
+        "Stop"
+onToggle
+IconButton:Stop.onClick
+stopPropagation
+onStop
+-- leaving
+<div>
+  <div class="agent-activity-row shell running activity-flash-out">
+    <div class="agent-activity-summary">
+      <span class="agent-activity-sigil">
+        <span data-stand="ActivitySigil" data-activity="a1" data-glyph="⟩" data-tick="3">
+      <div data-stand="Tooltip" data-content="undefined" data-disable="true" data-class="agent-activity-title">
+        "npm run dev"
+      <span class="agent-activity-stats">
+        <span class="agent-activity-elapsed">
+          "2m 6s"
+      <span data-cb="onClick" data-stand="IconButton:Stop" data-props="{\"icon\":\"stop\",\"tone\":\"danger\",\"density\":\"compact\",\"class\":\"agent-activity-stop\",\"tooltip\":false}">
+        "Stop"
+-- done
+<div>
+  <div class="agent-activity-row shell done">
+    <div class="agent-activity-summary">
+      <span class="agent-activity-sigil">
+        <span data-stand="ActivitySigil" data-activity="a1" data-glyph="✓" data-tick="3">
+      <div data-stand="Tooltip" data-content="undefined" data-disable="true" data-class="agent-activity-title">
+        "npm run dev"
+      <span class="agent-activity-stats">
+        <span class="agent-activity-elapsed">
+          "1m 4s"
+-- failed
+<div>
+  <div class="agent-activity-row shell error">
+    <div class="agent-activity-summary">
+      <span class="agent-activity-sigil">
+        <span data-stand="ActivitySigil" data-activity="a1" data-glyph="✗" data-tick="3">
+      <div data-stand="Tooltip" data-content="undefined" data-disable="true" data-class="agent-activity-title">
+        "npm run dev"
+      <span class="agent-activity-stats">
+        <span class="agent-activity-elapsed">
+          "1m 5s"
+      <span data-cb="onClick" data-stand="IconButton:Dismiss" data-props="{\"icon\":\"xmark\",\"density\":\"compact\",\"class\":\"agent-activity-dismiss\",\"tooltip\":false}">
+        "Dismiss"
+IconButton:Dismiss.onClick
+stopPropagation
+onDismiss
+-- stopped
+<div>
+  <div class="agent-activity-row tool stopped">
+    <div class="agent-activity-summary">
+      <span class="agent-activity-sigil">
+        <span data-stand="ActivitySigil" data-activity="a1" data-glyph="■" data-tick="3">
+      <div data-stand="Tooltip" data-content="undefined" data-disable="true" data-class="agent-activity-title">
+        "npm run dev"
+      <span class="agent-activity-stats">
+        <span class="agent-activity-elapsed">
+          "1m 5s"
+-- gone
+<div>

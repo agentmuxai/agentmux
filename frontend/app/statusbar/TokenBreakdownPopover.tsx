@@ -13,124 +13,19 @@
  * SPEC_STATUSBAR_TOKEN_PANEL_BY_AGENT_2026_08_30.md.
  */
 
-import { createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
-import { AnchoredPopover, type PopoverAnchor } from "@/app/element/anchored-popover";
-import { Button } from "@/app/element/ui";
+import { type JSX } from "solid-js";
+import { AnchoredPopover } from "@/app/element/anchored-popover";
 import { ConfirmModal } from "@/element/confirm-modal";
-import { getCliCatalogEntry } from "@/app/view/agent/defaults/cli-catalog";
-import { formatCompactNumber } from "@/util/format-count";
-import { revealBlock } from "@/app/util/reveal-block";
-import { AMBIENT_OPEN_MS, ambientSummary, watchAmbient } from "@/app/store/ambient-health";
-import { AmbientPurposes } from "./AmbientPurposes";
-import {
-    getAgentBreakdown,
-    getAgentCacheHitRate,
-    getCacheHitRate,
-    getSessionStartAt,
-    getTotal,
-    resetSession,
-    tokenUsageState,
-    type AgentUsage,
-    type ServiceRow,
-} from "@/store/token-usage";
-import { tip } from "@/app/element/tip";
+import { BreakdownFooter, BreakdownHeader, BreakdownRows } from "./token-breakdown-parts";
+import { createTokenBreakdown, type TokenBreakdownPopoverProps } from "./token-breakdown-state";
 
-function formatSessionStartTime(epochMs: number): string {
-    const d = new Date(epochMs);
-    return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-}
-
-function serviceDisplayName(id: string): string {
-    const entry = getCliCatalogEntry(id);
-    if (entry) return entry.displayName;
-    // Titlecase fallback for unknowns.
-    return id.slice(0, 1).toUpperCase() + id.slice(1);
-}
-
-/** `AgentUsage.byService` as a ServiceRow[], biggest total first (ties by
- *  service id), for one agent row. Used by the "AgentMux internal"
- *  bucket's expanded per-service detail. */
-function serviceRowsOf(row: AgentUsage): ServiceRow[] {
-    const rows: ServiceRow[] = Object.entries(row.byService).map(([id, u]) => ({
-        id,
-        input: u.input,
-        output: u.output,
-        freshInput: u.freshInput,
-        cacheCreation: u.cacheCreation,
-        cacheRead: u.cacheRead,
-    }));
-    rows.sort((a, b) => {
-        const aTotal = a.input + a.output;
-        const bTotal = b.input + b.output;
-        if (bTotal !== aTotal) return bTotal - aTotal;
-        return a.id.localeCompare(b.id);
-    });
-    return rows;
-}
-
-/** What names an agent's row from one breakdown to the next: its pane, else its name. */
-const rowKey = (r: AgentUsage): string => r.blockId ?? r.agentName;
-
-interface TokenBreakdownPopoverProps {
-    /** The TokenUsageIndicator button. */
-    anchor: PopoverAnchor;
-    onClose: () => void;
-}
+// Opens upward, right-aligned to the indicator (it sits at the right of
+// the status bar). Positioning, zoom, dismiss and the airspace cut are
+// AnchoredPopover's.
+const POPOVER_WIDTH = 320;
 
 export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.Element => {
-    const [confirmingReset, setConfirmingReset] = createSignal(false);
-    const [ambientExpanded, setAmbientExpanded] = createSignal(false);
-    // The counts come fast for as long as the popover is open, whether or not the part that shows
-    // them is (no internal tokens yet, or its row collapsed).
-    onMount(() => onCleanup(watchAmbient(AMBIENT_OPEN_MS)));
-
-    // Trigger reactivity on the store so breakdown re-renders when
-    // a new turn lands while the popover is open.
-    const agentRows = createMemo((): AgentUsage[] => {
-        void tokenUsageState.byAgent;
-        return getAgentBreakdown();
-    });
-    const realAgentRows = createMemo(() => agentRows().filter((r) => !r.isAmbient));
-    // The rows are listed by agent id and each reads its data from the latest breakdown: a turn that
-    // lands rebuilds the breakdown, and rows keyed by their data objects would be replaced under the
-    // pointer, losing the click (SPEC_PANE_SELECTION_STATE_MACHINE_AND_SWARM_CLICK_2026_10_18.md P1.4).
-    const realAgentIds = createMemo(
-        () => realAgentRows().map(rowKey),
-        [] as string[],
-        { equals: (a, b) => a.length === b.length && a.every((id, i) => id === b[i]) }
-    );
-    const rowById = createMemo(() => new Map(realAgentRows().map((r) => [rowKey(r), r])));
-    const ambientRow = createMemo(() => agentRows().find((r) => r.isAmbient) ?? null);
-    const total = createMemo(() => {
-        void tokenUsageState.byService;
-        return getTotal();
-    });
-    // null until at least one turn has reported a cache breakdown (see
-    // getCacheHitRate's doc comment) — render nothing rather than a
-    // misleading "0%" in that window.
-    const cacheHitRate = createMemo(() => {
-        void tokenUsageState.byService;
-        return getCacheHitRate();
-    });
-
-    // Opens upward, right-aligned to the indicator (it sits at the right of
-    // the status bar). Positioning, zoom, dismiss and the airspace cut are
-    // AnchoredPopover's.
-    const POPOVER_WIDTH = 320;
-
-    const handleResetClick = () => setConfirmingReset(true);
-
-    const handleConfirmReset = () => {
-        resetSession();
-        setConfirmingReset(false);
-        props.onClose();
-    };
-
-    const handleAgentClick = (row: AgentUsage) => {
-        if (!row.blockId) return;
-        void revealBlock(row.blockId, { source: "tokens" });
-        props.onClose();
-    };
+    const s = createTokenBreakdown(props);
 
     return (
         <>
@@ -143,155 +38,18 @@ export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.El
                 aria-label="Token usage breakdown"
                 style={{ width: `${POPOVER_WIDTH}px` }}
             >
-                <div class="token-usage-breakdown-header">
-                    <span class="token-usage-breakdown-title">Token Usage</span>
-                    <span class="token-usage-breakdown-subtitle">
-                        since {formatSessionStartTime(getSessionStartAt())}
-                    </span>
-                </div>
-                <Show
-                    // A failing purpose has no tokens, so it can be the only thing there is to explain the dot.
-                    when={agentRows().length > 0 || ambientSummary() != null}
-                    fallback={
-                        <div class="token-usage-breakdown-empty">
-                            No turns completed yet this session.
-                        </div>
-                    }
-                >
-                    <div class="token-usage-breakdown-rows">
-                        <For each={realAgentIds()}>
-                            {(id) => {
-                                // Keeps the last row if the agent drops out while this row is being removed.
-                                const row = createMemo<AgentUsage>((prev) => rowById().get(id) ?? prev);
-                                const agentCacheRate = createMemo(() => getAgentCacheHitRate(row()));
-                                return (
-                                    <Button
-                                        tone="quiet"
-                                        class="token-usage-breakdown-row token-usage-breakdown-agent-row"
-                                        onClick={() => handleAgentClick(row())}
-                                        title={`Click to focus ${row().agentName}'s pane`}
-                                    >
-                                        <span class="token-usage-breakdown-row-name">
-                                            {row().agentName}
-                                            <Show when={agentCacheRate() != null}>
-                                                <span
-                                                    class="token-usage-breakdown-row-cache"
-                                                    {...tip(`${Math.round((agentCacheRate() as number) * 100)}% of input served from cache`)}
-                                                >
-                                                    {Math.round((agentCacheRate() as number) * 100)}%
-                                                </span>
-                                            </Show>
-                                        </span>
-                                        <span class="token-usage-breakdown-row-meta">
-                                            {row().numTurns} {row().numTurns === 1 ? "turn" : "turns"}
-                                            <Show when={row().costUsd > 0}>
-                                                {" "}·{" "}${row().costUsd.toFixed(3)}
-                                            </Show>
-                                        </span>
-                                        <span class="token-usage-breakdown-row-counts">
-                                            <span class="token-usage-indicator-arrow">↑</span>
-                                            {formatCompactNumber(row().input)}
-                                            {" "}
-                                            <span class="token-usage-indicator-arrow">↓</span>
-                                            {formatCompactNumber(row().output)}
-                                        </span>
-                                    </Button>
-                                );
-                            }}
-                        </For>
-                        <Show when={ambientRow()}>
-                            {(row) => (
-                                <div class="token-usage-breakdown-ambient">
-                                    <Button
-                                        tone="quiet"
-                                        class="token-usage-breakdown-row token-usage-breakdown-ambient-toggle"
-                                        onClick={() => setAmbientExpanded(!ambientExpanded())}
-                                        aria-expanded={ambientExpanded()}
-                                    >
-                                        <span class="token-usage-breakdown-row-name">
-                                            {ambientExpanded() ? "▾" : "▸"} {row().agentName}
-                                        </span>
-                                        <span class="token-usage-breakdown-row-counts">
-                                            <span class="token-usage-indicator-arrow">↑</span>
-                                            {formatCompactNumber(row().input)}
-                                            {" "}
-                                            <span class="token-usage-indicator-arrow">↓</span>
-                                            {formatCompactNumber(row().output)}
-                                        </span>
-                                    </Button>
-                                    <Show when={ambientExpanded()}>
-                                        <div class="token-usage-breakdown-ambient-detail">
-                                            <For each={serviceRowsOf(row())}>
-                                                {(svc) => (
-                                                    <div class="token-usage-breakdown-row token-usage-breakdown-ambient-row">
-                                                        <span class="token-usage-breakdown-row-name">
-                                                            {serviceDisplayName(svc.id)}
-                                                        </span>
-                                                        <span class="token-usage-breakdown-row-counts">
-                                                            <span class="token-usage-indicator-arrow">↑</span>
-                                                            {formatCompactNumber(svc.input)}
-                                                            {" "}
-                                                            <span class="token-usage-indicator-arrow">↓</span>
-                                                            {formatCompactNumber(svc.output)}
-                                                        </span>
-                                                    </div>
-                                                )}
-                                            </For>
-                                            <AmbientPurposes />
-                                        </div>
-                                    </Show>
-                                </div>
-                            )}
-                        </Show>
-                        <Show when={!ambientRow() && ambientSummary()}>
-                            <div class="token-usage-breakdown-ambient">
-                                <div class="token-usage-breakdown-row">
-                                    <span class="token-usage-breakdown-row-name">AgentMux internal</span>
-                                </div>
-                                <div class="token-usage-breakdown-ambient-detail">
-                                    <AmbientPurposes />
-                                </div>
-                            </div>
-                        </Show>
-                        <div class="token-usage-breakdown-row token-usage-breakdown-total">
-                            <span class="token-usage-breakdown-row-name">Total</span>
-                            <span class="token-usage-breakdown-row-counts">
-                                <span class="token-usage-indicator-arrow">↑</span>
-                                {formatCompactNumber(total().input)}
-                                {" "}
-                                <span class="token-usage-indicator-arrow">↓</span>
-                                {formatCompactNumber(total().output)}
-                            </span>
-                        </div>
-                        <Show when={cacheHitRate() != null}>
-                            <div
-                                class="token-usage-breakdown-cache-rate"
-                                {...tip("Share of input tokens served from Claude's prompt cache this session (~0.1x the cost of a fresh token). Only available for providers that report a cache breakdown.")}
-                            >
-                                {Math.round((cacheHitRate() as number) * 100)}% of input served from cache
-                            </div>
-                        </Show>
-                    </div>
-                </Show>
-                <div class="token-usage-breakdown-footer">
-                    <Button
-                        tone="danger"
-                        density="compact"
-                        onClick={handleResetClick}
-                        disabled={agentRows().length === 0}
-                    >
-                        Reset counter
-                    </Button>
-                </div>
+                <BreakdownHeader />
+                <BreakdownRows s={s} />
+                <BreakdownFooter s={s} />
             </AnchoredPopover>
             <ConfirmModal
-                open={confirmingReset()}
+                open={s.confirmingReset()}
                 title="Reset token counter?"
                 description="This clears the running total for the current session. Per-pane Worked stats stay unchanged."
                 confirmLabel="Reset"
                 destructive={true}
-                onConfirm={handleConfirmReset}
-                onCancel={() => setConfirmingReset(false)}
+                onConfirm={s.handleConfirmReset}
+                onCancel={() => s.setConfirmingReset(false)}
             />
         </>
     );

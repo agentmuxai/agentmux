@@ -1,0 +1,592 @@
+shortcutFor pane:magnify
+shortcutFor pane:changeConnection
+shortcutFor pane:close
+shortcutHelp
+keyPlatform
+getPlatform
+tipsFor darwin
+gestureLabels drag mac
+tipLabel drag mac
+gestureLabels swap mac
+tipLabel swap mac
+gestureLabels zoom mac
+tipLabel zoom mac
+shortcutFor pane:magnify
+shortcutFor pane:magnify
+shortcutFor pane:changeConnection
+shortcutFor pane:close
+shortcutFor pane:close
+-- unfiltered
+<div>
+  <div class="flex flex-col w-full gap-6 @container">
+    <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-highlightbg/30 to-transparent hover:from-accent-400/5 rounded-lg border border-border hover:border-accent-400/20 transition-colors duration-300">
+      <div class="flex items-center gap-2 text-xl font-bold">
+        <div class="w-1 h-6 bg-accent-400 rounded-full">
+        <span class="text-foreground">
+          "Header Icons"
+      <div class="grid grid-cols-[repeat(auto-fit,minmax(min(15rem,100%),1fr))] gap-3">
+        <div class="flex items-center gap-3 p-2 rounded-md hover:bg-hover transition-colors">
+          <div class="text-[20px] min-w-[32px] h-[32px] flex items-center justify-center rounded-md border [&_svg]:h-[16px] text-secondary bg-hover border-border [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary">
+            <i class="fa-regular fa-window-maximize fa-fw">
+          <div class="flex flex-col gap-0.5 flex-1">
+            <span class="text-[15px]">
+              "Maximize a pane"
+            <div class="flex flex-row items-center">
+              <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-border whitespace-nowrap">
+                "Ctrl+magnify"
+        <div class="flex items-center gap-3 p-2 rounded-md hover:bg-hover transition-colors">
+          <div class="text-[20px] min-w-[32px] h-[32px] flex items-center justify-center rounded-md border [&_svg]:h-[16px] text-secondary bg-hover border-border [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary">
+            <i class="fa-solid fa-laptop fa-fw">
+          <div class="flex flex-col gap-0.5 flex-1">
+            <span class="text-[15px]">
+              "Change connection"
+        <div class="flex items-center gap-3 p-2 rounded-md hover:bg-hover transition-colors">
+          <div class="text-[20px] min-w-[32px] h-[32px] flex items-center justify-center rounded-md border [&_svg]:h-[16px] text-secondary bg-hover border-border [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary">
+            <i class="fa-solid fa-cog fa-fw">
+          <span class="text-[15px]">
+            "Pane Settings"
+        <div class="flex items-center gap-3 p-2 rounded-md hover:bg-hover transition-colors">
+          <div class="text-[20px] min-w-[32px] h-[32px] flex items-center justify-center rounded-md border [&_svg]:h-[16px] text-secondary bg-hover border-border [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary">
+            <i class="fa-solid fa-xmark fa-fw">
+          <div class="flex flex-col gap-0.5 flex-1">
+            <span class="text-[15px]">
+              "Close pane"
+            <div class="flex flex-row items-center">
+              <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-border whitespace-nowrap">
+                "Ctrl+close"
+    <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-highlightbg/30 to-transparent hover:from-accent-400/5 rounded-lg border border-border hover:border-accent-400/20 transition-colors duration-300">
+      <div class="flex items-center gap-2 text-xl font-bold">
+        <div class="w-1 h-6 bg-accent-400 rounded-full">
+        <span class="text-foreground">
+          "Keyboard Shortcuts"
+      <div class="columns-[17rem] gap-x-5">
+        <div class="flex flex-col gap-1.5 mb-6 break-inside-avoid">
+          <div class="text-sm text-accent-400 font-semibold uppercase tracking-wide mb-1">
+            "Panes"
+          <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
+            <span class="text-[15px]">
+              "Close the pane"
+            <div class="flex flex-row flex-wrap items-center gap-1">
+              <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-border whitespace-nowrap">
+                "Ctrl+W"
+          <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
+            <span class="text-[15px]">
+              "Split right"
+            <div class="flex flex-row flex-wrap items-center gap-1">
+              <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-border whitespace-nowrap">
+                "⌘D"
+              <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-border whitespace-nowrap">
+                "Ctrl+Shift+D"
+        <div class="flex flex-col gap-1.5 mb-6 break-inside-avoid">
+          <div class="text-sm text-accent-400 font-semibold uppercase tracking-wide mb-1">
+            "Tabs"
+          <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
+            <span class="text-[15px]">
+              "New tab"
+            <div class="flex flex-row flex-wrap items-center gap-1">
+              <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-border whitespace-nowrap">
+                "⌘T"
+    <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-highlightbg/30 to-transparent hover:from-accent-400/5 rounded-lg border border-border hover:border-accent-400/20 transition-colors duration-300">
+      <div class="flex items-center gap-2 text-xl font-bold">
+        <div class="w-1 h-6 bg-accent-400 rounded-full">
+        <span class="text-foreground">
+          "Mouse and gestures"
+      <div class="columns-[17rem] gap-x-5">
+        <div class="quicktips-gestures flex flex-col gap-1.5 mb-6 break-inside-avoid">
+          <div class="text-sm text-accent-400 font-semibold uppercase tracking-wide mb-1">
+            "Panes"
+          <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
+            <span class="text-[15px]">
+              "Gesture drag"
+            <div class="flex flex-row flex-wrap items-center gap-1">
+              <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-border whitespace-nowrap">
+                "Drag"
+              <span class="text-secondary">
+                "or"
+              <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-border whitespace-nowrap">
+                "Alt+Drag"
+              <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-border whitespace-nowrap">
+                "Shift"
+              <span class="text-secondary text-[13px]">
+                "on the header"
+          <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
+            <span class="text-[15px]">
+              "Gesture swap"
+            <div class="flex flex-row flex-wrap items-center gap-1">
+              <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-border whitespace-nowrap">
+                "⌘Click"
+        <div class="quicktips-gestures flex flex-col gap-1.5 mb-6 break-inside-avoid">
+          <div class="text-sm text-accent-400 font-semibold uppercase tracking-wide mb-1">
+            "Terminal"
+          <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
+            <span class="text-[15px]">
+              "Gesture zoom"
+            <div class="flex flex-row flex-wrap items-center gap-1">
+              <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-border whitespace-nowrap">
+                "Ctrl+Wheel"
+    <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-highlightbg/30 to-transparent hover:from-accent-400/5 rounded-lg border border-border hover:border-accent-400/20 transition-colors duration-300">
+      <div class="flex items-center gap-2 text-xl font-bold">
+        <div class="w-1 h-6 bg-accent-400 rounded-full">
+        <span class="text-foreground">
+          "More Tips"
+      <div class="flex flex-col gap-2">
+        <div class="flex items-center gap-3 p-2 rounded-md hover:bg-hover transition-colors">
+          <div class="text-[20px] min-w-[32px] h-[32px] flex items-center justify-center rounded-md border [&_svg]:h-[16px] text-secondary bg-hover border-border [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary">
+            <i class="fa-solid fa-cog fa-fw">
+          <span>
+            <b>
+              "Web View"
+            "-"
+            "Click the gear in the web view to set your homepage"
+        <div class="flex items-center gap-3 p-2 rounded-md hover:bg-hover transition-colors">
+          <div class="text-[20px] min-w-[32px] h-[32px] flex items-center justify-center rounded-md border [&_svg]:h-[16px] text-secondary bg-hover border-border [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary">
+            <i class="fa-solid fa-cog fa-fw">
+          <span>
+            <b>
+              "Terminal"
+            "-"
+            "Click the gear in the terminal to set your terminal theme and font size"
+    <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-highlightbg/30 to-transparent hover:from-accent-400/5 rounded-lg border border-border hover:border-accent-400/20 transition-colors duration-300">
+      <div class="flex items-center gap-2 text-xl font-bold">
+        <div class="w-1 h-6 bg-accent-400 rounded-full">
+        <span class="text-foreground">
+          "Need More Help?"
+      <div class="grid grid-cols-[repeat(auto-fit,minmax(min(15rem,100%),1fr))] gap-2">
+        <div class="flex items-center gap-3 p-3 rounded-md bg-panel hover:bg-highlightbg transition-colors">
+          <div class="text-[20px] min-w-[32px] h-[32px] flex items-center justify-center rounded-md border [&_svg]:h-[16px] text-secondary bg-hover border-border [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary">
+            <i class="fa-brands fa-discord fa-fw">
+          <a target="_blank" rel="noopener" class="hover:text-accent-400 hover:underline transition-colors font-medium" href="https://discord.com/invite/96erama9Ar">
+            "Join Our Discord"
+        <div class="flex items-center gap-3 p-3 rounded-md bg-panel hover:bg-highlightbg transition-colors">
+          <div class="text-[20px] min-w-[32px] h-[32px] flex items-center justify-center rounded-md border [&_svg]:h-[16px] text-secondary bg-hover border-border [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary">
+            <i class="fa-solid fa-sliders fa-fw">
+          <a target="_blank" rel="noopener" class="hover:text-accent-400 hover:underline transition-colors font-medium" href="https://docs.agentmux.ai/config">
+            "Configuration Options"
+        <div class="flex items-center gap-3 p-3 rounded-md bg-panel hover:bg-highlightbg transition-colors">
+          <div class="text-[20px] min-w-[32px] h-[32px] flex items-center justify-center rounded-md border [&_svg]:h-[16px] text-secondary bg-hover border-border [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary">
+            <i class="fa-solid fa-keyboard fa-fw">
+          <a target="_blank" rel="noopener" class="hover:text-accent-400 hover:underline transition-colors font-medium" href="https://docs.agentmux.ai/keybindings">
+            "All Keybindings"
+        <div class="flex items-center gap-3 p-3 rounded-md bg-panel hover:bg-highlightbg transition-colors">
+          <div class="text-[20px] min-w-[32px] h-[32px] flex items-center justify-center rounded-md border [&_svg]:h-[16px] text-secondary bg-hover border-border [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary">
+            <i class="fa-solid fa-book fa-fw">
+          <a target="_blank" rel="noopener" class="hover:text-accent-400 hover:underline transition-colors font-medium" href="https://docs.agentmux.ai">
+            "Full Documentation"
+        <div class="flex items-center gap-3 p-3 rounded-md bg-panel hover:bg-highlightbg transition-colors">
+          <div class="text-[20px] min-w-[32px] h-[32px] flex items-center justify-center rounded-md border [&_svg]:h-[16px] text-secondary bg-hover border-border [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary">
+            <i class="fa-solid fa-bug fa-fw">
+          <a target="_blank" rel="noopener" class="hover:text-accent-400 hover:underline transition-colors font-medium" href="https://github.com/agentmuxai/agentmux/issues/new">
+            "Report Bugs & Issues"
+    <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-amber-900/20 to-transparent rounded-lg border border-amber-500/20">
+      <div class="flex items-center gap-2 text-xl font-bold">
+        <div class="w-1 h-6 bg-amber-400 rounded-full">
+        <span class="text-foreground">
+          "Alpha Software & AI Content"
+      <div class="flex flex-col gap-2 text-secondary text-sm">
+        <p>
+          "AgentMux is"
+          <b>
+            "alpha software"
+          ". Features may be incomplete, unstable, or change between releases. AI agents generate code, text, and other outputs that may be"
+          <b>
+            "inaccurate, incomplete, or inappropriate"
+          ". Always review agent outputs before using them."
+        <p>
+          "To report bugs, request features, or flag issues with AI-generated content:"
+        <div class="flex items-center gap-3 p-3 rounded-md bg-panel hover:bg-highlightbg transition-colors mt-1">
+          <div class="text-[20px] min-w-[32px] h-[32px] flex items-center justify-center rounded-md border [&_svg]:h-[16px] text-secondary bg-hover border-border [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary">
+            <i class="fa-brands fa-github fa-fw">
+          <a target="_blank" href="https://github.com/agentmuxai/agentmux/issues/new" rel="noopener" class="hover:text-accent-400 hover:underline transition-colors font-medium">
+            "Open an Issue on GitHub"
+filter "  "
+shortcutFor pane:magnify
+shortcutFor pane:changeConnection
+shortcutFor pane:close
+shortcutHelp
+keyPlatform
+getPlatform
+tipsFor darwin
+gestureLabels drag mac
+tipLabel drag mac
+gestureLabels swap mac
+tipLabel swap mac
+gestureLabels zoom mac
+tipLabel zoom mac
+-- blank filter is no filter
+<div>
+  <div class="flex flex-col w-full gap-6 @container">
+    <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-highlightbg/30 to-transparent hover:from-accent-400/5 rounded-lg border border-border hover:border-accent-400/20 transition-colors duration-300">
+      <div class="flex items-center gap-2 text-xl font-bold">
+        <div class="w-1 h-6 bg-accent-400 rounded-full">
+        <span class="text-foreground">
+          "Header Icons"
+      <div class="grid grid-cols-[repeat(auto-fit,minmax(min(15rem,100%),1fr))] gap-3">
+        <div class="flex items-center gap-3 p-2 rounded-md hover:bg-hover transition-colors">
+          <div class="text-[20px] min-w-[32px] h-[32px] flex items-center justify-center rounded-md border [&_svg]:h-[16px] text-secondary bg-hover border-border [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary">
+            <i class="fa-regular fa-window-maximize fa-fw">
+          <div class="flex flex-col gap-0.5 flex-1">
+            <span class="text-[15px]">
+              "Maximize a pane"
+            <div class="flex flex-row items-center">
+              <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-border whitespace-nowrap">
+                "Ctrl+magnify"
+        <div class="flex items-center gap-3 p-2 rounded-md hover:bg-hover transition-colors">
+          <div class="text-[20px] min-w-[32px] h-[32px] flex items-center justify-center rounded-md border [&_svg]:h-[16px] text-secondary bg-hover border-border [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary">
+            <i class="fa-solid fa-laptop fa-fw">
+          <div class="flex flex-col gap-0.5 flex-1">
+            <span class="text-[15px]">
+              "Change connection"
+        <div class="flex items-center gap-3 p-2 rounded-md hover:bg-hover transition-colors">
+          <div class="text-[20px] min-w-[32px] h-[32px] flex items-center justify-center rounded-md border [&_svg]:h-[16px] text-secondary bg-hover border-border [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary">
+            <i class="fa-solid fa-cog fa-fw">
+          <span class="text-[15px]">
+            "Pane Settings"
+        <div class="flex items-center gap-3 p-2 rounded-md hover:bg-hover transition-colors">
+          <div class="text-[20px] min-w-[32px] h-[32px] flex items-center justify-center rounded-md border [&_svg]:h-[16px] text-secondary bg-hover border-border [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary">
+            <i class="fa-solid fa-xmark fa-fw">
+          <div class="flex flex-col gap-0.5 flex-1">
+            <span class="text-[15px]">
+              "Close pane"
+            <div class="flex flex-row items-center">
+              <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-border whitespace-nowrap">
+                "Ctrl+close"
+    <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-highlightbg/30 to-transparent hover:from-accent-400/5 rounded-lg border border-border hover:border-accent-400/20 transition-colors duration-300">
+      <div class="flex items-center gap-2 text-xl font-bold">
+        <div class="w-1 h-6 bg-accent-400 rounded-full">
+        <span class="text-foreground">
+          "Keyboard Shortcuts"
+      <div class="columns-[17rem] gap-x-5">
+        <div class="flex flex-col gap-1.5 mb-6 break-inside-avoid">
+          <div class="text-sm text-accent-400 font-semibold uppercase tracking-wide mb-1">
+            "Panes"
+          <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
+            <span class="text-[15px]">
+              "Close the pane"
+            <div class="flex flex-row flex-wrap items-center gap-1">
+              <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-border whitespace-nowrap">
+                "Ctrl+W"
+          <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
+            <span class="text-[15px]">
+              "Split right"
+            <div class="flex flex-row flex-wrap items-center gap-1">
+              <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-border whitespace-nowrap">
+                "⌘D"
+              <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-border whitespace-nowrap">
+                "Ctrl+Shift+D"
+        <div class="flex flex-col gap-1.5 mb-6 break-inside-avoid">
+          <div class="text-sm text-accent-400 font-semibold uppercase tracking-wide mb-1">
+            "Tabs"
+          <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
+            <span class="text-[15px]">
+              "New tab"
+            <div class="flex flex-row flex-wrap items-center gap-1">
+              <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-border whitespace-nowrap">
+                "⌘T"
+    <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-highlightbg/30 to-transparent hover:from-accent-400/5 rounded-lg border border-border hover:border-accent-400/20 transition-colors duration-300">
+      <div class="flex items-center gap-2 text-xl font-bold">
+        <div class="w-1 h-6 bg-accent-400 rounded-full">
+        <span class="text-foreground">
+          "Mouse and gestures"
+      <div class="columns-[17rem] gap-x-5">
+        <div class="quicktips-gestures flex flex-col gap-1.5 mb-6 break-inside-avoid">
+          <div class="text-sm text-accent-400 font-semibold uppercase tracking-wide mb-1">
+            "Panes"
+          <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
+            <span class="text-[15px]">
+              "Gesture drag"
+            <div class="flex flex-row flex-wrap items-center gap-1">
+              <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-border whitespace-nowrap">
+                "Drag"
+              <span class="text-secondary">
+                "or"
+              <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-border whitespace-nowrap">
+                "Alt+Drag"
+              <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-border whitespace-nowrap">
+                "Shift"
+              <span class="text-secondary text-[13px]">
+                "on the header"
+          <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
+            <span class="text-[15px]">
+              "Gesture swap"
+            <div class="flex flex-row flex-wrap items-center gap-1">
+              <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-border whitespace-nowrap">
+                "⌘Click"
+        <div class="quicktips-gestures flex flex-col gap-1.5 mb-6 break-inside-avoid">
+          <div class="text-sm text-accent-400 font-semibold uppercase tracking-wide mb-1">
+            "Terminal"
+          <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
+            <span class="text-[15px]">
+              "Gesture zoom"
+            <div class="flex flex-row flex-wrap items-center gap-1">
+              <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-border whitespace-nowrap">
+                "Ctrl+Wheel"
+    <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-highlightbg/30 to-transparent hover:from-accent-400/5 rounded-lg border border-border hover:border-accent-400/20 transition-colors duration-300">
+      <div class="flex items-center gap-2 text-xl font-bold">
+        <div class="w-1 h-6 bg-accent-400 rounded-full">
+        <span class="text-foreground">
+          "More Tips"
+      <div class="flex flex-col gap-2">
+        <div class="flex items-center gap-3 p-2 rounded-md hover:bg-hover transition-colors">
+          <div class="text-[20px] min-w-[32px] h-[32px] flex items-center justify-center rounded-md border [&_svg]:h-[16px] text-secondary bg-hover border-border [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary">
+            <i class="fa-solid fa-cog fa-fw">
+          <span>
+            <b>
+              "Web View"
+            "-"
+            "Click the gear in the web view to set your homepage"
+        <div class="flex items-center gap-3 p-2 rounded-md hover:bg-hover transition-colors">
+          <div class="text-[20px] min-w-[32px] h-[32px] flex items-center justify-center rounded-md border [&_svg]:h-[16px] text-secondary bg-hover border-border [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary">
+            <i class="fa-solid fa-cog fa-fw">
+          <span>
+            <b>
+              "Terminal"
+            "-"
+            "Click the gear in the terminal to set your terminal theme and font size"
+    <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-highlightbg/30 to-transparent hover:from-accent-400/5 rounded-lg border border-border hover:border-accent-400/20 transition-colors duration-300">
+      <div class="flex items-center gap-2 text-xl font-bold">
+        <div class="w-1 h-6 bg-accent-400 rounded-full">
+        <span class="text-foreground">
+          "Need More Help?"
+      <div class="grid grid-cols-[repeat(auto-fit,minmax(min(15rem,100%),1fr))] gap-2">
+        <div class="flex items-center gap-3 p-3 rounded-md bg-panel hover:bg-highlightbg transition-colors">
+          <div class="text-[20px] min-w-[32px] h-[32px] flex items-center justify-center rounded-md border [&_svg]:h-[16px] text-secondary bg-hover border-border [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary">
+            <i class="fa-brands fa-discord fa-fw">
+          <a target="_blank" rel="noopener" class="hover:text-accent-400 hover:underline transition-colors font-medium" href="https://discord.com/invite/96erama9Ar">
+            "Join Our Discord"
+        <div class="flex items-center gap-3 p-3 rounded-md bg-panel hover:bg-highlightbg transition-colors">
+          <div class="text-[20px] min-w-[32px] h-[32px] flex items-center justify-center rounded-md border [&_svg]:h-[16px] text-secondary bg-hover border-border [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary">
+            <i class="fa-solid fa-sliders fa-fw">
+          <a target="_blank" rel="noopener" class="hover:text-accent-400 hover:underline transition-colors font-medium" href="https://docs.agentmux.ai/config">
+            "Configuration Options"
+        <div class="flex items-center gap-3 p-3 rounded-md bg-panel hover:bg-highlightbg transition-colors">
+          <div class="text-[20px] min-w-[32px] h-[32px] flex items-center justify-center rounded-md border [&_svg]:h-[16px] text-secondary bg-hover border-border [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary">
+            <i class="fa-solid fa-keyboard fa-fw">
+          <a target="_blank" rel="noopener" class="hover:text-accent-400 hover:underline transition-colors font-medium" href="https://docs.agentmux.ai/keybindings">
+            "All Keybindings"
+        <div class="flex items-center gap-3 p-3 rounded-md bg-panel hover:bg-highlightbg transition-colors">
+          <div class="text-[20px] min-w-[32px] h-[32px] flex items-center justify-center rounded-md border [&_svg]:h-[16px] text-secondary bg-hover border-border [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary">
+            <i class="fa-solid fa-book fa-fw">
+          <a target="_blank" rel="noopener" class="hover:text-accent-400 hover:underline transition-colors font-medium" href="https://docs.agentmux.ai">
+            "Full Documentation"
+        <div class="flex items-center gap-3 p-3 rounded-md bg-panel hover:bg-highlightbg transition-colors">
+          <div class="text-[20px] min-w-[32px] h-[32px] flex items-center justify-center rounded-md border [&_svg]:h-[16px] text-secondary bg-hover border-border [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary">
+            <i class="fa-solid fa-bug fa-fw">
+          <a target="_blank" rel="noopener" class="hover:text-accent-400 hover:underline transition-colors font-medium" href="https://github.com/agentmuxai/agentmux/issues/new">
+            "Report Bugs & Issues"
+    <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-amber-900/20 to-transparent rounded-lg border border-amber-500/20">
+      <div class="flex items-center gap-2 text-xl font-bold">
+        <div class="w-1 h-6 bg-amber-400 rounded-full">
+        <span class="text-foreground">
+          "Alpha Software & AI Content"
+      <div class="flex flex-col gap-2 text-secondary text-sm">
+        <p>
+          "AgentMux is"
+          <b>
+            "alpha software"
+          ". Features may be incomplete, unstable, or change between releases. AI agents generate code, text, and other outputs that may be"
+          <b>
+            "inaccurate, incomplete, or inappropriate"
+          ". Always review agent outputs before using them."
+        <p>
+          "To report bugs, request features, or flag issues with AI-generated content:"
+        <div class="flex items-center gap-3 p-3 rounded-md bg-panel hover:bg-highlightbg transition-colors mt-1">
+          <div class="text-[20px] min-w-[32px] h-[32px] flex items-center justify-center rounded-md border [&_svg]:h-[16px] text-secondary bg-hover border-border [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary">
+            <i class="fa-brands fa-github fa-fw">
+          <a target="_blank" href="https://github.com/agentmuxai/agentmux/issues/new" rel="noopener" class="hover:text-accent-400 hover:underline transition-colors font-medium">
+            "Open an Issue on GitHub"
+filter undefined
+shortcutFor pane:magnify
+shortcutFor pane:changeConnection
+shortcutFor pane:close
+shortcutHelp
+keyPlatform
+getPlatform
+tipsFor darwin
+gestureLabels drag mac
+tipLabel drag mac
+gestureLabels swap mac
+tipLabel swap mac
+gestureLabels zoom mac
+tipLabel zoom mac
+-- no filter again
+<div>
+  <div class="flex flex-col w-full gap-6 @container">
+    <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-highlightbg/30 to-transparent hover:from-accent-400/5 rounded-lg border border-border hover:border-accent-400/20 transition-colors duration-300">
+      <div class="flex items-center gap-2 text-xl font-bold">
+        <div class="w-1 h-6 bg-accent-400 rounded-full">
+        <span class="text-foreground">
+          "Header Icons"
+      <div class="grid grid-cols-[repeat(auto-fit,minmax(min(15rem,100%),1fr))] gap-3">
+        <div class="flex items-center gap-3 p-2 rounded-md hover:bg-hover transition-colors">
+          <div class="text-[20px] min-w-[32px] h-[32px] flex items-center justify-center rounded-md border [&_svg]:h-[16px] text-secondary bg-hover border-border [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary">
+            <i class="fa-regular fa-window-maximize fa-fw">
+          <div class="flex flex-col gap-0.5 flex-1">
+            <span class="text-[15px]">
+              "Maximize a pane"
+            <div class="flex flex-row items-center">
+              <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-border whitespace-nowrap">
+                "Ctrl+magnify"
+        <div class="flex items-center gap-3 p-2 rounded-md hover:bg-hover transition-colors">
+          <div class="text-[20px] min-w-[32px] h-[32px] flex items-center justify-center rounded-md border [&_svg]:h-[16px] text-secondary bg-hover border-border [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary">
+            <i class="fa-solid fa-laptop fa-fw">
+          <div class="flex flex-col gap-0.5 flex-1">
+            <span class="text-[15px]">
+              "Change connection"
+        <div class="flex items-center gap-3 p-2 rounded-md hover:bg-hover transition-colors">
+          <div class="text-[20px] min-w-[32px] h-[32px] flex items-center justify-center rounded-md border [&_svg]:h-[16px] text-secondary bg-hover border-border [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary">
+            <i class="fa-solid fa-cog fa-fw">
+          <span class="text-[15px]">
+            "Pane Settings"
+        <div class="flex items-center gap-3 p-2 rounded-md hover:bg-hover transition-colors">
+          <div class="text-[20px] min-w-[32px] h-[32px] flex items-center justify-center rounded-md border [&_svg]:h-[16px] text-secondary bg-hover border-border [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary">
+            <i class="fa-solid fa-xmark fa-fw">
+          <div class="flex flex-col gap-0.5 flex-1">
+            <span class="text-[15px]">
+              "Close pane"
+            <div class="flex flex-row items-center">
+              <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-border whitespace-nowrap">
+                "Ctrl+close"
+    <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-highlightbg/30 to-transparent hover:from-accent-400/5 rounded-lg border border-border hover:border-accent-400/20 transition-colors duration-300">
+      <div class="flex items-center gap-2 text-xl font-bold">
+        <div class="w-1 h-6 bg-accent-400 rounded-full">
+        <span class="text-foreground">
+          "Keyboard Shortcuts"
+      <div class="columns-[17rem] gap-x-5">
+        <div class="flex flex-col gap-1.5 mb-6 break-inside-avoid">
+          <div class="text-sm text-accent-400 font-semibold uppercase tracking-wide mb-1">
+            "Panes"
+          <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
+            <span class="text-[15px]">
+              "Close the pane"
+            <div class="flex flex-row flex-wrap items-center gap-1">
+              <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-border whitespace-nowrap">
+                "Ctrl+W"
+          <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
+            <span class="text-[15px]">
+              "Split right"
+            <div class="flex flex-row flex-wrap items-center gap-1">
+              <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-border whitespace-nowrap">
+                "⌘D"
+              <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-border whitespace-nowrap">
+                "Ctrl+Shift+D"
+        <div class="flex flex-col gap-1.5 mb-6 break-inside-avoid">
+          <div class="text-sm text-accent-400 font-semibold uppercase tracking-wide mb-1">
+            "Tabs"
+          <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
+            <span class="text-[15px]">
+              "New tab"
+            <div class="flex flex-row flex-wrap items-center gap-1">
+              <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-border whitespace-nowrap">
+                "⌘T"
+    <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-highlightbg/30 to-transparent hover:from-accent-400/5 rounded-lg border border-border hover:border-accent-400/20 transition-colors duration-300">
+      <div class="flex items-center gap-2 text-xl font-bold">
+        <div class="w-1 h-6 bg-accent-400 rounded-full">
+        <span class="text-foreground">
+          "Mouse and gestures"
+      <div class="columns-[17rem] gap-x-5">
+        <div class="quicktips-gestures flex flex-col gap-1.5 mb-6 break-inside-avoid">
+          <div class="text-sm text-accent-400 font-semibold uppercase tracking-wide mb-1">
+            "Panes"
+          <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
+            <span class="text-[15px]">
+              "Gesture drag"
+            <div class="flex flex-row flex-wrap items-center gap-1">
+              <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-border whitespace-nowrap">
+                "Drag"
+              <span class="text-secondary">
+                "or"
+              <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-border whitespace-nowrap">
+                "Alt+Drag"
+              <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-border whitespace-nowrap">
+                "Shift"
+              <span class="text-secondary text-[13px]">
+                "on the header"
+          <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
+            <span class="text-[15px]">
+              "Gesture swap"
+            <div class="flex flex-row flex-wrap items-center gap-1">
+              <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-border whitespace-nowrap">
+                "⌘Click"
+        <div class="quicktips-gestures flex flex-col gap-1.5 mb-6 break-inside-avoid">
+          <div class="text-sm text-accent-400 font-semibold uppercase tracking-wide mb-1">
+            "Terminal"
+          <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
+            <span class="text-[15px]">
+              "Gesture zoom"
+            <div class="flex flex-row flex-wrap items-center gap-1">
+              <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-border whitespace-nowrap">
+                "Ctrl+Wheel"
+    <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-highlightbg/30 to-transparent hover:from-accent-400/5 rounded-lg border border-border hover:border-accent-400/20 transition-colors duration-300">
+      <div class="flex items-center gap-2 text-xl font-bold">
+        <div class="w-1 h-6 bg-accent-400 rounded-full">
+        <span class="text-foreground">
+          "More Tips"
+      <div class="flex flex-col gap-2">
+        <div class="flex items-center gap-3 p-2 rounded-md hover:bg-hover transition-colors">
+          <div class="text-[20px] min-w-[32px] h-[32px] flex items-center justify-center rounded-md border [&_svg]:h-[16px] text-secondary bg-hover border-border [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary">
+            <i class="fa-solid fa-cog fa-fw">
+          <span>
+            <b>
+              "Web View"
+            "-"
+            "Click the gear in the web view to set your homepage"
+        <div class="flex items-center gap-3 p-2 rounded-md hover:bg-hover transition-colors">
+          <div class="text-[20px] min-w-[32px] h-[32px] flex items-center justify-center rounded-md border [&_svg]:h-[16px] text-secondary bg-hover border-border [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary">
+            <i class="fa-solid fa-cog fa-fw">
+          <span>
+            <b>
+              "Terminal"
+            "-"
+            "Click the gear in the terminal to set your terminal theme and font size"
+    <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-highlightbg/30 to-transparent hover:from-accent-400/5 rounded-lg border border-border hover:border-accent-400/20 transition-colors duration-300">
+      <div class="flex items-center gap-2 text-xl font-bold">
+        <div class="w-1 h-6 bg-accent-400 rounded-full">
+        <span class="text-foreground">
+          "Need More Help?"
+      <div class="grid grid-cols-[repeat(auto-fit,minmax(min(15rem,100%),1fr))] gap-2">
+        <div class="flex items-center gap-3 p-3 rounded-md bg-panel hover:bg-highlightbg transition-colors">
+          <div class="text-[20px] min-w-[32px] h-[32px] flex items-center justify-center rounded-md border [&_svg]:h-[16px] text-secondary bg-hover border-border [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary">
+            <i class="fa-brands fa-discord fa-fw">
+          <a target="_blank" rel="noopener" class="hover:text-accent-400 hover:underline transition-colors font-medium" href="https://discord.com/invite/96erama9Ar">
+            "Join Our Discord"
+        <div class="flex items-center gap-3 p-3 rounded-md bg-panel hover:bg-highlightbg transition-colors">
+          <div class="text-[20px] min-w-[32px] h-[32px] flex items-center justify-center rounded-md border [&_svg]:h-[16px] text-secondary bg-hover border-border [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary">
+            <i class="fa-solid fa-sliders fa-fw">
+          <a target="_blank" rel="noopener" class="hover:text-accent-400 hover:underline transition-colors font-medium" href="https://docs.agentmux.ai/config">
+            "Configuration Options"
+        <div class="flex items-center gap-3 p-3 rounded-md bg-panel hover:bg-highlightbg transition-colors">
+          <div class="text-[20px] min-w-[32px] h-[32px] flex items-center justify-center rounded-md border [&_svg]:h-[16px] text-secondary bg-hover border-border [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary">
+            <i class="fa-solid fa-keyboard fa-fw">
+          <a target="_blank" rel="noopener" class="hover:text-accent-400 hover:underline transition-colors font-medium" href="https://docs.agentmux.ai/keybindings">
+            "All Keybindings"
+        <div class="flex items-center gap-3 p-3 rounded-md bg-panel hover:bg-highlightbg transition-colors">
+          <div class="text-[20px] min-w-[32px] h-[32px] flex items-center justify-center rounded-md border [&_svg]:h-[16px] text-secondary bg-hover border-border [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary">
+            <i class="fa-solid fa-book fa-fw">
+          <a target="_blank" rel="noopener" class="hover:text-accent-400 hover:underline transition-colors font-medium" href="https://docs.agentmux.ai">
+            "Full Documentation"
+        <div class="flex items-center gap-3 p-3 rounded-md bg-panel hover:bg-highlightbg transition-colors">
+          <div class="text-[20px] min-w-[32px] h-[32px] flex items-center justify-center rounded-md border [&_svg]:h-[16px] text-secondary bg-hover border-border [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary">
+            <i class="fa-solid fa-bug fa-fw">
+          <a target="_blank" rel="noopener" class="hover:text-accent-400 hover:underline transition-colors font-medium" href="https://github.com/agentmuxai/agentmux/issues/new">
+            "Report Bugs & Issues"
+    <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-amber-900/20 to-transparent rounded-lg border border-amber-500/20">
+      <div class="flex items-center gap-2 text-xl font-bold">
+        <div class="w-1 h-6 bg-amber-400 rounded-full">
+        <span class="text-foreground">
+          "Alpha Software & AI Content"
+      <div class="flex flex-col gap-2 text-secondary text-sm">
+        <p>
+          "AgentMux is"
+          <b>
+            "alpha software"
+          ". Features may be incomplete, unstable, or change between releases. AI agents generate code, text, and other outputs that may be"
+          <b>
+            "inaccurate, incomplete, or inappropriate"
+          ". Always review agent outputs before using them."
+        <p>
+          "To report bugs, request features, or flag issues with AI-generated content:"
+        <div class="flex items-center gap-3 p-3 rounded-md bg-panel hover:bg-highlightbg transition-colors mt-1">
+          <div class="text-[20px] min-w-[32px] h-[32px] flex items-center justify-center rounded-md border [&_svg]:h-[16px] text-secondary bg-hover border-border [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary">
+            <i class="fa-brands fa-github fa-fw">
+          <a target="_blank" href="https://github.com/agentmuxai/agentmux/issues/new" rel="noopener" class="hover:text-accent-400 hover:underline transition-colors font-medium">
+            "Open an Issue on GitHub"
