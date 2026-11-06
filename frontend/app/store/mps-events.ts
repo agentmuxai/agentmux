@@ -137,6 +137,7 @@ export const WpsEvent = {
     AgentReactiveRegistered: "agent:reactive-registered",
     AgentReactiveUnregistered: "agent:reactive-unregistered",
     AgentsChanged: "agents:changed",
+    HistorySessionsChanged: "history:sessions:changed",
     CronChanged: "cron_changed",
     DispatchActivity: "dispatch:activity",
     DispatchUpdated: "dispatch:updated",
@@ -184,7 +185,6 @@ export const WpsEvent = {
     // No-payload signals typed in srv that nothing subscribes to yet.
     AgentContentChanged: "agentcontent:changed",
     AgentHistoryChanged: "agenthistory:changed",
-    HistorySessionsChanged: "history:sessions:changed",
     AgentSkillsChanged: "agentskills:changed",
     DronesChanged: "drones:changed",
     NamedAgentsChanged: "namedagents:changed",
