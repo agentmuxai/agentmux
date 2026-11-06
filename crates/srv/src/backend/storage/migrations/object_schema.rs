@@ -931,9 +931,12 @@ pub(super) fn create_channel_migrations(conn: &Connection) -> Result<(), StoreEr
 }
 
 /// Run each additive `ALTER`, ignoring a column that is already there.
-fn apply_additive_columns(conn: &Connection, stmts: &[&str]) -> Result<(), StoreError> {
+pub(super) fn apply_additive_columns<S: AsRef<str>>(
+    conn: &Connection,
+    stmts: impl IntoIterator<Item = S>,
+) -> Result<(), StoreError> {
     for stmt in stmts {
-        if let Err(e) = conn.execute_batch(stmt) {
+        if let Err(e) = conn.execute_batch(stmt.as_ref()) {
             let msg = e.to_string();
             if !msg.contains("duplicate column") {
                 return Err(e.into());
