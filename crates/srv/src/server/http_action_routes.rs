@@ -91,7 +91,7 @@ pub(super) const NEVER: &[&str] = &[
     "POST /agentmux/agents/resolve", "POST /agentmux/wps/publish", "POST /api/post-chat-message",
     "POST /api/v1/agent/memory/session-start/ack", "POST /api/v1/agent/memory/session-start/part",
     "POST /api/v1/agent/self/context", "POST /api/v1/agent/self/mcp-beat", "POST /api/v1/agent/self/mcp-health",
-    "POST /api/v1/agent/tool-chunk", "POST /api/v1/agent/compaction-started", "POST /api/v1/agent/watch", "POST /api/v1/agent/workers",
+    "POST /api/v1/agent/tool-chunk", "POST /api/v1/agent/compaction-started", "POST /api/v1/agent/watch", "POST /api/v1/agent/workers", "POST /api/v1/agent/routes",
     "POST /api/v1/askpass",
     // Records itself (`app_api::aws_credentials`): a fresh session and every refusal, but not a cache hit, which the
     // AWS CLI asks for on every command and the layer would record each time.
