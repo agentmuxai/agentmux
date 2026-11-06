@@ -110,7 +110,6 @@ pub(super) struct AckResp {
     delivered_at: String,
 }
 
-
 /// Claim `body`'s injections for `agent_id` and deliver the ones this call
 /// won: the second half of [`sync_agent_reactive`], shared with
 /// [`sync_agents_batched`]. `agent_token` is the credential the pull used
@@ -211,7 +210,6 @@ pub(super) async fn claim_and_deliver(
     delivery_status::fetched(agent_id, delivered_count, &body.expired);
     AgentSyncOutcome::Ok
 }
-
 
 /// Give a claimed injection back to pending, so it's delivered on a later
 /// pull. A release that fails strands it as delivered: logged loudly.
