@@ -183,7 +183,7 @@ describe("DEFAULT_TAB_PRESET mirrors default_three_pane_tree", () => {
         const fnStart = wcore.indexOf("pub(crate) fn default_three_pane_tree(");
         expect(fnStart, "default_three_pane_tree in wcore/mod.rs").toBeGreaterThanOrEqual(0);
         const fn = wcore.slice(fnStart);
-        const body = fn.slice(fn.indexOf("let rootnode = LayoutNode {"), fn.indexOf("let leaforder"));
+        const body = fn.slice(fn.indexOf("let rootnode = LayoutNode {"), fn.indexOf("(rootnode, agent_node_id)"));
         const open: (RustNode | null)[] = [];
         const innermost = (): RustNode | undefined => {
             for (let i = open.length - 1; i >= 0; i--) if (open[i]) return open[i];

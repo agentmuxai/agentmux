@@ -5,7 +5,7 @@
 // reducer-owned columns of every workspace, tab, block, window and layout row
 // are rewritten from a reducer snapshot. Insert and update only, never delete
 // (#615): a row whose delete was dropped stays on disk, unlinked from its parent.
-// Not rebuilt, as the reducer doesn't hold them: meta, a layout's leaforder and
+// Not rebuilt, as the reducer doesn't hold them: meta, a layout's
 // action queue, and a block row whose `BlockCreated` was dropped. Events still in
 // the channel are applied afterwards; every apply is idempotent, so they converge.
 
@@ -133,19 +133,15 @@ fn resync_tab(mstore: &Store, rec: &TabRecord) -> ResyncResult {
     let Some(mut layout) = mstore.get::<PersistedLayoutState>(&tab.layoutstate)? else {
         return Ok(());
     };
-    // An empty tree clears leaforder too, as `LayoutTreeReplaced` does.
-    let leaforder = if rec.rootnode.is_none() { None } else { layout.leaforder.clone() };
     if layout.rootnode == rec.rootnode
         && layout.focusednodeid == rec.focused_node_id
         && layout.magnifiednodeid == rec.magnified_node_id
-        && layout.leaforder == leaforder
     {
         return Ok(());
     }
     layout.rootnode = rec.rootnode.clone();
     layout.focusednodeid = rec.focused_node_id.clone();
     layout.magnifiednodeid = rec.magnified_node_id.clone();
-    layout.leaforder = leaforder;
     mstore.update(&mut layout)?;
     Ok(())
 }

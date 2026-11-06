@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createRoot } from "solid-js";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { recycleBlockers } from "@/app/store/recycle-blockers";
 import { useInSessionSearch } from "./useInSessionSearch";
 
@@ -13,6 +13,16 @@ describe("useInSessionSearch", () => {
         expect(recycleBlockers()).toContain("a transcript search is open");
         search.close();
         expect(recycleBlockers()).not.toContain("a transcript search is open");
+        dispose();
+    });
+
+    it("tells the caller when the search ends", () => {
+        const onClose = vi.fn();
+        const { search, dispose } = createRoot((d) => ({ search: useInSessionSearch({ document: () => [], onClose }), dispose: d }));
+        search.setVisible(true);
+        expect(onClose).not.toHaveBeenCalled();
+        search.close();
+        expect(onClose).toHaveBeenCalledOnce();
         dispose();
     });
 });
