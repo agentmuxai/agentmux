@@ -419,6 +419,11 @@ pub(crate) async fn restore_all(state: &AppState, record: &Value) -> Result<Opti
                 reopened += 1;
                 taken.insert(ws_id.clone());
                 super::session_closed::forget(&state.mstore, &ws_id);
+                // Agents a switch away parked (the record names them) are back in their tabs before the window shows them.
+                let back = crate::sagas::park_agents::reattach_window_agents(state, &ws_id, &super::session_closed::parked_of(window)).await;
+                if back > 0 {
+                    tracing::info!(workspace_id = %ws_id, agents = back, "session_restore: the workspace's agents are back in its tabs");
+                }
                 Ok(Some((ws_id, Vec::new())))
             }
             None => super::session_restore::restore_workspace(state, window).await,

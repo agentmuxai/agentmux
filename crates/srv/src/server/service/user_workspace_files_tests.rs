@@ -215,6 +215,10 @@ fn unstarted_agent_panes(state: &AppState) -> usize {
 #[tokio::test]
 async fn an_import_starts_the_agents_of_every_window_not_only_the_first() {
     let state = fresh_state().await;
+    // With agents kept running (the default) the switch parks the replaced workspace's agents, and
+    // opening one of them again attaches its parked block instead of starting it; this test is about
+    // the start of the others, so the switch stops them as it does with the setting off.
+    crate::sagas::park_agents_tests::set_always_available(&state, false);
     let main = open_window(&state, "main").await;
     let mut windows = vec![main.workspaceid.clone()];
     for i in 2..=4 {

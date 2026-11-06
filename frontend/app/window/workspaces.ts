@@ -20,6 +20,7 @@ import { settingsAtom } from "@/store/config-signals";
 import { atoms, getApi, pushNotification } from "@/store/global";
 import { RpcApi } from "@/store/rpc-api";
 import { TabRpcClient } from "@/store/rpc-util";
+import { keepsRunningSetting } from "@/app/view/agent/shutdown/keeps-running-text";
 import { DONT_ASK_AGAIN, namesLine, warnsBeforeClosing } from "./window-close";
 import { WindowCloseConfirm } from "./window-close-confirm";
 import {
@@ -58,8 +59,8 @@ export function switchWarningText(agents: WindowAgent[], workspace: string): { t
     };
 }
 
-/** Whether to go ahead and close the open workspace: at once when no agent
- *  in it is mid-turn (or the warning is off), else when the user says so. */
+/** Whether to go ahead and close the open workspace: at once when its agents keep running (they are
+ *  parked), when none is mid-turn or when the warning is off, else when the user says so. */
 export async function confirmLeaving(): Promise<boolean> {
     let agents: WindowAgent[] = [];
     try {
@@ -67,7 +68,9 @@ export async function confirmLeaving(): Promise<boolean> {
     } catch (e) {
         console.warn("[workspaces] couldn't list the open workspace's agents", e);
     }
-    if (!warnsBeforeClosing(agents, settingsAtom() as Record<string, unknown>)) return true;
+    const settings = settingsAtom() as Record<string, unknown>;
+    // A switch parks the workspace's agents when they keep running without a pane: nothing is stopped to warn about.
+    if (keepsRunningSetting(settings?.["agents:always_available"]) || !warnsBeforeClosing(agents, settings)) return true;
     return new Promise<boolean>((resolve) => {
         openModal(WindowCloseConfirm, {
             ...switchWarningText(agents, currentName()),
