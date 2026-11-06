@@ -443,6 +443,7 @@ fn service_shell_and_vault_routes() -> Router<AppState> {
         .route("/api/v1/vault", get(super::vault_handlers::handle_vault_list))
         .route("/api/v1/vault/list", post(super::vault_handlers::handle_vault_list_for))
         .route("/api/v1/vault/generate", post(super::vault_handlers::handle_vault_generate))
+        .route("/api/v1/vault/history", post(super::vault_handlers::handle_vault_history))
         .route("/api/v1/vault/rotate", post(super::vault_rotate::handle_vault_rotate))
         .route("/api/v1/vault/request", post(super::vault_handlers::handle_vault_request))
         .route("/api/v1/vault/on_screen", get(super::vault_handlers::handle_vault_on_screen))

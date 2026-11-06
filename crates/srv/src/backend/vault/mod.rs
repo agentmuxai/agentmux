@@ -13,6 +13,7 @@ pub mod capture;
 pub mod expiry;
 pub mod files;
 pub mod generate;
+pub mod history;
 pub mod import;
 pub mod kdbx_export;
 pub mod kdbx_names;
@@ -104,6 +105,43 @@ pub struct VaultActivity {
     pub action: String,
     pub target: String,
     pub outcome: String,
+    /// Order on this machine.
+    #[ts(type = "number")]
+    pub seq: i64,
+    /// The value version this event made or used; 0 for one that touches no value.
+    #[ts(type = "number")]
+    pub version: i64,
+    /// `agent`, `person` or `srv`; empty for a line made before this was kept.
+    pub actor_kind: String,
+    /// The machine it happened on; empty for a line made before this was kept.
+    pub host: String,
+    /// The agent's own reason; empty for the person's actions and for lines made before reasons were kept.
+    pub reason: String,
+    /// Short references the event relates to (a task, a PR).
+    pub refs: Vec<String>,
+    /// Whether it handed the entry's value to a process, a form or a sign-in (the history's "Uses").
+    pub is_use: bool,
+}
+
+impl From<VaultActivityRow> for VaultActivity {
+    fn from(r: VaultActivityRow) -> Self {
+        VaultActivity {
+            is_use: crate::backend::storage::vault::VALUE_USES.contains(&r.action.as_str()),
+            refs: history::refs_of(&r.refs),
+            at: r.at,
+            entry_id: r.entry_id,
+            entry_label: r.entry_label,
+            actor: r.actor,
+            action: r.action,
+            target: r.target,
+            outcome: r.outcome,
+            seq: r.seq,
+            version: r.version,
+            actor_kind: r.actor_kind,
+            host: r.host,
+            reason: r.reason,
+        }
+    }
 }
 
 /// A new entry from the pane.
@@ -216,26 +254,29 @@ const USES: &[&str] = &["filled a web form", signins::SIGNED_IN, "ran a command"
 
 /// Adds a line to the activity log; a failure to is logged, not raised.
 pub fn record(store: &Store, entry_id: &str, entry_label: &str, actor: &str, action: &str, target: &str, outcome: &str) {
-    let mut target = target.to_string();
-    if USES.contains(&action) && !entry_id.is_empty() {
-        if let Ok(Some(row)) = store.vault_get(entry_id) {
-            if expiry::expired(&row, expiry::today()) {
-                target = if target.is_empty() { "(expired)".into() } else { format!("{target} (expired)") };
-            }
-        }
-    }
     let row = VaultActivityRow {
-        at: now_ms(),
         entry_id: entry_id.into(),
         entry_label: entry_label.into(),
         actor: actor.into(),
         action: action.into(),
-        target,
+        target: target.into(),
         outcome: outcome.into(),
+        ..Default::default()
     };
-    if let Err(e) = store.vault_activity_add(&row) {
-        tracing::warn!(error = %e, action, "vault: couldn't record activity");
+    record_row(store, row);
+}
+
+/// [`record`] with the line's other parts given too: the agent's reason and references.
+pub fn record_row(store: &Store, mut row: VaultActivityRow) {
+    if USES.contains(&row.action.as_str()) && !row.entry_id.is_empty() {
+        if let Ok(Some(entry)) = store.vault_get(&row.entry_id) {
+            if expiry::expired(&entry, expiry::today()) {
+                row.target = if row.target.is_empty() { "(expired)".into() } else { format!("{} (expired)", row.target) };
+            }
+        }
     }
+    row.at = now_ms();
+    history::append(store, row);
 }
 
 /// Saves a new entry from the person; returns its id.
@@ -640,18 +681,12 @@ pub fn activity(store: &Store, limit: i64) -> Result<Vec<VaultActivity>, String>
         .vault_activity_list(limit.clamp(1, 1000))
         .map_err(|e| e.to_string())?
         .into_iter()
-        .map(|r| VaultActivity {
-            at: r.at,
-            entry_id: r.entry_id,
-            entry_label: r.entry_label,
-            actor: r.actor,
-            action: r.action,
-            target: r.target,
-            outcome: r.outcome,
-        })
+        .map(VaultActivity::from)
         .collect())
 }
 
+#[cfg(test)]
+mod history_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

@@ -12,6 +12,7 @@ import type { VaultActivity } from "@/types/rpc/VaultActivity";
 import type { VaultRequest } from "@/types/rpc/VaultRequest";
 import type { VaultSection } from "@/types/rpc/VaultSection";
 import { VaultEntries } from "./vault-entries";
+import { VaultHistoryDialog, whoOf, whyOf } from "./vault-history";
 import { VaultManageDialog } from "./vault-manage";
 import { ALL_VAULTS, VaultPicker } from "./vault-vaults";
 import { VaultRequestsList } from "./vault-requests-list";
@@ -33,6 +34,7 @@ import {
     setVaultOnScreen,
     vaultAvailable,
     vaultChangedMs,
+    vaultEntries,
     vaultError,
     vaultProblem,
     vaultList,
@@ -127,8 +129,31 @@ function VaultKept(props: { visible: boolean }): JSX.Element {
     );
 }
 
+/** One line of the Activity tab; an entry that still exists opens its History. */
+function ActivityRow(props: { row: VaultActivity; onHistory: (a: VaultActivity) => void }): JSX.Element {
+    const a = () => props.row;
+    const exists = () => (vaultEntries() ?? []).some((e) => e.id === a().entry_id);
+    return (
+        <tr data-outcome={a().outcome}>
+            <td class="warden-manager-dim">{formatWhen(a().at)}</td>
+            <td>{whoOf(a())}</td>
+            <td>{a().action}</td>
+            <td>
+                <Show when={exists()} fallback={a().entry_label}>
+                    <Button density="compact" onClick={() => props.onHistory(a())}>
+                        {a().entry_label}
+                    </Button>
+                </Show>
+            </td>
+            <td class="warden-manager-dim">{a().target}</td>
+            <td class="warden-manager-dim">{whyOf(a())}</td>
+        </tr>
+    );
+}
+
 function VaultActivityLog(props: { visible: boolean }): JSX.Element {
     const [rows, setRows] = createSignal<VaultActivity[] | null>(null);
+    const [historyOf, setHistoryOf] = createSignal<VaultActivity | null>(null);
     const [error, setError] = createSignal<string | null>(null);
     const load = () =>
         loadActivity()
@@ -161,22 +186,16 @@ function VaultActivityLog(props: { visible: boolean }): JSX.Element {
                             <th>What</th>
                             <th>Entry</th>
                             <th>Where</th>
+                            <th>Why</th>
                         </tr>
                     </thead>
                     <tbody>
-                        <For each={rows()}>
-                            {(a) => (
-                                <tr data-outcome={a.outcome}>
-                                    <td class="warden-manager-dim">{formatWhen(a.at)}</td>
-                                    <td>{a.actor === "you" ? "You" : a.actor}</td>
-                                    <td>{a.action}</td>
-                                    <td>{a.entry_label}</td>
-                                    <td class="warden-manager-dim">{a.target}</td>
-                                </tr>
-                            )}
-                        </For>
+                        <For each={rows()}>{(a) => <ActivityRow row={a} onHistory={setHistoryOf} />}</For>
                     </tbody>
                 </table>
+            </Show>
+            <Show when={historyOf()}>
+                {(a) => <VaultHistoryDialog entryId={a().entry_id} label={a().entry_label} onClose={() => setHistoryOf(null)} />}
             </Show>
         </div>
     );
