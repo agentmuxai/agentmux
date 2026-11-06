@@ -86,6 +86,17 @@ impl PersistentSubprocessController {
     pub(super) async fn run_stdout_reader(ctx: StdoutReaderCtx) {
         let (stdout, mut reader) = StdoutReader::from_ctx(ctx);
         let mut lines = BufReader::new(stdout).lines();
+
+        // NOTE: OSC window-title extraction is NOT done here.
+        // PersistentSubprocessController uses piped stdout with stream-json
+        // NDJSON protocol. Claude Code sets window titles via process.title
+        // (SetConsoleTitle on Windows; argv[0] on Unix), which does NOT
+        // produce OSC escape sequences in the piped stdout stream. Inserting
+        // OSC bytes into stream-json stdout would corrupt the JSON protocol.
+        // block:activity events for agent panes are instead published by
+        // the terminalSequence hooks path — see spec §2.5 and the future
+        // SPEC_AGENT_HOOKS_TERMINAL_SEQUENCE spec.
+
         while let Ok(Some(line)) = lines.next_line().await {
             reader.handle_line(line);
         }
@@ -201,7 +212,15 @@ impl StdoutReader {
         // Track session metadata (debounced 1 s)
         self.stats.record_line(line.len(), &self.mstore_read);
 
+        // Set (instead of persisted immediately) when this line turns
+        // out to be a terminal `result`/`is_error:true` event arriving
+        // while a stale-`--resume` retry could still be confirmed for
+        // this exact attempt — see `persistent_resume::ResumeState`'s
+        // `held_error_line`. `false` for every other line, matching
+        // today's behavior exactly.
         let mut outcome = FrameOutcome::default();
+        // Parse JSON for control-frame handling, turn-active tracking,
+        // and session ID capture
         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&line) {
             outcome = self.handle_frame(&line, &parsed);
             if outcome.skip {
@@ -213,6 +232,15 @@ impl StdoutReader {
             return;
         }
 
+        // Publish line as MPS blockfile event and write-through to FileStore
+        // for persistent history (Phase 1.3).
+        //
+        // debug, not info: fires on EVERY output line a streaming agent
+        // produces — the single largest contributor (~27%) to an
+        // unrotated 406 MB launcher-log mirror on a real machine
+        // (SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29 P1). Default
+        // production filter is info, so this is now suppressed unless
+        // RUST_LOG=debug is set.
         tracing::debug!(
             block_id = %self.block_id_read,
             line_len = line.len(),
@@ -276,7 +304,7 @@ impl StdoutReader {
             && !closing_this_generation
             && parsed.get("is_error").and_then(|v| v.as_bool()) == Some(true);
         // reagentx P0 on PR #2371: the real CLI's stream-json
-        // protocol embeds `self.session_id_field` on EVERY event,
+        // protocol embeds `session_id_field` on EVERY event,
         // including the terminal `result` — so the doomed
         // attempt's own `is_error:true` line ALSO carries the
         // (stale) sid it was given. Calling
@@ -838,7 +866,7 @@ impl StdoutReader {
         // flushed here explicitly; when NOT still tracking,
         // any effect returned is THIS exact line's own
         // `PersistImmediately`, already handled by the
-        // unchanged fallthrough in `surface_turn_outcome` — executing it here too
+        // unchanged fallthrough (the append in `handle_line`) — executing it here too
         // would double-persist it.
         let (effects, still_tracking) = {
             let mut inner = self.inner_read.lock().unwrap();
