@@ -22,12 +22,7 @@ import { usePtyWidth } from "./hooks/usePtyWidth";
 import { useScrollToNode } from "./hooks/useScrollToNode";
 import { createSearchReveal } from "./search-reveal";
 
-export function usePaneInput(p: {
-    found: PaneFoundation;
-    model: AgentViewModel;
-    shown: ReturnType<typeof useShownDocument>;
-    late: PaneLate;
-}) {
+export function usePaneInput(p: { found: PaneFoundation; model: AgentViewModel; shown: ReturnType<typeof useShownDocument>; late: PaneLate }) {
     const { found, model, late } = p;
     const { paneModel, block } = found;
     const { viewControls } = p.shown;
@@ -38,8 +33,7 @@ export function usePaneInput(p: {
     // A match inside a run the pane's view hides opens that run until the search ends (search-reveal.ts).
     const reveal = createSearchReveal({
         shown: p.shown.shownDocument,
-        setPins: (update) =>
-            found.agentAtoms().documentStateAtom[1]((prev) => ({ ...prev, pinnedNodes: update(prev.pinnedNodes) })),
+        setPins: (update) => found.agentAtoms().documentStateAtom[1]((prev) => ({ ...prev, pinnedNodes: update(prev.pinnedNodes) })),
         jumpTo: scroll.jumpTo,
     });
 

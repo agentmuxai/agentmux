@@ -9,7 +9,7 @@
 
 ## 1. In one paragraph
 
-Today an incoming jekt is one row in the transcript, between the person's turns and the agent's replies, and an agent that gets many jekts (a leader: a median of about 7 an hour in the hours it is active, up to about 19) has a transcript that is half other agents. The design moves **the body and the metadata of an incoming jekt to a panel on the right of the pane** and leaves **a one-line row in the transcript** where it arrived, so the timeline still reads. Nothing about delivery, the marker, the history file or what the agent reads changes: it is a second view over the same document nodes, not a second store. The panel docks beside the transcript in a wide pane and becomes an overlay in a narrow one. A message that waits on the person never hides in it (it keeps a card and a waiting-for-you entry; today it has neither, see 2.4). Recommended: ship it as a per-pane setting, build in four PRs, no reply box in the first version.
+Today an incoming jekt is one row in the transcript, between the person's turns and the agent's replies, and an agent that gets many jekts (a leader's pane gets one every few minutes while it is active) has a transcript that is half other agents. The design moves **the body and the metadata of an incoming jekt to a panel on the right of the pane** and leaves **a one-line row in the transcript** where it arrived, so the timeline still reads. Nothing about delivery, the marker, the history file or what the agent reads changes: it is a second view over the same document nodes, not a second store. The panel docks beside the transcript in a wide pane and becomes an overlay in a narrow one. A message that waits on the person never hides in it (it keeps a card and a waiting-for-you entry; today it has neither, see 2.4). Recommended: ship it as a per-pane setting, build in four PRs, no reply box in the first version.
 
 ## 2. How it works today (verified in the code, 2026-11-04)
 
@@ -78,9 +78,9 @@ Common practice, in one list:
 
 ## 4. Evidence from the real case: a leader's pane
 
-The jekt audit file (metadata only, no text is kept) for a day showed that a leader's pane gets by far the most messages of any agent: a median of about 7 an hour in the hours it is active, up to about 19, a typical body of a paragraph (about 575 characters) and a tail of one to three thousand. The next busiest agents get a third or less of that, and most get a few an hour.
+A leader's pane gets far more messages than any other agent's: while it is active, one every few minutes, each usually a paragraph long and sometimes several screens. Most agents get a few an hour.
 
-So the panel must be comfortable at **one message every 4 to 8 minutes, up to one every 3, with a typical body of a paragraph and a tail of 1 to 3 thousand characters**. That fixes three choices: rows are one or two lines until opened; the list scrolls and follows; the unread count must mean something at 20 an hour (it cannot be "messages since the pane was opened").
+So the panel must be comfortable at **a message every few minutes, in bursts, each usually a paragraph and sometimes much longer**. That fixes three choices: rows are one or two lines until opened; the list scrolls and follows; the unread count must mean something at that rate (it cannot be "messages since the pane was opened").
 
 ## 5. The design
 
@@ -126,7 +126,7 @@ Open (click, or Enter): the whole body (markdown and links as the transcript ren
 
 - Sender, trust, tier, delivery and time come from the node or its `origin`; the panel **does not parse or re-derive anything** (AgentX 2). One shared function renders the tags for both places, so the transcript's open row and the panel row cannot disagree.
 - Tone: sensitive is error-toned, an unproven sender warn-toned (as `JektVariant` does now); a forced message sits above the list in a "Needs you" strip, not in the time order.
-- **Runs:** consecutive messages from one sender within 5 minutes share a header. At 7 an hour this mostly means a back-and-forth with one agent reads as one block.
+- **Runs:** consecutive messages from one sender within 5 minutes share a header. At a busy pane's rate this mostly means a back-and-forth with one agent reads as one block.
 - **Sort and follow:** oldest at the top, newest at the bottom, like the transcript. The list follows the tail until the reader scrolls up; then a "↓ N new" pill appears (see 5.5 for how, given the scroll rule).
 
 ### 5.3 What stays in the conversation (the stub)
