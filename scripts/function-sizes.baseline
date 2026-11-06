@@ -497,7 +497,6 @@
 237 frontend/app/view/settings/sections/terminal-section.tsx::TerminalSection
 114 frontend/app/view/settings/sections/widget-bar-settings.tsx::WidgetBarSettings
 104 frontend/app/view/settings/sections/widget-catalog.tsx::WidgetCatalog
-249 frontend/app/view/settings/sections/widgets-section.tsx::WidgetsSection
 105 frontend/app/view/settings/settings-view.tsx::SettingsView
 137 frontend/app/view/shortcuts/shortcuts.tsx::ShortcutsView
 111 frontend/app/view/swarm/swarm-agent-list.tsx::SwarmAgentList
