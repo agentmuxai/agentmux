@@ -7,7 +7,7 @@
 
 import { noteOpenedByPerson } from "@/app/store/agent-open-note";
 import { openAgentInActiveTab, sharedAgentRuntime } from "@/app/store/agent-runtime-live";
-import { pushNotification } from "@/app/store/global";
+import { MOS, pushNotification } from "@/app/store/global";
 import type { AgentDefinition } from "@/app/store/rpc-api";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -24,6 +24,7 @@ import { getProvider } from "../providers";
 import { copyForkHistory } from "../quick-fork";
 import type { CreatedAgent } from "./AgentCreateForm";
 import { isContainerAgentType } from "@/util/runtime-kind";
+import { paneToRevealFor } from "./attach-target";
 
 export function createPickerLaunch(
     props: { model: AgentViewModel },
@@ -118,6 +119,11 @@ export function createPickerLaunch(
     const runtimeById = createMemo(() => new Map(runtimeRows().map((r) => [r.agent_id, r] as const)));
     // An agent that runs with no pane: attach to it rather than start another process.
     const handleAttach = async (row: RecentSessionRow): Promise<void> => {
+        // Its pane may be in a workspace no window shows: reveal it (promoting a window) rather than open a second one.
+        const runtime = runtimeById().get(row.definition_id);
+        const meta = runtime?.block_id ? MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", runtime.block_id))()?.meta : undefined;
+        const blockId = paneToRevealFor(runtime, meta);
+        if (blockId && (await revealBlock(blockId, { source: "picker" }))) return;
         const why = await openAgentInActiveTab({
             agent_id: row.definition_id,
             name: row.instance_name || row.definition_name,
