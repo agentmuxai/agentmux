@@ -833,7 +833,7 @@ pub(super) fn add_agent_columns(conn: &Connection) -> Result<(), StoreError> {
         "ALTER TABLE db_agents ADD COLUMN container_volumes TEXT NOT NULL DEFAULT '[]'",
         "ALTER TABLE db_agents ADD COLUMN container_name TEXT NOT NULL DEFAULT ''",
         // NOTE: targets db_bundles, not db_memory_bundles — adopt_legacy_table_names
-        // (called at the top of this function) has already renamed the table
+        // (called at the top of `run_object_schema`) has already renamed the table
         // by the time this runs, on every DB that goes through the Phase 4
         // rename. See SPEC_ARMORY_PHASE4_STORAGE_RENAME_COMPLETION_2026_07_12.md.
         "ALTER TABLE db_bundles ADD COLUMN is_global INTEGER NOT NULL DEFAULT 0",
@@ -859,17 +859,17 @@ pub(super) fn add_agent_columns(conn: &Connection) -> Result<(), StoreError> {
         // comment for why, and OBJECT_SCHEMA_VERSION's v19 entry.
         "ALTER TABLE db_agents ADD COLUMN default_memory_id TEXT NOT NULL DEFAULT ''",
         // v26: muxspect Phase B/C per-agent conversation-disclosure policy —
-        // see OBJECT_SCHEMA_VERSION's v26 doc comment above. Dual-written
+        // see OBJECT_SCHEMA_VERSION's v26 doc comment in migrations.rs. Dual-written
         // to db_agents under the SAME column name (a simple opt-in-style
         // setting, like auto_continue_enabled above — not a differently-
         // named-on-db_agents case like memory_id/default_memory_id).
         "ALTER TABLE db_agents ADD COLUMN conversation_visibility TEXT NOT NULL DEFAULT 'private'",
         // v27: AgentMux-controlled, highest-priority Global Bundle tier —
-        // see OBJECT_SCHEMA_VERSION's v27 doc comment above.
+        // see OBJECT_SCHEMA_VERSION's v27 doc comment in migrations.rs.
         "ALTER TABLE db_bundles ADD COLUMN is_system INTEGER NOT NULL DEFAULT 0",
         // v29: the agent's latest launch state on db_agents — the four
         // db_agent_instances columns the consolidated row still lacked. See
-        // OBJECT_SCHEMA_VERSION's v29 doc comment above and the column doc in
+        // OBJECT_SCHEMA_VERSION's v29 doc comment in migrations.rs and the column doc in
         // db_agents' CREATE TABLE. Backfilled from db_agent_instances by
         // m0025_agents_launch_state_backfill; kept current by the instance
         // dual-write until the legacy table is dropped.
@@ -878,13 +878,13 @@ pub(super) fn add_agent_columns(conn: &Connection) -> Result<(), StoreError> {
         "ALTER TABLE db_agents ADD COLUMN started_at INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE db_agents ADD COLUMN ended_at INTEGER NOT NULL DEFAULT 0",
         // v39: identity M4c-1 — the Global Memory writer's UID beside its
-        // name. See OBJECT_SCHEMA_VERSION's v39 doc comment above.
+        // name. See OBJECT_SCHEMA_VERSION's v39 doc comment in migrations.rs.
         "ALTER TABLE db_bundle_versions ADD COLUMN written_by_uid TEXT NOT NULL DEFAULT ''",
         // v41: the subagent that owns a background task. See
-        // OBJECT_SCHEMA_VERSION's v41 doc comment above.
+        // OBJECT_SCHEMA_VERSION's v41 doc comment in migrations.rs.
         "ALTER TABLE db_background_tasks ADD COLUMN owner_tool_use_id TEXT",
         // v42: the Runtime menu choices the user last made for the agent. See
-        // OBJECT_SCHEMA_VERSION's v42 doc comment above.
+        // OBJECT_SCHEMA_VERSION's v42 doc comment in migrations.rs.
         "ALTER TABLE db_agents ADD COLUMN last_runtime TEXT NOT NULL DEFAULT ''",
         // v43 (see its doc comment), then a device's send grant (no bump: older builds ignore it).
         "ALTER TABLE db_agents ADD COLUMN hide_from_devices INTEGER NOT NULL DEFAULT 0",
