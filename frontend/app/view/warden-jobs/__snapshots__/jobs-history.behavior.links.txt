@@ -1,0 +1,105 @@
+loadRuns j1 before=- limit=50
+-- links
+<div>
+  <section class="warden-jobs-history" aria-label="Runs of Nightly build">
+    <header class="warden-jobs-history-head">
+      <div class="warden-jobs-history-title">
+        <strong>
+          "Nightly build"
+        <span class="ui-pill ui-pill--ok">
+          "Active"
+        <span class="warden-manager-dim">
+          "by"
+          "Builder"
+        <span class="warden-manager-dim">
+          "→"
+          "Builder"
+      <div class="warden-jobs-actions">
+        <button title="Run it once now" type="button" class="ui-button ui-tone-neutral ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-play">
+          "Run now"
+        <button type="button" class="ui-button ui-tone-neutral ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-pause">
+          "Pause"
+        <button type="button" class="ui-button ui-tone-danger ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-trash">
+          "Delete"
+        <button type="button" class="ui-button ui-tone-neutral ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-pen">
+          "Edit"
+        <button type="button" class="ui-button ui-tone-neutral ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-clone">
+          "Clone"
+        <button title="What it would do, starting nothing" type="button" class="ui-button ui-tone-neutral ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-vial">
+          "Dry run"
+        <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-xmark">
+          "Close"
+    <table class="warden-manager-table warden-jobs-runs">
+      <thead>
+        <tr>
+          <th>
+            "When"
+          <th>
+            "Run"
+          <th>
+            "Took"
+          <th>
+            "Summary"
+          <th>
+            "Cost"
+          <th>
+            "Account"
+          <th>
+            "Links"
+      <tbody>
+        <tr>
+          <td data-hover-tip="L1000" aria-description="L1000">
+            "9d ago"
+          <td>
+            <span class="ui-pill ui-pill--ok" title="ok">
+              "ok"
+          <td class="warden-jobs-num">
+            "0s"
+          <td class="warden-jobs-summary">
+          <td class="warden-jobs-num">
+          <td class="warden-manager-dim">
+          <td class="warden-jobs-links">
+            <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
+              <i aria-hidden="true" class="fa-solid fa-message">
+              "Agent"
+            <button title="The incident's task, in the Kanban" type="button" class="ui-button ui-tone-quiet ui-density-compact">
+              <i aria-hidden="true" class="fa-solid fa-table-columns">
+              "Kanban #"
+              "12"
+            <span class="warden-manager-dim" data-hover-tip="drone-5" aria-description="drone-5">
+              "Drone run"
+            <button title="https://example.com/a" type="button" class="ui-button ui-tone-quiet ui-density-compact">
+              <i aria-hidden="true" class="fa-solid fa-arrow-up-right-from-square">
+              "https://example.com/a"
+            <button title="https://example.com/b" type="button" class="ui-button ui-tone-quiet ui-density-compact">
+              <i aria-hidden="true" class="fa-solid fa-arrow-up-right-from-square">
+              "Report"
+            <button title="https://example.com/c" type="button" class="ui-button ui-tone-quiet ui-density-compact">
+              <i aria-hidden="true" class="fa-solid fa-arrow-up-right-from-square">
+              "https://example.com/c"
+            <button title="https://example.com/d" type="button" class="ui-button ui-tone-quiet ui-density-compact">
+              <i aria-hidden="true" class="fa-solid fa-arrow-up-right-from-square">
+              "A very long label of a …"
+        <tr>
+          <td data-hover-tip="L1000" aria-description="L1000">
+            "9d ago"
+          <td>
+            <span class="ui-pill ui-pill--ok" title="ok">
+              "ok"
+          <td class="warden-jobs-num">
+            "0s"
+          <td class="warden-jobs-summary">
+          <td class="warden-jobs-num">
+          <td class="warden-manager-dim">
+          <td class="warden-jobs-links">
+revealBlock blk-9 {"source":"jobs"}
+openWarden kanban
+openLink https://example.com/b
+openLink https://example.com/d
