@@ -193,6 +193,21 @@ describe("MessagesPanel", () => {
         expect(screen.queryByText(/ new$/)).toBeNull();
     });
 
+    it("counts an arrival as new when a filter change left the list up from its tail, with no scroll event", async () => {
+        const first = jekt({ from: "agent5", timestamp: 1_000 });
+        const { setDoc, view } = mount([first, jekt({ from: "agent6", timestamp: 2_000 })]);
+        const list = view.container.querySelector(".messages-panel__list") as HTMLElement;
+        // The reader was at the tail; the filter then leaves a long list sitting at its top.
+        Object.defineProperty(list, "scrollHeight", { value: 500, configurable: true });
+        Object.defineProperty(list, "clientHeight", { value: 100, configurable: true });
+        fireEvent.change(screen.getByLabelText("Show"), { target: { value: "all" } });
+        fireEvent.change(screen.getByLabelText("Show"), { target: { value: "from:agent5" } });
+        await Promise.resolve();
+        setDoc([first, jekt({ from: "agent6", timestamp: 2_000 }), jekt({ from: "agent7", timestamp: 3_000 })]);
+        await Promise.resolve();
+        expect(screen.getByText("1 new")).toBeTruthy();
+    });
+
     it("counts the moment as seen after the window gains focus, if it was unfocused when the time came", () => {
         vi.useFakeTimers();
         const focus = vi.spyOn(document, "hasFocus").mockReturnValue(false);

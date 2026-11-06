@@ -33,7 +33,7 @@ export const badgeText = (count: number): string => (count > 99 ? "99+" : String
 export type MessagesFilter = "all" | "needs-me" | "unread" | `from:${string}`;
 
 /** The senders that have written in this pane, most recent first, at most `limit`. */
-export function topSenders(messages: readonly JektMessageNode[], limit = 5): string[] {
+export function topSenders(messages: readonly JektMessageNode[], limit = 12): string[] {
     const seen = new Set<string>();
     const out: string[] = [];
     for (let i = messages.length - 1; i >= 0 && out.length < limit; i--) {

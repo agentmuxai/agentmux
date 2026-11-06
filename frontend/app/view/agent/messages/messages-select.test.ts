@@ -78,5 +78,7 @@ describe("filters", () => {
     it("lists the senders most recent first, at most the limit", () => {
         expect(topSenders(all)).toEqual(["agent2", "agent3"]);
         expect(topSenders([...all, jekt({ from: "agent4" })], 2)).toEqual(["agent4", "agent2"]);
+        const many = Array.from({ length: 20 }, (_, i) => jekt({ from: `sender${i}` }));
+        expect(topSenders(many)).toHaveLength(12);
     });
 });

@@ -21,10 +21,21 @@
 
 .messages-panel__tools {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
     gap: var(--space-2);
     flex-shrink: 0;
+    min-width: 0;
+
+    // The filter gives way before the button does, and the button never breaks: in a narrow pane the two stack.
+    > :first-child {
+        flex: 1 1 8ch;
+        min-width: 0;
+    }
+    > :last-child {
+        white-space: nowrap;
+    }
 }
 
 .messages-panel__list {
@@ -121,6 +132,12 @@
     display: flex;
     flex-wrap: wrap;
     gap: var(--space-1);
+}
+
+// The opened body is prose in a narrow column: its wrapped lines start at the margin, with no hanging indent.
+.messages-row__body .agent-preview.agent-preview--wrap .agent-preview-text {
+    padding-left: 0;
+    text-indent: 0;
 }
 
 .messages-row__raw-body {

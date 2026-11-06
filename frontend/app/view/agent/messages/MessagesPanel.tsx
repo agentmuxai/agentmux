@@ -188,14 +188,15 @@ function createListBehaviour(
             }
         )
     );
+    const onScroll = () => {
+        const list = getList();
+        if (!list) return;
+        atTail = list.scrollHeight - list.scrollTop - list.clientHeight <= TAIL_SLACK_PX;
+        if (atTail) setNewBelow(0);
+    };
     return {
         newBelow,
-        onScroll: () => {
-            const list = getList();
-            if (!list) return;
-            atTail = list.scrollHeight - list.scrollTop - list.clientHeight <= TAIL_SLACK_PX;
-            if (atTail) setNewBelow(0);
-        },
+        onScroll,
         toTail: () => {
             const list = getList();
             if (list) scrollMessagesTo(list, list.scrollHeight, "smooth");
@@ -236,6 +237,9 @@ function MessagesColumn(props: MessagesPanelProps & { model: Model }): JSX.Eleme
             setOpened((prev) => new Set(prev).add(nodeId));
         }
     );
+
+    // A filter changes what the list holds and where it sits, and no scroll event says so: look again.
+    createEffect(on(filter, () => queueMicrotask(moves.onScroll), { defer: true }));
 
     return (
         <SidePanel
