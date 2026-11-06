@@ -418,18 +418,26 @@ pub fn install_pinned_cli_with(
     Ok(InstallOutcome::Installed(bin))
 }
 
-/// Registry flags for installing `package`. AgentMux's own packages
-/// (`@agentmuxai/*`) are published to the public npm registry, but a machine
-/// can route that scope elsewhere in its `.npmrc` (a
-/// `@agentmuxai:registry=https://npm.pkg.github.com` line, for internal
-/// packages), and the install then 404s. The flag pins the scope for this one
-/// command only; other packages use the user's config as before.
-pub(crate) fn npm_registry_args(package: &str) -> Vec<String> {
-    if package.starts_with("@agentmuxai/") {
-        vec!["--@agentmuxai:registry=https://registry.npmjs.org/".to_string()]
-    } else {
-        Vec::new()
+/// The public npm registry, the only one an agent CLI is installed from.
+const NPM_REGISTRY: &str = "https://registry.npmjs.org/";
+
+/// The flags that keep an install from the person's own npm setup: the public registry, and an
+/// empty file each in place of their `~/.npmrc` and npm's global config (npm refuses one file
+/// loaded as both). Their registry, scope
+/// routing (a `@agentmuxai:registry=https://npm.pkg.github.com` line made the muxcode install
+/// 404), proxy and script policy then cannot change what is installed, or from where. A proxy
+/// in the environment (`HTTPS_PROXY`) still applies. The empty files are made in `dir`, the
+/// install folder, which is created if need be.
+pub(crate) fn npm_isolation_args(dir: &Path) -> std::io::Result<Vec<String>> {
+    std::fs::create_dir_all(dir)?;
+    let mut args = vec![format!("--registry={NPM_REGISTRY}")];
+    for (flag, name) in [("--userconfig", ".agentmux-empty-user.npmrc"), ("--globalconfig", ".agentmux-empty-global.npmrc")] {
+        let empty = dir.join(name);
+        std::fs::write(&empty, b"")?;
+        args.push(flag.to_string());
+        args.push(empty.to_string_lossy().into_owned());
     }
+    Ok(args)
 }
 
 /// Run `npm install --prefix <dir> <package>` to completion. `package` is one
@@ -456,9 +464,12 @@ fn run_npm_install(dir: &Path, package: &str, background: bool) -> std::io::Resu
                 flags |= BELOW_NORMAL_PRIORITY_CLASS;
             }
             let prefix = dir.to_string_lossy().replace('/', "\\");
-            let registry = npm_registry_args(package).join(" ");
+            let isolation = npm_isolation_args(dir)?;
+            // The two config paths are quoted: the install folder can hold spaces.
+            let (user, global) = (isolation[2].replace('/', "\\"), isolation[4].replace('/', "\\"));
+            let isolation = format!("{} --userconfig \"{user}\" --globalconfig \"{global}\"", isolation[0]);
             let cmdline = format!(
-                "npm install --loglevel=http --no-audit --no-fund --no-progress --legacy-peer-deps=false {registry} --prefix \"{prefix}\" {package}"
+                "npm install --loglevel=http --no-audit --no-fund --no-progress --legacy-peer-deps=false {isolation} --prefix \"{prefix}\" {package}"
             );
             let mut c = std::process::Command::new("cmd");
             // `npm install` runs arbitrary postinstall scripts — no instance
@@ -483,7 +494,7 @@ fn run_npm_install(dir: &Path, package: &str, background: bool) -> std::io::Resu
                 "--no-progress",
                 "--legacy-peer-deps=false",
             ])
-            .args(npm_registry_args(package))
+            .args(npm_isolation_args(dir)?)
             .arg("--prefix")
             .arg(dir)
             .args(package.split_whitespace())
@@ -651,16 +662,22 @@ pub fn warm_used_providers(
 #[cfg(test)]
 mod tests {
 
+    /// A `.npmrc` routing @agentmuxai to GitHub Packages made the muxcode install 404, and any
+    /// package could be pulled from the person's own registry: every install now names the public
+    /// one and reads an empty config instead of theirs.
     #[test]
-    fn agentmux_packages_install_from_the_public_registry_others_use_npmrc() {
-        // A `.npmrc` routing @agentmuxai to GitHub Packages made the muxcode
-        // install 404; the flag pins the scope for this command only.
-        assert_eq!(
-            super::npm_registry_args("@agentmuxai/muxcode@0.8.0"),
-            vec!["--@agentmuxai:registry=https://registry.npmjs.org/".to_string()]
-        );
-        assert!(super::npm_registry_args("@anthropic-ai/claude-code@2.1.288").is_empty());
-        assert!(super::npm_registry_args("openclaw").is_empty());
+    fn every_npm_install_uses_the_public_registry_and_an_empty_config() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("cli").join("claude").join("1.0.0");
+        let args = super::npm_isolation_args(&dir).unwrap();
+        assert_eq!(args[0], "--registry=https://registry.npmjs.org/");
+        assert_eq!((args[1].as_str(), args[3].as_str()), ("--userconfig", "--globalconfig"));
+        assert_ne!(args[2], args[4], "npm refuses one file as both the user and the global config");
+        for config in [&args[2], &args[4]] {
+            let empty = std::path::Path::new(config);
+            assert!(empty.starts_with(&dir), "the empty config is inside the install folder: {empty:?}");
+            assert_eq!(std::fs::read(empty).unwrap(), b"", "the config npm reads is empty");
+        }
     }
 
     use super::*;
