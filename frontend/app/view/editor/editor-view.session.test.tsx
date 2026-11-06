@@ -178,7 +178,25 @@ function modelOf(): EditorViewModel {
     return model;
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+// The language-server change is debounced by 250 ms. Left on the wall clock, whether it fires before the
+// next tab switch (which cancels it) depends on how loaded the machine is. So that one timer follows the
+// test's own sleeps instead: it fires once the sleeps add up to its delay, however long they really took.
+const LSP_DEBOUNCE_MS = 250;
+const realSetTimeout = globalThis.setTimeout;
+const realClearTimeout = globalThis.clearTimeout;
+const lspTimers = new Map<object, { at: number; fn: () => void }>();
+let lspClock = 0;
+const advanceLspClock = (ms: number) => {
+    lspClock += ms;
+    for (const [token, t] of [...lspTimers].sort((a, b) => a[1].at - b[1].at)) {
+        if (t.at > lspClock || !lspTimers.delete(token)) continue;
+        t.fn();
+    }
+};
+const sleep = async (ms: number) => {
+    await new Promise((r) => realSetTimeout(r, ms));
+    advanceLspClock(ms);
+};
 const settle = async () => {
     for (let i = 0; i < 6; i++) {
         await sleep(25);
@@ -223,6 +241,18 @@ const run = (model: EditorViewModel, command: string): boolean => {
 };
 
 beforeEach(() => {
+    lspTimers.clear();
+    lspClock = 0;
+    globalThis.setTimeout = ((fn: () => void, ms?: number, ...args: unknown[]) => {
+        if (ms !== LSP_DEBOUNCE_MS) return realSetTimeout(fn, ms, ...args);
+        const token = {};
+        lspTimers.set(token, { at: lspClock + LSP_DEBOUNCE_MS, fn });
+        return token;
+    }) as unknown as typeof setTimeout;
+    globalThis.clearTimeout = ((id?: unknown) => {
+        if (id && typeof id === "object" && lspTimers.delete(id)) return;
+        realClearTimeout(id as never);
+    }) as typeof clearTimeout;
     const none = { length: 0, item: () => null, [Symbol.iterator]: function* () {} };
     Range.prototype.getClientRects = () => none as unknown as DOMRectList;
     Range.prototype.getBoundingClientRect = () => new DOMRect();
@@ -245,6 +275,8 @@ afterEach(async () => {
     for (const m of models.splice(0)) m.dispose();
     await settle();
     document.documentElement.removeAttribute("data-theme-polarity");
+    globalThis.setTimeout = realSetTimeout;
+    globalThis.clearTimeout = realClearTimeout;
 });
 
 describe("building the view", () => {
