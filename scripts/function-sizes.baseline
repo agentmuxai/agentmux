@@ -167,7 +167,6 @@
 579 crates/srv/src/backend/blockcontroller/subprocess/container_spawn.rs::SubprocessController::spawn_container_turn
 211 crates/srv/src/backend/blockcontroller/subprocess/host_spawn.rs::SubprocessController::spawn_turn
 210 crates/srv/src/backend/bundle_export.rs::export_bundle
-463 crates/srv/src/backend/bundle_import.rs::parse_bundle_import_with_budget
 130 crates/srv/src/backend/bundle_import.rs::unzip_bundle_import_with_budget
 105 crates/srv/src/backend/container.rs::ContainerManager::create_and_start
 115 crates/srv/src/backend/cron/mod.rs::CronScheduler::schedule_job_inner
