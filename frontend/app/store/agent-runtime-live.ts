@@ -80,7 +80,7 @@ const parkedDeps = (open: (tabId: string) => Promise<unknown>): ParkedReopenDeps
     attach: async (tabId) => {
         await open(tabId);
     },
-    // Quiet: the workspace is shown or opened by this, and a failure is not an error here: the pane opens in the active tab.
+    // Quiet: a failure is reported once, by openAgentInActiveTab (WORKSPACE_NOT_SHOWN), not also by the reveal.
     reveal: async (blockId) => {
         const { revealBlock } = await import("@/app/util/reveal-block");
         return (await revealBlock(blockId, { source: "open", quiet: true })).ok;

@@ -25,6 +25,10 @@ export interface ParkedReopenDeps {
     reveal: (blockId: string) => Promise<boolean>;
 }
 
+/** What the person is told when the pane is back in its workspace and that workspace could not be shown. */
+export const WORKSPACE_NOT_SHOWN =
+    "Its pane is back in its workspace, but that workspace could not be opened in a window.";
+
 /** The block meta srv sets on a parked block: the tab it was parked from. */
 export const PARKED_FROM_TAB_META = "agent:parkedFromTab";
 
@@ -32,7 +36,9 @@ export const PARKED_FROM_TAB_META = "agent:parkedFromTab";
  * Reopen a parked agent's pane where it was. A parked block is in no tab, so it is put back in the tab it was
  * parked from (`agent:parkedFromTab`) and shown: in the window that has the workspace, or in a new one opened on
  * it, with the pane focused. True when that happened. False when the agent has no block, the block is not parked
- * (the caller's own path handles it), or the tab is gone with its workspace.
+ * (the caller's own path handles it), or the tab is gone with its workspace. Throws when the pane is back in its tab
+ * but the workspace could not be shown: the pane is no longer parked, so the active tab can't take it, and the
+ * person is told why instead of Open appearing to do nothing.
  */
 export async function reopenParkedWhereItWas(blockId: string | undefined, deps: ParkedReopenDeps): Promise<boolean> {
     if (!blockId) return false;
@@ -41,5 +47,6 @@ export async function reopenParkedWhereItWas(blockId: string | undefined, deps: 
     if (!isParkedMeta(meta) || typeof tabId !== "string" || tabId === "" || !(await deps.tabExists(tabId)))
         return false;
     await deps.attach(tabId);
-    return deps.reveal(blockId);
+    if (!(await deps.reveal(blockId))) throw new Error(WORKSPACE_NOT_SHOWN);
+    return true;
 }

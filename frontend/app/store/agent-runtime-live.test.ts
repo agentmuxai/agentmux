@@ -127,10 +127,11 @@ describe("openAgentInActiveTab", () => {
             expect(order).toEqual(["note:a1", "rpc:active"]);
         });
 
-        it("whose workspace cannot be shown falls back to opening in the active tab", async () => {
+        it("whose workspace cannot be shown says so, since the pane is back in it and the active tab can't take it", async () => {
             revealResult = { ok: false };
-            await openAgentInActiveTab({ agent_id: "a1", name: "Ada" });
-            expect(order).toEqual(["note:a1", "rpc:tab-old", "reveal:blk-1", "rpc:active"]);
+            const why = await openAgentInActiveTab({ agent_id: "a1", name: "Ada" });
+            expect(why).toMatch(/could not be opened/);
+            expect(order).toEqual(["note:a1", "rpc:tab-old", "reveal:blk-1"]);
         });
 
         it("still says why when srv refuses to put it back", async () => {
