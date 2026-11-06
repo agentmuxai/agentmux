@@ -217,6 +217,23 @@ describe("AuditManager", () => {
         expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument();
     });
 
+    it("does not change the list when a refresh already on its way lands after Pause, and counts it as new", async () => {
+        query.mockResolvedValue(page([entry({ id: "a", summary: "first one" })]));
+        render(() => <AuditManager paneBlockId="pane-1" />);
+        await waitFor(() => expect(screen.getByText("first one")).toBeInTheDocument());
+
+        let land!: (r: AuditQueryResult) => void;
+        query.mockImplementationOnce(() => new Promise<AuditQueryResult>((r) => (land = r)));
+        const before = query.mock.calls.length;
+        srvWroteARow();
+        await waitFor(() => expect(query.mock.calls.length).toBe(before + 1), { timeout: 3000 });
+
+        fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+        land(page([entry({ id: "b", summary: "landed after pause" }), entry({ id: "a", summary: "first one" })]));
+        await waitFor(() => expect(screen.getByRole("button", { name: "1 new" })).toBeInTheDocument());
+        expect(screen.queryByText("landed after pause")).toBeNull();
+    });
+
     it("stops following once older entries are loaded, and the pill jumps back to the newest", async () => {
         query.mockResolvedValueOnce(page([entry({ id: "a", summary: "first one" })], { next_cursor: "c1" }));
         render(() => <AuditManager paneBlockId="pane-1" />);

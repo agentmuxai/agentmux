@@ -56,20 +56,20 @@ export function createAuditList(filter: Accessor<AuditFilter>, visible: () => bo
     const { entries, setEntries, cursor, setCursor, error, setError, setLoading, loadingMore, setLoadingMore } = state;
     const { setPaused, setOlderLoaded, pending, setPending, following, showPage } = state;
 
-    // The newest request wins: a slow answer for an earlier filter is dropped.
-    let seq = 0;
-    // The same for the newest page fetched while the list holds still.
-    let peekSeq = 0;
-    // The filter changed while the pane was hidden: the list shown is for the old one until it is shown again.
-    let stale = false;
+    let seq = 0; // the newest request wins: a slow answer for an earlier filter is dropped
+    let peekSeq = 0; // the same for the newest page fetched while the list holds still
+    let stale = false; // the filter changed while the pane was hidden: the list is the old one's until it is shown
 
-    const loadFirst = async (quiet = false) => {
+    // `refreshing`: the page is only the newest entries again, so if the list was paused while it was on its way,
+    // it is kept as the newest page the pill counts, not shown.
+    const loadFirst = async (quiet = false, refreshing = false) => {
         const mine = ++seq;
         if (!quiet) setLoading(true);
         try {
             const res = await fetchAuditPage(buildRequest(untrack(filter), Date.now(), undefined, true));
             if (mine !== seq) return;
-            showPage(res);
+            if (refreshing && !untrack(following)) setPending(res);
+            else showPage(res);
         } catch (e) {
             if (mine === seq) setError(String(e));
         } finally {
@@ -143,7 +143,7 @@ export function createAuditList(filter: Accessor<AuditFilter>, visible: () => bo
             stale = false;
             return loadFirst(true);
         }
-        return untrack(following) ? loadFirst(true) : peek();
+        return untrack(following) ? loadFirst(true, true) : peek();
     });
     useAuditLive(visible, () => void refresh());
 
