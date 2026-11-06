@@ -1137,7 +1137,7 @@ describe("Delete", () => {
         );
     });
 
-    it("keeps the panel up, with a message, when the delete itself fails", async () => {
+    it("closes the delete view and shows a Delete failed notification when the delete itself fails", async () => {
         vi.useFakeTimers({ toFake: ["Date"] });
         vi.setSystemTime(new Date("2026-11-06T10:00:00.000Z"));
         const err = new Error("nope");

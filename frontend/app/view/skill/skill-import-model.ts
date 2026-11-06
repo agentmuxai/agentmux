@@ -111,6 +111,7 @@ export class SkillImportModel {
                     description: i.description,
                     content: i.content,
                     existing_id: i.existing_id,
+                    app_hash: i.app_hash,
                 })),
             });
             this.onDone(res.saved);

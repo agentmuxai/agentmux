@@ -134,7 +134,7 @@
 116 crates/srv/src/agents/runner.rs::run_agent_with_bin
 105 crates/srv/src/ambient/cli.rs::invoke_haiku
 124 crates/srv/src/ambient/digest.rs::extract_digest_parts
-125 crates/srv/src/backend/agent_config.rs::build_config_files
+124 crates/srv/src/backend/agent_config.rs::build_config_files
 222 crates/srv/src/backend/agent_config.rs::build_settings_with_hooks
 120 crates/srv/src/backend/agent_config.rs::write_claude_md_respecting_ownership
 118 crates/srv/src/backend/agent_config.rs::write_mcp_json_respecting_user_servers

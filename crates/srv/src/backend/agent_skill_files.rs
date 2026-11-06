@@ -54,7 +54,8 @@ pub fn refresh_for_block(meta: &MetaMapType, mstore: &Store, identity_store: &St
     // The name the pane was launched under fills `{{AGENT}}` in a skill, as it did when the files were first written.
     let launched_name = meta_get_string(meta, "agentName", "");
     let name = if launched_name.is_empty() { agent.name.as_str() } else { launched_name.as_str() };
-    let all = build_config_files(&HashMap::new(), &skills, name, &agent.id, &slug, &work_dir, &agent.provider);
+    let mut all = build_config_files(&HashMap::new(), &skills, name, &agent.id, &slug, &work_dir, &agent.provider);
+    all.extend(crate::backend::computer_use_skill::sibling_files(&skills, identity_store));
     let wanted = managed_skill_file_paths(all.iter().map(|f| f.filename.as_str()));
     let files: Vec<_> = all.iter().filter(|f| wanted.contains(&f.filename)).collect();
 
