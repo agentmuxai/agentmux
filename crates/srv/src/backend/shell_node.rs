@@ -350,6 +350,26 @@ pub struct ShellNodeRunner {
     pub capture: Option<crate::backend::vault::capture::Job>,
 }
 
+/// `cmd`, a command line, run the way a person's terminal runs it: `sh -c` on Unix, and on Windows cmd.exe
+/// reading the line as typed. `Command::args` would quote the whole line as ONE argument and backslash-escape
+/// the quotes inside it, which cmd.exe does not read: `--reason "two words"` reached the program as
+/// `--reason \"two` `words\"`. The line goes in raw, between the one pair of quotes `/S` takes off.
+fn local_command(cmd: &str) -> tokio::process::Command {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let mut c = tokio::process::Command::new("cmd");
+        c.as_std_mut().args(["/S", "/C"]).raw_arg(format!("\"{cmd}\""));
+        c
+    }
+    #[cfg(not(windows))]
+    {
+        let mut c = tokio::process::Command::new("sh");
+        c.args(["-c", cmd]);
+        c
+    }
+}
+
 impl ShellNodeRunner {
     pub async fn run(mut self) {
         let shell_id = self.shell_id.clone();
@@ -361,14 +381,8 @@ impl ShellNodeRunner {
             let mut c = tokio::process::Command::new(program);
             c.args(args);
             c
-        } else if cfg!(windows) {
-            let mut c = tokio::process::Command::new("cmd");
-            c.args(["/C", &self.cmd]);
-            c
         } else {
-            let mut c = tokio::process::Command::new("sh");
-            c.args(["-c", &self.cmd]);
-            c
+            local_command(&self.cmd)
         };
 
         // This runner backs POST /api/v1/shell/create — the MCP `Shell` tool,
@@ -829,6 +843,51 @@ mod tests {
     }
 
     use super::*;
+
+    /// Runs `line` through [`local_command`] in a folder holding a script that prints each of its first three
+    /// arguments in brackets, and returns what it printed.
+    async fn args_seen_by_script(line: &str) -> String {
+        // A folder of its own per call: the tests run in parallel.
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let dir = std::env::temp_dir().join(format!("amx-local-command-{}-{n}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (name, body) = if cfg!(windows) {
+            ("args.bat", "@echo off\r\necho [%~1][%~2][%~3]\r\n")
+        } else {
+            ("args.sh", "printf '[%s][%s][%s]' \"$1\" \"$2\" \"$3\"\n")
+        };
+        std::fs::write(dir.join(name), body).unwrap();
+        // The script by its full path: cmd does not look in the current folder when the person has turned that off.
+        let script = dir.join(name).display().to_string();
+        let line = if cfg!(windows) { line.replace("SCRIPT", &script) } else { line.replace("SCRIPT", &format!("sh {script}")) };
+        let out = local_command(&line).current_dir(&dir).output().await.unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if text.is_empty() {
+            return format!("(no output; {}; stderr: {})", out.status, String::from_utf8_lossy(&out.stderr).trim());
+        }
+        text
+    }
+
+    #[tokio::test]
+    async fn a_quoted_argument_with_spaces_is_one_argument_without_its_quotes() {
+        assert_eq!(args_seen_by_script(r#"SCRIPT "two words" x y"#).await, "[two words][x][y]");
+        assert_eq!(args_seen_by_script(r#"SCRIPT --reason "two words" -- "#).await, "[--reason][two words][--]");
+    }
+
+    #[tokio::test]
+    async fn quotes_inside_an_argument_and_an_apostrophe_survive() {
+        assert_eq!(args_seen_by_script(r#"SCRIPT "it's here" "a=b c" z"#).await, "[it's here][a=b c][z]");
+    }
+
+    #[tokio::test]
+    async fn a_command_line_with_two_commands_runs_both() {
+        let out = local_command("echo one && echo two").output().await.unwrap();
+        let text = String::from_utf8_lossy(&out.stdout);
+        let lines: Vec<&str> = text.lines().map(str::trim).collect();
+        assert_eq!(lines, ["one", "two"]);
+    }
 
     #[test]
     fn shell_events_serialize_as_before() {
