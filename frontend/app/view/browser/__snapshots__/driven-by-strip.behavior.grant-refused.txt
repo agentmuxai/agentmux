@@ -1,0 +1,156 @@
+model.setBypass true 60
+-- refused
+<div>
+  <div class="browser-driven-by" role="status">
+    <i aria-hidden="true" class="fa-solid fa-robot">
+    <div class="browser-driven-by-message">
+      <span>
+        "Driven by"
+        <b>
+          "Naki"
+    <div class="browser-driven-by-actions">
+      <button title="What Naki did in this pane" type="button" class="ui-button ui-tone-neutral ui-density-compact browser-actions-log-button" aria-pressed="false">
+        "Log ("
+        "0"
+        ")"
+      <button title="Hold Naki's actions in this pane until you resume; auto-approve's time stops too." type="button" class="ui-button ui-tone-neutral ui-density-compact browser-pause-button" aria-pressed="false">
+        "Pause"
+      <button title="Let Naki's clicks in this pane go through without asking you first." type="button" class="ui-button ui-tone-danger ui-density-compact browser-bypass-button" aria-pressed="true">
+        "Auto-approve"
+      <button title="End the agent's control of this pane; its next action here will fail." type="button" class="ui-button ui-tone-neutral ui-density-compact browser-take-over">
+        "Take over"
+  <div class="browser-bypass-confirm" role="dialog" aria-label="Turn on auto-approve">
+    <div class="browser-bypass-confirm-head">
+      <i class="fa-solid fa-bolt" aria-hidden="true">
+      <span>
+        "Auto-approve"
+        <b>
+          "Naki"
+        "'s clicks?"
+    <div class="browser-bypass-confirm-text">
+      "In this pane, on"
+      <b>
+        "github.com"
+      ","
+      "Naki"
+      "'s clicks that submit forms, delete or send go through"
+      <b>
+        "without asking you first"
+      ", and so does the page's own "Are you sure?" that follows one. It still can't type passwords or codes or run scripts, and payments still ask."
+    <div class="browser-bypass-confirm-minutes" role="radiogroup" aria-label="For how long">
+      <button role="radio" aria-checked="false" type="button" class="ui-button ui-tone-neutral ui-density-compact" aria-pressed="false">
+        "15 min"
+      <button role="radio" aria-checked="true" type="button" class="ui-button ui-tone-neutral ui-density-compact" aria-pressed="true">
+        "1 hour"
+      <button role="radio" aria-checked="false" type="button" class="ui-button ui-tone-neutral ui-density-compact" aria-pressed="false">
+        "4 hours"
+    <div class="browser-bypass-confirm-error" role="alert">
+      "srv said no"
+    <div class="browser-bypass-confirm-actions">
+      <button type="button" class="ui-button ui-tone-danger ui-density-compact">
+        "Turn on auto-approve"
+      <button type="button" class="ui-button ui-tone-neutral ui-density-compact">
+        "Cancel"
+model.setBypass true 60
+-- unreachable
+<div>
+  <div class="browser-driven-by" role="status">
+    <i aria-hidden="true" class="fa-solid fa-robot">
+    <div class="browser-driven-by-message">
+      <span>
+        "Driven by"
+        <b>
+          "Naki"
+    <div class="browser-driven-by-actions">
+      <button title="What Naki did in this pane" type="button" class="ui-button ui-tone-neutral ui-density-compact browser-actions-log-button" aria-pressed="false">
+        "Log ("
+        "0"
+        ")"
+      <button title="Hold Naki's actions in this pane until you resume; auto-approve's time stops too." type="button" class="ui-button ui-tone-neutral ui-density-compact browser-pause-button" aria-pressed="false">
+        "Pause"
+      <button title="Let Naki's clicks in this pane go through without asking you first." type="button" class="ui-button ui-tone-danger ui-density-compact browser-bypass-button" aria-pressed="true">
+        "Auto-approve"
+      <button title="End the agent's control of this pane; its next action here will fail." type="button" class="ui-button ui-tone-neutral ui-density-compact browser-take-over">
+        "Take over"
+  <div class="browser-bypass-confirm" role="dialog" aria-label="Turn on auto-approve">
+    <div class="browser-bypass-confirm-head">
+      <i class="fa-solid fa-bolt" aria-hidden="true">
+      <span>
+        "Auto-approve"
+        <b>
+          "Naki"
+        "'s clicks?"
+    <div class="browser-bypass-confirm-text">
+      "In this pane, on"
+      <b>
+        "github.com"
+      ","
+      "Naki"
+      "'s clicks that submit forms, delete or send go through"
+      <b>
+        "without asking you first"
+      ", and so does the page's own "Are you sure?" that follows one. It still can't type passwords or codes or run scripts, and payments still ask."
+    <div class="browser-bypass-confirm-minutes" role="radiogroup" aria-label="For how long">
+      <button role="radio" aria-checked="false" type="button" class="ui-button ui-tone-neutral ui-density-compact" aria-pressed="false">
+        "15 min"
+      <button role="radio" aria-checked="true" type="button" class="ui-button ui-tone-neutral ui-density-compact" aria-pressed="true">
+        "1 hour"
+      <button role="radio" aria-checked="false" type="button" class="ui-button ui-tone-neutral ui-density-compact" aria-pressed="false">
+        "4 hours"
+    <div class="browser-bypass-confirm-error" role="alert">
+      "AgentMux didn't answer in time when asked to turn on auto-approve, so it isn't certain it was done. Check this pane before trying again."
+    <div class="browser-bypass-confirm-actions">
+      <button type="button" class="ui-button ui-tone-danger ui-density-compact">
+        "Turn on auto-approve"
+      <button type="button" class="ui-button ui-tone-neutral ui-density-compact">
+        "Cancel"
+-- reopened
+<div>
+  <div class="browser-driven-by" role="status">
+    <i aria-hidden="true" class="fa-solid fa-robot">
+    <div class="browser-driven-by-message">
+      <span>
+        "Driven by"
+        <b>
+          "Naki"
+    <div class="browser-driven-by-actions">
+      <button title="What Naki did in this pane" type="button" class="ui-button ui-tone-neutral ui-density-compact browser-actions-log-button" aria-pressed="false">
+        "Log ("
+        "0"
+        ")"
+      <button title="Hold Naki's actions in this pane until you resume; auto-approve's time stops too." type="button" class="ui-button ui-tone-neutral ui-density-compact browser-pause-button" aria-pressed="false">
+        "Pause"
+      <button title="Let Naki's clicks in this pane go through without asking you first." type="button" class="ui-button ui-tone-danger ui-density-compact browser-bypass-button" aria-pressed="true">
+        "Auto-approve"
+      <button title="End the agent's control of this pane; its next action here will fail." type="button" class="ui-button ui-tone-neutral ui-density-compact browser-take-over">
+        "Take over"
+  <div class="browser-bypass-confirm" role="dialog" aria-label="Turn on auto-approve">
+    <div class="browser-bypass-confirm-head">
+      <i class="fa-solid fa-bolt" aria-hidden="true">
+      <span>
+        "Auto-approve"
+        <b>
+          "Naki"
+        "'s clicks?"
+    <div class="browser-bypass-confirm-text">
+      "In this pane, on"
+      <b>
+        "github.com"
+      ","
+      "Naki"
+      "'s clicks that submit forms, delete or send go through"
+      <b>
+        "without asking you first"
+      ", and so does the page's own "Are you sure?" that follows one. It still can't type passwords or codes or run scripts, and payments still ask."
+    <div class="browser-bypass-confirm-minutes" role="radiogroup" aria-label="For how long">
+      <button role="radio" aria-checked="false" type="button" class="ui-button ui-tone-neutral ui-density-compact" aria-pressed="false">
+        "15 min"
+      <button role="radio" aria-checked="true" type="button" class="ui-button ui-tone-neutral ui-density-compact" aria-pressed="true">
+        "1 hour"
+      <button role="radio" aria-checked="false" type="button" class="ui-button ui-tone-neutral ui-density-compact" aria-pressed="false">
+        "4 hours"
+    <div class="browser-bypass-confirm-actions">
+      <button type="button" class="ui-button ui-tone-danger ui-density-compact">
+        "Turn on auto-approve"
+      <button type="button" class="ui-button ui-tone-neutral ui-density-compact">
+        "Cancel"

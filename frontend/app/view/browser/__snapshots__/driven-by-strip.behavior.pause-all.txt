@@ -1,0 +1,52 @@
+-- paused for every pane
+<div>
+  <div class="browser-driven-by browser-driven-by--held" role="status">
+    <i aria-hidden="true" class="fa-solid fa-pause">
+    <div class="browser-driven-by-message">
+      <span>
+        <b>
+          "Paused"
+          "for every pane"
+          ":"
+        <b>
+          "Naki"
+        "'s actions here wait until you resume"
+    <div class="browser-driven-by-actions">
+      <button title="What Naki did in this pane" type="button" class="ui-button ui-tone-neutral ui-density-compact browser-actions-log-button" aria-pressed="false">
+        "Log ("
+        "0"
+        ")"
+      <button title="Agent browsing paused by Posa. Let agents act in every pane again." type="button" class="ui-button ui-tone-neutral ui-density-compact browser-pause-button" aria-pressed="true">
+        "Resume"
+      <button title="Let Naki's clicks in this pane go through without asking you first." type="button" class="ui-button ui-tone-danger ui-density-compact browser-bypass-button" aria-pressed="false">
+        "Auto-approve"
+      <button title="End the agent's control of this pane; its next action here will fail." type="button" class="ui-button ui-tone-neutral ui-density-compact browser-take-over">
+        "Take over"
+setAgentBrowsingPaused false
+setAgentBrowsingPaused false
+-- lifting it failed
+<div>
+  <div class="browser-driven-by browser-driven-by--held" role="status">
+    <i aria-hidden="true" class="fa-solid fa-pause">
+    <div class="browser-driven-by-message">
+      <span>
+        <b>
+          "Paused"
+          "for every pane"
+          ":"
+        <b>
+          "Naki"
+        "'s actions here wait until you resume"
+      <span class="browser-bypass-strip-error" role="alert">
+        "Couldn't resume: srv said no"
+    <div class="browser-driven-by-actions">
+      <button title="What Naki did in this pane" type="button" class="ui-button ui-tone-neutral ui-density-compact browser-actions-log-button" aria-pressed="false">
+        "Log ("
+        "0"
+        ")"
+      <button title="Agent browsing paused by Posa. Let agents act in every pane again." type="button" class="ui-button ui-tone-neutral ui-density-compact browser-pause-button" aria-pressed="true">
+        "Resume"
+      <button title="Let Naki's clicks in this pane go through without asking you first." type="button" class="ui-button ui-tone-danger ui-density-compact browser-bypass-button" aria-pressed="false">
+        "Auto-approve"
+      <button title="End the agent's control of this pane; its next action here will fail." type="button" class="ui-button ui-tone-neutral ui-density-compact browser-take-over">
+        "Take over"

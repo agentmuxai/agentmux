@@ -1,0 +1,46 @@
+-- on, log open
+<div>
+  <div class="browser-driven-by browser-driven-by--bypass" role="status">
+    <i aria-hidden="true" class="fa-solid fa-bolt">
+    <div class="browser-driven-by-message">
+      <span>
+        <b>
+          "Auto-approve on:"
+        <b>
+          "Naki"
+        "'s clicks go through without asking on"
+        "github.com, *.example.com"
+        "·"
+        "42 min left"
+    <div class="browser-driven-by-actions">
+      <button title="What Naki did in this pane" type="button" class="ui-button ui-tone-neutral ui-density-compact browser-actions-log-button" aria-pressed="true">
+        "Log ("
+        "1"
+        ")"
+      <button title="Hold Naki's actions in this pane until you resume; auto-approve's time stops too." type="button" class="ui-button ui-tone-neutral ui-density-compact browser-pause-button" aria-pressed="false">
+        "Pause"
+      <button type="button" class="ui-button ui-tone-danger ui-density-compact browser-bypass-end">
+        "Stop auto-approve"
+      <button title="End the agent's control of this pane; its next action here will fail." type="button" class="ui-button ui-tone-neutral ui-density-compact browser-take-over-inline">
+        "Take over"
+  <div class="browser-action-log" role="log" aria-label="What Naki did in this pane">
+    <div class="browser-action-log-head">
+      <span>
+        "What"
+        <b>
+          "Naki"
+        "did here, newest first"
+      <button type="button" class="ui-button ui-tone-neutral ui-density-compact">
+        "Close"
+    <ol class="browser-action-log-list">
+      <li class="browser-action-log-row">
+        <span class="browser-action-log-time">
+          "t1"
+        <span class="browser-action-log-kind">
+          "click"
+        <span class="browser-action-log-target">
+          "Submit"
+        <span class="browser-action-log-how">
+          "done"
+        <span class="browser-action-log-url" data-hover-tip="https://github.com/agentmuxai/agentmux?tab=issues" aria-description="https://github.com/agentmuxai/agentmux?tab=issues">
+          "github.com/agentmuxai/agentmux"

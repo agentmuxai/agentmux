@@ -1,0 +1,21 @@
+model.takeOver
+-- after a refused take over
+<div>
+  <div class="browser-driven-by" role="status">
+    <i aria-hidden="true" class="fa-solid fa-robot">
+    <div class="browser-driven-by-message">
+      <span>
+        "Driven by"
+        <b>
+          "Naki"
+    <div class="browser-driven-by-actions">
+      <button title="What Naki did in this pane" type="button" class="ui-button ui-tone-neutral ui-density-compact browser-actions-log-button" aria-pressed="false">
+        "Log ("
+        "0"
+        ")"
+      <button title="Hold Naki's actions in this pane until you resume; auto-approve's time stops too." type="button" class="ui-button ui-tone-neutral ui-density-compact browser-pause-button" aria-pressed="false">
+        "Pause"
+      <button title="Let Naki's clicks in this pane go through without asking you first." type="button" class="ui-button ui-tone-danger ui-density-compact browser-bypass-button" aria-pressed="false">
+        "Auto-approve"
+      <button title="End the agent's control of this pane; its next action here will fail." type="button" class="ui-button ui-tone-neutral ui-density-compact browser-take-over">
+        "Take over"

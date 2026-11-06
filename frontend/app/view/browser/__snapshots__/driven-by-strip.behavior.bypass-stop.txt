@@ -1,0 +1,58 @@
+model.setBypass false
+model.setBypass false
+-- failed
+<div>
+  <div class="browser-driven-by browser-driven-by--bypass" role="status">
+    <i aria-hidden="true" class="fa-solid fa-bolt">
+    <div class="browser-driven-by-message">
+      <span>
+        <b>
+          "Auto-approve on:"
+        <b>
+          "Naki"
+        "'s clicks go through without asking on"
+        "github.com, *.example.com"
+        "·"
+        "42 min left"
+      <span class="browser-bypass-strip-error" role="alert">
+        "Couldn't stop auto-approve: srv said no"
+    <div class="browser-driven-by-actions">
+      <button title="What Naki did in this pane" type="button" class="ui-button ui-tone-neutral ui-density-compact browser-actions-log-button" aria-pressed="false">
+        "Log ("
+        "0"
+        ")"
+      <button title="Hold Naki's actions in this pane until you resume; auto-approve's time stops too." type="button" class="ui-button ui-tone-neutral ui-density-compact browser-pause-button" aria-pressed="false">
+        "Pause"
+      <button type="button" class="ui-button ui-tone-danger ui-density-compact browser-bypass-end">
+        "Stop auto-approve"
+      <button title="End the agent's control of this pane; its next action here will fail." type="button" class="ui-button ui-tone-neutral ui-density-compact browser-take-over-inline">
+        "Take over"
+model.setBypass false
+-- unreachable
+<div>
+  <div class="browser-driven-by browser-driven-by--bypass" role="status">
+    <i aria-hidden="true" class="fa-solid fa-bolt">
+    <div class="browser-driven-by-message">
+      <span>
+        <b>
+          "Auto-approve on:"
+        <b>
+          "Naki"
+        "'s clicks go through without asking on"
+        "github.com, *.example.com"
+        "·"
+        "42 min left"
+      <span class="browser-bypass-strip-error" role="alert">
+        "AgentMux didn't answer in time when asked to stop auto-approve, so it isn't certain it was done. Check this pane before trying again."
+    <div class="browser-driven-by-actions">
+      <button title="What Naki did in this pane" type="button" class="ui-button ui-tone-neutral ui-density-compact browser-actions-log-button" aria-pressed="false">
+        "Log ("
+        "0"
+        ")"
+      <button title="Hold Naki's actions in this pane until you resume; auto-approve's time stops too." type="button" class="ui-button ui-tone-neutral ui-density-compact browser-pause-button" aria-pressed="false">
+        "Pause"
+      <button type="button" class="ui-button ui-tone-danger ui-density-compact browser-bypass-end">
+        "Stop auto-approve"
+      <button title="End the agent's control of this pane; its next action here will fail." type="button" class="ui-button ui-tone-neutral ui-density-compact browser-take-over-inline">
+        "Take over"
+model.takeOver
