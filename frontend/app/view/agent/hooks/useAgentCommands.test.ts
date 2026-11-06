@@ -1417,6 +1417,46 @@ describe("useAgentCommands — flushPendingControllerRefresh", () => {
         });
     });
 
+    it.each([
+        ["a provider with a sign-in check", ["auth", "status"], true],
+        ["a provider with none (Muse Code)", [], false],
+    ])("a refreshed controller proves the login only for %s", async (_label, authCheckCommand, proves) => {
+        hub.dispatchSlashCommand.mockImplementation(async (_msg: string, _registry: unknown, ctx: { deferControllerRefreshUntilIdle: () => void }) => {
+            ctx.deferControllerRefreshUntilIdle();
+            return { kind: "handled" };
+        });
+        const model = setup();
+        const notifyControllerHealthy = vi.fn();
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => ({ authCheckCommand }) as never,
+                documentNodes: () => [],
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => false,
+                loginWaiting: () => false,
+                setAuthNotice: () => {},
+                notifyControllerHealthy,
+                forceControllerRefresh: async () => true,
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
+                isCancelled: () => false,
+                resetCancelled: () => {},
+                isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => true,
+                backToPicker: async () => {},
+            });
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("/login", /* wasAlreadyWorking */ true);
+            await commands.flushPendingControllerRefresh();
+            expect(notifyControllerHealthy).toHaveBeenCalledWith(proves);
+            dispose();
+        });
+    });
+
     // reagentx P1 on PR #2338 (thirty-fifth re-review): the success branch
     // dispatched an unconditional FailureCleared, which the reducer applies
     // regardless of data.code — so a deferred /login refresh succeeding
