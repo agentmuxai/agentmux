@@ -102,9 +102,24 @@ describe("AgentSiteGrants", () => {
         fireEvent.input(screen.getByLabelText("Site"), { target: { value: "shell.example.com" } });
         const allow = screen.getByRole("button", { name: "Allow" });
         expect(allow).not.toBeDisabled();
-        fireEvent.click(screen.getAllByRole("checkbox").at(-1)!);
+        fireEvent.click(screen.getAllByLabelText("Terminal: type and run commands").at(-1)!);
         fireEvent.click(allow);
         await waitFor(() => expect(set).toHaveBeenCalledWith({}, { agent: "agent1", site: "shell.example.com", powers: ["terminal"] }));
+    });
+
+    it("adds a grant that shows the person each terminal line first, only with the terminal ticked", async () => {
+        set.mockResolvedValue(result());
+        render(() => <AgentSiteGrants />);
+        await screen.findByRole("button", { name: /Revoke/ });
+        fireEvent.change(screen.getByRole("combobox", { name: "Agent to give a standing grant" }), { target: { value: "agent1" } });
+        fireEvent.input(screen.getByLabelText("Site"), { target: { value: "shell.example.com" } });
+        const ask = screen.getByLabelText("and show me each line first") as HTMLInputElement;
+        expect(ask.disabled).toBe(true);
+        fireEvent.click(screen.getAllByLabelText("Terminal: type and run commands").at(-1)!);
+        expect(ask.disabled).toBe(false);
+        fireEvent.click(ask);
+        fireEvent.click(screen.getByRole("button", { name: "Allow" }));
+        await waitFor(() => expect(set).toHaveBeenCalledWith({}, { agent: "agent1", site: "shell.example.com", powers: ["terminal_ask"] }));
     });
 
     it("turns a console preset on for the chosen agent only", async () => {

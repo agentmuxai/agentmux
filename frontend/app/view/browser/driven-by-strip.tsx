@@ -16,7 +16,7 @@ import { browserPauseAll, pausedLabel, setAgentBrowsingPaused } from "@/app/stor
 import { createSignal, For, Show, type JSX } from "solid-js";
 import { actionFailed, actionKind, actionTime, shortUrl } from "./action-log";
 import type { BrowserViewModel } from "./browser-model";
-import { BYPASS_MINUTES, hasTerminalPower, leftLabel, minutesLabel, siteLabel } from "./bypass";
+import { BYPASS_MINUTES, leftLabel, minutesLabel, siteLabel, terminalNote } from "./bypass";
 import { plainError } from "./plain-error";
 import { tip } from "@/app/element/tip";
 
@@ -197,7 +197,7 @@ export function DrivenByStrip(props: { model: BrowserViewModel; agent: string })
                                     <span>
                                         <b>Auto-approve on:</b> <b>{b().agent}</b>'s clicks go through without asking on{" "}
                                         {b().origins.map(siteLabel).join(", ")}
-                                        {hasTerminalPower(b().powers) ? " and it runs commands in the terminal" : ""} ·{" "}
+                                        {terminalNote(b().powers)} ·{" "}
                                         {leftLabel(b().always, model.bypassMinutesLeft())}
                                     </span>
                                 </Show>

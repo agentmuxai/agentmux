@@ -69,6 +69,10 @@ export function attentionLook(a: BrowserAttention): AttentionLook {
                 answer: "approve",
                 no: "No",
             };
+        // A terminal line the agent typed, for the person to run or not
+        // (SPEC_BROWSER_WEB_TERMINAL_TYPING_2026_10_23.md §4.4).
+        case "line":
+            return { agent: true, tone: "danger", density: "comfortable", icon: "fa-terminal", yes: "Run it", answer: "approve", no: "Don't run" };
         // The page's own question (SPEC_BROWSER_PANE_NATIVE_DIALOGS_2026_10_17.md §4.4):
         // the browser's own words for it.
         case "dialog":

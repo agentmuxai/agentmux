@@ -11,6 +11,7 @@ export { LATE_PROMPT_LIMIT };
 /** What a power is called beside its checkbox. */
 export const POWER_LABELS: Record<string, string> = {
     terminal: "Terminal: type and run commands",
+    terminal_ask: "Terminal: ask me for each line",
 };
 
 /** A row's sites for display: the one it is named by, and how many frames of other sites belong to it. */

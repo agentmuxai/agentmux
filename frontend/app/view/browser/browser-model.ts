@@ -985,7 +985,7 @@ export class BrowserViewModel {
     /** The human answers the pane's banner (a hand-off, an approval, a
      *  question or a notice). Back is a notice's: the pane goes back, and the
      *  notice comes down as dismissed. */
-    resolveAttention(decision: "done" | "approve" | "approve_always" | "cancel" | "back"): Promise<void> {
+    resolveAttention(decision: "done" | "approve" | "approve_always" | "approve_ask" | "cancel" | "back"): Promise<void> {
         const a = this.attentionAtom();
         if (!a) return Promise.resolve();
         if (decision === "back") {

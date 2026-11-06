@@ -1,0 +1,15 @@
+<div class="browser-attention browser-attention--agent" role="alertdialog" aria-live="assertive" data-kind="line">
+<div class="browser-attention-head">
+<i aria-hidden="true" class="fa-solid fa-terminal">
+</i>
+<span>
+<b>Korp</b> typed a line in the terminal on <b>shell.example</b> and wants to run it: list the buckets</span>
+</div>
+<pre class="browser-attention-line" aria-label="The line that will run">user@host:~$ gsutil ls</pre>
+<div class="browser-attention-target">What the terminal shows now (the page's words, not AgentMux's):</div>
+<pre class="browser-attention-page-text">user@host:~$ gsutil ls</pre>
+<div class="browser-attention-actions">
+<button type="button" class="ui-button ui-tone-danger ui-density-comfortable">Run it</button>
+<button type="button" class="ui-button ui-tone-neutral ui-density-comfortable">Don't run</button>
+</div>
+</div>
