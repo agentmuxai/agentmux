@@ -533,7 +533,6 @@
 102 frontend/app/view/warden-jobs/job-editor-fields.tsx::WhatSection
 146 frontend/app/view/warden-jobs/job-template-approval.tsx::TemplateApproval
 180 frontend/app/view/warden-jobs/job-update-diff.tsx::JobUpdateDiff
-253 frontend/app/view/warden-jobs/jobs-history.tsx::JobHistory
 137 frontend/app/view/warden-jobs/warden-jobs-manager.tsx::WardenJobsManager
 218 frontend/app/window/logo-menu.tsx::LogoMenu
 157 frontend/app/window/logo-menu.tsx::menuItems
