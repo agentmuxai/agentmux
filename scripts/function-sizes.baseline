@@ -296,7 +296,7 @@
 133 crates/srv/src/server/browser_capture.rs::handle_browser_capture
 223 crates/srv/src/server/browser_terminal.rs::handle_ui_browser_terminal
 190 crates/srv/src/server/browser_vault_fill.rs::handle_vault_fill
-736 crates/srv/src/server/cli_handlers.rs::register_cli_handlers
+739 crates/srv/src/server/cli_handlers.rs::register_cli_handlers
 904 crates/srv/src/server/editor_handlers.rs::register_editor_handlers
 107 crates/srv/src/server/files.rs::handle_stream_local_file
 122 crates/srv/src/server/http_health.rs::handle_discovery
@@ -308,7 +308,7 @@
 106 crates/srv/src/server/identity_auth_dirs.rs::compute_and_ensure_account_dir
 326 crates/srv/src/server/identity_auth_spawn.rs::spawn_auth_cli
 404 crates/srv/src/server/identity_auth_spawn.rs::spawn_auth_cli_pty
-324 crates/srv/src/server/install_handlers.rs::spawn_install_task
+332 crates/srv/src/server/install_handlers.rs::spawn_install_task
 102 crates/srv/src/server/jekt_files.rs::receive
 105 crates/srv/src/server/jekt_hold.rs::hold_with_reason
 238 crates/srv/src/server/mux_obj_bridge.rs::dispatch_event

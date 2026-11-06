@@ -116,7 +116,7 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
                 // Not found. AgentMux doesn't install it: say how to.
                 let path_only = registered
-                    .map(|p| p.npm_package.is_empty())
+                    .map(|p| p.npm_package.is_empty() && crate::backend::cli_download::download_spec(p.id).is_none())
                     .unwrap_or_else(|| cmd.npm_package.is_empty());
                 if path_only {
                     // This branch fires for PATH-only providers
@@ -155,6 +155,9 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // installed.
                 let provider = crate::server::install_handlers::installable_provider(&cmd.provider_id)
                     .map_err(|e| format!("resolvecli: {e}"))?;
+                if crate::backend::cli_download::download_spec(provider.id).is_some() {
+                    return resolve_by_download(&notices, &broker, &paths, &cmd, provider.id, &pinned_version).await;
+                }
                 tracing::info!(
                     provider = %provider.id,
                     npm_package = %provider.npm_package,
@@ -886,6 +889,46 @@ impl CliSource {
 pub(crate) struct LocatedCli {
     pub path: String,
     pub source: CliSource,
+}
+
+/// `resolvecli` for a provider that is a release download (goose), not an npm
+/// package: the pinned file, its hash checked, unpacked under the install lock
+/// and marked complete (`backend::cli_download`).
+async fn resolve_by_download(
+    notices: &CliNotices,
+    broker: &Arc<crate::backend::mps::Broker>,
+    paths: &agentmux_common::DataPaths,
+    cmd: &CommandResolveCliData,
+    provider_id: &str,
+    pinned_version: &str,
+) -> Result<ResolveCliResult, String> {
+    use crate::backend::cli_install::InstallOutcome;
+    use crate::backend::cli_notice::InstallState;
+    let install_id = format!("{provider_id}-{pinned_version}-{}", agentmux_common::time::now_ms());
+    let started = std::time::Instant::now();
+    notices.install(&install_id, pinned_version, InstallState::Installing, None, None);
+    let (block_id, broker) = (cmd.block_id.clone(), broker.clone());
+    let on_line = move |_: &'static str, line: &str| {
+        tracing::info!(line = %line, "download output");
+        if !block_id.is_empty() {
+            crate::backend::mps::publish_install_progress(&broker, &block_id, line);
+        }
+    };
+    let stop = std::sync::atomic::AtomicBool::new(false);
+    let outcome = crate::backend::cli_download::install_download_cli(paths, provider_id, &on_line, &stop).await;
+    match &outcome {
+        Ok(_) => notices.install(&install_id, pinned_version, InstallState::Installed, Some(started.elapsed().as_secs_f64()), None),
+        Err(e) => notices.install(&install_id, pinned_version, InstallState::Failed, None, Some(&e.to_string())),
+    }
+    let (bin, source) = match outcome.map_err(|e| e.to_string())? {
+        InstallOutcome::Installed(bin) => (bin, "installed"),
+        InstallOutcome::AlreadyInstalled(bin) => (bin, "local_install"),
+    };
+    let bin = bin.to_string_lossy().to_string();
+    let version = get_cli_version(&bin).await;
+    tracing::info!(path = %bin, version = %version, source, "CLI installed (download)");
+    notices.observe_version(&version);
+    Ok(ResolveCliResult { cli_path: bin, version, source: source.to_string() })
 }
 
 /// The CLI a launch of `provider_id` would run, without installing anything:

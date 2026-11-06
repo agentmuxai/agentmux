@@ -21,6 +21,7 @@ import { sleep } from "@/util/util";
 import type { CheckCliAuthResult } from "@/types/rpc/CheckCliAuthResult";
 import { lastLinkedAccountId } from "../providers/provider-id-aliases";
 import type { ProviderDefinition } from "../providers";
+import { installPackageField } from "../providers/install-request";
 import { persistAndLinkAccount, runProviderLogin, type RunProviderLoginParams } from "./run-provider-login";
 
 /** How long a login page or terminal is given to finish: the same window
@@ -29,7 +30,7 @@ export const LOGIN_COMPLETION_TIMEOUT_MS = 5 * 60 * 1000;
 
 type CliProvider = Pick<
     ProviderDefinition,
-    "id" | "cliCommand" | "npmPackage" | "pinnedVersion" | "windowsInstallCommand" | "unixInstallCommand"
+    "id" | "cliCommand" | "npmPackage" | "managedInstall" | "pinnedVersion" | "windowsInstallCommand" | "unixInstallCommand"
 >;
 
 /** Find (or install) the provider's CLI. Throws what the RPC throws. */
@@ -37,7 +38,7 @@ export function resolveProviderCli(provider: CliProvider, blockId: string): Prom
     return RpcApi.ResolveCliCommand(TabRpcClient, {
         provider_id: provider.id,
         cli_command: provider.cliCommand,
-        npm_package: provider.npmPackage,
+        npm_package: installPackageField(provider),
         pinned_version: provider.pinnedVersion,
         windows_install_command: provider.windowsInstallCommand,
         unix_install_command: provider.unixInstallCommand,
