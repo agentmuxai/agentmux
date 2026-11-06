@@ -1,6 +1,6 @@
 # Spec: AgentMux installs its own isolated, pinned copy of all 19 agent CLIs
 
-**Status:** active — approved by the operator 2026-11-05 ("ok, lets wrap that up, lets get all the harnesses isolated"), relayed by AgentY. PR 1 (goose: `cli_download.rs`, the Install button, lookup) is #6590, which carries this spec; PRs 2–5 (§9) are left.
+**Status:** active — approved by the operator 2026-11-05 ("ok, lets wrap that up, lets get all the harnesses isolated"), relayed by AgentY. PR 1 (goose: `cli_download.rs`, the Install button, lookup) is #6590 (merged); PR 2 (pinned uv, Aider, Kimi) is the PR that carries this edit; PRs 3–5 (§9) are left.
 **Date:** 2026-11-05. Task #1571 (spec), #1572 (build). Author: Lazo. Verified against `agentmux` `main` @ `bf7e5b9863`.
 **Builds on:** `SPEC_NINE_NEW_HARNESSES_2026_10_14.md` (the six providers), `SPEC_AGENT_CLI_ISOLATION_NOTE_2026_10_18.md` (what is isolated today), `SPEC_SIGNED_UPDATE_CHECKSUMS_2026_10_25.md` (same "pinned hash, no trust in the origin" idea).
 **Research behind it:** a sourced fetch of each vendor's real distribution on 2026-11-05 (release assets, checksums, signatures, self-update switches, licences; downloads and Authenticode checks measured). Not committed.
@@ -31,7 +31,7 @@ The operator saw the agent pane tell them to install Goose themselves and asked 
 
 - **An install source per provider**, compiled in: `npm_package` (today) or an entry in `cli_download::SPECS` (PR 1; a `uv` kind joins in PR 2). PR 1 keeps the table beside the downloader instead of adding a field to all 19 `ProviderConfig` literals; a test holds each entry to its provider's pin, and a frontend parity test holds `managedInstall` to the table. An `Asset` is `{ os, arch, url, sha256, size, archive, exe_in_archive }`, all `&'static`, and gains an Authenticode subject when a PR needs one. A caller cannot name a URL or a hash: `installable_provider` stays the one gate and now means "has an npm package or a download". The unpacker takes only the one named executable out of the archive (no other entry is written, so no entry name can place a file).
 - **`backend/cli_download.rs`** next to `cli_install.rs`: take the same cross-instance lock, download to a temp file in the install folder (size capped at the listed size + 1 MB, a stall timeout, progress lines through `publish_install_progress`), hash while streaming, refuse a mismatch and say which hash was expected, unpack (`.zip`/`.tar.gz`, no `..`, no absolute paths; the srv unpacker used for updates already refuses those), check the executable runs (`--version`), check the Windows Authenticode subject where one is listed, then write `.agentmux-install-complete`. `find_installed` learns the layout (`<dir>/bin/<cli>` for downloads, `<dir>/venv/bin/<cli>` for uv) so every resolver sees the same copy.
-- **`uv`** is itself a pinned download (0.13.7, `.sha256` sidecar baked in) under `<shared>/tools/uv/<ver>/`, with `UV_TOOL_DIR`, `UV_TOOL_BIN_DIR`, `UV_PYTHON_INSTALL_DIR`, `UV_CACHE_DIR`, `UV_NO_MODIFY_PATH=1` and `--managed-python` all inside the provider's folder. Without `--managed-python` uv silently reused the system Python in testing, so nothing would have been isolated. The 500 MB cache is cleared after a good install.
+- **`uv`** is itself a pinned download (0.13.7; the hash baked in is GitHub's asset digest, which matches the `.sha256` sidecar) under `<shared>/tools/uv/<ver>/` (outside `cli/`, so the old-install pruner does not treat it as a leftover), with `UV_TOOL_DIR`, `UV_TOOL_BIN_DIR`, `UV_PYTHON_INSTALL_DIR`, `UV_CACHE_DIR`, `UV_NO_MODIFY_PATH=1` and `--managed-python` all inside the provider's folder. Without `--managed-python` uv silently reused the system Python in testing, so nothing would have been isolated. The 500 MB cache is cleared after a good install.
 - **Lookup order** (`locate_provider_cli`): AgentMux's copy for every provider; a copy on the person's PATH is used only when they pick **Use the CLI on my PATH** for that provider (one setting, default off). Their own install is never touched. This replaces "PATH for the six". **PR 1 keeps the PATH fallback** for the providers still on it (goose included) so nobody who installed goose themselves loses it; the setting and the strict order land in PR 5.
 - **Pin bumps** use the existing "update available" flow Toolchain shows for npm CLIs (`versionSource` in the catalog already names goose's GitHub repo); a new pin is a registry change with new hashes, so a bump is a PR a person reads.
 
@@ -74,12 +74,20 @@ The operator saw the agent pane tell them to install Goose themselves and asked 
 - Node and npm come from the system. Said in the Install error; fetching a pinned Node is out of scope.
 - `HOME` and `PATH` are the person's; this isolates the tools, not what an agent can do. Unchanged.
 
+## 8a. Built in PR 2 (Aider, Kimi)
+
+- `backend/cli_uv.rs`: the pinned uv, then per provider `uv venv --managed-python --python 3.12` and `uv pip install --require-hashes --only-binary :all: --no-deps -r <lock>` into `<install dir>/venv`, with `UV_CACHE_DIR`, `UV_PYTHON_INSTALL_DIR` and `UV_PYTHON_BIN_DIR` inside the install dir, `--no-config`, `--default-index https://pypi.org/simple`, and the person's `UV_*`/`PIP_*` index variables removed. The cache is deleted after a good install.
+- The locks are `uv pip compile --universal --python-version 3.12 --generate-hashes` outputs in `backend/cli_locks/` (Aider 110 packages, Kimi 169, plus `pip`; the Kimi lock adds `setuptools` and `wheel`). A test holds every entry to an exact pin with sha256 hashes and no URL source.
+- **Kimi's `ripgrepy` has no wheel** (sdist only), so it is built from its hash-checked sdist with `--no-binary ripgrepy --no-build-isolation`, setuptools and wheel coming from the same lock. uv builds an sdist before it installs anything, so they go in first, in a step of their own (macOS and Linux look checks caught the single-step install failing on a fresh venv); nothing is fetched unhashed.
+- Measured on Windows x64 (Area54): Python download, venv and install take about 11 s for Aider (venv 514 MB) and 15 s for Kimi (219 MB); `aider --version` prints 0.86.2 and `kimi --version` prints 1.52.0. macOS, Linux and Windows arm64 are untested; arm64 Windows may lack wheels for some packages, which fails the install with uv's own message.
+- Kimi's pin was empty and is now 1.52.0 (its registry entry, catalog and the install dir all key on it).
+
 ## 9. Phases (one PR per install kind; merge on muxreview approval)
 
 | PR | Content | Rough cost |
 |---|---|---|
 | 1 | `install` enum, `cli_download.rs`, lookup order, Install/Uninstall UI, **goose** (plain GitHub binary, all platforms), tests, this spec | 2–3 days |
-| 2 | pinned `uv`, hashed venv install: **aider**, then **kimi** (1.52.0) | 2 days |
+| 2 | pinned `uv`, hashed venv install: **aider**, then **kimi** (1.52.0): built, §8a | 2 days |
 | 3 | **grok** (TOFU hash, `grove*` and MinGit on Windows) | 1 day |
 | 4 | **antigravity** and **muse** (after the terms check) | 1–2 days |
 | 5 | npm hardening (§8), docs and picker note, container route for all | 1–2 days |

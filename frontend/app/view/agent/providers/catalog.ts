@@ -420,7 +420,8 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         authCheckCommand: ["info"],
         authLoginCommand: ["login"],
         npmPackage: "",
-        pinnedVersion: "",
+        managedInstall: true,
+        pinnedVersion: "1.52.0",
         docsUrl: "https://moonshotai.github.io/kimi-cli/",
         windowsInstallCommand: "pip install kimi-cli",
         unixInstallCommand: "pip install kimi-cli",
@@ -802,8 +803,8 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
     aider: {
         id: "aider",
         displayName: "Aider",
-        // Terminal tier: Aider's own UI in a terminal pane. Not on npm: the user
-        // installs it with Aider's installer. Mirrors crates/srv/src/backend/providers/aider.rs.
+        // Terminal tier: Aider's own UI in a terminal pane. Not on npm: AgentMux
+        // installs the pinned release itself (managedInstall), through uv. Mirrors crates/srv/src/backend/providers/aider.rs.
         cliCommand: "aider",
         defaultArgs: [],
         styledArgs: [],
@@ -817,6 +818,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         requiresLoginTty: true,
         headlessLoginUrlUnsupported: true,
         npmPackage: "",
+        managedInstall: true,
         pinnedVersion: "0.86.2",
         versionSource: { kind: "pypi", package: "aider-chat" },
         docsUrl: "https://aider.chat/docs/install.html",

@@ -169,9 +169,10 @@ describe("kimi provider", () => {
         expect(kimi.authLoginCommand).toEqual(["login"]);
     });
 
-    test("has empty npm package (python-based CLI)", () => {
+    test("has empty npm package (python-based CLI), installed by AgentMux at its last release", () => {
         expect(kimi.npmPackage).toBe("");
-        expect(kimi.pinnedVersion).toBe("");
+        expect(kimi.managedInstall).toBe(true);
+        expect(kimi.pinnedVersion).toBe("1.52.0");
     });
 
     test("uses subprocess controller", () => {

@@ -1,0 +1,8 @@
+subscribe accountavailability
+subscribe workqueue:changed
+rpc KanbanList
+subscribe agents:changed
+board#1 mounted
+pending: "collapsed":["review"]
+after 2.9 s: "collapsed":["review"]
+after 3.1 s: "collapsed":[]
