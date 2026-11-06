@@ -104,35 +104,8 @@ fn run(state: &AppState, slug: &str, uid: &str, req: AgentSkillRequest) -> Resul
     let changed = || state.broker.publish_event::<crate::backend::mps_events::SkillsChanged>(&(), vec![], 0);
     let target = || req.target.clone().filter(|t| !t.is_empty()).unwrap_or_else(|| uid.to_string());
     match req.action.as_str() {
-        "list" => {
-            let items = mstore.skill_list_global(catalog).map_err(|e| format!("skill: {e}"))?;
-            Ok(json!(items
-                .iter()
-                .map(|i| {
-                    let mut v = summary(&i.skill, i.bound_count, i.all_agents, i.new_agents, false);
-                    // A computer-use skill says so, with the app and version, so an agent can pick one for the window it is driving.
-                    if let Some(app) = &i.app {
-                        v["app"] = json!({ "vendor": app.info.vendor, "version": app.info.version, "platforms": app.info.platforms });
-                    }
-                    v
-                })
-                .collect::<Vec<_>>()))
-        }
-        "get" => {
-            let skill = global_skill(state, &req.skill_id)?;
-            if let Some(file) = req.file.as_deref().filter(|f| !f.is_empty()) {
-                return skill_file(catalog, &skill, file);
-            }
-            let items = mstore.skill_list_global(catalog).map_err(|e| format!("skill: {e}"))?;
-            let item = items.iter().find(|i| i.skill.id == skill.id);
-            let mut v = summary(&skill, item.map_or(0, |i| i.bound_count), item.is_some_and(|i| i.all_agents), item.is_some_and(|i| i.new_agents), true);
-            // A computer-use skill lists the files beside its text, its reference crops and its tests; ask for one with `file`.
-            if let Some(app) = item.and_then(|i| i.app.as_ref()) {
-                v["app"] = serde_json::to_value(app).unwrap_or_default();
-                v["note"] = json!("Read a file beside this text with get and file: its path from app.files. A reference crop comes back with its tags and a path to open as an image.");
-            }
-            Ok(v)
-        }
+        "list" => list_skills(state),
+        "get" => get_skill(state, &req),
         "record" => {
             let skill = global_skill(state, &req.skill_id)?;
             let rec = verified_record(catalog, &skill, slug, &req)?;
@@ -215,6 +188,38 @@ fn run(state: &AppState, slug: &str, uid: &str, req: AgentSkillRequest) -> Resul
         }
         other => Err(format!("skill: unknown action {other:?} (list, get, upsert, delete, bind, unbind, reach, record)")),
     }
+}
+
+/// Every catalog skill in short; a computer-use skill says so, with the app and version, so an agent can pick one for the window it is driving.
+fn list_skills(state: &AppState) -> Result<serde_json::Value, String> {
+    let items = state.mstore.skill_list_global(&state.identity_store).map_err(|e| format!("skill: {e}"))?;
+    Ok(json!(items
+        .iter()
+        .map(|i| {
+            let mut v = summary(&i.skill, i.bound_count, i.all_agents, i.new_agents, false);
+            if let Some(app) = &i.app {
+                v["app"] = json!({ "vendor": app.info.vendor, "version": app.info.version, "platforms": app.info.platforms });
+            }
+            v
+        })
+        .collect::<Vec<_>>()))
+}
+
+/// One skill in full; with `file`, one file beside its text. A computer-use skill lists those files, its reference crops and its tests.
+fn get_skill(state: &AppState, req: &AgentSkillRequest) -> Result<serde_json::Value, String> {
+    let (mstore, catalog) = (&state.mstore, &state.identity_store);
+    let skill = global_skill(state, &req.skill_id)?;
+    if let Some(file) = req.file.as_deref().filter(|f| !f.is_empty()) {
+        return skill_file(catalog, &skill, file);
+    }
+    let items = mstore.skill_list_global(catalog).map_err(|e| format!("skill: {e}"))?;
+    let item = items.iter().find(|i| i.skill.id == skill.id);
+    let mut v = summary(&skill, item.map_or(0, |i| i.bound_count), item.is_some_and(|i| i.all_agents), item.is_some_and(|i| i.new_agents), true);
+    if let Some(app) = item.and_then(|i| i.app.as_ref()) {
+        v["app"] = serde_json::to_value(app).unwrap_or_default();
+        v["note"] = json!("Read a file beside this text with get and file: its path from app.files. A reference crop comes back with its tags and a path to open as an image.");
+    }
+    Ok(v)
 }
 
 /// `Some(skill)` for an existing catalog skill, `None` for an id nothing has used yet (a caller may

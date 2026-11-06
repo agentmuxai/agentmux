@@ -92,6 +92,13 @@ pub fn valid_rel_path(path: &str) -> bool {
     parts.len() <= 4 && parts.iter().all(|p| !p.is_empty() && *p != "." && *p != ".." && !p.ends_with('.') && !p.ends_with(' '))
 }
 
+/// A name the folder itself uses (`SKILL.md`, the manifest, the signature, the pass records), in any letter case.
+/// On a case-insensitive disk a sibling called `skill.md` would overwrite the `SKILL.md` the person reviewed.
+fn is_reserved_name(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    ["skill.md", MANIFEST, SIG_FILE, VERIFIED_FILE].contains(&lower.as_str())
+}
+
 fn str_list(v: Option<&Value>) -> Vec<String> {
     v.and_then(Value::as_array)
         .map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect())
@@ -324,6 +331,9 @@ pub fn read_folder(dir: &Path) -> Result<Bundle, String> {
         if !valid_rel_path(path) {
             return Err(format!("{path}: not a path a skill can hold"));
         }
+        if is_reserved_name(path) && !matches!(path.as_str(), "SKILL.md" | MANIFEST | SIG_FILE | VERIFIED_FILE) {
+            return Err(format!("{path}: a name the skill folder uses for itself, in other letters; rename it"));
+        }
         let is_crop = path.starts_with("references/") && ext_of(path) == "png";
         if !is_crop && !TEXT_EXT.contains(&ext_of(path).as_str()) && path != SIG_FILE {
             return Err(format!("{path}: only text and script files are accepted ({}), and PNG crops under references/", TEXT_EXT.join(" ")));
@@ -444,7 +454,7 @@ pub struct SkillPointer {
     pub id: String,
     pub name: String,
     pub version: String,
-    /// At least one test of this skill passed on this platform.
+    /// At least one test of this installed version passed on this platform.
     pub verified_here: bool,
 }
 
@@ -453,7 +463,7 @@ pub fn skill_for_executable(catalog: &Store, platform: &str, exe: &str) -> Optio
     let apps = catalog.skill_app_map().ok()?;
     let (id, app) = apps.into_iter().find(|(_, a)| matches_executable(&a.info, platform, exe))?;
     let name = catalog.skill_get(&id).ok().flatten()?.name;
-    let verified_here = app.verified.iter().any(|r| r.platform == platform && r.result == "pass");
+    let verified_here = app.verified.iter().any(|r| r.platform == platform && r.result == "pass" && r.skill_version == app.info.version);
     Some(SkillPointer { id, name, version: app.info.version, verified_here })
 }
 
@@ -468,7 +478,7 @@ pub fn sibling_files(skills: &[AgentSkill], catalog: &Store) -> Vec<AgentConfigF
     for (skill, slug) in skills.iter().zip(agent_skill_slugs(skills)) {
         let Some(slug) = slug else { continue };
         for f in catalog.skill_files(&skill.id).unwrap_or_default() {
-            if (f.script && !f.approved) || f.image.is_some() || !valid_rel_path(&f.path) {
+            if (f.script && !f.approved) || f.image.is_some() || !valid_rel_path(&f.path) || is_reserved_name(&f.path) {
                 continue;
             }
             out.push(AgentConfigFile { filename: format!(".claude/skills/{slug}/{}", f.path), content: f.content });

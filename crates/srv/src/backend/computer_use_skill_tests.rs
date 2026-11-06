@@ -438,3 +438,27 @@ fn a_scan_reads_a_computer_use_folder_whole_and_refuses_a_broken_one_with_the_re
     assert_eq!(scan.warnings.len(), 1);
     assert!(scan.warnings[0].contains("acme-broken") && scan.warnings[0].contains("must be acme-other"), "{:?}", scan.warnings);
 }
+
+#[test]
+fn a_pass_on_an_older_version_does_not_say_tested_here() {
+    let (c, _) = installed();
+    let v2 = read(&base_files(&manifest("1.1.0", ""))).unwrap();
+    install(&c, "s1", &v2, 7).unwrap();
+    let p = skill_for_executable(&c, "windows", "WINWORD.EXE").unwrap();
+    assert_eq!((p.version.as_str(), p.verified_here), ("1.1.0", false), "the 1.0.0 pass is kept but does not speak for 1.1.0");
+}
+
+#[test]
+fn a_name_the_folder_uses_is_reserved_in_any_letters_and_never_written_beside_skill_md() {
+    // Not read from a disk: on a case-insensitive one `skill.md` and `SKILL.md` are the same file, which is the point.
+    for name in ["SKILL.md", "skill.md", "Skill.MD", "Computer-Use.json", "VERIFIED.json", "Skill.Sig"] {
+        assert!(is_reserved_name(name), "{name}");
+    }
+    assert!(!is_reserved_name("controls.md") && !is_reserved_name("references/skill.md"));
+
+    let (c, _) = installed();
+    c.conn().lock().unwrap().execute("UPDATE db_skill_file SET path = 'skill.md' WHERE path = 'controls.md'", []).unwrap();
+    let skills = vec![agent_skill("s1", "acme-word")];
+    let paths: Vec<String> = sibling_files(&skills, &c).into_iter().map(|f| f.filename).collect();
+    assert_eq!(paths, vec![".claude/skills/acme-word/test.json"]);
+}
