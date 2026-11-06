@@ -193,7 +193,7 @@
 110 crates/srv/src/backend/resume_preflight.rs::preflight
 157 crates/srv/src/backend/rpc/engine.rs::WshRpcEngine::handle_request
 270 crates/srv/src/backend/service.rs::get_method_meta
-244 crates/srv/src/backend/shell_node.rs::ShellNodeRunner::run
+238 crates/srv/src/backend/shell_node.rs::ShellNodeRunner::run
 111 crates/srv/src/backend/slug_migration/plan.rs::holder_of
 138 crates/srv/src/backend/spawn_env/build.rs::build_persistent_spawn_env
 129 crates/srv/src/backend/storage/agents/definition.rs::Store::agent_def_find_or_insert
