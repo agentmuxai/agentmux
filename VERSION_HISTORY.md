@@ -1,5 +1,74 @@
 # AgentMux Version History
 
+## 0.60.18 — 2026-11-06
+
+- Dragging a pane tab out of its window on Windows now shows the pane following the cursor, and the floating window opens where it was dropped
+- On Windows, dragging a tab or pane out of the window shows a normal arrow instead of the circle-slash cursor
+- feat(packs): per-application knowledge packs for computer use (Word, Excel, Ableton Live, WaveLab, Blender) as example skills, with the format spec and the research report
+- Editor session test: the language-server change debounce follows the test's own sleeps, so a loaded machine no longer changes the logs
+- srv: split the block controller's resync_controller into named steps
+- A submenu no longer closes while the pointer travels diagonally toward it across the row below, in context menus, title-bar menus and the kit Menu
+- Ctrl+F in an agent pane now opens a hidden run that holds the match, and closes it again when the search ends
+- New agent: Run installs Kimi, Antigravity, Grok Build, Aider and Muse Code with the vendor's own installer, after you approve it (srv downloads the script, shows its hash, runs that file; cancel stops it); goose's Windows install command for a copy you install yourself points at a file that exists
+- Split the pane open handler into named steps with direct tests
+- Fix a window that starts with Animations Off staying blank, and an error on every Animations change (a 0.60.17 regression)
+- The Audit pane shows new entries as srv writes them, with Pause and an N new pill, instead of asking every 5 seconds
+- Toolchain: an agent CLI behind its pin can be updated from its card; cards show their full name in a tooltip
+- Rename packs to computer-use skills in the packs spec (Memory > Skills with an App filter), and add the public skill repository spec and the prior-art report
+- The agent picker's Open it reveals an agent's pane in a closed workspace instead of opening a second one
+- The Vault pane can hold several Vaults on one computer: pick one, move an entry between them, say which agents may use each, import into one, and choose the Vault each browser profile keeps its sign-ins in
+- Layouts no longer store the unused leaforder field (nothing read it); older saved layouts still open
+- History (agents) now updates live while an agent's transcript grows, a conversation is archived or an agent changes, without pressing Refresh
+- AgentMux installs goose itself: it downloads the pinned release, checks its checksum and keeps its own copy, so the agent pane offers Install instead of asking you to install goose
+- A check keeps window modals to the app-wide ones: a new dialog about one pane has to be a pane modal
+- Add tests for the memory reinjection controller's races and the flags it releases, no code change
+- Split the memory reinjection controller into small functions over a state object, behaviour unchanged
+- An agent's request to control a native app is a card in its own pane instead of a window prompt
+- Open on a parked agent whose workspace still exists reopens that workspace in a window with its pane focused; only a deleted workspace moves the pane into the current tab
+- Agents list: an agent running in a pane of a closed workspace no longer reads stopped while its runtime state is idle
+- A sensitive message that needs your confirmation now shows a card in the agent's pane and rings the pane's waiting tone, instead of sitting in the transcript unnoticed
+- The docs screenshot capture scripts find the menus and the new-agent form again (menu selector, scrolling a 1280x800 window)
+- Computer-use skills backend (stage 2): a skill can carry a manifest, files beside its SKILL.md, reference crops and test records; Skills get reads a file, Skills record adds a test record, Desktop apps points at the skill for a window, and a skill folder imports whole.
+- A shared side panel in the UI kit, used by the Kanban's task drawer (no change to how the drawer looks)
+- Workspaces: switching workspace keeps the old workspace's agents running (parked) and switching back puts them in their tabs
+- A web-terminal grant can ask the person about each line: the agent's line is typed, shown in the pane with Run it and Don't run, and erased if they say no
+- Add tests for the failed-turn recovery's timing, races and the marks it keeps, no code change
+- Split the failed-turn recovery into small functions over a state object, behaviour unchanged
+- The first GitHub connect is one trip to GitHub's install page when no installation is linked yet, instead of an authorize page and then an install page
+- A narrow pane header keeps Close reachable and the status bar stays on one line at high chrome zoom; icon-only Settings tabs wrap instead of overlapping
+- Agent panes: a pane's tab strip lists only its own tabs; an agent open in another pane is no longer drawn as a tab of this one
+- task dev: ports are claimed so two runs cannot share a Vite, and the window waits for its own dev server
+- srv: split the object store's run_object_schema into named steps
+- Add tests for the drone canvas gestures ahead of splitting it
+- AgentMux installs Aider and Kimi itself: a pinned uv, a private Python and hash-checked packages, so the agent pane offers Install instead of asking you to run a script
+- srv: split the reactive handler's deliver_audited into named steps
+- Shortcuts pane: zoom like the other panes (Ctrl+scroll, Ctrl/Cmd +/-/0), and the filter and hint bar no longer sit over the tiles in short or narrow panes
+- Split the drone canvas into small functions over a state object
+- srv: split the shared and identity stores' schema functions into named steps
+- srv: split the persistent controller's run_stdout_reader into named steps
+- Add tests for the My agents row panels ahead of splitting them
+- Split the My agents row panels into small functions over a state object
+- srv: restore comments that earlier splits of the shell start and the jekt forward left behind
+- A renderer recycle that can't save a pane's state now says which pane and why, and a pane with nothing of its own to save no longer blocks it
+- Kanban: KanbanSection is split into a state object and view parts (359 -> 53 lines), with its behaviour pinned by tests
+- OAuth connect panel: OAuthConnectPanel is split into a state object and view parts (392 -> 54 lines), with its behaviour pinned by tests
+- Maintenance section: MaintenanceSection is split into a state object and view parts (356 -> 30 lines), with its behaviour pinned by tests
+- srv: split the ACP controller's spawn_process into named steps
+- Attachment tray: AttachmentTray is split into a state object and view parts (361 -> 46 lines), with its behaviour pinned by tests
+- AgentMux installs Grok Build itself: a pinned release, downloaded and hash-checked, in AgentMux's own folder
+- Split the History Typed pane into a state object and view parts, with its markup and calls pinned by tests; no change in behaviour
+- Add tests for the Outdated agent ids card ahead of splitting it
+- srv: split the persistent controller's process waiter into named steps
+- AgentMux installs Antigravity and Muse Code itself: pinned releases, downloaded and hash-checked, in AgentMux's own folder
+- Split the image viewer into a state object and view parts, with its markup and calls pinned by tests; no change in behaviour
+- srv: split the identity spawn gate (inject_identity_env_with_broker) into named steps
+- Split the host popover panel into a state object and view parts, with its markup and calls pinned by tests; no change in behaviour
+- Split the Outdated agent ids card into small functions over a state object
+- srv: split the bundle importer's parse_bundle_import_with_budget into named steps
+- Split the browser pane's driven-by strip into a state object and view parts, with its markup and calls pinned by tests; no change in behaviour
+- Split the agent identity links panel into a state object and view parts, with its markup and calls pinned by tests; no change in behaviour
+- Memory > Skills: an App skill badge, an All | App skills filter, and an App skill detail (routes, files, tests, reference crops and their drift)
+
 ## 0.60.17 — 2026-11-05
 
 - The Swarm's Broadcast and Supervise are two sections that open on their own, the list is one list with a labelled part per host, and the sections and the list scroll as one container with a single scrollbar
