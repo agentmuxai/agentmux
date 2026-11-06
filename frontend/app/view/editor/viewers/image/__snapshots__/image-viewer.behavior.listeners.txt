@@ -1,0 +1,9 @@
+bar props ["viewer","options","onReopenWith"] ["image","text"] viewer=image
+bytes source {"path":"C:/pics/a.png","revision":0}
+ResizeObserver created
+ResizeObserver observe
+window add: ["keydown","keyup","blur"]
+window remove: []
+ResizeObserver disconnect
+window remove after: ["keydown","keyup","blur"]
+content remove: [["wheel"]]

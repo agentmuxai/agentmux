@@ -1,0 +1,13 @@
+bar props ["viewer","options","onReopenWith"] ["image","text"] viewer=image
+bytes source {"path":"C:/pics/a.png","revision":0}
+ResizeObserver created
+ResizeObserver observe
+alt down: zoom-out=true
+alt up: zoom-out=false
+ctrl down: zoom-out=true
+blur: zoom-out=false
+pointer moved with ctrl: zoom-out=true
+pointer moved without: zoom-out=false
+mac ctrl down: zoom-out=false
+mac alt down: zoom-out=true
+mac press without: zoom-out=false
