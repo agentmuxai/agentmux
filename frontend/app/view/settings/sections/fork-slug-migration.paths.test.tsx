@@ -280,8 +280,6 @@ describe("errors", () => {
         expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't check the agent ids: down");
         await waitFor(() => expect(screen.getByRole("status").textContent?.trim()).toBe(""));
         cleanup();
-        srv({ plans: [Object.assign(new Error(), { message: "" })] });
-        migrate.mockReset();
         migrate.mockRejectedValue("plain");
         render(() => <ForkSlugMigration />);
         expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't check the agent ids: plain");
