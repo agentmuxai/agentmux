@@ -14,7 +14,12 @@ vi.mock("@/app/store/block-meta", () => ({
 }));
 
 import type { DocumentNode } from "@/app/agent-model/node-types";
-import { createMessagesPanelControls, parseMessagesState, setMessagesEnabled } from "./messages-state";
+import {
+    createMessagesPanelControls,
+    messagesControlsFor,
+    parseMessagesState,
+    setMessagesEnabled,
+} from "./messages-state";
 
 const incoming = (over: object = {}): DocumentNode =>
     ({ type: "jekt_message", id: "j1", direction: "incoming", ...over }) as unknown as DocumentNode;
@@ -58,6 +63,31 @@ describe("the pane's controls", () => {
         c.showInPanel("j9");
         expect(meta.written.at(-1)).toMatchObject({ enabled: true, open: true });
         expect(c.request()).toMatchObject({ nodeId: "j9" });
+    });
+
+    it("shows a stub's message in the overlay of a narrow pane and leaves the docked state alone", () => {
+        meta.value = { enabled: true, open: false };
+        meta.written = [];
+        const c = make();
+        c.setNarrow(true);
+        c.showInPanel("j9");
+        expect(c.overlayOpen()).toBe(true);
+        expect(meta.written).toEqual([]);
+        expect(c.request()).toMatchObject({ nodeId: "j9" });
+    });
+
+    it("does not open the overlay for a stub in a wide pane", () => {
+        meta.value = { enabled: true, open: true };
+        const c = make();
+        c.showInPanel("j9");
+        expect(c.overlayOpen()).toBe(false);
+    });
+
+    it("is found by pane for what acts on it from outside", () => {
+        meta.value = { enabled: true };
+        const c = make();
+        expect(messagesControlsFor("b1")).toBe(c);
+        expect(messagesControlsFor("nope")).toBeUndefined();
     });
 
     it("keeps the rest of its state when one part changes", () => {

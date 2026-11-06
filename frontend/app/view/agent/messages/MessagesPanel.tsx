@@ -91,6 +91,11 @@ function MessagesDock(props: MessagesPanelProps): JSX.Element {
         () => dock?.parentElement,
         () => props.zoom
     );
+    createEffect(() => {
+        controls.setNarrow(narrow());
+        if (!narrow()) controls.setOverlayOpen(false);
+    });
+    onCleanup(() => controls.setNarrow(false));
     publishHeaderButton(
         props.blockId,
         narrow,

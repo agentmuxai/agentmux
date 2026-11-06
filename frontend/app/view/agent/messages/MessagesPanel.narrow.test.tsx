@@ -47,6 +47,7 @@ function controlsFor(initial: Partial<MessagesState> = {}) {
     const [state, setState] = createSignal<MessagesState>({ ...DEFAULT_MESSAGES_STATE, enabled: true, ...initial });
     const [request, setRequest] = createSignal<{ nodeId: string; seq: number } | null>(null);
     const [overlayOpen, setOverlayOpen] = createSignal(false);
+    const [narrow, setNarrow] = createSignal(false);
     let seq = 0;
     const controls: MessagesPanelControls = {
         state,
@@ -54,12 +55,14 @@ function controlsFor(initial: Partial<MessagesState> = {}) {
         request,
         clearRequest: () => setRequest(null),
         showInPanel: (nodeId) => {
-            setOverlayOpen(true);
+            if (narrow()) setOverlayOpen(true);
             setRequest({ nodeId, seq: ++seq });
         },
         stubbed: () => false,
         overlayOpen,
         setOverlayOpen,
+        narrow,
+        setNarrow,
     };
     return controls;
 }
@@ -148,6 +151,18 @@ describe("MessagesPanel in a narrow pane", () => {
         controls.showInPanel(b.id);
         expect(controls.overlayOpen()).toBe(true);
         expect(view.container.querySelectorAll(".messages-row__body")).toHaveLength(1);
+    });
+
+    it("shuts the overlay when the pane grows wide, so narrowing it again does not open it by itself", () => {
+        paneWidth(400);
+        const { controls } = mount([jekt()]);
+        controls.setOverlayOpen(true);
+        paneWidth(900);
+        cleanup();
+        const wide = mount([jekt()], controls);
+        expect(controls.narrow()).toBe(false);
+        expect(controls.overlayOpen()).toBe(false);
+        wide.view.unmount();
     });
 
     it("takes the header button away when the pane is wide, and when the panel is off or unmounted", () => {

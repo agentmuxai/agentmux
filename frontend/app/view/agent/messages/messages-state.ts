@@ -11,7 +11,7 @@
 import type { DocumentNode } from "@/app/agent-model/node-types";
 import { getBlockMetaKeyAtom } from "@/app/store/block-atom-cache";
 import { setBlockMeta } from "@/app/store/block-meta";
-import { createContext, createMemo, createSignal, useContext, type Accessor } from "solid-js";
+import { createContext, createMemo, createSignal, getOwner, onCleanup, useContext, type Accessor } from "solid-js";
 
 export const AGENT_MESSAGES_KEY = "agent:messages";
 
@@ -46,6 +46,9 @@ export interface MessagesPanelControls {
     /** In a narrow pane the panel is an overlay, shut until the header button opens it: this session only. */
     overlayOpen: Accessor<boolean>;
     setOverlayOpen: (open: boolean) => void;
+    /** Whether the pane is narrow (the panel sets it from the pane's width): the overlay form, not the column. */
+    narrow: Accessor<boolean>;
+    setNarrow: (narrow: boolean) => void;
     /** Whether a row of the conversation is shown as a stub that opens the panel. */
     stubbed: (node: DocumentNode) => boolean;
 }
@@ -60,24 +63,36 @@ export function createMessagesPanelControls(
         void setBlockMeta(blockId, { [AGENT_MESSAGES_KEY]: { ...state(), ...changes } } as never);
     const [request, setRequest] = createSignal<{ nodeId: string; seq: number } | null>(null);
     const [overlayOpen, setOverlayOpen] = createSignal(false);
+    const [narrow, setNarrow] = createSignal(false);
     let seq = 0;
-    return {
+    const controls: MessagesPanelControls = {
         state,
         patch,
         request,
         clearRequest: () => setRequest(null),
         showInPanel: (nodeId) => {
-            if (!state().open) patch({ open: true });
-            setOverlayOpen(true);
+            // A narrow pane shows it in the overlay and leaves the docked panel's own state alone.
+            if (narrow()) setOverlayOpen(true);
+            else if (!state().open) patch({ open: true });
             setRequest({ nodeId, seq: ++seq });
         },
         overlayOpen,
         setOverlayOpen,
+        narrow,
+        setNarrow,
         // Every incoming jekt that is not forced: a sensitive one, or one nothing proved, keeps its full row.
         stubbed: (node) =>
             state().enabled && node.type === "jekt_message" && node.direction === "incoming" && !isForced(node),
     };
+    byBlock.set(blockId, controls);
+    if (getOwner()) onCleanup(() => byBlock.get(blockId) === controls && byBlock.delete(blockId));
+    return controls;
 }
+
+/** The panel controls of each pane that has them, for what acts on a pane from outside it (the palette). */
+const byBlock = new Map<string, MessagesPanelControls>();
+
+export const messagesControlsFor = (blockId: string): MessagesPanelControls | undefined => byBlock.get(blockId);
 
 /**
  * The Messages button each narrow agent pane puts in its header, by block. The pane's view model reads it for the

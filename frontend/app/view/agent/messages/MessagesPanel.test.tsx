@@ -42,6 +42,7 @@ function controlsFor(initial: Partial<MessagesState> = {}) {
     const [state, setState] = createSignal<MessagesState>({ ...DEFAULT_MESSAGES_STATE, enabled: true, ...initial });
     const [request, setRequest] = createSignal<{ nodeId: string; seq: number } | null>(null);
     const [overlayOpen, setOverlayOpen] = createSignal(false);
+    const [narrow, setNarrow] = createSignal(false);
     let seq = 0;
     const controls: MessagesPanelControls = {
         state,
@@ -52,6 +53,8 @@ function controlsFor(initial: Partial<MessagesState> = {}) {
         stubbed: () => false,
         overlayOpen,
         setOverlayOpen,
+        narrow,
+        setNarrow,
     };
     return controls;
 }
