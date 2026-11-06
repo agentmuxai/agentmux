@@ -1,0 +1,9 @@
+bar props ["viewer","options","onReopenWith"] ["image","text"] viewer=image
+bytes source {"path":"C:/pics/a.svg","revision":0,"type":"image/svg+xml"}
+ResizeObserver created
+ResizeObserver observe
+ResizeObserver disconnect
+bar props ["viewer","options","onReopenWith"] ["image","text"] viewer=image
+bytes source {"path":"","file":{},"revision":3}
+ResizeObserver created
+ResizeObserver observe

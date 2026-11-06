@@ -1,0 +1,8 @@
+bar props ["viewer","options","onReopenWith"] ["image","text"] viewer=image
+bytes source {"path":"C:/pics/a.png","revision":0}
+ResizeObserver created
+ResizeObserver observe
+at fit: translate(0px, 0px) scale(1)
+key "ArrowLeft" prevented=true
+translate(80px, 0px) scale(13.862896863102927)
+resized: translate(80px, 0px) scale(13.862896863102927)
