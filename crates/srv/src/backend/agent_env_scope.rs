@@ -55,6 +55,13 @@ pub const AGENT_ENV: &[EnvSpec] = &[
     spec("CLAUDE_CODE_HARBOR_KITE", Everywhere, "cli_messaging's gate for the CLI"),
     spec("ENABLE_CLAUDEAI_MCP_SERVERS", Everywhere, "claudeai_connectors' switch for the CLI"),
     spec("CLAUDE_CODE_SUBAGENT_MODEL", Everywhere, "the model the CLI's subagents use"),
+    // An agent on a model route (backend::model_gateway): its harness is pointed at srv, never at a key.
+    spec("ANTHROPIC_BASE_URL", Rewrite, "the gateway on srv; a container is given the address it can reach, as for AGENTMUX_LOCAL_URL"),
+    spec("ANTHROPIC_AUTH_TOKEN", Everywhere, "the agent's gateway token, the harness's only credential on a model route"),
+    spec("ANTHROPIC_API_KEY", Everywhere, "emptied on a model route so no other key is used"),
+    spec("ANTHROPIC_DEFAULT_OPUS_MODEL", Everywhere, "the route's model for the harness's largest tier"),
+    spec("ANTHROPIC_DEFAULT_SONNET_MODEL", Everywhere, "the route's model for the harness's middle tier"),
+    spec("ANTHROPIC_DEFAULT_HAIKU_MODEL", Everywhere, "the route's model for the harness's small tier"),
     // GitHub through the broker: the same hand-off in a container, where the image finds the hooks.
     spec("AGENTMUX_GITHUB_BROKER", Everywhere, "tells the shell wrappers to ask srv for a GitHub token"),
     spec("AGENTMUX_GIT_HOST", Everywhere, "the git host the broker serves"),
