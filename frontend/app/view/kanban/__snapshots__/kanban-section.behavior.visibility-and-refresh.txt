@@ -1,0 +1,16 @@
+subscribe accountavailability
+subscribe agents:changed
+-- hidden: nothing fetched
+subscribe workqueue:changed
+rpc KanbanList
+board#1 mounted
+-- shown
+rpc KanbanList
+-- refreshed
+unsubscribe workqueue:changed
+-- hidden again
+board#1 unmounted
+unsubscribe agents:changed
+resize observer disconnected
+unsubscribe accountavailability
+-- unmounted

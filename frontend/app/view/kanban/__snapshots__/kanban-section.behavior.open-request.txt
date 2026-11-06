@@ -1,0 +1,14 @@
+subscribe accountavailability
+subscribe workqueue:changed
+rpc KanbanList
+subscribe agents:changed
+board#1 mounted
+-- a request for a task the board lacks
+drawer: false
+-- a request by number
+request handled
+drawer mounted for w3
+{"task":"w3","agents":3,"now":"number"}
+{"task":"w2","agents":3,"now":"number"}
+drawer unmounted for w3
+drawer: false

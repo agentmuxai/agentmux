@@ -413,7 +413,6 @@
 134 frontend/app/util/select-trace.ts::createSelectTrace
 104 frontend/app/util/submenu-hover.ts::createSubmenuHover
 104 frontend/app/view/accounts/GoogleServicesSection.tsx::GoogleServicesSection
-287 frontend/app/view/accounts/OAuthConnectPanel.tsx::OAuthConnectPanel
 130 frontend/app/view/accounts/accounts-manager.tsx::AccountsManager
 170 frontend/app/view/agent/attachments/AttachmentLightbox.tsx::AttachmentLightbox
 101 frontend/app/view/agent/attachments/AttachmentTile.tsx::AttachmentTile
@@ -497,7 +496,6 @@
 165 frontend/app/view/identity/identity-accounts-tab.tsx::AccountDetailPanel
 229 frontend/app/view/kanban/kanban-board.tsx::KanbanBoard
 168 frontend/app/view/kanban/kanban-card.tsx::KanbanCard
-289 frontend/app/view/kanban/kanban-section.tsx::KanbanSection
 143 frontend/app/view/memory-editor/MemoryHistory.tsx::MemoryHistory
 126 frontend/app/view/native-memory/MemoryAdoptionPanel.tsx::MemoryAdoptionPanel
 112 frontend/app/view/native-memory/NativeMemoryCreate.tsx::NativeMemoryCreate

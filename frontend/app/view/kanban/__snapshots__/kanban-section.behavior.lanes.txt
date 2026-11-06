@@ -1,0 +1,384 @@
+subscribe accountavailability
+subscribe workqueue:changed
+rpc KanbanList
+subscribe agents:changed
+board#1 mounted
+board#1 unmounted
+board#2 mounted
+board#3 mounted
+board#4 mounted
+board#5 mounted
+-- lanes on
+<div class="kanban-container">
+<div class="warden-manager-body kanban">
+<div class="kanban-toolbar">
+<span class="ui-filter">
+<i aria-hidden="true" class="fa-solid fa-magnifying-glass ui-search-icon">
+</i>
+<input type="text" class="ui-filter-input" data-pane-focus="" placeholder="Find a task, #number, agent or repository" aria-label="Find a task">
+</span>
+<select class="ui-input ui-density-compact" aria-label="Repository">
+<option value="">All repositories</option>
+<option value="a5af/other">a5af/other</option>
+<option value="agentmuxai/agentmux">agentmuxai/agentmux</option>
+</select>
+<select class="ui-input ui-density-compact kanban-toolbar__reports" aria-label="Reports to">
+<option value="">Reports to anyone</option>
+<option value="operator">Reports to the operator</option>
+<option value="lead:u-agentx">Reports to AgentX</option>
+</select>
+<label class="kanban-toolbar__switch" data-hover-tip="One row of columns per repository" aria-description="One row of columns per repository">
+<button type="button" role="switch" class="ui-switch ui-density-compact" aria-checked="true" aria-label="Lanes by repository">
+<span class="ui-switch-thumb">
+</span>
+</button>Lanes</label>
+<label class="kanban-toolbar__switch" data-hover-tip="Agents working without a task show as dashed cards in In progress" aria-description="Agents working without a task show as dashed cards in In progress">
+<button type="button" role="switch" class="ui-switch ui-density-compact" aria-checked="true" aria-label="Show untracked work">
+<span class="ui-switch-thumb">
+</span>
+</button>Untracked</label>
+<label class="kanban-toolbar__switch" data-hover-tip="An agent with tasks waiting in its Kanban backlog gets a note after 2 minutes idle, once each time it goes idle" aria-description="An agent with tasks waiting in its Kanban backlog gets a note after 2 minutes idle, once each time it goes idle">
+<button type="button" role="switch" class="ui-switch ui-density-compact" aria-checked="false" aria-label="Remind idle agents of their backlog">
+<span class="ui-switch-thumb">
+</span>
+</button>Reminders</label>
+<button type="button" class="ui-button ui-tone-accent ui-density-compact">
+<i aria-hidden="true" class="fa-solid fa-plus">
+</i>New task</button>
+<div class="ui-tooltip-anchor">
+<button aria-label="Refresh" type="button" class="ui-button ui-tone-quiet ui-icon-button">
+<i aria-hidden="true" class="fa-solid fa-rotate">
+</i>
+</button>
+</div>
+</div>
+<div class="kanban-strip" aria-label="Agents">
+<button title="Camper: working. Drop a waiting task here to start it on Camper; click to open it." type="button" class="ui-button ui-tone-quiet ui-density-compact kanban-strip__agent">
+<span class="stub-chip">Camper</span>
+</button>
+<button title="Korp: waiting. Drop a waiting task here to start it on Korp; click to open it." type="button" class="ui-button ui-tone-quiet ui-density-compact kanban-strip__agent">
+<span class="stub-chip">Korp</span>
+</button>
+<button title="Idle: idle. Drop a waiting task here to start it on Idle; click to open it." type="button" class="ui-button ui-tone-quiet ui-density-compact kanban-strip__agent">
+<span class="stub-chip">Idle</span>
+</button>
+</div>
+<div class="kanban-lanes">
+<section class="kanban-lane" aria-label="Agents working without a task">
+<div class="kanban-lane__head">
+<span class="kanban-lane__name">Working without a task</span>
+<span class="warden-manager-dim">1</span>
+</div>
+<div class="stub-board" data-id="2">
+<pre>{"tasks":[],"untracked":["Korp"],"agents":3,"now":"number","holdingCamper":"w3","holdingKorp":null,"reviewLimit":0,"reviewTotal":2,"colors":{"u-gone":"#112233"},"narrow":false,"collapsed":[]}</pre>
+<button class="stub-board-open">
+</button>
+<button class="stub-board-agent">
+</button>
+<button class="stub-board-toggle">
+</button>
+</div>
+</section>
+<section class="kanban-lane" aria-label="a5af/other">
+<button aria-expanded="true" type="button" class="ui-button ui-tone-quiet ui-density-compact kanban-lane__head">
+<i aria-hidden="true" class="fa-solid fa-chevron-down">
+</i>
+<span class="kanban-lane__name">a5af/other</span>
+<span class="warden-manager-dim">2 open · 1<!----> need you</span>
+</button>
+<div class="stub-board" data-id="3">
+<pre>{"tasks":["w4","w6"],"untracked":[],"agents":3,"now":"number","holdingCamper":"w3","holdingKorp":null,"reviewLimit":0,"reviewTotal":2,"colors":{"u-gone":"#112233"},"narrow":false,"collapsed":[]}</pre>
+<button class="stub-board-open">
+</button>
+<button class="stub-board-agent">
+</button>
+<button class="stub-board-toggle">
+</button>
+</div>
+</section>
+<section class="kanban-lane" aria-label="agentmuxai/agentmux">
+<button aria-expanded="true" type="button" class="ui-button ui-tone-quiet ui-density-compact kanban-lane__head">
+<i aria-hidden="true" class="fa-solid fa-chevron-down">
+</i>
+<span class="kanban-lane__name">agentmuxai/agentmux</span>
+<span class="warden-manager-dim">3 open · 1<!----> need you</span>
+</button>
+<div class="stub-board" data-id="4">
+<pre>{"tasks":["w1","w2","w3"],"untracked":[],"agents":3,"now":"number","holdingCamper":"w3","holdingKorp":null,"reviewLimit":0,"reviewTotal":2,"colors":{"u-gone":"#112233"},"narrow":false,"collapsed":[]}</pre>
+<button class="stub-board-open">
+</button>
+<button class="stub-board-agent">
+</button>
+<button class="stub-board-toggle">
+</button>
+</div>
+</section>
+<section class="kanban-lane" aria-label="No repository">
+<button aria-expanded="true" type="button" class="ui-button ui-tone-quiet ui-density-compact kanban-lane__head">
+<i aria-hidden="true" class="fa-solid fa-chevron-down">
+</i>
+<span class="kanban-lane__name">No repository</span>
+<span class="warden-manager-dim">1 open · 0<!----> need you</span>
+</button>
+<div class="stub-board" data-id="5">
+<pre>{"tasks":["w5"],"untracked":[],"agents":3,"now":"number","holdingCamper":"w3","holdingKorp":null,"reviewLimit":0,"reviewTotal":2,"colors":{"u-gone":"#112233"},"narrow":false,"collapsed":[]}</pre>
+<button class="stub-board-open">
+</button>
+<button class="stub-board-agent">
+</button>
+<button class="stub-board-toggle">
+</button>
+</div>
+</section>
+</div>
+</div>
+</div>
+board#3 unmounted
+-- first lane folded
+<div class="kanban-container">
+<div class="warden-manager-body kanban">
+<div class="kanban-toolbar">
+<span class="ui-filter">
+<i aria-hidden="true" class="fa-solid fa-magnifying-glass ui-search-icon">
+</i>
+<input type="text" class="ui-filter-input" data-pane-focus="" placeholder="Find a task, #number, agent or repository" aria-label="Find a task">
+</span>
+<select class="ui-input ui-density-compact" aria-label="Repository">
+<option value="">All repositories</option>
+<option value="a5af/other">a5af/other</option>
+<option value="agentmuxai/agentmux">agentmuxai/agentmux</option>
+</select>
+<select class="ui-input ui-density-compact kanban-toolbar__reports" aria-label="Reports to">
+<option value="">Reports to anyone</option>
+<option value="operator">Reports to the operator</option>
+<option value="lead:u-agentx">Reports to AgentX</option>
+</select>
+<label class="kanban-toolbar__switch" data-hover-tip="One row of columns per repository" aria-description="One row of columns per repository">
+<button type="button" role="switch" class="ui-switch ui-density-compact" aria-checked="true" aria-label="Lanes by repository">
+<span class="ui-switch-thumb">
+</span>
+</button>Lanes</label>
+<label class="kanban-toolbar__switch" data-hover-tip="Agents working without a task show as dashed cards in In progress" aria-description="Agents working without a task show as dashed cards in In progress">
+<button type="button" role="switch" class="ui-switch ui-density-compact" aria-checked="true" aria-label="Show untracked work">
+<span class="ui-switch-thumb">
+</span>
+</button>Untracked</label>
+<label class="kanban-toolbar__switch" data-hover-tip="An agent with tasks waiting in its Kanban backlog gets a note after 2 minutes idle, once each time it goes idle" aria-description="An agent with tasks waiting in its Kanban backlog gets a note after 2 minutes idle, once each time it goes idle">
+<button type="button" role="switch" class="ui-switch ui-density-compact" aria-checked="false" aria-label="Remind idle agents of their backlog">
+<span class="ui-switch-thumb">
+</span>
+</button>Reminders</label>
+<button type="button" class="ui-button ui-tone-accent ui-density-compact">
+<i aria-hidden="true" class="fa-solid fa-plus">
+</i>New task</button>
+<div class="ui-tooltip-anchor">
+<button aria-label="Refresh" type="button" class="ui-button ui-tone-quiet ui-icon-button">
+<i aria-hidden="true" class="fa-solid fa-rotate">
+</i>
+</button>
+</div>
+</div>
+<div class="kanban-strip" aria-label="Agents">
+<button title="Camper: working. Drop a waiting task here to start it on Camper; click to open it." type="button" class="ui-button ui-tone-quiet ui-density-compact kanban-strip__agent">
+<span class="stub-chip">Camper</span>
+</button>
+<button title="Korp: waiting. Drop a waiting task here to start it on Korp; click to open it." type="button" class="ui-button ui-tone-quiet ui-density-compact kanban-strip__agent">
+<span class="stub-chip">Korp</span>
+</button>
+<button title="Idle: idle. Drop a waiting task here to start it on Idle; click to open it." type="button" class="ui-button ui-tone-quiet ui-density-compact kanban-strip__agent">
+<span class="stub-chip">Idle</span>
+</button>
+</div>
+<div class="kanban-lanes">
+<section class="kanban-lane" aria-label="Agents working without a task">
+<div class="kanban-lane__head">
+<span class="kanban-lane__name">Working without a task</span>
+<span class="warden-manager-dim">1</span>
+</div>
+<div class="stub-board" data-id="2">
+<pre>{"tasks":[],"untracked":["Korp"],"agents":3,"now":"number","holdingCamper":"w3","holdingKorp":null,"reviewLimit":0,"reviewTotal":2,"colors":{"u-gone":"#112233"},"narrow":false,"collapsed":[]}</pre>
+<button class="stub-board-open">
+</button>
+<button class="stub-board-agent">
+</button>
+<button class="stub-board-toggle">
+</button>
+</div>
+</section>
+<section class="kanban-lane" aria-label="a5af/other">
+<button aria-expanded="false" type="button" class="ui-button ui-tone-quiet ui-density-compact kanban-lane__head">
+<i aria-hidden="true" class="fa-solid fa-chevron-right">
+</i>
+<span class="kanban-lane__name">a5af/other</span>
+<span class="warden-manager-dim">2 open · 1<!----> need you</span>
+</button>
+</section>
+<section class="kanban-lane" aria-label="agentmuxai/agentmux">
+<button aria-expanded="true" type="button" class="ui-button ui-tone-quiet ui-density-compact kanban-lane__head">
+<i aria-hidden="true" class="fa-solid fa-chevron-down">
+</i>
+<span class="kanban-lane__name">agentmuxai/agentmux</span>
+<span class="warden-manager-dim">3 open · 1<!----> need you</span>
+</button>
+<div class="stub-board" data-id="4">
+<pre>{"tasks":["w1","w2","w3"],"untracked":[],"agents":3,"now":"number","holdingCamper":"w3","holdingKorp":null,"reviewLimit":0,"reviewTotal":2,"colors":{"u-gone":"#112233"},"narrow":false,"collapsed":[]}</pre>
+<button class="stub-board-open">
+</button>
+<button class="stub-board-agent">
+</button>
+<button class="stub-board-toggle">
+</button>
+</div>
+</section>
+<section class="kanban-lane" aria-label="No repository">
+<button aria-expanded="true" type="button" class="ui-button ui-tone-quiet ui-density-compact kanban-lane__head">
+<i aria-hidden="true" class="fa-solid fa-chevron-down">
+</i>
+<span class="kanban-lane__name">No repository</span>
+<span class="warden-manager-dim">1 open · 0<!----> need you</span>
+</button>
+<div class="stub-board" data-id="5">
+<pre>{"tasks":["w5"],"untracked":[],"agents":3,"now":"number","holdingCamper":"w3","holdingKorp":null,"reviewLimit":0,"reviewTotal":2,"colors":{"u-gone":"#112233"},"narrow":false,"collapsed":[]}</pre>
+<button class="stub-board-open">
+</button>
+<button class="stub-board-agent">
+</button>
+<button class="stub-board-toggle">
+</button>
+</div>
+</section>
+</div>
+</div>
+</div>
+board#6 mounted
+-- first lane open again
+<div class="kanban-container">
+<div class="warden-manager-body kanban">
+<div class="kanban-toolbar">
+<span class="ui-filter">
+<i aria-hidden="true" class="fa-solid fa-magnifying-glass ui-search-icon">
+</i>
+<input type="text" class="ui-filter-input" data-pane-focus="" placeholder="Find a task, #number, agent or repository" aria-label="Find a task">
+</span>
+<select class="ui-input ui-density-compact" aria-label="Repository">
+<option value="">All repositories</option>
+<option value="a5af/other">a5af/other</option>
+<option value="agentmuxai/agentmux">agentmuxai/agentmux</option>
+</select>
+<select class="ui-input ui-density-compact kanban-toolbar__reports" aria-label="Reports to">
+<option value="">Reports to anyone</option>
+<option value="operator">Reports to the operator</option>
+<option value="lead:u-agentx">Reports to AgentX</option>
+</select>
+<label class="kanban-toolbar__switch" data-hover-tip="One row of columns per repository" aria-description="One row of columns per repository">
+<button type="button" role="switch" class="ui-switch ui-density-compact" aria-checked="true" aria-label="Lanes by repository">
+<span class="ui-switch-thumb">
+</span>
+</button>Lanes</label>
+<label class="kanban-toolbar__switch" data-hover-tip="Agents working without a task show as dashed cards in In progress" aria-description="Agents working without a task show as dashed cards in In progress">
+<button type="button" role="switch" class="ui-switch ui-density-compact" aria-checked="true" aria-label="Show untracked work">
+<span class="ui-switch-thumb">
+</span>
+</button>Untracked</label>
+<label class="kanban-toolbar__switch" data-hover-tip="An agent with tasks waiting in its Kanban backlog gets a note after 2 minutes idle, once each time it goes idle" aria-description="An agent with tasks waiting in its Kanban backlog gets a note after 2 minutes idle, once each time it goes idle">
+<button type="button" role="switch" class="ui-switch ui-density-compact" aria-checked="false" aria-label="Remind idle agents of their backlog">
+<span class="ui-switch-thumb">
+</span>
+</button>Reminders</label>
+<button type="button" class="ui-button ui-tone-accent ui-density-compact">
+<i aria-hidden="true" class="fa-solid fa-plus">
+</i>New task</button>
+<div class="ui-tooltip-anchor">
+<button aria-label="Refresh" type="button" class="ui-button ui-tone-quiet ui-icon-button">
+<i aria-hidden="true" class="fa-solid fa-rotate">
+</i>
+</button>
+</div>
+</div>
+<div class="kanban-strip" aria-label="Agents">
+<button title="Camper: working. Drop a waiting task here to start it on Camper; click to open it." type="button" class="ui-button ui-tone-quiet ui-density-compact kanban-strip__agent">
+<span class="stub-chip">Camper</span>
+</button>
+<button title="Korp: waiting. Drop a waiting task here to start it on Korp; click to open it." type="button" class="ui-button ui-tone-quiet ui-density-compact kanban-strip__agent">
+<span class="stub-chip">Korp</span>
+</button>
+<button title="Idle: idle. Drop a waiting task here to start it on Idle; click to open it." type="button" class="ui-button ui-tone-quiet ui-density-compact kanban-strip__agent">
+<span class="stub-chip">Idle</span>
+</button>
+</div>
+<div class="kanban-lanes">
+<section class="kanban-lane" aria-label="Agents working without a task">
+<div class="kanban-lane__head">
+<span class="kanban-lane__name">Working without a task</span>
+<span class="warden-manager-dim">1</span>
+</div>
+<div class="stub-board" data-id="2">
+<pre>{"tasks":[],"untracked":["Korp"],"agents":3,"now":"number","holdingCamper":"w3","holdingKorp":null,"reviewLimit":0,"reviewTotal":2,"colors":{"u-gone":"#112233"},"narrow":false,"collapsed":[]}</pre>
+<button class="stub-board-open">
+</button>
+<button class="stub-board-agent">
+</button>
+<button class="stub-board-toggle">
+</button>
+</div>
+</section>
+<section class="kanban-lane" aria-label="a5af/other">
+<button aria-expanded="true" type="button" class="ui-button ui-tone-quiet ui-density-compact kanban-lane__head">
+<i aria-hidden="true" class="fa-solid fa-chevron-down">
+</i>
+<span class="kanban-lane__name">a5af/other</span>
+<span class="warden-manager-dim">2 open · 1<!----> need you</span>
+</button>
+<div class="stub-board" data-id="6">
+<pre>{"tasks":["w4","w6"],"untracked":[],"agents":3,"now":"number","holdingCamper":"w3","holdingKorp":null,"reviewLimit":0,"reviewTotal":2,"colors":{"u-gone":"#112233"},"narrow":false,"collapsed":[]}</pre>
+<button class="stub-board-open">
+</button>
+<button class="stub-board-agent">
+</button>
+<button class="stub-board-toggle">
+</button>
+</div>
+</section>
+<section class="kanban-lane" aria-label="agentmuxai/agentmux">
+<button aria-expanded="true" type="button" class="ui-button ui-tone-quiet ui-density-compact kanban-lane__head">
+<i aria-hidden="true" class="fa-solid fa-chevron-down">
+</i>
+<span class="kanban-lane__name">agentmuxai/agentmux</span>
+<span class="warden-manager-dim">3 open · 1<!----> need you</span>
+</button>
+<div class="stub-board" data-id="4">
+<pre>{"tasks":["w1","w2","w3"],"untracked":[],"agents":3,"now":"number","holdingCamper":"w3","holdingKorp":null,"reviewLimit":0,"reviewTotal":2,"colors":{"u-gone":"#112233"},"narrow":false,"collapsed":[]}</pre>
+<button class="stub-board-open">
+</button>
+<button class="stub-board-agent">
+</button>
+<button class="stub-board-toggle">
+</button>
+</div>
+</section>
+<section class="kanban-lane" aria-label="No repository">
+<button aria-expanded="true" type="button" class="ui-button ui-tone-quiet ui-density-compact kanban-lane__head">
+<i aria-hidden="true" class="fa-solid fa-chevron-down">
+</i>
+<span class="kanban-lane__name">No repository</span>
+<span class="warden-manager-dim">1 open · 0<!----> need you</span>
+</button>
+<div class="stub-board" data-id="5">
+<pre>{"tasks":["w5"],"untracked":[],"agents":3,"now":"number","holdingCamper":"w3","holdingKorp":null,"reviewLimit":0,"reviewTotal":2,"colors":{"u-gone":"#112233"},"narrow":false,"collapsed":[]}</pre>
+<button class="stub-board-open">
+</button>
+<button class="stub-board-agent">
+</button>
+<button class="stub-board-toggle">
+</button>
+</div>
+</section>
+</div>
+</div>
+</div>
+board#6 unmounted
+board#4 unmounted
+board#5 unmounted
+board#2 unmounted
+board#7 mounted
+lanes off, boards: 1

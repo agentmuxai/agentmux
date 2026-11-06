@@ -1,0 +1,4 @@
+-- aws
+<div>
+  <div class="identity-form-error">
+    "OAuth is not available for this provider."
