@@ -107,6 +107,7 @@ describe("while the host's file window is open", () => {
         expect(screen.getByText("Nothing is added until you press Import.")).toBeInTheDocument();
         expect(screen.getByText("Choose the file in the window that opened…")).toBeInTheDocument();
         expect(btn("Cancel")).not.toBeDisabled();
+        expect(screen.queryByLabelText("Passphrase")).toBeNull();
         expect(screen.queryByRole("button", { name: "Import" })).toBeNull();
         g.resolve(previewStep());
         await screen.findByText(/to import/);
@@ -302,6 +303,8 @@ describe("the column choices for a CSV", () => {
         expect(optionTexts(label)).toEqual(["Service", "Secret", "Owner"]);
         expect(screen.getByText("Label (its name)")).toBeInTheDocument();
         expect(screen.getByText("Key")).toBeInTheDocument();
+        // The passphrase form belongs to its own step only.
+        expect(screen.queryByLabelText("Passphrase")).toBeNull();
         expect(btn("Continue")).not.toBeDisabled();
     });
 
@@ -417,6 +420,7 @@ describe("the preview", () => {
         render(() => <VaultImportDialog onClose={vi.fn()} />);
         await screen.findByText(/to import, from LastPass\./);
         expect(dialog().textContent).toContain("1 entry to import");
+        expect(screen.queryByLabelText("Passphrase")).toBeNull();
         cleanup();
         vaultImport.mockResolvedValueOnce(previewStep({ total: 2 }));
         render(() => <VaultImportDialog onClose={vi.fn()} />);
