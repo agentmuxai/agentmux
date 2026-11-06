@@ -1,0 +1,53 @@
+WidgetsList {"timeout":5000}
+-- loading
+<div>
+  <div class="settings-section-body widgets-section">
+    <div data-stand="WidgetBarSettings">
+    <div class="settings-subheader">
+      "Widgets"
+    <div class="setting-row" id="setting-widgets.installed">
+      <div class="setting-devices-description">
+        "Widgets add your own kinds of pane. A widget runs only after you approve it here, and asks again whenever its files change."
+      <div class="widgets-toolbar">
+        <button type="button" class="ui-button ui-tone-neutral">
+          <i aria-hidden="true" class="fa-solid fa-plus">
+          "Install…"
+        <button type="button" class="ui-button ui-tone-neutral">
+          <i aria-hidden="true" class="fa-solid fa-rotate">
+          "Rescan"
+        <button type="button" class="ui-button ui-tone-neutral">
+          <i aria-hidden="true" class="fa-solid fa-folder-open">
+          "Open widgets folder"
+      <div class="setting-devices-description">
+        "Pick a package's widget.json, or a .zip. To write your own, start from a sample in docs/examples/widgets."
+      <div data-stand="WidgetCatalog">
+        <span data-cb="onInstalled">
+          "installed"
+      <div class="setting-devices-empty">
+        "Loading…"
+-- loaded, none installed
+<div>
+  <div class="settings-section-body widgets-section">
+    <div data-stand="WidgetBarSettings">
+    <div class="settings-subheader">
+      "Widgets"
+    <div class="setting-row" id="setting-widgets.installed">
+      <div class="setting-devices-description">
+        "Widgets add your own kinds of pane. A widget runs only after you approve it here, and asks again whenever its files change."
+      <div class="widgets-toolbar">
+        <button type="button" class="ui-button ui-tone-neutral">
+          <i aria-hidden="true" class="fa-solid fa-plus">
+          "Install…"
+        <button type="button" class="ui-button ui-tone-neutral">
+          <i aria-hidden="true" class="fa-solid fa-rotate">
+          "Rescan"
+        <button type="button" class="ui-button ui-tone-neutral">
+          <i aria-hidden="true" class="fa-solid fa-folder-open">
+          "Open widgets folder"
+      <div class="setting-devices-description">
+        "Pick a package's widget.json, or a .zip. To write your own, start from a sample in docs/examples/widgets."
+      <div data-stand="WidgetCatalog">
+        <span data-cb="onInstalled">
+          "installed"
+      <div class="setting-devices-empty">
+        "No widgets installed."
