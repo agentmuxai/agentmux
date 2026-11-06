@@ -107,5 +107,6 @@ describe("the tree", () => {
         const { violations, stale } = collect();
         expect(violations.map((v) => `${v.path}:${v.line} ${v.rule}`)).toEqual([]);
         expect(stale).toEqual([]);
-    });
+        // Reads every frontend file: several seconds on a busy machine, over the 5 s default.
+    }, 60_000);
 });
