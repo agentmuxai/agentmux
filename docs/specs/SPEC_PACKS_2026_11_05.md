@@ -1,4 +1,4 @@
-# SPEC: Computer-use skills: per-application knowledge for computer use (Word, Ableton Live, WaveLab first)
+# SPEC: Computer-use skills: per-application knowledge for computer use (Word, Excel, Ableton Live, WaveLab, Blender first)
 
 **Status:** active — approved by the operator 2026-11-05 (v2, relayed by AgentY); build #1560. Renamed to "computer-use skill" on 2026-11-05 at the operator's word (see the next lines); the Stage 1 files are moving to `agentmuxai/skills` (task #1630). Stages 2 to 5 are not started.
 **Operator decisions folded in (2026-11-05, quoted via AgentY):** "ok lets rename app packs simply packs. Ok, keep bundles, add another tab called packs .. we'll let our recent bundles work settle". So: the name is **computer-use skills** (UI, manifest, docs); Memory gets its own **Computer-use skills** tab; bundles stay as they are and computer-use skills are not folded into them.
