@@ -681,7 +681,7 @@ pub enum Event {
         version: u64,
     },
     /// SPEC_864 Phase 2 — `slices` mirrors the command's field: when
-    /// present, the persist subscriber also writes leaforder / focus /
+    /// present, the persist subscriber also writes focus /
     /// magnify / pendingbackendactions (REPLACE semantics). `None` =
     /// tree-only replace; those columns stay untouched.
     LayoutTreeReplaced {

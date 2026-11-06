@@ -86,9 +86,9 @@ pub(super) fn handle_layout_set_tree(
     tab.rootnode = new_tree.clone();
     // SPEC_864 Phase 2 — a seeding `LayoutSetTree` (srv's own; windows send
     // intents) carries focus/magnify in `slices`
-    // (REPLACE semantics; empty string = clear). leaforder /
-    // pending_backend_actions are not modeled in TabRecord — they ride the
-    // event through to the persist subscriber untouched.
+    // (REPLACE semantics; empty string = clear). pending_backend_actions
+    // is not modeled in TabRecord — it rides the event through to the
+    // persist subscriber untouched.
     if let Some(s) = &slices {
         tab.focused_node_id = s.focused_node_id.clone();
         tab.magnified_node_id = s.magnified_node_id.clone();

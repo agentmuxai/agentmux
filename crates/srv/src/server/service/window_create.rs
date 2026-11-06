@@ -550,16 +550,9 @@ pub(crate) async fn create_default_contents(
             None
         };
 
-        if let Some((tree, focused, leaforder)) = tree_and_focus {
-            if let Err(e) = super::reducer_helpers::seed_layout_via_reducer(
-                state,
-                &new_tab_id,
-                tree,
-                focused,
-                leaforder,
-                String::new(),
-            )
-            .await
+        if let Some((tree, focused)) = tree_and_focus {
+            if let Err(e) =
+                super::reducer_helpers::seed_layout_via_reducer(state, &new_tab_id, tree, focused, String::new()).await
             {
                 tracing::warn!(
                     tab_id = %new_tab_id,
@@ -720,6 +713,5 @@ mod create_window_seed_tests {
         let root = layout.rootnode.as_ref().expect("layout must be populated");
         assert!(root.children.is_empty(), "single pane — no split children");
         assert_eq!(root.data.as_ref().unwrap().block_id, tab.blockids[0]);
-        assert_eq!(layout.leaforder.as_ref().unwrap().len(), 1);
     }
 }
