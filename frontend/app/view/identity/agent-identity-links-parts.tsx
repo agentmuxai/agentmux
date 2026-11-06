@@ -110,8 +110,8 @@ export function LinkedAccounts(props: Part): JSX.Element {
                 // reagent P2 on PR #2414 (round 3): gated on
                 // linksLoaded() && !error() — without this,
                 // this text rendered indistinguishably for
-                // "still loading", "load failed" (the banner
-                // above already covers that), and a
+                // "still loading", "load failed" (the panel's error
+                // banner already covers that), and a
                 // genuinely empty agent.
                 <Show when={t.linksLoaded() && !t.error()}>
                     <div class="identity-pane-empty-hint">
@@ -141,7 +141,7 @@ export function LinkedAccounts(props: Part): JSX.Element {
 export function ConnectAnthropic(props: Part): JSX.Element {
     const t = props.t;
     // reagent P1 on PR #2414 (round 6): standalone, NOT
-    // nested inside the rows()===0 fallback above — a
+    // nested inside LinkedAccounts' no-rows fallback — a
     // Claude-provider agent with other-provider links
     // but no claude/claude-code row of its own needs
     // this same affordance, and the per-row

@@ -32,12 +32,11 @@ export interface AgentIdentityLinksPanelProps {
 function createLinks() {
     const [allLinks, setAllLinks] = createSignal<AgentDefinitionIdentity[]>([]);
     const [error, setError] = createSignal<string | null>(null);
-    // reagent P2 on PR #2414 (round 3): the empty-state "Connect Anthropic
-    // account" button below must not appear before the initial load
-    // resolves (was previously indistinguishable from "genuinely zero
-    // links") or after it fails (the top error banner already covers that
-    // case — offering the button too just invites clicking it against
-    // still-broken/unknown state).
+    // The "Connect Anthropic account" button (ConnectAnthropic,
+    // agent-identity-links-parts.tsx) must not appear before the initial load
+    // resolves (indistinguishable from "genuinely zero links") or after it
+    // fails (the panel's error banner covers that case, and the button would
+    // invite a click against still-broken/unknown state) (#2414).
     const [linksLoaded, setLinksLoaded] = createSignal(false);
 
     const refreshLinks = async (): Promise<void> => {
@@ -96,8 +95,8 @@ function createAgentProvider(props: AgentIdentityLinksPanelProps, agents: () => 
     });
 
     // Same resolver as the launch and the credential gate (#2594), so the
-    // "Connect Anthropic account" CTA below follows the provider the agent
-    // actually runs; falls
+    // "Connect Anthropic account" CTA (ConnectAnthropic) follows the provider
+    // the agent actually runs; falls
     // back to `agent()?.provider` while loading/unbound/on failure, same
     // fallback contract `resolveEffectiveLaunchProvider` itself documents
     // — a brief stale flash here is cosmetic (button visibility only),
