@@ -1,0 +1,25 @@
+rpc AppUpdateStatus
+host storeUpdateCheck
+-- store below the floor
+<div>
+  <div class="instance-panel-section-title">
+    "Maintenance"
+    <span class="maintenance-badge">
+      "↓ 0.59.27"
+  <div class="maintenance-update-row">
+    <span class="maintenance-icon maintenance-icon--update">
+      "↓"
+    <span class="maintenance-row-text">
+      "v0.59.27 is out"
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+      "What's new"
+  <div class="maintenance-row-text maintenance-row-text--warn">
+    "This version is older than v0.59.27 upgrades from (v0.58.0 or later). The Microsoft Store can only install the latest version, so AgentMux does not offer the update here. To update, move to the GitHub build: install v0.58.0 from GitHub first, then the latest."
+  <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+    "How to move off the Store build"
+  <div class="maintenance-update-row">
+    <span class="maintenance-row-text maintenance-row-text--dim">
+      "Checked <time>"
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+      "Check again"
+openLink https://docs.agentmux.ai/installation/#moving-off-the-microsoft-store-build

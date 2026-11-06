@@ -146,7 +146,6 @@
 186 crates/srv/src/backend/agent_session/migrations/v1_templates.rs::move_zone
 139 crates/srv/src/backend/attachments/extract.rs::rtf_text
 137 crates/srv/src/backend/blockcontroller/acp.rs::AcpController::send_input
-518 crates/srv/src/backend/blockcontroller/acp.rs::AcpController::spawn_process
 105 crates/srv/src/backend/blockcontroller/app_server_controller.rs::AppServerController::spawn_event_loop
 224 crates/srv/src/backend/blockcontroller/app_server_protocol.rs::CodexAppServerSession::apply_incoming
 115 crates/srv/src/backend/blockcontroller/core.rs::persist_last_failure
@@ -394,7 +393,6 @@
 197 frontend/app/statusbar/CpuCoresPopover.tsx::CpuCoresPopover
 140 frontend/app/statusbar/HostPopover.tsx::HostPopover
 277 frontend/app/statusbar/HostPopover.tsx::HostPopoverPanel
-316 frontend/app/statusbar/MaintenanceSection.tsx::MaintenanceSection
 169 frontend/app/statusbar/PairDevicePanel.tsx::PairDevicePanel
 171 frontend/app/statusbar/SystemStats.tsx::SystemStats
 219 frontend/app/statusbar/TokenBreakdownPopover.tsx::TokenBreakdownPopover
@@ -414,11 +412,9 @@
 134 frontend/app/util/select-trace.ts::createSelectTrace
 104 frontend/app/util/submenu-hover.ts::createSubmenuHover
 104 frontend/app/view/accounts/GoogleServicesSection.tsx::GoogleServicesSection
-287 frontend/app/view/accounts/OAuthConnectPanel.tsx::OAuthConnectPanel
 130 frontend/app/view/accounts/accounts-manager.tsx::AccountsManager
 170 frontend/app/view/agent/attachments/AttachmentLightbox.tsx::AttachmentLightbox
 101 frontend/app/view/agent/attachments/AttachmentTile.tsx::AttachmentTile
-296 frontend/app/view/agent/attachments/AttachmentTray.tsx::AttachmentTray
 143 frontend/app/view/agent/buildRuntimeArgs.ts::buildRuntimeArgs
 140 frontend/app/view/agent/cli-notice.ts::parseCliNoticeFrame
 111 frontend/app/view/agent/commands/global/login.ts::runLogin
@@ -498,7 +494,6 @@
 165 frontend/app/view/identity/identity-accounts-tab.tsx::AccountDetailPanel
 229 frontend/app/view/kanban/kanban-board.tsx::KanbanBoard
 168 frontend/app/view/kanban/kanban-card.tsx::KanbanCard
-289 frontend/app/view/kanban/kanban-section.tsx::KanbanSection
 143 frontend/app/view/memory-editor/MemoryHistory.tsx::MemoryHistory
 126 frontend/app/view/native-memory/MemoryAdoptionPanel.tsx::MemoryAdoptionPanel
 112 frontend/app/view/native-memory/NativeMemoryCreate.tsx::NativeMemoryCreate
