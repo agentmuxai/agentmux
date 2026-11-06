@@ -496,13 +496,11 @@ pub(crate) async fn install_asset(
         .await
         .map_err(|e| DownloadError::Unpack(e.to_string()))??;
     let _ = std::fs::remove_file(&archive);
-    let probe = bin.to_string_lossy().into_owned();
-    let version = tokio::task::spawn_blocking(move || {
-        crate::backend::tool_store::probe_version(&probe, &Some("--version".to_string()))
-    })
-    .await
-    .ok()
-    .flatten();
+    let (probe, id) = (bin.clone(), spec.provider_id);
+    let version = tokio::task::spawn_blocking(move || cli_install::probe_installed(&probe, id))
+        .await
+        .ok()
+        .flatten();
     let Some(version) = version else {
         return Err(DownloadError::NotRunnable(bin));
     };

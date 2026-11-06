@@ -215,6 +215,36 @@ fn the_executable_is_taken_from_a_zip_and_nothing_else_is_written() {
     assert_eq!(names.len(), 1, "only the program is written: {names:?}");
 }
 
+/// A probe must be able to turn a CLI's self-update off: the child sees the extra environment.
+#[test]
+fn the_install_probe_passes_its_environment_to_the_program() {
+    let dir = tempfile::tempdir().unwrap();
+    let prog = if cfg!(windows) {
+        let p = dir.path().join("p.cmd");
+        std::fs::write(&p, "@echo off\r\necho %AGM_PROBE_VAR%\r\n").unwrap();
+        p
+    } else {
+        let p = dir.path().join("p");
+        std::fs::write(&p, "#!/bin/sh\necho \"$AGM_PROBE_VAR\"\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        p
+    };
+    let got = crate::backend::tool_store::probe_version_with_env(&prog.to_string_lossy(), &Some("--version".into()), &[("AGM_PROBE_VAR", "9.8.7")]);
+    assert_eq!(got.as_deref(), Some("9.8.7"));
+}
+
+#[test]
+fn the_providers_that_update_themselves_get_their_switch_on_the_install_probe() {
+    for (id, var) in [("antigravity", "AGY_CLI_DISABLE_AUTO_UPDATE"), ("muse", "MUSE_NO_AUTO_UPDATE"), ("grok", "GROK_DISABLE_AUTOUPDATER")] {
+        let p = crate::backend::providers::get_provider(id).unwrap();
+        assert!(p.auth_extra_env.iter().any(|(k, _)| *k == var), "{id} does not set {var}");
+    }
+}
+
 #[test]
 fn a_raw_download_is_the_program_and_nothing_else_is_written() {
     let dir = tempfile::tempdir().unwrap();
