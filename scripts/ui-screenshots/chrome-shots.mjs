@@ -250,6 +250,8 @@ export const shots = [
             description: "Closing a window tab asks first, since its panes close with it.",
             prep: async (session) => {
                 tab.tabId = null;
+                // Closing a tab asks only when `tab:confirmclose` is on (off by default).
+                await session.evaluate(`RpcApi.SetConfigCommand(TabRpcClient, { "tab:confirmclose": true })`);
                 await openNewTab(session, tab);
                 await session.clickSelector(`.tab[data-tab-id="${tab.tabId}"] [title="Close Tab"]`);
                 await session.wait(500);
@@ -260,6 +262,7 @@ export const shots = [
                 const cancel = await session.centerOfText(".modal-root", "Cancel");
                 if (cancel) await session.clickAt(cancel);
                 await session.wait(300);
+                await session.evaluate(`RpcApi.SetConfigCommand(TabRpcClient, { "tab:confirmclose": false })`);
                 if (tab.tabId) await closeTab(session, tab.tabId);
                 tab.tabId = null;
             },

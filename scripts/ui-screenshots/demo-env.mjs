@@ -85,7 +85,9 @@ export function demoWidgets(demo, builtin = JSON.parse(readFileSync(WIDGETS_JSON
     // The file tree would be rooted at the home folder, not the demo project.
     editor.blockdef.meta["editor:tree_expanded"] = false;
     editor.blockdef.meta.file = `${demo}/src/App.tsx`;
-    // Sysinfo shows CPU only by default; the docs show it full.
+    // Sysinfo shows CPU only by default; the docs show it full. This is the widget's own definition: it applies
+    // to a pane made from the widget bar or the launcher, not to a pane already in the default tab, whose meta
+    // has no `sysinfo:type` (set it on that pane with SetMetaCommand when a shot needs the three graphs).
     const sysinfo = copy("defwidget@sysinfo");
     sysinfo.blockdef.meta["sysinfo:type"] = "CPU + Mem + Net";
     sysinfo.blockdef.meta["graph:metrics"] = ["cpu", "mem:used", "net:bytestotal"];
