@@ -812,6 +812,8 @@ declare global {
         title?: string;
         disabled?: boolean;
         noAction?: boolean;
+        /** A face wider than one icon: the header gives its buttons a fixed width, and this one sizes to its face. */
+        fitContent?: boolean;
     };
 
     type IconButtonDecl = IconButtonCommon & {

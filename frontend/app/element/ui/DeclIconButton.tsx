@@ -36,7 +36,11 @@ export function DeclIconButton(props: DeclIconButtonProps): JSX.Element {
             aria-label={title()}
             // An inline colour beats any hover rule on the button, as it always has; a toggle sets
             // none unless asked, so the pressed colour in ui.scss applies.
-            style={{ color: props.decl.iconColor ?? (toggle() ? undefined : "inherit") }}
+            style={{
+                color: props.decl.iconColor ?? (toggle() ? undefined : "inherit"),
+                // Inline, as the header's own width rule for its buttons outranks any class.
+                ...(props.decl.fitContent ? { width: "auto", "min-width": "26px" } : {}),
+            }}
             disabled={props.decl.disabled ?? false}
             pressed={toggle() ? active() : undefined}
             on:click={onClick}

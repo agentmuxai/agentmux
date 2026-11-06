@@ -11,7 +11,7 @@
 import type { DocumentNode } from "@/app/agent-model/node-types";
 import { getBlockMetaKeyAtom } from "@/app/store/block-atom-cache";
 import { setBlockMeta } from "@/app/store/block-meta";
-import { createContext, createMemo, createSignal, useContext, type Accessor } from "solid-js";
+import { createContext, createMemo, createSignal, getOwner, onCleanup, useContext, type Accessor } from "solid-js";
 
 export const AGENT_MESSAGES_KEY = "agent:messages";
 
@@ -43,6 +43,12 @@ export interface MessagesPanelControls {
     clearRequest: () => void;
     /** Open the panel on a message. */
     showInPanel: (nodeId: string) => void;
+    /** In a narrow pane the panel is an overlay, shut until the header button opens it: this session only. */
+    overlayOpen: Accessor<boolean>;
+    setOverlayOpen: (open: boolean) => void;
+    /** Whether the pane is narrow (the panel sets it from the pane's width): the overlay form, not the column. */
+    narrow: Accessor<boolean>;
+    setNarrow: (narrow: boolean) => void;
     /** Whether a row of the conversation is shown as a stub that opens the panel. */
     stubbed: (node: DocumentNode) => boolean;
 }
@@ -56,20 +62,56 @@ export function createMessagesPanelControls(
     const patch = (changes: Partial<MessagesState>) =>
         void setBlockMeta(blockId, { [AGENT_MESSAGES_KEY]: { ...state(), ...changes } } as never);
     const [request, setRequest] = createSignal<{ nodeId: string; seq: number } | null>(null);
+    const [overlayOpen, setOverlayOpen] = createSignal(false);
+    const [narrow, setNarrow] = createSignal(false);
     let seq = 0;
-    return {
+    const controls: MessagesPanelControls = {
         state,
         patch,
         request,
         clearRequest: () => setRequest(null),
         showInPanel: (nodeId) => {
-            if (!state().open) patch({ open: true });
+            // A narrow pane shows it in the overlay and leaves the docked panel's own state alone.
+            if (narrow()) setOverlayOpen(true);
+            else if (!state().open) patch({ open: true });
             setRequest({ nodeId, seq: ++seq });
         },
+        overlayOpen,
+        setOverlayOpen,
+        narrow,
+        setNarrow,
         // Every incoming jekt that is not forced: a sensitive one, or one nothing proved, keeps its full row.
         stubbed: (node) =>
             state().enabled && node.type === "jekt_message" && node.direction === "incoming" && !isForced(node),
     };
+    byBlock.set(blockId, controls);
+    if (getOwner()) onCleanup(() => byBlock.get(blockId) === controls && byBlock.delete(blockId));
+    return controls;
+}
+
+/** The panel controls of each pane that has them, for what acts on a pane from outside it (the palette). */
+const byBlock = new Map<string, MessagesPanelControls>();
+
+export const messagesControlsFor = (blockId: string): MessagesPanelControls | undefined => byBlock.get(blockId);
+
+/**
+ * The Messages button each narrow agent pane puts in its header, by block. The pane's view model reads it for the
+ * header's icon buttons; the panel publishes it while the pane is narrow and takes it back when it is not.
+ */
+const [headerButtons, setHeaderButtons] = createSignal<Record<string, IconButtonDecl>>({});
+
+export function publishMessagesHeaderButton(blockId: string, decl: IconButtonDecl | null): void {
+    setHeaderButtons((prev) => {
+        if (!decl && !(blockId in prev)) return prev;
+        const { [blockId]: _gone, ...rest } = prev;
+        return decl ? { ...rest, [blockId]: decl } : rest;
+    });
+}
+
+/** The header buttons the panel has for a pane: none, or the Messages button. Reactive. */
+export function messagesHeaderButtons(blockId: string): IconButtonDecl[] {
+    const decl = headerButtons()[blockId];
+    return decl ? [decl] : [];
 }
 
 /** What the conversation's rows need from the panel: provided by the pane's layout, absent outside it. */
