@@ -6,7 +6,8 @@
  * not act on until the person confirms in their own conversation
  * (docs/specs/SPEC_JEKT_SIDE_PANEL_RESEARCH_AND_DESIGN_2026_11_04.md §5.4). It waits from its arrival until the
  * person next sends in the pane, or dismisses it. A jekt that came before this window opened is history, not a
- * wait: replaying a resumed session must not raise a card and loop the waiting tone for old mail.
+ * wait: replaying a resumed session must not raise a card and loop the waiting tone for old mail. A replayed jekt has
+ * no time of its own (the parser stamps it with the moment it was read), so the parser marks it `replayed`.
  */
 
 import type { DocumentNode, JektMessageNode } from "@/app/agent-model/node-types";
@@ -23,6 +24,7 @@ export function needsConfirmation(node: DocumentNode): node is JektMessageNode {
     return (
         node.type === "jekt_message" &&
         node.direction === "incoming" &&
+        !node.replayed &&
         node.tier === "sensitive" &&
         node.escalate === "required"
     );

@@ -194,7 +194,7 @@ They do not duplicate because they do not share a store or a purpose. They link:
 | 3 | The panel: selector over the document, row wrapper, block-meta state, unread, stubs in panel mode, filters; the follower generalised in `one-way-flow.ts` | The risk is the follower (5.5); gated by a pane setting, default off |
 | 4 | Narrow overlay and header button; Swarm/tab unread chip; Audit links; flip the default after a soak | Screenshots at three widths |
 
-Tests: the panel selector (what moves and what stays, per kind), unread arithmetic, the forced-message rule, the scroll-writer check with the new exports, the existing `OriginContainer` tests in inline mode, a vitest for narrow versus wide, and a long-run check with AgentY's rate (a replayed hour of 19 messages) for follow behaviour. Rust: the `escalate` field on the origin. Two runs of the build, as asked ("keep runs to 1 or 2"): PRs 1 and 2 first, then 3 and 4.
+Tests: the panel selector (what moves and what stays, per kind), unread arithmetic, the forced-message rule, the scroll-writer check with the new exports, the existing `OriginContainer` tests in inline mode, a vitest for narrow versus wide, and a long-run check with a busy pane's rate (a replayed hour of messages) for follow behaviour. Rust: the `escalate` field on the origin. Two runs of the build, as asked ("keep runs to 1 or 2"): PRs 1 and 2 first, then 3 and 4.
 
 ## 8. Open questions for the operator (recommendation first)
 

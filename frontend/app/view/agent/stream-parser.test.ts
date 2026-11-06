@@ -941,3 +941,14 @@ describe("jekt ESCALATE marker", () => {
         expect(parsed(" ESCALATE=maybe").escalate).toBeUndefined();
     });
 });
+
+describe("a jekt read back from stored history", () => {
+    const stored = `[JEKT:FROM=a TO=b TIER=sensitive DELIVERY=wan TRUST=network-claimed ESCALATE=required MSGID=1 PRIORITY=normal TS=1783386012]\nbody\n[/JEKT]`;
+    const read = (isReplay: boolean) =>
+        new ClaudeCodeStreamParser({ isReplay }).parseStreamEvent({ type: "user_message", message: stored }) as import("../../agent-model/types").JektMessageNode;
+
+    test("is marked replayed, whatever time it is given, so it never waits on the person", () => {
+        expect(read(true).replayed).toBe(true);
+        expect(read(false).replayed).toBeUndefined();
+    });
+});

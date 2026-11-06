@@ -41,6 +41,10 @@ describe("jektsAwaitingYou", () => {
         expect(jektsAwaitingYou([jekt({ tier: "coord" })], none, 0)).toEqual([]);
     });
 
+    it("is not one read back from stored history, whatever time it carries", () => {
+        expect(jektsAwaitingYou([jekt({ replayed: true, timestamp: Date.now() + 5_000 })], none, 0)).toEqual([]);
+    });
+
     it("is not the agent's own outgoing echo", () => {
         expect(jektsAwaitingYou([jekt({ direction: "outgoing" })], none, 0)).toEqual([]);
     });

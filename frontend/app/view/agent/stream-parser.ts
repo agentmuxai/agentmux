@@ -1121,6 +1121,7 @@ export class ClaudeCodeStreamParser {
             priority: fields.PRIORITY === "urgent" ? "urgent" : "normal",
             direction,
             ...(fields.ESCALATE === "required" || fields.ESCALATE === "none" ? { escalate: fields.ESCALATE } : {}),
+            ...(this.isReplay ? { replayed: true as const } : {}),
             ...heldTiming(fields, event.timestamp || Date.now()),
         };
     }

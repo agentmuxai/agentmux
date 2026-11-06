@@ -146,6 +146,8 @@ export interface JektMessageNode {
     /** The marker's `ESCALATE=`, on a `TIER=sensitive` jekt: `required` means the recipient must stop and have the
      *  person confirm in their own conversation; `none` that the sender is proven. Absent on older markers. */
     escalate?: "required" | "none";
+    /** Parsed from stored history, not delivered live: its time is not when it arrived. */
+    replayed?: true;
     /** Files the sender sent with it, read back from srv's `<attached_files>`
      *  list (marker `FILES=`; SPEC_JEKT_FILE_TRANSFER_2026_10_05.md §6.2).
      *  Absent when none came. */
