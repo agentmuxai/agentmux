@@ -45,7 +45,7 @@ const entry = (over: Partial<VaultEntryInfo> = {}): VaultEntryInfo => ({
     ...over,
 });
 
-const row = (over: Partial<VaultActivity>): VaultActivity => ({ at: Date.now(), entry_id: "api-key-stripe", entry_label: "Stripe", actor: "Agent1", action: "ran a command", target: "stripe balance retrieve", outcome: "done", ...over });
+const row = (over: Partial<VaultActivity>): VaultActivity => ({ at: Date.now(), entry_id: "api-key-stripe", entry_label: "Stripe", actor: "Agent1", action: "ran a command", target: "stripe balance retrieve", outcome: "done", seq: 1, version: 0, actor_kind: "agent", host: "", reason: "", refs: [], is_use: true, ...over });
 
 beforeEach(() => {
     vault.mockClear();

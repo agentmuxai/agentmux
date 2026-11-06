@@ -16,6 +16,7 @@ import type { ImportPreview } from "@/types/rpc/ImportPreview";
 import type { ImportResult } from "@/types/rpc/ImportResult";
 import type { MappingNeeded } from "@/types/rpc/MappingNeeded";
 import type { VaultActivity } from "@/types/rpc/VaultActivity";
+import type { VaultChain } from "@/types/rpc/VaultChain";
 import type { VaultAgents } from "@/types/rpc/VaultAgents";
 import type { VaultInfo } from "@/types/rpc/VaultInfo";
 import type { VaultEntryInfo } from "@/types/rpc/VaultEntryInfo";
@@ -331,6 +332,10 @@ export async function denyAllFrom(agent: string): Promise<void> {
         ...requests.map((r) => declineRequest(r.id).catch(() => {})),
     ]);
 }
+/** An entry's history, newest first. */
+export const loadHistory = (id: string) => call<{ history: VaultActivity[] }>("history", { id, limit: 500 }).then((r) => r.history);
+/** Whether the activity record still holds together. */
+export const loadChain = () => call<{ chain: VaultChain }>("history_check").then((r) => r.chain);
 export const loadActivity = (limit = 200) => call<{ activity: VaultActivity[] }>("activity", { limit }).then((r) => r.activity);
 /** An entry with standing permissions, from a read that needs no key (Warden's view). */
 export interface GrantedEntry {

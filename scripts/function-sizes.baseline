@@ -522,7 +522,7 @@
 127 frontend/app/view/tower/tower-model.ts::TowerViewModel::constructor
 224 frontend/app/view/tower/tower-view.tsx::HostTable
 126 frontend/app/view/tower/tower-view.tsx::TowerView
-131 frontend/app/view/vault/vault-entries.tsx::VaultEntries
+121 frontend/app/view/vault/vault-entries.tsx::VaultEntries
 172 frontend/app/view/vault/vault-entry-form.tsx::VaultEntryForm
 264 frontend/app/view/vault/vault-export.tsx::VaultExportDialog
 136 frontend/app/view/vault/vault-reveal.tsx::VaultRevealDialog
