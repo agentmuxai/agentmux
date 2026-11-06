@@ -48,23 +48,15 @@ function parentRowHover(
 type Region = { getBoundingClientRect(): DOMRect };
 
 /**
- * The region the More button's close intent protects: the dropdown and each submenu open beside it. A pointer
- * that leaves the dropdown for its Messengers flyout is still inside it, so the dropdown stays and the flyout
- * opens; one that leaves both closes them.
+ * The element the More button's close intent aims at: the dropdown, and while a row's flyout is open, that flyout.
+ * A pointer that leaves the dropdown crossing toward the open flyout is held (the safe triangle runs from where
+ * it left to the flyout's near edge, however slowly it moves) and keeps both open once it arrives; one that
+ * leaves toward anything else closes them.
  */
 function createDropdownRegion(publish: ((el: Region | null) => void) | undefined) {
     let body: HTMLElement | null = null;
     const flyouts = new Map<string, HTMLElement>();
-    const rect = (): DOMRect => {
-        const rects = [body, ...flyouts.values()]
-            .filter((el): el is HTMLElement => !!el)
-            .map((el) => el.getBoundingClientRect());
-        const left = Math.min(...rects.map((r) => r.left));
-        const top = Math.min(...rects.map((r) => r.top));
-        const right = Math.max(...rects.map((r) => r.right));
-        const bottom = Math.max(...rects.map((r) => r.bottom));
-        return { x: left, y: top, left, top, right, bottom, width: right - left, height: bottom - top } as DOMRect;
-    };
+    const rect = (): DOMRect => ([...flyouts.values()].at(-1) ?? body)!.getBoundingClientRect();
     return {
         setBody(el: HTMLElement | null) {
             body = el;
@@ -79,8 +71,8 @@ function createDropdownRegion(publish: ((el: Region | null) => void) | undefined
 
 /**
  * What a row's flyout tells the row and the dropdown around it. The flyout is part of the dropdown for the More
- * button's hover intent: entering it cancels the pending close, leaving it starts one, and while it is open the
- * region the More button protects reaches it.
+ * button's hover intent: entering it cancels the pending close, leaving it starts one, and while it is open it is
+ * what the More button's close intent aims at.
  */
 function parentFlyoutHover(
     key: string,

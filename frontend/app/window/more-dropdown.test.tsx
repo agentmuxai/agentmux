@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The More dropdown and the submenu of one of its parent rows (Messengers) are one region for the More button's
- * hover intent: a pointer that leaves the dropdown for the flyout beside it must not close both.
+ * The More dropdown and the submenu of one of its parent rows (Messengers) answer to the More button's hover
+ * intent together: a pointer that leaves the dropdown for the flyout beside it must not close both, however slowly
+ * it crosses.
  */
 
 import { cleanup, fireEvent, render } from "@solidjs/testing-library";
@@ -71,7 +72,7 @@ describe("the More dropdown's parent rows", () => {
         expect(onSubmenuLeave).toHaveBeenCalledOnce();
     });
 
-    it("protects the dropdown and its open flyout as one region", () => {
+    it("aims the More button's close intent at the open flyout", () => {
         const { dropdown, regions } = mountDropdown();
         dropdown.getBoundingClientRect = () => rect(100, 0, 200, 80);
         const row = dropdown.querySelector(".action-widget-more-item") as HTMLElement;
@@ -81,6 +82,8 @@ describe("the More dropdown's parent rows", () => {
         flyout.getBoundingClientRect = () => rect(208, 10, 320, 60);
         const region = regions.filter(Boolean).at(-1)!;
         const r = region.getBoundingClientRect();
-        expect([r.left, r.top, r.right, r.bottom]).toEqual([100, 0, 320, 80]);
+        expect([r.left, r.top, r.right, r.bottom]).toEqual([208, 10, 320, 60]);
+        fireEvent.mouseLeave(row, { clientX: 150, clientY: 10 });
+        expect(document.querySelector(".action-widget-pinned-flyout")).not.toBeNull();
     });
 });
