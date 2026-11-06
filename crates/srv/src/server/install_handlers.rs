@@ -1191,9 +1191,8 @@ mod installed_version_tests {
         assert_eq!(installed_version_in(&shared, pkg), None);
     }
 
-    /// muxreview P1 on #6618: a uv venv install (Aider, Kimi) is an install too,
-    /// or `install.start` rebuilds a finished one and `install.check` loses
-    /// its version.
+    /// A uv venv install (Aider, Kimi) is an install too, or `install.start`
+    /// rebuilds a finished one and `install.check` loses its version (#6618).
     #[test]
     fn a_uv_venv_and_a_release_download_count_as_installed() {
         use super::installed_dir_among;
