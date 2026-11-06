@@ -1082,4 +1082,10 @@ async fn a_created_agent_on_a_route_is_checked_against_its_templates_harness() {
     let (status, body) = create(&state, req).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
     assert!(body["error"].as_str().unwrap().contains("needs a route"), "a model with no route is not silently dropped: {body}");
+    let mut req = create_request(sign_auth(&state, &def.slug), "Route Box", &template.slug);
+    req.model = Some("sonnet".into());
+    req.route.route = Some("anthropic".into());
+    let (status, body) = create(&state, req).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body["error"].as_str().unwrap().contains("needs a route"), "nor under the harness's own sign-in: {body}");
 }
