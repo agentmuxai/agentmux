@@ -23,6 +23,8 @@ pub struct Candidate {
     pub description: String,
     /// The body (the file without its frontmatter): what `db_skills.content` holds.
     pub content: String,
+    /// Set when the folder is a computer-use skill (it has a `computer-use.json`): its manifest and the files beside `SKILL.md`.
+    pub app: Option<Box<crate::backend::computer_use_skill::Bundle>>,
 }
 
 /// What a scan found, with the reasons anything was left out.
@@ -121,7 +123,7 @@ fn read_candidate(file: &Path, key: &str, fallback_name: &str, warnings: &mut Ve
         }
     };
     let (name, description, content) = parse_skill_md(&text, fallback_name);
-    Some(Candidate { key: key.to_string(), name, description, content })
+    Some(Candidate { key: key.to_string(), name, description, content, app: None })
 }
 
 /// Every `SKILL.md` under `root` (a skill folder, a pack of them, or one markdown file). A folder
@@ -165,6 +167,21 @@ fn walk(root: &Path, dir: &Path, dir_name: &str, depth: usize, scan: &mut Scan) 
             return;
         }
         let key = dir.strip_prefix(root).map(|p| p.to_string_lossy().replace('\\', "/")).unwrap_or_default();
+        // A folder with a manifest is a computer-use skill and is read whole, or refused with the reason: importing only its
+        // SKILL.md would drop the files its text points at.
+        if dir.join(crate::backend::computer_use_skill::MANIFEST).is_file() {
+            match crate::backend::computer_use_skill::read_folder(dir) {
+                Ok(b) => scan.candidates.push(Candidate {
+                    key,
+                    name: b.name.clone(),
+                    description: b.description.clone(),
+                    content: b.content.clone(),
+                    app: Some(Box::new(b)),
+                }),
+                Err(e) => scan.warnings.push(format!("{key}: not imported as a computer-use skill: {e}")),
+            }
+            return;
+        }
         scan.candidates.extend(read_candidate(&skill_md, &key, dir_name, &mut scan.warnings));
         return;
     }
@@ -303,7 +320,7 @@ pub async fn fetch_url(raw: &str) -> Result<Scan, String> {
     let stem = last.strip_suffix(".md").unwrap_or(last);
     let fallback = if stem.eq_ignore_ascii_case("skill") && segments.len() >= 2 { segments[segments.len() - 2] } else { stem };
     let (name, description, content) = parse_skill_md(&text, fallback);
-    Ok(Scan { candidates: vec![Candidate { key: String::new(), name, description, content }], warnings: vec![], capped: false })
+    Ok(Scan { candidates: vec![Candidate { key: String::new(), name, description, content, app: None }], warnings: vec![], capped: false })
 }
 
 fn valid_git_ref(r: &str) -> bool {

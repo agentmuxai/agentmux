@@ -28,6 +28,8 @@ import { blockDefFromSource, SHORTCUTS_FROM_META } from "@/app/store/shortcuts-f
 import { orderByRecent } from "@/app/store/shortcuts-recent";
 import { matchesEveryWord } from "@/app/util/fuzzysearch";
 import { tip } from "@/app/element/tip";
+import { readZoom } from "@/app/store/zoom-factor";
+import "./shortcuts.scss";
 
 function sortByDisplayOrder(
     wmap: { [key: string]: WidgetConfigType } | null | undefined
@@ -41,7 +43,8 @@ function sortByDisplayOrder(
 /** Whether a pane of `view` is open in this window, mounted or not (an inactive tab of a pane's stack is not). */
 const isViewOpen = async (view: string): Promise<boolean> => (await findOpenBlockByView(view)) != null;
 
-type GridLayoutType = { columns: number; tileWidth: number; tileHeight: number; showLabel: boolean };
+/** What the arrow keys need of the grid: how many tiles sit in a row, read from the rendered grid. */
+type GridLayoutType = { columns: number };
 
 /** The Shortcuts pane's state behind its native pane tab (`shortcutsPaneTab`). */
 /** Exported for the tests; the app reaches it through `shortcutsPaneTab`. */
@@ -49,7 +52,6 @@ export class ShortcutsViewModel {
     blockId: string;
     searchTerm: SignalAtom<string>;
     selectedIndex: SignalAtom<number>;
-    containerSize: SignalAtom<{ width: number; height: number }>;
     /**
      * A parent widget (e.g. "Messengers") the grid has drilled into — its
      * children replace the top-level grid until Escape/Back pops back out.
@@ -67,7 +69,6 @@ export class ShortcutsViewModel {
         this.blockId = blockId;
         this.searchTerm = createSignalAtom("");
         this.selectedIndex = createSignalAtom(0);
-        this.containerSize = createSignalAtom({ width: 0, height: 0 });
         this.activeParent = createSignalAtom<WidgetConfigType | null>(null);
     }
 
@@ -255,74 +256,32 @@ export class ShortcutsViewModel {
     }
 }
 
-function ShortcutsView(props: { model: ShortcutsViewModel }): JSX.Element {
+/** `zoom`: the pane's zoom (`term:zoom`), applied to the whole view, so the tiles, their icons and
+ *  labels, the filter and the hints all scale with it; 1 when not given. */
+function ShortcutsView(props: { model: ShortcutsViewModel; zoom?: () => number }): JSX.Element {
+    const zoom = () => props.zoom?.() ?? 1;
     const model = props.model;
     const searchTerm = model.searchTerm;
     const selectedIndex = model.selectedIndex;
     const filteredWidgets = createMemo(() => model.filteredWidgets());
-    const containerSize = model.containerSize;
 
-    let containerRef!: HTMLDivElement;
+    let gridRef!: HTMLDivElement;
+
+    // The tiles are a fixed size and wrap (`.shortcuts-grid`), so how many sit in a row is the
+    // browser's to work out. The arrow keys read it back from the grid's resolved tracks.
+    const measureColumns = () => {
+        const tracks = getComputedStyle(gridRef).gridTemplateColumns.split(/\s+/).filter((t) => t.endsWith("px")).length;
+        model.gridLayout = { columns: Math.max(1, tracks) };
+    };
 
     onMount(() => {
         // The filter is the pane's keyboard: it has the focus as soon as the pane opens.
         queueMicrotask(() => model.giveFocus());
-        if (!containerRef) return;
-        const resizeObserver = new ResizeObserver((entries) => {
-            for (const entry of entries) {
-                containerSize._set({
-                    width: entry.contentRect.width,
-                    height: entry.contentRect.height,
-                });
-            }
-        });
-        resizeObserver.observe(containerRef);
+        measureColumns();
+        const resizeObserver = new ResizeObserver(measureColumns);
+        resizeObserver.observe(gridRef);
         return () => resizeObserver.disconnect();
     });
-
-    const GAP = 16;
-    const LABEL_THRESHOLD = 60;
-    const MAX_TILE_SIZE = 120;
-
-    const availableHeight = createMemo(() => containerSize().height);
-
-    const gridLayout = createMemo<GridLayoutType>(() => {
-        const cw = containerSize().width;
-        const ah = availableHeight();
-        const fw = filteredWidgets();
-        if (cw === 0 || ah <= 0 || fw.length === 0) {
-            return { columns: 1, tileWidth: 90, tileHeight: 90, showLabel: true };
-        }
-        let bestColumns = 1;
-        let bestTileSize = 0;
-        let bestTileWidth = 90;
-        let bestTileHeight = 90;
-        let showLabel = true;
-        for (let cols = 1; cols <= fw.length; cols++) {
-            const rows = Math.ceil(fw.length / cols);
-            const tileWidth = (cw - (cols - 1) * GAP) / cols;
-            const tileHeight = (ah - (rows - 1) * GAP) / rows;
-            const currentTileSize = Math.min(tileWidth, tileHeight);
-            if (currentTileSize > bestTileSize) {
-                bestTileSize = currentTileSize;
-                bestColumns = cols;
-                bestTileWidth = tileWidth;
-                bestTileHeight = tileHeight;
-                showLabel = tileHeight >= LABEL_THRESHOLD;
-            }
-        }
-        return { columns: bestColumns, tileWidth: bestTileWidth, tileHeight: bestTileHeight, showLabel };
-    });
-
-    // Keep model.gridLayout in sync
-    createEffect(() => {
-        model.gridLayout = gridLayout();
-    });
-
-    const finalTileWidth = createMemo(() => Math.min(gridLayout().tileWidth, MAX_TILE_SIZE));
-    const finalTileHeight = createMemo(() =>
-        gridLayout().showLabel ? Math.min(gridLayout().tileHeight, MAX_TILE_SIZE) : finalTileWidth()
-    );
 
     // Reset selection when search term changes
     createEffect(() => {
@@ -330,32 +289,40 @@ function ShortcutsView(props: { model: ShortcutsViewModel }): JSX.Element {
         selectedIndex._set(0);
     });
 
+    // The grid scrolls, so the tile the arrows land on may be out of sight.
+    createEffect(() => {
+        const tile = gridRef?.children[selectedIndex()] as HTMLElement | undefined;
+        tile?.scrollIntoView?.({ block: "nearest" });
+    });
+
     // What Escape does now, for the hint line (the stages are in keyDownHandler).
     const escapeHint = () =>
         searchTerm() !== "" ? "clear the filter" : model.activeParent() ? "go back" : model.openedBySplit() ? "close" : null;
 
+    // A column: the filter on top, the tiles scrolling in the middle, the hints below. Each has a
+    // row of its own, so none can sit over another however small the pane is (shortcuts.scss).
     return (
-        <div class="relative w-full h-full p-4 box-border overflow-hidden flex flex-col items-center">
+        <div class="shortcuts-view" style={{ zoom: zoom() }}>
             {/* Faded logo behind the tiles, as in an empty Editor */}
             <EmptyPaneLogo />
-            <div class="relative z-[1] w-full max-w-[420px] shrink-0 flex">
-                <FilterInput
-                    value={searchTerm()}
-                    onInput={(q) => model.searchTerm._set(q)}
-                    onKeyDown={keydownWrapper(model.keyDownHandler.bind(model))}
-                    inputRef={(el) => (model.inputRef.current = el)}
-                    placeholder="Filter shortcuts"
-                    testId="shortcuts-filter"
-                />
-            </div>
-            <div ref={containerRef!} class="relative z-[1] w-full flex-1 min-h-0 flex flex-col items-center justify-center">
+            <div class="shortcuts-top">
+                <div class="w-full max-w-[420px] flex">
+                    <FilterInput
+                        value={searchTerm()}
+                        onInput={(q) => model.searchTerm._set(q)}
+                        onKeyDown={keydownWrapper(model.keyDownHandler.bind(model))}
+                        inputRef={(el) => (model.inputRef.current = el)}
+                        placeholder="Filter shortcuts"
+                        testId="shortcuts-filter"
+                    />
+                </div>
                 {/* Breadcrumb — shown only once drilled into a parent widget
                     (e.g. "Messengers"). Escape does the same thing; this is the
                     mouse-driven equivalent for discoverability. */}
                 <Show when={model.activeParent()}>
                     {(parent) => (
                         <div
-                            class="mb-2 flex items-center gap-1 text-secondary text-xs cursor-pointer hover:text-foreground"
+                            class="mt-2 flex items-center gap-1 text-secondary text-xs cursor-pointer hover:text-foreground"
                             onClick={() => model.goBack()}
                         >
                             <i class="fa-solid fa-chevron-left" />
@@ -363,36 +330,31 @@ function ShortcutsView(props: { model: ShortcutsViewModel }): JSX.Element {
                         </div>
                     )}
                 </Show>
-
+            </div>
+            <div class="shortcuts-scroll">
                 {/* Grid of widgets */}
-                <div
-                    class="grid gap-4 justify-center"
-                    style={{ "grid-template-columns": `repeat(${gridLayout().columns}, ${finalTileWidth()}px)` }}
-                >
+                <div ref={gridRef!} class="shortcuts-grid" data-testid="shortcuts-grid">
                     <For each={filteredWidgets()}>
                         {(widget, index) => (
                             <div
                                 onClick={(e) => void model.handleWidgetSelect(widget, { forceNew: e.shiftKey })}
                                 {...tip(widget.description || widget.label)}
                                 class={clsx(
-                                    "flex flex-col items-center justify-center rounded-md p-2 text-center",
+                                    "shortcuts-tile rounded-md text-center",
                                     "transition-colors duration-150",
                                     index() === selectedIndex()
                                         ? "bg-highlightbg text-foreground"
                                         : "bg-hover hover:bg-highlightbg text-secondary hover:text-foreground"
                                 )}
-                                style={{ width: `${finalTileWidth()}px`, height: `${finalTileHeight()}px` }}
                             >
-                                <div class="relative" style={{ color: widgetEntryColor(widget, "identity") }}>
+                                <div class="shortcuts-tile-icon relative" style={{ color: widgetEntryColor(widget, "identity") }}>
                                     <i class={makeIconClass(widget.icon, true, { defaultIcon: "window-maximize" })} />
                                     <Show when={model.isParentWidget(widget)}>
                                         <i class="fa-solid fa-chevron-right absolute -right-2.5 top-1/2 -translate-y-1/2 text-[8px] opacity-60" />
                                     </Show>
                                 </div>
-                                <Show when={gridLayout().showLabel && !isBlank(widget.label)}>
-                                    <div class="mt-1 w-full text-[11px] leading-4 overflow-hidden text-ellipsis whitespace-nowrap">
-                                        {widget.label}
-                                    </div>
+                                <Show when={!isBlank(widget.label)}>
+                                    <div class="shortcuts-tile-label">{widget.label}</div>
                                 </Show>
                             </div>
                         )}
@@ -400,7 +362,7 @@ function ShortcutsView(props: { model: ShortcutsViewModel }): JSX.Element {
                 </div>
             </div>
             <div
-                class="relative z-[1] shrink-0 flex flex-wrap items-center justify-center gap-x-5 gap-y-1 text-sm text-foreground"
+                class="shortcuts-hints flex flex-wrap items-center justify-center gap-x-5 gap-y-1 text-sm text-foreground"
                 data-testid="shortcuts-hints"
             >
                 <Show
@@ -444,11 +406,13 @@ export const shortcutsPaneTab: PaneTabManifest = {
     label: "Shortcuts",
     icon: "shapes",
     defaultColor: "pink",
-    capabilities: { header: "none" },
+    // The shared per-pane zoom (Ctrl+scroll, Ctrl/Cmd +/-/0, the all-panes gesture); 12 px is its
+    // text size. A zoom set here goes no further: a tile replaces this pane with a new one.
+    capabilities: { header: "none", paneZoom: { baseFontSize: 12 } },
     create: (ctx) => {
         const model = new ShortcutsViewModel(ctx.blockId);
         return {
-            component: () => <ShortcutsView model={model} />,
+            component: () => <ShortcutsView model={model} zoom={() => readZoom(ctx.meta())} />,
             liveTitle: () => ({ text: "Shortcuts" }),
             focus: () => model.giveFocus(),
             onKeyDown: (e) => model.keyDownHandler(e),

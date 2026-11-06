@@ -134,7 +134,7 @@
 116 crates/srv/src/agents/runner.rs::run_agent_with_bin
 105 crates/srv/src/ambient/cli.rs::invoke_haiku
 124 crates/srv/src/ambient/digest.rs::extract_digest_parts
-125 crates/srv/src/backend/agent_config.rs::build_config_files
+124 crates/srv/src/backend/agent_config.rs::build_config_files
 222 crates/srv/src/backend/agent_config.rs::build_settings_with_hooks
 120 crates/srv/src/backend/agent_config.rs::write_claude_md_respecting_ownership
 118 crates/srv/src/backend/agent_config.rs::write_mcp_json_respecting_user_servers
@@ -161,7 +161,6 @@
 110 crates/srv/src/backend/blockcontroller/persistent/queue.rs::PersistentSubprocessController::send_message_with_images_from
 197 crates/srv/src/backend/blockcontroller/persistent/resume_retry.rs::PersistentSubprocessController::retry_after_resume_failure
 155 crates/srv/src/backend/blockcontroller/persistent/segments.rs::PersistentSubprocessController::apply_resume_gate_with
-790 crates/srv/src/backend/blockcontroller/persistent/stdout_reader.rs::PersistentSubprocessController::run_stdout_reader
 292 crates/srv/src/backend/blockcontroller/persistent_resume.rs::update
 151 crates/srv/src/backend/blockcontroller/shell/file_ops.rs::handle_append_block_file
 162 crates/srv/src/backend/blockcontroller/shell/indexing.rs::build_output_idx_from
@@ -192,7 +191,6 @@
 126 crates/srv/src/backend/name_resolution.rs::resolve_name_to_uid
 145 crates/srv/src/backend/notify/policy.rs::PolicyState::step
 104 crates/srv/src/backend/reactive/activity_watcher.rs::run_agent_summary_loop
-637 crates/srv/src/backend/reactive/handler.rs::Handler::deliver_audited
 150 crates/srv/src/backend/reactive/handler.rs::Handler::register_agent_full
 112 crates/srv/src/backend/reactive/sanitize.rs::sanitize_message
 110 crates/srv/src/backend/resume_preflight.rs::preflight
@@ -520,7 +518,7 @@
 104 frontend/app/view/settings/sections/widget-catalog.tsx::WidgetCatalog
 249 frontend/app/view/settings/sections/widgets-section.tsx::WidgetsSection
 105 frontend/app/view/settings/settings-view.tsx::SettingsView
-178 frontend/app/view/shortcuts/shortcuts.tsx::ShortcutsView
+137 frontend/app/view/shortcuts/shortcuts.tsx::ShortcutsView
 111 frontend/app/view/swarm/swarm-agent-list.tsx::SwarmAgentList
 131 frontend/app/view/swarm/swarm-fleet-toolbar.tsx::SuperviseActions
 104 frontend/app/view/swarm/swarm-model.ts::SwarmViewModel::buildTree

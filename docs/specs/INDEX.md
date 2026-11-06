@@ -1126,6 +1126,7 @@ partial list.
 | [`SPEC_COMPOSER_STRIP_AND_HOST_POLISH_2026_06_25`](SPEC_COMPOSER_STRIP_AND_HOST_POLISH_2026_06_25.md) | Spec: Composer Strip Polish + Context Compaction Indicator + Host Type Coloring |
 | [`SPEC_COMPOSER_STRIP_LAYOUT_MIC_CENTER_MODEL_DEFAULTS_2026_07_10`](SPEC_COMPOSER_STRIP_LAYOUT_MIC_CENTER_MODEL_DEFAULTS_2026_07_10.md) | SPEC: Composer-strip layout fixes, mic vertical centering, curated model defaults |
 | [`SPEC_COMPOSER_UX_POLISH_2026_04_15`](SPEC_COMPOSER_UX_POLISH_2026_04_15.md) | Spec: Composer UX Polish — controls above input, Claude-style status line |
+| [`SPEC_COMPUTER_USE_SKILLS_PRACTICE_VOICEMEETER_CANTABILE_2026_11_05`](SPEC_COMPUTER_USE_SKILLS_PRACTICE_VOICEMEETER_CANTABILE_2026_11_05.md) | SPEC: Practice time for building computer-use skills, and two new ones: Voicemeeter and Cantabile |
 | [`SPEC_CONSOLIDATE_FORGE_IDENTITY_INTO_AGENT_2026_04_13`](SPEC_CONSOLIDATE_FORGE_IDENTITY_INTO_AGENT_2026_04_13.md) | SPEC — Consolidate Forge + Identity into the Agent Pane |
 | [`SPEC_CONTAINER_PANE_SUPPORT_2026_06_11`](SPEC_CONTAINER_PANE_SUPPORT_2026_06_11.md) | SPEC: Container Pane Support |
 | [`SPEC_CONTEXT_VISIBILITY_2026_06_17`](SPEC_CONTEXT_VISIBILITY_2026_06_17.md) | SPEC: Context & Token Visibility — what we can show the user, and how |

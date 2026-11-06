@@ -49,6 +49,8 @@ pub(crate) fn render_agent_config_files(
         work_dir,
         &agent.provider,
     );
+    // The files beside a computer-use skill's SKILL.md (its reference files and approved scripts).
+    config_files.extend(crate::backend::computer_use_skill::sibling_files(&effective_skills, identity_store));
 
     // v1 MCP: "agentmux" plus the agent's effective servers. The
     // legacy blob's user servers are merged in ONLY when the agent has no own

@@ -34,6 +34,8 @@ function item(over: Record<string, unknown> = {}) {
         existing_id: "",
         existing_description: "",
         existing_content: "",
+        app: null,
+        app_hash: "",
         ...over,
     };
 }
@@ -101,7 +103,7 @@ describe("Import a skill", () => {
             {},
             {
                 source: SOURCE,
-                items: [{ key: "alpha", name: "alpha", description: "Use for alpha", content: "step one\nstep two", existing_id: "" }],
+                items: [{ key: "alpha", name: "alpha", description: "Use for alpha", content: "step one\nstep two", existing_id: "", app_hash: "" }],
             },
         );
     });
