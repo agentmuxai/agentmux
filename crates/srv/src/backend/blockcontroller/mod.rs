@@ -29,6 +29,7 @@ pub mod persistent;
 mod persistent_resume;
 pub mod pidregistry;
 mod prompt_record;
+mod resync_lock;
 mod resync_steps;
 pub mod process_tree;
 pub mod session_agent;
@@ -957,6 +958,9 @@ pub fn resync_controller(
     if is_closing(block_id) {
         return Err(format!("resync_controller: block {block_id} is closing"));
     }
+
+    // One resync of this block at a time: see resync_lock.rs.
+    let _one_resync = resync_lock::ResyncGuard::acquire(block_id);
 
     let controller_type = resync_steps::effective_controller_type(block, controller_type);
 

@@ -321,9 +321,10 @@ function onAuthNoticeSet(state: LaunchPhaseState, command: Cmd<"AuthNoticeSet">)
     return { state: { ...state, authNotice: command.notice }, events: [] };
 }
 
-function onControllerHealthy(state: LaunchPhaseState): ReducerResult {
-    if (!state.canRetry && state.authNotice === null && state.authStatus === "authenticated") return same(state);
-    return { state: { ...state, canRetry: false, authNotice: null, authStatus: "authenticated" }, events: [] };
+function onControllerHealthy(state: LaunchPhaseState, command: Cmd<"ControllerHealthy">): ReducerResult {
+    const authStatus = command.provesAuth === false ? state.authStatus : "authenticated";
+    if (!state.canRetry && state.authNotice === null && state.authStatus === authStatus) return same(state);
+    return { state: { ...state, canRetry: false, authNotice: null, authStatus }, events: [] };
 }
 
 function onDisposed(state: LaunchPhaseState): ReducerResult {
