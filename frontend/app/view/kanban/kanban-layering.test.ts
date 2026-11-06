@@ -3,8 +3,9 @@
 
 /**
  * The task drawer paints over the board. In the narrow list each section's head is sticky at
- * `--z-tab-name`; a drawer with no z-index of its own was cut across by those heads. The drawer is the kit's SidePanel. jsdom does not
- * lay out SCSS, so this reads the two rules and the token values they name.
+ * `--z-tab-name`; a drawer with no z-index of its own was cut across by those heads. The drawer is the kit's
+ * SidePanel, so its rule is in `side-panel.scss` and the sticky head's in `kanban.scss`. jsdom does not lay out
+ * SCSS, so this reads the two rules and the token values they name.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";

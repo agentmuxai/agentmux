@@ -30,7 +30,7 @@ export function SidePanel(props: SidePanelProps): JSX.Element {
     return (
         <aside class={clsx("ui-side-panel", props.class)} aria-label={props.label}>
             <header class="ui-side-panel__head">
-                <Show when={props.lead}>{props.lead}</Show>
+                <Show when={props.lead}>{(lead) => lead()}</Show>
                 <h3 class="ui-side-panel__title">{props.title}</h3>
                 <IconButton icon="xmark" label="Close" onClick={props.onClose} />
             </header>
