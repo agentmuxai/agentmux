@@ -483,7 +483,6 @@
 285 frontend/app/view/editor/editor-model.ts::EditorViewModel::constructor
 190 frontend/app/view/editor/file-tree.tsx::FileTree
 155 frontend/app/view/editor/file-tree.tsx::TreeNode
-276 frontend/app/view/editor/viewers/image/image-viewer.tsx::ImageViewer
 101 frontend/app/view/editor/viewers/viewer-host.tsx::ViewerFor
 152 frontend/app/view/files/files-preview.tsx::FilesPreview
 118 frontend/app/view/global-bundle/GlobalMemoryFullView.tsx::EntryView
