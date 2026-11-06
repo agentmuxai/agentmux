@@ -86,10 +86,9 @@ vi.mock("@/util/platformutil", () => ({
 }));
 
 const providerMock = vi.hoisted(() => ({
-    // For the "AgentMux manages its own CLIs" note: one CLI it installs, one it doesn't.
     list: [
         { id: "codex", displayName: "Codex", npmPackage: "@openai/codex-cli", docsUrl: "https://example.test/codex" },
-        { id: "grok", displayName: "Grok Build", npmPackage: "", docsUrl: "https://example.test/grok" },
+        { id: "grok", displayName: "Grok Build", npmPackage: "", managedInstall: true, docsUrl: "https://example.test/grok" },
     ] as Array<Record<string, unknown>>,
 }));
 
@@ -344,27 +343,13 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
         expect(hint.textContent).not.toMatch(/model[a-z]/i);
     });
 
-    it("says AgentMux manages its own CLIs, and links only the ones it doesn't install", async () => {
+    it("says AgentMux installs its own copy of every agent CLI, with no exceptions to link", async () => {
         render(() => <AgentPicker model={makeMockModel() as any} />);
         const note = await screen.findByTestId("agent-templates-managed-note");
         expect(note.textContent).toContain("its own copy of each agent CLI");
-        const links = [...note.querySelectorAll("a")].map((a) => [a.textContent, a.getAttribute("href")]);
-        expect(links).toEqual([["Grok Build", "https://example.test/grok"]]);
-    });
-
-    it("drops the exceptions sentence when AgentMux installs every CLI, with no empty list or stray period", async () => {
-        const all = providerMock.list;
-        providerMock.list = [{ id: "codex", displayName: "Codex", npmPackage: "@openai/codex-cli", docsUrl: "https://example.test/codex" }];
-        try {
-            render(() => <AgentPicker model={makeMockModel() as any} />);
-            const note = await screen.findByTestId("agent-templates-managed-note");
-            expect(note.textContent).toContain("its own copy of each agent CLI");
-            expect(note.textContent).not.toContain("exceptions");
-            expect(note.textContent).not.toContain(": .");
-            expect(note.textContent).toContain("folders. This isolates the tools");
-        } finally {
-            providerMock.list = all;
-        }
+        expect(note.textContent).toContain('"Use the CLI on my PATH"');
+        expect(note.textContent).not.toContain("exceptions");
+        expect(note.querySelectorAll("a")).toHaveLength(0);
     });
 
     it("a click on a template opens its panel below it, and a second click closes it", async () => {

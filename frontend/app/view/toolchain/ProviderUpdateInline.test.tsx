@@ -56,6 +56,17 @@ describe("ProviderUpdateInline", () => {
         expect(h.start).toHaveBeenCalledTimes(1);
     });
 
+    it("in install mode, says Install and Installed where the update says Update and Updated", () => {
+        render(() => <ProviderUpdateInline providerId="goose" pinned="1.54.0" mode="install" />);
+        fireEvent.click(screen.getByRole("button", { name: "Install 1.54.0" }));
+        expect(h.start).toHaveBeenCalledTimes(1);
+        h.setState("running");
+        expect(screen.getByText("Installing…")).toBeInTheDocument();
+        h.setState("done");
+        expect(screen.getByText("Installed")).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Install again" })).toBeInTheDocument();
+    });
+
     it("offers Retry after a failure", () => {
         render(() => <ProviderUpdateInline providerId="codex" pinned="0.154.0" />);
         h.setState("failed");

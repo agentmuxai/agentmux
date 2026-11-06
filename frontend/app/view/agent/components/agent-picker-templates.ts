@@ -10,7 +10,6 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { createMemo, createSignal, type Accessor } from "solid-js";
 import { matchesFilters, type CardFilter, type FilterableCard } from "../defaults/provider-access-model";
-import { getProviderList } from "../providers";
 import { createCreateDraft, type CreateDraft } from "./AgentCreateForm";
 import type { InstallStates } from "./agent-picker-install";
 
@@ -23,8 +22,6 @@ export function createTemplates(d: {
     const { installState, checkInstalled } = d.install;
     const setNodejsError = (_: null): void => d.clearNodejsError();
     const [openTemplate, setOpenTemplate] = createSignal<string | null>(null);
-    /** The harnesses whose CLI AgentMux doesn't install (no npm package). */
-    const userInstalledProviders = () => getProviderList().filter((p) => !p.npmPackage && !p.managedInstall && p.docsUrl);
     // The open panel is creating an agent: it can't close or move meanwhile.
     const [panelBusy, setPanelBusy] = createSignal(false);
     const drafts = new Map<string, CreateDraft>();
@@ -141,7 +138,6 @@ export function createTemplates(d: {
         filterableCards,
         installedKnown,
         shownTemplates,
-        userInstalledProviders,
     };
 }
 

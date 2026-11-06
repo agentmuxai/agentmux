@@ -532,24 +532,7 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let only = req.and_then(|r| r.only);
                 let paths = agentmux_common::DataPaths::from_env()
                     .ok_or_else(|| "DataPaths::from_env() failed".to_string())?;
-                // The commands of every block that records one: the open panes
-                // and the ones restored from a layout, which keep the absolute CLI
-                // path until they mount.
-                let live: Vec<String> = mstore
-                    .get_all::<crate::backend::obj::Block>()
-                    .map_err(|e| format!("toolchain.prune: {e}"))?
-                    .iter()
-                    .filter_map(|b| {
-                        let mut parts: Vec<String> = Vec::new();
-                        if let Some(c) = b.meta.get("cmd").and_then(|v| v.as_str()) {
-                            parts.push(c.to_string());
-                        }
-                        if let Some(a) = b.meta.get("cmd:args").and_then(|v| v.as_array()) {
-                            parts.extend(a.iter().filter_map(|v| v.as_str().map(str::to_string)));
-                        }
-                        (!parts.is_empty()).then(|| parts.join(" "))
-                    })
-                    .collect();
+                let live = super::uninstall_handlers::live_block_commands(&mstore).map_err(|e| format!("toolchain.prune: {e}"))?;
                 let max_idle = crate::backend::cli_prune::DEFAULT_MAX_IDLE;
                 let now = std::time::SystemTime::now();
                 let run = tokio::task::spawn_blocking(move || {

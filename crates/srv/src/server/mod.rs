@@ -29,6 +29,7 @@ pub(crate) mod identity_handlers;
 pub mod install_handlers;
 mod lsp_handlers;
 mod system_install_handlers;
+mod uninstall_handlers;
 mod vendor_install_catalog;
 mod vendor_install_handlers;
 mod messagebus;

@@ -77,7 +77,7 @@ pub struct InUse {
 
 impl InUse {
     /// Whether any known command mentions something under `dir`.
-    fn mentions(&self, dir: &Path) -> bool {
+    pub(crate) fn mentions(&self, dir: &Path) -> bool {
         // Trailing separator, so `…/claude/2.1.28` is not "in use" because of
         // `…/claude/2.1.285/…`.
         let needle = format!("{}{}", dir.display(), std::path::MAIN_SEPARATOR);
@@ -144,7 +144,7 @@ impl Plan {
 }
 
 /// Total size of the files under `dir`, never following a symlink.
-fn dir_size(dir: &Path) -> u64 {
+pub(crate) fn dir_size(dir: &Path) -> u64 {
     let mut total = 0;
     let mut stack = vec![dir.to_path_buf()];
     while let Some(d) = stack.pop() {

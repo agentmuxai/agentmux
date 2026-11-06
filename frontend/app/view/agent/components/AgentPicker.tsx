@@ -34,10 +34,9 @@ import { CardGrid } from "@/app/element/ui/CardGrid";
 import { CopyErrorButton } from "@/app/errors/CopyErrorButton";
 import { formatErrorReport } from "@/app/errors/error-report";
 import { Menu } from "@/app/element/ui";
-import { getApi } from "@/app/store/global";
 import { readZoom } from "@/app/store/zoom-factor";
 import { MENU_ICON } from "@/app/util/menu-icons";
-import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
+import { createMemo, createSignal, Show, type JSX } from "solid-js";
 import type { AgentViewModel } from "../agent-model";
 import { isAgentInstalling } from "../install-sessions";
 import { AgentCard } from "./AgentCard";
@@ -62,35 +61,15 @@ interface AgentPickerProps {
     model: AgentViewModel;
 }
 
-/** The note under the harness list: what AgentMux installs itself, and the exceptions
- * (SPEC_AGENT_CLI_ISOLATION_NOTE_2026_10_18.md §4.1). They are the catalog's providers
- * AgentMux does not install, so the note can't drift from what it actually installs. */
-const ManagedCliNote = (props: { exceptions: Array<{ docsUrl?: string; displayName: string }> }): JSX.Element => (
+/** The note under the harness list (SPEC_AGENT_CLI_ISOLATION_NOTE_2026_10_18.md §4.1): AgentMux
+ * installs every agent CLI itself, so it has no exceptions to list
+ * (SPEC_ISOLATED_INSTALL_FOR_NON_NPM_CLIS_2026_11_05.md §4). */
+const ManagedCliNote = (): JSX.Element => (
     <p class="agent-picker-templates-hint" data-testid="agent-templates-managed-note">
         AgentMux installs and runs its own copy of each agent CLI, kept apart from any you installed
-        yourself, and keeps each agent's login and settings in its own folders.
-        <Show when={props.exceptions.length > 0}>
-            {" "}
-            The exceptions use the copy on your PATH, so install them yourself first:{" "}
-            <For each={props.exceptions}>
-                {(p, i) => (
-                    <>
-                        {i() > 0 ? ", " : ""}
-                        <a
-                            href={p.docsUrl}
-                            onClick={(e) => {
-                                e.preventDefault();
-                                getApi().openExternal(p.docsUrl);
-                            }}
-                        >
-                            {p.displayName}
-                        </a>
-                    </>
-                )}
-            </For>
-            .
-        </Show>{" "}
-        This isolates the tools, not what an agent can do on your computer.
+        yourself (to run yours instead, switch on "Use the CLI on my PATH" for it in Toolchain), and
+        keeps each agent's login and settings in its own folders. This isolates the tools, not what an
+        agent can do on your computer.
     </p>
 );
 
@@ -200,7 +179,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                             Each card is a <strong>harness</strong> (the CLI that runs the agent, e.g. Claude Code,
                             Codex) — you'll pick which <strong>model</strong> it uses next.
                         </p>
-                        <ManagedCliNote exceptions={templates.userInstalledProviders()} />
+                        <ManagedCliNote />
                         <AgentCardFilters
                             cards={templates.filterableCards()}
                             selected={templates.cardFilters()}
