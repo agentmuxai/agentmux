@@ -93,8 +93,8 @@ const VersionChip = (): JSX.Element => {
 let builtinsRegistered = false;
 
 /** Which fit tier hides each of AgentMux's items in a narrow bar (the rest stay: the backend dot, vault
- *  requests, update and version notices). Higher tiers hide more; system-stats sheds its readouts in
- *  StatusBar.scss. */
+ *  requests, update and version notices). Higher tiers hide more; before it goes, system-stats sheds its
+ *  readouts in StatusBar.scss. */
 const DROP_AT: Record<string, 1 | 2 | 3 | 4 | undefined> = {
     gpu: 2,
     "history-usage": 2,
@@ -106,6 +106,7 @@ const DROP_AT: Record<string, 1 | 2 | 3 | 4 | undefined> = {
     host: 3,
     connectivity: 4,
     muxbus: 4,
+    "system-stats": 4,
 };
 
 /** What a narrow bar sheds, tier by tier, until it fits on one line. */

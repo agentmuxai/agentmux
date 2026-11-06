@@ -226,6 +226,13 @@
     gap: var(--space-2);
     padding: var(--space-2) var(--space-4);
     border-top: 1px solid var(--border-color);
+
+    // A pane narrower than a button's label wraps the label instead of cutting it off.
+    .ui-button {
+        max-width: 100%;
+        white-space: normal;
+        text-align: left;
+    }
 }
 
 // ── Path field (Settings -> Recording) ───────────────────────────────────────

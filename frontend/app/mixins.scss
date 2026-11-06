@@ -36,12 +36,15 @@
     justify-content: flex-end;
 
     // A header too narrow for its controls sheds them by priority (element/width-fit.ts sets the
-    // tier): the view's own end buttons first, then the window controls (which the grip's menu also
-    // offers) and the tab strip's last sliver. Close and the grip stay.
+    // tier, each hiding what the one before did): the tab strip's last sliver, then the view's own
+    // end buttons, then the window controls, which the grip's menu also offers. Close and the grip
+    // stay.
+    &[data-fit="tabs"] .block-frame-default-header-tabstrip,
+    &[data-fit="trim"] .block-frame-default-header-tabstrip,
+    &[data-fit="min"] .block-frame-default-header-tabstrip,
     &[data-fit="trim"] .block-frame-end-extra,
     &[data-fit="min"] .block-frame-end-extra,
-    &[data-fit="min"] .block-frame-end-icons > :not(.block-frame-default-close),
-    &[data-fit="min"] .block-frame-default-header-tabstrip {
+    &[data-fit="min"] .block-frame-end-icons > :not(.block-frame-default-close) {
         display: none;
     }
 

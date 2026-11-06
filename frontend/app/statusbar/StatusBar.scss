@@ -79,8 +79,8 @@
     }
 
     // Fit tiers: each one hides everything the lower ones do. A slot says its tier in `data-drop-at`
-    // (StatusBar.tsx); system-stats drops its readouts, lowest value first, with the separator before each, and all of
-    // them at the last tier.
+    // (StatusBar.tsx); system-stats drops its readouts, lowest value first, with the separator before each (the whole
+    // item goes at the last tier, through its slot).
     @for $tier from 1 through 4 {
         &[data-fit="#{$tier}"] {
             @for $at from 1 through $tier {
@@ -120,9 +120,6 @@
         }
     }
 
-    &[data-fit="4"] .system-stats {
-        display: none;
-    }
 
     .status-bar-item {
         display: flex;
