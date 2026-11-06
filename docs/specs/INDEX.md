@@ -771,7 +771,7 @@ partial list.
 | [`SPEC_NODEJS_24_LTS_STANDARDIZATION_2026_09_15`](SPEC_NODEJS_24_LTS_STANDARDIZATION_2026_09_15.md) | Node.js 24 LTS standardization across agentmuxai repos |
 | [`SPEC_NO_WINDOW_SPAWN_AND_META_ROW_TYPE_SCALE_DRY_2026_10_01`](SPEC_NO_WINDOW_SPAWN_AND_META_ROW_TYPE_SCALE_DRY_2026_10_01.md) | Spec: DRY the no-window spawn flag, and the meta-row type scale |
 | [`SPEC_OFFLINE_RESILIENCE_2026_10_20`](SPEC_OFFLINE_RESILIENCE_2026_10_20.md) | SPEC: Stay in control of every agent when the internet drops, and recover by itself |
-| [`SPEC_ONE_CLICK_VENDOR_CLI_INSTALL_2026_10_20`](SPEC_ONE_CLICK_VENDOR_CLI_INSTALL_2026_10_20.md) | SPEC: One-click install for the six vendor-installed agent CLIs |
+| [`SPEC_ONE_CLICK_VENDOR_CLI_INSTALL_2026_10_20`](SPEC_ONE_CLICK_VENDOR_CLI_INSTALL_2026_10_20.md) | SPEC: One-click install for the vendor-installed agent CLIs |
 | [`SPEC_ONE_COMMAND_INSTALL_ALL_PLATFORMS_2026_11_01`](SPEC_ONE_COMMAND_INSTALL_ALL_PLATFORMS_2026_11_01.md) | Spec: install AgentMux with one copyable command on Windows, macOS and Linux |
 | [`SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24`](SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md) | SPEC: OS notification system (native toasts) + tray re-enablement |
 | [`SPEC_PACKS_2026_11_05`](SPEC_PACKS_2026_11_05.md) | SPEC: Computer-use skills: per-application knowledge for computer use (Word, Excel, Ableton Live, WaveLab, Blender first) |

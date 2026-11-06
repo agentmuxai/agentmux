@@ -1,4 +1,4 @@
-# SPEC: One-click install for the six vendor-installed agent CLIs
+# SPEC: One-click install for the vendor-installed agent CLIs
 
 **Date:** 2026-10-20
 **Status:** active — operator's answers to §7 given through AgentX (2026-11-05); built in #138 by Camper-2: §4.1 to §4.4 for the new-agent panel, with the approval in srv's approval window; what is not built is in §8
@@ -13,14 +13,13 @@ and the `install_chunk` stream), [`SPEC_AGENT_PICKER_INLINE_CREATE_2026_10_18.md
 
 ## 1. What this is
 
-Six harnesses aren't on npm, so AgentMux can't install them into its own isolated folder. Today the panel under such a
+Five harnesses are neither on npm nor downloaded by AgentMux, so it can't install them into its own isolated folder (goose, in the first draft of this spec, is now installed by AgentMux itself: §8). Today the panel under such a
 card shows the vendor's install command with **Copy**, a link to the vendor's instructions and **Check again**:
 
 | Harness | Windows | macOS and Linux |
 |---|---|---|
 | Kimi Code CLI | `pip install kimi-cli` | `pip install kimi-cli` |
 | Antigravity | `irm https://antigravity.google/cli/install.ps1 \| iex` | `curl -fsSL https://antigravity.google/cli/install.sh \| bash` |
-| goose | `irm https://github.com/aaif-goose/goose/releases/download/stable/download_cli.ps1 \| iex` | `curl -fsSL …/download_cli.sh \| CONFIGURE=false bash` |
 | Grok Build | `irm https://x.ai/cli/install.ps1 \| iex` | `curl -fsSL https://x.ai/cli/install.sh \| bash` |
 | Aider | `irm https://aider.chat/install.ps1 \| iex` | `curl -LsSf https://aider.chat/install.sh \| sh` |
 | Muse Code | `irm https://dev.meta.ai/install.ps1 \| iex` | `curl -fsSL https://dev.meta.ai/install.sh \| sh` |
@@ -28,7 +27,7 @@ card shows the vendor's install command with **Copy**, a link to the vendor's in
 This spec adds a **Run** button beside **Copy**: AgentMux runs that installer for the user, streams its output into the
 panel, and re-detects the CLI when it ends.
 
-Five of the six run a script fetched from the vendor's site at the moment of install, unpinned. That is remote code
+Four of the five run a script fetched from the vendor's site at the moment of install, unpinned. That is remote code
 execution by design: it is what the user would do by pasting the command, and the user is choosing to trust the vendor.
 The design below is about making sure **only the user can start it, only the vendor's own command runs, and the user
 sees exactly what ran**. It does not make the installers safe, and the panel must not suggest it does.
@@ -39,7 +38,7 @@ uninstall.
 
 ## 2. What exists today (read 2026-10-20)
 
-- **The six commands live only in the frontend**: `windowsInstallCommand`, `unixInstallCommand` and `docsUrl` in
+- **The commands live only in the frontend**: `windowsInstallCommand`, `unixInstallCommand` and `docsUrl` in
   `frontend/app/view/agent/providers/catalog.ts` (types in `providers/types.ts:79-82`). srv never runs them; it only
   echoes the frontend's text back as the `CliMissingOnPath` install hint (`cli_handlers.rs:111-134`). No version pin and
   no checksum for any of them. srv's provider records carry `known_install_paths` for each vendor's folder
@@ -50,21 +49,18 @@ uninstall.
   the program is never `sh`/`bash`/`cmd`/`powershell`); `sanitize_external_command` strips `AGENTMUX_*` from the child's
   environment; output streams as `install_chunk` events; `InstallConfirm` shows the exact server-built command and the
   user clicks **Install** first.
-- **But its consent is enforced only in the frontend.** The handler ignores its caller context; WebSocket `rpc`
-  messages reach the engine with no per-command authorization (`websocket.rs:712-714`); and every pane process inherits
-  `AGENTMUX_LOCAL_URL` and `AGENTMUX_AUTH_KEY` (`pane_env.rs:56-57`). So a process in an agent's pane could call it
-  without any click. See §6.
+- **Its consent is asked by srv.** Before anything runs, the handler asks the person in the approval window
+  (`ask_user`, served by the window host), so a call that no person answers with a yes does nothing; the panel's own
+  confirm is a courtesy on top.
 - **The npm path** (`install.start`) is started by the user from the card, and by `agent.open` (MuxAPI) for a missing
-  npm CLI using srv's own package and pin. Note for §6: `install.start` checks the `npmPackage` the caller sends only for
-  being non-empty, and installs it even when it doesn't match the provider (`install_handlers.rs:456, 762-766`). npm runs
-  package install scripts (no `--ignore-scripts`).
+  npm CLI. In both, srv takes the package and pin from its own provider registry for the provider id the caller names.
 
 ## 3. Threats, and what each one requires
 
 | # | Threat | Requirement |
 |---|---|---|
 | T1 | A caller makes srv run a command of its choosing. | srv runs only a command from a catalog compiled into srv, chosen by provider id. No command text, URL, argument or environment ever comes from the caller. |
-| T2 | An agent (or anything else holding the local auth key) starts an install without the user. An agent with a shell could run `curl … \| bash` itself, but then its own CLI's permission prompt applies; an AgentMux RPC that skips that prompt would make AgentMux the way around it. | The install runs only after a user approval that srv itself checks, through a channel a pane process can't reach (§4.3). A frontend-only confirm is not enough. |
+| T2 | A caller that isn't the person (an agent in a pane, say) starts an install without the person. An agent with a shell could run `curl … \| bash` itself, but then its own CLI's permission prompt applies; an AgentMux RPC that skips that prompt would make AgentMux the way around it. | The install runs only after a user approval that srv itself checks, through a channel a pane process can't reach (§4.3). A frontend-only confirm is not enough. |
 | T3 | The vendor script, or a redirect, serves something other than the vendor's installer. | HTTPS only; an allowlist of hosts per provider, redirects included; the script is downloaded first, its SHA-256 and size are shown and logged, and *that file* is what runs. No hash pinning (it would break on every vendor release); the user is trusting the vendor, and AgentMux records what that trust ran. |
 | T4 | The installer escalates, or waits forever on a prompt. | AgentMux never elevates. stdin is closed, so a `sudo` or interactive prompt fails instead of hanging. A failure says so and shows the manual command. A timeout ends a stuck install. |
 | T5 | The installer reads AgentMux secrets from its environment. | `sanitize_external_command`, as the system-tool install does. Nothing else is added to the environment except what the catalog entry names (goose's `CONFIGURE=false`). |
@@ -118,10 +114,9 @@ process can drive. The proposal, to confirm in implementation:
   `{providerId, recipe, url}`; srv shows its own approval surface naming the command and URL; only an approval from that
   surface marks it approved; `install_vendor_cli` runs only with an `approvalId` that srv approved, for that provider,
   within a short TTL, once.
-- **Verify before relying on it** that an approval can't be granted over the same WebSocket RPC surface a pane process
-  can reach with `AGENTMUX_AUTH_KEY`. If it can, that's a gap in the approval windows themselves and needs fixing first
-  (§6).
-- No MuxAPI / MCP tool starts this. `agent.open` keeps auto-installing npm CLIs only; for the six it keeps failing with
+- **The approval is answered only in the window host**, never over the RPC that starts the install (`ask_user`, as the
+  system-tool install does).
+- No MuxAPI / MCP tool starts this. `agent.open` keeps auto-installing npm CLIs only; for these it keeps failing with
   the install hint, as today.
 
 ### 4.4 The panel
@@ -141,7 +136,7 @@ The Toolchain pane's row for these six gets the same **Run** through the same ap
 
 ## 5. Tests
 
-- srv: the recipe table covers exactly the six and each OS; `install_vendor_cli` refuses an unknown provider, a missing,
+- srv: the recipe table covers exactly the five and each OS; `install_vendor_cli` refuses an unknown provider, a missing,
   expired, reused or other-provider `approvalId`; argv never contains a shell or a pipe; a redirect to a host outside
   `allowed_hosts` aborts before anything runs; an `http://` URL is refused; the downloaded file's hash is in the first
   chunk; the env is sanitized; cancel kills the child; the temp file is gone after success, failure and cancel.
@@ -150,14 +145,11 @@ The Toolchain pane's row for these six gets the same **Run** through the same ap
 - Live, once per OS: install goose, Aider and Kimi from a clean account; check the hash line, the re-detection without
   restart, and the failure path with the network off.
 
-## 6. Gaps found while writing this (fix separately, before or with this)
+## 6. Follow-ups found while writing this
 
-1. **The system-tool one-click install has no server-side user gate** (§2): consent lives only in the frontend, and a
-   pane process can reach the RPC. It runs package-manager installs of fixed packages, so the impact is small, but it
-   should get the same approval as §4.3.
-2. **`install.start` installs whatever `npmPackage` the caller sends** (§2). It should take the package from srv's
-   provider registry, as `agent.open`'s auto-install already does, and refuse a mismatch.
-3. **The isolation spec's Step A** assumed the six's install commands would stay in the frontend; §4.1 moves them, so
+1. **The system-tool one-click install** asks the person in the approval window like §4.3 (done; §8).
+2. **`install.start`** takes the package from srv's provider registry (done).
+3. **The isolation spec's Step A** assumed these install commands would stay in the frontend; §4.1 moves them, so
    that spec's description should point here once this lands.
 
 ## 7. Open questions
@@ -187,8 +179,8 @@ Answers to §7, from AgentX: (1) process-scoped `-ExecutionPolicy Bypass` on the
   and `install.cancel` as the npm and system-tool installs; one install per provider (T7).
 - **Only the user can start it (T2).** srv asks in the approval window (`ask_user`), the one the system-tool install
   already uses and no pane process can answer. The question names the vendor's command, what AgentMux does, and that
-  it installs outside AgentMux's isolation. With no window, no answer or a no, nothing is downloaded or run. §6 gap 1
-  is therefore already closed for the system-tool install, which has had this gate since it was written.
+  it installs outside AgentMux's isolation. With no window, no answer or a no, nothing is downloaded or run. §6 item 1
+  was therefore already done for the system-tool install, which has had this gate since it was written.
 - **Download, then run that file (T3).** HTTPS only, no credentials or odd port in the address, every redirect's host
   on the provider's list, 2 MB cap, 60 s limit. An empty answer or a web page is refused. The first lines of the
   run's log are the vendor's command, the URL, the final host, the size and the SHA-256, and srv logs the same.
@@ -222,4 +214,4 @@ Answers to §7, from AgentX: (1) process-scoped `-ExecutionPolicy Bypass` on the
   a launch failure. The panel shows srv's text; the hint is the remaining copy, to be read from srv's table.
 - **Live runs** of each installer on each OS (§5): the srv tests cover the download policy, the approval, argv, the
   environment and cancel with stand-in installers; no vendor installer was run for this change.
-- **§6 gaps 2 and 3** are their own tasks.
+- **§6 item 3** (the isolation spec's pointer to this one) is its own task.
