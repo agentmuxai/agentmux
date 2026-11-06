@@ -116,3 +116,47 @@ async fn only_a_seeded_template_can_be_hidden() {
     assert!(body["error"].as_str().unwrap().contains("delete"), "{body}");
     assert_eq!(state.mstore.agent_def_get(&mine.id).unwrap().unwrap().user_hidden, 0);
 }
+
+// ---- route and model on a model route ----
+
+fn on_route(state: &AppState, who: &AgentDefinition) {
+    crate::backend::model_gateway::launch::set_choice(&state.mstore, &who.id, "claude", "openrouter", "").unwrap();
+}
+
+#[tokio::test]
+async fn the_model_changes_on_the_route_the_agent_is_on_and_the_agent_can_leave_the_route() {
+    let state = test_state();
+    let (me, target) = (agent(&state, "Editor"), agent(&state, "Routed"));
+    on_route(&state, &target);
+    let token = crate::backend::model_gateway::token::token_for(&target.slug, &target.id, "openrouter");
+
+    let (status, body) = update_call(&state, Some(&me), json!({ "agent": target.slug, "model": "deepseek/deepseek-v4-pro-0813" })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["changed"], json!(["model"]));
+    let saved = crate::backend::model_gateway::launch::choice_of(&state.mstore, &target.id).unwrap();
+    assert_eq!((saved.route.as_str(), saved.model.as_str()), ("openrouter", "deepseek/deepseek-v4-pro-0813"));
+
+    let (status, body) = update_call(&state, Some(&me), json!({ "agent": target.slug, "model": "gpt-5" })).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body["error"].as_str().unwrap().contains("does not serve"), "{body}");
+
+    let (status, body) = update_call(&state, Some(&me), json!({ "agent": target.slug, "route": "" })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["changed"], json!(["route"]));
+    assert!(crate::backend::model_gateway::launch::choice_of(&state.mstore, &target.id).is_none());
+    assert!(crate::backend::model_gateway::token::grant_for(&token).is_none(), "its token stops working at once");
+}
+
+#[tokio::test]
+async fn an_update_does_not_put_an_agent_on_a_route_because_that_spends_the_persons_key() {
+    let state = test_state();
+    let (me, target) = (agent(&state, "Editor"), agent(&state, "Plain"));
+    for req in [json!({ "agent": target.slug, "route": "openrouter" }), json!({ "agent": target.slug, "model": "deepseek/deepseek-v4-pro-0813" })] {
+        let (status, body) = update_call(&state, Some(&me), req).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        assert!(body["error"].as_str().unwrap().contains("not on a model route"), "{body}");
+    }
+    assert!(crate::backend::model_gateway::launch::choice_of(&state.mstore, &target.id).is_none());
+    let (status, body) = update_call(&state, Some(&me), json!({ "agent": target.slug, "route": "" })).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+}

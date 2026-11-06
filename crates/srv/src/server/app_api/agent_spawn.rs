@@ -29,6 +29,7 @@ use super::*;
 mod container;
 mod create;
 mod many;
+pub(crate) mod route;
 pub(super) mod team;
 pub(crate) use create::handle_agent_create;
 pub(crate) use many::handle_agent_spawn_many;
@@ -48,7 +49,7 @@ pub(crate) const CREATED_BY_CONTENT: &str = "agent:created_by";
 
 /// Content only srv writes, and that a fork of the agent does not take along.
 pub(crate) fn written_only_by_srv(content_type: &str) -> bool {
-    content_type == WORKER_OF_CONTENT || content_type == CREATED_BY_CONTENT
+    content_type == WORKER_OF_CONTENT || content_type == CREATED_BY_CONTENT || content_type == crate::backend::model_gateway::launch::CONTENT_TYPE
 }
 
 /// The agent that made `def_id`: the one that created it, or the leader it is a worker of.
@@ -84,6 +85,9 @@ pub(crate) struct SpawnAgentResult {
     pub tab_id: String,
     pub provider: String,
     pub model: Option<String>,
+    /// The model route it runs on (`Agents routes`); absent when it runs on its harness's own sign-in.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub route: Option<String>,
     pub effort: Option<String>,
     /// The account it runs on: its name, and its id.
     pub account: String,
@@ -161,10 +165,7 @@ async fn spawn_with(
             return Err(refuse(StatusCode::BAD_REQUEST, format!("INVALID_ARG: a name is at most {MAX_NAME_CHARS} characters, on one line")));
         }
     }
-    let provider = state.id_store.resolve_effective_provider_id(&leader.def);
-    let leader_runtime = state.mstore.agent_last_runtime_get(&leader.def.id).unwrap_or_default();
-    let mut runtime = worker_runtime(&provider, &leader_runtime, req.model.as_deref(), req.effort.as_deref())
-        .map_err(|e| refuse(StatusCode::BAD_REQUEST, format!("INVALID_ARG: {e}")))?;
+    let (provider, mut runtime) = route::choose(state, &leader, &req.route, req.model.as_deref(), req.effort.as_deref())?;
     runtime.placement = container::decide_here(state, &req.container, &leader.def, &leader.def).await?;
     let tab_id = super::agent_block::resolve_tab_id_or_active(&state.mstore, &leader.block_id)
         .map_err(|e| refuse(StatusCode::CONFLICT, format!("NO_TAB: your pane isn't in a tab: {e}")))?;
@@ -183,12 +184,12 @@ async fn spawn_with(
         ));
     }
 
-    let account = choose_account(state, &leader, &provider, req.account.as_deref())?;
+    let account = route::account(state, &leader, &provider, &runtime, req.account.as_deref())?;
 
     let asked_user = if operator_approved {
         false
     } else {
-        consent(state, &leader, name, runtime.model.as_deref(), &runtime.placement, &account, brief, &req.user_instruction).await?
+        consent(state, &leader, name, runtime.model.as_deref(), &runtime, &account, brief, &req.user_instruction).await?
     };
 
     let name = match name {
@@ -215,7 +216,8 @@ async fn spawn_with(
         block_id: opened.block_id,
         tab_id: opened.tab_id,
         provider: opened.provider,
-        model: runtime.model,
+        route: runtime.route.as_ref().map(|c| c.route.clone()),
+        model: runtime.route.map(|c| c.model).or(runtime.model),
         effort: runtime.effort,
         account: account.label,
         account_id: account.id,
@@ -257,7 +259,7 @@ async fn launch(
     if let Some(stand_in) = reserved {
         crate::server::agent_lifecycle::rekey_reservation(state, stand_in, &worker.id);
     }
-    let placed = container::apply(state, &mut worker, &runtime.placement);
+    let placed = container::apply(state, &mut worker, &runtime.placement).and_then(|()| route::apply(state, &mut worker, runtime));
     let marked = placed.and_then(|()| {
         state
             .mstore
@@ -270,6 +272,9 @@ async fn launch(
             .map_err(|e| format!("mark it as a worker: {e}"))
     });
     let linked = marked.and_then(|()| {
+        if account.id.is_empty() {
+            return Ok(());
+        }
         state
             .identity_store
             .agent_identity_link(&worker.id, &account.id, &account.provider)
@@ -353,6 +358,7 @@ pub(crate) async fn spawn_for_job(
         account,
         brief: brief.to_string(),
         container: Default::default(),
+        route: Default::default(),
         user_instruction: String::new(),
     };
     spawn_with(state, leader, &req, true).await.map_err(|e| e.message)
@@ -380,6 +386,15 @@ pub(crate) struct WorkerRuntime {
     effort: Option<String>,
     /// Where it runs, when it was asked for (`runtime`, `container_image`, `memory_mb`, `cpus`).
     placement: container::Placement,
+    /// The model route and model it runs on, when it has one (`Agents routes`).
+    route: Option<crate::backend::model_gateway::launch::Choice>,
+    /// What the approval says about that route and who pays.
+    route_line: String,
+    /// The route was named, or differs from the leader's: the person is asked even when their own turn asked for the
+    /// worker, because their words asked for a worker and not for spending their key.
+    route_asked: bool,
+    /// Its harness, when that is not its leader's.
+    harness: Option<String>,
 }
 
 pub(crate) fn worker_runtime(
@@ -418,7 +433,7 @@ pub(crate) fn worker_runtime(
         return Err(format!("unknown effort {:?}: use low, medium, high, xhigh or max", effort.unwrap_or("")));
     }
     let stored = crate::backend::storage::agents::normalize_last_runtime(&raw)?;
-    Ok(WorkerRuntime { stored, model: parsed.model, effort: parsed.effort, placement: Default::default() })
+    Ok(WorkerRuntime { stored, model: parsed.model, effort: parsed.effort, ..Default::default() })
 }
 
 /// One spawn at a time per leader, from counting its workers to opening the
@@ -712,20 +727,22 @@ async fn consent(
     leader: &Leader,
     name: Option<&str>,
     model: Option<&str>,
-    placement: &container::Placement,
+    runtime: &WorkerRuntime,
     account: &WorkerAccount,
     brief: &str,
     user_instruction: &str,
 ) -> Result<bool, SpawnError> {
     let provenance = blockcontroller::get_controller(&leader.block_id).and_then(|c| c.turn_provenance());
-    let Err(why) = crate::sagas::self_quit::gate(provenance.as_ref(), user_instruction) else {
+    let gate = crate::sagas::self_quit::gate(provenance.as_ref(), user_instruction);
+    if gate.is_ok() && !runtime.route_asked {
         return Ok(false);
-    };
+    }
+    let why = gate.err().map_or_else(|| "a model route spends the person's key".to_string(), |w| w.as_str().to_string());
     tracing::info!(leader = %leader.def.name, why = why.as_str(), "agent.spawn: asking the user");
     let question = json!({
         "kind": "consent",
         "title": format!("{} wants to start a worker", one_line(&leader.def.name, 60)),
-        "message": consent_message(&leader.def.name, name, model, placement, account, brief),
+        "message": consent_message(&leader.def.name, name, model, runtime, account, brief),
         "checkbox": "",
         "ok_label": "Start it",
         "cancel_label": "Don't",
@@ -748,20 +765,21 @@ async fn ask_consent(state: &AppState, leader: &Leader, question: serde_json::Va
     }
 }
 
-fn consent_message(leader: &str, name: Option<&str>, model: Option<&str>, placement: &container::Placement, account: &WorkerAccount, brief: &str) -> String {
+fn consent_message(leader: &str, name: Option<&str>, model: Option<&str>, runtime: &WorkerRuntime, account: &WorkerAccount, brief: &str) -> String {
     let who = match name {
         Some(n) => format!("a new agent, {}", one_line(n, 60)),
         None => "a new agent".to_string(),
     };
     let on = model.map(|m| format!(" on {}", one_line(m, 40))).unwrap_or_default();
-    let on = format!("{on}{}", placement.describe());
+    let on = format!("{on}{}", runtime.placement.describe());
     let note = account.note.as_deref().map(|n| format!(" {}", one_line(n, 200))).unwrap_or_default();
+    let paid_by = if account.id.is_empty() { runtime.route_line.clone() } else { format!(" It runs on the account {}.{note}", one_line(&account.label, 80)) };
     format!(
         "{} wants to start {who}{on}, from its own instructions, in its team tab, with this task:\n\n{}\n\n\
-         It runs on the account {}.{note} It spends tokens until it is stopped. Start it?",
+         {} It spends tokens until it is stopped. Start it?",
         one_line(leader, 60),
         one_line(brief, 400),
-        one_line(&account.label, 80),
+        paid_by.trim(),
     )
 }
 
