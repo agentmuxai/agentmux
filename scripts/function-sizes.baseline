@@ -294,7 +294,7 @@
 161 crates/srv/src/server/app_api/pane.rs::open_pane_floating
 116 crates/srv/src/server/browser_bypass_routes.rs::handle_ui_browser_request_bypass
 133 crates/srv/src/server/browser_capture.rs::handle_browser_capture
-218 crates/srv/src/server/browser_terminal.rs::handle_ui_browser_terminal
+216 crates/srv/src/server/browser_terminal.rs::handle_ui_browser_terminal
 190 crates/srv/src/server/browser_vault_fill.rs::handle_vault_fill
 739 crates/srv/src/server/cli_handlers.rs::register_cli_handlers
 904 crates/srv/src/server/editor_handlers.rs::register_editor_handlers

@@ -611,10 +611,7 @@ pub(crate) async fn handle_ui_browser_terminal(
     // A grant that asks about each line has the person answer for it before Enter.
     if grant.asks_each_line() {
         return crate::server::browser_terminal_line::run(crate::server::browser_terminal_line::Call {
-            state: &state,
-            block_id: &block_id,
-            pane: &pane,
-            agent: &agent,
+            state: &state, block_id: &block_id, pane: &pane, agent: &agent,
             grant: &grant,
             origin: &origin,
             steps,
@@ -624,6 +621,7 @@ pub(crate) async fn handle_ui_browser_terminal(
             wait: Duration::from_secs(req.timeout_seconds.unwrap_or(DEFAULT_WAIT_SECS).min(MAX_WAIT_SECS)),
             until: req.until_text.as_deref(),
             rows_before: rows_of(&seen).unwrap_or_default(),
+            owner: crate::server::browser_owner::owner_of(&pane),
         })
         .await;
     }

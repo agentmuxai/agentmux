@@ -60,6 +60,9 @@ pub(crate) struct Call<'a> {
     pub until: Option<&'a str>,
     /// The terminal's rows before anything was typed.
     pub rows_before: Vec<String>,
+    /// Who drove the pane when the call began: once that changes the person has
+    /// taken it over and nothing more of the agent's is sent beyond clearing its line.
+    pub owner: Option<String>,
 }
 
 /// Is `c` a character the person could not see in a line, or would read as
@@ -70,7 +73,9 @@ fn is_hidden(c: char) -> bool {
             c,
             '\u{00a0}' | '\u{00ad}' | '\u{034f}' | '\u{061c}' | '\u{115f}' | '\u{1160}' | '\u{17b4}' | '\u{17b5}' | '\u{180e}'
                 | '\u{2000}'..='\u{200f}' | '\u{2028}'..='\u{202f}' | '\u{205f}'..='\u{206f}' | '\u{3000}' | '\u{3164}'
-                | '\u{feff}' | '\u{ffa0}'
+                | '\u{feff}' | '\u{ffa0}' | '\u{0600}'..='\u{0605}' | '\u{06dd}' | '\u{070f}' | '\u{08e2}' | '\u{1bca0}'..='\u{1bca3}'
+                | '\u{1d173}'..='\u{1d17a}' | '\u{2800}' | '\u{fe00}'..='\u{fe0f}' | '\u{fff9}'..='\u{fffc}'
+                | '\u{e0000}'..='\u{e007f}' | '\u{e0100}'..='\u{e01ef}'
         )
 }
 
@@ -177,7 +182,10 @@ async fn type_pre(c: &Call<'_>, pre: &[KeyStep]) -> (usize, Option<String>) {
 
 /// Take back what the agent typed: as many Backspaces as it typed characters,
 /// then, if the prompt still doesn't read as it did, Ctrl+C. Best effort: the
-/// pane may be gone or off the granted site, and then nothing more is sent.
+/// pane may be gone or off the granted site, and then nothing more is sent. The
+/// Backspaces go at once, before a person who took the pane over can type; the
+/// Ctrl+C waits for the screen and is dropped if the person has the pane by then,
+/// since it could interrupt what they started.
 async fn erase(c: &Call<'_>, typed: &[KeyStep]) {
     let count = typed.iter().filter(|k| k.text.is_some()).count();
     let baseline = tail_row(&c.rows_before);
@@ -189,6 +197,9 @@ async fn erase(c: &Call<'_>, typed: &[KeyStep]) {
         }
     }
     let_screen_catch_up(c.state, c.block_id).await;
+    if crate::server::browser_owner::owner_of(c.pane) != c.owner {
+        return;
+    }
     let now = look(c.state, c.block_id).await.ok().and_then(|v| rows_of(&v)).unwrap_or_default();
     if tail_row(&now) != baseline {
         if let Ok(ctrl_c) = step_for_key("Ctrl+C") {
@@ -300,7 +311,6 @@ pub(crate) async fn run(c: Call<'_>) -> Response {
             return refuse(&c, StatusCode::CONFLICT, "I can't confirm what would run: the terminal doesn't show what you typed. Hand off the pane".to_string());
         }
     };
-    let owner_before = crate::server::browser_owner::owner_of(c.pane);
     let (answer, _holding) = match ask_person(&c, &line, &rows).await {
         Ok(a) => a,
         Err(e) => {
@@ -313,7 +323,7 @@ pub(crate) async fn run(c: Call<'_>) -> Response {
         let (how, said) = if answer == Answer::TimedOut { (How::TimedOut, "timed_out") } else { (How::Declined, "declined") };
         return finish(&c, 0, None, how, Some(said)).await;
     }
-    let late = if crate::server::browser_owner::owner_of(c.pane) != owner_before {
+    let late = if crate::server::browser_owner::owner_of(c.pane) != c.owner {
         Some("the person took over this pane, so the line was not run".to_string())
     } else {
         match brake(&c) {
@@ -352,6 +362,15 @@ mod tests {
         assert_eq!(visible("rm\u{00a0}-rf"), "rm\\u{a0}-rf", "a look-alike space is not a space");
         assert_eq!(visible("echo \u{1b}[2J"), "echo \\u{1b}[2J");
         assert_eq!(visible("\u{202e}txt.sh"), "\\u{202e}txt.sh", "a direction mark is shown");
+    }
+
+    #[test]
+    fn tag_characters_selectors_annotations_and_blank_braille_are_shown_too() {
+        for c in ['\u{e0041}', '\u{e007f}', '\u{fe0f}', '\u{e0100}', '\u{fff9}', '\u{fffb}', '\u{2800}', '\u{200b}'] {
+            let shown = visible(&format!("a{c}b"));
+            assert!(shown.contains("\\u{") && !shown.contains(c), "U+{:04X} was left as it is: {shown:?}", c as u32);
+        }
+        assert_eq!(visible("café ✓ 日本語"), "café ✓ 日本語", "ordinary non-ASCII text is left readable");
     }
 
     #[test]
