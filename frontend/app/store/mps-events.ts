@@ -137,6 +137,8 @@ export const WpsEvent = {
     AgentReactiveRegistered: "agent:reactive-registered",
     AgentReactiveUnregistered: "agent:reactive-unregistered",
     AgentsChanged: "agents:changed",
+    /** An Audit row was written; the Audit asks `audit.query` for the newest rows (crates/srv/src/backend/audit_live.rs). */
+    AuditChanged: "audit:changed",
     HistorySessionsChanged: "history:sessions:changed",
     CronChanged: "cron_changed",
     DispatchActivity: "dispatch:activity",

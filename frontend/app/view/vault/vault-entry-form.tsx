@@ -19,6 +19,7 @@ import type { VaultSection } from "@/types/rpc/VaultSection";
 import { kindsIn, vaultKind, type VaultInput } from "./vault-kinds";
 import { firstSaveNotice } from "./vault-prompts";
 import { createEntry, updateEntry, vaultEntries } from "./vault-store";
+import { VaultField } from "./vault-vaults";
 import { getPlatform } from "@/util/platformutil";
 import { browserProfiles, ensureBrowserProfiles } from "@/app/view/browser/browser-profiles";
 // Loaded with the form, which an agent's pane opens without a Vault pane: a
@@ -27,7 +28,7 @@ import "@/app/view/warden-shared/warden-manager-chrome.scss";
 import "./vault-view.scss";
 
 export type VaultFormTarget =
-    | { mode: "new"; section: VaultSection; request?: VaultRequest }
+    | { mode: "new"; section: VaultSection; request?: VaultRequest; vault?: string }
     | { mode: "edit"; entry: VaultEntryInfo };
 
 function TextArea(props: { value: string; onInput: (v: string) => void; secret?: boolean; placeholder?: string; label: string }): JSX.Element {
@@ -46,6 +47,13 @@ function TextArea(props: { value: string; onInput: (v: string) => void; secret?:
     );
 }
 
+/** Personal, and the named profiles; a deleted one still shows while an entry names it (`current`). */
+function profileChoices(current: string | undefined) {
+    const named = browserProfiles().map((p) => ({ value: `profile:${p.id}`, label: p.name }));
+    const gone = current && current !== "personal" && !named.some((o) => o.value === current) ? [{ value: current, label: "A deleted profile" }] : [];
+    return [{ value: "personal", label: "Personal" }, ...named, ...gone];
+}
+
 export function VaultEntryForm(props: { target: VaultFormTarget; onClose: (savedId?: string) => void }): JSX.Element {
     const t = props.target;
     const editing = t.mode === "edit" ? t.entry : null;
@@ -59,15 +67,10 @@ export function VaultEntryForm(props: { target: VaultFormTarget; onClose: (saved
     const [clear, setClear] = createStore<Record<string, boolean>>({});
     const [error, setError] = createSignal<string | null>(null);
     const [busy, setBusy] = createSignal(false);
+    // Where a new entry goes: the Vault the lists are on, the one an agent asked for, or Personal.
+    const [vault, setVault] = createSignal((t.mode === "new" && (t.vault || t.request?.vault)) || "personal");
 
     ensureBrowserProfiles();
-    // Personal, and the named profiles; a deleted one still shows while an entry names it.
-    const profileOptions = () => {
-        const named = browserProfiles().map((p) => ({ value: `profile:${p.id}`, label: p.name }));
-        const now = fields.profile;
-        const gone = now && now !== "personal" && !named.some((o) => o.value === now) ? [{ value: now, label: "A deleted profile" }] : [];
-        return [{ value: "personal", label: "Personal" }, ...named, ...gone];
-    };
     const kindOptions = () => (t.mode === "new" ? kindsIn(kind()?.section ?? t.section) : []).map((k) => ({ value: k.name, label: k.label }));
     const isSet = (part: string) => editing?.parts_set.includes(part) ?? false;
     const main = () => kind()?.parts[0]?.name ?? "";
@@ -98,6 +101,7 @@ export function VaultEntryForm(props: { target: VaultFormTarget; onClose: (saved
                     fields: pick(fields, k.fields),
                     parts: pick(parts, k.parts),
                     request_id: request?.id,
+                    vault: vault(),
                 });
                 props.onClose(res.id);
             }
@@ -131,6 +135,9 @@ export function VaultEntryForm(props: { target: VaultFormTarget; onClose: (saved
                         <Field label="Kind" layout="stacked">
                             <Select value={kindName()} onChange={setKindName} options={kindOptions()} />
                         </Field>
+                    </Show>
+                    <Show when={!editing}>
+                        <VaultField value={vault()} onChange={setVault} description="Which agents may use it is the Vault's setting." />
                     </Show>
                     <Field label="Label" layout="stacked" description="How you and agents name it. Agents see labels, never values.">
                         <TextInput value={label()} onInput={(e) => setLabel(e.currentTarget.value)} autofocus={!request} maxLength={200} />
@@ -180,7 +187,7 @@ export function VaultEntryForm(props: { target: VaultFormTarget; onClose: (saved
                     <For each={(kind()?.fields ?? []).filter((f) => !f.kept && (!f.profile || !!fields.site?.trim()))}>
                         {(f) => (
                             <Field label={f.label} layout="stacked" description={f.profile ? "Only this profile's tabs are offered it." : undefined}>
-                                <Show when={!f.profile} fallback={<Select value={fields[f.name] || "personal"} onChange={(v) => setFields(f.name, v)} options={profileOptions()} />}>
+                                <Show when={!f.profile} fallback={<Select value={fields[f.name] || "personal"} onChange={(v) => setFields(f.name, v)} options={profileChoices(fields.profile)} />}>
                                     <Show
                                         when={f.multiline}
                                         fallback={<TextInput value={fields[f.name] ?? ""} placeholder={f.placeholder} onInput={(e) => setFields(f.name, e.currentTarget.value)} />}

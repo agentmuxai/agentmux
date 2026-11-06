@@ -13,7 +13,7 @@ use agentmux_common::time::now_ms;
 
 use super::{record, seal, EntryChange, NewEntry, Parts, PERSON};
 use crate::backend::storage::store::Store;
-use crate::backend::storage::vault::VaultRow;
+use crate::backend::storage::vault::{VaultRow, PERSONAL_VAULT};
 
 pub const PROFILE: &str = "profile";
 pub const REALM: &str = "realm";
@@ -87,9 +87,20 @@ fn offered(row: &VaultRow) -> bool {
     !tags_of(row).iter().any(|t| t == REFUSED || t == super::signups::UNCONFIRMED)
 }
 
+/// The Vault `profile` (`personal` or `profile:<id>`) keeps its sign-ins in and offers them from: the
+/// person's choice in the Vault pane, or Personal, also when the chosen Vault is gone (§5.3).
+pub fn vault_for(store: &Store, profile: &str) -> Result<String, String> {
+    let chosen = store.signin_vault(profile).map_err(|e| e.to_string())?;
+    Ok(match chosen {
+        Some(v) if store.vault_info(&v).map_err(|e| e.to_string())?.is_some() => v,
+        _ => PERSONAL_VAULT.to_string(),
+    })
+}
+
 /// The sign-ins kept for `s`, newest first.
 fn held(store: &Store, s: &Space) -> Result<Vec<VaultRow>, String> {
-    let mut rows: Vec<VaultRow> = store.vault_list().map_err(|e| e.to_string())?.into_iter().filter(|r| holds(r, s)).collect();
+    let vault = vault_for(store, &s.profile)?;
+    let mut rows: Vec<VaultRow> = store.vault_list().map_err(|e| e.to_string())?.into_iter().filter(|r| r.vault_id == vault && holds(r, s)).collect();
     rows.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
     Ok(rows)
 }
@@ -120,6 +131,7 @@ pub fn saved_as(store: &Store, s: &Space, username: &str, password: &str) -> Res
 /// offered ([`offered`]), newest first: `(entry id, origin, user name)`. HTTP sign-ins (with a
 /// realm or for a proxy) go through the browser's own prompt, not a form.
 pub fn offered_for(store: &Store, profile: &str, origins: &[String]) -> Result<Vec<(String, String, String)>, String> {
+    let vault = vault_for(store, profile)?;
     let mut rows: Vec<VaultRow> = store
         .vault_list()
         .map_err(|e| e.to_string())?
@@ -127,6 +139,7 @@ pub fn offered_for(store: &Store, profile: &str, origins: &[String]) -> Result<V
         .filter(|r| {
             let f = fields_of(r);
             r.kind == "login"
+                && r.vault_id == vault
                 && f.get(PROFILE).map(String::as_str) == Some(profile)
                 && f.get(SITE).is_some_and(|s| origins.contains(s))
                 && !f.contains_key(REALM)
@@ -246,7 +259,7 @@ fn save_as(store: &Store, s: &Space, username: &str, password: &str, tag: Option
     let tags = tag.map(|t| vec![t.to_string()]).unwrap_or_default();
     let entry = NewEntry { kind: "login".into(), label: label_for(s), fields, tags, parts };
     let (action, target) = if tag.is_some() { ("moved in", "from the old sign-in store") } else { ("saved", "from a browser sign-in") };
-    super::insert(store, entry, PERSON, action, target)
+    super::insert_in(store, entry, PERSON, action, target, &vault_for(store, &s.profile)?)
 }
 
 /// A sign-in's label: the site's host, and the realm it names.
@@ -296,11 +309,14 @@ pub fn profile_deleted(store: &Store, id: &str, name: &str, keep: bool) -> Resul
             super::delete(store, &row.id)?;
         }
     }
+    // The profile is going: it keeps no sign-in Vault of its own (reached only when every sign-in was dealt with).
+    store.signin_vault_set(&profile, PERSONAL_VAULT).map_err(|e| e.to_string())?;
     Ok(rows.len())
 }
 
-/// Moves entry `id` from `profile` to Personal, tagged. One written meanwhile is
-/// read again; one still unmoved after that is an error, so the profile stays.
+/// Moves entry `id` from `profile` to Personal, tagged, and into the Vault Personal's tabs offer sign-ins from
+/// (the entry would not be offered there otherwise). One written meanwhile is read again; one still unmoved
+/// after that is an error, so the profile stays.
 fn move_to_personal(store: &Store, id: &str, profile: &str, name: &str) -> Result<(), String> {
     for _ in 0..3 {
         let Some(row) = store.vault_get(id).map_err(|e| e.to_string())? else { return Ok(()) };
@@ -309,6 +325,10 @@ fn move_to_personal(store: &Store, id: &str, profile: &str, name: &str) -> Resul
             return Ok(());
         }
         fields.insert(PROFILE.to_string(), PERSONAL.to_string());
+        let vault = vault_for(store, PERSONAL)?;
+        if row.vault_id != vault {
+            store.vault_move_entry(&row.id, &vault).map_err(|e| e.to_string())?;
+        }
         let mut tags = tags_of(&row);
         if tags.len() < super::MAX_TAGS {
             tags.push(format!("from deleted profile {name}").chars().take(super::MAX_LABEL).collect());

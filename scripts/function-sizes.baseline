@@ -333,7 +333,7 @@
 140 crates/srv/src/server/shell_secrets.rs::inject
 135 crates/srv/src/server/system_install_handlers.rs::spawn_system_install_task
 107 crates/srv/src/server/ui_handlers.rs::handle_host_browser_popup
-206 crates/srv/src/server/vault_handlers.rs::handle_host_vault
+201 crates/srv/src/server/vault_handlers.rs::handle_host_vault
 132 crates/srv/src/server/vault_rotate.rs::handle_vault_rotate
 210 crates/srv/src/server/websocket.rs::handle_incoming_text
 227 crates/srv/src/server/websocket.rs::handle_ws_connection
@@ -471,7 +471,6 @@
 140 frontend/app/view/agent/hooks/useShellNodeStream.ts::useShellNodeStream
 163 frontend/app/view/agent/hooks/useSnapshotPersistence.ts::useSnapshotPersistence
 173 frontend/app/view/agent/hooks/useSubagentBackfillGate.ts::useSubagentBackfillGate
-300 frontend/app/view/agent/offline/failed-turn.ts::createFailedTurnRecovery
 185 frontend/app/view/agent/offline/offline-input.ts::createOfflineInput
 229 frontend/app/view/agent/parseHistoryLines.ts::HistoryParser::feed
 127 frontend/app/view/agent/providers/claude-translator.ts::ClaudeTranslator::translate
@@ -481,7 +480,7 @@
 116 frontend/app/view/agent/stream-parser.ts::ClaudeCodeStreamParser::eventToNode
 232 frontend/app/view/agent/useAgentStream.ts::useAgentStream
 116 frontend/app/view/agent/virtualization/held-release.ts::useScrolledOffRelease
-195 frontend/app/view/audit/audit-manager.tsx::AuditManager
+132 frontend/app/view/audit/audit-manager.tsx::AuditManager
 103 frontend/app/view/browser/browser-model.ts::BrowserViewModel::getBodyContextMenuItems
 101 frontend/app/view/browser/browser-profile-menu.tsx::BrowserProfileButton
 267 frontend/app/view/browser/driven-by-strip.tsx::DrivenByStrip
@@ -547,10 +546,10 @@
 127 frontend/app/view/tower/tower-model.ts::TowerViewModel::constructor
 224 frontend/app/view/tower/tower-view.tsx::HostTable
 126 frontend/app/view/tower/tower-view.tsx::TowerView
-133 frontend/app/view/vault/vault-entries.tsx::VaultEntries
-173 frontend/app/view/vault/vault-entry-form.tsx::VaultEntryForm
+131 frontend/app/view/vault/vault-entries.tsx::VaultEntries
+172 frontend/app/view/vault/vault-entry-form.tsx::VaultEntryForm
 264 frontend/app/view/vault/vault-export.tsx::VaultExportDialog
-286 frontend/app/view/vault/vault-import.tsx::VaultImportDialog
+284 frontend/app/view/vault/vault-import.tsx::VaultImportDialog
 136 frontend/app/view/vault/vault-reveal.tsx::VaultRevealDialog
 104 frontend/app/view/vault/vault-secrets.tsx::VaultSecrets
 105 frontend/app/view/warden-jobs/job-dry-run.tsx::JobDryRun

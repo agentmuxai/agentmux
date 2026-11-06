@@ -40,6 +40,12 @@ pub(super) const VAULT_SCHEMA: &str = "
         created_at INTEGER NOT NULL DEFAULT 0
     );
     INSERT OR IGNORE INTO db_vaults (id, name, agents, position) VALUES ('personal', 'Personal', 'all', 0);
+    -- The Vault each browser profile (`personal` or `profile:<id>`) saves its sign-ins to and offers
+    -- them from. A profile with no row uses Personal.
+    CREATE TABLE IF NOT EXISTS db_vault_signin_vaults (
+        profile  TEXT PRIMARY KEY,
+        vault_id TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS db_vault_activity (
         seq         INTEGER PRIMARY KEY AUTOINCREMENT,
         at          INTEGER NOT NULL,
@@ -355,8 +361,38 @@ impl Store {
             return Ok(false);
         }
         let n = tx.execute("DELETE FROM db_vaults WHERE id = ?1", params![id])?;
+        // A profile that saved its sign-ins there goes back to Personal.
+        tx.execute("DELETE FROM db_vault_signin_vaults WHERE vault_id = ?1", params![id])?;
         tx.commit()?;
         Ok(n > 0)
+    }
+
+    /// Each browser profile's sign-in Vault, for the profiles that have one other than Personal.
+    pub fn signin_vaults(&self) -> Result<Vec<(String, String)>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT profile, vault_id FROM db_vault_signin_vaults ORDER BY profile")?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// The Vault `profile` keeps its sign-ins in, if it is not Personal.
+    pub fn signin_vault(&self, profile: &str) -> Result<Option<String>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        Ok(conn.query_row("SELECT vault_id FROM db_vault_signin_vaults WHERE profile = ?1", params![profile], |r| r.get(0)).optional()?)
+    }
+
+    /// Sets the Vault `profile` keeps its sign-ins in; Personal clears the row.
+    pub fn signin_vault_set(&self, profile: &str, vault_id: &str) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        if vault_id == PERSONAL_VAULT {
+            conn.execute("DELETE FROM db_vault_signin_vaults WHERE profile = ?1", params![profile])?;
+        } else {
+            conn.execute(
+                "INSERT INTO db_vault_signin_vaults (profile, vault_id) VALUES (?1, ?2) ON CONFLICT(profile) DO UPDATE SET vault_id = ?2",
+                params![profile, vault_id],
+            )?;
+        }
+        Ok(())
     }
 
     /// Puts an entry in another Vault, keeping its id, versions and grants. False if there is no such entry.
