@@ -3,7 +3,7 @@
 **Task:** #23219 (research and design); the build is #23220 and waits on the operator's approval.
 **Asked by the operator (2026-11-04):** "can we have the jekt messages appear in a collapsible panel on the right, similar to the kanban's task description. so everything would work the same, but the jekt lines would run in the detached panel. lets research and design a best practice doc."
 **Author:** Naki-2@narko. **Read on:** `origin/main` at `a158acd8c` (2026-11-04), AgentMux 0.60.14. **Constraints from AgentX** (2026-11-04) are in section 6 and shape the design; where something below differs from what AgentX assumed, it says so.
-**Status:** AgentX approved it for the operator (2026-11-04) and agreed with the recommendation on all nine questions in section 8; his four corrections are folded in below (marked "AgentX"). The operator's approval is still to come. No code.
+**Status:** proposed. AgentX approved it for the operator (2026-11-04) and agreed with the recommendation on all nine questions in section 8; his four corrections are folded in below (marked "AgentX"). The operator's approval is still to come. No code.
 
 ---
 

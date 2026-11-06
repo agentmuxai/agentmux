@@ -3,7 +3,7 @@
 
 /**
  * A jekt that waits on the person, as a card in the agent's pane, docked above the composer
- * (docs/reports/REPORT_JEKT_SIDE_PANEL_RESEARCH_AND_DESIGN_2026_11_04.md §5.4): a `TIER=sensitive` jekt with
+ * (docs/specs/SPEC_JEKT_SIDE_PANEL_RESEARCH_AND_DESIGN_2026_11_04.md §5.4): a `TIER=sensitive` jekt with
  * `ESCALATE=required`, which the agent must not act on until the person confirms in their own conversation. The
  * card names the sender as the marker does, shows how far it was proven, and takes the person to the message. It
  * ends when the person next sends in the pane or dismisses it; the tone, the badge and the notification come from

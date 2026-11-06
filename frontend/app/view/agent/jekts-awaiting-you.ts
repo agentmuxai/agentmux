@@ -4,7 +4,7 @@
 /**
  * Which incoming jekts wait on the person: a `TIER=sensitive` jekt with `ESCALATE=required`, which the agent must
  * not act on until the person confirms in their own conversation
- * (docs/reports/REPORT_JEKT_SIDE_PANEL_RESEARCH_AND_DESIGN_2026_11_04.md §5.4). It waits from its arrival until the
+ * (docs/specs/SPEC_JEKT_SIDE_PANEL_RESEARCH_AND_DESIGN_2026_11_04.md §5.4). It waits from its arrival until the
  * person next sends in the pane, or dismisses it. A jekt that came before this window opened is history, not a
  * wait: replaying a resumed session must not raise a card and loop the waiting tone for old mail.
  */
