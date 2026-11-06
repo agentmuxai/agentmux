@@ -24,8 +24,10 @@ const VIEWPORT = SIZES.medium;
 
 const MENU = ".menu:not(.sub-menu)";
 const SUBMENU = ".menu.sub-menu";
-const CONTEXT_MENU = "#cef-context-menu-overlay > .anchored-popover > .menu:not(.sub-menu)";
-const CONTEXT_SUBMENU = "#cef-context-menu-overlay .menu.sub-menu";
+// A menu is a shell with the class `anchored-popover--menu` around its `.menu` body, whether the host draws it
+// (a right-click menu, in `#cef-context-menu-overlay`) or the kit does (a pane's + menu).
+const CONTEXT_MENU = ".anchored-popover--menu > .menu:not(.sub-menu)";
+const CONTEXT_SUBMENU = ".anchored-popover--menu > .menu.sub-menu";
 const MORE_DROPDOWN = ".action-widget-more-dropdown";
 const PALETTE = ".command-palette-panel";
 const POPOVER = ".anchored-popover";
