@@ -415,7 +415,6 @@
 134 frontend/app/util/select-trace.ts::createSelectTrace
 104 frontend/app/util/submenu-hover.ts::createSubmenuHover
 104 frontend/app/view/accounts/GoogleServicesSection.tsx::GoogleServicesSection
-287 frontend/app/view/accounts/OAuthConnectPanel.tsx::OAuthConnectPanel
 130 frontend/app/view/accounts/accounts-manager.tsx::AccountsManager
 170 frontend/app/view/agent/attachments/AttachmentLightbox.tsx::AttachmentLightbox
 101 frontend/app/view/agent/attachments/AttachmentTile.tsx::AttachmentTile
