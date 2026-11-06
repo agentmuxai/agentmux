@@ -1,0 +1,96 @@
+model.setPaused true
+-- pause failed
+<div>
+  <div class="browser-driven-by" role="status">
+    <i aria-hidden="true" class="fa-solid fa-robot">
+    <div class="browser-driven-by-message">
+      <span>
+        "Driven by"
+        <b>
+          "Naki"
+      <span class="browser-bypass-strip-error" role="alert">
+        "Couldn't pause: srv said no"
+    <div class="browser-driven-by-actions">
+      <button title="What Naki did in this pane" type="button" class="ui-button ui-tone-neutral ui-density-compact browser-actions-log-button" aria-pressed="false">
+        "Log ("
+        "0"
+        ")"
+      <button title="Hold Naki's actions in this pane until you resume; auto-approve's time stops too." type="button" class="ui-button ui-tone-neutral ui-density-compact browser-pause-button" aria-pressed="false">
+        "Pause"
+      <button title="Let Naki's clicks in this pane go through without asking you first." type="button" class="ui-button ui-tone-danger ui-density-compact browser-bypass-button" aria-pressed="false">
+        "Auto-approve"
+      <button title="End the agent's control of this pane; its next action here will fail." type="button" class="ui-button ui-tone-neutral ui-density-compact browser-take-over">
+        "Take over"
+model.setPaused true
+-- trying again
+<div>
+  <div class="browser-driven-by" role="status">
+    <i aria-hidden="true" class="fa-solid fa-robot">
+    <div class="browser-driven-by-message">
+      <span>
+        "Driven by"
+        <b>
+          "Naki"
+    <div class="browser-driven-by-actions">
+      <button title="What Naki did in this pane" type="button" class="ui-button ui-tone-neutral ui-density-compact browser-actions-log-button" aria-pressed="false">
+        "Log ("
+        "0"
+        ")"
+      <button title="Hold Naki's actions in this pane until you resume; auto-approve's time stops too." type="button" class="ui-button ui-tone-neutral ui-density-compact browser-pause-button" aria-pressed="false">
+        "Pause"
+      <button title="Let Naki's clicks in this pane go through without asking you first." type="button" class="ui-button ui-tone-danger ui-density-compact browser-bypass-button" aria-pressed="false">
+        "Auto-approve"
+      <button title="End the agent's control of this pane; its next action here will fail." type="button" class="ui-button ui-tone-neutral ui-density-compact browser-take-over">
+        "Take over"
+model.setPaused false
+-- resume failed
+<div>
+  <div class="browser-driven-by browser-driven-by--held" role="status">
+    <i aria-hidden="true" class="fa-solid fa-pause">
+    <div class="browser-driven-by-message">
+      <span>
+        <b>
+          "Paused"
+          ":"
+        <b>
+          "Naki"
+        "'s actions here wait until you resume"
+      <span class="browser-bypass-strip-error" role="alert">
+        "Couldn't resume: could not resume"
+    <div class="browser-driven-by-actions">
+      <button title="What Naki did in this pane" type="button" class="ui-button ui-tone-neutral ui-density-compact browser-actions-log-button" aria-pressed="false">
+        "Log ("
+        "0"
+        ")"
+      <button title="Let Naki act in this pane again." type="button" class="ui-button ui-tone-neutral ui-density-compact browser-pause-button" aria-pressed="true">
+        "Resume"
+      <button title="Let Naki's clicks in this pane go through without asking you first." type="button" class="ui-button ui-tone-danger ui-density-compact browser-bypass-button" aria-pressed="false">
+        "Auto-approve"
+      <button title="End the agent's control of this pane; its next action here will fail." type="button" class="ui-button ui-tone-neutral ui-density-compact browser-take-over">
+        "Take over"
+model.setPaused false
+-- resume failed, unreachable
+<div>
+  <div class="browser-driven-by browser-driven-by--held" role="status">
+    <i aria-hidden="true" class="fa-solid fa-pause">
+    <div class="browser-driven-by-message">
+      <span>
+        <b>
+          "Paused"
+          ":"
+        <b>
+          "Naki"
+        "'s actions here wait until you resume"
+      <span class="browser-bypass-strip-error" role="alert">
+        "AgentMux didn't answer in time when asked to resume the agent, so it isn't certain it was done. Check this pane before trying again."
+    <div class="browser-driven-by-actions">
+      <button title="What Naki did in this pane" type="button" class="ui-button ui-tone-neutral ui-density-compact browser-actions-log-button" aria-pressed="false">
+        "Log ("
+        "0"
+        ")"
+      <button title="Let Naki act in this pane again." type="button" class="ui-button ui-tone-neutral ui-density-compact browser-pause-button" aria-pressed="true">
+        "Resume"
+      <button title="Let Naki's clicks in this pane go through without asking you first." type="button" class="ui-button ui-tone-danger ui-density-compact browser-bypass-button" aria-pressed="false">
+        "Auto-approve"
+      <button title="End the agent's control of this pane; its next action here will fail." type="button" class="ui-button ui-tone-neutral ui-density-compact browser-take-over">
+        "Take over"
