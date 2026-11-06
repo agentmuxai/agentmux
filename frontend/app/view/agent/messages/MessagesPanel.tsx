@@ -108,6 +108,14 @@ function MessagesDock(props: MessagesPanelProps): JSX.Element {
         <div
             ref={dock}
             class="messages-dock"
+            // A listener on the element itself, not Solid's delegated one: a delegated handler cannot stop what
+            // listens at the document (the pane's own Esc).
+            on:keydown={(e) => {
+                // Esc shuts the open overlay first (focus inside it), as it shuts the Kanban's drawer.
+                if (e.key !== "Escape" || !narrow() || !controls.overlayOpen()) return;
+                e.stopPropagation();
+                controls.setOverlayOpen(false);
+            }}
             classList={{
                 "messages-dock--overlay": narrow(),
                 "messages-dock--idle": narrow() && !controls.overlayOpen(),

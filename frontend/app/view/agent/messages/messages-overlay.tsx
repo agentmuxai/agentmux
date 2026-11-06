@@ -69,7 +69,9 @@ export function publishHeaderButton(
         const title = `Messages${n ? `, ${n} unread` : ""}${needs ? ", needs you" : ""}`;
         publishMessagesHeaderButton(blockId, {
             elemtype: "iconbutton",
-            icon: <ButtonFace unread={n} needsYou={needs} />,
+            // A function, not a node: the pane's header is drawn in more than one place (the tile preview among
+            // them), and each draws its own face. One node can only sit in one of them.
+            icon: (() => <ButtonFace unread={n} needsYou={needs} />) as unknown as JSX.Element,
             title,
             click: toggle,
         });

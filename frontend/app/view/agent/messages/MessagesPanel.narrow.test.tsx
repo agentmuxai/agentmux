@@ -16,6 +16,7 @@ vi.mock("../hooks/useJektsAwaitingYou", () => ({
 }));
 
 import type { DocumentNode, JektMessageNode } from "@/app/agent-model/node-types";
+import { DeclIconButton } from "@/app/element/ui/DeclIconButton";
 import { MessagesPanel } from "./MessagesPanel";
 import { createNarrow, NARROW_BELOW_PX } from "./messages-overlay";
 import {
@@ -127,6 +128,30 @@ describe("MessagesPanel in a narrow pane", () => {
         const buttons = messagesHeaderButtons("p9");
         expect(buttons).toHaveLength(1);
         expect(buttons[0].title).toBe("Messages, 2 unread");
+    });
+
+    it("draws the button's face in every header that shows it, not only the last one", () => {
+        paneWidth(400);
+        mount([jekt()]);
+        const decl = messagesHeaderButtons("p9")[0];
+        const a = render(() => <DeclIconButton decl={decl} />);
+        const b = render(() => <DeclIconButton decl={decl} />);
+        expect(a.container.querySelector(".messages-header-button")).not.toBeNull();
+        expect(b.container.querySelector(".messages-header-button")).not.toBeNull();
+    });
+
+    it("shuts the open overlay on Esc pressed inside it, and leaves Esc alone otherwise", () => {
+        paneWidth(400);
+        const { view, controls } = mount([jekt()]);
+        controls.setOverlayOpen(true);
+        const outside = vi.fn();
+        document.addEventListener("keydown", outside);
+        fireEvent.keyDown(view.container.querySelector(".messages-panel__list")!, { key: "Escape" });
+        document.removeEventListener("keydown", outside);
+        expect(controls.overlayOpen()).toBe(false);
+        expect(outside).not.toHaveBeenCalled();
+        fireEvent.keyDown(view.container.querySelector(".messages-dock")!, { key: "Escape" });
+        expect(controls.overlayOpen()).toBe(false);
     });
 
     it("opens the panel over the conversation from the button, and closes it from the panel's close button", () => {
