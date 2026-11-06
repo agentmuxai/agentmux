@@ -679,7 +679,7 @@ fn spawn_install_task(
                 return;
             }
         }
-        // A release download, not an npm package (`backend::cli_download`).
+        // A release download or a uv venv, not an npm package (`backend::cli_download`, `backend::cli_uv`).
         if crate::backend::cli_download::is_managed_install(&provider_id) {
             let res = run_download_install(&provider_id, &cli_command, &broker, (&session_id, &scope), &mut cancel_rx).await;
             emit_done(&broker, res.is_ok(), res.err());

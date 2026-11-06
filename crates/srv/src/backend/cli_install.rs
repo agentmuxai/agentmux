@@ -133,8 +133,9 @@ pub fn is_valid_install(dir: &Path, cli_command: &str) -> bool {
     is_complete(dir) && installed_bin(dir, cli_command).is_some()
 }
 
-/// The CLI inside an install dir: an npm shim, or the program a release
-/// download unpacked (`cli_download`). One provider has one kind.
+/// The CLI inside an install dir: an npm shim, the program a release
+/// download unpacked (`cli_download`), or the entry point of a uv venv
+/// (`cli_uv`). One provider has one kind.
 pub fn installed_bin(dir: &Path, cli_command: &str) -> Option<PathBuf> {
     [
         npm_bin(dir, cli_command),

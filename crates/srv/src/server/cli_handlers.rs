@@ -1230,16 +1230,18 @@ mod tests {
 
     /// The one lookup decides npm vs PATH from the registry: an npm provider's
     /// CLI on PATH is not "found" (a launch would never run it), while a
-    /// provider AgentMux doesn't install is found there, as the user's copy.
+    /// provider with no npm package is found there, as the user's copy. That
+    /// covers the ones AgentMux does not install (grok here) and, until the strict
+    /// order lands, the ones it installs without npm (goose, Aider, Kimi).
     #[tokio::test]
-    async fn locate_provider_cli_uses_path_only_for_providers_agentmux_does_not_install() {
+    async fn locate_provider_cli_falls_back_to_path_only_for_providers_with_no_npm_package() {
         let _guard = crate::test_support::ISOLATED_AUTH_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // No managed installs: an empty AgentMux home.
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("AGENTMUX_HOME_OVERRIDE", home.path());
-        // `claude` (npm-managed) and `kimi` (PATH-only) both on PATH, first.
+        // `claude` (npm-managed) and `grok` (no npm package, not installed by AgentMux) both on PATH, first.
         let bin = tempfile::tempdir().unwrap();
-        for cli in ["claude", "kimi"] {
+        for cli in ["claude", "grok"] {
             let file = if cfg!(windows) { bin.path().join(format!("{cli}.cmd")) } else { bin.path().join(cli) };
             std::fs::write(&file, if cfg!(windows) { "@echo off\r\n" } else { "#!/bin/sh\n" }).unwrap();
             #[cfg(unix)]
@@ -1254,20 +1256,20 @@ mod tests {
         std::env::set_var("PATH", std::env::join_paths(dirs).unwrap());
 
         let claude = super::locate_provider_cli("claude").await;
-        let kimi = super::locate_provider_cli("kimi").await;
+        let grok = super::locate_provider_cli("grok").await;
         let unknown = super::locate_provider_cli("no-such-provider").await;
 
         std::env::set_var("PATH", old_path);
         std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
 
         assert_eq!(claude, None, "an npm provider's copy on PATH is not the one a launch runs");
-        let kimi = kimi.expect("a PATH-only provider is found on PATH");
-        assert_eq!(kimi.source, super::CliSource::SystemPath);
+        let grok = grok.expect("a provider with no npm package is found on PATH");
+        assert_eq!(grok.source, super::CliSource::SystemPath);
         // The same folder, whichever way each side spells it. `where` returns the long form of a
         // path even when PATH holds the 8.3 short one (GitHub's Windows runners put TEMP under
         // `C:\Users\RUNNER~1`), so comparing the strings fails the nightly while both name one file.
-        let found = std::fs::canonicalize(std::path::Path::new(&kimi.path).parent().unwrap()).unwrap();
-        assert_eq!(found, std::fs::canonicalize(bin.path()).unwrap(), "{}", kimi.path);
+        let found = std::fs::canonicalize(std::path::Path::new(&grok.path).parent().unwrap()).unwrap();
+        assert_eq!(found, std::fs::canonicalize(bin.path()).unwrap(), "{}", grok.path);
         assert_eq!(unknown, None);
     }
 
