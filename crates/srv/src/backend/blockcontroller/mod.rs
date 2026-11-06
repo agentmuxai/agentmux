@@ -955,12 +955,13 @@ pub fn resync_controller(
         return Ok(());
     }
 
+    // One resync of this block at a time: see resync_lock.rs. Closing is checked after waiting for it: a
+    // resync that waited can resume once the pane's teardown has run, and must not start a controller then.
+    let _one_resync = resync_lock::ResyncGuard::acquire(block_id);
+
     if is_closing(block_id) {
         return Err(format!("resync_controller: block {block_id} is closing"));
     }
-
-    // One resync of this block at a time: see resync_lock.rs.
-    let _one_resync = resync_lock::ResyncGuard::acquire(block_id);
 
     let controller_type = resync_steps::effective_controller_type(block, controller_type);
 
