@@ -6,7 +6,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
-import { createSubmenuHover, type SubmenuHoverController } from "./submenu-hover";
+import { closePeers, createSubmenuHover, type SubmenuHoverController } from "./submenu-hover";
 
 function makeRect(x: number, y: number, w: number, h: number): DOMRect {
     return {
@@ -96,6 +96,25 @@ describe("createSubmenuHover", () => {
             moveTo(290, 190);
             vi.advanceTimersByTime(10);
             expect(onClose).not.toHaveBeenCalled();
+        });
+
+        it("stays open for a path along the triangle's lower edge, a few pixels past the submenu's bottom", () => {
+            openSubmenu();
+            // The row's leave point is near the submenu's bottom; the hand heads for its last item and wobbles.
+            controller.onTriggerLeave({ clientX: 250, clientY: 280 });
+            moveTo(270, 292);
+            vi.advanceTimersByTime(10);
+            moveTo(290, 305);
+            vi.advanceTimersByTime(10);
+            expect(onClose).not.toHaveBeenCalled();
+        });
+
+        it("still closes for a pointer going straight down from the same point", () => {
+            openSubmenu();
+            controller.onTriggerLeave({ clientX: 250, clientY: 280 });
+            moveTo(250, 330);
+            vi.advanceTimersByTime(10);
+            expect(onClose).toHaveBeenCalledOnce();
         });
 
         it("closes promptly when the cursor moves away from the submenu", () => {
@@ -323,5 +342,173 @@ describe("createSubmenuHover with closeOnLeave: false (a submenu inside a menu)"
         controller.onTriggerLeave({ clientX: 150, clientY: 400 });
         vi.advanceTimersByTime(500);
         expect(onOpen).not.toHaveBeenCalled();
+    });
+});
+
+describe("closeForPeer: a peer row entered on the way to the open submenu (#24133)", () => {
+    // The trigger row is x:[0,300] y:[100,140]; the pointer leaves it through the bottom edge at (200,140), onto the
+    // peer row below, heading for the lower part of the submenu at x:[300,460] y:[100,300].
+    const LEAVE = { clientX: 200, clientY: 140 };
+    const ENTER_PEER = { clientX: 201, clientY: 141 };
+    let onOpen: Mock<() => void>;
+    let onClose: Mock<() => void>;
+    let controller: SubmenuHoverController;
+
+    beforeEach(() => {
+        vi.useFakeTimers();
+        onOpen = vi.fn<() => void>();
+        onClose = vi.fn<() => void>();
+        controller = createSubmenuHover({ closeOnLeave: false, onOpen, onClose });
+        controller.setSubmenuEl({ getBoundingClientRect: () => SUBMENU_RECT });
+        controller.onTriggerEnter();
+        vi.advanceTimersByTime(90);
+        controller.onTriggerLeave(LEAVE);
+    });
+
+    afterEach(() => {
+        controller.dispose();
+        vi.useRealTimers();
+    });
+
+    it("holds the submenu open while the pointer stays inside the triangle toward it", () => {
+        const settled = vi.fn();
+        expect(controller.closeForPeer(ENTER_PEER, settled)).toBe(true);
+        moveTo(250, 200);
+        moveTo(290, 260);
+        expect(onClose).not.toHaveBeenCalled();
+        expect(settled).not.toHaveBeenCalled();
+    });
+
+    it("keeps it open for good once the pointer arrives in the submenu", () => {
+        const settled = vi.fn();
+        controller.closeForPeer(ENTER_PEER, settled);
+        moveTo(290, 260);
+        controller.onSubmenuEnter();
+        vi.advanceTimersByTime(5000);
+        expect(onClose).not.toHaveBeenCalled();
+        expect(settled).not.toHaveBeenCalled();
+    });
+
+    it("closes and settles once the pointer leaves the triangle", () => {
+        const settled = vi.fn();
+        controller.closeForPeer(ENTER_PEER, settled);
+        moveTo(250, 200);
+        moveTo(201, 260); // straight down, away from the submenu
+        expect(onClose).toHaveBeenCalledOnce();
+        expect(settled).toHaveBeenCalledOnce();
+    });
+
+    it("closes and settles at the safety timeout when the pointer stops inside the triangle", () => {
+        const settled = vi.fn();
+        controller.closeForPeer(ENTER_PEER, settled);
+        vi.advanceTimersByTime(299);
+        expect(onClose).not.toHaveBeenCalled();
+        vi.advanceTimersByTime(1);
+        expect(onClose).toHaveBeenCalledOnce();
+        expect(settled).toHaveBeenCalledOnce();
+    });
+
+    it("keeps holding while the pointer keeps moving inside the triangle, however slowly (a 720 ms crossing)", () => {
+        const settled = vi.fn();
+        controller.closeForPeer(ENTER_PEER, settled);
+        for (let i = 1; i <= 24; i++) {
+            vi.advanceTimersByTime(30);
+            moveTo(201 + i * 4, 141 + i * 6); // a straight line toward the submenu's lower part, inside the triangle
+        }
+        expect(onClose).not.toHaveBeenCalled();
+        expect(settled).not.toHaveBeenCalled();
+        controller.onSubmenuEnter();
+        vi.advanceTimersByTime(5000);
+        expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it("closes once the pointer stops moving inside the triangle for the safety timeout", () => {
+        const settled = vi.fn();
+        controller.closeForPeer(ENTER_PEER, settled);
+        vi.advanceTimersByTime(200);
+        moveTo(250, 200);
+        vi.advanceTimersByTime(299);
+        expect(onClose).not.toHaveBeenCalled();
+        vi.advanceTimersByTime(1);
+        expect(onClose).toHaveBeenCalledOnce();
+        expect(settled).toHaveBeenCalledOnce();
+    });
+
+    it("closes at once, without holding, when the peer is entered outside the triangle", () => {
+        const settled = vi.fn();
+        expect(controller.closeForPeer({ clientX: 100, clientY: 160 }, settled)).toBe(false);
+        expect(onClose).toHaveBeenCalledOnce();
+        expect(settled).not.toHaveBeenCalled(); // the caller proceeds itself when nothing was held
+    });
+
+    it("closes at once when there is no pointer position or no known leave point", () => {
+        expect(controller.closeForPeer(undefined, vi.fn())).toBe(false);
+        expect(onClose).toHaveBeenCalledOnce();
+
+        const fresh = createSubmenuHover({ closeOnLeave: false, onOpen, onClose });
+        fresh.setSubmenuEl({ getBoundingClientRect: () => SUBMENU_RECT });
+        fresh.openNow();
+        onClose.mockClear();
+        expect(fresh.closeForPeer(ENTER_PEER, vi.fn())).toBe(false);
+        expect(onClose).toHaveBeenCalledOnce();
+    });
+
+    it("does nothing when it is not open", () => {
+        controller.close();
+        onClose.mockClear();
+        expect(controller.closeForPeer(ENTER_PEER, vi.fn())).toBe(false);
+        expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it("a forced close drops the held peer's settle callback", () => {
+        const settled = vi.fn();
+        controller.closeForPeer(ENTER_PEER, settled);
+        controller.close();
+        expect(onClose).toHaveBeenCalledOnce();
+        expect(settled).not.toHaveBeenCalled();
+    });
+
+    it("a second peer entered while holding replaces the first one's callback", () => {
+        const first = vi.fn();
+        const second = vi.fn();
+        controller.closeForPeer(ENTER_PEER, first);
+        expect(controller.closeForPeer({ clientX: 220, clientY: 170 }, second)).toBe(true);
+        vi.advanceTimersByTime(300);
+        expect(first).not.toHaveBeenCalled();
+        expect(second).toHaveBeenCalledOnce();
+    });
+
+    it("does not reuse a stale leave point after the pointer returned from the submenu", () => {
+        controller.onSubmenuEnter();
+        expect(controller.closeForPeer(ENTER_PEER, vi.fn())).toBe(false);
+        expect(onClose).toHaveBeenCalledOnce();
+    });
+});
+
+describe("closePeers", () => {
+    it("settles at once when no peer holds, and after the last held peer when some do", () => {
+        const make = (held: boolean) => {
+            let settle: (() => void) | undefined;
+            const peer = {
+                closeForPeer: vi.fn((_pt: unknown, cb?: () => void) => {
+                    settle = cb;
+                    return held;
+                }),
+            } as unknown as SubmenuHoverController;
+            return { peer, fire: () => settle?.() };
+        };
+        const self = make(false);
+        const none = make(false);
+        const then1 = vi.fn();
+        closePeers([self.peer, none.peer], self.peer, { clientX: 1, clientY: 2 }, then1);
+        expect(self.peer.closeForPeer).not.toHaveBeenCalled();
+        expect(then1).toHaveBeenCalledOnce();
+
+        const holding = make(true);
+        const then2 = vi.fn();
+        closePeers([self.peer, holding.peer], self.peer, { clientX: 1, clientY: 2 }, then2);
+        expect(then2).not.toHaveBeenCalled();
+        holding.fire();
+        expect(then2).toHaveBeenCalledOnce();
     });
 });

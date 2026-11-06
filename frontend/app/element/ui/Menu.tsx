@@ -128,6 +128,7 @@ function useSubmenus() {
     let tokens = 0;
     const peers = createPeerRegistry();
     const hovers = new Map<number, SubmenuHoverController>();
+    let hoveredRow: number | null = null;
     onCleanup(() => hovers.forEach((h) => h.dispose()));
     const hoverFor = (i: number): SubmenuHoverController => {
         let h = hovers.get(i);
@@ -146,9 +147,17 @@ function useSubmenus() {
         open,
         hovers,
         hoverFor,
-        enter: (i: number, hasSubmenu: boolean) => {
-            peers.closeOthers(String(i));
-            if (hasSubmenu) hoverFor(i).onTriggerEnter();
+        // The open submenu of another row stays while the pointer is still crossing toward it; this row's own
+        // opens once that has closed, if the pointer is still on the row.
+        enter: (i: number, hasSubmenu: boolean, e: MouseEvent) => {
+            hoveredRow = i;
+            peers.closeOthers(String(i), e, () => {
+                if (hasSubmenu && hoveredRow === i) hoverFor(i).onTriggerEnter();
+            });
+        },
+        leave: (i: number, e: MouseEvent) => {
+            if (hoveredRow === i) hoveredRow = null;
+            hovers.get(i)?.onTriggerLeave(e);
         },
         openNow: (i: number, focus: boolean) => {
             peers.closeOthers(String(i));
@@ -169,7 +178,7 @@ interface MenuRowProps {
     expanded: boolean;
     reserve: boolean;
     ref: (el: HTMLElement) => void;
-    onEnter: () => void;
+    onEnter: (e: MouseEvent) => void;
     onLeave: (e: MouseEvent) => void;
     onPick: () => void;
 }
@@ -326,11 +335,11 @@ function MenuPanel(props: MenuPanelProps): JSX.Element {
                                 expanded={sub.open()?.index === i()}
                                 reserve={reserveIcons()}
                                 ref={(el) => (rows[i()] = el)}
-                                onEnter={() => {
+                                onEnter={(e) => {
                                     if (nav.pickable(i())) nav.setActive(i());
-                                    sub.enter(i(), !!entry.submenu && nav.pickable(i()));
+                                    sub.enter(i(), !!entry.submenu && nav.pickable(i()), e);
                                 }}
-                                onLeave={(e) => entry.submenu && sub.hovers.get(i())?.onTriggerLeave(e)}
+                                onLeave={(e) => sub.leave(i(), e)}
                                 onPick={() => nav.select(i())}
                             />
                         </Show>

@@ -14,7 +14,7 @@ import {
     type MenuPositionResult,
 } from "@/app/util/menu-position";
 import { menuIconClass } from "@/app/util/menu-icons";
-import { createSubmenuHover, type SubmenuHoverController } from "@/app/util/submenu-hover";
+import { closePeers, createSubmenuHover, type SubmenuHoverController } from "@/app/util/submenu-hover";
 import { Z_JS_MENU } from "@/app/zindex";
 
 // Context menu click callback — registered by onContextMenuClick, called by showJsContextMenu.
@@ -362,13 +362,19 @@ function attachSubmenu(
     hover.setSubmenuEl(sub);
     peers.push(hover);
     if (topLevel && item.label) s.topLevelSubmenus.set(item.label, { hover, sub });
-    row.addEventListener("mouseenter", () => {
-        for (const peer of peers) {
-            if (peer !== hover) peer.close();
-        }
-        hover.onTriggerEnter();
+    // A peer whose submenu the pointer is still heading for stays open until the pointer leaves the safe
+    // triangle (or reaches it); this row then opens its own submenu, if the pointer is still on it.
+    let pointerOnRow = false;
+    row.addEventListener("mouseenter", (e) => {
+        pointerOnRow = true;
+        closePeers(peers, hover, e as MouseEvent, () => {
+            if (pointerOnRow) hover.onTriggerEnter();
+        });
     });
-    row.addEventListener("mouseleave", (e) => hover.onTriggerLeave(e as MouseEvent));
+    row.addEventListener("mouseleave", (e) => {
+        pointerOnRow = false;
+        hover.onTriggerLeave(e as MouseEvent);
+    });
     sub.addEventListener("mouseenter", () => hover.onSubmenuEnter());
     sub.addEventListener("mouseleave", (e) => hover.onSubmenuLeave(e as MouseEvent));
 }
@@ -376,9 +382,7 @@ function attachSubmenu(
 function attachPlainRow(s: MenuState, row: HTMLElement, item: NativeContextMenuItem, peers: SubmenuHoverController[]) {
     // A plain (no-submenu) row is still an explicit new selection —
     // entering it closes any open peer submenu immediately too.
-    row.addEventListener("mouseenter", () => {
-        for (const peer of peers) peer.close();
-    });
+    row.addEventListener("mouseenter", (e) => closePeers(peers, null, e as MouseEvent));
     row.addEventListener("click", () => {
         closeMenu(s);
         if (item.id && s.onClick) s.onClick(item.id);
