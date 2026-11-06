@@ -131,6 +131,7 @@ export type MuxEventPayloads = {
   "attachment:failed": AttachmentFailedEvent;
   "attachment:progress": AttachmentProgressEvent;
   "attachment:ready": AttachmentReadyEvent;
+  "audit:changed": null;
   "background-task-updated": BlockRefEvent;
   "block:activity": BlockActivityEvent;
   "block:reveal": BlockRevealEvent;
@@ -254,6 +255,7 @@ export const TYPED_MUX_EVENTS = [
   "attachment:failed",
   "attachment:progress",
   "attachment:ready",
+  "audit:changed",
   "background-task-updated",
   "block:activity",
   "block:reveal",
@@ -348,6 +350,7 @@ const NO_PAYLOAD_MUX_EVENTS: ReadonlySet<string> = new Set([
   "agenthistory:changed",
   "agents:changed",
   "agentskills:changed",
+  "audit:changed",
   "browsergrants:changed",
   "browserprofiles:changed",
   "cron_changed",

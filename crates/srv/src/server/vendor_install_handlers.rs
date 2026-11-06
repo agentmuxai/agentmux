@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! `toolchain.vendor_install_info` / `toolchain.install_vendor_cli` — one click to run the
-//! vendor's own installer for the six agent CLIs AgentMux can't install into its own folder
+//! vendor's own installer for the agent CLIs AgentMux can't install into its own folder
 //! (SPEC_ONE_CLICK_VENDOR_CLI_INSTALL_2026_10_20.md). It streams through the same
 //! `install_chunk` events as `install.start` and the system-tool install, and `install.cancel`
 //! stops it.
@@ -472,8 +472,8 @@ mod tests {
         Ok(UserAnswer { answered, approve, ..Default::default() })
     }
 
-    fn goose() -> &'static VendorInstall {
-        vendor_install("goose").unwrap()
+    fn grok() -> &'static VendorInstall {
+        vendor_install("grok").unwrap()
     }
 
     fn plan(program: &str, args: &[&str]) -> Plan {
@@ -481,7 +481,7 @@ mod tests {
     }
 
     fn run_of(state: &AppState) -> Run {
-        let entry = goose();
+        let entry = grok();
         Run { entry, recipe: entry.recipe(Os::current()), out: Emitter::new(state.broker.clone(), "vendorinstall-test") }
     }
 
@@ -494,12 +494,12 @@ mod tests {
                 assert_eq!(info.download_url.is_some(), matches!(v.recipe(os), Recipe::Script { .. }), "{} {os:?}", v.provider_id);
             }
         }
-        assert_eq!(info_for("goose", Os::Unix).command, "curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | CONFIGURE=false bash");
+        assert_eq!(info_for("grok", Os::Unix).command, "curl -fsSL https://x.ai/cli/install.sh | bash");
     }
 
     #[test]
     fn a_provider_that_has_no_vendor_installer_is_not_available() {
-        for id in ["claude", "codex", "", "../goose", "goose "] {
+        for id in ["claude", "codex", "goose", "", "../grok", "grok "] {
             let info = info_for(id, Os::Unix);
             assert!(!info.available && info.command.is_empty() && info.download_url.is_none(), "{id:?}");
         }
@@ -507,11 +507,11 @@ mod tests {
 
     #[test]
     fn the_question_names_the_vendors_command_what_runs_and_the_missing_isolation() {
-        let q = approval_question(goose(), goose().recipe(Os::Unix));
+        let q = approval_question(grok(), grok().recipe(Os::Unix));
         assert_eq!(q["kind"], "consent");
-        assert_eq!(q["title"], "Install goose");
+        assert_eq!(q["title"], "Install Grok Build");
         let message = q["message"].as_str().unwrap();
-        assert!(message.contains("download_cli.sh | CONFIGURE=false bash"), "{message}");
+        assert!(message.contains("install.sh | bash"), "{message}");
         assert!(message.contains("then run that file with: bash"), "{message}");
         assert!(message.contains("outside AgentMux's isolation"), "{message}");
         assert!(message.contains("SHA-256"), "{message}");
@@ -521,11 +521,11 @@ mod tests {
 
     #[test]
     fn only_an_answered_yes_approves() {
-        assert!(require_approval(answer(true, true), "goose").is_ok());
-        assert!(require_approval(answer(true, false), "goose").unwrap_err().contains("declined"));
-        assert!(require_approval(answer(false, true), "goose").unwrap_err().contains("in time"));
-        assert!(require_approval(answer(false, false), "goose").is_err());
-        assert!(require_approval(Err("no AgentMux window is connected to ask the user in".into()), "goose")
+        assert!(require_approval(answer(true, true), "Grok Build").is_ok());
+        assert!(require_approval(answer(true, false), "Grok Build").unwrap_err().contains("declined"));
+        assert!(require_approval(answer(false, true), "Grok Build").unwrap_err().contains("in time"));
+        assert!(require_approval(answer(false, false), "Grok Build").is_err());
+        assert!(require_approval(Err("no AgentMux window is connected to ask the user in".into()), "Grok Build")
             .unwrap_err()
             .contains("needs the user's approval"));
     }
@@ -535,9 +535,9 @@ mod tests {
     async fn with_no_window_to_ask_in_nothing_starts_and_the_claim_is_released() {
         let state = crate::server::tests::test_state();
         assert!(state.host_ipc.lock().await.is_none());
-        let err = start_install(&state, state.install_sessions.clone(), state.broker.clone(), "goose").await.unwrap_err();
+        let err = start_install(&state, state.install_sessions.clone(), state.broker.clone(), "grok").await.unwrap_err();
         assert!(err.contains("no AgentMux window is connected"), "{err}");
-        assert!(state.install_sessions.try_claim_system_tool(&claim_key(goose())), "the refusal let go of the claim");
+        assert!(state.install_sessions.try_claim_system_tool(&claim_key(grok())), "the refusal let go of the claim");
     }
 
     #[tokio::test]
@@ -550,8 +550,8 @@ mod tests {
     #[tokio::test]
     async fn a_second_request_while_one_is_pending_is_refused() {
         let state = crate::server::tests::test_state();
-        assert!(state.install_sessions.try_claim_system_tool(&claim_key(goose())));
-        let err = start_install(&state, state.install_sessions.clone(), state.broker.clone(), "goose").await.unwrap_err();
+        assert!(state.install_sessions.try_claim_system_tool(&claim_key(grok())));
+        let err = start_install(&state, state.install_sessions.clone(), state.broker.clone(), "grok").await.unwrap_err();
         assert!(err.contains("already being installed"), "{err}");
     }
 

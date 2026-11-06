@@ -84,6 +84,11 @@ vi.mock("./SystemToolInstallInline", () => ({
     },
 }));
 vi.mock("./CliDiskSpace", () => ({ CliDiskSpace: () => <div data-testid="cli-disk-space" /> }));
+vi.mock("./ProviderUpdateInline", () => ({
+    ProviderUpdateInline: (p: { providerId: string; pinned: string }) => (
+        <div data-testid="provider-update">{`${p.providerId} -> ${p.pinned}`}</div>
+    ),
+}));
 
 import { ToolchainView } from "./toolchain-view";
 
@@ -560,7 +565,7 @@ describe("the count of tools that are behind", () => {
         h.installed.claude = { installed: true, version: "1.0.0" };
         await mount();
         const one = await screen.findByText("1 tool is behind");
-        expect(one.closest(".ui-pill")).toHaveAttribute("title", expect.stringContaining("Reinstall from each row"));
+        expect(one.closest(".ui-pill")).toHaveAttribute("title", expect.stringContaining("offers Update"));
         expect(dot(card("claude"))).toHaveAccessibleName("Update available: 2.1.288");
         expect(card("claude").textContent).toContain("2.1.288 available");
         cleanup();
@@ -573,6 +578,31 @@ describe("the count of tools that are behind", () => {
         h.checkProviderInstalled.mockImplementation(() => new Promise(() => {}));
         render(() => <ToolchainView />);
         expect(screen.queryByText(/behind/)).toBeNull();
+    });
+});
+
+describe("updating a tool that is behind its pin", () => {
+    it("offers the update in the details of an installed npm CLI that is behind, to the pin", async () => {
+        h.installed.codex = { installed: true, version: "0.0.1" };
+        await mount();
+        await screen.findByText("1 tool is behind");
+        expect(screen.queryByTestId("provider-update")).toBeNull();
+        fireEvent.click(card("codex"));
+        const update = await screen.findByTestId("provider-update");
+        expect(update.textContent).toMatch(/^codex -> \d/);
+    });
+
+    it("offers nothing for a tool that is current or not installed", async () => {
+        h.installed.claude = { installed: true, version: "2.1.288" };
+        await mount();
+        fireEvent.click(card("claude"));
+        fireEvent.click(card("codex"));
+        expect(screen.queryByTestId("provider-update")).toBeNull();
+    });
+
+    it("names a card in its tooltip, since its title can be cut short", async () => {
+        await mount();
+        expect(card("claude")).toHaveAttribute("title", expect.stringMatching(/Claude/));
     });
 });
 

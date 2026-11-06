@@ -50,14 +50,17 @@ function entryFor(providerId: string): Entry {
         const [watchers, setWatchers] = createSignal(0);
         const listeners = new Set<(ok: boolean) => void>();
         const session = createInstallSession({
-            tracker: () =>
-                getProvider(providerId)?.npmPackage
+            tracker: () => {
+                const prov = getProvider(providerId);
+                return prov?.npmPackage || prov?.managedInstall
                     ? new NpmStepTracker(displayName(providerId))
-                    : new VendorStepTracker(displayName(providerId)),
+                    : new VendorStepTracker(displayName(providerId));
+            },
             begin: async () => {
                 const prov = getProvider(providerId);
-                // srv installs its own registry's package for this id.
-                if (prov?.npmPackage) return RpcApi.InstallStartCommand(TabRpcClient, { providerId: prov.id });
+                // srv installs its own registry's package for this id, or downloads the pinned
+                // release of a managed CLI (goose).
+                if (prov?.npmPackage || prov?.managedInstall) return RpcApi.InstallStartCommand(TabRpcClient, { providerId });
                 // The six CLIs AgentMux doesn't install into its own folder: srv runs the vendor's
                 // installer, but only once the person approves it in the approval window, and
                 // refuses a provider with no installer of its own.

@@ -106,7 +106,9 @@ pub(super) fn spawn_writer(
         for entry in rx {
             if let Err(e) = write_line(&mut file, &channel_name, &entry) {
                 tracing::warn!(path = %path.display(), error = %e, "jekt audit: could not append an entry");
+                continue;
             }
+            crate::backend::audit_live::poke();
         }
     })?;
     Ok((tx, writer))

@@ -178,7 +178,8 @@ Answers to §7, from AgentX: (1) process-scoped `-ExecutionPolicy Bypass` on the
 (4) ten minutes, with a per-provider override.
 
 **Built**
-- **One catalog in srv** (`server/vendor_install_catalog.rs`): the six recipes for each OS, the hosts a script may come
+- **One catalog in srv** (`server/vendor_install_catalog.rs`): the five recipes (Kimi, Antigravity, Grok Build, Aider,
+  Muse Code) for each OS, the hosts a script may come
   from, the time limit (`timeout_secs`, ten minutes each). `toolchain.vendor_install_info {providerId}` gives the panel
   the vendor's command for this OS, so **Copy** and **Run** show the same text; it answers `available: false` for any
   other provider, and the panel then keeps its copy-only step.
@@ -193,7 +194,7 @@ Answers to §7, from AgentX: (1) process-scoped `-ExecutionPolicy Bypass` on the
   run's log are the vendor's command, the URL, the final host, the size and the SHA-256, and srv logs the same.
 - **Run (T4, T5).** Argv only (`bash <file>`, `sh <file>`, `powershell -NoProfile -NonInteractive -ExecutionPolicy
   Bypass -File <file>`; for Kimi `<python> -m pip install --user kimi-cli`, with the Windows `py` launcher first). stdin
-  closed, no elevation, `sanitize_external_command`, the recipe's own environment only (goose's `CONFIGURE=false`).
+  closed, no elevation, `sanitize_external_command`, the recipe's own environment only (none of the five sets one today).
   The downloaded file is removed when the run ends, however it ends.
 - **Cancel and time limit** end the installer's whole process group (`taskkill /T` on Windows).
 - **Re-detection** after a clean exit through the provider's known install folder and PATH. Found: a line says where.
@@ -203,17 +204,21 @@ Answers to §7, from AgentX: (1) process-scoped `-ExecutionPolicy Bypass` on the
   Closing the panel doesn't stop the run (the session outlives it, as the npm install's does).
 
 **Found while building**
-- goose's Windows installer URL in the catalog (`releases/download/stable/download_cli.ps1`) answers 404; the release has
-  no such file. goose documents `raw.githubusercontent.com/aaif-goose/goose/main/download_cli.ps1`; both the table and
-  `catalog.ts` use it now.
-- Every script is under 60 KB. Only goose's redirects (its release URL goes to GitHub's asset host), so the list for
-  goose is `github.com` and `.githubusercontent.com`; the other four are one host each.
+- **goose is not in the table.** AgentMux now downloads goose itself (#6590, Lazo: a pinned release, its SHA-256
+  checked, its own folder, an Install button), so the vendor script would be a second way to install one CLI. The
+  managed install is the end state: Lazo's later changes do the same for Aider and Kimi (a pinned `uv`) and others, and
+  each one removes that CLI's row from this table. A test (`a_cli_agentmux_downloads_itself_is_not_in_the_vendor_table`)
+  fails if a provider is in both this table and `cli_download::SPECS`, so a CLI can't show two installs.
+- goose's Windows command in `catalog.ts` (`releases/download/stable/download_cli.ps1`) answered 404; the release has no
+  such file. goose documents `raw.githubusercontent.com/aaif-goose/goose/main/download_cli.ps1`, which `catalog.ts` now
+  uses (it is the command for a copy the person installs on their own).
+- Every script is under 60 KB, and the vendor sites answer without a redirect, so each provider's list is one host.
 
 **Not built**
 - **The approval inside the pane** (§7.3's answer). The approval window is the same surface as the system-tool
   install's today. When the pane-modal primitive lands, both move to it together; nothing in the RPC changes.
 - **The Toolchain pane's row** gets **Run** through the same RPC in its own change.
-- **Moving the six commands out of `catalog.ts`** (§4.1): `catalog.ts` still carries them, for the hint srv echoes on
+- **Moving the commands out of `catalog.ts`** (§4.1): `catalog.ts` still carries them, for the hint srv echoes on
   a launch failure. The panel shows srv's text; the hint is the remaining copy, to be read from srv's table.
 - **Live runs** of each installer on each OS (§5): the srv tests cover the download policy, the approval, argv, the
   environment and cancel with stand-in installers; no vendor installer was run for this change.

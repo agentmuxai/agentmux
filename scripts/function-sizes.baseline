@@ -296,7 +296,7 @@
 133 crates/srv/src/server/browser_capture.rs::handle_browser_capture
 223 crates/srv/src/server/browser_terminal.rs::handle_ui_browser_terminal
 190 crates/srv/src/server/browser_vault_fill.rs::handle_vault_fill
-736 crates/srv/src/server/cli_handlers.rs::register_cli_handlers
+739 crates/srv/src/server/cli_handlers.rs::register_cli_handlers
 904 crates/srv/src/server/editor_handlers.rs::register_editor_handlers
 107 crates/srv/src/server/files.rs::handle_stream_local_file
 122 crates/srv/src/server/http_health.rs::handle_discovery
@@ -308,7 +308,7 @@
 106 crates/srv/src/server/identity_auth_dirs.rs::compute_and_ensure_account_dir
 326 crates/srv/src/server/identity_auth_spawn.rs::spawn_auth_cli
 404 crates/srv/src/server/identity_auth_spawn.rs::spawn_auth_cli_pty
-324 crates/srv/src/server/install_handlers.rs::spawn_install_task
+332 crates/srv/src/server/install_handlers.rs::spawn_install_task
 102 crates/srv/src/server/jekt_files.rs::receive
 105 crates/srv/src/server/jekt_hold.rs::hold_with_reason
 238 crates/srv/src/server/mux_obj_bridge.rs::dispatch_event
@@ -471,7 +471,6 @@
 140 frontend/app/view/agent/hooks/useShellNodeStream.ts::useShellNodeStream
 163 frontend/app/view/agent/hooks/useSnapshotPersistence.ts::useSnapshotPersistence
 173 frontend/app/view/agent/hooks/useSubagentBackfillGate.ts::useSubagentBackfillGate
-300 frontend/app/view/agent/offline/failed-turn.ts::createFailedTurnRecovery
 185 frontend/app/view/agent/offline/offline-input.ts::createOfflineInput
 229 frontend/app/view/agent/parseHistoryLines.ts::HistoryParser::feed
 127 frontend/app/view/agent/providers/claude-translator.ts::ClaudeTranslator::translate
@@ -481,7 +480,7 @@
 116 frontend/app/view/agent/stream-parser.ts::ClaudeCodeStreamParser::eventToNode
 232 frontend/app/view/agent/useAgentStream.ts::useAgentStream
 116 frontend/app/view/agent/virtualization/held-release.ts::useScrolledOffRelease
-195 frontend/app/view/audit/audit-manager.tsx::AuditManager
+132 frontend/app/view/audit/audit-manager.tsx::AuditManager
 103 frontend/app/view/browser/browser-model.ts::BrowserViewModel::getBodyContextMenuItems
 101 frontend/app/view/browser/browser-profile-menu.tsx::BrowserProfileButton
 267 frontend/app/view/browser/driven-by-strip.tsx::DrivenByStrip

@@ -1,15 +1,19 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! The install recipes of the six agent CLIs that AgentMux can't install into its own folder
-//! (Kimi, Antigravity, goose, Grok Build, Aider, Muse Code): a compiled table, so what runs on
+//! The install recipes of the agent CLIs that AgentMux can't install into its own folder
+//! (Kimi, Antigravity, Grok Build, Aider, Muse Code): a compiled table, so what runs on
 //! the user's machine comes from srv and never from a caller
 //! (SPEC_ONE_CLICK_VENDOR_CLI_INSTALL_2026_10_20.md §4.1).
 //!
-//! The table holds each vendor's own installer, the same command the user would paste. Five of
-//! the six are a script fetched from the vendor's site at install time; the host list below
-//! pins where that script may come from, redirects included, and nothing more. What the script
-//! then downloads is the vendor's business, and the consent says so.
+//! The table holds each vendor's own installer, the same command the user would paste. All but
+//! Kimi are a script fetched from the vendor's site at install time; the host list below pins
+//! where that script may come from, redirects included, and nothing more. What the script then
+//! downloads is the vendor's business, and the consent says so.
+//!
+//! A CLI AgentMux downloads itself (`cli_download::SPECS`, a pinned release with a checked hash)
+//! is not in this table: its Install button is the managed one, and a test fails if a provider is
+//! in both. When a CLI moves to the managed install, its row here goes.
 
 /// What runs a downloaded script.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -151,26 +155,6 @@ pub(crate) const VENDOR_INSTALLS: &[VendorInstall] = &[
         timeout_secs: TEN_MINUTES,
     },
     VendorInstall {
-        provider_id: "goose",
-        display: "goose",
-        unix: Recipe::Script {
-            shown: "curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | CONFIGURE=false bash",
-            url: "https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh",
-            interpreter: Interpreter::Bash,
-            env: &[("CONFIGURE", "false")],
-        },
-        // The release has no `download_cli.ps1`; goose documents the one in its repository.
-        windows: Recipe::Script {
-            shown: "irm https://raw.githubusercontent.com/aaif-goose/goose/main/download_cli.ps1 | iex",
-            url: "https://raw.githubusercontent.com/aaif-goose/goose/main/download_cli.ps1",
-            interpreter: Interpreter::PowerShell,
-            env: &[("CONFIGURE", "false")],
-        },
-        // The release URL answers with a redirect to GitHub's asset host.
-        allowed_hosts: &["github.com", ".githubusercontent.com"],
-        timeout_secs: TEN_MINUTES,
-    },
-    VendorInstall {
         provider_id: "grok",
         display: "Grok Build",
         unix: Recipe::Script {
@@ -257,10 +241,10 @@ mod tests {
     }
 
     #[test]
-    fn the_table_covers_exactly_the_six_vendor_installed_clis() {
+    fn the_table_covers_exactly_the_vendor_installed_clis() {
         let mut ids: Vec<&str> = VENDOR_INSTALLS.iter().map(|v| v.provider_id).collect();
         ids.sort_unstable();
-        assert_eq!(ids, ["aider", "antigravity", "goose", "grok", "kimi", "muse"]);
+        assert_eq!(ids, ["aider", "antigravity", "grok", "kimi", "muse"]);
     }
 
     #[test]
@@ -268,6 +252,19 @@ mod tests {
         for v in VENDOR_INSTALLS {
             let p = crate::backend::providers::get_provider(v.provider_id).unwrap_or_else(|| panic!("{} is not a provider", v.provider_id));
             assert!(p.npm_package.is_empty(), "{} is installed by AgentMux itself", v.provider_id);
+        }
+    }
+
+    /// A CLI AgentMux downloads itself has its own Install; offering the vendor's script too would
+    /// show two ways to install one CLI. When a CLI gains a download spec, drop its row above.
+    #[test]
+    fn a_cli_agentmux_downloads_itself_is_not_in_the_vendor_table() {
+        for v in VENDOR_INSTALLS {
+            assert!(
+                crate::backend::cli_download::download_spec(v.provider_id).is_none(),
+                "{} is installed by AgentMux (cli_download::SPECS): remove it from VENDOR_INSTALLS",
+                v.provider_id
+            );
         }
     }
 
@@ -314,9 +311,9 @@ mod tests {
 
     #[test]
     fn the_consent_names_what_runs() {
-        let goose = vendor_install("goose").unwrap();
-        let unix = goose.recipe(Os::Unix).runs();
-        assert!(unix.contains("download_cli.sh") && unix.contains("bash"), "{unix}");
+        let grok = vendor_install("grok").unwrap();
+        let unix = grok.recipe(Os::Unix).runs();
+        assert!(unix.contains("install.sh") && unix.contains("bash"), "{unix}");
         let kimi = vendor_install("kimi").unwrap().recipe(Os::Unix).runs();
         assert_eq!(kimi, "python -m pip install --user kimi-cli");
         assert_eq!(vendor_install("kimi").unwrap().recipe(Os::Unix).shown(), "pip install kimi-cli");
