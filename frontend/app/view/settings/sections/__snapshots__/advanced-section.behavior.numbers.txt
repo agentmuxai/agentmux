@@ -1,0 +1,8 @@
+set agent:askquestiontimeoutms 12400
+set agent:compactat 481000
+set agent:compactat 0
+set agent:previewskidnotches 5
+set agent:previewskidnotches 10
+set agent:previewskidnotches 0
+set telemetry:interval 2
+set telemetry:numpoints 64
