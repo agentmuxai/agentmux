@@ -213,7 +213,7 @@ const CLI_CATALOG: CliCatalogEntry[] = [
         primaryContextFile: "AGENTS.md",
         mcpSupport: "stdio+http",
         popoverMarkdown:
-            "An open-source, extensible agent (Agentic AI Foundation, Linux Foundation) that works with 15+ model providers. Install it with goose's own installer, then run `goose configure` once to pick a provider and key.",
+            "An open-source, extensible agent (Agentic AI Foundation, Linux Foundation) that works with 15+ model providers. AgentMux installs it for you; then run `goose configure` once to pick a provider and key.",
         hostSupported: true,
         // ACP runs on the host only (no container ACP path yet).
         containerSupported: false,
@@ -226,7 +226,7 @@ const CLI_CATALOG: CliCatalogEntry[] = [
         primaryContextFile: "AGENTS.md",
         mcpSupport: "stdio+http",
         popoverMarkdown:
-            "xAI's coding agent, running Grok 4.6 by default. Install it with xAI's installer, then sign in with `grok login` (a SuperGrok or X Premium+ account) or set XAI_API_KEY.",
+            "xAI's coding agent, running Grok 4.6 by default. AgentMux installs it for you; then sign in with `grok login` (a SuperGrok or X Premium+ account) or set XAI_API_KEY.",
         hostSupported: true,
         // ACP runs on the host only (no container ACP path yet).
         containerSupported: false,
@@ -252,7 +252,7 @@ const CLI_CATALOG: CliCatalogEntry[] = [
         primaryContextFile: "AGENTS.md",
         mcpSupport: "none",
         popoverMarkdown:
-            "Aider, the git-native pair programmer, in its own terminal UI. It commits its changes as it goes. Install it with Aider's installer and set your model provider's key (for example OPENAI_API_KEY or ANTHROPIC_API_KEY). It opens in a terminal pane; AgentMux shows no transcript of its own.",
+            "Aider, the git-native pair programmer, in its own terminal UI. It commits its changes as it goes. AgentMux installs it for you; set your model provider's key (for example OPENAI_API_KEY or ANTHROPIC_API_KEY). It opens in a terminal pane; AgentMux shows no transcript of its own.",
         hostSupported: true,
         // A terminal pane on the host.
         containerSupported: false,
