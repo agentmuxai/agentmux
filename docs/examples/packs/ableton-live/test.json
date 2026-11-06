@@ -1,0 +1,15 @@
+{
+  "pack": "ableton-live",
+  "requires": ["Ableton Live 10 or newer installed", "uv installed; AbletonMCP installed and selected as the Control Surface (the person approves the install)", "the person says playback is allowed, or the test does not play"],
+  "task": "In a new empty Live set, create one MIDI track named 'pack-test', add a one-bar MIDI clip with a single C3 note, and read the clip back. Do not play it. Do not save over any existing set.",
+  "steps": [
+    "Route 1: read session info; create a MIDI track; name it; create a one-bar clip; add one note; read the clip back",
+    "Fallback, only if the bridge is unavailable: Ctrl+Shift+T, Ctrl+R and type the name, Ctrl+Shift+M"
+  ],
+  "verify": [
+    "the track count is one higher and its name is 'pack-test'",
+    "the clip reads back as one bar long with exactly one note at C3",
+    "playback was never started"
+  ],
+  "record": "append {appVersion, platform, date, runner, result, notes} to pack.json verified"
+}

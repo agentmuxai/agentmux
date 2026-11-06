@@ -1,0 +1,16 @@
+{
+  "pack": "wavelab",
+  "requires": ["Steinberg WaveLab Pro or Elements installed", "Desktop control on, and the person's grant for WaveLab when a step uses Desktop", "a 16-bit WAV test file the agent made in its own workspace"],
+  "task": "Make a copy of a short WAV, open the copy in WaveLab, normalise it to a peak of -1 dBFS, save it as a new file, and check the new peak. Never change the original.",
+  "steps": [
+    "Create the source WAV in your workspace with Python (for example a 1 s sine at -12 dBFS)",
+    "Route 1: COM script opens the copy and applies the operation, or Route 3: Batch Processor with a normalise step",
+    "Fallback: Desktop clicks, with zoom and a screenshot after each action"
+  ],
+  "verify": [
+    "the output file exists and is a different file from the source",
+    "the source file's hash is unchanged",
+    "the output's peak, computed in Python, is within 0.2 dB of -1 dBFS"
+  ],
+  "record": "append {appVersion, platform, date, runner, result, notes} to pack.json verified"
+}

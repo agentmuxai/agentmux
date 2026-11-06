@@ -1,0 +1,16 @@
+{
+  "pack": "excel",
+  "requires": ["Microsoft Excel for Windows installed", "Desktop control on, and the person's grant for EXCEL.EXE when a step uses Desktop", "python3 with openpyxl for the closed-file check"],
+  "task": "Create a new workbook, put 1, 2 and 3 in A1:A3 and =SUM(A1:A3) in B1, save it as pack-test.xlsx in your own workspace folder, read the result back, close Excel if you started it.",
+  "steps": [
+    "Route 2 (COM): Workbooks.Add, Range.Value2, Range.Formula, SaveAs with 51, read B1 Value2, Close, Quit",
+    "Closed-file check: openpyxl load_workbook(path, data_only=True)['Sheet1']['B1'].value",
+    "Route 3/4 (Desktop), only if COM is unavailable: Ctrl+N, Ctrl+G A1 Enter, type 1 Enter 2 Enter 3 Enter, Ctrl+G B1 Enter, type =SUM(A1:A3) Enter, F12 and the path, look"
+  ],
+  "verify": [
+    "B1 Value2 is 6 while Excel has the workbook open",
+    "pack-test.xlsx exists, is larger than 0 bytes, and openpyxl data_only=True returns 6 for B1",
+    "no EXCEL.EXE that you started is still running"
+  ],
+  "record": "append {packVersion, appVersion, platform, date, runner, route, result, notes} to pack.json verified"
+}

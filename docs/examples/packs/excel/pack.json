@@ -1,0 +1,24 @@
+{
+  "schema": "pack/v1",
+  "id": "excel",
+  "name": "Excel",
+  "version": "0.1.0",
+  "changelog": [
+    { "version": "0.1.0", "date": "2026-11-05", "by": "Manoz@Area54", "change": "first version, from documentation, unverified" }
+  ],
+  "app": {
+    "vendor": "Microsoft",
+    "executables": { "windows": ["EXCEL.EXE"], "macos": [], "linux": [] },
+    "titleHints": [" - Excel"],
+    "versions": { "supported": null, "tested": [] }
+  },
+  "platforms": ["windows"],
+  "ladder": [
+    { "kind": "api", "note": "the .xlsx file itself (openpyxl, XlsxWriter) when Excel need not be open; no formula results without Excel" },
+    { "kind": "api", "note": "Excel COM object model (Excel.Application), PowerShell or an Excel MCP server" },
+    { "kind": "shortcuts", "note": "Ctrl+G, F2, Ctrl+Arrow, Alt+Q Tell Me search" },
+    { "kind": "desktop", "note": "clicks, with zoom and a screenshot after each" }
+  ],
+  "mcp": { "catalogId": null, "note": "a COM-based Excel MCP server; none is in the AgentMux MCP catalog yet" },
+  "verified": []
+}
