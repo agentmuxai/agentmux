@@ -1,0 +1,150 @@
+-- narrow: two tiles and +6
+   focus: body
+<div>
+  <div class="agent-attachment-tray">
+    <div class="agent-attachment-tray__header">
+      <span class="agent-attachment-tray__summary is-ok">
+        "8 images · 8.0 MB / 1.0 GB"
+      <span class="agent-attachment-tray__header-actions">
+        <button type="button" class="ui-button ui-tone-quiet ui-button--link">
+          "Clear"
+    <ul class="agent-attachment-tray__tiles" aria-label="Attached images: 8">
+      <li class="stub-tile" data-key="k1" data-number="1" data-status="ready" data-kind="image" data-flash="no" data-caption="no" data-progress="1">
+        <button class="agent-attachment-tile__main">
+          "pic1.png"
+        <button class="stub-remove" aria-label="Remove pic1.png">
+      <li class="stub-tile" data-key="k2" data-number="2" data-status="ready" data-kind="image" data-flash="no" data-caption="no" data-progress="1">
+        <button class="agent-attachment-tile__main">
+          "pic2.png"
+        <button class="stub-remove" aria-label="Remove pic2.png">
+      <li class="agent-attachment-tile agent-attachment-tile--more">
+        <button aria-label="Show all 8 images" title="Show all 8 images" type="button" class="ui-button ui-tone-neutral agent-attachment-tile__main">
+          <span class="mosaic" aria-hidden="true">
+            <span class="cell is-image" style="background-image: url(\"blob:id3\");">
+            <span class="cell is-image" style="background-image: url(\"blob:id4\");">
+            <span class="cell is-image" style="background-image: url(\"blob:id5\");">
+            <span class="cell is-image" style="background-image: url(\"blob:id6\");">
+          <span class="more">
+            "+"
+            "6"
+  <span class="sr-only" aria-live="polite">
+-- expanded
+   focus: body
+<div>
+  <div class="agent-attachment-tray is-expanded">
+    <div class="agent-attachment-tray__header">
+      <span class="agent-attachment-tray__summary is-ok">
+        "8 images · 8.0 MB / 1.0 GB"
+      <span class="agent-attachment-tray__header-actions">
+        <button type="button" class="ui-button ui-tone-quiet ui-button--link">
+          "Show less"
+        <button type="button" class="ui-button ui-tone-quiet ui-button--link">
+          "Clear"
+    <ul class="agent-attachment-tray__tiles" aria-label="Attached images: 8">
+      <li class="stub-tile" data-key="k1" data-number="1" data-status="ready" data-kind="image" data-flash="no" data-caption="yes" data-progress="1">
+        <button class="agent-attachment-tile__main">
+          "pic1.png"
+        <button class="stub-remove" aria-label="Remove pic1.png">
+      <li class="stub-tile" data-key="k2" data-number="2" data-status="ready" data-kind="image" data-flash="no" data-caption="yes" data-progress="1">
+        <button class="agent-attachment-tile__main">
+          "pic2.png"
+        <button class="stub-remove" aria-label="Remove pic2.png">
+      <li class="stub-tile" data-key="k3" data-number="3" data-status="ready" data-kind="image" data-flash="no" data-caption="yes" data-progress="1">
+        <button class="agent-attachment-tile__main">
+          "pic3.png"
+        <button class="stub-remove" aria-label="Remove pic3.png">
+      <li class="stub-tile" data-key="k4" data-number="4" data-status="ready" data-kind="image" data-flash="no" data-caption="yes" data-progress="1">
+        <button class="agent-attachment-tile__main">
+          "pic4.png"
+        <button class="stub-remove" aria-label="Remove pic4.png">
+      <li class="stub-tile" data-key="k5" data-number="5" data-status="ready" data-kind="image" data-flash="no" data-caption="yes" data-progress="1">
+        <button class="agent-attachment-tile__main">
+          "pic5.png"
+        <button class="stub-remove" aria-label="Remove pic5.png">
+      <li class="stub-tile" data-key="k6" data-number="6" data-status="ready" data-kind="image" data-flash="no" data-caption="yes" data-progress="1">
+        <button class="agent-attachment-tile__main">
+          "pic6.png"
+        <button class="stub-remove" aria-label="Remove pic6.png">
+      <li class="stub-tile" data-key="k7" data-number="7" data-status="ready" data-kind="image" data-flash="no" data-caption="yes" data-progress="1">
+        <button class="agent-attachment-tile__main">
+          "pic7.png"
+        <button class="stub-remove" aria-label="Remove pic7.png">
+      <li class="stub-tile" data-key="k8" data-number="8" data-status="ready" data-kind="image" data-flash="no" data-caption="yes" data-progress="1">
+        <button class="agent-attachment-tile__main">
+          "pic8.png"
+        <button class="stub-remove" aria-label="Remove pic8.png">
+  <span class="sr-only" aria-live="polite">
+-- collapsed
+   focus: body
+<div>
+  <div class="agent-attachment-tray">
+    <div class="agent-attachment-tray__header">
+      <span class="agent-attachment-tray__summary is-ok">
+        "8 images · 8.0 MB / 1.0 GB"
+      <span class="agent-attachment-tray__header-actions">
+        <button type="button" class="ui-button ui-tone-quiet ui-button--link">
+          "Clear"
+    <ul class="agent-attachment-tray__tiles" aria-label="Attached images: 8">
+      <li class="stub-tile" data-key="k1" data-number="1" data-status="ready" data-kind="image" data-flash="no" data-caption="no" data-progress="1">
+        <button class="agent-attachment-tile__main">
+          "pic1.png"
+        <button class="stub-remove" aria-label="Remove pic1.png">
+      <li class="stub-tile" data-key="k2" data-number="2" data-status="ready" data-kind="image" data-flash="no" data-caption="no" data-progress="1">
+        <button class="agent-attachment-tile__main">
+          "pic2.png"
+        <button class="stub-remove" aria-label="Remove pic2.png">
+      <li class="agent-attachment-tile agent-attachment-tile--more">
+        <button aria-label="Show all 8 images" title="Show all 8 images" type="button" class="ui-button ui-tone-neutral agent-attachment-tile__main">
+          <span class="mosaic" aria-hidden="true">
+            <span class="cell is-image" style="background-image: url(\"blob:id3\");">
+            <span class="cell is-image" style="background-image: url(\"blob:id4\");">
+            <span class="cell is-image" style="background-image: url(\"blob:id5\");">
+            <span class="cell is-image" style="background-image: url(\"blob:id6\");">
+          <span class="more">
+            "+"
+            "6"
+  <span class="sr-only" aria-live="polite">
+-- wide again: the overflow is gone, so it collapses
+   focus: body
+<div>
+  <div class="agent-attachment-tray">
+    <div class="agent-attachment-tray__header">
+      <span class="agent-attachment-tray__summary is-ok">
+        "8 images · 8.0 MB / 1.0 GB"
+      <span class="agent-attachment-tray__header-actions">
+        <button type="button" class="ui-button ui-tone-quiet ui-button--link">
+          "Clear"
+    <ul class="agent-attachment-tray__tiles" aria-label="Attached images: 8">
+      <li class="stub-tile" data-key="k1" data-number="1" data-status="ready" data-kind="image" data-flash="no" data-caption="no" data-progress="1">
+        <button class="agent-attachment-tile__main">
+          "pic1.png"
+        <button class="stub-remove" aria-label="Remove pic1.png">
+      <li class="stub-tile" data-key="k2" data-number="2" data-status="ready" data-kind="image" data-flash="no" data-caption="no" data-progress="1">
+        <button class="agent-attachment-tile__main">
+          "pic2.png"
+        <button class="stub-remove" aria-label="Remove pic2.png">
+      <li class="stub-tile" data-key="k3" data-number="3" data-status="ready" data-kind="image" data-flash="no" data-caption="no" data-progress="1">
+        <button class="agent-attachment-tile__main">
+          "pic3.png"
+        <button class="stub-remove" aria-label="Remove pic3.png">
+      <li class="stub-tile" data-key="k4" data-number="4" data-status="ready" data-kind="image" data-flash="no" data-caption="no" data-progress="1">
+        <button class="agent-attachment-tile__main">
+          "pic4.png"
+        <button class="stub-remove" aria-label="Remove pic4.png">
+      <li class="stub-tile" data-key="k5" data-number="5" data-status="ready" data-kind="image" data-flash="no" data-caption="no" data-progress="1">
+        <button class="agent-attachment-tile__main">
+          "pic5.png"
+        <button class="stub-remove" aria-label="Remove pic5.png">
+      <li class="stub-tile" data-key="k6" data-number="6" data-status="ready" data-kind="image" data-flash="no" data-caption="no" data-progress="1">
+        <button class="agent-attachment-tile__main">
+          "pic6.png"
+        <button class="stub-remove" aria-label="Remove pic6.png">
+      <li class="stub-tile" data-key="k7" data-number="7" data-status="ready" data-kind="image" data-flash="no" data-caption="no" data-progress="1">
+        <button class="agent-attachment-tile__main">
+          "pic7.png"
+        <button class="stub-remove" aria-label="Remove pic7.png">
+      <li class="stub-tile" data-key="k8" data-number="8" data-status="ready" data-kind="image" data-flash="no" data-caption="no" data-progress="1">
+        <button class="agent-attachment-tile__main">
+          "pic8.png"
+        <button class="stub-remove" aria-label="Remove pic8.png">
+  <span class="sr-only" aria-live="polite">
