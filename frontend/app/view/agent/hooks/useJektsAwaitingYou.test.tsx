@@ -12,7 +12,9 @@ vi.mock("@/app/notification/waiting-for-you", () => ({
     endWaitingForYou: (...a: unknown[]) => ended(...a),
 }));
 const synced = vi.fn();
-vi.mock("./awaiting-user", () => ({ syncAwaitingUser: (...a: unknown[]) => synced(...a) }));
+vi.mock("./awaiting-user", () => ({ syncAwaitingConfirm: (...a: unknown[]) => synced(...a) }));
+const flag = vi.hoisted(() => ({ on: false }));
+vi.mock("@/app/store/block-atom-cache", () => ({ getBlockMetaKeyAtom: () => () => (flag.on ? true : undefined) }));
 vi.mock("@/app/store/global", () => ({ MOS: { getMuxObjectAtom: () => () => ({ oid: "pane" }) } }));
 
 import type { DocumentNode, JektMessageNode } from "@/app/agent-model/node-types";
@@ -46,6 +48,7 @@ afterEach(() => {
     started.mockClear();
     ended.mockClear();
     synced.mockClear();
+    flag.on = false;
 });
 
 /** One mount of the hook for pane `blockId` over a document the test edits. */
@@ -68,14 +71,21 @@ describe("useJektsAwaitingYou", () => {
             expect.stringContaining("jekt-needs-you"),
             "A sensitive message from agent2 needs you"
         );
-        // The pane's `term:awaiting_user` (tab badge, Swarm "Waiting for you") is written when the wait starts...
+        // The pane's `term:awaiting_confirm` (tab badge, Swarm "Waiting for you") is written when the wait starts...
         expect(synced).toHaveBeenCalledTimes(1);
-        expect(synced).toHaveBeenLastCalledWith("p1");
+        expect(synced).toHaveBeenLastCalledWith("p1", true);
         setDoc([...doc(), user()]);
         expect(paneRequests.of("p1")).toEqual([]);
         expect(ended).toHaveBeenCalledTimes(1);
-        // ...and again when it ends.
+        // ...and cleared when it ends.
         expect(synced).toHaveBeenCalledTimes(2);
+        expect(synced).toHaveBeenLastCalledWith("p1", false);
+    });
+
+    it("clears a flag a closed window left behind when it mounts with nothing waiting", () => {
+        flag.on = true;
+        mount("p9", () => []);
+        expect(synced).toHaveBeenCalledWith("p9", false);
     });
 
     it("raises nothing for a jekt that only informs", () => {

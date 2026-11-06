@@ -13,9 +13,11 @@
 import { createEffect, createMemo, createSignal, untrack } from "solid-js";
 
 import type { DocumentNode } from "@/app/agent-model/node-types";
+import { META_AWAITING_CONFIRM } from "@/app/store/agent-status";
+import { getBlockMetaKeyAtom } from "@/app/store/block-atom-cache";
 import { paneRequests, type PaneRequestHandle } from "@/app/store/pane-requests";
 import { JektNeedsYouCard } from "../components/JektNeedsYouCard";
-import { syncAwaitingUser } from "./awaiting-user";
+import { syncAwaitingConfirm } from "./awaiting-user";
 import { dismissalKey, jektsAwaitingYou, WINDOW_STARTED_MS } from "../jekts-awaiting-you";
 
 /** A pane's card, and the messages it was raised for. */
@@ -38,6 +40,9 @@ export function useJektsAwaitingYou(opts: UseJektsAwaitingYouOptions): void {
     const dismissed = dismissals.get(blockId) ?? new Set<string>();
     dismissals.set(blockId, dismissed);
     jumpers.set(blockId, opts.jumpTo);
+    // A flag left by a window that closed with the card up: nothing waits in this window, so it ends.
+    const flagged = getBlockMetaKeyAtom(blockId, META_AWAITING_CONFIRM as never) as () => unknown;
+    if (!cards.has(blockId) && flagged() === true) syncAwaitingConfirm(blockId, false);
 
     const waiting = createMemo(
         () => {
@@ -58,7 +63,7 @@ export function useJektsAwaitingYou(opts: UseJektsAwaitingYouOptions): void {
             cards.delete(blockId);
             if (list.length === 0) {
                 // The wait is over: the pane's "Waiting for you" (tab badge, Swarm) follows it.
-                if (card) syncAwaitingUser(blockId);
+                if (card) syncAwaitingConfirm(blockId, false);
                 return;
             }
             const newest = list[list.length - 1];
@@ -78,7 +83,7 @@ export function useJektsAwaitingYou(opts: UseJektsAwaitingYouOptions): void {
                 summary: `${newest.from}: sensitive message`,
             });
             cards.set(blockId, { key, handle });
-            syncAwaitingUser(blockId);
+            syncAwaitingConfirm(blockId, true);
         });
     });
 }

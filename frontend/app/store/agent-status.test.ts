@@ -89,6 +89,13 @@ describe("rankAgentStatus", () => {
         });
     });
 
+    it("a sensitive message waiting for confirmation needs you with or without a turn in flight", () => {
+        expect(rankAgentStatus({ live: false, confirmPending: true }).kind).toBe("needs-you");
+        expect(rankAgentStatus({ live: false, confirmPending: true, ended: "completed" }).kind).toBe("needs-you");
+        expect(rankAgentStatus({ live: true, confirmPending: true }).kind).toBe("needs-you");
+        expect(rankAgentStatus({ live: false, confirmPending: false }).kind).toBe("idle");
+    });
+
     // SPEC_SWARM_SUPERVISOR_2026_10_16.md §3.6: the mirror of a question.
     it("a Supervisor pause needs you only while no turn is in flight", () => {
         expect(rankAgentStatus({ live: false, pausedForYou: true }).kind).toBe("needs-you");
