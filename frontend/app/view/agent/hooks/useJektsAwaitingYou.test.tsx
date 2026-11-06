@@ -11,6 +11,8 @@ vi.mock("@/app/notification/waiting-for-you", () => ({
     startWaitingForYou: (...a: unknown[]) => started(...a),
     endWaitingForYou: (...a: unknown[]) => ended(...a),
 }));
+const synced = vi.fn();
+vi.mock("./awaiting-user", () => ({ syncAwaitingUser: (...a: unknown[]) => synced(...a) }));
 vi.mock("@/app/store/global", () => ({ MOS: { getMuxObjectAtom: () => () => ({ oid: "pane" }) } }));
 
 import type { DocumentNode, JektMessageNode } from "@/app/agent-model/node-types";
@@ -43,6 +45,7 @@ afterEach(() => {
     __resetPaneRequests();
     started.mockClear();
     ended.mockClear();
+    synced.mockClear();
 });
 
 /** One mount of the hook for pane `blockId` over a document the test edits. */
@@ -65,9 +68,14 @@ describe("useJektsAwaitingYou", () => {
             expect.stringContaining("jekt-needs-you"),
             "A sensitive message from agent2 needs you"
         );
+        // The pane's `term:awaiting_user` (tab badge, Swarm "Waiting for you") is written when the wait starts...
+        expect(synced).toHaveBeenCalledTimes(1);
+        expect(synced).toHaveBeenLastCalledWith("p1");
         setDoc([...doc(), user()]);
         expect(paneRequests.of("p1")).toEqual([]);
         expect(ended).toHaveBeenCalledTimes(1);
+        // ...and again when it ends.
+        expect(synced).toHaveBeenCalledTimes(2);
     });
 
     it("raises nothing for a jekt that only informs", () => {

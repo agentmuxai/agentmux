@@ -15,6 +15,7 @@ import { createEffect, createMemo, createSignal, untrack } from "solid-js";
 import type { DocumentNode } from "@/app/agent-model/node-types";
 import { paneRequests, type PaneRequestHandle } from "@/app/store/pane-requests";
 import { JektNeedsYouCard } from "../components/JektNeedsYouCard";
+import { syncAwaitingUser } from "./awaiting-user";
 import { dismissalKey, jektsAwaitingYou, WINDOW_STARTED_MS } from "../jekts-awaiting-you";
 
 /** A pane's card, and the messages it was raised for. */
@@ -55,7 +56,11 @@ export function useJektsAwaitingYou(opts: UseJektsAwaitingYouOptions): void {
             if (card?.key === key) return;
             card?.handle.close();
             cards.delete(blockId);
-            if (list.length === 0) return;
+            if (list.length === 0) {
+                // The wait is over: the pane's "Waiting for you" (tab badge, Swarm) follows it.
+                if (card) syncAwaitingUser(blockId);
+                return;
+            }
             const newest = list[list.length - 1];
             const handle = paneRequests.push(blockId, {
                 source: "jekt-needs-you",
@@ -73,6 +78,7 @@ export function useJektsAwaitingYou(opts: UseJektsAwaitingYouOptions): void {
                 summary: `${newest.from}: sensitive message`,
             });
             cards.set(blockId, { key, handle });
+            syncAwaitingUser(blockId);
         });
     });
 }

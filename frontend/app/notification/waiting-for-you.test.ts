@@ -111,4 +111,13 @@ describe("waiting for you", () => {
         expect(isAgentWaitingForYou("b7")).toBe(false);
         await vi.waitFor(() => expect(syncAwaitingUser).toHaveBeenCalledTimes(2));
     });
+
+    it("counts a sensitive jekt's card as the agent's own wait, and another card as not", () => {
+        startWaitingForYou("b8", "pane-request:desktop-control:3", "Desktop control");
+        expect(isAgentWaitingForYou("b8"), "a card for something else").toBe(false);
+        startWaitingForYou("b8", "pane-request:jekt-needs-you:4", "A sensitive message needs you");
+        expect(isAgentWaitingForYou("b8")).toBe(true);
+        endWaitingForYou("b8", "pane-request:jekt-needs-you:4");
+        expect(isAgentWaitingForYou("b8")).toBe(false);
+    });
 });

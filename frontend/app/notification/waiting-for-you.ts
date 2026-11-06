@@ -102,12 +102,21 @@ export function anyAgentWaitingForYou(): boolean {
 }
 
 /** Whether the agent itself waits in this pane (a question, a tool
- *  permission, or one of srv's [`AGENT_WAITS`]), which the pane's
- *  `term:awaiting_user` meta reports. */
+ *  permission, one of srv's [`AGENT_WAITS`], or a sensitive jekt it must not
+ *  act on until the person confirms), which the pane's `term:awaiting_user`
+ *  meta reports. */
 export function isAgentWaitingForYou(blockId: string): boolean {
     const s = waiting.get(blockId);
-    return !!s && (s.has("question") || s.has("permission") || [...s.keys()].some((k) => k.startsWith(AGENT_SOURCE)));
+    return (
+        !!s &&
+        (s.has("question") ||
+            s.has("permission") ||
+            [...s.keys()].some((k) => k.startsWith(AGENT_SOURCE) || k.startsWith(JEKT_NEEDS_YOU_SOURCE)))
+    );
 }
+
+/** The wait key prefix of the card for a sensitive jekt (`paneRequests` names a wait `pane-request:<source>:<id>`). */
+const JEKT_NEEDS_YOU_SOURCE = "pane-request:jekt-needs-you:";
 
 /** srv's calls to action that are the agent's own wait, as a question is: its
  *  tool call waits on the answer. They set the pane's "Waiting for you" too, in
