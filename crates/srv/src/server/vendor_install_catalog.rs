@@ -16,6 +16,8 @@
 //! that way, so the table is empty; add a row only for a CLI it cannot install itself.
 
 /// What runs a downloaded script.
+// No row in the table builds these until a CLI AgentMux cannot install itself returns; the tests do.
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Interpreter {
     Bash,
@@ -59,6 +61,8 @@ impl Os {
     }
 }
 
+// No row in the table builds these until a CLI AgentMux cannot install itself returns; the tests do.
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug)]
 pub(crate) enum Recipe {
     /// Download `url`, show its hash, run that file with `interpreter`. `shown` is the vendor's
@@ -120,6 +124,7 @@ impl VendorInstall {
     }
 }
 
+#[cfg(test)]
 const TEN_MINUTES: u64 = 600;
 
 pub(crate) const VENDOR_INSTALLS: &[VendorInstall] = &[];
