@@ -73,7 +73,8 @@
 
 .messages-panel__needs-actions {
     display: flex;
-    gap: var(--space-2);
+    flex-wrap: wrap;
+    gap: var(--space-1) var(--space-2);
 }
 
 .messages-row {
@@ -103,6 +104,9 @@
 .messages-row__from {
     flex: 1;
     min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
     font-weight: 600;
     text-align: left;
 }
