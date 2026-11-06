@@ -296,9 +296,9 @@ function unsure(r: RecoveryState, snap: FailedTurnSnapshot): "sending" | "unknow
     return m && m.state !== "sent" && m.text === snap.message?.text ? m.state : null;
 }
 
-    // A network failure from a tracked API starts waiting; any other failure
-    // ends the wait, and so does the row going away, unless the operator's
-    // own send or a retry took it (the turn is then offered, or settled).
+// A network failure from a tracked API starts waiting; any other failure
+// ends the wait, and so does the row going away, unless the operator's
+// own send or a retry took it (the turn is then offered, or settled).
 function watchFailure(r: RecoveryState): void {
     createEffect(() => {
         const f = r.deps.failure();
