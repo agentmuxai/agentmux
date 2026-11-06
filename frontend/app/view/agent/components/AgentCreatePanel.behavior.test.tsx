@@ -29,6 +29,8 @@ vi.mock("@/app/store/rpc-api", () => ({
         InstallCheckCommand: vi.fn(),
         ToolchainResolveInstallCommandCommand: vi.fn(),
         ToolchainInstallSystemToolCommand: vi.fn(),
+        ToolchainInstallVendorCliCommand: vi.fn(),
+        ToolchainVendorInstallInfoCommand: vi.fn(async () => ({ available: false, command: "", downloadUrl: null })),
         ListIdentityAccountsCommand: vi.fn(),
         CheckCliAuthCommand: vi.fn(),
         ContainerImageCheckCommand: vi.fn(async () => ({ status: dockerForTest.image })),

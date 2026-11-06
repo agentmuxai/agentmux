@@ -681,8 +681,9 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
     goose: {
         id: "goose",
         displayName: "goose",
-        // `goose acp`: ACP over stdio. Not on npm: the user installs the release
-        // (the install command); srv finds it. Mirrors crates/srv/src/backend/providers/goose.rs.
+        // `goose acp`: ACP over stdio. Not on npm: AgentMux downloads the pinned
+        // release itself (managedInstall); the install command below is for a copy the
+        // person installs on their own. Mirrors crates/srv/src/backend/providers/goose.rs.
         cliCommand: "goose",
         defaultArgs: [],
         styledArgs: [],
@@ -697,10 +698,11 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         requiresLoginTty: true,
         headlessLoginUrlUnsupported: true,
         npmPackage: "",
+        managedInstall: true,
         pinnedVersion: "1.54.0",
         versionSource: { kind: "github-release", repo: "aaif-goose/goose" },
         docsUrl: "https://goose-docs.ai/docs/getting-started/installation",
-        windowsInstallCommand: "irm https://github.com/aaif-goose/goose/releases/download/stable/download_cli.ps1 | iex",
+        windowsInstallCommand: "irm https://raw.githubusercontent.com/aaif-goose/goose/main/download_cli.ps1 | iex",
         unixInstallCommand: "curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | CONFIGURE=false bash",
         icon: "terminal",
         authConfigDirEnvVar: "GOOSE_PATH_ROOT",

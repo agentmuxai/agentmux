@@ -730,6 +730,7 @@ partial list.
 | [`SPEC_HOST_UI_THREAD_HANG_WATCHDOG_2026_08_14`](SPEC_HOST_UI_THREAD_HANG_WATCHDOG_2026_08_14.md) | SPEC: Host UI-thread hang detection, forensic dump, and auto-recovery |
 | [`SPEC_IDENTITY_STORE_SPLIT_2026_08_17`](SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md) | SPEC: Split the multi-concern shared store — permanent global identity data vs. explicitly-disposable Armory test accounts |
 | [`SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09`](SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md) | Spec: Instruction and Memory Portability |
+| [`SPEC_ISOLATED_INSTALL_FOR_NON_NPM_CLIS_2026_11_05`](SPEC_ISOLATED_INSTALL_FOR_NON_NPM_CLIS_2026_11_05.md) | Spec: AgentMux installs its own isolated, pinned copy of all 19 agent CLIs |
 | [`SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02`](SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md) | SPEC: Cross-channel jekt trust — closing the last unverifiable same-machine tier |
 | [`SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01`](SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01.md) | SPEC: jekt delivery that tells the truth — receiver state, one mailbox, receipts |
 | [`SPEC_JEKT_HOLD_FOR_COLD_SESSIONS_2026_10_25`](SPEC_JEKT_HOLD_FOR_COLD_SESSIONS_2026_10_25.md) | Spec: hold a routine message for an agent whose session has gone cold |
@@ -770,6 +771,7 @@ partial list.
 | [`SPEC_NODEJS_24_LTS_STANDARDIZATION_2026_09_15`](SPEC_NODEJS_24_LTS_STANDARDIZATION_2026_09_15.md) | Node.js 24 LTS standardization across agentmuxai repos |
 | [`SPEC_NO_WINDOW_SPAWN_AND_META_ROW_TYPE_SCALE_DRY_2026_10_01`](SPEC_NO_WINDOW_SPAWN_AND_META_ROW_TYPE_SCALE_DRY_2026_10_01.md) | Spec: DRY the no-window spawn flag, and the meta-row type scale |
 | [`SPEC_OFFLINE_RESILIENCE_2026_10_20`](SPEC_OFFLINE_RESILIENCE_2026_10_20.md) | SPEC: Stay in control of every agent when the internet drops, and recover by itself |
+| [`SPEC_ONE_CLICK_VENDOR_CLI_INSTALL_2026_10_20`](SPEC_ONE_CLICK_VENDOR_CLI_INSTALL_2026_10_20.md) | SPEC: One-click install for the vendor-installed agent CLIs |
 | [`SPEC_ONE_COMMAND_INSTALL_ALL_PLATFORMS_2026_11_01`](SPEC_ONE_COMMAND_INSTALL_ALL_PLATFORMS_2026_11_01.md) | Spec: install AgentMux with one copyable command on Windows, macOS and Linux |
 | [`SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24`](SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md) | SPEC: OS notification system (native toasts) + tray re-enablement |
 | [`SPEC_PACKS_2026_11_05`](SPEC_PACKS_2026_11_05.md) | SPEC: Computer-use skills: per-application knowledge for computer use (Word, Excel, Ableton Live, WaveLab, Blender first) |

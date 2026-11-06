@@ -24,7 +24,7 @@ export function createTemplates(d: {
     const setNodejsError = (_: null): void => d.clearNodejsError();
     const [openTemplate, setOpenTemplate] = createSignal<string | null>(null);
     /** The harnesses whose CLI AgentMux doesn't install (no npm package). */
-    const userInstalledProviders = () => getProviderList().filter((p) => !p.npmPackage && p.docsUrl);
+    const userInstalledProviders = () => getProviderList().filter((p) => !p.npmPackage && !p.managedInstall && p.docsUrl);
     // The open panel is creating an agent: it can't close or move meanwhile.
     const [panelBusy, setPanelBusy] = createSignal(false);
     const drafts = new Map<string, CreateDraft>();

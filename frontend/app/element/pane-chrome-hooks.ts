@@ -415,14 +415,14 @@ export function createPaneTabHandlers(
     // A click on a pill of a collapsed pane expands it, the active pill included (handleActivate
     // never sees that click) and an agent pane's own onActivate included (it returns before the
     // ordinary path). Restore first, then the activation, the order showBlockInPane uses
-    // (SPEC_PANE_TAB_MULTI_SELECT_MOVE_AND_COLLAPSED_EXPAND_2026_10_24.md §6). A fork pill belongs to
+    // (SPEC_PANE_TAB_MULTI_SELECT_MOVE_AND_COLLAPSED_EXPAND_2026_10_24.md §6). An extra tab belongs to
     // another pane, and its click reveals that pane: this pane is not expanded for it.
     const handleSelect = (blockId: string) => {
         if (nodeModel.isMinimized?.() && stackIds().includes(blockId)) layoutModel.minimizeNodeToggle(nodeModel.nodeId);
     };
     const handleActivate = (blockId: string) => {
-        // A view type whose tabs can live in OTHER panes (agent's cross-pane forks) handles
-        // activation itself and returns true; anything else falls through to the same-pane switch.
+        // A view type that handles activation itself (its own tab model) returns true; anything else
+        // falls through to the same-pane switch.
         if (model()?.onActivate?.(blockId) === true) return;
         if (blockId === activeBlockId()) return;
         setActiveBlockInStack(layoutModel, nodeModel.nodeId, blockId);
@@ -431,8 +431,8 @@ export function createPaneTabHandlers(
         if (model()?.onClose?.(blockId) === true) return;
         void closeBlockInStack(layoutModel, nodeModel.nodeId, blockId);
     };
-    // A pill's menu is the header menu for that tab (openPaneTabMenu). A single-tab pane's pill, and a
-    // fork pill of another pane (its Close Pane and magnify are not this pane's), leave the event to
+    // A pill's menu is the header menu for that tab (openPaneTabMenu). A single-tab pane's pill, and an
+    // extra tab of another pane (its Close Pane and magnify are not this pane's), leave the event to
     // the header's own handler.
     const handleTabContextMenu = (blockId: string, e: MouseEvent) => {
         if (stackIds().length < 2 || !stackIds().includes(blockId)) return;
