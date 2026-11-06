@@ -24,7 +24,7 @@ use super::layout_intents::Placement;
 /// SPEC_864 Phase 3 — reducer-routed: dispatches `LayoutSetTree` via
 /// `seed_layout_via_reducer` (single writer of `db_layout`; the reducer's
 /// `TabRecord.rootnode` stays authoritative) instead of the retired
-/// wcore-direct `rootnode`/`leaforder` write. Every caller runs post-saga,
+/// wcore-direct `rootnode` write. Every caller runs post-saga,
 /// so the tab is always reducer-known. Best-effort at the call sites: a
 /// failure leaves the new tab with the moved block but a malformed layout;
 /// the user-visible symptom is an empty render in the new window.
@@ -50,7 +50,7 @@ pub(crate) async fn setup_torn_off_stack_layout(
     let node_id = uuid::Uuid::new_v4().to_string();
     // Phase E.4.B Phase 2 — construct typed LayoutNode (was inline JSON).
     let rootnode = LayoutNode {
-        id: node_id.clone(),
+        id: node_id,
         flex_direction: FlexDirection::Row,
         size: 1.0,
         children: Vec::new(),
@@ -62,21 +62,9 @@ pub(crate) async fn setup_torn_off_stack_layout(
         }),
         ..Default::default()
     };
-    let leaforder = vec![LeafOrderEntry {
-        nodeid: node_id,
-        blockid: block_id.to_string(),
-    }];
     // Focused id stays empty — the legacy writer never set it for a
     // torn-off tab; the frontend focuses on load.
-    super::reducer_helpers::seed_layout_via_reducer(
-        state,
-        new_tab_id,
-        rootnode,
-        String::new(),
-        leaforder,
-        String::new(),
-    )
-    .await
+    super::reducer_helpers::seed_layout_via_reducer(state, new_tab_id, rootnode, String::new(), String::new()).await
 }
 
 /// The stack as the caller gave it (`tear_off_order` moves the visible block

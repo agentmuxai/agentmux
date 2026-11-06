@@ -179,19 +179,18 @@ pub(crate) fn write_default_three_pane_layout(
     sysinfo_block_id: &str,
 ) -> Result<(), StoreError> {
     let tab = store.must_get::<Tab>(tab_id)?;
-    let (rootnode, focused_node_id, leaforder) =
+    let (rootnode, focused_node_id) =
         default_three_pane_tree(agent_block_id, swarm_block_id, sysinfo_block_id);
     let mut layout = store.must_get::<LayoutState>(&tab.layoutstate)?;
     layout.rootnode = Some(rootnode);
     layout.focusednodeid = focused_node_id;
-    layout.leaforder = Some(leaforder);
     layout.pendingbackendactions = None;
     store.update(&mut layout)?;
     Ok(())
 }
 
 /// Pure builder for the default 3-pane tree (`agent | [sysinfo / swarm]`).
-/// Returns `(rootnode, focused_node_id, leaforder)`. Shared by
+/// Returns `(rootnode, focused_node_id)`. Shared by
 /// the pre-bootstrap store-direct writer above (first launch — reducer not
 /// hydrated yet) and the post-bootstrap reducer-routed CreateWindow seed
 /// (SPEC_864 Phase 3, `seed_layout_via_reducer`), so the layout shape can
@@ -205,7 +204,7 @@ pub(crate) fn default_three_pane_tree(
     agent_block_id: &str,
     swarm_block_id: &str,
     sysinfo_block_id: &str,
-) -> (LayoutNode, String, Vec<LeafOrderEntry>) {
+) -> (LayoutNode, String) {
     // Node IDs for each tree position. Leaves get their own node IDs distinct
     // from the block IDs they wrap.
     let agent_node_id = Uuid::new_v4().to_string();
@@ -240,7 +239,7 @@ pub(crate) fn default_three_pane_tree(
                     // sysinfo (CPU) sits ABOVE swarm, keeping the same 20%
                     // share of the right column it had in the 4-pane layout.
                     LayoutNode {
-                        id: sysinfo_node_id.clone(),
+                        id: sysinfo_node_id,
                         flex_direction: FlexDirection::Row,
                         size: 2.0,
                         children: Vec::new(),
@@ -251,7 +250,7 @@ pub(crate) fn default_three_pane_tree(
                         ..Default::default()
                     },
                     LayoutNode {
-                        id: swarm_node_id.clone(),
+                        id: swarm_node_id,
                         flex_direction: FlexDirection::Row,
                         size: 8.0,
                         children: Vec::new(),
@@ -269,13 +268,7 @@ pub(crate) fn default_three_pane_tree(
         ..Default::default()
     };
 
-    // Display order (agent, then the right column top-to-bottom).
-    let leaforder = vec![
-        LeafOrderEntry { nodeid: agent_node_id.clone(), blockid: agent_block_id.to_string() },
-        LeafOrderEntry { nodeid: sysinfo_node_id, blockid: sysinfo_block_id.to_string() },
-        LeafOrderEntry { nodeid: swarm_node_id, blockid: swarm_block_id.to_string() },
-    ];
-    (rootnode, agent_node_id, leaforder)
+    (rootnode, agent_node_id)
 }
 
 /// Pure builder for a single-pane tree wrapping exactly one block — no
@@ -284,7 +277,7 @@ pub(crate) fn default_three_pane_tree(
 /// (e.g. "Open in New Window" on a widget) instead of wanting the default
 /// 3-pane launch layout — the new window's sole pane is the requested
 /// widget, not that widget plus the default agent/swarm/sysinfo split.
-pub(crate) fn single_leaf_tree(block_id: &str) -> (LayoutNode, String, Vec<LeafOrderEntry>) {
+pub(crate) fn single_leaf_tree(block_id: &str) -> (LayoutNode, String) {
     let node_id = Uuid::new_v4().to_string();
     let rootnode = LayoutNode {
         id: node_id.clone(),
@@ -297,8 +290,7 @@ pub(crate) fn single_leaf_tree(block_id: &str) -> (LayoutNode, String, Vec<LeafO
         }),
         ..Default::default()
     };
-    let leaforder = vec![LeafOrderEntry { nodeid: node_id.clone(), blockid: block_id.to_string() }];
-    (rootnode, node_id, leaforder)
+    (rootnode, node_id)
 }
 
 /// Get the singleton client record.
@@ -473,16 +465,15 @@ mod tests {
         // Layout populated (the regression was new windows getting rootnode=None).
         let layout = store.must_get::<LayoutState>(&tab.layoutstate).unwrap();
         assert!(layout.rootnode.is_some(), "rootnode must be populated, not blank");
-        assert_eq!(layout.leaforder.as_ref().unwrap().len(), 3);
+        assert!(!layout.focusednodeid.is_empty(), "the agent pane starts focused");
     }
 
     /// The right column is `[sysinfo, swarm]` top-to-bottom — CPU above
     /// swarm, not below it — and sysinfo keeps the 20% share it had in the
-    /// old 4-pane layout. Asserted on the tree directly, since `leaforder`
-    /// alone wouldn't catch the two being swapped in `children`.
+    /// old 4-pane layout.
     #[test]
     fn default_three_pane_tree_puts_sysinfo_above_swarm() {
-        let (root, focused, leaforder) = default_three_pane_tree("b-agent", "b-swarm", "b-sysinfo");
+        let (root, focused) = default_three_pane_tree("b-agent", "b-swarm", "b-sysinfo");
 
         assert_eq!(root.children.len(), 2, "agent | right-column");
         let agent = &root.children[0];
@@ -496,21 +487,15 @@ mod tests {
         assert_eq!(right.children[1].data.as_ref().unwrap().block_id, "b-swarm", "swarm below");
         assert_eq!(right.children[0].size, 2.0);
         assert_eq!(right.children[1].size, 8.0);
-
-        let order: Vec<&str> = leaforder.iter().map(|e| e.blockid.as_str()).collect();
-        assert_eq!(order, vec!["b-agent", "b-sysinfo", "b-swarm"]);
     }
 
     #[test]
     fn single_leaf_tree_wraps_exactly_one_block_with_no_split() {
-        let (root, focused, leaforder) = single_leaf_tree("b-widget");
+        let (root, focused) = single_leaf_tree("b-widget");
 
         assert!(root.children.is_empty(), "no split — the root node IS the leaf");
         assert_eq!(root.data.as_ref().unwrap().block_id, "b-widget");
         assert_eq!(focused, root.id, "the sole pane starts focused");
-        assert_eq!(leaforder.len(), 1);
-        assert_eq!(leaforder[0].blockid, "b-widget");
-        assert_eq!(leaforder[0].nodeid, root.id);
     }
 
     #[test]
