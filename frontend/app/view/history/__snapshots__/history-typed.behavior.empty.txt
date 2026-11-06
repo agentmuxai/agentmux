@@ -1,0 +1,18 @@
+rpc ListAgentDefinitions include_hidden=true
+-- no agents
+<div>
+  <div class="warden-history-typed">
+    <div class="warden-history-bar">
+      <select disabled="" class="ui-input ui-density-compact" aria-label="Agent">
+      <span class="ui-filter">
+        <i aria-hidden="true" class="fa-solid fa-magnifying-glass ui-search-icon">
+        <input type="text" class="ui-filter-input" data-pane-focus="" placeholder="Search what was typed" aria-label="Search what was typed">
+      <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
+        <i aria-hidden="true" class="fa-solid fa-rotate">
+        "Refresh"
+    <div class="warden-section-stub">
+      "No agent to show."
+    <div class="warden-manager-footnote">
+      "What was typed to an agent is kept with the agent, up to its limit (the agent:inputhistory:max setting), and goes when the agent is deleted. Forgotten entries can be restored for"
+      "7"
+      "days, then they are gone."

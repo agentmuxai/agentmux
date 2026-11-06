@@ -489,7 +489,6 @@
 118 frontend/app/view/global-bundle/GlobalMemoryFullView.tsx::EntryView
 253 frontend/app/view/global-bundle/global-bundle-manager.tsx::GlobalBundleManager
 147 frontend/app/view/history/history-agents.tsx::HistoryAgents
-285 frontend/app/view/history/history-typed.tsx::HistoryTyped
 269 frontend/app/view/identity/agent-identity-links-panel.tsx::AgentIdentityLinksPanel
 165 frontend/app/view/identity/identity-accounts-tab.tsx::AccountDetailPanel
 229 frontend/app/view/kanban/kanban-board.tsx::KanbanBoard
