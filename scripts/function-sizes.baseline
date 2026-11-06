@@ -468,7 +468,6 @@
 132 frontend/app/view/audit/audit-manager.tsx::AuditManager
 103 frontend/app/view/browser/browser-model.ts::BrowserViewModel::getBodyContextMenuItems
 101 frontend/app/view/browser/browser-profile-menu.tsx::BrowserProfileButton
-267 frontend/app/view/browser/driven-by-strip.tsx::DrivenByStrip
 141 frontend/app/view/browser/use-browser-auth.ts::useBrowserAuth
 148 frontend/app/view/browser/use-freeze-frame.ts::useFreezeFrame
 394 frontend/app/view/browser/use-pane-rect-sync.ts::usePaneRectSync
@@ -482,7 +481,6 @@
 118 frontend/app/view/global-bundle/GlobalMemoryFullView.tsx::EntryView
 253 frontend/app/view/global-bundle/global-bundle-manager.tsx::GlobalBundleManager
 147 frontend/app/view/history/history-agents.tsx::HistoryAgents
-269 frontend/app/view/identity/agent-identity-links-panel.tsx::AgentIdentityLinksPanel
 165 frontend/app/view/identity/identity-accounts-tab.tsx::AccountDetailPanel
 229 frontend/app/view/kanban/kanban-board.tsx::KanbanBoard
 168 frontend/app/view/kanban/kanban-card.tsx::KanbanCard
