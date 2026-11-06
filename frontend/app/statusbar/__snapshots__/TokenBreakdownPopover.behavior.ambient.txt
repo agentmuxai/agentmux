@@ -1,0 +1,216 @@
+watchAmbient 5000
+-- collapsed
+<div>
+  <div data-stand="AnchoredPopover" data-placement="top-end" data-class="token-usage-breakdown" data-role="dialog" data-label="Token usage breakdown" data-style="{\"width\":\"320px\"}">
+    <span data-cb="onDismiss">
+      "dismiss"
+    <div class="token-usage-breakdown-header">
+      <span class="token-usage-breakdown-title">
+        "Token Usage"
+      <span class="token-usage-breakdown-subtitle">
+        "since"
+        "T"
+    <div class="token-usage-breakdown-rows">
+      <button title="Click to focus Manoz's pane" type="button" class="ui-button ui-tone-quiet token-usage-breakdown-row token-usage-breakdown-agent-row">
+        <span class="token-usage-breakdown-row-name">
+          "Manoz"
+          <span class="token-usage-breakdown-row-cache" data-hover-tip="80% of input served from cache" aria-description="80% of input served from cache">
+            "80"
+            "%"
+        <span class="token-usage-breakdown-row-meta">
+          "1"
+          "turn"
+        <span class="token-usage-breakdown-row-counts">
+          <span class="token-usage-indicator-arrow">
+            "↑"
+          "1.0k"
+          <span class="token-usage-indicator-arrow">
+            "↓"
+          "50"
+      <div class="token-usage-breakdown-ambient">
+        <button aria-expanded="false" type="button" class="ui-button ui-tone-quiet token-usage-breakdown-row token-usage-breakdown-ambient-toggle">
+          <span class="token-usage-breakdown-row-name">
+            "▸"
+            "AgentMux internal"
+          <span class="token-usage-breakdown-row-counts">
+            <span class="token-usage-indicator-arrow">
+              "↑"
+            "600"
+            <span class="token-usage-indicator-arrow">
+              "↓"
+            "15"
+      <div class="token-usage-breakdown-row token-usage-breakdown-total">
+        <span class="token-usage-breakdown-row-name">
+          "Total"
+        <span class="token-usage-breakdown-row-counts">
+          <span class="token-usage-indicator-arrow">
+            "↑"
+          "1.6k"
+          <span class="token-usage-indicator-arrow">
+            "↓"
+          "65"
+      <div class="token-usage-breakdown-cache-rate" data-hover-tip="Share of input tokens served from Claude's prompt cache this session (~0.1x the cost of a fresh token). Only available for providers that report a cache breakdown." aria-description="Share of input tokens served from Claude's prompt cache this session (~0.1x the cost of a fresh token). Only available for providers that report a cache breakdown.">
+        "80"
+        "% of input served from cache"
+    <div class="token-usage-breakdown-footer">
+      <button type="button" class="ui-button ui-tone-danger ui-density-compact">
+        "Reset counter"
+  <div data-stand="ConfirmModal" data-open="false" data-title="Reset token counter?" data-description="This clears the running total for the current session. Per-pane Worked stats stay unchanged." data-confirm-label="Reset" data-destructive="true">
+    <span data-cb="onConfirm">
+      "confirm"
+    <span data-cb="onCancel">
+      "cancel"
+-- expanded
+<div>
+  <div data-stand="AnchoredPopover" data-placement="top-end" data-class="token-usage-breakdown" data-role="dialog" data-label="Token usage breakdown" data-style="{\"width\":\"320px\"}">
+    <span data-cb="onDismiss">
+      "dismiss"
+    <div class="token-usage-breakdown-header">
+      <span class="token-usage-breakdown-title">
+        "Token Usage"
+      <span class="token-usage-breakdown-subtitle">
+        "since"
+        "T"
+    <div class="token-usage-breakdown-rows">
+      <button title="Click to focus Manoz's pane" type="button" class="ui-button ui-tone-quiet token-usage-breakdown-row token-usage-breakdown-agent-row">
+        <span class="token-usage-breakdown-row-name">
+          "Manoz"
+          <span class="token-usage-breakdown-row-cache" data-hover-tip="80% of input served from cache" aria-description="80% of input served from cache">
+            "80"
+            "%"
+        <span class="token-usage-breakdown-row-meta">
+          "1"
+          "turn"
+        <span class="token-usage-breakdown-row-counts">
+          <span class="token-usage-indicator-arrow">
+            "↑"
+          "1.0k"
+          <span class="token-usage-indicator-arrow">
+            "↓"
+          "50"
+      <div class="token-usage-breakdown-ambient">
+        <button aria-expanded="true" type="button" class="ui-button ui-tone-quiet token-usage-breakdown-row token-usage-breakdown-ambient-toggle">
+          <span class="token-usage-breakdown-row-name">
+            "▾"
+            "AgentMux internal"
+          <span class="token-usage-breakdown-row-counts">
+            <span class="token-usage-indicator-arrow">
+              "↑"
+            "600"
+            <span class="token-usage-indicator-arrow">
+              "↓"
+            "15"
+        <div class="token-usage-breakdown-ambient-detail">
+          <div class="token-usage-breakdown-row token-usage-breakdown-ambient-row">
+            <span class="token-usage-breakdown-row-name">
+              "Ambient:zeta_thing"
+            <span class="token-usage-breakdown-row-counts">
+              <span class="token-usage-indicator-arrow">
+                "↑"
+              "400"
+              <span class="token-usage-indicator-arrow">
+                "↓"
+              "5"
+          <div class="token-usage-breakdown-row token-usage-breakdown-ambient-row">
+            <span class="token-usage-breakdown-row-name">
+              "Ambient:activity_summary"
+            <span class="token-usage-breakdown-row-counts">
+              <span class="token-usage-indicator-arrow">
+                "↑"
+              "100"
+              <span class="token-usage-indicator-arrow">
+                "↓"
+              "5"
+          <div class="token-usage-breakdown-row token-usage-breakdown-ambient-row">
+            <span class="token-usage-breakdown-row-name">
+              "Ambient:next_prompt_suggestion"
+            <span class="token-usage-breakdown-row-counts">
+              <span class="token-usage-indicator-arrow">
+                "↑"
+              "100"
+              <span class="token-usage-indicator-arrow">
+                "↓"
+              "5"
+          <div data-stand="AmbientPurposes">
+      <div class="token-usage-breakdown-row token-usage-breakdown-total">
+        <span class="token-usage-breakdown-row-name">
+          "Total"
+        <span class="token-usage-breakdown-row-counts">
+          <span class="token-usage-indicator-arrow">
+            "↑"
+          "1.6k"
+          <span class="token-usage-indicator-arrow">
+            "↓"
+          "65"
+      <div class="token-usage-breakdown-cache-rate" data-hover-tip="Share of input tokens served from Claude's prompt cache this session (~0.1x the cost of a fresh token). Only available for providers that report a cache breakdown." aria-description="Share of input tokens served from Claude's prompt cache this session (~0.1x the cost of a fresh token). Only available for providers that report a cache breakdown.">
+        "80"
+        "% of input served from cache"
+    <div class="token-usage-breakdown-footer">
+      <button type="button" class="ui-button ui-tone-danger ui-density-compact">
+        "Reset counter"
+  <div data-stand="ConfirmModal" data-open="false" data-title="Reset token counter?" data-description="This clears the running total for the current session. Per-pane Worked stats stay unchanged." data-confirm-label="Reset" data-destructive="true">
+    <span data-cb="onConfirm">
+      "confirm"
+    <span data-cb="onCancel">
+      "cancel"
+-- collapsed again
+<div>
+  <div data-stand="AnchoredPopover" data-placement="top-end" data-class="token-usage-breakdown" data-role="dialog" data-label="Token usage breakdown" data-style="{\"width\":\"320px\"}">
+    <span data-cb="onDismiss">
+      "dismiss"
+    <div class="token-usage-breakdown-header">
+      <span class="token-usage-breakdown-title">
+        "Token Usage"
+      <span class="token-usage-breakdown-subtitle">
+        "since"
+        "T"
+    <div class="token-usage-breakdown-rows">
+      <button title="Click to focus Manoz's pane" type="button" class="ui-button ui-tone-quiet token-usage-breakdown-row token-usage-breakdown-agent-row">
+        <span class="token-usage-breakdown-row-name">
+          "Manoz"
+          <span class="token-usage-breakdown-row-cache" data-hover-tip="80% of input served from cache" aria-description="80% of input served from cache">
+            "80"
+            "%"
+        <span class="token-usage-breakdown-row-meta">
+          "1"
+          "turn"
+        <span class="token-usage-breakdown-row-counts">
+          <span class="token-usage-indicator-arrow">
+            "↑"
+          "1.0k"
+          <span class="token-usage-indicator-arrow">
+            "↓"
+          "50"
+      <div class="token-usage-breakdown-ambient">
+        <button aria-expanded="false" type="button" class="ui-button ui-tone-quiet token-usage-breakdown-row token-usage-breakdown-ambient-toggle">
+          <span class="token-usage-breakdown-row-name">
+            "▸"
+            "AgentMux internal"
+          <span class="token-usage-breakdown-row-counts">
+            <span class="token-usage-indicator-arrow">
+              "↑"
+            "600"
+            <span class="token-usage-indicator-arrow">
+              "↓"
+            "15"
+      <div class="token-usage-breakdown-row token-usage-breakdown-total">
+        <span class="token-usage-breakdown-row-name">
+          "Total"
+        <span class="token-usage-breakdown-row-counts">
+          <span class="token-usage-indicator-arrow">
+            "↑"
+          "1.6k"
+          <span class="token-usage-indicator-arrow">
+            "↓"
+          "65"
+      <div class="token-usage-breakdown-cache-rate" data-hover-tip="Share of input tokens served from Claude's prompt cache this session (~0.1x the cost of a fresh token). Only available for providers that report a cache breakdown." aria-description="Share of input tokens served from Claude's prompt cache this session (~0.1x the cost of a fresh token). Only available for providers that report a cache breakdown.">
+        "80"
+        "% of input served from cache"
+    <div class="token-usage-breakdown-footer">
+      <button type="button" class="ui-button ui-tone-danger ui-density-compact">
+        "Reset counter"
+  <div data-stand="ConfirmModal" data-open="false" data-title="Reset token counter?" data-description="This clears the running total for the current session. Per-pane Worked stats stay unchanged." data-confirm-label="Reset" data-destructive="true">
+    <span data-cb="onConfirm">
+      "confirm"
+    <span data-cb="onCancel">
+      "cancel"

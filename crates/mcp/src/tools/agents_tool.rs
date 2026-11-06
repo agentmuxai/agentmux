@@ -12,7 +12,7 @@
 //! launches the worker, then this process sends it the brief, signed as the
 //! caller.
 
-use agentmux_common::api_types::{ContainerAsk, CreateAgentRequest, SpawnAgentRequest, SpawnManyRequest, SpawnWorkerSpec};
+use agentmux_common::api_types::{ContainerAsk, CreateAgentRequest, RouteAsk, SpawnAgentRequest, SpawnManyRequest, SpawnWorkerSpec};
 
 use super::family::{pick, public_params, relabeled, Act};
 use super::*;
@@ -25,6 +25,7 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "spawn", tool: "SpawnAgent", rename: &[] },
     Act { action: "create", tool: "AgentCreate", rename: &[] },
     Act { action: "workers", tool: "AgentWorkers", rename: &[] },
+    Act { action: "routes", tool: "AgentRoutes", rename: &[] },
     Act { action: "start", tool: "AgentStart", rename: &[] },
     Act { action: "stop", tool: "AgentStop", rename: &[] },
     Act { action: "detach", tool: "AgentDetach", rename: &[] },
@@ -74,6 +75,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 "SpawnAgent" => spawn(&args, cx).await,
                 "AgentCreate" => create_agent(&args, cx).await,
                 "AgentWorkers" => workers(cx).await,
+                "AgentRoutes" => routes(cx, &args).await,
                 "AgentStart" => lifecycle(cx, "start", &args).await,
                 "AgentStop" => lifecycle(cx, "stop", &args).await,
                 "AgentDetach" => lifecycle(cx, "detach", &args).await,
@@ -160,6 +162,7 @@ async fn spawn(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
         brief: brief.clone(),
         account: str_arg(arguments, "account"),
         container: container_ask(arguments),
+        route: route_ask(arguments),
         user_instruction: str_arg(arguments, "user_instruction").unwrap_or_default(),
     };
     let url = format!("{}/api/v1/agent/spawn", cx.local_url.trim_end_matches('/'));
@@ -190,6 +193,11 @@ async fn spawn(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     Ok(serde_json::to_string_pretty(&body)?)
 }
 
+/// The harness and model route the new agent runs on, as `spawn`, a worker of `workers` and `create` ask for them.
+fn route_ask(args: &Value) -> RouteAsk {
+    RouteAsk { harness: str_arg(args, "harness"), route: str_arg(args, "route") }
+}
+
 /// Where the new agent runs, as `spawn`, a worker of `workers` and `create` ask for it.
 fn container_ask(args: &Value) -> ContainerAsk {
     ContainerAsk {
@@ -212,6 +220,8 @@ async fn create_agent(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
         template,
         account: str_arg(arguments, "account"),
         container: container_ask(arguments),
+        model: str_arg(arguments, "model"),
+        route: route_ask(arguments),
         user_instruction: str_arg(arguments, "user_instruction").unwrap_or_default(),
     };
     let url = format!("{}/api/v1/agent/create", cx.local_url.trim_end_matches('/'));
@@ -240,15 +250,15 @@ async fn spawn_many(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     let Some(asked) = arguments.get("workers").and_then(Value::as_array) else {
         anyhow::bail!("Agents spawn: workers must be a list of {{brief, name?, model?, effort?, account?}}");
     };
-    if ["brief", "name", "model", "effort", "account", "runtime", "container_image"].iter().any(|k| str_arg(arguments, k).is_some())
+    if ["brief", "name", "model", "effort", "account", "runtime", "container_image", "harness", "route"].iter().any(|k| str_arg(arguments, k).is_some())
         || ["memory_mb", "cpus"].iter().any(|k| arguments.get(k).is_some_and(|v| !v.is_null()))
     {
-        anyhow::bail!("Agents spawn: give either workers or brief (with name, model, effort, account, runtime, container_image, memory_mb, cpus), not both");
+        anyhow::bail!("Agents spawn: give either workers or brief (with name, model, effort, account, runtime, container_image, harness, route, memory_mb, cpus), not both");
     }
     let mut specs = Vec::with_capacity(asked.len());
     for (i, w) in asked.iter().enumerate() {
         let brief = str_arg(w, "brief").ok_or_else(|| anyhow::anyhow!("Agents spawn: workers[{i}] needs a brief"))?;
-        specs.push(SpawnWorkerSpec { name: str_arg(w, "name"), model: str_arg(w, "model"), effort: str_arg(w, "effort"), account: str_arg(w, "account"), brief, container: container_ask(w) });
+        specs.push(SpawnWorkerSpec { name: str_arg(w, "name"), model: str_arg(w, "model"), effort: str_arg(w, "effort"), account: str_arg(w, "account"), brief, container: container_ask(w), route: route_ask(w) });
     }
     let briefs: Vec<String> = specs.iter().map(|s| s.brief.clone()).collect();
     let request = SpawnManyRequest { auth: sign_ui_automation_auth()?, workers: specs, user_instruction: str_arg(arguments, "user_instruction").unwrap_or_default() };
@@ -357,6 +367,26 @@ async fn workers(cx: &ToolCtx<'_>) -> Result<String> {
     let body: Value = resp.json().await.unwrap_or(Value::Null);
     if !status.is_success() {
         anyhow::bail!("AgentWorkers: {}", body["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("srv answered {status}: {body}")));
+    }
+    Ok(serde_json::to_string_pretty(&body)?)
+}
+
+/// `routes`: the model routes a spawn or create may name (`/api/v1/agent/routes`), read-only.
+async fn routes(cx: &ToolCtx<'_>, args: &Value) -> Result<String> {
+    require_agent_env(cx.local_url, cx.auth_key, cx.block_id)?;
+    let url = format!("{}/api/v1/agent/routes", cx.local_url.trim_end_matches('/'));
+    let resp = cx
+        .client
+        .post(&url)
+        .header(AUTH_KEY_HEADER, cx.auth_key)
+        .json(&json!({ "harness": str_arg(args, "harness") }))
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or(Value::Null);
+    if !status.is_success() {
+        anyhow::bail!("Agents routes: {}", body["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("srv answered {status}: {body}")));
     }
     Ok(serde_json::to_string_pretty(&body)?)
 }
@@ -571,7 +601,7 @@ async fn rename_agent(cx: &ToolCtx<'_>, args: &Value) -> Result<String> {
 
 /// The fields `update` may change (`/api/v1/agent/update`); the name, provider, environment, accounts and
 /// seat have their own actions.
-const DEFINITION_FIELDS: &[&str] = &["description", "icon", "auto_start", "restart_on_crash", "idle_timeout_minutes"];
+const DEFINITION_FIELDS: &[&str] = &["description", "icon", "auto_start", "restart_on_crash", "idle_timeout_minutes", "route", "model"];
 /// What decides what an agent runs, where its traffic goes or which project files it reads: the operator's to set in
 /// My Agents, as `env_set` refuses the same.
 const OPERATOR_FIELDS: &[&str] = &["shell", "provider_flags", "working_directory", "model_vendor_base_url"];
@@ -923,6 +953,18 @@ mod tests {
         let (act, args) = pick("Agents", ACTS, &json!({ "action": "container_caches", "agent": "Korp", "clear": true })).unwrap();
         assert_eq!(act.tool, "AgentContainerCaches");
         assert_eq!(args, json!({ "agent": "Korp", "clear": true }));
+    }
+
+    #[test]
+    fn routes_has_its_handler_and_spawn_create_and_workers_carry_the_harness_and_route() {
+        let (act, _) = pick("Agents", ACTS, &json!({ "action": "routes" })).unwrap();
+        assert_eq!(act.tool, "AgentRoutes");
+        let ask = route_ask(&json!({ "harness": "claude", "route": "openrouter", "model": "m" }));
+        assert_eq!((ask.harness.as_deref(), ask.route.as_deref()), (Some("claude"), Some("openrouter")));
+        let none = route_ask(&json!({}));
+        assert!(none.harness.is_none() && none.route.is_none());
+        let wire = serde_json::to_value(&ask).unwrap();
+        assert_eq!(wire, json!({ "harness": "claude", "route": "openrouter" }), "flattened into the request as two fields");
     }
 
     #[test]

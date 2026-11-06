@@ -315,7 +315,6 @@
 110 crates/srv/src/server/service/tear_off.rs::handle_tear_off_block
 124 crates/srv/src/server/service/window_close.rs::handle_close_window
 217 crates/srv/src/server/service/window_create.rs::create_default_contents
-301 crates/srv/src/server/service/window_create.rs::handle_create_window
 140 crates/srv/src/server/shell_secrets.rs::inject
 135 crates/srv/src/server/system_install_handlers.rs::spawn_system_install_task
 107 crates/srv/src/server/ui_handlers.rs::handle_host_browser_popup
@@ -384,7 +383,6 @@
 140 frontend/app/statusbar/HostPopover.tsx::HostPopover
 169 frontend/app/statusbar/PairDevicePanel.tsx::PairDevicePanel
 171 frontend/app/statusbar/SystemStats.tsx::SystemStats
-219 frontend/app/statusbar/TokenBreakdownPopover.tsx::TokenBreakdownPopover
 145 frontend/app/store/agent-document/reducer.ts::scrubOrphanedInProgress
 258 frontend/app/store/agent-pane-state-store.ts::dispatch
 118 frontend/app/store/agent-pane-state/reducer-failure.ts::onCompactionBoundary
@@ -408,13 +406,11 @@
 140 frontend/app/view/agent/cli-notice.ts::parseCliNoticeFrame
 111 frontend/app/view/agent/commands/global/login.ts::runLogin
 213 frontend/app/view/agent/components/ActivityDock.tsx::ActivityDock
-223 frontend/app/view/agent/components/ActivityRow.tsx::ActivityRow
 200 frontend/app/view/agent/components/AgentCard.tsx::AgentCard
 160 frontend/app/view/agent/components/AgentContainerLimitsPanel.tsx::AgentContainerLimitsPanel
 116 frontend/app/view/agent/components/AgentDocumentView.tsx::AgentDocumentView
 116 frontend/app/view/agent/components/AgentEnvPanel.tsx::AgentEnvPanel
 167 frontend/app/view/agent/components/AgentFooter.tsx::AgentFooter
-231 frontend/app/view/agent/components/AgentPicker.tsx::AgentPicker
 178 frontend/app/view/agent/components/AgentSeatPanel.tsx::AgentSeatPanel
 120 frontend/app/view/agent/components/AgentSessionNotices.tsx::AgentSessionNotices
 126 frontend/app/view/agent/components/AgentShellInfoPanel.tsx::AgentShellInfoPanel

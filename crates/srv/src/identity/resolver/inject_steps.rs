@@ -541,3 +541,48 @@ pub(super) fn recheck_agent_not_deleted(mstore: &Store, instance: &AgentInstance
 
     Ok(())
 }
+
+/// Whether the agent runs on a model route (`model_gateway`): it is billed to the route's key and signs in nowhere, so the
+/// account gate does not apply to it.
+pub(super) fn on_model_route(mstore: &Store, instance: &AgentInstance) -> bool {
+    crate::backend::model_gateway::launch::choice_of(mstore, &instance.definition_id).is_some()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A Claude agent in a pane, with an instance and no account bound.
+    fn unbound_claude_agent(store: &Store, block_id: &str) -> AgentInstance {
+        use crate::backend::obj::{Block, MetaMapType};
+        let mut def = crate::backend::storage::agents::test_agent_def("def-route", "Routed", "claude", "host", 1, "");
+        store.agent_def_insert(&mut def).unwrap();
+        let mut meta = MetaMapType::new();
+        meta.insert("view".to_string(), serde_json::json!("agent"));
+        meta.insert("agentId".to_string(), serde_json::json!("def-route"));
+        let mut block = Block { oid: block_id.to_string(), parentoref: String::new(), version: 0, runtimeopts: None, stickers: None, meta, subblockids: None };
+        store.insert(&mut block).unwrap();
+        let instance = AgentInstance {
+            id: "inst-route".into(), definition_id: "def-route".into(), parent_instance_id: String::new(), block_id: block_id.into(), session_id: String::new(),
+            status: crate::backend::storage::store::InstanceStatus::Running.as_str().to_string(), github_context: String::new(), started_at: 0, ended_at: 0, created_at: 0,
+            identity_id: String::new(), memory_id: String::new(), instance_name: String::new(), working_directory: String::new(), display_hidden: false,
+        };
+        store.instance_create(&instance).unwrap();
+        instance
+    }
+
+    #[test]
+    fn an_agent_on_a_model_route_skips_the_no_account_gate_and_nothing_else() {
+        let store = std::sync::Arc::new(Store::open_in_memory().unwrap());
+        let instance = unbound_claude_agent(&store, "block-route-gate");
+        assert!(!on_model_route(&store, &instance));
+        let gated = super::super::inject_identity_env(store.clone(), store.clone(), store.clone(), "block-route-gate", &mut HashMap::new());
+        assert!(matches!(gated, Err(SpawnGateError::MissingCredentials { .. })), "without a route it is the gate: {gated:?}");
+
+        crate::backend::model_gateway::launch::set_choice(&store, "def-route", "claude", "openrouter", "").unwrap();
+        assert!(on_model_route(&store, &instance));
+        let mut env = HashMap::new();
+        assert_eq!(super::super::inject_identity_env(store.clone(), store.clone(), store.clone(), "block-route-gate", &mut env), Ok(()));
+        assert!(env.is_empty(), "no account is bound, so none is injected: {env:?}");
+    }
+}
