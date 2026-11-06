@@ -14,6 +14,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { Logger } from "@/util/logger";
 import { DEFAULT_RUNTIME_CONFIG, type AgentRuntimeConfig } from "../../agent-model/types";
 import type { ProviderDefinition, ProviderModel } from "./providers/types";
+import { installPackageField } from "./providers/install-request";
 import type { AgentDefinition } from "@/app/store/rpc-api";
 import { markAgentOpen } from "./open-trace";
 import { parseProviderFlags, withoutOverriddenFlags } from "./launch-args";
@@ -117,7 +118,7 @@ export async function resolveCliBin(
         {
             provider_id: provider.id,
             cli_command: provider.cliCommand,
-            npm_package: provider.npmPackage,
+            npm_package: installPackageField(provider),
             pinned_version: provider.pinnedVersion,
             windows_install_command: provider.windowsInstallCommand,
             unix_install_command: provider.unixInstallCommand,

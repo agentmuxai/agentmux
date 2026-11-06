@@ -14,8 +14,19 @@
 #   vite-port.sh blocked <port>     exit 0 if Chromium refuses the port
 #   vite-port.sh check <port>       exit 0 if usable; else one error, exit 1
 #   vite-port.sh listening <port>   exit 0 if something is listening on it
-#   vite-port.sh pick [start]       print the first usable, free port >= start
+#   vite-port.sh pick [start]       claim and print the first usable, free port >= start
 #                                   (default 5300)
+#   vite-port.sh claim <port>       take the claim on a port for this clone; exit 1 if
+#                                   another clone holds a live one
+#   vite-port.sh release <port>     drop this clone's claim on a port
+#
+# CLAIMS: a free port is not a reserved port. `task dev` can wait most of an hour
+# for the shared build slot between choosing its port and binding it, and runs that
+# wait together all start Vite in the same second. A claim is a directory made with
+# mkdir (atomic), under AGENTMUX_DEV_PORT_CLAIMS (default ~/.agentmux/dev-port-claims),
+# holding the clone that took it. One that nobody has renewed for
+# AGENTMUX_DEV_PORT_CLAIM_TTL seconds (default 7200) is taken over.
+# docs/retro/RETRO_DEV_VITE_PORT_RACE_COUPLED_INSTANCES_2026_11_06.md
 
 set -uo pipefail
 
@@ -86,12 +97,89 @@ cmd_check() {
   return 0
 }
 
+CLAIMS_DIR="${AGENTMUX_DEV_PORT_CLAIMS:-${HOME:-/tmp}/.agentmux/dev-port-claims}"
+CLAIM_TTL="${AGENTMUX_DEV_PORT_CLAIM_TTL:-7200}"
+
+# Who holds a claim: this clone, named from where the script lives so `pick` run from
+# any directory and `task dev` (run from the clone root) agree. A test sets
+# AGENTMUX_DEV_PORT_OWNER to be several clones at once.
+claim_owner() {
+  printf '%s' "${AGENTMUX_DEV_PORT_OWNER:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)}"
+}
+
+claim_field() { sed -n "s/^$2=//p" "$1/claim" 2>/dev/null | head -1; }
+
+# Written whole and renamed into place, so a reader never sees half a claim.
+write_claim() { # <dir> <since>
+  local tmp="$1/claim.tmp.$$"
+  {
+    echo "owner=$(claim_owner)"
+    echo "by=${AGENTMUX_AGENT_ID:-${USER:-unknown}}"
+    echo "since=$2"
+    echo "seen=$(date +%s)"
+  } >"$tmp" && mv -f "$tmp" "$1/claim"
+}
+
+cmd_claim() {
+  local port="${1:-}" d now owner seen since i
+  is_number "$port" || { echo "claim: '$port' is not a port number" >&2; return 2; }
+  mkdir -p "$CLAIMS_DIR" 2>/dev/null || { echo "vite-port.sh: cannot create $CLAIMS_DIR" >&2; return 2; }
+  d="$CLAIMS_DIR/$port"
+  now="$(date +%s)"
+  if mkdir "$d" 2>/dev/null; then
+    write_claim "$d" "$now"
+    return 0
+  fi
+  # Someone made it first; they may not have written their name yet.
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    [ -f "$d/claim" ] && break
+    sleep 0.1
+  done
+  owner="$(claim_field "$d" owner)"
+  seen="$(claim_field "$d" seen)"
+  since="$(claim_field "$d" since)"
+  if [ -n "$owner" ] && [ "$owner" = "$(claim_owner)" ]; then
+    write_claim "$d" "${since:-$now}"
+    return 0
+  fi
+  [ -n "$seen" ] || seen="$(stat -c %Y "$d" 2>/dev/null || stat -f %m "$d" 2>/dev/null || echo "$now")"
+  if [ $((now - seen)) -gt "$CLAIM_TTL" ]; then
+    # Nobody renewed it: its run is gone. Take it over under a lock, so two takers
+    # cannot each delete the other's fresh claim. The lock is dropped on every way out,
+    # and one a killed taker left (older than a minute) is cleared, or the port would
+    # stay refused for good.
+    [ -n "$(find "$d.lock" -maxdepth 0 -mmin +1 2>/dev/null)" ] && rmdir "$d.lock" 2>/dev/null
+    if mkdir "$d.lock" 2>/dev/null; then
+      taken=1
+      seen="$(claim_field "$d" seen)"
+      if [ -z "$seen" ] || [ $((now - seen)) -gt "$CLAIM_TTL" ]; then
+        rm -rf "$d"
+        if mkdir "$d" 2>/dev/null && write_claim "$d" "$now"; then taken=0; fi
+      fi
+      rmdir "$d.lock" 2>/dev/null
+      [ "$taken" = 0 ] && return 0
+    fi
+  fi
+  echo "❌ Port $port is claimed by another dev run: ${owner:-unknown} (agent $(claim_field "$d" by), since $(date -d "@${since:-$now}" '+%H:%M' 2>/dev/null || echo "${since:-?}"))." >&2
+  echo "   Take another port: AGENTMUX_VITE_PORT=\$(bash scripts/vite-port.sh pick) task dev" >&2
+  return 1
+}
+
+cmd_release() {
+  local d="$CLAIMS_DIR/${1:-}"
+  [ -n "${1:-}" ] && [ -f "$d/claim" ] || return 0
+  [ "$(claim_field "$d" owner)" = "$(claim_owner)" ] && rm -rf "$d"
+  return 0
+}
+
 cmd_pick() {
   local port="${1:-5300}"
   require_probe || return 1
   is_number "$port" || { echo "start port '$port' is not a number" >&2; return 1; }
   while [ "$port" -le 65535 ]; do
-    if ! is_blocked "$port" && ! is_listening "$port"; then
+    # The claim is the reservation: it is taken in the same step as the pick, so two
+    # picks at once cannot both get this port.
+    if ! is_blocked "$port" && ! is_listening "$port" && cmd_claim "$port" 2>/dev/null; then
       echo "$port"
       return 0
     fi
@@ -106,8 +194,10 @@ case "${1:-}" in
   check) cmd_check "${2:-}" ;;
   listening) require_probe && is_listening "${2:-}" ;;
   pick) cmd_pick "${2:-}" ;;
+  claim) cmd_claim "${2:-}" ;;
+  release) cmd_release "${2:-}" ;;
   *)
-    echo "usage: vite-port.sh {blocked|check|listening} <port> | pick [start]" >&2
+    echo "usage: vite-port.sh {blocked|check|listening|claim|release} <port> | pick [start]" >&2
     exit 2
     ;;
 esac

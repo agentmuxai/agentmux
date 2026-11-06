@@ -117,6 +117,13 @@ export interface LaunchFlowOptions {
 
 export type LaunchFlowResult = "success" | "auth_failed" | "fatal";
 
+/** What the activity log says an install will do if the CLI is missing. */
+function plannedInstallLine(provider: Pick<ProviderDefinition, "id" | "npmPackage" | "managedInstall" | "pinnedVersion">): string {
+    return provider.managedInstall
+        ? `if not found locally, will download ${provider.id} ${provider.pinnedVersion} (this may take a minute)...`
+        : `if not found locally, will install ${provider.npmPackage}@${provider.pinnedVersion} via npm (this may take 1-2 minutes)...`;
+}
+
 export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlowResult> {
     const { blockId, provider, log, authEnv } = opts;
     const setPhase = opts.setLaunchPhase ?? (() => {});
@@ -233,7 +240,7 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
     // Phase 1: CLI Detection / Installation
     log("cli", `checking for ${provider.cliCommand}...`);
     if (provider.pinnedVersion) {
-        log("cli", `if not found locally, will install ${provider.npmPackage}@${provider.pinnedVersion} via npm (this may take 1-2 minutes)...`);
+        log("cli", plannedInstallLine(provider));
     }
 
     // Subscribe to install progress events — backend streams npm/installer output line-by-line
@@ -264,7 +271,7 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
     markAgentOpen(blockId, "cli", { cli_source: cliResult.source });
 
     if (cliResult.source === "installed") {
-        log("cli", `installed ${provider.npmPackage} (${cliResult.version})`);
+        log("cli", `installed ${provider.npmPackage || provider.id} (${cliResult.version})`);
     } else if (cliResult.source === "local_install") {
         log("cli", `found: ${cliResult.cli_path} (${cliResult.version}) [local install]`);
     } else {
