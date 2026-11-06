@@ -350,7 +350,7 @@ export const TIPS: TipRow[] = [
         gesture: "click / alt+click / drag / wheel",
         where: "on an image in the Editor",
         label: "Zoom in a step about the pointer / zoom out a step / pan / zoom smoothly; + − 0 1 and the arrows too; [ ] the previous or next image in the folder; B the background",
-        source: { file: "frontend/app/view/editor/viewers/image/image-viewer.tsx", anchor: "isZoomOutModifier(e) ? -1 : 1" },
+        source: { file: "frontend/app/view/editor/viewers/image/image-viewer-state.ts", anchor: "isZoomOutModifier(e) ? -1 : 1" },
     },
     {
         // Not on macOS, where Ctrl+click is a right-click.
@@ -360,7 +360,7 @@ export const TIPS: TipRow[] = [
         where: "on an image in the Editor",
         label: "Zoom out a step about the pointer",
         os: ["win32", "linux"],
-        source: { file: "frontend/app/view/editor/viewers/image/image-viewer.tsx", anchor: "e.altKey || (e.ctrlKey && !isMacOS())" },
+        source: { file: "frontend/app/view/editor/viewers/image/image-viewer-state.ts", anchor: "e.altKey || (e.ctrlKey && !isMacOS())" },
     },
 
     // ── Agent ──

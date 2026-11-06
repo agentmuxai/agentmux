@@ -32,9 +32,9 @@ fn antigravity_drives_the_real_agy_cli() {
     for id in ["claude", "codex", "gemini", "qwen", "kimi", "openclaw", "pi", "muxcode", "copilot"] {
         assert_eq!(get_provider(id).unwrap().prompt_arg_flag(), None, "{id}");
     }
-    // Installed by Google's own script, not npm.
+    // Downloaded by AgentMux (cli_download::SPECS), not npm.
     assert!(p.npm_package.is_empty());
-    assert!(p.pinned_version.is_empty());
+    assert_eq!(p.pinned_version, "1.5.2");
     assert_eq!(p.supported_vendors, &["google"]);
     assert!(p.base_url_env_var.is_none());
 }

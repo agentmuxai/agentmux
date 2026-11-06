@@ -146,6 +146,14 @@ pub fn installed_bin(dir: &Path, cli_command: &str) -> Option<PathBuf> {
     .find(|b| b.is_file())
 }
 
+/// `--version` of a program just installed, run with the provider's own environment
+/// (`auth_extra_env`: its self-update off). agy 1.5 replaces itself on any run, which would
+/// stall the install on a ~200 MB download or swap the hash-checked binary for an unchecked one.
+pub(crate) fn probe_installed(bin: &Path, provider_id: &str) -> Option<String> {
+    let env = crate::backend::providers::get_provider(provider_id).map_or(&[][..], |p| p.auth_extra_env);
+    crate::backend::tool_store::probe_version_with_env(&bin.to_string_lossy(), &Some("--version".to_string()), env)
+}
+
 /// Under the install lock, before (re)installing into `dir`: unless it holds
 /// a valid install, remove it entirely — leftovers of a failed or interrupted
 /// install, and a stale completion marker whose shim is gone. Removing the

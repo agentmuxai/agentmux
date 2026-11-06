@@ -4,10 +4,11 @@
 use super::{ControllerType, ProviderConfig};
 
 // Muse Code (Meta): no ACP, but a typed protocol of its own, MSP (`muse
-// serve`), which the `msp` controller drives in an agent pane. Closed source,
-// installed with Meta's installer: srv runs the native binary beside the
-// launcher (`known_install_paths`), which also skips the launcher's hourly
-// self-update. Checked against 1.4.7-R6101.1 on 2026-10-14
+// serve`), which the `msp` controller drives in an agent pane. Closed source:
+// AgentMux downloads the pinned native binary itself (`cli_download::SPECS`),
+// with no launcher and so no hourly launcher self-update; a copy from Meta's
+// installer is still found beside its launcher (`known_install_paths`). Checked
+// against 1.4.7-R6101.1 on 2026-10-14
 // (SPEC_NINE_NEW_HARNESSES_2026_10_14.md §7.7).
 pub(super) static MUSE: ProviderConfig = ProviderConfig {
     id: "muse",

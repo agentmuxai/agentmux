@@ -95,7 +95,7 @@ const CLI_CATALOG: CliCatalogEntry[] = [
         primaryContextFile: "AGENTS.md",
         mcpSupport: "stdio+http",
         popoverMarkdown:
-            "Google's agentic coding CLI harness, which replaced Gemini CLI for personal Google accounts in June 2026. Emphasizes high-throughput agentic task execution with native skill discovery and subagent support. Uses your Google account. Installed with Google's own installer, not by AgentMux.",
+            "Google's agentic coding CLI harness, which replaced Gemini CLI for personal Google accounts in June 2026. Emphasizes high-throughput agentic task execution with native skill discovery and subagent support. Uses your Google account. AgentMux installs it for you.",
         hostSupported: true,
         // No container image built yet — host-only until agentmux/antigravity ships.
         containerSupported: false,
@@ -278,7 +278,7 @@ const CLI_CATALOG: CliCatalogEntry[] = [
         primaryContextFile: "AGENTS.md",
         mcpSupport: "stdio+http",
         popoverMarkdown:
-            "Meta's coding agent, running Muse Spark. Install it with Meta's installer, then sign in with /login (Muse's own `muse login`) or set META_API_KEY. A Muse subscription runs in contributor mode by default, which lets Meta train on your content; change it in Muse's settings.",
+            "Meta's coding agent, running Muse Spark. AgentMux installs it for you; then sign in with /login (Muse's own `muse login`) or set META_API_KEY. A Muse subscription runs in contributor mode by default, which lets Meta train on your content; change it in Muse's settings.",
         hostSupported: true,
         // MSP runs on the host only (`muse serve`, no container path).
         containerSupported: false,

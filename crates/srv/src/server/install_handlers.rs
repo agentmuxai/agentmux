@@ -1239,14 +1239,24 @@ mod registry_only_tests {
         assert!(seen > 0);
     }
 
+    /// Every provider with no npm package is installed by AgentMux's own download or uv install, so
+    /// each one is accepted here (the refusal for one that is not has no provider to try it on).
     #[test]
-    fn an_id_outside_the_registry_or_without_a_package_is_refused() {
+    fn every_provider_with_no_npm_package_is_installed_by_a_download_or_uv() {
+        let mut seen = 0;
+        for p in crate::backend::providers::all_providers().filter(|p| p.npm_package.is_empty()) {
+            assert!(crate::backend::cli_download::is_managed_install(p.id), "{} has no npm package and no managed install", p.id);
+            assert!(installable_provider(p.id).is_ok(), "{}", p.id);
+            seen += 1;
+        }
+        assert!(seen >= 6);
+    }
+
+    #[test]
+    fn an_id_outside_the_registry_is_refused() {
         for id in ["", "no-such-agent", "left-pad", "../claude", "claude/../../x", "@scope/pkg", "claude ", "C:\\x"] {
             assert!(installable_provider(id).is_err(), "{id:?}");
         }
-        let path_only = crate::backend::providers::all_providers().find(|p| p.npm_package.is_empty() && !crate::backend::cli_download::is_managed_install(p.id)).expect("a provider AgentMux does not install");
-        let err = installable_provider(path_only.id).unwrap_err();
-        assert!(err.contains("not installed by AgentMux"), "{err}");
     }
 
     #[tokio::test]
@@ -1269,18 +1279,6 @@ mod registry_only_tests {
         assert!(resp.error.contains("not a known agent CLI"), "{resp:?}");
         assert!(state.install_sessions.sessions.lock().is_empty(), "no session was started");
         assert!(state.install_sessions.active_providers.lock().is_empty(), "nothing was claimed");
-    }
-
-    #[tokio::test]
-    async fn install_start_refuses_a_provider_that_has_no_package_of_its_own() {
-        let state = crate::server::tests::test_state();
-        let (engine, mut out) = WshRpcEngine::new();
-        register_install_handlers(&engine, &state);
-        let path_only = crate::backend::providers::all_providers().find(|p| p.npm_package.is_empty() && !crate::backend::cli_download::is_managed_install(p.id)).expect("a path-only provider").id;
-        let resp = start(&engine, &mut out, serde_json::json!({ "providerId": path_only, "npmPackage": "left-pad" })).await;
-        assert!(resp.data.is_none(), "{resp:?}");
-        assert!(resp.error.contains("not installed by AgentMux"), "{resp:?}");
-        assert!(state.install_sessions.active_providers.lock().is_empty());
     }
 
     #[tokio::test]

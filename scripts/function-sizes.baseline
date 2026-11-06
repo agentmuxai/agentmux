@@ -167,7 +167,6 @@
 579 crates/srv/src/backend/blockcontroller/subprocess/container_spawn.rs::SubprocessController::spawn_container_turn
 211 crates/srv/src/backend/blockcontroller/subprocess/host_spawn.rs::SubprocessController::spawn_turn
 210 crates/srv/src/backend/bundle_export.rs::export_bundle
-463 crates/srv/src/backend/bundle_import.rs::parse_bundle_import_with_budget
 130 crates/srv/src/backend/bundle_import.rs::unzip_bundle_import_with_budget
 105 crates/srv/src/backend/container.rs::ContainerManager::create_and_start
 115 crates/srv/src/backend/cron/mod.rs::CronScheduler::schedule_job_inner
@@ -232,7 +231,6 @@
 154 crates/srv/src/broker/state.rs::update
 135 crates/srv/src/drone/executor/engine.rs::execute
 134 crates/srv/src/identity/oauth_client.rs::start_code_flow
-486 crates/srv/src/identity/resolver/inject.rs::inject_identity_env_with_broker
 125 crates/srv/src/identity/resolver/oauth_probe.rs::probe_oauth_status
 111 crates/srv/src/messaging/discord/gateway.rs::handle_dispatch
 207 crates/srv/src/messaging/discord/gateway.rs::run_session
@@ -388,7 +386,6 @@
 128 frontend/app/statusbar/BackendStatus.tsx::BackendStatusPanel
 197 frontend/app/statusbar/CpuCoresPopover.tsx::CpuCoresPopover
 140 frontend/app/statusbar/HostPopover.tsx::HostPopover
-277 frontend/app/statusbar/HostPopover.tsx::HostPopoverPanel
 169 frontend/app/statusbar/PairDevicePanel.tsx::PairDevicePanel
 171 frontend/app/statusbar/SystemStats.tsx::SystemStats
 219 frontend/app/statusbar/TokenBreakdownPopover.tsx::TokenBreakdownPopover
@@ -422,7 +419,7 @@
 116 frontend/app/view/agent/components/AgentDocumentView.tsx::AgentDocumentView
 116 frontend/app/view/agent/components/AgentEnvPanel.tsx::AgentEnvPanel
 167 frontend/app/view/agent/components/AgentFooter.tsx::AgentFooter
-255 frontend/app/view/agent/components/AgentPicker.tsx::AgentPicker
+231 frontend/app/view/agent/components/AgentPicker.tsx::AgentPicker
 178 frontend/app/view/agent/components/AgentSeatPanel.tsx::AgentSeatPanel
 120 frontend/app/view/agent/components/AgentSessionNotices.tsx::AgentSessionNotices
 239 frontend/app/view/agent/components/AgentSessionStats.tsx::AgentSessionStats
@@ -470,7 +467,6 @@
 132 frontend/app/view/audit/audit-manager.tsx::AuditManager
 103 frontend/app/view/browser/browser-model.ts::BrowserViewModel::getBodyContextMenuItems
 101 frontend/app/view/browser/browser-profile-menu.tsx::BrowserProfileButton
-267 frontend/app/view/browser/driven-by-strip.tsx::DrivenByStrip
 141 frontend/app/view/browser/use-browser-auth.ts::useBrowserAuth
 148 frontend/app/view/browser/use-freeze-frame.ts::useFreezeFrame
 394 frontend/app/view/browser/use-pane-rect-sync.ts::usePaneRectSync
@@ -479,13 +475,11 @@
 285 frontend/app/view/editor/editor-model.ts::EditorViewModel::constructor
 190 frontend/app/view/editor/file-tree.tsx::FileTree
 155 frontend/app/view/editor/file-tree.tsx::TreeNode
-276 frontend/app/view/editor/viewers/image/image-viewer.tsx::ImageViewer
 101 frontend/app/view/editor/viewers/viewer-host.tsx::ViewerFor
 152 frontend/app/view/files/files-preview.tsx::FilesPreview
 118 frontend/app/view/global-bundle/GlobalMemoryFullView.tsx::EntryView
 253 frontend/app/view/global-bundle/global-bundle-manager.tsx::GlobalBundleManager
 147 frontend/app/view/history/history-agents.tsx::HistoryAgents
-269 frontend/app/view/identity/agent-identity-links-panel.tsx::AgentIdentityLinksPanel
 165 frontend/app/view/identity/identity-accounts-tab.tsx::AccountDetailPanel
 229 frontend/app/view/kanban/kanban-board.tsx::KanbanBoard
 168 frontend/app/view/kanban/kanban-card.tsx::KanbanCard
@@ -500,7 +494,6 @@
 166 frontend/app/view/settings/sections/appearance-section.tsx::AppearanceSection
 120 frontend/app/view/settings/sections/browser-section.tsx::BrowserSection
 171 frontend/app/view/settings/sections/devices-section.tsx::DevicesSection
-359 frontend/app/view/settings/sections/fork-slug-migration.tsx::ForkSlugMigration
 185 frontend/app/view/settings/sections/notifications-section.tsx::NotificationsSection
 109 frontend/app/view/settings/sections/pinned-senders.tsx::PinnedSenders
 201 frontend/app/view/settings/sections/sounds-section.tsx::SoundsSection

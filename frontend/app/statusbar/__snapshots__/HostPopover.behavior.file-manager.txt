@@ -1,0 +1,6 @@
+popover placement=top-end role=dialog aria-label="Host info" class="status-bar-popover host-popover" anchor=trigger
+-- win: Show in File Explorer
+popover placement=top-end role=dialog aria-label="Host info" class="status-bar-popover host-popover" anchor=trigger
+-- mac: Reveal in Finder
+popover placement=top-end role=dialog aria-label="Host info" class="status-bar-popover host-popover" anchor=trigger
+-- linux: Open in file manager

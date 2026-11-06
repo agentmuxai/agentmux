@@ -1,0 +1,52 @@
+rpc ListAllAgentIdentities
+subscribeAccountChanges
+subscribe agentidentities:changed:codex-agent
+-- a Codex agent, none
+<div>
+  <div class="identity-pane">
+    <div class="identity-pane-detail">
+      <div class="identity-pane-readonly">
+        <h2 class="identity-pane-name">
+          "Codex Agent"
+        <h3 class="identity-pane-section-title">
+          "Linked accounts"
+        <div class="identity-pane-empty-hint">
+          <p>
+            "This agent has no linked accounts yet. Link one from its launch dialog."
+unsubscribe agentidentities:changed:codex-agent
+unsubscribeAccountChanges
+rpc ListAllAgentIdentities
+subscribeAccountChanges
+subscribe agentidentities:changed:nameless
+-- an agent without a name
+<div>
+  <div class="identity-pane">
+    <div class="identity-pane-detail">
+      <div class="identity-pane-readonly">
+        <h2 class="identity-pane-name">
+          "This agent"
+        <h3 class="identity-pane-section-title">
+          "Linked accounts"
+        <div class="identity-pane-empty-hint">
+          <p>
+            "This agent has no linked accounts yet. Link one from its launch dialog."
+        <div class="identity-pane-empty-hint">
+          <button type="button" class="ui-button ui-tone-accent identity-btn identity-btn-primary">
+            "Connect Anthropic account"
+unsubscribe agentidentities:changed:nameless
+unsubscribeAccountChanges
+rpc ListAllAgentIdentities
+subscribeAccountChanges
+subscribe agentidentities:changed:unknown-agent
+-- an agent that is not defined
+<div>
+  <div class="identity-pane">
+    <div class="identity-pane-detail">
+      <div class="identity-pane-readonly">
+        <h2 class="identity-pane-name">
+          "This agent"
+        <h3 class="identity-pane-section-title">
+          "Linked accounts"
+        <div class="identity-pane-empty-hint">
+          <p>
+            "This agent has no linked accounts yet. Link one from its launch dialog."
