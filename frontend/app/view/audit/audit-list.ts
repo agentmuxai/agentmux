@@ -45,16 +45,22 @@ function createListState() {
         setError(null);
     };
 
+    // The newest page, kept on the side: a query that worked clears the last one's error.
+    const holdPage = (res: AuditQueryResult) => {
+        setPending(res);
+        setError(null);
+    };
+
     return {
         entries, setEntries, cursor, setCursor, totals, notRecorded, error, setError, loading, setLoading,
-        loadingMore, setLoadingMore, paused, setPaused, setOlderLoaded, pending, setPending, following, newCount, showPage,
+        loadingMore, setLoadingMore, paused, setPaused, setOlderLoaded, pending, setPending, following, newCount, showPage, holdPage,
     };
 }
 
 export function createAuditList(filter: Accessor<AuditFilter>, visible: () => boolean) {
     const state = createListState();
     const { entries, setEntries, cursor, setCursor, error, setError, setLoading, loadingMore, setLoadingMore } = state;
-    const { setPaused, setOlderLoaded, pending, setPending, following, showPage } = state;
+    const { setPaused, setOlderLoaded, pending, setPending, following, showPage, holdPage } = state;
 
     let seq = 0; // the newest request wins: a slow answer for an earlier filter is dropped
     let peekSeq = 0; // the same for the newest page fetched while the list holds still
@@ -68,7 +74,7 @@ export function createAuditList(filter: Accessor<AuditFilter>, visible: () => bo
         try {
             const res = await fetchAuditPage(buildRequest(untrack(filter), Date.now(), undefined, true));
             if (mine !== seq) return;
-            if (refreshing && !untrack(following)) setPending(res);
+            if (refreshing && !untrack(following)) holdPage(res);
             else showPage(res);
         } catch (e) {
             if (mine === seq) setError(String(e));
@@ -82,7 +88,7 @@ export function createAuditList(filter: Accessor<AuditFilter>, visible: () => bo
         const mine = ++peekSeq;
         try {
             const res = await fetchAuditPage(buildRequest(untrack(filter), Date.now(), undefined, true));
-            if (mine === peekSeq && !untrack(following)) setPending(res);
+            if (mine === peekSeq && !untrack(following)) holdPage(res);
         } catch (e) {
             if (mine === peekSeq) setError(String(e));
         }

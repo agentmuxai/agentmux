@@ -234,6 +234,22 @@ describe("AuditManager", () => {
         expect(screen.queryByText("landed after pause")).toBeNull();
     });
 
+    it("clears an error from a failed look at the newest entries once a later one works, while paused", async () => {
+        query.mockResolvedValue(page([entry({ id: "a", summary: "first one" })]));
+        render(() => <AuditManager paneBlockId="pane-1" />);
+        await waitFor(() => expect(screen.getByText("first one")).toBeInTheDocument());
+        fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+
+        query.mockRejectedValueOnce(new Error("audit.query: store busy"));
+        srvWroteARow();
+        await waitFor(() => expect(screen.getByText(/store busy/)).toBeInTheDocument(), { timeout: 3000 });
+
+        query.mockResolvedValue(page([entry({ id: "b", summary: "newer" }), entry({ id: "a", summary: "first one" })]));
+        srvWroteARow();
+        await waitFor(() => expect(screen.queryByText(/store busy/)).toBeNull(), { timeout: 3000 });
+        expect(screen.getByRole("button", { name: "1 new" })).toBeInTheDocument();
+    });
+
     it("stops following once older entries are loaded, and the pill jumps back to the newest", async () => {
         query.mockResolvedValueOnce(page([entry({ id: "a", summary: "first one" })], { next_cursor: "c1" }));
         render(() => <AuditManager paneBlockId="pane-1" />);
