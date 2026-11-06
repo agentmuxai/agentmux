@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-20
 **Status:** active — operator's answers to §7 given through AgentX (2026-11-05); built in #138 by Camper-2: §4.1 to §4.4 for the new-agent panel, with the approval in srv's approval window; what is not built is in §8
-[`SPEC_AGENT_CLI_ISOLATION_NOTE_2026_10_18.md`](SPEC_AGENT_CLI_ISOLATION_NOTE_2026_10_18.md) §4.4. No code yet.
+**Context:** the security design for Step B of [`SPEC_AGENT_CLI_ISOLATION_NOTE_2026_10_18.md`](SPEC_AGENT_CLI_ISOLATION_NOTE_2026_10_18.md) §4.4.
 **Related:** [`SPEC_SYSTEM_TOOLCHAIN_INSTALLER_2026_08_24.md`](SPEC_SYSTEM_TOOLCHAIN_INSTALLER_2026_08_24.md) (the
 winget / Homebrew / pkexec one-click install this reuses),
 [`SPEC_UNIVERSAL_INSTALL_DIALOG_2026_09_23.md`](SPEC_UNIVERSAL_INSTALL_DIALOG_2026_09_23.md) (`InstallConfirm`, the
