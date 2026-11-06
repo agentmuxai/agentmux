@@ -111,27 +111,36 @@ function pointInTriangle(pt: Point, v1: Point, v2: Point, v3: Point): boolean {
 }
 
 /**
+ * How far the triangle's base reaches past the submenu's edge, along that edge. A hand heading for the far end of
+ * the submenu in a straight line runs along the triangle's edge, and a pixel of wobble puts it outside; the margin
+ * keeps that path inside while a pointer that leaves sideways, straight up or straight down is still far outside.
+ */
+const TRIANGLE_BASE_MARGIN_PX = 16;
+
+/**
  * The safe triangle: apex at the point the cursor left the trigger row, base
- * along whichever submenu edge faces that point. Submenus in this app always
+ * along whichever submenu edge faces that point (a little longer than the
+ * edge, by `TRIANGLE_BASE_MARGIN_PX`). Submenus in this app always
  * open to the left or right of their trigger (never above/below), so the
  * near edge is picked by horizontal side; the vertical fallback covers any
  * future top/bottom placement without needing a second code path.
  */
 function isInsideSafeTriangle(apex: Point, cursor: Point, submenuRect: DOMRect): boolean {
+    const m = TRIANGLE_BASE_MARGIN_PX;
     let corner1: Point;
     let corner2: Point;
     if (apex.x <= submenuRect.left) {
-        corner1 = { x: submenuRect.left, y: submenuRect.top };
-        corner2 = { x: submenuRect.left, y: submenuRect.bottom };
+        corner1 = { x: submenuRect.left, y: submenuRect.top - m };
+        corner2 = { x: submenuRect.left, y: submenuRect.bottom + m };
     } else if (apex.x >= submenuRect.right) {
-        corner1 = { x: submenuRect.right, y: submenuRect.top };
-        corner2 = { x: submenuRect.right, y: submenuRect.bottom };
+        corner1 = { x: submenuRect.right, y: submenuRect.top - m };
+        corner2 = { x: submenuRect.right, y: submenuRect.bottom + m };
     } else if (apex.y <= submenuRect.top) {
-        corner1 = { x: submenuRect.left, y: submenuRect.top };
-        corner2 = { x: submenuRect.right, y: submenuRect.top };
+        corner1 = { x: submenuRect.left - m, y: submenuRect.top };
+        corner2 = { x: submenuRect.right + m, y: submenuRect.top };
     } else {
-        corner1 = { x: submenuRect.left, y: submenuRect.bottom };
-        corner2 = { x: submenuRect.right, y: submenuRect.bottom };
+        corner1 = { x: submenuRect.left - m, y: submenuRect.bottom };
+        corner2 = { x: submenuRect.right + m, y: submenuRect.bottom };
     }
     return pointInTriangle(cursor, apex, corner1, corner2);
 }

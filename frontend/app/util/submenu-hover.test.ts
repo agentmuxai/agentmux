@@ -98,6 +98,25 @@ describe("createSubmenuHover", () => {
             expect(onClose).not.toHaveBeenCalled();
         });
 
+        it("stays open for a path along the triangle's lower edge, a few pixels past the submenu's bottom", () => {
+            openSubmenu();
+            // The row's leave point is near the submenu's bottom; the hand heads for its last item and wobbles.
+            controller.onTriggerLeave({ clientX: 250, clientY: 280 });
+            moveTo(270, 292);
+            vi.advanceTimersByTime(10);
+            moveTo(290, 305);
+            vi.advanceTimersByTime(10);
+            expect(onClose).not.toHaveBeenCalled();
+        });
+
+        it("still closes for a pointer going straight down from the same point", () => {
+            openSubmenu();
+            controller.onTriggerLeave({ clientX: 250, clientY: 280 });
+            moveTo(250, 330);
+            vi.advanceTimersByTime(10);
+            expect(onClose).toHaveBeenCalledOnce();
+        });
+
         it("closes promptly when the cursor moves away from the submenu", () => {
             openSubmenu();
             controller.onTriggerLeave({ clientX: 250, clientY: 200 });
