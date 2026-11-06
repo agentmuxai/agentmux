@@ -131,6 +131,7 @@ pub(crate) mod browser_powers;
 pub(crate) mod browser_pause_all;
 pub(crate) mod browser_standing;
 pub(crate) mod browser_terminal;
+pub(crate) mod browser_terminal_line;
 pub(crate) mod browser_uploads;
 pub(crate) mod host_http;
 pub(crate) mod operator_proof;
