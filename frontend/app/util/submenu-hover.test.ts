@@ -389,6 +389,32 @@ describe("closeForPeer: a peer row entered on the way to the open submenu (#2413
         expect(settled).toHaveBeenCalledOnce();
     });
 
+    it("keeps holding while the pointer keeps moving inside the triangle, however slowly (a 720 ms crossing)", () => {
+        const settled = vi.fn();
+        controller.closeForPeer(ENTER_PEER, settled);
+        for (let i = 1; i <= 24; i++) {
+            vi.advanceTimersByTime(30);
+            moveTo(201 + i * 4, 141 + i * 6); // a straight line toward the submenu's lower part, inside the triangle
+        }
+        expect(onClose).not.toHaveBeenCalled();
+        expect(settled).not.toHaveBeenCalled();
+        controller.onSubmenuEnter();
+        vi.advanceTimersByTime(5000);
+        expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it("closes once the pointer stops moving inside the triangle for the safety timeout", () => {
+        const settled = vi.fn();
+        controller.closeForPeer(ENTER_PEER, settled);
+        vi.advanceTimersByTime(200);
+        moveTo(250, 200);
+        vi.advanceTimersByTime(299);
+        expect(onClose).not.toHaveBeenCalled();
+        vi.advanceTimersByTime(1);
+        expect(onClose).toHaveBeenCalledOnce();
+        expect(settled).toHaveBeenCalledOnce();
+    });
+
     it("closes at once, without holding, when the peer is entered outside the triangle", () => {
         const settled = vi.fn();
         expect(controller.closeForPeer({ clientX: 100, clientY: 160 }, settled)).toBe(false);

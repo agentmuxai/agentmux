@@ -146,8 +146,9 @@ function usableRect(el: SubmenuEl | null): DOMRect | null {
 
 /**
  * One close attempt. Leaving the safe triangle from `begin`'s origin toward the submenu, or `timeoutMs`
- * passing (a stalled mousemove must never leave the submenu open forever), calls `onExpire` and then the
- * `settle` callback of a peer close that was held for it. `cancel` drops the attempt and that callback.
+ * passing with no mouse move inside it (a stalled mousemove must never leave the submenu open forever;
+ * a slow crossing that keeps moving is not stalled), calls `onExpire` and then the `settle` callback of a
+ * peer close that was held for it. `cancel` drops the attempt and that callback.
  */
 function createCloseTracker(getRect: () => DOMRect | null, timeoutMs: number, onExpire: () => void) {
     let origin: Point | null = null;
@@ -174,7 +175,13 @@ function createCloseTracker(getRect: () => DOMRect | null, timeoutMs: number, on
     };
     function onMove(e: MouseEvent): void {
         const rect = getRect();
-        if (origin && rect && !isInsideSafeTriangle(origin, { x: e.clientX, y: e.clientY }, rect)) expire();
+        if (!origin || !rect) return;
+        if (!isInsideSafeTriangle(origin, { x: e.clientX, y: e.clientY }, rect)) return expire();
+        restartTimer();
+    }
+    function restartTimer(): void {
+        if (timer !== null) clearTimeout(timer);
+        timer = setTimeout(expire, timeoutMs);
     }
     return {
         cancel,
@@ -187,7 +194,7 @@ function createCloseTracker(getRect: () => DOMRect | null, timeoutMs: number, on
                 tracking = true;
                 document.addEventListener("mousemove", onMove);
             }
-            timer = setTimeout(expire, timeoutMs);
+            restartTimer();
         },
         /** A window is already running: swap its callback. False when none is running. */
         replaceSettle(onSettle?: () => void): boolean {
