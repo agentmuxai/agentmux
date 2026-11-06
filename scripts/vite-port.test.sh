@@ -138,6 +138,12 @@ AGENTMUX_DEV_PORT_OWNER=clone-b bash "$SUT" claim "$CLAIM_PORT" >/dev/null 2>&1 
 # A claim nobody renewed (its run is gone) is taken over.
 sleep 2
 AGENTMUX_DEV_PORT_CLAIM_TTL=1 AGENTMUX_DEV_PORT_OWNER=clone-c bash "$SUT" claim "$CLAIM_PORT" >/dev/null 2>&1 && ok || bad "a lapsed claim was not taken over"
+# A takeover that was killed half way leaves its lock; that must not wedge the port for good.
+sleep 2
+mkdir "$AGENTMUX_DEV_PORT_CLAIMS/$CLAIM_PORT.lock"
+touch -d '5 minutes ago' "$AGENTMUX_DEV_PORT_CLAIMS/$CLAIM_PORT.lock" 2>/dev/null || touch -t "$(date -d '5 minutes ago' +%Y%m%d%H%M 2>/dev/null || date -v-5M +%Y%m%d%H%M)" "$AGENTMUX_DEV_PORT_CLAIMS/$CLAIM_PORT.lock"
+AGENTMUX_DEV_PORT_CLAIM_TTL=1 AGENTMUX_DEV_PORT_OWNER=clone-d bash "$SUT" claim "$CLAIM_PORT" >/dev/null 2>&1 && ok || bad "an abandoned takeover lock blocked a lapsed claim"
+if [ ! -d "$AGENTMUX_DEV_PORT_CLAIMS/$CLAIM_PORT.lock" ]; then ok; else bad "a takeover left its lock behind"; fi
 # claim rejects what is not a port.
 expect_status 2 "claim rejects a non-port" claim abc
 

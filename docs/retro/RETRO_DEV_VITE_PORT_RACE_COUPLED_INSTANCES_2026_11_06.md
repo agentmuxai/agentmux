@@ -22,18 +22,18 @@ It happened twice in an hour, with two different ports (5301, then 5300). Three 
 | 23:31 | Loap-3 runs `AGENTMUX_VITE_PORT=$(vite-port.sh pick) task dev`; pick returns 5301 (their 5300 was taken by Korp while they waited, which `task dev` refused correctly). The run then waits on the build slot behind another agent's cargo test. |
 | ~23:40 | Agent2 runs the same recipe; 5301 is still unbound, so pick returns 5301 again. Also waits on the build slot. |
 | ~23:48 | The slot frees. Both runs finish their builds and reach `dev:serve` together. Both pass the "port busy" check (nothing is bound yet), and both start `vite --strictPort` on 5301. |
-| 23:48 | Agent2's Vite binds first ("Vite ready"). Loap-3's Vite prints `Error: Port 5301 is already in use` and exits, but the `curl` readiness loop passes against Agent2's Vite and prints "Vite ready at http://localhost:5301". Both launchers start (cef pids 47032 and 44996, started one second apart), both with `--url=http://localhost:5301`. |
+| 23:48 | Agent2's Vite binds first ("Vite ready"). Loap-3's Vite prints `Error: Port 5301 is already in use` and exits, but the `curl` readiness loop passes against Agent2's Vite and prints "Vite ready at http://localhost:5301". Both launchers start one second apart, both with `--url=http://localhost:5301`. |
 | 23:48 to 01:44 | Loap-3's window (renderer lab, branch `loap-3-renderer-lab-run`) runs Agent2's frontend (branch `agent2/dnd-refine`: main plus the two tear-off PRs) against Loap-3's own srv. Agent2's window is fine. |
 | ~01:3x | The operator sees two `Agent2-dnd` windows. Agent2 stops its own instance, Loap-3's window is left dead (its Vite server is gone), and Agent2 relaunches. |
 | 01:44 | Loap-3 relaunches on 5300 (their 5301 instance already stopped). |
-| ~01:50 | **Second occurrence.** Agent2's relaunch also picks 5300 (free again) and both builds again finish together: their `dist/cef-dev-<stamp>` folders have the **same stamp, 1793958529**. Agent2's Vite wins 5300, Loap-3's cef (pid 43988) loads it. Reproduced on demand, with both sides still running. |
+| ~01:50 | **Second occurrence.** Agent2's relaunch also picks 5300 (free again) and both builds again finish together: their `dist/cef-dev-<stamp>` folders have the **same stamp, to the second**. Agent2's Vite wins 5300, Loap-3's window loads it. Reproduced on demand, with both sides still running. |
 
 ## Evidence
 
-- `.dev-home/5301/dev/loap-3-renderer-lab-run/.../data/authkey.dev` in Loap-3's clone, written 23:48, host pid 44996. That pid's command line is `...loap-3-0822g\agentmux\dist\cef-dev-1793951304\runtime\agentmux-cef.exe --url=http://localhost:5301`.
-- The only listener on 5301 was node pid 38800, command line `...agent2-0630f\agentmux-devmode\node_modules\vite\bin\vite.js ... --port 5301 --strictPort`.
+- The `authkey.dev` in the first run's dev home was written at 23:48 by a host whose command line carried `--url=http://localhost:5301`.
+- The only listener on 5301 was a node process running the other clone's `vite` with `--port 5301 --strictPort`.
 - Loap-3's task output, last 500 bytes: `(client) Re-optimizing dependencies because lockfile has changed`, then `error when starting dev server: Error: Port 5301 is already in use`, then `Vite ready at http://localhost:5301.` (their own Vite failed, the "ready" line still printed).
-- Second occurrence: cef 20852 (Agent2) and cef 43988 (Loap-3), both `dist\cef-dev-1793958529`, both `--url=http://localhost:5300`; listener on 5300 is Agent2's node pid 55540.
+- Second occurrence: both hosts ran from build folders with the same stamp and the same `--url=http://localhost:5300`; the listener on 5300 was Agent2's node process.
 
 ## Root cause
 

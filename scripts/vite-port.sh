@@ -145,13 +145,19 @@ cmd_claim() {
   [ -n "$seen" ] || seen="$(stat -c %Y "$d" 2>/dev/null || stat -f %m "$d" 2>/dev/null || echo "$now")"
   if [ $((now - seen)) -gt "$CLAIM_TTL" ]; then
     # Nobody renewed it: its run is gone. Take it over under a lock, so two takers
-    # cannot each delete the other's fresh claim.
+    # cannot each delete the other's fresh claim. The lock is dropped on every way out,
+    # and one a killed taker left (older than a minute) is cleared, or the port would
+    # stay refused for good.
+    [ -n "$(find "$d.lock" -maxdepth 0 -mmin +1 2>/dev/null)" ] && rmdir "$d.lock" 2>/dev/null
     if mkdir "$d.lock" 2>/dev/null; then
+      taken=1
       seen="$(claim_field "$d" seen)"
       if [ -z "$seen" ] || [ $((now - seen)) -gt "$CLAIM_TTL" ]; then
-        rm -rf "$d" && mkdir "$d" 2>/dev/null && write_claim "$d" "$now" && rmdir "$d.lock" && return 0
+        rm -rf "$d"
+        if mkdir "$d" 2>/dev/null && write_claim "$d" "$now"; then taken=0; fi
       fi
-      rmdir "$d.lock"
+      rmdir "$d.lock" 2>/dev/null
+      [ "$taken" = 0 ] && return 0
     fi
   fi
   echo "❌ Port $port is claimed by another dev run: ${owner:-unknown} (agent $(claim_field "$d" by), since $(date -d "@${since:-$now}" '+%H:%M' 2>/dev/null || echo "${since:-?}"))." >&2

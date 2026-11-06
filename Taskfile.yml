@@ -1099,18 +1099,6 @@ tasks:
                 # the window would flicker on ERR_UNSAFE_PORT with no explanation.
                 # SPEC_DEV_VITE_UNSAFE_PORT_GUARD_2026_10_02.md
                 bash scripts/vite-port.sh check "$AGENTMUX_VITE_PORT" || exit 1
-                # Claim the port for this clone. A port that is free now is not yours: the build slot
-                # can hold this run for most of an hour, and runs it releases together start Vite in
-                # the same second. A claim by another clone stops this run here, naming it.
-                # docs/retro/RETRO_DEV_VITE_PORT_RACE_COUPLED_INSTANCES_2026_11_06.md
-                bash scripts/vite-port.sh claim "$AGENTMUX_VITE_PORT" || exit 1
-                # This run's name for its Vite (scripts/dev-instance-plugin.mjs). The wait below needs
-                # it back, so a Vite that lost the port to another run is not mistaken for ours.
-                AGENTMUX_DEV_INSTANCE="$(node -e 'process.stdout.write(require("crypto").randomUUID())')" || exit 1
-                AGENTMUX_DEV_OWNER="${AGENTMUX_AGENT_ID:-${USER:-unknown}}"
-                AGENTMUX_DEV_COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
-                export AGENTMUX_DEV_INSTANCE AGENTMUX_DEV_OWNER AGENTMUX_DEV_COMMIT
-                echo "[dev] instance: owner $AGENTMUX_DEV_OWNER, commit $AGENTMUX_DEV_COMMIT, port $AGENTMUX_VITE_PORT, clone $(pwd -P 2>/dev/null || pwd)"
                 VITE_URL="http://localhost:$AGENTMUX_VITE_PORT"
                 export AGENTMUX_VITE_PORT
                 # The dev build's own data home, so it never reads or changes the real ~/.agentmux
@@ -1258,6 +1246,20 @@ tasks:
                   echo "[dev] Reaped stale Vite — port $AGENTMUX_VITE_PORT is free."
                 fi
 
+                # Claim the port for this clone, now that it is ours to start on. A port that is free is
+                # not yours: the build slot can hold a run for most of an hour, and runs it releases
+                # together start Vite in the same second. A claim by another clone stops this run here,
+                # naming it. Every exit after this releases it (the wait below); the app's exit does too.
+                # docs/retro/RETRO_DEV_VITE_PORT_RACE_COUPLED_INSTANCES_2026_11_06.md
+                bash scripts/vite-port.sh claim "$AGENTMUX_VITE_PORT" || exit 1
+                # This run's name for its Vite (scripts/dev-instance-plugin.mjs). The wait below needs
+                # it back, so a Vite that lost the port to another run is not mistaken for ours.
+                AGENTMUX_DEV_INSTANCE="$(node -e 'process.stdout.write(require("crypto").randomUUID())')" || { bash scripts/vite-port.sh release "$AGENTMUX_VITE_PORT"; exit 1; }
+                AGENTMUX_DEV_OWNER="${AGENTMUX_AGENT_ID:-${USER:-unknown}}"
+                AGENTMUX_DEV_COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+                export AGENTMUX_DEV_INSTANCE AGENTMUX_DEV_OWNER AGENTMUX_DEV_COMMIT
+                echo "[dev] instance: owner $AGENTMUX_DEV_OWNER, commit $AGENTMUX_DEV_COMMIT, port $AGENTMUX_VITE_PORT, clone $(pwd -P 2>/dev/null || pwd)"
+
                 # Don't `rm -rf $DEV_DIR` on exit — install-linux-desktop.sh
                 # writes Exec=$DEV_DIR/agentmux-cef into the user's
                 # ~/.local/share/applications/agentmux-dev-<branch>-<version>.desktop
@@ -1280,7 +1282,7 @@ tasks:
                 echo "Waiting for Vite on port $AGENTMUX_VITE_PORT..."
                 # Wait for THIS run's Vite (its token), not for anything that answers: a Vite that lost
                 # the --strictPort bind exits quietly and the winner's server would pass a curl.
-                bash scripts/dev-vite-wait.sh "$AGENTMUX_VITE_PORT" "$AGENTMUX_DEV_INSTANCE" 30 || exit 1
+                bash scripts/dev-vite-wait.sh "$AGENTMUX_VITE_PORT" "$AGENTMUX_DEV_INSTANCE" 30 || { bash scripts/vite-port.sh release "$AGENTMUX_VITE_PORT"; exit 1; }
                 echo "Vite ready at $VITE_URL."
                 # macOS/Linux: auto-prune any stale Chromium SingletonLock
                 # whose target PID is dead. Without this, a crashed host
@@ -1400,18 +1402,6 @@ tasks:
                   echo "Auto-selected Vite port $AGENTMUX_VITE_PORT for clone $CLONE_ROOT"
                 fi
                 bash scripts/vite-port.sh check "$AGENTMUX_VITE_PORT" || exit 1
-                # Claim the port for this clone. A port that is free now is not yours: the build slot
-                # can hold this run for most of an hour, and runs it releases together start Vite in
-                # the same second. A claim by another clone stops this run here, naming it.
-                # docs/retro/RETRO_DEV_VITE_PORT_RACE_COUPLED_INSTANCES_2026_11_06.md
-                bash scripts/vite-port.sh claim "$AGENTMUX_VITE_PORT" || exit 1
-                # This run's name for its Vite (scripts/dev-instance-plugin.mjs). The wait below needs
-                # it back, so a Vite that lost the port to another run is not mistaken for ours.
-                AGENTMUX_DEV_INSTANCE="$(node -e 'process.stdout.write(require("crypto").randomUUID())')" || exit 1
-                AGENTMUX_DEV_OWNER="${AGENTMUX_AGENT_ID:-${USER:-unknown}}"
-                AGENTMUX_DEV_COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
-                export AGENTMUX_DEV_INSTANCE AGENTMUX_DEV_OWNER AGENTMUX_DEV_COMMIT
-                echo "[dev] instance: owner $AGENTMUX_DEV_OWNER, commit $AGENTMUX_DEV_COMMIT, port $AGENTMUX_VITE_PORT, clone $(pwd -P 2>/dev/null || pwd)"
                 VITE_URL="http://localhost:$AGENTMUX_VITE_PORT"
                 export AGENTMUX_VITE_PORT
                 # The dev build's own data home, so it never reads or changes the real ~/.agentmux
@@ -1425,11 +1415,24 @@ tasks:
                   echo "   Override with AGENTMUX_VITE_PORT=<free-port> task dev:standalone"
                   exit 1
                 fi
+                # Claim the port for this clone, now that it is ours to start on. A port that is free is
+                # not yours: the build slot can hold a run for most of an hour, and runs it releases
+                # together start Vite in the same second. A claim by another clone stops this run here,
+                # naming it. Every exit after this releases it (the wait below); the app's exit does too.
+                # docs/retro/RETRO_DEV_VITE_PORT_RACE_COUPLED_INSTANCES_2026_11_06.md
+                bash scripts/vite-port.sh claim "$AGENTMUX_VITE_PORT" || exit 1
+                # This run's name for its Vite (scripts/dev-instance-plugin.mjs). The wait below needs
+                # it back, so a Vite that lost the port to another run is not mistaken for ours.
+                AGENTMUX_DEV_INSTANCE="$(node -e 'process.stdout.write(require("crypto").randomUUID())')" || { bash scripts/vite-port.sh release "$AGENTMUX_VITE_PORT"; exit 1; }
+                AGENTMUX_DEV_OWNER="${AGENTMUX_AGENT_ID:-${USER:-unknown}}"
+                AGENTMUX_DEV_COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+                export AGENTMUX_DEV_INSTANCE AGENTMUX_DEV_OWNER AGENTMUX_DEV_COMMIT
+                echo "[dev] instance: owner $AGENTMUX_DEV_OWNER, commit $AGENTMUX_DEV_COMMIT, port $AGENTMUX_VITE_PORT, clone $(pwd -P 2>/dev/null || pwd)"
                 AGENTMUX_VITE_PORT="$AGENTMUX_VITE_PORT" npx vite --config vite.config.ts --port "$AGENTMUX_VITE_PORT" --strictPort &
                 echo "Waiting for Vite on port $AGENTMUX_VITE_PORT..."
                 # Wait for THIS run's Vite (its token), not for anything that answers: a Vite that lost
                 # the --strictPort bind exits quietly and the winner's server would pass a curl.
-                bash scripts/dev-vite-wait.sh "$AGENTMUX_VITE_PORT" "$AGENTMUX_DEV_INSTANCE" 30 || exit 1
+                bash scripts/dev-vite-wait.sh "$AGENTMUX_VITE_PORT" "$AGENTMUX_DEV_INSTANCE" 30 || { bash scripts/vite-port.sh release "$AGENTMUX_VITE_PORT"; exit 1; }
                 echo "Vite ready at $VITE_URL."
                 # `LD_LIBRARY_PATH` is a Unix-only convention; on Windows
                 # it has no effect but is inconsistent with the `dev:serve`
