@@ -28,7 +28,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { MAX_SAVED_HELD, SNAPSHOT_SCHEMA_VERSION } from "./useHistoryPagination";
 import type { AgentAtoms } from "../../../agent-model/state";
-import type { DocumentNode } from "../../../agent-model/types";
+import type { DocumentNode, DocumentState } from "../../../agent-model/types";
 import type { LogFn } from "./useAgentControllerStatus";
 
 export interface UseSnapshotPersistenceOptions {
@@ -56,21 +56,71 @@ const SNAPSHOT_INTERVAL_MS = 30_000;
 /** Writes a recycle's flush makes while the user keeps changing the overlay. */
 const FLUSH_PASSES = 5;
 
-/** Every mounted pane's "write now if dirty" (c); resolves whether its last write landed. */
-const flushers = new Set<() => Promise<boolean>>();
+/** Every mounted pane's "write now if dirty" (c); resolves why its latest snapshot isn't stored, or null when it is. */
+const flushers = new Set<() => Promise<string | null>>();
 
 /**
- * Write every pane's pending snapshot now. Resolves true when every pane's
- * latest snapshot is stored, false when a write failed (it is logged, and the
- * pane stays dirty for its next tick): a recycle must not reload then.
+ * Write every pane's pending snapshot now. Resolves one line per pane whose
+ * latest snapshot is not stored (which pane, and a write that failed or an
+ * overlay that kept changing): a recycle must not reload then. Empty when all are.
  */
-export function flushPaneSnapshots(): Promise<boolean> {
-    return Promise.all([...flushers].map((flush) => flush())).then((saved) => saved.every(Boolean));
+export async function unsavedPaneSnapshots(): Promise<string[]> {
+    const problems = await Promise.all([...flushers].map((flush) => flush()));
+    return problems.filter((p): p is string => p !== null);
 }
 
-registerReloadSaver(async () =>
-    (await flushPaneSnapshots()) ? null : "a pane's collapsed rows, pins or filter couldn't be saved"
-);
+/** `unsavedPaneSnapshots` as a yes or no: true when every pane's latest snapshot is stored. */
+export async function flushPaneSnapshots(): Promise<boolean> {
+    return (await unsavedPaneSnapshots()).length === 0;
+}
+
+// The user sees one short reason. The cause goes to the console (the host's debug log keeps
+// it): the recycle's own decline line says only that something couldn't be saved.
+registerReloadSaver(async () => {
+    const problems = await unsavedPaneSnapshots();
+    if (problems.length === 0) return null;
+    console.warn(`[recycle] pane snapshots not saved: ${problems.join(" | ")}`);
+    return "a pane's collapsed rows, pins or filter couldn't be saved";
+});
+
+/**
+ * The overlay a write stores (schema v2): ids and flags only, never the nodes.
+ */
+function buildSnapshot(blockId: string, highWaterMark: number, docState: DocumentState | undefined, detailsOpen: boolean | undefined) {
+    // Note: no historyOffset field — v2 restore derives the render window
+    // from highWaterMark (windowStart = hwm - RESTORE_WINDOW_LINES), so a
+    // persisted offset would be dead/misleading.
+    //
+    // sourceBlockId records which block's per-block NDJSON `output` the
+    // highWaterMark counted. The snapshot itself is agent-anchored
+    // (definition_id zone) and survives across blocks, but the NDJSON it
+    // references is per-block — so restore must read history from this
+    // block, not from a fresh continuation pane's empty block.
+    return {
+        schemaVersion: SNAPSHOT_SCHEMA_VERSION,
+        savedAt: new Date().toISOString(),
+        highWaterMark,
+        sourceBlockId: blockId,
+        documentState: {
+            collapsedNodeIds: docState ? [...docState.collapsedNodes] : [],
+            pinnedNodeIds: docState ? [...docState.pinnedNodes] : [],
+            // The newest few rows held open, ids only: what a restart or an
+            // upgrade gives back as carried rows (held-release.ts).
+            heldOpenNodeIds: docState ? [...docState.heldOpenNodes].slice(-MAX_SAVED_HELD) : [],
+            scrollPosition: docState?.scrollPosition ?? 0,
+            filter: docState?.filter ?? {
+                showThinking: false,
+                showSuccessfulTools: true,
+                showFailedTools: true,
+                showIncoming: true,
+                showOutgoing: true,
+            },
+        },
+        paneState: {
+            detailsOpen: detailsOpen ?? false,
+        },
+    };
+}
 
 export function useSnapshotPersistence(opts: UseSnapshotPersistenceOptions): void {
     // Serialize concurrent writes through a single promise chain: the 30s
@@ -79,8 +129,9 @@ export function useSnapshotPersistence(opts: UseSnapshotPersistenceOptions): voi
     // line-count RPC and write. Without ordering, the older interval write
     // can resolve LAST and overwrite the close-time snapshot, losing recent nodes.
     let inFlightSnapshot: Promise<void> = Promise.resolve();
-    /** Whether the last write landed (a failure leaves the pane dirty). */
+    /** Whether the last write landed (a failure leaves the pane dirty), and why it didn't. */
     let lastWriteOk = true;
+    let lastWriteError = "";
     const writeSnapshotNow = () => {
         // Don't let a cross-block continuation pane (one that mounted against a
         // snapshot whose sourceBlockId names another block) overwrite the
@@ -88,6 +139,9 @@ export function useSnapshotPersistence(opts: UseSnapshotPersistenceOptions): voi
         // write would repoint the agent's snapshot at this near-empty block and
         // make the original block's conversation unrestorable. See spec §15 / #1397.
         if (opts.snapshotIsForeignBlock()) {
+            // Nothing of its own to save, so nothing is left unsaved: a write that failed before
+            // this pane became one would otherwise stay "not saved", and block every recycle.
+            lastWriteOk = true;
             return;
         }
         // Schema v2: capture the lightweight overlay state (DocumentState +
@@ -113,39 +167,7 @@ export function useSnapshotPersistence(opts: UseSnapshotPersistenceOptions): voi
             } catch {
                 // Soft fail — snapshot still ships without the mark.
             }
-            // Note: no historyOffset field — v2 restore derives the render window
-            // from highWaterMark (windowStart = hwm - RESTORE_WINDOW_LINES), so a
-            // persisted offset would be dead/misleading.
-            //
-            // sourceBlockId records which block's per-block NDJSON `output` the
-            // highWaterMark counted. The snapshot itself is agent-anchored
-            // (definition_id zone) and survives across blocks, but the NDJSON it
-            // references is per-block — so restore must read history from this
-            // block, not from a fresh continuation pane's empty block.
-            const snapshot = {
-                schemaVersion: SNAPSHOT_SCHEMA_VERSION,
-                savedAt: new Date().toISOString(),
-                highWaterMark,
-                sourceBlockId: opts.blockId,
-                documentState: {
-                    collapsedNodeIds: capturedDocState ? [...capturedDocState.collapsedNodes] : [],
-                    pinnedNodeIds: capturedDocState ? [...capturedDocState.pinnedNodes] : [],
-                    // The newest few rows held open, ids only: what a restart or an
-                    // upgrade gives back as carried rows (held-release.ts).
-                    heldOpenNodeIds: capturedDocState ? [...capturedDocState.heldOpenNodes].slice(-MAX_SAVED_HELD) : [],
-                    scrollPosition: capturedDocState?.scrollPosition ?? 0,
-                    filter: capturedDocState?.filter ?? {
-                        showThinking: false,
-                        showSuccessfulTools: true,
-                        showFailedTools: true,
-                        showIncoming: true,
-                        showOutgoing: true,
-                    },
-                },
-                paneState: {
-                    detailsOpen: capturedDetailsOpen ?? false,
-                },
-            };
+            const snapshot = buildSnapshot(opts.blockId, highWaterMark, capturedDocState, capturedDetailsOpen);
             await RpcApi.AgentSessionWriteStateCommand(TabRpcClient, {
                 definition_id: opts.definitionId,
                 content: JSON.stringify(snapshot),
@@ -153,6 +175,7 @@ export function useSnapshotPersistence(opts: UseSnapshotPersistenceOptions): voi
             lastWriteOk = true;
         }).catch((e) => {
             lastWriteOk = false;
+            lastWriteError = String(e?.message ?? e);
             dirty = true;
             opts.log("history", `snapshot write failed: ${e?.message ?? e}`, "warn");
         });
@@ -216,17 +239,18 @@ export function useSnapshotPersistence(opts: UseSnapshotPersistenceOptions): voi
     // For a recycle: write until a write captured the latest overlay. A change
     // made while a write is in flight would otherwise miss it. Bounded, and
     // false when the overlay keeps changing, so the recycle waits.
-    const flush = async (): Promise<boolean> => {
+    const flush = async (): Promise<string | null> => {
+        const who = `block ${opts.blockId.slice(0, 8)} agent ${opts.definitionId.slice(0, 8)}`;
         for (let pass = 0; pass < FLUSH_PASSES; pass++) {
             if (dirty) {
                 dirty = overlayDirty = false;
                 writeSnapshotNow();
             }
             await inFlightSnapshot;
-            if (!lastWriteOk) return false;
-            if (!overlayDirty) return true;
+            if (!lastWriteOk) return `${who}: write failed: ${lastWriteError}`;
+            if (!overlayDirty) return null;
         }
-        return false;
+        return `${who}: overlay kept changing through ${FLUSH_PASSES} writes`;
     };
     flushers.add(flush);
     onCleanup(() => flushers.delete(flush));
