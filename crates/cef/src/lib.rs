@@ -1117,13 +1117,11 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
     };
 
     // Initialize CEF.
-    //
     // CefInitialize returns 1 on success and 0 either on real init failure OR
     // on "normal early exit" (process singleton, command-line forward, etc).
     // We can only tell the two apart by calling cef_get_exit_code() and
     // matching against cef_resultcode_t. Treat NORMAL_EXIT* codes as a clean
     // exit; everything else is a real failure that we surface via panic.
-    //
     // Common early-exit codes (cef_resultcode_t):
     //   0  CEF_RESULT_CODE_NORMAL_EXIT
     //   24 CEF_RESULT_CODE_NORMAL_EXIT_PROCESS_NOTIFIED  ← singleton relaunch
@@ -1135,6 +1133,8 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
     // doesn't (dev:standalone, subprocess roles).
     let cef_init_started_at = std::time::Instant::now();
     launcher_ipc::report_startup_stage_begin("cef_init", "CEF initialize");
+    #[cfg(target_os = "windows")]
+    commands::drop_source_wrap::install();
     let init_result = initialize(
         Some(args.as_main_args()),
         Some(&settings),

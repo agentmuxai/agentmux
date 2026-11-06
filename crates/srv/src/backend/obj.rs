@@ -287,7 +287,7 @@ pub struct StickerType {
     pub display: StickerDisplayOpts,
 }
 
-// ---- LayoutActionData / LeafOrderEntry ----
+// ---- LayoutActionData ----
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct LayoutActionData {
@@ -324,12 +324,6 @@ pub struct LayoutActionData {
     /// not by the writers; an action without one was queued by an older srv.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queuedat: Option<i64>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct LeafOrderEntry {
-    pub nodeid: String,
-    pub blockid: String,
 }
 
 // ====================================================================
@@ -468,8 +462,6 @@ pub struct LayoutState {
     pub magnifiednodeid: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub focusednodeid: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub leaforder: Option<Vec<LeafOrderEntry>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pendingbackendactions: Option<Vec<LayoutActionData>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -744,6 +736,23 @@ mod tests {
         assert_eq!(parsed.magnifiednodeid, "node-1");
         assert!(parsed.rootnode.is_some());
         assert_eq!(parsed.rootnode.as_ref().unwrap().id, "node-1");
+    }
+
+    /// A row an older build wrote carries a `leaforder` array (since removed).
+    /// It must still load, and the next write must not bring it back.
+    #[test]
+    fn test_layout_state_row_with_leaforder_loads_and_resaves_without_it() {
+        let old_row = serde_json::json!({
+            "otype": "layout",
+            "oid": "ls-old",
+            "version": 3,
+            "focusednodeid": "node-1",
+            "leaforder": [{ "nodeid": "node-1", "blockid": "block-1" }],
+        });
+        let parsed: LayoutState = mux_obj_from_json(&serde_json::to_vec(&old_row).unwrap()).unwrap();
+        assert_eq!(parsed.focusednodeid, "node-1");
+        let rewritten = String::from_utf8(mux_obj_to_json(&parsed).unwrap()).unwrap();
+        assert!(!rewritten.contains("leaforder"), "resaved row: {rewritten}");
     }
 
     /// Phase E.4.B Phase 2 acceptance gate: deserializing the JSON shape

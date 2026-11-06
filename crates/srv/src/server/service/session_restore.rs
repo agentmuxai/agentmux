@@ -537,7 +537,7 @@ pub(crate) async fn replay_tabs(
         if let Some(mut tree) = tab.rootnode.clone() {
             resolve_placeholders(&mut tree, &new_block_ids);
             if let Err(e) =
-                seed_layout_via_reducer(state, &tab_id, tree, tab.focused.clone(), Vec::new(), tab.magnified.clone())
+                seed_layout_via_reducer(state, &tab_id, tree, tab.focused.clone(), tab.magnified.clone())
                     .await
             {
                 tracing::warn!(tab_id = %tab_id, error = %e, "{log_ctx}: layout write failed — tab restored blank");
@@ -866,7 +866,7 @@ mod tests {
             minimized: false,
             extra: Default::default(),
         };
-        seed_layout_via_reducer(&state, &tab_id, tree, "left".into(), Vec::new(), String::new())
+        seed_layout_via_reducer(&state, &tab_id, tree, "left".into(), String::new())
             .await
             .unwrap();
 
@@ -980,7 +980,7 @@ mod tests {
             extra: Default::default(),
         };
         // "left" pane is magnified.
-        seed_layout_via_reducer(&state, &tab_id, tree, "left".into(), Vec::new(), "left".into())
+        seed_layout_via_reducer(&state, &tab_id, tree, "left".into(), "left".into())
             .await
             .unwrap();
 

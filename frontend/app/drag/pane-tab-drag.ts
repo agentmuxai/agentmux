@@ -14,13 +14,10 @@ import { watchEscapeDuringDrag } from "./escape-watch";
 /** `paneKey` is the pane the pill belongs to; `tabId` its window tab. `blockIds` is the
  *  whole selection when several tabs are dragged together (the grabbed one included). */
 export function startPaneTabDrag(blockId: string, paneKey?: string, tabId?: string, blockIds?: readonly string[]): void {
-    beginDrag("pane-tab", {
-        blockId,
-        nodeId: paneKey,
-        tabId,
-        ...(blockIds && blockIds.length > 1 ? { blockIds } : {}),
-    });
-    watchEscapeDuringDrag();
+    const several = !!blockIds && blockIds.length > 1;
+    beginDrag("pane-tab", { blockId, nodeId: paneKey, tabId, ...(several ? { blockIds } : {}) });
+    // Only a single tab with a window tab can tear off, so only that one is followed (pane-live-follow.ts).
+    watchEscapeDuringDrag(!several && paneKey && tabId ? { blockId } : undefined);
 }
 
 export function releasePaneTabDrag(): void {

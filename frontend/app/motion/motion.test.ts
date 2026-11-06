@@ -4,7 +4,7 @@
 // Tests for motion.ts: the tier from the OS preference, the root attributes,
 // and the policy (SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15.md §4.3, §4.6).
 
-import { createRoot, createEffect } from "solid-js";
+import { createRoot, createEffect, createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
     initMotion,
@@ -178,6 +178,38 @@ describe("the Animations setting", () => {
         expect(scaledMs(400)).toBe(1000);
         setAnimationSettings({ "animation:preset": "off" });
         expect(scaledMs(160)).toBe(0);
+    });
+
+    it("can be set from inside an effect, as the window does, without re-running it (Off looped, 0.60.17)", () => {
+        const { win } = fakeWindow(false);
+        initMotion(win);
+        const [preset, setPreset] = createSignal<string>("smooth");
+        let runs = 0;
+        const dispose = createRoot((d) => {
+            createEffect(() => {
+                runs++;
+                setAnimationSettings({ "animation:preset": preset() });
+            });
+            return d;
+        });
+        setPreset("off");
+        expect(motionScale()).toBe(0);
+        setPreset("slow");
+        expect(motionScale()).toBe(1.5);
+        dispose();
+        expect(runs).toBe(3);
+    });
+
+    it("a window that starts with Animations Off applies it from the effect's first run", () => {
+        const { win, styles } = fakeWindow(false);
+        initMotion(win);
+        const dispose = createRoot((d) => {
+            createEffect(() => setAnimationSettings({ "animation:preset": "off" }));
+            return d;
+        });
+        expect(motionScale()).toBe(0);
+        expect(styles["--motion-scale"]).toBe("0");
+        dispose();
     });
 
     it("is reactive", () => {

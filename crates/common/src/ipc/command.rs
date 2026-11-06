@@ -511,7 +511,7 @@ pub enum Command {
     /// value is already current. Empty `node_id` clears the field.
     /// Routes through the reducer so the persist subscriber writes the
     /// new value into `LayoutState.focusednodeid` for the tab. The
-    /// rest of `LayoutState` (rootnode/leaforder/pendingbackendactions)
+    /// rest of `LayoutState` (rootnode/pendingbackendactions)
     /// keeps its existing wcore-direct path until Option B lands.
     SetFocusedNode {
         tab_id: String,
@@ -629,7 +629,7 @@ pub enum Command {
     /// for tear-off where the whole subtree changes atomically.
     ///
     /// `slices` (srv's seeders) carries the rest of the `LayoutState` row
-    /// (leaforder / focus / magnify / pendingbackendactions) with REPLACE
+    /// (focus / magnify / pendingbackendactions) with REPLACE
     /// semantics. `slices: None` (tree-only callers) leaves those columns
     /// untouched.
     LayoutSetTree {

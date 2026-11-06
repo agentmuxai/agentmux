@@ -26,7 +26,7 @@
 1799 crates/srv/src/backend/storage/muxbus.rs
 3365 crates/srv/src/identity/resolver/inject.rs
 2185 crates/srv/src/muxbus/cloud_subscriber.rs
-2149 crates/srv/src/persist_subscriber.rs
+2120 crates/srv/src/persist_subscriber.rs
 1509 crates/srv/src/registry/migrate.rs
 1521 crates/srv/src/server/editor_handlers.rs
 2107 crates/srv/src/server/muxspect_handlers.rs

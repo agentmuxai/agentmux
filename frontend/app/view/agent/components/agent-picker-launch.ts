@@ -6,8 +6,7 @@
 // AgentPicker.tsx (#13044 S6).
 
 import { noteOpenedByPerson } from "@/app/store/agent-open-note";
-import { openAgentInActiveTab, sharedAgentRuntime } from "@/app/store/agent-runtime-live";
-import { pushNotification } from "@/app/store/global";
+import { sharedAgentRuntime } from "@/app/store/agent-runtime-live";
 import type { AgentDefinition } from "@/app/store/rpc-api";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -24,6 +23,7 @@ import { getProvider } from "../providers";
 import { copyForkHistory } from "../quick-fork";
 import type { CreatedAgent } from "./AgentCreateForm";
 import { isContainerAgentType } from "@/util/runtime-kind";
+import { attachRunningAgent } from "./attach-target";
 
 export function createPickerLaunch(
     props: { model: AgentViewModel },
@@ -116,25 +116,8 @@ export function createPickerLaunch(
     // Each agent's runtime state, shared with the status bar and the Swarm.
     const runtimeRows = sharedAgentRuntime().rows;
     const runtimeById = createMemo(() => new Map(runtimeRows().map((r) => [r.agent_id, r] as const)));
-    // An agent that runs with no pane: attach to it rather than start another process.
-    const handleAttach = async (row: RecentSessionRow): Promise<void> => {
-        const why = await openAgentInActiveTab({
-            agent_id: row.definition_id,
-            name: row.instance_name || row.definition_name,
-        });
-        if (why) {
-            pushNotification({
-                icon: "fa-triangle-exclamation",
-                title: `Couldn't open ${row.instance_name || row.definition_name}`,
-                message: why,
-                timestamp: new Date().toISOString(),
-                type: "error",
-                expiration: Date.now() + 8000,
-                debug: { agentId: row.definition_id, agentName: row.instance_name || row.definition_name, code: "agent-open", detail: { reason: why } },
-            });
-        }
-    };
-
+    // An agent that runs but that no window shows: attach to it rather than start another process (attach-target.ts).
+    const handleAttach = (row: RecentSessionRow): Promise<void> => attachRunningAgent(row, runtimeById().get(row.definition_id));
     const handleFork = async (row: RecentSessionRow, branchLabel: string): Promise<void> => {
         const def = agents().find((a) => a.id === row.definition_id);
         if (!def) return;

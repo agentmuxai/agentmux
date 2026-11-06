@@ -326,7 +326,7 @@ pub(crate) async fn handle_redock_floating_pane(state: &AppState, call: &WebCall
     // see the layout change unless we explicitly broadcast on
     // the event bus. Mirrors the pattern in `app_api/agent_open.rs`.
     // Without this the target tab.blockids includes the new
-    // block but its layout.leaforder doesn't → block invisible.
+    // block but its layout.rootnode doesn't → block invisible.
     // One batched frame so the renderer applies all of them in a single
     // reactive flush — see EventBus::broadcast_mux_obj_updates.
     state.event_bus.broadcast_mux_obj_updates(&updates);

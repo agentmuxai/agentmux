@@ -10,7 +10,7 @@
 // JS: `shouldReduceMotion(<category>)` and `scaledMs(<ms>)`. Each window runs initMotion() at startup
 // (store/global.ts), so each keeps its own tier.
 
-import { createSignal } from "solid-js";
+import { createSignal, untrack } from "solid-js";
 
 import { type AnimationSettings, MAX_DURATION_MS, resolveAnimation, type ResolvedAnimation } from "./animation-settings";
 
@@ -64,11 +64,13 @@ function finishRunningTransitions(): void {
 }
 
 function publish(): void {
-    const next = resolveAnimation(settings, tier(), MOTION_POLICY);
-    const turnedOff = next.scale === 0 && resolved().scale !== 0;
+    // Untracked: the window calls this from an effect (store/global.ts), and an effect that reads what it
+    // writes runs again forever. It reads the tier and the scale it replaces, and must not depend on them.
+    const next = resolveAnimation(settings, untrack(tier), MOTION_POLICY);
+    const turnedOff = next.scale === 0 && untrack(resolved).scale !== 0;
     setResolved(next);
     if (root == null) return;
-    root.dataset.motionTier = tier();
+    root.dataset.motionTier = untrack(tier);
     root.dataset.motionReduce = next.reduced.join(" ");
     root.style.setProperty("--motion-scale", String(next.scale));
     root.style.setProperty("--motion-scale-decorative", String(next.decorativeScale));

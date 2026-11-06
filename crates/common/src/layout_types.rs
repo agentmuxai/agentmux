@@ -116,20 +116,16 @@ where
 
 /// The rest of a `LayoutState` row, carried by a seeding `LayoutSetTree`
 /// (`seed_layout_via_reducer`). The reducer applies `focused_node_id`/`magnified_node_id` to its `TabRecord`;
-/// `leaforder` and `pending_backend_actions` are opaque pass-through JSON the
+/// `pending_backend_actions` is opaque pass-through JSON the
 /// persist subscriber writes verbatim (no algebra re-run in the subscriber —
 /// that would be a new divergence surface).
 ///
-/// Semantics are REPLACE: an absent/`null` `leaforder` or
-/// `pending_backend_actions` CLEARS the persisted column; an empty `focused_node_id`/`magnified_node_id` clears focus/
-/// magnify. A `LayoutSetTree` with `slices: None` (granular/tree-only
-/// callers) leaves all four columns untouched.
+/// Semantics are REPLACE: an absent/`null` `pending_backend_actions` CLEARS
+/// the persisted field; an empty `focused_node_id`/`magnified_node_id` clears
+/// focus/magnify. A `LayoutSetTree` with `slices: None` (granular/tree-only
+/// callers) leaves all three untouched.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct LayoutClientSlices {
-    /// Frontend-recomputed geometry cache (`getLeafOrder`). Not read on
-    /// reproject; persisted only for legacy readers. `None` = clear.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub leaforder: Option<serde_json::Value>,
     /// Focused layout-node id; empty = clear.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub focused_node_id: String,
