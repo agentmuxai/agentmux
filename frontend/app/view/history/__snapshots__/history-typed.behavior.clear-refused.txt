@@ -1,0 +1,83 @@
+rpc ListAgentDefinitions include_hidden=true
+rpc AgentInputHistoryTrash agent=0123456789abcdef
+rpc AgentInputHistory agent=0123456789abcdef before=undefined limit=200
+-- asking
+<div>
+  <div class="warden-history-typed">
+    <div class="warden-history-bar">
+      <select class="ui-input ui-density-compact" aria-label="Agent">
+        <option value="0123456789abcdef">
+          "01234567"
+      <span class="ui-filter">
+        <i aria-hidden="true" class="fa-solid fa-magnifying-glass ui-search-icon">
+        <input type="text" class="ui-filter-input" data-pane-focus="" placeholder="Search what was typed" aria-label="Search what was typed">
+      <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
+        <i aria-hidden="true" class="fa-solid fa-rotate">
+        "Refresh"
+      <button type="button" class="ui-button ui-tone-danger ui-density-compact">
+        "Forget everything typed to 01234567"
+      <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
+        "Cancel"
+    <table class="warden-manager-table warden-history-table warden-history-typed-table">
+      <thead>
+        <tr>
+          <th>
+            "When"
+          <th>
+            "Typed"
+          <th>
+      <tbody>
+        <tr data-entry="1">
+          <td class="warden-history-typed-when">
+            "when:1060000"
+          <td>
+            <div class="warden-history-typed-text" data-hover-tip="hello" aria-description="hello">
+              "hello"
+          <td class="warden-history-actions">
+            <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
+              "Forget"
+    <div class="warden-manager-footnote">
+      "What was typed to an agent is kept with the agent, up to its limit (the agent:inputhistory:max setting), and goes when the agent is deleted. Forgotten entries can be restored for"
+      "7"
+      "days, then they are gone."
+cache clear agent=0123456789abcdef
+-- refused
+<div>
+  <div class="warden-history-typed">
+    <div class="warden-history-bar">
+      <select class="ui-input ui-density-compact" aria-label="Agent">
+        <option value="0123456789abcdef">
+          "01234567"
+      <span class="ui-filter">
+        <i aria-hidden="true" class="fa-solid fa-magnifying-glass ui-search-icon">
+        <input type="text" class="ui-filter-input" data-pane-focus="" placeholder="Search what was typed" aria-label="Search what was typed">
+      <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
+        <i aria-hidden="true" class="fa-solid fa-rotate">
+        "Refresh"
+      <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
+        "Clear…"
+    <div class="warden-manager-error">
+      "⚠"
+      "Error: no"
+    <table class="warden-manager-table warden-history-table warden-history-typed-table">
+      <thead>
+        <tr>
+          <th>
+            "When"
+          <th>
+            "Typed"
+          <th>
+      <tbody>
+        <tr data-entry="1">
+          <td class="warden-history-typed-when">
+            "when:1060000"
+          <td>
+            <div class="warden-history-typed-text" data-hover-tip="hello" aria-description="hello">
+              "hello"
+          <td class="warden-history-actions">
+            <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
+              "Forget"
+    <div class="warden-manager-footnote">
+      "What was typed to an agent is kept with the agent, up to its limit (the agent:inputhistory:max setting), and goes when the agent is deleted. Forgotten entries can be restored for"
+      "7"
+      "days, then they are gone."
