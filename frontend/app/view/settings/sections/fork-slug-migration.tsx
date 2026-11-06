@@ -58,7 +58,9 @@ export function unclearable(plan: ForkSlugPlan | null | undefined): ForkSlugBloc
 /** The card's status line. */
 export function planLine(plan: ForkSlugPlan): string {
     if (plan.last_run && !plan.last_run.finished) {
-        return plan.last_run.failed ? `An update stopped before it finished: ${plan.last_run.failed}` : "An update stopped before it finished.";
+        return plan.last_run.failed
+            ? `An update stopped before it finished: ${plan.last_run.failed}`
+            : "An update stopped before it finished.";
     }
     const n = plan.candidates.length;
     if (n === 0) return "Every agent has an up-to-date id.";
@@ -120,7 +122,11 @@ function reloadOnReturn<T>(phase: () => Phase, cardId: string, load: () => Promi
     return stamped;
 }
 
-function call(mode: ForkSlugMigrationMode, journal?: string, choices?: ForkSlugChoice[]): Promise<MigrateForkSlugsResult> {
+function call(
+    mode: ForkSlugMigrationMode,
+    journal?: string,
+    choices?: ForkSlugChoice[]
+): Promise<MigrateForkSlugsResult> {
     const data = { mode, ...(journal ? { journal } : {}), ...(choices && choices.length > 0 ? { choices } : {}) };
     return RpcApi.AgentsMigrateForkSlugsCommand(TabRpcClient, data);
 }
@@ -302,7 +308,8 @@ function cancelStop(s: MigrationState) {
 // The run Undo reverses: this session's, or the latest one on disk, so
 // Undo outlives the session that ran it.
 const undoJournal = (s: MigrationState) => s.report()?.journal || s.plan()?.last_run?.journal;
-const unfinished = (s: MigrationState) => (s.plan()?.last_run && !s.plan()!.last_run!.finished ? s.plan()!.last_run! : null);
+const unfinished = (s: MigrationState) =>
+    s.plan()?.last_run && !s.plan()!.last_run!.finished ? s.plan()!.last_run! : null;
 
 async function undo(s: MigrationState) {
     const journal = undoJournal(s);
@@ -432,7 +439,8 @@ const CandidateItem = (p: { s: MigrationState; c: ForkSlugCandidate }): JSX.Elem
                     <For each={c.locations}>
                         {(l) => (
                             <li>
-                                <span class="mono">{l.key}</span> {l.value} <span class="setting-fork-slugs-place">{l.place}</span>
+                                <span class="mono">{l.key}</span> {l.value}{" "}
+                                <span class="setting-fork-slugs-place">{l.place}</span>
                             </li>
                         )}
                     </For>
@@ -454,7 +462,12 @@ const RefusedNote = (p: { s: MigrationState; c: ForkSlugCandidate; why: string }
             <div class="setting-fork-slugs-actions">
                 <Show when={c.suggestion}>
                     {(sug) => (
-                        <Button tone="accent" density="compact" disabled={!canPick(s)} onClick={() => void useId(s, c, sug())}>
+                        <Button
+                            tone="accent"
+                            density="compact"
+                            disabled={!canPick(s)}
+                            onClick={() => void useId(s, c, sug())}
+                        >
                             Use {sug()}
                         </Button>
                     )}
@@ -506,8 +519,8 @@ const DuplicateList = (p: { s: MigrationState }): JSX.Element => {
     return (
         <Show when={duplicates(s).length > 0}>
             <div class="setting-fork-slugs-note">
-                These agents share an id, as older builds could leave them. An update doesn't change them; the
-                oldest keeps the id.
+                These agents share an id, as older builds could leave them. An update doesn't change them; the oldest
+                keeps the id.
             </div>
             <ul class="setting-fork-slugs-list" aria-label="Agents that share an id">
                 <For each={duplicates(s)}>
@@ -564,7 +577,8 @@ const StopModal = (p: { s: MigrationState }): JSX.Element => {
     return (
         <ConfirmModal
             open={s.confirmStop()}
-            destructive scope="pane"
+            destructive
+            scope="pane"
             title={`Stop ${plural(running(s).length, "pane")}?`}
             description="These panes run agents being updated. Each one shows a Keep running button for 30 seconds before it stops; the update starts once they have."
             confirmLabel="Stop and update"
@@ -572,7 +586,14 @@ const StopModal = (p: { s: MigrationState }): JSX.Element => {
             onCancel={() => cancelStop(s)}
         >
             <ul class="setting-fork-slugs-list">
-                <For each={running(s)}>{(r) => <li>{r.name}{r.channel ? ` (${r.channel})` : ""}</li>}</For>
+                <For each={running(s)}>
+                    {(r) => (
+                        <li>
+                            {r.name}
+                            {r.channel ? ` (${r.channel})` : ""}
+                        </li>
+                    )}
+                </For>
             </ul>
         </ConfirmModal>
     );
@@ -583,7 +604,8 @@ const UndoModal = (p: { s: MigrationState }): JSX.Element => {
     return (
         <ConfirmModal
             open={s.confirmUndo()}
-            destructive scope="pane"
+            destructive
+            scope="pane"
             title="Undo the update?"
             description="Every change it made is reversed, step by step, from its journal, and the agents take their old ids at their next launch."
             confirmLabel="Undo"
