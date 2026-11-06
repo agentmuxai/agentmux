@@ -511,38 +511,6 @@ $kanban-narrow: 760px;
     border-radius: var(--radius-sm);
 }
 
-.kanban-drawer {
-    position: absolute;
-    // Over the narrow list's sticky section heads (--z-tab-name).
-    z-index: var(--z-pane-overlay);
-    top: 0;
-    right: 0;
-    bottom: 0;
-    width: min(440px, 92%);
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-    padding: var(--space-3);
-    overflow-y: auto;
-    background: var(--main-bg-color);
-    border-left: 1px solid var(--border-color);
-    box-shadow: -8px 0 24px rgb(0 0 0 / 25%);
-}
-
-.kanban-drawer__head {
-    display: flex;
-    align-items: baseline;
-    gap: var(--space-2);
-}
-
-.kanban-drawer__title {
-    flex: 1;
-    margin: 0;
-    font-size: var(--text-md);
-    font-weight: 600;
-    overflow-wrap: anywhere;
-}
-
 .kanban-drawer__facts {
     display: flex;
     flex-wrap: wrap;
