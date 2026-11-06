@@ -45,7 +45,8 @@ pub struct UvSpec {
     /// Hash-locked requirements for the whole tree, `uv pip compile --universal --generate-hashes`.
     pub lock: &'static str,
     /// Packages with no wheel on PyPI, built from their hash-checked sdist
-    /// (without build isolation: setuptools comes from the same lock).
+    /// (without build isolation: setuptools and wheel come from the same lock,
+    /// installed first, since uv builds an sdist before it installs the rest).
     pub build_from_sdist: &'static [&'static str],
 }
 
@@ -206,6 +207,30 @@ pub async fn install_into(
     result
 }
 
+/// What an sdist build needs in the venv before it starts.
+const BUILD_TOOLS: &[&str] = &["setuptools", "wheel"];
+
+/// The entries of a hash-locked requirements file for the named packages, each with its hash lines.
+fn lock_entries(lock: &str, names: &[&str]) -> String {
+    let mut out = String::new();
+    let mut keep = false;
+    for line in lock.lines() {
+        let t = line.trim();
+        if t.is_empty() || t.starts_with('#') {
+            continue;
+        }
+        if !t.starts_with("--hash=") {
+            let name = t.split("==").next().unwrap_or("").trim();
+            keep = names.iter().any(|n| n.eq_ignore_ascii_case(name));
+        }
+        if keep {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    out
+}
+
 async fn install_venv(
     paths: &DataPaths,
     dir: &Path,
@@ -233,10 +258,17 @@ async fn install_venv(
         "pip", "install", "--no-config", "--python", &python, "--default-index", PYPI,
         "--require-hashes", "--only-binary", ":all:", "--no-deps",
     ];
-    for pkg in spec.build_from_sdist {
-        args.extend(["--no-binary", pkg]);
-    }
     if !spec.build_from_sdist.is_empty() {
+        // Without build isolation the build runs in the venv itself, so its tools must be there already.
+        let tools_file = dir.join("build-tools.lock.txt");
+        std::fs::write(&tools_file, lock_entries(spec.lock, BUILD_TOOLS)).map_err(|e| DownloadError::Unpack(e.to_string()))?;
+        let tools = tools_file.to_string_lossy().into_owned();
+        let mut first = args.clone();
+        first.extend(["-r", &tools]);
+        uv_run.run(&first).await?;
+        for pkg in spec.build_from_sdist {
+            args.extend(["--no-binary", pkg]);
+        }
         args.push("--no-build-isolation");
     }
     args.extend(["-r", &lock]);

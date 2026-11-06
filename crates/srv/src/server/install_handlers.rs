@@ -372,9 +372,13 @@ fn manifest_version(manifest: &std::path::Path) -> Option<String> {
 }
 
 fn installed_bin_in(dir: &std::path::Path, cli_command: &str) -> Option<std::path::PathBuf> {
-    let download = crate::backend::cli_download::download_bin(dir, cli_command);
-    if download.is_file() {
-        return Some(download);
+    for managed in [
+        crate::backend::cli_download::download_bin(dir, cli_command),
+        crate::backend::cli_uv::venv_bin(dir, cli_command),
+    ] {
+        if managed.is_file() {
+            return Some(managed);
+        }
     }
     let bin_dir = dir.join("node_modules").join(".bin");
     let candidates: &[&str] = if cfg!(windows) {
@@ -1185,6 +1189,28 @@ mod installed_version_tests {
         // install's version.
         std::fs::write(manifest(&shared), "not json").unwrap();
         assert_eq!(installed_version_in(&shared, pkg), None);
+    }
+
+    /// muxreview P1 on #6618: a uv venv install (Aider, Kimi) is an install too,
+    /// or `install.start` rebuilds a finished one and `install.check` loses
+    /// its version.
+    #[test]
+    fn a_uv_venv_and_a_release_download_count_as_installed() {
+        use super::installed_dir_among;
+        let tmp = tempfile::tempdir().unwrap();
+        let (venv, download, empty) = (tmp.path().join("venv"), tmp.path().join("dl"), tmp.path().join("none"));
+        for (dir, bin) in [
+            (&venv, crate::backend::cli_uv::venv_bin(&venv, "aider")),
+            (&download, crate::backend::cli_download::download_bin(&download, "goose")),
+        ] {
+            std::fs::create_dir_all(bin.parent().unwrap()).unwrap();
+            std::fs::write(&bin, "").unwrap();
+            assert!(dir.exists());
+        }
+        std::fs::create_dir_all(&empty).unwrap();
+        assert_eq!(installed_dir_among(vec![empty.clone(), venv.clone()], "aider"), Some(venv));
+        assert_eq!(installed_dir_among(vec![empty.clone(), download.clone()], "goose"), Some(download));
+        assert_eq!(installed_dir_among(vec![empty], "aider"), None);
     }
 }
 

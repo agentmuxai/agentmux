@@ -54,6 +54,19 @@ fn every_uv_install_names_a_registered_provider_its_pin_and_a_tight_lock() {
 }
 
 #[test]
+fn the_build_tools_are_taken_out_of_the_lock_with_their_hashes() {
+    for spec in UV_SPECS.iter().filter(|s| !s.build_from_sdist.is_empty()) {
+        let got = entries(&lock_entries(spec.lock, BUILD_TOOLS));
+        let names: Vec<&str> = got.iter().map(|(r, _)| r.split("==").next().unwrap()).collect();
+        assert_eq!(names, ["setuptools", "wheel"], "{}", spec.provider_id);
+        assert!(got.iter().all(|(_, h)| !h.is_empty()), "{}: a build tool lost its hashes", spec.provider_id);
+    }
+    let text = "# c\na==1 \\\n    --hash=sha256:x \\\n    # via y\nb==2 \\\n    --hash=sha256:y\n";
+    assert_eq!(lock_entries(text, &["b"]), "b==2 \\\n    --hash=sha256:y\n");
+    assert_eq!(lock_entries(text, &["c"]), "");
+}
+
+#[test]
 fn only_a_registered_provider_has_a_uv_install() {
     assert!(uv_spec("aider").is_some() && uv_spec("kimi").is_some());
     for id in ["goose", "claude", "../aider", "", "aider "] {
