@@ -1101,7 +1101,7 @@ fn register_service_handlers(engine: &Arc<WshRpcEngine>, state: &AppState, conn_
     // InstallSessionRegistry — install.cancel already works unchanged for
     // these sessions too, no new cancel command needed).
     super::system_install_handlers::register_system_install_handlers(engine, &state);
-    // One click to run the vendor installer of the six CLIs AgentMux does not install itself
+    // One click to run the vendor installer of the five CLIs AgentMux does not install itself
     // (toolchain.vendor_install_info / toolchain.install_vendor_cli — see
     // docs/specs/SPEC_ONE_CLICK_VENDOR_CLI_INSTALL_2026_10_20.md). Same registry and events as above.
     super::vendor_install_handlers::register_vendor_install_handlers(engine, &state);
