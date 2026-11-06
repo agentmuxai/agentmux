@@ -864,3 +864,7 @@ mod since_tests {
         assert_eq!(since_slice(wrapped, 1, None), (2..4, 5));
     }
 }
+
+#[cfg(test)]
+#[path = "http_pty_shell_tests.rs"]
+mod route_tests;
