@@ -387,6 +387,35 @@ pub fn use_file_store(dir: PathBuf) -> Result<(), String> {
         .map_err(|_| "the secret store was already chosen".to_string())
 }
 
+/// Where an isolated instance keeps its secrets: files under its own shared folder, or `None` only when it is not
+/// isolated (no `AGENTMUX_HOME_OVERRIDE`) or the keychain was asked for (`AGENTMUX_SECRET_STORE=keychain`, for a
+/// test of the keychain itself).
+fn isolated_secrets_dir(home_override: Option<&std::ffi::OsStr>, store: Option<&str>, shared_dir: Option<PathBuf>) -> Option<PathBuf> {
+    let home = home_override.filter(|h| !h.is_empty())?;
+    if store.is_some_and(|s| s.trim().eq_ignore_ascii_case("keychain")) {
+        return None;
+    }
+    // The launcher's folders when it exported them; else the override's own `shared`: an instance started with only the
+    // override is isolated all the same, and never falls back to the keychain.
+    let shared = shared_dir.unwrap_or_else(|| PathBuf::from(home).join("shared"));
+    Some(shared.join("secrets"))
+}
+
+/// An isolated instance (started with `AGENTMUX_HOME_OVERRIDE`, as `task dev` always is) keeps its secrets in files
+/// under its own home and never in the person's OS keychain. The keychain is the person's: a test build that saved the
+/// first Vault entry would make the real Vault key there, trusted only by that build, and the person's own AgentMux
+/// could not read it (nor would an account key it saved be theirs). Called once at startup, before anything reads a
+/// secret; true when it chose the file store.
+pub fn isolate_for_home_override() -> Result<bool, String> {
+    let shared = agentmux_common::DataPaths::from_env().map(|p| p.shared_dir);
+    let home = std::env::var_os("AGENTMUX_HOME_OVERRIDE");
+    let store = std::env::var("AGENTMUX_SECRET_STORE").ok();
+    match isolated_secrets_dir(home.as_deref(), store.as_deref(), shared) {
+        Some(dir) if FILE_STORE.get().is_none() => use_file_store(dir).map(|()| true),
+        _ => Ok(false),
+    }
+}
+
 /// Which backend this process uses, for logs: `"keychain"` or `"file"`.
 pub fn backend_name() -> &'static str {
     if FILE_STORE.get().is_some() {
@@ -714,6 +743,19 @@ mod tests {
         assert_eq!(mode(&dir), 0o700);
         file::put(&dir, "k", "v").unwrap();
         assert_eq!(mode(&file::path_for(&dir, "k")), 0o600);
+    }
+
+    #[test]
+    fn an_isolated_home_keeps_its_secrets_in_files_unless_the_keychain_is_asked_for() {
+        use std::ffi::OsStr;
+        let shared = Some(PathBuf::from("/iso/shared"));
+        let over = Some(OsStr::new("/iso"));
+        assert_eq!(isolated_secrets_dir(over, None, shared.clone()), Some(PathBuf::from("/iso/shared/secrets")));
+        assert_eq!(isolated_secrets_dir(over, Some("file"), shared.clone()), Some(PathBuf::from("/iso/shared/secrets")));
+        assert_eq!(isolated_secrets_dir(over, Some(" Keychain "), shared.clone()), None, "a test of the keychain asks for it");
+        assert_eq!(isolated_secrets_dir(None, None, shared.clone()), None, "the person's own instance keeps the keychain");
+        assert_eq!(isolated_secrets_dir(Some(OsStr::new("")), None, shared.clone()), None, "an empty override is none");
+        assert_eq!(isolated_secrets_dir(over, None, None), Some(PathBuf::from("/iso").join("shared").join("secrets")), "started with only the override: its own shared folder");
     }
 
     #[test]
