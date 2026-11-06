@@ -40,6 +40,7 @@ import {
     type KeptSecret,
 } from "./vault-store";
 
+import "@/app/view/section-pane/section-pane.scss";
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
 import "./vault-view.scss";
 

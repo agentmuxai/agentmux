@@ -298,7 +298,7 @@ One PR per phase; VS1 and VS4 can start before the layer is ready.
 - `request` and `generate` take `vault` (name or id). `generate` makes the entry there, or in the agent's first Vault; `request` records the Vault on the request so the form can start on it.
 - Host ops: `vault_create`, `vault_update`, `vault_delete`, `move_entry`; `list` returns `vaults` and each entry's `vault_id`; `create` takes `vault`.
 - An older AgentMux on the same computer shares the identity store and does not know the column: it lists every Vault's entries, ignoring the agent lists. Nothing is exposed that was not already on that machine, but the agent list is enforced only by builds from this one on.
-- Import still fills Personal; asking which Vault to import into comes with the pane.
+- Import fills Personal here; the pane asks which Vault to import into (see VS1b).
 
 **As built (VS1b, the pane).** VS1 is done with this one.
 - A Vault picker above the sections (once there is more than one Vault) narrows every list to one Vault or all; the choice is kept in the pane's meta (`vault:vault`). A **Vaults** button opens the dialog: add, rename, set agents (all, named by id, none) and delete an empty Vault. Named agents are typed as ids, separated by commas, as the Swarm shows them; a list to pick from comes later.
