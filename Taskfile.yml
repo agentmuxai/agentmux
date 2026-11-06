@@ -1099,6 +1099,18 @@ tasks:
                 # the window would flicker on ERR_UNSAFE_PORT with no explanation.
                 # SPEC_DEV_VITE_UNSAFE_PORT_GUARD_2026_10_02.md
                 bash scripts/vite-port.sh check "$AGENTMUX_VITE_PORT" || exit 1
+                # Claim the port for this clone. A port that is free now is not yours: the build slot
+                # can hold this run for most of an hour, and runs it releases together start Vite in
+                # the same second. A claim by another clone stops this run here, naming it.
+                # docs/retro/RETRO_DEV_VITE_PORT_RACE_COUPLED_INSTANCES_2026_11_06.md
+                bash scripts/vite-port.sh claim "$AGENTMUX_VITE_PORT" || exit 1
+                # This run's name for its Vite (scripts/dev-instance-plugin.mjs). The wait below needs
+                # it back, so a Vite that lost the port to another run is not mistaken for ours.
+                AGENTMUX_DEV_INSTANCE="$(node -e 'process.stdout.write(require("crypto").randomUUID())')" || exit 1
+                AGENTMUX_DEV_OWNER="${AGENTMUX_AGENT_ID:-${USER:-unknown}}"
+                AGENTMUX_DEV_COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+                export AGENTMUX_DEV_INSTANCE AGENTMUX_DEV_OWNER AGENTMUX_DEV_COMMIT
+                echo "[dev] instance: owner $AGENTMUX_DEV_OWNER, commit $AGENTMUX_DEV_COMMIT, port $AGENTMUX_VITE_PORT, clone $(pwd -P 2>/dev/null || pwd)"
                 VITE_URL="http://localhost:$AGENTMUX_VITE_PORT"
                 export AGENTMUX_VITE_PORT
                 # The dev build's own data home, so it never reads or changes the real ~/.agentmux
@@ -1266,14 +1278,9 @@ tasks:
                 AGENTMUX_VITE_PORT="$AGENTMUX_VITE_PORT" npx vite --config vite.config.ts --port "$AGENTMUX_VITE_PORT" --strictPort &
 
                 echo "Waiting for Vite on port $AGENTMUX_VITE_PORT..."
-                for i in $(seq 1 30); do
-                  curl -s "$VITE_URL" > /dev/null 2>&1 && break
-                  sleep 1
-                done
-                if ! curl -s "$VITE_URL" > /dev/null 2>&1; then
-                  echo "❌ Vite failed to start within 30 seconds"
-                  exit 1
-                fi
+                # Wait for THIS run's Vite (its token), not for anything that answers: a Vite that lost
+                # the --strictPort bind exits quietly and the winner's server would pass a curl.
+                bash scripts/dev-vite-wait.sh "$AGENTMUX_VITE_PORT" "$AGENTMUX_DEV_INSTANCE" 30 || exit 1
                 echo "Vite ready at $VITE_URL."
                 # macOS/Linux: auto-prune any stale Chromium SingletonLock
                 # whose target PID is dead. Without this, a crashed host
@@ -1319,6 +1326,8 @@ tasks:
                   # `||` matters: a task block exits on the first failing command,
                   # which would skip the prune after a crash.
                   bash scripts/prune-dev-builds.sh --only "$(basename "$DEV_DIR")" --wait 20 || true
+                  # Let go of the port's claim; one left behind lapses on its own after two hours.
+                  bash scripts/vite-port.sh release "$AGENTMUX_VITE_PORT" || true
                   exit $launcher_rc
                 else
                   # Phase 1: launch via the launcher (it spawns srv, hands the
@@ -1328,7 +1337,10 @@ tasks:
                   # host + srv share the terminal's process group, so Ctrl+C
                   # reaches all three. `task dev:standalone` keeps the direct
                   # host-invoke escape hatch.
-                  cd "$DEV_DIR" && LD_LIBRARY_PATH=. AGENTMUX_DEV=1 ./agentmux-launcher{{exeExt}} --url="$VITE_URL"
+                  launcher_rc=0
+                  (cd "$DEV_DIR" && LD_LIBRARY_PATH=. AGENTMUX_DEV=1 ./agentmux-launcher{{exeExt}} --url="$VITE_URL") || launcher_rc=$?
+                  bash scripts/vite-port.sh release "$AGENTMUX_VITE_PORT" || true
+                  exit $launcher_rc
                 fi
 
     dev:standalone:serve:
@@ -1388,6 +1400,18 @@ tasks:
                   echo "Auto-selected Vite port $AGENTMUX_VITE_PORT for clone $CLONE_ROOT"
                 fi
                 bash scripts/vite-port.sh check "$AGENTMUX_VITE_PORT" || exit 1
+                # Claim the port for this clone. A port that is free now is not yours: the build slot
+                # can hold this run for most of an hour, and runs it releases together start Vite in
+                # the same second. A claim by another clone stops this run here, naming it.
+                # docs/retro/RETRO_DEV_VITE_PORT_RACE_COUPLED_INSTANCES_2026_11_06.md
+                bash scripts/vite-port.sh claim "$AGENTMUX_VITE_PORT" || exit 1
+                # This run's name for its Vite (scripts/dev-instance-plugin.mjs). The wait below needs
+                # it back, so a Vite that lost the port to another run is not mistaken for ours.
+                AGENTMUX_DEV_INSTANCE="$(node -e 'process.stdout.write(require("crypto").randomUUID())')" || exit 1
+                AGENTMUX_DEV_OWNER="${AGENTMUX_AGENT_ID:-${USER:-unknown}}"
+                AGENTMUX_DEV_COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+                export AGENTMUX_DEV_INSTANCE AGENTMUX_DEV_OWNER AGENTMUX_DEV_COMMIT
+                echo "[dev] instance: owner $AGENTMUX_DEV_OWNER, commit $AGENTMUX_DEV_COMMIT, port $AGENTMUX_VITE_PORT, clone $(pwd -P 2>/dev/null || pwd)"
                 VITE_URL="http://localhost:$AGENTMUX_VITE_PORT"
                 export AGENTMUX_VITE_PORT
                 # The dev build's own data home, so it never reads or changes the real ~/.agentmux
@@ -1403,23 +1427,22 @@ tasks:
                 fi
                 AGENTMUX_VITE_PORT="$AGENTMUX_VITE_PORT" npx vite --config vite.config.ts --port "$AGENTMUX_VITE_PORT" --strictPort &
                 echo "Waiting for Vite on port $AGENTMUX_VITE_PORT..."
-                for i in $(seq 1 30); do
-                  curl -s "$VITE_URL" > /dev/null 2>&1 && break
-                  sleep 1
-                done
-                if ! curl -s "$VITE_URL" > /dev/null 2>&1; then
-                  echo "❌ Vite failed to start within 30 seconds"
-                  exit 1
-                fi
+                # Wait for THIS run's Vite (its token), not for anything that answers: a Vite that lost
+                # the --strictPort bind exits quietly and the winner's server would pass a curl.
+                bash scripts/dev-vite-wait.sh "$AGENTMUX_VITE_PORT" "$AGENTMUX_DEV_INSTANCE" 30 || exit 1
                 echo "Vite ready at $VITE_URL."
                 # `LD_LIBRARY_PATH` is a Unix-only convention; on Windows
                 # it has no effect but is inconsistent with the `dev:serve`
                 # OS gate above. Mirror that gate here.
                 if [ "{{OS}}" = "windows" ]; then
-                  cd "$DEV_DIR" && AGENTMUX_DEV=1 ./agentmux-cef{{exeExt}} --url="$VITE_URL"
+                  host_rc=0
+                  (cd "$DEV_DIR" && AGENTMUX_DEV=1 ./agentmux-cef{{exeExt}} --url="$VITE_URL") || host_rc=$?
                 else
-                  cd "$DEV_DIR" && LD_LIBRARY_PATH=. AGENTMUX_DEV=1 ./agentmux-cef{{exeExt}} --url="$VITE_URL"
+                  host_rc=0
+                  (cd "$DEV_DIR" && LD_LIBRARY_PATH=. AGENTMUX_DEV=1 ./agentmux-cef{{exeExt}} --url="$VITE_URL") || host_rc=$?
                 fi
+                bash scripts/vite-port.sh release "$AGENTMUX_VITE_PORT" || true
+                exit $host_rc
 
     run:
         desc: Run the host (must be built and bundled first).
