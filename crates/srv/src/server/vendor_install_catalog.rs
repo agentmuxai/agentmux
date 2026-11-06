@@ -1,9 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! The install recipes of the agent CLIs that AgentMux can't install into its own folder
-//! (Antigravity, Muse Code): a compiled table, so what runs on
-//! the user's machine comes from srv and never from a caller
+//! The install recipes of the agent CLIs that AgentMux can't install into its own folder: a
+//! compiled table, so what runs on the user's machine comes from srv and never from a caller
 //! (SPEC_ONE_CLICK_VENDOR_CLI_INSTALL_2026_10_20.md §4.1).
 //!
 //! The table holds each vendor's own installer, the same command the user would paste. Each is
@@ -12,10 +11,13 @@
 //! downloads is the vendor's business, and the consent says so.
 //!
 //! A CLI AgentMux installs itself (`cli_download::SPECS`, a pinned release with a checked hash, or
-//! `cli_uv::UV_SPECS`, a hash-locked Python venv) is not in this table: its Install button is the managed one, and a test fails if a provider is
-//! in both. When a CLI moves to the managed install, its row here goes.
+//! `cli_uv::UV_SPECS`, a hash-locked Python venv) is not in this table: its Install button is the
+//! managed one, and a test fails if a provider is in both. Every CLI AgentMux has is now installed
+//! that way, so the table is empty; add a row only for a CLI it cannot install itself.
 
 /// What runs a downloaded script.
+// No row in the table builds these until a CLI AgentMux cannot install itself returns; the tests do.
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Interpreter {
     Bash,
@@ -59,6 +61,8 @@ impl Os {
     }
 }
 
+// No row in the table builds these until a CLI AgentMux cannot install itself returns; the tests do.
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug)]
 pub(crate) enum Recipe {
     /// Download `url`, show its hash, run that file with `interpreter`. `shown` is the vendor's
@@ -120,9 +124,15 @@ impl VendorInstall {
     }
 }
 
+#[cfg(test)]
 const TEN_MINUTES: u64 = 600;
 
-pub(crate) const VENDOR_INSTALLS: &[VendorInstall] = &[
+pub(crate) const VENDOR_INSTALLS: &[VendorInstall] = &[];
+
+/// Rows only the tests see, so the machinery that runs a vendor's installer stays covered
+/// while the real table is empty.
+#[cfg(test)]
+pub(crate) const TEST_INSTALLS: &[VendorInstall] = &[
     VendorInstall {
         provider_id: "antigravity",
         display: "Antigravity",
@@ -141,28 +151,22 @@ pub(crate) const VENDOR_INSTALLS: &[VendorInstall] = &[
         allowed_hosts: &["antigravity.google"],
         timeout_secs: TEN_MINUTES,
     },
-    VendorInstall {
-        provider_id: "muse",
-        display: "Muse Code",
-        unix: Recipe::Script {
-            shown: "curl -fsSL https://dev.meta.ai/install.sh | sh",
-            url: "https://dev.meta.ai/install.sh",
-            interpreter: Interpreter::Sh,
-            env: &[],
-        },
-        windows: Recipe::Script {
-            shown: "irm https://dev.meta.ai/install.ps1 | iex",
-            url: "https://dev.meta.ai/install.ps1",
-            interpreter: Interpreter::PowerShell,
-            env: &[],
-        },
-        allowed_hosts: &["dev.meta.ai"],
-        timeout_secs: TEN_MINUTES,
-    },
 ];
 
+/// Every row `vendor_install` can find: the table, and under test the fixture rows too.
+pub(crate) fn all_installs() -> impl Iterator<Item = &'static VendorInstall> {
+    #[cfg(test)]
+    {
+        VENDOR_INSTALLS.iter().chain(TEST_INSTALLS)
+    }
+    #[cfg(not(test))]
+    {
+        VENDOR_INSTALLS.iter()
+    }
+}
+
 pub(crate) fn vendor_install(provider_id: &str) -> Option<&'static VendorInstall> {
-    VENDOR_INSTALLS.iter().find(|v| v.provider_id == provider_id)
+    all_installs().find(|v| v.provider_id == provider_id)
 }
 
 /// Whether a script may be fetched from `url`: HTTPS on the default port, no credentials in
@@ -192,10 +196,9 @@ mod tests {
     }
 
     #[test]
-    fn the_table_covers_exactly_the_vendor_installed_clis() {
-        let mut ids: Vec<&str> = VENDOR_INSTALLS.iter().map(|v| v.provider_id).collect();
-        ids.sort_unstable();
-        assert_eq!(ids, ["antigravity", "muse"]);
+    fn the_table_is_empty_because_agentmux_installs_every_cli_itself() {
+        let ids: Vec<&str> = VENDOR_INSTALLS.iter().map(|v| v.provider_id).collect();
+        assert!(ids.is_empty(), "{ids:?}: a CLI AgentMux can install itself belongs in cli_download::SPECS or cli_uv::UV_SPECS");
     }
 
     #[test]
@@ -221,7 +224,7 @@ mod tests {
 
     #[test]
     fn every_script_url_is_https_and_passes_its_own_host_list() {
-        for v in VENDOR_INSTALLS {
+        for v in all_installs() {
             for os in [Os::Windows, Os::Unix] {
                 match v.recipe(os) {
                     Recipe::Script { url: u, shown, .. } => {
@@ -235,7 +238,7 @@ mod tests {
 
     #[test]
     fn a_script_runs_by_the_interpreter_of_its_os() {
-        for v in VENDOR_INSTALLS {
+        for v in all_installs() {
             if let Recipe::Script { interpreter, url, .. } = v.recipe(Os::Windows) {
                 assert_eq!(*interpreter, Interpreter::PowerShell, "{}", v.provider_id);
                 assert!(url.ends_with(".ps1"), "{url}");

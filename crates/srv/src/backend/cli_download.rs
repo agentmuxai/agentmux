@@ -185,6 +185,139 @@ DownloadSpec {
             exe_in_archive: "",
         },
     ],
+},
+// Meta's own manifest for this build lists a SHA-256 and size per platform; they are
+// copied here, so this is not trust on first use. The binary is the one the vendor's
+// launcher would fetch, run directly: the launcher's hourly self-update never runs,
+// and `MUSE_NO_AUTO_UPDATE=1` is set besides. The Windows build is Authenticode-signed
+// (Meta Platforms, Inc.).
+DownloadSpec {
+    provider_id: "muse",
+    version: "1.4.7-R6101.1",
+    url_prefix: "https://lookaside.facebook.com/lookaside/muse/download/?channel=muse&version=1.4.7-R6101.1&file=",
+    assets: &[
+        Asset {
+            os: "windows",
+            arch: "x86_64",
+            url: "https://lookaside.facebook.com/lookaside/muse/download/?channel=muse&version=1.4.7-R6101.1&file=muse-x86-windows.exe",
+            sha256: "2d1ac7af0a9ea77643cb8690eee70f52f0f8476c46b194f143c831f481aea59d",
+            size: 467_174_136,
+            archive: Archive::Raw,
+            exe_in_archive: "",
+        },
+        Asset {
+            os: "windows",
+            arch: "aarch64",
+            url: "https://lookaside.facebook.com/lookaside/muse/download/?channel=muse&version=1.4.7-R6101.1&file=muse-aarch64-windows.exe",
+            sha256: "6580be6e5ab03b7a1e3ebe427b50693f6adce4e52ea808c5ea87ba07ccac2b9f",
+            size: 427_460_856,
+            archive: Archive::Raw,
+            exe_in_archive: "",
+        },
+        Asset {
+            os: "macos",
+            arch: "aarch64",
+            url: "https://lookaside.facebook.com/lookaside/muse/download/?channel=muse&version=1.4.7-R6101.1&file=muse-aarch64-macos",
+            sha256: "87ff5a31b63e30b6ac04d3e8298285517e753c126fb6f3aee80accf28c4562f1",
+            size: 358_892_272,
+            archive: Archive::Raw,
+            exe_in_archive: "",
+        },
+        Asset {
+            os: "macos",
+            arch: "x86_64",
+            url: "https://lookaside.facebook.com/lookaside/muse/download/?channel=muse&version=1.4.7-R6101.1&file=muse-x86-macos",
+            sha256: "6d766da6601a0aae8bd22294c0854970286e1b9ade3009f0d0289b7875a10c58",
+            size: 380_381_680,
+            archive: Archive::Raw,
+            exe_in_archive: "",
+        },
+        Asset {
+            os: "linux",
+            arch: "x86_64",
+            url: "https://lookaside.facebook.com/lookaside/muse/download/?channel=muse&version=1.4.7-R6101.1&file=muse-x86-linux",
+            sha256: "36e3dac91f56c15572b95be55d70ee9fd9685cd9ab49f747bab4746c8d7c2518",
+            size: 363_518_168,
+            archive: Archive::Raw,
+            exe_in_archive: "",
+        },
+        Asset {
+            os: "linux",
+            arch: "aarch64",
+            url: "https://lookaside.facebook.com/lookaside/muse/download/?channel=muse&version=1.4.7-R6101.1&file=muse-aarch64-linux",
+            sha256: "48db3c7468cd4f401eff9b415fb7e0cdfe0351fb1730649ceae2a0f766e23b85",
+            size: 325_916_776,
+            archive: Archive::Raw,
+            exe_in_archive: "",
+        },
+    ],
+},
+// Google serves only the latest build through its manifests, so the URL of the build
+// current on 2026-11-06 is pinned (an older build, 1.5.1, still downloaded a day after
+// it was replaced). Each file's SHA-512 matched Google's manifest when taken; the
+// SHA-256 here is of the same file. Linux uses the static musl builds. The Windows
+// build is Authenticode-signed (Google LLC). Where the vendor's installer would run
+// `agy install` to edit shell profiles, nothing is run here.
+DownloadSpec {
+    provider_id: "antigravity",
+    version: "1.5.2",
+    url_prefix: "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.2-4951595792859136/",
+    assets: &[
+        Asset {
+            os: "windows",
+            arch: "x86_64",
+            url: "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.2-4951595792859136/windows-x64/cli_windows_x64.exe",
+            sha256: "3f6f64a331fcd75c4ea3a25f89fdb0a9192feaa6e49bb828510b65dc0030b61e",
+            size: 222_561_944,
+            archive: Archive::Raw,
+            exe_in_archive: "",
+        },
+        Asset {
+            os: "windows",
+            arch: "aarch64",
+            url: "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.2-4951595792859136/windows-arm/cli_windows_arm64.exe",
+            sha256: "ab49a39c1fc2496093d7d4486c03f3813a9982401834e4593c93b68b68a44300",
+            size: 211_127_448,
+            archive: Archive::Raw,
+            exe_in_archive: "",
+        },
+        Asset {
+            os: "macos",
+            arch: "aarch64",
+            url: "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.2-4951595792859136/darwin-arm/cli_mac_arm64.tar.gz",
+            sha256: "c3f56b381c4755cdd02e5de67373c24788b2a2aeade156756b4419b67253bd0c",
+            size: 64_486_606,
+            archive: Archive::TarGz,
+            exe_in_archive: "antigravity",
+        },
+        Asset {
+            os: "macos",
+            arch: "x86_64",
+            url: "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.2-4951595792859136/darwin-x64/cli_mac_x64.tar.gz",
+            sha256: "fe99ebacc6bd46b4bf2d85c718420b28b699210cf7c2e3055242e2dad7a1beb3",
+            size: 70_102_814,
+            archive: Archive::TarGz,
+            exe_in_archive: "antigravity",
+        },
+        Asset {
+            os: "linux",
+            arch: "x86_64",
+            url: "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.2-4951595792859136/linux-x64-musl/cli_linux_x64_musl.tar.gz",
+            sha256: "6671806b8e68b0c3cfb87ae99675a9b037b33d9d4cf556fc633a35d198bebf5c",
+            size: 72_824_890,
+            archive: Archive::TarGz,
+            exe_in_archive: "antigravity",
+        },
+        Asset {
+            os: "linux",
+            arch: "aarch64",
+            url: "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.2-4951595792859136/linux-arm-musl/cli_linux_arm64_musl.tar.gz",
+            sha256: "f83f4246f5de84f5d966564bd844a65895cb015439eb55a82293fc0ab7c81e78",
+            size: 66_759_805,
+            archive: Archive::TarGz,
+            exe_in_archive: "antigravity",
+        },
+    ],
 }];
 
 /// The download install for `provider_id`, if AgentMux has one.
@@ -363,13 +496,11 @@ pub(crate) async fn install_asset(
         .await
         .map_err(|e| DownloadError::Unpack(e.to_string()))??;
     let _ = std::fs::remove_file(&archive);
-    let probe = bin.to_string_lossy().into_owned();
-    let version = tokio::task::spawn_blocking(move || {
-        crate::backend::tool_store::probe_version(&probe, &Some("--version".to_string()))
-    })
-    .await
-    .ok()
-    .flatten();
+    let (probe, id) = (bin.clone(), spec.provider_id);
+    let version = tokio::task::spawn_blocking(move || cli_install::probe_installed(&probe, id))
+        .await
+        .ok()
+        .flatten();
     let Some(version) = version else {
         return Err(DownloadError::NotRunnable(bin));
     };

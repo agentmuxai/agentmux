@@ -461,7 +461,7 @@ pub fn register_vendor_install_handlers(engine: &Arc<WshRpcEngine>, state: &AppS
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::server::vendor_install_catalog::VENDOR_INSTALLS;
+    use crate::server::vendor_install_catalog::all_installs;
 
     fn answer(answered: bool, approve: bool) -> Result<UserAnswer, String> {
         Ok(UserAnswer { answered, approve, ..Default::default() })
@@ -482,7 +482,7 @@ mod tests {
 
     #[test]
     fn the_panel_gets_the_vendors_command_for_every_provider_on_both_systems() {
-        for v in VENDOR_INSTALLS {
+        for v in all_installs() {
             for os in [Os::Windows, Os::Unix] {
                 let info = info_for(v.provider_id, os);
                 assert!(info.available && !info.command.is_empty(), "{} {os:?}", v.provider_id);
@@ -551,7 +551,7 @@ mod tests {
     #[test]
     fn the_claim_key_cannot_be_a_system_tool_id() {
         // `is_safe_tool_id` allows letters, digits, `_` and `-`: never a `:`.
-        for v in VENDOR_INSTALLS {
+        for v in all_installs() {
             assert!(claim_key(v).contains(':'));
         }
     }
