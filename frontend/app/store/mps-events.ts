@@ -137,6 +137,7 @@ export const WpsEvent = {
     AgentReactiveRegistered: "agent:reactive-registered",
     AgentReactiveUnregistered: "agent:reactive-unregistered",
     AgentsChanged: "agents:changed",
+    HistorySessionsChanged: "history:sessions:changed",
     CronChanged: "cron_changed",
     DispatchActivity: "dispatch:activity",
     DispatchUpdated: "dispatch:updated",

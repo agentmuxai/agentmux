@@ -163,7 +163,12 @@ pub(crate) fn mirror_append_to_global(gfs: &Arc<FileStore>, zone: &str, data: &[
     // Global zones are agent transcripts by construction — always stamp
     // (§4.4), keyed at the offset this append actually landed at (codex P2 on
     // PR #2508), in the same transaction as the append.
-    append_transcript_lines(gfs, zone, OUTPUT_FILE, data, true, "global transcripts", true)
+    let landed = append_transcript_lines(gfs, zone, OUTPUT_FILE, data, true, "global transcripts", true);
+    if landed.is_some() {
+        // The History pane's agent list: its size and last-active time moved.
+        crate::backend::history_changed::mark();
+    }
+    landed
 }
 
 /// `append_lines` on a transcript file, creating it on first write (or if

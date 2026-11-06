@@ -532,6 +532,13 @@
     }
   },
   {
+    "event": "history:sessions:changed",
+    "payloadTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
     "event": "identity:no-direct-links",
     "payloadTs": {
       "imports": [

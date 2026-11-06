@@ -112,6 +112,7 @@ pub mod rpc_types;
 pub mod schema;
 pub mod service;
 pub mod session_archive;
+pub mod history_changed;
 pub mod history_registry;
 pub mod history_usage;
 pub mod session_backfill;

@@ -52,7 +52,12 @@ pub(crate) fn archive_session_in(
     // shared store. A failure that is the corruption is not retried here: the move may have
     // cleared this channel's current already, so the next call is the one that takes the other path.
     let global = global.filter(|_| !damage::is_damaged(&zone));
-    archive_session_with(filestore, global, definition_id)
+    let archived = archive_session_with(filestore, global, definition_id)?;
+    if archived.is_some() {
+        // The History pane's agent list gains an archived conversation.
+        crate::backend::history_changed::mark();
+    }
+    Ok(archived)
 }
 
 fn archive_session_with(
