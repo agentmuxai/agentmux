@@ -136,9 +136,13 @@ pub fn is_valid_install(dir: &Path, cli_command: &str) -> bool {
 /// The CLI inside an install dir: an npm shim, or the program a release
 /// download unpacked (`cli_download`). One provider has one kind.
 pub fn installed_bin(dir: &Path, cli_command: &str) -> Option<PathBuf> {
-    [npm_bin(dir, cli_command), crate::backend::cli_download::download_bin(dir, cli_command)]
-        .into_iter()
-        .find(|b| b.is_file())
+    [
+        npm_bin(dir, cli_command),
+        crate::backend::cli_download::download_bin(dir, cli_command),
+        crate::backend::cli_uv::venv_bin(dir, cli_command),
+    ]
+    .into_iter()
+    .find(|b| b.is_file())
 }
 
 /// Under the install lock, before (re)installing into `dir`: unless it holds
@@ -206,6 +210,21 @@ pub fn lock_install(
     let Some(file) = open_lock_file(paths, provider_id, pinned_version)? else {
         return Ok(InstallGuard { _file: None });
     };
+    crate::registry::lock_exclusive(&file)?;
+    Ok(InstallGuard { _file: Some(file) })
+}
+
+/// The same lock for any install folder, not only `cli/<provider>/<pin>`
+/// (the pinned `uv` under `tools/`): `<dir>.lock` beside it. Blocking.
+pub fn lock_dir(dir: &Path) -> std::io::Result<InstallGuard> {
+    let parent = dir.parent().unwrap_or(dir);
+    std::fs::create_dir_all(parent)?;
+    let name = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(parent.join(format!("{name}.lock")))?;
     crate::registry::lock_exclusive(&file)?;
     Ok(InstallGuard { _file: Some(file) })
 }

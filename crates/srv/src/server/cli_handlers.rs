@@ -116,7 +116,7 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
                 // Not found. AgentMux doesn't install it: say how to.
                 let path_only = registered
-                    .map(|p| p.npm_package.is_empty() && crate::backend::cli_download::download_spec(p.id).is_none())
+                    .map(|p| p.npm_package.is_empty() && !crate::backend::cli_download::is_managed_install(p.id))
                     .unwrap_or_else(|| cmd.npm_package.is_empty());
                 if path_only {
                     // This branch fires for PATH-only providers
@@ -155,7 +155,7 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // installed.
                 let provider = crate::server::install_handlers::installable_provider(&cmd.provider_id)
                     .map_err(|e| format!("resolvecli: {e}"))?;
-                if crate::backend::cli_download::download_spec(provider.id).is_some() {
+                if crate::backend::cli_download::is_managed_install(provider.id) {
                     return resolve_by_download(&notices, &broker, &paths, &cmd, provider.id, &pinned_version).await;
                 }
                 tracing::info!(
@@ -915,7 +915,7 @@ async fn resolve_by_download(
         }
     };
     let stop = std::sync::atomic::AtomicBool::new(false);
-    let outcome = crate::backend::cli_download::install_download_cli(paths, provider_id, &on_line, &stop).await;
+    let outcome = crate::backend::cli_download::install_managed_cli(paths, provider_id, &on_line, &stop).await;
     match &outcome {
         Ok(_) => notices.install(&install_id, pinned_version, InstallState::Installed, Some(started.elapsed().as_secs_f64()), None),
         Err(e) => notices.install(&install_id, pinned_version, InstallState::Failed, None, Some(&e.to_string())),
