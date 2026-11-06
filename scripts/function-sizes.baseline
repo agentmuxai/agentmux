@@ -244,7 +244,6 @@
 280 crates/srv/src/muxbus/cloud_subscriber.rs::run_loop
 113 crates/srv/src/muxbus/cloud_subscriber.rs::sync_agent_reactive
 103 crates/srv/src/muxbus/cloud_subscriber.rs::sync_agents_batched
-345 crates/srv/src/muxbus/cloud_subscriber/delivery.rs::claim_and_deliver
 177 crates/srv/src/muxbus/pkce.rs::run_pkce_login_inner
 224 crates/srv/src/persist.rs::bootstrap_state_from_mstore
 159 crates/srv/src/persist_subscriber.rs::apply_event_to_mstore
