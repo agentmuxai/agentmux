@@ -976,6 +976,10 @@ pub(crate) async fn act_as(state: &AppState, data: Value, actor: &Actor) -> Resu
 }
 
 #[cfg(test)]
+#[path = "kanban_act_tests.rs"]
+mod act_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::backend::storage::work_board::WorkCard;
