@@ -959,6 +959,8 @@ declare global {
         "kanban:collapsed"?: string[];
         // The Vault's own section, within the Vault pane.
         "vault:section"?: "personal" | "cards" | "api-keys" | "logins" | "notes" | "kept" | "activity";
+        // The Vault the lists are narrowed to, by id; none for all of them (vault-model.ts).
+        "vault:vault"?: string | null;
         // An agent's Vault request to open the form for (vault-model.ts); cleared once shown.
         "vault:request"?: string | null;
         // The note on what may ask the person, dismissed (vault-model.ts).

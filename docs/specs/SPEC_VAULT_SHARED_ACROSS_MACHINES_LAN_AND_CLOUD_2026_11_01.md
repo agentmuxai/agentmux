@@ -298,7 +298,14 @@ One PR per phase; VS1 and VS4 can start before the layer is ready.
 - `request` and `generate` take `vault` (name or id). `generate` makes the entry there, or in the agent's first Vault; `request` records the Vault on the request so the form can start on it.
 - Host ops: `vault_create`, `vault_update`, `vault_delete`, `move_entry`; `list` returns `vaults` and each entry's `vault_id`; `create` takes `vault`.
 - An older AgentMux on the same computer shares the identity store and does not know the column: it lists every Vault's entries, ignoring the agent lists. Nothing is exposed that was not already on that machine, but the agent list is enforced only by builds from this one on.
-- Import still fills Personal; asking which Vault to import into comes with the pane.
+- Import fills Personal here; the pane asks which Vault to import into (see VS1b).
+
+**As built (VS1b, the pane).** VS1 is done with this one.
+- A Vault picker above the sections (once there is more than one Vault) narrows every list to one Vault or all; the choice is kept in the pane's meta (`vault:vault`). A **Vaults** button opens the dialog: add, rename, set agents (all, named by id, none) and delete an empty Vault. Named agents are typed as ids, separated by commas, as the Swarm shows them; a list to pick from comes later.
+- **Move to** on each entry (when there is more than one Vault) says which agents may use it in the Vault it goes to. The new-entry form and Import ask which Vault when there is more than one; a form opened from an agent's request starts on the Vault it named. Import's new entries go to the chosen Vault, and an entry it replaces stays in the Vault it is in (before, it went back to Personal).
+- **A sign-in Vault per browser profile**, in the Vaults dialog (Personal and each of the person's profiles; an agent's own profile is not listed). `db_vault_signin_vaults` holds the choice (Personal keeps no row), because the Personal jar has no entry in `browser-profiles.json`. A profile saves new sign-ins in its Vault and offers, fills and lists only the sign-ins kept there, for the key button and for an agent's `Browser` `signin` alike. Sign-ins already saved stay where they are: moving a sign-in out of a profile's Vault takes it out of that profile's tabs, and the dialog says so. Deleting a Vault sends the profiles that used it back to Personal. Incognito still uses Personal.
+- Host ops: `signin_vault` (profile, vault_id); `list` returns `signin_vaults`; `import_commit` takes `vault`.
+- Not built: the Vault's tier and members (VS2, VS3), and dragging an entry to a Vault.
 
 **Order and what comes back first** (2026-11-04). VS1 is built first: it is local, costs nothing and needs no account. VS4's resolver and **Backed by** reads come next; they read secrets the fleet already has, with the hosts' existing identities. Two steps go back to AgentY, for the operator, before they are built, because they cost money:
 - **Mirrored to Secrets Manager** creates new secrets in our AWS account, each a monthly charge.

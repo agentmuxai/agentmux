@@ -189,9 +189,79 @@ fn an_agents_browser_sign_in_chooses_only_from_vaults_it_may_use() {
         parts: Parts([("password".to_string(), "pw".to_string())].into()),
     };
     let id = create_in(&s, entry, &work.id).unwrap();
+    // Personal's tabs keep their sign-ins in Work, which only `builder` may use.
+    set_signin_vault(&s, "personal", &work.id).unwrap();
     let origins = [site.to_string()];
     let ids = |agent: &str| signins::offered_for_agent(&s, "personal", &origins, agent).unwrap().into_iter().map(|f| f.0).collect::<Vec<_>>();
     assert_eq!(ids("builder"), [id.clone()]);
     assert!(ids("other").is_empty(), "a sign-in in a Vault it may not use is not there");
     assert_eq!(signins::offered_for(&s, "personal", &origins).unwrap().len(), 1, "the key button the person presses lists it");
+}
+
+#[test]
+fn a_profile_saves_and_offers_sign_ins_in_its_own_vault() {
+    use crate::backend::vault::signins::{self, Space};
+    let s = store();
+    let work = create(&s, "Work", VaultAgents::None).unwrap();
+    let site = "https://intranet.example.com".to_string();
+    let space = |profile: &str| Space { profile: profile.into(), origin: site.clone(), realm: String::new(), proxy: false };
+    let in_vault = |id: &str| s.vault_get(id).unwrap().unwrap().vault_id;
+
+    // Nothing chosen: Personal, as before.
+    let first = signins::save(&s, &space("personal"), "alex", "pw-1").unwrap();
+    assert_eq!(in_vault(&first), "personal");
+
+    // The work profile saves into Work; Personal's tabs are not offered it, nor it Personal's.
+    set_signin_vault(&s, "profile:p-0123456789ab", &work.id).unwrap();
+    let second = signins::save(&s, &space("profile:p-0123456789ab"), "sam", "pw-2").unwrap();
+    assert_eq!(in_vault(&second), work.id);
+    let origins = [site.clone()];
+    assert_eq!(signins::offered_for(&s, "profile:p-0123456789ab", &origins).unwrap().into_iter().map(|f| f.0).collect::<Vec<_>>(), [second.clone()]);
+    assert_eq!(signins::offered_for(&s, "personal", &origins).unwrap().into_iter().map(|f| f.0).collect::<Vec<_>>(), [first.clone()]);
+
+    // Moving an entry out of the profile's Vault takes it out of the profile's list.
+    move_entry(&s, &second, "personal").unwrap();
+    assert!(signins::offered_for(&s, "profile:p-0123456789ab", &origins).unwrap().is_empty());
+
+    // A Vault that is gone sends the profile back to Personal; so does choosing Personal.
+    move_entry(&s, &second, &work.id).unwrap();
+    move_entry(&s, &second, "personal").unwrap();
+    remove(&s, &work.id).unwrap();
+    assert_eq!(signins::vault_for(&s, "profile:p-0123456789ab").unwrap(), "personal");
+    assert_eq!(signins::vault_for(&s, "personal").unwrap(), "personal");
+}
+
+#[test]
+fn only_a_browser_profile_and_an_existing_vault_can_be_chosen_for_sign_ins() {
+    let s = store();
+    assert!(set_signin_vault(&s, "somewhere", "personal").unwrap_err().contains("not a browser profile"));
+    assert!(set_signin_vault(&s, "personal", "vault-nope").unwrap_err().contains("no Vault"));
+    let work = create(&s, "Work", VaultAgents::All).unwrap();
+    set_signin_vault(&s, "personal", &work.id).unwrap();
+    assert_eq!(signin_vaults(&s).unwrap().get("personal"), Some(&work.id));
+    set_signin_vault(&s, "personal", "personal").unwrap();
+    assert!(signin_vaults(&s).unwrap().is_empty(), "Personal is the default and keeps no row");
+}
+
+#[test]
+fn deleting_a_profile_keeps_its_sign_ins_reachable_and_forgets_its_vault() {
+    use crate::backend::vault::signins::{self, Space};
+    let s = store();
+    let work = create(&s, "Work", VaultAgents::All).unwrap();
+    let profile = "profile:p-0123456789ab";
+    let site = "https://intranet.example.com".to_string();
+    let space = Space { profile: profile.into(), origin: site.clone(), realm: String::new(), proxy: false };
+    set_signin_vault(&s, profile, &work.id).unwrap();
+    let id = signins::save(&s, &space, "sam", "pw").unwrap();
+    assert_eq!(s.vault_get(&id).unwrap().unwrap().vault_id, work.id);
+
+    assert_eq!(signins::profile_deleted(&s, "p-0123456789ab", "Work profile", true).unwrap(), 1);
+    assert_eq!(s.vault_get(&id).unwrap().unwrap().vault_id, "personal", "it goes where Personal's tabs look");
+    assert_eq!(signins::offered_for(&s, "personal", std::slice::from_ref(&site)).unwrap().into_iter().map(|f| f.0).collect::<Vec<_>>(), [id]);
+    assert!(signin_vaults(&s).unwrap().is_empty(), "the profile's row is gone with it");
+
+    // Deleting the sign-ins with the profile forgets the choice too.
+    set_signin_vault(&s, "profile:p-ffff", &work.id).unwrap();
+    signins::profile_deleted(&s, "p-ffff", "Old", false).unwrap();
+    assert!(signin_vaults(&s).unwrap().is_empty());
 }

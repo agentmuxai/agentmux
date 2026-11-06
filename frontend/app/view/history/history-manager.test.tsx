@@ -18,6 +18,21 @@ vi.mock("@/app/store/rpc-api", () => ({
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
+// srv's events, fired by the test.
+const eventHandlers = new Map<string, Set<() => void>>();
+vi.mock("@/app/store/mps", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("@/app/store/mps")>()),
+    onMuxEvent: (event: string, handler: () => void) => {
+        if (!eventHandlers.has(event)) eventHandlers.set(event, new Set());
+        eventHandlers.get(event)!.add(handler);
+        return () => eventHandlers.get(event)?.delete(handler);
+    },
+}));
+vi.mock("@/app/store/ws", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("@/app/store/ws")>()),
+    addWSReconnectHandler: () => {},
+}));
+const fireEvent_ = (event: string) => eventHandlers.get(event)?.forEach((h) => h());
 const openOrFocusHistoryTab = vi.fn();
 vi.mock("@/app/view/agent/open-history-tab", () => ({
     openOrFocusHistoryTab: (...a: unknown[]) => openOrFocusHistoryTab(...a),
@@ -85,6 +100,68 @@ describe("History pane", () => {
         expect(HistoryAgentSessionsCommand).toHaveBeenCalledWith({}, { definition_id: "parent-1" }, { timeout: 300_000 });
         expect(screen.getByRole("cell", { name: "Archived" })).toBeInTheDocument();
         expect(screen.getByText("/work/a")).toBeInTheDocument();
+    });
+
+    describe("live", () => {
+        beforeEach(() => {
+            eventHandlers.clear();
+            vi.useFakeTimers({ shouldAdvanceTime: true });
+        });
+        afterEach(() => vi.useRealTimers());
+
+        it("reads the list again when srv says a session changed, without a Refresh", async () => {
+            render(() => <HistoryManager paneBlockId="warden-1" visible={true} />);
+            await waitFor(() => expect(screen.getByText("Parent")).toBeInTheDocument());
+            expect(HistoryAgentsCommand).toHaveBeenCalledTimes(1);
+            HistoryAgentsCommand.mockResolvedValue({ agents: [agent("parent-1", { name: "Parent", archives: 3, archive_bytes: 4096 })] });
+            fireEvent_("history:sessions:changed");
+            await vi.advanceTimersByTimeAsync(600);
+            await waitFor(() => expect(screen.getByText(/1 agents · .* kept · 3 archived conversations/)).toBeInTheDocument());
+            expect(HistoryAgentsCommand).toHaveBeenCalledTimes(2);
+        });
+
+        it("reads it again when an agent is renamed, created or deleted", async () => {
+            render(() => <HistoryManager paneBlockId="warden-1" visible={true} />);
+            await waitFor(() => expect(screen.getByText("Parent")).toBeInTheDocument());
+            HistoryAgentsCommand.mockResolvedValue({ agents: [agent("parent-1", { name: "Renamed" })] });
+            fireEvent_("agents:changed");
+            await vi.advanceTimersByTimeAsync(600);
+            await waitFor(() => expect(screen.getByText("Renamed")).toBeInTheDocument());
+        });
+
+        it("keeps a row's open sessions through a reload, and reads them again for a new archived conversation", async () => {
+            render(() => <HistoryManager paneBlockId="warden-1" visible={true} />);
+            await waitFor(() => expect(screen.getByText("Parent")).toBeInTheDocument());
+            fireEvent.click(screen.getAllByRole("button", { name: "Show sessions" })[0]);
+            await waitFor(() => expect(screen.getByText("s1234567")).toBeInTheDocument());
+            expect(HistoryAgentSessionsCommand).toHaveBeenCalledTimes(1);
+
+            // The transcript grew: the row's numbers move, its sessions stay as they are.
+            HistoryAgentsCommand.mockResolvedValue({
+                agents: [agent("parent-1", { name: "Parent", archives: 2, archive_bytes: 1024, current_bytes: 9999 })],
+            });
+            fireEvent_("history:sessions:changed");
+            await vi.advanceTimersByTimeAsync(600);
+            await waitFor(() => expect(HistoryAgentsCommand).toHaveBeenCalledTimes(2));
+            expect(screen.getByText("s1234567")).toBeInTheDocument();
+            expect(HistoryAgentSessionsCommand).toHaveBeenCalledTimes(1);
+
+            // A conversation was archived: the open sessions are read again.
+            HistoryAgentsCommand.mockResolvedValue({ agents: [agent("parent-1", { name: "Parent", archives: 3, archive_bytes: 2048 })] });
+            fireEvent_("history:sessions:changed");
+            await vi.advanceTimersByTimeAsync(600);
+            await waitFor(() => expect(HistoryAgentSessionsCommand).toHaveBeenCalledTimes(2));
+            expect(screen.getByText("s1234567")).toBeInTheDocument();
+        });
+
+        it("stops following when the section is hidden", async () => {
+            const { unmount } = render(() => <HistoryManager paneBlockId="warden-1" visible={true} />);
+            await waitFor(() => expect(screen.getByText("Parent")).toBeInTheDocument());
+            unmount();
+            fireEvent_("history:sessions:changed");
+            await vi.advanceTimersByTimeAsync(600);
+            expect(HistoryAgentsCommand).toHaveBeenCalledTimes(1);
+        });
     });
 
     it("opens an agent's history in the History pane", async () => {

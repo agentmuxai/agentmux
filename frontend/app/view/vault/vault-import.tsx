@@ -16,6 +16,7 @@ import type { ImportPreview } from "@/types/rpc/ImportPreview";
 import type { ImportResult } from "@/types/rpc/ImportResult";
 import { SECTION_LABELS, VAULT_KINDS, vaultKind } from "./vault-kinds";
 import { cancelImport, commitImport, deleteImportFile, pickImport, type CsvMapping, type Duplicates, type ImportStep } from "./vault-store";
+import { VaultField } from "./vault-vaults";
 
 /** Files that are encrypted but can't be a KeePass database, which is the only kind with a key file. The
  *  host recognises a database by its contents, so a renamed one (`backup.bin`) still gets the key-file row. */
@@ -30,10 +31,23 @@ const DUPLICATE_CHOICES: { value: Duplicates; label: string }[] = [
     { value: "keep_both", label: "Keep both" },
 ];
 
-export function VaultImportDialog(props: { onClose: () => void }): JSX.Element {
+/** What to do with entries the file shares with the Vault; nothing is asked when there are none. */
+function DuplicatesChoice(props: { count: number; value: Duplicates; onChange: (d: Duplicates) => void }): JSX.Element {
+    return (
+        <Show when={props.count > 0}>
+            <Field label={`${props.count} already in your Vault`} layout="stacked" description="The same value (or the same site and username, for a login).">
+                <SegmentedControl options={DUPLICATE_CHOICES} value={props.value} onChange={props.onChange} ariaLabel="What to do with entries already in the Vault" />
+            </Field>
+        </Show>
+    );
+}
+
+/** `into` is the Vault the new entries go to when the dialog opens (Personal when left out). */
+export function VaultImportDialog(props: { onClose: () => void; into?: string }): JSX.Element {
     const [step, setStep] = createSignal<ImportStep | null>(null);
     const [pass, setPass] = createSignal("");
     const [duplicates, setDuplicates] = createSignal<Duplicates>("skip");
+    const [into, setInto] = createSignal(props.into || "personal");
     const [busy, setBusy] = createSignal(true);
     const [error, setError] = createSignal<string | null>(null);
     const [result, setResult] = createSignal<ImportResult | null>(null);
@@ -114,7 +128,7 @@ export function VaultImportDialog(props: { onClose: () => void }): JSX.Element {
         setBusy(true);
         setError(null);
         try {
-            setResult(await commitImport(preview.token, duplicates()));
+            setResult(await commitImport(preview.token, duplicates(), into()));
         } catch (e) {
             setError(e instanceof Error ? e.message : String(e));
         } finally {
@@ -257,11 +271,8 @@ export function VaultImportDialog(props: { onClose: () => void }): JSX.Element {
                                         </div>
                                     )}
                                 </For>
-                                <Show when={preview().duplicates > 0}>
-                                    <Field label={`${preview().duplicates} already in your Vault`} layout="stacked" description="The same value (or the same site and username, for a login).">
-                                        <SegmentedControl options={DUPLICATE_CHOICES} value={duplicates()} onChange={setDuplicates} ariaLabel="What to do with entries already in the Vault" />
-                                    </Field>
-                                </Show>
+                                <VaultField label="Import into" value={into()} onChange={setInto} description="New entries go to this Vault. One you replace stays in the Vault it is in." />
+                                <DuplicatesChoice count={preview().duplicates} value={duplicates()} onChange={setDuplicates} />
                                 <Show when={preview().skipped.length > 0}>
                                     <div class="vault-import-skipped">
                                         <strong>{preview().skipped.length} can't be imported</strong>
