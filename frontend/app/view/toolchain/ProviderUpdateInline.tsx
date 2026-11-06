@@ -25,15 +25,17 @@ interface ProviderUpdateInlineProps {
 export const ProviderUpdateInline = (props: ProviderUpdateInlineProps): JSX.Element => {
     const session = () => agentInstallSession(props.providerId);
     return (
-        <div class="system-tool-install-inline">
-            <Show
-                when={session().state() !== "idle"}
-                fallback={
+        <Show
+            when={session().state() !== "idle"}
+            fallback={
+                <div class="toolchain-detail-row">
                     <Button tone="accent" onClick={() => void session().start()}>
                         {`Update to ${props.pinned}`}
                     </Button>
-                }
-            >
+                </div>
+            }
+        >
+            <div class="system-tool-install-inline">
                 <div class="system-tool-install-status">
                     {session().state() === "running"
                         ? "Updating…"
@@ -47,8 +49,8 @@ export const ProviderUpdateInline = (props: ProviderUpdateInlineProps): JSX.Elem
                         <Button onClick={() => void session().start()}>Retry</Button>
                     </div>
                 </Show>
-            </Show>
-        </div>
+            </div>
+        </Show>
     );
 };
 
