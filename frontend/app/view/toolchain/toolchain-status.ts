@@ -62,7 +62,7 @@ export function toolNotes(row: ToolFacts, drift: DriftResult): ToolNote[] {
     if (row.kind === "provider" && row.source === "system_path") {
         notes.push({
             text: "your install",
-            title: "AgentMux doesn't install this CLI: it runs the copy you installed",
+            title: "You chose Use the CLI on my PATH: AgentMux runs the copy you installed, not its own",
         });
     }
     if (drift.drift === "behind-pin") {

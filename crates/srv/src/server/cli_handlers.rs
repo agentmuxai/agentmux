@@ -932,32 +932,31 @@ async fn resolve_by_download(
 }
 
 /// The CLI a launch of `provider_id` would run, without installing anything:
-/// AgentMux's own install; else, only for a provider whose registry entry has
-/// no npm package (the ones AgentMux doesn't install), the user's own copy on
-/// PATH or in its installer's folder. Whether a provider is npm-managed comes
-/// from the registry, never from a caller, so an npm provider's missing
-/// install never reads as "found" because a copy of its CLI is on PATH: a
-/// launch would not run that copy. The one lookup behind `install.check`,
-/// `resolvecli`, the launch (`agent.open`) and the ambient calls, so the
-/// agent picker and the Toolchain pane can't disagree
-/// (SPEC_AGENT_PICKER_INLINE_CREATE_2026_10_18.md §1). `None` for an unknown
-/// provider.
+/// AgentMux's own install, for every provider. The person's own copy on PATH
+/// or in its installer's folder only when they listed the provider in
+/// `cli:usepath` ("Use the CLI on my PATH"), and then it comes first. Never
+/// otherwise, so a copy on PATH can't make a missing install read as "found".
+/// The one lookup behind `install.check`, `resolvecli`, the launch
+/// (`agent.open`) and the ambient calls, so the agent picker and the Toolchain
+/// pane can't disagree (SPEC_AGENT_PICKER_INLINE_CREATE_2026_10_18.md §1).
+/// `None` for an unknown provider.
 pub(crate) async fn locate_provider_cli(provider_id: &str) -> Option<LocatedCli> {
-    let provider = crate::backend::providers::get_provider(provider_id)?;
-    if let Some(paths) = agentmux_common::DataPaths::from_env() {
-        if let Some(bin) = crate::backend::cli_install::find_installed_for_provider(&paths, provider.id) {
-            return Some(LocatedCli { path: bin.to_string_lossy().into_owned(), source: CliSource::LocalInstall });
-        }
-    }
-    if !provider.npm_package.is_empty() {
-        return None;
-    }
-    resolve_provider_cli_on_path(provider.id, provider.cli_command)
-        .await
-        .map(|path| LocatedCli { path, source: CliSource::SystemPath })
+    locate_provider_cli_with(provider_id, crate::backend::providers::uses_path_cli(provider_id)).await
 }
 
-/// A PATH-only provider's CLI: on PATH, else in the folder its own installer
+async fn locate_provider_cli_with(provider_id: &str, use_path: bool) -> Option<LocatedCli> {
+    let provider = crate::backend::providers::get_provider(provider_id)?;
+    if use_path {
+        if let Some(path) = resolve_provider_cli_on_path(provider.id, provider.cli_command).await {
+            return Some(LocatedCli { path, source: CliSource::SystemPath });
+        }
+    }
+    let paths = agentmux_common::DataPaths::from_env()?;
+    crate::backend::cli_install::find_installed_for_provider(&paths, provider.id)
+        .map(|bin| LocatedCli { path: bin.to_string_lossy().into_owned(), source: CliSource::LocalInstall })
+}
+
+/// The person's own copy of a CLI: on PATH, else in the folder its own installer
 /// uses ([`crate::backend::providers::known_install_paths`]), which may not
 /// be on this process's PATH until AgentMux restarts.
 ///
@@ -1228,13 +1227,11 @@ mod tests {
     }
 
 
-    /// The one lookup decides npm vs PATH from the registry: an npm provider's
-    /// CLI on PATH is not "found" (a launch would never run it), while a
-    /// provider with no npm package is found there, as the user's copy; until the
-    /// strict order lands that includes the ones AgentMux installs without npm
-    /// (goose here, Aider, Kimi, Grok), so an existing user install keeps working.
+    /// The strict order: a copy on PATH is never "found" (a launch would not run
+    /// it), for an npm provider (claude) or any other (goose), unless the person
+    /// listed the provider in `cli:usepath`; then it is, as their own copy.
     #[tokio::test]
-    async fn locate_provider_cli_falls_back_to_path_only_for_providers_with_no_npm_package() {
+    async fn locate_provider_cli_uses_a_copy_on_path_only_when_the_person_asked() {
         let _guard = crate::test_support::ISOLATED_AUTH_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // No managed installs: an empty AgentMux home.
         let home = tempfile::tempdir().unwrap();
@@ -1255,15 +1252,18 @@ mod tests {
         dirs.extend(std::env::split_paths(&old_path));
         std::env::set_var("PATH", std::env::join_paths(dirs).unwrap());
 
-        let claude = super::locate_provider_cli("claude").await;
-        let goose = super::locate_provider_cli("goose").await;
-        let unknown = super::locate_provider_cli("no-such-provider").await;
+        let claude_off = super::locate_provider_cli_with("claude", false).await;
+        let goose_off = super::locate_provider_cli_with("goose", false).await;
+        let claude_on = super::locate_provider_cli_with("claude", true).await;
+        let goose = super::locate_provider_cli_with("goose", true).await;
+        let unknown = super::locate_provider_cli_with("no-such-provider", true).await;
 
         std::env::set_var("PATH", old_path);
         std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
 
-        assert_eq!(claude, None, "an npm provider's copy on PATH is not the one a launch runs");
-        let goose = goose.expect("a provider with no npm package is found on PATH");
+        assert_eq!((claude_off, goose_off), (None, None), "a copy on PATH is not the one a launch runs");
+        assert_eq!(claude_on.expect("listed: claude on PATH is found").source, super::CliSource::SystemPath);
+        let goose = goose.expect("listed: goose on PATH is found");
         assert_eq!(goose.source, super::CliSource::SystemPath);
         // The same folder, whichever way each side spells it. `where` returns the long form of a
         // path even when PATH holds the 8.3 short one (GitHub's Windows runners put TEMP under
