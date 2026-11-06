@@ -274,8 +274,6 @@ impl AcpController {
     /// ACP v1 handshake: `initialize` only. Its result decides between
     /// `session/new` and `session/load`; the stdout reader sends that.
     pub(super) fn send_initialize(&self, working_dir: &str) {
-        // ACP v1 handshake: `initialize` only. Its result decides between
-        // `session/new` and `session/load`; the stdout reader sends that.
         let init_id = self.next_id();
         let init_req = serde_json::json!({
             "jsonrpc": "2.0",
@@ -292,7 +290,6 @@ impl AcpController {
                 tracing::error!(block_id = %self.block_id, "[acp] initialize dropped — channel full or closed; agent will not start");
             }
         }
-
     }
 }
 
@@ -330,10 +327,7 @@ impl AcpStdoutReader {
     /// Handshake: `initialize` answered → open or load the session; a failed `session/load` → open
     /// a new one. Returns the session a successful `session/load` loaded.
     fn advance_handshake(&self, json: &serde_json::Value, state: &mut LineState) -> Option<String> {
-        // Handshake: `initialize` answered → open or load the
-        // session; a failed `session/load` → open a new one. A
-        // loaded session's result carries no id: it is the one
-        // we asked for.
+        // A loaded session's result carries no id: it is the one we asked for.
         let msg_id = json.get("id").and_then(|v| v.as_u64());
         let mut loaded: Option<String> = None;
         {
@@ -573,7 +567,6 @@ impl AcpStdoutReader {
 
     /// Persist + broadcast via the shared helper (same as subprocess/host_spawn.rs).
     fn append_line(&self, line: &str, state: &LineState) {
-        // Persist + broadcast via the shared helper (same as subprocess/host_spawn.rs)
         if state.recovered_error {
             tracing::info!(block_id = %self.block_id_stdout, "[acp] session/load refused; opening a new session");
         } else if state.replaying {

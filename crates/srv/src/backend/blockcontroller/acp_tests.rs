@@ -623,7 +623,9 @@ async fn a_delivered_prompt_is_stored_with_its_signed_origin() {
 
 /// `spawn_process` against a real child: a stub agent that answers the ACP handshake
 /// (`initialize`, `session/new`) and one `session/prompt`, then exits. Covers the launch, the
-/// stdin writer, the stdout reader's handshake and prompt flush, and the process waiter.
+/// stdin writer, the stdout reader's handshake and prompt flush, and the process waiter. The stub
+/// stays alive for a moment after its last reply, so the turn state is read while the process
+/// waiter has not run yet: the reader alone must have resolved the prompt.
 #[cfg(unix)]
 #[tokio::test]
 async fn spawn_process_runs_the_handshake_and_flushes_the_queued_prompt() {
@@ -637,12 +639,22 @@ async fn spawn_process_runs_the_handshake_and_flushes_the_queued_prompt() {
         reply(r#"{"sessionId":"s-stub"}"#),
         reply(r#"{"stopReason":"end_turn"}"#),
     ]
-    .concat();
+    .concat()
+        + "sleep 3";
     let c = controller();
     c.inner.lock().unwrap().pending_prompt = Some("hello".to_string());
     let dir = std::env::temp_dir().to_string_lossy().to_string();
     c.spawn_process("sh".to_string(), vec!["-c".to_string(), script], dir, HashMap::new()).expect("the stub starts");
     assert_eq!(c.inner.lock().unwrap().proc_status, STATUS_RUNNING);
+
+    let mut waited = 0;
+    while c.inner.lock().unwrap().pending_prompt.is_some() || c.health_monitor.is_active_turn() {
+        assert!(waited < 20, "the prompt was not sent and resolved within 2s");
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        waited += 1;
+    }
+    assert_eq!(c.inner.lock().unwrap().proc_status, STATUS_RUNNING, "the reader resolved the prompt before the process exited");
+    assert!(c.outstanding_prompt_ids.lock().unwrap().is_empty(), "the prompt resolved");
 
     let mut waited = 0;
     while c.inner.lock().unwrap().proc_status != STATUS_DONE {
@@ -655,7 +667,4 @@ async fn spawn_process_runs_the_handshake_and_flushes_the_queued_prompt() {
     assert_eq!(inner.session_id.as_deref(), Some("s-stub"), "the handshake opened the session");
     assert!(inner.pending_prompt.is_none(), "the queued prompt was sent once the session was ready");
     assert!(inner.stdin_tx.is_none(), "stdin is closed after the exit");
-    drop(inner);
-    assert!(c.outstanding_prompt_ids.lock().unwrap().is_empty(), "the prompt resolved");
-    assert!(!c.health_monitor.is_active_turn(), "the turn ended");
 }
