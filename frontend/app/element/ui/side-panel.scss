@@ -34,3 +34,12 @@
     font-weight: 600;
     overflow-wrap: anywhere;
 }
+
+// Beside the content, in a row: it takes its own width and the full height of the row, and sits in the flow.
+.ui-side-panel--docked {
+    position: relative;
+    z-index: auto;
+    flex: none;
+    width: var(--side-panel-width, 320px);
+    box-shadow: none;
+}

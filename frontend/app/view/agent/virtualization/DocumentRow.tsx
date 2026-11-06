@@ -29,6 +29,7 @@ import { ContextDeliveryCard } from "../components/ContextDeliveryCard";
 import { SetupNote } from "../components/SetupNote";
 import { UserMessageBlock } from "../components/UserMessageBlock";
 import { useNodePeek } from "../hooks/useNodePeek";
+import { useMessagesPanel } from "../messages/messages-state";
 import type { ContextDeliveryNode, DocumentNode, DocumentState, ShellNode, UserMessageNode } from "../../../agent-model/types";
 import { markRowMount } from "../../../agent-model/perf-probe";
 import { useTick } from "@/app/hook/useTick";
@@ -265,6 +266,9 @@ function createNodeBodyState(props: DocumentNodeBodyProps): NodeBodyState {
 
 function renderMessageRows(s: NodeBodyState): JSX.Element {
     const { props } = s;
+    // With the Messages panel on, an incoming jekt is a one-line stub whose click opens it there (messages-state.ts).
+    const panel = useMessagesPanel();
+    const stub = (): boolean => !!panel?.stubbed(props.node());
     return (
         <>
             <Show when={props.node() && props.node().type === "markdown"}>
@@ -305,8 +309,8 @@ function renderMessageRows(s: NodeBodyState): JSX.Element {
             <Show when={props.node() && props.node().type === "jekt_message"}>
                 <OriginContainer
                     node={props.node() as Extract<DocumentNode, { type: "jekt_message" }>}
-                    collapsed={!s.disclosure().open}
-                    onToggle={s.onExpand}
+                    collapsed={stub() || !s.disclosure().open}
+                    onToggle={stub() ? () => panel?.showInPanel(props.node().id) : s.onExpand}
                     onHoldOpen={() => props.onHoldNodeOpen?.(props.node().id)}
                 />
             </Show>
