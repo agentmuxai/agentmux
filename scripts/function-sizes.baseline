@@ -484,7 +484,6 @@
 112 frontend/app/view/native-memory/NativeMemoryCreate.tsx::NativeMemoryCreate
 150 frontend/app/view/native-memory/NativeMemoryFileView.tsx::NativeMemoryFileView
 154 frontend/app/view/remotes/remotes-view.tsx::Detail
-240 frontend/app/view/settings/sections/advanced-section.tsx::AdvancedSection
 175 frontend/app/view/settings/sections/agent-site-grants.tsx::AgentSiteGrants
 128 frontend/app/view/settings/sections/animations-section.tsx::AnimationsSection
 166 frontend/app/view/settings/sections/appearance-section.tsx::AppearanceSection
@@ -496,7 +495,6 @@
 237 frontend/app/view/settings/sections/terminal-section.tsx::TerminalSection
 114 frontend/app/view/settings/sections/widget-bar-settings.tsx::WidgetBarSettings
 104 frontend/app/view/settings/sections/widget-catalog.tsx::WidgetCatalog
-249 frontend/app/view/settings/sections/widgets-section.tsx::WidgetsSection
 105 frontend/app/view/settings/settings-view.tsx::SettingsView
 137 frontend/app/view/shortcuts/shortcuts.tsx::ShortcutsView
 111 frontend/app/view/swarm/swarm-agent-list.tsx::SwarmAgentList

@@ -1,0 +1,8 @@
+set term:disablewebgl true
+set agent:compacthints false
+set agent:overlapnotes false
+set agent:retryonreconnect false
+set kanban:reminders false
+set dnd:enabled false
+set dnd:agentinserttoken false
+setDevMode true
