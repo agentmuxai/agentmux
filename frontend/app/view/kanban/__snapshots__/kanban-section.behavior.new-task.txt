@@ -1,0 +1,9 @@
+subscribe accountavailability
+subscribe workqueue:changed
+rpc KanbanList
+subscribe agents:changed
+board#1 mounted
+new task form mounted with 3 agents
+form shown: true
+new task form unmounted
+form shown: false

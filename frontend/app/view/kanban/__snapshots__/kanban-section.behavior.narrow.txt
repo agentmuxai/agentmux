@@ -1,0 +1,13 @@
+subscribe accountavailability
+subscribe workqueue:changed
+rpc KanbanList
+subscribe agents:changed
+board#1 mounted
+start: "narrow":false
+760 px: "narrow":true
+761 px: "narrow":false
+board#1 unmounted
+unsubscribe agents:changed
+resize observer disconnected
+unsubscribe accountavailability
+unsubscribe workqueue:changed
