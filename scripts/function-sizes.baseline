@@ -451,7 +451,6 @@
 154 frontend/app/view/agent/components/composer-row-layout.ts::computeComposerRows
 114 frontend/app/view/agent/components/composer-stats-zone.tsx::useStatsZone
 257 frontend/app/view/agent/components/my-agents-list-data.ts::useMyAgentsData
-478 frontend/app/view/agent/components/my-agents-list-panels.ts::createRowPanels
 326 frontend/app/view/agent/components/shell-highlight/tokenize.ts::Scanner::scanListInner
 189 frontend/app/view/agent/failure/failure-accessory.ts::failureToRow
 168 frontend/app/view/agent/failure/useAccountBinding.ts::useAccountBinding
