@@ -35,7 +35,7 @@ use tokio::sync::oneshot;
 use crate::backend::mps::Broker;
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::server::app_api::connections::{ask_user, UserAnswer};
-use crate::server::install_handlers::{resolve_tool_path, InstallChunkEvent, InstallSessionRegistry, InstallStream};
+use crate::server::install_handlers::{InstallChunkEvent, InstallSessionRegistry, InstallStream};
 use crate::server::system_install_handlers::ClaimGuard;
 use crate::server::vendor_install_catalog::{url_allowed, vendor_install, Interpreter, Os, Recipe, VendorInstall};
 use crate::server::AppState;
@@ -281,30 +281,9 @@ async fn prepare_script(
     Ok(Plan { program: program.to_string(), args, env: env.to_vec(), _script: Some(script) })
 }
 
-/// The Python `pip install --user` runs under: the Windows launcher first (the `python.exe` the
-/// Store ships before Python is installed only opens the Store), then `python3` and `python`.
-async fn find_python() -> Option<String> {
-    let candidates: &[&str] = if cfg!(windows) { &["py", "python"] } else { &["python3", "python"] };
-    for candidate in candidates {
-        if let Some(path) = resolve_tool_path(candidate).await {
-            return Some(path);
-        }
-    }
-    None
-}
-
-async fn prepare_pip(package: &'static str) -> Result<Plan, String> {
-    let python = find_python()
-        .await
-        .ok_or_else(|| "spawn python: Python isn't installed, or isn't on PATH. Install it from the Toolchain first.".to_string())?;
-    let args = ["-m", "pip", "install", "--user", package].map(String::from).to_vec();
-    Ok(Plan { program: python, args, env: Vec::new(), _script: None })
-}
-
 async fn prepare(run: &Run) -> Result<Plan, String> {
     match run.recipe {
         Recipe::Script { url, interpreter, env, .. } => prepare_script(run, *url, *interpreter, *env).await,
-        Recipe::Pip { package } => prepare_pip(*package).await,
     }
 }
 
@@ -531,8 +510,6 @@ mod tests {
         assert!(message.contains("then run that file with: bash"), "{message}");
         assert!(message.contains("outside AgentMux's isolation"), "{message}");
         assert!(message.contains("SHA-256"), "{message}");
-        let pip = approval_question(vendor_install("kimi").unwrap(), vendor_install("kimi").unwrap().recipe(Os::Unix));
-        assert!(pip["message"].as_str().unwrap().contains("python -m pip install --user kimi-cli"));
     }
 
     #[test]

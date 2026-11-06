@@ -2,17 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! The install recipes of the agent CLIs that AgentMux can't install into its own folder
-//! (Kimi, Antigravity, Grok Build, Aider, Muse Code): a compiled table, so what runs on
+//! (Antigravity, Grok Build, Muse Code): a compiled table, so what runs on
 //! the user's machine comes from srv and never from a caller
 //! (SPEC_ONE_CLICK_VENDOR_CLI_INSTALL_2026_10_20.md §4.1).
 //!
-//! The table holds each vendor's own installer, the same command the user would paste. All but
-//! Kimi are a script fetched from the vendor's site at install time; the host list below pins
+//! The table holds each vendor's own installer, the same command the user would paste. Each is
+//! a script fetched from the vendor's site at install time; the host list below pins
 //! where that script may come from, redirects included, and nothing more. What the script then
 //! downloads is the vendor's business, and the consent says so.
 //!
-//! A CLI AgentMux downloads itself (`cli_download::SPECS`, a pinned release with a checked hash)
-//! is not in this table: its Install button is the managed one, and a test fails if a provider is
+//! A CLI AgentMux installs itself (`cli_download::SPECS`, a pinned release with a checked hash, or
+//! `cli_uv::UV_SPECS`, a hash-locked Python venv) is not in this table: its Install button is the managed one, and a test fails if a provider is
 //! in both. When a CLI moves to the managed install, its row here goes.
 
 /// What runs a downloaded script.
@@ -69,8 +69,6 @@ pub(crate) enum Recipe {
         interpreter: Interpreter,
         env: &'static [(&'static str, &'static str)],
     },
-    /// `<python> -m pip install --user <package>`.
-    Pip { package: &'static str },
 }
 
 impl Recipe {
@@ -78,7 +76,6 @@ impl Recipe {
     pub(crate) fn shown(&self) -> String {
         match self {
             Self::Script { shown, .. } => (*shown).to_string(),
-            Self::Pip { package } => format!("pip install {package}"),
         }
     }
 
@@ -90,14 +87,12 @@ impl Recipe {
                 let args = if args.is_empty() { String::new() } else { format!(" {}", args.join(" ")) };
                 format!("download {url}, then run that file with: {program}{args} <the downloaded file>")
             }
-            Self::Pip { package } => format!("python -m pip install --user {package}"),
         }
     }
 
     pub(crate) fn url(&self) -> Option<&'static str> {
         match self {
             Self::Script { url, .. } => Some(url),
-            Self::Pip { .. } => None,
         }
     }
 }
@@ -128,14 +123,6 @@ impl VendorInstall {
 const TEN_MINUTES: u64 = 600;
 
 pub(crate) const VENDOR_INSTALLS: &[VendorInstall] = &[
-    VendorInstall {
-        provider_id: "kimi",
-        display: "Kimi Code CLI",
-        unix: Recipe::Pip { package: "kimi-cli" },
-        windows: Recipe::Pip { package: "kimi-cli" },
-        allowed_hosts: &[],
-        timeout_secs: TEN_MINUTES,
-    },
     VendorInstall {
         provider_id: "antigravity",
         display: "Antigravity",
@@ -170,24 +157,6 @@ pub(crate) const VENDOR_INSTALLS: &[VendorInstall] = &[
             env: &[],
         },
         allowed_hosts: &["x.ai"],
-        timeout_secs: TEN_MINUTES,
-    },
-    VendorInstall {
-        provider_id: "aider",
-        display: "Aider",
-        unix: Recipe::Script {
-            shown: "curl -LsSf https://aider.chat/install.sh | sh",
-            url: "https://aider.chat/install.sh",
-            interpreter: Interpreter::Sh,
-            env: &[],
-        },
-        windows: Recipe::Script {
-            shown: "irm https://aider.chat/install.ps1 | iex",
-            url: "https://aider.chat/install.ps1",
-            interpreter: Interpreter::PowerShell,
-            env: &[],
-        },
-        allowed_hosts: &["aider.chat"],
         timeout_secs: TEN_MINUTES,
     },
     VendorInstall {
@@ -244,7 +213,7 @@ mod tests {
     fn the_table_covers_exactly_the_vendor_installed_clis() {
         let mut ids: Vec<&str> = VENDOR_INSTALLS.iter().map(|v| v.provider_id).collect();
         ids.sort_unstable();
-        assert_eq!(ids, ["aider", "antigravity", "grok", "kimi", "muse"]);
+        assert_eq!(ids, ["antigravity", "grok", "muse"]);
     }
 
     #[test]
@@ -261,8 +230,8 @@ mod tests {
     fn a_cli_agentmux_downloads_itself_is_not_in_the_vendor_table() {
         for v in VENDOR_INSTALLS {
             assert!(
-                crate::backend::cli_download::download_spec(v.provider_id).is_none(),
-                "{} is installed by AgentMux (cli_download::SPECS): remove it from VENDOR_INSTALLS",
+                !crate::backend::cli_download::is_managed_install(v.provider_id),
+                "{} is installed by AgentMux (cli_download::SPECS or cli_uv::UV_SPECS): remove it from VENDOR_INSTALLS",
                 v.provider_id
             );
         }
@@ -277,7 +246,6 @@ mod tests {
                         assert!(url_allowed(v.allowed_hosts, &url(u)), "{} {os:?}: {u}", v.provider_id);
                         assert!(shown.contains(u), "{} {os:?}: the shown command names its own URL", v.provider_id);
                     }
-                    Recipe::Pip { package } => assert!(v.allowed_hosts.is_empty() && !package.is_empty()),
                 }
             }
         }
@@ -314,9 +282,6 @@ mod tests {
         let grok = vendor_install("grok").unwrap();
         let unix = grok.recipe(Os::Unix).runs();
         assert!(unix.contains("install.sh") && unix.contains("bash"), "{unix}");
-        let kimi = vendor_install("kimi").unwrap().recipe(Os::Unix).runs();
-        assert_eq!(kimi, "python -m pip install --user kimi-cli");
-        assert_eq!(vendor_install("kimi").unwrap().recipe(Os::Unix).shown(), "pip install kimi-cli");
     }
 
     #[test]
