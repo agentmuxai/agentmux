@@ -1,0 +1,29 @@
+rpc ListAgentDefinitions include_hidden=true
+rpc AgentInputHistoryTrash agent=a1
+rpc AgentInputHistory agent=a1 before=undefined limit=200
+rpc AgentInputHistorySearch agent=a1 query="zzz" limit=200
+-- no match
+<div>
+  <div class="warden-history-typed">
+    <div class="warden-history-bar">
+      <select class="ui-input ui-density-compact" aria-label="Agent">
+        <option value="a1">
+          "Alpha"
+        <option value="a2">
+          "Beta"
+        <option value="zz23456789abcdef">
+          "zz234567"
+      <span class="ui-filter">
+        <i aria-hidden="true" class="fa-solid fa-magnifying-glass ui-search-icon">
+        <input type="text" class="ui-filter-input" data-pane-focus="" placeholder="Search what was typed" aria-label="Search what was typed">
+        <button type="button" class="ui-filter-clear" aria-label="Clear filter">
+          <i class="fa-solid fa-xmark" aria-hidden="true">
+      <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
+        <i aria-hidden="true" class="fa-solid fa-rotate">
+        "Refresh"
+    <div class="warden-section-stub">
+      "Nothing typed to this agent matches."
+    <div class="warden-manager-footnote">
+      "What was typed to an agent is kept with the agent, up to its limit (the agent:inputhistory:max setting), and goes when the agent is deleted. Forgotten entries can be restored for"
+      "7"
+      "days, then they are gone."

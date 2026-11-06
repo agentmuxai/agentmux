@@ -207,8 +207,6 @@
 183 crates/srv/src/backend/storage/filestore/counter.rs::FileStore::append_in_tx
 143 crates/srv/src/backend/storage/filestore/offset_ops.rs::FileStore::write_at
 125 crates/srv/src/backend/storage/migrations.rs::run_filestore_migrations
-306 crates/srv/src/backend/storage/migrations.rs::run_identity_store_schema
-232 crates/srv/src/backend/storage/migrations.rs::run_shared_store_schema
 310 crates/srv/src/backend/storage/muxbus.rs::Store::muxbus_load_tokens
 403 crates/srv/src/backend/subagent_watcher/jsonl.rs::SubagentWatcher::process_jsonl_change
 131 crates/srv/src/backend/subagent_watcher/mod.rs::SubagentWatcher::build_watch
@@ -488,7 +486,6 @@
 118 frontend/app/view/global-bundle/GlobalMemoryFullView.tsx::EntryView
 253 frontend/app/view/global-bundle/global-bundle-manager.tsx::GlobalBundleManager
 147 frontend/app/view/history/history-agents.tsx::HistoryAgents
-285 frontend/app/view/history/history-typed.tsx::HistoryTyped
 269 frontend/app/view/identity/agent-identity-links-panel.tsx::AgentIdentityLinksPanel
 165 frontend/app/view/identity/identity-accounts-tab.tsx::AccountDetailPanel
 229 frontend/app/view/kanban/kanban-board.tsx::KanbanBoard

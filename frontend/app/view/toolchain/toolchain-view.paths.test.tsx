@@ -660,21 +660,21 @@ describe("a card's actions and details", () => {
 
     it("shows a missing agent CLI's own installer only when it is not installed through npm", async () => {
         await mount();
-        open(card("grok"));
-        expect(await screen.findByText("curl -fsSL https://x.ai/cli/install.sh | bash")).toBeInTheDocument();
+        open(card("antigravity"));
+        expect(await screen.findByText("curl -fsSL https://antigravity.google/cli/install.sh | bash")).toBeInTheDocument();
         open(card("claude"));
         await screen.findByText("Not found on this machine's PATH.");
         expect(screen.queryByText("Install command")).toBeNull();
-        // Installed by AgentMux itself (goose, Aider, Kimi): no installer command to copy.
-        open(card("kimi"));
-        expect(screen.queryByText("pip install kimi-cli")).toBeNull();
+        // Installed by AgentMux itself (goose, Aider, Kimi, Grok): no installer command to copy.
+        open(card("grok"));
+        expect(screen.queryByText("curl -fsSL https://x.ai/cli/install.sh | bash")).toBeNull();
     });
 
     it("uses the Windows installer on Windows", async () => {
         h.platform = "win32";
         await mount();
-        open(card("grok"));
-        expect(await screen.findByText("irm https://x.ai/cli/install.ps1 | iex")).toBeInTheDocument();
+        open(card("antigravity"));
+        expect(await screen.findByText("irm https://antigravity.google/cli/install.ps1 | iex")).toBeInTheDocument();
         open(card("python"));
         expect(await screen.findByText(/winget install/)).toBeInTheDocument();
     });
