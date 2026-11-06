@@ -135,7 +135,7 @@ const MoreDropdown = ({
                         return (
                             <div
                                 class="action-widget-more-item"
-                                onMouseEnter={() => parentPeers.closeOthers(key)}
+                                onMouseEnter={(e) => parentPeers.closeOthers(key, e)}
                                 onClick={(e) => handleItemClick(widget, e)}
                                 onContextMenu={(e) => handleItemContextMenu(e, key)}
                             >
@@ -148,6 +148,7 @@ const MoreDropdown = ({
                     }
 
                     let rowEl: HTMLDivElement | undefined;
+                    let pointerOnRow = false;
                     let hover = parentRowHoverControllers.get(key);
                     if (!hover) {
                         hover = createSubmenuHover({
@@ -166,11 +167,16 @@ const MoreDropdown = ({
                             <div
                                 ref={(el) => (rowEl = el)}
                                 class="action-widget-more-item"
-                                onMouseEnter={() => {
-                                    parentPeers.closeOthers(key);
-                                    hover.onTriggerEnter();
+                                onMouseEnter={(e) => {
+                                    // Crossing toward another row's open submenu holds it (safe triangle) and
+                                    // opens this row's own once it is gone, if the pointer is still here.
+                                    pointerOnRow = true;
+                                    parentPeers.closeOthers(key, e, () => {
+                                        if (pointerOnRow) hover.onTriggerEnter();
+                                    });
                                 }}
                                 onMouseLeave={(e) => {
+                                    pointerOnRow = false;
                                     if (isItemMenuOpen?.()) return;
                                     hover.onTriggerLeave(e);
                                 }}
