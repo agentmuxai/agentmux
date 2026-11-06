@@ -40,6 +40,9 @@ export type AgentStatusKind = "needs-you" | "held" | "working" | "unavailable" |
 /** Why an agent can't start a turn: out of quota until a reset, or signed out. */
 export type UnavailableReason = "limited" | "signed_out";
 
+/** The META key a pane sets while a sensitive jekt waits for the person's confirmation. */
+export const META_AWAITING_CONFIRM = "term:awaiting_confirm";
+
 /** Status kinds, best first. */
 export const STATUS_ORDER: readonly AgentStatusKind[] = ["needs-you", "held", "working", "unavailable", "interrupted", "errored", "idle"];
 
@@ -56,6 +59,10 @@ export interface AgentStatusFacts {
      *  the pane was not mounted, must not outrank anything for an idle agent
      *  (#4234). */
     needsYou?: boolean;
+    /** A sensitive message waits for the person to confirm it (`META_AWAITING_CONFIRM`, set by the pane while its
+     *  card is up and cleared when it ends). Counts whether or not a turn is live: the agent has normally replied
+     *  and stopped by then, so a wait that needed a live turn would never show. */
+    confirmPending?: boolean;
     /** The Swarm Supervisor stopped the agent for the user. Counts only while
      *  nothing is `live`: a turn in flight means the pause is over
      *  (docs/specs/SPEC_SWARM_SUPERVISOR_2026_10_16.md §3.6). */
@@ -73,7 +80,7 @@ export interface AgentStatusFacts {
 
 /** The status that wins for these facts. */
 export function rankAgentStatus(facts: AgentStatusFacts): AgentStatus {
-    if (facts.live ? facts.needsYou : facts.pausedForYou) return { kind: "needs-you" };
+    if (facts.confirmPending || (facts.live ? facts.needsYou : facts.pausedForYou)) return { kind: "needs-you" };
     const reason = HELD_ORDER.find((r) => facts.held?.[r]);
     if (reason) return { kind: "held", reason };
     if (facts.live) return { kind: "working" };

@@ -32,7 +32,7 @@
  */
 
 import { readSwarmSummary } from "./activitySummary";
-import { rankAgentStatus, type AgentStatus } from "./agent-status";
+import { META_AWAITING_CONFIRM, rankAgentStatus, type AgentStatus } from "./agent-status";
 import { isUsableTitle } from "./ambient-title";
 import { supervisorPauseReason } from "./supervisor";
 
@@ -205,6 +205,7 @@ function swarmAgentStatus(meta: Record<string, unknown> | undefined, status: "ru
     return rankAgentStatus({
         live,
         needsYou: meta?.[META_AWAITING_USER] === true,
+        confirmPending: meta?.[META_AWAITING_CONFIRM] === true,
         pausedForYou: supervisorPauseReason(meta, live) !== null,
     });
 }
