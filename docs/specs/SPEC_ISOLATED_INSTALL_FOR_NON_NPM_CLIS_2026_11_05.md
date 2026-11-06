@@ -1,6 +1,6 @@
 # Spec: AgentMux installs its own isolated, pinned copy of all 19 agent CLIs
 
-**Status:** active — approved by the operator 2026-11-05 ("ok, lets wrap that up, lets get all the harnesses isolated"), relayed by AgentY. PR 1 (goose: `cli_download.rs`, the Install button, lookup) is #6590 (merged); PR 2 (pinned uv, Aider, Kimi) is the PR that carries this edit; PRs 3–5 (§9) are left.
+**Status:** active — approved by the operator 2026-11-05 ("ok, lets wrap that up, lets get all the harnesses isolated"), relayed by AgentY. PR 1 (goose: `cli_download.rs`, the Install button, lookup) is #6590 (merged); PR 2 (pinned uv, Aider, Kimi) is #6618 (merged); PR 3 (Grok) is the PR that carries this edit; PRs 4–5 (§9) are left.
 **Date:** 2026-11-05. Task #1571 (spec), #1572 (build). Author: Lazo. Verified against `agentmux` `main` @ `bf7e5b9863`.
 **Builds on:** `SPEC_NINE_NEW_HARNESSES_2026_10_14.md` (the six providers), `SPEC_AGENT_CLI_ISOLATION_NOTE_2026_10_18.md` (what is isolated today), `SPEC_SIGNED_UPDATE_CHECKSUMS_2026_10_25.md` (same "pinned hash, no trust in the origin" idea).
 **Research behind it:** a sourced fetch of each vendor's real distribution on 2026-11-05 (release assets, checksums, signatures, self-update switches, licences; downloads and Authenticode checks measured). Not committed.
@@ -55,7 +55,7 @@ The operator saw the agent pane tell them to install Goose themselves and asked 
 - No script from the internet is run. No `curl | sh`, no `irm | iex`, no Meta launcher, no `agy install`, no vendor PATH edit.
 - One hash per file, in a reviewed PR, from a different trust path than the download. Grok has none upstream: that one is trust on first use, recorded in the code comment and the PR, and its Authenticode subject is the second check on Windows.
 - Where a vendor does not sign (goose.exe) the build-provenance attestation is checked when the hash is captured, not at the person's machine.
-- The Windows MinGit zip Grok needs has a `.sha256`: checked like the rest.
+- Grok's Windows installer also fetches `grove*.exe` and a MinGit zip (which has a `.sha256`). PR 3 does not: without them grove uses the git on PATH, which the installer itself treats as a note, not a failure. Add them later if a Grok feature turns out to need them.
 
 ## 7. Decisions and open points
 
@@ -82,13 +82,20 @@ The operator saw the agent pane tell them to install Goose themselves and asked 
 - Measured on Windows x64 (Area54): Python download, venv and install take about 11 s for Aider (venv 514 MB) and 15 s for Kimi (219 MB); `aider --version` prints 0.86.2 and `kimi --version` prints 1.52.0. macOS, Linux and Windows arm64 are untested; arm64 Windows may lack wheels for some packages, which fails the install with uv's own message.
 - Kimi's pin was empty and is now 1.52.0 (its registry entry, catalog and the install dir all key on it).
 
+## 8b. Built in PR 3 (Grok)
+
+- `cli_download::Archive::Raw`: the download is the program (no archive), so the checked file is copied to `bin/grok[.exe]` and nothing else is written. The six assets are `https://x.ai/cli/grok-1.0.52-<platform>[.exe]` (Windows x64 and arm64, macOS arm64 and x64, Linux x64 and arm64; one Linux build, no musl split).
+- **The hashes are trust on first use**: xAI publishes no checksum, so each was taken once from x.ai on 2026-11-06 (the Windows x64 one equals a download made the day before) and baked in, with the size. A changed file fails the install and names the expected hash. Windows builds are Authenticode-signed (X.AI LLC); that is checked when the hash is captured, not on the person's machine.
+- The provider already sets `GROK_DISABLE_AUTOUPDATER=1` and moves `GROK_HOME`, so the pinned copy does not update itself. The vendor installer's own folder (`~/.grok`) is no longer written by AgentMux.
+- Grok's row is gone from the vendor-installer table, so the panel shows one Install, not two.
+
 ## 9. Phases (one PR per install kind; merge on muxreview approval)
 
 | PR | Content | Rough cost |
 |---|---|---|
 | 1 | `install` enum, `cli_download.rs`, lookup order, Install/Uninstall UI, **goose** (plain GitHub binary, all platforms), tests, this spec | 2–3 days |
 | 2 | pinned `uv`, hashed venv install: **aider**, then **kimi** (1.52.0): built, §8a | 2 days |
-| 3 | **grok** (TOFU hash, `grove*` and MinGit on Windows) | 1 day |
+| 3 | **grok** (TOFU hash, raw binary): built, §8b | 1 day |
 | 4 | **antigravity** and **muse** (after the terms check) | 1–2 days |
 | 5 | npm hardening (§8), docs and picker note, container route for all | 1–2 days |
 
