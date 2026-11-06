@@ -24,9 +24,10 @@
 //! 5. the window the user acted from shows the first window's contents, with
 //!    its name and appearance; the rest wait for that window to open them
 //!    (`TakeRestoredWindows`);
-//! 6. the contents the closed workspace showed have their agents and shells
-//!    stopped, after the reply, one switch at a time. The next switch waits
-//!    for that.
+//! 6. the contents the closed workspace showed have their shells stopped and
+//!    their agents parked (they keep running, `agents:always_available`; the
+//!    saved record names them, and switching back puts them in their tabs),
+//!    after the reply, one switch at a time. The next switch waits for that.
 //!
 //! The next launch opens the workspace that was open last: it is the one the
 //! client names.
@@ -189,6 +190,7 @@ pub(crate) async fn switch_to(state: &AppState, target_id: &str, window_id: &str
         Saved::HeldForSwitch | Saved::Failed => return Err("the open workspace couldn't be saved".to_string()),
     }
     let held = SavesHeld::new(store);
+    let left = current_id(store);
     let others: Vec<Window> =
         super::session_windows::live_windows(store).into_iter().map(|(w, _)| w).filter(|w| w.oid != acting.oid).collect();
 
@@ -230,7 +232,7 @@ pub(crate) async fn switch_to(state: &AppState, target_id: &str, window_id: &str
     let st = state.clone();
     tokio::spawn(async move {
         for ws in leaving {
-            super::session_closed::keep_workspace(&st, ws, json!({}), true).await;
+            super::session_closed::keep_workspace(&st, ws, json!({}), true, left.as_deref()).await;
         }
         drop(guard);
     });

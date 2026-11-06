@@ -28,7 +28,6 @@ use serde_json::{json, Value};
 
 use crate::server::browser_actions::{note, How, Kind};
 use crate::server::browser_bypass as bypass;
-use crate::server::browser_powers::Power;
 use crate::server::ui_handlers::{banner_for, err_response, proxy_value, target_block_id};
 use crate::server::AppState;
 
@@ -44,7 +43,7 @@ const MAX_LINES: usize = 40;
 /// client that gave up never leaves the handler typing with nobody waiting.
 const TYPE_BUDGET: Duration = Duration::from_secs(90);
 /// Keys per call to the host. A brake is checked between calls.
-const CHUNK: usize = 32;
+pub(crate) const CHUNK: usize = 32;
 /// How long xterm.js's screen-reader rows can trail the screen: it redraws
 /// them at most once a second, so a line's output (a password prompt) may not
 /// be in the rows for up to this long after the line ran.
@@ -385,7 +384,7 @@ pub(crate) fn tidy_rows(rows: &[String]) -> Vec<String> {
     v.split_off(skip)
 }
 
-fn rows_of(state: &Value) -> Option<Vec<String>> {
+pub(crate) fn rows_of(state: &Value) -> Option<Vec<String>> {
     state.get("rows")?.as_array().map(|a| {
         a.iter()
             .filter_map(|r| r.as_str().map(str::to_string))
@@ -394,7 +393,7 @@ fn rows_of(state: &Value) -> Option<Vec<String>> {
 }
 
 /// Ask the host what the page's terminal looks like now.
-async fn look(state: &AppState, block_id: &str) -> Result<Value, (StatusCode, String)> {
+pub(crate) async fn look(state: &AppState, block_id: &str) -> Result<Value, (StatusCode, String)> {
     proxy_value(
         state,
         "terminal_state",
@@ -405,7 +404,7 @@ async fn look(state: &AppState, block_id: &str) -> Result<Value, (StatusCode, St
 }
 
 /// Why the terminal can't be typed into right now.
-enum Refusal {
+pub(crate) enum Refusal {
     /// The page, or the terminal's frame, is off the granted sites, or there is no terminal.
     Plain(StatusCode, String),
     /// The terminal is asking for something only the person types.
@@ -416,7 +415,7 @@ enum Refusal {
 /// line the terminal shows, and says whether the grant lets the agent type
 /// there now. Run before the first key and again before every later line: a
 /// page can navigate, and a command can open a prompt, between two keys.
-async fn check_target(
+pub(crate) async fn check_target(
     state: &AppState,
     block_id: &str,
     grant: &bypass::Grant,
@@ -484,7 +483,7 @@ fn log_how(sent: usize, secret_stop: bool, stopped: Option<&str>) -> How {
 /// Before the next line goes in, let what the last one did reach the rows: wait
 /// out [`ROWS_LAG`], then read until two reads in a row agree, for at most
 /// [`LINE_SETTLE`], so a prompt a command opened is showing when it is checked.
-async fn let_screen_catch_up(state: &AppState, block_id: &str) {
+pub(crate) async fn let_screen_catch_up(state: &AppState, block_id: &str) {
     let start = Instant::now();
     tokio::time::sleep(ROWS_LAG).await;
     let mut last: Option<Vec<String>> = None;
@@ -496,6 +495,17 @@ async fn let_screen_catch_up(state: &AppState, block_id: &str) {
         last = now;
         tokio::time::sleep(POLL).await;
     }
+}
+
+/// The grant that lets `agent` type on `pane`: this agent, this pane, the
+/// terminal power, and this page. The person's standing grant for the agent on
+/// the page's site makes one when the pane has none.
+async fn terminal_grant(state: &AppState, block_id: &str, pane: &str, agent: &str) -> Option<bypass::Grant> {
+    if let Some(g) = bypass::active_for(pane, agent).filter(|g| g.allows_terminal()) {
+        return Some(g);
+    }
+    let url = crate::server::browser_bypass_routes::page_url(state, block_id).await.ok()?;
+    crate::server::browser_standing::activate_at(state, pane, agent, &url).filter(|g| g.allows_terminal())
 }
 
 /// `POST /api/v1/ui/browser/terminal` — backs `Browser`'s `terminal` action.
@@ -570,15 +580,7 @@ pub(crate) async fn handle_ui_browser_terminal(
         );
     }
 
-    // The grant: this agent, this pane, the terminal power, and this page.
-    let mut grant = bypass::active_for(&pane, &agent).filter(|g| g.allows(Power::Terminal));
-    if grant.is_none() {
-        // The person's standing grant for this agent on the page's site makes one.
-        if let Ok(url) = crate::server::browser_bypass_routes::page_url(&state, &block_id).await {
-            grant = crate::server::browser_standing::activate_at(&state, &pane, &agent, &url).filter(|g| g.allows(Power::Terminal));
-        }
-    }
-    let Some(grant) = grant else {
+    let Some(grant) = terminal_grant(&state, &block_id, &pane, &agent).await else {
         return log(what).fail(
             &state,
             StatusCode::FORBIDDEN,
@@ -605,6 +607,24 @@ pub(crate) async fn handle_ui_browser_terminal(
         .and_then(|o| o.as_str())
         .unwrap_or("")
         .to_string();
+
+    // A grant that asks about each line has the person answer for it before Enter.
+    if grant.asks_each_line() {
+        return crate::server::browser_terminal_line::run(crate::server::browser_terminal_line::Call {
+            state: &state, block_id: &block_id, pane: &pane, agent: &agent,
+            grant: &grant,
+            origin: &origin,
+            steps,
+            typed: &typed,
+            reason: req.reason.as_deref().unwrap_or(""),
+            what,
+            wait: Duration::from_secs(req.timeout_seconds.unwrap_or(DEFAULT_WAIT_SECS).min(MAX_WAIT_SECS)),
+            until: req.until_text.as_deref(),
+            rows_before: rows_of(&seen).unwrap_or_default(),
+            owner: crate::server::browser_owner::owner_of(&pane),
+        })
+        .await;
+    }
 
     // Type a line at a time (or a chunk of a long one), with the brakes, the
     // grant, the page and the prompt checked between pieces.
@@ -702,6 +722,13 @@ pub(crate) async fn handle_ui_browser_terminal(
     if let Some(why) = stopped {
         data["stopped"] = json!(why);
     }
+    output_fields(&mut data, rows, screen_reader, sent);
+    (StatusCode::OK, Json(json!({ "ok": true, "data": data }))).into_response()
+}
+
+/// What a call tells the agent about the terminal's output: the rows when they
+/// could be read (page content, untrusted), else why not.
+pub(crate) fn output_fields(data: &mut Value, rows: Option<Vec<String>>, screen_reader: bool, sent: usize) {
     match rows {
         Some(rows) if screen_reader => {
             data["output"] = json!(rows);
@@ -720,12 +747,11 @@ pub(crate) async fn handle_ui_browser_terminal(
             );
         }
     }
-    (StatusCode::OK, Json(json!({ "ok": true, "data": data }))).into_response()
 }
 
 /// Read the terminal until its rows stop changing for [`QUIET`], or `until`
 /// shows in them, or `wait` is up.
-async fn settle(
+pub(crate) async fn settle(
     state: &AppState,
     block_id: &str,
     wait: Duration,

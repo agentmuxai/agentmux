@@ -30,6 +30,7 @@ vi.mock("@/app/store/mps", () => ({
 vi.mock("@/app/store/mps-events", () => ({ WpsEvent: { ControllerStatus: "controllerstatus" } }));
 vi.mock("@/app/store/services", () => ({ BlockService: { GetControllerStatus: (...a: unknown[]) => h.getStatus(...a) } }));
 
+import { META_AWAITING_CONFIRM } from "./agent-status";
 import { openProgressSubscriptions, progressOf, usePaneTabProgress } from "./pane-tab-progress";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -77,6 +78,14 @@ describe("the pill's progress follows srv's decide() rows", () => {
             expect(got?.state ?? null).toBe(SHOWN.has(row.expected) ? row.expected : null);
         });
     }
+});
+
+describe("a sensitive message waiting for confirmation", () => {
+    it("shows Waiting for you on the pill while the agent is idle", () => {
+        const base = { isAgentPane: true, turnActive: false, now: 1 };
+        expect(progressOf({ ...base, meta: { [META_AWAITING_CONFIRM]: true } })?.state).toBe("waiting");
+        expect(progressOf({ ...base, meta: {} })).toBeNull();
+    });
 });
 
 describe("the pill's words", () => {

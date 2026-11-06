@@ -292,9 +292,9 @@
 109 crates/srv/src/server/app_api/memory.rs::memory_write_impl
 102 crates/srv/src/server/app_api/pane.rs::build_pane_meta
 161 crates/srv/src/server/app_api/pane.rs::open_pane_floating
-126 crates/srv/src/server/browser_bypass_routes.rs::handle_ui_browser_request_bypass
+116 crates/srv/src/server/browser_bypass_routes.rs::handle_ui_browser_request_bypass
 133 crates/srv/src/server/browser_capture.rs::handle_browser_capture
-223 crates/srv/src/server/browser_terminal.rs::handle_ui_browser_terminal
+216 crates/srv/src/server/browser_terminal.rs::handle_ui_browser_terminal
 190 crates/srv/src/server/browser_vault_fill.rs::handle_vault_fill
 739 crates/srv/src/server/cli_handlers.rs::register_cli_handlers
 904 crates/srv/src/server/editor_handlers.rs::register_editor_handlers
@@ -415,7 +415,7 @@
 228 frontend/app/tab/tab.tsx::Tab
 185 frontend/app/tab/tabcontent.tsx::TabContent
 134 frontend/app/util/select-trace.ts::createSelectTrace
-119 frontend/app/util/submenu-hover.ts::createSubmenuHover
+104 frontend/app/util/submenu-hover.ts::createSubmenuHover
 104 frontend/app/view/accounts/GoogleServicesSection.tsx::GoogleServicesSection
 287 frontend/app/view/accounts/OAuthConnectPanel.tsx::OAuthConnectPanel
 130 frontend/app/view/accounts/accounts-manager.tsx::AccountsManager
@@ -509,7 +509,7 @@
 150 frontend/app/view/native-memory/NativeMemoryFileView.tsx::NativeMemoryFileView
 154 frontend/app/view/remotes/remotes-view.tsx::Detail
 240 frontend/app/view/settings/sections/advanced-section.tsx::AdvancedSection
-178 frontend/app/view/settings/sections/agent-site-grants.tsx::AgentSiteGrants
+175 frontend/app/view/settings/sections/agent-site-grants.tsx::AgentSiteGrants
 128 frontend/app/view/settings/sections/animations-section.tsx::AnimationsSection
 166 frontend/app/view/settings/sections/appearance-section.tsx::AppearanceSection
 120 frontend/app/view/settings/sections/browser-section.tsx::BrowserSection
@@ -559,7 +559,7 @@
 137 frontend/app/view/warden-jobs/warden-jobs-manager.tsx::WardenJobsManager
 218 frontend/app/window/logo-menu.tsx::LogoMenu
 157 frontend/app/window/logo-menu.tsx::menuItems
-197 frontend/app/window/more-dropdown.tsx::MoreDropdown
+190 frontend/app/window/more-dropdown.tsx::MoreDropdown
 107 frontend/app/window/pane-media-capture-indicator.tsx::PaneMediaCaptureIndicator
 117 frontend/app/window/titlebar-context-menu.tsx::TitleBarContextMenu
 128 frontend/app/window/use-widget-bar-responsive.ts::useWidgetBarResponsive

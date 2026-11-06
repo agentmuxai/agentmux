@@ -397,6 +397,18 @@ $browser-nav-stack-below: 388px;
         overflow: auto;
     }
 
+    // The terminal line the person is asked to run: monospace, wrapped, every character visible.
+    .browser-attention-line {
+        margin: 0;
+        padding: var(--space-1) var(--space-3);
+        border-left: 2px solid var(--error-color);
+        font-family: var(--font-mono);
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        max-height: 160px;
+        overflow: auto;
+    }
+
     .browser-attention-actions {
         display: flex;
         flex-wrap: wrap;

@@ -145,8 +145,17 @@ describe("the warning before a switch", () => {
         expect(h.modals).toEqual([]);
     });
 
+    it("isn't shown while agents keep running without a pane: the switch parks them", async () => {
+        h.agents = [agent("Korp", true)];
+        expect(await confirmLeaving()).toBe(true);
+        h.settings = { "agents:always_available": true };
+        expect(await confirmLeaving()).toBe(true);
+        expect(h.modals).toEqual([]);
+    });
+
     it("is shown when one is, and its answer decides", async () => {
         h.agents = [agent("Korp", true)];
+        h.settings = { "agents:always_available": false };
         const yes = confirmLeaving();
         await vi.waitFor(() => expect(h.modals).toHaveLength(1));
         expect(lastModal().component).toBe("WindowCloseConfirm");
@@ -164,7 +173,7 @@ describe("the warning before a switch", () => {
 
     it("follows the window:confirmcloseworking setting", async () => {
         h.agents = [agent("Korp", true)];
-        h.settings = { "window:confirmcloseworking": false };
+        h.settings = { "agents:always_available": false, "window:confirmcloseworking": false };
         expect(await confirmLeaving()).toBe(true);
         expect(h.modals).toEqual([]);
     });
@@ -183,6 +192,7 @@ describe("switching", () => {
 
     it("does nothing when the user keeps the workspace open", async () => {
         h.agents = [agent("Korp", true)];
+        h.settings = { "agents:always_available": false };
         const done = switchWorkspace(ws("b", "Reviews"));
         await vi.waitFor(() => expect(h.modals).toHaveLength(1));
         lastModal().props.onCancel();

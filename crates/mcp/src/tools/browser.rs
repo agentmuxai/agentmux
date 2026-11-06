@@ -581,9 +581,11 @@ async fn run_terminal(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
             keys,
             until_text: arguments.get("until_text").and_then(|v| v.as_str()).map(str::to_string),
             timeout_seconds: Some(wait),
+            reason: arguments.get("reason").and_then(|v| v.as_str()).map(str::to_string),
         })
-        // Typing 20,000 characters takes a while, then the output wait.
-        .timeout(std::time::Duration::from_secs(120 + wait))
+        // Typing 20,000 characters takes a while, then the output wait; a grant that asks
+        // about each line also waits for the person's answer.
+        .timeout(std::time::Duration::from_secs(120 + wait + 240))
         .send()
         .await
         .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
@@ -860,9 +862,18 @@ fn terminal_result_text(data: Option<&serde_json::Value>) -> String {
     let Some(d) = data else {
         return "Typed".to_string();
     };
+    // A grant that shows the person each line: what they answered comes first.
+    match d["answer"].as_str() {
+        Some("declined") => return "The person pressed Don't run: the line was erased from the terminal and nothing ran. Ask them in chat if you still need it.".to_string(),
+        Some("timed_out") => return "The person didn't answer in time: the line was erased from the terminal and nothing ran.".to_string(),
+        _ => {}
+    }
     let sent = d["sent"].as_u64().unwrap_or(0);
     let of = d["of"].as_u64().unwrap_or(sent);
     let mut out = if sent == of { format!("Typed {sent} keys.") } else { format!("Typed {sent} of {of} keys.") };
+    if d["answer"].as_str() == Some("approved") {
+        out = format!("The person pressed Run it. {out}");
+    }
     if let Some(why) = d["stopped"].as_str() {
         out.push_str(&format!(" Stopped early: {why}."));
     }
@@ -922,7 +933,9 @@ fn key_result_text(data: Option<&serde_json::Value>) -> String {
 /// the grant lets it do.
 fn granted_text(d: &Value) -> String {
     let sites: Vec<&str> = d["origins"].as_array().map(|a| a.iter().filter_map(|v| v.as_str()).collect()).unwrap_or_default();
-    let terminal = d["powers"].as_array().is_some_and(|a| a.iter().any(|v| v.as_str() == Some("terminal")));
+    let has = |p: &str| d["powers"].as_array().is_some_and(|a| a.iter().any(|v| v.as_str() == Some(p)));
+    // Asking about each line is the stricter of the two, so it wins when both are there.
+    let (terminal, per_line) = (has("terminal") && !has("terminal_ask"), has("terminal_ask"));
     let how_long = if d["always"].as_bool() == Some(true) {
         "until the user revokes it".to_string()
     } else {
@@ -937,6 +950,9 @@ fn granted_text(d: &Value) -> String {
         if terminal {
             " You may also type and run commands in a web terminal on these sites with action terminal: \
              nobody checks each line, the user can Stop or Pause you, and a password or code prompt is theirs to type."
+        } else if per_line {
+            " You may also use a web terminal on these sites with action terminal, one line per call: the user is shown \
+             each line (give a `reason`) and presses Run it or Don't run; a password or code prompt is theirs to type."
         } else {
             ""
         }
@@ -1187,6 +1203,19 @@ mod call_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // A grant that shows the person each line: the agent is told what they answered.
+    #[test]
+    fn a_terminal_line_the_person_answered_says_so() {
+        let said = |data: serde_json::Value| terminal_result_text(Some(&data));
+        let declined = said(serde_json::json!({ "sent": 0, "of": 10, "answer": "declined", "note": "nothing ran" }));
+        assert!(declined.contains("pressed Don't run") && declined.contains("nothing ran"), "{declined}");
+        let late = said(serde_json::json!({ "sent": 0, "of": 10, "answer": "timed_out" }));
+        assert!(late.contains("didn't answer in time"), "{late}");
+        let run = said(serde_json::json!({ "sent": 11, "of": 11, "answer": "approved", "output": ["$ echo hi", "ran: echo hi"] }));
+        assert!(run.starts_with("The person pressed Run it. Typed 11 keys.") && run.contains("ran: echo hi"), "{run}");
+        assert_eq!(said(serde_json::json!({ "sent": 3, "of": 3 })), "Typed 3 keys.", "a free-run call has no answer to report");
+    }
 
     // `fill` with `vault`: what the agent is told never carries the value.
     #[test]

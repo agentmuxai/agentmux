@@ -14,19 +14,24 @@
 pub(crate) enum Power {
     /// Committing clicks go through without asking (what Auto-approve always did).
     Clicks,
-    /// Type and run commands in a web terminal.
+    /// Type and run commands in a web terminal, no question per line.
     Terminal,
+    /// Type in a web terminal, but the person is shown each line and presses
+    /// Run it before Enter goes in (spec §4.4). Stricter than [`Power::Terminal`]:
+    /// a grant that carries both asks.
+    TerminalAsk,
 }
 
 impl Power {
     /// The order a grant lists its powers in.
-    const ALL: [Power; 2] = [Power::Clicks, Power::Terminal];
+    const ALL: [Power; 3] = [Power::Clicks, Power::Terminal, Power::TerminalAsk];
 
     /// The name on the wire, in `powers` lists.
     pub(crate) fn name(self) -> &'static str {
         match self {
             Power::Clicks => "clicks",
             Power::Terminal => "terminal",
+            Power::TerminalAsk => "terminal_ask",
         }
     }
 
@@ -59,6 +64,14 @@ pub(crate) fn parse(asked: Option<&[String]>) -> Result<Vec<Power>, String> {
     Ok(out)
 }
 
+/// `powers` with the terminal asking about each line: the person's "Allow, asking
+/// for each line" on a request for the terminal.
+pub(crate) fn asking_each_line(powers: &[Power]) -> Vec<Power> {
+    let mut out: Vec<Power> = powers.iter().map(|p| if *p == Power::Terminal { Power::TerminalAsk } else { *p }).collect();
+    out.dedup();
+    out
+}
+
 /// The powers a standing grant can carry beyond committing clicks, which every
 /// grant has: what Settings offers a checkbox for.
 pub(crate) fn granted_by_the_person() -> Vec<String> {
@@ -89,6 +102,13 @@ mod tests {
         let p = parse(Some(&asked(&["terminal", "Clicks", "terminal"]))).unwrap();
         assert_eq!(p, vec![Power::Clicks, Power::Terminal]);
         assert_eq!(names(&p), vec!["clicks", "terminal"]);
+    }
+
+    #[test]
+    fn allowing_with_a_question_per_line_swaps_the_terminal_for_its_stricter_form() {
+        let p = parse(Some(&asked(&["terminal"]))).unwrap();
+        assert_eq!(asking_each_line(&p), vec![Power::Clicks, Power::TerminalAsk]);
+        assert_eq!(asking_each_line(&[Power::Clicks]), vec![Power::Clicks]);
     }
 
     #[test]

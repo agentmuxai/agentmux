@@ -1,6 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { META_AWAITING_CONFIRM } from "./agent-status";
 import { describe, expect, it } from "vitest";
 import {
     FALLBACK_TOOLTIP,
@@ -139,6 +140,12 @@ describe("resolveSwarmLine", () => {
         });
         // And it is only the true flag: a cleared one falls through the ladder.
         expect(line({ meta: { ...waiting, [META_AWAITING_USER]: false }, status: "running" }).source).toBe("restored");
+    });
+
+    it("says it is waiting for you for a sensitive message awaiting confirmation, idle or not", () => {
+        const confirm = { [META_AWAITING_CONFIRM]: true };
+        expect(line({ meta: confirm, status: "idle" })).toEqual({ text: STATUS_WAITING, source: "status" });
+        expect(line({ meta: confirm, status: "running" })).toEqual({ text: STATUS_WAITING, source: "status" });
     });
 
     it("ignores a waiting flag once the agent has no turn in flight", () => {
