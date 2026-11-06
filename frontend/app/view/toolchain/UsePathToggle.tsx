@@ -12,6 +12,7 @@
 import type { JSX } from "solid-js";
 
 import { Switch } from "@/app/element/ui";
+import { tip } from "@/app/element/tip";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { settingsAtom } from "@/app/store/global";
@@ -45,7 +46,7 @@ export const UsePathToggle = (props: UsePathToggleProps): JSX.Element => {
                 onChange={(on) => void change(on)}
                 ariaLabel="Use the CLI on my PATH"
             />
-            <span class="toolchain-detail-label" title="Off: AgentMux runs its own copy. On: it runs yours, which it never changes.">
+            <span class="toolchain-detail-label" {...tip("Off: AgentMux runs its own copy. On: it runs yours, which it never changes.")}>
                 Use the CLI on my PATH
             </span>
         </div>
