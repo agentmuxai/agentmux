@@ -203,8 +203,8 @@ pub(super) const IDENTITY_STORE_TABLES_SQL: &str = "CREATE TABLE IF NOT EXISTS d
         CREATE INDEX IF NOT EXISTS idx_ids_agent_identity_links_account
             ON db_agent_identity_links(account_id);
 
-        -- v2: fallback mirror only — see this function's own doc comment
-        -- above. id_store stays the authoritative read/write path.
+        -- v2: fallback mirror only — see the v2 note on
+        -- IDENTITY_STORE_SCHEMA_VERSION in migrations.rs. id_store stays the authoritative read/write path.
         CREATE TABLE IF NOT EXISTS db_accounts (
             id           TEXT PRIMARY KEY,
             name         TEXT NOT NULL,
@@ -435,7 +435,7 @@ pub(super) const IDENTITY_STORE_TABLES_SQL: &str = "CREATE TABLE IF NOT EXISTS d
         );
         CREATE INDEX IF NOT EXISTS idx_ids_skills_is_global ON db_skills(is_global);
         -- v8: name-only, matching skill_upsert_unique_global's own dup-check
-        -- — see this constant's v8 doc comment. Replaces
+        -- — see the v8 note on IDENTITY_STORE_SCHEMA_VERSION in migrations.rs. Replaces
         -- idx_ids_skills_global_name_type (dropped just below for an
         -- existing store; a fresh store never creates it in the first
         -- place, since this whole batch runs as one execute_batch).
@@ -480,7 +480,7 @@ pub(super) fn seed_shared_blank_bundle(conn: &Connection) -> Result<(), StoreErr
 pub(super) fn add_shared_store_columns(conn: &Connection) -> Result<(), StoreError> {
     // ---- Additive column migrations (schema v5+) ----
     // Same idempotent pattern as run_object_schema's additive column steps (`object_schema.rs`):
-    // the flat CREATE batch above covers fresh DBs; these carry an existing
+    // SHARED_STORE_TABLES_SQL covers fresh DBs; these carry an existing
     // shared store forward. "duplicate column" is swallowed so this is safe
     // to run on every startup regardless of whether the column already exists.
     //
@@ -520,7 +520,7 @@ pub(super) fn seed_identity_blank_bundle(conn: &Connection) -> Result<(), StoreE
 /// Additive columns on the identity store, added after its tables were first created.
 pub(super) fn add_identity_store_columns(conn: &Connection) -> Result<(), StoreError> {
     // Additive columns added after this store's tables were first created —
-    // same idempotent pattern as run_shared_store_schema's own ALTER loop.
+    // same idempotent pattern as add_shared_store_columns's ALTER loop.
     apply_additive_columns(conn, [
         // db_bundles.is_system: see OBJECT_SCHEMA_VERSION's v27 doc comment.
         "ALTER TABLE db_bundles ADD COLUMN is_system INTEGER NOT NULL DEFAULT 0",
