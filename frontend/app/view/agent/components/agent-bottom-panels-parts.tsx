@@ -289,8 +289,7 @@ export function TurnStatus(part: Part): JSX.Element {
                 onDismissNotice={p.offline.dismissNotice}
                 clockTime={clockTime}
             />
-
-    <WorkingRowAnchor p={p} t={t} />
+            <WorkingRowAnchor p={p} t={t} />
         </>
     );
 }
