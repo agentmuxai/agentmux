@@ -11,8 +11,6 @@ export { isParkedMeta, PARKED_META };
 /** What a parked row says on hover. */
 export const PARKED_ROW_TITLE = "click to open its pane";
 
-
-
 /** The agent a block runs, by the id `agent.open` takes: its instance when the block is bound to one, else its id. */
 export function agentUidOfBlockMeta(meta: Record<string, unknown> | undefined): string {
     for (const key of ["agentInstanceId", "agentId"]) {

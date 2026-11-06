@@ -5,9 +5,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const order: string[] = [];
 let blockMeta: Record<string, unknown> | undefined;
+// Whether this window has the block yet: when not, only a reload gives it.
+let blockCached = true;
+const reload = vi.fn(async () => ({ meta: blockMeta }));
 vi.mock("@/app/store/global", () => ({
     atoms: { activeTabId: () => "t1" },
-    MOS: { makeORef: (_t: string, id: string) => id, getMuxObjectAtom: () => () => ({ meta: blockMeta }) },
+    MOS: {
+        makeORef: (_t: string, id: string) => id,
+        getObjectValue: () => (blockCached ? { meta: blockMeta } : undefined),
+        reloadMuxObject: () => reload(),
+    },
 }));
 vi.mock("@/app/store/mps", () => ({ onMuxEvent: vi.fn() }));
 vi.mock("@/app/store/mps-events", () => ({ WpsEvent: { AgentsChanged: "agents:changed" } }));
@@ -50,6 +57,8 @@ describe("openAgentInActiveTab", () => {
         order.length = 0;
         reveal.mockClear();
         blockMeta = undefined;
+        blockCached = true;
+        reload.mockClear();
         revealResult = { ok: true };
         runtimeRows = [];
         openResult = async () => ({ block_id: "b1" });
@@ -79,6 +88,14 @@ describe("openAgentInActiveTab", () => {
         it("whose workspace still exists is shown there, in a window with its pane focused, and not moved", async () => {
             const why = await openAgentInActiveTab({ agent_id: "a1", name: "Ada" });
             expect(why).toBeUndefined();
+            expect(reveal).toHaveBeenCalledWith("blk-1", { source: "open", quiet: true });
+            expect(order).toEqual(["note:a1", "reveal:blk-1"]);
+        });
+
+        it("is found even when this window has not loaded its block yet", async () => {
+            blockCached = false;
+            await openAgentInActiveTab({ agent_id: "a1", name: "Ada" });
+            expect(reload).toHaveBeenCalledOnce();
             expect(reveal).toHaveBeenCalledWith("blk-1", { source: "open", quiet: true });
             expect(order).toEqual(["note:a1", "reveal:blk-1"]);
         });

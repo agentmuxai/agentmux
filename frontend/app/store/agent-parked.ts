@@ -15,8 +15,8 @@ export function isParkedMeta(meta: Record<string, unknown> | undefined): boolean
 }
 
 export interface ParkedReopenDeps {
-    /** The block meta of `blockId`, as the window has it. */
-    blockMeta: (blockId: string) => Record<string, unknown> | undefined;
+    /** The block meta of `blockId`; loads the block when this window has not got it yet. */
+    blockMeta: (blockId: string) => Promise<Record<string, unknown> | undefined>;
     /** Show the block wherever it is; whether it was shown. */
     reveal: (blockId: string) => Promise<boolean>;
 }
@@ -27,6 +27,6 @@ export interface ParkedReopenDeps {
  * block is not parked (the caller's own path handles it), or the workspace or tab is gone.
  */
 export async function reopenParkedWhereItWas(blockId: string | undefined, deps: ParkedReopenDeps): Promise<boolean> {
-    if (!blockId || !isParkedMeta(deps.blockMeta(blockId))) return false;
+    if (!blockId || !isParkedMeta(await deps.blockMeta(blockId))) return false;
     return deps.reveal(blockId);
 }

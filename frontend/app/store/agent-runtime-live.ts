@@ -64,7 +64,11 @@ export async function openAgentInActiveTab(agent: Pick<AgentRuntime, "agent_id" 
 }
 
 const parkedDeps = {
-    blockMeta: (blockId: string) => MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", blockId))()?.meta,
+    // A parked agent's block is the one this window is least likely to have: load it rather than read an empty cache.
+    blockMeta: async (blockId: string) => {
+        const oref = MOS.makeORef("block", blockId);
+        return (MOS.getObjectValue<Block>(oref) ?? (await MOS.reloadMuxObject<Block>(oref)))?.meta;
+    },
     // Quiet: a workspace that is gone is not an error here, the pane opens in the active tab instead.
     reveal: async (blockId: string) => {
         const { revealBlock } = await import("@/app/util/reveal-block");
