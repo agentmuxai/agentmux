@@ -173,25 +173,29 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                             drift from what AgentMux actually installs. */}
                         <p class="agent-picker-templates-hint" data-testid="agent-templates-managed-note">
                             AgentMux installs and runs its own copy of each agent CLI, kept apart from any you installed
-                            yourself, and keeps each agent's login and settings in its own folders. The exceptions use
-                            the copy on your PATH, so install them yourself first:{" "}
-                            <For each={templates.userInstalledProviders()}>
-                                {(p, i) => (
-                                    <>
-                                        {i() > 0 ? ", " : ""}
-                                        <a
-                                            href={p.docsUrl}
-                                            onClick={(e) => {
-                                                e.preventDefault();
-                                                getApi().openExternal(p.docsUrl);
-                                            }}
-                                        >
-                                            {p.displayName}
-                                        </a>
-                                    </>
-                                )}
-                            </For>
-                            . This isolates the tools, not what an agent can do on your computer.
+                            yourself, and keeps each agent's login and settings in its own folders.
+                            <Show when={templates.userInstalledProviders().length > 0}>
+                                {" "}
+                                The exceptions use the copy on your PATH, so install them yourself first:{" "}
+                                <For each={templates.userInstalledProviders()}>
+                                    {(p, i) => (
+                                        <>
+                                            {i() > 0 ? ", " : ""}
+                                            <a
+                                                href={p.docsUrl}
+                                                onClick={(e) => {
+                                                    e.preventDefault();
+                                                    getApi().openExternal(p.docsUrl);
+                                                }}
+                                            >
+                                                {p.displayName}
+                                            </a>
+                                        </>
+                                    )}
+                                </For>
+                                .
+                            </Show>{" "}
+                            This isolates the tools, not what an agent can do on your computer.
                         </p>
                         <AgentCardFilters
                             cards={templates.filterableCards()}
