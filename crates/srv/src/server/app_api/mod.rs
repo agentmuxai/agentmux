@@ -79,6 +79,10 @@ pub(crate) use agent_define::{check_provider_unchanged, validate_vendor_base_url
 // directly, same as `fleet`'s exposure just below.
 pub(crate) mod pane;
 mod pane_open_tab;
+mod pane_open_steps;
+#[cfg(test)]
+#[path = "tests/pane_open_steps_tests.rs"]
+mod pane_open_steps_tests;
 mod pane_singleton;
 // pub(crate): `server/mod.rs`'s `POST /api/v1/agent/dev_server/register`
 // handler (the `RegisterDevServer` MCP tool's backing route) calls

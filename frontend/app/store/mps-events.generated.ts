@@ -155,6 +155,7 @@ export type MuxEventPayloads = {
   "files:changed": FilesChangedEvent;
   "files:op": FsOpEvent;
   "google:notice": GoogleNoticeEvent;
+  "history:sessions:changed": null;
   "identity:no-direct-links": NoDirectLinksEvent;
   "identity:signinlink": SigninLinkEvent;
   "identityaccounts:changed": null;
@@ -278,6 +279,7 @@ export const TYPED_MUX_EVENTS = [
   "files:changed",
   "files:op",
   "google:notice",
+  "history:sessions:changed",
   "identity:no-direct-links",
   "identity:signinlink",
   "identityaccounts:changed",
@@ -353,6 +355,7 @@ const NO_PAYLOAD_MUX_EVENTS: ReadonlySet<string> = new Set([
   "browserprofiles:changed",
   "cron_changed",
   "drones:changed",
+  "history:sessions:changed",
   "identityaccounts:changed",
   "mcp:changed",
   "memories:changed",
