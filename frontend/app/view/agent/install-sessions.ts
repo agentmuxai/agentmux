@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * One install session per provider CLI (npm, or the vendor's own installer for the six AgentMux
+ * One install session per provider CLI (npm, or the vendor's own installer for the CLIs AgentMux
  * doesn't install itself), outliving the panel that started
  * it (SPEC_AGENT_PICKER_INLINE_CREATE_2026_10_18.md §2.3). Closing the new-agent
  * panel under a harness card doesn't stop its install: the card shows
@@ -61,7 +61,7 @@ function entryFor(providerId: string): Entry {
                 // srv installs its own registry's package for this id, or downloads the pinned
                 // release of a managed CLI (goose).
                 if (prov?.npmPackage || prov?.managedInstall) return RpcApi.InstallStartCommand(TabRpcClient, { providerId });
-                // The six CLIs AgentMux doesn't install into its own folder: srv runs the vendor's
+                // The CLIs AgentMux doesn't install into its own folder: srv runs the vendor's
                 // installer, but only once the person approves it in the approval window, and
                 // refuses a provider with no installer of its own.
                 return RpcApi.ToolchainInstallVendorCliCommand(TabRpcClient, { providerId });

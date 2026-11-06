@@ -43,7 +43,7 @@ use crate::server::AppState;
 pub const COMMAND_TOOLCHAIN_VENDOR_INSTALL_INFO: &str = "toolchain.vendor_install_info";
 pub const COMMAND_TOOLCHAIN_INSTALL_VENDOR_CLI: &str = "toolchain.install_vendor_cli";
 
-/// The longest script AgentMux downloads. The six are under 60 KB.
+/// The longest script AgentMux downloads. The five are under 60 KB.
 const MAX_SCRIPT_BYTES: usize = 2 * 1024 * 1024;
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(60);
 /// How long a finished installer's output is waited for. A helper it left running can hold a pipe open.
@@ -227,16 +227,32 @@ async fn fetch_script(url: &str, allowed: &'static [&'static str]) -> Result<Fet
     Ok(Fetched { bytes, host, sha256 })
 }
 
+/// What goes on disk for `interpreter`. Windows PowerShell 5.1 reads a `.ps1` with no byte-order
+/// mark in the ANSI code page, so a script with an em dash or a curly quote in a string would not
+/// parse the way `irm | iex` (which decodes the text properly) runs it: it gets the UTF-8 mark,
+/// unless it has one already. The hash shown is of what the vendor sent, not of this.
+fn script_on_disk(bytes: &[u8], interpreter: Interpreter) -> Vec<u8> {
+    const MARKS: [&[u8]; 3] = [b"\xEF\xBB\xBF", b"\xFF\xFE", b"\xFE\xFF"];
+    if interpreter != Interpreter::PowerShell || MARKS.iter().any(|m| bytes.starts_with(m)) {
+        return bytes.to_vec();
+    }
+    let mut out = Vec::with_capacity(bytes.len() + 3);
+    out.extend_from_slice(MARKS[0]);
+    out.extend_from_slice(bytes);
+    out
+}
+
 /// Saves the script where only this user can read it; removed when the returned path is dropped.
 fn write_script(bytes: &[u8], interpreter: Interpreter) -> Result<tempfile::TempPath, String> {
     use std::io::Write;
+    let bytes = script_on_disk(bytes, interpreter);
     let suffix = format!(".{}", interpreter.extension());
     let mut file = tempfile::Builder::new()
         .prefix("agentmux-vendor-install-")
         .suffix(&suffix)
         .tempfile()
         .map_err(|e| format!("couldn't save the installer to run it: {e}"))?;
-    file.write_all(bytes).and_then(|()| file.flush()).map_err(|e| format!("couldn't save the installer to run it: {e}"))?;
+    file.write_all(&bytes).and_then(|()| file.flush()).map_err(|e| format!("couldn't save the installer to run it: {e}"))?;
     Ok(file.into_temp_path())
 }
 
@@ -587,11 +603,25 @@ mod tests {
     }
 
     #[test]
+    fn a_powershell_script_gets_a_utf8_mark_unless_it_has_one() {
+        let plain = "Write-Host \"a — b\"".as_bytes();
+        let marked = script_on_disk(plain, Interpreter::PowerShell);
+        assert_eq!(&marked[..3], b"\xEF\xBB\xBF");
+        assert_eq!(&marked[3..], plain);
+        // Already marked (UTF-8 or UTF-16): left as the vendor sent it.
+        assert_eq!(script_on_disk(&marked, Interpreter::PowerShell), marked);
+        assert_eq!(script_on_disk(b"\xFF\xFEh\0i\0", Interpreter::PowerShell), b"\xFF\xFEh\0i\0");
+        // A shell script is never touched: a mark before `#!` would stop it being one.
+        assert_eq!(script_on_disk(b"#!/bin/sh\n", Interpreter::Bash), b"#!/bin/sh\n");
+        assert_eq!(script_on_disk(b"#!/bin/sh\n", Interpreter::Sh), b"#!/bin/sh\n");
+    }
+
+    #[test]
     fn the_script_is_saved_with_its_extension_and_removed_with_its_path() {
         let path = write_script(b"echo hi\n", Interpreter::PowerShell).unwrap();
         let kept = path.to_path_buf();
         assert_eq!(kept.extension().and_then(|e| e.to_str()), Some("ps1"));
-        assert_eq!(std::fs::read(&kept).unwrap(), b"echo hi\n");
+        assert_eq!(std::fs::read(&kept).unwrap(), b"\xEF\xBB\xBFecho hi\n", "a PowerShell file starts with the UTF-8 mark");
         drop(path);
         assert!(!kept.exists(), "the downloaded file is gone when the run ends");
     }

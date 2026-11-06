@@ -8,31 +8,31 @@ import { VendorStepTracker } from "./vendor-steps";
 const statuses = (t: VendorStepTracker) => t.snapshot().map((s) => `${s.id}:${s.status}`);
 
 const RESTART_NOTE =
-    'Note: the installer finished successfully, but AgentMux\'s current session doesn\'t see "goose" yet — restart AgentMux to pick up the updated PATH.';
+    'Note: the installer finished successfully, but AgentMux\'s current session doesn\'t see "Aider" yet — restart AgentMux to pick up the updated PATH.';
 
 describe("VendorStepTracker", () => {
     it("plans get ready, install, check; never a permission row", () => {
-        expect(new VendorStepTracker("goose").snapshot().map((s) => s.label)).toEqual([
+        expect(new VendorStepTracker("Aider").snapshot().map((s) => s.label)).toEqual([
             "Get ready",
-            "Install goose",
-            "Check goose is available",
+            "Install Aider",
+            "Check Aider is available",
         ]);
     });
 
     it("walks srv's lines: the command, the download and hash, the run, then the finding", () => {
-        const t = new VendorStepTracker("goose");
+        const t = new VendorStepTracker("Aider");
         t.start();
         expect(t.line("$ curl -fsSL https://example.test/download_cli.sh | CONFIGURE=false bash")).toBe("command");
         t.line("Downloading https://example.test/download_cli.sh");
         t.line("SHA-256 ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
         expect(statuses(t)).toEqual(["prepare:done", "install:active", "verify:pending"]);
-        t.line("Found goose at /home/me/.local/bin/goose");
+        t.line("Found Aider at /home/me/.local/bin/Aider");
         t.succeed();
         expect(statuses(t)).toEqual(["prepare:done", "install:done", "verify:done"]);
     });
 
     it("adds the restart row when srv can't see the CLI yet", () => {
-        const t = new VendorStepTracker("goose");
+        const t = new VendorStepTracker("Aider");
         t.start();
         t.line("$ bash /tmp/x.sh");
         expect(t.line(RESTART_NOTE)).toBe("warning");
@@ -42,7 +42,7 @@ describe("VendorStepTracker", () => {
     });
 
     it("says an installer's failure may have left files, and shows that on the failed step", () => {
-        const t = new VendorStepTracker("goose");
+        const t = new VendorStepTracker("Aider");
         t.start();
         t.line("$ bash /tmp/x.sh");
         const f = t.fail("bash exited Some(1)");
@@ -62,11 +62,11 @@ describe("VendorStepTracker", () => {
 
     it("reads srv's refusal to start as the person not approving", () => {
         for (const text of [
-            "toolchain.install_vendor_cli: the user declined to install goose",
-            "toolchain.install_vendor_cli: the user did not approve installing goose in time",
-            "toolchain.install_vendor_cli: installing goose needs the user's approval, and no AgentMux window is connected to ask the user in",
+            "toolchain.install_vendor_cli: the user declined to install Aider",
+            "toolchain.install_vendor_cli: the user did not approve installing Aider in time",
+            "toolchain.install_vendor_cli: installing Aider needs the user's approval, and no AgentMux window is connected to ask the user in",
         ]) {
-            const t = new VendorStepTracker("goose");
+            const t = new VendorStepTracker("Aider");
             t.start();
             expect(t.fail(text).message).toBe("You didn't approve the install, so nothing was run.");
         }
@@ -98,7 +98,7 @@ describe("VendorStepTracker", () => {
     });
 
     it("starts a retry clean", () => {
-        const t = new VendorStepTracker("goose");
+        const t = new VendorStepTracker("Aider");
         t.start();
         t.line("$ bash /tmp/x.sh");
         t.fail("bash exited Some(1)");

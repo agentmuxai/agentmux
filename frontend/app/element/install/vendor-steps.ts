@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Step tracker for a vendor-installed agent CLI (Kimi, Antigravity, goose, Grok Build, Aider, Muse
+ * Step tracker for a vendor-installed agent CLI (Kimi, Antigravity, Grok Build, Aider, Muse
  * Code): srv, after the person approves it, downloads the vendor's installer, shows its hash and
  * runs it (vendor_install_handlers.rs, SPEC_ONE_CLICK_VENDOR_CLI_INSTALL_2026_10_20.md). The
  * steps and the output markers are a system-tool install's, so this wraps that tracker and

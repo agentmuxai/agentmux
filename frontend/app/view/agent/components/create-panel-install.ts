@@ -14,7 +14,7 @@ import type { PanelState } from "./create-panel-state";
 
 export function useInstallStep(s: PanelState) {
     // For a CLI AgentMux doesn't install into its own folder: whether srv has the vendor's
-    // installer to run for it (the six), and the command it would show. Null for any other.
+    // installer to run for it, and the command it would show. Null for any other.
     const [vendorInfo, setVendorInfo] = createSignal<VendorInstallInfo | null>(null);
     createEffect(() => {
         const id = s.providerId();
