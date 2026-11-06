@@ -145,7 +145,12 @@ pub fn info_from_manifest(text: &str) -> Result<SkillAppInfo, String> {
             if v.get("command").is_some() || v.get("args").is_some() {
                 return Err(format!("{MANIFEST}: mcp is a catalog id, never a command line"));
             }
-            Some(s(v, "catalogId").ok_or_else(|| format!("{MANIFEST}: mcp needs a catalogId"))?)
+            // `catalogId: null` says the app has no entry in the MCP catalog yet.
+            match v.get("catalogId") {
+                None | Some(Value::Null) => None,
+                Some(Value::String(id)) => Some(id.clone()),
+                Some(_) => return Err(format!("{MANIFEST}: mcp.catalogId is a string or null")),
+            }
         }
         Some(_) => return Err(format!("{MANIFEST}: mcp is a catalog id, never a command line")),
     };

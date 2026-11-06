@@ -154,6 +154,11 @@ fn an_mcp_pointer_may_be_a_bare_id_or_an_object_with_a_catalog_id() {
     assert_eq!(info_from_manifest(&id).unwrap().mcp.as_deref(), Some("ableton-live"));
     let obj = manifest("1.0.0", "").replace(r#""mcp":null"#, r#""mcp":{"catalogId":"ableton-live","note":"n"}"#);
     assert_eq!(info_from_manifest(&obj).unwrap().mcp.as_deref(), Some("ableton-live"));
+    // The Word and Excel skills say there is no catalog entry yet.
+    let none_yet = manifest("1.0.0", "").replace(r#""mcp":null"#, r#""mcp":{"catalogId":null,"note":"none yet"}"#);
+    assert_eq!(info_from_manifest(&none_yet).unwrap().mcp, None);
+    let number = manifest("1.0.0", "").replace(r#""mcp":null"#, r#""mcp":{"catalogId":5}"#);
+    assert!(info_from_manifest(&number).unwrap_err().contains("string or null"));
 }
 
 #[test]
