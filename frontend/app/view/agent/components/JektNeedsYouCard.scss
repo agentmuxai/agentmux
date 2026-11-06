@@ -1,0 +1,62 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// A jekt that waits on the person, as a card in the agent pane: the question card's chrome, so the kinds of
+// request above the composer read as one set (docs/reports/REPORT_JEKT_SIDE_PANEL_RESEARCH_AND_DESIGN_2026_11_04.md §5.4).
+
+@use "../styles/attention-card" as *;
+
+.jekt-needs-you-card {
+    @include attention-card;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-3);
+    min-height: 0;
+    container-type: inline-size;
+}
+
+.jekt-needs-you-title {
+    margin: 0;
+    font-size: var(--text-md);
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.jekt-needs-you-body {
+    min-height: 0;
+    overflow-y: auto;
+    overflow-wrap: anywhere;
+
+    p {
+        margin: 0 0 var(--space-2);
+    }
+}
+
+.jekt-needs-you-trust {
+    color: var(--success-text-color);
+
+    &[data-proven="false"] {
+        color: var(--warning-text-color);
+    }
+}
+
+.jekt-needs-you-more {
+    color: var(--secondary-text-color);
+}
+
+.jekt-needs-you-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: var(--space-2);
+    flex-shrink: 0;
+}
+
+@container (max-width: 280px) {
+    .jekt-needs-you-actions {
+        flex-direction: column;
+        align-items: stretch;
+        width: 100%;
+    }
+}

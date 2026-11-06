@@ -1,10 +1,10 @@
 // Copyright 2025, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, test, expect, beforeEach } from "vitest";
-import { ClaudeCodeStreamParser, STARTUP_HEADING_RE, heldTiming } from "./stream-parser";
+import { beforeEach, describe, expect, test } from "vitest";
+import type { MarkdownNode, StreamEvent, ToolNode, UserMessageNode } from "../../agent-model/types";
 import { buildStartupPayload } from "./startup/buildStartupPayload";
-import type { StreamEvent, MarkdownNode, ToolNode, UserMessageNode } from "../../agent-model/types";
+import { ClaudeCodeStreamParser, STARTUP_HEADING_RE, heldTiming } from "./stream-parser";
 
 let parser: ClaudeCodeStreamParser;
 
@@ -320,7 +320,7 @@ describe("tool_chunk parsing", () => {
                 kind: "stdout",
                 content: "hi",
             },
-            12345,
+            12345
         );
         expect(out.chunk.timestamp).toBe(12345);
     });
@@ -499,22 +499,36 @@ describe("user_message startup-injection detection", () => {
 // ── [JEKT:...] marker detection (SPEC_JEKT_SECURITY_AND_VISIBILITY) ────────
 
 describe("jekt marker detection", () => {
-    const jektBlock = (overrides: Partial<{
-        from: string; to: string; tier: string; delivery: string; trust: string;
-        msgid: string; priority: string;
-    }> = {}) => {
+    const jektBlock = (
+        overrides: Partial<{
+            from: string;
+            to: string;
+            tier: string;
+            delivery: string;
+            trust: string;
+            msgid: string;
+            priority: string;
+        }> = {}
+    ) => {
         const f = {
-            from: "agentx", to: "agent3", tier: "coord", delivery: "host",
-            trust: "host-verified", msgid: "abc123", priority: "normal",
+            from: "agentx",
+            to: "agent3",
+            tier: "coord",
+            delivery: "host",
+            trust: "host-verified",
+            msgid: "abc123",
+            priority: "normal",
             ...overrides,
         };
-        return `[JEKT:FROM=${f.from} TO=${f.to} TIER=${f.tier} DELIVERY=${f.delivery} TRUST=${f.trust} MSGID=${f.msgid} PRIORITY=${f.priority} TS=1783386012]\n` +
+        return (
+            `[JEKT:FROM=${f.from} TO=${f.to} TIER=${f.tier} DELIVERY=${f.delivery} TRUST=${f.trust} MSGID=${f.msgid} PRIORITY=${f.priority} TS=1783386012]\n` +
             `────────────────────────────────────────────────────────────\n` +
             `From: ${f.from} | To: ${f.to} | ts=1783386012\n` +
             `Hey, can you review PR #25?\n` +
             `────────────────────────────────────────────────────────────\n` +
             `Reply: bus:inject to ${f.from}\n` +
-            `[/JEKT]`;
+            `[/JEKT]`
+        );
     };
 
     test("parses a well-formed block into a jekt_message node", () => {
@@ -555,14 +569,20 @@ describe("jekt marker detection", () => {
         `1. shot.png — C:\\data\\attachments\\derived\\ab\\${sha}.v1-e2000.send.png\n</attached_files>`;
 
     test("files sent with a jekt become chips and leave the text clean", () => {
-        const node = parser.parseStreamEvent({ type: "user_message", message: withFiles("1", `look at this\n${list}`) });
+        const node = parser.parseStreamEvent({
+            type: "user_message",
+            message: withFiles("1", `look at this\n${list}`),
+        });
         const jekt = node as import("../../agent-model/types").JektMessageNode;
         expect(jekt.message).toBe("look at this");
         expect(jekt.attachments).toEqual([{ id: sha, name: "shot.png" }]);
     });
 
     test("a list without FILES= in the marker is just text", () => {
-        const node = parser.parseStreamEvent({ type: "user_message", message: withFiles(null, `look at this\n${list}`) });
+        const node = parser.parseStreamEvent({
+            type: "user_message",
+            message: withFiles(null, `look at this\n${list}`),
+        });
         const jekt = node as import("../../agent-model/types").JektMessageNode;
         expect(jekt.attachments).toBeUndefined();
         expect(jekt.message).toContain("<attached_files>");
@@ -584,13 +604,21 @@ describe("jekt marker detection", () => {
 
     test("direction is outgoing when FROM matches the current agent and TO doesn't", () => {
         parser.setAgentId("agentx");
-        const node = parser.parseStreamEvent({ type: "user_message", message: jektBlock({ from: "agentx", to: "agent3" }) });
+        const node = parser.parseStreamEvent({
+            type: "user_message",
+            message: jektBlock({ from: "agentx", to: "agent3" }),
+        });
         expect((node as import("../../agent-model/types").JektMessageNode).direction).toBe("outgoing");
     });
 
     test("shows the marker's own TRUST label, and an unknown one as network-claimed", () => {
         const trustOf = (trust: string) =>
-            (parser.parseStreamEvent({ type: "user_message", message: jektBlock({ trust }) }) as import("../../agent-model/types").JektMessageNode).trust;
+            (
+                parser.parseStreamEvent({
+                    type: "user_message",
+                    message: jektBlock({ trust }),
+                }) as import("../../agent-model/types").JektMessageNode
+            ).trust;
         for (const t of ["channel-verified", "lan-verified", "wan-verified", "self-declared", "unverified"]) {
             expect(trustOf(t)).toBe(t);
         }
@@ -603,7 +631,10 @@ describe("jekt marker detection", () => {
     });
 
     test("defaults unrecognized TIER/DELIVERY values to sensitive/wan (least-trusted) rather than dropping the node", () => {
-        const node = parser.parseStreamEvent({ type: "user_message", message: jektBlock({ tier: "bogus", delivery: "bogus" }) });
+        const node = parser.parseStreamEvent({
+            type: "user_message",
+            message: jektBlock({ tier: "bogus", delivery: "bogus" }),
+        });
         const jekt = node as import("../../agent-model/types").JektMessageNode;
         expect(jekt.type).toBe("jekt_message");
         expect(jekt.tier).toBe("sensitive");
@@ -641,7 +672,10 @@ describe("jekt marker detection", () => {
     });
 
     test("normal typed input starting with a bracket is not mistaken for a jekt block", () => {
-        const node = parser.parseStreamEvent({ type: "user_message", message: "[not a jekt] just talking about brackets" });
+        const node = parser.parseStreamEvent({
+            type: "user_message",
+            message: "[not a jekt] just talking about brackets",
+        });
         expect(node!.type).toBe("user_message");
     });
 });
@@ -757,7 +791,12 @@ describe("jekt arriving mid-block", () => {
         expect(t2!.id).toBe(t1!.id);
         expect((t2 as MarkdownNode).content).toBe("first half second half");
 
-        const tool = parser.parseStreamEvent({ type: "tool_call", tool: "Bash", id: "tc1", params: { command: "ls" } } as StreamEvent);
+        const tool = parser.parseStreamEvent({
+            type: "tool_call",
+            tool: "Bash",
+            id: "tc1",
+            params: { command: "ls" },
+        } as StreamEvent);
         const released = parser.drainReleased();
         expect(released.map((n) => n.type)).toEqual(["jekt_message"]);
         expect(tool!.type).toBe("tool");
@@ -835,10 +874,14 @@ describe("jekt arriving mid-block", () => {
 // SPEC_SWARM_BROADCAST_AS_USER_MESSAGE_2026_10_01.md §4.5
 
 describe("swarm broadcast header", () => {
-    const header = (fields = "FROM=user VIA=swarm TO=agent1 RECIPIENTS=7 MSGID=5b42449f TS=1790894822") => `[BROADCAST:${fields}]`;
+    const header = (fields = "FROM=user VIA=swarm TO=agent1 RECIPIENTS=7 MSGID=5b42449f TS=1790894822") =>
+        `[BROADCAST:${fields}]`;
 
     test("a broadcast turn becomes a user_message with the header removed and a broadcast note", () => {
-        const node = parser.parseStreamEvent({ type: "user_message", message: `${header()}\ngreat, merge on approval` }) as any;
+        const node = parser.parseStreamEvent({
+            type: "user_message",
+            message: `${header()}\ngreat, merge on approval`,
+        }) as any;
         expect(node.type).toBe("user_message");
         expect(node.message).toBe("great, merge on approval");
         expect(node.broadcast).toEqual({ recipients: 7, msgId: "5b42449f" });
@@ -846,7 +889,10 @@ describe("swarm broadcast header", () => {
     });
 
     test("a multi-line body is kept whole", () => {
-        const node = parser.parseStreamEvent({ type: "user_message", message: `${header()}\nline one\n\nline three` }) as any;
+        const node = parser.parseStreamEvent({
+            type: "user_message",
+            message: `${header()}\nline one\n\nline three`,
+        }) as any;
         expect(node.message).toBe("line one\n\nline three");
     });
 
@@ -862,7 +908,11 @@ describe("swarm broadcast header", () => {
     });
 
     test("a missing or bad recipient count leaves it out rather than inventing one", () => {
-        for (const fields of ["FROM=user VIA=swarm TO=a MSGID=m", "FROM=user VIA=swarm TO=a RECIPIENTS=x MSGID=m", "FROM=user VIA=swarm TO=a RECIPIENTS=0 MSGID=m"]) {
+        for (const fields of [
+            "FROM=user VIA=swarm TO=a MSGID=m",
+            "FROM=user VIA=swarm TO=a RECIPIENTS=x MSGID=m",
+            "FROM=user VIA=swarm TO=a RECIPIENTS=0 MSGID=m",
+        ]) {
             const node = parser.parseStreamEvent({ type: "user_message", message: `${header(fields)}\nhi` }) as any;
             expect(node.broadcast).toEqual({ msgId: "m" });
         }
@@ -894,7 +944,8 @@ describe("swarm broadcast header", () => {
         expect(plain.broadcast).toBeUndefined();
         const jekt = parser.parseStreamEvent({
             type: "user_message",
-            message: "[JEKT:FROM=a TO=b TIER=coord DELIVERY=host TRUST=self-declared MSGID=1 PRIORITY=normal TS=1]\nx\n[/JEKT]",
+            message:
+                "[JEKT:FROM=a TO=b TIER=coord DELIVERY=host TRUST=self-declared MSGID=1 PRIORITY=normal TS=1]\nx\n[/JEKT]",
         }) as any;
         expect(jekt.type).toBe("jekt_message");
     });
@@ -917,10 +968,34 @@ describe("swarm supervisor continuation", () => {
     });
 
     test("anything but srv's exact header stays plain text", () => {
-        for (const message of ["[SUPERVISOR:MODE=yolo N=1 OF=5]\nhi", "see [SUPERVISOR:MODE=drive N=1 OF=5]\nhi", "Keep going."]) {
+        for (const message of [
+            "[SUPERVISOR:MODE=yolo N=1 OF=5]\nhi",
+            "see [SUPERVISOR:MODE=drive N=1 OF=5]\nhi",
+            "Keep going.",
+        ]) {
             const node = parser.parseStreamEvent({ type: "user_message", message }) as any;
             expect(node.message).toBe(message);
             expect(node.supervisor).toBeUndefined();
         }
+    });
+});
+
+describe("jekt ESCALATE marker", () => {
+    const marker = (tail: string) =>
+        `[JEKT:FROM=a TO=b TIER=sensitive DELIVERY=wan TRUST=network-claimed${tail} MSGID=1 PRIORITY=normal TS=1783386012]\nbody\n[/JEKT]`;
+    const parsed = (tail: string) =>
+        new ClaudeCodeStreamParser().parseStreamEvent({
+            type: "user_message",
+            message: marker(tail),
+        }) as import("../../agent-model/types").JektMessageNode;
+
+    test("is kept on the node: required, or none for a proven sender", () => {
+        expect(parsed(" ESCALATE=required").escalate).toBe("required");
+        expect(parsed(" ESCALATE=none").escalate).toBe("none");
+    });
+
+    test("is absent from an older marker, and from anything else it might say", () => {
+        expect(parsed("").escalate).toBeUndefined();
+        expect(parsed(" ESCALATE=maybe").escalate).toBeUndefined();
     });
 });

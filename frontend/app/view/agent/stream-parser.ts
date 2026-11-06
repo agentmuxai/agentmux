@@ -1120,6 +1120,7 @@ export class ClaudeCodeStreamParser {
             msgId: fields.MSGID || "",
             priority: fields.PRIORITY === "urgent" ? "urgent" : "normal",
             direction,
+            ...(fields.ESCALATE === "required" || fields.ESCALATE === "none" ? { escalate: fields.ESCALATE } : {}),
             ...heldTiming(fields, event.timestamp || Date.now()),
         };
     }
