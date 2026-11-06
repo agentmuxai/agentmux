@@ -335,7 +335,7 @@
 140 crates/srv/src/server/shell_secrets.rs::inject
 135 crates/srv/src/server/system_install_handlers.rs::spawn_system_install_task
 107 crates/srv/src/server/ui_handlers.rs::handle_host_browser_popup
-206 crates/srv/src/server/vault_handlers.rs::handle_host_vault
+201 crates/srv/src/server/vault_handlers.rs::handle_host_vault
 132 crates/srv/src/server/vault_rotate.rs::handle_vault_rotate
 210 crates/srv/src/server/websocket.rs::handle_incoming_text
 227 crates/srv/src/server/websocket.rs::handle_ws_connection
@@ -550,10 +550,10 @@
 127 frontend/app/view/tower/tower-model.ts::TowerViewModel::constructor
 224 frontend/app/view/tower/tower-view.tsx::HostTable
 126 frontend/app/view/tower/tower-view.tsx::TowerView
-133 frontend/app/view/vault/vault-entries.tsx::VaultEntries
-173 frontend/app/view/vault/vault-entry-form.tsx::VaultEntryForm
+131 frontend/app/view/vault/vault-entries.tsx::VaultEntries
+172 frontend/app/view/vault/vault-entry-form.tsx::VaultEntryForm
 264 frontend/app/view/vault/vault-export.tsx::VaultExportDialog
-286 frontend/app/view/vault/vault-import.tsx::VaultImportDialog
+284 frontend/app/view/vault/vault-import.tsx::VaultImportDialog
 136 frontend/app/view/vault/vault-reveal.tsx::VaultRevealDialog
 104 frontend/app/view/vault/vault-secrets.tsx::VaultSecrets
 105 frontend/app/view/warden-jobs/job-dry-run.tsx::JobDryRun

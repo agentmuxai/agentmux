@@ -351,7 +351,7 @@ describe("Import", () => {
 
         fireEvent.click(within(dialog).getByRole("radio", { name: "Replace mine" }));
         fireEvent.click(within(dialog).getByRole("button", { name: "Import" }));
-        await waitFor(() => expect(calls("import_commit")).toEqual([{ token: "tok-1", duplicates: "replace" }]));
+        await waitFor(() => expect(calls("import_commit")).toEqual([{ token: "tok-1", duplicates: "replace", vault: "personal" }]));
         expect((await screen.findByRole("status")).textContent).toContain("2 added, 0 replaced, 1 skipped");
     });
 

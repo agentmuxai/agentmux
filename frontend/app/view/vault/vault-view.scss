@@ -318,3 +318,68 @@
 .vault-dup {
     color: var(--warning-text-color);
 }
+
+// The Vault picker: narrows the lists to one Vault, and opens the Vaults dialog.
+.vault-picker {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3) 0;
+    min-width: 0;
+
+    > :last-child {
+        margin-left: auto;
+        flex: 0 0 auto;
+    }
+}
+
+.vault-picker-choices {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-x: auto;
+}
+
+.vault-in-vault {
+    opacity: 0.8;
+}
+
+.vault-vault-list {
+    display: flex;
+    flex-direction: column;
+    margin: 0 0 var(--space-2);
+    padding: 0;
+    list-style: none;
+}
+
+.vault-vault-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-1) 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.vault-vault-name {
+    flex: 0 0 auto;
+    font-weight: 600;
+}
+
+.vault-vault-agents {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.vault-editor-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-2);
+}
+
+.vault-signin-vaults {
+    margin-top: var(--space-3);
+
+    h4 {
+        margin: 0 0 var(--space-1);
+    }
+}
