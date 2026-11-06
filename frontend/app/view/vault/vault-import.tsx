@@ -14,8 +14,6 @@ import { ModalBody, ModalFooter, ModalHeader } from "@/app/element/modal-parts";
 import { Button, Field, SegmentedControl, Select, TextInput } from "@/app/element/ui";
 import type { ImportPreview } from "@/types/rpc/ImportPreview";
 import type { ImportResult } from "@/types/rpc/ImportResult";
-import type { PreviewSection } from "@/types/rpc/PreviewSection";
-import type { Skipped } from "@/types/rpc/Skipped";
 import { SECTION_LABELS, VAULT_KINDS, vaultKind } from "./vault-kinds";
 import {
     cancelImport,
@@ -449,7 +447,7 @@ function PreviewStep(props: { s: ImportState; preview: Accessor<ImportPreview> }
     );
 }
 
-function SectionPreview(props: { section: PreviewSection }): JSX.Element {
+function SectionPreview(props: { section: ImportPreview["sections"][number] }): JSX.Element {
     const sec = () => props.section;
     return (
         <div class="vault-import-section">
@@ -474,7 +472,7 @@ function SectionPreview(props: { section: PreviewSection }): JSX.Element {
     );
 }
 
-function SkippedList(props: { skipped: Skipped[] }): JSX.Element {
+function SkippedList(props: { skipped: ImportPreview["skipped"] }): JSX.Element {
     return (
         <div class="vault-import-skipped">
             <strong>{props.skipped.length} can't be imported</strong>
