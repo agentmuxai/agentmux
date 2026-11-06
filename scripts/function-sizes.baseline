@@ -310,7 +310,6 @@
 110 crates/srv/src/server/remote_ops/receive.rs::receive
 130 crates/srv/src/server/service/host_ipc.rs::handle_register
 277 crates/srv/src/server/service/misc.rs::handle_misc_service
-431 crates/srv/src/server/service/object.rs::handle_object_service
 115 crates/srv/src/server/service/session_other_builds.rs::restore
 132 crates/srv/src/server/service/tab_lifecycle.rs::handle_create_tab
 118 crates/srv/src/server/service/tab_move.rs::handle_move_block_to_tab
