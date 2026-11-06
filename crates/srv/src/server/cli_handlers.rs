@@ -155,6 +155,9 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // installed.
                 let provider = crate::server::install_handlers::installable_provider(&cmd.provider_id)
                     .map_err(|e| format!("resolvecli: {e}"))?;
+                if crate::backend::cli_download::download_spec(provider.id).is_some() {
+                    return resolve_by_download(&notices, &broker, &paths, &cmd, provider.id, &pinned_version).await;
+                }
                 tracing::info!(
                     provider = %provider.id,
                     npm_package = %provider.npm_package,
@@ -163,7 +166,6 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     "CLI not found locally, installing via npm"
                 );
 
-                if crate::backend::cli_download::download_spec(provider.id).is_some() { return resolve_by_download(&notices, &broker, &paths, &cmd, provider.id, &pinned_version).await; }
                 {
                     // Verify npm is available before attempting install.
                     let npm_available = if cfg!(windows) {
