@@ -206,7 +206,12 @@ describe("AuditManager", () => {
         await waitFor(() => expect(screen.getByRole("button", { name: "1 new" })).toBeInTheDocument(), { timeout: 3000 });
         expect(screen.queryByText("written while paused")).toBeNull();
 
+        // The jump scrolls the pane's body to the top, not the list into view (which would hide the filters and the bar).
+        const scrollTo = vi.fn();
+        HTMLElement.prototype.scrollTo = scrollTo as unknown as typeof HTMLElement.prototype.scrollTo;
         fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+        delete (HTMLElement.prototype as { scrollTo?: unknown }).scrollTo;
+        expect(scrollTo).toHaveBeenCalledWith({ top: 0 });
         expect(screen.getByText("written while paused")).toBeInTheDocument();
         expect(screen.queryByRole("button", { name: "1 new" })).toBeNull();
         expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument();

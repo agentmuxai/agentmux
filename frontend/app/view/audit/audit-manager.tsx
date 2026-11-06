@@ -36,12 +36,13 @@ export const AuditManager = (props: { paneBlockId: string; visible?: boolean; ag
     const [searchText, setSearchText] = createSignal(untrack(filter).text);
     let typing: ReturnType<typeof setTimeout> | undefined;
     const list = createAuditList(filter, () => props.visible ?? true);
-    let feed: HTMLUListElement | undefined;
+    // The pane's scrolling body: the newest entries are at its top, under the filters.
+    let body: HTMLDivElement | undefined;
     const tick = useTick(1000);
     const now = createMemo(() => (tick(), Date.now()));
     const jumpToNewest = () => {
         list.showNewest();
-        feed?.scrollIntoView?.({ block: "start" });
+        body?.scrollTo?.({ top: 0 });
     };
 
     // The pane's `audit:agent` changing (the Swarm's "Audit for this agent") sets the filter, which starts the list over.
@@ -74,7 +75,7 @@ export const AuditManager = (props: { paneBlockId: string; visible?: boolean; ag
     const unrecorded = () => list.notRecorded().filter((k) => filter().kinds.has(k));
 
     return (
-        <div class="warden-manager-body">
+        <div class="warden-manager-body" ref={body}>
             <p class="warden-manager-summary">Every jekt, fleet action, registration and agent start and end, most recent first</p>
             <div class="audit-filter-bar">
                 <FilterInput
@@ -144,7 +145,7 @@ export const AuditManager = (props: { paneBlockId: string; visible?: boolean; ag
                 when={!empty()}
                 fallback={<div class="warden-section-stub">{list.loading() ? "Loading…" : "No entries match."}</div>}
             >
-                <ul class="audit-feed" ref={feed}>
+                <ul class="audit-feed">
                     <For each={list.entries()}>{(entry) => <AuditRow entry={entry} now={now()} paneBlockId={props.paneBlockId} />}</For>
                 </ul>
                 <Show when={list.cursor()}>

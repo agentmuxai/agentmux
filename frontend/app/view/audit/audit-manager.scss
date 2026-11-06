@@ -19,11 +19,15 @@
     gap: var(--space-1);
 }
 
+// Stays at the top of the pane's scrolling body, so Pause and "N new" are in reach however far down the list is.
 .audit-live-bar {
+    position: sticky;
+    top: 0;
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: var(--space-2);
+    background: var(--main-bg-color);
 }
 
 .audit-totals {
