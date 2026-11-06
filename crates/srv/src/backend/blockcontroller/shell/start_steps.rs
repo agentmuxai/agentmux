@@ -232,7 +232,9 @@ impl ShellController {
     }
 }
 
-/// Whether the command is a known agent CLI, or the block has an agent id.
+/// Whether the command is a known agent CLI, or the block has an agent id. Worked out before the
+/// spawn so the commit-aware admission gate can use it, and reused after it to set
+/// `inner.is_agent_pane`.
 pub(super) fn is_agent_pane(cmd_str: &str, has_agent_id: bool) -> bool {
     let cmd = cmd_str.to_lowercase();
     has_agent_id

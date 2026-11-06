@@ -20,6 +20,7 @@ use crate::backend::storage::store::Store;
 /// Everything the wait task needs from `start`, moved in when it is spawned.
 pub(super) struct ExitWatch {
     pub(super) child: Box<dyn portable_pty::Child + Send + Sync>,
+    /// The askpass secret lives exactly as long as the shell.
     pub(super) askpass_guard: Option<crate::backend::remote::askpass::Revoke>,
     /// The SSH connection name and destination, for an SSH pane.
     pub(super) ssh: Option<(String, String)>,
@@ -41,6 +42,7 @@ pub(super) struct ExitWatch {
 /// What `start` hands over to build an [`ExitWatch`]; the rest comes from the controller.
 pub(super) struct ExitParts {
     pub(super) child: Box<dyn portable_pty::Child + Send + Sync>,
+    /// The askpass secret lives exactly as long as the shell.
     pub(super) askpass_guard: Option<crate::backend::remote::askpass::Revoke>,
     pub(super) ssh: Option<(String, String)>,
     pub(super) agent_id: Option<String>,
