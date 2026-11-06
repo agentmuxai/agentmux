@@ -10,7 +10,7 @@ import { AgentCreateForm } from "./AgentCreateForm";
 import { FreeStartGuide } from "./FreeStartGuide";
 import type { InstallStep } from "./create-panel-install";
 import type { FreeGuide } from "./create-panel-guide";
-import { NpmInstall, VendorInstall } from "./create-panel-install-view";
+import { NpmInstall, VendorInstall, VendorRun } from "./create-panel-install-view";
 import { STEP_LABEL } from "./create-panel-model";
 import type { PanelState } from "./create-panel-state";
 import type { StepFlow } from "./create-panel-steps";
@@ -88,6 +88,9 @@ export function PanelView(props: { p: PanelParts }): JSX.Element {
             <Switch>
                 <Match when={flow.step() === "tools"}>
                     <ToolsStep p={props.p} />
+                </Match>
+                <Match when={flow.step() === "install" && s.userInstalled() && install.session()}>
+                    {(sess) => <VendorRun p={props.p} session={sess} />}
                 </Match>
                 <Match when={flow.step() === "install" && s.userInstalled()}>
                     <VendorInstall p={props.p} />
