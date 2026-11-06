@@ -94,8 +94,9 @@ describe("built-in pane tabs (block-registry.ts)", () => {
         const zoomHolders = [...VIEWS, "files", "tower", "vault", "history", "audit"].filter((v) => paneTabCapability(v, "paneZoom") != null).sort();
         expect(zoomHolders).toEqual([
             "agent", "audit", "connectors", "cpuplot", "drone", "editor", "files", "help", "history", "memory", "settings",
-            "swarm", "sysinfo", "term", "toolchain", "tower", "vault", "warden",
+            "shortcuts", "swarm", "sysinfo", "term", "toolchain", "tower", "vault", "warden",
         ]);
+        expect(paneTabCapability("shortcuts", "paneZoom")?.baseFontSize).toBe(12);
         expect(paneTabCapability("tower", "paneZoom")?.baseFontSize).toBe(13);
         expect(paneTabCapability("toolchain", "paneZoom")?.baseFontSize).toBe(12);
         expect(paneTabCapability("settings", "paneZoom")?.baseFontSize).toBe(12);

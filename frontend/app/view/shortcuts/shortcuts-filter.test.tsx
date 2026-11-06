@@ -52,7 +52,7 @@ function mountPane() {
             "defwidget@drone": w("Drone", 4),
         },
     } as unknown as FullConfigType);
-    const tab = shortcutsPaneTab.create({ blockId: "b1" } as never);
+    const tab = shortcutsPaneTab.create({ blockId: "b1", meta: () => ({}) } as never);
     const result = render(() => <>{tab.component({ ctx: {} as never })}</>);
     const filter = screen.getByTestId("shortcuts-filter-input") as HTMLInputElement;
     return { ...result, filter };
