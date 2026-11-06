@@ -95,6 +95,12 @@ function MessagesDock(props: MessagesPanelProps): JSX.Element {
         controls.setNarrow(narrow());
         if (!narrow()) controls.setOverlayOpen(false);
     });
+    // Opened, the overlay takes the keyboard: Esc then shuts it instead of reaching the pane (focus stays on the
+    // header button otherwise).
+    createEffect(() => {
+        if (narrow() && controls.overlayOpen())
+            queueMicrotask(() => dock?.querySelector<HTMLElement>(".ui-side-panel__head button")?.focus());
+    });
     onCleanup(() => controls.setNarrow(false));
     publishHeaderButton(
         props.blockId,

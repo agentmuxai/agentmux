@@ -140,6 +140,24 @@ describe("MessagesPanel in a narrow pane", () => {
         expect(b.container.querySelector(".messages-header-button")).not.toBeNull();
     });
 
+    it("moves the keyboard into the overlay when it opens, so Esc shuts it", async () => {
+        paneWidth(400);
+        const { view, controls } = mount([jekt()]);
+        controls.setOverlayOpen(true);
+        await Promise.resolve();
+        expect(view.container.querySelector(".messages-dock")!.contains(document.activeElement)).toBe(true);
+    });
+
+    it("sizes the header button to its face", () => {
+        paneWidth(400);
+        mount([jekt()]);
+        const decl = messagesHeaderButtons("p9")[0];
+        const a = render(() => <DeclIconButton decl={decl} />);
+        const button = a.container.querySelector("button") as HTMLElement;
+        expect(button.style.width).toBe("auto");
+        expect(button.style.minWidth).toBe("26px");
+    });
+
     it("shuts the open overlay on Esc pressed inside it, and leaves Esc alone otherwise", () => {
         paneWidth(400);
         const { view, controls } = mount([jekt()]);

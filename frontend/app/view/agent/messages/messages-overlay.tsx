@@ -73,6 +73,7 @@ export function publishHeaderButton(
             // them), and each draws its own face. One node can only sit in one of them.
             icon: (() => <ButtonFace unread={n} needsYou={needs} />) as unknown as JSX.Element,
             title,
+            fitContent: true,
             click: toggle,
         });
     });
