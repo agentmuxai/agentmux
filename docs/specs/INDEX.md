@@ -608,6 +608,7 @@ partial list.
 | [`SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16`](SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md) | Canonical Agent Identity/History Persistence Protocol — Synthesis with Mandatory ABF |
 | [`SPEC_AGENT_INPUT_HISTORY_2026_10_18`](SPEC_AGENT_INPUT_HISTORY_2026_10_18.md) | Spec: Agent input history that lives with the agent |
 | [`SPEC_AGENT_INSTALL_STAGE_2026_05_17`](SPEC_AGENT_INSTALL_STAGE_2026_05_17.md) | SPEC: Agent Install Stage |
+| [`SPEC_AGENT_MODEL_ROUTES_ANY_MODEL_SPAWN_AND_SWITCH_2026_11_06`](SPEC_AGENT_MODEL_ROUTES_ANY_MODEL_SPAWN_AND_SWITCH_2026_11_06.md) | Spec: an agent is a harness, a model route and a key: spawn on any model and switch the model in place |
 | [`SPEC_AGENT_OPEN_FIRST_SCREEN_THEN_REST_2026_10_19`](SPEC_AGENT_OPEN_FIRST_SCREEN_THEN_REST_2026_10_19.md) | Spec: opening an agent shows its first screen at once, and loads the rest afterwards |
 | [`SPEC_AGENT_OVERLAP_AWARENESS_2026_10_10`](SPEC_AGENT_OVERLAP_AWARENESS_2026_10_10.md) | SPEC: agents can see who else is working on the same thing |
 | [`SPEC_AGENT_OWN_BROWSER_PROFILE_2026_11_04`](SPEC_AGENT_OWN_BROWSER_PROFILE_2026_11_04.md) | SPEC: every agent browses with its own named, persistent profile (2026-11-04) |

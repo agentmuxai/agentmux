@@ -146,7 +146,7 @@ pub(crate) async fn build_persistent_spawn_env(
         super::identity::carry_agent_identity_env(&mut env_vars, &display_name, identity.as_ref().and_then(|i| i.slug.as_deref()));
     }
     super::block_identity::carry_agent_workdir_env(&mut env_vars, block_meta);
-    crate::backend::subagent_model::carry(&mut env_vars, block_meta);
+    carry_model_env(&mstore_for_slug, block_id, block_meta, &mut env_vars).await;
     super::workspaces::record_launch_workspace(block_id, &env_vars);
     // PATH gets the bundled tools dir (portable builds, runtime/tools/bin/)
     // and the user tools dir (~/.agentmux/tools/bin/), both ahead of the
@@ -165,4 +165,19 @@ pub(crate) async fn build_persistent_spawn_env(
     crate::backend::cli_messaging::apply_for_spawn(&mut env_vars, block_meta);
 
     Ok(env_vars)
+}
+
+/// The models an agent runs on: an agent on a model route is pointed at the gateway, then the sub-agent model
+/// is chosen, which keeps a model the route has already set.
+async fn carry_model_env(mstore: &Arc<crate::backend::storage::store::Store>, block_id: &str, block_meta: &crate::backend::obj::MetaMapType, env_vars: &mut std::collections::HashMap<String, String>) {
+    let (mstore, block, mut route_env) = (mstore.clone(), block_id.to_string(), env_vars.clone());
+    let carried = tokio::task::spawn_blocking(move || {
+        crate::backend::model_gateway::launch::carry_for_block(&mstore, &block, &mut route_env);
+        route_env
+    })
+    .await;
+    if let Ok(carried) = carried {
+        *env_vars = carried;
+    }
+    crate::backend::subagent_model::carry(env_vars, block_meta);
 }
