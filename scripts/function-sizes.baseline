@@ -278,7 +278,6 @@
 285 crates/srv/src/server/app_api/bundle/import_for_agent.rs::bundle_import_for_agent_impl
 142 crates/srv/src/server/app_api/dev_server.rs::handle_register_dev_server
 123 crates/srv/src/server/app_api/global_memory.rs::global_memory_write_inner
-406 crates/srv/src/server/app_api/kanban.rs::act_as
 111 crates/srv/src/server/app_api/layout.rs::layout_open_impl
 109 crates/srv/src/server/app_api/memory.rs::memory_write_impl
 102 crates/srv/src/server/app_api/pane.rs::build_pane_meta
@@ -493,7 +492,6 @@
 185 frontend/app/view/settings/sections/notifications-section.tsx::NotificationsSection
 109 frontend/app/view/settings/sections/pinned-senders.tsx::PinnedSenders
 201 frontend/app/view/settings/sections/sounds-section.tsx::SoundsSection
-237 frontend/app/view/settings/sections/terminal-section.tsx::TerminalSection
 114 frontend/app/view/settings/sections/widget-bar-settings.tsx::WidgetBarSettings
 104 frontend/app/view/settings/sections/widget-catalog.tsx::WidgetCatalog
 105 frontend/app/view/settings/settings-view.tsx::SettingsView

@@ -6,9 +6,11 @@
 //!
 //! - Every 5 minutes: the free space of the disk that holds the agents' workspaces. When it is
 //!   low, a pass prunes orphans and abandoned clones at once; if it is still low afterwards, the
-//!   agents with the largest build folders and their leaders get a note naming the folders and
-//!   sizes, at most once an hour on the whole machine (a file in the shared locks folder keeps
-//!   the time, so two AgentMux channels do not both warn).
+//!   agents whose own workspace is large hear of it, about their own folders, and the host's
+//!   steward gets the summary for the whole computer. A note goes out again only after free space
+//!   falls a further few GB or the level gets worse, never on a timer alone, and only a critical
+//!   level starts a turn (`disk_notice.rs`; a file in the shared locks folder keeps the last
+//!   note, so two AgentMux channels do not both warn).
 //! - Every hour: the orphan pass over every local workspace.
 //! - When an agent completes a Kanban task: its own clones lose their `incremental` folders.
 
@@ -17,6 +19,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use crate::backend::build_cache::{self as bc, Policy, Why};
+use crate::backend::disk_notice::{self as dn, Level};
 use crate::backend::obj::{self, Block};
 use crate::backend::storage::store::Store;
 use crate::backend::wconfig::ConfigState;
@@ -25,8 +28,6 @@ const DISK_EVERY: Duration = Duration::from_secs(5 * 60);
 const HOURLY_EVERY: Duration = Duration::from_secs(3600);
 /// The first hourly pass waits this long after start, so it never competes with startup.
 const FIRST_HOURLY_AFTER: Duration = Duration::from_secs(10 * 60);
-/// At most one disk warning per host in this time.
-const WARN_EVERY: Duration = Duration::from_secs(3600);
 /// After a warning that nobody received, the next attempt (which walks every build folder) waits
 /// this long.
 const RETRY_AFTER: Duration = Duration::from_secs(30 * 60);
@@ -35,8 +36,8 @@ static NEXT_TRY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::ne
 /// How long a finished task's cleanup waits for another srv's pass, and how often it looks.
 const TASK_LOCK_WAIT: Duration = Duration::from_secs(15 * 60);
 const LOCK_POLL: Duration = Duration::from_millis(500);
-/// How many agents with the largest build folders hear of a warning.
-const WARN_AGENTS: usize = 3;
+/// The key a held low-disk note is kept under: a newer one replaces it.
+const HOLD_KEY: &str = "low-disk";
 
 /// Where the agents' workspaces are: `~/.agentmux/agents`.
 pub fn agents_root() -> Option<PathBuf> {
@@ -183,12 +184,15 @@ pub struct LocalAgent {
     pub agent_id: String,
     /// The name it is shown with.
     pub name: String,
-    /// Its definition id, for the seat's lead.
-    pub def_id: Option<String>,
     /// Its workspace.
     pub workspace: PathBuf,
-    /// Its leader's definition id, if it has one.
-    pub lead_def_id: Option<String>,
+    /// Whether its seat says it is this computer's steward, who gets the summary for the host.
+    pub steward: bool,
+}
+
+/// Whether a seat names its agent a steward: in its qualifier or the line about what it owns.
+fn seat_is_steward(seat: &crate::registry::AgentSeat) -> bool {
+    [seat.qualifier.as_deref(), seat.area.as_deref()].into_iter().flatten().any(|t| t.to_ascii_lowercase().contains("steward"))
 }
 
 fn local_agents(mstore: &Store) -> Vec<LocalAgent> {
@@ -206,79 +210,97 @@ fn local_agents(mstore: &Store) -> Vec<LocalAgent> {
         if out.iter().any(|a| same_path(&a.workspace, &workspace) && a.target == rec.uid.clone().filter(|u| !u.is_empty()).unwrap_or(rec.agent_id.clone())) {
             continue;
         }
-        let lead_def_id = def.and_then(|d| crate::backend::agent_seat::effective_seat(mstore, d)).and_then(|s| s.lead);
+        let steward = def.and_then(|d| crate::backend::agent_seat::effective_seat(mstore, d)).is_some_and(|seat| seat_is_steward(&seat));
         out.push(LocalAgent {
             target: rec.uid.clone().filter(|u| !u.is_empty()).unwrap_or(rec.agent_id.clone()),
             agent_id: rec.agent_id.clone(),
             name: def.map(|d| d.name.clone()).unwrap_or_else(|| rec.agent_id.clone()),
-            def_id: def.map(|d| d.id.clone()),
             workspace,
-            lead_def_id,
+            steward,
         });
     }
     out
 }
 
-/// The agents to tell and what to tell them: the owners of the `WARN_AGENTS` largest
-/// workspaces, and each one's leader, each once. `sizes` is `(workspace, bytes)` largest first.
-pub fn recipients(sizes: &[(PathBuf, u64)], agents: &[LocalAgent]) -> Vec<LocalAgent> {
+/// One workspace's build folders, as the note needs them.
+#[derive(Debug, Clone)]
+pub struct WorkspaceSize {
+    pub workspace: PathBuf,
+    pub target_bytes: u64,
+    pub incremental_bytes: u64,
+}
+
+/// The agents whose own workspace is large (build folders over `BIG_WORKSPACE`, or incremental
+/// caches over `BIG_INCREMENTAL`): they are the ones who can free the space, so they hear of it.
+/// A small workspace never does, however few others there are.
+pub fn big_owners(sizes: &[WorkspaceSize], agents: &[LocalAgent]) -> Vec<LocalAgent> {
     let mut out: Vec<LocalAgent> = Vec::new();
-    let add = |a: &LocalAgent, out: &mut Vec<LocalAgent>| {
-        if !out.iter().any(|o| o.target == a.target) {
-            out.push(a.clone());
-        }
-    };
-    for (workspace, _) in sizes.iter().take(WARN_AGENTS) {
-        for owner in agents.iter().filter(|a| same_path(&a.workspace, workspace)) {
-            add(owner, &mut out);
-            if let Some(lead) = owner.lead_def_id.as_ref().and_then(|l| agents.iter().find(|a| a.def_id.as_deref() == Some(l.as_str()))) {
-                add(lead, &mut out);
+    for s in sizes.iter().filter(|s| s.target_bytes >= dn::BIG_WORKSPACE || s.incremental_bytes >= dn::BIG_INCREMENTAL) {
+        for owner in agents.iter().filter(|a| same_path(&a.workspace, &s.workspace)) {
+            if !out.iter().any(|o| o.target == owner.target) {
+                out.push(owner.clone());
             }
         }
     }
     out
 }
 
-/// The note: how low the disk is, and the largest build folders with sizes.
-pub fn warning_text(free: u64, total: u64, sizes: &[bc::TargetSize], policy: &Policy) -> String {
-    let pct = if total > 0 { free as f64 * 100.0 / total as f64 } else { 0.0 };
-    let mut lines = vec![format!(
-        "[AgentMux] This computer's disk is running low: {} free of {} ({pct:.1}%), below the {} / {:.0}% warning level. Largest cargo build folders:",
-        bc::human(free),
-        bc::human(total),
-        bc::human(policy.warn_free_bytes),
-        policy.warn_free_pct
-    )];
-    for s in sizes.iter().take(6) {
-        lines.push(format!("- {} : {} ({} of it incremental)", s.clone.display(), bc::human(s.target_bytes), bc::human(s.incremental_bytes)));
+/// Whether `clone` is `workspace` itself or a folder in it.
+fn in_workspace(workspace: &Path, clone: &Path) -> bool {
+    same_path(workspace, clone) || inside(workspace, clone)
+}
+
+/// The stewards, each once: an agent with panes in two folders is listed twice by `local_agents`,
+/// and a critical note would start two turns for it.
+pub fn stewards(agents: &[LocalAgent]) -> Vec<&LocalAgent> {
+    let mut out: Vec<&LocalAgent> = Vec::new();
+    for a in agents.iter().filter(|a| a.steward) {
+        if !out.iter().any(|o| o.target == a.target) {
+            out.push(a);
+        }
     }
-    lines.push(
-        "AgentMux already clears an agent's incremental cache when it completes a task and prunes old incremental folders every hour. If you own one of these, delete the `target` folders of clones you are done with (only your own, by path)."
-            .to_string(),
-    );
-    lines.join("\n")
+    out
+}
+
+fn folder_line(s: &bc::TargetSize, owner: Option<&str>) -> String {
+    let who = owner.map_or(String::new(), |o| format!(" [{o}]"));
+    format!("- {} : {} ({} of it incremental){who}", s.clone.display(), bc::human(s.target_bytes), bc::human(s.incremental_bytes))
+}
+
+/// The note for one big workspace's owner: its own folders, largest first.
+fn owner_note(policy: &Policy, level: Level, free: u64, total: u64, agent: &LocalAgent, per_clone: &[bc::TargetSize]) -> String {
+    let own: Vec<String> = per_clone.iter().filter(|c| in_workspace(&agent.workspace, &c.clone)).take(6).map(|c| folder_line(c, None)).collect();
+    dn::note_text(policy, level, free, total, "Your largest cargo build folders:", &own)
+}
+
+/// The note for the host's steward: the largest folders on the computer, each with its owner.
+fn steward_note(policy: &Policy, level: Level, free: u64, total: u64, agents: &[LocalAgent], per_clone: &[bc::TargetSize]) -> String {
+    let all: Vec<String> = per_clone
+        .iter()
+        .take(6)
+        .map(|c| folder_line(c, agents.iter().find(|a| in_workspace(&a.workspace, &c.clone)).map(|a| a.name.as_str())))
+        .collect();
+    dn::note_text(policy, level, free, total, "Largest cargo build folders on this computer (owner in brackets):", &all)
+}
+
+/// Tells `agent`: a warning is held for its next turn, only a critical level starts one.
+fn tell(agent: &LocalAgent, level: Level, text: &str) -> bool {
+    let handler = crate::backend::reactive::get_global_handler();
+    let sent = if level == Level::Critical { handler.deliver_system_note(&agent.target, text) } else { handler.hold_system_note(&agent.target, HOLD_KEY, text) };
+    match sent {
+        Ok(()) => {
+            tracing::info!(agent = %agent.name, level = ?level, "build cache: low-disk note sent");
+            true
+        }
+        Err(e) => {
+            tracing::warn!(agent = %agent.name, error = %e, "build cache: low-disk note not delivered");
+            false
+        }
+    }
 }
 
 fn warn_marker() -> Option<PathBuf> {
     Some(dirs::home_dir()?.join(".agentmux").join("shared").join("locks").join("build-cache-warn"))
-}
-
-/// Whether a warning may go out now: none went out in the last hour. The marker file is shared
-/// by every AgentMux on the host.
-fn warning_due(marker: &Path, now: SystemTime) -> bool {
-    match std::fs::metadata(marker).and_then(|m| m.modified()) {
-        Ok(last) => now.duration_since(last).unwrap_or_default() >= WARN_EVERY,
-        Err(_) => true,
-    }
-}
-
-/// Records that a warning went out, so none follows for an hour. Only called once a note was
-/// delivered: a warning nobody received must not use up the hour.
-fn mark_warned(marker: &Path, now: SystemTime) -> bool {
-    if let Some(dir) = marker.parent() {
-        let _ = std::fs::create_dir_all(dir);
-    }
-    std::fs::write(marker, now.duration_since(SystemTime::UNIX_EPOCH).map_or(0, |d| d.as_secs()).to_string()).is_ok()
 }
 
 /// Whether a build runs in `clone`, looking at the machine's processes afresh each time: a pass
@@ -344,11 +366,21 @@ fn summary(r: &bc::Report) -> String {
     format!("removed {} build folders ({} freed){busy}", r.removed.len(), bc::human(r.bytes()))
 }
 
-/// One look at the disk: clean up when low, and warn if it is still low afterwards.
+fn unix_now() -> u64 {
+    SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map_or(0, |d| d.as_secs())
+}
+
+/// One look at the disk: clean up when low, and if it is still low and worse than at the last
+/// note (`disk_notice::should_send`), tell the agents who can free space.
 fn disk_check(mstore: &Store, policy: &Policy) {
     let Some(root) = agents_root() else { return };
     let Some((free, total)) = bc::disk_of(&root) else { return };
+    let marker = warn_marker();
     if !policy.is_low(free, total) {
+        // Back above the warning level with room to spare: the next drop is a new event.
+        if let Some(m) = marker.as_ref().filter(|_| dn::recovered(policy, free, total)) {
+            dn::clear_sent(m);
+        }
         return;
     }
     tracing::warn!(free = %bc::human(free), total = %bc::human(total), "build cache: the disk is low");
@@ -359,44 +391,55 @@ fn disk_check(mstore: &Store, policy: &Policy) {
     if !policy.is_low(free, total) {
         return;
     }
-    let Some(marker) = warn_marker() else { return };
-    let now = SystemTime::now();
-    if !warning_due(&marker, now) {
+    let Some(marker) = marker else { return };
+    let level = dn::level(policy, free, total);
+    let prev = dn::read_sent(&marker, free);
+    if !dn::should_send(prev.as_ref(), level, free, unix_now()) {
+        // The record keeps the worst level reached until the disk has recovered: free space that
+        // bounces across the critical line is one event, not a new wake-up each time it dips.
         return;
     }
     // The walk below reads every build folder: on a full disk, do not repeat it every check when
     // there was nobody to tell.
-    let now_s = now.duration_since(SystemTime::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    let now_s = unix_now();
     if now_s < NEXT_TRY.load(std::sync::atomic::Ordering::Relaxed) {
         return;
     }
     NEXT_TRY.store(now_s + RETRY_AFTER.as_secs(), std::sync::atomic::Ordering::Relaxed);
     let mut per_clone: Vec<bc::TargetSize> = Vec::new();
-    let mut per_workspace: Vec<(PathBuf, u64)> = Vec::new();
+    let mut sizes: Vec<WorkspaceSize> = Vec::new();
     for ws in workspaces(&root) {
-        let sizes = bc::target_sizes(&ws);
-        let sum: u64 = sizes.iter().map(|s| s.target_bytes).sum();
-        if sum > 0 {
-            per_workspace.push((ws, sum));
+        let clones = bc::target_sizes(&ws);
+        let target_bytes: u64 = clones.iter().map(|s| s.target_bytes).sum();
+        if target_bytes > 0 {
+            sizes.push(WorkspaceSize { workspace: ws, target_bytes, incremental_bytes: clones.iter().map(|s| s.incremental_bytes).sum() });
         }
-        per_clone.extend(sizes);
+        per_clone.extend(clones);
     }
-    per_workspace.sort_by(|a, b| b.1.cmp(&a.1));
+    sizes.sort_by(|a, b| b.target_bytes.cmp(&a.target_bytes));
     per_clone.sort_by(|a, b| b.target_bytes.cmp(&a.target_bytes));
-    let text = warning_text(free, total, &per_clone, policy);
-    let handler = crate::backend::reactive::get_global_handler();
-    let mut delivered = 0;
-    for r in recipients(&per_workspace, &local_agents(mstore)) {
-        match handler.deliver_system_note(&r.target, &text) {
-            Ok(()) => {
-                delivered += 1;
-                tracing::info!(agent = %r.name, "build cache: low-disk note sent");
-            }
-            Err(e) => tracing::warn!(agent = %r.name, error = %e, "build cache: low-disk note not delivered"),
+    let agents = local_agents(mstore);
+    let (mut attempted, mut delivered) = (0, 0);
+    // The steward gets the whole computer's summary, so an owner who is the steward is told once.
+    for owner in big_owners(&sizes, &agents).iter().filter(|a| !a.steward) {
+        attempted += 1;
+        if tell(owner, level, &owner_note(policy, level, free, total, owner, &per_clone)) {
+            delivered += 1;
         }
     }
-    if delivered > 0 {
-        mark_warned(&marker, SystemTime::now());
+    for steward in stewards(&agents) {
+        attempted += 1;
+        if tell(steward, level, &steward_note(policy, level, free, total, &agents, &per_clone)) {
+            delivered += 1;
+        }
+    }
+    if attempted == 0 {
+        // No workspace is large and no steward is here: nothing to say. That is handled, not a
+        // failure, so it is recorded and the folders are not walked again until the disk drops further.
+        tracing::info!("build cache: the disk is low but no agent has large build folders and no steward is here; nobody to tell");
+        dn::write_sent(&marker, &dn::Sent { level, free, at: unix_now() });
+    } else if delivered > 0 {
+        dn::write_sent(&marker, &dn::Sent { level, free, at: unix_now() });
     } else {
         tracing::warn!("build cache: the disk is low and no agent could be told; trying again in 30 minutes");
     }
@@ -478,55 +521,78 @@ pub fn install(mstore: Arc<Store>, config: Arc<ConfigState>) {
 mod tests {
     use super::*;
 
-    fn agent(target: &str, def: &str, ws: &str, lead: Option<&str>) -> LocalAgent {
-        LocalAgent {
-            target: target.into(),
-            agent_id: target.into(),
-            name: target.into(),
-            def_id: Some(def.into()),
-            workspace: PathBuf::from(ws),
-            lead_def_id: lead.map(str::to_string),
-        }
+    const GB: u64 = 1 << 30;
+
+    fn agent(target: &str, ws: &str, steward: bool) -> LocalAgent {
+        LocalAgent { target: target.into(), agent_id: target.into(), name: target.into(), workspace: PathBuf::from(ws), steward }
+    }
+
+    fn ws(path: &str, target_gb: f64, incremental_gb: f64) -> WorkspaceSize {
+        WorkspaceSize { workspace: PathBuf::from(path), target_bytes: (target_gb * GB as f64) as u64, incremental_bytes: (incremental_gb * GB as f64) as u64 }
+    }
+
+    fn clone_of(path: &str, target_gb: u64, incremental_gb: u64) -> bc::TargetSize {
+        bc::TargetSize { clone: PathBuf::from(path), target_bytes: target_gb * GB, incremental_bytes: incremental_gb * GB }
     }
 
     #[test]
-    fn the_largest_workspaces_owners_and_their_leaders_hear_of_it_once() {
-        let agents = vec![
-            agent("w1", "d-w1", "/a/w1", Some("d-lead")),
-            agent("w2", "d-w2", "/a/w2", Some("d-lead")),
-            agent("w3", "d-w3", "/a/w3", None),
-            agent("w4", "d-w4", "/a/w4", Some("d-lead")),
-            agent("lead", "d-lead", "/a/lead", None),
-        ];
-        let sizes = vec![(PathBuf::from("/a/w1"), 300), (PathBuf::from("/a/w2"), 200), (PathBuf::from("/a/w3"), 100), (PathBuf::from("/a/w4"), 50)];
-        let who: Vec<String> = recipients(&sizes, &agents).into_iter().map(|a| a.target).collect();
-        assert_eq!(who, ["w1", "lead", "w2", "w3"], "the top three, and their leader once; the fourth is not told");
-        assert!(recipients(&[], &agents).is_empty());
-        assert!(recipients(&[(PathBuf::from("/elsewhere"), 1)], &agents).is_empty(), "a workspace with no agent here");
+    fn only_an_owner_of_a_large_workspace_hears_of_it() {
+        // charlie's case: three agents with folders of 24.8, 14 and 3.5 GB (no incremental left).
+        let agents = vec![agent("parlo", "/a/parlo", false), agent("maricon", "/a/maricon", false), agent("opaz", "/a/opaz", false)];
+        let sizes = vec![ws("/a/parlo", 24.8, 1.0), ws("/a/maricon", 14.0, 0.5), ws("/a/opaz", 3.5, 0.0)];
+        let who: Vec<String> = big_owners(&sizes, &agents).into_iter().map(|a| a.target).collect();
+        assert_eq!(who, ["parlo", "maricon"], "the 3.5 GB folder with nothing incremental is not told");
     }
 
     #[test]
-    fn the_warning_names_folders_and_sizes() {
-        let sizes = vec![
-            bc::TargetSize { clone: PathBuf::from("/a/w1/agentmux"), target_bytes: 193 << 30, incremental_bytes: 155 << 30 },
-            bc::TargetSize { clone: PathBuf::from("/a/w2/agentmux"), target_bytes: 5 << 30, incremental_bytes: 1 << 30 },
-        ];
-        let text = warning_text(15 << 30, 1000 << 30, &sizes, &Policy::default());
-        assert!(text.starts_with("[AgentMux] This computer's disk is running low: 15.0 GB free of 1000 GB (1.5%)"), "{text}");
-        assert!(text.contains("- /a/w1/agentmux : 193 GB (155 GB of it incremental)"), "{text}");
-        assert!(text.contains("- /a/w2/agentmux : 5.0 GB (1.0 GB of it incremental)"), "{text}");
+    fn a_small_workspace_with_a_big_incremental_cache_is_told_and_the_line_is_exact() {
+        let agents = vec![agent("a", "/a/a", false), agent("b", "/a/b", false), agent("c", "/a/c", false)];
+        let sizes = vec![ws("/a/a", 9.9, 1.9), ws("/a/b", 10.0, 0.0), ws("/a/c", 6.0, 2.0)];
+        let who: Vec<String> = big_owners(&sizes, &agents).into_iter().map(|a| a.target).collect();
+        assert_eq!(who, ["b", "c"], "10 GB of build folders counts, 9.9 GB does not; 2 GB incremental counts, 1.9 does not");
+        assert!(big_owners(&[], &agents).is_empty());
+        assert!(big_owners(&[ws("/elsewhere", 50.0, 5.0)], &agents).is_empty(), "a workspace with no agent here");
     }
 
     #[test]
-    fn a_warning_goes_out_once_an_hour_for_the_whole_host() {
-        let t = tempfile::tempdir().unwrap();
-        let marker = t.path().join("locks").join("build-cache-warn");
-        let now = SystemTime::now();
-        assert!(warning_due(&marker, now), "none yet");
-        assert!(warning_due(&marker, now), "asking does not use the hour up: a warning nobody received must not");
-        assert!(mark_warned(&marker, now));
-        assert!(!warning_due(&marker, now + Duration::from_secs(1800)), "half an hour later: no");
-        assert!(warning_due(&marker, now + Duration::from_secs(2 * 3600)), "two hours later: yes");
+    fn two_agents_in_one_big_workspace_both_hear_of_it_once() {
+        let agents = vec![agent("a1", "/a/shared", false), agent("a2", "/a/shared", false), agent("a1", "/a/shared", false)];
+        let who: Vec<String> = big_owners(&[ws("/a/shared", 30.0, 0.0)], &agents).into_iter().map(|a| a.target).collect();
+        assert_eq!(who, ["a1", "a2"]);
+    }
+
+    #[test]
+    fn an_owner_is_told_of_its_own_folders_and_the_steward_of_all_with_their_owners() {
+        let agents = vec![agent("w1", "/a/w1", false), agent("w2", "/a/w2", false), agent("clamk", "/a/clamk", true)];
+        let per_clone = vec![clone_of("/a/w1/agentmux", 24, 3), clone_of("/a/w2/agentmux", 14, 1), clone_of("/a/w2", 3, 0)];
+        let p = Policy::default();
+        let own = owner_note(&p, Level::Warning, 43 * GB, 440 * GB, &agents[0], &per_clone);
+        assert!(own.contains("- /a/w1/agentmux : 24.0 GB (3.0 GB of it incremental)") || own.contains("- /a/w1/agentmux : 24 GB"), "{own}");
+        assert!(!own.contains("/a/w2"), "an owner is not told about other agents' folders: {own}");
+        let all = steward_note(&p, Level::Warning, 43 * GB, 440 * GB, &agents, &per_clone);
+        assert!(all.contains("/a/w1/agentmux") && all.contains("[w1]"), "{all}");
+        assert!(all.contains("[w2]"), "{all}");
+        assert!(all.contains("owner in brackets"), "{all}");
+        let w2 = owner_note(&p, Level::Warning, 43 * GB, 440 * GB, &agents[1], &per_clone);
+        assert!(w2.contains("- /a/w2 :"), "a clone that is the workspace itself counts as in it: {w2}");
+    }
+
+    #[test]
+    fn a_steward_with_panes_in_two_folders_is_told_once() {
+        let agents = vec![agent("clamk", "/a/clamk", true), agent("w1", "/a/w1", false), agent("clamk", "/a/clamk-2", true)];
+        let who: Vec<&str> = stewards(&agents).into_iter().map(|a| a.target.as_str()).collect();
+        assert_eq!(who, ["clamk"]);
+        assert!(stewards(&[agent("w1", "/a/w1", false)]).is_empty());
+    }
+
+    #[test]
+    fn a_seat_that_names_a_steward_makes_a_steward() {
+        use crate::registry::AgentSeat;
+        let seat = |q: Option<&str>, area: Option<&str>| AgentSeat { role: "worker".into(), qualifier: q.map(str::to_string), area: area.map(str::to_string), ..Default::default() };
+        assert!(seat_is_steward(&seat(Some("Steward"), None)));
+        assert!(seat_is_steward(&seat(None, Some("narko's steward (see below); tasks AgentY gives it"))));
+        assert!(!seat_is_steward(&seat(Some("product"), Some("agent pane, identity, accounts"))));
+        assert!(!seat_is_steward(&seat(None, None)));
     }
 
     #[test]

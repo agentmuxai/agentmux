@@ -12,6 +12,33 @@
     max-width: 45%;
 }
 
+// In a narrow pane the dock is the overlay: it lies over the conversation along the pane's right edge, like the
+// Kanban's task drawer (the kit's SidePanel is positioned against the pane's view), and is gone until opened.
+.messages-dock--overlay {
+    position: absolute;
+    z-index: var(--z-pane-overlay);
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(440px, 92%);
+    max-width: none;
+
+    .ui-side-panel--docked {
+        width: 100%;
+        box-shadow: -8px 0 24px rgb(0 0 0 / 25%);
+    }
+}
+
+.messages-dock--idle {
+    display: none;
+}
+
+.messages-header-button {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+}
+
 .messages-panel {
     // The shell scrolls its own body; here the list scrolls and the head, filter and Needs-you strip stay put.
     overflow: hidden;
@@ -28,10 +55,11 @@
     flex-shrink: 0;
     min-width: 0;
 
-    // The filter gives way before the button does, and the button never breaks: in a narrow pane the two stack.
+    // The filter gives way before the button does, but never below its label, and the button never breaks: in a
+    // narrow panel the two stack.
     > :first-child {
         flex: 1 1 8ch;
-        min-width: 0;
+        min-width: 9ch;
     }
     > :last-child {
         white-space: nowrap;

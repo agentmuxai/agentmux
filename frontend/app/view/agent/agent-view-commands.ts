@@ -10,7 +10,7 @@
 import { commandRegistry } from "@/app/store/command-registry";
 import { getFocusedBlockId } from "@/app/store/block-component-registry";
 import { agentViewControls } from "./agent-view-controls";
-import { messagesEnabled, setMessagesEnabled } from "./messages/messages-state";
+import { messagesControlsFor, messagesEnabled, setMessagesEnabled } from "./messages/messages-state";
 import { PRESET_LABEL, PRESET_NAMES } from "./virtualization/verbosity";
 
 export function registerAgentViewCommands(): () => void {
@@ -58,6 +58,19 @@ export function registerAgentViewCommands(): () => void {
             keywords: "messages jekts incoming panel side inbox",
             when: () => focused() !== undefined && !messagesEnabled(getFocusedBlockId()),
             execute: () => setMessagesEnabled(getFocusedBlockId(), true),
+        }),
+        // A narrow pane's header can shed the Messages button: the palette opens the overlay too.
+        commandRegistry.register({
+            id: "agent:messages:open",
+            label: "Agent: Open messages panel",
+            category: "Agent",
+            icon: "inbox",
+            keywords: "messages jekts incoming panel overlay open inbox",
+            when: () => {
+                const c = messagesControlsFor(getFocusedBlockId());
+                return focused() !== undefined && !!c && c.state().enabled && c.narrow() && !c.overlayOpen();
+            },
+            execute: () => messagesControlsFor(getFocusedBlockId())?.setOverlayOpen(true),
         }),
         commandRegistry.register({
             id: "agent:messages:hide",
