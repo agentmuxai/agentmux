@@ -35,6 +35,23 @@ describe("a window modal from a file that is not in KEEP", () => {
         expect(rules("frontend/app/view/a.tsx", src)).toEqual(["confirmModal:1", "confirmModal:3"]);
     });
 
+    it("reads a scope after an arrow function in an earlier prop (a correctly scoped modal is not flagged)", () => {
+        expect(rules("frontend/app/view/a.tsx", '<ConfirmModal onConfirm={() => go()} scope="pane" />')).toEqual([]);
+        expect(rules("frontend/app/view/a.tsx", '<ConfirmModal onConfirm={() => go()} title="x" />')).toEqual(["confirmModal:1"]);
+        expect(rules("frontend/app/view/a.tsx", '<ConfirmModal onConfirm={() => setScope("pane")} />')).toEqual(["confirmModal:1"]);
+    });
+
+    it("does not mistake a // or /* inside a string for a comment, so a call after it is still seen", () => {
+        expect(rules("frontend/app/view/a.ts", 'const u = "a//b"; openModal(X);')).toEqual(["openModal:1"]);
+        expect(rules("frontend/app/view/a.ts", 'const g = "**/*.ts"; openModal(X);')).toEqual(["openModal:1"]);
+        expect(rules("frontend/app/view/a.ts", "const t = `//${x}`; openModal(X);")).toEqual(["openModal:1"]);
+    });
+
+    it("an apostrophe in JSX text does not swallow the code after it", () => {
+        const src = ["<p>Don't allow</p>", "openModal(X);", "// it's fine", ""].join("\n");
+        expect(rules("frontend/app/view/a.tsx", src)).toEqual(["openModal:2"]);
+    });
+
     it("flags an explicit window scope, as a prop and as an option", () => {
         expect(rules("frontend/app/view/a.tsx", '<Modal scope="window" />\nopen({ scope: "window" });')).toEqual([
             "windowScope:1",

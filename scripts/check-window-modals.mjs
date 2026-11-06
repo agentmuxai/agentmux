@@ -52,16 +52,74 @@ const SCRIPT_EXT = new Set([".ts", ".tsx", ".js", ".jsx"]);
 const isTest = (path) => /\.test\.[cm]?[jt]sx?$/.test(path) || path.includes("/__tests__/");
 const lineAt = (text, index) => text.slice(0, index).split("\n").length;
 
-/** `text` with comments blanked out (newlines kept, so line numbers hold). */
+const NEWLINE = String.fromCharCode(10);
+const blank = (s) => s.replace(/[^\n]/g, " ");
+
+/**
+ * `text` with comments blanked out (newlines kept, so line numbers hold). Strings and template literals are
+ * skipped over, so a `//` or `/*` inside one starts no comment. (A regex literal holding a quote can still
+ * fool it; none in frontend/ does.)
+ */
 export function stripComments(text) {
-    return text
-        .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " "))
-        .replace(/(^|[^:\\])\/\/[^\n]*/g, (m, p) => p + " ".repeat(m.length - p.length));
+    let out = "";
+    let i = 0;
+    while (i < text.length) {
+        const c = text[i];
+        const next = text[i + 1];
+        if (c === "/" && next === "/") {
+            const end = text.indexOf("\n", i);
+            const stop = end === -1 ? text.length : end;
+            out += blank(text.slice(i, stop));
+            i = stop;
+        } else if (c === "/" && next === "*") {
+            const end = text.indexOf("*/", i + 2);
+            const stop = end === -1 ? text.length : end + 2;
+            out += blank(text.slice(i, stop));
+            i = stop;
+        } else if (c === '"' || c === "'" || c === "`") {
+            // A quoted string ends on its line (an apostrophe in JSX text is not one); a template may run on.
+            let j = i + 1;
+            while (j < text.length && text[j] !== c && (c === "`" || text[j] !== NEWLINE)) j += text[j] === "\\" ? 2 : 1;
+            out += text.slice(i, j + 1);
+            i = j + 1;
+        } else {
+            out += c;
+            i++;
+        }
+    }
+    return out;
+}
+
+/** Where the JSX tag that opens at `start` (the `<`) ends: its first `>` outside braces and quotes. */
+function tagEnd(code, start) {
+    let depth = 0;
+    for (let i = start + 1; i < code.length; i++) {
+        const c = code[i];
+        if (c === '"' || c === "'" || c === "`") {
+            i++;
+            while (i < code.length && code[i] !== c && (c === "`" || code[i] !== NEWLINE)) i += code[i] === "\\" ? 2 : 1;
+        } else if (c === "{") depth++;
+        else if (c === "}") depth--;
+        else if (c === ">" && depth === 0) return i;
+    }
+    return code.length;
+}
+
+/** The `<ConfirmModal` tags in `code` that name no `scope`, as `{ index }`. */
+function unscopedConfirmModals(code) {
+    const out = [];
+    for (const m of code.matchAll(/<ConfirmModal\b/g)) {
+        const attrs = code.slice(m.index, tagEnd(code, m.index));
+        // Top level only: blank what sits inside braces, so `onConfirm={() => scope="x"}` does not count.
+        let depth = 0;
+        const top = [...attrs].map((c) => (c === "{" ? (depth++, " ") : c === "}" ? (depth--, " ") : depth > 0 ? " " : c)).join("");
+        if (!/\bscope\s*=/.test(top)) out.push({ index: m.index });
+    }
+    return out;
 }
 
 const KINDS = [
     ["openModal", /(?<![.\w])openModal\s*\(|\bmodalsModel\.openModal\s*\(/g],
-    ["confirmModal", /<ConfirmModal\b(?![^>]*\bscope=)/g],
     ["windowScope", /\bscope\s*[=:]\s*\{?\s*["']window["']/g],
 ];
 const FORBIDDEN = [/\bwindow\.(?:confirm|alert|prompt)\s*\(/g];
@@ -77,9 +135,14 @@ export function scan(text) {
             hits.push({ kind, line: lineAt(code, m.index) });
         }
     }
+    for (const { index } of unscopedConfirmModals(code)) {
+        counts.confirmModal = (counts.confirmModal ?? 0) + 1;
+        hits.push({ kind: "confirmModal", line: lineAt(code, index) });
+    }
     for (const re of FORBIDDEN) {
         for (const m of code.matchAll(re)) hits.push({ kind: "freezes-renderer", line: lineAt(code, m.index) });
     }
+    hits.sort((a, b) => a.line - b.line);
     return { counts, hits };
 }
 
