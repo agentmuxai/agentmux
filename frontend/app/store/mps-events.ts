@@ -184,6 +184,7 @@ export const WpsEvent = {
     // No-payload signals typed in srv that nothing subscribes to yet.
     AgentContentChanged: "agentcontent:changed",
     AgentHistoryChanged: "agenthistory:changed",
+    HistorySessionsChanged: "history:sessions:changed",
     AgentSkillsChanged: "agentskills:changed",
     DronesChanged: "drones:changed",
     NamedAgentsChanged: "namedagents:changed",
