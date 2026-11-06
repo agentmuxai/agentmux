@@ -51,6 +51,11 @@
 }
 
 // Routes are in order, best first: show the numbers.
+// A flex item draws no marker, so the numbered list keeps its items as list items.
 .skill-app-list--ordered {
     list-style: decimal;
+
+    li {
+        display: list-item;
+    }
 }
