@@ -33,7 +33,6 @@ impl Act<'_> {
         self.state.work_store.work_board_get(&id).map_err(|e| e.to_string())?.ok_or_else(|| "no such task".to_string())
     }
 
-
     pub(super) fn create(&self) -> Result<Value, String> {
         let Act { state, req, regs, now, .. } = *self;
         let title = req.title.as_deref().map(str::trim).filter(|t| !t.is_empty()).ok_or("a title is required")?;
