@@ -1,0 +1,9 @@
+loadRuns j1 before=- limit=50
+loadRuns j1 before=861000000 limit=50
+loadRuns j1 before=858060000 limit=50
+rows: 120
+loadRuns j1 before=- limit=120
+rows after poll: 120
+loadRuns j1 before=- limit=120
+rows after change: 121 first=9d ago
+cap 200

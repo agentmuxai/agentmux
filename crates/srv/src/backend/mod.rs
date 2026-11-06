@@ -75,6 +75,7 @@ pub mod providers;
 pub mod cli_download;
 pub mod cli_install;
 pub mod cli_prune;
+pub mod cli_uninstall;
 pub mod cli_uv;
 pub mod cli_notice;
 pub mod startup_files;
@@ -199,6 +200,8 @@ pub mod kanban;
 pub mod task_media;
 /// The wake at an out-of-quota agent's reset (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §7).
 pub mod limit_wake;
+/// Model routes and the gateway that carries an agent's model traffic (SPEC_AGENT_MODEL_ROUTES_ANY_MODEL_SPAWN_AND_SWITCH_2026_11_06.md).
+pub mod model_gateway;
 /// Which model a Claude agent's sub-agents run on (SPEC_SUBAGENT_MODELS_2026_10_25.md).
 pub mod subagent_model;
 /// An agent accepting or sending back a task in Review.

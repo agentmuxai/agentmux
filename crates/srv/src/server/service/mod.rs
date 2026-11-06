@@ -29,6 +29,8 @@ mod layout_intents_tests;
 mod pane_tab_command_tests;
 mod misc;
 mod object;
+#[cfg(test)]
+mod object_tests;
 pub(crate) mod object_helpers;
 pub(crate) mod reducer_helpers;
 pub(crate) mod session_restore;

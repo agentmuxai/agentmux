@@ -100,9 +100,14 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
     // segment is what keeps other pages out. Full router only, never the LAN.
     let widget_files = widget_files_routes();
 
+    // The model gateway: an agent's harness calls it with its gateway token, which the handler checks
+    // itself. Full router only; a container reaches it through the container listener.
+    let model_gateway = Router::new().route("/api/v1/model/:route/*tail", axum::routing::any(super::model_gateway_handlers::handle_model_gateway));
+
     let full = Router::new()
         .merge(full_health)
         .merge(widget_files)
+        .merge(model_gateway)
         .merge(whatsapp_webhooks)
         .merge(lan_forward_routes)
         .merge(authed_routes);
@@ -443,6 +448,7 @@ fn service_shell_and_vault_routes() -> Router<AppState> {
         .route("/api/v1/vault", get(super::vault_handlers::handle_vault_list))
         .route("/api/v1/vault/list", post(super::vault_handlers::handle_vault_list_for))
         .route("/api/v1/vault/generate", post(super::vault_handlers::handle_vault_generate))
+        .route("/api/v1/vault/history", post(super::vault_handlers::handle_vault_history))
         .route("/api/v1/vault/rotate", post(super::vault_rotate::handle_vault_rotate))
         .route("/api/v1/vault/request", post(super::vault_handlers::handle_vault_request))
         .route("/api/v1/vault/on_screen", get(super::vault_handlers::handle_vault_on_screen))

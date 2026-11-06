@@ -1,0 +1,240 @@
+-- every kind
+<div>
+  <div class="settings-section-body widgets-section">
+    <div data-stand="WidgetBarSettings">
+    <div class="settings-subheader">
+      "Widgets"
+    <div class="setting-row" id="setting-widgets.installed">
+      <div class="setting-devices-description">
+        "Widgets add your own kinds of pane. A widget runs only after you approve it here, and asks again whenever its files change."
+      <div class="widgets-toolbar">
+        <button type="button" class="ui-button ui-tone-neutral">
+          <i aria-hidden="true" class="fa-solid fa-plus">
+          "Install…"
+        <button type="button" class="ui-button ui-tone-neutral">
+          <i aria-hidden="true" class="fa-solid fa-rotate">
+          "Rescan"
+        <button type="button" class="ui-button ui-tone-neutral">
+          <i aria-hidden="true" class="fa-solid fa-folder-open">
+          "Open widgets folder"
+      <div class="setting-devices-description">
+        "Pick a package's widget.json, or a .zip. To write your own, start from a sample in docs/examples/widgets."
+      <div data-stand="WidgetCatalog">
+        <span data-cb="onInstalled">
+          "installed"
+      <div class="widgets-list">
+        <div class="widget-row" data-widget-id="acme.notes">
+          <div class="widget-row-head">
+            <i class="fa-solid fa-note-sticky">
+            <span class="widget-row-name">
+              "Notes"
+            <span class="widget-row-version">
+              "1.0.0"
+            <span class="widget-row-kind">
+              "sandboxed"
+            <span class="widget-row-state state-needs_approval">
+              "Waiting for your approval"
+          <div class="widget-row-description">
+            "A scratchpad"
+          <div class="widget-row-signature">
+            "Not signed"
+          <div class="widget-row-permissions">
+            "Keep its own data on this computer · Connect to https://api.github.com · Send messages to your agents. An agent acts on what it's told, so only allow this for a widget you trust."
+          <div class="widget-row-actions">
+            <button type="button" class="ui-button ui-tone-accent">
+              "Approve"
+            <button type="button" class="ui-button ui-tone-neutral">
+              <i aria-hidden="true" class="fa-solid fa-folder-open">
+              "Show folder"
+            <button type="button" class="ui-button ui-tone-danger">
+              "Uninstall"
+        <div class="widget-row" data-widget-id="acme.on">
+          <div class="widget-row-head">
+            <i class="fa-solid fa-note-sticky">
+            <span class="widget-row-name">
+              "On one"
+            <span class="widget-row-version">
+              "1.0.0"
+            <span class="widget-row-kind">
+              "sandboxed"
+            <span class="widget-row-state state-approved">
+              "On"
+          <div class="widget-row-description">
+            "A scratchpad"
+          <div class="widget-row-signature">
+            "Signed by acme · ab:cd"
+          <div class="widget-row-permissions">
+            "Keep its own data on this computer · Connect to https://api.github.com · Send messages to your agents. An agent acts on what it's told, so only allow this for a widget you trust."
+          <div class="widget-row-actions">
+            <button type="button" class="ui-button ui-tone-neutral">
+              "Turn off"
+            <button type="button" class="ui-button ui-tone-neutral">
+              <i aria-hidden="true" class="fa-solid fa-folder-open">
+              "Show folder"
+            <button type="button" class="ui-button ui-tone-danger">
+              "Uninstall"
+        <div class="widget-row" data-widget-id="acme.off">
+          <div class="widget-row-head">
+            <i class="fa-solid fa-note-sticky">
+            <span class="widget-row-name">
+              "Off one"
+            <span class="widget-row-version">
+              "1.0.0"
+            <span class="widget-row-kind">
+              "sandboxed"
+            <span class="widget-row-state state-disabled">
+              "Off"
+          <div class="widget-row-signature">
+            "Signed by acme · ef:01"
+          <div class="widget-row-permissions">
+            "Keep its own data on this computer · Connect to https://api.github.com · Send messages to your agents. An agent acts on what it's told, so only allow this for a widget you trust."
+          <div class="widget-row-actions">
+            <button type="button" class="ui-button ui-tone-neutral">
+              "Turn on"
+            <button type="button" class="ui-button ui-tone-neutral">
+              <i aria-hidden="true" class="fa-solid fa-folder-open">
+              "Show folder"
+            <button type="button" class="ui-button ui-tone-danger">
+              "Uninstall"
+        <div class="widget-row" data-widget-id="acme.changed">
+          <div class="widget-row-head">
+            <i class="fa-solid fa-note-sticky">
+            <span class="widget-row-name">
+              "Changed one"
+            <span class="widget-row-version">
+              "1.0.0"
+            <span class="widget-row-kind">
+              "sandboxed"
+            <span class="widget-row-state state-changed">
+              "Changed since you approved it"
+          <div class="widget-row-description">
+            "A scratchpad"
+          <div class="widget-row-signature warning">
+            "Signed by another key than acme's (99:99)"
+          <div class="widget-row-permissions">
+            "Keep its own data on this computer · Connect to https://api.github.com · Send messages to your agents. An agent acts on what it's told, so only allow this for a widget you trust."
+          <div class="widget-row-actions">
+            <button type="button" class="ui-button ui-tone-accent">
+              "Review and approve"
+            <button type="button" class="ui-button ui-tone-neutral">
+              <i aria-hidden="true" class="fa-solid fa-folder-open">
+              "Show folder"
+            <button type="button" class="ui-button ui-tone-danger">
+              "Uninstall"
+        <div class="widget-row" data-widget-id="acme.unsigned-other">
+          <div class="widget-row-head">
+            <i class="fa-solid fa-note-sticky">
+            <span class="widget-row-name">
+              "Unsigned unlike"
+            <span class="widget-row-version">
+              "1.0.0"
+            <span class="widget-row-kind">
+              "sandboxed"
+            <span class="widget-row-state state-approved">
+              "On"
+          <div class="widget-row-description">
+            "A scratchpad"
+          <div class="widget-row-signature warning">
+            "Not signed, unlike acme's other widgets"
+          <div class="widget-row-permissions">
+            "Keep its own data on this computer · Connect to https://api.github.com · Send messages to your agents. An agent acts on what it's told, so only allow this for a widget you trust."
+          <div class="widget-row-actions">
+            <button type="button" class="ui-button ui-tone-neutral">
+              "Turn off"
+            <button type="button" class="ui-button ui-tone-neutral">
+              <i aria-hidden="true" class="fa-solid fa-folder-open">
+              "Show folder"
+            <button type="button" class="ui-button ui-tone-danger">
+              "Uninstall"
+        <div class="widget-row" data-widget-id="acme.broken">
+          <div class="widget-row-head">
+            <i class="fa-solid fa-note-sticky">
+            <span class="widget-row-name">
+              "Broken one"
+            <span class="widget-row-version">
+              "1.0.0"
+            <span class="widget-row-kind">
+              "sandboxed"
+            <span class="widget-row-state state-invalid">
+              "Can't be loaded"
+          <div class="widget-row-description">
+            "A scratchpad"
+          <div class="settings-config-error">
+            "Could not start"
+          <div class="widget-row-signature">
+            "Not signed"
+          <div class="widget-row-actions">
+            <button type="button" class="ui-button ui-tone-neutral">
+              <i aria-hidden="true" class="fa-solid fa-folder-open">
+              "Show folder"
+            <button type="button" class="ui-button ui-tone-danger">
+              "Uninstall"
+        <div class="widget-row" data-widget-id="acme.errored">
+          <div class="widget-row-head">
+            <i class="fa-solid fa-note-sticky">
+            <span class="widget-row-name">
+              "Errored one"
+            <span class="widget-row-version">
+              "1.0.0"
+            <span class="widget-row-kind">
+              "sandboxed"
+            <span class="widget-row-state state-invalid">
+              "Can't be loaded"
+          <div class="widget-row-description">
+            "A scratchpad"
+          <div class="settings-config-error">
+            "Bad manifest"
+          <div class="widget-row-signature">
+            "Not signed"
+          <div class="widget-row-permissions">
+            "Keep its own data on this computer · Connect to https://api.github.com · Send messages to your agents. An agent acts on what it's told, so only allow this for a widget you trust."
+          <div class="widget-row-actions">
+            <button type="button" class="ui-button ui-tone-neutral">
+              <i aria-hidden="true" class="fa-solid fa-folder-open">
+              "Show folder"
+            <button type="button" class="ui-button ui-tone-danger">
+              "Uninstall"
+        <div class="widget-row" data-widget-id="acme.trusted">
+          <div class="widget-row-head">
+            <i class="fa-solid fa-note-sticky">
+            <span class="widget-row-name">
+              "Trusted one"
+            <span class="widget-row-version">
+              "1.0.0"
+            <span class="widget-row-kind">
+              "trusted"
+            <span class="widget-row-state state-approved">
+              "On"
+          <div class="widget-row-description">
+            "A scratchpad"
+          <div class="widget-row-signature">
+            "Not signed"
+          <div class="widget-row-actions">
+            <button type="button" class="ui-button ui-tone-neutral">
+              "Turn off"
+            <button type="button" class="ui-button ui-tone-neutral">
+              <i aria-hidden="true" class="fa-solid fa-folder-open">
+              "Show folder"
+        <div class="widget-row" data-widget-id="acme.noperm">
+          <div class="widget-row-head">
+            <i class="fa-solid fa-note-sticky">
+            <span class="widget-row-name">
+              "No permissions"
+            <span class="widget-row-version">
+              "1.0.0"
+            <span class="widget-row-kind">
+              "sandboxed"
+            <span class="widget-row-state state-approved">
+              "On"
+          <div class="widget-row-description">
+            "A scratchpad"
+          <div class="widget-row-signature">
+            "Not signed"
+          <div class="widget-row-actions">
+            <button type="button" class="ui-button ui-tone-neutral">
+              "Turn off"
+            <button type="button" class="ui-button ui-tone-neutral">
+              <i aria-hidden="true" class="fa-solid fa-folder-open">
+              "Show folder"
+            <button type="button" class="ui-button ui-tone-danger">
+              "Uninstall"

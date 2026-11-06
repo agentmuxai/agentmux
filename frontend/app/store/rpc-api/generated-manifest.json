@@ -744,6 +744,10 @@
             "method": "InstallStartCommand"
         },
         {
+            "command": "install.uninstall",
+            "method": "InstallUninstallCommand"
+        },
+        {
             "command": "installtool",
             "method": "InstallToolCommand"
         },

@@ -421,3 +421,19 @@ export function scrollTranscriptTo(scroller: HTMLElement, top: number, behavior:
 export function scrollTranscriptBy(scroller: HTMLElement, delta: number): void {
     scroller.scrollTop += delta; // perf:allow-layout-read — the caller's own move, never in a frame loop
 }
+
+/**
+ * Move the Messages panel's list to `top`. The panel's list is a scroller of its own, and a second place that wrote
+ * scroll positions would break the rule that makes "who moved it" answerable, so its moves come through here, next to
+ * the transcript's. The list has no follower: it stays at its tail by being moved to the end when a message arrives
+ * while the reader is there.
+ */
+export function scrollMessagesTo(scroller: HTMLElement, top: number, behavior: "auto" | "smooth" = "auto"): void {
+    if (behavior === "smooth") scroller.scrollTo({ top, behavior });
+    else scroller.scrollTop = top;
+}
+
+/** Move the Messages panel's list by `delta` unzoomed CSS px. */
+export function scrollMessagesBy(scroller: HTMLElement, delta: number): void {
+    scroller.scrollTop += delta; // perf:allow-layout-read — the caller's own move, never in a frame loop
+}

@@ -151,6 +151,12 @@ fn entry_ops(store: &crate::backend::storage::store::Store, op: &str, body: &Val
         }
         // An entry's earlier values, and putting one back (spec §4.4 of the generate spec).
         "versions" => Ok((json!({ "versions": vault::versions::list(store, &s("id"))? }), false)),
+        // An entry's history, and whether the record of it still holds together (the History dialog).
+        "history" => {
+            let limit = body.get("limit").and_then(Value::as_i64).unwrap_or(500);
+            Ok((json!({ "history": vault::history::history_for(store, &s("id"), vault::history::Asker::Person, limit)? }), false))
+        }
+        "history_check" => Ok((json!({ "chain": vault::history::check(store)? }), false)),
         _ => {
             let seq = body.get("seq").and_then(Value::as_i64).ok_or("restore needs the version's seq")?;
             vault::versions::restore(store, &s("id"), seq)?;
@@ -220,7 +226,7 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
                 vault::delete(&store, id)?;
                 Ok((json!({}), true))
             }
-            "vault_create" | "vault_update" | "vault_delete" | "move_entry" | "signin_vault" | "versions" | "restore" => entry_ops(&store, &op, &body),
+            "vault_create" | "vault_update" | "vault_delete" | "move_entry" | "signin_vault" | "versions" | "restore" | "history" | "history_check" => entry_ops(&store, &op, &body),
             "decline_request" => {
                 let id = body.get("request_id").and_then(Value::as_str).unwrap_or("");
                 if let Some(req) = requests::requests().get(id) {
@@ -419,6 +425,35 @@ pub(crate) struct GenerateBody {
     /// The asking agent's signed identity: the record names it, so it must be proven.
     #[serde(default)]
     auth: Option<agentmux_common::api_types::UiAutomationAuth>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct HistoryBody {
+    id: String,
+    #[serde(default)]
+    limit: Option<i64>,
+    #[serde(default)]
+    auth: Option<agentmux_common::api_types::UiAutomationAuth>,
+}
+
+/// `POST /api/v1/vault/history`: an entry's history (who did what, when, under which version, and why), for an
+/// entry in a Vault the proven agent may use. It holds no value
+/// (docs/specs/SPEC_VAULT_PARITY_ENTRY_HISTORY_REASONS_AND_IMPORT_2026_11_06.md §5.3).
+pub(crate) async fn handle_vault_history(State(state): State<AppState>, Json(body): Json<HistoryBody>) -> Response {
+    let (agent, pane) = asking_agent(&state, body.auth.as_ref());
+    let proven = pane.is_some();
+    let store = state.identity_store.clone();
+    let limit = body.limit.unwrap_or(100);
+    let asked = tokio::task::spawn_blocking(move || {
+        let agent = proven.then_some(agent.as_str());
+        vault::history::history_for(&store, &body.id, vault::history::Asker::Agent(agent), limit)
+    })
+    .await;
+    match asked {
+        Ok(Ok(rows)) => Json(json!({ "history": rows })).into_response(),
+        Ok(Err(e)) => error(StatusCode::NOT_FOUND, e),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
 }
 
 /// `POST /api/v1/vault/generate`: a new entry whose value the Vault makes

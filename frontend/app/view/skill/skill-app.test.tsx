@@ -119,7 +119,7 @@ describe("App skill status", () => {
         const older = app({ verified: [record({ skillVersion: "0.9.0" })] });
         expect(appStatus(older as never, "windows")).toEqual({ tone: "idle", label: "not tested yet" });
         expect(recordsFor(older as never, "windows")).toEqual([]);
-        expect(appStatus(app() as never, "macos")).toEqual({ tone: "idle", label: "tested on windows only" });
+        expect(appStatus(app({ platforms: ["windows", "macos"] }) as never, "macos")).toEqual({ tone: "idle", label: "tested on windows only" });
     });
 
     it("says how many reference crops were taken on an older app version than the last pass", () => {
@@ -130,6 +130,11 @@ describe("App skill status", () => {
         expect(referenceDrift(a as never, "windows")).toBe("1 of 2 references were taken on 16.0; the last pass was on 16.1");
         expect(referenceDrift(app() as never, "windows")).toBeNull();
         expect(referenceDrift(app({ references: [] }) as never, "windows")).toBeNull();
+    });
+
+    it("a skill for another platform's app says so instead of 'not tested yet'", () => {
+        expect(appStatus(app() as never, "macos")).toEqual({ tone: "idle", label: "for windows only" });
+        expect(appStatus(app({ platforms: [] }) as never, "macos").label).toBe("tested on windows only");
     });
 
     it("the App filter keeps only the skills with a manifest", () => {
@@ -147,8 +152,12 @@ describe("Memory > Skills with an App skill", () => {
         expect(cards).toHaveLength(2);
         const word = cards.find((c) => c.textContent?.includes("acme-word"))!;
         expect(word.textContent).toContain("App skill");
-        expect(word.textContent).toContain("Acme · verified 16.0");
+        expect(word.textContent).toContain("Acme");
+        expect(word.textContent).toContain("verified 16.0");
         expect(word.textContent).toContain("route: api");
+        // The status dot is the card's own, and there is no second badge to collide with it.
+        expect(word.querySelector(".ui-card-badge")).toBeNull();
+        expect(word.querySelector(".ui-status-dot")).not.toBeNull();
         const pdf = cards.find((c) => c.textContent?.includes("pdf-extraction"))!;
         expect(pdf.textContent).not.toContain("App skill");
     });
@@ -175,10 +184,11 @@ describe("Memory > Skills with an App skill", () => {
         expect(within(detail).getByText(/Published by acme/)).toBeTruthy();
         const routes = within(detail).getByRole("list", { name: "Routes" });
         expect(routes.textContent).toContain("api COM");
+        expect(routes.className).toContain("skill-app-list--ordered");
         const files = within(detail).getByRole("list", { name: "Files" });
         expect(files.textContent).toContain("controls.md");
         expect(files.textContent).toContain("2.0 KB");
-        expect(files.textContent).toContain("not approved: never given to an agent");
+        expect(files.textContent).toContain("not approved");
         expect(files.textContent).not.toContain("ribbon.png");
         expect(within(detail).getByRole("list", { name: "Tests" }).textContent).toContain("16.0 on windows");
         expect(within(detail).getByRole("list", { name: "Reference crops" }).textContent).toContain("the Home tab");

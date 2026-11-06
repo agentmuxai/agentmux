@@ -1,0 +1,4 @@
+set agent:subagentmodel "opus"
+set agent:subagentmodel null
+set agent:exploremodel "claude-haiku-4-5"
+set agent:exploremodel null

@@ -17,6 +17,7 @@ import { computeMoveNode } from "./layoutTree";
 import type { LayoutModel } from "./layoutModel";
 import { placementDirection, showPlacement, sideOfDirection, type PlacementSide } from "./placementPreview";
 import {
+    DefaultNodeSize,
     DropDirection,
     FlexDirection,
     LayoutTreeActionType,
@@ -32,9 +33,13 @@ export type PillZone =
     /** The pill becomes its own pane on `side` of this one, shown by the ghost for `direction`. */
     | { kind: "place"; direction: DropDirection; side: PlacementSide };
 
-/** The stand-in for a pill in a preview: a leaf that is in no tree, as a pane from another tab is. */
+/**
+ * The stand-in for a pill in a preview: a leaf that is in no tree, as a pane from another tab is. It
+ * carries a size like any leaf: a move into a tree it is not in keeps the size it brought, and without
+ * one the previewed layout gives it no extent, so the ghost is a 2 px line.
+ */
 export function pillStandIn(blockId: string): LayoutNode {
-    return { id: `pill:${blockId}`, data: { blockId } } as LayoutNode;
+    return { id: `pill:${blockId}`, data: { blockId }, size: DefaultNodeSize } as LayoutNode;
 }
 
 export interface PillZoneInput {

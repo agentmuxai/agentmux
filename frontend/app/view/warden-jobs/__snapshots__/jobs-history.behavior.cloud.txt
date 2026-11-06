@@ -1,0 +1,54 @@
+loadRuns c1 before=- limit=50
+-- cloud job
+<div>
+  <section class="warden-jobs-history" aria-label="Runs of Nightly build">
+    <header class="warden-jobs-history-head">
+      <div class="warden-jobs-history-title">
+        <strong>
+          "Nightly build"
+        <span class="ui-pill ui-pill--ok">
+          "Active"
+        <span class="warden-manager-dim">
+          "by"
+          "Builder"
+        <span class="warden-manager-dim">
+          "→"
+          "Builder"
+        <span data-stand="CloudFacts">
+          "nightly-bot"
+      <div class="warden-jobs-actions">
+        <span data-stand="CloudRunNow">
+          "nightly-bot"
+        <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-xmark">
+          "Close"
+    <table class="warden-manager-table warden-jobs-runs">
+      <thead>
+        <tr>
+          <th>
+            "When"
+          <th>
+            "Run"
+          <th>
+            "Took"
+          <th>
+            "Summary"
+          <th>
+            "Cost"
+          <th>
+            "Account"
+          <th>
+            "Links"
+      <tbody>
+        <tr>
+          <td data-hover-tip="L863940000" aria-description="L863940000">
+            "1m ago"
+          <td>
+            <span class="ui-pill ui-pill--ok" title="ok">
+              "ok"
+          <td class="warden-jobs-num">
+            "0s"
+          <td class="warden-jobs-summary">
+          <td class="warden-jobs-num">
+          <td class="warden-manager-dim">
+          <td class="warden-jobs-links">

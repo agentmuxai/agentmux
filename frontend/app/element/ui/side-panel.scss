@@ -34,3 +34,16 @@
     font-weight: 600;
     overflow-wrap: anywhere;
 }
+
+// Beside the content, in a row: it takes its own width and the full height of the row, and sits in the flow.
+.ui-side-panel--docked {
+    position: relative;
+    z-index: auto;
+    // Its width is a wish: the column it sits in may be narrower (the Messages dock is at most 45% of the pane), and
+    // the panel then shrinks with it instead of pushing past it.
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 100%;
+    width: var(--side-panel-width, 320px);
+    box-shadow: none;
+}

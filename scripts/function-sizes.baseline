@@ -193,7 +193,7 @@
 110 crates/srv/src/backend/resume_preflight.rs::preflight
 157 crates/srv/src/backend/rpc/engine.rs::WshRpcEngine::handle_request
 270 crates/srv/src/backend/service.rs::get_method_meta
-244 crates/srv/src/backend/shell_node.rs::ShellNodeRunner::run
+238 crates/srv/src/backend/shell_node.rs::ShellNodeRunner::run
 111 crates/srv/src/backend/slug_migration/plan.rs::holder_of
 138 crates/srv/src/backend/spawn_env/build.rs::build_persistent_spawn_env
 129 crates/srv/src/backend/storage/agents/definition.rs::Store::agent_def_find_or_insert
@@ -287,7 +287,7 @@
 133 crates/srv/src/server/browser_capture.rs::handle_browser_capture
 216 crates/srv/src/server/browser_terminal.rs::handle_ui_browser_terminal
 190 crates/srv/src/server/browser_vault_fill.rs::handle_vault_fill
-739 crates/srv/src/server/cli_handlers.rs::register_cli_handlers
+722 crates/srv/src/server/cli_handlers.rs::register_cli_handlers
 904 crates/srv/src/server/editor_handlers.rs::register_editor_handlers
 107 crates/srv/src/server/files.rs::handle_stream_local_file
 122 crates/srv/src/server/http_health.rs::handle_discovery
@@ -310,7 +310,6 @@
 110 crates/srv/src/server/remote_ops/receive.rs::receive
 130 crates/srv/src/server/service/host_ipc.rs::handle_register
 277 crates/srv/src/server/service/misc.rs::handle_misc_service
-431 crates/srv/src/server/service/object.rs::handle_object_service
 115 crates/srv/src/server/service/session_other_builds.rs::restore
 132 crates/srv/src/server/service/tab_lifecycle.rs::handle_create_tab
 118 crates/srv/src/server/service/tab_move.rs::handle_move_block_to_tab
@@ -435,7 +434,7 @@
 130 frontend/app/view/agent/components/SeatRosterImport.tsx::SeatRosterImport
 108 frontend/app/view/agent/components/SlashCommandPicker.tsx::SlashCommandPicker
 233 frontend/app/view/agent/components/agent-picker-launch.ts::createPickerLaunch
-130 frontend/app/view/agent/components/agent-picker-templates.ts::createTemplates
+127 frontend/app/view/agent/components/agent-picker-templates.ts::createTemplates
 154 frontend/app/view/agent/components/composer-row-layout.ts::computeComposerRows
 114 frontend/app/view/agent/components/composer-stats-zone.tsx::useStatsZone
 257 frontend/app/view/agent/components/my-agents-list-data.ts::useMyAgentsData
@@ -477,7 +476,6 @@
 101 frontend/app/view/editor/viewers/viewer-host.tsx::ViewerFor
 152 frontend/app/view/files/files-preview.tsx::FilesPreview
 118 frontend/app/view/global-bundle/GlobalMemoryFullView.tsx::EntryView
-253 frontend/app/view/global-bundle/global-bundle-manager.tsx::GlobalBundleManager
 147 frontend/app/view/history/history-agents.tsx::HistoryAgents
 165 frontend/app/view/identity/identity-accounts-tab.tsx::AccountDetailPanel
 229 frontend/app/view/kanban/kanban-board.tsx::KanbanBoard
@@ -487,7 +485,6 @@
 112 frontend/app/view/native-memory/NativeMemoryCreate.tsx::NativeMemoryCreate
 150 frontend/app/view/native-memory/NativeMemoryFileView.tsx::NativeMemoryFileView
 154 frontend/app/view/remotes/remotes-view.tsx::Detail
-240 frontend/app/view/settings/sections/advanced-section.tsx::AdvancedSection
 175 frontend/app/view/settings/sections/agent-site-grants.tsx::AgentSiteGrants
 128 frontend/app/view/settings/sections/animations-section.tsx::AnimationsSection
 166 frontend/app/view/settings/sections/appearance-section.tsx::AppearanceSection
@@ -499,7 +496,6 @@
 237 frontend/app/view/settings/sections/terminal-section.tsx::TerminalSection
 114 frontend/app/view/settings/sections/widget-bar-settings.tsx::WidgetBarSettings
 104 frontend/app/view/settings/sections/widget-catalog.tsx::WidgetCatalog
-249 frontend/app/view/settings/sections/widgets-section.tsx::WidgetsSection
 105 frontend/app/view/settings/settings-view.tsx::SettingsView
 137 frontend/app/view/shortcuts/shortcuts.tsx::ShortcutsView
 111 frontend/app/view/swarm/swarm-agent-list.tsx::SwarmAgentList
@@ -522,7 +518,7 @@
 127 frontend/app/view/tower/tower-model.ts::TowerViewModel::constructor
 224 frontend/app/view/tower/tower-view.tsx::HostTable
 126 frontend/app/view/tower/tower-view.tsx::TowerView
-131 frontend/app/view/vault/vault-entries.tsx::VaultEntries
+121 frontend/app/view/vault/vault-entries.tsx::VaultEntries
 172 frontend/app/view/vault/vault-entry-form.tsx::VaultEntryForm
 264 frontend/app/view/vault/vault-export.tsx::VaultExportDialog
 136 frontend/app/view/vault/vault-reveal.tsx::VaultRevealDialog
@@ -532,7 +528,6 @@
 102 frontend/app/view/warden-jobs/job-editor-fields.tsx::WhatSection
 146 frontend/app/view/warden-jobs/job-template-approval.tsx::TemplateApproval
 180 frontend/app/view/warden-jobs/job-update-diff.tsx::JobUpdateDiff
-253 frontend/app/view/warden-jobs/jobs-history.tsx::JobHistory
 137 frontend/app/view/warden-jobs/warden-jobs-manager.tsx::WardenJobsManager
 218 frontend/app/window/logo-menu.tsx::LogoMenu
 157 frontend/app/window/logo-menu.tsx::menuItems

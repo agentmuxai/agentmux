@@ -11,6 +11,7 @@ import { Button, FilterInput, IconButton } from "@/app/element/ui";
 import type { VaultEntryInfo } from "@/types/rpc/VaultEntryInfo";
 import type { VaultSection } from "@/types/rpc/VaultSection";
 import { VaultEntryForm, type VaultFormTarget } from "./vault-entry-form";
+import { VaultHistoryDialog } from "./vault-history";
 import { VaultRevealDialog } from "./vault-reveal";
 import { VaultVersionsDialog } from "./vault-versions";
 import { EXPIRING_SOON_DAYS, expiryOf, formatWhen } from "./vault-format";
@@ -74,6 +75,21 @@ function EntryDetails(props: { entry: VaultEntryInfo; showVault: boolean }): JSX
     );
 }
 
+function DeleteEntryConfirm(props: { entry: VaultEntryInfo; onConfirm: () => Promise<void>; onCancel: () => void }): JSX.Element {
+    return (
+        <ConfirmModal
+            open={true}
+            scope="pane"
+            title={`Delete ${props.entry.label}?`}
+            description="Its value is deleted from this computer. Agents that use it by name will be told it's gone."
+            confirmLabel="Delete"
+            destructive
+            onConfirm={props.onConfirm}
+            onCancel={props.onCancel}
+        />
+    );
+}
+
 /** `vault` narrows the list to one Vault (its id); empty shows every Vault's entries. */
 export function VaultEntries(props: { section: VaultSection; vault?: string }): JSX.Element {
     const [filter, setFilter] = createSignal("");
@@ -83,6 +99,7 @@ export function VaultEntries(props: { section: VaultSection; vault?: string }): 
     const [revealing, setRevealing] = createSignal<VaultEntryInfo | null>(null);
     const [versionsOf, setVersionsOf] = createSignal<VaultEntryInfo | null>(null);
     const [moving, setMoving] = createSignal<VaultEntryInfo | null>(null);
+    const [historyOf, setHistoryOf] = createSignal<VaultEntryInfo | null>(null);
     const [error, setError] = createSignal<string | null>(null);
     const inSection = createMemo(() => (vaultEntries() ?? []).filter((e) => e.section === props.section && (!props.vault || e.vault_id === props.vault)));
     const dated = createMemo(() => inSection().some((e) => expiryOf(e.fields.expires) !== null));
@@ -174,6 +191,7 @@ export function VaultEntries(props: { section: VaultSection; vault?: string }): 
                                         <Show when={vaultList().length > 1}>
                                             <IconButton icon="folder-open" label="Move to another Vault" density="compact" onClick={() => setMoving(e)} />
                                         </Show>
+                                        <IconButton icon="book" label="History" density="compact" onClick={() => setHistoryOf(e)} />
                                         <Show when={e.versions > 0}>
                                             <IconButton icon="rotate-left" label="Earlier values" density="compact" onClick={() => setVersionsOf(e)} />
                                         </Show>
@@ -189,20 +207,8 @@ export function VaultEntries(props: { section: VaultSection; vault?: string }): 
             <Show when={revealing()}>{(entry) => <VaultRevealDialog entry={entry()} onClose={() => setRevealing(null)} />}</Show>
             <Show when={moving()}>{(entry) => <VaultMoveDialog entry={entry()} onClose={() => setMoving(null)} />}</Show>
             <Show when={versionsOf()}>{(entry) => <VaultVersionsDialog entry={entry()} onClose={() => setVersionsOf(null)} />}</Show>
-            <Show when={deleting()}>
-                {(e) => (
-                    <ConfirmModal
-                        open={true}
-                        scope="pane"
-                        title={`Delete ${e().label}?`}
-                        description="Its value is deleted from this computer. Agents that use it by name will be told it's gone."
-                        confirmLabel="Delete"
-                        destructive
-                        onConfirm={confirmDelete}
-                        onCancel={() => setDeleting(null)}
-                    />
-                )}
-            </Show>
+            <Show when={historyOf()}>{(e) => <VaultHistoryDialog entryId={e().id} label={e().label} onClose={() => setHistoryOf(null)} />}</Show>
+            <Show when={deleting()}>{(e) => <DeleteEntryConfirm entry={e()} onConfirm={confirmDelete} onCancel={() => setDeleting(null)} />}</Show>
         </div>
     );
 }

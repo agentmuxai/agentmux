@@ -146,18 +146,27 @@ function reachFacts(skill: SkillCatalogItem): string[] {
 function SkillCard(p: { m: ManagerState; skill: SkillCatalogItem }): JSX.Element {
     const app = () => p.skill.app;
     const status = () => (app() ? appStatus(app()!, appPlatform()) : null);
+    // An App skill's card leads with how well it is tested and its route; where it came from is in its detail.
     const facts = () => [
+        ...(app() ? [<span>{status()!.label}</span>] : []),
         ...(app() && firstRoute(app()!) ? [<span>route: {firstRoute(app()!)}</span>] : []),
         ...reachFacts(p.skill).map((fact) => <span>{fact}</span>),
-        ...(p.skill.source ? [<span>Imported from {p.skill.source.location}</span>] : []),
+        ...(p.skill.source && !app() ? [<span>Imported from {p.skill.source.location}</span>] : []),
     ];
     return (
         <Card
             class="skill-card"
             icon={<i class="fa-solid fa-wand-magic-sparkles" />}
             title={p.skill.name}
-            subtitle={app() ? `${app()!.vendor} · ${status()!.label}` : p.skill.description || undefined}
-            badge={app() ? <Pill tone="accent">App skill</Pill> : undefined}
+            subtitle={
+                app() ? (
+                    <>
+                        <Pill tone="accent">App skill</Pill> {app()!.vendor}
+                    </>
+                ) : (
+                    p.skill.description || undefined
+                )
+            }
             status={status() ? { tone: status()!.tone, label: status()!.label } : undefined}
             attention={status()?.tone === "error"}
             meta={facts()}
@@ -197,7 +206,9 @@ function SkillList(p: { m: ManagerState }): JSX.Element {
             <Show when={model.errorAtom()}>
                 <div class="agent-primitive-modal-error">{model.errorAtom()}</div>
             </Show>
-            <AppFilterRow value={p.m.filter()} onChange={p.m.setFilter} />
+            <div class="skill-app-filter">
+                <AppFilterRow value={p.m.filter()} onChange={p.m.setFilter} />
+            </div>
             <Show
                 when={shown().length > 0}
                 fallback={

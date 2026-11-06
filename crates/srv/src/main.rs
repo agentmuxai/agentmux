@@ -100,6 +100,11 @@ fn prepare_process_mode() -> bool {
         }
     } else {
         bootstrap::install_process_watchers();
+        // An isolated test or dev instance never touches the person's keychain.
+        if let Err(e) = crate::identity::secret_store::isolate_for_home_override() {
+            eprintln!("agentmux-srv: {e}");
+            std::process::exit(1);
+        }
     }
     headless
 }

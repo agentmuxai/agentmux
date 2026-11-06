@@ -33,8 +33,11 @@ import { AgentProgressBar } from "./components/AgentProgressBar";
 import { AgentSearchBar } from "./components/AgentSearchBar";
 import { AgentShellDrawer } from "./components/AgentShellDrawer";
 import { BtwOverlay } from "./components/BtwOverlay";
+import { createMessagesPanelControls, MessagesPanelContext } from "./messages/messages-state";
+import { MessagesPanel } from "./messages/MessagesPanel";
 import { openOrFocusHistoryTab } from "./open-history-tab";
 import { ShutdownOverlay } from "./shutdown/ShutdownOverlay";
+import { ruleOf } from "./virtualization/verbosity";
 
 /** The hook groups AgentPresentationView built, handed to the parts that draw them. */
 export interface AgentViewParts {
@@ -55,6 +58,8 @@ export interface AgentViewParts {
 
 export function AgentViewLayout({ v }: { v: AgentViewParts }): JSX.Element {
     const { model, found, feed, input, late } = v;
+    // The Messages panel's state and what the conversation's rows need from it (messages/messages-state.ts).
+    const messages = createMessagesPanelControls(model.blockId, (node) => !!ruleOf(node as Parameters<typeof ruleOf>[0]).forced);
     // A context-menu region under the click (the Shell drawer) owns its own menu. This handler runs first, being
     // a descendant of blockframe's, so without yielding a transcript selection would show a Copy for the wrong
     // text inside the terminal.
@@ -91,11 +96,24 @@ export function AgentViewLayout({ v }: { v: AgentViewParts }): JSX.Element {
             <PaneLoadingCover phase={feed.readiness.phase} />
             {/* Shutdown log while the pane closes in place (SPEC_AGENT_SELF_QUIT_2026_09_24.md §5.5). */}
             <ShutdownOverlay blockId={model.blockId} agentName={found.agentName()} />
-            <div class="agent-view-zoomed" style={{ zoom: input.zoomFactor() }}>
-                <AgentViewOverlays v={v} />
-                <AgentViewTranscript v={v} />
-                <AgentViewBottom v={v} />
-            </div>
+            {/* The conversation and, beside it, the Messages panel (a sibling of the zoomed column, so the
+                transcript's bottom panels stay direct children of it). */}
+            <MessagesPanelContext.Provider value={messages}>
+                <div class="agent-view-row">
+                    <div class="agent-view-zoomed" style={{ zoom: input.zoomFactor() }}>
+                        <AgentViewOverlays v={v} />
+                        <AgentViewTranscript v={v} />
+                        <AgentViewBottom v={v} />
+                    </div>
+                    <MessagesPanel
+                        blockId={model.blockId}
+                        controls={messages}
+                        nodes={found.paneModel.document}
+                        jumpTo={input.scroll.jumpTo}
+                        zoom={input.zoomFactor()}
+                    />
+                </div>
+            </MessagesPanelContext.Provider>
             {/* The shell drawer: outside `.agent-view-zoomed`, a flex child of `.agent-view`. */}
             <AgentShellDrawer
                 open={found.paneModel.state.detailsOpen}

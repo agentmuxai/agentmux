@@ -12,7 +12,7 @@
 
 import { createEffect, createMemo, createSignal, untrack } from "solid-js";
 
-import type { DocumentNode } from "@/app/agent-model/node-types";
+import type { DocumentNode, JektMessageNode } from "@/app/agent-model/node-types";
 import { META_AWAITING_CONFIRM } from "@/app/store/agent-status";
 import { getBlockMetaKeyAtom } from "@/app/store/block-atom-cache";
 import { paneRequests, type PaneRequestHandle } from "@/app/store/pane-requests";
@@ -86,4 +86,21 @@ export function useJektsAwaitingYou(opts: UseJektsAwaitingYouOptions): void {
             syncAwaitingConfirm(blockId, true);
         });
     });
+}
+
+/**
+ * The jekts that wait on the person in this pane right now, for another reader of the same wait (the Messages
+ * panel's "Needs you" strip): the card's own list, so a Dismiss on either clears both. Tracks the dismissals.
+ */
+export function awaitingYou(blockId: string, nodes: readonly DocumentNode[]): JektMessageNode[] {
+    dismissedTick();
+    return jektsAwaitingYou(nodes, dismissals.get(blockId) ?? new Set<string>(), WINDOW_STARTED_MS);
+}
+
+/** Dismiss every message waiting in the pane: the card's Dismiss, from the panel. */
+export function dismissAwaiting(blockId: string, waiting: readonly JektMessageNode[]): void {
+    const dismissed = dismissals.get(blockId) ?? new Set<string>();
+    dismissals.set(blockId, dismissed);
+    for (const n of waiting) dismissed.add(dismissalKey(n));
+    bumpDismissed((v) => v + 1);
 }

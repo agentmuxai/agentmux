@@ -254,6 +254,14 @@
 }
 
 // An entry's earlier values: last characters, when and by whom replaced, Restore.
+// The History dialog's All / Changes / Uses buttons sit together on the left.
+.vault-history-filters {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-bottom: var(--space-2);
+}
+
 .vault-versions {
     display: flex;
     flex-direction: column;

@@ -23,9 +23,9 @@ import type { MessageOrigin } from "@/types/rpc/MessageOrigin";
 import { AttachmentStrip } from "../attachments/AttachmentStrip";
 import { proseDoc, rawDoc } from "../preview-text/docs";
 import type { JektMessageNode, SystemNoteNode } from "../../../agent-model/types";
-import { JEKT_DELIVERY_ICONS, JEKT_TIER_ICONS } from "../../../agent-model/types";
 import { arrivedLive } from "../virtualization/live-arrival";
 import { CollapsibleMessage } from "./CollapsibleMessage";
+import { JektMeta, JektTags } from "./JektParts";
 import { PreviewLines } from "./PreviewLines";
 import { previewBox } from "./scroll-handoff";
 
@@ -147,20 +147,6 @@ function NoteVariant(props: { node: SystemNoteNode }): JSX.Element {
     );
 }
 
-function formatTimestamp(ts: number): string {
-    return new Date(ts).toLocaleString();
-}
-
-/** "45 s", "12 min", "3 h 5 min": how long a held jekt waited. */
-function formatHeldFor(secs: number): string {
-    if (secs < 60) return `${secs} s`;
-    const mins = Math.floor(secs / 60);
-    if (mins < 60) return `${mins} min`;
-    const h = Math.floor(mins / 60);
-    const m = mins % 60;
-    return m ? `${h} h ${m} min` : `${h} h`;
-}
-
 /** When the jekt reached this pane: its send time, plus how long it waited if it was held for an
  *  absent recipient (`HELD_FOR`). A held jekt delivered just now arrived live, however long ago it was sent. */
 function deliveredAt(node: Pick<JektMessageNode, "timestamp" | "heldForSecs">): number {
@@ -169,9 +155,6 @@ function deliveredAt(node: Pick<JektMessageNode, "timestamp" | "heldForSecs">): 
 
 /** Both capped boxes (body, raw payload) skid and hand scroll to the pane at their edges, like a tool preview. */
 const handoff = previewBox();
-
-/** Nothing proved a jekt's sender (anything but a `*-verified` trust): shown as a warning. */
-const unproven = (trust: string): boolean => !trust.endsWith("-verified");
 
 function JektVariant(props: {
     node: JektMessageNode;
@@ -210,12 +193,7 @@ function JektVariant(props: {
                         <i class={`fa-solid fa-${incoming() ? "arrow-down-long" : "arrow-up-long"}`} aria-hidden="true" />{" "}
                         {incoming() ? `Jekt from ${props.node.from}` : `Jekt to ${props.node.to}`}
                     </span>
-                    <Tag tone={props.node.tier === "sensitive" ? "error" : "neutral"} detail={`Tier: ${props.node.tier}`}>
-                        {JEKT_TIER_ICONS[props.node.tier]} {props.node.tier}
-                    </Tag>
-                    <Tag tone={unproven(props.node.trust) ? "warn" : "neutral"} detail={`Delivery: ${props.node.deliveryTier} (${props.node.trust})`}>
-                        {JEKT_DELIVERY_ICONS[props.node.deliveryTier]} {props.node.deliveryTier}
-                    </Tag>
+                    <JektTags node={props.node} />
                 </>
             }
             body={
@@ -228,19 +206,7 @@ function JektVariant(props: {
                     <div class="agent-origin-body" ref={handoff}>
                         <PreviewLines doc={bodyDoc()} linkify />
                     </div>
-                    <div class="agent-origin-meta">
-                        <span class="agent-origin-meta-item">From: {props.node.from}</span>
-                        <span class="agent-origin-meta-item">To: {props.node.to}</span>
-                        <span class="agent-origin-meta-item">MSGID: {props.node.msgId || "—"}</span>
-                        <span class="agent-origin-meta-item">Trust: {props.node.trust}</span>
-                        <span class="agent-origin-meta-item">Priority: {props.node.priority}</span>
-                        <span class="agent-origin-meta-item">{formatTimestamp(props.node.timestamp)}</span>
-                        <Show when={props.node.heldForSecs !== undefined}>
-                            <Tag detail="The recipient was not running; this was held and delivered when it started">
-                                Held for {formatHeldFor(props.node.heldForSecs ?? 0)}
-                            </Tag>
-                        </Show>
-                    </div>
+                    <JektMeta node={props.node} />
                     <details class="agent-origin-raw">
                         <summary>Raw payload</summary>
                         <div class="agent-origin-raw-body" ref={handoff}>

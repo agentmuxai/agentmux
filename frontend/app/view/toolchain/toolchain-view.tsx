@@ -29,6 +29,8 @@ import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { SystemToolInstallInline } from "./SystemToolInstallInline";
 import { CliDiskSpace } from "./CliDiskSpace";
 import { ProviderUpdateInline } from "./ProviderUpdateInline";
+import { ProviderUninstallInline } from "./ProviderUninstallInline";
+import { UsePathToggle } from "./UsePathToggle";
 import { toolNotes, toolStatus, widgetStatus } from "./toolchain-status";
 import { WidgetPortField } from "./WidgetPortField";
 import "./toolchain-view.scss";
@@ -80,6 +82,8 @@ interface ToolRow {
     installUrl?: string;
     installCommand?: string;
     npmPackage?: string;
+    /** AgentMux installs this agent CLI itself (npm, or a pinned download): Install and Uninstall apply. */
+    installable?: boolean;
     latestVersion?: string;
     /** `pinnedVersion` from the provider catalog — the version AgentMux
      *  validated. Provider rows only; core tools have no pin. */
@@ -173,6 +177,7 @@ function buildToolRows(plat: ToolchainState["plat"]): ToolRow[] {
         id: p.id, label: p.displayName, icon: p.icon, kind: "provider",
         loading: true, found: false, docsUrl: p.docsUrl, installUrl: p.docsUrl,
         npmPackage: p.npmPackage,
+        installable: !!(p.npmPackage || p.managedInstall),
         // A CLI AgentMux doesn't install: the command of its own installer,
         // shown with a copy button while it is missing.
         installCommand: p.npmPackage || p.managedInstall ? undefined : (plat === "windows" ? p.windowsInstallCommand : p.unixInstallCommand) || undefined,
@@ -523,7 +528,8 @@ function nothingMatches(s: ToolchainState): boolean {
 function toolActions(row: ToolRow): JSX.Element {
     return (
         <>
-            <Show when={!row.loading && !row.found && row.installUrl}>
+            {/* A CLI AgentMux installs has its own Install in the details; this one opens a web page. */}
+            <Show when={!row.loading && !row.found && row.installUrl && !row.installable}>
                 <Button density="compact" icon="arrow-up-right-from-square" onClick={() => open(row.installUrl)}>
                     Install
                 </Button>
@@ -568,9 +574,30 @@ function toolCard(s: ToolchainState, key: string): JSX.Element {
 
 /** The pin to update to: set for an installed agent CLI that AgentMux installs and that is behind it. */
 function updatablePin(row: ToolRow): string | undefined {
-    if (row.kind !== "provider" || !row.npmPackage || !row.found) return undefined;
+    // Only AgentMux's own copy: the person's (Use the CLI on my PATH) is theirs to update.
+    if (row.kind !== "provider" || !row.installable || row.source !== "local_install") return undefined;
     const drift = rowDrift(row);
     return drift.drift === "behind-pin" ? drift.pinned : undefined;
+}
+
+/** What an agent CLI's row offers: install or update AgentMux's copy, remove it, or run the person's own instead. */
+function providerControls(s: ToolchainState, row: () => ToolRow): JSX.Element {
+    const look = () => {
+        const idx = s.rows.findIndex((r) => r.id === row().id);
+        if (idx !== -1) void probe(s, idx, { force: true });
+    };
+    return (
+        <>
+            <Show when={updatablePin(row())}>{(pin) => <ProviderUpdateInline providerId={row().id} pinned={pin()} />}</Show>
+            <Show when={!row().loading && !row().found && row().installable && row().pinnedVersion}>
+                {(pin) => <ProviderUpdateInline mode="install" providerId={row().id} pinned={pin()} />}
+            </Show>
+            <Show when={row().installable && row().source === "local_install"}>
+                <ProviderUninstallInline providerId={row().id} label={row().label} onRemoved={look} />
+            </Show>
+            <UsePathToggle providerId={row().id} onChanged={look} />
+        </>
+    );
 }
 
 function toolDetail(s: ToolchainState, key: string): JSX.Element {
@@ -585,14 +612,16 @@ function toolDetail(s: ToolchainState, key: string): JSX.Element {
                     <For each={toolNotes(row(), rowDrift(row())).filter((n) => n.title)}>
                         {(n) => <p class="toolchain-detail-note">{n.title}</p>}
                     </For>
-                    <Show when={updatablePin(row())}>
-                        {(pin) => <ProviderUpdateInline providerId={row().id} pinned={pin()} />}
-                    </Show>
+                    <Show when={row().kind === "provider"}>{providerControls(s, row)}</Show>
                     <Show when={row().loading}>
                         <p class="toolchain-detail-note">Looking for {row().label} on this machine…</p>
                     </Show>
                     <Show when={!row().loading && !row().found}>
-                        <p class="toolchain-detail-note">Not found on this machine's PATH.</p>
+                        <p class="toolchain-detail-note">
+                            {row().installable
+                                ? `AgentMux's own copy of ${row().label} is not installed. A copy on your PATH is not used unless "Use the CLI on my PATH" is on.`
+                                : "Not found on this machine's PATH."}
+                        </p>
                         <Show when={row().installCommand}>
                             <span class="toolchain-detail-label">Install command</span>
                             <div class="toolchain-detail-row">
