@@ -143,7 +143,15 @@ pub(super) fn status_of(
             (pane, wanted, reach_of(&block.meta, net, now_ms), controller)
         }
     };
-    AgentStatus { availability: availability_of_block(mstore, live, now_ms), pane, wanted, api, controller }
+    let read = state_block(live, block.map(|b| b.oid.as_str()), controller);
+    AgentStatus { availability: availability_of_block(mstore, read, now_ms), pane, wanted, api, controller }
+}
+
+/// The block whose controller says what the agent is doing: the registered one, else the agent's own block
+/// when a controller holds it. A pane in a closed workspace can run with no registration; reading it as
+/// absent made `Agents list` say `stopped` for an agent whose runtime state was `idle`.
+fn state_block<'a>(live: Option<&'a str>, block: Option<&'a str>, controller: bool) -> Option<&'a str> {
+    live.or(block.filter(|_| controller))
 }
 
 /// [`describe`] for a status: what a routine message does now is `decide`'s answer (so an offline model
@@ -430,6 +438,14 @@ mod tests {
         let none = crate::connectivity::ConnectivityStatus { revision: 0, services: vec![] };
         let v = describe_block(&store, None, Some(&block.oid), &none, Some(AFTER), 1_000);
         assert_eq!((v["state"].as_str(), v["pane"].as_str(), v["wanted"].as_str()), (Some("stopped"), Some("parked"), Some("stopped")));
+    }
+
+    #[test]
+    fn a_controller_held_block_with_no_registration_is_read_for_its_state() {
+        assert_eq!(state_block(Some("reg"), Some("own"), true), Some("reg"), "the registered block wins");
+        assert_eq!(state_block(None, Some("own"), true), Some("own"), "a running pane in a closed workspace is read, not called stopped");
+        assert_eq!(state_block(None, Some("own"), false), None, "no controller: nothing runs");
+        assert_eq!(state_block(None, None, true), None);
     }
 
     fn status(availability: Availability, pane: Pane, wanted: Wanted, api: Reach) -> AgentStatus {

@@ -8,63 +8,53 @@
 import { createEffect, createMemo, createSignal, For, Show, type JSX } from "solid-js";
 
 import { Button, FilterInput, IconButton } from "@/app/element/ui";
+import { createDomainStore } from "@/app/store/domain-store";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { SESSIONS_TIMEOUT_MS } from "@/app/view/agent/history/HistoryNavigator";
 import { openOrFocusHistoryTab } from "@/app/view/agent/open-history-tab";
 import { ageMs, formatAge } from "@/app/view/warden-shared/warden-shared";
 import type { HistoryAgent } from "@/types/rpc/HistoryAgent";
-import type { HistoryAgentSessions } from "@/types/rpc/HistoryAgentSessions";
 import { formatBytes } from "@/util/format-bytes";
-import { agentRows, formatWhen, historyTotals } from "./history-shared";
+import { agentRows, formatWhen, historyTotals, type AgentRow } from "./history-shared";
+import { useOpenSessions, type Sessions } from "./history-sessions";
 
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
 import "./history.scss";
 import { tip } from "@/app/element/tip";
 
-type Sessions = { loading: true } | { loading: false; data?: HistoryAgentSessions; error?: string };
+/** srv announces a change at most every two seconds while a transcript grows; a write by another AgentMux sharing the store is not announced, so the list also reads again this often. */
+const SAFETY_POLL_MS = 30_000;
 
 export const HistoryAgents = (props: { paneBlockId: string; visible: boolean }): JSX.Element => {
-    const [agents, setAgents] = createSignal<HistoryAgent[] | null>(null);
-    const [error, setError] = createSignal<string | null>(null);
-    const [loading, setLoading] = createSignal(false);
-    const [filter, setFilter] = createSignal("");
-    const [open, setOpen] = createSignal<Record<string, Sessions>>({});
-
-    const refresh = async () => {
-        setLoading(true);
-        try {
-            const res = await RpcApi.HistoryAgentsCommand(TabRpcClient, {});
-            setAgents(res.agents);
-            setError(null);
-            // Sessions shown before a refresh may be out of date: read them again when reopened.
-            setOpen({});
-        } catch (e) {
-            setError(String(e));
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    // Loads the first time the section is shown; Refresh reads it again.
-    createEffect(() => {
-        if (props.visible && agents() === null && !loading()) void refresh();
+    // Live while the section is shown: a new session, a growing transcript or a renamed agent updates it.
+    const store = createDomainStore<HistoryAgent[] | null>({
+        initial: null,
+        load: async () => (await RpcApi.HistoryAgentsCommand(TabRpcClient, {})).agents,
+        events: ["AgentsChanged", "HistorySessionsChanged"],
+        debounceMs: 500,
+        safetyPollMs: SAFETY_POLL_MS,
     });
+    const agents = store.data;
+    const error = store.error;
+    const [refreshing, setRefreshing] = createSignal(false);
+    const [filter, setFilter] = createSignal("");
+    const { open, closeAll, toggleSessions } = useOpenSessions(agents);
 
-    const toggleSessions = async (id: string) => {
-        if (open()[id]) {
-            const { [id]: _, ...rest } = open();
-            setOpen(rest);
-            return;
-        }
-        setOpen({ ...open(), [id]: { loading: true } });
+    // Refresh reads the list again and drops the sessions shown, which are read again when reopened.
+    const refresh = async () => {
+        setRefreshing(true);
         try {
-            const data = await RpcApi.HistoryAgentSessionsCommand(TabRpcClient, { definition_id: id }, { timeout: SESSIONS_TIMEOUT_MS });
-            if (open()[id]) setOpen({ ...open(), [id]: { loading: false, data } });
-        } catch (e) {
-            if (open()[id]) setOpen({ ...open(), [id]: { loading: false, error: String(e) } });
+            await store.refresh();
+            closeAll();
+        } finally {
+            setRefreshing(false);
         }
     };
+
+    // Follows while the section is shown (the first load is the follow's), and stops when it is hidden.
+    createEffect(() => {
+        if (props.visible) store.follow();
+    });
 
     const openHistory = (a: HistoryAgent) =>
         void openOrFocusHistoryTab({
@@ -75,6 +65,10 @@ export const HistoryAgents = (props: { paneBlockId: string; visible: boolean }):
         });
 
     const rows = createMemo(() => agentRows(agents() ?? [], filter()));
+    // The list is keyed by agent id, so a reload that changes one agent's numbers updates its cells in
+    // place and leaves the other rows, and any open sessions, alone.
+    const rowIds = createMemo(() => rows().map((r) => r.agent.definition_id));
+    const rowsById = createMemo(() => new Map(rows().map((r) => [r.agent.definition_id, r])));
     const totals = createMemo(() => historyTotals(agents() ?? []));
     const now = () => Date.now();
 
@@ -82,7 +76,7 @@ export const HistoryAgents = (props: { paneBlockId: string; visible: boolean }):
         <div class="warden-history-agents">
             <div class="warden-history-bar">
                 <FilterInput value={filter()} onInput={setFilter} placeholder="Filter agents" />
-                <Button tone="quiet" density="compact" icon="rotate" busy={loading()} onClick={() => void refresh()}>
+                <Button tone="quiet" density="compact" icon="rotate" busy={refreshing()} onClick={() => void refresh()}>
                     Refresh
                 </Button>
             </div>
@@ -98,7 +92,7 @@ export const HistoryAgents = (props: { paneBlockId: string; visible: boolean }):
                 when={rows().length > 0}
                 fallback={
                     <div class="warden-section-stub">
-                        {loading() || agents() === null ? "Loading…" : filter() ? "No agent matches." : "No agent history yet."}
+                        {agents() === null && !error() ? "Loading…" : filter() ? "No agent matches." : "No agent history yet."}
                     </div>
                 }
             >
@@ -114,16 +108,17 @@ export const HistoryAgents = (props: { paneBlockId: string; visible: boolean }):
                         </tr>
                     </thead>
                     <tbody>
-                        <For each={rows()}>
-                            {(row) => {
-                                const a = row.agent;
-                                const id = a.definition_id;
+                        <For each={rowIds()}>
+                            {(id) => {
+                                // The last row stands while the id is on its way out of the list.
+                                const row = createMemo<AgentRow>((last) => rowsById().get(id) ?? last!);
+                                const a = () => row().agent;
                                 const sessions = () => open()[id];
                                 return (
                                     <>
-                                        <tr data-agent={id} data-deleted={a.deleted ? "" : undefined}>
+                                        <tr data-agent={id} data-deleted={a().deleted ? "" : undefined}>
                                             <td>
-                                                <span class="warden-history-agent" style={{ "padding-left": `${row.depth * 1.25}em` }}>
+                                                <span class="warden-history-agent" style={{ "padding-left": `${row().depth * 1.25}em` }}>
                                                     <IconButton
                                                         icon={sessions() ? "chevron-down" : "chevron-right"}
                                                         label={sessions() ? "Hide sessions" : "Show sessions"}
@@ -132,25 +127,25 @@ export const HistoryAgents = (props: { paneBlockId: string; visible: boolean }):
                                                         onClick={() => void toggleSessions(id)}
                                                     />
                                                     <Show
-                                                        when={!a.deleted}
+                                                        when={!a().deleted}
                                                         fallback={<span class="warden-manager-dim">Deleted agent</span>}
                                                     >
-                                                        <span>{a.name}</span>
+                                                        <span>{a().name}</span>
                                                     </Show>
                                                     <span class="warden-manager-mono warden-manager-dim warden-history-id">{id.slice(0, 8)}</span>
-                                                    <Show when={a.fork_of}>
+                                                    <Show when={a().fork_of}>
                                                         <span class="warden-manager-dim warden-history-fork">
-                                                            fork of {a.fork_of_name || a.fork_of.slice(0, 8)}
+                                                            fork of {a().fork_of_name || a().fork_of.slice(0, 8)}
                                                         </span>
                                                     </Show>
                                                 </span>
                                             </td>
-                                            <td>{a.provider || <span class="warden-manager-dim">—</span>}</td>
-                                            <td class="warden-history-num">{formatBytes(a.current_bytes + a.archive_bytes)}</td>
-                                            <td class="warden-history-num">{a.archives || <span class="warden-manager-dim">—</span>}</td>
-                                            <td>{a.last_active_ms ? `${formatAge(ageMs(a.last_active_ms, now()))} ago` : "—"}</td>
+                                            <td>{a().provider || <span class="warden-manager-dim">—</span>}</td>
+                                            <td class="warden-history-num">{formatBytes(a().current_bytes + a().archive_bytes)}</td>
+                                            <td class="warden-history-num">{a().archives || <span class="warden-manager-dim">—</span>}</td>
+                                            <td>{a().last_active_ms ? `${formatAge(ageMs(a().last_active_ms, now()))} ago` : "—"}</td>
                                             <td class="warden-history-actions">
-                                                <Button tone="quiet" density="compact" onClick={() => openHistory(a)}>
+                                                <Button tone="quiet" density="compact" onClick={() => openHistory(a())}>
                                                     Open history
                                                 </Button>
                                             </td>

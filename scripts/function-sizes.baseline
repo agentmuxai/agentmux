@@ -152,7 +152,6 @@
 115 crates/srv/src/backend/blockcontroller/core.rs::persist_last_failure
 217 crates/srv/src/backend/blockcontroller/durable_ssh.rs::Run::attach_once
 217 crates/srv/src/backend/blockcontroller/durable_ssh.rs::Run::run
-329 crates/srv/src/backend/blockcontroller/mod.rs::resync_controller
 158 crates/srv/src/backend/blockcontroller/msp.rs::MspController::spawn_process
 319 crates/srv/src/backend/blockcontroller/persistent/eager_resume.rs::PersistentSubprocessController::try_eager_resume_as
 104 crates/srv/src/backend/blockcontroller/persistent/input.rs::PersistentSubprocessController::send_user_message_with_images_from
@@ -292,7 +291,6 @@
 111 crates/srv/src/server/app_api/layout.rs::layout_open_impl
 109 crates/srv/src/server/app_api/memory.rs::memory_write_impl
 102 crates/srv/src/server/app_api/pane.rs::build_pane_meta
-300 crates/srv/src/server/app_api/pane.rs::open_pane
 161 crates/srv/src/server/app_api/pane.rs::open_pane_floating
 126 crates/srv/src/server/browser_bypass_routes.rs::handle_ui_browser_request_bypass
 133 crates/srv/src/server/browser_capture.rs::handle_browser_capture
@@ -473,7 +471,6 @@
 140 frontend/app/view/agent/hooks/useShellNodeStream.ts::useShellNodeStream
 163 frontend/app/view/agent/hooks/useSnapshotPersistence.ts::useSnapshotPersistence
 173 frontend/app/view/agent/hooks/useSubagentBackfillGate.ts::useSubagentBackfillGate
-316 frontend/app/view/agent/memory-reinjection-controller.ts::createMemoryReinjectionController
 300 frontend/app/view/agent/offline/failed-turn.ts::createFailedTurnRecovery
 185 frontend/app/view/agent/offline/offline-input.ts::createOfflineInput
 229 frontend/app/view/agent/parseHistoryLines.ts::HistoryParser::feed
@@ -502,7 +499,7 @@
 152 frontend/app/view/files/files-preview.tsx::FilesPreview
 118 frontend/app/view/global-bundle/GlobalMemoryFullView.tsx::EntryView
 253 frontend/app/view/global-bundle/global-bundle-manager.tsx::GlobalBundleManager
-153 frontend/app/view/history/history-agents.tsx::HistoryAgents
+147 frontend/app/view/history/history-agents.tsx::HistoryAgents
 285 frontend/app/view/history/history-typed.tsx::HistoryTyped
 269 frontend/app/view/identity/agent-identity-links-panel.tsx::AgentIdentityLinksPanel
 165 frontend/app/view/identity/identity-accounts-tab.tsx::AccountDetailPanel

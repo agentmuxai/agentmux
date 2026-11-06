@@ -46,6 +46,8 @@ pub fn spawn_background_subsystems(
     broker.set_client(Box::new(bridge));
     // Remote connections' status changes, from wherever a connection is used.
     backend::remote::link::init(broker.clone());
+    // The History pane's agent list: one event while transcripts change (`history_changed.rs`).
+    backend::history_changed::spawn_publisher(broker.clone());
 
     // Shared filesystem-watcher framework — constructed once, before any
     // consumer, all three of which now build on it (see

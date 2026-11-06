@@ -1,4 +1,5 @@
 use super::*;
+use super::pane_open_steps as steps;
 use agentmux_common::AUTH_KEY_HEADER;
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -1167,19 +1168,7 @@ mod close_pane_tests {
 /// view, enqueues a layout action (split or insert), and broadcasts the
 /// block/tab/layout updates so the frontend renders the new pane.
 pub async fn open_pane(state: &AppState, mut cmd: CommandPaneOpenData) -> Result<PaneOpenResult, String> {
-    // The Media pane is folded into the Editor
-    // (SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.11): a media open
-    // is an Editor open that follows the folder, and may reuse the Editor
-    // pane on screen like OpenEditor does.
-    if cmd.view == "media" && cmd.meta.is_none() {
-        if let Some(conn) = cmd.connection.as_deref().map(str::trim).filter(|c| !c.is_empty() && *c != "local") {
-            if crate::backend::fs_ops::remote::ssh_connection(Some(conn)).is_some() {
-                return Err(format!("INVALID_ARG: media files on {conn} can't be shown yet"));
-            }
-        }
-        cmd.view = "editor".to_string();
-        cmd.follow_folder.get_or_insert(true);
-    }
+    steps::fold_media_into_editor(&mut cmd)?;
     crate::server::files_root::bind_pane_open(state, &mut cmd).await?;
     let viewer = pane::requested_viewer(&cmd)?;
     let bring_back = super::pane_singleton::wants_existing(&cmd);
@@ -1191,48 +1180,15 @@ pub async fn open_pane(state: &AppState, mut cmd: CommandPaneOpenData) -> Result
 
     // Use caller-supplied meta when present (widget bar path: full blockdef.meta
     // already known); otherwise derive from view + args via build_pane_meta.
-    let meta = match cmd.meta {
+    let meta = match cmd.meta.take() {
         Some(m) => m,
         None => pane::build_pane_meta(&cmd)?,
     };
 
-    // Editor-pane reuse (SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03.md
-    // Part 2): if the calling agent already has an Editor pane open in its own
-    // tab, add the requested file as a new tab in that pane instead of always
-    // spawning another Editor pane. Gated on the explicit `reuse_editor_pane`
-    // opt-in only — NOT inferred from `meta`/`split_reference_block_id` being
-    // present, since `EditorViewModel.openToTheSide`/`openInTerminal` also set
-    // `split_reference_block_id` to their OWN block id for split placement and
-    // must not trigger reuse (reagent P1 on PR #2404 caught an earlier version
-    // of this check incorrectly reusing the calling pane itself for
-    // `openToTheSide`). Also excludes `floating` requests — those always get
-    // their own new window (codex P1 on PR #2404: this branch previously ran
-    // before the floating check below and silently swallowed floating
-    // requests into a reused docked pane).
-    //
-    // An explicit `tree_expanded` (`OpenEditor`'s `collapse_tree`) does NOT
-    // bypass reuse: a reused pane keeps its own tree state (it has no live way
-    // to take a new one), and the option only shapes a pane this call creates.
-    // Bypassing reuse made a new pane on every open of an agent that always passes it.
-    // A `target_block_id` names the Editor pane to put the file in: it needs no other opt-in.
-    let named = cmd.target_block_id.as_deref().map(str::trim).filter(|t| !t.is_empty());
-    if named.is_some() {
-        if cmd.view != "editor" {
-            return Err("INVALID_ARG: target_id only names an Editor pane (view editor or media)".to_string());
-        }
-        if cmd.floating == Some(true) {
-            return Err("INVALID_ARG: target_id can't be combined with floating".to_string());
-        }
-    }
-    if cmd.view == "editor" && (cmd.reuse_editor_pane == Some(true) || named.is_some()) && cmd.floating != Some(true) {
-        if let Some(file) = cmd.file.as_deref() {
-            let connection = cmd.connection.as_deref().unwrap_or("");
-            let follow = cmd.follow_folder == Some(true);
-            let caller = cmd.split_reference_block_id.as_deref();
-            if let Some(result) = pane::maybe_reuse_editor_pane(state, caller, named, file, connection, follow, viewer).await? {
-                return Ok(result);
-            }
-        }
+    // Reuse of an open Editor pane (`reuse_editor_pane`), or the one a `target_id` names.
+    let named = steps::named_editor_target(&cmd)?;
+    if let Some(result) = steps::reuse_editor_pane(state, &cmd, named, viewer).await? {
+        return Ok(result);
     }
 
     // Resolve tab: explicit tab_id wins; otherwise, if the caller told us
@@ -1269,200 +1225,13 @@ pub async fn open_pane(state: &AppState, mut cmd: CommandPaneOpenData) -> Result
         return pane::open_pane_floating(state, &mstore, &event_bus, cmd.view, tab_id, meta).await;
     }
 
-    // Stack path (SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.3): create
-    // the block directly as a new tab of the pane holding
-    // `stack_onto_block_id`, in one reducer step, then tell the frontend with
-    // a queued `stackpush` action. Replaces `skip_placement` + a frontend
-    // push, whose gap could leave the block in no pane.
     if let Some(target) = cmd.stack_onto_block_id.clone().filter(|t| !t.is_empty()) {
-        // The new tab is the visible one unless the caller said not to take focus
-        // (`focus: false`: an agent's popup must not switch the person's tab).
-        let activate = cmd.focus.unwrap_or(true);
-        let tab_id = resolve_tab_id_for_block(&mstore, &target)
-            .map_err(|e| format!("pane.open: stack_onto_block_id: {e}"))?;
-        let meta_val = serde_json::to_value(&meta)
-            .map_err(|e| format!("pane.open: stack_onto_block_id: meta serialize: {e}"))?;
-        let events = crate::server::service::dispatch_to_reducer(
-            state,
-            agentmux_common::ipc::Command::CreateBlockInStack {
-                tab_id: tab_id.clone(),
-                target_block_id: target.clone(),
-                meta: meta_val,
-                activate,
-            },
-        )
-        .await;
-        if let Some(msg) = events.iter().find_map(|e| match e {
-            agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
-            _ => None,
-        }) {
-            return Err(format!("pane.open: {msg}"));
-        }
-        let block_id = events
-            .iter()
-            .find_map(|e| match e {
-                agentmux_common::ipc::Event::BlockCreated { block_id, .. } => Some(block_id.clone()),
-                _ => None,
-            })
-            .ok_or_else(|| "pane.open: CreateBlockInStack emitted no BlockCreated".to_string())?;
-        for ev in &events {
-            if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, &mstore) {
-                tracing::warn!("pane.open: stack_onto_block_id: mstore apply failed: {e}");
-            }
-        }
-        crate::server::service::publish_events(state, &events);
-        if let Err(e) =
-            crate::server::service::layout_helpers::queue_target_stack_push(state, &tab_id, &block_id, &target, activate).await
-        {
-            tracing::warn!(block_id = %block_id, "pane.open: stack_onto_block_id: stackpush queue failed: {e}");
-        }
-        tracing::info!(block_id = %block_id, target = %target, view = %cmd.view, "pane.open: block created as a pane tab");
-        return Ok(PaneOpenResult {
-            block_id,
-            tab_id,
-            view: cmd.view,
-            created: true,
-        });
+        return steps::open_stacked(state, &cmd, target, meta).await;
     }
 
-    // Skip-placement path (in-pane tabs — SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md
-    // §4.2): create the block through the reducer, same as the docked path
-    // below, but return immediately — no layout action, no tear_off_block
-    // saga. The caller attaches it to an existing pane's block-stack instead
-    // (`pushBlockOntoStack`), so it must never render docked or floating
-    // first.
     if cmd.skip_placement == Some(true) {
-        let meta_val = serde_json::to_value(&meta)
-            .map_err(|e| format!("pane.open: skip_placement: meta serialize: {e}"))?;
-        let create_events = crate::server::service::dispatch_to_reducer(
-            state,
-            agentmux_common::ipc::Command::CreateBlock {
-                tab_id: tab_id.clone(),
-                meta: meta_val,
-            },
-        )
-        .await;
-        if let Some(msg) = create_events.iter().find_map(|e| match e {
-            agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
-            _ => None,
-        }) {
-            return Err(format!("pane.open: skip_placement: CreateBlock: {msg}"));
-        }
-        let block_id = create_events
-            .iter()
-            .find_map(|e| match e {
-                agentmux_common::ipc::Event::BlockCreated { block_id, .. } => Some(block_id.clone()),
-                _ => None,
-            })
-            .ok_or_else(|| "pane.open: skip_placement: CreateBlock emitted no BlockCreated".to_string())?;
-        for ev in &create_events {
-            if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, &mstore) {
-                tracing::warn!("pane.open: skip_placement: CreateBlock mstore apply failed: {e}");
-            }
-        }
-        crate::server::service::publish_events(state, &create_events);
-        tracing::info!(block_id = %block_id, view = %cmd.view, "pane.open: block created, placement skipped");
-        return Ok(PaneOpenResult {
-            block_id,
-            tab_id,
-            view: cmd.view,
-            created: true,
-        });
+        return steps::open_unplaced(state, cmd.view, tab_id, meta).await;
     }
 
-    // Create block (docked path) THROUGH THE REDUCER (#1681), not wcore-direct.
-    // A store-only `create_block` lands the block in SQLite but never in the
-    // reducer-canonical `state.blocks` map — and this RPC runs after bootstrap,
-    // which is the only time `srv_state` is hydrated from SQLite. The pane then
-    // renders fine (frontend reads SQLite) but a later TearOffBlock /
-    // RedockFloatingPane is rejected "block not found" because the saga
-    // pre-conditions check the reducer. The BlockCreated event carries meta,
-    // which apply_block_created writes to the mstore Block. Mirrors the
-    // already-correct open_pane_floating path.
-    let meta_val = serde_json::to_value(&meta)
-        .map_err(|e| format!("pane.open: meta serialize: {e}"))?;
-    let create_events = crate::server::service::dispatch_to_reducer(
-        state,
-        agentmux_common::ipc::Command::CreateBlock {
-            tab_id: tab_id.clone(),
-            meta: meta_val,
-        },
-    )
-    .await;
-    if let Some(msg) = create_events.iter().find_map(|e| match e {
-        agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
-        _ => None,
-    }) {
-        return Err(format!("pane.open: CreateBlock: {msg}"));
-    }
-    let block_id = create_events
-        .iter()
-        .find_map(|e| match e {
-            agentmux_common::ipc::Event::BlockCreated { block_id, .. } => Some(block_id.clone()),
-            _ => None,
-        })
-        .ok_or_else(|| "pane.open: CreateBlock emitted no BlockCreated".to_string())?;
-    for ev in &create_events {
-        if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, &mstore) {
-            tracing::warn!("pane.open: CreateBlock mstore apply failed: {e}");
-        }
-    }
-    crate::server::service::publish_events(state, &create_events);
-
-    // Place it, split if requested, else append: srv's tree, then the queued
-    // action for the window. Best-effort: a failure leaves the block created
-    // but not laid out.
-    let placement = pane::resolve_placement(
-        cmd.split_direction.as_deref(),
-        cmd.split_reference_block_id.as_deref(),
-        cmd.focus.unwrap_or(true),
-    );
-    if let Err(e) = crate::server::service::layout_intents::place_block(state, &tab_id, &block_id, placement).await {
-        tracing::warn!("pane.open: placing the pane failed: {e}");
-    }
-
-    tracing::info!(
-        block_id = %block_id,
-        view = %cmd.view,
-        "pane.open: block created + layout updated"
-    );
-
-    // Broadcast block + tab + layout updates
-    {
-        let mut updates = Vec::new();
-        if let Ok(updated_block) = mstore.must_get::<Block>(&block_id) {
-            updates.push(obj::MuxObjUpdate {
-                updatetype: "update".into(),
-                otype: "block".into(),
-                oid: block_id.clone(),
-                obj: Some(obj::mux_obj_to_value(&updated_block)),
-            });
-        }
-        if let Ok(updated_tab) = mstore.must_get::<Tab>(&tab_id) {
-            updates.push(obj::MuxObjUpdate {
-                updatetype: "update".into(),
-                otype: "tab".into(),
-                oid: tab_id.clone(),
-                obj: Some(obj::mux_obj_to_value(&updated_tab)),
-            });
-            if let Ok(updated_layout) = mstore.must_get::<obj::LayoutState>(&updated_tab.layoutstate) {
-                updates.push(obj::MuxObjUpdate {
-                    updatetype: "update".into(),
-                    otype: "layout".into(),
-                    oid: updated_tab.layoutstate.clone(),
-                    obj: Some(obj::mux_obj_to_value(&updated_layout)),
-                });
-            }
-        }
-        // One batched frame so the renderer applies all of them in a single
-        // reactive flush — see EventBus::broadcast_mux_obj_updates.
-        event_bus.broadcast_mux_obj_updates(&updates);
-    }
-
-    Ok(PaneOpenResult {
-        block_id,
-        tab_id,
-        view: cmd.view,
-        created: true,
-    })
+    steps::open_docked(state, &cmd, tab_id, meta).await
 }
