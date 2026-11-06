@@ -547,7 +547,9 @@ impl Store {
     /// chain, all in one transaction. Returns the line as stored.
     pub fn vault_activity_add(&self, row: &VaultActivityRow) -> Result<VaultActivityRow, StoreError> {
         let mut conn = self.conn.lock().unwrap();
-        let tx = conn.transaction()?;
+        // Immediate: the store is shared by every AgentMux process on the computer, and the chain's tip is read and then
+        // written, so a second process must wait (busy_timeout) rather than read the same tip and lose its line.
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let mut row = row.clone();
         row.seq = tx
             .query_row("SELECT seq FROM sqlite_sequence WHERE name = 'db_vault_activity'", [], |r| r.get::<_, i64>(0))
