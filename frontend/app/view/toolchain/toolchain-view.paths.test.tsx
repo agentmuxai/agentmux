@@ -50,7 +50,7 @@ const h = vi.hoisted(() => ({
 
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: h.rpc }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
-vi.mock("@/store/global", () => ({ getApi: () => ({ openExternal: h.openExternal }) }));
+vi.mock("@/store/global", () => ({ getApi: () => ({ openExternal: h.openExternal }), settingsAtom: () => ({}) }));
 vi.mock("@/store/block-layout-actions", () => ({ createBlock: h.createBlock }));
 vi.mock("@/util/platformutil", async (importOriginal) => ({
     ...(await importOriginal<typeof import("@/util/platformutil")>()),
@@ -642,11 +642,11 @@ describe("a card's actions and details", () => {
         await mount();
         open(card("claude"));
         expect(
-            await screen.findByText("AgentMux doesn't install this CLI: it runs the copy you installed")
+            await screen.findByText("You chose Use the CLI on my PATH: AgentMux runs the copy you installed, not its own")
         ).toBeInTheDocument();
         expect(document.querySelectorAll(".toolchain-detail-note")).toHaveLength(1);
         const note = within(card("claude")).getByText("your install");
-        expect(note).toHaveAttribute("data-hover-tip", expect.stringContaining("AgentMux doesn't install"));
+        expect(note).toHaveAttribute("data-hover-tip", expect.stringContaining("You chose Use the CLI on my PATH"));
         expect(within(card("claude")).getByText("up to date")).not.toHaveAttribute("data-hover-tip");
     });
 

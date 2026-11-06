@@ -4,6 +4,21 @@
 use super::*;
 
 #[test]
+fn only_a_provider_listed_in_cli_usepath_uses_the_copy_on_path() {
+    let setting = |value: serde_json::Value| std::collections::HashMap::from([(SETTING_USE_PATH.to_string(), value)]);
+    let listed = setting(serde_json::json!(["goose", "claude"]));
+    assert!(path_listed(&listed, "goose") && path_listed(&listed, "claude"));
+    assert!(!path_listed(&listed, "codex"));
+    // Absent, empty or not a list of ids: AgentMux's copy for everyone.
+    assert!(!path_listed(&std::collections::HashMap::new(), "goose"));
+    assert!(!path_listed(&setting(serde_json::json!([])), "goose"));
+    assert!(!path_listed(&setting(serde_json::json!("goose")), "goose"));
+    assert!(!path_listed(&setting(serde_json::json!([1, null])), "goose"));
+    // No settings attached (a unit test, early boot): nobody uses PATH.
+    assert!(!uses_path_cli("goose"));
+}
+
+#[test]
 fn canonical_ids_resolve() {
     assert!(get_provider("claude").is_some());
     assert!(get_provider("codex").is_some());
