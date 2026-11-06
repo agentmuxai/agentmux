@@ -1,0 +1,46 @@
+rpc ListAllAgentIdentities
+subscribeAccountChanges
+subscribe agentidentities:changed:claude-agent
+-- failed with a message
+<div>
+  <div class="identity-pane">
+    <div class="identity-pane-detail">
+      <div class="identity-pane-error">
+        "srv is busy"
+      <div class="identity-pane-readonly">
+        <h2 class="identity-pane-name">
+          "Claude Agent"
+        <h3 class="identity-pane-section-title">
+          "Linked accounts"
+unsubscribe agentidentities:changed:claude-agent
+unsubscribeAccountChanges
+rpc ListAllAgentIdentities
+subscribeAccountChanges
+subscribe agentidentities:changed:claude-agent
+-- failed without one
+<div>
+  <div class="identity-pane">
+    <div class="identity-pane-detail">
+      <div class="identity-pane-error">
+        "Failed to load agent identities"
+      <div class="identity-pane-readonly">
+        <h2 class="identity-pane-name">
+          "Claude Agent"
+        <h3 class="identity-pane-section-title">
+          "Linked accounts"
+unsubscribe agentidentities:changed:claude-agent
+unsubscribeAccountChanges
+rpc ListAllAgentIdentities
+subscribeAccountChanges
+subscribe agentidentities:changed:claude-agent
+-- failed, with links from before
+<div>
+  <div class="identity-pane">
+    <div class="identity-pane-detail">
+      <div class="identity-pane-error">
+        "srv is busy"
+      <div class="identity-pane-readonly">
+        <h2 class="identity-pane-name">
+          "Claude Agent"
+        <h3 class="identity-pane-section-title">
+          "Linked accounts"

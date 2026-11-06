@@ -1,0 +1,11 @@
+rpc ListAllAgentIdentities
+subscribeAccountChanges
+-- no agent
+<div>
+  <div class="identity-pane">
+    <div class="identity-pane-detail">
+      <div class="identity-pane-empty">
+        <p>
+          "This pane isn't attached to a specific agent."
+        <p class="identity-pane-empty-hint">
+          "Open the Identity tab from an agent's own pane to see the accounts that agent launches with."

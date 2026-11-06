@@ -24,297 +24,34 @@
 // scope — created from the agent-launch flow directly, per
 // docs/specs/SPEC_IDENTITY_DIRECT_LINKS_PHASE3_PRC_2026_07_10.md.
 
-import { createEffect, createMemo, createResource, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
+import { Show, type JSX } from "solid-js";
 
-import { useAgentDefinitions } from "@/app/view/agent/components/AgentPicker";
-import { resolveEffectiveLaunchProvider } from "@/app/view/agent/agent-launch-env";
-import { RpcApi } from "@/app/store/rpc-api";
-import { TabRpcClient } from "@/app/store/rpc-util";
-import { onMuxEvent } from "@/app/store/mps";
-import { loadAccounts, subscribeAccountChanges, PROVIDER_LABELS, type Account } from "./identity-model";
-import { statusBadge } from "./identity-manager";
-import { joinAgentIdentityRows } from "./agent-identities-model";
-import { ClaudeLoginPanel } from "@/app/view/accounts/ClaudeLoginPanel";
-import { canonicalProviderId } from "@/app/view/agent/providers/provider-id-aliases";
-import { brandForProvider } from "@/app/view/accounts/provider-brand";
+import { createAgentIdentityLinks, type AgentIdentityLinksPanelProps } from "./agent-identity-links-state";
+import { ClaudeLogin, ConnectAnthropic, LinkedAccounts, NoAgent } from "./agent-identity-links-parts";
 
 import "./identity-pane-view.scss";
-import type { AgentDefinition, AgentDefinitionIdentity } from "@/app/store/rpc-api";
-import { Button } from "@/app/element/ui";
-
-interface AgentIdentityLinksPanelProps {
-    /** The agent whose linked accounts to show. `undefined` when this
-     *  panel has no agent context (e.g. a generically opened identity
-     *  block) — renders a context-free empty state in that case. */
-    agentId: string | undefined;
-}
 
 export const AgentIdentityLinksPanel = (props: AgentIdentityLinksPanelProps): JSX.Element => {
-    const [agents] = useAgentDefinitions();
-
-    const [allLinks, setAllLinks] = createSignal<AgentDefinitionIdentity[]>([]);
-    const [accounts, setAccounts] = createSignal<Account[]>(loadAccounts());
-    const [error, setError] = createSignal<string | null>(null);
-    // Set to the account id being refreshed (or "" for a fresh connect —
-    // distinguished from "closed" by claudePanelOpen()) when the Claude
-    // Connect/Re-login panel is open.
-    const [claudePanelOpen, setClaudePanelOpen] = createSignal(false);
-    const [claudeRefreshAccountId, setClaudeRefreshAccountId] = createSignal<string | undefined>(undefined);
-    // reagent P0 on PR #2414: see ClaudeLoginPanel's staleAliasProvider doc
-    // comment — set when the row being acted on carries a legacy-alias
-    // provider string, so the panel can unlink it after a successful login
-    // instead of leaving an orphaned row that silently blocks every future
-    // spawn under the new canonical link.
-    const [claudeStaleAliasProvider, setClaudeStaleAliasProvider] = createSignal<string | undefined>(undefined);
-    // reagent P2 on PR #2414 (round 3): the empty-state "Connect Anthropic
-    // account" button below must not appear before the initial load
-    // resolves (was previously indistinguishable from "genuinely zero
-    // links") or after it fails (the top error banner already covers that
-    // case — offering the button too just invites clicking it against
-    // still-broken/unknown state).
-    const [linksLoaded, setLinksLoaded] = createSignal(false);
-
-    const openClaudeLogin = (existingAccountId: string | undefined, rawProvider?: string) => {
-        setClaudeRefreshAccountId(existingAccountId);
-        setClaudeStaleAliasProvider(
-            rawProvider && rawProvider !== "claude" ? rawProvider : undefined,
-        );
-        setClaudePanelOpen(true);
-    };
-
-    const refreshLinks = async (): Promise<void> => {
-        try {
-            const result = await RpcApi.ListAllAgentIdentitiesCommand(TabRpcClient);
-            setAllLinks(result ?? []);
-            setError(null);
-        } catch (e: any) {
-            setError(e?.message ?? "Failed to load agent identities");
-        } finally {
-            setLinksLoaded(true);
-        }
-    };
-    void refreshLinks();
-
-    const unsubAccounts = subscribeAccountChanges(setAccounts);
-    onCleanup(unsubAccounts);
-
-    // Re-subscribe to this agent's own link-change event whenever the
-    // agentId prop changes.
-    createEffect(() => {
-        const id = props.agentId;
-        if (!id) return;
-        const unsub = onMuxEvent(`agentidentities:changed:${id}`, () => void refreshLinks());
-        onCleanup(unsub);
-    });
-
-    const accountsById = createMemo<Map<string, Account>>(() => {
-        const m = new Map<string, Account>();
-        for (const a of accounts()) m.set(a.id, a);
-        return m;
-    });
-
-    const agent = createMemo<AgentDefinition | null>(() => {
-        const id = props.agentId;
-        if (!id) return null;
-        return agents().find((a) => a.id === id) ?? null;
-    });
-
-    // Same resolver as the launch and the credential gate (#2594), so the
-    // "Connect Anthropic account" CTA below follows the provider the agent
-    // actually runs; falls
-    // back to `agent()?.provider` while loading/unbound/on failure, same
-    // fallback contract `resolveEffectiveLaunchProvider` itself documents
-    // — a brief stale flash here is cosmetic (button visibility only),
-    // not a spawn/credential decision.
-    const [resolvedAgentProviderId] = createResource(agent, (a) =>
-        a ? resolveEffectiveLaunchProvider(a) : Promise.resolve(""),
-    );
-    const effectiveAgentProviderId = () => resolvedAgentProviderId() || (agent()?.provider ?? "");
-
-    const rows = createMemo(() => {
-        const id = props.agentId;
-        if (!id) return [];
-        return joinAgentIdentityRows(id, allLinks(), accountsById());
-    });
-
-    // reagent P1 on PR #2414 (round 6): the empty-state Connect button was
-    // gated on `rows().length === 0`, so a Claude-provider agent with ANY
-    // other-provider link (e.g. a github row, but no claude/claude-code
-    // row) fell into the table branch instead — where the per-row
-    // Connect/Re-login button only renders on rows whose OWN provider is
-    // claude, so there was no row to attach it to either. Net effect: no
-    // in-app affordance anywhere in the panel to connect Claude for that
-    // agent, despite this being exactly the broken/missing-Claude-binding
-    // case the panel exists to fix. Computed independently of rows().length
-    // so it applies whether the table renders or not.
-    const hasClaudeLink = createMemo(() => rows().some((r) => canonicalProviderId(r.provider) === "claude"));
-
+    const t = createAgentIdentityLinks(props);
     return (
         <div class="identity-pane">
             <div class="identity-pane-detail">
-                <Show when={error()}>
-                    <div class="identity-pane-error">{error()}</div>
+                <Show when={t.error()}>
+                    <div class="identity-pane-error">{t.error()}</div>
                 </Show>
 
-                <Show
-                    when={props.agentId}
-                    fallback={
-                        <div class="identity-pane-empty">
-                            <p>This pane isn't attached to a specific agent.</p>
-                            <p class="identity-pane-empty-hint">
-                                Open the Identity tab from an agent's own pane to see the accounts
-                                that agent launches with.
-                            </p>
-                        </div>
-                    }
-                >
+                <Show when={props.agentId} fallback={<NoAgent />}>
                     <div class="identity-pane-readonly">
-                        <h2 class="identity-pane-name">{agent()?.name ?? "This agent"}</h2>
+                        <h2 class="identity-pane-name">{t.agent()?.name ?? "This agent"}</h2>
 
                         <h3 class="identity-pane-section-title">Linked accounts</h3>
-                        <Show
-                            when={rows().length > 0}
-                            fallback={
-                                // reagent P2 on PR #2414 (round 3): gated on
-                                // linksLoaded() && !error() — without this,
-                                // this text rendered indistinguishably for
-                                // "still loading", "load failed" (the banner
-                                // above already covers that), and a
-                                // genuinely empty agent.
-                                <Show when={linksLoaded() && !error()}>
-                                    <div class="identity-pane-empty-hint">
-                                        <p>This agent has no linked accounts yet. Link one from its launch dialog.</p>
-                                    </div>
-                                </Show>
-                            }
-                        >
-                            <table class="identity-pane-bindings">
-                                <thead>
-                                    <tr>
-                                        <th>Provider</th>
-                                        <th>Account</th>
-                                        <th>Status</th>
-                                        <th />
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <For each={rows()}>
-                                        {(row) => {
-                                            const badge = createMemo(() => statusBadge(row.account?.status));
-                                            return (
-                                                <tr>
-                                                    <td>
-                                                        {(PROVIDER_LABELS as Record<string, string>)[
-                                                            brandForProvider(row.provider)
-                                                        ] ?? row.provider}
-                                                    </td>
-                                                    <td>
-                                                        {row.account
-                                                            ? row.account.display_name?.trim() ||
-                                                              // Anthropic accounts persist an
-                                                              // internal `${provider}-oauth` name
-                                                              // (identity_auth_persist.rs) with no
-                                                              // display_name set — fall back to the
-                                                              // brand label instead of leaking that
-                                                              // internal name (codex P2 on PR #2806).
-                                                              (brandForProvider(row.provider) === "anthropic"
-                                                                  ? "Anthropic"
-                                                                  : row.account.name)
-                                                            : "—"}
-                                                    </td>
-                                                    <td>
-                                                        <span class="identity-pane-status">
-                                                            <span
-                                                                class={`identity-pane-status-dot is-${badge().dot}`}
-                                                                aria-hidden="true"
-                                                            />
-                                                            <span class="identity-pane-status-label">
-                                                                {badge().label}
-                                                            </span>
-                                                        </span>
-                                                    </td>
-                                                    <td>
-                                                        {/* Claude-only for now — the in-app session
-                                                            (InAppLoginPanel/ClaudeLoginPanel) only
-                                                            exists for Claude; other providers still
-                                                            route through the launch dialog. Canonicalize
-                                                            — db_agent_identity_links can carry a
-                                                            legacy-alias row ("claude-code") for a
-                                                            migrated agent (reagent P1 on PR #2414;
-                                                            see provider-id-aliases.ts). */}
-                                                        <Show when={canonicalProviderId(row.provider) === "claude"}>
-                                                            <Button
-                                                                class="identity-btn identity-btn-secondary"
-                                                                // reagent P2 on PR #2414 (round 5): row.accountId
-                                                                // (from the link row itself, agent-identities-model.ts)
-                                                                // is always present when a link exists; row.account
-                                                                // (the JOINED Account object) is null whenever the
-                                                                // local accounts cache hasn't caught up yet — using
-                                                                // row.account?.id here passed undefined on a
-                                                                // stale-cache click, minting a brand-new Claude
-                                                                // account instead of refreshing the one the link
-                                                                // row already points at.
-                                                                onClick={() => openClaudeLogin(row.accountId, row.provider)}
-                                                            >
-                                                                {row.account ? "Re-login" : "Connect"}
-                                                            </Button>
-                                                        </Show>
-                                                    </td>
-                                                </tr>
-                                            );
-                                        }}
-                                    </For>
-                                </tbody>
-                            </table>
-                        </Show>
-
-                        {/* reagent P1 on PR #2414 (round 6): standalone, NOT
-                            nested inside the rows()===0 fallback above — a
-                            Claude-provider agent with other-provider links
-                            but no claude/claude-code row of its own needs
-                            this same affordance, and the per-row
-                            Connect/Re-login button (only rendered on rows
-                            whose OWN provider is claude) can't cover it since
-                            no such row exists to attach it to. Gated on the
-                            agent's own provider (#2414):
-                            otherwise this links an unrelated Claude account
-                            to an agent whose actual provider is something
-                            else entirely. */}
-                        <Show
-                            when={
-                                linksLoaded() &&
-                                !error() &&
-                                !hasClaudeLink() &&
-                                canonicalProviderId(effectiveAgentProviderId()) === "claude"
-                            }
-                        >
-                            <div class="identity-pane-empty-hint">
-                                <Button
-                                    tone="accent"
-                                    class="identity-btn identity-btn-primary"
-                                    onClick={() => openClaudeLogin(undefined)}
-                                >
-                                    Connect Anthropic account
-                                </Button>
-                            </div>
-                        </Show>
+                        <LinkedAccounts t={t} />
+                        <ConnectAnthropic t={t} />
                     </div>
                 </Show>
             </div>
 
-            <Show when={claudePanelOpen()}>
-                {/* This panel can be hosted inside a pane's ModalLayer
-                    scope="pane" — "pane" here stacks this dialog correctly
-                    over that modal instead of both competing for the same
-                    window-level backdrop. */}
-                <ClaudeLoginPanel
-                    onClose={() => setClaudePanelOpen(false)}
-                    existingAccountId={claudeRefreshAccountId()}
-                    linkTarget={props.agentId ? { agentDefinitionId: props.agentId } : undefined}
-                    staleAliasProvider={claudeStaleAliasProvider()}
-                    scope="pane"
-                />
-            </Show>
+            <ClaudeLogin t={t} agentId={props.agentId} />
         </div>
     );
 };
