@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createResource, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createResource, createSignal, For, onCleanup, onMount, Show, type Accessor, type JSX, type Setter } from "solid-js";
 import { beginDrag, endDrag, session, type DragEndReason } from "@/app/drag/drag-session";
 
 import { RpcApi } from "@/app/store/rpc-api";
@@ -10,7 +10,7 @@ import { showCopyContextMenu, showTextInputContextMenu, type CopyMenuEntry } fro
 import { abbreviateText } from "@/util/format-text";
 import { BLOCK_KINDS, blockMeta } from "./block-registry";
 import type { DroneViewModel } from "./drone-model";
-import type { BlockKind, FlowNode } from "./drone-types";
+import type { BlockKind, FlowEdge, FlowNode } from "./drone-types";
 import "./drone-view.scss";
 import type { Bundle } from "@/app/store/rpc-api";
 import { Button, IconButton, TextArea, TextInput } from "@/app/element/ui";
@@ -157,416 +157,380 @@ const NodeChip = (p: { model: DroneViewModel; kind: BlockKind }): JSX.Element =>
 // Supports: drag-from-bar to create, node drag, pan/zoom + fit, and
 // port-to-port drag wiring. See SPEC_DRONE_CANVAS_NODE_EDITOR_2026_06_05.md.
 
-const Canvas = (p: { model: DroneViewModel }): JSX.Element => {
-    const m = p.model;
-    let canvasEl!: HTMLDivElement;
+const ZMIN = 0.2,
+    ZMAX = 2.5;
+const clampZoom = (z: number) => Math.min(ZMAX, Math.max(ZMIN, z));
 
-    // ── viewport transform (pan / zoom) ─────────────────────────────
-    const vpStyle = () => {
-        const v = m.viewportAtom();
-        return {
-            transform: `translate(${v.x}px, ${v.y}px) scale(${v.zoom})`,
-            "transform-origin": "0 0",
-        };
-    };
-    const ZMIN = 0.2,
-        ZMAX = 2.5;
-    const clampZoom = (z: number) => Math.min(ZMAX, Math.max(ZMIN, z));
+interface NodeDrag {
+    id: string;
+    sx: number;
+    sy: number;
+    ox: number;
+    oy: number;
+    zoom: number;
+}
+interface PanDrag {
+    sx: number;
+    sy: number;
+    ox: number;
+    oy: number;
+    moved: boolean;
+}
+interface ConnDrag {
+    sourceId: string;
+    sourceHandle: string;
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+}
 
-    const onWheel = (e: WheelEvent) => {
-        // Let scrollable areas inside nodes (class "nowheel") scroll
-        // their content instead of zooming the canvas.
-        if ((e.target as HTMLElement | null)?.closest(".nowheel")) return;
-        // Ctrl/Cmd+scroll is the shared pane zoom (the window's handler), not the graph's.
-        if (isModKey(e)) return;
-        // The graph's own zoom. Stopped here, so the window's zoom handler, which takes Ctrl or Cmd
-        // on any platform, doesn't also zoom the pane: a macOS pinch is a Ctrl+wheel.
-        e.preventDefault();
-        e.stopPropagation();
-        const rect = canvasEl.getBoundingClientRect();
-        const mx = e.clientX - rect.left;
-        const my = e.clientY - rect.top;
-        const v = m.viewportAtom();
-        const zoom = clampZoom(v.zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1));
-        // Anchor the flow-point under the cursor so zoom feels natural.
-        const fx = (mx - v.x) / v.zoom;
-        const fy = (my - v.y) / v.zoom;
-        m.setViewport({ zoom, x: mx - fx * zoom, y: my - fy * zoom });
-    };
+/**
+ * What the canvas's gestures share: the model, the element, the drag in
+ * progress, and the window listeners that follow it (each needs one identity
+ * so it can be removed again).
+ */
+interface CanvasState {
+    m: DroneViewModel;
+    el: HTMLDivElement;
+    drag: NodeDrag | null;
+    pan: PanDrag | null;
+    conn: Accessor<ConnDrag | null>;
+    setConn: Setter<ConnDrag | null>;
+    nodeMove: (e: PointerEvent) => void;
+    nodeUp: () => void;
+    panMove: (e: PointerEvent) => void;
+    panUp: () => void;
+    connMove: (e: PointerEvent) => void;
+    connUp: (e: PointerEvent) => void;
+}
 
-    const zoomByCenter = (factor: number) => {
-        const rect = canvasEl.getBoundingClientRect();
-        const cx = rect.width / 2,
-            cy = rect.height / 2;
-        const v = m.viewportAtom();
-        const zoom = clampZoom(v.zoom * factor);
-        const fx = (cx - v.x) / v.zoom;
-        const fy = (cy - v.y) / v.zoom;
-        m.setViewport({ zoom, x: cx - fx * zoom, y: cy - fy * zoom });
+function createCanvasState(m: DroneViewModel): CanvasState {
+    const [conn, setConn] = createSignal<ConnDrag | null>(null);
+    const s: CanvasState = {
+        m,
+        el: undefined as unknown as HTMLDivElement, // set by the canvas's ref
+        drag: null,
+        pan: null,
+        conn,
+        setConn,
+        nodeMove: (e) => onNodeMove(s, e),
+        nodeUp: () => onNodeUp(s),
+        panMove: (e) => onPanMove(s, e),
+        panUp: () => onPanUp(s),
+        connMove: (e) => onConnMove(s, e),
+        connUp: (e) => onConnUp(s, e),
     };
+    return s;
+}
 
-    const fitView = () => {
-        const nodes = m.draftAtom().graph.nodes;
-        const rect = canvasEl.getBoundingClientRect();
-        if (nodes.length === 0) {
-            m.setViewport({ x: 0, y: 0, zoom: 1 });
-            return;
-        }
-        const NW = NODE_W,
-            NH = 76,
-            pad = 80;
-        let minX = Infinity,
-            minY = Infinity,
-            maxX = -Infinity,
-            maxY = -Infinity;
-        for (const n of nodes) {
-            minX = Math.min(minX, n.position.x);
-            minY = Math.min(minY, n.position.y);
-            maxX = Math.max(maxX, n.position.x + NW);
-            maxY = Math.max(maxY, n.position.y + NH);
-        }
-        const w = maxX - minX || 1,
-            h = maxY - minY || 1;
-        const zoom = clampZoom(Math.min((rect.width - pad) / w, (rect.height - pad) / h));
-        m.setViewport({
-            zoom,
-            x: rect.width / 2 - (minX + w / 2) * zoom,
-            y: rect.height / 2 - (minY + h / 2) * zoom,
-        });
-    };
+// ── viewport transform (pan / zoom) ─────────────────────────────
 
-    // ── node drag (zoom-aware: divide client delta by zoom) ─────────
-    let drag: { id: string; sx: number; sy: number; ox: number; oy: number; zoom: number } | null =
-        null;
-    const onNodeMove = (e: PointerEvent) => {
-        if (!drag) return;
-        const dx = (e.clientX - drag.sx) / drag.zoom;
-        const dy = (e.clientY - drag.sy) / drag.zoom;
-        m.moveNode(drag.id, { x: drag.ox + dx, y: drag.oy + dy });
+const vpStyle = (m: DroneViewModel) => {
+    const v = m.viewportAtom();
+    return {
+        transform: `translate(${v.x}px, ${v.y}px) scale(${v.zoom})`,
+        "transform-origin": "0 0",
     };
-    const onNodeUp = () => {
-        drag = null;
-        window.removeEventListener("pointermove", onNodeMove);
-    };
-    const onNodePointerDown = (e: PointerEvent, n: FlowNode) => {
-        if (e.button !== 0) return; // left-button drag only
-        const t = e.target as HTMLElement;
-        if (t.closest(".nodrag") || t.closest(".drone-node-close")) return;
-        e.stopPropagation(); // don't let the canvas start a pan
-        m.setSelected(n.id);
-        m.setSelectedEdge(null);
-        drag = {
-            id: n.id,
-            sx: e.clientX,
-            sy: e.clientY,
-            ox: n.position.x,
-            oy: n.position.y,
-            zoom: m.viewportAtom().zoom,
-        };
-        window.addEventListener("pointermove", onNodeMove);
-        window.addEventListener("pointerup", onNodeUp, { once: true });
-    };
+};
 
-    // ── canvas pan (drag empty background or middle-mouse) ──────────
-    let pan: { sx: number; sy: number; ox: number; oy: number; moved: boolean } | null = null;
-    const onPanMove = (e: PointerEvent) => {
-        if (!pan) return;
-        const dx = e.clientX - pan.sx,
-            dy = e.clientY - pan.sy;
-        if (Math.abs(dx) > 2 || Math.abs(dy) > 2) pan.moved = true;
-        m.setViewport({ x: pan.ox + dx, y: pan.oy + dy });
-    };
-    const onPanUp = () => {
-        // A background press that never moved is a click → deselect.
-        if (pan && !pan.moved) m.setSelected(null);
-        pan = null;
-        window.removeEventListener("pointermove", onPanMove);
-    };
-    const isBackground = (t: HTMLElement) =>
-        t === canvasEl ||
-        t.classList.contains("drone-viewport") ||
-        t.classList.contains("drone-canvas-edges") ||
-        t.tagName.toLowerCase() === "svg";
-    const onCanvasPointerDown = (e: PointerEvent) => {
-        const t = e.target as HTMLElement;
-        if (e.button === 1 || (e.button === 0 && isBackground(t))) {
-            const v = m.viewportAtom();
-            pan = { sx: e.clientX, sy: e.clientY, ox: v.x, oy: v.y, moved: false };
-            window.addEventListener("pointermove", onPanMove);
-            window.addEventListener("pointerup", onPanUp, { once: true });
-        }
-    };
+function onWheel(s: CanvasState, e: WheelEvent) {
+    const { m } = s;
+    // Let scrollable areas inside nodes (class "nowheel") scroll
+    // their content instead of zooming the canvas.
+    if ((e.target as HTMLElement | null)?.closest(".nowheel")) return;
+    // Ctrl/Cmd+scroll is the shared pane zoom (the window's handler), not the graph's.
+    if (isModKey(e)) return;
+    // The graph's own zoom. Stopped here, so the window's zoom handler, which takes Ctrl or Cmd
+    // on any platform, doesn't also zoom the pane: a macOS pinch is a Ctrl+wheel.
+    e.preventDefault();
+    e.stopPropagation();
+    const rect = s.el.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const v = m.viewportAtom();
+    const zoom = clampZoom(v.zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1));
+    // Anchor the flow-point under the cursor so zoom feels natural.
+    const fx = (mx - v.x) / v.zoom;
+    const fy = (my - v.y) / v.zoom;
+    m.setViewport({ zoom, x: mx - fx * zoom, y: my - fy * zoom });
+}
 
-    onCleanup(() => {
-        window.removeEventListener("pointermove", onNodeMove);
-        window.removeEventListener("pointermove", onPanMove);
+function zoomByCenter(s: CanvasState, factor: number) {
+    const { m } = s;
+    const rect = s.el.getBoundingClientRect();
+    const cx = rect.width / 2,
+        cy = rect.height / 2;
+    const v = m.viewportAtom();
+    const zoom = clampZoom(v.zoom * factor);
+    const fx = (cx - v.x) / v.zoom;
+    const fy = (cy - v.y) / v.zoom;
+    m.setViewport({ zoom, x: cx - fx * zoom, y: cy - fy * zoom });
+}
+
+function fitView(s: CanvasState) {
+    const { m } = s;
+    const nodes = m.draftAtom().graph.nodes;
+    const rect = s.el.getBoundingClientRect();
+    if (nodes.length === 0) {
+        m.setViewport({ x: 0, y: 0, zoom: 1 });
+        return;
+    }
+    const NW = NODE_W,
+        NH = 76,
+        pad = 80;
+    let minX = Infinity,
+        minY = Infinity,
+        maxX = -Infinity,
+        maxY = -Infinity;
+    for (const n of nodes) {
+        minX = Math.min(minX, n.position.x);
+        minY = Math.min(minY, n.position.y);
+        maxX = Math.max(maxX, n.position.x + NW);
+        maxY = Math.max(maxY, n.position.y + NH);
+    }
+    const w = maxX - minX || 1,
+        h = maxY - minY || 1;
+    const zoom = clampZoom(Math.min((rect.width - pad) / w, (rect.height - pad) / h));
+    m.setViewport({
+        zoom,
+        x: rect.width / 2 - (minX + w / 2) * zoom,
+        y: rect.height / 2 - (minY + h / 2) * zoom,
     });
+}
 
-    // ── drag-from-bar → drop-on-canvas ──────────────────────────────
-    const screenToFlow = (clientX: number, clientY: number) => {
-        const rect = canvasEl.getBoundingClientRect();
-        const v = m.viewportAtom();
-        return {
-            x: (clientX - rect.left - v.x) / v.zoom,
-            y: (clientY - rect.top - v.y) / v.zoom,
-        };
-    };
-    // Only a node chip's drag is accepted here. Anything else (OS files, a
-    // pane or tab being moved) is left to its own handlers; the canvas used to
-    // show a copy cursor for files and then swallow them
-    // (SPEC_DRAG_AND_DROP_CONSOLIDATION_2026_09_27.md §2.1).
-    const isNodeDrag = (e: DragEvent) =>
-        dragKind() != null || Array.from(e.dataTransfer?.types ?? []).includes("application/x-drone-kind");
-    const onDragOver = (e: DragEvent) => {
-        if (!isNodeDrag(e)) return;
-        e.preventDefault();
-        if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
-    };
-    const onDrop = (e: DragEvent) => {
-        if (!isNodeDrag(e)) return;
-        e.preventDefault();
-        const kind =
-            dragKind() ??
-            (e.dataTransfer?.getData("application/x-drone-kind") as BlockKind | undefined) ??
-            null;
-        if (!kind) return;
-        const p0 = screenToFlow(e.clientX, e.clientY);
-        // Center the node body roughly under the cursor.
-        m.addNode(kind, { x: p0.x - NODE_W / 2, y: p0.y - 20 });
-        endChipDrag("drop");
-    };
+// ── node drag (zoom-aware: divide client delta by zoom) ─────────
 
-    // Keep the model's canvas pixel size current so a chip-click can
-    // place a node at the visible center.
+function onNodeMove(s: CanvasState, e: PointerEvent) {
+    const { m, drag } = s;
+    if (!drag) return;
+    const dx = (e.clientX - drag.sx) / drag.zoom;
+    const dy = (e.clientY - drag.sy) / drag.zoom;
+    m.moveNode(drag.id, { x: drag.ox + dx, y: drag.oy + dy });
+}
+
+function onNodeUp(s: CanvasState) {
+    s.drag = null;
+    window.removeEventListener("pointermove", s.nodeMove);
+}
+
+function onNodePointerDown(s: CanvasState, e: PointerEvent, n: FlowNode) {
+    const { m } = s;
+    if (e.button !== 0) return; // left-button drag only
+    const t = e.target as HTMLElement;
+    if (t.closest(".nodrag") || t.closest(".drone-node-close")) return;
+    e.stopPropagation(); // don't let the canvas start a pan
+    m.setSelected(n.id);
+    m.setSelectedEdge(null);
+    s.drag = {
+        id: n.id,
+        sx: e.clientX,
+        sy: e.clientY,
+        ox: n.position.x,
+        oy: n.position.y,
+        zoom: m.viewportAtom().zoom,
+    };
+    window.addEventListener("pointermove", s.nodeMove);
+    window.addEventListener("pointerup", s.nodeUp, { once: true });
+}
+
+// ── canvas pan (drag empty background or middle-mouse) ──────────
+
+function onPanMove(s: CanvasState, e: PointerEvent) {
+    const { m, pan } = s;
+    if (!pan) return;
+    const dx = e.clientX - pan.sx,
+        dy = e.clientY - pan.sy;
+    if (Math.abs(dx) > 2 || Math.abs(dy) > 2) pan.moved = true;
+    m.setViewport({ x: pan.ox + dx, y: pan.oy + dy });
+}
+
+function onPanUp(s: CanvasState) {
+    // A background press that never moved is a click → deselect.
+    if (s.pan && !s.pan.moved) s.m.setSelected(null);
+    s.pan = null;
+    window.removeEventListener("pointermove", s.panMove);
+}
+
+const isBackground = (s: CanvasState, t: HTMLElement) =>
+    t === s.el ||
+    t.classList.contains("drone-viewport") ||
+    t.classList.contains("drone-canvas-edges") ||
+    t.tagName.toLowerCase() === "svg";
+
+function onCanvasPointerDown(s: CanvasState, e: PointerEvent) {
+    const t = e.target as HTMLElement;
+    if (e.button === 1 || (e.button === 0 && isBackground(s, t))) {
+        const v = s.m.viewportAtom();
+        s.pan = { sx: e.clientX, sy: e.clientY, ox: v.x, oy: v.y, moved: false };
+        window.addEventListener("pointermove", s.panMove);
+        window.addEventListener("pointerup", s.panUp, { once: true });
+    }
+}
+
+// ── drag-from-bar → drop-on-canvas ──────────────────────────────
+
+function screenToFlow(s: CanvasState, clientX: number, clientY: number) {
+    const rect = s.el.getBoundingClientRect();
+    const v = s.m.viewportAtom();
+    return {
+        x: (clientX - rect.left - v.x) / v.zoom,
+        y: (clientY - rect.top - v.y) / v.zoom,
+    };
+}
+
+// Only a node chip's drag is accepted here. Anything else (OS files, a
+// pane or tab being moved) is left to its own handlers; the canvas used to
+// show a copy cursor for files and then swallow them
+// (SPEC_DRAG_AND_DROP_CONSOLIDATION_2026_09_27.md §2.1).
+const isNodeDrag = (e: DragEvent) =>
+    dragKind() != null || Array.from(e.dataTransfer?.types ?? []).includes("application/x-drone-kind");
+
+function onDragOver(e: DragEvent) {
+    if (!isNodeDrag(e)) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+}
+
+function onDrop(s: CanvasState, e: DragEvent) {
+    if (!isNodeDrag(e)) return;
+    e.preventDefault();
+    const kind =
+        dragKind() ??
+        (e.dataTransfer?.getData("application/x-drone-kind") as BlockKind | undefined) ??
+        null;
+    if (!kind) return;
+    const p0 = screenToFlow(s, e.clientX, e.clientY);
+    // Center the node body roughly under the cursor.
+    s.m.addNode(kind, { x: p0.x - NODE_W / 2, y: p0.y - 20 });
+    endChipDrag("drop");
+}
+
+// Keep the model's canvas pixel size current so a chip-click can
+// place a node at the visible center.
+function watchCanvasSize(s: CanvasState) {
     onMount(() => {
         const sync = () => {
-            const r = canvasEl.getBoundingClientRect();
-            m.setCanvasSize({ w: r.width, h: r.height });
+            const r = s.el.getBoundingClientRect();
+            s.m.setCanvasSize({ w: r.width, h: r.height });
         };
         sync();
         const ro = new ResizeObserver(sync);
-        ro.observe(canvasEl);
+        ro.observe(s.el);
         // Focus the canvas on any pointer-down within it (capture phase, so
         // it runs even when a node/edge/port handler stops propagation) —
         // this is what scopes the Delete/Escape keydown to this pane.
-        const focusOnDown = () => canvasEl.focus({ preventScroll: true });
-        canvasEl.addEventListener("pointerdown", focusOnDown, true);
+        const focusOnDown = () => s.el.focus({ preventScroll: true });
+        s.el.addEventListener("pointerdown", focusOnDown, true);
         onCleanup(() => {
             ro.disconnect();
-            canvasEl.removeEventListener("pointerdown", focusOnDown, true);
+            s.el.removeEventListener("pointerdown", focusOnDown, true);
         });
     });
+}
 
-    // ── port → port connection drag ─────────────────────────────────
-    const [conn, setConn] = createSignal<
-        { sourceId: string; sourceHandle: string; x1: number; y1: number; x2: number; y2: number } | null
-    >(null);
-    const onConnMove = (e: PointerEvent) => {
-        const c = conn();
-        if (!c) return;
-        const p = screenToFlow(e.clientX, e.clientY);
-        setConn({ ...c, x2: p.x, y2: p.y });
-    };
-    // Tear down a connection drag — removes BOTH window listeners (the
-    // pointerup is registered `once`, but an Escape-cancel resolves before
-    // it fires, so we must remove it explicitly) and clears the preview.
-    const cancelConn = () => {
-        window.removeEventListener("pointermove", onConnMove);
-        window.removeEventListener("pointerup", onConnUp);
-        setConn(null);
-    };
-    const onConnUp = (e: PointerEvent) => {
-        const c = conn();
-        cancelConn();
-        if (!c) return;
-        // Drop target = whatever input port is under the cursor.
-        const el = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
-        const port = el?.closest(".drone-port--in") as HTMLElement | null;
-        if (port?.dataset.node) {
-            m.connect({
-                source: c.sourceId,
-                sourceHandle: c.sourceHandle,
-                target: port.dataset.node,
-                targetHandle: port.dataset.handle ?? "in",
-            });
-        }
-    };
-    const startConn = (e: PointerEvent, nodeId: string, handleId: string) => {
-        if (e.button !== 0) return;
-        e.stopPropagation(); // don't start a node drag
-        const node = m.draftAtom().graph.nodes.find((n) => n.id === nodeId);
-        if (!node) return;
-        const sp = portFlowPos(node, "out", handleId);
-        setConn({ sourceId: nodeId, sourceHandle: handleId, x1: sp.x, y1: sp.y, x2: sp.x, y2: sp.y });
-        window.addEventListener("pointermove", onConnMove);
-        window.addEventListener("pointerup", onConnUp, { once: true });
-    };
+// ── port → port connection drag ─────────────────────────────────
 
-    // ── keyboard: delete selection · escape cancels ─────────────────
-    // Bound to the canvas element (not window) and the canvas is focused
-    // on any pointer-down within it (capture phase, below), so Delete only
-    // affects the pane the user is actually interacting with — never
-    // another drone pane's selection in the same window.
-    const onKey = (e: KeyboardEvent) => {
-        const tag = (e.target as HTMLElement | null)?.tagName;
-        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-        if (e.key === "Escape") {
-            cancelConn();
-            m.setSelected(null);
-            m.setSelectedEdge(null);
-            return;
+function onConnMove(s: CanvasState, e: PointerEvent) {
+    const c = s.conn();
+    if (!c) return;
+    const p = screenToFlow(s, e.clientX, e.clientY);
+    s.setConn({ ...c, x2: p.x, y2: p.y });
+}
+
+// Tear down a connection drag — removes BOTH window listeners (the
+// pointerup is registered `once`, but an Escape-cancel resolves before
+// it fires, so we must remove it explicitly) and clears the preview.
+function cancelConn(s: CanvasState) {
+    window.removeEventListener("pointermove", s.connMove);
+    window.removeEventListener("pointerup", s.connUp);
+    s.setConn(null);
+}
+
+function onConnUp(s: CanvasState, e: PointerEvent) {
+    const c = s.conn();
+    cancelConn(s);
+    if (!c) return;
+    // Drop target = whatever input port is under the cursor.
+    const el = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
+    const port = el?.closest(".drone-port--in") as HTMLElement | null;
+    if (port?.dataset.node) {
+        s.m.connect({
+            source: c.sourceId,
+            sourceHandle: c.sourceHandle,
+            target: port.dataset.node,
+            targetHandle: port.dataset.handle ?? "in",
+        });
+    }
+}
+
+function startConn(s: CanvasState, e: PointerEvent, nodeId: string, handleId: string) {
+    if (e.button !== 0) return;
+    e.stopPropagation(); // don't start a node drag
+    const node = s.m.draftAtom().graph.nodes.find((n) => n.id === nodeId);
+    if (!node) return;
+    const sp = portFlowPos(node, "out", handleId);
+    s.setConn({ sourceId: nodeId, sourceHandle: handleId, x1: sp.x, y1: sp.y, x2: sp.x, y2: sp.y });
+    window.addEventListener("pointermove", s.connMove);
+    window.addEventListener("pointerup", s.connUp, { once: true });
+}
+
+// ── keyboard: delete selection · escape cancels ─────────────────
+// Bound to the canvas element (not window) and the canvas is focused
+// on any pointer-down within it (capture phase, above), so Delete only
+// affects the pane the user is actually interacting with — never
+// another drone pane's selection in the same window.
+function onKey(s: CanvasState, e: KeyboardEvent) {
+    const { m } = s;
+    const tag = (e.target as HTMLElement | null)?.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+    if (e.key === "Escape") {
+        cancelConn(s);
+        m.setSelected(null);
+        m.setSelectedEdge(null);
+        return;
+    }
+    if (e.key === "Delete" || e.key === "Backspace") {
+        const edgeId = m.selectedEdgeAtom();
+        const nodeId = m.selectedAtom();
+        if (edgeId) {
+            m.removeEdge(edgeId);
+            e.preventDefault();
+        } else if (nodeId) {
+            m.removeNode(nodeId);
+            e.preventDefault();
         }
-        if (e.key === "Delete" || e.key === "Backspace") {
-            const edgeId = m.selectedEdgeAtom();
-            const nodeId = m.selectedAtom();
-            if (edgeId) {
-                m.removeEdge(edgeId);
-                e.preventDefault();
-            } else if (nodeId) {
-                m.removeNode(nodeId);
-                e.preventDefault();
-            }
-        }
-    };
+    }
+}
+
+const Canvas = (p: { model: DroneViewModel }): JSX.Element => {
+    const s = createCanvasState(p.model);
+    const m = s.m;
+
     onCleanup(() => {
-        window.removeEventListener("pointermove", onConnMove);
-        window.removeEventListener("pointerup", onConnUp);
+        window.removeEventListener("pointermove", s.nodeMove);
+        window.removeEventListener("pointermove", s.panMove);
+    });
+    watchCanvasSize(s);
+    onCleanup(() => {
+        window.removeEventListener("pointermove", s.connMove);
+        window.removeEventListener("pointerup", s.connUp);
     });
 
     return (
         <div
             class="drone-canvas"
-            ref={canvasEl}
+            ref={(el) => (s.el = el)}
             tabindex={-1}
-            onWheel={onWheel}
-            onPointerDown={onCanvasPointerDown}
-            onKeyDown={onKey}
+            onWheel={(e) => onWheel(s, e)}
+            onPointerDown={(e) => onCanvasPointerDown(s, e)}
+            onKeyDown={(e) => onKey(s, e)}
             onDragOver={onDragOver}
-            onDrop={onDrop}
+            onDrop={(e) => onDrop(s, e)}
         >
-            <div class="drone-viewport" style={vpStyle()}>
-                <svg class="drone-canvas-edges">
-                    <For each={m.draftAtom().graph.edges}>
-                        {(edge) => {
-                            const src = () =>
-                                m.draftAtom().graph.nodes.find((n) => n.id === edge.source);
-                            const dst = () =>
-                                m.draftAtom().graph.nodes.find((n) => n.id === edge.target);
-                            const d = () => {
-                                const a = portFlowPos(src()!, "out", edge.sourceHandle ?? "out");
-                                const b = portFlowPos(dst()!, "in", edge.targetHandle ?? "in");
-                                return bezierPath(a.x, a.y, b.x, b.y);
-                            };
-                            return (
-                                <Show when={src() && dst()}>
-                                    <path
-                                        class="drone-edge-hit"
-                                        d={d()}
-                                        onPointerDown={(e) => {
-                                            e.stopPropagation();
-                                            m.setSelectedEdge(edge.id);
-                                        }}
-                                    />
-                                    <path
-                                        class="drone-edge"
-                                        classList={{
-                                            "drone-edge--selected": m.selectedEdgeAtom() === edge.id,
-                                        }}
-                                        d={d()}
-                                    />
-                                </Show>
-                            );
-                        }}
-                    </For>
-                    <Show when={conn()}>
-                        {(c) => (
-                            <path
-                                class="drone-edge-preview"
-                                d={bezierPath(c().x1, c().y1, c().x2, c().y2)}
-                            />
-                        )}
-                    </Show>
-                </svg>
-                <For each={m.draftAtom().graph.nodes}>
-                    {(n) => {
-                        const meta = blockMeta(n.data.kind as BlockKind);
-                        const selected = () => m.selectedAtom() === n.id;
-                        return (
-                            <div
-                                class="drone-node"
-                                classList={{
-                                    "drone-node--selected": selected(),
-                                }}
-                                style={{
-                                    left: `${n.position.x}px`,
-                                    top: `${n.position.y}px`,
-                                    "--block-color": meta.color,
-                                }}
-                                onPointerDown={(e) => onNodePointerDown(e, n)}
-                                onContextMenu={(e) => showCopyContextMenu(nodeCopyEntries(n), e)}
-                            >
-                                <header class="drone-node-header">
-                                    <span class="drone-node-emoji">{meta.emoji}</span>
-                                    <span class="drone-node-label">{meta.label}</span>
-                                    <IconButton
-                                        icon="xmark"
-                                        label="Remove block"
-                                        density="compact"
-                                        class="drone-node-close"
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            m.removeNode(n.id);
-                                        }}
-                                    />
-                                </header>
-                                <Show
-                                    when={selected()}
-                                    fallback={
-                                        <div class="drone-node-summary">
-                                            {nodeSummary(n)}
-                                        </div>
-                                    }
-                                >
-                                    <NodeFields
-                                        model={m}
-                                        node={n}
-                                    />
-                                </Show>
-                                <For each={meta.inputs}>
-                                    {(h, i) => (
-                                        <div
-                                            class="drone-port drone-port--in nodrag"
-                                            data-node={n.id}
-                                            data-handle={h.id}
-                                            {...tip(`input: ${h.label}`, { label: true })}
-                                            style={{ top: `${portOffsetY(meta.inputs.length, i()) - 6}px` }}
-                                        />
-                                    )}
-                                </For>
-                                <For each={meta.outputs}>
-                                    {(h, i) => (
-                                        <div
-                                            class="drone-port drone-port--out nodrag"
-                                            data-node={n.id}
-                                            data-handle={h.id}
-                                            {...tip(`output: ${h.label}`, { label: true })}
-                                            style={{
-                                                top: `${portOffsetY(meta.outputs.length, i()) - 6}px`,
-                                                background:
-                                                    h.id === "true"
-                                                        ? "var(--success-color)"
-                                                        : h.id === "false"
-                                                          ? "var(--secondary-text-color)"
-                                                          : meta.color,
-                                            }}
-                                            onPointerDown={(e) => startConn(e, n.id, h.id)}
-                                        />
-                                    )}
-                                </For>
-                            </div>
-                        );
-                    }}
-                </For>
+            <div class="drone-viewport" style={vpStyle(m)}>
+                <EdgesLayer model={m} conn={s.conn} />
+                <For each={m.draftAtom().graph.nodes}>{(n) => <CanvasNode s={s} n={n} />}</For>
             </div>
             <Show when={m.draftAtom().graph.nodes.length === 0}>
                 <div class="drone-canvas-hint" style={{ zoom: m.zoom() }}>
@@ -575,20 +539,145 @@ const Canvas = (p: { model: DroneViewModel }): JSX.Element => {
                     canvas to pan · Del removes the selection
                 </div>
             </Show>
-            <div class="drone-controls" style={{ zoom: m.zoom() }}>
-                <Button class="ui-icon-button drone-ctrl" density="compact" title="Zoom in" onClick={() => zoomByCenter(1.2)}>
-                    +
-                </Button>
-                <Button class="ui-icon-button drone-ctrl" density="compact" title="Zoom out" onClick={() => zoomByCenter(1 / 1.2)}>
-                    −
-                </Button>
-                <Button class="ui-icon-button drone-ctrl" density="compact" title="Fit view" onClick={fitView}>
-                    ⤢
-                </Button>
-            </div>
+            <CanvasControls s={s} />
         </div>
     );
 };
+
+const EdgesLayer = (p: { model: DroneViewModel; conn: Accessor<ConnDrag | null> }): JSX.Element => (
+    <svg class="drone-canvas-edges">
+        <For each={p.model.draftAtom().graph.edges}>{(edge) => <DroneEdge model={p.model} edge={edge} />}</For>
+        <Show when={p.conn()}>
+            {(c) => <path class="drone-edge-preview" d={bezierPath(c().x1, c().y1, c().x2, c().y2)} />}
+        </Show>
+    </svg>
+);
+
+const DroneEdge = (p: { model: DroneViewModel; edge: FlowEdge }): JSX.Element => {
+    const m = p.model;
+    const edge = p.edge;
+    const src = () => m.draftAtom().graph.nodes.find((n) => n.id === edge.source);
+    const dst = () => m.draftAtom().graph.nodes.find((n) => n.id === edge.target);
+    const d = () => {
+        const a = portFlowPos(src()!, "out", edge.sourceHandle ?? "out");
+        const b = portFlowPos(dst()!, "in", edge.targetHandle ?? "in");
+        return bezierPath(a.x, a.y, b.x, b.y);
+    };
+    return (
+        <Show when={src() && dst()}>
+            <path
+                class="drone-edge-hit"
+                d={d()}
+                onPointerDown={(e) => {
+                    e.stopPropagation();
+                    m.setSelectedEdge(edge.id);
+                }}
+            />
+            <path
+                class="drone-edge"
+                classList={{
+                    "drone-edge--selected": m.selectedEdgeAtom() === edge.id,
+                }}
+                d={d()}
+            />
+        </Show>
+    );
+};
+
+const CanvasNode = (p: { s: CanvasState; n: FlowNode }): JSX.Element => {
+    const { s, n } = p;
+    const m = s.m;
+    const meta = blockMeta(n.data.kind as BlockKind);
+    const selected = () => m.selectedAtom() === n.id;
+    return (
+        <div
+            class="drone-node"
+            classList={{
+                "drone-node--selected": selected(),
+            }}
+            style={{
+                left: `${n.position.x}px`,
+                top: `${n.position.y}px`,
+                "--block-color": meta.color,
+            }}
+            onPointerDown={(e) => onNodePointerDown(s, e, n)}
+            onContextMenu={(e) => showCopyContextMenu(nodeCopyEntries(n), e)}
+        >
+            <header class="drone-node-header">
+                <span class="drone-node-emoji">{meta.emoji}</span>
+                <span class="drone-node-label">{meta.label}</span>
+                <IconButton
+                    icon="xmark"
+                    label="Remove block"
+                    density="compact"
+                    class="drone-node-close"
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        m.removeNode(n.id);
+                    }}
+                />
+            </header>
+            <Show when={selected()} fallback={<div class="drone-node-summary">{nodeSummary(n)}</div>}>
+                <NodeFields model={m} node={n} />
+            </Show>
+            <NodePorts s={s} n={n} />
+        </div>
+    );
+};
+
+const NodePorts = (p: { s: CanvasState; n: FlowNode }): JSX.Element => {
+    const { s, n } = p;
+    const meta = blockMeta(n.data.kind as BlockKind);
+    return (
+        <>
+            <For each={meta.inputs}>
+                {(h, i) => (
+                    <div
+                        class="drone-port drone-port--in nodrag"
+                        data-node={n.id}
+                        data-handle={h.id}
+                        {...tip(`input: ${h.label}`, { label: true })}
+                        style={{ top: `${portOffsetY(meta.inputs.length, i()) - 6}px` }}
+                    />
+                )}
+            </For>
+            <For each={meta.outputs}>
+                {(h, i) => (
+                    <div
+                        class="drone-port drone-port--out nodrag"
+                        data-node={n.id}
+                        data-handle={h.id}
+                        {...tip(`output: ${h.label}`, { label: true })}
+                        style={{
+                            top: `${portOffsetY(meta.outputs.length, i()) - 6}px`,
+                            background:
+                                h.id === "true"
+                                    ? "var(--success-color)"
+                                    : h.id === "false"
+                                      ? "var(--secondary-text-color)"
+                                      : meta.color,
+                        }}
+                        onPointerDown={(e) => startConn(s, e, n.id, h.id)}
+                    />
+                )}
+            </For>
+        </>
+    );
+};
+
+const CanvasControls = (p: { s: CanvasState }): JSX.Element => (
+    <div class="drone-controls" style={{ zoom: p.s.m.zoom() }}>
+        <Button class="ui-icon-button drone-ctrl" density="compact" title="Zoom in" onClick={() => zoomByCenter(p.s, 1.2)}>
+            +
+        </Button>
+        <Button class="ui-icon-button drone-ctrl" density="compact" title="Zoom out" onClick={() => zoomByCenter(p.s, 1 / 1.2)}>
+            −
+        </Button>
+        <Button class="ui-icon-button drone-ctrl" density="compact" title="Fit view" onClick={() => fitView(p.s)}>
+            ⤢
+        </Button>
+    </div>
+);
 
 function nodeSummary(n: FlowNode): string {
     switch (n.data.kind) {
