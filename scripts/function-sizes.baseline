@@ -238,7 +238,7 @@
 113 crates/srv/src/bootstrap/watchers.rs::start_parent_watcher
 154 crates/srv/src/broker/state.rs::update
 135 crates/srv/src/drone/executor/engine.rs::execute
-133 crates/srv/src/identity/oauth_client.rs::start_code_flow
+134 crates/srv/src/identity/oauth_client.rs::start_code_flow
 486 crates/srv/src/identity/resolver/inject.rs::inject_identity_env_with_broker
 125 crates/srv/src/identity/resolver/oauth_probe.rs::probe_oauth_status
 111 crates/srv/src/messaging/discord/gateway.rs::handle_dispatch
