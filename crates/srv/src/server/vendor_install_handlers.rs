@@ -160,6 +160,7 @@ struct Plan {
     _script: Option<tempfile::TempPath>,
 }
 
+#[derive(Debug)]
 struct Fetched {
     bytes: Vec<u8>,
     host: String,
