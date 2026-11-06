@@ -210,7 +210,7 @@ export interface UseAgentControllerStatus {
      * agent recovered and was answering messages, but the initial
      * auth_failed launch had left the button stuck showing.
      */
-    notifyControllerHealthy: () => void;
+    notifyControllerHealthy: (provesAuth?: boolean) => void;
     /**
      * Kill (if running) and respawn this pane's controller process, then
      * refresh its runtime status. Originally internal-only (used by the
@@ -346,8 +346,8 @@ function endRecoveryFlow(c: ControllerCtx) {
     c.dispatch({ type: "RecoveryEnded" });
 }
 
-function notifyControllerHealthy(c: ControllerCtx) {
-    c.dispatch({ type: "ControllerHealthy" });
+function notifyControllerHealthy(c: ControllerCtx, provesAuth?: boolean) {
+    c.dispatch({ type: "ControllerHealthy", provesAuth });
 }
 
 async function startLaunchFlow(c: ControllerCtx) {
@@ -754,7 +754,7 @@ export function useAgentControllerStatus(
         relogin: (reloginOpts) => relogin(c, reloginOpts),
         loginViaTerminal: (terminalOpts) => loginViaTerminal(c, terminalOpts),
         useTerminalInstead: () => useTerminalInstead(c),
-        notifyControllerHealthy: () => notifyControllerHealthy(c),
+        notifyControllerHealthy: (provesAuth) => notifyControllerHealthy(c, provesAuth),
         forceControllerRefresh: (context) => forceControllerRefresh(c, context),
         cancelLogin: () => cancelLogin(c),
         isCancelled: () => isCancelled(c),
