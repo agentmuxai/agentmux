@@ -17,7 +17,7 @@ import {
     type RetryMark,
     type TurnStarted,
 } from "./failed-turn";
-import { type DeliveryOutcome, keyedLock } from "./offline-input";
+import { type DeliveryOutcome, keyedLock, UNKNOWN_HOLD_MS } from "./offline-input";
 
 type Attachment = { id?: string; name: string };
 const user = (message: string, opts: { timestamp?: number; attachments?: Attachment[]; supervisor?: boolean; system?: boolean } = {}): DocumentNode =>
@@ -106,13 +106,21 @@ function makePane(
         mark?: ReturnType<typeof createSignal<RetryMark | null>>;
         /** A send starts a turn that keeps running (Submitting, then Streaming). */
         startsTurn?: boolean;
+        /** The document is loaded (default). */
+        ready?: boolean;
+        /** The CLI is retrying an API request. */
+        retrying?: boolean;
+        /** The pause before an automatic retry; "default" leaves the recovery's own. */
+        settleMs?: number | "default";
+        /** Leave the clock format to the recovery's own. */
+        defaultClock?: boolean;
     } = {}
 ) {
     const [failure, setFailure] = createSignal<PaneFailure | null>(null);
     const [api, setApi] = createSignal<Reachability | null>(opts.api === undefined ? "offline" : opts.api);
     const [tracked, setTracked] = createSignal(true);
-    const [retrying] = createSignal(false);
-    const [ready] = createSignal(true);
+    const [retrying, setRetrying] = createSignal(opts.retrying ?? false);
+    const [ready, setReady] = createSignal(opts.ready ?? true);
     const [working, setWorking] = createSignal(false);
     const [held, setHeld] = createSignal(0);
     const [autoRetryOn, setAutoRetryOn] = createSignal(true);
@@ -140,6 +148,7 @@ function makePane(
     });
     const restoreFailure = vi.fn((f: PaneFailure) => setFailure(f));
     const clearFailure = vi.fn(() => setFailure(null));
+    const settleMs = opts.settleMs ?? 0;
     let ui!: FailedTurnRecovery;
     const dispose = createRoot((d) => {
         ui = createFailedTurnRecovery({
@@ -159,8 +168,8 @@ function makePane(
             storage: { mark, saveMark: setMark },
             lock: keyedLock(new Map(), "b"),
             now: () => 5_000,
-            settleMs: () => 0,
-            clockTime: (ms) => `t${ms}`,
+            ...(settleMs === "default" ? {} : { settleMs: () => settleMs }),
+            ...(opts.defaultClock ? {} : { clockTime: (ms: number) => `t${ms}` }),
         });
         return d;
     });
@@ -178,6 +187,8 @@ function makePane(
         mark,
         setMark,
         setApi,
+        setReady,
+        setRetrying,
         setTracked,
         setWorking,
         setHeld,
@@ -641,6 +652,727 @@ describe("a turn that failed on the network", () => {
         p.answer("accepted");
         await flush();
         expect(p.ui.pending()).toBe(false);
+        p.dispose();
+    });
+});
+
+const BASE = user("build it", { timestamp: 1_000, attachments: [PNG] });
+const otherFailure = (): AgentFailure => ({ code: "rate_limited", title: "Slow down", detail: "429", retryable: true });
+const retryMark = (m: Partial<RetryMark> = {}): RetryMark => ({
+    text: "build it",
+    at: 5_000,
+    auto: true,
+    state: "unknown",
+    ...m,
+});
+const BACK_ONLINE =
+    "Back online: sent your message from t1000 again, since its turn failed while the API was unreachable.";
+const offerOf = (p: ReturnType<typeof makePane>) => p.ui.notices().find((n) => n.retry)!;
+
+describe("when it retries and how it counts time", () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    it("waits two to five seconds after the API answers when nothing says otherwise", async () => {
+        const random = vi.spyOn(Math, "random").mockReturnValue(0.5);
+        const p = makePane({ api: "online", settleMs: "default" });
+        p.failLive();
+        await vi.advanceTimersByTimeAsync(3_499);
+        expect(p.sent).toEqual([]);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(p.sent).toHaveLength(1);
+        random.mockRestore();
+        p.dispose();
+    });
+
+    it("names the time of the message in the clock format of the machine", async () => {
+        const sentAt = new Date(2026, 10, 5, 14, 30).getTime();
+        const p = makePane({ api: "online", doc: [user("build it", { timestamp: sentAt })], defaultClock: true });
+        p.failLive();
+        await flush();
+        expect(p.ui.notices()[0].text).toMatch(/your message from 14\D30 again/);
+        p.dispose();
+    });
+
+    it("says 'your last message' when the document doesn't know when it was sent", async () => {
+        const p = makePane({ api: "online", doc: [user("build it")] });
+        p.failLive();
+        await flush();
+        expect(p.ui.notices().map((n) => n.text)).toEqual([
+            "Back online: sent your last message again, since its turn failed while the API was unreachable.",
+        ]);
+        p.dispose();
+    });
+
+    it("keeps every notice, in the order they came", async () => {
+        const p = makePane({ api: "online" });
+        p.failLive();
+        await flush();
+        p.setDoc([BASE, user("then this", { timestamp: 2_000 })]);
+        p.failLive();
+        await flush();
+        expect(p.ui.notices().map((n) => n.text)).toEqual([
+            BACK_ONLINE,
+            "Back online: sent your message from t2000 again, since its turn failed while the API was unreachable.",
+        ]);
+        p.dispose();
+    });
+
+    it("leaves no timer behind once disposed", () => {
+        const waiting = makePane({ api: "online", settleMs: 10_000 });
+        waiting.failLive();
+        expect(vi.getTimerCount()).toBe(1);
+        waiting.dispose();
+        expect(vi.getTimerCount()).toBe(0);
+
+        const unchecked = makePane({ api: "unknown" });
+        expect(vi.getTimerCount()).toBe(1);
+        unchecked.dispose();
+        expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("starts the unchecked wait over each time the API goes unchecked again", async () => {
+        const p = makePane({ api: "unknown" });
+        p.failLive();
+        await vi.advanceTimersByTimeAsync(UNKNOWN_HOLD_MS - 1_000);
+        p.setApi("offline");
+        p.setApi("unknown");
+        // The first wait would have ended here (and a retry follows a pause later).
+        await vi.advanceTimersByTimeAsync(1_001);
+        expect(p.sent).toEqual([]);
+        await vi.advanceTimersByTimeAsync(UNKNOWN_HOLD_MS);
+        expect(p.sent).toHaveLength(1);
+        p.dispose();
+    });
+
+    it("forgets that the API stayed unchecked once it is known again", async () => {
+        const p = makePane({ api: "unknown" });
+        await vi.advanceTimersByTimeAsync(UNKNOWN_HOLD_MS);
+        p.setApi("offline");
+        p.failLive();
+        p.setApi("unknown");
+        await flush();
+        expect(p.sent).toEqual([]);
+        await vi.advanceTimersByTimeAsync(UNKNOWN_HOLD_MS + 1);
+        expect(p.sent).toHaveLength(1);
+        p.dispose();
+    });
+
+    it("waits while the CLI is still retrying the API request", async () => {
+        const p = makePane({ api: "online", retrying: true });
+        p.failLive();
+        await flush();
+        expect(p.sent).toEqual([]);
+        p.setRetrying(false);
+        await flush();
+        expect(p.sent).toHaveLength(1);
+        p.dispose();
+    });
+
+    it("doesn't act on a settle timer the conditions have since withdrawn", async () => {
+        const p = makePane({ api: "online", settleMs: 1_000 });
+        p.failLive();
+        await vi.advanceTimersByTimeAsync(500);
+        p.setWorking(true);
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(p.sent).toEqual([]);
+        p.setWorking(false);
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(p.sent).toHaveLength(1);
+        p.dispose();
+    });
+
+    it("doesn't decide before the document is ready, and a failure seen before it is only offered", async () => {
+        const p = makePane({ api: "online", ready: false });
+        p.failLive();
+        p.typeAndSend();
+        await flush();
+        expect(p.ui.notices()).toEqual([]);
+        p.setReady(true);
+        await flush();
+        expect(offerOf(p)).toBeDefined();
+        expect(p.sent).toEqual([]);
+        p.dispose();
+
+        // Nor retried by itself: the turn was not seen live.
+        const q = makePane({ api: "online", ready: false });
+        q.failLive();
+        q.setReady(true);
+        await flush();
+        expect(q.sent).toEqual([]);
+        q.dispose();
+    });
+
+    it("stops waiting when the API stops being tracked", async () => {
+        const p = makePane();
+        p.failLive();
+        expect(p.ui.pending()).toBe(true);
+        p.setTracked(false);
+        expect(p.ui.pending()).toBe(false);
+        p.setApi("online");
+        await flush();
+        expect(p.sent).toEqual([]);
+        p.dispose();
+    });
+
+    it("doesn't wait for a failure that isn't a network one, and drops the wait when one follows", async () => {
+        const p = makePane({ api: "online" });
+        p.failLive(otherFailure());
+        expect(p.ui.pending()).toBe(false);
+        await flush();
+        expect(p.sent).toEqual([]);
+        p.dispose();
+
+        const q = makePane();
+        q.failLive();
+        expect(q.ui.pending()).toBe(true);
+        q.failAfter(otherFailure());
+        expect(q.ui.pending()).toBe(false);
+        q.setApi("online");
+        await flush();
+        expect(q.sent).toEqual([]);
+        q.dispose();
+    });
+});
+
+describe("whether a failure is the operator's live turn", () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    it("needs a turn that started after the previous failure and no later than this one", async () => {
+        // Started when the previous failure landed: that one's turn, not this one's.
+        const same = makePane();
+        same.failLive();
+        same.failLive(network(), { at: 100 });
+        same.setApi("online");
+        await flush();
+        expect(same.sent).toEqual([]);
+        same.dispose();
+
+        // Started the moment this one landed: live.
+        const exact = makePane({ api: "online" });
+        exact.failLive(network(), { at: 100 });
+        await flush();
+        expect(exact.sent).toHaveLength(1);
+        exact.dispose();
+
+        // Started after it landed: some later turn's.
+        const later = makePane({ api: "online" });
+        later.failLive(network(), { at: 101 });
+        await flush();
+        expect(later.sent).toEqual([]);
+        later.dispose();
+    });
+
+    it("isn't retried when the operator had a message held, even once it has gone", async () => {
+        const p = makePane({ api: "online" });
+        p.setHeld(1);
+        p.failLive();
+        p.setHeld(0);
+        await flush();
+        expect(p.sent).toEqual([]);
+        p.dispose();
+    });
+
+    it("re-sends the turn as it was when it failed, not as the document reads later", async () => {
+        const p = makePane({ doc: [BASE] });
+        p.failLive();
+        p.setDoc([BASE, tool()]);
+        p.setApi("online");
+        await flush();
+        expect(p.sent).toEqual([{ text: "build it", attachments: [PNG] }]);
+        p.dispose();
+    });
+
+    it("only says it retries by itself for a turn that would", async () => {
+        const typed = makePane();
+        typed.failLive();
+        typed.ui.typed();
+        expect(typed.ui.reconnectHint()).toBeNull();
+        expect(typed.ui.pending()).toBe(false);
+        typed.dispose();
+
+        const readBack = makePane();
+        readBack.failReadBack();
+        expect(readBack.ui.reconnectHint()).toBeNull();
+        expect(readBack.ui.pending()).toBe(false);
+        readBack.dispose();
+
+        const retried = makePane({ mark: createSignal<RetryMark | null>(retryMark({ state: "sent" })) });
+        retried.failLive();
+        expect(retried.ui.reconnectHint()).toBeNull();
+        expect(retried.ui.pending()).toBe(false);
+        retried.dispose();
+
+        const other = makePane({ mark: createSignal<RetryMark | null>(retryMark({ text: "something else" })) });
+        other.failLive();
+        expect(other.ui.reconnectHint()).toBe("retries by itself when the API is back");
+        other.dispose();
+    });
+});
+
+describe("a turn the operator wrote after", () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    it("is offered only once the row has gone, and decided once", async () => {
+        const p = makePane({ api: "online" });
+        p.failLive();
+        // Typed but not sent: the row still shows its Retry.
+        p.ui.typed();
+        await flush();
+        expect(p.ui.notices()).toEqual([]);
+        expect(vi.getTimerCount()).toBe(0);
+        // Sent: the row goes, and the offer takes its place.
+        p.typeAndSend();
+        await flush();
+        expect(p.ui.notices().filter((n) => n.retry)).toHaveLength(1);
+        expect(vi.getTimerCount()).toBe(0);
+        p.dispose();
+    });
+
+    it("is not offered when nothing started by the operator is left to re-send", async () => {
+        const p = makePane({ api: "online", doc: [user("hi", { timestamp: 500 }), jekt()] });
+        p.failAfter();
+        p.typeAndSend();
+        await flush();
+        expect(p.ui.notices()).toEqual([]);
+        p.dispose();
+    });
+
+    it("is offered as it was when the operator typed, whatever the document gains", async () => {
+        const p = makePane({ doc: [BASE] });
+        p.failLive();
+        p.typeAndSend();
+        p.setDoc([BASE, user("u there?", { timestamp: 2_000 })]);
+        // Typing again changes nothing about the turn that failed.
+        p.ui.typed();
+        p.setApi("online");
+        await flush();
+        expect(offerOf(p).text).toContain("Your message from t1000 failed");
+        offerOf(p).retry!();
+        await flush();
+        expect(p.sent).toEqual([{ text: "build it", attachments: [PNG] }]);
+        p.dispose();
+    });
+
+    it("is read off the document when the turn was not ready at the failure", async () => {
+        const p = makePane({ api: "online", ready: false, doc: [BASE] });
+        p.failLive();
+        p.typeAndSend();
+        p.setDoc([BASE, user("u there?", { timestamp: 2_000 })]);
+        p.setReady(true);
+        await flush();
+        expect(offerOf(p).text).toContain("Your message from t1000 failed");
+        offerOf(p).retry!();
+        await flush();
+        expect(p.sent).toEqual([{ text: "build it", attachments: [PNG] }]);
+        p.dispose();
+    });
+
+    it("keeps the turn it decided on when the document gains messages later", async () => {
+        const p = makePane({ api: "online", ready: false, doc: [BASE] });
+        p.setHeld(1);
+        p.failLive();
+        p.typeAndSend();
+        p.setHeld(0);
+        p.setReady(true);
+        await flush();
+        p.setDoc([BASE, user("u there?", { timestamp: 2_000 })]);
+        expect(offerOf(p).text).toContain("Your message from t1000 failed");
+        p.dispose();
+    });
+
+    it("says a retry may have gone already, but only once it is known not to have been answered", async () => {
+        const p = makePane();
+        p.failLive();
+        p.typeAndSend();
+        p.setApi("online");
+        await flush();
+        expect(offerOf(p).text).not.toContain("may have gone");
+
+        p.outcomes.push("pending");
+        offerOf(p).retry!();
+        await flush();
+        expect(offerOf(p).text).not.toContain("may have gone");
+        p.answer("unknown");
+        await flush();
+        expect(offerOf(p).text).toBe(
+            "Back online. Your message from t1000 failed while the API was unreachable; it wasn't sent again, since you wrote after it. A retry may have gone already."
+        );
+        // The offer is under the composer: the row has nothing to say about it.
+        expect(p.ui.reconnectHint()).toBeNull();
+        p.dispose();
+    });
+
+    it("doesn't put the row back for an offered retry that didn't go", async () => {
+        const p = makePane();
+        p.failLive();
+        p.typeAndSend();
+        p.setApi("online");
+        await flush();
+        p.outcomes.push("rejected");
+        offerOf(p).retry!();
+        await flush();
+        expect(p.restoreFailure).not.toHaveBeenCalled();
+        expect(offerOf(p)).toBeDefined();
+        p.dispose();
+    });
+
+    it("keeps an earlier notice ahead of the offer", async () => {
+        const p = makePane({ api: "online" });
+        p.outcomes.push("unknown");
+        p.failLive();
+        await flush();
+        // The next turn fails and the operator writes before the first retry is confirmed.
+        p.setDoc([BASE, user("then this", { timestamp: 2_000 })]);
+        p.failLive();
+        p.typeAndSend();
+        await flush();
+        p.late[0](true);
+        const list = p.ui.notices();
+        expect(list.map((n) => n.text)).toEqual([
+            BACK_ONLINE,
+            expect.stringContaining("Your message from t2000 failed"),
+        ]);
+        expect(list[1].retry).toBeDefined();
+        p.dispose();
+    });
+
+    it("dismisses one notice by itself, and the offer by dropping the turn", async () => {
+        const p = makePane({ api: "online" });
+        p.failLive();
+        await flush();
+        p.setDoc([BASE, user("then this", { timestamp: 2_000 })]);
+        p.failLive();
+        await flush();
+        const [first, second] = p.ui.notices();
+        p.ui.dismissNotice(first.id);
+        expect(p.ui.notices().map((n) => n.id)).toEqual([second.id]);
+        p.dispose();
+
+        const q = makePane({ api: "online" });
+        q.failLive();
+        q.typeAndSend();
+        await flush();
+        q.ui.dismissNotice(offerOf(q).id);
+        expect(q.ui.notices()).toEqual([]);
+        expect(q.ui.pending()).toBe(false);
+        q.dispose();
+    });
+
+    it("typing clears what it did by itself, and a retry that went, and only that", async () => {
+        const p = makePane({ api: "online" });
+        p.failLive();
+        await flush();
+        expect(p.ui.notices()).toHaveLength(1);
+        expect(p.mark()?.state).toBe("sent");
+        p.ui.typed();
+        expect(p.ui.notices()).toEqual([]);
+        expect(p.mark()).toBeNull();
+        p.dispose();
+
+        const q = makePane({ mark: createSignal<RetryMark | null>(retryMark()) });
+        q.ui.typed();
+        expect(q.mark()?.state).toBe("unknown");
+        q.dispose();
+    });
+});
+
+describe("a retry whose answer is late, wrong or superseded", () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    it("ignores an answer for a retry that is no longer the stored one", async () => {
+        const sameTime = makePane({ api: "online" });
+        sameTime.outcomes.push("pending");
+        sameTime.failLive();
+        await flush();
+        const stored = sameTime.mark()!;
+        sameTime.setMark({ ...stored, text: "x" });
+        sameTime.answer("accepted");
+        await flush();
+        expect(sameTime.mark()).toEqual({ ...stored, text: "x" });
+        expect(sameTime.clearFailure).not.toHaveBeenCalled();
+        sameTime.dispose();
+
+        const sameText = makePane({ api: "online" });
+        sameText.outcomes.push("pending");
+        sameText.failLive();
+        await flush();
+        const kept = sameText.mark()!;
+        sameText.setMark({ ...kept, at: kept.at + 1 });
+        sameText.answer("accepted");
+        await flush();
+        expect(sameText.mark()).toEqual({ ...kept, at: kept.at + 1 });
+        sameText.dispose();
+    });
+
+    it("ignores an answer for a retry another mount already settled", async () => {
+        const p = makePane({ api: "online" });
+        p.outcomes.push("pending");
+        p.failLive();
+        await flush();
+        p.setMark({ ...p.mark()!, state: "sent" });
+        p.answer("accepted");
+        await flush();
+        expect(p.ui.notices()).toEqual([]);
+        p.dispose();
+    });
+
+    it("takes a late answer only for the stored retry, and only while it is unknown", async () => {
+        const replaced = makePane({ api: "online" });
+        replaced.outcomes.push("unknown");
+        replaced.failLive();
+        await flush();
+        const stored = replaced.mark()!;
+        replaced.setMark({ ...stored, text: "x" });
+        replaced.late[0](true);
+        expect(replaced.mark()).toEqual({ ...stored, text: "x" });
+        expect(replaced.clearFailure).not.toHaveBeenCalled();
+        replaced.dispose();
+
+        const settled = makePane({ api: "online" });
+        settled.outcomes.push("unknown");
+        settled.failLive();
+        await flush();
+        settled.setMark({ ...settled.mark()!, state: "sent" });
+        settled.late[0](false);
+        expect(settled.mark()?.state).toBe("sent");
+        settled.dispose();
+    });
+
+    it("goes back to the earlier mark when the late answer says it didn't go", async () => {
+        const p = makePane({ api: "online" });
+        p.outcomes.push("unknown");
+        p.failLive();
+        await flush();
+        p.late[0](false);
+        expect(p.mark()).toBeNull();
+        expect(p.clearFailure).not.toHaveBeenCalled();
+        expect(p.ui.notices()).toEqual([]);
+        p.dispose();
+    });
+
+    it("says a late-confirmed automatic retry went", async () => {
+        const p = makePane({ api: "online" });
+        p.outcomes.push("unknown");
+        p.failLive();
+        await flush();
+        expect(p.ui.notices()).toEqual([]);
+        p.late[0](true);
+        expect(p.ui.notices().map((n) => n.text)).toEqual([BACK_ONLINE]);
+        p.dispose();
+    });
+
+    it("says it may have gone twice when a retry that may have gone is retried and confirmed late", async () => {
+        const p = makePane({ api: "online" });
+        p.outcomes.push("unknown", "unknown");
+        p.failLive();
+        await flush();
+        expect(p.ui.retry()).toBe(true);
+        await flush();
+        p.late[1](true);
+        expect(p.ui.notices().map((n) => n.text)).toEqual(["Sent your message again. It may have gone once already."]);
+        p.dispose();
+    });
+
+    it("keeps a retry the operator made by hand a hand retry, even after one that may have gone", async () => {
+        const p = makePane();
+        p.outcomes.push("unknown");
+        p.failLive();
+        expect(p.ui.retry()).toBe(true);
+        await flush();
+        expect(p.mark()).toMatchObject({ auto: false, state: "unknown" });
+        expect(p.ui.retry()).toBe(true);
+        await flush();
+        expect(p.mark()).toMatchObject({ auto: false, state: "sent" });
+        p.dispose();
+    });
+
+    it("puts the row back unless the turn it started has settled", async () => {
+        // Another message's retry is not this one's.
+        const other = makePane({ api: "online", startsTurn: true });
+        other.outcomes.push("unknown");
+        other.failLive();
+        await flush();
+        other.setMark({ text: "other", at: 6_000, auto: false, state: "sent" });
+        other.setWorking(false);
+        expect(other.restoreFailure).toHaveBeenCalledTimes(1);
+        other.dispose();
+
+        // This one's own, settled by another mount while the turn ran.
+        const same = makePane({ api: "online", startsTurn: true });
+        same.outcomes.push("unknown");
+        same.failLive();
+        await flush();
+        same.setMark({ text: "build it", at: 5_000, auto: true, state: "sent" });
+        same.setWorking(false);
+        expect(same.restoreFailure).not.toHaveBeenCalled();
+        same.dispose();
+    });
+
+    it("forgets the retry's mark when the row is dismissed, unless a retry is on its way", async () => {
+        const p = makePane({ api: "online" });
+        p.outcomes.push("unknown");
+        p.failLive();
+        await flush();
+        p.dismissRow();
+        expect(p.mark()).toBeNull();
+        p.dispose();
+
+        const q = makePane({ api: "online" });
+        q.outcomes.push("pending");
+        q.failLive();
+        await flush();
+        q.dismissRow();
+        expect(q.mark()?.state).toBe("sending");
+        q.dispose();
+    });
+
+    it("is busy only while a retry of the turn it tracks is on its way", () => {
+        const flying = makePane({ mark: createSignal<RetryMark | null>(retryMark({ state: "sending", at: 4_000 })) });
+        expect(flying.ui.retryBusy()).toBe(false);
+        flying.failLive();
+        expect(flying.ui.retryBusy()).toBe(true);
+        flying.dispose();
+
+        const idle = makePane();
+        idle.failLive();
+        expect(idle.ui.retryBusy()).toBe(false);
+        idle.dispose();
+    });
+});
+
+describe("a retry an earlier mount had on its way, and the transcript", () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    it("settles this mount's failure only when that same retry went", async () => {
+        const shared = createSignal<RetryMark | null>(null);
+        const first = makePane({ api: "online", mark: shared });
+        first.outcomes.push("pending");
+        first.failLive();
+        await flush();
+        first.dispose();
+
+        const second = makePane({ api: "online", mark: shared });
+        second.failReadBack();
+        await flush();
+        // Another retry, at another time, went.
+        shared[1]({ text: "build it", at: 9_999, auto: true, state: "sent" });
+        await flush();
+        expect(second.clearFailure).not.toHaveBeenCalled();
+        // The same one, still not answered.
+        shared[1]({ text: "build it", at: 5_000, auto: true, state: "unknown" });
+        await flush();
+        expect(second.clearFailure).not.toHaveBeenCalled();
+        // The same one went: so did this failure, and it says the retry was automatic.
+        shared[1]({ text: "build it", at: 5_000, auto: true, state: "sent" });
+        await flush();
+        expect(second.clearFailure).toHaveBeenCalledTimes(1);
+        expect(second.ui.notices().map((n) => n.text)).toEqual([BACK_ONLINE]);
+        second.dispose();
+    });
+
+    it("finds an unanswered retry in the transcript only when ready, and only the same message after it", async () => {
+        const p = makePane({ api: "online" });
+        p.outcomes.push("unknown");
+        p.failLive();
+        await flush();
+        const notFound = async (doc: DocumentNode[]) => {
+            p.setDoc(doc);
+            await flush();
+            expect(p.mark()?.state).toBe("unknown");
+        };
+        const agent = {
+            type: "agent_message",
+            id: "a",
+            message: "build it",
+            timestamp: 5_100,
+            direction: "incoming",
+        } as unknown as DocumentNode;
+        await notFound([BASE, agent]);
+        await notFound([BASE, user("something else", { timestamp: 5_100 })]);
+        await notFound([BASE, user("build it")]);
+        await notFound([BASE, user("build it", { timestamp: 4_000 })]);
+        // Not before the document is ready.
+        p.setReady(false);
+        p.setDoc([BASE, user("build it", { timestamp: 5_000 })]);
+        await flush();
+        expect(p.mark()?.state).toBe("unknown");
+        // At the very time of the retry counts.
+        p.setReady(true);
+        await flush();
+        expect(p.mark()?.state).toBe("sent");
+        // A transcript is not a notice: nothing says AgentMux did it.
+        expect(p.ui.notices()).toEqual([]);
+        p.dispose();
+    });
+
+    it("leaves the turn alone when the retry found is another message's", async () => {
+        const mark = createSignal<RetryMark | null>(retryMark({ text: "other", auto: false }));
+        const p = makePane({ mark, ready: false, doc: [user("other", { timestamp: 6_000 }), BASE] });
+        p.failLive();
+        p.setReady(true);
+        await flush();
+        expect(p.mark()?.state).toBe("sent");
+        expect(p.clearFailure).not.toHaveBeenCalled();
+        p.dispose();
+    });
+});
+
+describe("a turn completing", () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    const pane = (m: Partial<RetryMark> = {}, started: Partial<TurnStarted> | null = {}) => {
+        const p = makePane({ mark: createSignal<RetryMark | null>(retryMark(m)) });
+        p.failLive();
+        p.setStarted(started === null ? null : { at: 6_000, content: "build it", hidden: false, ...started });
+        return p;
+    };
+
+    it("settles the retry it started, and the turn with it", () => {
+        const p = pane();
+        p.ui.turnCompleted();
+        expect(p.mark()).toBeNull();
+        expect(p.ui.pending()).toBe(false);
+        expect(p.ui.notices().map((n) => n.text)).toEqual([BACK_ONLINE]);
+        p.dispose();
+
+        // At the very time the retry was sent counts too.
+        const exact = pane({}, { at: 5_000 });
+        exact.ui.turnCompleted();
+        expect(exact.mark()).toBeNull();
+        exact.dispose();
+    });
+
+    it("settles nothing for a turn that isn't that retry's", () => {
+        for (const started of [null, { hidden: true }, { content: "other" }, { at: 4_000 }]) {
+            const p = pane({}, started);
+            p.ui.turnCompleted();
+            expect(p.mark()?.state).toBe("unknown");
+            expect(p.ui.pending()).toBe(false);
+            expect(p.ui.notices()).toEqual([]);
+            p.dispose();
+        }
+    });
+
+    it("clears a retry that already went, without settling the turn again", () => {
+        const p = pane({ state: "sent" });
+        p.ui.turnCompleted();
+        expect(p.mark()).toBeNull();
+        expect(p.ui.notices()).toEqual([]);
+        p.dispose();
+    });
+
+    it("settles another message's retry without touching this turn", () => {
+        const p = pane({ text: "other" }, { content: "other" });
+        p.ui.turnCompleted();
+        expect(p.mark()).toBeNull();
+        expect(p.ui.notices()).toEqual([]);
+        expect(p.clearFailure).not.toHaveBeenCalled();
         p.dispose();
     });
 });
