@@ -383,7 +383,6 @@
 140 frontend/app/statusbar/HostPopover.tsx::HostPopover
 169 frontend/app/statusbar/PairDevicePanel.tsx::PairDevicePanel
 171 frontend/app/statusbar/SystemStats.tsx::SystemStats
-219 frontend/app/statusbar/TokenBreakdownPopover.tsx::TokenBreakdownPopover
 145 frontend/app/store/agent-document/reducer.ts::scrubOrphanedInProgress
 258 frontend/app/store/agent-pane-state-store.ts::dispatch
 118 frontend/app/store/agent-pane-state/reducer-failure.ts::onCompactionBoundary
