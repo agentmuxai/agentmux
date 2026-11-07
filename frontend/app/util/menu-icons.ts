@@ -53,6 +53,7 @@ export const MENU_ICON = {
     forward: "arrow-right",
     reload: "arrows-rotate",
     print: "print",
+    saveAs: "download",
     home: "house",
     // Agents and connections
     history: "clock-rotate-left",
