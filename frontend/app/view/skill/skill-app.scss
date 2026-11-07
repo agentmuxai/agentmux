@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Memory → Skills: the App skill detail.
+@use "../../mixins.scss";
+
 .skill-app {
     display: flex;
     flex-direction: column;
@@ -63,6 +65,9 @@
 // A script under review: its purpose, what it needs, the exact text, then Approve or Revoke.
 .skill-app-script {
     flex-basis: 100%;
+    // A flex child is as wide as its longest line unless told it may shrink: the source box scrolls inside instead.
+    min-width: 0;
+    max-width: 100%;
     display: flex;
     flex-direction: column;
     gap: var(--space-1);
@@ -81,4 +86,8 @@
     white-space: pre;
     border: 1px solid var(--border-color);
     border-radius: var(--radius-sm);
+
+    &:focus-visible {
+        @include mixins.focus-ring;
+    }
 }

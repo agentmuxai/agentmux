@@ -18,8 +18,15 @@ import type { SkillApp } from "@/types/rpc/SkillApp";
 import { describeSignature, scriptState } from "./skill-app-model";
 import "./skill-app.scss";
 
-export function ScriptReview(p: { skillId: string; file: SkillFileInfo; info: ScriptInfo | undefined }): JSX.Element {
-    const [open, setOpen] = createSignal(false);
+/** `open` and `onToggle` belong to the caller: approving refreshes the file list, which rebuilds each row, and the panel must stay as it was. */
+export function ScriptReview(p: {
+    skillId: string;
+    file: SkillFileInfo;
+    info: ScriptInfo | undefined;
+    open: boolean;
+    onToggle: () => void;
+}): JSX.Element {
+    const open = () => p.open;
     const [busy, setBusy] = createSignal(false);
     const [error, setError] = createSignal("");
     // Keyed on the hash too: a script replaced by an update is read again, never shown stale.
@@ -45,7 +52,7 @@ export function ScriptReview(p: { skillId: string; file: SkillFileInfo; info: Sc
             <Pill tone={p.file.approved ? "ok" : "warn"} title={p.file.approved ? undefined : "Never given to an agent until you approve it"}>
                 {scriptState(p.file)}
             </Pill>
-            <Button variant="link" aria-expanded={open()} onClick={() => setOpen(!open())}>
+            <Button variant="link" aria-expanded={open()} onClick={p.onToggle}>
                 {open() ? "Hide" : "Review"}
             </Button>
             <Show when={open()}>

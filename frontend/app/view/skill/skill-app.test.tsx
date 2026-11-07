@@ -5,6 +5,7 @@
 // (docs/specs/SPEC_PACKS_2026_11_05.md §8).
 
 import { cleanup, fireEvent, render, screen, within } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const rpc = vi.hoisted(() => ({
@@ -22,6 +23,7 @@ vi.mock("@/app/element/markdown", () => ({ Markdown: () => null }));
 vi.mock("@/util/platformutil", () => ({ getPlatform: () => "win32" }));
 
 import { SkillManager } from "./skill-manager";
+import { SkillAppDetail } from "./skill-app";
 import { appStatus, describeSignature, filterSkills, recordsFor, referenceDrift } from "./skill-app-model";
 
 function record(over: Record<string, unknown> = {}) {
@@ -258,5 +260,17 @@ describe("Signature and script approval", () => {
         fireEvent.click(await within(detail).findByRole("button", { name: "Revoke approval" }));
         expect((await within(detail).findByRole("alert")).textContent).toBe("script changed");
         expect(rpc.SkillCatalogAppScriptCommand).toHaveBeenCalledWith({}, { skill_id: "k1", path: "scripts/run.py", approved: false });
+    });
+
+    it("the Review panel stays open when an approval makes the detail rebuild its rows", async () => {
+        rpc.SkillCatalogAppFileCommand.mockResolvedValue({ path: "scripts/run.py", text: "x" });
+        const [current, setCurrent] = createSignal(app() as never);
+        render(() => <SkillAppDetail skillId="k1" app={current()} />);
+        fireEvent.click(screen.getByRole("button", { name: "Review" }));
+        await screen.findByRole("group", { name: "Script scripts/run.py" });
+        const approved = app({ files: [{ path: "scripts/run.py", bytes: 100, script: true, approved: true, image: false, sha256: "e".repeat(64) }] });
+        setCurrent(approved as never);
+        expect(await screen.findByRole("button", { name: "Revoke approval" })).toBeTruthy();
+        expect(screen.getByRole("group", { name: "Script scripts/run.py" })).toBeTruthy();
     });
 });

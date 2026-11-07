@@ -6,7 +6,7 @@
  * the detail of a computer-use skill: where it came from, its route, files, tests and reference crops.
  */
 
-import { For, Show, type JSX } from "solid-js";
+import { createSignal, For, Show, type JSX } from "solid-js";
 import { Pill, SegmentedControl } from "@/app/element/ui";
 import type { SkillApp } from "@/types/rpc/SkillApp";
 import {
@@ -44,6 +44,14 @@ export function SkillAppDetail(p: { skillId: string; app: SkillApp }): JSX.Eleme
     const status = () => appStatus(p.app, platform);
     const drift = () => referenceDrift(p.app, platform);
     const signature = () => describeSignature(p.app.signature);
+    // Which scripts' Review panels are open, kept here because an approval rebuilds the rows below.
+    const [reviewing, setReviewing] = createSignal<ReadonlySet<string>>(new Set());
+    const toggle = (path: string) =>
+        setReviewing((cur) => {
+            const next = new Set(cur);
+            if (!next.delete(path)) next.add(path);
+            return next;
+        });
     return (
         <section class="skill-app" aria-label="App skill">
             <h4 class="skill-app-title">
@@ -85,7 +93,13 @@ export function SkillAppDetail(p: { skillId: string; app: SkillApp }): JSX.Eleme
                         <li>
                             {f.path} <span class="skill-app-muted">{fileSize(f.bytes)}</span>
                             <Show when={f.script}>
-                                <ScriptReview skillId={p.skillId} file={f} info={p.app.scripts.find((x) => x.path === f.path)} />
+                                <ScriptReview
+                                    skillId={p.skillId}
+                                    file={f}
+                                    info={p.app.scripts.find((x) => x.path === f.path)}
+                                    open={reviewing().has(f.path)}
+                                    onToggle={() => toggle(f.path)}
+                                />
                             </Show>
                         </li>
                     )}
