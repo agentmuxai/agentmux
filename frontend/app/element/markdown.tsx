@@ -5,7 +5,7 @@
 import { ErrorBoundary } from "@/app/element/errorboundary";
 import { createContentBlockPlugin } from "@/app/element/markdown-contentblock-plugin";
 import { transformBlocks, type MarkdownContentBlockType } from "@/app/element/markdown-util";
-import { findSafeSplitPoint, settleOpenTail } from "@/app/element/markdown-incremental";
+import { findSafeSplitPoint, settleOpenLink, settleOpenTail } from "@/app/element/markdown-incremental";
 import { AM_SPAN_CLASSES } from "@/app/element/markdown-semantic";
 
 /**
@@ -851,9 +851,12 @@ function renderCommit(s: MarkdownState, processor: Accessor<Processor>): Rendere
     // fragment back until its `>` arrives
     // (SPEC_AGENT_PANE_RICH_OUTPUT_2026_09_27.md §2.4). A link's destination
     // is likewise shown compact from its first character, not raw until its
-    // `)`. Only the open tail is ever affected, and never once streaming ends.
+    // `)`, and that holds for the settled render too: a stream that pauses
+    // for the settle window is rendered settled (MarkdownBlockState.ts) with
+    // more text still to come. Only the open tail is ever affected, and the
+    // half-typed tag is only held back while streaming.
     const streamingNow = s.streamingOn();
-    const openTail = (text: string) => (streamingNow ? settleOpenTail(text) : text);
+    const openTail = (text: string) => (streamingNow ? settleOpenTail(text) : settleOpenLink(text));
     const c: Commit = { txt, highlight, blocks, processor, tailProc, openTail };
 
     try {

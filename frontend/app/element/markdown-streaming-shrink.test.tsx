@@ -15,6 +15,8 @@ vi.mock("@/app/store/global", () => ({
     getSettingsKeyAtom: () => () => undefined,
 }));
 
+import { MarkdownBlock } from "../view/agent/components/MarkdownBlock";
+import type { MarkdownNode } from "../agent-model/types";
 import { Markdown } from "./markdown";
 
 afterEach(() => cleanup());
@@ -77,8 +79,46 @@ describe("a streaming reply never shows a long raw form that then collapses", ()
         expect(inline.container.textContent).toContain("pick[i](args");
     });
 
-    it("leaves settled text exactly as written", () => {
+    it("settles an unfinished link in a message that has stopped, as a pause mid-stream renders settled too", () => {
         const { settled } = sweep("An unfinished [link](https://example.com/x");
-        expect(settled).toContain("[link](https://example.com/x");
+        expect(settled).toContain("An unfinished link");
+        expect(settled).not.toContain("https://example.com");
+    });
+
+    it("leaves the rest of a settled message exactly as written", () => {
+        const { settled } = sweep("Plain text with `code`, a [link](https://example.com/x) and <b>html</b>.");
+        expect(settled).toContain("Plain text with code, a link and html.");
+    });
+});
+
+// MarkdownBlock cannot know when a stream has ended: after STREAM_RENDER_MS (90 ms) without an update it renders
+// the message settled, and real streams pause longer than that all the time. That settled render must not show
+// the raw address either, or the link collapses on the next chunk.
+describe("a pause in the stream (a settled render with more text to come)", () => {
+    const PAUSE_MS = 120;
+
+    it.each([
+        ["a link", REPLIES["a link"]],
+        ["an image", REPLIES["an image"]],
+        ["a link to a local file", REPLIES["a link to a local file"]],
+        ["a task link", REPLIES["a task link"]],
+    ])("%s never shows its raw address between chunks", (_name, text) => {
+        vi.useFakeTimers();
+        try {
+            const [node, setNode] = createSignal<MarkdownNode>({ type: "markdown", id: "md-1", content: "" });
+            const { container } = render(() => <MarkdownBlock node={node()} />);
+            let prev = 0;
+            const drops: string[] = [];
+            for (let i = 1; i <= text.length; i += 3) {
+                setNode({ type: "markdown", id: "md-1", content: text.slice(0, i) });
+                vi.advanceTimersByTime(PAUSE_MS); // past the settle window: the settled render runs
+                const len = (container.textContent ?? "").length;
+                if (len < prev - SLACK_CHARS) drops.push(`after ${JSON.stringify(text.slice(0, i).slice(-14))}: ${prev} -> ${len}`);
+                prev = len;
+            }
+            expect(drops).toEqual([]);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 });
