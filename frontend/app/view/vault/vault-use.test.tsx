@@ -23,6 +23,7 @@ const use = (over: Partial<UseRequest> = {}): UseRequest => ({
     field: "Social Security Number",
     offer_always: true,
     reason: "the first time this entry is used on this site",
+    agent_reason: "",
     needs_value: false,
     kind: "ssn",
     command: "",
@@ -104,6 +105,20 @@ describe("the prompt for an agent's use of an entry", () => {
         expect(dialog.textContent).not.toContain("Into");
         fireEvent.click(within(dialog).getByRole("button", { name: "Always for Agent1" }));
         await waitFor(() => expect(calls("answer_use")).toEqual([{ id: "use-1", decision: "always" }]));
+    });
+
+    it("quotes what the agent says it wants the entry for, attributed to it, and says nothing when it gave none", async () => {
+        uses = [use({ command: "stripe balance retrieve", cwd: "C:/work", origin: "", field: "STRIPE_API_KEY", agent_reason: "check the balance before the payout, task 27968" })];
+        await refreshVault();
+        const first = render(() => <UsePrompt use={uses[0]} close={() => {}} />);
+        const says = (await screen.findByRole("group")).querySelector(".vault-use-says")!;
+        expect(says.textContent).toBe("Agent1 says: check the balance before the payout, task 27968");
+        first.unmount();
+
+        uses = [use({ command: "stripe balance retrieve", cwd: "C:/work", origin: "", field: "STRIPE_API_KEY" })];
+        await refreshVault();
+        render(() => <UsePrompt use={uses[0]} close={() => {}} />);
+        expect((await screen.findByRole("group")).querySelector(".vault-use-says")).toBeNull();
     });
 
     it("asks for an agent's sign-in by site and masked user, and offers Always for that agent on that site", async () => {

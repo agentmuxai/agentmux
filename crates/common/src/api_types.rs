@@ -82,6 +82,11 @@ pub struct ShellCreateRequest {
     /// output is withheld whole. Needs `auth`; works over any `connection`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub capture: Option<Vec<CaptureRule>>,
+    /// Why the command takes, or stores a value in, the Vault: one line of 8 to 300 characters, required with
+    /// `secrets`, `stdin_secret`, `secret_files` or `capture`. The person sees it in the approval ("<agent> says"),
+    /// and it is kept in the entry's history. It is the agent's own claim and decides nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 /// One value `Terminal` `run` takes out of a command's output into the Vault

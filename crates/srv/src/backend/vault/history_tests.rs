@@ -6,7 +6,7 @@
 
 use super::history::{self, Asker, Head, Why};
 use super::vaults::{self, VaultAgents};
-use super::{create, create_in, delete, record, record_row, reveal, seal, update, EntryChange, NewEntry};
+use super::{create, create_in, delete, generate_entry, record, record_row, reveal, seal, update, EntryChange, GenerateRequest, NewEntry};
 use crate::backend::storage::store::Store;
 use crate::backend::storage::vault::VaultActivityRow;
 
@@ -249,9 +249,16 @@ fn rows_made_before_the_chain_are_counted_and_not_checked() {
     assert_eq!(rows[2].seq, 3);
     assert_eq!(rows[2].version, 1, "old rows' versions were never kept, but their actions count: the old entry's `created` is its first version");
 
-    // An unchained row after the chain began is not an old one.
+    // A row written after the chain began by an older build sharing the store has no hash: counted, not a change,
+    // and the next row of this build still follows the last chained one.
     s.vault_run_sql_for_tests("INSERT INTO db_vault_activity (seq, at, entry_id, action, outcome) VALUES (9, 3, 'x', 'revealed', 'done')");
-    assert_eq!(chain_of(&s).broken_at, Some(9));
+    let mixed = chain_of(&s);
+    assert!(mixed.intact, "{mixed:?}");
+    assert_eq!((mixed.checked, mixed.before_chain, mixed.unchained_after), (1, 2, 1));
+    record(&s, "old", "Old", "you", "copied", "value", "done");
+    let after = chain_of(&s);
+    assert!(after.intact, "{after:?}");
+    assert_eq!((after.checked, after.unchained_after), (2, 1));
 }
 
 #[test]
@@ -259,4 +266,52 @@ fn the_actor_kind_tells_a_person_an_agent_and_the_vault_itself() {
     assert_eq!(history::actor_kind("you"), "person");
     assert_eq!(history::actor_kind("Vault"), "srv");
     assert_eq!(history::actor_kind("agent2-6"), "agent");
+}
+
+fn generating(why: &str, reason: Option<&str>) -> GenerateRequest {
+    GenerateRequest {
+        kind: "api-key".into(),
+        label: "Webhook secret".into(),
+        why: why.into(),
+        reason: reason.map(String::from),
+        fields: Default::default(),
+        rules: Default::default(),
+        expires: None,
+        vault: None,
+    }
+}
+
+#[test]
+fn a_reason_is_one_line_of_eight_to_three_hundred_characters() {
+    assert_eq!(history::require_reason(Some("  deploy the docs
+ site,  task 27968 ")).unwrap(), "deploy the docs site, task 27968");
+    assert!(history::require_reason(None).unwrap_err().contains("a reason is required"));
+    assert!(history::require_reason(Some("   ")).is_err());
+    assert!(history::require_reason(Some("too short")).is_ok(), "nine characters is enough");
+    assert!(history::require_reason(Some("short")).unwrap_err().contains("8 to 300"));
+    assert!(history::require_reason(Some(&"x".repeat(300))).is_ok());
+    assert!(history::require_reason(Some(&"x".repeat(301))).unwrap_err().contains("at most 300"));
+}
+
+#[test]
+fn generate_refuses_a_missing_or_short_reason_before_it_makes_anything() {
+    let s = store();
+    for req in [generating("", None), generating("", Some("short")), generating("short", Some("   ")), generating("x", None)] {
+        let err = generate_entry(&s, req, "builder").unwrap_err();
+        assert!(err.contains("a reason is required"), "{err}");
+    }
+    assert_eq!(s.vault_count().unwrap(), 0, "nothing was made");
+    assert!(s.vault_activity_all().unwrap().is_empty(), "nothing was recorded");
+}
+
+#[test]
+fn generate_keeps_the_reason_in_the_history_and_why_still_works_as_the_older_name() {
+    let s = store();
+    let a = generate_entry(&s, generating("", Some("a webhook secret for task 27968")), "builder").unwrap();
+    let b = generate_entry(&s, generating("the older name still counts", None), "builder").unwrap();
+    let reason_of = |id: &str| history::history_for(&s, id, Asker::Person, 5).unwrap().into_iter().find(|r| r.action == "generated").unwrap();
+    let (ra, rb) = (reason_of(&a.id), reason_of(&b.id));
+    assert_eq!((ra.reason.as_str(), ra.actor.as_str(), ra.actor_kind.as_str(), ra.version), ("a webhook secret for task 27968", "builder", "agent", 1));
+    assert_eq!(rb.reason, "the older name still counts");
+    assert!(!ra.target.contains("task 27968"), "the reason is its own column, not the target");
 }

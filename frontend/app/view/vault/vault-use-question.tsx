@@ -19,7 +19,7 @@ import "./vault-view.scss";
 /** Longest an agent's own words are shown in a question (its name, an entry's
  *  label, its reason), so they can't push the answers out of view or pass for
  *  AgentMux's own wording. The whole text is in the tooltip. */
-export const CLIP = { name: 40, label: 60, reason: 240 } as const;
+export const CLIP = { name: 40, label: 60, reason: 240, agent_reason: 300 } as const;
 
 /** `text` cut to `max` characters, with an ellipsis when it was longer. */
 export function clip(text: string, max: number): string {
@@ -238,6 +238,17 @@ function TypedValue(props: { use: UseRequest; answer: UseAnswerState; focus: boo
     );
 }
 
+/** What the agent says it wants this for: quoted and attributed, never as the person's words, and it decides nothing. */
+function UseSays(props: { use: UseRequest }): JSX.Element {
+    return (
+        <Show when={props.use.agent_reason}>
+            <p class="vault-use-says">
+                <strong>{clip(props.use.agent, CLIP.name)}</strong> says: <q><Clipped text={props.use.agent_reason} max={CLIP.agent_reason} /></q>
+            </p>
+        </Show>
+    );
+}
+
 /** The question and its answers, laid out by `Body` and `Actions` (the modal's
  *  parts, or the card's). `focus` lets a typed value's field take the focus: the
  *  window's prompt may, a card in the agent's pane never does (spec §4.4). */
@@ -249,6 +260,7 @@ export function UseQuestion(props: { use: UseRequest; answer: UseAnswerState; Bo
         <div class="vault-use-activity" onPointerMove={held} onKeyDown={held} onFocusIn={held}>
             <props.Body>
                 <UseDeadline use={u} />
+                <UseSays use={u} />
                 <Show when={u.command} fallback={<UseTarget use={u} />}>
                     <UseCommand use={u} />
                 </Show>

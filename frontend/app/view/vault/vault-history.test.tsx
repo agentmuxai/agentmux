@@ -42,7 +42,7 @@ vi.mock("./vault-store", () => ({
 
 import { chainNote, historyFilter, VaultHistoryDialog, whyOf } from "./vault-history";
 
-beforeEach(() => chain.mockReset().mockResolvedValue({ intact: true, checked: 3, before_chain: 1, broken_at: null, head_checked: true, problem: "" }));
+beforeEach(() => chain.mockReset().mockResolvedValue({ intact: true, checked: 3, before_chain: 1, unchained_after: 0, broken_at: null, head_checked: true, problem: "" }));
 afterEach(cleanup);
 
 describe("what a row's reason says", () => {
@@ -61,9 +61,10 @@ describe("what a row's reason says", () => {
 
     it("says whether the record holds", () => {
         expect(chainNote(undefined)).toBe("");
-        expect(chainNote({ intact: true, checked: 3, before_chain: 1, broken_at: null, head_checked: true, problem: "" })).toContain("3 checked; 1 older line was made before checking began");
-        expect(chainNote({ intact: true, checked: 2, before_chain: 0, broken_at: null, head_checked: false, problem: "" })).toContain("could not be checked");
-        expect(chainNote({ intact: false, checked: 1, before_chain: 0, broken_at: 7, head_checked: true, problem: "this line was changed" })).toBe("The record has been changed: line 7 — this line was changed.");
+        expect(chainNote({ intact: true, checked: 3, before_chain: 1, unchained_after: 0, broken_at: null, head_checked: true, problem: "" })).toContain("3 checked; 1 older line was made before checking began");
+        expect(chainNote({ intact: true, checked: 2, before_chain: 0, unchained_after: 0, broken_at: null, head_checked: false, problem: "" })).toContain("could not be checked");
+        expect(chainNote({ intact: true, checked: 2, before_chain: 0, unchained_after: 2, broken_at: null, head_checked: true, problem: "" })).toContain("2 lines were written by an older AgentMux");
+        expect(chainNote({ intact: false, checked: 1, before_chain: 0, unchained_after: 0, broken_at: 7, head_checked: true, problem: "this line was changed" })).toBe("The record has been changed: line 7 — this line was changed.");
     });
 });
 
@@ -91,7 +92,7 @@ describe("the History dialog", () => {
     });
 
     it("warns when the record was changed", async () => {
-        chain.mockResolvedValue({ intact: false, checked: 1, before_chain: 0, broken_at: 3, head_checked: true, problem: "this line was changed" });
+        chain.mockResolvedValue({ intact: false, checked: 1, before_chain: 0, unchained_after: 0, broken_at: 3, head_checked: true, problem: "this line was changed" });
         render(() => <VaultHistoryDialog entryId="api-key-stripe" label="Stripe" onClose={() => {}} />);
         expect((await screen.findByRole("alert")).textContent).toContain("line 3");
     });

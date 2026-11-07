@@ -67,6 +67,9 @@ pub(crate) struct CaptureRequest {
     /// How long to wait for the download after the click (at most 2 minutes).
     #[serde(default)]
     timeout_ms: Option<u64>,
+    /// Why the agent keeps what the page shows: one line of 8 to 300 characters, required.
+    #[serde(default)]
+    reason: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -105,6 +108,51 @@ fn rule_of(req: &CaptureRequest) -> Result<CaptureRule, String> {
     Ok(CaptureRule { into, from: CaptureFrom::Stdout("all".into()) })
 }
 
+/// Who is asking to replace an entry's value with what a page shows, and why.
+struct Asking<'a> {
+    state: &'a AppState,
+    block_id: &'a str,
+    agent: &'a str,
+    agent_pane: &'a str,
+    origin: &'a str,
+    reason: &'a str,
+}
+
+/// Asks the person to let `entry` (id, label, part, kind) be replaced by what the page shows. True when nobody
+/// answered and it went ahead; a refusal is the answer to give the agent, after the denied try is recorded.
+async fn ask_to_replace(who: &Asking<'_>, entry: &(String, String, &'static str, String)) -> Result<bool, Response> {
+    let (id, label, part, kind) = entry;
+    let (agent, origin) = (who.agent, who.origin);
+    let request = UseRequest {
+        id: uuid::Uuid::new_v4().to_string(),
+        agent: agent.to_string(),
+        block_id: who.agent_pane.to_string(),
+        entry_id: id.clone(),
+        entry_label: label.clone(),
+        what: part.to_string(),
+        origin: origin.to_string(),
+        field: String::new(),
+        offer_always: false,
+        reason: "what the page shows replaces the value".into(),
+        agent_reason: who.reason.to_string(),
+        kind: kind.clone(),
+        replaces: true,
+        requested_ms: agentmux_common::time::now_ms_u64(),
+        ..Default::default()
+    };
+    let headline = format!("{agent} wants to replace {label} with what {origin} shows");
+    let (ended, _) = super::vault_ask::ask(who.state, who.block_id, request, ANSWER_WAIT, &headline).await;
+    if !ended.allowed() {
+        let outcome = ended.outcome();
+        let target = format!("from {origin}");
+        let line = crate::backend::vault::Line { entry_id: id, label, actor: agent, action: capture::CAPTURED, target: &target, outcome, reason: who.reason };
+        crate::backend::vault::record_line(&who.state.identity_store, line);
+        super::vault_handlers::publish(who.state);
+        return Err(err_response(StatusCode::FORBIDDEN, format!("the person didn't allow it ({outcome}): nothing was saved")));
+    }
+    Ok(ended == Ended::WentAhead)
+}
+
 /// `POST /api/v1/ui/browser/capture`.
 pub(crate) async fn handle_browser_capture(
     State(state): State<AppState>,
@@ -114,6 +162,10 @@ pub(crate) async fn handle_browser_capture(
     let Some(ref_) = req.ref_.clone().filter(|r| !r.trim().is_empty()) else {
         let what = if req.download { "the button or link that downloads the file" } else { "the element that shows the secret" };
         return err_response(StatusCode::BAD_REQUEST, format!("capture needs the ref of {what} (from snapshot or find)"));
+    };
+    let reason = match crate::backend::vault::history::require_reason(req.reason.as_deref()) {
+        Ok(r) => r,
+        Err(e) => return err_response(StatusCode::BAD_REQUEST, e),
     };
     let block_id = match target_block_id(&state, caller.as_deref(), &req.auth, req.pane.as_deref()) {
         Ok(b) => b,
@@ -126,12 +178,13 @@ pub(crate) async fn handle_browser_capture(
         Err(e) => return err_response(StatusCode::BAD_REQUEST, e),
     };
     let (store, a) = (state.identity_store.clone(), agent.clone());
-    let plan = match tokio::task::spawn_blocking(move || capture::plan(&store, &[rule], &a, "")).await {
+    let mut plan = match tokio::task::spawn_blocking(move || capture::plan(&store, &[rule], &a, "")).await {
         Ok(Ok(p)) => p,
         Ok(Err(e)) => return err_response(StatusCode::BAD_REQUEST, e),
         Err(e) => return err_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     };
 
+    plan.reason = reason.clone();
     // Replacing the person's value asks them, naming the page once it is known.
     let replaces = match &plan.rules[0].into {
         Target::Existing { id, label, part, kind, .. } => Some((id.clone(), label.clone(), *part, kind.clone())),
@@ -178,32 +231,12 @@ pub(crate) async fn handle_browser_capture(
         return err_response(StatusCode::BAD_REQUEST, "AgentMux can't tell which site this page is, so nothing was saved".into());
     }
     let mut went_ahead = false;
-    if let Some((id, label, part, kind)) = &replaces {
-        let request = UseRequest {
-            id: uuid::Uuid::new_v4().to_string(),
-            agent: agent.clone(),
-            block_id: agent_pane.clone(),
-            entry_id: id.clone(),
-            entry_label: label.clone(),
-            what: part.to_string(),
-            origin: origin.clone(),
-            field: String::new(),
-            offer_always: false,
-            reason: "what the page shows replaces the value".into(),
-            kind: kind.clone(),
-            replaces: true,
-            requested_ms: agentmux_common::time::now_ms_u64(),
-            ..Default::default()
-        };
-        let headline = format!("{agent} wants to replace {label} with what {origin} shows");
-        let (ended, _) = super::vault_ask::ask(&state, &block_id, request, ANSWER_WAIT, &headline).await;
-        if !ended.allowed() {
-            let outcome = ended.outcome();
-            crate::backend::vault::record(&state.identity_store, id, label, &agent, capture::CAPTURED, &format!("from {origin}"), outcome);
-            super::vault_handlers::publish(&state);
-            return err_response(StatusCode::FORBIDDEN, format!("the person didn't allow it ({outcome}): nothing was saved"));
+    if let Some(entry) = &replaces {
+        let asking = Asking { state: &state, block_id: &block_id, agent: &agent, agent_pane: &agent_pane, origin: &origin, reason: &reason };
+        match ask_to_replace(&asking, entry).await {
+            Ok(ahead) => went_ahead = ahead,
+            Err(refused) => return refused,
         }
-        went_ahead = ended == Ended::WentAhead;
     }
 
     let (store, given, from) = (state.identity_store.clone(), req.into, origin.clone());
