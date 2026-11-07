@@ -356,7 +356,6 @@
 105 frontend/app/init/error-display.ts::showStartupError
 138 frontend/app/modals/command-palette.tsx::CommandPaletteModal
 160 frontend/app/modals/typeaheadmodal.tsx::TypeAheadModal
-162 frontend/app/modals/userinputmodal.tsx::UserInputModal
 121 frontend/app/notification/notificationitem.tsx::NotificationItem
 148 frontend/app/notification/sound/sound-service.ts::installSoundService
 111 frontend/app/platform/pane-overlay.ts::flushClip
