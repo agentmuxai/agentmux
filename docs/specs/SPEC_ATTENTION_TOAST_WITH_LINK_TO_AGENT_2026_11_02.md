@@ -1,7 +1,7 @@
 # Spec: when something waits on you, you can see what, where, and one click takes you to it
 
 **Date:** 2026-11-05 (task #18210, build #18211). Revised the same day after the operator widened it (section 1).
-**Status:** active — approved; PR 1 (the toast, the one list from the registry and srv's rows, the setting, the sound rule) in #6773; PR 2 (the status-bar list and its count, parked agents' "Open", the 10 s close, Do Not Disturb) in #6787. Remaining: the shutdown chime and `app:` asks as registry sources (3.8, 3.1), the Kanban and LAN groups, the optional recent rows (D7).
+**Status:** active — approved; PR 1 (the toast, the one list from the registry and srv's rows, the setting, the sound rule) in #6773; PR 2 (the status-bar list and its count, parked agents' "Open", the 10 s close, Do Not Disturb) in #6788. Remaining: the shutdown chime and `app:` asks as registry sources (3.8, 3.1), the Kanban and LAN groups, the optional recent rows (D7).
 **Author:** Agent5@narko, for AgentX's lane
 **Scope:** `frontend/app/notification/` (the waiting registry, the sound service, the toast stack), `frontend/app/statusbar/AgentCountsStatus.tsx`, `frontend/app/util/reveal-block.ts`. No new srv route; the build may add a field to an existing event (3.3).
 **Related:** `SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27.md`, `SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md`, `SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md`, `REPORT_AGENT_ATTENTION_CTA_CONTRAST_AND_TONE_2026_10_10.md`, `SPEC_AGENT_COLOR_2026_08_08.md`
@@ -134,7 +134,7 @@ PR 1 (#6773) builds the toast, the merged list (this window's registry plus srv'
 - `revealBlock` already restores a minimized pane (there is no separate collapsed pane state), so the click needed no change there.
 - The sound rule is `SOUNDS[id].source` (`ask` or `event`), refused from the event bus when wrong (`sounds.ts`, `sound-service.ts`), and `scripts/check-audio-creators.mjs` (a CI gate) forbids `new Audio` and `new AudioContext` outside `notification/sound/` (voice input's two files excepted).
 
-PR 2 (#6787) builds the status-bar list (3.6), the 10 s close, Do Not Disturb and the parked agent's "Open" (3.4). Where it differs from the text above:
+PR 2 (#6788) builds the status-bar list (3.6), the 10 s close, Do Not Disturb and the parked agent's "Open" (3.4). Where it differs from the text above:
 
 - **The entry:** `AgentCountsStatus` stays while any agent runs or anything waits, and its waiting count is the larger of srv's count and the list's (the list also holds an ask only this window's registry knows). While anything waits, a click opens the list (`AttentionListPopover`: name in its colour, what, how long, and **Go** or **Open**, oldest first, then "Open the Swarm"); with nothing waiting a click opens the Swarm as before.
 - **The click is one function** for the toast and the list rows (`attention-go.ts`): an agent whose block is parked (`agent:parked`) is opened with `openAgentInActiveTab`, any other is revealed with `revealBlock`. A refusal to open is said in an error notice.
