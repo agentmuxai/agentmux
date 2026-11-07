@@ -7,8 +7,9 @@
  * drags the window, a double-click maximizes it and a right-click opens the
  * title-bar menu, like the rest of the header's empty space; the dots take no
  * events. It draws 4×4 dots (the panes' grips are 4×3) and is centred in the
- * whole header, not only in the row below its top padding (window-grip.scss). It sits outside the scrolling tab strip, so it never scrolls or
- * fades with the tabs.
+ * whole header, not only in the row below its top padding (window-grip.scss).
+ * It sits outside the scrolling tab strip, so it never scrolls or fades with
+ * the tabs.
  *
  * docs/specs/SPEC_DRAG_SPACE_AFFORDANCE_2026_10_13.md §5.1, §5.8;
  * docs/reports/REPORT_WINDOW_HEADER_GRIP_PLACEMENT_2026_10_17.md.
