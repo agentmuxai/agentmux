@@ -90,6 +90,11 @@ pub struct UseImport {
     /// The field of a JSON secret, when one is picked; empty for the whole secret.
     pub key: String,
     pub region: String,
+    /// What the read runs under: an AWS grant (a container agent) or a profile on this computer (a native one); empty
+    /// for this computer's default login.
+    pub profile: String,
+    /// `profile` is a grant AgentMux mints a session for, not a profile on this computer.
+    pub grant: bool,
     /// The Vault it goes into.
     pub vault: String,
     /// It replaces the value of the entry (`entry_id`), the old one kept as a version.

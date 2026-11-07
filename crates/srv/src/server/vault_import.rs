@@ -19,7 +19,7 @@ use serde_json::json;
 
 use super::AppState;
 use crate::backend::vault::aws_import::{self, ImportRequest, Plan, Target, Via, SERVICE};
-use crate::backend::vault::uses::{UseImport, UseRequest};
+use crate::backend::vault::uses::{Ended, UseImport, UseRequest};
 use crate::identity::aws_broker::mint::HostRunner;
 use crate::identity::aws_broker::request::{credentials_for, Ask};
 use crate::identity::aws_broker::{policy, sessions};
@@ -83,6 +83,8 @@ fn card(plan: &Plan, who: &Who) -> UseRequest {
             secret: plan.source.aws_secret_id.clone(),
             key: plan.source.key.clone().unwrap_or_default(),
             region: plan.source.region.clone().unwrap_or_default(),
+            profile: plan.source.profile.clone().unwrap_or_default(),
+            grant: who.container,
             vault: plan.vault_name.clone(),
             replaces,
         }),
@@ -92,6 +94,14 @@ fn card(plan: &Plan, who: &Who) -> UseRequest {
 
 fn headline(plan: &Plan, who: &Who) -> String {
     format!("{} wants to copy a secret from {SERVICE} into your Vault as {}", who.agent, plan.label())
+}
+
+/// What the agent is told when the card didn't end in a yes: silence is a no for an import, whatever the kind.
+fn not_allowed(ended: Ended) -> String {
+    match ended {
+        Ended::Expired => "nobody answered, and a copy of a secret needs a yes: nothing was copied; ask the person".to_string(),
+        other => other.refusal("nothing was copied"),
+    }
 }
 
 /// The arguments checked, and for a container agent the grant it names, before anyone is asked.
@@ -149,7 +159,7 @@ pub(crate) async fn handle_vault_import(State(state): State<AppState>, Json(body
     let wait = body.wait_secs.map(Duration::from_secs).unwrap_or(ANSWER_WAIT).min(ANSWER_WAIT_MAX);
     let (ended, _) = super::vault_ask::ask(&state, &who.pane, card(&plan, &who), wait, &headline(&plan, &who)).await;
     if !ended.allowed() {
-        return refused(&state, &plan, &who, ended.outcome(), StatusCode::FORBIDDEN, ended.refusal("nothing was copied"));
+        return refused(&state, &plan, &who, ended.outcome(), StatusCode::FORBIDDEN, not_allowed(ended));
     }
     let minted = match credentials(&state, &plan, &who).await {
         Ok(minted) => minted,
@@ -177,7 +187,7 @@ mod tests {
             Target::New { kind: "api-key", part: "value", label: "Staging database".into(), fields: Default::default(), vault_id: "personal".into() }
         };
         Plan {
-            source: Source { aws_secret_id: "staging/db".into(), key: Some("db.password".into()), region: Some("eu-west-1".into()), profile: None },
+            source: Source { aws_secret_id: "staging/db".into(), key: Some("db.password".into()), region: Some("eu-west-1".into()), profile: Some("work-read".into()) },
             target,
             vault_name: "Personal".into(),
             reason: "copy the staging database password for task 28071".into(),
@@ -191,11 +201,21 @@ mod tests {
 
     #[test]
     fn the_card_names_the_secret_the_vault_and_what_the_agent_says_and_offers_no_always() {
+        let in_container = super::card(&plan(false), &Who { container: true, ..who() });
         let card = card(&plan(false), &who());
         let import = card.import.as_ref().unwrap();
         assert_eq!((import.service.as_str(), import.secret.as_str(), import.key.as_str(), import.region.as_str(), import.vault.as_str()), (SERVICE, "staging/db", "db.password", "eu-west-1", "Personal"));
         assert!(!import.replaces && !card.offer_always && !card.needs_value);
+        assert_eq!((import.profile.as_str(), import.grant), ("work-read", false), "the card says which AWS login the read runs under");
+        assert!(in_container.import.unwrap().grant, "a container agent's profile is a grant");
         assert_eq!((card.agent_reason.as_str(), card.block_id.as_str(), card.entry_id.as_str()), ("copy the staging database password for task 28071", "block-1", ""));
+    }
+
+    #[test]
+    fn silence_on_an_import_says_it_needed_a_yes_not_that_an_id_or_card_did() {
+        let said = not_allowed(Ended::Expired);
+        assert!(said.contains("needs a yes") && said.contains("nothing was copied") && !said.contains("ID or card"), "{said}");
+        assert_eq!(not_allowed(Ended::Denied), "the person said no: nothing was copied");
     }
 
     #[test]

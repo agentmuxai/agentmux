@@ -19,12 +19,31 @@ import "./vault-view.scss";
 /** Longest an agent's own words are shown in a question (its name, an entry's
  *  label, its reason), so they can't push the answers out of view or pass for
  *  AgentMux's own wording. The whole text is in the tooltip. */
-export const CLIP = { name: 40, label: 60, reason: 240, agent_reason: 140 } as const;
+export const CLIP = { name: 40, label: 60, reason: 240, agent_reason: 140, secret: 90 } as const;
 
 /** `text` cut to `max` characters, with an ellipsis when it was longer. */
 export function clip(text: string, max: number): string {
     const chars = Array.from(text);
     return chars.length <= max ? text : `${chars.slice(0, max - 1).join("").trimEnd()}…`;
+}
+
+/** `text` cut to `max` characters in the middle, keeping its start and its end, with an ellipsis. */
+export function clipMiddle(text: string, max: number): string {
+    const chars = Array.from(text);
+    if (chars.length <= max) return text;
+    const head = Math.ceil((max - 1) / 3);
+    const tail = max - 1 - head;
+    return `${chars.slice(0, head).join("")}…${chars.slice(chars.length - tail).join("")}`;
+}
+
+/** A secret's id cut in the middle (its name is at the end), the whole of it in the tooltip when cut. */
+export function ClippedId(props: { text: string; max: number }): JSX.Element {
+    const shown = () => clipMiddle(props.text, props.max);
+    return (
+        <span class="vault-clipped" {...tip(shown() === props.text ? undefined : props.text)}>
+            {shown()}
+        </span>
+    );
 }
 
 /** An agent's words cut to `max`, the whole of them in the tooltip when cut. */
@@ -109,16 +128,26 @@ function UseImportSubject(props: { use: UseRequest; import: NonNullable<UseReque
     return (
         <>
             <p>
-                The secret <strong class="warden-manager-mono"><Clipped text={i.secret} max={CLIP.label} /></strong>
+                The secret <strong class="warden-manager-mono vault-import-id"><ClippedId text={i.secret} max={CLIP.secret} /></strong>
                 <Show when={i.key}>
                     {" "}
-                    (key <strong class="warden-manager-mono"><Clipped text={i.key} max={CLIP.label} /></strong>)
+                    (key <strong class="warden-manager-mono vault-import-id"><ClippedId text={i.key} max={CLIP.label} /></strong>)
                 </Show>
                 <Show when={i.region}>
                     {" "}
-                    in <strong class="warden-manager-mono">{i.region}</strong>
+                    in <strong class="warden-manager-mono vault-import-region">{i.region}</strong>
                 </Show>{" "}
                 from {i.service}.
+            </p>
+            <p>
+                <Show
+                    when={i.profile}
+                    fallback="It is read with this computer's default AWS login."
+                >
+                    {i.grant ? "It is read under the AWS grant " : "It is read with the AWS profile "}
+                    <strong class="warden-manager-mono vault-import-id"><Clipped text={i.profile} max={CLIP.label} /></strong>
+                    {i.grant ? "." : " on this computer."}
+                </Show>
             </p>
             <Show
                 when={i.replaces}
@@ -334,10 +363,23 @@ export function UseQuestion(props: { use: UseRequest; answer: UseAnswerState; Bo
     return (
         <div class="vault-use-activity" onPointerMove={held} onKeyDown={held} onFocusIn={held}>
             <props.Body>
-                <UseDeadline use={u} />
-                <UseSays use={u} />
-                <Show when={u.import} fallback={<UseSubject use={u} answer={a} focus={props.focus} />}>
-                    {(i) => <UseImportSubject use={u} import={i()} />}
+                <Show
+                    when={u.import}
+                    fallback={
+                        <>
+                            <UseDeadline use={u} />
+                            <UseSays use={u} />
+                            <UseSubject use={u} answer={a} focus={props.focus} />
+                        </>
+                    }
+                >
+                    {(i) => (
+                        <>
+                            <UseImportSubject use={u} import={i()} />
+                            <UseSays use={u} />
+                            <UseDeadline use={u} />
+                        </>
+                    )}
                 </Show>
                 <p class="warden-manager-dim">{promptNote(u)}</p>
                 <Show when={a.error()}>

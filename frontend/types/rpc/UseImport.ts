@@ -13,6 +13,15 @@ service: string, secret: string,
  */
 key: string, region: string, 
 /**
+ * What the read runs under: an AWS grant (a container agent) or a profile on this computer (a native one); empty
+ * for this computer's default login.
+ */
+profile: string, 
+/**
+ * `profile` is a grant AgentMux mints a session for, not a profile on this computer.
+ */
+grant: boolean, 
+/**
  * The Vault it goes into.
  */
 vault: string, 
