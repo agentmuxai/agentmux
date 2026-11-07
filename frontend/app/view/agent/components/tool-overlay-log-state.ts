@@ -337,6 +337,18 @@ export function useFollowEffects(
 const measureHeight = (el: HTMLElement): number => el.scrollHeight;
 
 /**
+ * The height the log settles at once the ease lets go of it: its content plus the horizontal scrollbar a
+ * long line brings (`offsetHeight - clientHeight`; the box has no border). `scrollHeight` alone leaves the
+ * scrollbar out, so the ease ended 7 px short of where the box then landed: a result with a line wider than
+ * the pane shrank, then grew by the scrollbar. A box with no client height is not laid out (hidden), so it
+ * says nothing about a scrollbar.
+ */
+export function settledLogHeight(el: HTMLElement): number {
+    const bar = el.clientHeight > 0 ? Math.max(0, el.offsetHeight - el.clientHeight) : 0;
+    return measureHeight(el) + bar;
+}
+
+/**
  * BUT the magnitude cap (resize-contract.ts's MAX_ANIMATED_DELTA_PX)
  * must be gated on the RENDERED delta, not the scrollHeight one
  * (#2962): a raw chunk log anywhere near
@@ -433,7 +445,7 @@ export function useBranchHeightContinuity(
         // is the content it got while hidden, which lands under the show's
         // cover, not a change to ease (SPEC_AGENT_PANE_NO_CATCH_UP_MOTION_2026_10_15.md §3.3).
         if (el && lastBranch !== undefined && b !== lastBranch && props.open !== false && !shownAgain) {
-            pendingCommit = beginHeightContinuity(el, measureHeight, measureRenderedHeight);
+            pendingCommit = beginHeightContinuity(el, settledLogHeight, measureRenderedHeight);
         }
         lastBranch = b;
     });
