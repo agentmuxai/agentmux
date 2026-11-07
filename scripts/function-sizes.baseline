@@ -344,7 +344,6 @@
 122 frontend/app/element/ProviderLogo.tsx::ProviderLogo
 112 frontend/app/element/anchored-popover.tsx::AnchoredPopover
 126 frontend/app/element/flyoutmenu.tsx::FlyoutMenu
-157 frontend/app/element/install/LogView.tsx::LogView
 160 frontend/app/element/install/install-session.ts::createInstallSession
 118 frontend/app/element/markdown-incremental.ts::findSafeSplitPoint
 113 frontend/app/element/markdown-util.ts::transformBlocks
