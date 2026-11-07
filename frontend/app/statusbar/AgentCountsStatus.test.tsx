@@ -136,6 +136,28 @@ describe("AgentCountsStatus", () => {
             expect(goTo).toHaveBeenCalledWith(expect.objectContaining({ blockId: "parked" }));
         });
 
+        it("closes the list when a narrow bar hides the entry", () => {
+            // The popover's own positioning watches its anchor too: every observer is told.
+            const notify: (() => void)[] = [];
+            vi.stubGlobal(
+                "ResizeObserver",
+                class {
+                    constructor(cb: () => void) {
+                        notify.push(cb);
+                    }
+                    observe() {}
+                    disconnect() {}
+                }
+            );
+            render(() => <AgentCountsStatus rows={() => []} items={() => [item("b1")]} />);
+            fireEvent.click(screen.getByRole("button", { name: /waiting on you/ }));
+            expect(screen.getByRole("dialog")).toBeTruthy();
+            // jsdom has no layout: an element with no boxes is one `display: none` took out of the bar.
+            notify.forEach((cb) => cb());
+            expect(screen.queryByRole("dialog")).toBeNull();
+            vi.unstubAllGlobals();
+        });
+
         it("closes the list when the last request is answered, and goes with the last agent", () => {
             const [items, setItems] = createSignal([item("b1")]);
             const [rows, setRows] = createSignal([agent("a", "waiting_on_user")]);

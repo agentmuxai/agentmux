@@ -6,7 +6,7 @@ import { runtimeCounts, type AgentRuntimeCounts } from "@/app/store/agent-runtim
 import { sharedAgentRuntime } from "@/app/store/agent-runtime-live";
 import { openOrFocusPaneByView } from "@/app/store/block-component-registry";
 import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
-import { createMemo, createSignal, Show, type Accessor, type JSX } from "solid-js";
+import { createMemo, createSignal, onCleanup, Show, type Accessor, type JSX } from "solid-js";
 import { AttentionListPopover } from "./AttentionListPopover";
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
@@ -38,11 +38,21 @@ export function AgentCountsStatus(props: {
     });
     const [open, setOpen] = createSignal(false);
     let ref: HTMLDivElement | undefined;
+    // A narrow bar can hide the entry while its list is open; the list has no anchor then and would jump to a corner.
+    const watchAnchor = (el: HTMLDivElement) => {
+        ref = el;
+        if (typeof ResizeObserver === "undefined") return;
+        const watch = new ResizeObserver(() => {
+            if (el.getClientRects().length === 0) setOpen(false);
+        });
+        watch.observe(el);
+        onCleanup(() => watch.disconnect());
+    };
     const openSwarm = () => void openOrFocusPaneByView("swarm");
     return (
         <Show when={counts().running > 0 || counts().waiting > 0}>
             <div
-                ref={ref}
+                ref={watchAnchor}
                 class="status-bar-item clickable status-agent-counts"
                 onClick={() => (counts().waiting > 0 ? setOpen(!open()) : openSwarm())}
                 data-tip={agentCountsTip(counts())}

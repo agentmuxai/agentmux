@@ -28,7 +28,9 @@
         list-style: none;
         margin: 0;
         padding: 0;
-        max-height: 320px;
+        // As tall as the space above the bar allows (the header and footer take about 160 px; the body is zoomed
+        // with the chrome, so the window's height is divided by the zoom).
+        max-height: min(320px, calc(100vh / var(--zoomfactor, 1) - 160px));
         overflow-y: auto;
     }
 
