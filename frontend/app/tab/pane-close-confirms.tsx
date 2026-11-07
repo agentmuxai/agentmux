@@ -67,22 +67,25 @@ function shownBlockOf(tabId: string, blockId: string): string {
     return data?.activeBlockId ?? data?.blockId ?? blockId;
 }
 
-/** Questions already open, by pane and kind: a second close of the same pane shares the first's answer. */
+/** Questions already open, by pane, kind and what they ask about: a repeat of the same question shares its answer. */
 const asking = new Map<string, Promise<boolean>>();
 
 /**
  * Asks `Component` in the pane that holds `blockId` (the one on screen, when it is a stack) and resolves with
- * the person's answer: true closes the pane. The pane going away first answers no.
+ * the person's answer: true closes the pane. The pane going away first answers no. `subject` names the blocks
+ * the question is about: a second close that covers other blocks is a different question and waits its turn
+ * in the pane, never answered by the first's Shut down.
  */
 export function askInPane<P extends object>(
     tabId: string,
     blockId: string,
     source: "close-busy" | "close-leave",
+    subject: string[],
     Component: (props: P & Answer) => JSX.Element,
     props: P
 ): Promise<boolean> {
     const host = shownBlockOf(tabId, blockId);
-    const key = `${host}:${source}`;
+    const key = `${host}:${source}:${[...subject].sort().join(",")}`;
     const open = asking.get(key);
     if (open) return open;
     const answered = new Promise<boolean>((resolve) => {
@@ -100,7 +103,7 @@ export function askInPane<P extends object>(
 /** Tests only: forget every open question and its request. */
 export function __resetPaneCloseConfirms(): void {
     for (const key of asking.keys()) {
-        const host = key.slice(0, key.lastIndexOf(":"));
+        const host = key.split(":")[0];
         for (const r of paneRequests.of(host)) paneRequests.close(r.id);
     }
     asking.clear();

@@ -151,7 +151,7 @@ async function beforeNodeDelete(
     );
     const busy = await busyMembers(membersToProbe(blockIds, isAgentBlock, (id) => parked.has(id)), paneCloseProbe);
     if (busy.length > 0) {
-        const answer = askInPane(props.tabId, blockIds[0], "close-busy", CloseBusyConfirm, { busy });
+        const answer = askInPane(props.tabId, blockIds[0], "close-busy", busy.map((m) => m.blockId), CloseBusyConfirm, { busy });
         if (!(await (hooks ? hooks.asking(answer) : answer))) {
             notKept(busy.map(describeBusyMember).join("; "));
             return false;
@@ -159,7 +159,7 @@ async function beforeNodeDelete(
     }
     const leaving = await leavePrompts(blockIds, leaveProbe);
     if (leaving.length > 0) {
-        const answer = askInPane(props.tabId, blockIds[0], "close-leave", LeaveSiteConfirm, { leaving });
+        const answer = askInPane(props.tabId, blockIds[0], "close-leave", leaving.map((l) => l.blockId), LeaveSiteConfirm, { leaving });
         if (!(await (hooks ? hooks.asking(answer) : answer))) {
             notKept(describeLeave(leaving));
             return false;

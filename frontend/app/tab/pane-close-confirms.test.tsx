@@ -63,7 +63,7 @@ afterEach(() => {
 describe("closing a pane asks in that pane only", () => {
     it("busy agents: the question is in the pane's layer, not the tab's, and the rest stays live", async () => {
         const { getByTestId } = render(() => <Window shown={["a-2", "b"]} />);
-        const answer = askInPane("t1", "a-1", "close-busy", CloseBusyConfirm, { busy });
+        const answer = askInPane("t1", "a-1", "close-busy", ["a-2"], CloseBusyConfirm, { busy });
         const dialog = screen.getByText("Close this pane?");
         // Asked for a background tab of the stack, drawn in the pane that is on screen.
         expect(getByTestId("pane-a-2").contains(dialog)).toBe(true);
@@ -79,39 +79,59 @@ describe("closing a pane asks in that pane only", () => {
 
     it("busy agents: Cancel and Escape keep the pane", async () => {
         render(() => <Window shown={["a-2"]} />);
-        const cancelled = askInPane("t1", "a-2", "close-busy", CloseBusyConfirm, { busy });
+        const cancelled = askInPane("t1", "a-2", "close-busy", ["a-2"], CloseBusyConfirm, { busy });
         fireEvent.click(screen.getByText("Cancel"));
         await expect(cancelled).resolves.toBe(false);
-        const escaped = askInPane("t1", "a-2", "close-busy", CloseBusyConfirm, { busy });
+        const escaped = askInPane("t1", "a-2", "close-busy", ["a-2"], CloseBusyConfirm, { busy });
         fireEvent.keyDown(document.querySelector(".modal-panel")!, { key: "Escape" });
         await expect(escaped).resolves.toBe(false);
     });
 
     it("a page that would ask to leave: names the site; Keep open keeps, Close anyway closes", async () => {
         render(() => <Window shown={["w"]} />);
-        const kept = askInPane("t1", "w", "close-leave", LeaveSiteConfirm, { leaving });
+        const kept = askInPane("t1", "w", "close-leave", ["w"], LeaveSiteConfirm, { leaving });
         expect(screen.getByText("portal.example.com may have unsaved changes.")).toBeTruthy();
         fireEvent.click(screen.getByText("Keep open"));
         await expect(kept).resolves.toBe(false);
-        const closed = askInPane("t1", "w", "close-leave", LeaveSiteConfirm, { leaving });
+        const closed = askInPane("t1", "w", "close-leave", ["w"], LeaveSiteConfirm, { leaving });
         fireEvent.click(screen.getByText("Close anyway"));
         await expect(closed).resolves.toBe(true);
     });
 
     it("a second close of the same pane shares the first question's answer", async () => {
         render(() => <Window shown={["a-2"]} />);
-        const first = askInPane("t1", "a-2", "close-busy", CloseBusyConfirm, { busy });
-        const second = askInPane("t1", "a-1", "close-busy", CloseBusyConfirm, { busy });
+        const first = askInPane("t1", "a-2", "close-busy", ["a-2"], CloseBusyConfirm, { busy });
+        const second = askInPane("t1", "a-1", "close-busy", ["a-2"], CloseBusyConfirm, { busy });
         expect(second).toBe(first);
         expect(screen.getAllByText("Close this pane?")).toHaveLength(1);
         fireEvent.click(screen.getByText("Shut down"));
         await expect(Promise.all([first, second])).resolves.toEqual([true, true]);
     });
 
+    it("a close that covers other agents is another question: the first's Shut down does not answer it", async () => {
+        render(() => <Window shown={["a-2"]} />);
+        const posa = { ...busy[0], blockId: "a-1", name: "Posa" };
+        const one = askInPane("t1", "a-1", "close-busy", ["a-1"], CloseBusyConfirm, { busy: [posa] });
+        const whole = askInPane("t1", "a-1", "close-busy", ["a-1", "a-2"], CloseBusyConfirm, { busy: [posa, busy[0]] });
+        expect(whole).not.toBe(one);
+        // Each question is its own dialog in the pane, with its own buttons.
+        expect(screen.getAllByText("Close this pane?")).toHaveLength(2);
+        let wholeAnswered = false;
+        void whole.then(() => (wholeAnswered = true));
+        fireEvent.click(screen.getAllByText("Shut down")[0]);
+        await expect(one).resolves.toBe(true);
+        await Promise.resolve();
+        expect(wholeAnswered).toBe(false);
+        expect(screen.getAllByText("Close this pane?")).toHaveLength(1);
+        expect(screen.getByText("Korp — mid-turn, 2 processes running")).toBeTruthy();
+        fireEvent.click(screen.getByText("Cancel"));
+        await expect(whole).resolves.toBe(false);
+    });
+
     it("two panes close at once: each asks in its own pane, and each answer is its own", async () => {
         const { getByTestId } = render(() => <Window shown={["a-2", "b"]} />);
-        const forA = askInPane("t1", "a-2", "close-busy", CloseBusyConfirm, { busy });
-        const forB = askInPane("t1", "b", "close-busy", CloseBusyConfirm, { busy });
+        const forA = askInPane("t1", "a-2", "close-busy", ["a-2"], CloseBusyConfirm, { busy });
+        const forB = askInPane("t1", "b", "close-busy", ["b"], CloseBusyConfirm, { busy });
         expect(getByTestId("pane-a-2").textContent).toContain("Close this pane?");
         expect(getByTestId("pane-b").textContent).toContain("Close this pane?");
         fireEvent.click(within(getByTestId("pane-b")).getByText("Shut down"));
@@ -123,7 +143,7 @@ describe("closing a pane asks in that pane only", () => {
 
     it("the pane going away first answers no", async () => {
         render(() => <Window shown={["b"]} />);
-        const answer = askInPane("t1", "b", "close-busy", CloseBusyConfirm, { busy });
+        const answer = askInPane("t1", "b", "close-busy", ["b"], CloseBusyConfirm, { busy });
         pane("b")[1](undefined);
         await expect(answer).resolves.toBe(false);
     });

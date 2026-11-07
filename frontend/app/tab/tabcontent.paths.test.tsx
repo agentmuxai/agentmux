@@ -109,7 +109,7 @@ vi.mock("@/app/tab/pane-leaf-chrome", () => ({
 vi.mock("@/app/tab/pane-close-confirms", () => ({
     CloseBusyConfirm: () => null,
     LeaveSiteConfirm: () => null,
-    askInPane: (_tabId: string, blockId: string, source: string, _Component: unknown, props: Record<string, unknown>) =>
+    askInPane: (_tabId: string, blockId: string, source: string, _subject: string[], _Component: unknown, props: Record<string, unknown>) =>
         new Promise<boolean>((resolve) =>
             h.asked.push({ kind: source === "close-busy" ? "busy" : "leave", blockId, props, resolve })
         ),
