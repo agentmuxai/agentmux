@@ -17,14 +17,13 @@
 .messages-panel {
     // 95% of the pane's surface, so the conversation shows faintly behind it.
     background: color-mix(in srgb, var(--main-bg-color) 95%, transparent);
-    // Below the CPU and memory readout the pane draws at its top right corner, which it would cover.
-    top: var(--space-8);
     // The shell scrolls its own body; here the list scrolls and the head, filter and Needs-you strip stay put.
     overflow: hidden;
     min-height: 0;
     font-size: var(--text-sm);
 
-    // A close button that is easy to hit, and red under the pointer.
+    // A close button that is easy to hit, and red under the pointer. It sits at the panel's top right corner, which
+    // assumes the pane's top band is free (the CPU and memory readout moves into the composer strip: #28995).
     .ui-side-panel__head {
         align-items: center;
     }
