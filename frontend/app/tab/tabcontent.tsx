@@ -99,23 +99,16 @@ const leaveProbe: LeaveProbe = {
         siteOf(MOS.getObjectValue<MuxObj>(MOS.makeORef("block", blockId))?.meta?.["url"] as string | undefined),
 };
 
-function TabContent(props: { tabId: string }): JSX.Element {
-    const oref = createMemo(() => MOS.makeORef("tab", props.tabId));
-    const tabAtom = createMemo(() => MOS.getMuxObjectAtom<Tab>(oref()));
-    const tabData = createMemo(() => tabAtom()());
+type PendingClose = { busy: BusyMember[]; resolve: (close: boolean) => void };
+type PendingLeave = { leaving: LeavePrompt[]; resolve: (close: boolean) => void };
 
-    const tileGapSize = createMemo(() => {
-        const settings = atoms.settingsAtom();
-        return settings["window:tilegapsize"];
-    });
-
+/** The two confirmations a pane's close can wait on, each a queue answered in order. */
+function createClosePrompts() {
     // Queue, not a single slot: two busy panes closed in quick succession
     // each get their own answer, in order. A single slot let the second
     // prompt overwrite the first, whose close then waited forever
     // (reagent P1 on #3422).
-    const [pendingCloses, setPendingCloses] = createSignal<
-        { busy: BusyMember[]; resolve: (close: boolean) => void }[]
-    >([]);
+    const [pendingCloses, setPendingCloses] = createSignal<PendingClose[]>([]);
     const pendingClose = () => pendingCloses()[0] ?? null;
     const answerPendingClose = (close: boolean) => {
         const [head, ...rest] = pendingCloses();
@@ -131,157 +124,199 @@ function TabContent(props: { tabId: string }): JSX.Element {
 
     // The same for a browser page that would ask "Leave site?" when its pane
     // is closed by the person: AgentMux's own dialog, naming the site.
-    const [pendingLeaves, setPendingLeaves] = createSignal<
-        { leaving: LeavePrompt[]; resolve: (close: boolean) => void }[]
-    >([]);
+    const [pendingLeaves, setPendingLeaves] = createSignal<PendingLeave[]>([]);
     const pendingLeave = () => pendingLeaves()[0] ?? null;
     const answerPendingLeave = (close: boolean) => {
         const [head, ...rest] = pendingLeaves();
         setPendingLeaves(rest);
         head?.resolve(close);
     };
+    const askBusy = (busy: BusyMember[]) =>
+        new Promise<boolean>((resolve) => setPendingCloses((q) => [...q, { busy, resolve }]));
+    const askLeave = (leaving: LeavePrompt[]) =>
+        new Promise<boolean>((resolve) => setPendingLeaves((q) => [...q, { leaving, resolve }]));
+    return { pendingClose, answerPendingClose, pendingLeave, answerPendingLeave, askBusy, askLeave };
+}
 
-    const tileLayoutContents = createMemo<TileLayoutContents>(() => {
-        const renderContent: ContentRenderer = (nodeModel: NodeModel) => {
-            return <PaneLeafChrome nodeModel={nodeModel} />;
-        };
+type ClosePrompts = ReturnType<typeof createClosePrompts>;
 
-        // Deliberately plain <Block>, not <PaneLeafChrome> — a drag-preview
-        // thumbnail has no interactive tab strip to hoist (it's a static
-        // snapshot, never switched), so routing it through the chrome
-        // decision would be pure overhead for no behavior change.
-        const renderPreview: PreviewRenderer = (nodeModel: NodeModel) => {
-            return <Block nodeModel={nodeModel} preview={true} />;
-        };
+// Every block in the closed leaf, not just the visible one — closing a
+// pane that holds several tabs used to leave every background tab's
+// agent running with no pane. `closeBlockInStack` passes `{ blockId }`
+// alone, which the backend treats as one tab of a surviving pane.
+// SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md §4.1.
+async function onNodeDelete(data: TabLayoutData) {
+    const blockIds = effectiveStack(data).filter(Boolean);
+    getApi().sendLog(`[BUG-TRACE] onNodeDelete ENTER for blockIds: ${blockIds.join(",")}`);
+    try {
+        const result = await services.ObjectService.ClosePane(blockIds);
+        getApi().sendLog(`[BUG-TRACE] onNodeDelete ClosePane returned: ${JSON.stringify(result)}`);
+        return result;
+    } catch (err) {
+        getApi().sendLog(`[BUG-TRACE] onNodeDelete ERROR: ${err}`);
+        // The pane is already gone from the UI; the close runs through
+        // `fireAndForget`, which would only log this. Tell the user —
+        // an agent may still be running (spec §4.5). The orphan reaper
+        // finishes the job if it can't be retried from here.
+        pushFlashError({
+            id: "",
+            icon: "triangle-exclamation",
+            title: "Couldn't fully close the pane",
+            message: String(err),
+            expiration: Date.now() + 10_000,
+        });
+        throw err;
+    }
+}
 
-        // Every block in the closed leaf, not just the visible one — closing a
-        // pane that holds several tabs used to leave every background tab's
-        // agent running with no pane. `closeBlockInStack` passes `{ blockId }`
-        // alone, which the backend treats as one tab of a surviving pane.
-        // SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md §4.1.
-        async function onNodeDelete(data: TabLayoutData) {
-            const blockIds = effectiveStack(data).filter(Boolean);
-            getApi().sendLog(`[BUG-TRACE] onNodeDelete ENTER for blockIds: ${blockIds.join(",")}`);
-            try {
-                const result = await services.ObjectService.ClosePane(blockIds);
-                getApi().sendLog(`[BUG-TRACE] onNodeDelete ClosePane returned: ${JSON.stringify(result)}`);
-                return result;
-            } catch (err) {
-                getApi().sendLog(`[BUG-TRACE] onNodeDelete ERROR: ${err}`);
-                // The pane is already gone from the UI; the close runs through
-                // `fireAndForget`, which would only log this. Tell the user —
-                // an agent may still be running (spec §4.5). The orphan reaper
-                // finishes the job if it can't be retried from here.
-                pushFlashError({
-                    id: "",
-                    icon: "triangle-exclamation",
-                    title: "Couldn't fully close the pane",
-                    message: String(err),
-                    expiration: Date.now() + 10_000,
-                });
-                throw err;
-            }
+// One confirmation for the whole pane when an agent in it is
+// mid-turn or has tracked processes running (spec §4.6). Then an agent
+// pane is closed IN PLACE (§5.5): returning false stops the layout
+// from removing it now; srv removes it once its agents are down.
+// While agents keep running (the default) a close only takes the pane away: srv parks the
+// agent, so there is no busy prompt and no shutdown log, just a note that it runs on.
+//
+// Only what can be answered is asked: an agent for a turn in progress, a browser for "Leave
+// site?". Every other pane has nothing to ask, so its close makes no srv call and the pane
+// leaves in the same frame (SPEC_PANE_CLOSING_INDICATOR_AND_FASTER_CLOSE_2026_10_28.md §3).
+// `hooks.asking` marks a person's answer being awaited, when the prompt is the indicator.
+async function beforeNodeDelete(
+    props: { tabId: string },
+    prompts: ClosePrompts,
+    data: TabLayoutData,
+    hooks?: BeforeDeleteHooks
+): Promise<boolean> {
+    const blockIds = effectiveStack(data).filter(Boolean);
+    // Already closing (an agent winding down under its shutdown log): a second click
+    // neither probes srv again nor asks the prompts again.
+    if (isClosingWithLog(blockIds)) return false;
+    const parked = new Map(
+        agentsKeepRunning() ? blockIds.flatMap((id) => { const a = parkedAgentOf(id); return a ? [[id, a] as const] : []; }) : []
+    );
+    const busy = await busyMembers(membersToProbe(blockIds, isAgentBlock, (id) => parked.has(id)), paneCloseProbe);
+    if (busy.length > 0) {
+        const answer = prompts.askBusy(busy);
+        if (!(await (hooks ? hooks.asking(answer) : answer))) {
+            notKept(busy.map(describeBusyMember).join("; "));
+            return false;
         }
-
-        // One confirmation for the whole pane when an agent in it is
-        // mid-turn or has tracked processes running (spec §4.6). Then an agent
-        // pane is closed IN PLACE (§5.5): returning false stops the layout
-        // from removing it now; srv removes it once its agents are down.
-        // While agents keep running (the default) a close only takes the pane away: srv parks the
-        // agent, so there is no busy prompt and no shutdown log, just a note that it runs on.
-        //
-        // Only what can be answered is asked: an agent for a turn in progress, a browser for "Leave
-        // site?". Every other pane has nothing to ask, so its close makes no srv call and the pane
-        // leaves in the same frame (SPEC_PANE_CLOSING_INDICATOR_AND_FASTER_CLOSE_2026_10_28.md §3).
-        // `hooks.asking` marks a person's answer being awaited, when the prompt is the indicator.
-        async function beforeNodeDelete(data: TabLayoutData, hooks?: BeforeDeleteHooks): Promise<boolean> {
-            const blockIds = effectiveStack(data).filter(Boolean);
-            // Already closing (an agent winding down under its shutdown log): a second click
-            // neither probes srv again nor asks the prompts again.
-            if (isClosingWithLog(blockIds)) return false;
-            const parked = new Map(
-                agentsKeepRunning() ? blockIds.flatMap((id) => { const a = parkedAgentOf(id); return a ? [[id, a] as const] : []; }) : []
-            );
-            const busy = await busyMembers(membersToProbe(blockIds, isAgentBlock, (id) => parked.has(id)), paneCloseProbe);
-            if (busy.length > 0) {
-                const answer = new Promise<boolean>((resolve) => setPendingCloses((q) => [...q, { busy, resolve }]));
-                if (!(await (hooks ? hooks.asking(answer) : answer))) {
-                    notKept(busy.map(describeBusyMember).join("; "));
-                    return false;
-                }
-            }
-            const leaving = await leavePrompts(blockIds, leaveProbe);
-            if (leaving.length > 0) {
-                const answer = new Promise<boolean>((resolve) => setPendingLeaves((q) => [...q, { leaving, resolve }]));
-                if (!(await (hooks ? hooks.asking(answer) : answer))) {
-                    notKept(describeLeave(leaving));
-                    return false;
-                }
-            }
-            // The agents srv parks close at once; any other agent block still winds down under its log.
-            const winds = (id: string) => isAgentBlock(id) && !parked.has(id);
-            if (closesWithShutdownLog(blockIds, winds)) {
-                void closeWithShutdownLog(props.tabId, blockIds, winds);
-                return false;
-            }
-            noteKeepsRunning([...parked.values()]);
-            // The host's log says the person closed these panes.
-            notePersonClose(blockIds.filter(isBrowserBlock));
-            return true;
+    }
+    const leaving = await leavePrompts(blockIds, leaveProbe);
+    if (leaving.length > 0) {
+        const answer = prompts.askLeave(leaving);
+        if (!(await (hooks ? hooks.asking(answer) : answer))) {
+            notKept(describeLeave(leaving));
+            return false;
         }
+    }
+    // The agents srv parks close at once; any other agent block still winds down under its log.
+    const winds = (id: string) => isAgentBlock(id) && !parked.has(id);
+    if (closesWithShutdownLog(blockIds, winds)) {
+        void closeWithShutdownLog(props.tabId, blockIds, winds);
+        return false;
+    }
+    noteKeepsRunning([...parked.values()]);
+    // The host's log says the person closed these panes.
+    notePersonClose(blockIds.filter(isBrowserBlock));
+    return true;
+}
 
-        return {
-            renderContent,
-            renderPreview,
-            tabId: props.tabId,
-            onNodeDelete,
-            beforeNodeDelete,
-            gapSizePx: tileGapSize(),
-        };
-    });
-
-    const handleContextMenu = (e: MouseEvent) => {
-        const tab = tabData();
-        if (!tab || (tab.blockids?.length ?? 0) > 0) return;
-        e.preventDefault();
-        e.stopPropagation();
-        // Live, like the pane "+" picker: follows widgets hidden or shown while it's open.
-        ContextMenuModel.showLiveContextMenu(buildEmptyTabMenu, e);
+function buildTileLayoutContents(
+    props: { tabId: string },
+    prompts: ClosePrompts,
+    tileGapSize: () => number | undefined
+): TileLayoutContents {
+    const renderContent: ContentRenderer = (nodeModel: NodeModel) => {
+        return <PaneLeafChrome nodeModel={nodeModel} />;
     };
 
-    const isEmpty = createMemo(() => (tabData()?.blockids?.length ?? 0) === 0);
+    // Deliberately plain <Block>, not <PaneLeafChrome> — a drag-preview
+    // thumbnail has no interactive tab strip to hoist (it's a static
+    // snapshot, never switched), so routing it through the chrome
+    // decision would be pure overhead for no behavior change.
+    const renderPreview: PreviewRenderer = (nodeModel: NodeModel) => {
+        return <Block nodeModel={nodeModel} preview={true} />;
+    };
 
-    const rootStyle = (): JSX.CSSProperties => ({
-        background: "var(--workspace-surface)",
+    return {
+        renderContent,
+        renderPreview,
+        tabId: props.tabId,
+        onNodeDelete,
+        beforeNodeDelete: (data: TabLayoutData, hooks?: BeforeDeleteHooks) =>
+            beforeNodeDelete(props, prompts, data, hooks),
+        gapSizePx: tileGapSize(),
+    };
+}
+
+function createTabState(props: { tabId: string }) {
+    const oref = createMemo(() => MOS.makeORef("tab", props.tabId));
+    const tabAtom = createMemo(() => MOS.getMuxObjectAtom<Tab>(oref()));
+    const tabData = createMemo(() => tabAtom()());
+
+    const tileGapSize = createMemo(() => {
+        const settings = atoms.settingsAtom();
+        return settings["window:tilegapsize"];
     });
+
+    const prompts = createClosePrompts();
+    const tileLayoutContents = createMemo<TileLayoutContents>(() =>
+        buildTileLayoutContents(props, prompts, tileGapSize)
+    );
+    const isEmpty = createMemo(() => (tabData()?.blockids?.length ?? 0) === 0);
+    return { tabAtom, tabData, prompts, tileLayoutContents, isEmpty };
+}
+
+type TabState = ReturnType<typeof createTabState>;
+
+function onEmptyTabContextMenu(s: TabState, e: MouseEvent): void {
+    const tab = s.tabData();
+    if (!tab || (tab.blockids?.length ?? 0) > 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    // Live, like the pane "+" picker: follows widgets hidden or shown while it's open.
+    ContextMenuModel.showLiveContextMenu(buildEmptyTabMenu, e);
+}
+
+const rootStyle = (): JSX.CSSProperties => ({
+    background: "var(--workspace-surface)",
+});
+
+function TabContent(props: { tabId: string }): JSX.Element {
+    const s = createTabState(props);
 
     return (
         <div
             class="flex flex-row flex-grow min-h-0 w-full items-center justify-center overflow-hidden relative"
             style={rootStyle()}
-            onContextMenu={handleContextMenu}
+            onContextMenu={(e) => onEmptyTabContextMenu(s, e)}
         >
             <Show
-                when={tabData() != null}
+                when={s.tabData() != null}
                 fallback={<CenteredDiv>Tab Not Found</CenteredDiv>}
             >
                 <Show
-                    when={isEmpty()}
-                    fallback={
-                        <ModalLayer scope="tab">
-                            <TileLayout
-                                contents={tileLayoutContents()}
-                                tabAtom={tabAtom()}
-                                getCursorPoint={getApi().getCursorPoint}
-                            />
-                            <TabCloseConfirms busy={pendingClose} leave={pendingLeave} answerBusy={answerPendingClose} answerLeave={answerPendingLeave} />
-                        </ModalLayer>
-                    }
+                    when={s.isEmpty()}
+                    fallback={<TabPanes s={s} />}
                 >
                     <EmptyTabIdentity />
                 </Show>
             </Show>
         </div>
+    );
+}
+
+function TabPanes({ s }: { s: TabState }): JSX.Element {
+    const p = s.prompts;
+    return (
+        <ModalLayer scope="tab">
+            <TileLayout
+                contents={s.tileLayoutContents()}
+                tabAtom={s.tabAtom()}
+                getCursorPoint={getApi().getCursorPoint}
+            />
+            <TabCloseConfirms busy={p.pendingClose} leave={p.pendingLeave} answerBusy={p.answerPendingClose} answerLeave={p.answerPendingLeave} />
+        </ModalLayer>
     );
 }
 
