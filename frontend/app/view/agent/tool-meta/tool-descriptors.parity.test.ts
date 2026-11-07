@@ -38,7 +38,7 @@ const ROWS: Row[] = [
     { name: "Read", params: { file_path: "src/a.ts" }, icon: "📖", label: "Read", detail: "src/a.ts", summary: "📖 Read src/a.ts", contentFirst: false, top: true, activity: "src/a.ts", arg: "src/a.ts" },
     { range: "1:1", name: "Write", params: { file_path: "src/b.md", content: "x" }, icon: "📝", label: "Write", detail: "src/b.md", summary: "📝 Write src/b.md", contentFirst: false, top: true, activity: "src/b.md", arg: "src/b.md" },
     { name: "Edit", params: { file_path: "src/c.ts" }, icon: "✏️", label: "Edit", detail: "src/c.ts", summary: "✏️ Edit src/c.ts", contentFirst: false, top: true, activity: "src/c.ts", arg: "src/c.ts" },
-    { name: "Bash", params: { command: "ls -la" }, icon: "🔧", label: "Bash", detail: "ls -la", summary: "🔧 Bash ls -la", contentFirst: false, top: false, activity: "ls -la", arg: "ls -la" },
+    { name: "Bash", params: { command: "ls -la" }, icon: "🔧", label: "Bash", detail: "ls -la", summary: "🔧 Bash ls -la", contentFirst: false, top: false, activity: "List files", arg: "ls -la" },
     { name: "Grep", params: { pattern: "foo" }, icon: "🔍", label: "Grep", detail: "foo", summary: "🔍 Grep foo", contentFirst: false, top: false, activity: "foo", arg: "foo" },
     { name: "Glob", params: { pattern: "**/*.ts" }, icon: "📁", label: "Glob", detail: "**/*.ts", summary: "📁 Glob **/*.ts", contentFirst: false, top: false, activity: "**/*.ts", arg: "**/*.ts" },
     // CHANGED (§1.1): working-row argument, previously none.
