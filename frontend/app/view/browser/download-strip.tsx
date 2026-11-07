@@ -26,7 +26,9 @@ function RowStatus(props: { row: DownloadRow }): JSX.Element {
                 <span class="browser-download-progress">cancelled</span>
             </Show>
             <Show when={row().state === "failed"}>
-                <span class="browser-download-failed">{row().reason ?? "The download failed."}</span>
+                <span class="browser-download-failed" title={row().reason ?? "The download failed."}>
+                    {row().reason ?? "The download failed."}
+                </span>
             </Show>
         </>
     );
@@ -42,9 +44,9 @@ export function DownloadStrip(props: { model: BrowserViewModel }): JSX.Element {
                         <div class="browser-download-row" classList={{ "browser-download-row--failed": row.state === "failed" }}>
                             <Show
                                 when={row.state !== "ignored"}
-                                fallback={<span class="browser-download-failed">{row.reason}</span>}
+                                fallback={<span class="browser-download-failed" title={row.reason}>{row.reason}</span>}
                             >
-                                <span class="browser-download-name">{row.name}</span>
+                                <span class="browser-download-name" title={row.name}>{row.name}</span>
                                 <RowStatus row={row} />
                                 <span class="browser-download-actions">
                                     <Show when={row.state === "running" && row.id != null}>
