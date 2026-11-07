@@ -131,6 +131,35 @@ describe("the prompt for an agent's use of an entry", () => {
         expect(shown.endsWith("…")).toBe(true);
     });
 
+    it("asks to copy a secret in from AWS: names the secret, key, region and Vault, offers no Always, and never goes ahead on silence", async () => {
+        const importing = { service: "AWS Secrets Manager", secret: "staging/db-creds", key: "db.password", region: "eu-west-1", vault: "Staging", replaces: false };
+        uses = [use({ entry_id: "", entry_label: "Staging database", kind: "api-key", origin: "", field: "", what: "secret", offer_always: false, agent_reason: "copy the staging password, task 28071", import: importing })];
+        await refreshVault();
+        const first = render(() => <UsePrompt use={uses[0]} close={vi.fn()} />);
+        const dialog = await screen.findByRole("group");
+        expect(dialog.textContent).toContain("Agent1 wants to copy a secret from AWS Secrets Manager into your Vault as Staging database");
+        expect(dialog.textContent).toContain("staging/db-creds");
+        expect(dialog.textContent).toContain("db.password");
+        expect(dialog.textContent).toContain("eu-west-1");
+        expect(dialog.textContent).toContain("Staging");
+        expect(dialog.textContent).toContain("Agent1 says: copy the staging password, task 28071");
+        expect(dialog.textContent).toContain("The agent never sees the value: AgentMux reads it.");
+        expect(dialog.textContent).toContain("nothing is copied without a yes");
+        expect(within(dialog).queryByRole("button", { name: /Always/ })).toBeNull();
+        expect(within(dialog).queryByRole("timer")).toBeNull();
+        fireEvent.click(within(dialog).getByRole("button", { name: "Allow once" }));
+        await waitFor(() => expect(calls("answer_use")).toEqual([{ id: "use-1", decision: "once" }]));
+        first.unmount();
+
+        uses = [use({ entry_id: "api-key-stripe", entry_label: "Stripe", kind: "api-key", origin: "", field: "", what: "secret", offer_always: false, import: { ...importing, key: "", region: "", replaces: true } })];
+        await refreshVault();
+        render(() => <UsePrompt use={uses[0]} close={vi.fn()} />);
+        const replacing = (await screen.findByRole("group")).textContent!;
+        expect(replacing).toContain("Agent1 wants to replace the value of Stripe with a secret from AWS Secrets Manager");
+        expect(replacing).toContain("The old value is kept for 7 days");
+        expect(replacing).not.toContain("(key");
+    });
+
     it("asks for an agent's sign-in by site and masked user, and offers Always for that agent on that site", async () => {
         uses = [
             use({

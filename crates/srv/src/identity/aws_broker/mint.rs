@@ -180,7 +180,7 @@ fn short(s: &str) -> String {
 }
 
 /// What the host's AWS CLI says when its login has lapsed.
-fn login_lapsed(stderr: &str) -> bool {
+pub(crate) fn login_lapsed(stderr: &str) -> bool {
     let s = stderr.to_lowercase();
     ["sso login", "sso session", "token has expired", "error loading sso token", "refresh token", "expiredtoken"].iter().any(|m| s.contains(m))
 }
