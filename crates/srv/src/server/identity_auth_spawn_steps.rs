@@ -485,7 +485,6 @@ async fn run_pty(login: Arc<Login>, started: Started, mut stdin_rx: Receiver<Str
         let _ = h.await;
     }
     stdin_writer_handle.abort();
-    stdin_writer_handle.abort();
 
     // Final transition fallback — some CLIs exit cleanly without
     // emitting a login-success line that record_line recognizes.
