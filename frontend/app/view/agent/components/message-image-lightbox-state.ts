@@ -64,11 +64,11 @@ function createImageStore(abort: AbortController) {
             put(path, { kind: e instanceof MediaTooLargeError ? "too-large" : "missing" });
         }
     };
-    /** Lets go of every file more than one step from position `i` of `paths`. */
+    /** Lets go of every file that is not within one step of position `i` of `paths` (a repeated file stays while any of its places is). */
     const dropFarFrom = (i: number, paths: string[]) => {
+        const near = new Set(paths.filter((_, pos) => ringDistance(pos, i, paths.length) <= 1));
         for (const [path, e] of Object.entries(entries())) {
-            const pos = paths.indexOf(path);
-            if (pos >= 0 && ringDistance(pos, i, paths.length) > 1) {
+            if (paths.includes(path) && !near.has(path)) {
                 revoke(e);
                 put(path, undefined);
             }

@@ -81,6 +81,18 @@ describe("MessageImageLightbox", () => {
         await waitFor(() => expect(h.revoked.length).toBeGreaterThan(0));
     });
 
+    it("keeps the shown image when the message repeats it and its first place is far away", async () => {
+        const at = (n: string) => ({ path: `D:/p/${n}.png`, name: `${n}.png`, alt: "" });
+        const repeated = [at("a"), at("b"), at("c"), at("a"), at("d"), at("e")];
+        const { container } = mount(3, repeated);
+        await waitFor(() => expect(container.querySelector("img")).not.toBeNull());
+        key(container, "ArrowRight");
+        key(container, "ArrowLeft");
+        await waitFor(() => expect(container.querySelector("img")).not.toBeNull());
+        expect(container.textContent).not.toContain("Loading");
+        expect(label(container)).toBe("Image 4 of 6: a.png");
+    });
+
     it("closes on Escape, and opens the shown image in the Editor on E", () => {
         const { container, onClose, onOpenEditor } = mount(2);
         key(container, "e");
