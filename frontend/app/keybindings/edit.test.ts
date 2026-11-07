@@ -156,6 +156,29 @@ describe("conflictsFor", () => {
     });
 });
 
+describe("entries the registry would skip", () => {
+    const bad = [
+        { command: "tab:new", key: "ctrl+nonsense+x" },
+        { command: "tab:new", key: 5 },
+        { command: "nope", key: "ctrl+alt+t" },
+        { command: "ext:acme.prs/refresh", key: "ctrl+alt+t" },
+        { command: "split:right", key: "a b c" },
+        null,
+    ];
+
+    it("are kept as written and never make a plan throw", () => {
+        const plan = planChange(bad, "pane:close", [{ key: "ctrl+alt+t" }], "other", { replace: true });
+        expect(plan.entries.slice(0, bad.length)).toEqual(bad.slice(0, bad.length));
+        expect(plan.entries).toHaveLength(bad.length + 2);
+    });
+
+    it("neither conflict nor hold a key", () => {
+        expect(conflictsFor({ command: "pane:close", key: "ctrl+alt+t" }, bad, "other")).toEqual([]);
+        expect(keysOf(bad, "tab:new", "other")).toEqual(["ctrl+shift+t"]);
+        expect(planChange(bad, "pane:close", [{ key: "ctrl+alt+t" }], "other").conflicts).toEqual([]);
+    });
+});
+
 describe("planChange with conflicts", () => {
     it("reports what the new keys collide with, and does not change the other command", () => {
         const plan = planChange([], "pane:close", [{ key: "ctrl+shift+d" }], "other");

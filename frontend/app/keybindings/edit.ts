@@ -7,7 +7,7 @@
 
 import { DEFAULT_KEYBINDINGS } from "./defaults";
 import { keyId, type KeyPlatform } from "./keys";
-import { compileRows, contextOf, defaultKeysOf, whenDisjoint, type UserKeybinding } from "./registry";
+import { compileRows, contextOf, defaultKeysOf, validEntries, whenDisjoint, type UserKeybinding } from "./registry";
 import { reservedFor, type Reserved } from "./reserved";
 
 /** A key and the context it works in (`when`, as in the setting). A default key is the same key only with the
@@ -57,8 +57,8 @@ function pinned(platform: KeyPlatform): "mac" | "other" {
 
 const tidy = (key: string) => key.trim().split(/\s+/).join(" ");
 
-const asEntries = (entries: unknown[]): UserKeybinding[] =>
-    entries.filter((e): e is UserKeybinding => !!e && typeof (e as UserKeybinding).command === "string" && !!(e as UserKeybinding).command.replace(/^-/, ""));
+/** Only the entries the registry applies: one it skips never fires, so it neither conflicts nor holds a key. */
+const asEntries = validEntries;
 
 function commandOf(entry: unknown): string | null {
     const c = (entry as UserKeybinding | null)?.command;

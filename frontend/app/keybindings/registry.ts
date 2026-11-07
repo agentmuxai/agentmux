@@ -82,6 +82,40 @@ export { keybindingsVersion };
 
 const TABLE_COMMANDS = new Set(DEFAULT_KEYBINDINGS.map((r) => r.command));
 
+/** Why `e` can't be used as an entry of the `keybindings` setting, or null when it can. */
+function entryProblem(e: UserKeybinding, isKnownCommand: (id: string) => boolean): string | null {
+    if (!e || typeof e.command !== "string" || !e.command.replace(/^-/, "")) return 'needs a "command"';
+    const unbind = e.command.startsWith("-");
+    if (e.key != null && (typeof e.key !== "string" || !e.key.trim())) return '"key" is empty';
+    if (!unbind && e.key == null) return `needs a "key" for ${e.command}`;
+    if (e.key && e.key.trim().split(/\s+/).length > 2) return `"${e.key}": a chord is at most two keys`;
+    const id = e.command.replace(/^-/, "");
+    // A widget's command runs only on the user's click (palette, status bar); bound to a key it would join the
+    // table agents' RunCommand reads (SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §6.8).
+    if (id.startsWith("ext:")) return `"${id}" is a widget's command, which can't be bound to a key`;
+    // A typo on a default key would otherwise win and run nothing.
+    if (!TABLE_COMMANDS.has(id) && !isKnownCommand(id)) return `unknown command "${id}"`;
+    if (e.platform != null && e.platform !== "mac" && e.platform !== "other") return 'platform must be "mac" or "other"';
+    try {
+        if (e.key) for (const p of ["mac", "other"] as const) e.key.trim().split(/\s+/).forEach((k) => parseKey(k, p));
+        validateWhen(e.when);
+    } catch (err) {
+        return (err as Error).message;
+    }
+    return null;
+}
+
+/** Whether a command outside the table exists (the palette's ids), as the app last told `setUserKeybindings`. */
+let knownCommand: (id: string) => boolean = () => false;
+
+/**
+ * The entries of `entries` the registry would apply: the same check as `setUserKeybindings`, so a list that is
+ * not saved yet (Settings, an agent's request) is read exactly as the saved one will be.
+ */
+export function validEntries(entries: unknown[]): UserKeybinding[] {
+    return entries.filter((e): e is UserKeybinding => entryProblem(e as UserKeybinding, knownCommand) == null);
+}
+
 /**
  * Applies the `keybindings` setting. User keys come before the defaults, so
  * they win. Returns a message for every entry that was skipped; a bad entry
@@ -93,55 +127,17 @@ export function setUserKeybindings(entries: unknown, isKnownCommand: (id: string
     const ok: UserKeybinding[] = [];
     for (const [i, raw] of (Array.isArray(entries) ? entries : []).entries()) {
         const e = raw as UserKeybinding;
-        const skip = (message: string) => {
-            warnings.push(`keybindings[${i}]: ${message}`);
-            found.push({ index: i, command: typeof e?.command === "string" ? e.command.replace(/^-/, "") : "", message });
-        };
-        if (!e || typeof e.command !== "string" || !e.command.replace(/^-/, "")) {
-            skip('needs a "command"');
+        const problem = entryProblem(e, isKnownCommand);
+        if (problem == null) {
+            ok.push(e);
             continue;
         }
-        const unbind = e.command.startsWith("-");
-        if (e.key != null && (typeof e.key !== "string" || !e.key.trim())) {
-            skip('"key" is empty');
-            continue;
-        }
-        if (!unbind && e.key == null) {
-            skip(`needs a "key" for ${e.command}`);
-            continue;
-        }
-        if (e.key && e.key.trim().split(/\s+/).length > 2) {
-            skip(`"${e.key}": a chord is at most two keys`);
-            continue;
-        }
-        const id = e.command.replace(/^-/, "");
-        if (id.startsWith("ext:")) {
-            // A widget's command runs only on the user's click (palette,
-            // status bar); bound to a key it would join the table agents'
-            // RunCommand reads (SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §6.8).
-            skip(`"${id}" is a widget's command, which can't be bound to a key`);
-            continue;
-        }
-        if (!TABLE_COMMANDS.has(id) && !isKnownCommand(id)) {
-            // A typo on a default key would otherwise win and run nothing.
-            skip(`unknown command "${id}"`);
-            continue;
-        }
-        if (e.platform != null && e.platform !== "mac" && e.platform !== "other") {
-            skip('platform must be "mac" or "other"');
-            continue;
-        }
-        try {
-            if (e.key) for (const p of ["mac", "other"] as const) e.key.trim().split(/\s+/).forEach((k) => parseKey(k, p));
-            validateWhen(e.when);
-        } catch (err) {
-            skip((err as Error).message);
-            continue;
-        }
-        ok.push(e);
+        warnings.push(`keybindings[${i}]: ${problem}`);
+        found.push({ index: i, command: typeof e?.command === "string" ? e.command.replace(/^-/, "") : "", message: problem });
     }
     userBindings = ok;
     issues = found;
+    knownCommand = isKnownCommand;
     compiled.clear();
     setKeybindingsVersion((v) => v + 1);
     return warnings;
