@@ -74,7 +74,7 @@ vi.mock("./inject-resume-preflight", () => ({
     buildResumePreflightNode: (...a: unknown[]) => (h.fns.pass("buildResumePreflightNode", ...a), null),
     injectResumePreflight: (...a: unknown[]) => h.fns.pass("injectResumePreflight", ...a),
 }));
-vi.mock("./virtualization/verbosity", () => ({ deriveDisplayNodes: (...a: unknown[]) => h.fns.pass("deriveDisplayNodes", ...a) }));
+vi.mock("./virtualization/verbosity", () => ({ deriveDisplayNodes: (...a: unknown[]) => h.fns.pass("deriveDisplayNodes", ...a), isForcedRow: () => false }));
 vi.mock("./failure/failure-writer", () => ({ clearFailure: (...a: unknown[]) => h.fns.clearFailure(...a) }));
 vi.mock("./failure/resolved-auth-errors", () => ({ markResolvedAuthErrors: (...a: unknown[]) => h.fns.pass("markResolvedAuthErrors", ...a) }));
 vi.mock("./failure/useAgentAccountBinding", () => ({
