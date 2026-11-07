@@ -307,7 +307,7 @@ describe("the chip, the tag and the active badge", () => {
         expect(m.q('[data-testid="tooltip"]')!.getAttribute("data-content")).toBe("Open in another pane");
     });
 
-    it("says it too when the list gives no locations", () => {
+    it("shows no active badge when the list gives no open definitions", () => {
         const m = mount({ noListFns: true });
         expect(m.q(".agent-active-badge")).toBeNull();
     });
