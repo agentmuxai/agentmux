@@ -3,10 +3,10 @@
 
 /**
  * Settings › Sounds, pinned as a whole ahead of splitting it into parts: each scenario mounts the real section over a
- * settings object and a settings object held in a signal, with stand-ins for the slider, toggle and select controls, and logs the section as an indented tree (every control with the
- * props it was given) and, in order, every setting it writes. The logs are snapshots recorded on the unsplit component;
- * the split must leave them byte for byte. (This pins the markup and the writes; the controls' own behaviour is tested
- * with the controls.)
+ * settings object held in a signal, with stand-ins for the slider, toggle and select controls, and logs the section as
+ * an indented tree (every control with the props it was given) and, in order, every setting it writes. The logs are
+ * snapshots recorded on the unsplit component; the split must leave them byte for byte. (This pins the markup and the
+ * writes; the controls' own behaviour is tested with the controls.)
  */
 
 import { cleanup, fireEvent, render } from "@solidjs/testing-library";
