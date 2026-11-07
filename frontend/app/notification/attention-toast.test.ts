@@ -131,6 +131,19 @@ describe("the attention toast", () => {
         expect(h.removed).toHaveLength(1);
     });
 
+    it("does not come back after a Go to agent button took it off the screen, which is no X", () => {
+        const h = harness();
+        h.wait(START_GRACE_MS);
+        h.set([item("b1"), item("b2", { local: false })]);
+        h.actions.get("attention:go:b2")!();
+        expect(h.revealed).toEqual(["b2"]);
+        h.wait(6000);
+        h.set([item("b1"), item("b2", { local: false })]);
+        expect(h.pushed).toHaveLength(1);
+        h.set([item("b1"), item("b2", { local: false }), item("b3")]);
+        expect(h.last()).toMatchObject({ title: "Agent-b3" });
+    });
+
     it("does not push the toast again while what it says is unchanged (a screen reader would read it out again)", () => {
         const h = harness();
         h.wait(START_GRACE_MS);

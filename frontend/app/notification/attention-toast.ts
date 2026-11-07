@@ -131,12 +131,22 @@ export function createAttentionToast(deps: AttentionToastDeps): { update: () => 
             const says = JSON.stringify(items.map((i) => [i.blockId, i.name, i.color, i.what, i.local]));
             if (shown && says === said) return;
             said = says;
-            const toast = buildToast(items, deps.reveal, deps.setAction, deps.tint);
-            toast.onClose = () => {
+            // Its X and any of its buttons take the toast off the screen: what it named does not bring it back.
+            const close = () => {
                 shown = false;
                 said = "";
                 for (const i of items) dismissed.add(i.blockId);
             };
+            const toast = buildToast(
+                items,
+                (blockId) => {
+                    close();
+                    deps.reveal(blockId);
+                },
+                deps.setAction,
+                deps.tint
+            );
+            toast.onClose = close;
             shown = true;
             deps.push({ ...toast, timestamp: new Date(now).toISOString() });
         },
