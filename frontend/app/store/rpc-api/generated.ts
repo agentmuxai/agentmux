@@ -541,9 +541,6 @@ import type { UnwatchMediaDirReq } from "@/types/rpc/UnwatchMediaDirReq";
 import type { UpdateContainerResult } from "@/types/rpc/UpdateContainerResult";
 import type { UpgradeRequestsEvent } from "@/types/rpc/UpgradeRequestsEvent";
 import type { ValidationReport } from "@/types/rpc/ValidationReport";
-import type { VendorInstallInfo } from "@/types/rpc/VendorInstallInfo";
-import type { VendorInstallReq } from "@/types/rpc/VendorInstallReq";
-import type { VendorInstallStarted } from "@/types/rpc/VendorInstallStarted";
 import type { ViewerAgentHiddenResult } from "@/types/rpc/ViewerAgentHiddenResult";
 import type { ViewerCanSendResult } from "@/types/rpc/ViewerCanSendResult";
 import type { ViewerDevicesResult } from "@/types/rpc/ViewerDevicesResult";
@@ -2632,14 +2629,6 @@ export const GeneratedApi = {
   ): Promise<InstallSystemToolResult> {
     return client.rpcCall("toolchain.install_system_tool", data, { timeout: 150000, ...opts });
   },
-  // command "toolchain.install_vendor_cli"
-  ToolchainInstallVendorCliCommand(
-    client: RpcClient,
-    data: VendorInstallReq,
-    opts?: RpcOpts
-  ): Promise<VendorInstallStarted> {
-    return client.rpcCall("toolchain.install_vendor_cli", data, { timeout: 150000, ...opts });
-  },
   // command "toolchain.prune"
   ToolchainPruneCommand(
     client: RpcClient,
@@ -2655,14 +2644,6 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<ResolveInstallCommandResult> {
     return client.rpcCall("toolchain.resolve_install_command", data, opts);
-  },
-  // command "toolchain.vendor_install_info"
-  ToolchainVendorInstallInfoCommand(
-    client: RpcClient,
-    data: VendorInstallReq,
-    opts?: RpcOpts
-  ): Promise<VendorInstallInfo> {
-    return client.rpcCall("toolchain.vendor_install_info", data, opts);
   },
   // command "toolchain.versions"
   ToolchainVersionsCommand(

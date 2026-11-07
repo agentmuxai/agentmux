@@ -498,10 +498,10 @@ fn require_approval(answer: Result<UserAnswer, String>, tool_id: &str) -> Result
 
 /// A tool's install claim, released when dropped while `armed`: a refusal, or the request ending
 /// before the install starts.
-pub(super) struct ClaimGuard {
-    pub(super) registry: Arc<crate::server::install_handlers::InstallSessionRegistry>,
-    pub(super) key: String,
-    pub(super) armed: bool,
+struct ClaimGuard {
+    registry: Arc<crate::server::install_handlers::InstallSessionRegistry>,
+    key: String,
+    armed: bool,
 }
 
 impl Drop for ClaimGuard {

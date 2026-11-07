@@ -1487,21 +1487,12 @@
             "opts": "{ timeout: 150000, ...opts }"
         },
         {
-            "command": "toolchain.install_vendor_cli",
-            "method": "ToolchainInstallVendorCliCommand",
-            "opts": "{ timeout: 150000, ...opts }"
-        },
-        {
             "command": "toolchain.prune",
             "method": "ToolchainPruneCommand"
         },
         {
             "command": "toolchain.resolve_install_command",
             "method": "ToolchainResolveInstallCommandCommand"
-        },
-        {
-            "command": "toolchain.vendor_install_info",
-            "method": "ToolchainVendorInstallInfoCommand"
         },
         {
             "command": "toolchain.versions",
