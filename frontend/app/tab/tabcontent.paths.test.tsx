@@ -32,7 +32,9 @@ type Parked = { agentId: string; name: string };
 
 const h = vi.hoisted(() => ({
     tile: null as null | { contents: unknown; tabAtom: unknown; getCursorPoint: unknown },
-    confirms: null as null | {
+    // The questions asked in a pane (`askInPane`), oldest first, as the tests read and answer them.
+    asked: [] as { kind: "busy" | "leave"; blockId: string; props: Record<string, unknown>; resolve: (close: boolean) => void }[],
+    confirms: null as unknown as {
         busy: () => { busy: { blockId: string; name: string; turnActive: boolean; processCount: number }[] } | null;
         leave: () => { leaving: { blockId: string; site: string }[] } | null;
         answerBusy: (close: boolean) => void;
@@ -67,6 +69,21 @@ const h = vi.hoisted(() => ({
     parkedAgentOf: vi.fn<(id: string) => Parked | undefined>(),
 }));
 
+// What the old tab-level prompts exposed: the oldest open question of each kind, and a way to answer it.
+const askedOf = (kind: "busy" | "leave") => h.asked.find((q) => q.kind === kind);
+const answerOldest = (kind: "busy" | "leave", close: boolean) => {
+    const q = askedOf(kind);
+    if (!q) return;
+    h.asked.splice(h.asked.indexOf(q), 1);
+    q.resolve(close);
+};
+h.confirms = {
+    busy: () => (askedOf("busy")?.props as ReturnType<typeof h.confirms.busy>) ?? null,
+    leave: () => (askedOf("leave")?.props as ReturnType<typeof h.confirms.leave>) ?? null,
+    answerBusy: (close) => answerOldest("busy", close),
+    answerLeave: (close) => answerOldest("leave", close),
+};
+
 vi.mock("@/layout/index", () => ({}));
 vi.mock("@/layout/lib/layoutStack", () => ({
     effectiveStack: (data: { blockId: string; blockStack?: string[] }) =>
@@ -89,11 +106,13 @@ vi.mock("@/app/tab/pane-leaf-chrome", () => ({
         <div data-testid="leaf-chrome" data-block={props.nodeModel.blockId} />
     ),
 }));
-vi.mock("@/app/tab/tab-close-confirms", () => ({
-    TabCloseConfirms: (props: NonNullable<typeof h.confirms>) => {
-        h.confirms = props;
-        return <div data-testid="close-confirms" />;
-    },
+vi.mock("@/app/tab/pane-close-confirms", () => ({
+    CloseBusyConfirm: () => null,
+    LeaveSiteConfirm: () => null,
+    askInPane: (_tabId: string, blockId: string, source: string, _subject: string[], _Component: unknown, props: Record<string, unknown>) =>
+        new Promise<boolean>((resolve) =>
+            h.asked.push({ kind: source === "close-busy" ? "busy" : "leave", blockId, props, resolve })
+        ),
 }));
 vi.mock("@/element/ModalLayer", () => ({
     ModalLayer: (props: { scope: string; children?: JSX.Element }) => (
@@ -181,7 +200,7 @@ beforeEach(() => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
     h.tile = null;
-    h.confirms = null;
+    h.asked.length = 0;
     h.fullConfig = undefined;
     h.objects = {};
     h.aboutDetails = undefined;
@@ -241,10 +260,8 @@ describe("TabContent render", () => {
         const { container, getByTestId, queryByTestId } = mountWithPanes();
         const layer = getByTestId("modal-layer");
         expect(layer.getAttribute("data-scope")).toBe("tab");
-        expect(Array.from(layer.children).map((c) => c.getAttribute("data-testid"))).toEqual([
-            "tile-layout",
-            "close-confirms",
-        ]);
+        // The close questions are no longer drawn here: each is a modal of the pane being closed.
+        expect(Array.from(layer.children).map((c) => c.getAttribute("data-testid"))).toEqual(["tile-layout"]);
         expect(container.querySelector(".empty-tab-logo")).toBeNull();
         expect(queryByTestId("tile-layout")).not.toBeNull();
     });
@@ -919,52 +936,33 @@ describe("TabContent beforeNodeDelete", () => {
     });
 });
 
-describe("TabContent teardown", () => {
-    it("answers open prompts 'no' when the tab goes away, so their closes do not wait forever", async () => {
-        const { unmount } = mountWithPanes();
-        setBlock("a1", { view: "agent" });
-        setBlock("w1", { view: "browser" });
-        h.controllerStatus.mockResolvedValue({ turn_active: true });
-        h.hibernationCheck = vi.fn(async () => ({ leave_prompt: true }));
-        const busy = contents().beforeNodeDelete(layoutData("a1"));
-        await flush();
-        const leave = contents().beforeNodeDelete(layoutData("w1"));
-        await flush();
-        expect(h.confirms!.busy()).not.toBeNull();
-        expect(h.confirms!.leave()).not.toBeNull();
-        unmount();
-        expect(await busy).toBe(false);
-        expect(await leave).toBe(false);
-        expect(h.closeWithShutdownLog).not.toHaveBeenCalled();
-        expect(h.pushNotification).toHaveBeenCalledTimes(2);
-    });
-
-    it("answers every queued prompt, not only the first", async () => {
-        const { unmount } = mountWithPanes();
+describe("where a pane's close questions are asked", () => {
+    it("asks a busy pane's question in that pane, by the block it closes", async () => {
+        mountWithPanes();
         setBlock("a1", { view: "agent" });
         h.controllerStatus.mockResolvedValue({ turn_active: true });
-        const first = contents().beforeNodeDelete(layoutData("a1"));
+        void contents().beforeNodeDelete(layoutData("a1"));
         await flush();
-        const second = contents().beforeNodeDelete(layoutData("a1"));
-        await flush();
-        unmount();
-        expect(await first).toBe(false);
-        expect(await second).toBe(false);
-        expect(h.closeWithShutdownLog).not.toHaveBeenCalled();
-        expect(h.pushNotification).toHaveBeenCalledTimes(2);
+        expect(h.asked.map((q) => [q.kind, q.blockId])).toEqual([["busy", "a1"]]);
     });
 
-    it("answers every queued leave prompt 'no' too", async () => {
-        const { unmount } = mountWithPanes();
+    it("asks a browser pane's leave question in that pane", async () => {
+        mountWithPanes();
         setBlock("w1", { view: "browser" });
         h.hibernationCheck = vi.fn(async () => ({ leave_prompt: true }));
-        const first = contents().beforeNodeDelete(layoutData("w1"));
+        void contents().beforeNodeDelete(layoutData("w1"));
         await flush();
-        const second = contents().beforeNodeDelete(layoutData("w1"));
+        expect(h.asked.map((q) => [q.kind, q.blockId])).toEqual([["leave", "w1"]]);
+    });
+
+    it("asks two panes closed together at once, each in its own pane, not one behind the other", async () => {
+        mountWithPanes();
+        setBlock("a1", { view: "agent" });
+        setBlock("a2", { view: "agent" });
+        h.controllerStatus.mockResolvedValue({ turn_active: true });
+        void contents().beforeNodeDelete(layoutData("a1"));
+        void contents().beforeNodeDelete(layoutData("a2"));
         await flush();
-        unmount();
-        expect(await first).toBe(false);
-        expect(await second).toBe(false);
-        expect(h.pushNotification).toHaveBeenCalledTimes(2);
+        expect(h.asked.map((q) => q.blockId)).toEqual(["a1", "a2"]);
     });
 });
