@@ -5,8 +5,8 @@
 // given where focus is. Pure: the dispatcher supplies the context.
 
 import { createSignal } from "solid-js";
-import { DEFAULT_KEYBINDINGS, rowKeys, type KeyBindingRow, type KeyPane } from "./defaults";
-import { formatKey, matchKey, parseKey, sameKey, type KeyEventLike, type KeyPlatform, type KeySpec } from "./keys";
+import { DEFAULT_KEYBINDINGS, rowKeys, type KeyBindingRow, type KeyCategory, type KeyPane } from "./defaults";
+import { formatKey, keyId, matchKey, parseKey, sameKey, type KeyEventLike, type KeyPlatform, type KeySpec } from "./keys";
 
 /** Where focus is when a key is pressed. */
 export interface KeyContext {
@@ -31,16 +31,23 @@ const PANE_WHEN: Record<KeyPane, string> = {
     files: "viewType == files",
 };
 
+/** Where a row's keys reach: its own `when` plus the pane it belongs to. */
+export function contextOf(row: Pick<KeyBindingRow, "when" | "pane">): string {
+    return [row.when, row.pane && PANE_WHEN[row.pane]].filter(Boolean).join(" && ");
+}
+
 export interface ResolvedBinding {
     row: KeyBindingRow;
     /** The binding is a chord and this key was its first step. */
     chordStart: boolean;
 }
 
-interface CompiledRow {
+export interface CompiledRow {
     row: KeyBindingRow;
     steps: KeySpec[];
     source: string;
+    /** From the person's `keybindings` setting, not from the default table. */
+    user: boolean;
 }
 
 const compiled = new Map<KeyPlatform, CompiledRow[]>();
@@ -57,6 +64,17 @@ export interface UserKeybinding {
 
 let userBindings: UserKeybinding[] = [];
 
+/** An entry of the setting that was skipped, with where it is, so the Settings view can show it under its row. */
+export interface KeybindingIssue {
+    /** Position in the setting's array. */
+    index: number;
+    /** The command the entry names, without a leading `-`; "" when it names none. */
+    command: string;
+    message: string;
+}
+
+let issues: KeybindingIssue[] = [];
+
 /** Bumped whenever the user's keybindings change, so views that read the
  *  table (help pane, CodeMirror keymaps) can follow. */
 const [keybindingsVersion, setKeybindingsVersion] = createSignal(0);
@@ -71,25 +89,29 @@ const TABLE_COMMANDS = new Set(DEFAULT_KEYBINDINGS.map((r) => r.command));
  */
 export function setUserKeybindings(entries: unknown, isKnownCommand: (id: string) => boolean = () => false): string[] {
     const warnings: string[] = [];
+    const found: KeybindingIssue[] = [];
     const ok: UserKeybinding[] = [];
     for (const [i, raw] of (Array.isArray(entries) ? entries : []).entries()) {
         const e = raw as UserKeybinding;
-        const where = `keybindings[${i}]`;
+        const skip = (message: string) => {
+            warnings.push(`keybindings[${i}]: ${message}`);
+            found.push({ index: i, command: typeof e?.command === "string" ? e.command.replace(/^-/, "") : "", message });
+        };
         if (!e || typeof e.command !== "string" || !e.command.replace(/^-/, "")) {
-            warnings.push(`${where}: needs a "command"`);
+            skip('needs a "command"');
             continue;
         }
         const unbind = e.command.startsWith("-");
         if (e.key != null && (typeof e.key !== "string" || !e.key.trim())) {
-            warnings.push(`${where}: "key" is empty`);
+            skip('"key" is empty');
             continue;
         }
         if (!unbind && e.key == null) {
-            warnings.push(`${where}: needs a "key" for ${e.command}`);
+            skip(`needs a "key" for ${e.command}`);
             continue;
         }
         if (e.key && e.key.trim().split(/\s+/).length > 2) {
-            warnings.push(`${where}: "${e.key}": a chord is at most two keys`);
+            skip(`"${e.key}": a chord is at most two keys`);
             continue;
         }
         const id = e.command.replace(/^-/, "");
@@ -97,88 +119,104 @@ export function setUserKeybindings(entries: unknown, isKnownCommand: (id: string
             // A widget's command runs only on the user's click (palette,
             // status bar); bound to a key it would join the table agents'
             // RunCommand reads (SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §6.8).
-            warnings.push(`${where}: "${id}" is a widget's command, which can't be bound to a key`);
+            skip(`"${id}" is a widget's command, which can't be bound to a key`);
             continue;
         }
         if (!TABLE_COMMANDS.has(id) && !isKnownCommand(id)) {
             // A typo on a default key would otherwise win and run nothing.
-            warnings.push(`${where}: unknown command "${id}"`);
+            skip(`unknown command "${id}"`);
             continue;
         }
         if (e.platform != null && e.platform !== "mac" && e.platform !== "other") {
-            warnings.push(`${where}: platform must be "mac" or "other"`);
+            skip('platform must be "mac" or "other"');
             continue;
         }
         try {
             if (e.key) for (const p of ["mac", "other"] as const) e.key.trim().split(/\s+/).forEach((k) => parseKey(k, p));
             validateWhen(e.when);
         } catch (err) {
-            warnings.push(`${where}: ${(err as Error).message}`);
+            skip((err as Error).message);
             continue;
         }
         ok.push(e);
     }
     userBindings = ok;
+    issues = found;
     compiled.clear();
     setKeybindingsVersion((v) => v + 1);
     return warnings;
 }
 
+/** The entries of the setting that were skipped, in the order of the array. Reactive. */
+export function keybindingIssues(): KeybindingIssue[] {
+    keybindingsVersion();
+    return issues;
+}
+
+/**
+ * The rows `entries` (the person's valid `keybindings`) and the default table give on `platform`, user keys
+ * first. Pure: Settings reads it for a list of entries that is not yet saved.
+ */
+export function compileRows(platform: KeyPlatform, entries: UserKeybinding[]): CompiledRow[] {
+    const rows: CompiledRow[] = [];
+    // Your "other" entries apply on Linux too (it's Windows and Linux).
+    const mine = entries.filter((u) => u.platform == null || u.platform === platform || (u.platform === "other" && platform === "linux"));
+    // By parsed key, not text: "Ctrl+Tab" and "mod+t" unbind ctrl+Tab and meta+t.
+    const stepsOf = (key: string) => key.trim().split(/\s+/).map((s) => parseKey(s, platform));
+    const sameSteps = (a: KeySpec[], b: KeySpec[]) => a.length === b.length && a.every((k, i) => sameKey(k, b[i]));
+    const unbinds = mine
+        .filter((u) => u.command.startsWith("-"))
+        .map((u) => ({ command: u.command.slice(1), steps: u.key ? stepsOf(u.key) : null }));
+    const unbound = (command: string, steps: KeySpec[]) =>
+        unbinds.some((u) => u.command === command && (u.steps == null || sameSteps(u.steps, steps)));
+    // A command's first row is its main one (later rows add chords or scoped keys).
+    const byCommand = new Map<string, KeyBindingRow>();
+    for (const r of DEFAULT_KEYBINDINGS) if (!byCommand.has(r.command)) byCommand.set(r.command, r);
+    // In list order: an unbind removes the defaults and your own entries
+    // above it, so "unbind, then rebind elsewhere" works.
+    const userRows: CompiledRow[] = [];
+    for (const u of mine) {
+        if (u.command.startsWith("-")) {
+            const command = u.command.slice(1);
+            const steps = u.key ? stepsOf(u.key) : null;
+            for (let i = userRows.length - 1; i >= 0; i--) {
+                const r = userRows[i];
+                if (r.row.command === command && (steps == null || sameSteps(steps, r.steps))) userRows.splice(i, 1);
+            }
+            continue;
+        }
+        if (!u.key) continue;
+        const base = byCommand.get(u.command);
+        const row: KeyBindingRow = {
+            command: u.command,
+            label: base?.label ?? u.command,
+            category: base?.category ?? "General",
+            when: u.when,
+            // In a terminal: as its command's own rows do; always for a
+            // command the table doesn't have (you bound it on purpose) or
+            // when your `when` asks for the terminal.
+            skipShell: base ? base.skipShell || /(^|&&)\s*terminalFocus\s*($|&&)/.test(u.when ?? "") : true,
+            pane: base?.pane,
+            helpGroup: base?.helpGroup,
+        };
+        // One space between chord steps, whatever was typed: labels split on " ".
+        userRows.push({ row, source: u.key.trim().split(/\s+/).join(" "), steps: stepsOf(u.key), user: true });
+    }
+    rows.push(...userRows);
+    for (const row of DEFAULT_KEYBINDINGS) {
+        for (const source of rowKeys(row, platform)) {
+            const steps = source.split(" ").map((s) => parseKey(s, platform));
+            if (unbound(row.command, steps)) continue;
+            rows.push({ row, source, steps, user: false });
+        }
+    }
+    return rows;
+}
+
 function rowsFor(platform: KeyPlatform): CompiledRow[] {
     let rows = compiled.get(platform);
     if (!rows) {
-        rows = [];
-        // Your "other" entries apply on Linux too (it's Windows and Linux).
-        const mine = userBindings.filter((u) => u.platform == null || u.platform === platform || (u.platform === "other" && platform === "linux"));
-        // By parsed key, not text: "Ctrl+Tab" and "mod+t" unbind ctrl+Tab and meta+t.
-        const stepsOf = (key: string) => key.trim().split(/\s+/).map((s) => parseKey(s, platform));
-        const sameSteps = (a: KeySpec[], b: KeySpec[]) => a.length === b.length && a.every((k, i) => sameKey(k, b[i]));
-        const unbinds = mine
-            .filter((u) => u.command.startsWith("-"))
-            .map((u) => ({ command: u.command.slice(1), steps: u.key ? stepsOf(u.key) : null }));
-        const unbound = (command: string, steps: KeySpec[]) =>
-            unbinds.some((u) => u.command === command && (u.steps == null || sameSteps(u.steps, steps)));
-        // A command's first row is its main one (later rows add chords or scoped keys).
-        const byCommand = new Map<string, KeyBindingRow>();
-        for (const r of DEFAULT_KEYBINDINGS) if (!byCommand.has(r.command)) byCommand.set(r.command, r);
-        // In list order: an unbind removes the defaults and your own entries
-        // above it, so "unbind, then rebind elsewhere" works.
-        const userRows: CompiledRow[] = [];
-        for (const u of mine) {
-            if (u.command.startsWith("-")) {
-                const command = u.command.slice(1);
-                const steps = u.key ? stepsOf(u.key) : null;
-                for (let i = userRows.length - 1; i >= 0; i--) {
-                    const r = userRows[i];
-                    if (r.row.command === command && (steps == null || sameSteps(steps, r.steps))) userRows.splice(i, 1);
-                }
-                continue;
-            }
-            if (!u.key) continue;
-            const base = byCommand.get(u.command);
-            const row: KeyBindingRow = {
-                command: u.command,
-                label: base?.label ?? u.command,
-                category: base?.category ?? "General",
-                when: u.when,
-                // In a terminal: as its command's own rows do; always for a
-                // command the table doesn't have (you bound it on purpose) or
-                // when your `when` asks for the terminal.
-                skipShell: base ? base.skipShell || /(^|&&)\s*terminalFocus\s*($|&&)/.test(u.when ?? "") : true,
-                pane: base?.pane,
-                helpGroup: base?.helpGroup,
-            };
-            // One space between chord steps, whatever was typed: labels split on " ".
-            userRows.push({ row, source: u.key.trim().split(/\s+/).join(" "), steps: stepsOf(u.key) });
-        }
-        rows.push(...userRows);
-        for (const row of DEFAULT_KEYBINDINGS) {
-            for (const source of rowKeys(row, platform)) {
-                const steps = source.split(" ").map((s) => parseKey(s, platform));
-                if (unbound(row.command, steps)) continue;
-                rows.push({ row, source, steps });
-            }
-        }
+        rows = compileRows(platform, userBindings);
         compiled.set(platform, rows);
     }
     return rows;
@@ -303,7 +341,6 @@ export function formatCommand(command: string, platform: KeyPlatform): string {
 export function findConflicts(platform: KeyPlatform): string[] {
     const rows = rowsFor(platform);
     const out: string[] = [];
-    const whenOf = (r: KeyBindingRow) => [r.when, r.pane && PANE_WHEN[r.pane]].filter(Boolean).join(" && ");
     for (let i = 0; i < rows.length; i++) {
         for (let j = i + 1; j < rows.length; j++) {
             const a = rows[i];
@@ -312,7 +349,7 @@ export function findConflicts(platform: KeyPlatform): string[] {
             // A pane row over a global row is precedence by design (see
             // `KeyBindingRow.pane`); two pane rows or two global rows must not clash.
             if (!a.row.pane !== !b.row.pane) continue;
-            if (whenDisjoint(whenOf(a.row), whenOf(b.row))) continue;
+            if (whenDisjoint(contextOf(a.row), contextOf(b.row))) continue;
             if (a.steps.length !== b.steps.length) {
                 // A chord leader must not also be a single-key binding.
                 const [single, chord] = a.steps.length === 1 ? [a, b] : [b, a];
@@ -357,6 +394,78 @@ export function whenDisjoint(a: string, b: string): boolean {
         return DOC_TAB_HOSTS.includes(v.view) ? f.neg : !f.neg;
     };
     return ta.some((x) => tb.some((y) => contradicts(x, y)));
+}
+
+/** One key of a command, with the context it works in. */
+export interface BindingKey {
+    key: string;
+    when?: string;
+    /** Written by the person, not in the default table. */
+    user: boolean;
+}
+
+/** What Settings, Help, the palette and `ListShortcuts` show for one command. */
+export interface CommandBindings {
+    command: string;
+    label: string;
+    category: KeyCategory;
+    helpGroup?: string;
+    pane?: KeyPane;
+    devOnly: boolean;
+    /** The keys the table gives it on this platform. */
+    defaults: string[];
+    /** The keys it has now (the person's, or the defaults they left alone). */
+    keys: string[];
+    keyRows: BindingKey[];
+    /** Differs from the defaults: a key added or removed, or a key with a context of their own. */
+    changed: boolean;
+    /** No key at all ("Not set"). */
+    unbound: boolean;
+    /** Messages for the setting's entries that name this command and were skipped. */
+    issues: string[];
+}
+
+/** The keys the default table gives `command` on `platform`, each with the `when` of its row. */
+export function defaultKeysOf(command: string, platform: KeyPlatform): { key: string; when?: string }[] {
+    return DEFAULT_KEYBINDINGS.filter((r) => r.command === command).flatMap((r) => rowKeys(r, platform).map((key) => ({ key, when: r.when })));
+}
+
+/**
+ * Every command with its keys now and its defaults, for `platform`: the default table's order, then any
+ * command the person bound that the table does not have. The one place that joins the two; views read it and
+ * never walk the rows themselves.
+ */
+export function bindingsView(platform: KeyPlatform): CommandBindings[] {
+    keybindingsVersion();
+    const rows = rowsFor(platform);
+    const base = new Map<string, KeyBindingRow>();
+    for (const r of DEFAULT_KEYBINDINGS) if (!base.has(r.command)) base.set(r.command, r);
+    const order = [...base.keys()];
+    for (const c of rows) if (!base.has(c.row.command) && !order.includes(c.row.command)) order.push(c.row.command);
+    return order.map((command) => {
+        const main = base.get(command);
+        const own = rows.filter((c) => c.row.command === command);
+        const defaults = defaultKeysOf(command, platform);
+        const keyRows = own.map((c) => ({ key: c.source, when: c.row.when, user: c.user }));
+        const ids = (keys: string[]) => new Set(keys.map((k) => keyId(k, platform)));
+        const have = ids(keyRows.map((k) => k.key));
+        const was = ids(defaults.map((k) => k.key));
+        const changed = have.size !== was.size || [...have].some((k) => !was.has(k)) || keyRows.some((k) => k.user && k.when);
+        return {
+            command,
+            label: main?.label ?? own[0]?.row.label ?? command,
+            category: main?.category ?? own[0]?.row.category ?? "General",
+            helpGroup: main?.helpGroup,
+            pane: main?.pane,
+            devOnly: !!main?.devOnly,
+            defaults: [...new Set(defaults.map((k) => k.key))],
+            keys: [...new Set(keyRows.map((k) => k.key))],
+            keyRows,
+            changed,
+            unbound: keyRows.length === 0,
+            issues: issues.filter((i) => i.command === command).map((i) => i.message),
+        };
+    });
 }
 
 export const _rowsForTests = rowsFor;
