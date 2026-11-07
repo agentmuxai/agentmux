@@ -347,7 +347,6 @@
 157 frontend/app/element/install/LogView.tsx::LogView
 160 frontend/app/element/install/install-session.ts::createInstallSession
 118 frontend/app/element/markdown-incremental.ts::findSafeSplitPoint
-176 frontend/app/element/markdown-media.tsx::LocalAV
 113 frontend/app/element/markdown-util.ts::transformBlocks
 257 frontend/app/element/modal.tsx::Modal
 155 frontend/app/element/strip-reveal-controller.ts::createStripReveal

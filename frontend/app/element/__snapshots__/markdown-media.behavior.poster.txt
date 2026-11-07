@@ -1,0 +1,36 @@
+IntersectionObserver rootMargin=600px 0px
+observe figure.am-media am-media-video
+io.disconnect
+fetchMediaRange C:/work/clips/demo.mp4 0-2097151 aborted=false
+createObjectURL blob:test/1
+-- poster failed
+<div>
+  <figure class="am-media am-media-video">
+    <div class="am-media-stage">
+      <div class="am-media-stage-overlay">
+        <button type="button" class="am-media-play" aria-label="Play demo.mp4">
+          <i aria-hidden="true" class="fa fa-play">
+        <span class="am-media-av-label">
+          <span class="am-media-card-name">
+            "demo.mp4"
+          <span class="am-muted">
+            "4.8 MB"
+io.disconnect
+revokeObjectURL blob:test/1
+-- no poster bytes
+IntersectionObserver rootMargin=600px 0px
+observe figure.am-media am-media-video
+io.disconnect
+fetchMediaRange C:/work/clips/demo.mp4 0-2097151 aborted=false
+-- no poster, ready to play
+<div>
+  <figure class="am-media am-media-video">
+    <div class="am-media-stage">
+      <div class="am-media-stage-overlay">
+        <button type="button" class="am-media-play" aria-label="Play demo.mp4">
+          <i aria-hidden="true" class="fa fa-play">
+        <span class="am-media-av-label">
+          <span class="am-media-card-name">
+            "demo.mp4"
+          <span class="am-muted">
+            "4.8 MB"

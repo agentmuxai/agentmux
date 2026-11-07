@@ -1,0 +1,31 @@
+IntersectionObserver rootMargin=600px 0px
+observe figure.am-media
+-- image waiting
+<div>
+  <figure class="am-media">
+    <div class="am-media-placeholder" style="aspect-ratio: 16 / 9;">
+    <figcaption>
+      "clip"
+io.disconnect
+fetchMediaBlob C:/work/shots/a.png max=26214400 type=undefined aborted=false
+createObjectURL blob:test/1
+withHeightContinuity
+-- image ready
+<div>
+  <figure class="am-media">
+    <img class="am-media-img" src="blob:test/1" alt="clip" data-tip="Open in the editor">
+    <figcaption>
+      "clip"
+io.disconnect
+revokeObjectURL blob:test/1
+-- missing
+IntersectionObserver rootMargin=600px 0px
+observe figure.am-media
+io.disconnect
+fetchMediaBlob C:/work/shots/gone.png max=26214400 type=undefined aborted=false
+-- image missing
+<div>
+  <span class="am-muted">
+    "[image not found:"
+    "shots/gone.png"
+    "]"
