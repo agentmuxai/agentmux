@@ -404,7 +404,6 @@
 126 frontend/app/view/agent/components/AgentShellInfoPanel.tsx::AgentShellInfoPanel
 148 frontend/app/view/agent/components/BtwOverlay.tsx::BtwOverlay
 130 frontend/app/view/agent/components/HiddenTemplatesSection.tsx::HiddenTemplatesSection
-195 frontend/app/view/agent/components/InAppLoginPanel.tsx::InAppLoginPanel
 157 frontend/app/view/agent/components/InputHistorySearch.tsx::InputHistorySearch
 193 frontend/app/view/agent/components/MarkdownBlock.tsx::MarkdownBlock
 141 frontend/app/view/agent/components/MyAgentsList.tsx::MyAgentsList
