@@ -40,6 +40,12 @@ describe("the window's grip", () => {
         expect(grip.querySelector("svg")).not.toBeNull();
     });
 
+    it("draws 4×4 dots (the panes' grips are 4×3)", () => {
+        const { container } = render(() => <SystemStatus />);
+        const grip = container.querySelector("[data-testid=window-grip]")!;
+        expect(grip.querySelectorAll("svg circle").length).toBe(16);
+    });
+
     it("stays last when the host draws no window controls (macOS's AgentMux logo follows the status area)", () => {
         h.chrome = false;
         const { container } = render(() => <SystemStatus />);
