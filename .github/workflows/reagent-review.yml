@@ -92,12 +92,16 @@ jobs:
           sparse-checkout: .github/actions
           persist-credentials: false
 
+      # A PR opened by Dependabot or Renovate asks for `reagent-deps`: the broker verifies the account (login, id
+      # and type) and grants no credential of any kind, and the reviewer job reviews it by rule without a model
+      # (muxreview docs/DEPENDENCY_REVIEW.md). Every other PR asks for `reagent-review` as before. The broker
+      # is the gate in both cases; this only chooses which entry to ask.
       - name: Ask the broker
         id: grant
         uses: ./.github/actions/actions-broker
         with:
           broker-url: ${{ secrets.ACTIONS_BROKER_URL }}
-          entry: reagent-review
+          entry: ${{ (contains(fromJSON('["dependabot[bot]","renovate[bot]"]'), github.event.pull_request.user.login || github.event.issue.user.login)) && 'reagent-deps' || 'reagent-review' }}
           mode: grant
           context: >-
             {"pr": ${{ github.event.pull_request.number || github.event.issue.number }},
@@ -141,6 +145,6 @@ jobs:
         uses: ./.github/actions/actions-broker
         with:
           broker-url: ${{ secrets.ACTIONS_BROKER_URL }}
-          entry: reagent-review
+          entry: ${{ (contains(fromJSON('["dependabot[bot]","renovate[bot]"]'), github.event.pull_request.user.login || github.event.issue.user.login)) && 'reagent-deps' || 'reagent-review' }}
           mode: result
           result-file: ${{ runner.temp }}/review-out/result.json
