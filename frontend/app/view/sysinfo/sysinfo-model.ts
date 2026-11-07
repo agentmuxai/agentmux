@@ -18,6 +18,7 @@ import type { ConnStatus } from "@/types/rpc/ConnStatus";
 import { GapBackfiller } from "./sysinfo-backfill";
 import { type AreaChoice, FOCUS_CHOICES, MAX_WINDOW_POINTS, toAreaChoice } from "./sysinfo-overview-data";
 import { AreaPlotType, DataItem, DefaultNumPoints, DefaultPlotMeta, DefaultPlotType, PlotTypes, SIMPLE_VIEWS } from "./sysinfo-types";
+import { coversGap, gapBetween, isStepRow } from "./sysinfo-gap";
 import { convertTimeSeriesToDataItem, getGapThresholdMs } from "./sysinfo-util";
 
 // ---------------------------------------------------------------------------
@@ -129,8 +130,7 @@ export function sampleReducer(state: DataItem[], action: SampleAction): DataItem
             // above guarantees `cur.ts > prev.ts`, so this only ever sees a
             // genuine forward gap.
             if (cur.ts - prev.ts > gapThreshold) {
-                result.push(makeBlankItem(template, prev.ts + 1));
-                result.push(makeBlankItem(template, cur.ts - 1));
+                result.push(...gapBetween(prev, cur, (ts) => makeBlankItem(template, ts)));
             }
             result.push(cur);
         }
@@ -152,7 +152,7 @@ export function sampleReducer(state: DataItem[], action: SampleAction): DataItem
         let known = 0;
         let newest = -Infinity;
         for (const d of state) {
-            if (d.blank === 1) continue;
+            if (d.blank === 1 || isStepRow(d)) continue;
             byTs.set(d.ts, d);
             known++;
             newest = Math.max(newest, d.ts);
@@ -217,8 +217,9 @@ export function sampleReducer(state: DataItem[], action: SampleAction): DataItem
             // edges get a marker, so the line and the area break at both ends (a
             // marker on the left alone left the area to ramp up from 0 to this
             // sample). A shorter gap is joined by the line between two real
-            // readings; no value is repeated to fill it in.
-            return [...trimmed, makeBlankItem(last, last.ts + 1), makeBlankItem(item, item.ts - 1), item];
+            // readings; no value is repeated to fill it in. A sample whose own window
+            // spans the gap (a late tick) is a step across it instead (sysinfo-gap.ts).
+            return [...trimmed, ...gapBetween(last, item, (ts) => makeBlankItem(last, ts)), item];
         }
 
         return [...trimmed, item];
@@ -308,8 +309,13 @@ class SysinfoViewModel {
                 numPoints: this.numPoints(),
             });
             // The live lane delivers only the newest sample after a stall; the rest
-            // are in srv's history. A forward gap past the threshold is fetched.
-            if (previous != null && item.ts - previous.ts > getGapThresholdMs(this.getConfiguredInterval())) {
+            // are in srv's history. A forward gap past the threshold is fetched, unless the
+            // sample covers it (srv's sampler ran late: there is nothing in history to fetch).
+            if (
+                previous != null &&
+                item.ts - previous.ts > getGapThresholdMs(this.getConfiguredInterval()) &&
+                !coversGap(previous, item)
+            ) {
                 this.backfiller.noteGap(previous.ts);
             }
         } catch (e) {

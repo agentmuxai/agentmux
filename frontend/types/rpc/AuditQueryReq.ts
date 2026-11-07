@@ -27,4 +27,9 @@ limit?: number,
 /**
  * Also answer `totals` over every entry the filter matches, not only this page.
  */
-totals?: boolean, };
+totals?: boolean, 
+/**
+ * `channel`: only what this srv's channel wrote (an entry that says nothing of its channel is this one's);
+ * `machine` (the default): what every channel on this computer wrote.
+ */
+scope?: string, };

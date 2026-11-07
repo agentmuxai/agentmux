@@ -20,7 +20,7 @@ import {
     startAppUpdateDownload,
     storeAnswer,
     storeFallbackLine,
-    storeOfferLine,
+    storeStandingLine,
     upgradeAndRestart,
     useStoreOffer,
     viaStore,
@@ -53,13 +53,16 @@ function createUpdateView() {
     // the latest (which can't migrate this data), and a standalone build from the
     // page would sit beside the Store copy, not upgrade it.
     const storeBelowFloor = () => viaStore() && !!installFirst();
-    // A Store install is updated by the Store: no button until it lists the release, and a plain line until then.
+    // A Store install is updated by the Store: the release on offer is the one it lists, so there is no button until it lists one.
     const storeOffers = () => !viaStore() || storeAnswer()?.state === "available";
-    const storeLine = () => (viaStore() && !storeBelowFloor() ? storeOfferLine(updaterVersion(), storeAnswer()) : null);
-    // Where this AgentMux stands, beside Check for update. Nothing checks on
-    // its own, so before the first check it says so.
+    // Where this AgentMux stands, beside Check for update. A Store install says it in the Store's terms.
     const standing = () => {
         const s = appUpdate();
+        if (viaStore(s)) {
+            const offer = storeAnswer(s);
+            const line = storeStandingLine(offer, offer && offer.checkedMs > 0 ? checkedAt(offer.checkedMs) : null);
+            return line ?? `Checked ${checkedAt(offer!.checkedMs)}`;
+        }
         const checked = s && s.checked_ms > 0 ? checkedAt(s.checked_ms) : null;
         if (s?.state === "local-build" && s.latest) return `Development build. The latest release is v${s.latest}.`;
         if (s?.state === "up-to-date") return `v${s.current} is up to date${checked ? ` (checked ${checked})` : ""}`;
@@ -76,7 +79,7 @@ function createUpdateView() {
         if (upd === "ready") return "↑ ready";
         return null;
     };
-    return { release, download, updaterStatus, percent, updaterVersion, installFirst, storeBelowFloor, storeOffers, storeLine, standing, badge };
+    return { release, download, updaterStatus, percent, updaterVersion, installFirst, storeBelowFloor, storeOffers, standing, badge };
 }
 
 /** Check for update, and what it said when it failed. */
@@ -98,7 +101,7 @@ export function createMaintenance() {
     // A newer release srv found (store/app-update.ts) leads; the host
     // updater's own states are kept for a host that has one.
     onMount(() => void loadAppUpdate());
-    useStoreOffer();
+    useStoreOffer(true);
     const view = createUpdateView();
     const { release, installFirst, storeBelowFloor } = view;
     const [startError, setStartError] = createSignal<string | null>(null);
@@ -134,7 +137,7 @@ export function createMaintenance() {
         try {
             setStoreStayed(null);
             const result = await getApi()?.approvals?.storeUpdate?.(release()?.version).catch(() => undefined);
-            if (result?.outcome === "none" && release()) recordStoreNone(release()!.version);
+            if (result?.outcome === "none") recordStoreNone();
             if (!result || result.outcome === "fallback") {
                 setStoreNote(storeFallbackLine(result?.message));
                 void openLink(MS_STORE_PAGE_URL);

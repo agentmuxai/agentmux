@@ -32,6 +32,7 @@ import { injectedTurn } from "./cli-wrappers";
 import { toolDetailOf } from "./tool-descriptors";
 import { TOOL_STATUS } from "./tool-status";
 import type { BashParams, BashResult, DocumentNode, ToolLogChunk, ToolNode } from "./types";
+import { phraseCommand } from "./command-phrase";
 import { dockTitle } from "./dock-label";
 import { wholeCommandSleepMs } from "./sleep-detect";
 import type { ActivityStatus, PinnedActivity } from "./activity-types";
@@ -262,6 +263,18 @@ export function bashDescription(n: ToolNode): string | undefined {
     return typeof d === "string" && d.trim() !== "" ? d.trim() : undefined;
 }
 
+/** The dock title of a call: the model's own phrase, a Bash command in words, or the call's main argument. */
+function toolTitle(n: ToolNode, detail: string): { title: string; fullTitle?: string } {
+    const described = bashDescription(n);
+    if (described) return dockTitle(described);
+    const command = n.tool === "Bash" ? (n.params as BashParams | undefined)?.command : undefined;
+    if (typeof command === "string" && command.trim() !== "") {
+        const whole = dockTitle(command);
+        return { title: phraseCommand(command), fullTitle: whole.fullTitle ?? whole.title };
+    }
+    return dockTitle(detail || n.toolName || n.tool);
+}
+
 export function toolToActivity(n: ToolNode): PinnedActivity {
     // By raw name, then coarse kind: a WebSearch's kind is "Other", which
     // has no detail; a "BASH" is still a Bash.
@@ -270,9 +283,9 @@ export function toolToActivity(n: ToolNode): PinnedActivity {
     return {
         id: n.id,
         kind: "tool",
-        // A Bash call reads as the phrase the model gave it; the command is the fallback, and the
-        // expanded row shows it in full.
-        ...dockTitle(bashDescription(n) || detail || n.toolName || n.tool),
+        // A Bash call reads as the phrase the model gave it, or else as its command in words; the row's tooltip
+        // and the expanded row show the command itself.
+        ...toolTitle(n, detail),
         // Only set for a whole-command sleep, which is the only case where the
         // remaining time is actually KNOWN rather than guessed — the row shows
         // a countdown instead of a blind elapsed timer.

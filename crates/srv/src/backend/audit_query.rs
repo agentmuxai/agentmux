@@ -57,6 +57,8 @@ pub struct Ctx<'a> {
 
 /// The stores read.
 pub struct Sources<'a> {
+    /// This srv's channel (`AGENTMUX_INSTANCE_CHANNEL`): what the `channel` scope keeps.
+    pub channel: &'a str,
     /// The account's shared audit file.
     pub jekt_file: Option<&'a Path>,
     /// This srv's own audit file, where it kept its rows while it did not use the shared folder.
@@ -172,10 +174,12 @@ struct Filter {
     since: u64,
     until: u64,
     text: String,
+    /// The channel the entries must come from, or none for every channel: the `channel` scope.
+    channel: Option<String>,
 }
 
 impl Filter {
-    fn of(req: &AuditQueryReq) -> Result<Self, String> {
+    fn of(req: &AuditQueryReq, own_channel: &str) -> Result<Self, String> {
         let kinds: HashSet<String> = match &req.kinds {
             Some(kinds) if !kinds.is_empty() => kinds.iter().map(|k| k.trim().to_lowercase()).collect(),
             _ => DEFAULT_KINDS.iter().map(|k| k.to_string()).collect(),
@@ -183,12 +187,18 @@ impl Filter {
         if let Some(unknown) = kinds.iter().find(|k| !RECORDED.contains(&k.as_str()) && !NOT_RECORDED.contains(&k.as_str())) {
             return Err(format!("audit.query: unknown kind '{unknown}'; the kinds are jekt, action, registry, agent_start, agent_end, tool, turn and thought"));
         }
+        let channel = match req.scope.as_deref().map(str::trim) {
+            Some("channel") => Some(own_channel.to_string()),
+            None | Some("") | Some("machine") => None,
+            Some(other) => return Err(format!("audit.query: unknown scope '{other}'; the scopes are channel and machine")),
+        };
         Ok(Self {
             agent: req.agent_id.as_deref().map(str::trim).filter(|a| !a.is_empty()).map(str::to_string),
             kinds,
             since: req.since_ms.unwrap_or(0),
             until: req.until_ms.unwrap_or(u64::MAX),
             text: req.text.as_deref().map(|t| t.trim().to_lowercase()).unwrap_or_default(),
+            channel,
         })
     }
 
@@ -196,12 +206,18 @@ impl Filter {
     fn key(&self) -> String {
         let mut kinds: Vec<&str> = self.kinds.iter().map(String::as_str).collect();
         kinds.sort_unstable();
-        format!("{:?}|{}|{}|{}|{}", self.agent.as_deref().map(route), kinds.join(","), self.since, self.until, self.text)
+        format!("{:?}|{}|{}|{}|{}|{:?}", self.agent.as_deref().map(route), kinds.join(","), self.since, self.until, self.text, self.channel)
     }
 
     fn keep(&self, e: &AuditEntry) -> bool {
         if !self.kinds.contains(&e.kind) || e.ts_ms < self.since || e.ts_ms > self.until {
             return false;
+        }
+        // An entry that names another channel is not this one's; one that names none is.
+        if let (Some(own), Some(from)) = (&self.channel, e.provenance.as_ref().and_then(|p| p.channel.as_deref())) {
+            if from != own {
+                return false;
+            }
         }
         if let Some(want) = &self.agent {
             let ends = [e.agent_id.as_deref(), e.from.as_ref().map(|f| f.agent_id.as_str()), e.to.as_ref().map(|t| t.agent_id.as_str())];
@@ -391,7 +407,7 @@ impl Store for LedgerStore {
 
 /// A page of the Audit.
 pub fn query<'a>(src: &'a Sources<'a>, req: &AuditQueryReq) -> Result<AuditQueryResult, String> {
-    let filter = Filter::of(req)?;
+    let filter = Filter::of(req, src.channel)?;
     let limit = (req.limit.map_or(DEFAULT_LIMIT, |l| l as usize)).clamp(1, MAX_LIMIT);
     let cursor = req.cursor.as_deref().map(Cursor::decode).transpose()?.unwrap_or_default();
     let place = |i: usize| cursor.places[i].clone();
@@ -453,7 +469,7 @@ pub fn query<'a>(src: &'a Sources<'a>, req: &AuditQueryReq) -> Result<AuditQuery
     });
     let not_recorded = NOT_RECORDED.iter().filter(|k| filter.kinds.contains(**k)).map(|k| k.to_string()).collect();
     let totals = req.totals.unwrap_or(false).then(|| totals::of(src, &filter));
-    Ok(AuditQueryResult { entries, next_cursor, not_recorded, totals })
+    Ok(AuditQueryResult { entries, next_cursor, not_recorded, totals, channel: Some(src.channel.to_string()) })
 }
 
 #[cfg(test)]

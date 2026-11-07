@@ -89,6 +89,8 @@ windows-sys = { version = "0.59", features = [
     # Pre-splash: BeginPaint/EndPaint, CreateSolidBrush, FillRect,
     # DeleteObject, GetClientRect for the layered popup window.
     "Win32_Graphics_Gdi",
+    # DwmGetWindowAttribute(DWMWA_CLOAKED): the upgrade dialog's owner is a window on this desktop (src/upgrade_window.rs).
+    "Win32_Graphics_Dwm",
     # HKCU AppUserModelId registration for OS toasts (src/notify/windows.rs).
     "Win32_System_Registry",
     # MiniDumpWriteDump (Win32_System_Diagnostics_Debug) is gated on these

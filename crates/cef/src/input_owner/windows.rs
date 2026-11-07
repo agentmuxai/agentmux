@@ -96,6 +96,7 @@ wrap_task! {
 
 /// A click in pane `block`'s page (`WM_LBUTTONDOWN` in its windows).
 pub fn pane_pointer_down(state: &Arc<AppState>, block: &str) {
+    crate::browser_api::last_input::note(block);
     if let Some(window) = state.browser_pane_window_label(block) {
         dispatch(state, &window, Event::PanePointerDown(block.to_string()));
     }

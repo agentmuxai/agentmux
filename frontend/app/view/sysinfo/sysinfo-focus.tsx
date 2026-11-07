@@ -28,7 +28,6 @@ import {
     windowStats,
     withBusiestCore,
 } from "./sysinfo-overview-data";
-import { createAxisColumns } from "./sysinfo-layout";
 import { TimeChart } from "./sysinfo-plot-lazy";
 import { type DataItem, DefaultPlotMeta } from "./sysinfo-types";
 
@@ -57,9 +56,7 @@ export function FocusView(props: FocusProps): JSX.Element {
     // Committed memory is read against its limit, so its scale ends there.
     const commitMeta = { ...DefaultPlotMeta["mem:used"], maxy: "mem:commit:total", autoMaxY: false } as TimeSeriesMeta;
 
-    // The charts are one column: one y-axis width for all of them, so their plots
-    // line up and time reads straight down (sysinfo-layout.ts).
-    const axes = createAxisColumns(() => props.area);
+
 
     // The title is read inside the chart, so new samples change its text, not the chart.
     const chart = (
@@ -69,7 +66,6 @@ export function FocusView(props: FocusProps): JSX.Element {
         format: (v: number) => string,
         opts: { data?: () => DataItem[]; timeAxis?: () => boolean; top?: boolean } = {}
     ) => {
-        const key = series.map((s) => s.key).join("+");
         return (
             <TimeChart
                 plotData={(opts.data ?? rows)()}
@@ -82,8 +78,6 @@ export function FocusView(props: FocusProps): JSX.Element {
                 title={title()}
                 timeAxis={opts.timeAxis?.() ?? false}
                 top={opts.top}
-                axisWidth={axes.widthFor(0)}
-                onAxisWidth={(w) => axes.report(0, key, w)}
                 class="sysinfo-focus-chart"
             />
         );

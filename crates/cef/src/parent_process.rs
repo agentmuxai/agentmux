@@ -175,6 +175,36 @@ fn parent_exe_file_windows() -> Option<String> {
     }
 }
 
+/// Let the launcher put its window in front of whatever the person is using.
+/// Called when they click Upgrade & restart in the version panel: the launcher
+/// then asks "Restart AgentMux to upgrade?" in a dialog of its own, and Windows
+/// only brings a window to the front for a process that was given the right,
+/// which a click in this host's window gives to this process and not to the
+/// launcher. Only when the launcher is this host's real parent (the stamp is
+/// not one inherited from another AgentMux); a no-op everywhere else.
+#[cfg(target_os = "windows")]
+pub fn allow_launcher_foreground() {
+    use windows_sys::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow;
+    let stamp = std::env::var("AGENTMUX_LAUNCHER_PID").ok();
+    let Some(launcher) = stamped_launcher(stamp.as_deref(), parent_pid()) else {
+        return;
+    };
+    // SAFETY: a plain call with a process id; it fails harmlessly for a process that is gone.
+    if unsafe { AllowSetForegroundWindow(launcher) } == 0 {
+        tracing::debug!("[ipc] AllowSetForegroundWindow({launcher}) refused");
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn allow_launcher_foreground() {}
+
+/// The launcher's pid when `stamp` (its `AGENTMUX_LAUNCHER_PID`) names this process's actual parent.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn stamped_launcher(stamp: Option<&str>, parent_pid: Option<u32>) -> Option<u32> {
+    let stamped = stamp?.trim().parse::<u32>().ok()?;
+    (parent_pid == Some(stamped)).then_some(stamped)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -199,6 +229,17 @@ mod tests {
         {
             assert!(result.is_none(), "non-windows always returns None");
         }
+    }
+
+    #[test]
+    fn only_the_real_parent_is_the_launcher() {
+        assert_eq!(stamped_launcher(Some("4242"), Some(4242)), Some(4242));
+        assert_eq!(stamped_launcher(Some(" 4242\n"), Some(4242)), Some(4242));
+        // A stamp inherited from a parent AgentMux names some other process.
+        assert_eq!(stamped_launcher(Some("4242"), Some(777)), None);
+        assert_eq!(stamped_launcher(Some("4242"), None), None);
+        assert_eq!(stamped_launcher(Some("abc"), Some(4242)), None);
+        assert_eq!(stamped_launcher(None, Some(4242)), None);
     }
 
     /// The test runner always has a parent, and it isn't itself.
