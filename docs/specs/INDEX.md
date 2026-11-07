@@ -742,6 +742,7 @@ partial list.
 | [`SPEC_KANBAN_REMINDER_OFF_BY_DEFAULT_2026_10_22`](SPEC_KANBAN_REMINDER_OFF_BY_DEFAULT_2026_10_22.md) | Spec: the Kanban's backlog reminder off by default, with a setting to turn it on |
 | [`SPEC_KANBAN_STAGES_COLOURS_AND_NARROW_VIEW_2026_10_23`](SPEC_KANBAN_STAGES_COLOURS_AND_NARROW_VIEW_2026_10_23.md) | Spec: the Kanban's stages (Backlog, In Research, Spec'd, In progress, Review, Merged, Released), its colours, and its narrow view |
 | [`SPEC_KANBAN_TASK_MEDIA_2026_10_25`](SPEC_KANBAN_TASK_MEDIA_2026_10_25.md) | Spec: Kanban tasks carry media; a UI change that needs the operator's OK comes with screenshots or a recording |
+| [`SPEC_KEYBOARD_SHORTCUTS_SETTINGS_2026_11_06`](SPEC_KEYBOARD_SHORTCUTS_SETTINGS_2026_11_06.md) | Spec: Settings > Keyboard shortcuts: rebind every shortcut, with Help and the rest following live (#1861) |
 | [`SPEC_KEYED_SLOT_RETENTION_FIX_2026_10_12`](SPEC_KEYED_SLOT_RETENTION_FIX_2026_10_12.md) | Spec: `<Key>` slots must not keep old rows alive |
 | [`SPEC_LAN_KEY_CONTINUITY_2026_10_29`](SPEC_LAN_KEY_CONTINUITY_2026_10_29.md) | SPEC: LAN key continuity, with no person in the loop |
 | [`SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30`](SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md) | SPEC: Large-file module analysis and DRY opportunities |
