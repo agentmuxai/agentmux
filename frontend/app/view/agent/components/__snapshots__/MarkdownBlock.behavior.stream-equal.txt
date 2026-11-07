@@ -1,0 +1,6 @@
+useTick 1000
+Markdown text="same" streaming=false scrollable=false media=undefined
+PeekOverlay show=false rowEl=agent-markdown-peek-anchor
+chunk at 1100: "same"
+chunk at 1400: "same"
+(no further render for equal values)

@@ -1,0 +1,95 @@
+useTick 1000
+-- canceled, closed
+<div>
+  <div class="agent-markdown-block markdown-canceled">
+    <span data-stand="Button" data-variant="link" data-class="markdown-canceled-header" aria-expanded="false">
+      <span class="markdown-canceled-icon" aria-hidden="true">
+        "⏹"
+      <span class="markdown-canceled-label">
+        "Canceled — partial thought"
+      <span class="markdown-canceled-chevron" aria-hidden="true">
+        "▸"
+Markdown text="partial" streaming=undefined scrollable=false media=undefined
+-- canceled, pinned open: its own content, not the throttled view
+<div>
+  <div class="agent-markdown-block markdown-canceled">
+    <span data-stand="Button" data-variant="link" data-class="markdown-canceled-header" aria-expanded="true">
+      <span class="markdown-canceled-icon" aria-hidden="true">
+        "⏹"
+      <span class="markdown-canceled-label">
+        "Canceled — partial thought"
+      <span class="markdown-canceled-chevron" aria-hidden="true">
+        "▾"
+    <div class="markdown-canceled-body">
+      <div data-stand="Markdown">
+        "partial"
+Button onClick
+onTogglePin
+Markdown text="partial more" streaming=undefined scrollable=false media=undefined
+-- canceled content follows the node
+<div>
+  <div class="agent-markdown-block markdown-canceled">
+    <span data-stand="Button" data-variant="link" data-class="markdown-canceled-header" aria-expanded="true">
+      <span class="markdown-canceled-icon" aria-hidden="true">
+        "⏹"
+      <span class="markdown-canceled-label">
+        "Canceled — partial thought"
+      <span class="markdown-canceled-chevron" aria-hidden="true">
+        "▾"
+    <div class="markdown-canceled-body">
+      <div data-stand="Markdown">
+        "partial more"
+-- a view-folded thought
+useTick 1000
+-- thinking, collapsed by the view
+<div>
+  <div class="agent-markdown-block markdown-canceled thinking-block">
+    <span data-stand="Button" data-variant="link" data-class="markdown-canceled-header" aria-expanded="false">
+      <span class="markdown-canceled-icon" aria-hidden="true">
+      <span class="markdown-canceled-label">
+        "Thinking"
+      <span class="markdown-canceled-chevron" aria-hidden="true">
+        "▸"
+Markdown text="deep thought" streaming=false scrollable=false media=undefined
+-- thinking, pinned open: the throttled view
+<div>
+  <div class="agent-markdown-block markdown-canceled thinking-block">
+    <span data-stand="Button" data-variant="link" data-class="markdown-canceled-header" aria-expanded="true">
+      <span class="markdown-canceled-icon" aria-hidden="true">
+      <span class="markdown-canceled-label">
+        "Thinking"
+      <span class="markdown-canceled-chevron" aria-hidden="true">
+        "▾"
+    <div class="markdown-canceled-body">
+      <div data-stand="Markdown">
+        "deep thought"
+-- thinking content follows the node
+<div>
+  <div class="agent-markdown-block markdown-canceled thinking-block">
+    <span data-stand="Button" data-variant="link" data-class="markdown-canceled-header" aria-expanded="true">
+      <span class="markdown-canceled-icon" aria-hidden="true">
+      <span class="markdown-canceled-label">
+        "Thinking"
+      <span class="markdown-canceled-chevron" aria-hidden="true">
+        "▾"
+    <div class="markdown-canceled-body">
+      <div data-stand="Markdown">
+        "deep thought"
+-- a view-expanded thought
+useTick 1000
+Markdown text="open thought" streaming=false scrollable=false media=undefined
+-- thinking, expanded by the view
+<div>
+  <div class="agent-markdown-block markdown-canceled thinking-block">
+    <span data-stand="Button" data-variant="link" data-class="markdown-canceled-header" aria-expanded="true">
+      <span class="markdown-canceled-icon" aria-hidden="true">
+      <span class="markdown-canceled-label">
+        "Thinking"
+      <span class="markdown-canceled-chevron" aria-hidden="true">
+        "▾"
+    <div class="markdown-canceled-body">
+      <div data-stand="Markdown">
+        "open thought"
+-- no toggle handler
+useTick 1000
+Button onClick
