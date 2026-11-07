@@ -22,6 +22,7 @@ import { useJektsAwaitingYou } from "./hooks/useJektsAwaitingYou";
 import { usePtyWidth } from "./hooks/usePtyWidth";
 import { useScrollToNode } from "./hooks/useScrollToNode";
 import { createSearchReveal } from "./search-reveal";
+import { topVisibleNodeId } from "./search/top-row";
 import { rawIdAtOrAfter, topRowId } from "./search/transcript-index";
 
 export function usePaneInput(p: { found: PaneFoundation; model: AgentViewModel; shown: ReturnType<typeof useShownDocument>; late: PaneLate }) {
@@ -50,8 +51,9 @@ export function usePaneInput(p: { found: PaneFoundation; model: AgentViewModel; 
         onClose: reveal.release,
         onNoMatch: reveal.release,
         topNodeId: () => {
+            // The drawn rows answer for the streaming tail too, which the layout slice has no rows for.
             const at = layoutSnapshot(model.blockId);
-            const top = at ? topRowId(found.layoutView()?.rows ?? [], at.scrollTop) : null;
+            const top = topVisibleNodeId(late.root) ?? (at ? topRowId(found.layoutView()?.rows ?? [], at.scrollTop) : null);
             // The rows on screen include hidden-run lines and dividers that the document holds under no id of their own.
             return rawIdAtOrAfter(p.shown.shownDocument(), top, new Set(paneModel.document().map((n) => n.id)));
         },
