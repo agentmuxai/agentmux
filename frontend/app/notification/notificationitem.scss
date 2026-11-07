@@ -52,6 +52,8 @@
         font-weight: 400;
         line-height: 18px;
         opacity: 0.7;
+        // A message of several lines (the attention toast's, one agent a line).
+        white-space: pre-line;
     }
 
     .notification-actions {

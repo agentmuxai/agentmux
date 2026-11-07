@@ -1185,6 +1185,8 @@ declare global {
         /** How a screen reader is told of it: `status` (polite) or `alert` (at once). Absent, an error
          *  is an alert and everything else a status. Never moves focus. */
         live?: "status" | "alert";
+        /** A colour for the title (an agent's pane colour, say); absent, the type's. */
+        titleColor?: string;
         /** Extra detail for the toast's Copy button (not shown on the toast itself). */
         debug?: NotificationDebug;
         /** Runs when the user closes the toast with its X (not when it expires

@@ -226,6 +226,7 @@ function DecisionPanelFull(props: DecisionViewProps): JSX.Element {
                 s.rootEl = el;
             }}
             class="agent-decision-panel"
+            data-toast-avoid
             classList={{
                 "agent-decision-panel--high-risk": s.risk() === "high",
                 "agent-decision-panel--armed": s.highRiskArmed(),

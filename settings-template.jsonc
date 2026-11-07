@@ -212,6 +212,10 @@
     // looking at that pane. Default true.
     // "notify:sound:agent.waiting.for.input": true,
 
+    // Show a toast that names the agent waiting on you, with a link to it. Independent of the
+    // waiting tone. Default true.
+    // "notify:waiting:toast": true,
+
     // Independent gain for the waiting-for-input sound, 0.0 (silent) to 1.0. Layered below the
     // shared master gain. Default 0.25.
     // "notify:sounds:waiting:volume": 0.25,
