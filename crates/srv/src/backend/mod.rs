@@ -165,6 +165,7 @@ pub mod tool_calls;
 pub mod update;
 pub mod agent_image_digest;
 pub mod upgrade_notice;
+pub mod background_set;
 pub mod background_work;
 pub mod upgrade_request;
 pub mod storage;

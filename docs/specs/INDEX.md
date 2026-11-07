@@ -637,6 +637,7 @@ partial list.
 | [`SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23`](SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md) | SPEC: Agent seats in the UI: role, lead and area on the agent, shown where you meet it |
 | [`SPEC_AGENT_SELF_QUIT_2026_09_24`](SPEC_AGENT_SELF_QUIT_2026_09_24.md) | SPEC: Agent self-quit — `/quit` for the user, `QuitSelf` for the agent (on direct user instruction only) |
 | [`SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24`](SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md) | SPEC: one live instance per agent — an agent identity is driven by at most one process, across host, LAN and WAN |
+| [`SPEC_AGENT_STATE_BACKGROUND_WORK_2026_11_01`](SPEC_AGENT_STATE_BACKGROUND_WORK_2026_11_01.md) | Spec: a new agent state beside Working and Idle: Background |
 | [`SPEC_AGENT_TEARDOWN_SINGLE_PATH_2026_10_01`](SPEC_AGENT_TEARDOWN_SINGLE_PATH_2026_10_01.md) | SPEC: One teardown path for everything an agent owns |
 | [`SPEC_AGENT_TERMINAL_DRIVING_2026_10_15`](SPEC_AGENT_TERMINAL_DRIVING_2026_10_15.md) | SPEC: Agents drive terminals through MuxAPI: keys, screen, wait, commands, terminal panes |
 | [`SPEC_AGENT_TRANSCRIPT_SINGLE_COPY_2026_10_19`](SPEC_AGENT_TRANSCRIPT_SINGLE_COPY_2026_10_19.md) | Spec: an agent's transcript is written once, to the agent's own zone |
