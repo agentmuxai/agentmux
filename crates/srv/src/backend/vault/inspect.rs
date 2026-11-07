@@ -65,7 +65,8 @@ pub struct Shown {
     /// `none`, `ok`, `soon` (within 14 days) or `expired`.
     pub expiry: &'static str,
     pub days_left: Option<i64>,
-    /// How many times its value was set (the version it is on now).
+    /// How many times its value was set (the version it is on now). 0 for an entry a file import made: its history
+    /// has one summary line for the whole file, not one of its own.
     pub value_version: i64,
     /// Earlier values kept for 7 days.
     pub kept_versions: usize,
@@ -256,8 +257,8 @@ pub struct Verified {
 }
 
 /// What is wrong with an entry's structure and its sealed row, in fixed words: its kind, its plain fields, its main
-/// part, and that the Vault key opens it. Never a value.
-fn entry_problems(store: &Store, row: &VaultRow, key: &KeyResult, today: chrono::NaiveDate) -> Vec<String> {
+/// part, and that the Vault key opens it. Never a value. A removed history line is found by the chain, not here.
+fn entry_problems(row: &VaultRow, key: &KeyResult, today: chrono::NaiveDate) -> Vec<String> {
     let Some(kind) = kinds::kind(&row.kind) else { return vec![format!("its kind {:?} isn't one this AgentMux knows", row.kind)] };
     let mut out = Vec::new();
     if row.label.trim().is_empty() {
@@ -276,7 +277,6 @@ fn entry_problems(store: &Store, row: &VaultRow, key: &KeyResult, today: chrono:
         out.push(format!("its value expired on {date}: rotate or replace it"));
     }
     out.extend(sealed_problems(row, kind, key));
-    out.extend(history_problem(store, row));
     out
 }
 
@@ -298,13 +298,6 @@ fn sealed_problems(row: &VaultRow, kind: &kinds::Kind, key: &KeyResult) -> Optio
     (!extra.is_empty()).then(|| format!("it has a part a {} entry doesn't have: {}", kind.name, extra.join(", ")))
 }
 
-/// An entry's history is present from the line that set its value: none means the line was removed (or the entry is
-/// older than the record).
-fn history_problem(store: &Store, row: &VaultRow) -> Option<String> {
-    let set = store.vault_activity_for_entry(&row.id, &VALUE_SETTING, row.created_at, 1).ok()?;
-    set.is_empty().then(|| "no line of its history records how its value was set".to_string())
-}
-
 /// `verify`: each entry (the one named, else every entry `agent` may use) and, without an id, the whole history's
 /// chain. `key` is the Vault key as read (or why it couldn't be). An expired entry is a problem.
 pub fn verify(store: &Store, id: Option<&str>, agent: Option<&str>, key: &KeyResult, today: chrono::NaiveDate) -> Result<Verified, String> {
@@ -314,7 +307,7 @@ pub fn verify(store: &Store, id: Option<&str>, agent: Option<&str>, key: &KeyRes
     };
     let mut problems = Vec::new();
     for row in &rows {
-        for problem in entry_problems(store, row, key, today) {
+        for problem in entry_problems(row, key, today) {
             problems.push(Problem { id: row.id.clone(), problem });
         }
     }

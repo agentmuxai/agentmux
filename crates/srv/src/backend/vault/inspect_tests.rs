@@ -212,9 +212,9 @@ fn verify_says_when_the_key_is_unreadable_or_the_wrong_one() {
 }
 
 #[test]
-fn verify_finds_a_broken_chain_and_an_entry_whose_history_was_removed() {
+fn verify_finds_a_broken_chain() {
     let s = store();
-    let id = create(&s, entry("Stripe", &[])).unwrap();
+    create(&s, entry("Stripe", &[])).unwrap();
     create(&s, entry("Other", &[])).unwrap();
     assert!(verify(&s, None, Some("builder"), &key(), today()).unwrap().ok);
 
@@ -222,11 +222,6 @@ fn verify_finds_a_broken_chain_and_an_entry_whose_history_was_removed() {
     let got = verify(&s, None, Some("builder"), &key(), today()).unwrap();
     let chain = got.problems.iter().find(|p| p.id.is_empty()).expect("a problem for the history as a whole");
     assert!(chain.problem.contains("chain doesn't hold at line"), "{}", chain.problem);
-
-    s.vault_run_sql_for_tests(&format!("DELETE FROM db_vault_activity WHERE entry_id = '{id}'"));
-    let one = verify(&s, Some(&id), Some("builder"), &key(), today()).unwrap();
-    assert!(one.problems.iter().any(|p| p.problem.contains("no line of its history")), "{one:?}");
-    assert!(one.problems.iter().all(|p| !p.id.is_empty()), "an entry's check doesn't walk the whole chain");
 }
 
 #[test]

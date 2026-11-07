@@ -41,9 +41,9 @@ async fn inspect(action: &str, arguments: &Value, cx: &ToolCtx<'_>, base: &str) 
             json!({ "id": text("id"), "auth": auth.ok() })
         }
         "update" => json!({
-            "id": text("id"),
+            "id": text("id").filter(|i| !i.trim().is_empty()).ok_or_else(|| anyhow::anyhow!("Vault update needs an id: the entry to change (list shows them)"))?,
             "label": text("label"),
-            "fields": arguments.get("fields").cloned().unwrap_or_else(|| json!({})),
+            "fields": arguments.get("fields").filter(|f| f.is_object()).cloned().unwrap_or_else(|| json!({})),
             "tags": arguments.get("tags").cloned(),
             "reason": text("reason"),
             "auth": auth.map_err(|e| anyhow::anyhow!("Vault update needs this agent's signed identity: {e}"))?,
