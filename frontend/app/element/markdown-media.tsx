@@ -32,7 +32,28 @@ import { createLocalAv, whenNearViewport, type LocalAvState } from "./markdown-m
 export type MarkdownMediaOpts = {
     /** Relative paths resolve against this: the agent's working directory. */
     baseDir: string;
+    /**
+     * Set by the agent pane: a click on an image of a message with two or more local images opens them
+     * in a preview that steps through them. Without it (or with one image) a click opens the Editor.
+     */
+    openGallery?: (gallery: MediaGallery) => void;
 };
+
+/** One image of a message, for the preview that steps through them. */
+export type MediaGalleryItem = { path: string; name: string; alt: string };
+export type MediaGallery = { items: MediaGalleryItem[]; index: number };
+
+/** The block's text is one message: its images, in reading order, and the position of `figure` among them. */
+function messageGallery(figure: HTMLElement): MediaGallery {
+    const figures = [...(figure.closest(".agent-markdown-block")?.querySelectorAll<HTMLElement>("figure[data-am-media-path]") ?? [])];
+    return {
+        items: figures.map((f) => {
+            const path = f.dataset.amMediaPath ?? "";
+            return { path, name: basenameOf(path), alt: f.dataset.amMediaAlt ?? "" };
+        }),
+        index: figures.indexOf(figure),
+    };
+}
 
 interface MuxBlockProps {
     blockkey: string;
@@ -70,6 +91,35 @@ export function openMediaInEditor(path: string): void {
         if (await openInEditorPaneOnScreen(path, { followFolder: true })) return;
         await createBlock({ meta: { view: "editor", file: path, "editor:follow_folder": true } });
     });
+}
+
+type LocalImageProps = { path: string; src: string; alt: string; openGallery?: MarkdownMediaOpts["openGallery"] };
+
+/** A message with two or more images steps through them; one image, or no pane to show it, goes to the Editor. */
+function openImage(props: LocalImageProps, figure: HTMLElement | undefined): void {
+    const gallery = props.openGallery && figure ? messageGallery(figure) : undefined;
+    if (gallery && gallery.items.length > 1 && gallery.index >= 0) props.openGallery!(gallery);
+    else openMediaInEditor(props.path);
+}
+
+/** An image of an agent's message is a button for the keyboard too, named with its place among the message's images once focused. */
+function galleryKeys(open: () => void, name: string) {
+    return {
+        tabIndex: 0,
+        role: "button" as const,
+        "aria-label": `Open image: ${name}`,
+        onKeyDown: (e: KeyboardEvent) => {
+            if (e.key !== "Enter" && e.key !== " ") return;
+            e.preventDefault();
+            open();
+        },
+        onFocus: (e: FocusEvent) => {
+            const img = e.currentTarget as HTMLElement;
+            const figure = img.closest<HTMLElement>("figure[data-am-media-path]");
+            const { items, index } = figure ? messageGallery(figure) : { items: [], index: -1 };
+            if (items.length > 1) img.setAttribute("aria-label", `Open image: ${name}, ${index + 1} of ${items.length}`);
+        },
+    };
 }
 
 /**
@@ -115,7 +165,7 @@ type LocalImageState =
  * unmount). The natural aspect ratio is set before the image swaps in, and the
  * swap goes through the resize contract, so the row settles once.
  */
-function LocalImage(props: { path: string; src: string; alt: string }): JSX.Element {
+function LocalImage(props: LocalImageProps): JSX.Element {
     const [state, setState] = createSignal<LocalImageState>({ kind: "waiting" });
     const [ratio, setRatio] = createSignal(knownRatio.get(props.path));
     let box: HTMLElement | undefined;
@@ -161,6 +211,8 @@ function LocalImage(props: { path: string; src: string; alt: string }): JSX.Elem
         if (url) URL.revokeObjectURL(url);
     });
 
+    const open = () => openImage(props, box);
+
     const readyUrl = () => {
         const s = state();
         return s.kind === "ready" ? s.url : undefined;
@@ -173,7 +225,7 @@ function LocalImage(props: { path: string; src: string; alt: string }): JSX.Elem
     return (
         <Switch
             fallback={
-                <figure class="am-media" ref={box}>
+                <figure class="am-media" ref={box} data-am-media-path={props.path} data-am-media-alt={props.alt}>
                     <Show
                         when={readyUrl()}
                         fallback={<div class="am-media-placeholder" style={{ "aspect-ratio": ratio() ?? "16 / 9" }} />}
@@ -183,9 +235,10 @@ function LocalImage(props: { path: string; src: string; alt: string }): JSX.Elem
                                 class="am-media-img"
                                 src={src()}
                                 alt={props.alt}
-                                {...tip("Open in the editor")}
+                                {...tip(props.openGallery ? "Open image" : "Open in the editor")}
                                 style={ratio() ? { "aspect-ratio": ratio() } : undefined}
-                                onClick={() => openMediaInEditor(props.path)}
+                                {...(props.openGallery ? galleryKeys(open, props.alt || basenameOf(props.path)) : {})}
+                                onClick={open}
                                 onError={() => {
                                     // Undecodable: free the blob now, not at unmount.
                                     if (url) URL.revokeObjectURL(url);
@@ -430,7 +483,7 @@ const MarkdownImg = (p: { props: JSX.ImgHTMLAttributes<HTMLImageElement>; media?
     const shown = /^file:/i.test(src) ? path : src;
     if (isNetworkPath(path)) return <span class="am-muted">[image: {shown} — network paths aren't loaded]</span>;
     const kind = inlineMediaKind(path);
-    if (kind === "image") return <LocalImage path={path} src={shown} alt={alt} />;
+    if (kind === "image") return <LocalImage path={path} src={shown} alt={alt} openGallery={p.media.openGallery} />;
     if (kind === "video" || kind === "audio") return <LocalAV path={path} src={shown} kind={kind} />;
     return <span class="am-muted">[image: {shown} — unsupported type]</span>;
 };

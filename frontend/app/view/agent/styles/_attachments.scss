@@ -445,6 +445,40 @@ $gap: 6px;
         }
     }
 
+    // The message image preview (MessageImageLightbox.tsx) fits the pane, not the window: the panel is capped to
+    // the pane (and scales with chrome zoom), so the picture shrinks inside it by flex rather than by vw and vh,
+    // and the bar always stays in view. The picture keeps its proportions (contain).
+    &__panel--message {
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+
+    &__dialog--message {
+        flex: 1 1 auto;
+        min-height: 0;
+    }
+
+    &__image--message {
+        flex: 1 1 auto;
+        flex-direction: column;
+        min-height: 0;
+        overflow: hidden;
+
+        img {
+            flex: 0 1 auto;
+            min-height: 0;
+            max-width: 100%;
+            max-height: none;
+            object-fit: contain;
+        }
+    }
+
+    // The message image preview's step announcement (MessageImageLightbox.tsx): read, never seen.
+    &__live {
+        @include mixins.sr-only;
+    }
+
     &__missing {
         padding: 40px;
         color: var(--secondary-text-color);
