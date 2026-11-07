@@ -56,6 +56,9 @@ mod ui_liveness;
 mod host_hang_dump;
 mod upgrade;
 mod upgrade_restart;
+// Windows's "Upgrade & restart": the AgentMux window the dialog sits over (upgrade_restart.rs).
+#[cfg(target_os = "windows")]
+mod upgrade_window;
 // Linux's "Upgrade & restart": its targets, its dialog (upgrade_restart.rs).
 mod upgrade_linux;
 // Linux's .deb/.rpm upgrade: the password prompt and the install helper (upgrade_restart.rs).
