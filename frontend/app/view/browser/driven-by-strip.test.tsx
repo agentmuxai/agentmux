@@ -64,6 +64,8 @@ describe("DrivenByStrip", () => {
         const taken = fakeModel({ tookControlAtom: () => true });
         const again = render(() => <DrivenByStrip model={taken.model} agent="Naki" />);
         expect(again.container.textContent).toContain("Driven by Naki (took control)");
+        // One nowrap span, so a narrow pane never breaks "(took control)" across two lines.
+        expect(again.container.querySelector(".browser-took-control")?.textContent).toBe("(took control)");
     });
 
     it("shows the host's worded failure to stop auto-approve once, with no lead-in in front of it", async () => {
