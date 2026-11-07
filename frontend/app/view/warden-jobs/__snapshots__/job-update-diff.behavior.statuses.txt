@@ -1,0 +1,88 @@
+model.updateDiff j1
+-- at the template's version
+<div>
+  <section class="warden-jobs-update" aria-label="Update for Nightly build">
+    <h3 class="warden-jobs-heading">
+      "Update for"
+      "Nightly build"
+    <p>
+      "nightly-build"
+      ":"
+      <strong>
+        "1.0.0"
+      "→"
+      <strong>
+        "1.1.0"
+    <div class="warden-section-stub">
+      "This job is at the template's version."
+    <div class="warden-jobs-actions">
+      <span data-stand="Button" data-tone="quiet" data-busy="undefined">
+        "Close"
+-- unavailable
+model.updateDiff j1
+-- unavailable
+<div>
+  <section class="warden-jobs-update" aria-label="Update for Nightly build">
+    <h3 class="warden-jobs-heading">
+      "Update for"
+      "Nightly build"
+    <p>
+      "nightly-build"
+      ":"
+      <strong>
+        "1.0.0"
+      "→"
+      <strong>
+        "1.1.0"
+    <div class="warden-jobs-note">
+      "The template was removed."
+    <div class="warden-jobs-actions">
+      <span data-stand="Button" data-tone="quiet" data-busy="undefined">
+        "Close"
+-- needs approval
+model.updateDiff j1
+-- needs approval
+<div>
+  <section class="warden-jobs-update" aria-label="Update for Nightly build">
+    <h3 class="warden-jobs-heading">
+      "Update for"
+      "Nightly build"
+    <p>
+      "nightly-build"
+      ":"
+      <strong>
+        "1.0.0"
+      "→"
+      <strong>
+        "1.1.0"
+    <div class="warden-jobs-note">
+      "Version 1.1.0 isn't approved yet."
+    <div class="warden-jobs-actions">
+      <span data-stand="Button" data-tone="accent" data-icon="shield-halved" data-busy="undefined">
+        "Review and approve"
+        "1.1.0"
+      <span data-stand="Button" data-tone="quiet" data-busy="undefined">
+        "Close"
+-- the new version can't take the settings
+model.updateDiff j1
+-- params error
+<div>
+  <section class="warden-jobs-update" aria-label="Update for Nightly build">
+    <h3 class="warden-jobs-heading">
+      "Update for"
+      "Nightly build"
+    <p>
+      "nightly-build"
+      ":"
+      <strong>
+        "1.0.0"
+      "→"
+      <strong>
+        "1.1.0"
+    <div class="warden-manager-error" role="alert">
+      "The new version can't take this job's settings as they are:"
+      "branch is required"
+      ". Edit the job to fix them, then accept."
+    <div class="warden-jobs-actions">
+      <span data-stand="Button" data-tone="quiet" data-busy="undefined">
+        "Close"
