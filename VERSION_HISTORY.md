@@ -1,5 +1,87 @@
 # AgentMux Version History
 
+## 0.60.20 — 2026-11-07
+
+- A Microsoft Store install asks the Microsoft Store whether there is an update and offers the version the Store lists; GitHub is only the release-notes link
+- Pin the container agent turn with tests against a fake Docker daemon (no behaviour change)
+- A dock row for a shell command with no description names what it runs in words instead of showing the raw command line
+- Vault: an agent gives a reason (8 to 300 characters) whenever it uses or changes a Vault entry; it is shown on the approval and kept in the entry's history
+- CI: muxreview reviews Dependabot and Renovate PRs by rule (no model) and says why when it cannot approve, instead of skipping them silently
+- Windows: the Upgrade & restart confirmation now opens in front of the AgentMux window (owned by it, with the launcher allowed to take the foreground) instead of waiting as a button on the taskbar
+- The CPU chart no longer shows gaps when the machine is busy: the sampler runs on its own thread and a late sample is drawn as a step, and the chart now runs to the left edge under the y labels with a fade
+- Several downloads started at once in a browser pane now ask where to save one at a time instead of cancelling each other, and the download strip keeps at most six rows and clears cancelled ones
+- An agent retakes a browser pane the person took over once they have left it alone for 60 seconds, not only after Give back
+- On Linux, a download in a browser pane asks where to save with the app's own Save As dialog, so it no longer cancels at once when the system dialog is missing, and the download strip grows with the chrome zoom
+- The Audit's Pause / N new bar stays on top of the rows that scroll under it
+- Split the status bar's per-core CPU panel into a state module and small views (no behaviour change)
+- The Audit shows this channel's entries by default, with a This machine scope that lists every channel on the computer in a section each
+- Computer-use skills: AgentMux checks and shows who signed a skill, pins the publisher's key when you approve its first script, and never gives an agent a script until you review and approve it
+- A pane that follows the bottom of a transcript no longer lets go when nobody scrolled: a pointer whose release was never seen, or a sideways wheel over a wide table, no longer counts as the reader scrolling
+- Split the in-app login panel into a state module and small views (no behaviour change)
+- Browser take_control and release: an agent can drive a browser pane it did not open (asking the user in the pane for their Personal sign-ins, another agent's pane or one they just used), and Pane layout shows who drives each browser pane
+- Split the widget bar's More dropdown into a state module and row views (no behaviour change)
+- Split the editor file tree into a state module, a node view and the inline name editor (no behaviour change)
+- Split the identity RPC register function into named handlers with direct tests
+- Add path tests for the Sysinfo time chart
+- Split the agent pane's markdown block into a render-throttle hook, a peek hook and two views (no behaviour change)
+- Split the Sysinfo time chart into small functions over a state object
+- A browser pane's page that starts several downloads at once no longer has the later ones dropped and the pane's downloads blocked: each still asks where to save
+- Split the job update diff into a state module and view parts, with the same markup and behaviour (180 -> 17 lines)
+- Computer-use skills: export a skill as one .skill file (signature kept while the skill is unchanged) and import one from its path, with the same checks as a folder
+- Split the find bar into a state module and a view, with the same markup and behaviour (180 -> 11 lines)
+- Split the agent Seat panel into a state module and view parts, with the same markup and behaviour (178 -> 19 lines)
+- The Sysinfo chart titles keep clear of the pane's buttons after the pane's zoom changes
+- Split the agents-on-sites setting into a state module and view parts, with the same markup and behaviour (175 -> 24 lines)
+- Add path tests for the Kanban card
+- Split the Kanban card into small functions over a state object
+- Split the inline video and audio player's state out of the markdown media file, with the same markup and behaviour (LocalAV 176 -> 20 lines)
+- Memory > Skills: Browse the public catalog of computer-use skills and install or update one; the catalog's index is checked against a key built into AgentMux, and every download against its hashes and its author's signature
+- Split the attachment preview into a state module and view parts, with the same markup and behaviour (AttachmentLightbox 170 -> 23 lines)
+- Split the Pair a device panel into a state module and view parts, with the same markup and behaviour (PairDevicePanel 169 -> 10 lines)
+- Split the Settings Devices section into a state file and view parts, behaviour unchanged (DevicesSection 171 -> 67 lines)
+- Split the Settings Appearance section into view parts, behaviour unchanged (AppearanceSection 166 -> 33 lines)
+- Add tests for the Vault entry form ahead of splitting it
+- Split the Vault entry form into small functions over a state object
+- The agent transcript never renders an empty window over its rows, and a pane at the bottom no longer has its scroll position moved by a row re-measure
+- Split the status bar's system readouts into a state file and view parts, behaviour unchanged (SystemStats 171 -> 81 lines)
+- Split the agent composer footer into a state file and view parts, behaviour unchanged (AgentFooter 167 -> 18 lines)
+- Split the container limits panel into a state file and view parts, behaviour unchanged (AgentContainerLimitsPanel 160 -> 35 lines)
+- Split the agent history search (Ctrl+R) into a state file and view parts, behaviour unchanged (InputHistorySearch 157 -> 11 lines)
+- Agents can have the Vault copy a secret from AWS Secrets Manager into an entry (Vault import): the person is asked once, the agent never sees the value
+- Split the install log into a state file and view parts, behaviour unchanged (LogView 157 -> 17 lines)
+- Add tests for the My agents row ahead of splitting it
+- Split the My agents row into small functions over a state object
+- Memory > Skills > Browse no longer offers Install for a skill that is for another OS; it says which OS it needs
+- A browser pane's driven-by strip no longer splits "(took control)" across two lines in a narrow pane
+- Add tests for the account detail panel ahead of splitting it
+- Split the account detail panel into small functions over a state object
+- A page's own file chooser in a browser pane an agent drives is cancelled at once and the agent is told to use set_files, instead of an OS dialog the pane waits behind
+- Agent pane search: the find bar searches an index of the whole transcript in slices off the long-task path, starts at the row on screen, counts rows, follows a transcript that is still growing, and lands a jump on a row it had not measured
+- A streaming reply shows a link by its label from the first character of its destination, instead of the raw address that then collapses and pulls the feed back
+- In the agent pane, an image opened from a message steps through that message's other images with the arrow keys
+- Cargo.lock: move async-executor 1.14.0 to 1.14.1, chacha20 0.10.1 to 0.10.2 and spin 0.9.8 to 0.9.9, which replace yanked releases
+- Keyboard shortcuts: the registry can list every command with its defaults, plan the smallest settings change for a rebind, find conflicts and flag reserved keys (groundwork for Settings > Keyboard shortcuts)
+- Agent pane search: a magnifier in the pane header opens the find bar (also Ctrl+F and the palette), F3 and Shift+F3 step through matches, Esc returns focus to the magnifier, and the count is announced politely to screen readers
+- Add tests for the Swarm agent row ahead of splitting it
+- Split the Swarm agent row into small functions over a state object
+- Log every cover phase change of a pane and what the follow controller saw at each size change, so a pane stuck under the cover or off the bottom names its trigger
+- Help shows the default beside a shortcut you changed and Not set for one you removed; shortcut hints follow a rebinding at once; ListShortcuts reports defaults, changed and unbound
+- Settings > Agents > Desktop driving: a switch for letting agents look at and control desktop apps, and the Desktop tool's refusal now names that place
+- A Bash result with a line wider than the pane no longer shrinks its panel and then grows it again when it arrives
+- The window's grip is a 4×4 dot grid, centred in the whole window header (panes' grips stay 4×3)
+- Settings has a Keyboard shortcuts section: every command with its keys and default, search and filters, Reset per command and for all, and the entries that could not be used
+- A page's camera or microphone request in a browser pane an agent drives is decided by the sensitive-operation countdown (os_prompt_answer): denied now and the agent told, allowed for 30 minutes once the person lets the countdown end
+- Add tests for the tab content ahead of splitting it
+- Split the tab content into small functions over a state object
+- A toast names the agent that waits on you, in its colour, with a Go to agent link; one list from this window's requests and srv's agent rows; every sound is classified as an ask or an event, and a gate keeps sounds inside the sound service
+- Background work, step 1: a shadow detector logs which idle agents would read Background (a declared background shell or a process tree left behind), with no change to any state, ahead of the Background state
+- Background shadow: a declared background shell is counted once, not also as its process tree
+- Add tests for the user input modal ahead of splitting it
+- Split the user input modal into small functions over a state object
+- In a browser pane an agent drives, a page's link to a program on the computer and a site whose certificate is not trusted are reported to the agent with what to do, instead of leaving it a page that does nothing
+- Add tests for the Overview focus view ahead of splitting it
+- Split the Overview focus view into small functions over a state object
+
 ## 0.60.19 — 2026-11-06
 
 - A sensitive message that needs your confirmation now shows a card in the agent's pane and rings the pane's waiting tone, instead of sitting in the transcript unnoticed
