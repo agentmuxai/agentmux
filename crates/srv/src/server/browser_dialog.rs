@@ -216,6 +216,25 @@ async fn answer_host(state: &AppState, id: &str, accept: bool) {
     }
 }
 
+/// What the agent reads about a file chooser the page opened: what it asked for, and its title.
+fn chooser_message(ask: &str, title: &str) -> String {
+    if title.is_empty() {
+        format!("the page asked to {ask}")
+    } else {
+        format!("the page asked to {ask}: {title}")
+    }
+}
+
+/// Why the chooser was cancelled, and what to do. Only a file the agent puts in an input with `set_files`
+/// goes up; a folder or a save has no such door from a pane the agent drives.
+fn chooser_reason(ask: &str) -> String {
+    if ask == "choose a file" || ask == "choose several files" {
+        "AgentMux doesn't open the system file chooser in a pane you drive. Use Browser set_files with the page's file input to attach files from your workspace".to_string()
+    } else {
+        format!("AgentMux doesn't open the system file chooser in a pane you drive, and a page can't {ask} from one")
+    }
+}
+
 /// `POST /api/v1/host/browser_dialog` — the host parked a page's dialog in an
 /// agent-driven pane and asks what to do (dialogs spec §4.2). Body
 /// `{id, target, kind, message, origin}`; answers `accept`, `cancel`, or
@@ -245,6 +264,11 @@ pub(crate) async fn handle_host_browser_dialog(
         // The host doesn't keep which kind it was.
         record(&agent, &target, "dialog", &message, "ended", "the page navigated or closed before it was answered");
         return answered("ok");
+    }
+    if let Some(ask) = body.get("chooser").and_then(|v| v.as_str()) {
+        // A page's own file chooser, cancelled by the host: the agent is told what to do instead.
+        record(&agent, &target, "file_chooser", &chooser_message(ask, &message), "cancelled", &chooser_reason(ask));
+        return answered("cancel");
     }
     if flag("suppressed") {
         record(&agent, &target, &kind_str, &message, "cancelled", "the page showed more than 5 dialogs in 10 seconds");
@@ -385,6 +409,16 @@ mod tests {
         assert!(take_ended("dlg-test-ended-1"));
         assert!(!take_ended("dlg-test-ended-1"));
         assert!(!take_ended("dlg-test-never"));
+    }
+
+    #[test]
+    fn a_cancelled_file_chooser_tells_the_agent_what_to_do_instead() {
+        assert_eq!(chooser_message("choose a file", ""), "the page asked to choose a file");
+        assert_eq!(chooser_message("choose several files", "Upload photos"), "the page asked to choose several files: Upload photos");
+        assert!(chooser_reason("choose a file").contains("Browser set_files"));
+        assert!(chooser_reason("choose several files").contains("Browser set_files"));
+        let save = chooser_reason("pick where to save a file");
+        assert!(!save.contains("set_files") && save.contains("can't pick where to save a file"), "{save}");
     }
 
     #[test]

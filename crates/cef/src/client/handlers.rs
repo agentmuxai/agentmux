@@ -102,6 +102,17 @@ wrap_client! {
             Some(super::downloads::AgentMuxDownloadHandler::new(state))
         }
 
+        fn dialog_handler(&self) -> Option<DialogHandler> {
+            // Real web panes only, like the page's own dialogs below: it answers only for panes an
+            // agent drives and leaves the person's panes to CEF's own file dialog
+            // (docs/reports/REPORT_AGENTS_AND_OS_PROMPTS_2026_11_07.md, tier 1).
+            if !self.is_browser_pane || self.drag_capture {
+                return None;
+            }
+            let state = self.inner.lock().state.clone();
+            Some(super::filedialog::AgentMuxDialogHandler::new(state))
+        }
+
         fn jsdialog_handler(&self) -> Option<JsdialogHandler> {
             // Real web panes only, like downloads: the app's own confirm()
             // boxes stay CEF's. It answers only for panes an agent drives and
