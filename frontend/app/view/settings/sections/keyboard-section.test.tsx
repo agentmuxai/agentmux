@@ -11,6 +11,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const h = vi.hoisted(() => ({ writes: [] as Array<[string, unknown]> }));
 
 vi.mock("@/util/platformutil", () => ({ isMacOS: () => false, isLinux: () => false }));
+vi.mock("@/app/store/keymodel", () => ({ disableGlobalKeybindings: () => {}, enableGlobalKeybindings: () => {} }));
+vi.mock("@/util/clipboard", () => ({ writeText: () => Promise.resolve() }));
 vi.mock("@/app/store/global", async () => {
     const { createSignal } = await import("solid-js");
     const [settings, setSettings] = createSignal<unknown>({});

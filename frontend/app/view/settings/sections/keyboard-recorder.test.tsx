@@ -11,6 +11,7 @@ const h = vi.hoisted(() => ({ writes: [] as Array<[string, unknown]>, off: vi.fn
 
 vi.mock("@/util/platformutil", () => ({ isMacOS: () => false, isLinux: () => false }));
 vi.mock("@/app/store/keymodel", () => ({ disableGlobalKeybindings: h.off, enableGlobalKeybindings: h.on }));
+vi.mock("@/util/clipboard", () => ({ writeText: () => Promise.resolve() }));
 vi.mock("@/app/store/global", async () => {
     const { createSignal } = await import("solid-js");
     const [settings, setSettings] = createSignal<unknown>({});
