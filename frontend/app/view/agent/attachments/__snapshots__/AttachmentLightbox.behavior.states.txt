@@ -1,0 +1,121 @@
+Modal open=true scope=pane size=fit panelClass=agent-attachment-lightbox__panel
+useAttachmentUrl send id=a1
+useAttachmentText thumb id=undefined
+initialFocus -> agent-attachment-lightbox__dialog
+-- an error
+<div>
+  <div data-stand="Modal" data-aria-label="Image 1: shot.png">
+    <div class="agent-attachment-lightbox__dialog" tabindex="-1">
+      <div class="agent-attachment-lightbox__image">
+        <span class="agent-attachment-lightbox__missing">
+          "Couldn't read the file."
+      <div class="agent-attachment-lightbox__bar">
+        <span class="agent-attachment-lightbox__title" data-tip="shot.png">
+          <span class="num">
+            "1"
+          "shot.png"
+        <span class="agent-attachment-lightbox__meta">
+          "4000"
+          "×"
+          "3000"
+          "·"
+          "2.4 MB"
+          <span class="sent">
+            "· sent as"
+            "2000"
+            "×"
+            "1500"
+            ","
+            "391 KB"
+        <span class="agent-attachment-lightbox__actions">
+          <span data-stand="IconButton" data-icon="xmark" data-label="Close preview" data-tooltip="false" data-title="Close (Esc)">
+-- pending
+Modal open=true scope=pane size=fit panelClass=agent-attachment-lightbox__panel
+useAttachmentUrl send id=undefined
+useAttachmentText thumb id=undefined
+initialFocus -> agent-attachment-lightbox__dialog
+-- processing
+<div>
+  <div data-stand="Modal" data-aria-label="Image 1: shot.png">
+    <div class="agent-attachment-lightbox__dialog" tabindex="-1">
+      <div class="agent-attachment-lightbox__image">
+        <span class="agent-attachment-lightbox__missing">
+          "Processing…"
+      <div class="agent-attachment-lightbox__bar">
+        <span class="agent-attachment-lightbox__title" data-tip="shot.png">
+          <span class="num">
+            "1"
+          "shot.png"
+        <span class="agent-attachment-lightbox__actions">
+          <span data-stand="IconButton" data-icon="xmark" data-label="Close preview" data-tooltip="false" data-title="Close (Esc)">
+-- no id
+Modal open=true scope=pane size=fit panelClass=agent-attachment-lightbox__panel
+useAttachmentUrl send id=undefined
+useAttachmentText thumb id=undefined
+initialFocus -> agent-attachment-lightbox__dialog
+-- gone
+<div>
+  <div data-stand="Modal" data-aria-label="File 1: scan.pdf">
+    <div class="agent-attachment-lightbox__dialog" tabindex="-1">
+      <div class="agent-attachment-lightbox__image">
+        <span class="agent-attachment-lightbox__missing">
+          "This file is no longer available."
+      <div class="agent-attachment-lightbox__bar">
+        <span class="agent-attachment-lightbox__title" data-tip="scan.pdf">
+          <span class="num">
+            "1"
+          "scan.pdf"
+        <span class="agent-attachment-lightbox__actions">
+          <span data-stand="IconButton" data-icon="xmark" data-label="Close preview" data-tooltip="false" data-title="Close (Esc)">
+-- the transcript only knows the id
+AttachmentsInfoCommand {"ids":["a1"]}
+Modal open=true scope=pane size=fit panelClass=agent-attachment-lightbox__panel
+useAttachmentUrl send id=a1
+useAttachmentText thumb id=undefined
+initialFocus -> agent-attachment-lightbox__dialog
+-- before the details arrive
+<div>
+  <div data-stand="Modal" data-aria-label="Image 1: shot.png">
+    <div class="agent-attachment-lightbox__dialog" tabindex="-1">
+      <div class="agent-attachment-lightbox__image">
+        <img src="blob:send/9" alt="shot.png">
+      <div class="agent-attachment-lightbox__bar">
+        <span class="agent-attachment-lightbox__title" data-tip="shot.png">
+          <span class="num">
+            "1"
+          "shot.png"
+        <span class="agent-attachment-lightbox__actions">
+          <span data-stand="IconButton" data-icon="xmark" data-label="Close preview" data-tooltip="false" data-title="Close (Esc)">
+useAttachmentUrl send id=a1
+useAttachmentText thumb id=undefined
+-- after the details arrive
+<div>
+  <div data-stand="Modal" data-aria-label="Image 1: shot.png">
+    <div class="agent-attachment-lightbox__dialog" tabindex="-1">
+      <div class="agent-attachment-lightbox__image">
+        <img src="blob:send/9" alt="shot.png">
+      <div class="agent-attachment-lightbox__bar">
+        <span class="agent-attachment-lightbox__title" data-tip="shot.png">
+          <span class="num">
+            "1"
+          "shot.png"
+        <span class="agent-attachment-lightbox__meta">
+          "4000"
+          "×"
+          "3000"
+          "·"
+          "2.4 MB"
+          <span class="sent">
+            "· sent as"
+            "2000"
+            "×"
+            "1500"
+            ","
+            "391 KB"
+        <span class="agent-attachment-lightbox__actions">
+          <span data-stand="IconButton" data-icon="xmark" data-label="Close preview" data-tooltip="false" data-title="Close (Esc)">
+-- an item with its info asks for nothing
+Modal open=true scope=pane size=fit panelClass=agent-attachment-lightbox__panel
+useAttachmentUrl send id=a1
+useAttachmentText thumb id=undefined
+initialFocus -> agent-attachment-lightbox__dialog

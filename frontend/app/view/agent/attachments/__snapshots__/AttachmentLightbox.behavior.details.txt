@@ -1,0 +1,105 @@
+Modal open=true scope=pane size=fit panelClass=agent-attachment-lightbox__panel
+useAttachmentUrl send id=undefined
+useAttachmentText thumb id=undefined
+initialFocus -> agent-attachment-lightbox__dialog
+-- a pdf
+<div>
+  <div data-stand="Modal" data-aria-label="File 1: report.pdf">
+    <div class="agent-attachment-lightbox__dialog" tabindex="-1">
+      <div class="agent-attachment-lightbox__image">
+        <div class="agent-attachment-lightbox__details is-pdf">
+          <span class="icon" aria-hidden="true">
+            <i class="fa-solid fa-file-pdf">
+            <span class="ext">
+              "PDF"
+          <span class="name">
+            "report.pdf"
+          <span class="facts">
+            "PDF"
+            "·"
+            "1.1 MB"
+            "·"
+            "12"
+            "pages"
+          <span class="facts">
+            "Text version extracted ("
+            "3.9 KB"
+            "); the agent gets both."
+          <span class="facts">
+            "Scanned pages were skipped."
+      <div class="agent-attachment-lightbox__bar">
+        <span class="agent-attachment-lightbox__title" data-tip="report.pdf">
+          <span class="num">
+            "1"
+          "report.pdf"
+        <span class="agent-attachment-lightbox__meta">
+          "PDF"
+          "·"
+          "1.1 MB"
+        <span class="agent-attachment-lightbox__actions">
+          <span data-stand="IconButton" data-icon="xmark" data-label="Close preview" data-tooltip="false" data-title="Close (Esc)">
+-- one page, macros
+Modal open=true scope=pane size=fit panelClass=agent-attachment-lightbox__panel
+useAttachmentUrl send id=undefined
+useAttachmentText thumb id=undefined
+initialFocus -> agent-attachment-lightbox__dialog
+-- a workbook with macros
+<div>
+  <div data-stand="Modal" data-aria-label="File 1: budget.xlsm">
+    <div class="agent-attachment-lightbox__dialog" tabindex="-1">
+      <div class="agent-attachment-lightbox__image">
+        <div class="agent-attachment-lightbox__details is-excel">
+          <span class="icon" aria-hidden="true">
+            <i class="fa-solid fa-file-excel">
+            <span class="ext">
+              "XLSM"
+          <span class="name">
+            "budget.xlsm"
+          <span class="facts">
+            "Spreadsheet"
+            "·"
+            "2.0 KB"
+            "·"
+            "1"
+            "page"
+          <span class="warn">
+            <i class="fa-solid fa-triangle-exclamation">
+            "Contains macros. AgentMux never opens or runs them."
+      <div class="agent-attachment-lightbox__bar">
+        <span class="agent-attachment-lightbox__title" data-tip="budget.xlsm">
+          <span class="num">
+            "1"
+          "budget.xlsm"
+        <span class="agent-attachment-lightbox__meta">
+          "Spreadsheet"
+          "·"
+          "2.0 KB"
+        <span class="agent-attachment-lightbox__actions">
+          <span data-stand="IconButton" data-icon="xmark" data-label="Close preview" data-tooltip="false" data-title="Close (Esc)">
+-- no details yet
+AttachmentsInfoCommand {"ids":["z1"]}
+Modal open=true scope=pane size=fit panelClass=agent-attachment-lightbox__panel
+useAttachmentUrl send id=undefined
+useAttachmentText thumb id=undefined
+initialFocus -> agent-attachment-lightbox__dialog
+-- an archive, details not yet fetched
+<div>
+  <div data-stand="Modal" data-aria-label="File 1: archive.zip">
+    <div class="agent-attachment-lightbox__dialog" tabindex="-1">
+      <div class="agent-attachment-lightbox__image">
+        <div class="agent-attachment-lightbox__details is-archive">
+          <span class="icon" aria-hidden="true">
+            <i class="fa-solid fa-file-zipper">
+            <span class="ext">
+              "ZIP"
+          <span class="name">
+            "archive.zip"
+          <span class="facts">
+            "Archive"
+      <div class="agent-attachment-lightbox__bar">
+        <span class="agent-attachment-lightbox__title" data-tip="archive.zip">
+          <span class="num">
+            "1"
+          "archive.zip"
+        <span class="agent-attachment-lightbox__actions">
+          <span data-stand="IconButton" data-icon="xmark" data-label="Close preview" data-tooltip="false" data-title="Close (Esc)">
