@@ -309,6 +309,29 @@ describe("follow controller (one-way flow)", () => {
         expect(s.following()).toBe(true);
     });
 
+    it("B4b: an element losing focus is not the window blurring: a press on the transcript while the composer has focus keeps its drag", () => {
+        const s = setup({ geo });
+        const composer = document.createElement("textarea");
+        document.body.appendChild(composer);
+        s.row.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+        composer.dispatchEvent(new Event("blur")); // the press moved focus: the textarea's blur reaches the capturing window listener
+        const range = document.createRange();
+        range.setStart(s.row.firstChild!, 0);
+        range.setEnd(s.row.firstChild!, 4);
+        document.getSelection()!.addRange(range);
+        document.dispatchEvent(new Event("selectionchange"));
+        expect(s.following()).toBe(false); // the selection drag still detaches
+        composer.remove();
+    });
+
+    it("B4c: the page becoming visible again is not a release", () => {
+        const s = setup({ geo });
+        s.row.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+        document.dispatchEvent(new Event("visibilitychange")); // visible: jsdom's state
+        s.scrollTo(150);
+        expect(s.following()).toBe(false); // still held, so the scroll is the user's
+    });
+
     it("B5: a sideways wheel (a wide table) is not a gesture, so a scroll the browser makes just after it is not the user's", () => {
         const s = setup({ geo });
         s.scrollRef.dispatchEvent(new WheelEvent("wheel", { deltaX: 60, deltaY: 0, bubbles: true }));

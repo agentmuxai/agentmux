@@ -278,15 +278,22 @@ function listenForGestures(scroller: HTMLElement, on: GestureHandlers): () => vo
     const onPointerMove = (e: PointerEvent): void => {
         if (on.held() && e.buttons === 0) on.onPointerUp();
     };
+    // Capture sees the blur of every element too (a press on the transcript blurs the composer): only the window's counts.
+    const onWindowBlur = (e: Event): void => {
+        if (!(e.target instanceof Element)) on.onPointerUp();
+    };
+    const onVisibility = (): void => {
+        if (document.visibilityState === "hidden") on.onPointerUp();
+    };
     scroller.addEventListener("wheel", on.onWheel, passive);
     scroller.addEventListener("touchstart", on.onTouch, passive);
     scroller.addEventListener("touchmove", on.onTouch, passive);
     scroller.addEventListener("pointerdown", on.onPointerDown, passive);
     window.addEventListener("pointerup", on.onPointerUp, passive);
     window.addEventListener("pointercancel", on.onPointerUp, passive);
-    window.addEventListener("blur", on.onPointerUp, passive);
+    window.addEventListener("blur", onWindowBlur, passive);
     document.addEventListener("pointermove", onPointerMove, passive);
-    document.addEventListener("visibilitychange", on.onPointerUp, passive);
+    document.addEventListener("visibilitychange", onVisibility, passive);
     document.addEventListener("pointerdown", on.onDocPointerDown, passive);
     document.addEventListener("keydown", on.onKey, passive);
     document.addEventListener("selectionchange", on.onSelectionChange);
@@ -297,9 +304,9 @@ function listenForGestures(scroller: HTMLElement, on: GestureHandlers): () => vo
         scroller.removeEventListener("pointerdown", on.onPointerDown, passive);
         window.removeEventListener("pointerup", on.onPointerUp, passive);
         window.removeEventListener("pointercancel", on.onPointerUp, passive);
-        window.removeEventListener("blur", on.onPointerUp, passive);
+        window.removeEventListener("blur", onWindowBlur, passive);
         document.removeEventListener("pointermove", onPointerMove, passive);
-        document.removeEventListener("visibilitychange", on.onPointerUp, passive);
+        document.removeEventListener("visibilitychange", onVisibility, passive);
         document.removeEventListener("pointerdown", on.onDocPointerDown, passive);
         document.removeEventListener("keydown", on.onKey, passive);
         document.removeEventListener("selectionchange", on.onSelectionChange);
