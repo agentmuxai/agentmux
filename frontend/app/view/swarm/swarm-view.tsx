@@ -1,50 +1,67 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createMemo, createSignal, untrack, For, Show, type Accessor, type JSX } from "solid-js";
-import type { SwarmViewModel, AgentTreeNode, ActiveSubagent, ActiveShell, ActiveCron, WorkflowDispatch, DispatchActivityEntry, TodoItem } from "./swarm-model";
-import { subagentDisplayLabel, subagentRowKey, subagentToolDetail, workflowRetireSignal, AUTO_RETIRE_DELAY_MS } from "./swarm-model";
-import { REMOTE_PROVIDER_UNKNOWN, SwarmProviderIcon } from "./swarm-provider-icon";
+import { isLightThemeActive } from "@/app/block/pane-identity";
+import { tip } from "@/app/element/tip";
 import { Button, IconButton } from "@/app/element/ui";
-import AnsiLine from "@/element/ansiline";
+import { Tag } from "@/app/element/ui/Tag";
+import { useTick } from "@/app/hook/useTick";
+import { subagentStatus } from "@/app/store/agent-status";
+import { unavailableOfMeta } from "@/app/store/agent-unavailable";
+import { showCopyContextMenu } from "@/app/store/contextmenu";
+import { MOS } from "@/app/store/global";
+import type { BackgroundTaskView } from "@/app/store/rpc-api";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { MOS } from "@/app/store/global";
-import { isLightThemeActive } from "@/app/block/pane-identity";
-import { showCopyContextMenu } from "@/app/store/contextmenu";
-import type { LayoutModel } from "@/layout/lib/layoutModel";
-import { requestSubagentName } from "./subagent-naming";
-import { useTick } from "@/app/hook/useTick";
-import { longRunningToolRows, type LongRunningToolRow } from "./swarm-longrunning";
-import { formatElapsedClock, formatTimeLeft } from "@/util/format-time";
-import { PARKED_ROW_TITLE } from "./swarm-open-parked";
-import { phaseToDisplayStatus, type AgentDisplayStatus } from "./swarm-display-status";
-import { UnavailableChip } from "./swarm-row-notes";
-import { stopReceivingItems, useRegistrationFlag } from "./swarm-row-registration";
-import { AgentStatusChip } from "./swarm-status-chip";
-import { unavailableOfMeta } from "@/app/store/agent-unavailable";
-import { BackgroundTaskBucket, SubagentBackgroundTasks, visibleBackgroundTasks } from "./swarm-background-tasks";
-import type { BackgroundTaskView } from "@/app/store/rpc-api";
-import { swarmRowColors } from "./swarm-row-colors";
-import { lastActiveLabel, lastActiveMs } from "./swarm-last-active";
 import { isAwaitingUser } from "@/app/store/swarm-line";
-import { SupervisorBucket, supervisorRows } from "./swarm-supervisor";
-import { subagentStatus } from "@/app/store/agent-status";
-import { remoteAgentKey } from "./swarm-fleet-targets";
-import { remoteSeatInfo } from "./swarm-seat-groups";
-import { remoteChip, remoteLine, seenAgo, type RemoteRow } from "./swarm-remote";
-import { Tag } from "@/app/element/ui/Tag";
-import { SwarmSeatPill } from "./swarm-seats";
-import { Highlight } from "./swarm-filter-bar";
-import { highlightWords } from "./swarm-filter-state";
-import "./swarm-view.scss";
-import { tip } from "@/app/element/tip";
+import AnsiLine from "@/element/ansiline";
+import type { LayoutModel } from "@/layout/lib/layoutModel";
+import { formatElapsedClock, formatTimeLeft } from "@/util/format-time";
+import { createMemo, createSignal, For, Show, untrack, type Accessor, type JSX } from "solid-js";
+import { requestSubagentName } from "./subagent-naming";
 import { AgentCardHead, AgentCardLines } from "./swarm-agent-card";
 import { useAgentRowActivation, useSummaryFlash } from "./swarm-agent-row-hooks";
+import { BackgroundTaskBucket, SubagentBackgroundTasks, visibleBackgroundTasks } from "./swarm-background-tasks";
+import { phaseToDisplayStatus, type AgentDisplayStatus } from "./swarm-display-status";
+import { Highlight } from "./swarm-filter-bar";
+import { highlightWords } from "./swarm-filter-state";
+import { remoteAgentKey } from "./swarm-fleet-targets";
+import { lastActiveLabel, lastActiveMs } from "./swarm-last-active";
+import { longRunningToolRows, type LongRunningToolRow } from "./swarm-longrunning";
+import type {
+    ActiveCron,
+    ActiveShell,
+    ActiveSubagent,
+    AgentTreeNode,
+    DispatchActivityEntry,
+    SwarmViewModel,
+    TodoItem,
+    WorkflowDispatch,
+} from "./swarm-model";
+import {
+    AUTO_RETIRE_DELAY_MS,
+    subagentDisplayLabel,
+    subagentRowKey,
+    subagentToolDetail,
+    workflowRetireSignal,
+} from "./swarm-model";
+import { PARKED_ROW_TITLE } from "./swarm-open-parked";
+import { REMOTE_PROVIDER_UNKNOWN, SwarmProviderIcon } from "./swarm-provider-icon";
+import { remoteChip, remoteLine, seenAgo, type RemoteRow } from "./swarm-remote";
+import { swarmRowColors } from "./swarm-row-colors";
+import { UnavailableChip } from "./swarm-row-notes";
+import { stopReceivingItems, useRegistrationFlag } from "./swarm-row-registration";
+import { remoteSeatInfo } from "./swarm-seat-groups";
+import { SwarmSeatPill } from "./swarm-seats";
+import { AgentStatusChip } from "./swarm-status-chip";
+import { SupervisorBucket, supervisorRows } from "./swarm-supervisor";
+import "./swarm-view.scss";
 
 /** The block shown in the focused pane — for a multi-tab pane, its active
  *  tab. Reactive to tab switches inside the pane, not just pane focus. */
-export function focusedActiveBlockId(layoutModel: Pick<LayoutModel, "localTreeStateAtom" | "focusedNode">): string | null {
+export function focusedActiveBlockId(
+    layoutModel: Pick<LayoutModel, "localTreeStateAtom" | "focusedNode">
+): string | null {
     layoutModel.localTreeStateAtom();
     const data = layoutModel.focusedNode()?.data;
     return data?.activeBlockId || data?.blockId || null;
@@ -111,10 +128,16 @@ export function RemoteAgentRow(props: { model: SwarmViewModel; row: RemoteRow })
                     checked={props.model.isSelected(key())}
                     disabled={section().stale}
                     onChange={() => props.model.toggleSelected(key())}
-                    title={section().stale ? "Not seen recently, so it can't be selected" : "Select for a fleet action (broadcast/stop)"}
+                    title={
+                        section().stale
+                            ? "Not seen recently, so it can't be selected"
+                            : "Select for a fleet action (broadcast/stop)"
+                    }
                 />
                 <SwarmProviderIcon provider={props.row.agent.provider} unknownTitle={REMOTE_PROVIDER_UNKNOWN} />
-                <span class="swarm-remote-agent-name"><Highlight text={props.row.agent.name} words={highlightWords(props.model, "name")} /></span>
+                <span class="swarm-remote-agent-name">
+                    <Highlight text={props.row.agent.name} words={highlightWords(props.model, "name")} />
+                </span>
                 <SwarmSeatPill seat={remoteSeatInfo(props.row).seat} />
                 <span class="swarm-remote-where">
                     <span class="swarm-remote-title">{section().title}</span>
@@ -180,7 +203,11 @@ export function subagentDisplayStatus(sub: ActiveSubagent, parentAgentStatus: "r
  * or the ViewModel) is what makes the returned value recompute every
  * second; this function is otherwise a pure read of `countdownStateAtom`.
  */
-export function countdownSecondsRemaining(model: SwarmViewModel, rowKey: string, tick: Accessor<number>): number | null {
+export function countdownSecondsRemaining(
+    model: SwarmViewModel,
+    rowKey: string,
+    tick: Accessor<number>
+): number | null {
     tick();
     const entry = model.countdownStateAtom().get(rowKey);
     if (entry === undefined) return null;
@@ -227,26 +254,8 @@ function AgentSelectCheckbox(props: { node: Accessor<AgentTreeNode>; model: Swar
     );
 }
 
-// Exported for `swarm-agent-row.render.test.tsx`, which pins the PR #2862
-// regression both reviewers caught: an agent whose only activity is a
-// long-running tool call must still show the expand affordance and render the
-// bucket. Same test-only export precedent as `DispatchActivityFeedEntry`.
-export function AgentRow({
-    node,
-    focusedBlockId,
-    model,
-    rowKey,
-}: {
-    node: Accessor<AgentTreeNode>;
-    focusedBlockId: () => string | null;
-    model: SwarmViewModel;
-    /** The key the list orders the row by (swarm-order.ts), for the slide when it moves. */
-    rowKey?: string;
-}): JSX.Element {
-    const displayStatus = createMemo<AgentDisplayStatus>(() =>
-        phaseToDisplayStatus(node().blockId, node().agentStatus)
-    );
-    const collapsed = createMemo(() => model.isAgentCollapsed(node().blockId));
+/** What an agent's row works out from its node and the clock, before it draws anything. */
+function createRowSources(node: Accessor<AgentTreeNode>) {
     // The agent's own pane-tab color — same source PaneChrome's `tabColors`
     // memo reads for the tab underline (pane-identity.ts: the pane's pick,
     // else its agent color, else its widget color), so the Swarm row's
@@ -291,6 +300,25 @@ export function AgentRow({
         tick();
         return Date.now();
     };
+    return {
+        blockMeta,
+        rowColors,
+        lastActive,
+        lastActiveText,
+        longRunningRows,
+        ownBackgroundRows,
+        supervisorDecisions,
+        rowNow,
+    };
+}
+
+function createRowState(node: Accessor<AgentTreeNode>, model: SwarmViewModel) {
+    const displayStatus = createMemo<AgentDisplayStatus>(() =>
+        phaseToDisplayStatus(node().blockId, node().agentStatus)
+    );
+    const collapsed = createMemo(() => model.isAgentCollapsed(node().blockId));
+    const sources = createRowSources(node);
+    const { blockMeta, longRunningRows, ownBackgroundRows, supervisorDecisions, rowNow } = sources;
     // A question, or a Supervisor pause that needs you, ranks ahead of it (store/agent-status.ts).
     const unavailable = createMemo(() =>
         isAwaitingUser(blockMeta(), node().agentStatus)
@@ -305,22 +333,58 @@ export function AgentRow({
     const activation = useAgentRowActivation(node, blockMeta);
     // What srv flags for this agent's registration (another instance claiming it, a refused jekt).
     const registrationFlag = useRegistrationFlag(() => node().blockId);
-    // Rows are `user-select: none` (swarm-view.scss) for the drag/click UX,
-    // so unlike a normal text pane there's no way to select-and-Copy — the
-    // pane body's generic Copy-on-selection context menu (block/pane-
-    // actions.ts) can never fire anything here. This is the only way to
-    // copy an agent's name or block id out of Swarm. The sub-rows below use the
-    // same helper. See docs/specs/REPORT_CONTEXT_MENU_GAP_AUDIT_2026_08_07.md.
-    const handleAgentRowContextMenu = (e: MouseEvent) => {
-        showCopyContextMenu(
-            [
-                { label: "Copy agent name", value: node().agentName },
-                { label: "Copy block ID", value: node().blockId },
-            ],
-            e,
-            stopReceivingItems(registrationFlag())
-        );
+    return {
+        node,
+        model,
+        displayStatus,
+        collapsed,
+        ...sources,
+        unavailable,
+        totalRows,
+        hasChildren,
+        summaryFlash,
+        activation,
+        registrationFlag,
     };
+}
+
+type RowState = ReturnType<typeof createRowState>;
+
+// Rows are `user-select: none` (swarm-view.scss) for the drag/click UX,
+// so unlike a normal text pane there's no way to select-and-Copy — the
+// pane body's generic Copy-on-selection context menu (block/pane-
+// actions.ts) can never fire anything here. This is the only way to
+// copy an agent's name or block id out of Swarm. The sub-rows below use the
+// same helper. See docs/specs/REPORT_CONTEXT_MENU_GAP_AUDIT_2026_08_07.md.
+function onAgentRowContextMenu(s: RowState, e: MouseEvent) {
+    showCopyContextMenu(
+        [
+            { label: "Copy agent name", value: s.node().agentName },
+            { label: "Copy block ID", value: s.node().blockId },
+        ],
+        e,
+        stopReceivingItems(s.registrationFlag())
+    );
+}
+
+// Exported for `swarm-agent-row.render.test.tsx`, which pins the PR #2862
+// regression both reviewers caught: an agent whose only activity is a
+// long-running tool call must still show the expand affordance and render the
+// bucket. Same test-only export precedent as `DispatchActivityFeedEntry`.
+export function AgentRow({
+    node,
+    focusedBlockId,
+    model,
+    rowKey,
+}: {
+    node: Accessor<AgentTreeNode>;
+    focusedBlockId: () => string | null;
+    model: SwarmViewModel;
+    /** The key the list orders the row by (swarm-order.ts), for the slide when it moves. */
+    rowKey?: string;
+}): JSX.Element {
+    const s = createRowState(node, model);
+    const { activation, rowColors } = s;
 
     return (
         <div class="swarm-agent-group" data-swarm-key={rowKey}>
@@ -341,27 +405,33 @@ export function AgentRow({
                 role="button"
                 tabIndex={0}
                 onMouseDown={activation.onMouseDown}
-                onContextMenu={handleAgentRowContextMenu}
+                onContextMenu={(e) => onAgentRowContextMenu(s, e)}
                 {...tip(activation.isParked() ? `${node().agentName}: ${PARKED_ROW_TITLE}` : node().agentName)}
             >
                 <AgentCardHead
                     node={node}
                     model={model}
-                    blockMeta={blockMeta}
-                    collapsed={collapsed}
-                    hasChildren={hasChildren}
-                    totalRows={totalRows}
+                    blockMeta={s.blockMeta}
+                    collapsed={s.collapsed}
+                    hasChildren={s.hasChildren}
+                    totalRows={s.totalRows}
                     isParked={activation.isParked}
-                    lastActive={lastActive}
-                    lastActiveText={lastActiveText}
-                    longRunningRows={longRunningRows}
-                    registrationFlag={registrationFlag}
-                    unavailable={unavailable}
-                    displayStatus={displayStatus}
-                    rowNow={rowNow}
+                    lastActive={s.lastActive}
+                    lastActiveText={s.lastActiveText}
+                    longRunningRows={s.longRunningRows}
+                    registrationFlag={s.registrationFlag}
+                    unavailable={s.unavailable}
+                    displayStatus={s.displayStatus}
+                    rowNow={s.rowNow}
                     selectBox={<AgentSelectCheckbox node={node} model={model} />}
                 />
-                <AgentCardLines node={node} model={model} unavailable={unavailable} summaryFlash={summaryFlash} rowNow={rowNow} />
+                <AgentCardLines
+                    node={node}
+                    model={model}
+                    unavailable={s.unavailable}
+                    summaryFlash={s.summaryFlash}
+                    rowNow={s.rowNow}
+                />
             </div>
             <Show when={activation.openRefused()}>
                 {(why) => (
@@ -370,30 +440,38 @@ export function AgentRow({
                     </div>
                 )}
             </Show>
-            <Show when={collapsed() ? undefined : node()} keyed>
-                {(current) => (
-                    <div class="swarm-children">
-                        <SupervisorBucket rows={supervisorDecisions()} />
-                        <TodoBucket
-                            rows={current.todoRows}
-                            truncated={current.todosTruncated}
-                            partial={current.todosPartial}
-                        />
-                        <AgentToolBucket
-                            rows={current.agentToolRows}
-                            model={model}
-                            parentAgentStatus={current.agentStatus}
-                            backgroundBySubagent={current.backgroundTasks.bySubagent}
-                        />
-                        <WorkflowBucket rows={current.workflowRows} model={model} />
-                        <ShellBucket rows={current.shellRows} />
-                        <CronBucket rows={current.cronRows} />
-                        <LongRunningBucket rows={longRunningRows()} />
-                        <BackgroundTaskBucket tasks={ownBackgroundRows()} />
-                    </div>
-                )}
-            </Show>
+            <RowChildren s={s} />
         </div>
+    );
+}
+
+/** The buckets under an expanded row, rebuilt whenever its node is replaced. */
+function RowChildren({ s }: { s: RowState }) {
+    const { model } = s;
+    return (
+        <Show when={s.collapsed() ? undefined : s.node()} keyed>
+            {(current) => (
+                <div class="swarm-children">
+                    <SupervisorBucket rows={s.supervisorDecisions()} />
+                    <TodoBucket
+                        rows={current.todoRows}
+                        truncated={current.todosTruncated}
+                        partial={current.todosPartial}
+                    />
+                    <AgentToolBucket
+                        rows={current.agentToolRows}
+                        model={model}
+                        parentAgentStatus={current.agentStatus}
+                        backgroundBySubagent={current.backgroundTasks.bySubagent}
+                    />
+                    <WorkflowBucket rows={current.workflowRows} model={model} />
+                    <ShellBucket rows={current.shellRows} />
+                    <CronBucket rows={current.cronRows} />
+                    <LongRunningBucket rows={s.longRunningRows()} />
+                    <BackgroundTaskBucket tasks={s.ownBackgroundRows()} />
+                </div>
+            )}
+        </Show>
     );
 }
 
@@ -444,7 +522,9 @@ function TodoBucket({
                 <Show when={partial}>
                     <div
                         class="swarm-todo-partial"
-                        {...tip("AgentMux started watching this agent mid-session, so items created before that may be missing.")}
+                        {...tip(
+                            "AgentMux started watching this agent mid-session, so items created before that may be missing."
+                        )}
                     >
                         earlier items may be missing
                     </div>
@@ -734,7 +814,9 @@ function CronRow({ cron }: { cron: ActiveCron }): JSX.Element {
     );
     // Fires that reached no one don't count above; say so instead of looking healthy.
     const missedLabel = createMemo(() =>
-        cron.missed_count ? `missed ${cron.missed_count} · ${MISS_REASON_TEXT[cron.last_miss_reason ?? ""] ?? "not delivered"}` : ""
+        cron.missed_count
+            ? `missed ${cron.missed_count} · ${MISS_REASON_TEXT[cron.last_miss_reason ?? ""] ?? "not delivered"}`
+            : ""
     );
 
     return (
@@ -758,7 +840,9 @@ function CronRow({ cron }: { cron: ActiveCron }): JSX.Element {
             <span class="swarm-cron-last-fired">{lastFired()}</span>
             <span class="swarm-cron-fire-count">{fireCountLabel()}</span>
             <Show when={missedLabel()}>
-                <span class="swarm-cron-missed" {...tip(cron.last_miss_reason)}>{missedLabel()}</span>
+                <span class="swarm-cron-missed" {...tip(cron.last_miss_reason)}>
+                    {missedLabel()}
+                </span>
             </Show>
             <Tag size="xs" tone={cron.enabled ? "accent" : "neutral"}>
                 {cron.enabled ? "Active" : "Paused"}
@@ -776,13 +860,7 @@ function CronRow({ cron }: { cron: ActiveCron }): JSX.Element {
  * 1,030+ members). Expanding shows a concatenated activity feed
  * (`DispatchActivityFeed`) instead of nested `SubagentRow`s.
  */
-function WorkflowDispatchRow({
-    group,
-    model,
-}: {
-    group: WorkflowDispatch;
-    model: SwarmViewModel;
-}): JSX.Element {
+function WorkflowDispatchRow({ group, model }: { group: WorkflowDispatch; model: SwarmViewModel }): JSX.Element {
     // Expand state lives on the ViewModel, not a local signal — see
     // SwarmViewModel._expandedIds for why a local signal here silently
     // collapses on unrelated tree refreshes.
@@ -915,7 +993,9 @@ function DispatchActivityFeed({
             <Show when={entries().length === 0}>
                 <div class="swarm-dispatch-feed-empty">No activity yet.</div>
             </Show>
-            <For each={entries()}>{(entry) => <DispatchActivityFeedEntry entry={entry} showAgentTag={showAgentTag} />}</For>
+            <For each={entries()}>
+                {(entry) => <DispatchActivityFeedEntry entry={entry} showAgentTag={showAgentTag} />}
+            </For>
         </div>
     );
 }
@@ -963,7 +1043,9 @@ export function DispatchActivityFeedEntry({
                     {tag}
                     <div class="swarm-subagent-detail-tool">
                         <div class="swarm-subagent-detail-tool-header" onClick={() => setExpanded(!expanded())}>
-                            <i class={`fa-solid fa-${expanded() ? "chevron-down" : "chevron-right"} swarm-subagent-detail-expand-icon`} />
+                            <i
+                                class={`fa-solid fa-${expanded() ? "chevron-down" : "chevron-right"} swarm-subagent-detail-expand-icon`}
+                            />
                             <span class="swarm-subagent-detail-tool-name">{et.name}</span>
                         </div>
                         <Show when={expanded()}>
@@ -981,7 +1063,9 @@ export function DispatchActivityFeedEntry({
                             class={`swarm-subagent-detail-tool-header ${et.is_error ? "swarm-subagent-detail-tool-header--error" : ""}`}
                             onClick={() => setExpanded(!expanded())}
                         >
-                            <i class={`fa-solid fa-${expanded() ? "chevron-down" : "chevron-right"} swarm-subagent-detail-expand-icon`} />
+                            <i
+                                class={`fa-solid fa-${expanded() ? "chevron-down" : "chevron-right"} swarm-subagent-detail-expand-icon`}
+                            />
                             <span>{et.is_error ? "Error" : "Result"}</span>
                         </div>
                         <Show when={expanded()}>

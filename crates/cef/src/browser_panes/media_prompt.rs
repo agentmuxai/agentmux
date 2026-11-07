@@ -260,6 +260,26 @@ pub fn arm_timeout(id: u64) {
     cef::post_delayed_task(cef::ThreadId::UI, Some(&mut task), PROMPT_TIMEOUT_MS);
 }
 
+/// Answer a parked request from any thread: the answer moves to the UI thread, where the callback
+/// belongs. A request that was answered meanwhile (the timeout, the pane closing) is left alone.
+pub fn resolve_on_ui(id: u64, allow: bool) {
+    let mut task = ResolveTask::new(id, allow);
+    cef::post_task(cef::ThreadId::UI, Some(&mut task));
+}
+
+wrap_task! {
+    pub(crate) struct ResolveTask {
+        id: u64,
+        allow: bool,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            resolve(self.id, self.allow);
+        }
+    }
+}
+
 wrap_task! {
     pub(crate) struct TimeoutTask {
         id: u64,

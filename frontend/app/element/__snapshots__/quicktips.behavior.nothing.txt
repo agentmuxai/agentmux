@@ -97,10 +97,14 @@ shortcutFor pane:close
               <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-border whitespace-nowrap">
                 "Ctrl+close"
     <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-highlightbg/30 to-transparent hover:from-accent-400/5 rounded-lg border border-border hover:border-accent-400/20 transition-colors duration-300">
-      <div class="flex items-center gap-2 text-xl font-bold">
-        <div class="w-1 h-6 bg-accent-400 rounded-full">
-        <span class="text-foreground">
-          "Keyboard Shortcuts"
+      <div class="flex items-center justify-between gap-3">
+        <div class="flex items-center gap-2 text-xl font-bold">
+          <div class="w-1 h-6 bg-accent-400 rounded-full">
+          <span class="text-foreground">
+            "Keyboard Shortcuts"
+        <button type="button" class="ui-button ui-tone-neutral">
+          <i aria-hidden="true" class="fa-solid fa-keyboard">
+          "Customize"
       <div class="columns-[17rem] gap-x-5">
         <div class="flex flex-col gap-1.5 mb-6 break-inside-avoid">
           <div class="text-sm text-accent-400 font-semibold uppercase tracking-wide mb-1">

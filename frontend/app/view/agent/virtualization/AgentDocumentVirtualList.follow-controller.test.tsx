@@ -429,8 +429,8 @@ describe("follow controller (one-way flow)", () => {
         expect(s.g.top).toBe(900);
         expect(followLines()).toEqual(
             expect.arrayContaining([
-                "pane=abcdef1 following→suspended cause=zero-size",
-                "pane=abcdef1 suspended→following cause=sized",
+                "pane=abcdef1 following→suspended cause=zero-size via=viewport ch=0 sh=1000 top=700",
+                "pane=abcdef1 suspended→following cause=sized via=viewport ch=300 sh=1200 top=900",
             ])
         );
     });

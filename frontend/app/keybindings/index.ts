@@ -33,8 +33,10 @@ export function keyPlatform(): KeyPlatform {
     return isMacOS() ? "mac" : isLinux() ? "linux" : "other";
 }
 
-/** The shortcut for a command ("Ctrl+Shift+T", "⌘T"), or "" if it has none. */
+/** The shortcut for a command ("Ctrl+Shift+T", "⌘T"), or "" if it has none. Reactive: anything that reads it
+ *  inside JSX or a memo shows the new key as soon as the person rebinds it. */
 export function shortcutFor(command: string): string {
+    keybindingsVersion();
     return formatCommand(command, keyPlatform());
 }
 
@@ -73,6 +75,7 @@ export function paneCommandFor(e: KeyboardEvent, pane: KeyPane): string | null {
 /** A command's keys in CodeMirror's syntax ("Ctrl-Shift-s", "Meta-s"), so an
  *  editor keymap comes from the table. Single-key bindings only. */
 export function codeMirrorKeys(command: string): string[] {
+    keybindingsVersion();
     const platform = keyPlatform();
     return keysFor(command, platform)
         .filter((k) => !k.includes(" "))

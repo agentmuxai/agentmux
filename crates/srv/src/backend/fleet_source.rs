@@ -122,6 +122,7 @@ impl FleetSource {
         config: Arc<crate::backend::wconfig::ConfigState>,
         own_url: String,
     ) -> Self {
+        crate::backend::background_set::watch(Arc::clone(&mstore));
         let state_store = Arc::clone(&mstore);
         let line_store = Arc::clone(&mstore);
         Self::new(
@@ -179,13 +180,17 @@ impl FleetSource {
         let listed = (self.agents)();
         self.since.retain(|block_id| listed.iter().any(|(_, b)| b == block_id));
         let now_ms = agentmux_common::time::now_ms_u64();
-        let agent_status = listed
+        let agent_status: BTreeMap<_, _> = listed
             .iter()
             .filter_map(|(name, block_id)| {
                 let status = self.since.record(block_id, (self.state_of_block)(block_id), now_ms)?;
                 Some((name.clone(), status))
             })
             .collect();
+        // Shadow only (SPEC_AGENT_STATE_BACKGROUND_WORK §9 step 1): which idle agents would read Background.
+        let idle: Vec<(String, String)> =
+            listed.iter().filter(|(name, _)| agent_status.get(name).is_some_and(|s| s.state == AgentState::Idle)).cloned().collect();
+        crate::backend::background_set::shadow_sample(&idle, now_ms);
         let agent_lines = listed
             .iter()
             .filter_map(|(name, block_id)| Some((name.clone(), (self.line_of_block)(block_id)?)))

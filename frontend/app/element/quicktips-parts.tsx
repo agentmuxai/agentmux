@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { shortcutFor } from "@/app/keybindings";
+import { Button } from "@/app/element/ui";
+import { openKeyboardSettings } from "@/app/store/keyboard-focus-request";
 import { cn } from "@/util/util";
 import { For, JSX, Show } from "solid-js";
 import type { QuickTipsState } from "./quicktips-state";
@@ -90,7 +92,12 @@ export const HeaderIconsCard = ({ s }: { s: QuickTipsState }): JSX.Element => {
 export const ShortcutsCard = ({ s }: { s: QuickTipsState }): JSX.Element => {
     return (
         <div class={CARD}>
-            <CardTitle>Keyboard Shortcuts</CardTitle>
+            <div class="flex items-center justify-between gap-3">
+                <CardTitle>Keyboard Shortcuts</CardTitle>
+                <Button icon="keyboard" onClick={() => void openKeyboardSettings()}>
+                    Customize
+                </Button>
+            </div>
 
             {/* Generated from the shortcut table (frontend/app/keybindings/defaults.ts),
                 so this list can't disagree with what the keys do. Columns, not a grid:
@@ -110,7 +117,16 @@ export const ShortcutsCard = ({ s }: { s: QuickTipsState }): JSX.Element => {
                                         <span class="text-[15px]">{entry.label}</span>
                                         <div class="flex flex-row flex-wrap items-center gap-1">
                                             <For each={entry.keys}>{(k) => <KeyCap>{k}</KeyCap>}</For>
+                                            <Show when={entry.unbound}>
+                                                <span class="quicktips-unbound text-secondary">Not set</span>
+                                                <Button class="quicktips-set" onClick={() => void openKeyboardSettings(entry.command)}>
+                                                    Set…
+                                                </Button>
+                                            </Show>
                                         </div>
+                                        <Show when={entry.defaults}>
+                                            <div class="quicktips-default text-[13px] text-secondary">Default: {entry.defaults!.join(", ")}</div>
+                                        </Show>
                                     </div>
                                 )}
                             </For>
