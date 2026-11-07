@@ -1,0 +1,39 @@
+onMuxEvent sysinfo local
+-- before any reading
+<div>
+sysinfo empty
+parseDiskVolumes 0
+-- an empty reading
+<div>
+  <div class="status-bar-item system-stats">
+    <button type="button" class="stat-mono stat-cpu stat-cpu-button" data-tip="Per-core CPU usage" aria-label="CPU usage, click for per-core breakdown" aria-haspopup="dialog" style="color: var(--cpu-0);" aria-expanded="false">
+      "CPU"
+      "0"
+      "%"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-mem" data-tip="Memory used and total" aria-label="Memory usage" style="color: var(--secondary-text-color);">
+      "Mem"
+      "0M"
+      "/"
+      "0M"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-net stat-idle" data-tip="Network upload and download" aria-label="Network traffic">
+      <span class="stat-disk-arrow">
+        "↑"
+      "0K"
+      <span class="stat-disk-arrow">
+        "↓"
+      "0K"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-disk stat-idle" data-tip="Disk read and write" aria-label="Disk I/O">
+      <span class="stat-disk-arrow">
+        "R"
+      "0K"
+      <span class="stat-disk-arrow">
+        "W"
+      "0K"
+unsubscribe
+unmounted
