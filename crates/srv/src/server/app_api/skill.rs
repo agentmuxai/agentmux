@@ -21,6 +21,8 @@ use super::*;
 use crate::backend::storage::skill_source::SkillSource;
 #[path = "skill_app_rpc.rs"]
 mod app_rpc;
+#[path = "skill_catalog_rpc.rs"]
+mod catalog_rpc;
 use crate::backend::storage::skills::SkillCatalogItem;
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -41,6 +43,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_skill_catalog_import_preview(engine, state);
     register_skill_catalog_import_commit(engine, state);
     app_rpc::register(engine, state);
+    catalog_rpc::register(engine, state);
     register_skill_catalog_set_opt_out(engine, state);
     register_skill_catalog_bind_to_bundle(engine, state);
     register_skill_catalog_unbind_from_bundle(engine, state);

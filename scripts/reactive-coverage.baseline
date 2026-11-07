@@ -5,9 +5,9 @@
 frontend/app/view/agent/attachments/attachment-lightbox-state.ts
 frontend/app/view/agent/components/AgentBundlesTab.tsx
 frontend/app/view/agent/components/AgentContainerCaches.tsx
-frontend/app/view/agent/components/AgentContainerLimitsPanel.tsx
 frontend/app/view/agent/components/AgentCreateForm.tsx
 frontend/app/view/agent/components/InputHistorySearch.tsx
+frontend/app/view/agent/components/agent-container-limits-state.ts
 frontend/app/view/agent/components/use-runtime-choice.ts
 frontend/app/view/agent/hooks/useHistoryPagination.ts
 frontend/app/view/bundle-summary.tsx

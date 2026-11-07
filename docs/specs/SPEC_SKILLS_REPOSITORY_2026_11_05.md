@@ -1,6 +1,6 @@
 # SPEC: A public computer-use skill repository, `agentmuxai/skills`, installed on demand
 
-**Status:** active — approved by the operator 2026-11-05 ("yes proceed with computer use implementation", relayed by AgentY, with R2 to R6 as recommended: Apache-2.0, DCO, every listed skill signed, only the guide bundled, AgentY creates the repo); build #1630, first PR #6582. The repository is `agentmuxai/skills`.
+**Status:** active — approved by the operator 2026-11-05 ("yes proceed with computer use implementation", relayed by AgentY, with R2 to R6 as recommended: Apache-2.0, DCO, every listed skill signed, only the guide bundled, AgentY creates the repo); build #1630, first PR #6582. The repository is `agentmuxai/skills`, and its catalog is live. Built in the app: P2 (`backend/skill_catalog.rs`, `app_skills.catalog` and `.install`, `PACK_CATALOG_KEYS`) and P3 (Memory > Skills > Browse the catalog, with Install and Update). Not built: the "From the AgentMux catalog" prompt line, and the app version found on this machine next to each entry.
 **Date:** 2026-11-05
 **Author:** Manoz@Area54, at AgentY's request after the operator asked (quoted): "we also need a pack repository, so we dont ship them all, in fact is there already a pack repository? we may want to start it as a public contribution on agentmuxai/skills, what do u think?"
 **Written against:** origin/main `c655acddd` (v0.60.17).

@@ -7,6 +7,7 @@
 # Scope (per spec §3.1 + §3.2):
 #   - frontend/app/view/term/*.{ts,tsx}    — terminal pane (xterm.js)
 #   - frontend/app/view/agent/components/AgentFooter.tsx  — agent composer
+#     (and agent-footer-parts.tsx, agent-footer-state.ts, where its wiring lives)
 #
 # Banned identifiers (any property access or call):
 #   scrollHeight / scrollTop / scrollWidth / scrollLeft
@@ -44,6 +45,8 @@ SCOPE=(
   frontend/app/view/term/*.ts
   frontend/app/view/term/*.tsx
   frontend/app/view/agent/components/AgentFooter.tsx
+  frontend/app/view/agent/components/agent-footer-parts.tsx
+  frontend/app/view/agent/components/agent-footer-state.ts
   # The agent pane's scroll/pin path runs on every stream flush of every
   # visible pane. Every layout read in it must be in a ResizeObserver callback
   # (layout already clean) or on a user-initiated path, and say which with the

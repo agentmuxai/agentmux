@@ -1261,6 +1261,44 @@
     }
   },
   {
+    "command": "app_skills.catalog",
+    "request": "agentmux_srv::backend::rpc_types::skill::CommandAppSkillsCatalogData",
+    "requestName": "CommandAppSkillsCatalogData",
+    "requestTs": {
+      "imports": [
+        "CommandAppSkillsCatalogData"
+      ],
+      "name": "CommandAppSkillsCatalogData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::skill::AppSkillsCatalog",
+    "responseName": "AppSkillsCatalog",
+    "responseTs": {
+      "imports": [
+        "AppSkillsCatalog"
+      ],
+      "name": "AppSkillsCatalog"
+    }
+  },
+  {
+    "command": "app_skills.catalog.install",
+    "request": "agentmux_srv::backend::rpc_types::skill::CommandAppSkillsCatalogInstallData",
+    "requestName": "CommandAppSkillsCatalogInstallData",
+    "requestTs": {
+      "imports": [
+        "CommandAppSkillsCatalogInstallData"
+      ],
+      "name": "CommandAppSkillsCatalogInstallData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::skill::AppSkillInstallResult",
+    "responseName": "AppSkillInstallResult",
+    "responseTs": {
+      "imports": [
+        "AppSkillInstallResult"
+      ],
+      "name": "AppSkillInstallResult"
+    }
+  },
+  {
     "command": "appendagenthistory",
     "request": "agentmux_srv::backend::rpc_types::agent::CommandAppendAgentHistoryData",
     "requestName": "CommandAppendAgentHistoryData",
