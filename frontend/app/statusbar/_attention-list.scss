@@ -30,7 +30,7 @@
         padding: 0;
         // As tall as the space above the bar allows (the header and footer take about 160 px; the body is zoomed
         // with the chrome, so the window's height is divided by the zoom).
-        max-height: min(320px, calc(100vh / var(--zoomfactor, 1) - 160px));
+        max-height: min(320px, calc(100vh / var(--zoomfactor) - 160px));
         overflow-y: auto;
     }
 
