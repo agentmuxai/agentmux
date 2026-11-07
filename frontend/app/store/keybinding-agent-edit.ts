@@ -21,7 +21,10 @@ const UNDO_MS = 60_000;
 
 const entriesNow = (): unknown[] => ((settingsAtom() as Record<string, unknown> | undefined)?.["keybindings"] as unknown[] | undefined) ?? [];
 const write = (entries: unknown[]): Promise<unknown> => RpcApi.SetConfigCommand(TabRpcClient, { keybindings: entries } as never);
-const same = (a: unknown[], b: unknown[]): boolean => JSON.stringify(a) === JSON.stringify(b);
+/** JSON with each object's keys in order: the setting comes back from the config file with its keys sorted. */
+const canonical = (v: unknown): string =>
+    JSON.stringify(v, (_k, x) => (x && typeof x === "object" && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => (a < b ? -1 : 1))) : x));
+const same = (a: unknown[], b: unknown[]): boolean => canonical(a) === canonical(b);
 const changes = (n: number): string => (n === 1 ? "a shortcut" : `${n} shortcuts`);
 
 function say(id: string, title: string, message: string): void {

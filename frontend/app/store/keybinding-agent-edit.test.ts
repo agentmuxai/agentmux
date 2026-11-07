@@ -85,6 +85,18 @@ describe("agentSetShortcut", () => {
         expect(h.notices[1]).toMatchObject({ title: "Undone 1 change by AgentX" });
     });
 
+    it("puts the old setting back when the setting reads back with its keys in another order", async () => {
+        const before = [{ command: "-pane:close", platform: "other" }];
+        h.entries.current = before;
+        await agentSetShortcut({ command: "tab:new", bindings: ["ctrl+shift+y"], when: "!terminalFocus" }, "AgentX");
+        // The config file gives each entry back with its keys sorted.
+        h.entries.current = (h.entries.current as Record<string, unknown>[]).map((e) => Object.fromEntries(Object.entries(e).sort(([a], [b]) => (a < b ? -1 : 1))));
+        h.actions.get(h.notices[0].actions[0].actionKey)!();
+        await flush();
+        expect(h.writes[1]).toEqual(before);
+        expect(h.notices[1]).toMatchObject({ title: "Undone 1 change by AgentX" });
+    });
+
     it("leaves the person's own later changes alone when Undo is pressed", async () => {
         await agentSetShortcut({ command: "tab:new", bindings: ["ctrl+shift+y"] }, "AgentX");
         // The person changed another shortcut afterwards.

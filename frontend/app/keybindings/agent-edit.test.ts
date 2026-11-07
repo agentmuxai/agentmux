@@ -41,6 +41,32 @@ describe("planAgentSet", () => {
         expect((told as { entries: unknown[] }).entries).toContainEqual({ command: "tab:new", key: "ctrl+shift+y", when: "!terminalFocus", platform: "other" });
     });
 
+    it("takes a blank place as no place given: the key works where the command works today", () => {
+        // `null`: srv sends an absent `when` as null.
+        for (const when of ["", "   ", null as unknown as string]) {
+            const plan = planAgentSet([], { command: "term:copy", bindings: ["ctrl+shift+y"], when }, "other");
+            expect((plan as { entries: unknown[] }).entries).toContainEqual({ command: "term:copy", key: "ctrl+shift+y", when: "terminalFocus && viewType == term", platform: "other" });
+        }
+    });
+
+    it("leaves a key the person types with to the person: it would type into every text field and terminal", () => {
+        for (const key of ["a", "5", "shift+a", "code:Space", "a ctrl+k"]) {
+            const plan = planAgentSet([], { command: "tab:new", bindings: [key] }, "other");
+            expect(plan, key).toMatchObject({ changed: false });
+            expect((plan as { reason: string }).reason, key).toContain("Ask the person to set it in Settings");
+        }
+        // Function keys, arrows and keys with Ctrl, Alt or Meta are not typing.
+        for (const key of ["F9", "ctrl+alt+9", "alt+shift+a"]) {
+            expect(planAgentSet([], { command: "tab:new", bindings: [key] }, "other"), key).toMatchObject({ changed: true });
+        }
+    });
+
+    it("takes cmd and command as the Meta key", () => {
+        for (const key of ["cmd+shift+y", "command+shift+y"]) {
+            expect(planAgentSet([], { command: "tab:new", bindings: [key] }, "mac"), key).toMatchObject({ changed: true });
+        }
+    });
+
     it("says so when nothing would change", () => {
         expect(planAgentSet([], { command: "tab:new", bindings: ["ctrl+shift+t"] }, "other")).toEqual({ changed: false, reason: "New tab already has Ctrl+Shift+T" });
         expect(planAgentSet(NEW_TAB_MINE, { command: "tab:new", bindings: ["ctrl+alt+t"] }, "other")).toMatchObject({ changed: false });
@@ -110,5 +136,12 @@ describe("planAgentReset", () => {
             summary: "all shortcuts back on their defaults (2 commands)",
         });
         expect(planAgentReset([], { all: true }, "other")).toEqual({ changed: false, reason: "no shortcut is changed" });
+    });
+
+    it("clears entries that did not apply, and says that rather than counting 0 commands", () => {
+        const entries = [{ command: "no:such", key: "ctrl+alt+9" }, { command: "tab:new", key: "ctrl+shift+" }];
+        setUserKeybindings(entries, () => false);
+        const plan = planAgentReset(entries, { all: true }, "other");
+        expect(plan).toEqual({ changed: true, count: 2, entries: [], keys: [], summary: "the shortcuts setting cleared (2 entries that did not apply)" });
     });
 });

@@ -6,15 +6,14 @@
 // be saved. Plain functions over `planChange`, so the view holds no rule of its own.
 
 import { DEFAULT_KEYBINDINGS } from "@/app/keybindings/defaults";
-import { choicesOf, planChange, type Conflict, type KeyChoice, type PlannedChange } from "@/app/keybindings/edit";
-import { formatKey, parseKey, type KeyPlatform } from "@/app/keybindings/keys";
+import { choicesOf, isPlainKey, PLAIN_KEY_GUARD, planChange, type Conflict, type KeyChoice, type PlannedChange } from "@/app/keybindings/edit";
+import { formatKey, type KeyPlatform } from "@/app/keybindings/keys";
 import type { Reserved } from "@/app/keybindings/reserved";
 
 /** A shortcut is at most two keys (a chord). */
 export const MAX_STEPS = 2;
 
-/** What a bare printable key is saved with, so it never fires while the person types (WCAG 2.1.4). */
-export const PLAIN_KEY_GUARD = "!textInputFocus && !terminalFocus";
+export { isPlainKey, PLAIN_KEY_GUARD };
 
 export interface WhereChoice {
     /** The `when` the setting gets; "" is everywhere. */
@@ -39,12 +38,6 @@ export const ownWhen = (command: string): string => DEFAULT_KEYBINDINGS.find((r)
 export function whereChoices(command: string): WhereChoice[] {
     const own = ownWhen(command);
     return WHERE.some((w) => w.value === own) ? WHERE : [{ value: own, label: "As it works today" }, ...WHERE];
-}
-
-/** A key with no Ctrl, Alt or Meta that types something: a letter, a digit, punctuation, Space or a numpad key. */
-export function isPlainKey(step: string, platform: KeyPlatform): boolean {
-    const k = parseKey(step, platform);
-    return !k.ctrl && !k.alt && !k.meta && (k.letter != null || k.code != null);
 }
 
 export interface RecorderOptions {

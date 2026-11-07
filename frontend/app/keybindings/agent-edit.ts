@@ -8,7 +8,7 @@
 // the person.
 
 import { DEFAULT_KEYBINDINGS } from "./defaults";
-import { choicesOf, ownWhen, planChange } from "./edit";
+import { choicesOf, isPlainKey, ownWhen, planChange } from "./edit";
 import { formatKey, parseKey, type KeyPlatform } from "./keys";
 import { bindingsView, defaultKeysOf, validEntries } from "./registry";
 import { reservedFor } from "./reserved";
@@ -77,6 +77,13 @@ function reservedProblem(key: string, platform: KeyPlatform): string | null {
     return r.tier === "blocked" ? `${shown} cannot be used: ${r.reason}` : `${shown}: ${r.reason}. Ask the person to set it in Settings, where they can confirm it`;
 }
 
+/** A bare letter, digit or punctuation key would type into every text field and terminal unless it is limited to
+ *  where the person is not typing: the Settings recorder asks the person to allow it, so an agent leaves it to them. */
+function plainProblem(key: string, platform: KeyPlatform): string | null {
+    if (!isPlainKey(key.split(" ")[0], platform)) return null;
+    return `${formatKey(key, platform)} is a key the person types with. Ask the person to set it in Settings, where they can allow plain keys`;
+}
+
 /** What `req` does to `entries`, or why not. */
 export function planAgentSet(entries: unknown[], req: AgentSetRequest, platform: KeyPlatform): AgentEdit {
     const command = req.command?.trim();
@@ -84,10 +91,11 @@ export function planAgentSet(entries: unknown[], req: AgentSetRequest, platform:
     if (!Array.isArray(req.bindings)) return refuse("`bindings` must be a list of keys (empty to unbind the command)");
     const keys = req.bindings.map((k) => String(k).trim().split(/\s+/).join(" "));
     for (const key of keys) {
-        const bad = keyProblem(key, platform) ?? reservedProblem(key, platform);
+        const bad = keyProblem(key, platform) ?? reservedProblem(key, platform) ?? plainProblem(key, platform);
         if (bad) return refuse(bad);
     }
-    const when = req.when === undefined ? ownWhen(command) : req.when.trim() || undefined;
+    // A blank `when` is no `when` given: the key works where the command works today.
+    const when = req.when?.trim() || ownWhen(command);
     const plan = planChange(entries, command, keys.map((key) => ({ key, ...(when ? { when } : {}) })), platform);
     const written = plan.entries.filter((e) => !entries.includes(e));
     if (written.some((e) => validEntries([e]).length === 0)) {
@@ -106,9 +114,13 @@ export function planAgentSet(entries: unknown[], req: AgentSetRequest, platform:
 /** What `req` does to `entries`, or why not. */
 export function planAgentReset(entries: unknown[], req: AgentResetRequest, platform: KeyPlatform): AgentEdit {
     if (req.all) {
-        const count = bindingsView(platform).filter((v) => !v.devOnly && v.changed).length;
+        const changed = bindingsView(platform).filter((v) => !v.devOnly && v.changed).length;
         if (entries.length === 0) return refuse("no shortcut is changed");
-        return { changed: true, entries: [], count, keys: [], summary: `all shortcuts back on their defaults (${count} ${count === 1 ? "command" : "commands"})` };
+        // Entries that did not apply (an unknown command, a bad key) are cleared too, though no command differs.
+        const summary = changed > 0
+            ? `all shortcuts back on their defaults (${changed} ${changed === 1 ? "command" : "commands"})`
+            : `the shortcuts setting cleared (${entries.length} ${entries.length === 1 ? "entry" : "entries"} that did not apply)`;
+        return { changed: true, entries: [], count: changed || entries.length, keys: [], summary };
     }
     const command = req.command?.trim();
     if (!command || !isTableCommand(command)) return refuse(`unknown command "${req.command ?? ""}": give a command, or \`all\` to reset every shortcut`);
