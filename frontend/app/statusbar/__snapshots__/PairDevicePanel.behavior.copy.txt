@@ -1,0 +1,111 @@
+Button "Pair a device" click
+ViewerPairStartCommand
+toCanvas canvas agentmux://pair?v=1&host=198.51.100.7&code=ABCDEFGH23 {"width":176,"margin":1}
+Button "Copy link" click
+writeText agentmux://pair?v=1&host=198.51.100.7&code=ABCDEFGH23
+-- copied
+<div>
+  <div class="status-bar-pair" data-testid="pair-device">
+    <div class="status-bar-popover-row" style="padding-left:12px">
+      <span data-stand="Button" data-density="compact" data-disabled="undefined">
+        "Hide"
+      <span data-stand="Button" data-density="compact" data-disabled="false">
+        "New code"
+      <span data-stand="Button" data-density="compact" data-disabled="false">
+        "Copied"
+    <div class="status-bar-qr-panel">
+      <canvas class="status-bar-qr-canvas" aria-label="Pairing QR code">
+      <div class="status-bar-qr-note" data-testid="pair-countdown">
+        "Scan with AgentMux Mobile. Works once, for"
+        "2:00"
+        "."
+      <div class="status-bar-qr-note">
+        "Pairing lets that device watch this computer's agents, read-only (and its processes, if you share them in Tower). Show this code only to your own devices. Another AgentMux computer pairs with the copied link, in its Tower."
+Button "New code" click
+ViewerPairStartCommand
+toCanvas canvas agentmux://pair?v=1&host=198.51.100.7&code=ABCDEFGH23 {"width":176,"margin":1}
+-- a new code: copy is offered again
+<div>
+  <div class="status-bar-pair" data-testid="pair-device">
+    <div class="status-bar-popover-row" style="padding-left:12px">
+      <span data-stand="Button" data-density="compact" data-disabled="undefined">
+        "Hide"
+      <span data-stand="Button" data-density="compact" data-disabled="false">
+        "New code"
+      <span data-stand="Button" data-density="compact" data-disabled="false">
+        "Copy link"
+    <div class="status-bar-qr-panel">
+      <canvas class="status-bar-qr-canvas" aria-label="Pairing QR code">
+      <div class="status-bar-qr-note" data-testid="pair-countdown">
+        "Scan with AgentMux Mobile. Works once, for"
+        "2:00"
+        "."
+      <div class="status-bar-qr-note">
+        "Pairing lets that device watch this computer's agents, read-only (and its processes, if you share them in Tower). Show this code only to your own devices. Another AgentMux computer pairs with the copied link, in its Tower."
+Button "Copy link" click
+writeText agentmux://pair?v=1&host=198.51.100.7&code=ABCDEFGH23
+-- the clipboard failed
+<div>
+  <div class="status-bar-pair" data-testid="pair-device">
+    <div class="status-bar-popover-row" style="padding-left:12px">
+      <span data-stand="Button" data-density="compact" data-disabled="undefined">
+        "Hide"
+      <span data-stand="Button" data-density="compact" data-disabled="false">
+        "New code"
+      <span data-stand="Button" data-density="compact" data-disabled="false">
+        "Copy link"
+    <div class="status-bar-pair-note status-bar-pair-note--warn" role="alert">
+      "⚠"
+      "Couldn't copy the link to the clipboard."
+    <div class="status-bar-qr-panel">
+      <canvas class="status-bar-qr-canvas" aria-label="Pairing QR code">
+      <div class="status-bar-qr-note" data-testid="pair-countdown">
+        "Scan with AgentMux Mobile. Works once, for"
+        "2:00"
+        "."
+      <div class="status-bar-qr-note">
+        "Pairing lets that device watch this computer's agents, read-only (and its processes, if you share them in Tower). Show this code only to your own devices. Another AgentMux computer pairs with the copied link, in its Tower."
+Button "Hide" click
+-- hidden, the error stays
+<div>
+  <div class="status-bar-pair" data-testid="pair-device">
+    <div class="status-bar-popover-row" style="padding-left:12px">
+      <span data-stand="Button" data-density="compact" data-disabled="false">
+        "Pair a device"
+    <div class="status-bar-pair-note status-bar-pair-note--warn" role="alert">
+      "⚠"
+      "Couldn't copy the link to the clipboard."
+Button "Pair a device" click
+ViewerPairStartCommand
+toCanvas canvas agentmux://pair?v=1&host=198.51.100.7&code=ABCDEFGH23 {"width":176,"margin":1}
+-- a code again, the error cleared
+<div>
+  <div class="status-bar-pair" data-testid="pair-device">
+    <div class="status-bar-popover-row" style="padding-left:12px">
+      <span data-stand="Button" data-density="compact" data-disabled="undefined">
+        "Hide"
+      <span data-stand="Button" data-density="compact" data-disabled="false">
+        "New code"
+      <span data-stand="Button" data-density="compact" data-disabled="false">
+        "Copy link"
+    <div class="status-bar-qr-panel">
+      <canvas class="status-bar-qr-canvas" aria-label="Pairing QR code">
+      <div class="status-bar-qr-note" data-testid="pair-countdown">
+        "Scan with AgentMux Mobile. Works once, for"
+        "2:00"
+        "."
+      <div class="status-bar-qr-note">
+        "Pairing lets that device watch this computer's agents, read-only (and its processes, if you share them in Tower). Show this code only to your own devices. Another AgentMux computer pairs with the copied link, in its Tower."
+Button "Copy link" click
+-- expired: copy is off and does nothing
+<div>
+  <div class="status-bar-pair" data-testid="pair-device">
+    <div class="status-bar-popover-row" style="padding-left:12px">
+      <span data-stand="Button" data-density="compact" data-disabled="undefined">
+        "Hide"
+      <span data-stand="Button" data-density="compact" data-disabled="false">
+        "New code"
+      <span data-stand="Button" data-density="compact" data-disabled="true">
+        "Copy link"
+    <div class="status-bar-pair-note" role="status">
+      "This code expired. Choose New code to show another."
