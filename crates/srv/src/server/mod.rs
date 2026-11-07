@@ -126,6 +126,7 @@ pub(crate) mod browser_owner;
 pub(crate) mod browser_pane_gone;
 pub(crate) mod browser_pane_records;
 pub(crate) mod browser_popup;
+pub(crate) mod browser_control;
 pub(crate) mod browser_retake;
 pub(crate) mod browser_powers;
 pub(crate) mod browser_pause_all;

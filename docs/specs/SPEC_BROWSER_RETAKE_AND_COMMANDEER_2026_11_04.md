@@ -1,6 +1,6 @@
 # SPEC: an agent retakes a browser pane, and takes one it did not open (2026-11-04)
 
-**Status:** active — approved by the operator (2026-11-04, via AgentY); built in #18112: retake, Give back and `handoff_status` first (what shipped is marked below); the idle rule built; `take_control`, `release` and `driver` in the layout follow
+**Status:** active — approved by the operator (2026-11-04, via AgentY); built in #18112: retake, Give back and `handoff_status` first (what shipped is marked below); the idle rule, `take_control`, `release` and `driver` in the layout built (all of it)
 **Author:** Camper-2@narko, 2026-11-04, at the operator's direction
 
 Task #18111; the build is #18112. Author: Camper-2.
@@ -41,6 +41,8 @@ Control of a browser pane is always visible and always one click from the person
 5. **Visible and reversible.** The header shows "Driven by X (took control)" with the existing Take over button; the pane's Log records "X took control (profile P, the person last acted N s ago)". A person's takeover ends it as for any pane and starts the retake path of §1.
 6. **Limits on a pane taken, not opened.** Its site limit is the site it is on now unless the agent passes `allowed_origins`; any other site asks the person, as a navigation off an opened pane's list does. `eval` and `set_files` are refused exactly as on opened panes (the refusal names the reason and the alternative). The auto-approve grant is not inherited; it is requested for this pane.
 7. **Profile rule unchanged:** a taken pane keeps its profile; taking it does not give the agent that profile for anything else, and the agent never silently gets the person's Personal sign-ins.
+
+*Built (§2):* `Browser take_control` and `release` (`browser_control.rs`), `driver` in `Pane layout`, a `take` banner kind (Allow / Not now), the header's "(took control)" and the Log's `took control` and `released` entries. A pane nobody drives (released, or never taken) needs no prompt; what asks is Personal sign-ins, another agent driving, or the person's input in the last 60 s (or the host being unable to say). The profile rule runs first and is `check_agent_may_use`, so another agent's own profile is refused even after that agent releases; a shared profile or Incognito passes. The agent that was driving is not given a special message when it is displaced: its next call gets the plain "not a pane you own" refusal. A "took control" notice for 10 seconds in the pane is not built; the header and the Log say it.
 
 ## Where it goes
 

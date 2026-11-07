@@ -68,6 +68,10 @@ pub(crate) enum Kind {
     AutoApproveOff,
     Pause,
     Resume,
+    /// An agent began driving a pane it did not open.
+    TookControl,
+    /// An agent let a pane go.
+    Released,
 }
 
 /// How it went: who let it through, or why it didn't happen.

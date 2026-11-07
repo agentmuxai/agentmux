@@ -44,6 +44,10 @@ pub(crate) const LAST_DRIVER_META_KEY: &str = "browser:last_driver";
 /// host), so the retake still works after an srv restart. Cleared when an agent drives the pane again.
 pub(crate) const GIVEN_BACK_META_KEY: &str = "browser:given_back";
 
+/// Block meta key set to true while the agent that drives the pane did not open it (`take_control`), so the header
+/// says "took control". Cleared when the agent lets the pane go.
+pub(crate) const TOOK_CONTROL_META_KEY: &str = "browser:took_control";
+
 fn owners() -> &'static Mutex<HashMap<String, String>> {
     static OWNERS: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
     OWNERS.get_or_init(Default::default)
@@ -269,6 +273,28 @@ pub(crate) fn retaken_meta(agent: &str) -> MetaMapType {
     m
 }
 
+/// The meta that shows `agent` driving a pane it did not open.
+pub(crate) fn took_control_meta(agent: &str) -> MetaMapType {
+    let mut m = retaken_meta(agent);
+    m.insert(TOOK_CONTROL_META_KEY.to_string(), serde_json::json!(true));
+    m
+}
+
+/// The meta of a pane nobody drives and the person did not take over: an agent let it go (`release`).
+pub(crate) fn released_meta() -> MetaMapType {
+    [OWNER_META_KEY, LAST_DRIVER_META_KEY, GIVEN_BACK_META_KEY, TOOK_CONTROL_META_KEY]
+        .into_iter()
+        .map(|k| (k.to_string(), serde_json::Value::Null))
+        .collect()
+}
+
+/// Who drives a browser pane, for `Pane layout`: the agent's id, `person` after they took it over from an agent that
+/// has not got it back, or None for a pane no agent has driven.
+pub(crate) fn driver_of(meta: &MetaMapType) -> Option<String> {
+    let text = |k: &str| meta.get(k).and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty());
+    text(OWNER_META_KEY).map(str::to_string).or_else(|| text(LAST_DRIVER_META_KEY).map(|_| "person".to_string()))
+}
+
 /// Every pane an agent owns. The host keeps a copy, to decide inside
 /// `on_before_popup` which of a pane's popups open in-app
 /// (SPEC_BROWSER_PANE_NATIVE_POPUPS_AGENT_DRIVEN_2026_10_08.md §3); it is
@@ -357,11 +383,12 @@ pub(crate) fn check(
 /// banner that asks the person something, the bypass the person granted,
 /// what the agent did and whether the person paused it, what opened a
 /// popup, the sites a pane is limited to, and which agent coaches a worker.
-pub(crate) fn srv_only_keys() -> [&'static str; 12] {
+pub(crate) fn srv_only_keys() -> [&'static str; 13] {
     [
         OWNER_META_KEY,
         LAST_DRIVER_META_KEY,
         GIVEN_BACK_META_KEY,
+        TOOK_CONTROL_META_KEY,
         crate::server::browser_allowlist::ALLOWED_META_KEY,
         crate::server::browser_attention::ATTENTION_META_KEY,
         crate::server::browser_bypass::BYPASS_META_KEY,
@@ -411,6 +438,7 @@ pub(crate) fn guard_client_meta_write(oref: &str, meta: &MetaMapType) -> Result<
     for key in [
         LAST_DRIVER_META_KEY,
         GIVEN_BACK_META_KEY,
+        TOOK_CONTROL_META_KEY,
         crate::server::browser_attention::ATTENTION_META_KEY,
         crate::server::browser_bypass::BYPASS_META_KEY,
         crate::server::browser_actions::ACTIONS_META_KEY,
@@ -770,13 +798,33 @@ mod tests {
 
     #[test]
     fn a_client_cannot_write_the_last_driver_or_the_give_back() {
-        for key in [LAST_DRIVER_META_KEY, GIVEN_BACK_META_KEY] {
+        for key in [LAST_DRIVER_META_KEY, GIVEN_BACK_META_KEY, TOOK_CONTROL_META_KEY] {
             assert!(guard_client_meta_write("block:test-guard-last", &meta(key, json!("lark"))).is_err(), "{key}");
             assert!(guard_client_meta_write("block:test-guard-last", &meta(key, serde_json::Value::Null)).is_err(), "{key}");
             let mut m = MetaMapType::new();
             m.insert(key.into(), json!("lark"));
             assert_eq!(strip_srv_only_keys(&mut m), vec![key], "a new pane from a client has neither");
         }
+    }
+
+    #[test]
+    fn who_drives_a_pane_is_the_agent_the_person_or_nobody() {
+        let mut m = MetaMapType::new();
+        assert_eq!(driver_of(&m), None, "never driven");
+        m.insert(OWNER_META_KEY.into(), json!("lark"));
+        m.insert(LAST_DRIVER_META_KEY.into(), json!("lark"));
+        assert_eq!(driver_of(&m).as_deref(), Some("lark"));
+        m.insert(OWNER_META_KEY.into(), serde_json::Value::Null);
+        assert_eq!(driver_of(&m).as_deref(), Some("person"), "taken over from lark");
+        for (k, v) in released_meta() {
+            assert!(v.is_null(), "{k}");
+            m.insert(k, v);
+        }
+        assert_eq!(driver_of(&m), None, "released");
+        let took = took_control_meta("lark");
+        assert_eq!(took.get(TOOK_CONTROL_META_KEY), Some(&json!(true)));
+        assert_eq!(took.get(OWNER_META_KEY), Some(&json!("lark")));
+        assert!(took.get(GIVEN_BACK_META_KEY).is_some_and(|v| v.is_null()));
     }
 
     #[test]

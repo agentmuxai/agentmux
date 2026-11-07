@@ -15,6 +15,10 @@ describe("attentionLook", () => {
         expect(attentionLook(a({ kind: "approval" }))).toMatchObject({ yes: "Approve", answer: "approve" });
     });
 
+    it("asks whether another agent may drive the pane, with Not now as the way out", () => {
+        expect(attentionLook(a({ kind: "take" }))).toMatchObject({ yes: "Allow", answer: "approve", no: "Not now", agent: true });
+    });
+
     it("answers a page's dialog in the browser's own words", () => {
         expect(attentionLook(a({ kind: "dialog", dialogKind: "confirm" }))).toMatchObject({ yes: "OK", no: "Cancel" });
         expect(attentionLook(a({ kind: "dialog", dialogKind: "beforeunload" }))).toMatchObject({
