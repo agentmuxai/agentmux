@@ -9,7 +9,6 @@ import {
     releaseDownload,
     stagedRelease,
     stagedUrgency,
-    updateOffered,
     useStoreOffer,
 } from "@/store/app-update";
 import { atoms, getApi } from "@/store/global";
@@ -71,8 +70,8 @@ const UpdateStatus = (): JSX.Element => {
         void loadStoreCameBack();
     });
     useStoreOffer();
-    // A Store install shows the chip only once the Store itself lists the update.
-    const fromSrv = () => (updateOffered() ? availableRelease() : null);
+    // A Store install shows the chip only once the Store itself lists the update (availableRelease).
+    const fromSrv = () => availableRelease();
     const staged = () => stagedRelease();
     // srv is fetching it: nothing to click yet, and the version panel has the progress.
     const fetching = () => {

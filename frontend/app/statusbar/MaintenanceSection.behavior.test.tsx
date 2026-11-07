@@ -18,7 +18,7 @@ const h = vi.hoisted(() => ({
     updaterVersion: null as string | null,
     status: null as any,
     check: null as any,
-    storeOffer: { state: "available", message: "" } as any,
+    storeOffer: { state: "available", message: "", version: "0.59.27" } as any,
     storeResult: undefined as any,
     hostError: null as string | null,
     revealError: null as string | null,
@@ -71,6 +71,7 @@ vi.mock("@/store/global", () => ({
         listen: () => Promise.resolve(() => {}),
     }),
     openLink: (url: string) => void h.log.push(`openLink ${url}`),
+    getSettingsKeyAtom: () => () => undefined,
 }));
 vi.mock("@/app/store/app-update", async (orig) => ({
     ...(await orig<typeof import("@/app/store/app-update")>()),
@@ -148,7 +149,7 @@ beforeEach(() => {
     h.updaterStatus = "up-to-date";
     h.updaterVersion = null;
     h.check = null;
-    h.storeOffer = { state: "available", message: "" };
+    h.storeOffer = { state: "available", message: "", version: "0.59.27" };
     h.storeResult = undefined;
     h.hostError = null;
     h.revealError = null;
@@ -293,7 +294,7 @@ describe("a release srv found", () => {
 describe("a Microsoft Store install", () => {
     it("asks the Store, and says what it answered", async () => {
         for (const [label, offer] of [
-            ["available", { state: "available", message: "" }],
+            ["available", { state: "available", message: "", version: "0.59.27" }],
             ["none", { state: "none", message: "" }],
             ["no answer", { state: "no_answer", message: "" }],
             ["unknown", { state: "unknown", message: "offline" }],

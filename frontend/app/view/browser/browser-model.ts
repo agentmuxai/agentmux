@@ -736,7 +736,7 @@ export class BrowserViewModel {
         void getApi().listen<DownloadUpdate>("pane-download-update", (payload) => {
             if (this.closed || payload.block_id !== this.blockId) return;
             this._downloads[1]((rows) => applyDownloadUpdate(rows, payload));
-            if (payload.state === "done" && payload.download_id != null) {
+            if ((payload.state === "done" || payload.state === "cancelled") && payload.download_id != null) {
                 const key = String(payload.download_id);
                 clearTimeout(this._downloadTimers.get(key));
                 this._downloadTimers.set(

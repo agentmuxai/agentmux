@@ -10,7 +10,7 @@ host storeUpdateCheck
     <span class="maintenance-icon maintenance-icon--update">
       "↓"
     <span class="maintenance-row-text">
-      "v0.59.27 is out"
+      "v0.59.27 is in the Microsoft Store"
     <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
       "What's new"
   <div class="maintenance-row-text maintenance-row-text--warn">
