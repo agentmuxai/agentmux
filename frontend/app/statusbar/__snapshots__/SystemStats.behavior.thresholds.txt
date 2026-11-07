@@ -1,0 +1,226 @@
+onMuxEvent sysinfo local
+sysinfo memory just under the line
+parseDiskVolumes 0
+-- at 90% and 85%
+<div>
+  <div class="status-bar-item system-stats">
+    <button type="button" class="stat-mono stat-cpu stat-cpu-button" data-tip="Per-core CPU usage" aria-label="CPU usage, click for per-core breakdown" aria-haspopup="dialog" style="color: var(--cpu-0);" aria-expanded="false">
+      "CPU"
+      "0"
+      "%"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-mem" data-tip="Memory used and total" aria-label="Memory usage" style="color: var(--secondary-text-color);">
+      "Mem"
+      "14.4G"
+      "/"
+      "16.0G"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-commit" data-tip="Commit charge used and total (RAM + page file budget)." aria-label="Commit charge" style="color: var(--secondary-text-color);">
+      "PF"
+      "85.0G"
+      "/"
+      "100.0G"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-net stat-idle" data-tip="Network upload and download" aria-label="Network traffic">
+      <span class="stat-disk-arrow">
+        "↑"
+      "0K"
+      <span class="stat-disk-arrow">
+        "↓"
+      "0K"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-disk stat-idle" data-tip="Disk read and write" aria-label="Disk I/O">
+      <span class="stat-disk-arrow">
+        "R"
+      "0K"
+      <span class="stat-disk-arrow">
+        "W"
+      "0K"
+sysinfo memory over the line
+parseDiskVolumes 0
+-- over 90% and 85%
+<div>
+  <div class="status-bar-item system-stats">
+    <button type="button" class="stat-mono stat-cpu stat-cpu-button" data-tip="Per-core CPU usage" aria-label="CPU usage, click for per-core breakdown" aria-haspopup="dialog" style="color: var(--cpu-0);" aria-expanded="false">
+      "CPU"
+      "0"
+      "%"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-mem" data-tip="Memory used and total" aria-label="Memory usage" style="color: var(--warning-text-color);">
+      "Mem"
+      "14.5G"
+      "/"
+      "16.0G"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-commit" data-tip="Commit charge used and total (RAM + page file budget)." aria-label="Commit charge" style="color: var(--warning-text-color);">
+      "PF"
+      "85.5G"
+      "/"
+      "100.0G"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-net stat-idle" data-tip="Network upload and download" aria-label="Network traffic">
+      <span class="stat-disk-arrow">
+        "↑"
+      "0K"
+      <span class="stat-disk-arrow">
+        "↓"
+      "0K"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-disk stat-idle" data-tip="Disk read and write" aria-label="Disk I/O">
+      <span class="stat-disk-arrow">
+        "R"
+      "0K"
+      <span class="stat-disk-arrow">
+        "W"
+      "0K"
+sysinfo page file over 95%
+parseDiskVolumes 0
+-- sizes in M, page file over 95%
+<div>
+  <div class="status-bar-item system-stats">
+    <button type="button" class="stat-mono stat-cpu stat-cpu-button" data-tip="Per-core CPU usage" aria-label="CPU usage, click for per-core breakdown" aria-haspopup="dialog" style="color: var(--cpu-0);" aria-expanded="false">
+      "CPU"
+      "0"
+      "%"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-mem" data-tip="Memory used and total" aria-label="Memory usage" style="color: var(--secondary-text-color);">
+      "Mem"
+      "512M"
+      "/"
+      "768M"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-commit" data-tip="Commit charge used and total (RAM + page file budget)." aria-label="Commit charge" style="color: var(--error-text-color);">
+      "PF"
+      "96.0G"
+      "/"
+      "100.0G"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-net stat-idle" data-tip="Network upload and download" aria-label="Network traffic">
+      <span class="stat-disk-arrow">
+        "↑"
+      "0K"
+      <span class="stat-disk-arrow">
+        "↓"
+      "0K"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-disk stat-idle" data-tip="Disk read and write" aria-label="Disk I/O">
+      <span class="stat-disk-arrow">
+        "R"
+      "0K"
+      <span class="stat-disk-arrow">
+        "W"
+      "0K"
+sysinfo rates
+parseDiskVolumes 0
+-- rates in K, K, G, G
+<div>
+  <div class="status-bar-item system-stats">
+    <button type="button" class="stat-mono stat-cpu stat-cpu-button" data-tip="Per-core CPU usage" aria-label="CPU usage, click for per-core breakdown" aria-haspopup="dialog" style="color: var(--cpu-0);" aria-expanded="false">
+      "CPU"
+      "0"
+      "%"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-mem" data-tip="Memory used and total" aria-label="Memory usage" style="color: var(--secondary-text-color);">
+      "Mem"
+      "0M"
+      "/"
+      "0M"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-net" data-tip="Network upload and download" aria-label="Network traffic">
+      <span class="stat-disk-arrow">
+        "↑"
+      "0K"
+      <span class="stat-disk-arrow">
+        "↓"
+      "512K"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-disk" data-tip="Disk read and write" aria-label="Disk I/O">
+      <span class="stat-disk-arrow">
+        "R"
+      "1.0G"
+      <span class="stat-disk-arrow">
+        "W"
+      "2.0G"
+sysinfo one way only
+parseDiskVolumes 0
+-- one way only
+<div>
+  <div class="status-bar-item system-stats">
+    <button type="button" class="stat-mono stat-cpu stat-cpu-button" data-tip="Per-core CPU usage" aria-label="CPU usage, click for per-core breakdown" aria-haspopup="dialog" style="color: var(--cpu-0);" aria-expanded="false">
+      "CPU"
+      "0"
+      "%"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-mem" data-tip="Memory used and total" aria-label="Memory usage" style="color: var(--secondary-text-color);">
+      "Mem"
+      "0M"
+      "/"
+      "0M"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-net" data-tip="Network upload and download" aria-label="Network traffic">
+      <span class="stat-disk-arrow">
+        "↑"
+      "0K"
+      <span class="stat-disk-arrow">
+        "↓"
+      "1.0M"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-disk" data-tip="Disk read and write" aria-label="Disk I/O">
+      <span class="stat-disk-arrow">
+        "R"
+      "0K"
+      <span class="stat-disk-arrow">
+        "W"
+      "0K"
+sysinfo no memory total
+parseDiskVolumes 0
+-- no memory total
+<div>
+  <div class="status-bar-item system-stats">
+    <button type="button" class="stat-mono stat-cpu stat-cpu-button" data-tip="Per-core CPU usage" aria-label="CPU usage, click for per-core breakdown" aria-haspopup="dialog" style="color: var(--cpu-0);" aria-expanded="false">
+      "CPU"
+      "0"
+      "%"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-mem" data-tip="Memory used and total" aria-label="Memory usage" style="color: var(--secondary-text-color);">
+      "Mem"
+      "3.0G"
+      "/"
+      "0M"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-net stat-idle" data-tip="Network upload and download" aria-label="Network traffic">
+      <span class="stat-disk-arrow">
+        "↑"
+      "0K"
+      <span class="stat-disk-arrow">
+        "↓"
+      "0K"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-disk stat-idle" data-tip="Disk read and write" aria-label="Disk I/O">
+      <span class="stat-disk-arrow">
+        "R"
+      "0K"
+      <span class="stat-disk-arrow">
+        "W"
+      "0K"
