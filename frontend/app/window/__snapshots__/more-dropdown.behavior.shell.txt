@@ -1,0 +1,16 @@
+ref ""
+setSubmenuEl region
+popover: placement=bottom-end gutter=4 hideUntilPlaced=true shell=anchored-popover--menu class=action-widget-more-dropdown
+-- one plain row
+<div data-stand="AnchoredPopover" data-placement="bottom-end" data-gutter="4" data-hide-until-placed="true" data-shell="anchored-popover--menu" class="action-widget-more-dropdown">
+  <div class="action-widget-more-item" data-row-key="row-0">
+    <span class="action-widget-more-item-icon widget-icon" style="--widget-icon-color: c-Terminal;">
+      <i class="fa fa-solid fa-window-maximize fa-fw">
+    <span class="action-widget-more-item-label">
+      "Terminal"
+flyouts open: none
+onClose
+(only Escape closed it)
+the dropdown: close intent aims at 0,0,0,0
+setSubmenuEl null
+unmounted
