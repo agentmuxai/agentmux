@@ -301,7 +301,9 @@ wrap_task! {
     }
 }
 
-/// Ask where to save with `rfd` on its own thread (the dialog blocks), then answer on the UI thread.
+/// Ask where to save with `rfd` on its own thread (the dialog blocks), then answer on the UI thread. A
+/// dialog can't be closed from outside, so one still open when its pane closes stays until the person
+/// answers; the answer is then dropped (`SaveAnswerTask` finds no callback).
 fn ask_with_rfd(block_id: &str, id: u32, path: PathBuf, cb: &BeforeDownloadCallback) {
     ASKING.with(|m| m.borrow_mut().insert((block_id.to_string(), id), cb.clone()));
     let block_id = block_id.to_string();
@@ -314,8 +316,10 @@ fn ask_with_rfd(block_id: &str, id: u32, path: PathBuf, cb: &BeforeDownloadCallb
             dialog = dialog.set_directory(dir);
         }
         let chosen = dialog.save_file();
-        let mut task = SaveAnswerTask::new(block_id, id, chosen);
-        let _ = post_task(ThreadId::UI, Some(&mut task));
+        let mut task = SaveAnswerTask::new(block_id.clone(), id, chosen);
+        if post_task(ThreadId::UI, Some(&mut task)) == 0 {
+            tracing::warn!(target: "pane-download", %block_id, id, "could not post the Save As answer to the UI thread");
+        }
     });
 }
 
