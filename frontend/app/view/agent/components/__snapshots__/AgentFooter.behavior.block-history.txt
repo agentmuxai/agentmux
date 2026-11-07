@@ -1,0 +1,26 @@
+getAttachmentDraft blk-1
+useComposerPaste blk-1 draft-blk-1 undefined
+historyAgentId {}
+getSentHistory blk-1
+useComposerPlaceholder blk-1 Claude
+useComposerRestore blk-1 undefined
+setComposerValue "restored text" {"block":"blk-1","agent":null,"draft":"draft-blk-1","sent":["block one","block two"],"hist":{"pos":2,"draft":""},"esc":null,"composing":false,"scroll":false,"prefix":null,"index":0,"completions":[]}
+useComposerVoiceHandle blk-1 undefined
+useComposerFocusHandle blk-1 undefined
+AttachmentTray draft-blk-1
+restoreDraftOnMount {"block":"blk-1","agent":null,"draft":"draft-blk-1","sent":["block one","block two"],"hist":{"pos":2,"draft":""},"esc":null,"composing":false,"scroll":false,"prefix":null,"index":0,"completions":[],"textarea":"TEXTAREA"}
+-- a block's own history
+<div>
+  <div class="agent-footer">
+    <div class="agent-input-container">
+      <div data-stand="AttachmentTray" data-draft="draft-blk-1">
+        <span data-stand="focus">
+      <textarea data-raw-text-field="the prompt composer: a surface of its own that grows with its text and takes IME composition, paste and the history keys itself, not a form field" aria-label="Message the agent" rows="1" spellcheck="false" class="agent-input" placeholder="Send message to Claude">
+handleKeyDown a {"block":"blk-1","agent":null,"draft":"draft-blk-1","sent":["block one","block two"],"hist":{"pos":2,"draft":""},"esc":null,"composing":false,"scroll":false,"prefix":null,"index":0,"completions":[],"textarea":"TEXTAREA"}
+-- after one key
+<div>
+  <div class="agent-footer">
+    <div class="agent-input-container">
+      <div data-stand="AttachmentTray" data-draft="draft-blk-1">
+        <span data-stand="focus">
+      <textarea data-raw-text-field="the prompt composer: a surface of its own that grows with its text and takes IME composition, paste and the history keys itself, not a form field" aria-label="Message the agent" rows="1" spellcheck="false" class="agent-input" placeholder="Send message to Claude">
