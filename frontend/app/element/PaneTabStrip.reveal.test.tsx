@@ -56,16 +56,15 @@ class StripModel {
         readonly el: HTMLElement,
         readonly geo: Geometry
     ) {
-        const model = this;
-        const get = (n: () => number) => ({ get: () => (model.reads++, n()), configurable: true });
+        const get = (n: () => number) => ({ get: () => (this.reads++, n()), configurable: true });
         Object.defineProperty(el, "scrollWidth", get(() => geo.tabs * geo.tabW + ADD_W));
         Object.defineProperty(el, "clientWidth", get(() => geo.client));
         Object.defineProperty(el, "offsetWidth", get(() => geo.client));
         Object.defineProperty(el, "scrollLeft", {
-            get: () => (model.reads++, model.value),
+            get: () => (this.reads++, this.value),
             set: (v: number) => {
-                model.writes.push(v);
-                model.set(v);
+                this.writes.push(v);
+                this.set(v);
             },
             configurable: true,
         });
@@ -425,6 +424,17 @@ describe.each<Kind>(["pane", "doc"])("the %s tab strip reveals its selected tab"
         fireEvent.pointerDown(m.content);
         flush();
         expect(s.writes).toEqual([]);
+    });
+
+    it("the pane becoming focused brings back a selected tab off the left end of a strip scrolled all the way right", () => {
+        const m = mountPane({ active: "t10" });
+        const s = m.strips[kind];
+        userScroll(m, kind, 5000);
+        expect(s.value).toBe(s.max);
+        expect(s.isRevealed("t10")).toBe(false);
+        revealPaneStrips(m.root, "focus");
+        flush();
+        expect(s.isRevealed("t10")).toBe(true);
     });
 
     it.each([
