@@ -66,7 +66,7 @@ pub fn refused(why: &str) -> StoreOutcome {
 /// app, and, when it was asked to install them, the overall state.
 pub fn decide(updates_listed: usize, installed: Option<StoreState>) -> StoreOutcome {
     if updates_listed == 0 {
-        return StoreOutcome::new("none", "The Microsoft Store doesn't have this update yet. It gets each release after GitHub does; try again later.");
+        return StoreOutcome::new("none", "The Microsoft Store has no newer version.");
     }
     match installed {
         None => refused("the Store listed an update but wasn't asked to install it"),
@@ -89,16 +89,35 @@ pub struct StoreCheck {
     pub state: &'static str,
     /// Why, when the state is `unknown`; empty otherwise.
     pub message: String,
+    /// When `available`: the version of the Store's package update (`0.60.17`), the version the
+    /// page offers; empty when the Store listed an update without a readable version.
+    pub version: String,
 }
 
-/// The decision for a check: how many updates the Store listed, or why it
+impl StoreCheck {
+    fn new(state: &'static str, message: String, version: String) -> Self {
+        Self { state, message, version }
+    }
+}
+
+/// `major.minor.build` of a package version, as the release's version reads (the fourth part is
+/// reserved by the Store and always 0).
+fn version_text((major, minor, build): (u16, u16, u16)) -> String {
+    format!("{major}.{minor}.{build}")
+}
+
+/// The decision for a check: the versions of the updates the Store listed, or why it
 /// could not be asked. An unreachable Store is `unknown`, never guessed from GitHub.
-pub fn decide_check(listed: Result<usize, String>) -> StoreCheck {
+/// The offered version is the highest one listed (`None`: listed, but unreadable).
+pub fn decide_check(listed: Result<Vec<Option<(u16, u16, u16)>>, String>) -> StoreCheck {
     match listed {
-        Ok(0) => StoreCheck { state: "none", message: String::new() },
-        Ok(_) => StoreCheck { state: "available", message: String::new() },
-        Err(why) if why == NO_ANSWER => StoreCheck { state: "no_answer", message: String::new() },
-        Err(why) => StoreCheck { state: "unknown", message: why },
+        Ok(updates) if updates.is_empty() => StoreCheck::new("none", String::new(), String::new()),
+        Ok(updates) => {
+            let version = updates.into_iter().flatten().max().map(version_text).unwrap_or_default();
+            StoreCheck::new("available", String::new(), version)
+        }
+        Err(why) if why == NO_ANSWER => StoreCheck::new("no_answer", String::new(), String::new()),
+        Err(why) => StoreCheck::new("unknown", why, String::new()),
     }
 }
 
@@ -106,7 +125,7 @@ pub fn decide_check(listed: Result<usize, String>) -> StoreCheck {
 /// Blocks on the Store's answer, so call it off the async workers.
 #[cfg(target_os = "windows")]
 pub fn check_update() -> StoreCheck {
-    decide_check(on_winrt_thread("store-check", || list_updates().map(|(_, n)| n)).and_then(|r| r))
+    decide_check(on_winrt_thread("store-check", || list_updates().map(|(_, versions)| versions)).and_then(|r| r))
 }
 
 /// Only Windows has a Store.
@@ -166,9 +185,16 @@ fn list_error(e: String) -> String {
     if e == NO_ANSWER { e } else { format!("couldn't list updates: {e}") }
 }
 
-/// The Store's context (our window attached) and how many updates it lists for this app.
+/// The version of one listed update's package, when the Store gives one.
 #[cfg(target_os = "windows")]
-fn list_updates() -> Result<(windows::Services::Store::StoreContext, usize), String> {
+fn update_version(update: &windows::Services::Store::StorePackageUpdate) -> Option<(u16, u16, u16)> {
+    let v = update.Package().ok()?.Id().ok()?.Version().ok()?;
+    Some((v.Major, v.Minor, v.Build))
+}
+
+/// The Store's context (our window attached) and the version of each update it lists for this app.
+#[cfg(target_os = "windows")]
+fn list_updates() -> Result<(windows::Services::Store::StoreContext, Vec<Option<(u16, u16, u16)>>), String> {
     use windows::core::Interface;
     use windows::Services::Store::StoreContext;
     use windows::Win32::Foundation::HWND;
@@ -182,8 +208,9 @@ fn list_updates() -> Result<(windows::Services::Store::StoreContext, usize), Str
     }
     let updates = context.GetAppAndOptionalStorePackageUpdatesAsync().map_err(|e| list_error(e.to_string()))?;
     let updates = answer_within(updates, LIST_TIMEOUT).map_err(list_error)?;
-    let listed = updates.Size().map_err(|e| format!("couldn't count updates: {e}"))? as usize;
-    Ok((context, listed))
+    let listed = updates.Size().map_err(|e| format!("couldn't count updates: {e}"))?;
+    let versions = (0..listed).map(|i| updates.GetAt(i).ok().and_then(|u| update_version(&u))).collect();
+    Ok((context, versions))
 }
 
 /// The IPC commands `store_update_install` (args `{ version }`: the release being installed) and
@@ -241,7 +268,8 @@ fn store_state(s: windows::Services::Store::StorePackageUpdateState) -> StoreSta
 
 #[cfg(target_os = "windows")]
 fn install_update_here(target: &str, web_endpoint: &str, auth_key: &str) -> Result<StoreOutcome, String> {
-    let (context, listed) = list_updates()?;
+    let (context, versions) = list_updates()?;
+    let listed = versions.len();
     if listed == 0 {
         return Ok(decide(0, None));
     }
@@ -280,10 +308,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn nothing_listed_means_the_store_doesnt_have_it_yet() {
+    fn nothing_listed_means_the_store_has_no_newer_version() {
         let o = decide(0, None);
         assert_eq!(o.outcome, "none");
-        assert!(o.message.contains("gets each release after GitHub"));
+        assert_eq!(o.message, "The Microsoft Store has no newer version.");
         // Even if a state came with it, an empty list is "none".
         assert_eq!(decide(0, Some(StoreState::Completed)).outcome, "none");
     }
@@ -319,7 +347,7 @@ mod tests {
     #[test]
     fn a_store_that_never_answers_is_told_as_that() {
         let check = decide_check(Err(NO_ANSWER.into()));
-        assert_eq!((check.state, check.message.as_str()), ("no_answer", ""));
+        assert_eq!((check.state, check.message.as_str(), check.version.as_str()), ("no_answer", "", ""));
         let install = refused(NO_ANSWER);
         assert_eq!(install.outcome, "fallback");
         assert!(install.message.contains("didn't answer"), "{}", install.message);
@@ -347,13 +375,31 @@ mod tests {
 
     #[test]
     fn a_check_says_what_the_store_listed_and_never_guesses() {
-        assert_eq!(decide_check(Ok(1)).state, "available");
-        assert_eq!(decide_check(Ok(4)).state, "available");
-        let none = decide_check(Ok(0));
-        assert_eq!((none.state, none.message.as_str()), ("none", ""));
+        let one = decide_check(Ok(vec![Some((0, 60, 17))]));
+        assert_eq!((one.state, one.version.as_str()), ("available", "0.60.17"));
+        let none = decide_check(Ok(vec![]));
+        assert_eq!((none.state, none.message.as_str(), none.version.as_str()), ("none", "", ""));
         let unknown = decide_check(Err("no Store context: 0x80070490".into()));
-        assert_eq!(unknown.state, "unknown");
+        assert_eq!((unknown.state, unknown.version.as_str()), ("unknown", ""));
         assert!(unknown.message.contains("0x80070490"));
+    }
+
+    /// The offer is the package version the Store lists, not whatever GitHub's latest tag is.
+    #[test]
+    fn the_offered_version_is_the_highest_one_the_store_lists() {
+        let many = decide_check(Ok(vec![Some((0, 60, 9)), Some((0, 60, 17)), None, Some((0, 59, 40))]));
+        assert_eq!((many.state, many.version.as_str()), ("available", "0.60.17"));
+        // Numbers, not text: 0.60.100 is newer than 0.60.17.
+        assert_eq!(decide_check(Ok(vec![Some((0, 60, 17)), Some((0, 60, 100))])).version, "0.60.100");
+        // Listed, but no readable version: still an update the Store has, with nothing to name.
+        let unreadable = decide_check(Ok(vec![None]));
+        assert_eq!((unreadable.state, unreadable.version.as_str()), ("available", ""));
+    }
+
+    #[test]
+    fn the_check_serialises_its_version_for_the_page() {
+        let v = serde_json::to_value(decide_check(Ok(vec![Some((0, 60, 17))]))).unwrap();
+        assert_eq!((v["state"].as_str(), v["version"].as_str()), (Some("available"), Some("0.60.17")));
     }
 
     #[cfg(not(target_os = "windows"))]

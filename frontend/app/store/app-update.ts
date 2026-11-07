@@ -8,6 +8,11 @@
  * agent asks: `app.update-status` when a window opens,
  * kept current by the `app:updatestatus` event. The status-bar chip and the
  * version panel's Maintenance section read it.
+ *
+ * A Microsoft Store install is the exception: the Store, not GitHub, says
+ * whether there is an update and which version it is (the host's
+ * `store_update_check`, asked from here on srv's own cadence and on click).
+ * GitHub is then only where that version's release notes are linked from.
  * docs/specs/SPEC_UPGRADE_FOR_USERS_AND_AGENTS_2026_10_15.md §3.
  */
 
@@ -15,6 +20,7 @@ import { pushNotification } from "@/app/store/flash-notifications";
 import { createEffect, createSignal, onCleanup } from "solid-js";
 
 import { WpsEvent } from "@/app/store/mps-events";
+import { getSettingsKeyAtom } from "@/store/global";
 import { getApi } from "@/util/app-api";
 import { formatTimeOrDate } from "@/util/format-time";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -43,13 +49,13 @@ export function acceptAppUpdate(next: unknown): void {
 
 /**
  * Check for update: srv asks GitHub now (at most every 30 seconds) and every
- * window gets the answer. Throws when GitHub can't be reached.
+ * window gets the answer. Throws when GitHub can't be reached. A Store install
+ * asks the Store instead, whose answer (never an error) is shown as it is.
  */
 export async function checkForUpdate(): Promise<void> {
-    acceptAppUpdate(await RpcApi.AppUpdateCheckCommand(TabRpcClient));
-    // A Store install is updated by the Store, which lags GitHub: ask it again too.
-    const release = availableRelease();
-    if (viaStore() && release) await askStore(release.version);
+    if (!viaStore()) acceptAppUpdate(await RpcApi.AppUpdateCheckCommand(TabRpcClient));
+    // A Store install is updated by the Store, which has its own idea of the latest version.
+    if (viaStore()) await askStore();
 }
 
 /** Ask srv for the status now (a window opened after the last event). */
@@ -66,57 +72,84 @@ export function viaStore(s: AppUpdateStatus | null = appUpdate()): boolean {
     return s?.install === "windows-store";
 }
 
-/** What the Store itself said about `version`: `asking` until it answers; `no_answer` when it never did; `unknown` carries why it couldn't be asked. */
-export type StoreOffer = { version: string; state: "asking" | "available" | "none" | "no_answer" | "unknown"; message: string };
-
-const [storeOffer, setStoreOffer] = createSignal<StoreOffer | null>(null);
-
-/** Ask the Store (through the host) whether it lists an update, instead of guessing from GitHub. `quiet`: keep showing the last answer until the new one comes. */
-export async function askStore(version: string, quiet = false): Promise<void> {
-    if (!quiet) setStoreOffer({ version, state: "asking", message: "" });
-    let next: StoreOffer;
-    try {
-        const r = await getApi()?.approvals?.storeUpdateCheck?.();
-        next = r ? { version, state: r.state, message: r.message } : { version, state: "unknown", message: "this window can't ask the Store" };
-    } catch (e: any) {
-        next = { version, state: "unknown", message: String(e?.message ?? e) };
+/** Whether dotted numeric version `a` is newer than `b` (numbers, not text: 0.60.100 is newer than 0.60.17); a missing part counts as 0. */
+function isNewer(a: string, b: string): boolean {
+    const pa = a.split(".").map((n) => Number.parseInt(n, 10) || 0);
+    const pb = b.split(".").map((n) => Number.parseInt(n, 10) || 0);
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+        const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+        if (d !== 0) return d > 0;
     }
-    setStoreOffer(next);
+    return false;
 }
 
-/** Forget the Store's answer: the next look at a release on offer asks again. */
+/** What the Store itself said: `asking` until it answers; `no_answer` when it never did; `unknown` carries why it couldn't be asked. `version` is the Store package's version when `available` (empty if it gave none); `checkedMs` is when it last answered. */
+export type StoreOffer = { state: "asking" | "available" | "none" | "no_answer" | "unknown"; version: string; message: string; checkedMs: number };
+
+const [storeOffer, setStoreOffer] = createSignal<StoreOffer | null>(null);
+let storeAsk: Promise<void> | null = null;
+
+/**
+ * Ask the Store (through the host) whether it lists an update, instead of guessing from GitHub. `quiet`: keep
+ * showing the last answer until the new one comes. Asks made while one is out share it.
+ */
+export function askStore(quiet = false): Promise<void> {
+    storeAsk ??= (async () => {
+        if (!quiet) setStoreOffer({ state: "asking", version: "", message: "", checkedMs: storeOffer()?.checkedMs ?? 0 });
+        let next: Omit<StoreOffer, "checkedMs">;
+        try {
+            const r = await getApi()?.approvals?.storeUpdateCheck?.();
+            next = r
+                ? { state: r.state, version: r.version ?? "", message: r.message }
+                : { state: "unknown", version: "", message: "this window can't ask the Store" };
+        } catch (e: any) {
+            next = { state: "unknown", version: "", message: String(e?.message ?? e) };
+        }
+        // A version that isn't newer than this one is no update, whatever the Store lists.
+        const current = appUpdate()?.current;
+        if (next.state === "available" && next.version && current && !isNewer(next.version, current)) {
+            next = { state: "none", version: "", message: "" };
+        }
+        setStoreOffer({ ...next, checkedMs: Date.now() });
+    })().finally(() => {
+        storeAsk = null;
+    });
+    return storeAsk;
+}
+
+/** Forget the Store's answer: the next look asks again. */
 export function forgetStoreOffer(): void {
     setStoreOffer(null);
 }
 
 /** Record what the Store said when asked to install (it had nothing to install). */
-export function recordStoreNone(version: string): void {
-    setStoreOffer({ version, state: "none", message: "" });
+export function recordStoreNone(): void {
+    setStoreOffer({ state: "none", version: "", message: "", checkedMs: Date.now() });
 }
 
-/** The Store's answer about the release on offer, or null when none was asked about it. */
+/** The Store's last answer for a Store install, or null when none was asked yet (or this isn't a Store install). */
 export function storeAnswer(s: AppUpdateStatus | null = appUpdate()): StoreOffer | null {
-    const release = availableRelease(s);
-    const offer = storeOffer();
-    return viaStore(s) && release && offer?.version === release.version ? offer : null;
+    return viaStore(s) ? storeOffer() : null;
 }
 
 /**
- * Whether an update can be had now: always, for an install AgentMux updates
- * itself; for a Store install, only when the Store lists it.
+ * What the version panel says where a release would be, for a Store install that has none to offer, in the
+ * Store's own terms; null when it has one (the panel then offers it).
  */
-export function updateOffered(s: AppUpdateStatus | null = appUpdate()): boolean {
-    return !viaStore(s) || storeAnswer(s)?.state === "available";
-}
-
-/** What the panel says in place of "v1.2 is out" while the Store has not listed it; null once it has. */
-export function storeOfferLine(version: string | null | undefined, offer: StoreOffer | null): string | null {
-    if (offer?.state === "available") return null;
-    const released = `v${version} is released.`;
-    if (!offer || offer.state === "asking") return `${released} Asking the Microsoft Store whether it has it…`;
-    if (offer.state === "none") return `${released} The Microsoft Store is still reviewing it.`;
-    if (offer.state === "no_answer") return `${released} The Microsoft Store didn't answer; try again later.`;
-    return `${released} Couldn't ask the Microsoft Store whether it has it${offer.message ? ` (${offer.message})` : ""}.`;
+export function storeStandingLine(offer: StoreOffer | null, checked: string | null): string | null {
+    if (!offer) return "Not checked with the Microsoft Store yet";
+    switch (offer.state) {
+        case "available":
+            return null;
+        case "asking":
+            return "Asking the Microsoft Store for updates…";
+        case "none":
+            return `The Microsoft Store has no newer version${checked ? ` (checked ${checked})` : ""}`;
+        case "no_answer":
+            return "The Microsoft Store didn't answer; try again later.";
+        default:
+            return `Couldn't ask the Microsoft Store${offer.message ? ` (${offer.message})` : ""}.`;
+    }
 }
 
 /** What the Store's last install left (host: store_restart): the app came back `updated`, or `stayed` on the version it was closed on. */
@@ -147,25 +180,59 @@ export async function loadStoreCameBack(): Promise<void> {
     pushNotification({ ...note, icon: "fa-triangle-exclamation", title: "The update did not install", message: storeStayedLine(r), type: "warning", persistent: true });
 }
 
-/** The Store certifies a release hours after GitHub publishes it: how often to ask again while it hasn't listed it. */
-const STORE_REASK_MS = 30 * 60 * 1000;
+/** A window asks the Store this long after it starts, then every `STORE_ASK_EVERY_MS`: srv's own cadence for GitHub (`update/auto.rs`). */
+const STORE_FIRST_ASK_MS = 60 * 1000;
+const STORE_ASK_EVERY_MS = 6 * 60 * 60 * 1000;
 
-/** In a component: ask the Store about each release on offer to a Store install, and again every half hour until it lists it. */
-export function useStoreOffer(): void {
+let storeWatchers = 0;
+let storeTimer: ReturnType<typeof setInterval> | undefined;
+
+/** The background asks follow the same switch as srv's: `update:auto` off asks nothing by itself. */
+const autoChecks = () => getSettingsKeyAtom("update:auto")() !== false;
+
+/**
+ * In a component: a Store install asks the Store for updates a minute after the window starts and every six
+ * hours after, as srv does for GitHub. `now`: ask as soon as the Store install is known (the version panel is
+ * open) when nothing was answered yet, or the Store didn't answer.
+ */
+export function useStoreOffer(now = false): void {
+    let askedNow = false;
     createEffect(() => {
-        const release = availableRelease();
-        if (viaStore() && release && storeOffer()?.version !== release.version) void askStore(release.version);
+        if (!viaStore()) return;
+        const offer = storeOffer();
+        if (now) {
+            const retry = !offer || offer.state === "no_answer" || offer.state === "unknown";
+            if (retry && !askedNow) {
+                askedNow = true;
+                void askStore();
+            }
+            return;
+        }
+        if (offer) return;
+        const first = setTimeout(() => {
+            if (autoChecks() && !storeOffer()) void askStore();
+        }, STORE_FIRST_ASK_MS);
+        onCleanup(() => clearTimeout(first));
     });
-    const timer = setInterval(() => {
-        const release = availableRelease();
-        const state = storeAnswer()?.state;
-        if (viaStore() && release && (state === "none" || state === "unknown")) void askStore(release.version, true);
-    }, STORE_REASK_MS);
-    onCleanup(() => clearInterval(timer));
+    if (storeWatchers++ === 0) {
+        storeTimer = setInterval(() => {
+            if (viaStore() && autoChecks()) void askStore(true);
+        }, STORE_ASK_EVERY_MS);
+    }
+    onCleanup(() => {
+        if (--storeWatchers === 0) clearInterval(storeTimer);
+    });
 }
 
-/** The release srv says is newer than this build, or null. */
+/**
+ * The release newer than this build, or null: what srv says GitHub has; for a Store install, what the Store
+ * says it has (its own version, with that version's release notes as the link).
+ */
 export function availableRelease(s: AppUpdateStatus | null = appUpdate()): { version: string; url: string } | null {
+    if (viaStore(s)) {
+        const offer = storeOffer();
+        return offer?.state === "available" ? { version: offer.version, url: releaseNotesUrl(offer.version) } : null;
+    }
     if (s?.state !== "available" || !s.latest || !s.url) return null;
     return { version: s.latest, url: s.url };
 }
