@@ -36,7 +36,7 @@
 
 ### 2.3 Grips elsewhere
 
-The only grip in the app is the `grip` icon on the ≡ menu's Layouts item ([`frontend/app/window/hamburger-menu.tsx`](../../frontend/app/window/hamburger-menu.tsx)). Reorder lists (bundle order) drag the whole tile with no handle. Font Awesome Free 6.7.2 has `grip` (3×2), `grip-vertical` (2×3), `grip-lines` and `grip-lines-vertical`.
+The only grip in the app is the `grip` icon on the ≡ menu's Layouts item (`frontend/app/window/hamburger-menu.tsx`). Reorder lists (bundle order) drag the whole tile with no handle. Font Awesome Free 6.7.2 has `grip` (3×2), `grip-vertical` (2×3), `grip-lines` and `grip-lines-vertical`.
 
 ## 3. Problems worth fixing, whatever the glyph
 
