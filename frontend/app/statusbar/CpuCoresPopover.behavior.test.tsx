@@ -32,7 +32,7 @@ vi.mock("@/app/element/anchored-popover", () => ({
     AnchoredPopover: (p: {
         placement?: string;
         class?: string;
-        role?: string;
+        role?: JSX.HTMLAttributes<HTMLDivElement>["role"];
         "aria-label"?: string;
         style?: JSX.CSSProperties;
         onDismiss: () => void;
