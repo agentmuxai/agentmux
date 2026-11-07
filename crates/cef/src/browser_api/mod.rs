@@ -43,6 +43,7 @@ pub mod key_typing;
 pub mod last_input;
 pub mod page_state;
 pub mod page_url;
+pub mod press;
 pub mod ref_tables;
 pub mod resolver;
 pub mod routes;
@@ -93,6 +94,7 @@ pub fn register_routes(router: Router<Arc<AppState>>) -> Router<Arc<AppState>> {
         .route("/agentmux/browser/click_element", post(routes::click_element))
         .route("/agentmux/browser/focus_element", post(routes::focus_element))
         .route("/agentmux/browser/dispatch_key", post(routes::dispatch_key))
+        .route("/agentmux/browser/press", post(press::press_route))
         .route("/agentmux/browser/terminal_state", post(terminal::terminal_state))
         .route("/agentmux/browser/terminal_keys", post(terminal::terminal_keys))
         .route("/agentmux/browser/navigate", post(routes::navigate))
