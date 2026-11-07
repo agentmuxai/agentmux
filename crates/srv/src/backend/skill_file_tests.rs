@@ -64,6 +64,17 @@ fn refused(bytes: &[u8]) -> String {
 }
 
 #[test]
+fn a_version_with_path_characters_is_neither_accepted_nor_put_in_a_file_name() {
+    use crate::backend::computer_use_skill::tests::{base_files, manifest, read};
+    for bad in ["1.0.0-x/../../name", "1.0.0+a\\b", "1.0.0-rc 1", "1.0.0-é"] {
+        let err = read(&base_files(&manifest(bad, ""))).unwrap_err();
+        assert!(err.contains("version"), "{bad}: {err}");
+    }
+    assert!(read(&base_files(&manifest("1.0.0-rc.1+build.5", ""))).is_ok());
+    assert_eq!(file_name("acme-word", "1.0.0-x/../../name"), "acme-word-1.0.0-x.name.skill");
+}
+
+#[test]
 fn a_signed_skill_keeps_its_signature_through_export_and_import() {
     let original = signed_with_script(1, "1.0.0");
     let exported = export(&installed(&original), "s1").unwrap();

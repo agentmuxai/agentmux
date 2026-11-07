@@ -100,6 +100,15 @@ async fn a_skill_file_is_previewed_like_a_folder_with_its_scripts_and_signature(
 }
 
 #[test]
+fn an_export_only_writes_a_plain_file_name_inside_the_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    for bad in ["../out.skill", "a/b.skill", "a\\b.skill", "C:evil.skill", "x..y.skill", ""] {
+        assert!(write_unused(dir.path(), bad, b"x").is_err(), "{bad:?}");
+    }
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+}
+
+#[test]
 fn an_export_never_overwrites_a_file_that_is_there() {
     let dir = tempfile::tempdir().unwrap();
     let first = write_unused(dir.path(), "a-b-1.0.0.skill", b"one").unwrap();

@@ -92,7 +92,17 @@ pub fn export(catalog: &Store, skill_id: &str) -> Result<Exported, String> {
     if total > MAX_TOTAL_BYTES {
         return Err(format!("{} is over {} MB: too large to share as one file", skill.name, MAX_TOTAL_BYTES / 1024 / 1024));
     }
-    Ok(Exported { filename: format!("{folder}-{}.{EXTENSION}", app.info.version), bytes: zip_folder(&folder, &files)?, signed })
+    Ok(Exported { filename: file_name(&folder, &app.info.version), bytes: zip_folder(&folder, &files)?, signed })
+}
+
+/// `<folder>-<version>.skill`, with the version cut down to the characters a version has: it comes from a manifest, and a
+/// file name is no place for whatever else it might hold.
+fn file_name(folder: &str, version: &str) -> String {
+    let mut version: String = version.chars().filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+')).collect();
+    while version.contains("..") {
+        version = version.replace("..", ".");
+    }
+    format!("{folder}-{version}.{EXTENSION}")
 }
 
 fn zip_folder(folder: &str, files: &BTreeMap<String, Vec<u8>>) -> Result<Vec<u8>, String> {

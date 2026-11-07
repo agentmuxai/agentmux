@@ -74,10 +74,15 @@ fn is_name(s: &str) -> bool {
         && s.split('-').all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit()))
 }
 
+/// `1.2.3`, with an optional `-prerelease` and `+build`, each of letters, digits, dots and hyphens: the version ends up in
+/// file names and a pass record's key, so nothing else may ride along after the numbers.
 fn is_semver(s: &str) -> bool {
     let core = s.split(['-', '+']).next().unwrap_or("");
     let parts: Vec<&str> = core.split('.').collect();
-    parts.len() == 3 && parts.iter().all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+    let tail = &s[core.len()..];
+    parts.len() == 3
+        && parts.iter().all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+        && tail.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'+'))
 }
 
 fn ext_of(path: &str) -> String {

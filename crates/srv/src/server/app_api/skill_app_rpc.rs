@@ -77,6 +77,10 @@ fn register_app_script(engine: &Arc<WshRpcEngine>, state: &AppState) {
 /// appears between two tries is never overwritten.
 fn write_unused(dir: &std::path::Path, filename: &str, bytes: &[u8]) -> std::io::Result<std::path::PathBuf> {
     use std::io::{ErrorKind, Write};
+    // A name, not a path: the caller builds it from a manifest.
+    if filename.contains(['/', '\\', ':']) || filename.contains("..") || filename.is_empty() {
+        return Err(std::io::Error::new(ErrorKind::InvalidInput, format!("{filename:?} is not a plain file name")));
+    }
     let (stem, ext) = filename.rsplit_once('.').unwrap_or((filename, ""));
     for n in 1..1000 {
         let path = if n == 1 { dir.join(filename) } else { dir.join(format!("{stem} ({n}).{ext}")) };
