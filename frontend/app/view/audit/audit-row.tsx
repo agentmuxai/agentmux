@@ -46,10 +46,12 @@ export const AuditRow = (props: { entry: AuditEntry; now: number; paneBlockId: s
                 {kindLabel(props.entry.kind)}
             </Pill>
             <span class="audit-row-summary">
-                {props.entry.summary}
-                <Show when={props.entry.reason}>
-                    <span class="audit-row-reason"> · {props.entry.reason}</span>
-                </Show>
+                <span class="audit-row-summary-text">
+                    {props.entry.summary}
+                    <Show when={props.entry.reason}>
+                        <span class="audit-row-reason"> · {props.entry.reason}</span>
+                    </Show>
+                </span>
                 <Show when={props.sound}>
                     <Tooltip divClassName="audit-row-sound" content="Plays a sound">
                         <span role="img" aria-label="Plays a sound">

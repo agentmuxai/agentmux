@@ -74,13 +74,21 @@
     font-family: monospace;
 }
 
+// The text is cut with an ellipsis; the speaker sits after it, so a long summary never hides it.
 .audit-row-summary {
-    @include mixins.truncate;
+    display: flex;
+    align-items: center;
+    min-width: 0;
 }
 
-// The tooltip's wrapper is a div, in the middle of the summary's text.
+.audit-row-summary-text {
+    @include mixins.truncate;
+    min-width: 0;
+}
+
+// The tooltip's wrapper is a div.
 .audit-row-sound {
-    display: inline-block;
+    flex: none;
     margin-left: var(--space-1);
     opacity: 0.55;
 }
@@ -138,9 +146,17 @@
     }
 
     .audit-row-summary {
+        display: block;
+    }
+
+    .audit-row-summary-text {
         white-space: normal;
         overflow: visible;
         text-overflow: unset;
+    }
+
+    .audit-row-sound {
+        display: inline-block;
     }
 
     .audit-row-cost {
