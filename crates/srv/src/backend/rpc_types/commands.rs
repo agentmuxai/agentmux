@@ -812,6 +812,8 @@ pub const COMMAND_SKILL_CATALOG_SET_OPT_OUT: &str = "skill.catalog.set_opt_out";
 pub const COMMAND_SKILL_CATALOG_BIND_ALL: &str = "skill.catalog.bind_all";
 pub const COMMAND_SKILL_CATALOG_IMPORT_PREVIEW: &str = "skill.catalog.import_preview";
 pub const COMMAND_SKILL_CATALOG_IMPORT_COMMIT: &str = "skill.catalog.import_commit";
+pub const COMMAND_SKILL_CATALOG_APP_FILE: &str = "skill.catalog.app_file";
+pub const COMMAND_SKILL_CATALOG_APP_SCRIPT: &str = "skill.catalog.app_script";
 
 // Bundle-scoped siblings of the three above (composable model v2,
 // docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md, GH issue #2024 item

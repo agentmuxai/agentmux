@@ -167,4 +167,20 @@ describe("Import a skill", () => {
         fireEvent.click(screen.getByRole("button", { name: "Update 1 skill" }));
         await waitFor(() => expect(rpc.SkillCatalogImportCommitCommand).toHaveBeenCalledTimes(1));
     });
+
+    it("a computer-use skill shows who signed it and its scripts, and says they are not run until approved", async () => {
+        const app = {
+            files: [], verified: [], content_hash: "c".repeat(64), publisher: "acme", id: "word", name: "Word", version: "1.0.0",
+            vendor: "Acme", executables: {}, title_hints: [], platforms: ["windows"], ladder: [], mcp: null, supported: "", tested: [],
+            references: [],
+            scripts: [{ path: "scripts/toc.py", purpose: "Fills the table of contents", needs: ["python 3"] }],
+            signature: { state: "signed_new", publisher: "acme", fingerprint: "AAAA-BBBB", pinned: null },
+        };
+        rpc.SkillCatalogImportPreviewCommand.mockResolvedValue({ source: SOURCE, warnings: [], items: [item({ app, app_hash: "c".repeat(64) })] });
+        await readSource();
+        const list = await screen.findByRole("list", { name: "Skills found" });
+        expect(within(list).getByText(/Signed by acme · AAAA-BBBB/)).toBeTruthy();
+        expect(within(list).getByRole("list", { name: "Scripts" }).textContent).toContain("Fills the table of contents · needs python 3");
+        expect(within(list).getByText(/not run: no agent gets one until you approve it/)).toBeTruthy();
+    });
 });

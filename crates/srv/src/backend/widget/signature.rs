@@ -36,6 +36,9 @@ pub struct Domain {
 pub const WIDGET: Domain = Domain { prefix: b"agentmux-widget-sig-v1\0", sig_file: "widget.sig" };
 pub const JOB_TEMPLATE: Domain = Domain { prefix: b"agentmux-job-template-sig-v1\0", sig_file: "template.sig" };
 
+/// A computer-use skill (docs/specs/SPEC_PACKS_2026_11_05.md §5): signed over `<publisher>.<id>`, its version and its content hash.
+pub const COMPUTER_USE_SKILL: Domain = Domain { prefix: b"agentmux-skill-sig-v1\0", sig_file: "skill.sig" };
+
 pub const SIG_FILE: &str = WIDGET.sig_file;
 
 #[derive(Debug, Deserialize)]
@@ -68,6 +71,11 @@ pub fn check(domain: &Domain, dir: &Path, id: &str, version: &str, hash: &str) -
         Err(e) => return Some(Err(format!("can't read {file}: {e}"))),
     };
     Some(verify(domain, &text, id, version, hash))
+}
+
+/// Check signature text already read (an imported skill's `skill.sig`): the publisher's public key when it verifies.
+pub fn verify_text(domain: &Domain, text: &str, id: &str, version: &str, hash: &str) -> Result<String, String> {
+    verify(domain, text, id, version, hash)
 }
 
 fn verify(domain: &Domain, text: &str, id: &str, version: &str, hash: &str) -> Result<String, String> {
@@ -147,7 +155,7 @@ pub enum SignatureState {
     KeyChanged,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ts_rs::TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct WidgetSignatureInfo {
     pub state: SignatureState,

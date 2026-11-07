@@ -37,6 +37,15 @@ const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS db_skill_app (
         approved INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (skill_id, path)
     );
+    CREATE TABLE IF NOT EXISTS db_skill_signature (
+        skill_id   TEXT PRIMARY KEY,
+        signer_key TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS db_skill_publisher_pin (
+        publisher  TEXT PRIMARY KEY,
+        public_key TEXT NOT NULL,
+        pinned_at  INTEGER NOT NULL DEFAULT 0
+    );
     CREATE TABLE IF NOT EXISTS db_skill_verified (
         skill_id       TEXT NOT NULL,
         skill_version  TEXT NOT NULL,
@@ -92,6 +101,8 @@ pub struct VerifiedRecord {
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct SkillFileInfo {
     pub path: String,
+    /// SHA-256 of the file as stored: what an approval is for.
+    pub sha256: String,
     #[ts(type = "number")]
     pub bytes: u64,
     /// A script the agent's shell would run: not written to an agent's folder until a person approves it.
@@ -148,12 +159,45 @@ pub struct SkillAppInfo {
     pub references: Vec<ReferenceInfo>,
 }
 
+/// What a person asks of a script: revoke it, or approve the text with this hash.
+#[derive(Debug, Clone, Copy)]
+pub enum ScriptApproval<'a> {
+    Revoke,
+    Approve { reviewed_sha256: &'a str },
+}
+
+/// What `skill_script_set_approved` did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScriptOutcome {
+    Done,
+    NotAScript,
+    /// The script is not the text that was reviewed: it was replaced since.
+    Changed,
+    /// The publisher is pinned to another key than this skill's signer.
+    OtherAuthor,
+}
+
+/// What a script's manifest entry says about it, for the prompt that asks for its approval.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct ScriptInfo {
+    pub path: String,
+    /// What it is for, in the publisher's words.
+    pub purpose: String,
+    /// What it needs to run ("python 3", "network").
+    pub needs: Vec<String>,
+}
+
 /// A computer-use skill as the catalog holds it: the manifest, the files beside `SKILL.md`, and the pass records.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct SkillApp {
     #[serde(flatten)]
     pub info: SkillAppInfo,
+    /// The manifest's scripts, with what each is for and needs.
+    pub scripts: Vec<ScriptInfo>,
+    /// Who signed it, and whether that is the key its publisher is pinned to.
+    pub signature: crate::backend::widget::signature::WidgetSignatureInfo,
     pub files: Vec<SkillFileInfo>,
     pub verified: Vec<VerifiedRecord>,
     /// The SHA-256 the publisher's signature covers (empty for a skill that came without one).
@@ -179,6 +223,12 @@ pub struct SkillFile {
     pub image: Option<Vec<u8>>,
     pub script: bool,
     pub approved: bool,
+}
+
+fn pins_of(conn: &rusqlite::Connection) -> Result<crate::backend::widget::signature::Pins, StoreError> {
+    let mut stmt = conn.prepare("SELECT publisher, public_key FROM db_skill_publisher_pin")?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+    Ok(rows.collect::<Result<_, _>>()?)
 }
 
 fn hex_sha256(bytes: &[u8]) -> String {
@@ -244,6 +294,7 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         conn.execute_batch(SCHEMA)?;
         let mut out = BTreeMap::new();
+        let pins = pins_of(&conn)?;
         {
             let mut stmt = conn.prepare("SELECT skill_id, manifest, content_hash FROM db_skill_app WHERE (?1 IS NULL OR skill_id = ?1)")?;
             let rows = stmt.query_map(params![only], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)))?;
@@ -251,13 +302,25 @@ impl Store {
                 let (id, manifest, content_hash) = row?;
                 // A manifest this build can't read is left out rather than failing the whole list.
                 if let Ok(info) = crate::backend::computer_use_skill::info_from_manifest(&manifest) {
-                    out.insert(id, SkillApp { info, files: Vec::new(), verified: Vec::new(), content_hash });
+                    let scripts = crate::backend::computer_use_skill::script_infos(&manifest);
+                    let signature = crate::backend::widget::signature::describe(&format!("{}.{}", info.publisher, info.id), None, &pins);
+                    out.insert(id, SkillApp { info, scripts, signature, files: Vec::new(), verified: Vec::new(), content_hash });
+                }
+            }
+        }
+        {
+            let mut stmt = conn.prepare("SELECT skill_id, signer_key FROM db_skill_signature WHERE (?1 IS NULL OR skill_id = ?1)")?;
+            let rows = stmt.query_map(params![only], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+            for row in rows {
+                let (id, key) = row?;
+                if let Some(app) = out.get_mut(&id) {
+                    app.signature = crate::backend::widget::signature::describe(&format!("{}.{}", app.info.publisher, app.info.id), Some(&key), &pins);
                 }
             }
         }
         {
             let mut stmt = conn.prepare(
-                "SELECT skill_id, path, length(CAST(content AS BLOB)) + COALESCE(length(image), 0), script, approved, image IS NOT NULL FROM db_skill_file
+                "SELECT skill_id, path, length(CAST(content AS BLOB)) + COALESCE(length(image), 0), script, approved, image IS NOT NULL, sha256 FROM db_skill_file
                  WHERE (?1 IS NULL OR skill_id = ?1) ORDER BY skill_id, path",
             )?;
             let rows = stmt.query_map(params![only], |r| {
@@ -269,6 +332,7 @@ impl Store {
                         script: r.get::<_, i64>(3)? != 0,
                         approved: r.get::<_, i64>(4)? != 0,
                         image: r.get::<_, i64>(5)? != 0,
+                        sha256: r.get(6)?,
                     },
                 ))
             })?;
@@ -369,10 +433,74 @@ impl Store {
         self.skill_optout_forget(skill_id)
     }
 
+    /// Record which key verified a skill's signature at install; `None` for a skill that came unsigned.
+    pub fn skill_signer_set(&self, skill_id: &str, signer: Option<&str>) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute_batch(SCHEMA)?;
+        match signer {
+            Some(key) => conn.execute(
+                "INSERT INTO db_skill_signature (skill_id, signer_key) VALUES (?1, ?2) ON CONFLICT(skill_id) DO UPDATE SET signer_key = excluded.signer_key",
+                params![skill_id, key],
+            )?,
+            None => conn.execute("DELETE FROM db_skill_signature WHERE skill_id = ?1", params![skill_id])?,
+        };
+        Ok(())
+    }
+
+    /// Publisher → the key it is pinned to (the first key a person approved a script of its for).
+    pub fn skill_publisher_pins(&self) -> Result<crate::backend::widget::signature::Pins, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute_batch(SCHEMA)?;
+        pins_of(&conn)
+    }
+
+    /// Approve or revoke one script. Approving needs the SHA-256 the person reviewed and applies only if the stored
+    /// script still has it, and not at all when the skill's publisher is pinned to another key than the one that
+    /// signed this skill (or it is unsigned): that is a different author, not an update. A first approval of a
+    /// signed skill pins its publisher to the signer's key.
+    pub fn skill_script_set_approved(&self, skill_id: &str, path: &str, approval: ScriptApproval<'_>, now_ms: i64) -> Result<ScriptOutcome, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute_batch(SCHEMA)?;
+        let stored: Option<String> = conn
+            .query_row("SELECT sha256 FROM db_skill_file WHERE skill_id = ?1 AND path = ?2 AND script = 1", params![skill_id, path], |r| r.get(0))
+            .optional()?;
+        let Some(stored) = stored else { return Ok(ScriptOutcome::NotAScript) };
+        let ScriptApproval::Approve { reviewed_sha256 } = approval else {
+            conn.execute("UPDATE db_skill_file SET approved = 0 WHERE skill_id = ?1 AND path = ?2", params![skill_id, path])?;
+            return Ok(ScriptOutcome::Done);
+        };
+        if stored != reviewed_sha256 {
+            return Ok(ScriptOutcome::Changed);
+        }
+        let (publisher, signer): (Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT a.publisher, (SELECT signer_key FROM db_skill_signature WHERE skill_id = a.skill_id)
+                 FROM db_skill_app a WHERE a.skill_id = ?1",
+                params![skill_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?
+            .unwrap_or((None, None));
+        if let Some(publisher) = &publisher {
+            let pinned: Option<String> = conn.query_row("SELECT public_key FROM db_skill_publisher_pin WHERE publisher = ?1", params![publisher], |r| r.get(0)).optional()?;
+            if pinned.is_some() && pinned != signer {
+                return Ok(ScriptOutcome::OtherAuthor);
+            }
+        }
+        conn.execute("UPDATE db_skill_file SET approved = 1 WHERE skill_id = ?1 AND path = ?2", params![skill_id, path])?;
+        conn.execute(
+            "INSERT OR IGNORE INTO db_skill_publisher_pin (publisher, public_key, pinned_at)
+             SELECT a.publisher, s.signer_key, ?2 FROM db_skill_app a JOIN db_skill_signature s ON s.skill_id = a.skill_id WHERE a.skill_id = ?1",
+            params![skill_id, now_ms],
+        )?;
+        Ok(ScriptOutcome::Done)
+    }
+
     /// Drop a deleted skill's manifest, files and records. Call on the catalog store.
     pub fn skill_app_forget(&self, skill_id: &str) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
         conn.execute_batch(SCHEMA)?;
+        conn.execute("DELETE FROM db_skill_signature WHERE skill_id = ?1", params![skill_id])?;
         conn.execute("DELETE FROM db_skill_app WHERE skill_id = ?1", params![skill_id])?;
         conn.execute("DELETE FROM db_skill_file WHERE skill_id = ?1", params![skill_id])?;
         conn.execute("DELETE FROM db_skill_verified WHERE skill_id = ?1", params![skill_id])?;

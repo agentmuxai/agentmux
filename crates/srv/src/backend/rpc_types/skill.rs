@@ -390,3 +390,39 @@ mod req_shape_tests {
         );
     }
 }
+
+/// `skill.catalog.app_file` — window-scoped. One text file beside a computer-use skill's `SKILL.md`, to read before approving it.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandSkillCatalogAppFileData {
+    pub skill_id: String,
+    pub path: String,
+}
+
+/// A file of a computer-use skill, as text.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct SkillAppFile {
+    pub path: String,
+    pub text: String,
+}
+
+/// `skill.catalog.app_script` — window-scoped. Approve or revoke one script of a computer-use skill. A script is
+/// written to an agent's folder only while it is approved.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandSkillCatalogAppScriptData {
+    pub skill_id: String,
+    pub path: String,
+    pub approved: bool,
+    /// The SHA-256 of the script the person read. Approving applies only to that text, so a script replaced
+    /// since is refused; revoking ignores it.
+    pub sha256: String,
+}
+
+/// Result of `skill.catalog.app_script`.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct SkillAppScriptResult {
+    pub approved: bool,
+}

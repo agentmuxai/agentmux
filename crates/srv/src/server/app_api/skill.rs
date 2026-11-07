@@ -19,6 +19,8 @@
 
 use super::*;
 use crate::backend::storage::skill_source::SkillSource;
+#[path = "skill_app_rpc.rs"]
+mod app_rpc;
 use crate::backend::storage::skills::SkillCatalogItem;
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -38,6 +40,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_skill_catalog_bind_all(engine, state);
     register_skill_catalog_import_preview(engine, state);
     register_skill_catalog_import_commit(engine, state);
+    app_rpc::register(engine, state);
     register_skill_catalog_set_opt_out(engine, state);
     register_skill_catalog_bind_to_bundle(engine, state);
     register_skill_catalog_unbind_from_bundle(engine, state);
@@ -694,6 +697,44 @@ async fn read_skill_source(src: &SkillSource) -> Result<crate::backend::skill_im
     }
 }
 
+// What the preview says about a computer-use skill's bundle: its files, its scripts and who signed it.
+// A bundle the signature check refuses is still shown, with the reason added to the warnings.
+fn preview_app(
+    catalog: &crate::backend::storage::store::Store,
+    b: &crate::backend::computer_use_skill::Bundle,
+    name: &str,
+    warnings: &mut Vec<String>,
+) -> crate::backend::storage::skill_app::SkillApp {
+    crate::backend::computer_use_skill::stash(b);
+    let signer = match crate::backend::computer_use_skill::check_signature(catalog, b) {
+        Ok(k) => k,
+        Err(e) => {
+            warnings.push(format!("{name}: {e}"));
+            None
+        }
+    };
+    let pins = catalog.skill_publisher_pins().unwrap_or_default();
+    crate::backend::storage::skill_app::SkillApp {
+        info: b.info.clone(),
+        scripts: crate::backend::computer_use_skill::script_infos(&b.manifest_json),
+        signature: crate::backend::widget::signature::describe(&format!("{}.{}", b.info.publisher, b.info.id), signer.as_deref(), &pins),
+        files: b
+            .files
+            .iter()
+            .map(|f| crate::backend::storage::skill_app::SkillFileInfo {
+                path: f.path.clone(),
+                sha256: String::new(),
+                bytes: f.image.as_ref().map_or(f.content.len(), Vec::len) as u64,
+                script: f.script,
+                approved: false,
+                image: f.image.is_some(),
+            })
+            .collect(),
+        verified: b.verified.clone(),
+        content_hash: b.content_hash.clone(),
+    }
+}
+
 // Read a source and compare each skill in it with the catalog. Writes nothing: the person reads
 // the whole text (and the diff for a skill that already exists) before `import_commit`.
 fn register_skill_catalog_import_preview(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -747,25 +788,7 @@ fn register_skill_catalog_import_preview(engine: &Arc<WshRpcEngine>, state: &App
                         Some(e) => ("changed", Some(e)),
                     };
                     let app_hash = c.app.as_ref().map(|b| b.content_hash.clone()).unwrap_or_default();
-                    let app = c.app.as_ref().map(|b| {
-                        crate::backend::computer_use_skill::stash(b);
-                        crate::backend::storage::skill_app::SkillApp {
-                            info: b.info.clone(),
-                            files: b
-                                .files
-                                .iter()
-                                .map(|f| crate::backend::storage::skill_app::SkillFileInfo {
-                                    path: f.path.clone(),
-                                    bytes: f.image.as_ref().map_or(f.content.len(), Vec::len) as u64,
-                                    script: f.script,
-                                    approved: false,
-                                    image: f.image.is_some(),
-                                })
-                                .collect(),
-                            verified: b.verified.clone(),
-                            content_hash: b.content_hash.clone(),
-                        }
-                    });
+                    let app = c.app.as_ref().map(|b| preview_app(&identity_store, b, &c.name, &mut warnings));
                     items.push(SkillImportItem {
                         key: c.key,
                         name: c.name,
@@ -806,6 +829,7 @@ fn register_skill_catalog_import_commit(engine: &Arc<WshRpcEngine>, state: &AppS
                 // ones before it written.
                 let mut seen = std::collections::HashSet::new();
                 let mut existing_rows = Vec::with_capacity(req.items.len());
+                let mut signers = Vec::with_capacity(req.items.len());
                 for item in &req.items {
                     let name = item.name.trim();
                     if name.is_empty() || name.chars().count() > 200 {
@@ -817,14 +841,18 @@ fn register_skill_catalog_import_commit(engine: &Arc<WshRpcEngine>, state: &AppS
                     if !seen.insert(name.to_string()) {
                         return Err(format!("{E}: two of the skills are called '{name}'; import them one at a time"));
                     }
+                    let mut signer = None;
                     if !item.app_hash.is_empty() {
                         // What the person saw must still be what is written: the text and name match the kept folder.
                         match crate::backend::computer_use_skill::stashed(&item.app_hash) {
-                            Some(b) if b.name == name && b.content == item.content && b.description == item.description => {}
+                            Some(b) if b.name == name && b.content == item.content && b.description == item.description => {
+                                signer = crate::backend::computer_use_skill::check_signature(&identity_store, &b).map_err(|e| format!("{E}: '{name}': {e}"))?;
+                            }
                             Some(_) => return Err(format!("{E}: '{name}' differs from the folder that was previewed; preview it again")),
                             None => return Err(format!("{E}: the preview of '{name}' has expired; preview it again")),
                         }
                     }
+                    signers.push(signer);
                     existing_rows.push(if item.existing_id.is_empty() {
                         None
                     } else {
@@ -836,7 +864,7 @@ fn register_skill_catalog_import_commit(engine: &Arc<WshRpcEngine>, state: &AppS
                 }
                 let mut saved = Vec::new();
                 let mut failure = None;
-                for (item, existing) in req.items.into_iter().zip(existing_rows) {
+                for ((item, existing), signer) in req.items.into_iter().zip(existing_rows).zip(signers) {
                     let skill = crate::backend::storage::Skill {
                         id: existing.as_ref().map_or_else(|| uuid::Uuid::new_v4().to_string(), |s| s.id.clone()),
                         name: item.name.trim().to_string(),
@@ -855,7 +883,7 @@ fn register_skill_catalog_import_commit(engine: &Arc<WshRpcEngine>, state: &AppS
                         .and_then(|_| if existing.is_none() { identity_store.skill_set_reach(&skill.id, false, false, now) } else { Ok(()) })
                         .and_then(|_| identity_store.skill_source_set(&skill.id, &source, now))
                         .and_then(|_| match &bundle {
-                            Some(b) => crate::backend::computer_use_skill::install(&identity_store, &skill.id, b, now),
+                            Some(b) => crate::backend::computer_use_skill::install(&identity_store, &skill.id, b, signer.as_deref(), now),
                             // A plain skill re-imported over an app skill carries no folder: drop the old one.
                             None if existing.is_some() => identity_store.skill_app_forget(&skill.id),
                             None => Ok(()),
