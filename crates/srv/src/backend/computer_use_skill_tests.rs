@@ -462,3 +462,62 @@ fn a_name_the_folder_uses_is_reserved_in_any_letters_and_never_written_beside_sk
     let paths: Vec<String> = sibling_files(&skills, &c).into_iter().map(|f| f.filename).collect();
     assert_eq!(paths, vec![".claude/skills/acme-word/test.json"]);
 }
+
+fn signed_with_script(seed: u8, version: &str) -> Bundle {
+    use crate::backend::widget::signature::{test_keys, COMPUTER_USE_SKILL};
+    let listed = manifest(version, &format!(r#","scripts":[{{"path":"scripts/run.py","sha256":"{}","purpose":"test","needs":["python"]}}]"#, sha256_hex(PY.as_bytes())));
+    let mut files = base_files(&listed);
+    files.push(("scripts/run.py", PY.to_string()));
+    let unsigned = read(&files).unwrap();
+    files.push(("skill.sig", test_keys::sig_file_in(&COMPUTER_USE_SKILL, seed, "acme.word", version, &unsigned.content_hash)));
+    read(&files).unwrap()
+}
+
+#[test]
+fn a_signature_is_checked_and_the_publisher_is_pinned_by_the_first_script_a_person_approves() {
+    use crate::backend::widget::signature::{test_keys, SignatureState};
+    let (b1, c) = (signed_with_script(1, "1.0.0"), catalog());
+    c.skill_upsert_unique_global(&catalog_skill("s1", &b1.name)).unwrap();
+    assert_eq!(check_signature(&c, &b1).unwrap(), Some(test_keys::public_key(1)));
+    install(&c, "s1", &b1, 1).unwrap();
+    let app = c.skill_app_get("s1").unwrap().unwrap();
+    assert_eq!((app.signature.state, app.signature.publisher.as_str()), (SignatureState::SignedNew, "acme"));
+    assert!(app.signature.fingerprint.is_some() && app.signature.pinned.is_none());
+    assert_eq!((app.scripts[0].purpose.as_str(), app.scripts[0].needs.clone()), ("test", vec!["python".to_string()]));
+    let script = app.files.iter().find(|f| f.script).unwrap();
+    assert_eq!(script.sha256, sha256_hex(PY.as_bytes()));
+
+    // A signature that does not match its files is refused.
+    let tampered = Bundle { content_hash: "0".repeat(64), ..b1.clone() };
+    assert!(check_signature(&c, &tampered).unwrap_err().contains("doesn't match"));
+
+    // Approving a script is what pins the publisher to the key; approving a file that is not a script does nothing.
+    assert!(c.skill_publisher_pins().unwrap().is_empty());
+    assert!(!c.skill_script_set_approved("s1", "test.json", true, 5).unwrap());
+    assert!(c.skill_script_set_approved("s1", "scripts/run.py", true, 5).unwrap());
+    assert_eq!(c.skill_publisher_pins().unwrap().get("acme"), Some(&test_keys::public_key(1)));
+    assert_eq!(c.skill_app_get("s1").unwrap().unwrap().signature.state, SignatureState::Signed);
+
+    // After that: another key, or none, is a different author, not an update.
+    let other = signed_with_script(2, "1.1.0");
+    assert!(check_signature(&c, &other).unwrap_err().contains("different author"));
+    let unsigned = read(&base_files(&manifest("1.1.0", ""))).unwrap();
+    let e = check_signature(&c, &unsigned).unwrap_err();
+    assert!(e.contains("not signed") && e.contains("pinned"), "{e}");
+    // The same key updating is fine, and its script starts unapproved again because the text changed.
+    assert!(check_signature(&c, &signed_with_script(1, "1.1.0")).is_ok());
+}
+
+#[test]
+fn only_an_approved_script_is_written_beside_skill_md_and_revoking_takes_it_back() {
+    let (b, c) = (signed_with_script(1, "1.0.0"), catalog());
+    c.skill_upsert_unique_global(&catalog_skill("s1", &b.name)).unwrap();
+    install(&c, "s1", &b, 1).unwrap();
+    let skills = vec![agent_skill("s1", "acme-word")];
+    let has_script = |c: &Store| sibling_files(&skills, c).iter().any(|f| f.filename.ends_with("scripts/run.py"));
+    assert!(!has_script(&c));
+    c.skill_script_set_approved("s1", "scripts/run.py", true, 2).unwrap();
+    assert!(has_script(&c));
+    c.skill_script_set_approved("s1", "scripts/run.py", false, 3).unwrap();
+    assert!(!has_script(&c));
+}

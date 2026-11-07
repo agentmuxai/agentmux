@@ -10,6 +10,7 @@ import { For, Show, type JSX } from "solid-js";
 import type { SkillImportItem } from "@/types/rpc/SkillImportItem";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { Button, TextInput } from "@/app/element/ui";
+import { ImportAppFacts } from "./skill-app-scripts";
 import { diffLineClass, diffLines, lineDiff } from "@/app/view/memory-editor/line-diff";
 import { SOURCE_KIND_LABELS, type SkillImportModel, type SkillSourceKind } from "./skill-import-model";
 
@@ -48,6 +49,7 @@ function SkillImportRow(props: { model: SkillImportModel; item: SkillImportItem 
             <Show when={item().description}>
                 <div class="skill-import-item-desc">{item().description}</div>
             </Show>
+            <Show when={item().app}>{(app) => <ImportAppFacts app={app()} />}</Show>
             <Show when={item().status !== "same"}>
                 <Show
                     when={item().status === "changed"}
