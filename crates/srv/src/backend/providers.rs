@@ -725,6 +725,20 @@ pub fn live_setting_str(key: &str) -> Option<String> {
     (!value.is_empty()).then_some(value)
 }
 
+/// `cli:usepath`: the ids of the providers whose CLI is the person's own copy on
+/// PATH, not AgentMux's (SPEC_ISOLATED_INSTALL_FOR_NON_NPM_CLIS_2026_11_05.md §3).
+pub const SETTING_USE_PATH: &str = "cli:usepath";
+
+/// `provider_id` is listed in [`SETTING_USE_PATH`] now. Absent: AgentMux's copy.
+pub fn uses_path_cli(provider_id: &str) -> bool {
+    CONFIG.get().is_some_and(|c| path_listed(&c.get_settings().extra, provider_id))
+}
+
+fn path_listed(extra: &std::collections::HashMap<String, serde_json::Value>, provider_id: &str) -> bool {
+    let ids = extra.get(SETTING_USE_PATH).and_then(serde_json::Value::as_array);
+    ids.is_some_and(|ids| ids.iter().any(|id| id.as_str() == Some(provider_id)))
+}
+
 /// [`SETTING_COMPACT_AT`] now, or its default.
 pub fn compact_at_setting() -> u64 {
     CONFIG.get().and_then(|c| c.extra_u64(SETTING_COMPACT_AT)).unwrap_or(DEFAULT_COMPACT_AT)

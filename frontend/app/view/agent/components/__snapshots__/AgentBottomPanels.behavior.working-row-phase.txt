@@ -1,0 +1,201 @@
+readSwarmSummary({"model":"sonnet"})
+readSwarmSummary({"model":"sonnet"})
+-- streaming, waiting
+<div>
+  <div data-stand=DesktopDrivingBar data-props={"blockId":"\"blk-1\""}>
+  <div data-stand=AgentAuthPanel data-props={"authNotice":"null","authProviderId":"\"claude\"","authUrl":"null","launchPhase":"\"idle\"","onCancelLogin":"<fn>","onDismissAuthNotice":"<fn>","onUseTerminal":"<fn>"}>
+    <span data-cb=onDismissAuthNotice>
+      "onDismissAuthNotice"
+    <span data-cb=onCancelLogin>
+      "onCancelLogin"
+    <span data-cb=onUseTerminal>
+      "onUseTerminal"
+  <div class=agent-request-stack>
+    <div data-stand=AgentDecisionPanel data-props={"onDecide":"<fn>","onDefer":"<fn>","pending":"[]"}>
+      <span data-cb=onDecide>
+        "onDecide"
+      <span data-cb=onDefer>
+        "onDefer"
+    <div data-stand=AgentQuestionPanel data-props={"blockId":"\"blk-1\"","onAnswer":"<fn>","onCancel":"<fn>","pending":"[]"}>
+      <span data-cb=onAnswer>
+        "onAnswer"
+      <span data-cb=onCancel>
+        "onCancel"
+    <div data-stand=PaneRequestDock data-props={"blockId":"\"blk-1\""}>
+  <div data-stand=PendingMessagesPanel data-props={"pendingMessages":"[]"}>
+  <div data-stand=AgentCredentialsRevokedChip data-props={"agentId":"\"agent-7\"","flowRunning":"false"}>
+  <div data-stand=ShutdownPendingBanner data-props={"agentId":"\"agent-7\"","agentName":"\"Seven\"","blockId":"\"blk-1\""}>
+  <div data-stand=SensitiveBanner data-props={}>
+  <div data-stand=AgentDisconnectedBanner data-props={"onReconnect":"<fn>","phase":"{\"kind\":\"Streaming\",\"waitingReason\":\"api overloaded\",\"retryAtMs\":1700000005000}"}>
+    <span data-cb=onReconnect>
+      "onReconnect"
+  <div data-stand=ForkProviderFallbackBanner data-props={"meta":"{\"model\":\"sonnet\"}"}>
+  <div data-stand=HistoryLoadFailedBanner data-props={"phase":"\"Ready\""}>
+  <div data-stand=ActivityDock data-props={"backgroundTasksAtom":"<fn>","blockId":"\"blk-1\"","documentNodes":"[]"}>
+  <div data-stand=TurnAwayDigest data-props={"blockId":"\"blk-1\"","busy":"false","looking":"true"}>
+  <div data-stand=ApiRetryRow data-props={"onStop":"<fn>","retry":"null"}>
+    <span data-cb=onStop>
+      "onStop"
+  <div data-stand=HeldInputPanel data-props={"clockTime":"<fn>","held":"[]","notices":"[]","onCancel":"<fn>","onDismissNotice":"<fn>","onSendNow":"<fn>"}>
+    <span data-cb=onSendNow>
+      "onSendNow"
+    <span data-cb=onCancel>
+      "onCancel"
+    <span data-cb=onDismissNotice>
+      "onDismissNotice"
+  <div class=agent-working-row-anchor>
+    <div data-stand=AgentWorkingRow data-props={"activity":"null","activitySummary":"null","compacting":"false","compactionContextTokens":"null","compactionModel":"\"key(sonnet, null)\"","hasAuthUrl":"false","launchPhase":"\"idle\"","loading":"false","needsYou":"null","onCancelLogin":"<fn>","reconnecting":"false","retryAtMs":"1700000005000","sessionStats":"null","stopping":"false","turnCarry":"null","turnLedger":"null","turnTokens":"0","waitingReason":"\"api overloaded\""}>
+      <span data-cb=onCancelLogin>
+        "onCancelLogin"
+  <div data-stand=AgentSessionNotices data-props={"blockAtom":"{\"meta\":{\"model\":\"sonnet\"}}","blockId":"\"blk-1\"","providerId":"\"claude-code\""}>
+  <div data-stand=AgentStoppedBanner data-props={"agentId":"\"agent-7\"","block":"{\"meta\":{\"model\":\"sonnet\"}}"}>
+readSwarmSummary({"model":"sonnet"})
+-- streaming, nothing to wait for
+<div>
+  <div data-stand=DesktopDrivingBar data-props={"blockId":"\"blk-1\""}>
+  <div data-stand=AgentAuthPanel data-props={"authNotice":"null","authProviderId":"\"claude\"","authUrl":"null","launchPhase":"\"idle\"","onCancelLogin":"<fn>","onDismissAuthNotice":"<fn>","onUseTerminal":"<fn>"}>
+    <span data-cb=onDismissAuthNotice>
+      "onDismissAuthNotice"
+    <span data-cb=onCancelLogin>
+      "onCancelLogin"
+    <span data-cb=onUseTerminal>
+      "onUseTerminal"
+  <div class=agent-request-stack>
+    <div data-stand=AgentDecisionPanel data-props={"onDecide":"<fn>","onDefer":"<fn>","pending":"[]"}>
+      <span data-cb=onDecide>
+        "onDecide"
+      <span data-cb=onDefer>
+        "onDefer"
+    <div data-stand=AgentQuestionPanel data-props={"blockId":"\"blk-1\"","onAnswer":"<fn>","onCancel":"<fn>","pending":"[]"}>
+      <span data-cb=onAnswer>
+        "onAnswer"
+      <span data-cb=onCancel>
+        "onCancel"
+    <div data-stand=PaneRequestDock data-props={"blockId":"\"blk-1\""}>
+  <div data-stand=PendingMessagesPanel data-props={"pendingMessages":"[]"}>
+  <div data-stand=AgentCredentialsRevokedChip data-props={"agentId":"\"agent-7\"","flowRunning":"false"}>
+  <div data-stand=ShutdownPendingBanner data-props={"agentId":"\"agent-7\"","agentName":"\"Seven\"","blockId":"\"blk-1\""}>
+  <div data-stand=SensitiveBanner data-props={}>
+  <div data-stand=AgentDisconnectedBanner data-props={"onReconnect":"<fn>","phase":"{\"kind\":\"Streaming\"}"}>
+    <span data-cb=onReconnect>
+      "onReconnect"
+  <div data-stand=ForkProviderFallbackBanner data-props={"meta":"{\"model\":\"sonnet\"}"}>
+  <div data-stand=HistoryLoadFailedBanner data-props={"phase":"\"Ready\""}>
+  <div data-stand=ActivityDock data-props={"backgroundTasksAtom":"<fn>","blockId":"\"blk-1\"","documentNodes":"[]"}>
+  <div data-stand=TurnAwayDigest data-props={"blockId":"\"blk-1\"","busy":"false","looking":"true"}>
+  <div data-stand=ApiRetryRow data-props={"onStop":"<fn>","retry":"null"}>
+    <span data-cb=onStop>
+      "onStop"
+  <div data-stand=HeldInputPanel data-props={"clockTime":"<fn>","held":"[]","notices":"[]","onCancel":"<fn>","onDismissNotice":"<fn>","onSendNow":"<fn>"}>
+    <span data-cb=onSendNow>
+      "onSendNow"
+    <span data-cb=onCancel>
+      "onCancel"
+    <span data-cb=onDismissNotice>
+      "onDismissNotice"
+  <div class=agent-working-row-anchor>
+    <div data-stand=AgentWorkingRow data-props={"activity":"null","activitySummary":"null","compacting":"false","compactionContextTokens":"null","compactionModel":"\"key(sonnet, null)\"","hasAuthUrl":"false","launchPhase":"\"idle\"","loading":"false","needsYou":"null","onCancelLogin":"<fn>","reconnecting":"false","retryAtMs":"null","sessionStats":"null","stopping":"false","turnCarry":"null","turnLedger":"null","turnTokens":"0","waitingReason":"null"}>
+      <span data-cb=onCancelLogin>
+        "onCancelLogin"
+  <div data-stand=AgentSessionNotices data-props={"blockAtom":"{\"meta\":{\"model\":\"sonnet\"}}","blockId":"\"blk-1\"","providerId":"\"claude-code\""}>
+  <div data-stand=AgentStoppedBanner data-props={"agentId":"\"agent-7\"","block":"{\"meta\":{\"model\":\"sonnet\"}}"}>
+readSwarmSummary({"model":"sonnet"})
+-- interrupting
+<div>
+  <div data-stand=DesktopDrivingBar data-props={"blockId":"\"blk-1\""}>
+  <div data-stand=AgentAuthPanel data-props={"authNotice":"null","authProviderId":"\"claude\"","authUrl":"null","launchPhase":"\"idle\"","onCancelLogin":"<fn>","onDismissAuthNotice":"<fn>","onUseTerminal":"<fn>"}>
+    <span data-cb=onDismissAuthNotice>
+      "onDismissAuthNotice"
+    <span data-cb=onCancelLogin>
+      "onCancelLogin"
+    <span data-cb=onUseTerminal>
+      "onUseTerminal"
+  <div class=agent-request-stack>
+    <div data-stand=AgentDecisionPanel data-props={"onDecide":"<fn>","onDefer":"<fn>","pending":"[]"}>
+      <span data-cb=onDecide>
+        "onDecide"
+      <span data-cb=onDefer>
+        "onDefer"
+    <div data-stand=AgentQuestionPanel data-props={"blockId":"\"blk-1\"","onAnswer":"<fn>","onCancel":"<fn>","pending":"[]"}>
+      <span data-cb=onAnswer>
+        "onAnswer"
+      <span data-cb=onCancel>
+        "onCancel"
+    <div data-stand=PaneRequestDock data-props={"blockId":"\"blk-1\""}>
+  <div data-stand=PendingMessagesPanel data-props={"pendingMessages":"[]"}>
+  <div data-stand=AgentCredentialsRevokedChip data-props={"agentId":"\"agent-7\"","flowRunning":"false"}>
+  <div data-stand=ShutdownPendingBanner data-props={"agentId":"\"agent-7\"","agentName":"\"Seven\"","blockId":"\"blk-1\""}>
+  <div data-stand=SensitiveBanner data-props={}>
+  <div data-stand=AgentDisconnectedBanner data-props={"onReconnect":"<fn>","phase":"{\"kind\":\"Interrupting\",\"waitingReason\":\"ignored\"}"}>
+    <span data-cb=onReconnect>
+      "onReconnect"
+  <div data-stand=ForkProviderFallbackBanner data-props={"meta":"{\"model\":\"sonnet\"}"}>
+  <div data-stand=HistoryLoadFailedBanner data-props={"phase":"\"Ready\""}>
+  <div data-stand=ActivityDock data-props={"backgroundTasksAtom":"<fn>","blockId":"\"blk-1\"","documentNodes":"[]"}>
+  <div data-stand=TurnAwayDigest data-props={"blockId":"\"blk-1\"","busy":"false","looking":"true"}>
+  <div data-stand=ApiRetryRow data-props={"onStop":"<fn>","retry":"null"}>
+    <span data-cb=onStop>
+      "onStop"
+  <div data-stand=HeldInputPanel data-props={"clockTime":"<fn>","held":"[]","notices":"[]","onCancel":"<fn>","onDismissNotice":"<fn>","onSendNow":"<fn>"}>
+    <span data-cb=onSendNow>
+      "onSendNow"
+    <span data-cb=onCancel>
+      "onCancel"
+    <span data-cb=onDismissNotice>
+      "onDismissNotice"
+  <div class=agent-working-row-anchor>
+    <div data-stand=AgentWorkingRow data-props={"activity":"null","activitySummary":"null","compacting":"false","compactionContextTokens":"null","compactionModel":"\"key(sonnet, null)\"","hasAuthUrl":"false","launchPhase":"\"idle\"","loading":"false","needsYou":"null","onCancelLogin":"<fn>","reconnecting":"false","retryAtMs":"null","sessionStats":"null","stopping":"true","turnCarry":"null","turnLedger":"null","turnTokens":"0","waitingReason":"null"}>
+      <span data-cb=onCancelLogin>
+        "onCancelLogin"
+  <div data-stand=AgentSessionNotices data-props={"blockAtom":"{\"meta\":{\"model\":\"sonnet\"}}","blockId":"\"blk-1\"","providerId":"\"claude-code\""}>
+  <div data-stand=AgentStoppedBanner data-props={"agentId":"\"agent-7\"","block":"{\"meta\":{\"model\":\"sonnet\"}}"}>
+readSwarmSummary({"model":"sonnet"})
+-- idle
+<div>
+  <div data-stand=DesktopDrivingBar data-props={"blockId":"\"blk-1\""}>
+  <div data-stand=AgentAuthPanel data-props={"authNotice":"null","authProviderId":"\"claude\"","authUrl":"null","launchPhase":"\"idle\"","onCancelLogin":"<fn>","onDismissAuthNotice":"<fn>","onUseTerminal":"<fn>"}>
+    <span data-cb=onDismissAuthNotice>
+      "onDismissAuthNotice"
+    <span data-cb=onCancelLogin>
+      "onCancelLogin"
+    <span data-cb=onUseTerminal>
+      "onUseTerminal"
+  <div class=agent-request-stack>
+    <div data-stand=AgentDecisionPanel data-props={"onDecide":"<fn>","onDefer":"<fn>","pending":"[]"}>
+      <span data-cb=onDecide>
+        "onDecide"
+      <span data-cb=onDefer>
+        "onDefer"
+    <div data-stand=AgentQuestionPanel data-props={"blockId":"\"blk-1\"","onAnswer":"<fn>","onCancel":"<fn>","pending":"[]"}>
+      <span data-cb=onAnswer>
+        "onAnswer"
+      <span data-cb=onCancel>
+        "onCancel"
+    <div data-stand=PaneRequestDock data-props={"blockId":"\"blk-1\""}>
+  <div data-stand=PendingMessagesPanel data-props={"pendingMessages":"[]"}>
+  <div data-stand=AgentCredentialsRevokedChip data-props={"agentId":"\"agent-7\"","flowRunning":"false"}>
+  <div data-stand=ShutdownPendingBanner data-props={"agentId":"\"agent-7\"","agentName":"\"Seven\"","blockId":"\"blk-1\""}>
+  <div data-stand=SensitiveBanner data-props={}>
+  <div data-stand=AgentDisconnectedBanner data-props={"onReconnect":"<fn>","phase":"{\"kind\":\"Idle\"}"}>
+    <span data-cb=onReconnect>
+      "onReconnect"
+  <div data-stand=ForkProviderFallbackBanner data-props={"meta":"{\"model\":\"sonnet\"}"}>
+  <div data-stand=HistoryLoadFailedBanner data-props={"phase":"\"Ready\""}>
+  <div data-stand=ActivityDock data-props={"backgroundTasksAtom":"<fn>","blockId":"\"blk-1\"","documentNodes":"[]"}>
+  <div data-stand=TurnAwayDigest data-props={"blockId":"\"blk-1\"","busy":"false","looking":"true"}>
+  <div data-stand=ApiRetryRow data-props={"onStop":"<fn>","retry":"null"}>
+    <span data-cb=onStop>
+      "onStop"
+  <div data-stand=HeldInputPanel data-props={"clockTime":"<fn>","held":"[]","notices":"[]","onCancel":"<fn>","onDismissNotice":"<fn>","onSendNow":"<fn>"}>
+    <span data-cb=onSendNow>
+      "onSendNow"
+    <span data-cb=onCancel>
+      "onCancel"
+    <span data-cb=onDismissNotice>
+      "onDismissNotice"
+  <div class=agent-working-row-anchor>
+    <div data-stand=AgentWorkingRow data-props={"activity":"null","activitySummary":"null","compacting":"false","compactionContextTokens":"null","compactionModel":"\"key(sonnet, null)\"","hasAuthUrl":"false","launchPhase":"\"idle\"","loading":"false","needsYou":"null","onCancelLogin":"<fn>","reconnecting":"false","retryAtMs":"null","sessionStats":"null","stopping":"false","turnCarry":"null","turnLedger":"null","turnTokens":"0","waitingReason":"null"}>
+      <span data-cb=onCancelLogin>
+        "onCancelLogin"
+  <div data-stand=AgentSessionNotices data-props={"blockAtom":"{\"meta\":{\"model\":\"sonnet\"}}","blockId":"\"blk-1\"","providerId":"\"claude-code\""}>
+  <div data-stand=AgentStoppedBanner data-props={"agentId":"\"agent-7\"","block":"{\"meta\":{\"model\":\"sonnet\"}}"}>

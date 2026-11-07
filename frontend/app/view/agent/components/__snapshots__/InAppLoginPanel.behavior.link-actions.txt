@@ -1,0 +1,52 @@
+-- link step
+<div>
+  <div class="in-app-login-waiting">
+    <div class="in-app-login-waiting-title">
+      "🔐 Sign in to"
+      "Claude"
+    <div class="in-app-login-hint">
+      "Waiting for you to authorize in the browser — we'll detect it automatically."
+    <div class="in-app-login-step">
+      <div class="in-app-login-url-label">
+        "1 · Authorize in your browser"
+      <div class="in-app-login-hint">
+        "Your browser should have opened automatically. If it didn't, copy this backup link and open it manually:"
+      <div class="in-app-login-url-row">
+        <code class="in-app-login-url-text" data-hover-tip="https://claude.com/cai/oauth/authorize?code=true&state=abc" aria-description="https://claude.com/cai/oauth/authorize?code=true&state=abc">
+          "https://claude.com/cai/oauth/authorize?code=true&state=abc"
+      <div class="in-app-login-url-actions">
+        <span data-stand="Button" data-class="grey solid" data-disabled="false">
+          "Open link"
+        <span data-stand="Button" data-class="grey solid" data-disabled="false">
+          "Copy link"
+    <div class="in-app-login-step">
+      <div class="in-app-login-url-label">
+        "2 · Paste the authorization code"
+      <div class="in-app-login-hint">
+        "After you authorize, the page shows a code — paste it here:"
+      <div class="in-app-login-callback-row">
+        <input data-stand="TextInput" data-variant="plain" class="in-app-login-url-input" placeholder="Paste the authorization code…" data-value="">
+        <span data-stand="Button" data-class="grey solid" data-title="Paste from clipboard and submit" data-disabled="false">
+          "Paste & submit"
+        <span data-stand="Button" data-class="grey solid" data-disabled="false">
+          "Submit"
+    <div class="in-app-login-actions">
+      <span data-stand="Button" data-disabled="false">
+        "Cancel login"
+      <span data-stand="Button" data-class="grey" data-disabled="false">
+        "Use terminal instead"
+Button "Open link" onClick
+openExternal https://claude.com/cai/oauth/authorize?code=true&state=abc
+Button "Open link" onClick
+openExternal https://claude.com/cai/oauth/authorize?code=true&state=abc
+console.warn [auth-diag] openExternal failed: no browser
+Button "Open link" onClick
+openExternal https://claude.com/cai/oauth/authorize?code=true&state=abc
+console.warn [auth-diag] openExternal failed: plain string
+Button "Copy link" onClick
+clipboard writeText https://claude.com/cai/oauth/authorize?code=true&state=abc
+Button "Copy link" onClick
+clipboard writeText https://claude.com/cai/oauth/authorize?code=true&state=abc
+console.log clipboard write failed clipboard denied
+Button "Use terminal instead" onClick
+onUseTerminal

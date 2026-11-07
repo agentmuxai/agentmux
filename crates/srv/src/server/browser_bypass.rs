@@ -110,6 +110,27 @@ impl Grant {
         self.powers.contains(&power)
     }
 
+    /// Does this grant already give what a request for `power` asks? A grant
+    /// that lets the terminal run freely covers a request to use it with a
+    /// question per line (the laxer one holds the stricter).
+    pub(crate) fn satisfies(&self, power: Power) -> bool {
+        match power {
+            Power::TerminalAsk => self.allows_terminal(),
+            p => self.allows(p),
+        }
+    }
+
+    /// May the agent type in a web terminal at all, whether or not each line asks?
+    pub(crate) fn allows_terminal(&self) -> bool {
+        self.allows(Power::Terminal) || self.allows(Power::TerminalAsk)
+    }
+
+    /// Does each line need the person's Run it? The stricter power wins when a
+    /// grant carries both.
+    pub(crate) fn asks_each_line(&self) -> bool {
+        self.allows(Power::TerminalAsk)
+    }
+
     /// Is `url` on the sites this grant is bound to? A page with no web
     /// origin (`about:blank`, `data:`) never is.
     pub(crate) fn covers(&self, url: &str) -> bool {
@@ -620,6 +641,23 @@ mod tests {
         put("bp-time", "naki", &["https://github.com"], 0);
         assert_eq!(due("bp-time", "bp-time-id", Duration::from_secs(900), Instant::now(), true), Due::End(TIME_UP_REASON));
         forget("bp-time", "test");
+    }
+
+    #[test]
+    fn asking_about_each_line_is_the_stricter_terminal_and_a_free_one_covers_a_request_for_it() {
+        put("bp-ask", "naki", &["https://github.com"], 60);
+        let power = |p: Power| table().grants.get_mut("bp-ask").unwrap().grant.powers.push(p);
+        let g = || active_for("bp-ask", "naki").unwrap();
+        assert!(!g().allows_terminal() && !g().asks_each_line());
+        power(Power::Terminal);
+        assert!(g().allows_terminal() && !g().asks_each_line(), "a free terminal runs without asking");
+        assert!(g().satisfies(Power::TerminalAsk), "a request to use it with questions needs nothing more");
+        power(Power::TerminalAsk);
+        assert!(g().asks_each_line(), "both: the stricter wins");
+        table().grants.get_mut("bp-ask").unwrap().grant.powers.retain(|p| *p != Power::Terminal);
+        assert!(g().allows_terminal() && g().asks_each_line());
+        assert!(!g().satisfies(Power::Terminal), "asking each line does not give the free terminal");
+        forget("bp-ask", "test");
     }
 
     #[test]

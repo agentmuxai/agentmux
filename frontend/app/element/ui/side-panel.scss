@@ -1,0 +1,49 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// SidePanel: a panel along the right edge of its pane. Sizes and colours come from theme tokens only.
+
+.ui-side-panel {
+    position: absolute;
+    // Over a narrow list's sticky section heads (--z-tab-name).
+    z-index: var(--z-pane-overlay);
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(440px, 92%);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    padding: var(--space-3);
+    overflow-y: auto;
+    background: var(--main-bg-color);
+    border-left: 1px solid var(--border-color);
+    box-shadow: -8px 0 24px rgb(0 0 0 / 25%);
+}
+
+.ui-side-panel__head {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+}
+
+.ui-side-panel__title {
+    flex: 1;
+    margin: 0;
+    font-size: var(--text-md);
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+// Beside the content, in a row: it takes its own width and the full height of the row, and sits in the flow.
+.ui-side-panel--docked {
+    position: relative;
+    z-index: auto;
+    // Its width is a wish: the column it sits in may be narrower (the Messages dock is at most 45% of the pane), and
+    // the panel then shrinks with it instead of pushing past it.
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 100%;
+    width: var(--side-panel-width, 320px);
+    box-shadow: none;
+}

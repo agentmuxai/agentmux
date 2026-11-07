@@ -1093,6 +1093,8 @@ fn register_service_handlers(engine: &Arc<WshRpcEngine>, state: &AppState, conn_
     // Install handlers (install.start / install.cancel — see
     // docs/specs/SPEC_AGENT_INSTALL_STAGE_2026_05_17.md)
     super::install_handlers::register_install_handlers(engine, &state);
+    // Toolchain's Uninstall of an agent CLI (install.uninstall).
+    super::uninstall_handlers::register_uninstall_handlers(engine, &state);
 
     // System-toolchain install handlers (toolchain.resolve_install_command /
     // toolchain.install_system_tool — see

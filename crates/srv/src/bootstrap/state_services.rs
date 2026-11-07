@@ -229,6 +229,8 @@ pub fn spawn_state_services(state: &AppState) {
     backend::supervisor::settings::install_config(Arc::clone(&state.config_watcher));
     backend::transcript::framer::install_config(Arc::clone(&state.config_watcher));
     backend::transcript::damage::install_broker(Arc::clone(&state.broker));
+    // The open Audit panes are told when a row is written.
+    backend::audit_live::install_broker(Arc::clone(&state.broker));
     crate::identity::accounts_changed::install_broker(Arc::clone(&state.broker));
     // The open workspace saves itself as it changes (SPEC_WORKSPACES_2026_10_23.md §4.1).
     crate::server::service::user_workspace::spawn_saver(Arc::clone(&state.mstore));

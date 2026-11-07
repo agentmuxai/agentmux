@@ -1,0 +1,95 @@
+onMuxEvent sysinfo local
+sysinfo 70 cores
+squares: 70, tab stops: 1
+-- heatmap, first squares only
+<div>
+  <div data-stand="AnchoredPopover" data-placement="top-end" class="cpu-cores-popover cpu-cores-popover--heat" role="dialog" aria-label="Per-core CPU usage" style="width: 360px;">
+    <div class="cpu-cores-header">
+      <span class="cpu-cores-title">
+        "CPU Usage"
+      <span class="cpu-cores-aggregate" style="color: var(--secondary-text-color);">
+        "avg"
+        "43"
+        "%"
+    <div class="cpu-cores-subtitle">
+      <span>
+        "70 cores"
+      <span class="cpu-cores-legend" aria-hidden="true">
+        "idle"
+        <span class="cpu-cores-legend-ramp">
+        "busy"
+    <div class="cpu-cores-heatmap" role="group" aria-label="Per-core CPU heatmap, arrow keys to navigate" style="--cols: 14; --sq: 22px;">
+      <span class="cpu-core-square" data-core-idx="0" tabindex="0" data-hover-tip="Core 0 — 0%" aria-description="Core 0 — 0%" aria-label="Core 0, 0%" style="background-color: color-mix(in srgb, var(--warning-color) 0%, var(--cpu-idle-color));">
+      <span class="cpu-core-square" data-core-idx="1" tabindex="-1" data-hover-tip="Core 1 — 1%" aria-description="Core 1 — 1%" aria-label="Core 1, 1%" style="background-color: color-mix(in srgb, var(--warning-color) 3%, var(--cpu-idle-color));">
+      <span class="cpu-core-square" data-core-idx="2" tabindex="-1" data-hover-tip="Core 2 — 3%" aria-description="Core 2 — 3%" aria-label="Core 2, 3%" style="background-color: color-mix(in srgb, var(--warning-color) 6%, var(--cpu-idle-color));">
+      <span class="cpu-core-square" data-core-idx="3" tabindex="-1" data-hover-tip="Core 3 — 4%" aria-description="Core 3 — 4%" aria-label="Core 3, 4%" style="background-color: color-mix(in srgb, var(--warning-color) 9%, var(--cpu-idle-color));">
+      <span class="cpu-core-square" data-core-idx="4" tabindex="-1" data-hover-tip="Core 4 — 6%" aria-description="Core 4 — 6%" aria-label="Core 4, 6%" style="background-color: color-mix(in srgb, var(--warning-color) 12%, var(--cpu-idle-color));">
+      <span class="cpu-core-square" data-core-idx="5" tabindex="-1" data-hover-tip="Core 5 — 7%" aria-description="Core 5 — 7%" aria-label="Core 5, 7%" style="background-color: color-mix(in srgb, var(--warning-color) 14%, var(--cpu-idle-color));">
+      <span class="cpu-core-square" data-core-idx="6" tabindex="-1" data-hover-tip="Core 6 — 9%" aria-description="Core 6 — 9%" aria-label="Core 6, 9%" style="background-color: color-mix(in srgb, var(--warning-color) 17%, var(--cpu-idle-color));">
+      <span class="cpu-core-square" data-core-idx="7" tabindex="-1" data-hover-tip="Core 7 — 10%" aria-description="Core 7 — 10%" aria-label="Core 7, 10%" style="background-color: color-mix(in srgb, var(--warning-color) 20%, var(--cpu-idle-color));">
+      <span class="cpu-core-square" data-core-idx="8" tabindex="-1" data-hover-tip="Core 8 — 12%" aria-description="Core 8 — 12%" aria-label="Core 8, 12%" style="background-color: color-mix(in srgb, var(--warning-color) 23%, var(--cpu-idle-color));">
+      <span class="cpu-core-square" data-core-idx="9" tabindex="-1" data-hover-tip="Core 9 — 13%" aria-description="Core 9 — 13%" aria-label="Core 9, 13%" style="background-color: color-mix(in srgb, var(--warning-color) 26%, var(--cpu-idle-color));">
+      <span class="cpu-core-square" data-core-idx="10" tabindex="-1" data-hover-tip="Core 10 — 14%" aria-description="Core 10 — 14%" aria-label="Core 10, 14%" style="background-color: color-mix(in srgb, var(--warning-color) 29%, var(--cpu-idle-color));">
+      <span class="cpu-core-square" data-core-idx="11" tabindex="-1" data-hover-tip="Core 11 — 16%" aria-description="Core 11 — 16%" aria-label="Core 11, 16%" style="background-color: color-mix(in srgb, var(--warning-color) 32%, var(--cpu-idle-color));">
+      <span class="cpu-core-square" data-core-idx="12" tabindex="-1" data-hover-tip="Core 12 — 17%" aria-description="Core 12 — 17%" aria-label="Core 12, 17%" style="background-color: color-mix(in srgb, var(--warning-color) 35%, var(--cpu-idle-color));">
+      <span class="cpu-core-square" data-core-idx="13" tabindex="-1" data-hover-tip="Core 13 — 19%" aria-description="Core 13 — 19%" aria-label="Core 13, 19%" style="background-color: color-mix(in srgb, var(--warning-color) 38%, var(--cpu-idle-color));">
+      <span class="cpu-core-square" data-core-idx="14" tabindex="-1" data-hover-tip="Core 14 — 20%" aria-description="Core 14 — 20%" aria-label="Core 14, 20%" style="background-color: color-mix(in srgb, var(--warning-color) 41%, var(--cpu-idle-color));">
+      <span class="cpu-core-square" data-core-idx="15" tabindex="-1" data-hover-tip="Core 15 — 22%" aria-description="Core 15 — 22%" aria-label="Core 15, 22%" style="background-color: color-mix(in srgb, var(--warning-color) 43%, var(--cpu-idle-color));">
+      <span class="cpu-core-square" data-core-idx="16" tabindex="-1" data-hover-tip="Core 16 — 23%" aria-description="Core 16 — 23%" aria-label="Core 16, 23%" style="background-color: color-mix(in srgb, var(--warning-color) 46%, var(--cpu-idle-color));">
+      <span class="cpu-core-square" data-core-idx="17" tabindex="-1" data-hover-tip="Core 17 — 25%" aria-description="Core 17 — 25%" aria-label="Core 17, 25%" style="background-color: color-mix(in srgb, var(--warning-color) 49%, var(--cpu-idle-color));">
+      <span class="cpu-core-square" data-core-idx="18" tabindex="-1" data-hover-tip="Core 18 — 26%" aria-description="Core 18 — 26%" aria-label="Core 18, 26%" style="background-color: color-mix(in srgb, var(--warning-color) 52%, var(--cpu-idle-color));">
+      <span class="cpu-core-square" data-core-idx="19" tabindex="-1" data-hover-tip="Core 19 — 28%" aria-description="Core 19 — 28%" aria-label="Core 19, 28%" style="background-color: color-mix(in srgb, var(--warning-color) 55%, var(--cpu-idle-color));">
+      <span class="cpu-core-square" data-core-idx="20" tabindex="-1" data-hover-tip="Core 20 — 29%" aria-description="Core 20 — 29%" aria-label="Core 20, 29%" style="background-color: color-mix(in srgb, var(--warning-color) 58%, var(--cpu-idle-color));">
+      <span class="cpu-core-square" data-core-idx="21" tabindex="-1" data-hover-tip="Core 21 — 30%" aria-description="Core 21 — 30%" aria-label="Core 21, 30%" style="background-color: color-mix(in srgb, var(--warning-color) 61%, var(--cpu-idle-color));">
+      <span class="cpu-core-square" data-core-idx="22" tabindex="-1" data-hover-tip="Core 22 — 32%" aria-description="Core 22 — 32%" aria-label="Core 22, 32%" style="background-color: color-mix(in srgb, var(--warning-color) 64%, var(--cpu-idle-color));">
+      <span class="cpu-core-square" data-core-idx="23" tabindex="-1" data-hover-tip="Core 23 — 33%" aria-description="Core 23 — 33%" aria-label="Core 23, 33%" style="background-color: color-mix(in srgb, var(--warning-color) 67%, var(--cpu-idle-color));">
+      <span class="cpu-core-square" data-core-idx="24" tabindex="-1" data-hover-tip="Core 24 — 35%" aria-description="Core 24 — 35%" aria-label="Core 24, 35%" style="background-color: color-mix(in srgb, var(--warning-color) 70%, var(--cpu-idle-color));">
+      <span class="cpu-core-square" data-core-idx="25" tabindex="-1" data-hover-tip="Core 25 — 36%" aria-description="Core 25 — 36%" aria-label="Core 25, 36%" style="background-color: color-mix(in srgb, var(--warning-color) 72%, var(--cpu-idle-color));">
+      <span class="cpu-core-square" data-core-idx="26" tabindex="-1" data-hover-tip="Core 26 — 38%" aria-description="Core 26 — 38%" aria-label="Core 26, 38%" style="background-color: color-mix(in srgb, var(--warning-color) 75%, var(--cpu-idle-color));">
+      <span class="cpu-core-square" data-core-idx="27" tabindex="-1" data-hover-tip="Core 27 — 39%" aria-description="Core 27 — 39%" aria-label="Core 27, 39%" style="background-color: color-mix(in srgb, var(--warning-color) 78%, var(--cpu-idle-color));">
+      <span class="cpu-core-square" data-core-idx="28" tabindex="-1" data-hover-tip="Core 28 — 41%" aria-description="Core 28 — 41%" aria-label="Core 28, 41%" style="background-color: color-mix(in srgb, var(--warning-color) 81%, var(--cpu-idle-color));">
+      <span class="cpu-core-square" data-core-idx="29" tabindex="-1" data-hover-tip="Core 29 — 42%" aria-description="Core 29 — 42%" aria-label="Core 29, 42%" style="background-color: color-mix(in srgb, var(--warning-color) 84%, var(--cpu-idle-color));">
+      <span class="cpu-core-square" data-core-idx="30" tabindex="-1" data-hover-tip="Core 30 — 43%" aria-description="Core 30 — 43%" aria-label="Core 30, 43%" style="background-color: color-mix(in srgb, var(--warning-color) 87%, var(--cpu-idle-color));">
+      <span class="cpu-core-square" data-core-idx="31" tabindex="-1" data-hover-tip="Core 31 — 45%" aria-description="Core 31 — 45%" aria-label="Core 31, 45%" style="background-color: color-mix(in srgb, var(--warning-color) 90%, var(--cpu-idle-color));">
+      <span class="cpu-core-square" data-core-idx="32" tabindex="-1" data-hover-tip="Core 32 — 46%" aria-description="Core 32 — 46%" aria-label="Core 32, 46%" style="background-color: color-mix(in srgb, var(--warning-color) 93%, var(--cpu-idle-color));">
+      <span class="cpu-core-square" data-core-idx="33" tabindex="-1" data-hover-tip="Core 33 — 48%" aria-description="Core 33 — 48%" aria-label="Core 33, 48%" style="background-color: color-mix(in srgb, var(--warning-color) 96%, var(--cpu-idle-color));">
+      <span class="cpu-core-square" data-core-idx="34" tabindex="-1" data-hover-tip="Core 34 — 49%" aria-description="Core 34 — 49%" aria-label="Core 34, 49%" style="background-color: color-mix(in srgb, var(--warning-color) 99%, var(--cpu-idle-color));">
+      <span class="cpu-core-square" data-core-idx="35" tabindex="-1" data-hover-tip="Core 35 — 51%" aria-description="Core 35 — 51%" aria-label="Core 35, 51%" style="background-color: color-mix(in srgb, var(--error-color) 1%, var(--warning-color));">
+      <span class="cpu-core-square" data-core-idx="36" tabindex="-1" data-hover-tip="Core 36 — 52%" aria-description="Core 36 — 52%" aria-label="Core 36, 52%" style="background-color: color-mix(in srgb, var(--error-color) 4%, var(--warning-color));">
+      <span class="cpu-core-square" data-core-idx="37" tabindex="-1" data-hover-tip="Core 37 — 54%" aria-description="Core 37 — 54%" aria-label="Core 37, 54%" style="background-color: color-mix(in srgb, var(--error-color) 7%, var(--warning-color));">
+      <span class="cpu-core-square" data-core-idx="38" tabindex="-1" data-hover-tip="Core 38 — 55%" aria-description="Core 38 — 55%" aria-label="Core 38, 55%" style="background-color: color-mix(in srgb, var(--error-color) 10%, var(--warning-color));">
+      <span class="cpu-core-square" data-core-idx="39" tabindex="-1" data-hover-tip="Core 39 — 57%" aria-description="Core 39 — 57%" aria-label="Core 39, 57%" style="background-color: color-mix(in srgb, var(--error-color) 13%, var(--warning-color));">
+      <span class="cpu-core-square" data-core-idx="40" tabindex="-1" data-hover-tip="Core 40 — 58%" aria-description="Core 40 — 58%" aria-label="Core 40, 58%" style="background-color: color-mix(in srgb, var(--error-color) 16%, var(--warning-color));">
+      <span class="cpu-core-square" data-core-idx="41" tabindex="-1" data-hover-tip="Core 41 — 59%" aria-description="Core 41 — 59%" aria-label="Core 41, 59%" style="background-color: color-mix(in srgb, var(--error-color) 19%, var(--warning-color));">
+      <span class="cpu-core-square" data-core-idx="42" tabindex="-1" data-hover-tip="Core 42 — 61%" aria-description="Core 42 — 61%" aria-label="Core 42, 61%" style="background-color: color-mix(in srgb, var(--error-color) 22%, var(--warning-color));">
+      <span class="cpu-core-square" data-core-idx="43" tabindex="-1" data-hover-tip="Core 43 — 62%" aria-description="Core 43 — 62%" aria-label="Core 43, 62%" style="background-color: color-mix(in srgb, var(--error-color) 25%, var(--warning-color));">
+      <span class="cpu-core-square" data-core-idx="44" tabindex="-1" data-hover-tip="Core 44 — 64%" aria-description="Core 44 — 64%" aria-label="Core 44, 64%" style="background-color: color-mix(in srgb, var(--error-color) 28%, var(--warning-color));">
+      <span class="cpu-core-square" data-core-idx="45" tabindex="-1" data-hover-tip="Core 45 — 65%" aria-description="Core 45 — 65%" aria-label="Core 45, 65%" style="background-color: color-mix(in srgb, var(--error-color) 30%, var(--warning-color));">
+      <span class="cpu-core-square" data-core-idx="46" tabindex="-1" data-hover-tip="Core 46 — 67%" aria-description="Core 46 — 67%" aria-label="Core 46, 67%" style="background-color: color-mix(in srgb, var(--error-color) 33%, var(--warning-color));">
+      <span class="cpu-core-square" data-core-idx="47" tabindex="-1" data-hover-tip="Core 47 — 68%" aria-description="Core 47 — 68%" aria-label="Core 47, 68%" style="background-color: color-mix(in srgb, var(--error-color) 36%, var(--warning-color));">
+      <span class="cpu-core-square" data-core-idx="48" tabindex="-1" data-hover-tip="Core 48 — 70%" aria-description="Core 48 — 70%" aria-label="Core 48, 70%" style="background-color: color-mix(in srgb, var(--error-color) 39%, var(--warning-color));">
+      <span class="cpu-core-square" data-core-idx="49" tabindex="-1" data-hover-tip="Core 49 — 71%" aria-description="Core 49 — 71%" aria-label="Core 49, 71%" style="background-color: color-mix(in srgb, var(--error-color) 42%, var(--warning-color));">
+      <span class="cpu-core-square" data-core-idx="50" tabindex="-1" data-hover-tip="Core 50 — 72%" aria-description="Core 50 — 72%" aria-label="Core 50, 72%" style="background-color: color-mix(in srgb, var(--error-color) 45%, var(--warning-color));">
+      <span class="cpu-core-square" data-core-idx="51" tabindex="-1" data-hover-tip="Core 51 — 74%" aria-description="Core 51 — 74%" aria-label="Core 51, 74%" style="background-color: color-mix(in srgb, var(--error-color) 48%, var(--warning-color));">
+      <span class="cpu-core-square" data-core-idx="52" tabindex="-1" data-hover-tip="Core 52 — 75%" aria-description="Core 52 — 75%" aria-label="Core 52, 75%" style="background-color: color-mix(in srgb, var(--error-color) 51%, var(--warning-color));">
+      <span class="cpu-core-square" data-core-idx="53" tabindex="-1" data-hover-tip="Core 53 — 77%" aria-description="Core 53 — 77%" aria-label="Core 53, 77%" style="background-color: color-mix(in srgb, var(--error-color) 54%, var(--warning-color));">
+      <span class="cpu-core-square" data-core-idx="54" tabindex="-1" data-hover-tip="Core 54 — 78%" aria-description="Core 54 — 78%" aria-label="Core 54, 78%" style="background-color: color-mix(in srgb, var(--error-color) 57%, var(--warning-color));">
+      <span class="cpu-core-square" data-core-idx="55" tabindex="-1" data-hover-tip="Core 55 — 80%" aria-description="Core 55 — 80%" aria-label="Core 55, 80%" style="background-color: color-mix(in srgb, var(--error-color) 59%, var(--warning-color));">
+      <span class="cpu-core-square" data-core-idx="56" tabindex="-1" data-hover-tip="Core 56 — 81%" aria-description="Core 56 — 81%" aria-label="Core 56, 81%" style="background-color: color-mix(in srgb, var(--error-color) 62%, var(--warning-color));">
+      <span class="cpu-core-square" data-core-idx="57" tabindex="-1" data-hover-tip="Core 57 — 83%" aria-description="Core 57 — 83%" aria-label="Core 57, 83%" style="background-color: color-mix(in srgb, var(--error-color) 65%, var(--warning-color));">
+      <span class="cpu-core-square" data-core-idx="58" tabindex="-1" data-hover-tip="Core 58 — 84%" aria-description="Core 58 — 84%" aria-label="Core 58, 84%" style="background-color: color-mix(in srgb, var(--error-color) 68%, var(--warning-color));">
+      <span class="cpu-core-square" data-core-idx="59" tabindex="-1" data-hover-tip="Core 59 — 86%" aria-description="Core 59 — 86%" aria-label="Core 59, 86%" style="background-color: color-mix(in srgb, var(--error-color) 71%, var(--warning-color));">
+      <span class="cpu-core-square" data-core-idx="60" tabindex="-1" data-hover-tip="Core 60 — 87%" aria-description="Core 60 — 87%" aria-label="Core 60, 87%" style="background-color: color-mix(in srgb, var(--error-color) 74%, var(--warning-color));">
+      <span class="cpu-core-square" data-core-idx="61" tabindex="-1" data-hover-tip="Core 61 — 88%" aria-description="Core 61 — 88%" aria-label="Core 61, 88%" style="background-color: color-mix(in srgb, var(--error-color) 77%, var(--warning-color));">
+      <span class="cpu-core-square" data-core-idx="62" tabindex="-1" data-hover-tip="Core 62 — 90%" aria-description="Core 62 — 90%" aria-label="Core 62, 90%" style="background-color: color-mix(in srgb, var(--error-color) 80%, var(--warning-color));">
+      <span class="cpu-core-square" data-core-idx="63" tabindex="-1" data-hover-tip="Core 63 — 91%" aria-description="Core 63 — 91%" aria-label="Core 63, 91%" style="background-color: color-mix(in srgb, var(--error-color) 83%, var(--warning-color));">
+      <span class="cpu-core-square" data-core-idx="64" tabindex="-1" data-hover-tip="Core 64 — 93%" aria-description="Core 64 — 93%" aria-label="Core 64, 93%" style="background-color: color-mix(in srgb, var(--error-color) 86%, var(--warning-color));">
+      <span class="cpu-core-square" data-core-idx="65" tabindex="-1" data-hover-tip="Core 65 — 94%" aria-description="Core 65 — 94%" aria-label="Core 65, 94%" style="background-color: color-mix(in srgb, var(--error-color) 88%, var(--warning-color));">
+      <span class="cpu-core-square" data-core-idx="66" tabindex="-1" data-hover-tip="Core 66 — 96%" aria-description="Core 66 — 96%" aria-label="Core 66, 96%" style="background-color: color-mix(in srgb, var(--error-color) 91%, var(--warning-color));">
+      <span class="cpu-core-square" data-core-idx="67" tabindex="-1" data-hover-tip="Core 67 — 97%" aria-description="Core 67 — 97%" aria-label="Core 67, 97%" style="background-color: color-mix(in srgb, var(--error-color) 94%, var(--warning-color));">
+      <span class="cpu-core-square" data-core-idx="68" tabindex="-1" data-hover-tip="Core 68 — 99%" aria-description="Core 68 — 99%" aria-label="Core 68, 99%" style="background-color: color-mix(in srgb, var(--error-color) 97%, var(--warning-color));">
+      <span class="cpu-core-square" data-core-idx="69" tabindex="-1" data-hover-tip="Core 69 — 100%" aria-description="Core 69 — 100%" aria-label="Core 69, 100%" style="background-color: color-mix(in srgb, var(--error-color) 100%, var(--warning-color));">
+hover 5: Core 5 — 7%
+leave: 70 cores
+focus 9: Core 9 — 13%, tab stop on 9
+blur: 70 cores, tab stop still on 9

@@ -1,0 +1,187 @@
+-- defaults, no themes
+<div>
+  <div class="settings-section-body">
+    <div class="setting-row" id="setting-terminal.default_shell">
+      <div class="ui-field ui-field--stacked">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Default shell"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "The shell new local terminals open with. Agents' shells and SSH or WSL terminals keep their own."
+        <div class="ui-field-control">
+          <div data-stand="DefaultShellSetting">
+    <div class="setting-row" id="setting-terminal.font_size">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Font size"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Terminal font size in pixels (8–32)"
+        <div class="ui-field-control">
+          <div data-stand="NumberControl" data-props="{\"class\":\"\\\"setting-number\\\"\",\"max\":\"32\",\"min\":\"8\",\"parse\":\"\\\"int\\\"\",\"step\":\"1\",\"value\":\"15\"}">
+            <span data-cb="onChange">
+              "change"
+    <div class="setting-row" id="setting-terminal.font_family">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Font family"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Comma-separated font fallback list"
+        <div class="ui-field-control">
+          <input data-stand="TextInput" class="setting-text" type="text" placeholder="Hack, Consolas, monospace" prop-value="">
+    <div class="setting-row" id="setting-terminal.scrollback">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Scrollback lines"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Number of lines kept in terminal scrollback (1000–100000)"
+        <div class="ui-field-control">
+          <div data-stand="NumberControl" data-props="{\"class\":\"\\\"setting-number setting-number--wide\\\"\",\"max\":\"100000\",\"min\":\"1000\",\"parse\":\"\\\"int\\\"\",\"step\":\"1000\",\"value\":\"2000\"}">
+            <span data-cb="onChange">
+              "change"
+    <div class="setting-row" id="setting-terminal.copy_on_select">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Copy on select"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Automatically copy selected text to clipboard"
+        <div class="ui-field-control">
+          <div data-stand="ToggleControl" data-checked="false">
+            <span data-cb="onChange">
+              "toggle"
+    <div class="setting-row" id="setting-terminal.shift_enter_newline">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Shift+Enter → new line"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "In a terminal: Shift+Enter sends a newline instead of running the line"
+        <div class="ui-field-control">
+          <div data-stand="ToggleControl" data-checked="false">
+            <span data-cb="onChange">
+              "toggle"
+    <div class="setting-row" id="setting-terminal.durable_ssh">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Keep SSH sessions alive"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Durable SSH terminals keep their shell running on the host (in AgentMux's small helper there), so a dropped link, sleep or a restart reconnects instead of ending it. On a host without the helper, the first terminal asks before installing it, and is a plain terminal if it isn't installed. Connectors → Remotes can set it per host."
+        <div class="ui-field-control">
+          <div data-stand="Select" data-props="{\"class\":\"\\\"setting-select\\\"\",\"value\":\"\\\"auto\\\"\"}">
+            <span data-cb="onChange">
+              "change"
+            <option value="auto">
+              "On, else a plain terminal"
+            <option value="on">
+              "Always (needs the helper)"
+            <option value="off">
+              "Never"
+    <div class="setting-row" id="setting-terminal.helper_install">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Install the helper on new hosts"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Durable terminals and file browsing on an SSH host need AgentMux's small helper there. Ask before installing it, install it without asking, or never install it. Each host can override this in Connectors → Remotes, and an agent's install is always asked about."
+        <div class="ui-field-control">
+          <div data-stand="Select" data-props="{\"class\":\"\\\"setting-select\\\"\",\"value\":\"\\\"ask\\\"\"}">
+            <span data-cb="onChange">
+              "change"
+            <option value="ask">
+              "Ask first"
+            <option value="always">
+              "Always"
+            <option value="never">
+              "Never"
+    <div class="setting-row" id="setting-terminal.bracketed_paste">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Bracketed paste"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Allow programs to detect pasted text vs. typed text"
+        <div class="ui-field-control">
+          <div data-stand="ToggleControl" data-checked="true">
+            <span data-cb="onChange">
+              "toggle"
+    <div class="setting-row" id="setting-terminal.transparency">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Terminal transparency"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Terminal background transparency (0 = opaque, 1 = fully transparent)"
+        <div class="ui-field-control">
+          <div data-stand="SliderControl" data-props="{\"max\":\"1\",\"min\":\"0\",\"step\":\"0.05\",\"value\":\"0.5\"}">
+            <span data-cb="onChange">
+              "change"
+    <div class="setting-row" id="setting-terminal.scroll_sensitivity">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Scroll sensitivity"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Scroll wheel speed multiplier for terminal panes (0.1–10, default 1). Independent of the OS scroll-speed setting."
+        <div class="ui-field-control">
+          <div data-stand="NumberControl" data-props="{\"class\":\"\\\"setting-number setting-number--wide\\\"\",\"max\":\"10\",\"min\":\"0.1\",\"step\":\"0.1\",\"value\":\"1\"}">
+            <span data-cb="onChange">
+              "change"
+    <div class="setting-row" id="setting-terminal.cpu_mem_badge">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Show CPU/mem badge"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Show a live CPU%/memory usage badge in the top-right corner of terminal panes"
+        <div class="ui-field-control">
+          <div data-stand="ToggleControl" data-checked="true">
+            <span data-cb="onChange">
+              "toggle"
+    <div class="setting-row" id="setting-terminal.predictive_echo">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Predictive echo"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Show local predictive echo of typed characters while waiting on a slow/remote shell"
+        <div class="ui-field-control">
+          <div data-stand="ToggleControl" data-checked="true">
+            <span data-cb="onChange">
+              "toggle"
+    <div class="setting-row setting-row--indent" id="setting-terminal.predictive_echo_threshold">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Predictive echo threshold"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Round-trip latency (ms) above which predictive echo kicks in"
+        <div class="ui-field-control">
+          <div data-stand="NumberControl" data-props="{\"class\":\"\\\"setting-number setting-number--wide\\\"\",\"min\":\"0\",\"step\":\"1\",\"value\":\"0\"}">
+            <span data-cb="onChange">
+              "change"
+    <div class="setting-row" id="setting-terminal.agent_max_runtime">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Agent max runtime"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Hours before the watchdog kills a long-running agent pane. 0 = no limit."
+        <div class="ui-field-control">
+          <div data-stand="NumberControl" data-props="{\"class\":\"\\\"setting-number setting-number--wide\\\"\",\"min\":\"0\",\"step\":\"0.5\",\"value\":\"0\"}">
+            <span data-cb="onChange">
+              "change"
+    <div class="setting-row" id="setting-terminal.agent_idle_timeout">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Agent idle timeout"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Minutes of PTY silence before the watchdog kills an idle agent pane. 0 = no limit."
+        <div class="ui-field-control">
+          <div data-stand="NumberControl" data-props="{\"class\":\"\\\"setting-number setting-number--wide\\\"\",\"min\":\"0\",\"step\":\"1\",\"value\":\"0\"}">
+            <span data-cb="onChange">
+              "change"

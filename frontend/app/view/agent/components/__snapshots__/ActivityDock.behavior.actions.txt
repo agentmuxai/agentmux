@@ -1,0 +1,90 @@
+useTick 1000
+createPromotionClock
+taskOutcomesFor blk-1
+shellActivities
+subagentActivities blk-1
+toolActivities
+applyStreamOutcomes 5
+applyRegistryOutcomes 5 0
+backgroundTaskActivities 0 known=[sh,bad,cr,er,sa]
+Button onClick
+ActivityRow sh onStop
+ShellStopCommand sh
+ActivityRow bad onStop
+ShellStopCommand bad
+ActivityRow cr onStop
+ShellStopCommand cr
+ActivityRow sa onStop
+ActivityRow er onDismiss
+-- after the stops and the dismissal
+<div>
+  <div class="agent-activity-dock">
+    <div data-stand="ActivityRow" data-id="sa" data-status="running" data-expanded="false" data-leaving="false">
+      <span data-cb="onToggle">
+        "toggle"
+      <span data-cb="onStop">
+        "stop"
+      <span data-cb="onDismiss">
+        "dismiss"
+    <div data-stand="ActivityRow" data-id="cr" data-status="running" data-expanded="false" data-leaving="false">
+      <span data-cb="onToggle">
+        "toggle"
+      <span data-cb="onStop">
+        "stop"
+      <span data-cb="onDismiss">
+        "dismiss"
+    <div data-stand="ActivityRow" data-id="bad" data-status="running" data-expanded="false" data-leaving="false">
+      <span data-cb="onToggle">
+        "toggle"
+      <span data-cb="onStop">
+        "stop"
+      <span data-cb="onDismiss">
+        "dismiss"
+    <div data-stand="ActivityRow" data-id="sh" data-status="running" data-expanded="false" data-leaving="false">
+      <span data-cb="onToggle">
+        "toggle"
+      <span data-cb="onStop">
+        "stop"
+      <span data-cb="onDismiss">
+        "dismiss"
+    <span data-stand="Button" data-cb="onClick" data-variant="row" data-density="compact" data-class="agent-activity-overflow">
+      "▾ fewer"
+shellActivities
+subagentActivities blk-1
+toolActivities
+applyStreamOutcomes 5
+applyRegistryOutcomes 5 0
+backgroundTaskActivities 0 known=[sh,bad,cr,er,sa]
+-- the dismissed row does not come back
+<div>
+  <div class="agent-activity-dock">
+    <div data-stand="ActivityRow" data-id="cr" data-status="running" data-expanded="false" data-leaving="false">
+      <span data-cb="onToggle">
+        "toggle"
+      <span data-cb="onStop">
+        "stop"
+      <span data-cb="onDismiss">
+        "dismiss"
+    <div data-stand="ActivityRow" data-id="bad" data-status="running" data-expanded="false" data-leaving="false">
+      <span data-cb="onToggle">
+        "toggle"
+      <span data-cb="onStop">
+        "stop"
+      <span data-cb="onDismiss">
+        "dismiss"
+    <div data-stand="ActivityRow" data-id="sh" data-status="running" data-expanded="false" data-leaving="false">
+      <span data-cb="onToggle">
+        "toggle"
+      <span data-cb="onStop">
+        "stop"
+      <span data-cb="onDismiss">
+        "dismiss"
+    <div data-stand="ActivityRow" data-id="sa" data-status="running" data-expanded="false" data-leaving="false">
+      <span data-cb="onToggle">
+        "toggle"
+      <span data-cb="onStop">
+        "stop"
+      <span data-cb="onDismiss">
+        "dismiss"
+    <span data-stand="Button" data-cb="onClick" data-variant="row" data-density="compact" data-class="agent-activity-overflow">
+      "▾ fewer"

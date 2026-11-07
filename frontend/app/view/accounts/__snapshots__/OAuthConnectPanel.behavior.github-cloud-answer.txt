@@ -1,0 +1,21 @@
+-- srv asked for the sign-in
+  call AccountOAuthClientGet [{"provider":"github"}]
+  call AccountOAuthStart [{"provider":"github","name":"work"}]
+<div>
+  <div class="oauth-connect">
+    <div data-testid="cloud-sign-in">
+      "Sign in to AgentMux Cloud to connect GitHub"
+    <div class="identity-key-actions">
+      <button type="button" class="ui-button ui-tone-accent identity-btn identity-btn-primary">
+        "Connect GitHub"
+-- signed out: the prompt once
+<div>
+  <div class="oauth-connect">
+    <div data-testid="cloud-sign-in">
+      "Sign in to AgentMux Cloud to connect GitHub"
+-- signed in: the prompt gone
+<div>
+  <div class="oauth-connect">
+    <div class="identity-key-actions">
+      <button type="button" class="ui-button ui-tone-accent identity-btn identity-btn-primary">
+        "Connect GitHub"

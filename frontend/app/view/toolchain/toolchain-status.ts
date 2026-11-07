@@ -62,7 +62,7 @@ export function toolNotes(row: ToolFacts, drift: DriftResult): ToolNote[] {
     if (row.kind === "provider" && row.source === "system_path") {
         notes.push({
             text: "your install",
-            title: "AgentMux doesn't install this CLI: it runs the copy you installed",
+            title: "You chose Use the CLI on my PATH: AgentMux runs the copy you installed, not its own",
         });
     }
     if (drift.drift === "behind-pin") {
@@ -81,7 +81,11 @@ export function toolNotes(row: ToolFacts, drift: DriftResult): ToolNote[] {
     if (drift.currency === "pin-behind-upstream") {
         notes.push({
             text: `pin ${drift.pinned} · upstream ${drift.latest}`,
-            title: `AgentMux pins ${drift.pinned}; upstream has ${drift.latest}. Nothing for you to do — this is ours to bump.`,
+            // Behind the pin there IS something to do (update to the pin), so the note
+            // must not say otherwise right above the Update button.
+            title:
+                `AgentMux pins ${drift.pinned}; upstream has ${drift.latest}.` +
+                (drift.drift === "behind-pin" ? "" : " Nothing for you to do — this is ours to bump."),
         });
     }
     return notes;

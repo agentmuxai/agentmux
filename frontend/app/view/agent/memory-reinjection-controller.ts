@@ -256,319 +256,335 @@ const SEEN_BOUNDARIES_MAX = 64;
 /** A fresh-session outcome older than this is not a session starting now. */
 const FRESH_SESSION_MAX_AGE_MS = 60_000;
 
-export function createMemoryReinjectionController(opts: MemoryReinjectionControllerOpts): MemoryReinjectionController {
-    let hiding = false;
-    // A catch-up turn is in flight, from its send until its own session_end.
-    // Unlike `hiding` it hides nothing.
-    let catchingUp = false;
-    let pendingNode: MemoryReinjectionNode | ContextDeliveryNode | null = null;
-    let deferred: DeferredTrigger | undefined = undefined; // undefined = nothing deferred
-    const seenBoundaries = new Set<string>();
+/** What one controller's functions share: its options and the turn it is in the middle of. */
+interface ControllerState {
+    opts: MemoryReinjectionControllerOpts;
+    /** A hidden reinjection turn is in flight, from its send until its session_end. */
+    hiding: boolean;
+    /** A catch-up turn is in flight, from its send until its own session_end. Unlike `hiding` it hides nothing. */
+    catchingUp: boolean;
+    pendingNode: MemoryReinjectionNode | ContextDeliveryNode | null;
+    /** undefined = nothing deferred */
+    deferred: DeferredTrigger | undefined;
+    seenBoundaries: Set<string>;
+}
 
-    function firstSighting(uuid: string): boolean {
-        if (seenBoundaries.has(uuid)) return false;
-        seenBoundaries.add(uuid);
-        if (seenBoundaries.size > SEEN_BOUNDARIES_MAX) {
-            seenBoundaries.delete(seenBoundaries.values().next().value as string);
-        }
-        return true;
+function firstSighting(s: ControllerState, uuid: string): boolean {
+    if (s.seenBoundaries.has(uuid)) return false;
+    s.seenBoundaries.add(uuid);
+    if (s.seenBoundaries.size > SEEN_BOUNDARIES_MAX) {
+        s.seenBoundaries.delete(s.seenBoundaries.values().next().value as string);
     }
+    return true;
+}
 
-    async function claimAnswer(t: DeferredTrigger): Promise<ClaimAnswer> {
-        // Only a fresh session's frame is srv's own, so only it dates the claim.
-        const at = t.reason === "fresh_session" && t.frameTimestamp ? Date.parse(t.frameTimestamp) : NaN;
-        const eventAtMs = Number.isNaN(at) ? undefined : at;
-        // A failed claim means deliver: a duplicate beats no memory.
-        const answer = await opts
-            .claimFallback!(t.reason as ReinjectionReason, t.boundaryUuid ?? undefined, eventAtMs)
-            .catch(() => true);
-        return typeof answer === "boolean" ? { deliver: answer } : answer;
-    }
+async function claimAnswer(s: ControllerState, t: DeferredTrigger): Promise<ClaimAnswer> {
+    // Only a fresh session's frame is srv's own, so only it dates the claim.
+    const at = t.reason === "fresh_session" && t.frameTimestamp ? Date.parse(t.frameTimestamp) : NaN;
+    const eventAtMs = Number.isNaN(at) ? undefined : at;
+    // A failed claim means deliver: a duplicate beats no memory.
+    const answer = await s.opts
+        .claimFallback!(t.reason as ReinjectionReason, t.boundaryUuid ?? undefined, eventAtMs)
+        .catch(() => true);
+    return typeof answer === "boolean" ? { deliver: answer } : answer;
+}
 
-    async function claim(t: DeferredTrigger): Promise<boolean> {
-        return (await claimAnswer(t)).deliver;
-    }
+async function claim(s: ControllerState, t: DeferredTrigger): Promise<boolean> {
+    return (await claimAnswer(s, t)).deliver;
+}
 
-    /**
-     * What to send and what to show: srv's composition when it can (CD2b),
-     * else this side's own from `fetchEntries`. `null` = nothing to deliver.
-     */
-    async function prepare(
-        frameTimestamp: string | null,
-        reason: ReinjectionReason,
-        boundaryUuid: string | null,
-    ): Promise<{ message: string; deliveryId?: string; node: MemoryReinjectionNode | ContextDeliveryNode } | null> {
-        if (opts.compose) {
-            const composed = await opts.compose(reason).then(
-                (c) => ({ ok: true as const, c }),
-                () => ({ ok: false as const }),
-            );
-            if (composed.ok) {
-                return composed.c ? { message: composed.c.text, deliveryId: composed.c.deliveryId, node: composed.c.node } : null;
-            }
-        }
-        let entries: MemoryEntryInput[];
-        try {
-            entries = await opts.fetchEntries();
-        } catch {
-            // Fetch failed before anything was sent or dispatched — nothing
-            // to revert. Best-effort: skip this reinjection rather than
-            // block or surface an error for a hidden, unsolicited turn.
-            return null;
-        }
-        if (!shouldReinject(entries)) return null; // §3.1 suppression rule
-        return {
-            message: composeReinjectionMessage(entries, reason),
-            node: buildMemoryReinjectionNode(entries, {
-                frameTimestamp,
-                boundaryUuid,
-                now: opts.now(),
-                contextWindow: opts.contextWindow(),
-            }),
-        };
-    }
-
-    /**
-     * A catch-up turn: claim the memory event first (the hook may have
-     * delivered it), ask srv for the message with or without memory, then send
-     * it with nothing hidden. Reads `isPaneWorking()` after every await, as
-     * `doTrigger` does, and re-defers if a turn started.
-     */
-    // A catch-up that finds the pane busy waits only when it may (a manual
-    // compaction, found mid-way through its own turn). Any other has lost its
-    // point: a user already talking to the agent needs no catching up. But a
-    // memory event it already claimed is srv's to expect from us (the hook
-    // stood down for it), so that memory still goes out, as the ordinary hidden
-    // reinjection once the pane is quiet.
-    function postpone(t: DeferredTrigger): void {
-        if (t.canDefer) deferred = t;
-        else if (t.claimed && t.memory) deferred = { ...t, catchUp: false };
-    }
-
-    async function doCatchUp(t: DeferredTrigger): Promise<void> {
-        if (!opts.composeCatchUp) return;
-        if (opts.isPaneWorking()) {
-            postpone(t);
-            return;
-        }
-        if (!t.claimed && opts.claimFallback) {
-            const answer = await claimAnswer(t);
-            // Another block's compaction: this block's agent was not compacted.
-            if (answer.foreign) return;
-            t.memory = answer.deliver;
-            t.claimed = true;
-            if (opts.isPaneWorking()) {
-                postpone(t);
-                return;
-            }
-        }
-        const composed = await opts.composeCatchUp(t.reason as CatchUpReason, t.memory).catch(() => null);
-        if (!composed) return;
-        if (opts.isPaneWorking() || catchingUp || hiding) {
-            // A turn started while srv composed. The message stays unsent; it is
-            // composed again, from fresh state, when the pane next goes quiet.
-            postpone(t);
-            return;
-        }
-        pendingNode = composed.node ?? null;
-        catchingUp = true;
-        opts.dispatchTurnStart(CATCH_UP_TURN_PLACEHOLDER_CONTENT, true);
-        try {
-            await opts.sendRpc(composed.text, composed.deliveryId);
-        } catch {
-            catchingUp = false;
-            pendingNode = null;
-            opts.dispatchTurnStartFailed();
-            // The event was not caught up after all: let a second sighting of it
-            // try again, and still deliver any memory it claimed (the hook stood
-            // down for the claim), as the plain reinjection, at the next quiet.
-            for (const key of t.seenKeys) seenBoundaries.delete(key);
-            // At once, not at a later session_end: no turn started, so an idle
-            // pane never reaches one.
-            if (t.claimed && t.memory) void doTrigger({ ...t, catchUp: false });
+/**
+ * What to send and what to show: srv's composition when it can (CD2b),
+ * else this side's own from `fetchEntries`. `null` = nothing to deliver.
+ */
+async function prepare(
+    s: ControllerState,
+    frameTimestamp: string | null,
+    reason: ReinjectionReason,
+    boundaryUuid: string | null,
+): Promise<{ message: string; deliveryId?: string; node: MemoryReinjectionNode | ContextDeliveryNode } | null> {
+    if (s.opts.compose) {
+        const composed = await s.opts.compose(reason).then(
+            (c) => ({ ok: true as const, c }),
+            () => ({ ok: false as const }),
+        );
+        if (composed.ok) {
+            return composed.c ? { message: composed.c.text, deliveryId: composed.c.deliveryId, node: composed.c.node } : null;
         }
     }
-
-    async function doTrigger(t: DeferredTrigger): Promise<void> {
-        if (t.catchUp) return doCatchUp(t);
-        const prepared = await prepare(t.frameTimestamp, t.reason as ReinjectionReason, t.boundaryUuid);
-        if (!prepared) return;
-
-        // Re-check busy-ness HERE, after the async fetchEntries() await —
-        // reagentx P1, second review round: checking isPaneWorking() only
-        // once at the top of trigger() (before this await) left a real
-        // race. fetchEntries() is a genuine RPC round trip
-        // (memory-reinjection-fetch.ts reads personal-memory files
-        // sequentially, not in parallel, widening the window further) — a
-        // real turn can start DURING it (a queued message auto-promoted,
-        // or the user sending into an apparently-idle pane), and firing
-        // TurnStart unconditionally after the fetch resolves reintroduces
-        // the exact turnPhase-corruption bug "fix 1" (doc comment above)
-        // was built to eliminate, just through a narrower window. Also why
-        // maybeFireDeferred() no longer needs its own isPaneWorking()
-        // check — it calls this same function, and this is the ONE place
-        // busy-ness is verified immediately before the dispatch that
-        // matters, not scattered across multiple call sites that could
-        // drift out of sync.
-        if (opts.isPaneWorking()) {
-            deferred = t;
-            return;
-        }
-
-        // Only now — about to fire, pane idle — ask whether the SessionStart
-        // hook already delivered this event. Standing down here touches
-        // nothing: no hiding, no pending node, no TurnStart (Codex on #3926:
-        // a skip must never strand the pane busy). A claim is only made when
-        // the fallback is really about to fire, never while deferred.
-        if (opts.claimFallback && !t.claimed) {
-            if (!(await claim(t))) return;
-            // The claim was a round trip too: a real turn may have started.
-            if (opts.isPaneWorking()) {
-                deferred = { ...t, claimed: true };
-                return;
-            }
-        }
-
-        const { message, deliveryId, node } = prepared;
-
-        // Mirrors the real send path's own optimistic-TurnStart-before-RPC
-        // ordering (agent-view.tsx's handleSendMessage) — turnPhase must
-        // read "busy" before the RPC call, not after, so a real message
-        // sent by the user in the gap between dispatch and RPC resolution
-        // still correctly queues behind this turn instead of racing it.
-        // Synchronous from the isPaneWorking() check immediately above
-        // (no further await in between), so this is as close to atomic as
-        // this async architecture allows.
-        hiding = true;
-        pendingNode = node;
-        // Placeholder content, not `message` — see doc comment fix 2 and
-        // HIDDEN_TURN_PLACEHOLDER_CONTENT. The REAL content only ever
-        // travels through opts.sendRpc below, never through reducer state.
-        opts.dispatchTurnStart(HIDDEN_TURN_PLACEHOLDER_CONTENT, true);
-
-        try {
-            await opts.sendRpc(message, deliveryId);
-        } catch {
-            // RPC outright failed — mirror useAgentCommands.ts's own
-            // catch-path philosophy (never leave the pane stuck showing
-            // "Working…" for a turn the backend never received).
-            hiding = false;
-            pendingNode = null;
-            opts.dispatchTurnStartFailed();
-        }
+    let entries: MemoryEntryInput[];
+    try {
+        entries = await s.opts.fetchEntries();
+    } catch {
+        // Fetch failed before anything was sent or dispatched — nothing
+        // to revert. Best-effort: skip this reinjection rather than
+        // block or surface an error for a hidden, unsolicited turn.
+        return null;
     }
-
-    async function trigger(
-        frameTimestamp: string | null,
-        reason: ReinjectionReason,
-        boundaryUuid: string | null = null,
-    ): Promise<void> {
-        if (boundaryUuid && !firstSighting(boundaryUuid)) return; // once per boundary
-        if (hiding || catchingUp) return; // re-entrancy guard — see doc comment
-        if (deferred !== undefined) return; // already have one queued — first wins, arbitrary but simple
-
-        const t: DeferredTrigger = { frameTimestamp, reason, boundaryUuid, claimed: false, catchUp: false, memory: true, canDefer: true, seenKeys: [] };
-        // A compaction is claimed now, not when it fires: the SessionStart
-        // hook delivered moments ago, inside srv's claim window. Claimed at
-        // the end of a long turn, that window has passed and both would send.
-        if (reason === "compaction" && opts.claimFallback) {
-            if (!(await claim(t))) return;
-            t.claimed = true;
-            if (hiding || deferred !== undefined) return;
-        }
-
-        // Early-exit OPTIMIZATION only — skips an unnecessary fetchEntries()
-        // round trip when the pane is obviously already busy right now.
-        // NOT load-bearing for correctness: doTrigger() re-checks
-        // isPaneWorking() itself, immediately before dispatching, which is
-        // what actually closes the race a stale check here could reopen.
-        if (opts.isPaneWorking()) {
-            deferred = t;
-            return;
-        }
-
-        await doTrigger(t);
-    }
-
-    async function catchUp(
-        frameTimestamp: string | null,
-        reason: CatchUpReason,
-        catchUpOpts: { boundaryUuid?: string | null; deferIfBusy?: boolean } = {},
-    ): Promise<void> {
-        const boundaryUuid = catchUpOpts.boundaryUuid ?? null;
-        const seenKeys: string[] = [];
-        if (boundaryUuid) {
-            if (!firstSighting(boundaryUuid)) return; // once per boundary
-            seenKeys.push(boundaryUuid);
-        }
-        // One per fresh session: the same outcome seen twice (a re-read, a second
-        // writer) must not start a second turn.
-        if (reason === "fresh_session" && frameTimestamp) {
-            if (!firstSighting(`fresh:${frameTimestamp}`)) return;
-            seenKeys.push(`fresh:${frameTimestamp}`);
-        }
-        if (hiding || catchingUp || deferred !== undefined) return;
-        // An outcome that is not recent (a re-read after a reconnect, a line
-        // another writer appended) is not a session starting now.
-        if (reason === "fresh_session" && frameTimestamp) {
-            const at = Date.parse(frameTimestamp);
-            if (!Number.isNaN(at) && opts.now() - at > FRESH_SESSION_MAX_AGE_MS) return;
-        }
-        // A user already talking to the agent has nothing to be caught up on.
-        if (opts.isPaneWorking() && !catchUpOpts.deferIfBusy) return;
-        const t: DeferredTrigger = {
+    if (!shouldReinject(entries)) return null; // §3.1 suppression rule
+    return {
+        message: composeReinjectionMessage(entries, reason),
+        node: buildMemoryReinjectionNode(entries, {
             frameTimestamp,
-            reason,
             boundaryUuid,
-            // A resumed conversation re-delivers no memory, so there is no event to claim.
-            claimed: reason === "resumed",
-            catchUp: true,
-            memory: reason !== "resumed",
-            canDefer: catchUpOpts.deferIfBusy === true,
-            seenKeys,
-        };
-        // A compaction is claimed now, not when the turn fires: the hook
-        // delivered moments ago, inside srv's claim window, and a manual
-        // compaction's own turn can outlast it.
-        if (reason === "compaction" && opts.claimFallback) {
-            const answer = await claimAnswer(t);
-            if (answer.foreign) return;
-            t.memory = answer.deliver;
-            t.claimed = true;
-            if (hiding || catchingUp || deferred !== undefined) return;
+            now: s.opts.now(),
+            contextWindow: s.opts.contextWindow(),
+        }),
+    };
+}
+
+// A catch-up that finds the pane busy waits only when it may (a manual
+// compaction, found mid-way through its own turn). Any other has lost its
+// point: a user already talking to the agent needs no catching up. But a
+// memory event it already claimed is srv's to expect from us (the hook
+// stood down for it), so that memory still goes out, as the ordinary hidden
+// reinjection once the pane is quiet.
+function postpone(s: ControllerState, t: DeferredTrigger): void {
+    if (t.canDefer) s.deferred = t;
+    else if (t.claimed && t.memory) s.deferred = { ...t, catchUp: false };
+}
+
+/**
+ * A catch-up turn: claim the memory event first (the hook may have
+ * delivered it), ask srv for the message with or without memory, then send
+ * it with nothing hidden. Reads `isPaneWorking()` after every await, as
+ * `doTrigger` does, and re-defers if a turn started.
+ */
+async function doCatchUp(s: ControllerState, t: DeferredTrigger): Promise<void> {
+    if (!s.opts.composeCatchUp) return;
+    if (s.opts.isPaneWorking()) {
+        postpone(s, t);
+        return;
+    }
+    if (!t.claimed && s.opts.claimFallback) {
+        const answer = await claimAnswer(s, t);
+        // Another block's compaction: this block's agent was not compacted.
+        if (answer.foreign) return;
+        t.memory = answer.deliver;
+        t.claimed = true;
+        if (s.opts.isPaneWorking()) {
+            postpone(s, t);
+            return;
         }
-        await doCatchUp(t);
+    }
+    const composed = await s.opts.composeCatchUp(t.reason as CatchUpReason, t.memory).catch(() => null);
+    if (!composed) return;
+    if (s.opts.isPaneWorking() || s.catchingUp || s.hiding) {
+        // A turn started while srv composed. The message stays unsent; it is
+        // composed again, from fresh state, when the pane next goes quiet.
+        postpone(s, t);
+        return;
+    }
+    s.pendingNode = composed.node ?? null;
+    s.catchingUp = true;
+    s.opts.dispatchTurnStart(CATCH_UP_TURN_PLACEHOLDER_CONTENT, true);
+    try {
+        await s.opts.sendRpc(composed.text, composed.deliveryId);
+    } catch {
+        s.catchingUp = false;
+        s.pendingNode = null;
+        s.opts.dispatchTurnStartFailed();
+        // The event was not caught up after all: let a second sighting of it
+        // try again, and still deliver any memory it claimed (the hook stood
+        // down for the claim), as the plain reinjection, at the next quiet.
+        for (const key of t.seenKeys) s.seenBoundaries.delete(key);
+        // At once, not at a later session_end: no turn started, so an idle
+        // pane never reaches one.
+        if (t.claimed && t.memory) void doTrigger(s, { ...t, catchUp: false });
+    }
+}
+
+async function doTrigger(s: ControllerState, t: DeferredTrigger): Promise<void> {
+    if (t.catchUp) return doCatchUp(s, t);
+    const prepared = await prepare(s, t.frameTimestamp, t.reason as ReinjectionReason, t.boundaryUuid);
+    if (!prepared) return;
+
+    // Re-check busy-ness HERE, after the async fetchEntries() await —
+    // reagentx P1, second review round: checking isPaneWorking() only
+    // once at the top of trigger() (before this await) left a real
+    // race. fetchEntries() is a genuine RPC round trip
+    // (memory-reinjection-fetch.ts reads personal-memory files
+    // sequentially, not in parallel, widening the window further) — a
+    // real turn can start DURING it (a queued message auto-promoted,
+    // or the user sending into an apparently-idle pane), and firing
+    // TurnStart unconditionally after the fetch resolves reintroduces
+    // the exact turnPhase-corruption bug "fix 1" (doc comment above)
+    // was built to eliminate, just through a narrower window. Also why
+    // maybeFireDeferred() no longer needs its own isPaneWorking()
+    // check — it calls this same function, and this is the ONE place
+    // busy-ness is verified immediately before the dispatch that
+    // matters, not scattered across multiple call sites that could
+    // drift out of sync.
+    if (s.opts.isPaneWorking()) {
+        s.deferred = t;
+        return;
     }
 
-    function onSessionEnd(): MemoryReinjectionNode | ContextDeliveryNode | null {
-        if (catchingUp) {
-            // The catch-up turn is over. Its card was written to the pane when
-            // srv accepted the message; this copy is the backstop, deduped by id.
-            const node = pendingNode;
-            catchingUp = false;
-            pendingNode = null;
-            return node;
+    // Only now — about to fire, pane idle — ask whether the SessionStart
+    // hook already delivered this event. Standing down here touches
+    // nothing: no hiding, no pending node, no TurnStart (Codex on #3926:
+    // a skip must never strand the pane busy). A claim is only made when
+    // the fallback is really about to fire, never while deferred.
+    if (s.opts.claimFallback && !t.claimed) {
+        if (!(await claim(s, t))) return;
+        // The claim was a round trip too: a real turn may have started.
+        if (s.opts.isPaneWorking()) {
+            s.deferred = { ...t, claimed: true };
+            return;
         }
-        if (!hiding) return null;
-        const node = pendingNode;
-        hiding = false;
-        pendingNode = null;
+    }
+
+    const { message, deliveryId, node } = prepared;
+
+    // Mirrors the real send path's own optimistic-TurnStart-before-RPC
+    // ordering (agent-view.tsx's handleSendMessage) — turnPhase must
+    // read "busy" before the RPC call, not after, so a real message
+    // sent by the user in the gap between dispatch and RPC resolution
+    // still correctly queues behind this turn instead of racing it.
+    // Synchronous from the isPaneWorking() check immediately above
+    // (no further await in between), so this is as close to atomic as
+    // this async architecture allows.
+    s.hiding = true;
+    s.pendingNode = node;
+    // Placeholder content, not `message` — see doc comment fix 2 and
+    // HIDDEN_TURN_PLACEHOLDER_CONTENT. The REAL content only ever
+    // travels through opts.sendRpc below, never through reducer state.
+    s.opts.dispatchTurnStart(HIDDEN_TURN_PLACEHOLDER_CONTENT, true);
+
+    try {
+        await s.opts.sendRpc(message, deliveryId);
+    } catch {
+        // RPC outright failed — mirror useAgentCommands.ts's own
+        // catch-path philosophy (never leave the pane stuck showing
+        // "Working…" for a turn the backend never received).
+        s.hiding = false;
+        s.pendingNode = null;
+        s.opts.dispatchTurnStartFailed();
+    }
+}
+
+async function trigger(
+    s: ControllerState,
+    frameTimestamp: string | null,
+    reason: ReinjectionReason,
+    boundaryUuid: string | null = null,
+): Promise<void> {
+    if (boundaryUuid && !firstSighting(s, boundaryUuid)) return; // once per boundary
+    if (s.hiding || s.catchingUp) return; // re-entrancy guard — see doc comment
+    if (s.deferred !== undefined) return; // already have one queued — first wins, arbitrary but simple
+
+    const t: DeferredTrigger = { frameTimestamp, reason, boundaryUuid, claimed: false, catchUp: false, memory: true, canDefer: true, seenKeys: [] };
+    // A compaction is claimed now, not when it fires: the SessionStart
+    // hook delivered moments ago, inside srv's claim window. Claimed at
+    // the end of a long turn, that window has passed and both would send.
+    if (reason === "compaction" && s.opts.claimFallback) {
+        if (!(await claim(s, t))) return;
+        t.claimed = true;
+        if (s.hiding || s.deferred !== undefined) return;
+    }
+
+    // Early-exit OPTIMIZATION only — skips an unnecessary fetchEntries()
+    // round trip when the pane is obviously already busy right now.
+    // NOT load-bearing for correctness: doTrigger() re-checks
+    // isPaneWorking() itself, immediately before dispatching, which is
+    // what actually closes the race a stale check here could reopen.
+    if (s.opts.isPaneWorking()) {
+        s.deferred = t;
+        return;
+    }
+
+    await doTrigger(s, t);
+}
+
+async function catchUp(
+    s: ControllerState,
+    frameTimestamp: string | null,
+    reason: CatchUpReason,
+    catchUpOpts: { boundaryUuid?: string | null; deferIfBusy?: boolean } = {},
+): Promise<void> {
+    const boundaryUuid = catchUpOpts.boundaryUuid ?? null;
+    const seenKeys: string[] = [];
+    if (boundaryUuid) {
+        if (!firstSighting(s, boundaryUuid)) return; // once per boundary
+        seenKeys.push(boundaryUuid);
+    }
+    // One per fresh session: the same outcome seen twice (a re-read, a second
+    // writer) must not start a second turn.
+    if (reason === "fresh_session" && frameTimestamp) {
+        if (!firstSighting(s, `fresh:${frameTimestamp}`)) return;
+        seenKeys.push(`fresh:${frameTimestamp}`);
+    }
+    if (s.hiding || s.catchingUp || s.deferred !== undefined) return;
+    // An outcome that is not recent (a re-read after a reconnect, a line
+    // another writer appended) is not a session starting now.
+    if (reason === "fresh_session" && frameTimestamp) {
+        const at = Date.parse(frameTimestamp);
+        if (!Number.isNaN(at) && s.opts.now() - at > FRESH_SESSION_MAX_AGE_MS) return;
+    }
+    // A user already talking to the agent has nothing to be caught up on.
+    if (s.opts.isPaneWorking() && !catchUpOpts.deferIfBusy) return;
+    const t: DeferredTrigger = {
+        frameTimestamp,
+        reason,
+        boundaryUuid,
+        // A resumed conversation re-delivers no memory, so there is no event to claim.
+        claimed: reason === "resumed",
+        catchUp: true,
+        memory: reason !== "resumed",
+        canDefer: catchUpOpts.deferIfBusy === true,
+        seenKeys,
+    };
+    // A compaction is claimed now, not when the turn fires: the hook
+    // delivered moments ago, inside srv's claim window, and a manual
+    // compaction's own turn can outlast it.
+    if (reason === "compaction" && s.opts.claimFallback) {
+        const answer = await claimAnswer(s, t);
+        if (answer.foreign) return;
+        t.memory = answer.deliver;
+        t.claimed = true;
+        if (s.hiding || s.catchingUp || s.deferred !== undefined) return;
+    }
+    await doCatchUp(s, t);
+}
+
+function onSessionEnd(s: ControllerState): MemoryReinjectionNode | ContextDeliveryNode | null {
+    if (s.catchingUp) {
+        // The catch-up turn is over. Its card was written to the pane when
+        // srv accepted the message; this copy is the backstop, deduped by id.
+        const node = s.pendingNode;
+        s.catchingUp = false;
+        s.pendingNode = null;
         return node;
     }
+    if (!s.hiding) return null;
+    const node = s.pendingNode;
+    s.hiding = false;
+    s.pendingNode = null;
+    return node;
+}
 
-    function maybeFireDeferred(): void {
-        if (hiding) return; // shouldn't be reachable (trigger() already guards), but never stack regardless
-        if (deferred === undefined) return;
-        const t = deferred;
-        deferred = undefined;
-        void doTrigger(t);
-    }
+function maybeFireDeferred(s: ControllerState): void {
+    if (s.hiding) return; // shouldn't be reachable (trigger() already guards), but never stack regardless
+    if (s.deferred === undefined) return;
+    const t = s.deferred;
+    s.deferred = undefined;
+    void doTrigger(s, t);
+}
 
+export function createMemoryReinjectionController(opts: MemoryReinjectionControllerOpts): MemoryReinjectionController {
+    const s: ControllerState = {
+        opts,
+        hiding: false,
+        catchingUp: false,
+        pendingNode: null,
+        deferred: undefined,
+        seenBoundaries: new Set<string>(),
+    };
     return {
-        isHiding: () => hiding,
-        trigger,
-        catchUp,
-        onSessionEnd,
-        maybeFireDeferred,
+        isHiding: () => s.hiding,
+        trigger: (frameTimestamp, reason, boundaryUuid) => trigger(s, frameTimestamp, reason, boundaryUuid),
+        catchUp: (frameTimestamp, reason, catchUpOpts) => catchUp(s, frameTimestamp, reason, catchUpOpts),
+        onSessionEnd: () => onSessionEnd(s),
+        maybeFireDeferred: () => maybeFireDeferred(s),
     };
 }

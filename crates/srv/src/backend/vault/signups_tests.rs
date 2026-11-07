@@ -98,3 +98,21 @@ fn a_sent_sign_up_confirms_the_entry_made_with_that_password_found_in_the_vault(
     assert_eq!(tags(&s, &other), [UNCONFIRMED], "only the one sent");
     assert_eq!(confirm_sent(&s, &space(), "alex", "made-long-ago").unwrap(), None, "once only");
 }
+
+#[test]
+fn a_sign_up_password_is_made_in_the_profiles_sign_in_vault() {
+    use super::super::vaults::{self, VaultAgents};
+    let s = store();
+    let work = vaults::create(&s, "Work", VaultAgents::All).unwrap();
+    let profile = "profile:p-0123456789ab";
+    vaults::set_signin_vault(&s, profile, &work.id).unwrap();
+    let space = Space { profile: profile.into(), ..space() };
+    let (made, _) = create(&s, &space, "alex", "made-on-sign-up").unwrap();
+    assert_eq!(s.vault_get(&made).unwrap().unwrap().vault_id, work.id);
+    // Sent: it is offered to that profile's tabs, and saving the same user's password again joins it.
+    assert!(confirm(&s, &made, "alex", "made-on-sign-up").unwrap());
+    let site = [space.origin.clone()];
+    assert_eq!(signins::offered_for(&s, profile, &site).unwrap().into_iter().map(|f| f.0).collect::<Vec<_>>(), [made.clone()]);
+    assert!(signins::offered_for(&s, PERSONAL, &site).unwrap().is_empty());
+    assert_eq!(signins::save(&s, &space, "alex", "a newer password").unwrap(), made, "no duplicate in another Vault");
+}

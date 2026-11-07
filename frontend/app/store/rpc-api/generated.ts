@@ -534,6 +534,8 @@ import type { TowerPeerInfo } from "@/types/rpc/TowerPeerInfo";
 import type { TowerPeersResult } from "@/types/rpc/TowerPeersResult";
 import type { TowerSampleReq } from "@/types/rpc/TowerSampleReq";
 import type { TowerSnapshot } from "@/types/rpc/TowerSnapshot";
+import type { UninstallReq } from "@/types/rpc/UninstallReq";
+import type { UninstallResult } from "@/types/rpc/UninstallResult";
 import type { UnlinkAgentIdentityResult } from "@/types/rpc/UnlinkAgentIdentityResult";
 import type { UnwatchMediaDirReq } from "@/types/rpc/UnwatchMediaDirReq";
 import type { UpdateContainerResult } from "@/types/rpc/UpdateContainerResult";
@@ -1643,6 +1645,10 @@ export const GeneratedApi = {
   // command "install.start"
   InstallStartCommand(client: RpcClient, data: InstallStartReq, opts?: RpcOpts): Promise<InstallStartResult> {
     return client.rpcCall("install.start", data, opts);
+  },
+  // command "install.uninstall"
+  InstallUninstallCommand(client: RpcClient, data: UninstallReq, opts?: RpcOpts): Promise<UninstallResult> {
+    return client.rpcCall("install.uninstall", data, opts);
   },
   // command "installtool"
   InstallToolCommand(client: RpcClient, data: CommandInstallToolData, opts?: RpcOpts): Promise<InstallToolResult> {

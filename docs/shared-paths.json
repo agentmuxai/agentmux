@@ -172,16 +172,19 @@
       "name": "CLI installs and the local secrets file",
       "paths": [
         "cli/",
+        "tools/",
         "secrets/"
       ],
-      "why": "A provider CLI is installed once per machine; a headless srv keeps its secrets file beside the shared folder.",
-      "gate": "Each CLI install is a versioned folder.",
-      "lock": "A per-provider version.lock for installs.",
+      "why": "A provider CLI is installed once per machine, and the pinned uv that installs the Python ones sits beside them; a headless srv keeps its secrets file beside the shared folder, and so does an isolated test instance in its own home (never the person's keychain).",
+      "gate": "Each CLI install is a versioned folder; the uv is too.",
+      "lock": "A per-provider version.lock for installs, and one beside the uv folder.",
       "users": [
         "crates/srv/src/backend/cli_install.rs",
+        "crates/srv/src/backend/cli_uv.rs",
         "crates/srv/src/backend/cli_prune.rs",
         "crates/srv/src/server/install_handlers.rs",
-        "crates/srv/src/headless.rs"
+        "crates/srv/src/headless.rs",
+        "crates/srv/src/identity/secret_store.rs"
       ]
     },
     {

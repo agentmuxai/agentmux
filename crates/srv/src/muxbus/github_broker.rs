@@ -310,6 +310,10 @@ pub struct InstallState {
     pub install_url: String,
     #[serde(default)]
     pub expires_at_ms: i64,
+    /// The broker is set up for a one-trip first connect: GitHub's callback after the install page goes to
+    /// the cloud relay. False (or absent, from an older broker) until then.
+    #[serde(default)]
+    pub one_trip: bool,
 }
 
 /// What a revalidation did.
@@ -326,6 +330,16 @@ pub struct Revalidated {
 /// The body of an authorization-code exchange.
 pub fn code_body(code: &str, code_verifier: &str, redirect_uri: &str, replace: bool) -> Value {
     let mut body = json!({ "grant": "code", "code": code, "code_verifier": code_verifier, "redirect_uri": redirect_uri });
+    if replace {
+        body["replace"] = json!(true);
+    }
+    body
+}
+
+/// The body of an install trip's code exchange (the one-trip first connect): no PKCE verifier, since GitHub's
+/// install page starts none; the install `state` the broker issued to this account is what binds the code.
+pub fn trip_code_body(code: &str, state: &str, redirect_uri: &str, replace: bool) -> Value {
+    let mut body = json!({ "grant": "code", "code": code, "state": state, "redirect_uri": redirect_uri });
     if replace {
         body["replace"] = json!(true);
     }
@@ -413,6 +427,19 @@ pub async fn exchange_code(
     replace: bool,
 ) -> Result<TokenGrant, BrokerError> {
     let body = code_body(code, code_verifier, redirect_uri, replace);
+    grant_of(call(http, who, reqwest::Method::POST, "/github/v1/token", Some(&body)).await?)
+}
+
+/// Trade the code an install trip came back with (and the trip's `state`) for the user's grant.
+pub async fn exchange_trip_code(
+    http: &reqwest::Client,
+    who: &Caller,
+    code: &str,
+    state: &str,
+    redirect_uri: &str,
+    replace: bool,
+) -> Result<TokenGrant, BrokerError> {
+    let body = trip_code_body(code, state, redirect_uri, replace);
     grant_of(call(http, who, reqwest::Method::POST, "/github/v1/token", Some(&body)).await?)
 }
 

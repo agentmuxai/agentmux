@@ -16,6 +16,7 @@ import { getPaneModel } from "@/app/store/agent-pane-registration";
 import { isInitReady } from "@/app/store/agent-pane-state/types";
 import { makeORef } from "@/app/store/mos";
 import { ObjectService } from "@/app/store/services";
+import { META_AWAITING_CONFIRM } from "@/app/store/agent-status";
 import { META_AWAITING_USER } from "@/app/store/swarm-line";
 import { fireAndForget } from "@/util/util";
 
@@ -25,6 +26,14 @@ export function syncAwaitingUser(blockId: string): void {
     const waiting = isAgentWaitingForYou(blockId);
     fireAndForget(() =>
         ObjectService.UpdateObjectMeta(makeORef("block", blockId), { [META_AWAITING_USER]: waiting ? true : null } as any)
+    );
+}
+
+/** Write `term:awaiting_confirm` from whether a sensitive jekt's card is up: the tab badge and the Swarm read it
+ *  (agent-status.ts), and unlike a question's flag it counts while the agent is idle. `null` removes the key. */
+export function syncAwaitingConfirm(blockId: string, waiting: boolean): void {
+    fireAndForget(() =>
+        ObjectService.UpdateObjectMeta(makeORef("block", blockId), { [META_AWAITING_CONFIRM]: waiting ? true : null } as any)
     );
 }
 

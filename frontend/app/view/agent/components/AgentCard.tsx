@@ -20,15 +20,15 @@
  * ends); while it runs the ribbon reads "Installing…".
  */
 
-import { createMemo, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { Button, TagList, type TagSpec } from "@/app/element/ui";
 import { focusManager } from "@/app/store/focusManager";
+import type { AgentDefinition } from "@/app/store/rpc-api";
 import { ProviderLogo } from "@/element/ProviderLogo";
+import { createMemo, createSignal, onCleanup, onMount, Show, type Accessor, type JSX } from "solid-js";
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
 import { accessTagsFor } from "../defaults/provider-access-model";
-import { AccessTagDetail } from "./AccessTagDetail";
 import type { PinDrift } from "../providers/version-drift";
-import type { AgentDefinition } from "@/app/store/rpc-api";
+import { AccessTagDetail } from "./AccessTagDetail";
 
 interface AgentCardProps {
     agent: AgentDefinition;
@@ -87,59 +87,79 @@ interface AgentCardProps {
 /** Below this width a card shows two chips and its corner action drops to its own line. */
 const NARROW_CARD_PX = 300;
 
-export const AgentCard = (props: AgentCardProps): JSX.Element => {
+/** What a card's parts share: its props, the tags it shows, whether it is narrow, and its element. */
+interface CardState {
+    props: AgentCardProps;
+    title: () => string;
+    caption: () => string;
+    tags: Accessor<TagSpec[]>;
+    chipCount: Accessor<number>;
+    hasAction: () => boolean;
+    narrow: Accessor<boolean>;
+    /** The card's element, once it is in the page. */
+    el: { current: HTMLDivElement | undefined };
+}
+
+function createCardState(props: AgentCardProps): CardState {
     const catalog = createMemo(() => getCliCatalogEntry(props.agent.provider));
     const title = () => catalog()?.displayName || props.agent.name;
     const caption = () => catalog()?.blurb || props.agent.description || props.agent.name;
-
-    // The card's tags (docs/specs/SPEC_PROVIDER_CARD_TAGS_FREE_LOCAL_2026_10_29.md §3):
-    // the ribbon is what a click will do; the chips, in the kit's fixed order, are
-    // properties: Free and Local from the access data, and a newer pinned CLI.
-    const tags = createMemo<TagSpec[]>(() => {
-        const out: TagSpec[] = [];
-        if (props.installed === false) {
-            out.push({
-                id: "install",
-                kind: "ribbon",
-                tone: "ok",
-                icon: "download",
-                label: props.installing ? "Installing…" : "Click to install",
-            });
-        }
-        const now = new Date();
-        for (const tag of accessTagsFor(props.agent.provider, now)) {
-            out.push({
-                id: tag.label.toLowerCase(),
-                label: tag.label,
-                tone: tag.tone,
-                icon: tag.icon,
-                group: tag.label === "Free" ? "plan" : "where",
-                detail: <AccessTagDetail tag={tag} />,
-            });
-        }
-        // Not alongside the install ribbon: "not installed" already supersedes "out of
-        // date", and two calls to action on one card is what the ribbon's spec says not to do.
-        if (props.installed !== false && props.drift === "behind-pin") {
-            out.push({
-                id: "update",
-                label: "Update available",
-                tone: "warn",
-                icon: "circle-up",
-                group: "fact",
-                title: "A newer CLI version is pinned by AgentMux — update it in the Toolchain pane",
-            });
-        }
-        return out;
-    });
+    const tags = createMemo<TagSpec[]>(() => cardTags(props));
     const chipCount = createMemo(() => tags().filter((t) => t.kind !== "ribbon").length);
     // A corner action (the ribbon, or "+ New") the card shows now.
     const hasAction = () => props.installed === false || (!!props.hasCurrentSession && !props.launching);
-
-    // A narrow card shows two chips, the rest folding into "+N", and its corner action
-    // moves to its own line under them (`agent-card--narrow` in _picker.scss).
     const [narrow, setNarrow] = createSignal(false);
-    let cardEl: HTMLDivElement | undefined;
+    const el: CardState["el"] = { current: undefined };
+    watchWidth(el, setNarrow);
+    claimDefaultFocus(props, el);
+    return { props, title, caption, tags, chipCount, hasAction, narrow, el };
+}
+
+// The card's tags (docs/specs/SPEC_PROVIDER_CARD_TAGS_FREE_LOCAL_2026_10_29.md §3):
+// the ribbon is what a click will do; the chips, in the kit's fixed order, are
+// properties: Free and Local from the access data, and a newer pinned CLI.
+function cardTags(props: AgentCardProps): TagSpec[] {
+    const out: TagSpec[] = [];
+    if (props.installed === false) {
+        out.push({
+            id: "install",
+            kind: "ribbon",
+            tone: "ok",
+            icon: "download",
+            label: props.installing ? "Installing…" : "Click to install",
+        });
+    }
+    const now = new Date();
+    for (const tag of accessTagsFor(props.agent.provider, now)) {
+        out.push({
+            id: tag.label.toLowerCase(),
+            label: tag.label,
+            tone: tag.tone,
+            icon: tag.icon,
+            group: tag.label === "Free" ? "plan" : "where",
+            detail: <AccessTagDetail tag={tag} />,
+        });
+    }
+    // Not alongside the install ribbon: "not installed" already supersedes "out of
+    // date", and two calls to action on one card is what the ribbon's spec says not to do.
+    if (props.installed !== false && props.drift === "behind-pin") {
+        out.push({
+            id: "update",
+            label: "Update available",
+            tone: "warn",
+            icon: "circle-up",
+            group: "fact",
+            title: "A newer CLI version is pinned by AgentMux — update it in the Toolchain pane",
+        });
+    }
+    return out;
+}
+
+// A narrow card shows two chips, the rest folding into "+N", and its corner action
+// moves to its own line under them (`agent-card--narrow` in _picker.scss).
+function watchWidth(el: CardState["el"], setNarrow: (narrow: boolean) => void): void {
     onMount(() => {
+        const cardEl = el.current;
         if (typeof ResizeObserver === "undefined" || !cardEl) return;
         const observer = new ResizeObserver((entries) => {
             const width = entries[0]?.contentRect.width ?? 0;
@@ -148,6 +168,9 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
         observer.observe(cardEl);
         onCleanup(() => observer.disconnect());
     });
+}
+
+function claimDefaultFocus(props: AgentCardProps, el: CardState["el"]): void {
     onMount(() => {
         if (!props.defaultFocus || props.disabled || !props.blockId) return;
         // Through the shared guard, never a bare focus(): this used to take
@@ -156,74 +179,83 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
         // refetch, since those used to remount the card
         // (REPORT_AGENT_PANE_SIDE_BY_SIDE_SCROLL_AND_FOCUS_QUIRKS_2026_09_23.md §2).
         focusManager.claimFocusOnMount(props.blockId, () => {
-            cardEl?.focus({ preventScroll: true });
+            el.current?.focus({ preventScroll: true });
             return true;
         });
     });
+}
 
-    // A press on a chip (to read its tooltip) is the chip's own, not the card's: it must not
-    // open or close the creation panel.
-    const onChip = (e: Event) => e.target instanceof Element && e.target.closest(".agent-card-tags") !== null;
+// A press on a chip (to read its tooltip) is the chip's own, not the card's: it must not
+// open or close the creation panel.
+const onChip = (e: Event) => e.target instanceof Element && e.target.closest(".agent-card-tags") !== null;
 
-    const handleCardClick = (e: MouseEvent) => {
-        if (onChip(e)) return;
-        if (!props.disabled) props.onLaunch(props.agent, e);
-    };
+function handleCardClick(s: CardState, e: MouseEvent) {
+    const { props } = s;
+    if (onChip(e)) return;
+    if (!props.disabled) props.onLaunch(props.agent, e);
+}
 
-    const handleKeyDown = (e: KeyboardEvent) => {
-        if (onChip(e)) return;
-        if (typeToFilter(e)) return;
-        if (props.disabled) return;
-        if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            props.onLaunch(props.agent, e);
-        }
-    };
-
-    // Type to filter: the picker focuses its first card (Enter launches it),
-    // but a printable key goes into the pane's filter box, so landing on the
-    // picker after a close still lets the user type right away.
-    // SPEC_FOCUS_FOLLOWS_SELECTION_2026_10_08.md §2d.
-    const typeToFilter = (e: KeyboardEvent): boolean => {
-        const filter = () => cardEl?.closest("[data-blockid]")?.querySelector<HTMLInputElement>("input[data-pane-focus]");
-        // An IME composition starting (CJK and others): move the caret to the
-        // filter and let the composition happen there.
-        if (e.isComposing || e.key === "Process" || e.keyCode === 229) {
-            const input = filter();
-            input?.focus({ preventScroll: true });
-            return input != null;
-        }
-        if (e.key.length !== 1 || e.key === " " || e.ctrlKey || e.metaKey || e.altKey) return false;
-        const input = filter();
-        if (!input) return false;
+function handleKeyDown(s: CardState, e: KeyboardEvent) {
+    const { props } = s;
+    if (onChip(e)) return;
+    if (typeToFilter(s, e)) return;
+    if (props.disabled) return;
+    if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
-        input.focus({ preventScroll: true });
-        const end = input.value.length;
-        input.setRangeText(e.key, end, end, "end");
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-        return true;
-    };
+        props.onLaunch(props.agent, e);
+    }
+}
 
-    const handleNewClick = (e: MouseEvent) => {
-        // Don't bubble up — outer card click would auto-continue and
-        // race the archive RPC we're about to fire.
-        e.stopPropagation();
-        if (props.disabled) return;
-        props.onNewSession?.(props.agent);
-    };
+// Type to filter: the picker focuses its first card (Enter launches it),
+// but a printable key goes into the pane's filter box, so landing on the
+// picker after a close still lets the user type right away.
+// SPEC_FOCUS_FOLLOWS_SELECTION_2026_10_08.md §2d.
+function typeToFilter(s: CardState, e: KeyboardEvent): boolean {
+    const cardEl = s.el.current;
+    const filter = () => cardEl?.closest("[data-blockid]")?.querySelector<HTMLInputElement>("input[data-pane-focus]");
+    // An IME composition starting (CJK and others): move the caret to the
+    // filter and let the composition happen there.
+    if (e.isComposing || e.key === "Process" || e.keyCode === 229) {
+        const input = filter();
+        input?.focus({ preventScroll: true });
+        return input != null;
+    }
+    if (e.key.length !== 1 || e.key === " " || e.ctrlKey || e.metaKey || e.altKey) return false;
+    const input = filter();
+    if (!input) return false;
+    e.preventDefault();
+    input.focus({ preventScroll: true });
+    const end = input.value.length;
+    input.setRangeText(e.key, end, end, "end");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    return true;
+}
 
-    const handleContextMenu = (e: MouseEvent) => {
-        // Only intercept if a handler is wired. Otherwise let the
-        // browser show its default menu (useful for "Inspect" in
-        // dev). The handler is responsible for preventDefault.
-        if (props.onContextMenu) {
-            props.onContextMenu(props.agent, e);
-        }
-    };
+function handleNewClick(s: CardState, e: MouseEvent) {
+    const { props } = s;
+    // Don't bubble up — outer card click would auto-continue and
+    // race the archive RPC we're about to fire.
+    e.stopPropagation();
+    if (props.disabled) return;
+    props.onNewSession?.(props.agent);
+}
 
+function handleContextMenu(s: CardState, e: MouseEvent) {
+    const { props } = s;
+    // Only intercept if a handler is wired. Otherwise let the
+    // browser show its default menu (useful for "Inspect" in
+    // dev). The handler is responsible for preventDefault.
+    if (props.onContextMenu) {
+        props.onContextMenu(props.agent, e);
+    }
+}
+
+export const AgentCard = (props: AgentCardProps): JSX.Element => {
+    const s = createCardState(props);
+    const { title, caption, chipCount, hasAction, narrow, tags } = s;
     return (
         <div
-            ref={cardEl}
+            ref={(el) => (s.el.current = el)}
             class={`agent-card${props.launching ? " agent-card--launching" : ""}`}
             classList={{
                 "agent-card--disabled": props.disabled,
@@ -233,9 +265,9 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
                 "agent-card--has-action": hasAction(),
                 "agent-card--narrow": narrow(),
             }}
-            onClick={handleCardClick}
-            onContextMenu={handleContextMenu}
-            onKeyDown={handleKeyDown}
+            onClick={(e) => handleCardClick(s, e)}
+            onContextMenu={(e) => handleContextMenu(s, e)}
+            onKeyDown={(e) => handleKeyDown(s, e)}
             role="button"
             tabIndex={props.disabled ? -1 : 0}
             aria-disabled={props.disabled}
@@ -264,23 +296,7 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
                 note), as the kit's Tag. The old install ribbon and upgrade badge were
                 hand-rolled copies of it. */}
             <TagList tags={tags()} max={narrow() ? 2 : 3} size="xs" class="agent-card-tags" />
-            {/* Option E (PR #1008): "+ New" affordance — visible only
-                when the agent has an in-progress session. This
-                button asks the parent to archive the current zone
-                and start fresh. Hidden during install ribbon
-                state to avoid double-CTA overlap. */}
-            <Show when={props.hasCurrentSession && props.installed !== false && !props.launching}>
-                <Button
-                    density="compact"
-                    class="agent-card-new-session-btn"
-                    onClick={handleNewClick}
-                    title="Archive current session and start a new one"
-                    aria-label={`Start a new session for ${title()} (archives the current one)`}
-                    tabIndex={props.disabled ? -1 : 0}
-                >
-                    {"+ New"}
-                </Button>
-            </Show>
+            <NewSessionButton s={s} />
             <Show when={props.launching}>
                 <span class="agent-card-spinner" />
             </Show>
@@ -289,3 +305,27 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
 };
 
 AgentCard.displayName = "AgentCard";
+
+/** Option E (PR #1008): "+ New" affordance — visible only
+ *  when the agent has an in-progress session. This
+ *  button asks the parent to archive the current zone
+ *  and start fresh. Hidden during install ribbon
+ *  state to avoid double-CTA overlap. */
+function NewSessionButton(p: { s: CardState }) {
+    const { s } = p;
+    const { props, title } = s;
+    return (
+        <Show when={props.hasCurrentSession && props.installed !== false && !props.launching}>
+            <Button
+                density="compact"
+                class="agent-card-new-session-btn"
+                onClick={(e) => handleNewClick(s, e)}
+                title="Archive current session and start a new one"
+                aria-label={`Start a new session for ${title()} (archives the current one)`}
+                tabIndex={props.disabled ? -1 : 0}
+            >
+                {"+ New"}
+            </Button>
+        </Show>
+    );
+}

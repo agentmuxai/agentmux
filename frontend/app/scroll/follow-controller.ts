@@ -85,6 +85,8 @@ export type FollowEvent =
           geo: ScrollGeometry;
           /** The gesture was a held scrollbar (telemetry only). */
           scrollbar?: boolean;
+          /** What made the batch the user's: `scrollbar`, `pointer` (held on the content) or `gesture` (telemetry only). */
+          input?: string;
           /**
            * The latest gesture, still inside its window, moved the transcript UP (a wheel-up, an up
            * key). A scroll event now that does not move up is then one our own earlier write left
@@ -201,7 +203,7 @@ export function followReducer(state: FollowState, event: FollowEvent): FollowRes
                         state,
                         DETACHED,
                         event.scrollbar ? "user-scroll:scrollbar" : "user-scroll",
-                        gapDetail(geo)
+                        event.input ? `${gapDetail(geo)} input=${event.input}` : gapDetail(geo)
                     );
                 } else {
                     return result; // down never detaches (§5.4)

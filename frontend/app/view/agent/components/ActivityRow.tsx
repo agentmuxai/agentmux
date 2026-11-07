@@ -10,281 +10,35 @@
  */
 
 import clsx from "clsx";
-import { IconButton } from "@/app/element/ui/Button";
-import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
-import { useTick } from "@/app/hook/useTick";
-import { formatElapsedCompact, formatTimeLeft } from "@/util/format-time";
-import { ChunkPreview } from "./ChunkPreview";
-import {
-    createDispatchDetail,
-    subagentDisplayLabel,
-    type ActiveSubagent,
-    type DispatchDetail,
-    type SubagentEvent,
-} from "../../swarm/swarm-model";
-import { EXIT_FLASH_MS, KIND_SIGIL, type PinnedActivity } from "../../../agent-model/activity-types";
-import { ActivitySigil } from "./ActivitySigil";
-import { Tooltip } from "@/app/element/tooltip";
-import { usePulseWhen } from "@/app/motion/solid";
-import { toolOutputChunks } from "../../../agent-model/tool-adapter";
-import type { ToolLogChunk } from "../../../agent-model/types";
-
-/** One-line text summary per subagent event kind — deliberately simpler than
- *  the Swarm pane's own `DispatchActivityFeedEntry` (no per-event expand/
- *  collapse, no dedicated CSS): the dock reuses the existing shell-log line
- *  chrome (`.agent-tool-log-line`) instead of depending on `swarm-view.scss`,
- *  which only loads once the user has opened a Swarm pane this session. */
-function subagentEventLine(e: SubagentEvent): string {
-    const t = e.event_type;
-    switch (t.type) {
-        case "text": return t.content;
-        case "result": return t.content;
-        case "progress": return t.output;
-        case "tool_use": return `→ ${t.name}`;
-        case "tool_result": return t.is_error ? `✗ ${t.preview}` : t.preview;
-    }
-}
-
-/** Terminal-status glyph for one member row inside an expanded group roster
- *  — mirrors ActivityRow's own top-level `sigil()` (running/done/stopped),
- *  just scoped to a single `ActiveSubagent` instead of a `PinnedActivity`. */
-function memberSigil(status: ActiveSubagent["status"]): string {
-    switch (status) {
-        case "active": return KIND_SIGIL.subagent;
-        case "completed": return "✓";
-        case "abandoned": return "■";
-    }
-}
-
-interface ActivityRowProps {
-    /** Reactive accessor — returns undefined if the activity just left. */
-    activity: () => PinnedActivity | undefined;
-    expanded: () => boolean;
-    /** True once this row is past its retention window and only still
-     *  mounted for the departure flash — see ActivityDock's `isLeaving`. */
-    leaving: () => boolean;
-    onToggle: () => void;
-    onStop: () => void;
-    onDismiss: () => void;
-}
+import { Show, type JSX } from "solid-js";
+import { ActivitySummary, GroupRoster, ShellLog, SubagentLog } from "./activity-row-parts";
+import { createActivityRow, type ActivityRowProps } from "./activity-row-state";
 
 export const ActivityRow = (props: ActivityRowProps): JSX.Element => {
-    const tick = useTick(1000);
-
-    // Landing flash on first mount: the same bounce a tab plays when it lands after a
-    // drag/drop. `entering` is cleared after EXIT_FLASH_MS so the departure flash waits it out.
-    const [entering, setEntering] = createSignal(true);
-    let rowRef: HTMLDivElement | undefined;
-    usePulseWhen(() => rowRef, entering);
-    onMount(() => {
-        const timer = setTimeout(() => setEntering(false), EXIT_FLASH_MS);
-        onCleanup(() => clearTimeout(timer));
-    });
-
-    /**
-     * "~Ns left" for a whole-command sleep, while it's still running — the one
-     * activity whose remaining time is actually known (`sleepMs`, set only by
-     * `sleep-detect.ts`'s narrow matcher). Everything else shows elapsed only,
-     * because a guess here would be worse than nothing.
-     *
-     * Clamped at 0: the process is reaped slightly after its own deadline, so
-     * the last tick before `ToolEnd` would otherwise render a negative number.
-     * Empty once terminal — a finished row shows its final elapsed, not a
-     * countdown to a moment that has passed.
-     */
-    const remaining = createMemo(() => {
-        const a = props.activity();
-        if (!a || a.sleepMs == null || a.status !== "running") return "";
-        tick();
-        return formatTimeLeft(a.startedAt + a.sleepMs - Date.now());
-    });
-
-    const elapsed = createMemo(() => {
-        const a = props.activity();
-        if (!a) return "";
-        const end = a.endedAt ?? (tick(), Date.now());
-        return formatElapsedCompact(end - a.startedAt);
-    });
-
-    // Terminal statuses override the kind sigil with a result glyph.
-    const sigil = createMemo(() => {
-        const a = props.activity();
-        if (!a) return "";
-        switch (a.status) {
-            case "running": return KIND_SIGIL[a.kind];
-            case "done": return "✓";
-            case "error": return "✗";
-            case "stopped": return "■";
-        }
-    });
-
-    const tail = createMemo((): string | undefined => {
-        const a = props.activity();
-        if (!a) return undefined;
-        // A shell's or a tool's last output line is not shown on the row: the expanded log has it.
-        if (a.subagent) {
-            // Cheap tail from data already on ActiveSubagent — no extra
-            // fetch/subscribe just to render a collapsed row's tail (that
-            // cost is reserved for the expanded view, below).
-            const n = a.subagent.event_count;
-            return n > 0 ? `${n} event${n === 1 ? "" : "s"}` : undefined;
-        }
-        if (a.subagentGroup) {
-            const members = a.subagentGroup.members;
-            const active = members.filter((m) => m.status === "active").length;
-            return active > 0 ? `${active}/${members.length} active` : `${members.length} subagents`;
-        }
-        return undefined;
-    });
-
-    // Full command for the expanded header — the collapsed row's title is
-    // ellipsis-truncated by CSS, so a long command (a heartbeat-wrapped
-    // dev launch, a multi-flag one-liner) is unidentifiable without this.
-    // Shell rows: `cmd` is the real command even when the row carries a
-    // custom display title. Tool rows: BashParams.command, falling back to
-    // the title (which toolToActivity derives from the same field).
-    const fullCommand = createMemo((): string | undefined => {
-        const a = props.activity();
-        if (!a) return undefined;
-        if (a.shell) return a.shell.cmd;
-        if (a.tool) return (a.tool.params as { command?: string } | undefined)?.command ?? a.fullTitle ?? a.title;
-        return undefined;
-    });
-
-    // Expanded shell/tool log — the same streamed-output preview as
-    // PersistentShellBlock and a running tool (ChunkPreview.tsx). A promoted
-    // tool call's log is optional (only populated for tools that stream
-    // partials — see ToolNode.log's own doc comment), unlike a ShellNode's,
-    // which always has one.
-    const logChunks = createMemo((): ToolLogChunk[] => {
-        const a = props.activity();
-        return (a?.shell?.log.chunks ?? (a?.tool ? toolOutputChunks(a.tool) : undefined) ?? []) as ToolLogChunk[];
-    });
-
-    // Expanded subagent transcript — created only while this row is actually
-    // expanded (mirrors SwarmViewModel's own lazy `getDispatchDetail` cache),
-    // disposed on collapse/unmount so an idle dock isn't holding N live
-    // event subscriptions for subagents nobody is looking at.
-    const [dispatchDetail, setDispatchDetail] = createSignal<DispatchDetail | null>(null);
-    createEffect(() => {
-        const sub = props.activity()?.subagent;
-        if (!props.expanded() || !sub) {
-            setDispatchDetail(null);
-            return;
-        }
-        const detail = createDispatchDetail(sub.dispatch_id, sub.agent_id);
-        setDispatchDetail(detail);
-        onCleanup(() => detail.dispose());
-    });
+    const s = createActivityRow(props);
 
     return (
         <Show when={props.activity()}>
             {(a) => (
                 <div
-                    ref={(el) => {
-                        rowRef = el;
-                    }}
+                    ref={s.setRowRef}
                     class={clsx("agent-activity-row", a().kind, a().status, {
                         expanded: props.expanded(),
-                        "activity-flash-out": !entering() && props.leaving(),
+                        "activity-flash-out": !s.entering() && props.leaving(),
                     })}
                 >
-                    <div class="agent-activity-summary" onClick={props.onToggle}>
-                        <span class="agent-activity-sigil">
-                            <ActivitySigil activity={a()} glyph={sigil()} tick={tick} />
-                        </span>
-                        <Tooltip content={a().fullTitle} disable={!a().fullTitle} divClassName="agent-activity-title">{a().title}</Tooltip>
-                        {/* The stats, on the right like the working row's: what it counted, a known wait's time left, how long it has run. */}
-                        <span class="agent-activity-stats">
-                            <Show when={tail()}>
-                                <span class="agent-activity-tail">{tail()}</span>
-                            </Show>
-                            <Show when={remaining()}>
-                                <span class="agent-activity-remaining">{remaining()}</span>
-                            </Show>
-                            <span class="agent-activity-elapsed">{elapsed()}</span>
-                        </span>
-                        <Show when={a().canStop}>
-                            <IconButton
-                                icon="stop"
-                                label="Stop"
-                                tooltip={false}
-                                tone="danger"
-                                density="compact"
-                                class="agent-activity-stop"
-                                onClick={(e) => { e.stopPropagation(); props.onStop(); }}
-                            />
-                        </Show>
-                        <Show when={!a().canStop && a().status === "error"}>
-                            <IconButton
-                                icon="xmark"
-                                label="Dismiss"
-                                tooltip={false}
-                                density="compact"
-                                class="agent-activity-dismiss"
-                                onClick={(e) => { e.stopPropagation(); props.onDismiss(); }}
-                            />
-                        </Show>
-                    </div>
+                    <ActivitySummary s={s} a={a} props={props} />
 
                     <Show when={props.expanded() && (a().shell || a().tool)}>
-                        <div
-                            class="agent-activity-log agent-tool-overlay-log"
-                            onClick={(e) => e.stopPropagation()}
-                        >
-                            {/* Full command, word-wrapped — the collapsed
-                                title truncates, so this header is how the
-                                user identifies WHAT is running (user report
-                                2026-08-10: long-running process in the dock
-                                was unidentifiable when expanded). */}
-                            <Show when={fullCommand()}>
-                                <div class="agent-activity-command">{fullCommand()}</div>
-                            </Show>
-                            <ChunkPreview chunks={logChunks()} />
-                            <Show when={logChunks().length === 0 && a().tool}>
-                                <pre class="agent-tool-log-line">No output yet</pre>
-                            </Show>
-                            <Show when={a().shell?.log.open ?? a().tool?.log?.open ?? false}>
-                                <div class="agent-shell-streaming-indicator" />
-                            </Show>
-                        </div>
+                        <ShellLog s={s} a={a} props={props} />
                     </Show>
 
                     <Show when={props.expanded() && a().subagent}>
-                        <div
-                            class="agent-activity-log agent-tool-overlay-log"
-                            onClick={(e) => e.stopPropagation()}
-                        >
-                            <Show when={dispatchDetail() && dispatchDetail()!.entriesAtom().length === 0}>
-                                <pre class="agent-tool-log-line">No activity yet</pre>
-                            </Show>
-                            <For each={dispatchDetail()?.entriesAtom() ?? []}>
-                                {(entry) => <pre class="agent-tool-log-line">{subagentEventLine(entry.event)}</pre>}
-                            </For>
-                        </div>
+                        <SubagentLog s={s} a={a} props={props} />
                     </Show>
 
-                    {/* Group roster — a compact per-member summary, not a live
-                        transcript: opening one dock row's expand shouldn't
-                        subscribe to N members' event streams at once (a
-                        single Task/Workflow run can spawn dozens). Full
-                        per-member transcripts remain the Swarm pane's job. */}
                     <Show when={props.expanded() && a().subagentGroup}>
-                        <div
-                            class="agent-activity-log agent-tool-overlay-log"
-                            onClick={(e) => e.stopPropagation()}
-                        >
-                            <For each={a().subagentGroup!.members}>
-                                {(member) => (
-                                    <pre class="agent-tool-log-line">
-                                        {memberSigil(member.status)} {subagentDisplayLabel(member)}
-                                        {member.event_count > 0
-                                            ? ` — ${member.event_count} event${member.event_count === 1 ? "" : "s"}`
-                                            : ""}
-                                    </pre>
-                                )}
-                            </For>
-                        </div>
+                        <GroupRoster s={s} a={a} props={props} />
                     </Show>
                 </div>
             )}

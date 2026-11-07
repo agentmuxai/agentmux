@@ -1,0 +1,69 @@
+shortcutFor tab:new
+hostHas multiWindow
+hostHas windowTransparency
+shortcutFor view:command-palette
+devModeOn
+FlyoutMenu
+refreshWorkspaceList
+-- a host with neither
+<div>
+  <div data-stand="FlyoutMenu" data-anchor="logo-menu-anchor" data-placement="bottom-start" data-mirrored="false">
+    <button class="logo-menu-btn" title="Menu" data-drag-region="false">
+      <svg width="20" height="20" viewBox="0 0 5 5" fill="currentColor" aria-hidden="true">
+        <rect x="0" y="0" width="5" height="1">
+        <rect x="0" y="2" width="2" height="3">
+        <rect x="3" y="2" width="2" height="1">
+        <rect x="3" y="4" width="2" height="1">
+    <div data-item="0" data-label="New Tab" data-icon="plus" data-shortcut="<tab:new>" data-checked="undefined" data-keepopen="undefined" data-divider="false">
+    <div data-item="1" data-label="" data-checked="undefined" data-keepopen="undefined" data-divider="true">
+    <div data-item="2" data-label="Theme" data-icon="palette" data-checked="undefined" data-keepopen="undefined" data-divider="false">
+      <div data-item="2.0" data-label="Dark" data-checked="true" data-keepopen="true" data-divider="false">
+      <div data-item="2.1" data-label="Light" data-checked="false" data-keepopen="true" data-divider="false">
+    <div data-item="3" data-label="Workspaces" data-icon="grip" data-checked="undefined" data-keepopen="undefined" data-divider="false">
+      <div data-item="3.0" data-label="New Workspace…" data-icon="plus" data-checked="undefined" data-keepopen="undefined" data-divider="false">
+      <div data-item="3.1" data-label="Open Workspace" data-icon="folder-open" data-checked="undefined" data-keepopen="undefined" data-divider="false">
+        <div data-item="3.1.0" data-label="Main" data-checked="true" data-keepopen="undefined" data-divider="false">
+      <div data-item="3.2" data-label="Import…" data-icon="file-import" data-checked="undefined" data-keepopen="undefined" data-divider="false">
+      <div data-item="3.3" data-label="Export…" data-icon="file-export" data-checked="undefined" data-keepopen="undefined" data-divider="false">
+      <div data-item="3.4" data-label="" data-checked="undefined" data-keepopen="undefined" data-divider="true">
+      <div data-item="3.5" data-label="Rename workspace…" data-icon="pen" data-checked="undefined" data-keepopen="undefined" data-divider="false">
+      <div data-item="3.6" data-label="Delete workspace…" data-icon="trash-can" data-checked="undefined" data-keepopen="undefined" data-divider="false">
+    <div data-item="4" data-label="" data-checked="undefined" data-keepopen="undefined" data-divider="true">
+    <div data-item="5" data-label="Command Palette" data-icon="magnifying-glass" data-shortcut="<view:command-palette>" data-checked="undefined" data-keepopen="undefined" data-divider="false">
+    <div data-item="6" data-label="Online Docs" data-icon="book" data-checked="undefined" data-keepopen="undefined" data-divider="false">
+    <div data-item="7" data-label="" data-checked="undefined" data-keepopen="undefined" data-divider="true">
+    <div data-item="8" data-label="Exit" data-icon="right-from-bracket" data-checked="undefined" data-keepopen="undefined" data-divider="false">
+shortcutFor tab:new
+hostHas multiWindow
+hostHas windowTransparency
+shortcutFor view:command-palette
+devModeOn
+-- dev mode on
+<div>
+  <div data-stand="FlyoutMenu" data-anchor="logo-menu-anchor" data-placement="bottom-start" data-mirrored="false">
+    <button class="logo-menu-btn" title="Menu" data-drag-region="false">
+      <svg width="20" height="20" viewBox="0 0 5 5" fill="currentColor" aria-hidden="true">
+        <rect x="0" y="0" width="5" height="1">
+        <rect x="0" y="2" width="2" height="3">
+        <rect x="3" y="2" width="2" height="1">
+        <rect x="3" y="4" width="2" height="1">
+    <div data-item="0" data-label="New Tab" data-icon="plus" data-shortcut="<tab:new>" data-checked="undefined" data-keepopen="undefined" data-divider="false">
+    <div data-item="1" data-label="" data-checked="undefined" data-keepopen="undefined" data-divider="true">
+    <div data-item="2" data-label="Theme" data-icon="palette" data-checked="undefined" data-keepopen="undefined" data-divider="false">
+      <div data-item="2.0" data-label="Dark" data-checked="true" data-keepopen="true" data-divider="false">
+      <div data-item="2.1" data-label="Light" data-checked="false" data-keepopen="true" data-divider="false">
+    <div data-item="3" data-label="Workspaces" data-icon="grip" data-checked="undefined" data-keepopen="undefined" data-divider="false">
+      <div data-item="3.0" data-label="New Workspace…" data-icon="plus" data-checked="undefined" data-keepopen="undefined" data-divider="false">
+      <div data-item="3.1" data-label="Open Workspace" data-icon="folder-open" data-checked="undefined" data-keepopen="undefined" data-divider="false">
+        <div data-item="3.1.0" data-label="Main" data-checked="true" data-keepopen="undefined" data-divider="false">
+      <div data-item="3.2" data-label="Import…" data-icon="file-import" data-checked="undefined" data-keepopen="undefined" data-divider="false">
+      <div data-item="3.3" data-label="Export…" data-icon="file-export" data-checked="undefined" data-keepopen="undefined" data-divider="false">
+      <div data-item="3.4" data-label="" data-checked="undefined" data-keepopen="undefined" data-divider="true">
+      <div data-item="3.5" data-label="Rename workspace…" data-icon="pen" data-checked="undefined" data-keepopen="undefined" data-divider="false">
+      <div data-item="3.6" data-label="Delete workspace…" data-icon="trash-can" data-checked="undefined" data-keepopen="undefined" data-divider="false">
+    <div data-item="4" data-label="" data-checked="undefined" data-keepopen="undefined" data-divider="true">
+    <div data-item="5" data-label="Command Palette" data-icon="magnifying-glass" data-shortcut="<view:command-palette>" data-checked="undefined" data-keepopen="undefined" data-divider="false">
+    <div data-item="6" data-label="DevTools" data-icon="code" data-checked="undefined" data-keepopen="undefined" data-divider="false">
+    <div data-item="7" data-label="Online Docs" data-icon="book" data-checked="undefined" data-keepopen="undefined" data-divider="false">
+    <div data-item="8" data-label="" data-checked="undefined" data-keepopen="undefined" data-divider="true">
+    <div data-item="9" data-label="Exit" data-icon="right-from-bracket" data-checked="undefined" data-keepopen="undefined" data-divider="false">

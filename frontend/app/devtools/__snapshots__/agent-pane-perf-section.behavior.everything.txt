@@ -1,0 +1,200 @@
+agentPerfStore.snapshot
+-- everything
+<div>
+  <div style="margin-top:8px;padding-top:8px;border-top:1px solid #333">
+    <div style="font-weight:bold;color:#7af;margin-bottom:4px">
+      "📊 Agent Pane Perf"
+    <div style="margin-bottom:6px">
+      <div style="color:#aaa;font-size:10px;margin-bottom:2px">
+        "Row mount duration (last 64 per kind)"
+      <table style="font-size:10px;border-collapse:collapse;width:100%">
+        <thead>
+          <tr style="color:#888">
+            <th style="text-align:left;padding:1px 4px">
+              "kind"
+            <th style="text-align:right;padding:1px 4px">
+              "p50"
+            <th style="text-align:right;padding:1px 4px">
+              "p95"
+            <th style="text-align:right;padding:1px 4px">
+              "max"
+            <th style="text-align:right;padding:1px 4px">
+              "n"
+            <th style="text-align:right;padding:1px 4px">
+              "est-miss"
+        <tbody>
+          <tr>
+            <td style="padding:1px 4px">
+              "text"
+            <td style="padding:1px 4px;text-align:right">
+              "2.0"
+            <td style="padding:1px 4px;text-align:right">
+              "3.0"
+            <td style="padding:1px 4px;text-align:right">
+              "4.0"
+            <td style="padding:1px 4px;text-align:right;color:#888">
+              "5"
+            <td style="padding: 1px 4px; text-align: right; color: rgb(255, 170, 102);">
+              "50%"
+              "⚠"
+      <div style="color:#666;font-size:9px;margin-top:2px">
+        "est-miss = pct measured outside ±"
+        "30%"
+        "of estimate"
+    <div style="margin-bottom:6px">
+      <div style="color:#aaa;font-size:10px;margin-bottom:2px">
+        "Store dispatch duration (last 64 per kind)"
+      <table style="font-size:10px;border-collapse:collapse;width:100%">
+        <thead>
+          <tr style="color:#888">
+            <th style="text-align:left;padding:1px 4px">
+              "kind"
+            <th style="text-align:right;padding:1px 4px">
+              "p50"
+            <th style="text-align:right;padding:1px 4px">
+              "max"
+            <th style="text-align:right;padding:1px 4px">
+              "n"
+        <tbody>
+          <tr>
+            <td style="padding:1px 4px">
+              "layout"
+            <td style="padding:1px 4px;text-align:right">
+              "1.0"
+            <td style="padding:1px 4px;text-align:right">
+              "3.0"
+            <td style="padding:1px 4px;text-align:right;color:#888">
+              "4"
+    <div style="margin-bottom:6px">
+      <div style="color:#aaa;font-size:10px;margin-bottom:2px">
+        "Transcript cursors"
+      <div style="font-size:10px;color:#bbb;padding-left:8px">
+        "abcdefgh"
+        ":"
+        "10"
+        "delivered,"
+        "1"
+        "dup,"
+        "3"
+        "echo, gaps"
+        "2"
+        "("
+        "5"
+        "lines)"
+        <span style="color: rgb(102, 204, 136);">
+          "· skipped"
+          "0"
+          ", unpositioned"
+          "0"
+          ", gen changes"
+          "0"
+          ", own echoes dropped"
+          "4"
+    <div style="margin-bottom:6px">
+      <div style="color:#aaa;font-size:10px">
+        "Layout shifts in agent pane (last"
+        "1"
+        ")"
+      <div style="font-size:10px;color:#bbb;padding-left:8px">
+        "2ms"
+        "ago:"
+        "0.5000"
+    <div>
+      <div style="color:#aaa;font-size:10px">
+        "Recent estimator misses (last"
+        "1"
+        ")"
+      <div style="font-size:10px;color:#bbb;padding-left:8px">
+        "1ms"
+        "ago:"
+        "text"
+        "— est"
+        "10"
+        "px, actual"
+        "20"
+        "px ("
+        "100%"
+        ")"
+poll x1
+agentPerfStore.snapshot
+-- after a poll: new row kind, no cursors, no shifts
+<div>
+  <div style="margin-top:8px;padding-top:8px;border-top:1px solid #333">
+    <div style="font-weight:bold;color:#7af;margin-bottom:4px">
+      "📊 Agent Pane Perf"
+    <div style="margin-bottom:6px">
+      <div style="color:#aaa;font-size:10px;margin-bottom:2px">
+        "Row mount duration (last 64 per kind)"
+      <table style="font-size:10px;border-collapse:collapse;width:100%">
+        <thead>
+          <tr style="color:#888">
+            <th style="text-align:left;padding:1px 4px">
+              "kind"
+            <th style="text-align:right;padding:1px 4px">
+              "p50"
+            <th style="text-align:right;padding:1px 4px">
+              "p95"
+            <th style="text-align:right;padding:1px 4px">
+              "max"
+            <th style="text-align:right;padding:1px 4px">
+              "n"
+            <th style="text-align:right;padding:1px 4px">
+              "est-miss"
+        <tbody>
+          <tr>
+            <td style="padding:1px 4px">
+              "diff"
+            <td style="padding:1px 4px;text-align:right">
+              "20"
+            <td style="padding:1px 4px;text-align:right">
+              "30"
+            <td style="padding:1px 4px;text-align:right">
+              "40"
+            <td style="padding:1px 4px;text-align:right;color:#888">
+              "50"
+            <td style="padding: 1px 4px; text-align: right; color: rgb(102, 204, 136);">
+              "0%"
+      <div style="color:#666;font-size:9px;margin-top:2px">
+        "est-miss = pct measured outside ±"
+        "30%"
+        "of estimate"
+    <div style="margin-bottom:6px">
+      <div style="color:#aaa;font-size:10px;margin-bottom:2px">
+        "Store dispatch duration (last 64 per kind)"
+      <table style="font-size:10px;border-collapse:collapse;width:100%">
+        <thead>
+          <tr style="color:#888">
+            <th style="text-align:left;padding:1px 4px">
+              "kind"
+            <th style="text-align:right;padding:1px 4px">
+              "p50"
+            <th style="text-align:right;padding:1px 4px">
+              "max"
+            <th style="text-align:right;padding:1px 4px">
+              "n"
+        <tbody>
+          <tr>
+            <td style="padding:1px 4px">
+              "layout"
+            <td style="padding:1px 4px;text-align:right">
+              "1.0"
+            <td style="padding:1px 4px;text-align:right">
+              "3.0"
+            <td style="padding:1px 4px;text-align:right;color:#888">
+              "4"
+    <div>
+      <div style="color:#aaa;font-size:10px">
+        "Recent estimator misses (last"
+        "1"
+        ")"
+      <div style="font-size:10px;color:#bbb;padding-left:8px">
+        "1ms"
+        "ago:"
+        "text"
+        "— est"
+        "10"
+        "px, actual"
+        "20"
+        "px ("
+        "100%"
+        ")"

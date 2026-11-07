@@ -15,6 +15,8 @@ export class VaultViewModel {
     zoomAtom: Accessor<number>;
     /** The selected section, meta-backed so it survives a remount. */
     sectionAtom: Accessor<VaultPaneSection>;
+    /** The Vault the lists are narrowed to (its id), meta-backed; empty for all of them. */
+    vaultAtom: Accessor<string>;
     /** An agent's request to fill in, set when the request's prompt opens the Vault. */
     requestAtom: Accessor<string>;
     /** A pending use or ask to show in the Requests list, set by openVaultAt. */
@@ -35,6 +37,10 @@ export class VaultViewModel {
         const meta = ctx.meta;
         this.zoomAtom = createMemo<number>(() => readZoom(meta()));
         this.sectionAtom = createMemo<VaultPaneSection>(() => sectionOf(VAULT_SECTIONS, "vault", meta()));
+        this.vaultAtom = createMemo<string>(() => {
+            const v = meta()?.["vault:vault"];
+            return typeof v === "string" ? v : "";
+        });
         this.requestAtom = createMemo<string>(() => {
             const r = meta()?.["vault:request"];
             return typeof r === "string" ? r : "";

@@ -24,10 +24,33 @@ export const AGENT_SITE_GRANTS_SETTING = {
     id: "browser.agent_sites",
     label: "Agents on sites",
     description:
-        "What an agent may do on a site without asking each time, until you revoke it. Every row lets the agent make committing clicks there without asking (a payment still asks). Add Terminal to let it type and run commands in a web terminal there, such as Cloud Shell: nobody checks each line, so Stop, Pause and Take over in the pane are how you stop it, and Revoke here ends it at once.",
+        "What an agent may do on a site without asking each time, until you revoke it. Every row lets the agent make committing clicks there without asking (a payment still asks). Add Terminal to let it type and run commands in a web terminal there, such as Cloud Shell: nobody checks each line, so Stop, Pause and Take over in the pane are how you stop it, and Revoke here ends it at once. Tick \"ask me for each line\" instead to be shown every line in the pane, with Run it and Don't run, before it goes in.",
     section: "browser",
     keywords: ["agent", "agents", "site", "sites", "grant", "auto-approve", "terminal", "cloud shell", "revoke", "always", "standing", "permission"],
 } satisfies SettingsIndexEntry;
+
+type TerminalChoice = "none" | "terminal" | "terminal_ask";
+
+/** The add form's terminal options: off, run freely, or show the person each line first (which needs the terminal on). */
+function TerminalChoices(props: { value: TerminalChoice; onChange: (v: TerminalChoice) => void }) {
+    return (
+        <>
+            <label class="agent-site-grant-power">
+                <input type="checkbox" checked={props.value !== "none"} onChange={(e) => props.onChange(e.currentTarget.checked ? "terminal" : "none")} />
+                <span>{POWER_LABELS.terminal}</span>
+            </label>
+            <label class="agent-site-grant-power">
+                <input
+                    type="checkbox"
+                    checked={props.value === "terminal_ask"}
+                    disabled={props.value === "none"}
+                    onChange={(e) => props.onChange(e.currentTarget.checked ? "terminal_ask" : "terminal")}
+                />
+                <span>and show me each line first</span>
+            </label>
+        </>
+    );
+}
 
 const agentName = (a: AgentDefinition) => a.name || a.slug || a.id;
 
@@ -56,7 +79,7 @@ export function AgentSiteGrants(): JSX.Element {
     const [busy, setBusy] = createSignal(false);
     const [pick, setPick] = createSignal("");
     const [site, setSite] = createSignal("");
-    const [terminal, setTerminal] = createSignal(false);
+    const [terminal, setTerminal] = createSignal<TerminalChoice>("none");
     const now = () => Math.floor(Date.now() / 1000);
 
     /** One change, then the list as srv now has it. */
@@ -90,7 +113,7 @@ export function AgentSiteGrants(): JSX.Element {
             RpcApi.BrowserGrantsSetCommand(TabRpcClient, {
                 agent: agent.slug,
                 site: site().trim(),
-                powers: terminal() ? ["terminal"] : [],
+                powers: terminal() === "none" ? [] : [terminal()],
             })
         );
         if (ok) setSite("");
@@ -186,10 +209,7 @@ export function AgentSiteGrants(): JSX.Element {
                                     if (e.key === "Enter") void add();
                                 }}
                             />
-                            <label class="agent-site-grant-power">
-                                <input type="checkbox" checked={terminal()} onChange={(e) => setTerminal(e.currentTarget.checked)} />
-                                <span>{POWER_LABELS.terminal}</span>
-                            </label>
+                            <TerminalChoices value={terminal()} onChange={setTerminal} />
                             <Button disabled={!picked() || !site().trim() || busy()} onClick={() => void add()}>
                                 Allow
                             </Button>

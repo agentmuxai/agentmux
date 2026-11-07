@@ -21,6 +21,17 @@ vi.mock("@/app/store/rpc-api", () => ({
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/view/vault/vault-secrets", () => ({ VaultSecrets: () => null }));
 
+const eventHandlers = new Map<string, (data: unknown) => void>();
+vi.mock("@/app/store/mps", () => ({
+    onMuxEvent: (name: string, handler: (data: unknown) => void) => {
+        eventHandlers.set(name, handler);
+        return () => eventHandlers.delete(name);
+    },
+}));
+const reconnectHandlers: Array<() => void> = [];
+vi.mock("@/app/store/ws", () => ({ addWSReconnectHandler: (h: () => void) => reconnectHandlers.push(h) }));
+const srvWroteARow = () => eventHandlers.get("audit:changed")?.(undefined);
+
 const revealBlock = vi.fn();
 vi.mock("@/app/util/reveal-block", () => ({ revealBlock: (...a: unknown[]) => revealBlock(...a) }));
 const openOrFocusHistoryTab = vi.fn();
@@ -169,6 +180,123 @@ describe("AuditManager", () => {
         await waitFor(() => expect(screen.getByText("new agent's")).toBeInTheDocument());
         expect(query.mock.calls.at(-1)![0]).toMatchObject({ agent_id: "loap" });
         expect(query.mock.calls.at(-1)![0].cursor).toBeUndefined();
+    });
+
+    it("takes a new entry when srv says a row was written, without waiting for a poll", async () => {
+        query.mockResolvedValue(page([entry({ id: "a", summary: "first one" })]));
+        render(() => <AuditManager paneBlockId="pane-1" />);
+        await waitFor(() => expect(screen.getByText("first one")).toBeInTheDocument());
+
+        query.mockResolvedValue(page([entry({ id: "b", summary: "just written" }), entry({ id: "a", summary: "first one" })]));
+        srvWroteARow();
+        srvWroteARow();
+        await waitFor(() => expect(screen.getByText("just written")).toBeInTheDocument(), { timeout: 3000 });
+        // A burst of events is one request.
+        expect(query).toHaveBeenCalledTimes(2);
+    });
+
+    it("holds the list while paused and counts what is new, then shows it on Resume", async () => {
+        query.mockResolvedValue(page([entry({ id: "a", summary: "first one" })]));
+        render(() => <AuditManager paneBlockId="pane-1" />);
+        await waitFor(() => expect(screen.getByText("first one")).toBeInTheDocument());
+
+        fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+        query.mockResolvedValue(page([entry({ id: "b", summary: "written while paused" }), entry({ id: "a", summary: "first one" })]));
+        srvWroteARow();
+        await waitFor(() => expect(screen.getByRole("button", { name: "1 new" })).toBeInTheDocument(), { timeout: 3000 });
+        expect(screen.queryByText("written while paused")).toBeNull();
+
+        // The jump scrolls the pane's body to the top, not the list into view (which would hide the filters and the bar).
+        const scrollTo = vi.fn();
+        HTMLElement.prototype.scrollTo = scrollTo as unknown as typeof HTMLElement.prototype.scrollTo;
+        fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+        delete (HTMLElement.prototype as { scrollTo?: unknown }).scrollTo;
+        expect(scrollTo).toHaveBeenCalledWith({ top: 0 });
+        expect(screen.getByText("written while paused")).toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "1 new" })).toBeNull();
+        expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument();
+    });
+
+    it("does not change the list when a refresh already on its way lands after Pause, and counts it as new", async () => {
+        query.mockResolvedValue(page([entry({ id: "a", summary: "first one" })]));
+        render(() => <AuditManager paneBlockId="pane-1" />);
+        await waitFor(() => expect(screen.getByText("first one")).toBeInTheDocument());
+
+        let land!: (r: AuditQueryResult) => void;
+        query.mockImplementationOnce(() => new Promise<AuditQueryResult>((r) => (land = r)));
+        const before = query.mock.calls.length;
+        srvWroteARow();
+        await waitFor(() => expect(query.mock.calls.length).toBe(before + 1), { timeout: 3000 });
+
+        fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+        land(page([entry({ id: "b", summary: "landed after pause" }), entry({ id: "a", summary: "first one" })]));
+        await waitFor(() => expect(screen.getByRole("button", { name: "1 new" })).toBeInTheDocument());
+        expect(screen.queryByText("landed after pause")).toBeNull();
+    });
+
+    it("clears an error from a failed look at the newest entries once a later one works, while paused", async () => {
+        query.mockResolvedValue(page([entry({ id: "a", summary: "first one" })]));
+        render(() => <AuditManager paneBlockId="pane-1" />);
+        await waitFor(() => expect(screen.getByText("first one")).toBeInTheDocument());
+        fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+
+        query.mockRejectedValueOnce(new Error("audit.query: store busy"));
+        srvWroteARow();
+        await waitFor(() => expect(screen.getByText(/store busy/)).toBeInTheDocument(), { timeout: 3000 });
+
+        query.mockResolvedValue(page([entry({ id: "b", summary: "newer" }), entry({ id: "a", summary: "first one" })]));
+        srvWroteARow();
+        await waitFor(() => expect(screen.queryByText(/store busy/)).toBeNull(), { timeout: 3000 });
+        expect(screen.getByRole("button", { name: "1 new" })).toBeInTheDocument();
+    });
+
+    it("stops following once older entries are loaded, and the pill jumps back to the newest", async () => {
+        query.mockResolvedValueOnce(page([entry({ id: "a", summary: "first one" })], { next_cursor: "c1" }));
+        render(() => <AuditManager paneBlockId="pane-1" />);
+        await waitFor(() => expect(screen.getByText("first one")).toBeInTheDocument());
+        query.mockResolvedValueOnce(page([entry({ id: "z", summary: "an old one" })]));
+        fireEvent.click(screen.getByRole("button", { name: /Show older/ }));
+        await waitFor(() => expect(screen.getByText("an old one")).toBeInTheDocument());
+
+        query.mockResolvedValue(page([entry({ id: "n1", summary: "new one" }), entry({ id: "a", summary: "first one" })]));
+        srvWroteARow();
+        await waitFor(() => expect(screen.getByRole("button", { name: "1 new" })).toBeInTheDocument(), { timeout: 3000 });
+        expect(screen.queryByText("new one")).toBeNull();
+        expect(screen.getByText("an old one")).toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole("button", { name: "1 new" }));
+        expect(screen.getByText("new one")).toBeInTheDocument();
+        expect(screen.queryByText("an old one")).toBeNull();
+    });
+
+    it("asks again after the websocket reconnects", async () => {
+        query.mockResolvedValue(page([entry({ id: "a", summary: "first one" })]));
+        render(() => <AuditManager paneBlockId="pane-1" />);
+        await waitFor(() => expect(screen.getByText("first one")).toBeInTheDocument());
+        const before = query.mock.calls.length;
+
+        query.mockResolvedValue(page([entry({ id: "c", summary: "missed while down" })]));
+        for (const reconnected of reconnectHandlers) reconnected();
+        await waitFor(() => expect(screen.getByText("missed while down")).toBeInTheDocument());
+        expect(query.mock.calls.length).toBeGreaterThan(before);
+    });
+
+    it("asks for this channel's entries first, and for every channel's, in a section each, when This machine is picked", async () => {
+        query.mockResolvedValue(page([entry({ id: "a", summary: "dev one", provenance: { channel: "dev" } })], { channel: "dev" }));
+        render(() => <AuditManager paneBlockId="pane-1" />);
+        await waitFor(() => expect(screen.getByText("dev one")).toBeInTheDocument());
+        expect(query.mock.calls[0][0].scope).toBe("channel");
+        expect(screen.queryByRole("heading", { level: 3 })).toBeNull();
+
+        query.mockResolvedValue(
+            page([entry({ id: "b", summary: "stable one", provenance: { channel: "stable", host: "narko" } }), entry({ id: "a", summary: "dev one", provenance: { channel: "dev" } })], {
+                channel: "dev",
+            })
+        );
+        fireEvent.click(screen.getByRole("radio", { name: "This machine" }));
+        await waitFor(() => expect(screen.getByText("stable one")).toBeInTheDocument());
+        expect(query.mock.calls.at(-1)![0].scope).toBe("machine");
+        expect(screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual(["narko · stable", "dev"]);
     });
 
     it("shows an error from the query", async () => {

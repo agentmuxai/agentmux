@@ -1,0 +1,29 @@
+onMuxEvent sysinfo local
+sysinfo 80 cores
+End on 80: tab stop 79 focus: core 79
+sysinfo 70 cores
+shrunk to 70: tab stop 69
+sysinfo 90 cores
+grown to 90: tab stop 69
+sysinfo 10 cores
+shrunk to 10 (rows): tab stop state kept, list rows 10
+sysinfo 70 cores
+back to 70: tab stop 9
+sysinfo 0 cores
+-- no cores any more
+<div>
+  <div data-stand="AnchoredPopover" data-placement="top-end" class="cpu-cores-popover cpu-cores-popover--rows" role="dialog" aria-label="Per-core CPU usage" style="width: 260px;">
+    <div class="cpu-cores-header">
+      <span class="cpu-cores-title">
+        "CPU Usage"
+      <span class="cpu-cores-aggregate" style="color: var(--secondary-text-color);">
+        "avg"
+        "43"
+        "%"
+    <div class="cpu-cores-subtitle">
+      <span>
+        "0 cores"
+    <div class="cpu-cores-empty">
+      "Reading CPU…"
+heatmap present: no
+key on a stale grid ignored: readout 0 cores

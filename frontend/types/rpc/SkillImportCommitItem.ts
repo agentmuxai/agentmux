@@ -7,4 +7,8 @@ export type SkillImportCommitItem = { key: string, name: string, description: st
 /**
  * The catalog skill to update; empty to create one.
  */
-existing_id: string, };
+existing_id: string, 
+/**
+ * The `app_hash` the preview gave a computer-use skill; empty for a plain one.
+ */
+app_hash: string, };

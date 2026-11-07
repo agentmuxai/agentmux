@@ -1,0 +1,12 @@
+TokenStrip created
+ImportBanner created
+model.open {"kind":"entry","id":"s1"}
+FullView created
+model.open {"kind":"entry","id":"o1"}
+FullView created
+model.open {"kind":"claude-config"}
+FullView created
+model.open {"kind":"preview"}
+FullView created
+model.open {"kind":"new"}
+FullView created

@@ -34,7 +34,8 @@ describe("toolToActivity", () => {
         expect(a.startedAt).toBe(1000);
         expect(a.endedAt).toBeUndefined();
         expect(a.canStop).toBe(false);
-        expect(a.title).toBe("cargo test -p agentmux-srv");
+        expect(a.title).toBe("Run cargo test");
+        expect(a.fullTitle).toBe("cargo test -p agentmux-srv");
         expect(a.tool).toBe(n);
     });
 
@@ -172,7 +173,7 @@ describe("toolActivities — backgrounded calls", () => {
         expect(acts[0].status).toBe("running");
         expect(acts[0].startedAt).toBe(1000);
         expect(acts[0].endedAt).toBeUndefined();
-        expect(acts[0].title).toBe("task dev");
+        expect(acts[0].title).toBe("Run task dev");
     });
 
     it("stays running until ITS OWN task-notification lands — another call's doesn't end it", () => {
@@ -367,11 +368,22 @@ describe("toolOutputChunks (muxreview P1 on #4125)", () => {
 });
 
 describe("toolToActivity — the model's phrase", () => {
-    it("titles a Bash call by its description, keeping the command as the fallback", () => {
+    it("titles a Bash call by its description, or else by its command in words with the command as the tooltip", () => {
         const withPhrase = mkBash({ params: { command: "cd ~/x && npx vitest run", description: "Run tests and typecheck" } });
         expect(toolToActivity(withPhrase).title).toBe("Run tests and typecheck");
-        expect(toolToActivity(mkBash({ params: { command: "cd ~/x && npx vitest run", description: "  " } })).title).toBe("cd ~/x && npx vitest run");
-        expect(toolToActivity(mkBash({ params: { command: "cargo test" } })).title).toBe("cargo test");
+        const blank = toolToActivity(mkBash({ params: { command: "cd ~/x && npx vitest run", description: "  " } }));
+        expect(blank.title).toBe("Run npx vitest in x");
+        expect(blank.fullTitle).toBe("cd ~/x && npx vitest run");
+        expect(toolToActivity(mkBash({ params: { command: "cargo test" } })).title).toBe("Run cargo test");
+    });
+
+    it("never shows a workspace path or a cd in a dock title", () => {
+        const a = toolToActivity(
+            mkBash({ params: { command: "cd ~/.agentmux/agents/maricon-09101/work/rr && cargo test -p srv" } })
+        );
+        expect(a.title).toBe("Run cargo test in rr");
+        expect(a.title).not.toMatch(/agentmux|~|cd /);
+        expect(a.fullTitle).toBe("cd ~/.agentmux/agents/maricon-09101/work/rr && cargo test -p srv");
     });
 
     it("titles a backgrounded call by its description too", () => {

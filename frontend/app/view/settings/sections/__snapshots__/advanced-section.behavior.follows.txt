@@ -1,0 +1,428 @@
+-- after a change
+<div>
+  <div class="settings-section-body">
+    <div class="settings-subheader">
+      "Terminal (power user)"
+    <div class="setting-row" id="setting-advanced.disable_webgl">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Disable WebGL rendering"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Fall back to canvas-based terminal rendering (restart required)"
+        <div class="ui-field-control">
+          <div data-stand="ToggleControl" data-checked="true">
+            <span data-cb="onChange">
+              "toggle"
+    <div class="settings-subheader">
+      "Agent panes"
+    <div class="setting-row" id="setting-advanced.auto_answer_timeout">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Auto-answer timeout"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Seconds an AskUserQuestion panel waits for you before auto-selecting the recommended option(s)"
+        <div class="ui-field-control">
+          <div data-stand="NumberControl" data-props="{\"class\":\"\\\"setting-number setting-number--wide\\\"\",\"min\":\"1\",\"step\":\"1\",\"value\":\"30\"}">
+            <span data-cb="onChange">
+              "change"
+    <div class="setting-row" id="setting-advanced.compact_at">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Compact agents at"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Thousands of tokens at which Claude agents compact their context. Lower saves tokens; higher keeps more detail. 0 keeps Claude Code's own (about 967). Takes effect when each agent next starts"
+        <div class="ui-field-control">
+          <div data-stand="NumberControl" data-props="{\"class\":\"\\\"setting-number setting-number--wide\\\"\",\"min\":\"0\",\"step\":\"50\",\"value\":\"600\"}">
+            <span data-cb="onChange">
+              "change"
+    <div class="setting-row" id="setting-advanced.preview_skid_notches">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Preview scroll skid"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Wheel notches a tool preview absorbs at its top or bottom edge before the scroll passes to the pane, so a preview sliding under the pointer is not scrolled past. 0 passes it on at once. Applies to open panes"
+        <div class="ui-field-control">
+          <div data-stand="NumberControl" data-props="{\"class\":\"\\\"setting-number\\\"\",\"max\":\"10\",\"min\":\"0\",\"parse\":\"\\\"int\\\"\",\"step\":\"1\",\"value\":\"2\"}">
+            <span data-cb="onChange">
+              "change"
+    <div class="setting-row" id="setting-advanced.container_memory">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Container agents' memory"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Megabytes of memory each container agent may use, unless the agent has its own limit. auto is half of what Docker has (at least 2 GB). 0 is no limit. Reaches running containers without restarting them"
+        <div class="ui-field-control">
+          <input data-stand="TextInput" class="setting-number setting-number--wide" placeholder="auto" value="auto">
+    <div class="setting-row" id="setting-advanced.container_cpus">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Container agents' CPUs"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "CPUs each container agent may use, unless the agent has its own limit. auto is all but a quarter of what Docker has (at least one). 0 is no limit. Reaches running containers without restarting them"
+        <div class="ui-field-control">
+          <input data-stand="TextInput" class="setting-number setting-number--wide" placeholder="auto" value="auto">
+    <div class="setting-row" id="setting-advanced.subagent_model">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Sub-agent model"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "The model Claude agents' general-purpose sub-agents run on: sonnet, haiku, opus, a model ID, or inherit to use the agent's own. A sub-agent that names its own model, or one the agent passes per call, still wins. Takes effect when each agent next starts"
+        <div class="ui-field-control">
+          <input data-stand="TextInput" class="setting-number setting-number--wide" placeholder="sonnet" value="sonnet">
+    <div class="setting-row" id="setting-advanced.explore_model">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Explore sub-agent model"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "The model Claude agents' Explore sub-agents run on: haiku, sonnet, opus, a model ID, or inherit to leave Claude Code's built-in. Takes effect when each agent next starts"
+        <div class="ui-field-control">
+          <input data-stand="TextInput" class="setting-number setting-number--wide" placeholder="haiku" value="haiku">
+    <div class="setting-row" id="setting-advanced.compact_hints">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Suggest compacting"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "When an agent's turn ends with a large context, tell it once that it can compact itself before its next task, so it doesn't compact by itself mid-task"
+        <div class="ui-field-control">
+          <div data-stand="ToggleControl" data-checked="true">
+            <span data-cb="onChange">
+              "toggle"
+    <div class="setting-row" id="setting-advanced.overlap_notes">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Overlap notes"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Tell an agent when it edits a file another agent on this computer is also changing, naming that agent so it can message them first"
+        <div class="ui-field-control">
+          <div data-stand="ToggleControl" data-checked="true">
+            <span data-cb="onChange">
+              "toggle"
+    <div class="setting-row" id="setting-advanced.retry_on_reconnect">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Retry after the API is back"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "When a turn failed because the model API couldn't be reached, retry it once by itself when the API answers again, unless a tool ran in it or you typed in that pane since"
+        <div class="ui-field-control">
+          <div data-stand="ToggleControl" data-checked="true">
+            <span data-cb="onChange">
+              "toggle"
+    <div class="setting-row" id="setting-advanced.kanban_reminders">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Remind idle agents of their backlog"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "An agent with tasks waiting in its Kanban backlog gets a note after 2 minutes idle, once each time it goes idle"
+        <div class="ui-field-control">
+          <div data-stand="ToggleControl" data-checked="false">
+            <span data-cb="onChange">
+              "toggle"
+    <div class="settings-subheader">
+      "Sysinfo widget"
+    <div class="setting-row" id="setting-advanced.sysinfo_sample_interval">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Sample interval"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Seconds between sysinfo widget samples"
+        <div class="ui-field-control">
+          <div data-stand="NumberControl" data-props="{\"class\":\"\\\"setting-number setting-number--wide\\\"\",\"min\":\"1\",\"step\":\"1\",\"value\":\"1\"}">
+            <span data-cb="onChange">
+              "change"
+    <div class="setting-row" id="setting-advanced.sysinfo_history_length">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "History length"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Number of sysinfo widget samples retained (30–1024)"
+        <div class="ui-field-control">
+          <div data-stand="NumberControl" data-props="{\"class\":\"\\\"setting-number setting-number--wide\\\"\",\"max\":\"1024\",\"min\":\"30\",\"parse\":\"\\\"int\\\"\",\"step\":\"1\",\"value\":\"120\"}">
+            <span data-cb="onChange">
+              "change"
+    <div class="settings-subheader">
+      "Drag & drop"
+    <div class="setting-row" id="setting-advanced.enable_file_drop">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Enable file drop"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Drag files onto an agent pane to attach them"
+        <div class="ui-field-control">
+          <div data-stand="ToggleControl" data-checked="true">
+            <span data-cb="onChange">
+              "toggle"
+    <div class="setting-row" id="setting-advanced.insert_reference_token">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Insert reference token"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Also insert a file-reference token into the composer on drop, in addition to attaching the file"
+        <div class="ui-field-control">
+          <div data-stand="ToggleControl" data-checked="true">
+            <span data-cb="onChange">
+              "toggle"
+    <div class="setting-row" id="setting-advanced.max_concurrent_uploads">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Max concurrent uploads"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Files uploaded at once on a multi-file drop. Leave blank for unlimited."
+        <div class="ui-field-control">
+          <input data-stand="TextInput" class="setting-number setting-number--wide" type="number" min="1" placeholder="unlimited" value="">
+    <div class="settings-subheader">
+      "Environment"
+    <div class="setting-row" id="setting-advanced.global_env_vars">
+      <div class="ui-field ui-field--stacked">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Global environment variables"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Environment variables injected into every shell"
+        <div class="ui-field-control">
+          <div data-stand="KeyValueEditor" data-value="{\"A\":\"1\"}">
+            <span data-cb="onChange">
+              "change"
+    <div class="settings-subheader">
+      "Developer"
+    <div class="setting-row" id="setting-advanced.dev_mode">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Dev mode"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Shows DevTools in the menu, Inspect Element and View Page Source in right-click menus, and other developer tools. Off by default in the installed app; on by default in a task dev or debug build"
+        <div class="ui-field-control">
+          <div data-stand="ToggleControl" data-checked="false">
+            <span data-cb="onChange">
+              "toggle"
+-- settings gone
+<div>
+  <div class="settings-section-body">
+    <div class="settings-subheader">
+      "Terminal (power user)"
+    <div class="setting-row" id="setting-advanced.disable_webgl">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Disable WebGL rendering"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Fall back to canvas-based terminal rendering (restart required)"
+        <div class="ui-field-control">
+          <div data-stand="ToggleControl" data-checked="false">
+            <span data-cb="onChange">
+              "toggle"
+    <div class="settings-subheader">
+      "Agent panes"
+    <div class="setting-row" id="setting-advanced.auto_answer_timeout">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Auto-answer timeout"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Seconds an AskUserQuestion panel waits for you before auto-selecting the recommended option(s)"
+        <div class="ui-field-control">
+          <div data-stand="NumberControl" data-props="{\"class\":\"\\\"setting-number setting-number--wide\\\"\",\"min\":\"1\",\"step\":\"1\",\"value\":\"30\"}">
+            <span data-cb="onChange">
+              "change"
+    <div class="setting-row" id="setting-advanced.compact_at">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Compact agents at"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Thousands of tokens at which Claude agents compact their context. Lower saves tokens; higher keeps more detail. 0 keeps Claude Code's own (about 967). Takes effect when each agent next starts"
+        <div class="ui-field-control">
+          <div data-stand="NumberControl" data-props="{\"class\":\"\\\"setting-number setting-number--wide\\\"\",\"min\":\"0\",\"step\":\"50\",\"value\":\"600\"}">
+            <span data-cb="onChange">
+              "change"
+    <div class="setting-row" id="setting-advanced.preview_skid_notches">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Preview scroll skid"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Wheel notches a tool preview absorbs at its top or bottom edge before the scroll passes to the pane, so a preview sliding under the pointer is not scrolled past. 0 passes it on at once. Applies to open panes"
+        <div class="ui-field-control">
+          <div data-stand="NumberControl" data-props="{\"class\":\"\\\"setting-number\\\"\",\"max\":\"10\",\"min\":\"0\",\"parse\":\"\\\"int\\\"\",\"step\":\"1\",\"value\":\"2\"}">
+            <span data-cb="onChange">
+              "change"
+    <div class="setting-row" id="setting-advanced.container_memory">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Container agents' memory"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Megabytes of memory each container agent may use, unless the agent has its own limit. auto is half of what Docker has (at least 2 GB). 0 is no limit. Reaches running containers without restarting them"
+        <div class="ui-field-control">
+          <input data-stand="TextInput" class="setting-number setting-number--wide" placeholder="auto" value="auto">
+    <div class="setting-row" id="setting-advanced.container_cpus">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Container agents' CPUs"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "CPUs each container agent may use, unless the agent has its own limit. auto is all but a quarter of what Docker has (at least one). 0 is no limit. Reaches running containers without restarting them"
+        <div class="ui-field-control">
+          <input data-stand="TextInput" class="setting-number setting-number--wide" placeholder="auto" value="auto">
+    <div class="setting-row" id="setting-advanced.subagent_model">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Sub-agent model"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "The model Claude agents' general-purpose sub-agents run on: sonnet, haiku, opus, a model ID, or inherit to use the agent's own. A sub-agent that names its own model, or one the agent passes per call, still wins. Takes effect when each agent next starts"
+        <div class="ui-field-control">
+          <input data-stand="TextInput" class="setting-number setting-number--wide" placeholder="sonnet" value="sonnet">
+    <div class="setting-row" id="setting-advanced.explore_model">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Explore sub-agent model"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "The model Claude agents' Explore sub-agents run on: haiku, sonnet, opus, a model ID, or inherit to leave Claude Code's built-in. Takes effect when each agent next starts"
+        <div class="ui-field-control">
+          <input data-stand="TextInput" class="setting-number setting-number--wide" placeholder="haiku" value="haiku">
+    <div class="setting-row" id="setting-advanced.compact_hints">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Suggest compacting"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "When an agent's turn ends with a large context, tell it once that it can compact itself before its next task, so it doesn't compact by itself mid-task"
+        <div class="ui-field-control">
+          <div data-stand="ToggleControl" data-checked="true">
+            <span data-cb="onChange">
+              "toggle"
+    <div class="setting-row" id="setting-advanced.overlap_notes">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Overlap notes"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Tell an agent when it edits a file another agent on this computer is also changing, naming that agent so it can message them first"
+        <div class="ui-field-control">
+          <div data-stand="ToggleControl" data-checked="true">
+            <span data-cb="onChange">
+              "toggle"
+    <div class="setting-row" id="setting-advanced.retry_on_reconnect">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Retry after the API is back"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "When a turn failed because the model API couldn't be reached, retry it once by itself when the API answers again, unless a tool ran in it or you typed in that pane since"
+        <div class="ui-field-control">
+          <div data-stand="ToggleControl" data-checked="true">
+            <span data-cb="onChange">
+              "toggle"
+    <div class="setting-row" id="setting-advanced.kanban_reminders">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Remind idle agents of their backlog"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "An agent with tasks waiting in its Kanban backlog gets a note after 2 minutes idle, once each time it goes idle"
+        <div class="ui-field-control">
+          <div data-stand="ToggleControl" data-checked="false">
+            <span data-cb="onChange">
+              "toggle"
+    <div class="settings-subheader">
+      "Sysinfo widget"
+    <div class="setting-row" id="setting-advanced.sysinfo_sample_interval">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Sample interval"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Seconds between sysinfo widget samples"
+        <div class="ui-field-control">
+          <div data-stand="NumberControl" data-props="{\"class\":\"\\\"setting-number setting-number--wide\\\"\",\"min\":\"1\",\"step\":\"1\",\"value\":\"1\"}">
+            <span data-cb="onChange">
+              "change"
+    <div class="setting-row" id="setting-advanced.sysinfo_history_length">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "History length"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Number of sysinfo widget samples retained (30–1024)"
+        <div class="ui-field-control">
+          <div data-stand="NumberControl" data-props="{\"class\":\"\\\"setting-number setting-number--wide\\\"\",\"max\":\"1024\",\"min\":\"30\",\"parse\":\"\\\"int\\\"\",\"step\":\"1\",\"value\":\"120\"}">
+            <span data-cb="onChange">
+              "change"
+    <div class="settings-subheader">
+      "Drag & drop"
+    <div class="setting-row" id="setting-advanced.enable_file_drop">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Enable file drop"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Drag files onto an agent pane to attach them"
+        <div class="ui-field-control">
+          <div data-stand="ToggleControl" data-checked="true">
+            <span data-cb="onChange">
+              "toggle"
+    <div class="setting-row" id="setting-advanced.insert_reference_token">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Insert reference token"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Also insert a file-reference token into the composer on drop, in addition to attaching the file"
+        <div class="ui-field-control">
+          <div data-stand="ToggleControl" data-checked="true">
+            <span data-cb="onChange">
+              "toggle"
+    <div class="setting-row" id="setting-advanced.max_concurrent_uploads">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Max concurrent uploads"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Files uploaded at once on a multi-file drop. Leave blank for unlimited."
+        <div class="ui-field-control">
+          <input data-stand="TextInput" class="setting-number setting-number--wide" type="number" min="1" placeholder="unlimited" value="">
+    <div class="settings-subheader">
+      "Environment"
+    <div class="setting-row" id="setting-advanced.global_env_vars">
+      <div class="ui-field ui-field--stacked">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Global environment variables"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Environment variables injected into every shell"
+        <div class="ui-field-control">
+          <div data-stand="KeyValueEditor" data-value="{}">
+            <span data-cb="onChange">
+              "change"
+    <div class="settings-subheader">
+      "Developer"
+    <div class="setting-row" id="setting-advanced.dev_mode">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Dev mode"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Shows DevTools in the menu, Inspect Element and View Page Source in right-click menus, and other developer tools. Off by default in the installed app; on by default in a task dev or debug build"
+        <div class="ui-field-control">
+          <div data-stand="ToggleControl" data-checked="false">
+            <span data-cb="onChange">
+              "toggle"

@@ -77,6 +77,17 @@ function reloadAfterReconnect(): void {
     });
 }
 
+/**
+ * Calls `refresh` after the websocket reconnects, until the returned function is called: for a view that holds
+ * its own list and so is not a `createDomainStore`, but must catch up the same way.
+ */
+export function onReconnectRefresh(refresh: () => void): () => void {
+    const run = async () => refresh();
+    followed.add(run);
+    reloadAfterReconnect();
+    return () => void followed.delete(run);
+}
+
 export function createDomainStore<T>(options: DomainStoreOptions<T>): DomainStore<T> {
     const [data, setData] = createSignal<T>(options.initial);
     const [loaded, setLoaded] = createSignal(false);

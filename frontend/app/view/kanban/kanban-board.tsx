@@ -7,12 +7,13 @@
 // untracked work in In progress; Review's load in its header; cancelled tasks folded under Merged.
 
 import { dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
-import { createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createMemo, createSignal, For, onCleanup, onMount, Show, type JSX, type Setter } from "solid-js";
 
 import { kanbanCardItemType } from "@/app/drag/drag-types";
 import { Button, IconButton } from "@/app/element/ui";
 import { formatAge } from "@/app/view/warden-shared/warden-shared";
 
+import { tip } from "@/app/element/tip";
 import { AgentChip, agentStateWords, KanbanCard, UntrackedCard } from "./kanban-card";
 import {
     backlogGroups,
@@ -30,7 +31,6 @@ import {
 } from "./kanban-columns";
 import type { KanbanModel } from "./kanban-model";
 import type { KanbanAgent, KanbanTask } from "./kanban-types";
-import { tip } from "@/app/element/tip";
 
 /** A drop target for Kanban cards; `hover` shows it will take the card. */
 export function useCardDrop(
@@ -162,7 +162,7 @@ function CollapsedColumn(props: {
     );
 }
 
-export function KanbanBoard(props: {
+interface BoardProps {
     tasks: KanbanTask[];
     untracked: KanbanAgent[];
     agents: KanbanAgent[];
@@ -183,7 +183,25 @@ export function KanbanBoard(props: {
     collapsed?: readonly ColumnId[];
     /** Collapse or expand a column; without it the board has no collapse control. */
     onToggleCollapsed?: (id: ColumnId) => void;
-}): JSX.Element {
+}
+
+/** What the board's columns share: the props, which columns are folded or collapsed, Review's load, and
+ *  whether the cancelled tasks under Merged are shown. */
+interface BoardState {
+    props: BoardProps;
+    groups: (column: ColumnId) => BacklogGroup[];
+    foldable: (id: ColumnId) => boolean;
+    folded: (id: ColumnId) => boolean;
+    toggle: (id: ColumnId) => void;
+    stripped: (id: ColumnId) => boolean;
+    gridColumns: () => string | undefined;
+    review: () => ReturnType<typeof reviewLoad>;
+    over: () => boolean;
+    showCancelled: () => boolean;
+    setShowCancelled: Setter<boolean>;
+}
+
+function createBoardState(props: BoardProps): BoardState {
     const groups = (column: ColumnId) => backlogGroups(props.tasks, props.agents, column);
     // In the narrow list, Merged and Released start folded: one header line each.
     const [unfolded, setUnfolded] = createSignal<ReadonlySet<ColumnId>>(new Set());
@@ -195,7 +213,9 @@ export function KanbanBoard(props: {
             if (!next.delete(id)) next.add(id);
             return next;
         });
-    const collapsedSet = createMemo(() => new Set(props.narrow || !props.onToggleCollapsed ? [] : parseCollapsed(props.collapsed)));
+    const collapsedSet = createMemo(
+        () => new Set(props.narrow || !props.onToggleCollapsed ? [] : parseCollapsed(props.collapsed))
+    );
     const stripped = (id: ColumnId) => collapsedSet().has(id);
     // Collapsed columns take a strip's width; the rest share what is left, as they did.
     const gridColumns = () =>
@@ -205,8 +225,95 @@ export function KanbanBoard(props: {
     const review = createMemo(() => reviewLoad(props.tasks, props.now));
     const over = () => props.reviewLimit > 0 && props.reviewTotal > props.reviewLimit;
     const [showCancelled, setShowCancelled] = createSignal(false);
+    return {
+        props,
+        groups,
+        foldable,
+        folded,
+        toggle,
+        stripped,
+        gridColumns,
+        review,
+        over,
+        showCancelled,
+        setShowCancelled,
+    };
+}
 
-    const columnHead = (id: ColumnId, label: string, count: number) => (
+export function KanbanBoard(props: BoardProps): JSX.Element {
+    const s = createBoardState(props);
+    return (
+        <div class="kanban-board" style={{ "grid-template-columns": s.gridColumns() }}>
+            <For each={COLUMNS}>{(col) => <ColumnSection s={s} col={col} />}</For>
+        </div>
+    );
+}
+
+type Column = (typeof COLUMNS)[number];
+
+function ColumnSection({ s, col }: { s: BoardState; col: Column }) {
+    const { props, folded, stripped } = s;
+    const tasks = () => columnTasks(props.tasks, col.id);
+    const finished = () => (col.id === "merged" ? tasks().filter((t) => t.state !== "cancelled") : tasks());
+    const cancelled = () => (col.id === "merged" ? tasks().filter((t) => t.state === "cancelled") : []);
+    return (
+        <section
+            class="kanban-column"
+            classList={{
+                [`kanban-column--${col.id}`]: true,
+                "kanban-column--empty":
+                    finished().length + cancelled().length === 0 &&
+                    !(col.id === "progress" && props.untracked.length > 0) &&
+                    col.id !== "backlog",
+                "kanban-column--folded": folded(col.id),
+                "kanban-column--collapsed": stripped(col.id),
+            }}
+            aria-label={col.label}
+        >
+            <Show when={!stripped(col.id)} fallback={<ColumnStrip s={s} col={col} tasks={tasks} />}>
+                {columnHead(
+                    s,
+                    col.id,
+                    col.label,
+                    finished().length + (col.id === "progress" ? props.untracked.length : 0)
+                )}
+                <Show
+                    when={col.id !== "backlog" && col.id !== "specd"}
+                    fallback={<WaitingList s={s} column={col.id} />}
+                >
+                    <ColumnList s={s} col={col} finished={finished} cancelled={cancelled} />
+                </Show>
+            </Show>
+        </section>
+    );
+}
+
+function ColumnStrip({ s, col, tasks }: { s: BoardState; col: Column; tasks: () => KanbanTask[] }) {
+    const { props } = s;
+    return (
+        <CollapsedColumn
+            id={col.id}
+            label={col.label}
+            stats={columnStats(tasks(), props.now, col.id === "progress" ? props.untracked.length : 0)}
+            onExpand={() => props.onToggleCollapsed?.(col.id)}
+            onDrop={(id) => {
+                // Dropped on a waiting column's strip: the task waits for anyone, at
+                // the end of the column.
+                const last = tasks()[tasks().length - 1];
+                void props.model.act({
+                    action: "move",
+                    id,
+                    agent: "",
+                    rank: rankBetween(last ? rankOf(last) : undefined, undefined),
+                });
+            }}
+        />
+    );
+}
+
+function columnHead(s: BoardState, id: ColumnId, label: string, count: number) {
+    const { props, foldable, folded, toggle } = s;
+    return (
         <div
             class="kanban-column__head"
             classList={{ "kanban-column__head--foldable": foldable(id) }}
@@ -241,29 +348,40 @@ export function KanbanBoard(props: {
                     />
                 )}
             </Show>
-            <span
-                class="kanban-column__count"
-                classList={{ "kanban-column__count--over": id === "review" && over() }}
-                {...tip(id === "review" && over() ? `More than ${props.reviewLimit} waiting for review` : undefined)}
-            >
-                {count}
-                <Show when={id === "review" && review().specs > 0}>
-                    {" · "}
-                    {review().specs} spec{review().specs === 1 ? "" : "s"}
-                </Show>
-                <Show when={id === "review" && review().count > 0}> · oldest {formatAge(review().oldestMs)}</Show>
-                <Show when={id === "review" && over()}> · over {props.reviewLimit}</Show>
-            </span>
+            <ColumnCount s={s} id={id} count={count} />
         </div>
     );
+}
 
-    const card = (t: KanbanTask) => (
-        <KanbanCard task={t} now={props.now} agents={props.agents} colors={props.colors} onOpen={props.onOpen} />
+function ColumnCount({ s, id, count }: { s: BoardState; id: ColumnId; count: number }) {
+    const { props, review, over } = s;
+    return (
+        <span
+            class="kanban-column__count"
+            classList={{ "kanban-column__count--over": id === "review" && over() }}
+            {...tip(id === "review" && over() ? `More than ${props.reviewLimit} waiting for review` : undefined)}
+        >
+            {count}
+            <Show when={id === "review" && review().specs > 0}>
+                {" · "}
+                {review().specs} spec{review().specs === 1 ? "" : "s"}
+            </Show>
+            <Show when={id === "review" && review().count > 0}> · oldest {formatAge(review().oldestMs)}</Show>
+            <Show when={id === "review" && over()}> · over {props.reviewLimit}</Show>
+        </span>
     );
+}
 
-    /** A waiting column: one group per agent, each a drop target. Backlog always shows Anyone, so a card
-     *  can be given to anyone; Spec'd only the groups it has. */
-    const waiting = (column: ColumnId) => (
+function card(s: BoardState, t: KanbanTask) {
+    const { props } = s;
+    return <KanbanCard task={t} now={props.now} agents={props.agents} colors={props.colors} onOpen={props.onOpen} />;
+}
+
+/** A waiting column: one group per agent, each a drop target. Backlog always shows Anyone, so a card
+ *  can be given to anyone; Spec'd only the groups it has. */
+function WaitingList({ s, column }: { s: BoardState; column: ColumnId }) {
+    const { props, groups } = s;
+    return (
         <div class="kanban-column__list">
             {/* Keyed by the group's agent name (a string), so a group, and its drop target, stays mounted
                 when the board refreshes. */}
@@ -296,98 +414,45 @@ export function KanbanBoard(props: {
             </Show>
         </div>
     );
+}
 
+function ColumnList(listProps: {
+    s: BoardState;
+    col: Column;
+    finished: () => KanbanTask[];
+    cancelled: () => KanbanTask[];
+}) {
+    const { s, col, finished, cancelled } = listProps;
+    const { props, showCancelled, setShowCancelled } = s;
     return (
-        <div class="kanban-board" style={{ "grid-template-columns": gridColumns() }}>
-            <For each={COLUMNS}>
-                {(col) => {
-                    const tasks = () => columnTasks(props.tasks, col.id);
-                    const finished = () =>
-                        col.id === "merged" ? tasks().filter((t) => t.state !== "cancelled") : tasks();
-                    const cancelled = () => (col.id === "merged" ? tasks().filter((t) => t.state === "cancelled") : []);
-                    return (
-                        <section
-                            class="kanban-column"
-                            classList={{
-                                [`kanban-column--${col.id}`]: true,
-                                "kanban-column--empty":
-                                    finished().length + cancelled().length === 0 &&
-                                    !(col.id === "progress" && props.untracked.length > 0) &&
-                                    col.id !== "backlog",
-                                "kanban-column--folded": folded(col.id),
-                                "kanban-column--collapsed": stripped(col.id),
-                            }}
-                            aria-label={col.label}
-                        >
-                            <Show
-                                when={!stripped(col.id)}
-                                fallback={
-                                    <CollapsedColumn
-                                        id={col.id}
-                                        label={col.label}
-                                        stats={columnStats(
-                                            tasks(),
-                                            props.now,
-                                            col.id === "progress" ? props.untracked.length : 0
-                                        )}
-                                        onExpand={() => props.onToggleCollapsed?.(col.id)}
-                                        onDrop={(id) => {
-                                            // Dropped on a waiting column's strip: the task waits for anyone, at
-                                            // the end of the column.
-                                            const last = tasks()[tasks().length - 1];
-                                            void props.model.act({
-                                                action: "move",
-                                                id,
-                                                agent: "",
-                                                rank: rankBetween(last ? rankOf(last) : undefined, undefined),
-                                            });
-                                        }}
-                                    />
-                                }
-                            >
-                            {columnHead(
-                                col.id,
-                                col.label,
-                                finished().length + (col.id === "progress" ? props.untracked.length : 0)
-                            )}
-                            <Show when={col.id !== "backlog" && col.id !== "specd"} fallback={waiting(col.id)}>
-                                <div class="kanban-column__list">
-                                    <Show when={col.id === "progress"}>
-                                        <For each={props.untracked}>
-                                            {(a) => (
-                                                <UntrackedCard
-                                                    agent={a}
-                                                    onTrack={(ag) =>
-                                                        void props.model.act({ action: "track", block_id: ag.block_id })
-                                                    }
-                                                    onOpenAgent={(ag) => props.onOpenAgent(ag.block_id)}
-                                                />
-                                            )}
-                                        </For>
-                                    </Show>
-                                    <For each={finished()}>{card}</For>
-                                    <Show when={cancelled().length > 0}>
-                                        <Button
-                                            density="compact"
-                                            tone="quiet"
-                                            icon={showCancelled() ? "chevron-down" : "chevron-right"}
-                                            class="kanban-column__fold"
-                                            aria-expanded={showCancelled()}
-                                            onClick={() => setShowCancelled(!showCancelled())}
-                                        >
-                                            Cancelled · {cancelled().length}
-                                        </Button>
-                                        <Show when={showCancelled()}>
-                                            <For each={cancelled()}>{card}</For>
-                                        </Show>
-                                    </Show>
-                                </div>
-                            </Show>
-                            </Show>
-                        </section>
-                    );
-                }}
-            </For>
+        <div class="kanban-column__list">
+            <Show when={col.id === "progress"}>
+                <For each={props.untracked}>
+                    {(a) => (
+                        <UntrackedCard
+                            agent={a}
+                            onTrack={(ag) => void props.model.act({ action: "track", block_id: ag.block_id })}
+                            onOpenAgent={(ag) => props.onOpenAgent(ag.block_id)}
+                        />
+                    )}
+                </For>
+            </Show>
+            <For each={finished()}>{(t) => card(s, t)}</For>
+            <Show when={cancelled().length > 0}>
+                <Button
+                    density="compact"
+                    tone="quiet"
+                    icon={showCancelled() ? "chevron-down" : "chevron-right"}
+                    class="kanban-column__fold"
+                    aria-expanded={showCancelled()}
+                    onClick={() => setShowCancelled(!showCancelled())}
+                >
+                    Cancelled · {cancelled().length}
+                </Button>
+                <Show when={showCancelled()}>
+                    <For each={cancelled()}>{(t) => card(s, t)}</For>
+                </Show>
+            </Show>
         </div>
     );
 }

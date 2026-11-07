@@ -451,7 +451,7 @@ pub struct ImportResult {
 }
 
 /// Writes a staged import: all of it or none of it.
-pub fn commit(store: &Store, token: &str, duplicates: Duplicates) -> Result<ImportResult, String> {
+pub fn commit(store: &Store, token: &str, duplicates: Duplicates, vault_id: &str) -> Result<ImportResult, String> {
     let taken = {
         let mut held = staged().lock().unwrap_or_else(|p| p.into_inner());
         held.remove(token)
@@ -459,7 +459,7 @@ pub fn commit(store: &Store, token: &str, duplicates: Duplicates) -> Result<Impo
     let Some(staged_import) = taken.filter(|s| s.at.elapsed() < STAGED_TTL) else {
         return Err("this import has expired: choose the file again".into());
     };
-    match write_staged(store, &staged_import, duplicates) {
+    match write_staged(store, &staged_import, duplicates, vault_id) {
         Ok(result) => Ok(result),
         Err(e) => {
             // Nothing was written: the import stays staged, so Import can be pressed again.
@@ -470,7 +470,8 @@ pub fn commit(store: &Store, token: &str, duplicates: Duplicates) -> Result<Impo
 }
 
 /// Writes `incoming`, all of it or none of it.
-fn write_staged(store: &Store, incoming: &Staged, duplicates: Duplicates) -> Result<ImportResult, String> {
+fn write_staged(store: &Store, incoming: &Staged, duplicates: Duplicates, vault_id: &str) -> Result<ImportResult, String> {
+    store.vault_info(vault_id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no Vault {vault_id}"))?;
     let key = seal::key(store.vault_count().map_err(|e| e.to_string())? == 0)?;
     let now = now_ms();
     let mut inserts: Vec<VaultRow> = Vec::new();
@@ -496,7 +497,8 @@ fn write_staged(store: &Store, incoming: &Staged, duplicates: Duplicates) -> Res
                 created_at: created,
                 updated_at: now,
                 last_used_at: 0,
-                vault_id: crate::backend::storage::vault::PERSONAL_VAULT.into(),
+                // A replaced entry stays in the Vault it is in.
+                vault_id: store.vault_get(existing).map_err(|err| err.to_string())?.map_or_else(|| vault_id.to_string(), |row| row.vault_id),
             });
             continue;
         }
@@ -531,7 +533,7 @@ fn write_staged(store: &Store, incoming: &Staged, duplicates: Duplicates) -> Res
             created_at: created,
             updated_at: now,
             last_used_at: 0,
-            vault_id: crate::backend::storage::vault::PERSONAL_VAULT.into(),
+            vault_id: vault_id.to_string(),
         });
     }
     store.vault_write_many(&inserts, &updates).map_err(|e| e.to_string())?;

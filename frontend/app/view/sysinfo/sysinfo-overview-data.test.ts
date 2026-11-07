@@ -171,3 +171,17 @@ describe("a window set as a sample count", () => {
         expect([formatWindow(45), formatWindow(240), formatWindow(150)]).toEqual(["45s", "4m", "2.5m"]);
     });
 });
+
+describe("a step row (a late sample drawn across its gap)", () => {
+    const step = (ts: number, v: Record<string, number>): DataItem => ({ ts, step: 1, ...v });
+
+    it("is not a sample in the window's figures", () => {
+        const rows = [row(1, { cpu: 10 }), step(2, { cpu: 90 }), row(3, { cpu: 20 })];
+        expect(windowStats(rows, "cpu")).toEqual({ now: 20, min: 10, max: 20, avg: 15 });
+    });
+
+    it("still carries the busiest core, so that line doesn't break at the step", () => {
+        const rows = withBusiestCore([step(2, { "cpu:0": 40, "cpu:1": 90 })], ["cpu:0", "cpu:1"]);
+        expect(rows[0][BUSIEST_CORE]).toBe(90);
+    });
+});

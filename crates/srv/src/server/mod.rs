@@ -29,6 +29,7 @@ pub(crate) mod identity_handlers;
 pub mod install_handlers;
 mod lsp_handlers;
 mod system_install_handlers;
+mod uninstall_handlers;
 mod messagebus;
 // pub(crate): muxbus::cloud_subscriber (the WAN delivery path) calls
 // resolve_transcript_request_tier_fields directly — see that function's
@@ -41,6 +42,7 @@ pub(crate) mod agent_self_keys;
 pub(crate) mod container_pane_snapshot;
 pub(crate) mod files_root;
 mod container_workspace;
+mod model_gateway_handlers;
 mod container_tool_chunk;
 mod container_compaction_started;
 pub(crate) mod jekt_held;
@@ -129,6 +131,7 @@ pub(crate) mod browser_powers;
 pub(crate) mod browser_pause_all;
 pub(crate) mod browser_standing;
 pub(crate) mod browser_terminal;
+pub(crate) mod browser_terminal_line;
 pub(crate) mod browser_uploads;
 pub(crate) mod host_http;
 pub(crate) mod operator_proof;
@@ -160,6 +163,9 @@ mod sender_claims_tests;
 #[cfg(test)]
 #[path = "tests/agent_status_tests.rs"]
 mod agent_status_tests;
+#[cfg(test)]
+#[path = "tests/model_gateway_tests.rs"]
+mod model_gateway_tests;
 #[cfg(test)]
 #[path = "tests/http_skill_tests.rs"]
 mod http_skill_tests;

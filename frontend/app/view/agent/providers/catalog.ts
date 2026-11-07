@@ -420,7 +420,8 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         authCheckCommand: ["info"],
         authLoginCommand: ["login"],
         npmPackage: "",
-        pinnedVersion: "",
+        managedInstall: true,
+        pinnedVersion: "1.52.0",
         docsUrl: "https://moonshotai.github.io/kimi-cli/",
         windowsInstallCommand: "pip install kimi-cli",
         unixInstallCommand: "pip install kimi-cli",
@@ -542,19 +543,20 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         authType: "cli-managed",
         authCheckCommand: ["models"],
         authLoginCommand: [],
-        // Not on npm: `agy` is a native binary that Google's installer puts in
-        // place and keeps up to date itself, so AgentMux can't install it.
-        // Like kimi, launch finds it on PATH (or in the installer's folder,
-        // `known_install_paths` in providers.rs) and otherwise shows the
-        // command below.
+        // Not on npm: `agy` is a native binary. AgentMux downloads the pinned build
+        // itself (managedInstall; Google's server lists only the latest, so the build
+        // current on 2026-11-06 is the pin); the install command below is for a copy
+        // the person installs on their own.
         npmPackage: "",
-        pinnedVersion: "",
+        managedInstall: true,
+        pinnedVersion: "1.5.2",
         docsUrl: "https://antigravity.google/",
         windowsInstallCommand: "irm https://antigravity.google/cli/install.ps1 | iex",
         unixInstallCommand: "curl -fsSL https://antigravity.google/cli/install.sh | bash",
         icon: "zap",
         authConfigDirEnvVar: "ANTIGRAVITY_CONFIG_DIR",
         authDirName: "antigravity",
+        authExtraEnv: { AGY_CLI_DISABLE_AUTO_UPDATE: "true" },
         supportedVendors: ["google"],
         startupInstructionsFilename: "GEMINI.md",
         launchArgs: ["--output-format", "stream-json", "--dangerously-skip-permissions"],
@@ -681,8 +683,9 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
     goose: {
         id: "goose",
         displayName: "goose",
-        // `goose acp`: ACP over stdio. Not on npm: the user installs the release
-        // (the install command); srv finds it. Mirrors crates/srv/src/backend/providers/goose.rs.
+        // `goose acp`: ACP over stdio. Not on npm: AgentMux downloads the pinned
+        // release itself (managedInstall); the install command below is for a copy the
+        // person installs on their own. Mirrors crates/srv/src/backend/providers/goose.rs.
         cliCommand: "goose",
         defaultArgs: [],
         styledArgs: [],
@@ -697,10 +700,11 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         requiresLoginTty: true,
         headlessLoginUrlUnsupported: true,
         npmPackage: "",
+        managedInstall: true,
         pinnedVersion: "1.54.0",
         versionSource: { kind: "github-release", repo: "aaif-goose/goose" },
         docsUrl: "https://goose-docs.ai/docs/getting-started/installation",
-        windowsInstallCommand: "irm https://github.com/aaif-goose/goose/releases/download/stable/download_cli.ps1 | iex",
+        windowsInstallCommand: "irm https://raw.githubusercontent.com/aaif-goose/goose/main/download_cli.ps1 | iex",
         unixInstallCommand: "curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | CONFIGURE=false bash",
         icon: "terminal",
         authConfigDirEnvVar: "GOOSE_PATH_ROOT",
@@ -716,8 +720,9 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
     grok: {
         id: "grok",
         displayName: "Grok Build",
-        // `grok agent stdio`: ACP over stdio. Not on npm: the user installs it with
-        // xAI's installer; srv finds it. Mirrors crates/srv/src/backend/providers/grok.rs.
+        // `grok agent stdio`: ACP over stdio. Not on npm: AgentMux downloads the pinned
+        // release itself (managedInstall); the install command below is for a copy the
+        // person installs on their own. Mirrors crates/srv/src/backend/providers/grok.rs.
         cliCommand: "grok",
         defaultArgs: [],
         styledArgs: [],
@@ -732,6 +737,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         requiresLoginTty: true,
         headlessLoginUrlUnsupported: true,
         npmPackage: "",
+        managedInstall: true,
         pinnedVersion: "1.0.52",
         versionSource: { kind: "vendor", url: "https://x.ai/cli/stable" },
         docsUrl: "https://github.com/xai-org/grok-build",
@@ -800,8 +806,8 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
     aider: {
         id: "aider",
         displayName: "Aider",
-        // Terminal tier: Aider's own UI in a terminal pane. Not on npm: the user
-        // installs it with Aider's installer. Mirrors crates/srv/src/backend/providers/aider.rs.
+        // Terminal tier: Aider's own UI in a terminal pane. Not on npm: AgentMux
+        // installs the pinned release itself (managedInstall), through uv. Mirrors crates/srv/src/backend/providers/aider.rs.
         cliCommand: "aider",
         defaultArgs: [],
         styledArgs: [],
@@ -815,6 +821,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         requiresLoginTty: true,
         headlessLoginUrlUnsupported: true,
         npmPackage: "",
+        managedInstall: true,
         pinnedVersion: "0.86.2",
         versionSource: { kind: "pypi", package: "aider-chat" },
         docsUrl: "https://aider.chat/docs/install.html",
@@ -868,8 +875,9 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         id: "muse",
         displayName: "Muse Code",
         // An agent pane over Muse's own protocol, MSP (`muse serve`; it has no
-        // ACP), driven by srv's MspController. Not on npm: the user installs it
-        // with Meta's installer; srv runs its native binary. Mirrors
+        // ACP), driven by srv's MspController. Not on npm: AgentMux downloads the
+        // pinned native binary itself (managedInstall); the install command below is
+        // for a copy the person installs on their own. Mirrors
         // crates/srv/src/backend/providers/muse.rs.
         cliCommand: "muse",
         defaultArgs: [],
@@ -883,6 +891,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         requiresLoginTty: true,
         headlessLoginUrlUnsupported: true,
         npmPackage: "",
+        managedInstall: true,
         pinnedVersion: "1.4.7-R6101.1",
         versionSource: { kind: "vendor", url: "https://api.meta.ai/muse-code/channels/muse-stable" },
         docsUrl: "https://dev.meta.ai/docs/muse-code",

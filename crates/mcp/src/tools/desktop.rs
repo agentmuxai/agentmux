@@ -188,7 +188,12 @@ async fn apps(cx: &ToolCtx<'_>) -> Result<String> {
                 let granted = st.map(|s| s["granted"].as_bool() == Some(true)).unwrap_or(false);
                 let note = if granted { "you may drive it" } else { "the user is asked on first use" };
                 let title: String = r.title.chars().take(80).collect();
-                lines.push(format!("{:>10}  {app} — {title:?} — {note}", r.id));
+                // A skill for this app, when the catalog has one. Reading it grants nothing.
+                let skill = st.and_then(|s| s["skill"].as_object()).map(|k| {
+                    let seen = if k.get("verified_here").and_then(Value::as_bool) == Some(true) { "tested here" } else { "not tested here" };
+                    format!(" — skill: {} {} ({seen}); Skills get skill_id={}", k.get("name").and_then(Value::as_str).unwrap_or(""), k.get("version").and_then(Value::as_str).unwrap_or(""), k.get("id").and_then(Value::as_str).unwrap_or(""))
+                });
+                lines.push(format!("{:>10}  {app} — {title:?} — {note}{}", r.id, skill.unwrap_or_default()));
             }
         }
     }

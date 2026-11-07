@@ -1,0 +1,117 @@
+useTick 1000
+createPromotionClock
+taskOutcomesFor blk-1
+shellActivities
+subagentActivities blk-1
+toolActivities
+applyStreamOutcomes 4
+applyRegistryOutcomes 4 0
+backgroundTaskActivities 0 known=[unnamed,named,group,plain]
+Button onClick
+ActivityRow unnamed onToggle
+requestSubagentName unnamed
+-- unnamed expanded
+<div>
+  <div class="agent-activity-dock">
+    <div data-stand="ActivityRow" data-id="unnamed" data-status="running" data-expanded="true" data-leaving="false">
+      <span data-cb="onToggle">
+        "toggle"
+      <span data-cb="onStop">
+        "stop"
+      <span data-cb="onDismiss">
+        "dismiss"
+    <div data-stand="ActivityRow" data-id="plain" data-status="running" data-expanded="false" data-leaving="false">
+      <span data-cb="onToggle">
+        "toggle"
+      <span data-cb="onStop">
+        "stop"
+      <span data-cb="onDismiss">
+        "dismiss"
+    <div data-stand="ActivityRow" data-id="group" data-status="running" data-expanded="false" data-leaving="false">
+      <span data-cb="onToggle">
+        "toggle"
+      <span data-cb="onStop">
+        "stop"
+      <span data-cb="onDismiss">
+        "dismiss"
+    <div data-stand="ActivityRow" data-id="named" data-status="running" data-expanded="false" data-leaving="false">
+      <span data-cb="onToggle">
+        "toggle"
+      <span data-cb="onStop">
+        "stop"
+      <span data-cb="onDismiss">
+        "dismiss"
+    <span data-stand="Button" data-cb="onClick" data-variant="row" data-density="compact" data-class="agent-activity-overflow">
+      "▾ fewer"
+ActivityRow unnamed onToggle
+-- unnamed collapsed: no request
+<div>
+  <div class="agent-activity-dock">
+    <div data-stand="ActivityRow" data-id="plain" data-status="running" data-expanded="false" data-leaving="false">
+      <span data-cb="onToggle">
+        "toggle"
+      <span data-cb="onStop">
+        "stop"
+      <span data-cb="onDismiss">
+        "dismiss"
+    <div data-stand="ActivityRow" data-id="group" data-status="running" data-expanded="false" data-leaving="false">
+      <span data-cb="onToggle">
+        "toggle"
+      <span data-cb="onStop">
+        "stop"
+      <span data-cb="onDismiss">
+        "dismiss"
+    <div data-stand="ActivityRow" data-id="named" data-status="running" data-expanded="false" data-leaving="false">
+      <span data-cb="onToggle">
+        "toggle"
+      <span data-cb="onStop">
+        "stop"
+      <span data-cb="onDismiss">
+        "dismiss"
+    <div data-stand="ActivityRow" data-id="unnamed" data-status="running" data-expanded="false" data-leaving="false">
+      <span data-cb="onToggle">
+        "toggle"
+      <span data-cb="onStop">
+        "stop"
+      <span data-cb="onDismiss">
+        "dismiss"
+    <span data-stand="Button" data-cb="onClick" data-variant="row" data-density="compact" data-class="agent-activity-overflow">
+      "▾ fewer"
+ActivityRow unnamed onToggle
+requestSubagentName unnamed
+ActivityRow named onToggle
+ActivityRow group onToggle
+requestSubagentName m2
+requestSubagentName m3
+ActivityRow plain onToggle
+-- all expanded
+<div>
+  <div class="agent-activity-dock">
+    <div data-stand="ActivityRow" data-id="plain" data-status="running" data-expanded="true" data-leaving="false">
+      <span data-cb="onToggle">
+        "toggle"
+      <span data-cb="onStop">
+        "stop"
+      <span data-cb="onDismiss">
+        "dismiss"
+    <div data-stand="ActivityRow" data-id="group" data-status="running" data-expanded="true" data-leaving="false">
+      <span data-cb="onToggle">
+        "toggle"
+      <span data-cb="onStop">
+        "stop"
+      <span data-cb="onDismiss">
+        "dismiss"
+    <div data-stand="ActivityRow" data-id="named" data-status="running" data-expanded="true" data-leaving="false">
+      <span data-cb="onToggle">
+        "toggle"
+      <span data-cb="onStop">
+        "stop"
+      <span data-cb="onDismiss">
+        "dismiss"
+    <div data-stand="ActivityRow" data-id="unnamed" data-status="running" data-expanded="true" data-leaving="false">
+      <span data-cb="onToggle">
+        "toggle"
+      <span data-cb="onStop">
+        "stop"
+      <span data-cb="onDismiss">
+        "dismiss"

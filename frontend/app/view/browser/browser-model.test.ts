@@ -698,3 +698,44 @@ describe("BrowserViewModel body context menu icons (SPEC_CONTEXT_MENU_ICONS_2026
         expect(icons).toMatchObject({ Cut: "scissors", Copy: "copy", Paste: "paste", "Copy Link Address": "link" });
     });
 });
+
+describe("BrowserViewModel Save link as / Save image as (SPEC_BROWSER_PANE_DOWNLOADS_2026_10_14.md §6)", () => {
+    const labelsOf = (items: ContextMenuItem[]) => items.map((i) => (i.type === "separator" ? "-" : i.label));
+    const itemNamed = (items: ContextMenuItem[], label: string) => items.find((i) => i.label === label)!;
+
+    it("offers Save link as… under a link and Save image as… under an image, and neither elsewhere", () => {
+        const vm = makeVM();
+        expect(labelsOf(vm.getBodyContextMenuItems({ x: 1, y: 2 }))).not.toEqual(expect.arrayContaining(["Save link as…"]));
+        expect(labelsOf(vm.getBodyContextMenuItems({ x: 1, y: 2 }))).not.toEqual(expect.arrayContaining(["Save image as…"]));
+        const link = labelsOf(vm.getBodyContextMenuItems({ x: 1, y: 2, linkUrl: "https://example.com/a.pdf" }));
+        expect(link).toEqual(expect.arrayContaining(["Copy Link Address", "Save link as…"]));
+        expect(link).not.toEqual(expect.arrayContaining(["Save image as…"]));
+        const image = labelsOf(vm.getBodyContextMenuItems({ x: 1, y: 2, imageUrl: "https://example.com/p.png" }));
+        expect(image).toEqual(expect.arrayContaining(["Save image as…"]));
+        expect(image).not.toEqual(expect.arrayContaining(["Save link as…"]));
+    });
+
+    it("puts an image inside a link in one group, with no double separator", () => {
+        const labels = labelsOf(
+            makeVM().getBodyContextMenuItems({ x: 1, y: 2, linkUrl: "https://example.com/", imageUrl: "https://example.com/p.png" })
+        );
+        expect(labels).toEqual(expect.arrayContaining(["Copy Link Address", "Save link as…", "Save image as…"]));
+        expect(labels.join("|")).not.toContain("-|-");
+        expect(labels.indexOf("Save image as…")).toBe(labels.indexOf("Save link as…") + 1);
+    });
+
+    it("starts the download of the address that was clicked, in this pane", () => {
+        const vm = makeVM();
+        const items = vm.getBodyContextMenuItems({ x: 1, y: 2, linkUrl: "https://example.com/a.pdf", imageUrl: "https://example.com/p.png" });
+        itemNamed(items, "Save link as…").click?.();
+        expect(invokeCommand).toHaveBeenCalledWith("browser_download_start", { block_id: vm.blockId, url: "https://example.com/a.pdf" });
+        itemNamed(items, "Save image as…").click?.();
+        expect(invokeCommand).toHaveBeenCalledWith("browser_download_start", { block_id: vm.blockId, url: "https://example.com/p.png" });
+    });
+
+    it("gives both rows the download icon", () => {
+        const items = makeVM().getBodyContextMenuItems({ x: 1, y: 2, linkUrl: "https://example.com/", imageUrl: "https://example.com/p.png" });
+        expect(itemNamed(items, "Save link as…").icon).toBe("download");
+        expect(itemNamed(items, "Save image as…").icon).toBe("download");
+    });
+});

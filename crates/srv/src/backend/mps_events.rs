@@ -252,6 +252,9 @@ events! {
     AgentContentChanged: "agentcontent:changed" => (),
     /// An entry was appended to an agent's history.
     AgentHistoryChanged: "agenthistory:changed" => (),
+    /// The History pane's agent list may have changed: a transcript grew, a conversation was archived,
+    /// or a fork took a copy of its parent's (at most one per two seconds; `backend/history_changed.rs`).
+    HistorySessionsChanged: "history:sessions:changed" => (),
     /// A named agent was hidden.
     NamedAgentsChanged: "namedagents:changed" => (),
     /// An agent was hidden from, or shown to, the paired devices (`viewer.agent-hidden`).
@@ -288,6 +291,8 @@ events! {
     TrackedBlocksChanged: crate::broker::process::EVENT_TRACKED_BLOCKS_CHANGED => (),
     /// The work queue changed.
     WorkQueueChanged: "workqueue:changed" => (),
+    /// An Audit row was written (`audit_live`): at most one event per 100 ms; a pane asks `audit.query` for the newest rows.
+    AuditChanged: "audit:changed" => (),
 }
 
 per_id_events! {

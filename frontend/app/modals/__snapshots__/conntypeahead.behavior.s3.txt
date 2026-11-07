@@ -1,0 +1,30 @@
+useMuxObjectValue block:blk-1
+remotesList
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="" conn=ssh:dev
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="" conn=ssh:dev
+refreshRemotes
+ConnListAWSCommand {"timeout":2000}
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="" conn=ssh:dev
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="" conn=ssh:dev
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="" conn=ssh:dev
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="" conn=ssh:dev
+-- with S3
+<div data-stand=TypeAheadModal data-suggestions=[{"headerText":"Local","items":[{"label":"me@box","value":"","icon":"laptop","iconColor":"var(--grey-text-color)","status":"connected","current":false,"hasOnSelect":false}]},{"headerText":"SSH hosts","items":[{"label":"ssh:dev","value":"ssh:dev","icon":"server","iconColor":"var(--grey-text-color)","status":"connected","current":true,"hasOnSelect":false},{"label":"ssh:old","value":"ssh:old","icon":"server","iconColor":"var(--grey-text-color)","status":"connected","current":false,"hasOnSelect":false}]},{"headerText":"S3","items":[{"label":"aws:b","value":"aws:b","icon":"database","iconColor":"var(--accent-color)","status":"connected","current":false,"hasOnSelect":false},{"label":"aws:a","value":"aws:a","icon":"database","iconColor":"var(--accent-color)","status":"connected","current":false,"hasOnSelect":false}]},{"label":"Disconnect ssh:dev","value":"","icon":"xmark","iconColor":"var(--grey-text-color)","status":"connected","hasOnSelect":true},{"label":"Manage remotes…","value":"Manage remotes…","icon":"server","iconColor":"var(--grey-text-color)","status":"disconnected","hasOnSelect":true}] data-select-index=0 data-auto-focus=true data-value= data-label=Connect to (username@host)...>
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="aws:" conn=ssh:dev
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="aws:" conn=ssh:dev
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="aws:" conn=ssh:dev
+-- typed aws:
+<div data-stand=TypeAheadModal data-suggestions=[{"headerText":"S3","items":[{"label":"aws:b","value":"aws:b","icon":"database","iconColor":"var(--accent-color)","status":"connected","current":false,"hasOnSelect":false},{"label":"aws:a","value":"aws:a","icon":"database","iconColor":"var(--accent-color)","status":"connected","current":false,"hasOnSelect":false}]},{"label":"Disconnect ssh:dev","value":"","icon":"xmark","iconColor":"var(--grey-text-color)","status":"connected","hasOnSelect":true},{"label":"aws: (New Connection)","value":"","icon":"plus","iconColor":"var(--grey-text-color)","status":"connected","hasOnSelect":true}] data-select-index=0 data-auto-focus=true data-value=aws: data-label=Connect to (username@host)...>
+item aws:b
+refreshRemotes
+ConnListAWSCommand {"timeout":2000}
+console.log unable to load s3 list from backend: Error: no aws

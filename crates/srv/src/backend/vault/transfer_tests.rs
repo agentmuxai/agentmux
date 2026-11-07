@@ -89,7 +89,7 @@ fn a_round_trip_keeps_every_entry_kind_part_field_tag_and_id() {
     }
     assert_eq!(s.vault_count().unwrap(), 0, "inspect writes nothing");
 
-    let done = commit(&s, &preview.token, Duplicates::Skip).unwrap();
+    let done = commit(&s, &preview.token, Duplicates::Skip, PERSONAL_VAULT).unwrap();
     assert_eq!((done.added, done.replaced, done.skipped), (3, 0, 0));
     for id in &ids {
         assert!(s.vault_get(id).unwrap().is_some(), "{id} keeps its id");
@@ -212,7 +212,7 @@ fn entries_that_cant_come_in_are_listed_with_why_and_the_rest_still_import() {
     assert!(why["Odd kind"].contains("unknown kind"));
     assert!(why["No value"].contains("no value"));
     assert!(why["Wrong part"].contains("no part"));
-    assert_eq!(commit(&s, &preview.token, Duplicates::Skip).unwrap().added, 1);
+    assert_eq!(commit(&s, &preview.token, Duplicates::Skip, PERSONAL_VAULT).unwrap().added, 1);
 }
 
 #[test]
@@ -228,21 +228,44 @@ fn duplicates_are_marked_and_skipped_replaced_or_kept_as_the_person_chooses() {
     let skip = inspect(&s, &path, Some(PASS)).unwrap();
     assert_eq!((skip.total, skip.duplicates), (3, 3), "the same SSN, card number and login are duplicates");
     assert!(skip.sections.iter().flat_map(|p| &p.first).all(|e| e.duplicate));
-    let r = commit(&s, &skip.token, Duplicates::Skip).unwrap();
+    let r = commit(&s, &skip.token, Duplicates::Skip, PERSONAL_VAULT).unwrap();
     assert_eq!((r.added, r.replaced, r.skipped), (0, 0, 3));
     assert_eq!(s.vault_get("ssn-alex").unwrap().unwrap().label, "Alex (renamed)");
 
     let replace = inspect(&s, &path, Some(PASS)).unwrap();
-    let r = commit(&s, &replace.token, Duplicates::Replace).unwrap();
+    let r = commit(&s, &replace.token, Duplicates::Replace, PERSONAL_VAULT).unwrap();
     assert_eq!((r.added, r.replaced, r.skipped), (0, 3, 0));
     assert_eq!(s.vault_get("ssn-alex").unwrap().unwrap().label, "Alex", "replaced by the file's version, same id");
     assert_eq!(s.vault_count().unwrap(), 3);
 
     let both = inspect(&s, &path, Some(PASS)).unwrap();
-    let r = commit(&s, &both.token, Duplicates::KeepBoth).unwrap();
+    let r = commit(&s, &both.token, Duplicates::KeepBoth, PERSONAL_VAULT).unwrap();
     assert_eq!((r.added, r.replaced, r.skipped), (3, 0, 0));
     assert_eq!(s.vault_count().unwrap(), 6);
     assert!(s.vault_get("ssn-alex-2").unwrap().is_some(), "the file's id was taken, so a new one");
+}
+
+#[test]
+fn an_import_goes_to_the_chosen_vault_and_a_replaced_entry_stays_where_it_is() {
+    use crate::backend::vault::vaults::{self, VaultAgents};
+    let s = store();
+    seed(&s);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("v.vault");
+    export(&s, None, PASS, &path).unwrap();
+    let work = vaults::create(&s, "Work", VaultAgents::None).unwrap();
+    vaults::move_entry(&s, "ssn-alex", &work.id).unwrap();
+
+    let replace = inspect(&s, &path, Some(PASS)).unwrap();
+    commit(&s, &replace.token, Duplicates::Replace, PERSONAL_VAULT).unwrap();
+    assert_eq!(s.vault_get("ssn-alex").unwrap().unwrap().vault_id, work.id, "replacing keeps the Vault the entry is in");
+
+    let both = inspect(&s, &path, Some(PASS)).unwrap();
+    commit(&s, &both.token, Duplicates::KeepBoth, &work.id).unwrap();
+    assert_eq!(s.vault_get("ssn-alex-2").unwrap().unwrap().vault_id, work.id, "new entries go to the chosen Vault");
+    assert!(commit(&s, "no-such-token", Duplicates::Skip, "vault-nope").is_err());
+    let missing = inspect(&s, &path, Some(PASS)).unwrap();
+    assert!(commit(&s, &missing.token, Duplicates::KeepBoth, "vault-nope").unwrap_err().contains("no Vault"));
 }
 
 #[test]
@@ -269,7 +292,7 @@ fn an_import_is_all_or_nothing() {
     let row = VaultRow { id: "card-company-card".into(), kind: "note".into(), label: "x".into(), fields: "{}".into(), tags: "[]".into(), sealed: vec![1], created_at: 1, updated_at: 1, last_used_at: 0, vault_id: "personal".into() };
     // The writer takes the file's id only when it's free, so it picks another: nothing fails…
     s.vault_insert(&row).unwrap();
-    assert_eq!(commit(&s, &preview.token, Duplicates::Skip).unwrap().added, 3);
+    assert_eq!(commit(&s, &preview.token, Duplicates::Skip, PERSONAL_VAULT).unwrap().added, 3);
     assert!(s.vault_get("card-company-card-2").unwrap().is_some());
     // …and a write that does fail leaves nothing behind.
     let bad = [VaultRow { id: "dupe".into(), ..row.clone() }, VaultRow { id: "dupe".into(), ..row.clone() }];
@@ -287,12 +310,12 @@ fn a_staged_import_is_used_once_and_can_be_cancelled() {
     export(&s, None, PASS, &path).unwrap();
     wipe(&s);
     let p = inspect(&s, &path, Some(PASS)).unwrap();
-    commit(&s, &p.token, Duplicates::Skip).unwrap();
-    assert!(commit(&s, &p.token, Duplicates::Skip).unwrap_err().contains("expired"));
+    commit(&s, &p.token, Duplicates::Skip, PERSONAL_VAULT).unwrap();
+    assert!(commit(&s, &p.token, Duplicates::Skip, PERSONAL_VAULT).unwrap_err().contains("expired"));
     let p = inspect(&s, &path, Some(PASS)).unwrap();
     cancel(&p.token);
-    assert!(commit(&s, &p.token, Duplicates::Skip).unwrap_err().contains("expired"));
-    assert!(commit(&s, "no-such-token", Duplicates::Skip).is_err());
+    assert!(commit(&s, &p.token, Duplicates::Skip, PERSONAL_VAULT).unwrap_err().contains("expired"));
+    assert!(commit(&s, "no-such-token", Duplicates::Skip, PERSONAL_VAULT).is_err());
 }
 
 #[test]
@@ -315,9 +338,9 @@ fn a_failed_write_leaves_the_import_staged_to_try_again() {
     let p = inspect(&s, &path, Some(PASS)).unwrap();
     // The write fails: the table isn't there.
     s.conn().lock().unwrap().execute_batch("ALTER TABLE db_vault_entries RENAME TO db_vault_entries_away").unwrap();
-    assert!(commit(&s, &p.token, Duplicates::Skip).is_err());
+    assert!(commit(&s, &p.token, Duplicates::Skip, PERSONAL_VAULT).is_err());
     s.conn().lock().unwrap().execute_batch("ALTER TABLE db_vault_entries_away RENAME TO db_vault_entries").unwrap();
-    let done = commit(&s, &p.token, Duplicates::Skip).unwrap();
+    let done = commit(&s, &p.token, Duplicates::Skip, PERSONAL_VAULT).unwrap();
     assert_eq!(done.added, 3, "the same staged import, written on the second try");
 }
 
@@ -365,7 +388,7 @@ http://sn,,,,\"NoteType:Credit Card\nNumber:4111111111111111\nSecurity Code:123\
     for secret in ["hunter2", "123-45", "4111", "JBSWY3"] {
         assert!(!shown.contains(secret), "the preview shows {secret}");
     }
-    let done = commit(&s, &preview.token, Duplicates::Skip).unwrap();
+    let done = commit(&s, &preview.token, Duplicates::Skip, PERSONAL_VAULT).unwrap();
     assert_eq!(done.added, 3);
     assert_eq!(all_parts(&s, "login-example")["totp"], "JBSWY3DPEHPK3PXP");
     assert_eq!(all_parts(&s, "ssn-my-ssn")["value"], "123-45-6789");
@@ -385,7 +408,7 @@ http://sn,,,,\"NoteType:Driver's License\nNumber:D1234567\nExpiration Date:June,
     let path = write(&dir, "lastpass_vault_export.csv", csv);
     let preview = inspect(&s, &path, None).unwrap();
     assert_eq!((preview.total, preview.skipped.len()), (1, 0), "{:?}", preview.skipped);
-    commit(&s, &preview.token, Duplicates::Skip).unwrap();
+    commit(&s, &preview.token, Duplicates::Skip, PERSONAL_VAULT).unwrap();
     let row = s.vault_get("drivers-licence-licence").unwrap().unwrap();
     assert!(row.fields.contains("\"expires\":\"2028-06-30\""), "the month's last day: {}", row.fields);
 }
@@ -396,10 +419,10 @@ fn a_second_import_of_the_same_export_marks_every_entry_a_duplicate() {
     let dir = tempfile::tempdir().unwrap();
     let path = write(&dir, "chrome.csv", "name,url,username,password\nGitHub,https://github.com,alex,pw1\nExample,https://example.com,bob,pw2\n");
     let first = inspect(&s, &path, None).unwrap();
-    commit(&s, &first.token, Duplicates::Skip).unwrap();
+    commit(&s, &first.token, Duplicates::Skip, PERSONAL_VAULT).unwrap();
     let again = inspect(&s, &path, None).unwrap();
     assert_eq!((again.total, again.duplicates), (2, 2));
-    let done = commit(&s, &again.token, Duplicates::Skip).unwrap();
+    let done = commit(&s, &again.token, Duplicates::Skip, PERSONAL_VAULT).unwrap();
     assert_eq!((done.added, done.skipped), (0, 2));
     assert_eq!(s.vault_count().unwrap(), 2);
 }
@@ -417,7 +440,7 @@ fn a_csv_no_reader_knows_is_imported_with_the_persons_column_choices() {
     let mapping = Mapping { kind: "api-key".into(), label: 0, value: 1, site: None, username: None };
     let preview = inspect_with(&s, &path, None, Some(&mapping)).unwrap();
     assert_eq!((preview.source, preview.total), (Source::Csv, 2));
-    commit(&s, &preview.token, Duplicates::Skip).unwrap();
+    commit(&s, &preview.token, Duplicates::Skip, PERSONAL_VAULT).unwrap();
     assert_eq!(all_parts(&s, "api-key-stripe")["value"], "sk_test_1");
 }
 
@@ -508,7 +531,7 @@ fn a_keepass_database_asks_for_its_password_then_previews_and_is_not_called_a_pl
     let preview = inspect(&s, &path, Some("master-pw")).unwrap();
     assert_eq!((preview.source, preview.total, preview.plaintext_file), (Source::KeePass, 1, false));
     assert!(preview.source_label.contains("KeePass"));
-    let result = commit(&s, &preview.token, Duplicates::Skip).unwrap();
+    let result = commit(&s, &preview.token, Duplicates::Skip, PERSONAL_VAULT).unwrap();
     assert_eq!(result.added, 1);
 }
 

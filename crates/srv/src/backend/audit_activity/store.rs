@@ -93,8 +93,9 @@ pub(super) fn spawn_writer(dir: PathBuf, channel_name: String) -> std::io::Resul
             line.push(b'\n');
             if let Some((_, file)) = open.as_mut() {
                 // One write call per line, so lines from several srvs don't interleave.
-                if let Err(e) = file.write_all(&line).and_then(|_| file.flush()) {
-                    tracing::warn!(error = %e, "audit activity: could not append a row");
+                match file.write_all(&line).and_then(|_| file.flush()) {
+                    Ok(()) => crate::backend::audit_live::poke(),
+                    Err(e) => tracing::warn!(error = %e, "audit activity: could not append a row"),
                 }
             }
         }

@@ -18,9 +18,11 @@ import { SkillCatalogModel, type SkillDraft } from "./skill-model";
 import { SkillImportModel } from "./skill-import-model";
 import { SkillImportPanel, SkillImportResult } from "./skill-import";
 import { SkillMatrix } from "./skill-matrix";
+import { AppFilterRow, SkillAppDetail } from "./skill-app";
+import { appPlatform, appStatus, filterSkills, firstRoute, type AppFilter } from "./skill-app-model";
 import "./skill-import.scss";
 import "../agent/components/AgentPrimitiveModal.scss";
-import { Button, Card, CardGrid, Switch, TextArea, TextInput } from "@/app/element/ui";
+import { Button, Card, CardGrid, Pill, Switch, TextArea, TextInput } from "@/app/element/ui";
 import { focusOnOpen } from "@/util/focusutil";
 
 /** The agents a skill is bound to, each with Unbind. */
@@ -87,6 +89,8 @@ interface ManagerState {
     setImporting: Setter<Importing | null>;
     showMatrix: Accessor<boolean>;
     setShowMatrix: Setter<boolean>;
+    filter: Accessor<AppFilter>;
+    setFilter: Setter<AppFilter>;
 }
 
 function createManagerState(): ManagerState {
@@ -97,7 +101,8 @@ function createManagerState(): ManagerState {
     // The import panel, or an imported skill's "check for changes" (`updateOf` set).
     const [importing, setImporting] = createSignal<Importing | null>(null);
     const [showMatrix, setShowMatrix] = createSignal(false);
-    return { model, importing, setImporting, showMatrix, setShowMatrix };
+    const [filter, setFilter] = createSignal<AppFilter>("all");
+    return { model, importing, setImporting, showMatrix, setShowMatrix, filter, setFilter };
 }
 
 const inDetail = (m: ManagerState) =>
@@ -139,16 +144,31 @@ function reachFacts(skill: SkillCatalogItem): string[] {
 }
 
 function SkillCard(p: { m: ManagerState; skill: SkillCatalogItem }): JSX.Element {
+    const app = () => p.skill.app;
+    const status = () => (app() ? appStatus(app()!, appPlatform()) : null);
+    // An App skill's card leads with how well it is tested and its route; where it came from is in its detail.
     const facts = () => [
+        ...(app() ? [<span>{status()!.label}</span>] : []),
+        ...(app() && firstRoute(app()!) ? [<span>route: {firstRoute(app()!)}</span>] : []),
         ...reachFacts(p.skill).map((fact) => <span>{fact}</span>),
-        ...(p.skill.source ? [<span>Imported from {p.skill.source.location}</span>] : []),
+        ...(p.skill.source && !app() ? [<span>Imported from {p.skill.source.location}</span>] : []),
     ];
     return (
         <Card
             class="skill-card"
             icon={<i class="fa-solid fa-wand-magic-sparkles" />}
             title={p.skill.name}
-            subtitle={p.skill.description || undefined}
+            subtitle={
+                app() ? (
+                    <>
+                        <Pill tone="accent">App skill</Pill> {app()!.vendor}
+                    </>
+                ) : (
+                    p.skill.description || undefined
+                )
+            }
+            status={status() ? { tone: status()!.tone, label: status()!.label } : undefined}
+            attention={status()?.tone === "error"}
             meta={facts()}
             onSelect={() => {
                 p.m.setImporting(null);
@@ -161,6 +181,7 @@ function SkillCard(p: { m: ManagerState; skill: SkillCatalogItem }): JSX.Element
 
 function SkillList(p: { m: ManagerState }): JSX.Element {
     const model = p.m.model;
+    const shown = () => filterSkills(model.skillsAtom(), p.m.filter());
     return (
         <div class="agent-primitive-modal-list ui-density-compact">
             <div class="primitive-card-actions">
@@ -185,14 +206,21 @@ function SkillList(p: { m: ManagerState }): JSX.Element {
             <Show when={model.errorAtom()}>
                 <div class="agent-primitive-modal-error">{model.errorAtom()}</div>
             </Show>
+            <div class="skill-app-filter">
+                <AppFilterRow value={p.m.filter()} onChange={p.m.setFilter} />
+            </div>
             <Show
-                when={model.skillsAtom().length > 0}
-                fallback={<div class="agent-primitive-modal-list-empty">No skills yet</div>}
+                when={shown().length > 0}
+                fallback={
+                    <div class="agent-primitive-modal-list-empty">
+                        {p.m.filter() === "app" ? "No App skills yet. Import one, or write your own." : "No skills yet"}
+                    </div>
+                }
             >
                 <div class="primitive-card-body">
                     <CardGrid
                         ariaLabel="Skills"
-                        items={model.skillsAtom()}
+                        items={shown()}
                         keyOf={(skill) => skill.id}
                         renderCard={(skill) => <SkillCard m={p.m} skill={skill} />}
                     />
@@ -234,6 +262,7 @@ function SkillReadOnly(p: { m: ManagerState; skill: Accessor<SkillCatalogItem> }
                     ? "Used by every agent"
                     : `Used by ${skill().bound_count} ${skill().bound_count === 1 ? "agent" : "agents"}`}
             </p>
+            <Show when={skill().app}>{(app) => <SkillAppDetail app={app()} />}</Show>
             <SkillReach model={model} skill={skill()} />
             <SkillBoundAgents model={model} skill={skill()} />
             <Show when={skill().source}>

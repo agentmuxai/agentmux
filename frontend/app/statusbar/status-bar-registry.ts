@@ -16,6 +16,9 @@ export interface StatusBarItem {
     /** Lower first. AgentMux's own items use multiples of 100; widget items
      *  sit between `WIDGET_ORDER_RIGHT` / `WIDGET_ORDER_LEFT` and the next. */
     order: number;
+    /** In a bar too narrow for every item, the first fit tier at which this one is hidden (1 first,
+     *  4 last), so the bar stays one line; absent, it stays unless the bar is cut at the edge. */
+    dropAt?: 1 | 2 | 3 | 4;
     render: () => JSX.Element;
 }
 

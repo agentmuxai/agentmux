@@ -7,6 +7,7 @@
 pub mod late_tick;
 pub mod panes;
 pub mod schedule;
+pub mod thread;
 
 pub use schedule::{Scheduler, SourceId, SourceSpec};
 

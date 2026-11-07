@@ -26,137 +26,161 @@
  * stylesheet-disabled investigation.
  */
 
-import {
-    createMemo,
-    createSignal,
-    For,
-    onCleanup,
-    onMount,
-    Show,
-    type JSX,
-} from "solid-js";
-import { useTick } from "@/app/hook/useTick";
+import { For, Show, type JSX } from "solid-js";
 import { Button } from "@/element/ui";
-import {
-    dispatchRecordsAtom,
-    describeSource,
-    type DispatchRecord,
-    __resetDispatchLog,
-} from "@/store/command-source";
+import { __resetDispatchLog } from "@/store/command-source";
 import { AgentPanePerfSection } from "./agent-pane-perf-section";
 import { shortcutFor } from "@/app/keybindings";
-import { keyCommands } from "@/app/store/keymodel-dispatch";
 import { Z_DEV_DIAGNOSTICS } from "@/app/zindex";
 import { TextInput } from "@/app/element/ui";
+import { ageMs, createDiagPanel, type DiagPanelState } from "./diag-panel-state";
 
-const DEFAULT_DISPLAY_LIMIT = 80;
-
-interface DisplayRow {
-    /** Index into the live records array — used for stable keys. */
-    idx: number;
-    /** Original record's wall-clock timestamp. The `age` string is
-     *  computed inline in the render so it doesn't pollute the
-     *  `rows` memo with a time dependency — see the createMemo
-     *  comment for why that matters. */
-    at: number;
-    slice: string;
-    /** Per-pane key, truncated to 7 chars when present. */
-    keyShort: string;
-    /** Command discriminator (e.g. "Navigate", "PaneClicked"). */
-    cmdType: string;
-    source: string;
-    /** Number of events emitted by the dispatch. */
-    eventCount: number;
+/** The title and the count of dispatches recorded. */
+function DiagHeader(props: { s: DiagPanelState }): JSX.Element {
+    const s = props.s;
+    return (
+        <div
+            style={{
+                display: "flex",
+                "align-items": "center",
+                gap: "8px",
+                "margin-bottom": "6px",
+            }}
+        >
+            <div style={{ "font-weight": "bold", color: "#7af" }}>
+                🔬 Reducer Dispatch Ring
+            </div>
+            <span style={{ color: "#777" }}>
+                ({s.totalDispatches()} total — {shortcutFor("dev:diagnostics")})
+            </span>
+        </div>
+    );
 }
 
-function commandType(cmd: unknown): string {
-    if (cmd != null && typeof cmd === "object" && "type" in cmd) {
-        const t = (cmd as { type?: unknown }).type;
-        if (typeof t === "string") return t;
-    }
-    return "?";
+/** The slice dropdown, the key filter and the clear button. */
+function DiagFilters(props: { s: DiagPanelState }): JSX.Element {
+    const s = props.s;
+    return (
+        <div
+            style={{
+                display: "flex",
+                gap: "6px",
+                "margin-bottom": "6px",
+                "align-items": "center",
+            }}
+        >
+            <select
+                value={s.sliceFilter()}
+                onInput={(e) => s.setSliceFilter(e.currentTarget.value)}
+                style={{
+                    "background-color": "#222",
+                    color: "#d0d0d0",
+                    border: "1px solid #444",
+                    "border-radius": "3px",
+                    padding: "2px 4px",
+                    "font-family": "inherit",
+                    "font-size": "inherit",
+                }}
+            >
+                <option value="">all slices</option>
+                <For each={s.availableSlices()}>
+                    {(s) => <option value={s}>{s}</option>}
+                </For>
+            </select>
+            <TextInput
+                variant="plain"
+                placeholder="filter by key…"
+                value={s.keyFilter()}
+                onInput={(e) => s.setKeyFilter(e.currentTarget.value)}
+                style={{
+                    flex: "1",
+                    "background-color": "#222",
+                    color: "#d0d0d0",
+                    border: "1px solid #444",
+                    "border-radius": "3px",
+                    padding: "2px 6px",
+                    "font-family": "inherit",
+                    "font-size": "inherit",
+                }}
+            />
+            <Button density="compact" onClick={() => __resetDispatchLog()} title="Wipe the dispatch ring (dev only)">
+                clear
+            </Button>
+        </div>
+    );
 }
 
-function ageMs(now: number, at: number): string {
-    const dt = now - at;
-    if (dt < 1000) return `${dt}ms ago`;
-    if (dt < 60_000) return `${(dt / 1000).toFixed(1)}s ago`;
-    return `${(dt / 60_000).toFixed(1)}min ago`;
-}
-
-function toRow(idx: number, rec: DispatchRecord): DisplayRow {
-    return {
-        idx,
-        at: rec.at,
-        slice: rec.slice,
-        keyShort: rec.key ? rec.key.slice(0, 7) : "—",
-        cmdType: commandType(rec.command),
-        source: describeSource(rec.source),
-        eventCount: rec.events.length,
-    };
+/** The newest dispatches, or why there are none to show. */
+function DiagRows(props: { s: DiagPanelState }): JSX.Element {
+    const s = props.s;
+    return (
+        <div
+            style={{
+                "overflow-y": "auto",
+                flex: "1",
+                "border-top": "1px solid #333",
+                "padding-top": "4px",
+            }}
+        >
+            <Show
+                when={s.rows().length > 0}
+                fallback={
+                    <div style={{ color: "#888", "padding": "8px" }}>
+                        {s.totalDispatches() === 0
+                            ? "No dispatches recorded yet."
+                            : "No matches for the current filter."}
+                    </div>
+                }
+            >
+                <table
+                    style={{
+                        width: "100%",
+                        "border-collapse": "collapse",
+                    }}
+                >
+                    <thead>
+                        <tr style={{ color: "#888" }}>
+                            <th style={hdrStyle}>age</th>
+                            <th style={hdrStyle}>slice</th>
+                            <th style={hdrStyle}>key</th>
+                            <th style={hdrStyle}>command</th>
+                            <th style={hdrStyle}>source</th>
+                            <th style={hdrStyle}>events</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <For each={s.rows()}>
+                            {(row) => (
+                                <tr>
+                                    {/* Age is computed inline so only the cell
+                                        re-renders on the 1 Hz tick — the row
+                                        identity stays stable across ticks (see
+                                        the rows memo's comment). */}
+                                    <td style={cellStyle}>{ageMs(s.now(), row.at)}</td>
+                                    <td style={cellStyle}>
+                                        <span style={{ color: "#aaa" }}>{row.slice}</span>
+                                    </td>
+                                    <td style={cellStyle}>{row.keyShort}</td>
+                                    <td style={cellStyle}>
+                                        <span style={{ color: "#7af" }}>{row.cmdType}</span>
+                                    </td>
+                                    <td style={cellStyle}>{row.source}</td>
+                                    <td style={cellStyle}>{row.eventCount}</td>
+                                </tr>
+                            )}
+                        </For>
+                    </tbody>
+                </table>
+            </Show>
+        </div>
+    );
 }
 
 export function DiagPanel(): JSX.Element {
-    const [visible, setVisible] = createSignal(false);
-    const tick = useTick(1000);
-    const now = createMemo(() => (tick(), Date.now()));
-    const [sliceFilter, setSliceFilter] = createSignal<string>("");
-    const [keyFilter, setKeyFilter] = createSignal<string>("");
-
-    // Its key is a shortcut-table row (`dev:diagnostics`), so it can't collide
-    // with another binding and also works from a terminal.
-    onMount(() => {
-        keyCommands.set("dev:diagnostics", () => {
-            setVisible((v) => !v);
-            return true;
-        });
-    });
-    onCleanup(() => keyCommands.delete("dev:diagnostics"));
-
-    // Available slices for the filter dropdown — derived from the
-    // current records. Recomputed reactively so a new slice that
-    // shows up appears in the dropdown without a manual refresh.
-    const availableSlices = createMemo(() => {
-        const seen = new Set<string>();
-        for (const r of dispatchRecordsAtom()) seen.add(r.slice);
-        return Array.from(seen).sort();
-    });
-
-    // Filtered + sliced view, newest first. Limited to
-    // DEFAULT_DISPLAY_LIMIT rows so a runaway dispatch (which the
-    // audit ring is precisely there to catch) doesn't wedge the
-    // panel itself.
-    //
-    // **Important:** this memo deliberately does NOT depend on `now()`.
-    // If it did, the 1 Hz age-tick interval would force a rebuild of
-    // every DisplayRow and `<For>` would re-create every <tr> on
-    // each tick — exactly the kind of inefficiency the panel exists
-    // to surface. The `age` cell reads `now()` inline in the render
-    // (Solid's fine-grained reactivity isolates the update to that
-    // single text node).
-    const rows = createMemo<DisplayRow[]>(() => {
-        const all = dispatchRecordsAtom();
-        const slice = sliceFilter();
-        const key = keyFilter().trim().toLowerCase();
-        const filtered: DisplayRow[] = [];
-        // Walk newest-to-oldest so we can stop once we've collected
-        // the display limit — saves work on large rings.
-        for (let i = all.length - 1; i >= 0 && filtered.length < DEFAULT_DISPLAY_LIMIT; i--) {
-            const r = all[i];
-            if (slice !== "" && r.slice !== slice) continue;
-            if (key !== "") {
-                const recKey = (r.key ?? "").toLowerCase();
-                if (!recKey.includes(key)) continue;
-            }
-            filtered.push(toRow(i, r));
-        }
-        return filtered;
-    });
-
-    const totalDispatches = createMemo(() => dispatchRecordsAtom().length);
+    const s = createDiagPanel();
 
     return (
-        <Show when={visible()}>
+        <Show when={s.visible()}>
             <div
                 style={{
                     position: "fixed",
@@ -177,126 +201,9 @@ export function DiagPanel(): JSX.Element {
                     "box-shadow": "0 4px 12px rgba(0, 0, 0, 0.5)",
                 }}
             >
-                <div
-                    style={{
-                        display: "flex",
-                        "align-items": "center",
-                        gap: "8px",
-                        "margin-bottom": "6px",
-                    }}
-                >
-                    <div style={{ "font-weight": "bold", color: "#7af" }}>
-                        🔬 Reducer Dispatch Ring
-                    </div>
-                    <span style={{ color: "#777" }}>
-                        ({totalDispatches()} total — {shortcutFor("dev:diagnostics")})
-                    </span>
-                </div>
-                <div
-                    style={{
-                        display: "flex",
-                        gap: "6px",
-                        "margin-bottom": "6px",
-                        "align-items": "center",
-                    }}
-                >
-                    <select
-                        value={sliceFilter()}
-                        onInput={(e) => setSliceFilter(e.currentTarget.value)}
-                        style={{
-                            "background-color": "#222",
-                            color: "#d0d0d0",
-                            border: "1px solid #444",
-                            "border-radius": "3px",
-                            padding: "2px 4px",
-                            "font-family": "inherit",
-                            "font-size": "inherit",
-                        }}
-                    >
-                        <option value="">all slices</option>
-                        <For each={availableSlices()}>
-                            {(s) => <option value={s}>{s}</option>}
-                        </For>
-                    </select>
-                    <TextInput
-                        variant="plain"
-                        placeholder="filter by key…"
-                        value={keyFilter()}
-                        onInput={(e) => setKeyFilter(e.currentTarget.value)}
-                        style={{
-                            flex: "1",
-                            "background-color": "#222",
-                            color: "#d0d0d0",
-                            border: "1px solid #444",
-                            "border-radius": "3px",
-                            padding: "2px 6px",
-                            "font-family": "inherit",
-                            "font-size": "inherit",
-                        }}
-                    />
-                    <Button density="compact" onClick={() => __resetDispatchLog()} title="Wipe the dispatch ring (dev only)">
-                        clear
-                    </Button>
-                </div>
-                <div
-                    style={{
-                        "overflow-y": "auto",
-                        flex: "1",
-                        "border-top": "1px solid #333",
-                        "padding-top": "4px",
-                    }}
-                >
-                    <Show
-                        when={rows().length > 0}
-                        fallback={
-                            <div style={{ color: "#888", "padding": "8px" }}>
-                                {totalDispatches() === 0
-                                    ? "No dispatches recorded yet."
-                                    : "No matches for the current filter."}
-                            </div>
-                        }
-                    >
-                        <table
-                            style={{
-                                width: "100%",
-                                "border-collapse": "collapse",
-                            }}
-                        >
-                            <thead>
-                                <tr style={{ color: "#888" }}>
-                                    <th style={hdrStyle}>age</th>
-                                    <th style={hdrStyle}>slice</th>
-                                    <th style={hdrStyle}>key</th>
-                                    <th style={hdrStyle}>command</th>
-                                    <th style={hdrStyle}>source</th>
-                                    <th style={hdrStyle}>events</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <For each={rows()}>
-                                    {(row) => (
-                                        <tr>
-                                            {/* Age is computed inline so only the cell
-                                                re-renders on the 1 Hz tick — the row
-                                                identity stays stable across ticks (see
-                                                the rows memo's comment). */}
-                                            <td style={cellStyle}>{ageMs(now(), row.at)}</td>
-                                            <td style={cellStyle}>
-                                                <span style={{ color: "#aaa" }}>{row.slice}</span>
-                                            </td>
-                                            <td style={cellStyle}>{row.keyShort}</td>
-                                            <td style={cellStyle}>
-                                                <span style={{ color: "#7af" }}>{row.cmdType}</span>
-                                            </td>
-                                            <td style={cellStyle}>{row.source}</td>
-                                            <td style={cellStyle}>{row.eventCount}</td>
-                                        </tr>
-                                    )}
-                                </For>
-                            </tbody>
-                        </table>
-                    </Show>
-                </div>
+                <DiagHeader s={s} />
+                <DiagFilters s={s} />
+                <DiagRows s={s} />
                 <AgentPanePerfSection />
             </div>
         </Show>

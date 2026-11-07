@@ -17,7 +17,7 @@
 //! per-pane limit) so `cargo test` covers it; `cargo test` has no CEF process
 //! (the constraint recorded in `media_prompt.rs`).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -196,6 +196,82 @@ impl WaitingDownloads {
     pub(crate) fn clear_pane(&mut self, pane: &str) {
         self.by_pane.remove(pane);
     }
+}
+
+/// One Save As dialog at a time per pane. CEF routes a download's dialog through the pane's single file
+/// chooser, so a second `cont(.., show_dialog = true)` while one is open cancels the new download at
+/// once and dismisses the open dialog without its download ever ending (macOS, 2026-11-06: ids 5 and 6;
+/// the first kept its waiting slot and its hidden temp file). So only the first download of a pane asks;
+/// the rest are parked, still counted as waiting, and ask in turn as each dialog is answered. Plain
+/// data over the parked value `T`, so it is tested without CEF.
+pub(crate) struct SaveDialogs<T> {
+    open: HashMap<String, u32>,
+    parked: HashMap<String, VecDeque<(u32, T)>>,
+}
+
+impl<T> Default for SaveDialogs<T> {
+    fn default() -> Self {
+        Self { open: HashMap::new(), parked: HashMap::new() }
+    }
+}
+
+impl<T> SaveDialogs<T> {
+    /// A download of `pane` is ready to ask. Returns it back when its dialog may open now; `None`
+    /// means it is parked behind the pane's open dialog.
+    pub(crate) fn offer(&mut self, pane: &str, id: u32, item: T) -> Option<T> {
+        if self.open.contains_key(pane) {
+            self.parked.entry(pane.to_string()).or_default().push_back((id, item));
+            return None;
+        }
+        self.open.insert(pane.to_string(), id);
+        Some(item)
+    }
+
+    /// The dialog for `id` was answered, or the download ended. When it was the open one, the pane's
+    /// next parked download is returned and is now the open one. A parked download that ended before
+    /// its turn is dropped; an id never offered changes nothing.
+    pub(crate) fn finished(&mut self, pane: &str, id: u32) -> Option<(u32, T)> {
+        if self.open.get(pane) != Some(&id) {
+            if let Some(q) = self.parked.get_mut(pane) {
+                q.retain(|(p, _)| *p != id);
+                if q.is_empty() {
+                    self.parked.remove(pane);
+                }
+            }
+            return None;
+        }
+        self.open.remove(pane);
+        let q = self.parked.get_mut(pane)?;
+        let next = q.pop_front();
+        if q.is_empty() {
+            self.parked.remove(pane);
+        }
+        if let Some((nid, _)) = &next {
+            self.open.insert(pane.to_string(), *nid);
+        }
+        next
+    }
+
+    /// The pane closed: nothing of its is open or parked.
+    pub(crate) fn clear_pane(&mut self, pane: &str) {
+        self.open.remove(pane);
+        self.parked.remove(pane);
+    }
+}
+
+thread_local! {
+    /// The panes' Save As queues. The parked value holds a `BeforeDownloadCallback`, which is not
+    /// `Send`, so it lives on the CEF UI thread like `RUNNING`.
+    static SAVE_DIALOGS: std::cell::RefCell<SaveDialogs<(String, BeforeDownloadCallback)>> =
+        std::cell::RefCell::new(SaveDialogs::default());
+}
+
+/// Open the platform's Save As dialog for a download, starting at the folder it would go to.
+fn show_save_dialog(suggested: &str, cb: &BeforeDownloadCallback) {
+    let path = default_save_path(suggested);
+    // show_dialog = true: CEF opens the platform's Save As dialog, starting at `path`, and cancels
+    // the download if the user cancels.
+    cb.cont(Some(&CefString::from(path.to_string_lossy().as_ref())), 1);
 }
 
 static WAITING: Mutex<Option<WaitingDownloads>> = Mutex::new(None);
@@ -441,6 +517,7 @@ wrap_task! {
     impl Task {
         fn execute(&self) {
             RUNNING.with(|m| m.borrow_mut().retain(|(p, _), _| p != &self.block_id));
+            SAVE_DIALOGS.with(|d| d.borrow_mut().clear_pane(&self.block_id));
         }
     }
 }
@@ -560,15 +637,23 @@ wrap_download_handler! {
                 return 0;
             }
 
-            let path = default_save_path(&suggested);
-            tracing::info!(
-                target: "pane-download",
-                %block_id, id, ext = %extension_of(&suggested),
-                "asking where to save"
-            );
-            // show_dialog = true: CEF opens the platform's Save As dialog,
-            // starting at `path`, and cancels the download if the user cancels.
-            cb.cont(Some(&CefString::from(path.to_string_lossy().as_ref())), 1);
+            // One dialog at a time per pane: a second would cancel itself and the open one.
+            let parked = (suggested.clone(), cb.clone());
+            match SAVE_DIALOGS.with(|d| d.borrow_mut().offer(&block_id, id, parked)) {
+                Some((suggested, cb)) => {
+                    tracing::info!(
+                        target: "pane-download",
+                        %block_id, id, ext = %extension_of(&suggested),
+                        "asking where to save"
+                    );
+                    show_save_dialog(&suggested, &cb);
+                }
+                None => tracing::info!(
+                    target: "pane-download",
+                    %block_id, id,
+                    "waiting for the pane's open Save As dialog"
+                ),
+            }
             1
         }
 
@@ -597,6 +682,11 @@ wrap_download_handler! {
             let block_id = browser.and_then(|b| self.state.block_id_for_browser(b));
             if let Some(block_id) = &block_id {
                 with_waiting(|w| w.release(block_id, id));
+                // This dialog is over: the pane's next parked download asks now.
+                if let Some((nid, (suggested, cb))) = SAVE_DIALOGS.with(|d| d.borrow_mut().finished(block_id, id)) {
+                    tracing::info!(target: "pane-download", %block_id, id = nid, ext = %extension_of(&suggested), "asking where to save");
+                    show_save_dialog(&suggested, &cb);
+                }
             }
             if !path.is_empty() {
                 remember_download_dir(Path::new(&path));
@@ -652,6 +742,59 @@ wrap_download_handler! {
 }
 
 #[cfg(test)]
+mod save_dialog_tests {
+    use super::*;
+
+    #[test]
+    fn only_the_first_download_of_a_pane_asks_and_the_rest_wait_their_turn() {
+        let mut q = SaveDialogs::<&str>::default();
+        assert_eq!(q.offer("p", 5, "a"), Some("a"));
+        assert_eq!(q.offer("p", 6, "b"), None);
+        assert_eq!(q.offer("p", 7, "c"), None);
+        // 5's dialog is answered: 6 asks next, then 7.
+        assert_eq!(q.finished("p", 5), Some((6, "b")));
+        assert_eq!(q.finished("p", 6), Some((7, "c")));
+        assert_eq!(q.finished("p", 7), None);
+        // Nothing is open any more: the next one asks at once.
+        assert_eq!(q.offer("p", 8, "d"), Some("d"));
+    }
+
+    #[test]
+    fn a_repeat_update_for_an_answered_dialog_does_not_open_another() {
+        let mut q = SaveDialogs::<&str>::default();
+        assert_eq!(q.offer("p", 1, "a"), Some("a"));
+        assert_eq!(q.offer("p", 2, "b"), None);
+        assert_eq!(q.finished("p", 1), Some((2, "b")));
+        // 1 finishes later (its file is done): 2 is the open one, so nothing changes.
+        assert_eq!(q.finished("p", 1), None);
+        assert_eq!(q.offer("p", 3, "c"), None);
+    }
+
+    #[test]
+    fn a_parked_download_that_ends_before_its_turn_is_dropped() {
+        let mut q = SaveDialogs::<&str>::default();
+        q.offer("p", 1, "a");
+        q.offer("p", 2, "b");
+        q.offer("p", 3, "c");
+        assert_eq!(q.finished("p", 2), None);
+        assert_eq!(q.finished("p", 1), Some((3, "c")));
+    }
+
+    #[test]
+    fn panes_do_not_wait_on_each_other_and_a_closed_pane_clears() {
+        let mut q = SaveDialogs::<&str>::default();
+        assert_eq!(q.offer("p", 1, "a"), Some("a"));
+        // The same id in another pane (another request context) is its own dialog.
+        assert_eq!(q.offer("q", 1, "x"), Some("x"));
+        assert_eq!(q.offer("p", 2, "b"), None);
+        q.clear_pane("p");
+        assert_eq!(q.finished("p", 1), None);
+        assert_eq!(q.offer("p", 3, "c"), Some("c"));
+        assert_eq!(q.finished("q", 1), None);
+    }
+}
+
+#[cfg(test)]
 mod vault_hold_tests {
     use super::*;
 
@@ -668,8 +811,72 @@ mod vault_hold_tests {
     }
 }
 
+/// The pane's download commands from the frontend. Cancel is the strip's: the host holds the callback, so the
+/// page and the strip name only a pane and a download id, and an id the host no longer holds does nothing
+/// (spec §5). Start is the right-click menu's "Save link as…" / "Save image as…" (`start_download` checks the
+/// address, which is the page's text).
+pub fn run_command(state: &std::sync::Arc<crate::state::AppState>, cmd: &str, args: &serde_json::Value) {
+    let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
+    match cmd {
+        "browser_download_cancel" => {
+            let id = args.get("download_id").and_then(|v| v.as_u64()).and_then(|v| u32::try_from(v).ok());
+            if let Some(id) = id {
+                cancel_download(block_id, id);
+            }
+        }
+        "browser_download_start" => {
+            let url = args.get("url").and_then(|v| v.as_str()).unwrap_or("");
+            state.browser_panes.start_download(block_id, url, state);
+        }
+        _ => {}
+    }
+}
+
+/// The most a link's or image's address can be for "Save link as…" / "Save image as…" (a `data:` image can be long).
+const MAX_SAVE_URL_BYTES: usize = 2 * 1024 * 1024;
+
+/// Whether a page's link or image address may be saved from the right-click menu. The menu hands the host
+/// text the page chose, so only the schemes a page can already show a person go further: not `file:`,
+/// `javascript:`, `chrome:` or anything that opens another program.
+pub fn download_url_allowed(url: &str) -> bool {
+    if url.len() > MAX_SAVE_URL_BYTES || url.chars().any(char::is_control) {
+        return false;
+    }
+    let lower = url.get(..8).unwrap_or(url).to_ascii_lowercase();
+    ["http://", "https://", "blob:", "data:"].iter().any(|scheme| lower.starts_with(scheme))
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_the_schemes_a_page_can_show_a_person_can_be_saved_from_the_menu() {
+        for ok in ["http://example.com/a.pdf", "https://example.com/p.png?x=1", "HTTPS://EXAMPLE.COM/", "blob:https://example.com/0f1e", "data:image/png;base64,iVBOR"] {
+            assert!(download_url_allowed(ok), "{ok}");
+        }
+        for bad in [
+            "",
+            "file:///C:/Windows/win.ini",
+            "javascript:alert(1)",
+            "chrome://settings",
+            "view-source:https://example.com/",
+            "ftp://example.com/a",
+            "ms-msdt:/id",
+            "//example.com/a",
+            "https//example.com",
+            "https://example.com/a\nb",
+            "https://example.com/\u{0}",
+        ] {
+            assert!(!download_url_allowed(bad), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn an_address_past_the_cap_is_refused() {
+        let long = format!("data:image/png;base64,{}", "A".repeat(MAX_SAVE_URL_BYTES));
+        assert!(!download_url_allowed(&long));
+        assert!(download_url_allowed(&format!("https://example.com/{}", "a".repeat(2000))));
+    }
+
     use super::*;
 
     #[test]

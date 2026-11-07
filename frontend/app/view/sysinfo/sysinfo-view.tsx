@@ -15,7 +15,7 @@ import { SysinfoBar } from "./sysinfo-bar";
 import type { SysinfoViewModel } from "./sysinfo-model";
 import { MeasureTable, Overview } from "./sysinfo-overview";
 import { type AreaChoice, FOCUS_CHOICES } from "./sysinfo-overview-data";
-import { createAxisColumns, inTopRow, sharesPercentRange, showsTimeAxis, showsYLabels } from "./sysinfo-layout";
+import { inTopRow, sharesPercentRange, showsTimeAxis, showsYLabels } from "./sysinfo-layout";
 import { SingleLinePlot } from "./sysinfo-plot-lazy";
 import { SysinfoZoomContext } from "./sysinfo-zoom";
 import { AreaPlotType, SIMPLE_VIEWS } from "./sysinfo-types";
@@ -151,9 +151,8 @@ function SysinfoViewInner(props: SysinfoViewProps): JSX.Element {
     const columns = () => (cols2() ? 2 : 1);
     // Where each chart's text goes (sysinfo-layout.ts): time labels on the bottom
     // row only, y labels on the left column only when every chart shares 0–100%,
-    // one y-axis width per column so the plots line up.
+    // and the plots run to both edges, so they line up without a shared axis.
     const sameRange = createMemo(() => sharesPercentRange(yvals()));
-    const axisColumns = createAxisColumns(() => yvals().join(","));
 
     // The pane's zoom scales Sysinfo's text, not its charts (SysinfoZoomContext).
     const zoom = createMemo(() => readZoom(model.meta()));
@@ -234,8 +233,6 @@ function SysinfoViewInner(props: SysinfoViewProps): JSX.Element {
                                         timeAxis={showsTimeAxis(i(), yvals().length, columns())}
                                         yLabels={showsYLabels(i(), columns(), sameRange())}
                                         top={inTopRow(i(), columns())}
-                                        axisWidth={axisColumns.widthFor(i() % columns())}
-                                        onAxisWidth={(w) => axisColumns.report(i() % columns(), yval, w)}
                                     />
                                 )}
                             </For>

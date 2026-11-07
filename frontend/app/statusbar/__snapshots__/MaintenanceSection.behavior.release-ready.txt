@@ -1,0 +1,102 @@
+rpc AppUpdateStatus
+-- ready: folder and installer
+<div>
+  <div class="instance-panel-section-title">
+    "Maintenance"
+    <span class="maintenance-badge">
+      "↑ ready"
+  <div class="maintenance-update-row">
+    <span class="maintenance-icon maintenance-icon--update">
+      "↑"
+    <span class="maintenance-row-text" data-hover-tip="C:/AgentMux/next" aria-description="C:/AgentMux/next">
+      "v"
+      "0.59.27"
+      "is ready"
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+      "Show folder"
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+      "Show installer"
+    <button type="button" class="ui-button ui-tone-accent ui-density-compact maintenance-btn maintenance-btn--primary">
+      "Upgrade & restart"
+  <div class="maintenance-update-row">
+    <span class="maintenance-row-text maintenance-row-text--dim">
+      "Checked <time>"
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+      "Check again"
+host revealInFileExplorer C:/AgentMux/next
+host revealInFileExplorer C:/Downloads/setup.exe
+host revealInFileExplorer C:/AgentMux/next
+-- after a failed reveal
+<div>
+  <div class="instance-panel-section-title">
+    "Maintenance"
+    <span class="maintenance-badge">
+      "↑ ready"
+  <div class="maintenance-update-row">
+    <span class="maintenance-icon maintenance-icon--update">
+      "↑"
+    <span class="maintenance-row-text" data-hover-tip="C:/AgentMux/next" aria-description="C:/AgentMux/next">
+      "v"
+      "0.59.27"
+      "is ready"
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+      "Show folder"
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+      "Show installer"
+    <button type="button" class="ui-button ui-tone-accent ui-density-compact maintenance-btn maintenance-btn--primary">
+      "Upgrade & restart"
+  <div class="maintenance-row-text maintenance-row-text--error">
+    "Couldn't open C:/AgentMux/next: no such folder"
+  <div class="maintenance-update-row">
+    <span class="maintenance-row-text maintenance-row-text--dim">
+      "Checked <time>"
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+      "Check again"
+host appUpdate restart now=false
+rpc AppUpdateStatus
+-- ready: an AppImage
+<div>
+  <div class="instance-panel-section-title">
+    "Maintenance"
+    <span class="maintenance-badge">
+      "↑ ready"
+  <div class="maintenance-update-row">
+    <span class="maintenance-icon maintenance-icon--update">
+      "↑"
+    <span class="maintenance-row-text" data-hover-tip="/home/u/AgentMux.AppImage" aria-description="/home/u/AgentMux.AppImage">
+      "v"
+      "0.59.27"
+      "is ready"
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+      "Show file"
+    <button type="button" class="ui-button ui-tone-accent ui-density-compact maintenance-btn maintenance-btn--primary">
+      "Upgrade & restart"
+  <div class="maintenance-update-row">
+    <span class="maintenance-row-text maintenance-row-text--dim">
+      "Checked <time>"
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+      "Check again"
+-- ready with an error
+<div>
+  <div class="instance-panel-section-title">
+    "Maintenance"
+    <span class="maintenance-badge">
+      "↑ ready"
+  <div class="maintenance-update-row">
+    <span class="maintenance-icon maintenance-icon--update">
+      "↑"
+    <span class="maintenance-row-text" data-hover-tip="C:/AgentMux/next" aria-description="C:/AgentMux/next">
+      "v"
+      "0.59.27"
+      "is ready"
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+      "Show folder"
+    <button type="button" class="ui-button ui-tone-accent ui-density-compact maintenance-btn maintenance-btn--primary">
+      "Upgrade & restart"
+  <div class="maintenance-row-text maintenance-row-text--error">
+    "could not verify one file"
+  <div class="maintenance-update-row">
+    <span class="maintenance-row-text maintenance-row-text--dim">
+      "Checked <time>"
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+      "Check again"

@@ -1,0 +1,4 @@
+focused, this pane: {"blockId":"\"blk-1\"","busy":"false","looking":"true"}
+window blurred: {"blockId":"\"blk-1\"","busy":"true","looking":"false"}
+another pane focused: {"blockId":"\"blk-1\"","busy":"false","looking":"false"}
+no pane focused: {"blockId":"\"blk-1\"","busy":"true","looking":"false"}

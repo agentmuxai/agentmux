@@ -12,10 +12,10 @@ use std::path::Path;
 use super::ordered::Ordered;
 use super::{jekt_file, Ctx, Filter};
 use crate::backend::audit_activity::{day_files, ActivityRow, DayFile};
-use crate::backend::rpc_types::{AuditEntry, AuditHistoryLink, AuditLinks, AuditPaneLink};
+use crate::backend::rpc_types::{AuditEntry, AuditHistoryLink, AuditLinks, AuditPaneLink, AuditProvenance};
 
 /// The start of the day after `day`, in Unix ms: a file whose day ended before the window started holds nothing of it.
-fn day_end_ms(day: &str) -> u64 {
+pub(super) fn day_end_ms(day: &str) -> u64 {
     chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d")
         .ok()
         .and_then(|d| d.succ_opt())
@@ -24,7 +24,7 @@ fn day_end_ms(day: &str) -> u64 {
 }
 
 /// The Audit's entry for `row`, which is the line starting at byte `at` of the file for `day` in the folder tagged `tag`.
-fn entry_of(tag: char, day: &str, at: u64, row: &ActivityRow, ctx: &Ctx) -> AuditEntry {
+pub(super) fn entry_of(tag: char, day: &str, at: u64, row: &ActivityRow, ctx: &Ctx) -> AuditEntry {
     let slug = (ctx.slug_of_uid)(&row.agent).unwrap_or_else(|| row.agent.clone());
     AuditEntry {
         id: format!("a{tag}{day}:{at:016x}"),
@@ -47,7 +47,8 @@ fn entry_of(tag: char, day: &str, at: u64, row: &ActivityRow, ctx: &Ctx) -> Audi
             }),
             pane: Some(row.block.as_str()).filter(|b| !b.is_empty() && (ctx.block_exists)(b)).map(|b| AuditPaneLink { block_id: b.to_string() }),
         },
-        provenance: None,
+        // Where the row was written, which a channel scope and the Audit's sections read.
+        provenance: row.channel.as_ref().map(|c| AuditProvenance { channel: Some(c.clone()), ..Default::default() }),
     }
 }
 

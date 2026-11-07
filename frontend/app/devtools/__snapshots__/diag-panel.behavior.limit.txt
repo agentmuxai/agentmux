@@ -1,0 +1,9 @@
+useTick 1000
+keyCommands.set dev:diagnostics
+toggle shortcut
+shortcutFor dev:diagnostics
+handler returned true
+rows: 80
+first: 906ms agolayoutk94C94src:keyboard1
+last: 985ms agolayoutk15C15src:keyboard0
+total shown in the header: 95

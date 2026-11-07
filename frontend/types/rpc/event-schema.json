@@ -323,6 +323,13 @@
     }
   },
   {
+    "event": "audit:changed",
+    "payloadTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
     "event": "background-task-updated",
     "payloadTs": {
       "imports": [
@@ -529,6 +536,13 @@
         "GoogleNoticeEvent"
       ],
       "name": "GoogleNoticeEvent"
+    }
+  },
+  {
+    "event": "history:sessions:changed",
+    "payloadTs": {
+      "imports": [],
+      "name": "null"
     }
   },
   {

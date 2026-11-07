@@ -4236,6 +4236,25 @@
     }
   },
   {
+    "command": "install.uninstall",
+    "request": "agentmux_srv::server::uninstall_handlers::UninstallReq",
+    "requestName": "UninstallReq",
+    "requestTs": {
+      "imports": [
+        "UninstallReq"
+      ],
+      "name": "UninstallReq"
+    },
+    "response": "agentmux_srv::server::uninstall_handlers::UninstallResult",
+    "responseName": "UninstallResult",
+    "responseTs": {
+      "imports": [
+        "UninstallResult"
+      ],
+      "name": "UninstallResult"
+    }
+  },
+  {
     "command": "installtool",
     "request": "agentmux_srv::backend::rpc_types::misc::CommandInstallToolData",
     "requestName": "CommandInstallToolData",

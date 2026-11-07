@@ -1,0 +1,58 @@
+watchAmbient 5000
+-- summary only
+<div>
+  <div data-stand="AnchoredPopover" data-placement="top-end" data-class="token-usage-breakdown" data-role="dialog" data-label="Token usage breakdown" data-style="{\"width\":\"320px\"}">
+    <span data-cb="onDismiss">
+      "dismiss"
+    <div class="token-usage-breakdown-header">
+      <span class="token-usage-breakdown-title">
+        "Token Usage"
+      <span class="token-usage-breakdown-subtitle">
+        "since"
+        "T"
+    <div class="token-usage-breakdown-rows">
+      <div class="token-usage-breakdown-ambient">
+        <div class="token-usage-breakdown-row">
+          <span class="token-usage-breakdown-row-name">
+            "AgentMux internal"
+        <div class="token-usage-breakdown-ambient-detail">
+          <div data-stand="AmbientPurposes">
+      <div class="token-usage-breakdown-row token-usage-breakdown-total">
+        <span class="token-usage-breakdown-row-name">
+          "Total"
+        <span class="token-usage-breakdown-row-counts">
+          <span class="token-usage-indicator-arrow">
+            "↑"
+          "0"
+          <span class="token-usage-indicator-arrow">
+            "↓"
+          "0"
+    <div class="token-usage-breakdown-footer">
+      <button type="button" class="ui-button ui-tone-danger ui-density-compact" disabled="">
+        "Reset counter"
+  <div data-stand="ConfirmModal" data-open="false" data-title="Reset token counter?" data-description="This clears the running total for the current session. Per-pane Worked stats stay unchanged." data-confirm-label="Reset" data-destructive="true">
+    <span data-cb="onConfirm">
+      "confirm"
+    <span data-cb="onCancel">
+      "cancel"
+-- summary gone
+<div>
+  <div data-stand="AnchoredPopover" data-placement="top-end" data-class="token-usage-breakdown" data-role="dialog" data-label="Token usage breakdown" data-style="{\"width\":\"320px\"}">
+    <span data-cb="onDismiss">
+      "dismiss"
+    <div class="token-usage-breakdown-header">
+      <span class="token-usage-breakdown-title">
+        "Token Usage"
+      <span class="token-usage-breakdown-subtitle">
+        "since"
+        "T"
+    <div class="token-usage-breakdown-empty">
+      "No turns completed yet this session."
+    <div class="token-usage-breakdown-footer">
+      <button type="button" class="ui-button ui-tone-danger ui-density-compact" disabled="">
+        "Reset counter"
+  <div data-stand="ConfirmModal" data-open="false" data-title="Reset token counter?" data-description="This clears the running total for the current session. Per-pane Worked stats stay unchanged." data-confirm-label="Reset" data-destructive="true">
+    <span data-cb="onConfirm">
+      "confirm"
+    <span data-cb="onCancel">
+      "cancel"

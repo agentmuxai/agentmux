@@ -1,0 +1,19 @@
+onMuxEvent sysinfo local
+sysinfo 70 cores
+cols 14
+ArrowRight: prevented=true readout=Core 1 — 1% tab stop=1 focus: core 1
+ArrowRight: prevented=true readout=Core 2 — 3% tab stop=2 focus: core 2
+ArrowDown: prevented=true readout=Core 16 — 23% tab stop=16 focus: core 16
+ArrowLeft: prevented=true readout=Core 15 — 22% tab stop=15 focus: core 15
+ArrowUp: prevented=true readout=Core 1 — 1% tab stop=1 focus: core 1
+ArrowUp: prevented=true readout=Core 0 — 0% tab stop=0 focus: core 0
+ArrowLeft: prevented=true readout=Core 0 — 0% tab stop=0 focus: core 0
+End: prevented=true readout=Core 69 — 100% tab stop=69 focus: core 69
+ArrowRight: prevented=true readout=Core 69 — 100% tab stop=69 focus: core 69
+ArrowDown: prevented=true readout=Core 69 — 100% tab stop=69 focus: core 69
+Home: prevented=true readout=Core 0 — 0% tab stop=0 focus: core 0
+ArrowLeft: prevented=true readout=Core 0 — 0% tab stop=0 focus: core 0
+ArrowUp: prevented=true readout=Core 0 — 0% tab stop=0 focus: core 0
+a: prevented=false readout=Core 0 — 0% tab stop=0 focus: core 0
+Tab: prevented=false readout=Core 0 — 0% tab stop=0 focus: core 0
+Enter: prevented=false readout=Core 0 — 0% tab stop=0 focus: core 0

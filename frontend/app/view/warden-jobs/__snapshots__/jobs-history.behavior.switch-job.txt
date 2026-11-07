@@ -1,0 +1,171 @@
+loadRuns j1 before=- limit=50
+dryRun j1
+-- j1 with confirm and dry run
+<div>
+  <section class="warden-jobs-history" aria-label="Runs of Nightly build">
+    <header class="warden-jobs-history-head">
+      <div class="warden-jobs-history-title">
+        <strong>
+          "Nightly build"
+        <span class="ui-pill ui-pill--ok">
+          "Active"
+        <span class="warden-manager-dim">
+          "by"
+          "Builder"
+        <span class="warden-manager-dim">
+          "→"
+          "Builder"
+      <div class="warden-jobs-actions">
+        <button title="Run it once now" type="button" class="ui-button ui-tone-neutral ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-play">
+          "Run now"
+        <button type="button" class="ui-button ui-tone-neutral ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-pause">
+          "Pause"
+        <button type="button" class="ui-button ui-tone-danger ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-trash">
+          "Delete it, keep its runs"
+        <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
+          "Keep"
+        <button type="button" class="ui-button ui-tone-neutral ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-pen">
+          "Edit"
+        <button type="button" class="ui-button ui-tone-neutral ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-clone">
+          "Clone"
+        <button title="What it would do, starting nothing" type="button" class="ui-button ui-tone-neutral ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-vial">
+          "Dry run"
+        <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-xmark">
+          "Close"
+    <div data-stand="JobDryRun" data-vault="[{\"id\":\"v-1\",\"name\":\"Repo token\"}]">
+      "Weekly report"
+      "|"
+      "ok"
+      "|"
+      "Builder"
+      "|"
+      "zz"
+    <table class="warden-manager-table warden-jobs-runs">
+      <thead>
+        <tr>
+          <th>
+            "When"
+          <th>
+            "Run"
+          <th>
+            "Took"
+          <th>
+            "Summary"
+          <th>
+            "Cost"
+          <th>
+            "Account"
+          <th>
+            "Links"
+      <tbody>
+        <tr>
+          <td data-hover-tip="L863940000" aria-description="L863940000">
+            "1m ago"
+          <td>
+            <span class="ui-pill ui-pill--ok" title="ok">
+              "ok"
+          <td class="warden-jobs-num">
+            "0s"
+          <td class="warden-jobs-summary">
+          <td class="warden-jobs-num">
+          <td class="warden-manager-dim">
+          <td class="warden-jobs-links">
+        <tr>
+          <td data-hover-tip="L863880000" aria-description="L863880000">
+            "2m ago"
+          <td>
+            <span class="ui-pill ui-pill--ok" title="ok">
+              "ok"
+          <td class="warden-jobs-num">
+            "0s"
+          <td class="warden-jobs-summary">
+          <td class="warden-jobs-num">
+          <td class="warden-manager-dim">
+          <td class="warden-jobs-links">
+loadRuns j2 before=- limit=50
+-- j2 loading
+<div>
+  <section class="warden-jobs-history" aria-label="Runs of Other job">
+    <header class="warden-jobs-history-head">
+      <div class="warden-jobs-history-title">
+        <strong>
+          "Other job"
+        <span class="ui-pill ui-pill--ok">
+          "Active"
+        <span class="warden-manager-dim">
+          "by"
+          "Builder"
+        <span class="warden-manager-dim">
+          "→"
+          "Builder"
+      <div class="warden-jobs-actions">
+        <button title="Run it once now" type="button" class="ui-button ui-tone-neutral ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-play">
+          "Run now"
+        <button type="button" class="ui-button ui-tone-neutral ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-pause">
+          "Pause"
+        <button type="button" class="ui-button ui-tone-danger ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-trash">
+          "Delete"
+        <button type="button" class="ui-button ui-tone-neutral ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-pen">
+          "Edit"
+        <button type="button" class="ui-button ui-tone-neutral ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-clone">
+          "Clone"
+        <button title="What it would do, starting nothing" type="button" class="ui-button ui-tone-neutral ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-vial">
+          "Dry run"
+        <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-xmark">
+          "Close"
+    <div class="warden-section-stub">
+      "No runs yet."
+loadRuns j3 before=- limit=50
+-- j3 after the stale j2 answer
+<div>
+  <section class="warden-jobs-history" aria-label="Runs of Third">
+    <header class="warden-jobs-history-head">
+      <div class="warden-jobs-history-title">
+        <strong>
+          "Third"
+        <span class="ui-pill ui-pill--ok">
+          "Active"
+        <span class="warden-manager-dim">
+          "by"
+          "Builder"
+        <span class="warden-manager-dim">
+          "→"
+          "Builder"
+      <div class="warden-jobs-actions">
+        <button title="Run it once now" type="button" class="ui-button ui-tone-neutral ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-play">
+          "Run now"
+        <button type="button" class="ui-button ui-tone-neutral ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-pause">
+          "Pause"
+        <button type="button" class="ui-button ui-tone-danger ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-trash">
+          "Delete"
+        <button type="button" class="ui-button ui-tone-neutral ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-pen">
+          "Edit"
+        <button type="button" class="ui-button ui-tone-neutral ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-clone">
+          "Clone"
+        <button title="What it would do, starting nothing" type="button" class="ui-button ui-tone-neutral ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-vial">
+          "Dry run"
+        <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
+          <i aria-hidden="true" class="fa-solid fa-xmark">
+          "Close"
+    <div class="warden-section-stub">
+      "No runs yet."

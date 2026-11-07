@@ -14,6 +14,21 @@ use super::*;
 const REQUEST_WAIT_SECS: u64 = 300;
 const REQUEST_WAIT_MAX_SECS: u64 = 600;
 
+/// `history`: an entry's history, for an entry in a Vault this agent may use. No value in it.
+async fn history(arguments: &Value, cx: &ToolCtx<'_>, base: &str) -> Result<String> {
+    let id = arguments.get("id").and_then(Value::as_str).unwrap_or("").trim();
+    if id.is_empty() {
+        anyhow::bail!("Vault history needs an id: the entry whose history to read (list shows them)");
+    }
+    let body = json!({
+        "id": id,
+        "limit": arguments.get("limit").and_then(Value::as_i64),
+        "auth": crate::identity::sign_ui_automation_auth().map_err(|e| anyhow::anyhow!("Vault history needs this agent's signed identity: {e}"))?,
+    });
+    let result = crate::srv_http::srv_post_json(cx.client, &format!("{base}/api/v1/vault/history"), cx.auth_key, &body, "Vault history").await?;
+    Ok(serde_json::to_string_pretty(&result).unwrap_or_default())
+}
+
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     match name {
         "Vault" => {
@@ -101,7 +116,8 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                     let result: Value = serde_json::from_str(&text).unwrap_or_default();
                     Ok(serde_json::to_string_pretty(&result).unwrap_or_default())
                 }
-                other => anyhow::bail!("Vault: unknown action {other:?}; use list, request, generate or rotate"),
+                "history" => history(arguments, cx, base).await,
+                other => anyhow::bail!("Vault: unknown action {other:?}; use list, request, generate, rotate or history"),
             }
         }
         _ => Err(not_in_family()),
@@ -116,7 +132,7 @@ mod tests {
     fn the_schema_lists_every_action_and_every_kind_srv_knows() {
         let schema: Value = serde_json::from_str(crate::tool_schemas::VAULT_TOOL).unwrap();
         let actions = &schema["inputSchema"]["properties"]["action"]["enum"];
-        assert_eq!(actions, &json!(["list", "request", "generate", "rotate"]));
+        assert_eq!(actions, &json!(["list", "request", "generate", "rotate", "history"]));
         // srv's catalog (backend/vault/kinds.rs) is the source; this list
         // must name the same kinds.
         let srv = include_str!("../../../srv/src/backend/vault/kinds.rs");

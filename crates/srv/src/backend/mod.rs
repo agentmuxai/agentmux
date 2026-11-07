@@ -40,6 +40,7 @@ pub mod job_templates;
 pub mod vault;
 pub mod build_cache;
 pub mod build_cache_service;
+pub mod disk_notice;
 pub mod old_versions;
 pub mod old_versions_service;
 pub mod bundle_export;
@@ -72,8 +73,11 @@ pub mod agent_runtime;
 pub mod agent_context_usage;
 pub mod agent_api_retry;
 pub mod providers;
+pub mod cli_download;
 pub mod cli_install;
 pub mod cli_prune;
+pub mod cli_uninstall;
+pub mod cli_uv;
 pub mod cli_notice;
 pub mod startup_files;
 pub mod confined_read;
@@ -112,6 +116,7 @@ pub mod rpc_types;
 pub mod schema;
 pub mod service;
 pub mod session_archive;
+pub mod history_changed;
 pub mod history_registry;
 pub mod history_usage;
 pub mod session_backfill;
@@ -121,6 +126,7 @@ pub mod continuity;
 pub mod continuity_relocate;
 pub mod continuity_segments;
 pub mod audit_activity;
+pub mod audit_live;
 pub mod audit_query;
 pub mod memory;
 pub mod agent_bundle_sidecar;
@@ -128,7 +134,9 @@ pub mod continuity_state;
 /// Skills that ship with AgentMux, seeded into the catalog once.
 pub mod builtin_skills;
 /// Reading a skill from a folder, a git repository or a URL, for import.
+pub mod computer_use_skill;
 pub mod skill_import;
+pub mod skill_slugs;
 /// What of Personal Memory fits in a delivery, and what the agent is told about the rest.
 pub mod shellexec;
 pub mod transcript;
@@ -193,6 +201,8 @@ pub mod kanban;
 pub mod task_media;
 /// The wake at an out-of-quota agent's reset (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §7).
 pub mod limit_wake;
+/// Model routes and the gateway that carries an agent's model traffic (SPEC_AGENT_MODEL_ROUTES_ANY_MODEL_SPAWN_AND_SWITCH_2026_11_06.md).
+pub mod model_gateway;
 /// Which model a Claude agent's sub-agents run on (SPEC_SUBAGENT_MODELS_2026_10_25.md).
 pub mod subagent_model;
 /// An agent accepting or sending back a task in Review.

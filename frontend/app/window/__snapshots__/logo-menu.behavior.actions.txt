@@ -1,0 +1,21 @@
+shortcutFor tab:new
+hostHas multiWindow
+shortcutFor window:new
+hostHas windowTransparency
+shortcutFor view:command-palette
+devModeOn
+FlyoutMenu
+refreshWorkspaceList
+press 0 New Tab
+createTab
+press 2 New Window
+openNewWindowFromHere
+press 8 Command Palette
+openModal CommandPaletteModal
+press 9 DevTools
+toggleDevtools
+press 10 Online Docs
+openExternal https://docs.agentmux.ai
+press 12 Exit
+fireAndForget
+requestCloseWindow

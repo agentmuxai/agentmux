@@ -4,6 +4,21 @@
 use super::*;
 
 #[test]
+fn only_a_provider_listed_in_cli_usepath_uses_the_copy_on_path() {
+    let setting = |value: serde_json::Value| std::collections::HashMap::from([(SETTING_USE_PATH.to_string(), value)]);
+    let listed = setting(serde_json::json!(["goose", "claude"]));
+    assert!(path_listed(&listed, "goose") && path_listed(&listed, "claude"));
+    assert!(!path_listed(&listed, "codex"));
+    // Absent, empty or not a list of ids: AgentMux's copy for everyone.
+    assert!(!path_listed(&std::collections::HashMap::new(), "goose"));
+    assert!(!path_listed(&setting(serde_json::json!([])), "goose"));
+    assert!(!path_listed(&setting(serde_json::json!("goose")), "goose"));
+    assert!(!path_listed(&setting(serde_json::json!([1, null])), "goose"));
+    // No settings attached (a unit test, early boot): nobody uses PATH.
+    assert!(!uses_path_cli("goose"));
+}
+
+#[test]
 fn canonical_ids_resolve() {
     assert!(get_provider("claude").is_some());
     assert!(get_provider("codex").is_some());
@@ -32,9 +47,9 @@ fn antigravity_drives_the_real_agy_cli() {
     for id in ["claude", "codex", "gemini", "qwen", "kimi", "openclaw", "pi", "muxcode", "copilot"] {
         assert_eq!(get_provider(id).unwrap().prompt_arg_flag(), None, "{id}");
     }
-    // Installed by Google's own script, not npm.
+    // Downloaded by AgentMux (cli_download::SPECS), not npm.
     assert!(p.npm_package.is_empty());
-    assert!(p.pinned_version.is_empty());
+    assert_eq!(p.pinned_version, "1.5.2");
     assert_eq!(p.supported_vendors, &["google"]);
     assert!(p.base_url_env_var.is_none());
 }

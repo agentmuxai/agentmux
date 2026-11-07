@@ -1,0 +1,138 @@
+loadStoredSort
+useAgentDefinitions
+usePickerReadiness blk-1
+useInstanceOpenDefinitions
+useInstallStates
+createPrereqs
+createTemplates
+createPickerLaunch blk-1
+-- both notices
+<div>
+  <div class="agent-view" style="zoom: 1;">
+    <div class="agent-picker">
+      <div data-stand="FilterBar" data-props="{\"onClear\":\"<fn>\",\"onInput\":\"<fn>\",\"onSortChange\":\"<fn>\",\"sortBy\":\"\\\"recent\\\"\",\"value\":\"\\\"\\\"\"}">
+        <span data-cb="onInput">
+          "onInput"
+        <span data-cb="onClear">
+          "onClear"
+        <span data-cb="onSortChange">
+          "onSortChange"
+      <div data-stand="MyAgentsList" data-props="{\"nameFilter\":\"\\\"\\\"\",\"onAttach\":\"<fn>\",\"onFirstLoad\":\"<fn>\",\"onFork\":\"<fn>\",\"onReattach\":\"<fn>\",\"onSwitchToExisting\":\"<fn>\",\"onViewHistory\":\"<fn>\",\"openDefinitions\":\"{\\\"c1\\\":\\\"blk-x\\\"}\",\"openLocations\":\"{\\\"c1\\\":{\\\"tab\\\":\\\"t1\\\"}}\",\"paneBlockId\":\"\\\"blk-1\\\"\",\"resolveOpenDefinitions\":\"<fn>\",\"runtimeOf\":\"<fn>\",\"sortBy\":\"\\\"recent\\\"\"}">
+        <span data-cb="onReattach">
+          "onReattach"
+        <span data-cb="onAttach">
+          "onAttach"
+        <span data-cb="onFork">
+          "onFork"
+        <span data-cb="onSwitchToExisting">
+          "onSwitchToExisting"
+        <span data-cb="onFirstLoad">
+          "onFirstLoad"
+        <span data-cb="onViewHistory">
+          "onViewHistory"
+      <span data-stand="runtimeOf">
+        ""runtime-a1""
+      <div class="agent-picker-templates-header" data-testid="agent-templates-header">
+        <span>
+          "New Agent"
+      <p class="agent-picker-templates-hint" data-testid="agent-templates-hint">
+        "Each card is a"
+        <strong>
+          "harness"
+        "(the CLI that runs the agent, e.g. Claude Code, Codex) — you'll pick which"
+        <strong>
+          "model"
+        "it uses next."
+      <p class="agent-picker-templates-hint" data-testid="agent-templates-managed-note">
+        "AgentMux installs and runs its own copy of each agent CLI, kept apart from any you installed yourself (to run yours instead, switch on "Use the CLI on my PATH" for it in Toolchain), and keeps each agent's login and settings in its own folders. This isolates the tools, not what an agent can do on your computer."
+      <div data-stand="AgentCardFilters" data-props="{\"cards\":\"[\\\"fc\\\"]\",\"disabled\":\"false\",\"installedKnown\":\"true\",\"onChange\":\"<fn>\",\"selected\":\"[\\\"f1\\\"]\",\"shown\":\"1\"}">
+        <span data-cb="onChange">
+          "onChange"
+      <div data-testid="agent-templates-list">
+        <div data-stand="CardGrid" data-class="agent-picker-list" data-label="New agent" data-min="240" data-selected="null">
+          <span data-cb="onClose">
+            "close"
+          <div data-key="c1">
+            <div data-stand="AgentCard" data-props="{\"agent\":\"c1\",\"launching\":false,\"disabled\":false,\"installed\":true,\"installing\":false,\"expanded\":false,\"drift\":\"drift\",\"onLaunch\":\"<fn>\",\"onContextMenu\":\"<fn>\",\"hasCurrentSession\":false,\"defaultFocus\":true,\"blockId\":\"blk-1\"}">
+              <span data-cb="onLaunch">
+                "launch"
+              <span data-cb="onContextMenu">
+                "menu"
+      <div data-stand="HiddenTemplatesSection" data-props="{}">
+      <div class="agent-nodejs-notice">
+        <div class="nodejs-notice-icon">
+          <i class="fa-solid fa-circle-exclamation">
+        <div class="nodejs-notice-content">
+          <div class="nodejs-notice-title">
+            "Launch aborted"
+          <div class="nodejs-notice-text">
+            "The row could not be recorded"
+        <div data-stand="CopyErrorButton" data-variant="icon" data-class="agent-nodejs-notice-copy">
+          "Launch aborted|The row could not be recorded"
+      <div class="agent-nodejs-notice">
+        <div class="nodejs-notice-icon">
+          <i class="fa-solid fa-circle-exclamation">
+        <div class="nodejs-notice-content">
+          <div class="nodejs-notice-title">
+            "Node.js Required"
+          <div class="nodejs-notice-text">
+            "Node 20 is needed"
+          <div class="nodejs-notice-hint">
+            "After installing, restart AgentMux and try again."
+    <div data-stand="PaneLoadingCover">
+      "ready"
+-- none
+<div>
+  <div class="agent-view" style="zoom: 1;">
+    <div class="agent-picker">
+      <div data-stand="FilterBar" data-props="{\"onClear\":\"<fn>\",\"onInput\":\"<fn>\",\"onSortChange\":\"<fn>\",\"sortBy\":\"\\\"recent\\\"\",\"value\":\"\\\"\\\"\"}">
+        <span data-cb="onInput">
+          "onInput"
+        <span data-cb="onClear">
+          "onClear"
+        <span data-cb="onSortChange">
+          "onSortChange"
+      <div data-stand="MyAgentsList" data-props="{\"nameFilter\":\"\\\"\\\"\",\"onAttach\":\"<fn>\",\"onFirstLoad\":\"<fn>\",\"onFork\":\"<fn>\",\"onReattach\":\"<fn>\",\"onSwitchToExisting\":\"<fn>\",\"onViewHistory\":\"<fn>\",\"openDefinitions\":\"{\\\"c1\\\":\\\"blk-x\\\"}\",\"openLocations\":\"{\\\"c1\\\":{\\\"tab\\\":\\\"t1\\\"}}\",\"paneBlockId\":\"\\\"blk-1\\\"\",\"resolveOpenDefinitions\":\"<fn>\",\"runtimeOf\":\"<fn>\",\"sortBy\":\"\\\"recent\\\"\"}">
+        <span data-cb="onReattach">
+          "onReattach"
+        <span data-cb="onAttach">
+          "onAttach"
+        <span data-cb="onFork">
+          "onFork"
+        <span data-cb="onSwitchToExisting">
+          "onSwitchToExisting"
+        <span data-cb="onFirstLoad">
+          "onFirstLoad"
+        <span data-cb="onViewHistory">
+          "onViewHistory"
+      <span data-stand="runtimeOf">
+        ""runtime-a1""
+      <div class="agent-picker-templates-header" data-testid="agent-templates-header">
+        <span>
+          "New Agent"
+      <p class="agent-picker-templates-hint" data-testid="agent-templates-hint">
+        "Each card is a"
+        <strong>
+          "harness"
+        "(the CLI that runs the agent, e.g. Claude Code, Codex) — you'll pick which"
+        <strong>
+          "model"
+        "it uses next."
+      <p class="agent-picker-templates-hint" data-testid="agent-templates-managed-note">
+        "AgentMux installs and runs its own copy of each agent CLI, kept apart from any you installed yourself (to run yours instead, switch on "Use the CLI on my PATH" for it in Toolchain), and keeps each agent's login and settings in its own folders. This isolates the tools, not what an agent can do on your computer."
+      <div data-stand="AgentCardFilters" data-props="{\"cards\":\"[\\\"fc\\\"]\",\"disabled\":\"false\",\"installedKnown\":\"true\",\"onChange\":\"<fn>\",\"selected\":\"[\\\"f1\\\"]\",\"shown\":\"1\"}">
+        <span data-cb="onChange">
+          "onChange"
+      <div data-testid="agent-templates-list">
+        <div data-stand="CardGrid" data-class="agent-picker-list" data-label="New agent" data-min="240" data-selected="null">
+          <span data-cb="onClose">
+            "close"
+          <div data-key="c1">
+            <div data-stand="AgentCard" data-props="{\"agent\":\"c1\",\"launching\":false,\"disabled\":false,\"installed\":true,\"installing\":false,\"expanded\":false,\"drift\":\"drift\",\"onLaunch\":\"<fn>\",\"onContextMenu\":\"<fn>\",\"hasCurrentSession\":false,\"defaultFocus\":true,\"blockId\":\"blk-1\"}">
+              <span data-cb="onLaunch">
+                "launch"
+              <span data-cb="onContextMenu">
+                "menu"
+      <div data-stand="HiddenTemplatesSection" data-props="{}">
+    <div data-stand="PaneLoadingCover">
+      "ready"

@@ -20,7 +20,7 @@ import { remoteSettingsMenuItems } from "@/app/view/remotes/open-remotes";
 import { BlockStatsBadge, statsBadgeShown } from "@/element/blockstats";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { ClosingLabel } from "./closing-label";
-import { minimizeToHeader, useBlockConnection, useBodyContextMenu } from "./blockframe-hooks";
+import { minimizeToHeader, useBlockConnection, useBodyContextMenu, useHeaderFit } from "./blockframe-hooks";
 import { DeclIconButton } from "@/app/element/ui/DeclIconButton";
 import { NodeModel } from "@/layout/index";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
@@ -417,13 +417,13 @@ function EndIcons(props: {
                 <For each={endIconButtons()}>
                     {(button) =>
                         button.elemtype === "toggleiconbutton" ? (
-                            <DeclIconButton decl={button} />
+                            <DeclIconButton decl={button} className="block-frame-end-extra" />
                         ) : (
-                            <DeclIconButton decl={button} />
+                            <DeclIconButton decl={button} className="block-frame-end-extra" />
                         )
                     }
                 </For>
-                <div class="block-frame-btn-separator" aria-hidden="true" />
+                <div class="block-frame-btn-separator block-frame-end-extra" aria-hidden="true" />
             </Show>
             {/* No header mic on any pane. Agent panes put their mic beside the
                 composer (AgentFooter.tsx); terminals had one here, removed
@@ -557,7 +557,7 @@ function BlockFrame_Header(
     // header, instead.
     const [headerHovering, setHeaderHovering] = createSignal(false);
     let headerRef: HTMLDivElement | undefined;
-
+    useHeaderFit(() => headerRef);
     const viewName = createMemo(() => {
         const bd = blockData();
         if (bd?.meta?.["frame:title"]) {

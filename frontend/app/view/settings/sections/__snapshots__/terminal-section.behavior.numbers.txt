@@ -1,0 +1,9 @@
+set term:fontsize 20
+set term:scrollback 12000
+set term:transparency 0.7
+set term:scrollsensitivity 3.3
+set term:predictiveecho:thresholdms 90
+set term:agentmaxruntimehours 2.5
+set term:agentidletimeoutmins 30
+set term:fontfamily "Menlo"
+set term:fontfamily ""

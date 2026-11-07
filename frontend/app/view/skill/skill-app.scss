@@ -1,0 +1,61 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Memory → Skills: the App skill detail.
+.skill-app {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    margin: var(--space-2) 0;
+    padding: var(--space-2);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+}
+
+// The filter row lines up with the action row above it and the cards below.
+.skill-app-filter {
+    padding: var(--space-2) var(--space-2) 0;
+}
+
+.skill-app-title {
+    margin: 0;
+    font-size: var(--text-sm);
+}
+
+.skill-app-line {
+    margin: 0;
+    font-size: var(--text-xs);
+    color: var(--main-text-color);
+}
+
+.skill-app-list {
+    margin: 0;
+    padding-left: var(--space-3);
+    font-size: var(--text-xs);
+    color: var(--main-text-color);
+
+    li {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: var(--space-1);
+    }
+}
+
+.skill-app-muted {
+    color: var(--secondary-text-color);
+}
+
+.skill-app-warn {
+    color: var(--warning-text-color);
+}
+
+// Routes are in order, best first: show the numbers.
+// A flex item draws no marker, so the numbered list keeps its items as list items.
+.skill-app-list--ordered {
+    list-style: decimal;
+
+    li {
+        display: list-item;
+    }
+}

@@ -42,8 +42,10 @@ export function useTurnStreams(p: { found: PaneFoundation; model: AgentViewModel
         },
         // An ACTIVE turn proves the CLI is alive and running: clear a "Retry Login" notice and an auth failure
         // row left by the mount-time launch flow, which would outlive the failure and fast-fail every send.
-        // An idle heartbeat proves nothing about the credential, so only an active turn counts.
-        onActiveTurnConfirmed: () => late.declareAuthHealthy(),
+        // An idle heartbeat proves nothing about the credential, so only an active turn counts. A turn opens
+        // when the message is sent, before any model call: so for a provider with no sign-in check (Muse) it
+        // clears the notice but does not turn the strip's tag to "Logged in" while the pane says it isn't.
+        onActiveTurnConfirmed: () => late.declareAuthHealthy((found.provider()?.authCheckCommand?.length ?? 0) > 0),
     });
 
     // Re-poll turn state on refocus, to recover a missed turn-end push (hooks/useTurnReconciliation.ts).

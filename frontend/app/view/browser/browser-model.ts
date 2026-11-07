@@ -736,7 +736,7 @@ export class BrowserViewModel {
         void getApi().listen<DownloadUpdate>("pane-download-update", (payload) => {
             if (this.closed || payload.block_id !== this.blockId) return;
             this._downloads[1]((rows) => applyDownloadUpdate(rows, payload));
-            if (payload.state === "done" && payload.download_id != null) {
+            if ((payload.state === "done" || payload.state === "cancelled") && payload.download_id != null) {
                 const key = String(payload.download_id);
                 clearTimeout(this._downloadTimers.get(key));
                 this._downloadTimers.set(
@@ -851,6 +851,7 @@ export class BrowserViewModel {
         x?: number;
         y?: number;
         linkUrl?: string;
+        imageUrl?: string;
         selectionText?: string;
         isEditable?: boolean;
         canGoBack?: boolean;
@@ -909,16 +910,7 @@ export class BrowserViewModel {
             }
             items.push({ type: "separator" }, ...editItems);
         }
-        if (browserCtx?.linkUrl) {
-            items.push(
-                { type: "separator" },
-                {
-                    label: "Copy Link Address",
-                    icon: MENU_ICON.copyLink,
-                    click: () => { void clipboardWriteText(browserCtx.linkUrl!); },
-                },
-            );
-        }
+        items.push(...this.linkAndImageItems(browserCtx));
         items.push(
             { type: "separator" },
             {
@@ -985,7 +977,7 @@ export class BrowserViewModel {
     /** The human answers the pane's banner (a hand-off, an approval, a
      *  question or a notice). Back is a notice's: the pane goes back, and the
      *  notice comes down as dismissed. */
-    resolveAttention(decision: "done" | "approve" | "approve_always" | "cancel" | "back"): Promise<void> {
+    resolveAttention(decision: "done" | "approve" | "approve_always" | "approve_ask" | "cancel" | "back"): Promise<void> {
         const a = this.attentionAtom();
         if (!a) return Promise.resolve();
         if (decision === "back") {
@@ -1116,6 +1108,28 @@ export class BrowserViewModel {
     recordLoadMs(loadMs: number): Promise<void> {
         recordLoad(this.urlAtom(), loadMs);
         return this.ctx.setMeta({ [LOADMS_META_KEY]: Math.round(loadMs) });
+    }
+
+    /** The rows for a link and a picture under the click: copy the link's address, and save the link or the image. */
+    private linkAndImageItems(browserCtx?: { linkUrl?: string; imageUrl?: string }): ContextMenuItem[] {
+        const items: ContextMenuItem[] = [];
+        const linkUrl = browserCtx?.linkUrl;
+        const imageUrl = browserCtx?.imageUrl;
+        if (linkUrl) {
+            items.push(
+                { label: "Copy Link Address", icon: MENU_ICON.copyLink, click: () => { void clipboardWriteText(linkUrl); } },
+                { label: "Save link as…", icon: MENU_ICON.saveAs, click: () => { this.saveAs(linkUrl); } },
+            );
+        }
+        if (imageUrl) {
+            items.push({ label: "Save image as…", icon: MENU_ICON.saveAs, click: () => { this.saveAs(imageUrl); } });
+        }
+        return items.length ? [{ type: "separator" }, ...items] : [];
+    }
+
+    /** Save a link or an image of the page: the host starts the download, and its Save As dialog and the strip take over. */
+    saveAs(url: string): void {
+        getApi().browserPanes.startDownload(this.blockId, url).catch(() => {});
     }
 
     /** Stop a running download (the strip's Cancel). The host holds the download; it

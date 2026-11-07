@@ -1,0 +1,122 @@
+TokenStrip created
+ImportBanner created
+FullView created
+-- new
+<div>
+  <div class="global-bundle">
+    <div data-stand="ConfirmDialog">
+    <div class="native-memory-manager-detail global-bundle-detail">
+      <div class="native-memory-manager-header">
+        <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-manager-back">
+          "← All global memory"
+        <span class="native-memory-manager-crumbs">
+          <span class="native-memory-manager-agent-name">
+            "Global Memory"
+          <span class="native-memory-manager-crumb-sep" aria-hidden="true">
+            "·"
+          <span class="native-memory-manager-filename global-bundle-crumb-name">
+            "New memory"
+      <div class="global-bundle-error">
+        "Save failed"
+      <div class="native-memory-manager-body native-memory-manager-body--pinned">
+        <div data-stand="FullView">
+          "new"
+-- view claude-config
+<div>
+  <div class="global-bundle">
+    <div data-stand="ConfirmDialog">
+    <div class="native-memory-manager-detail global-bundle-detail">
+      <div class="native-memory-manager-header">
+        <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-manager-back">
+          "← All global memory"
+        <span class="native-memory-manager-crumbs">
+          <span class="native-memory-manager-agent-name">
+            "Global Memory"
+          <span class="native-memory-manager-crumb-sep" aria-hidden="true">
+            "·"
+          <span class="native-memory-manager-filename global-bundle-crumb-name">
+            "CLAUDE.md"
+      <div class="global-bundle-error">
+        "Save failed"
+      <div class="native-memory-manager-body native-memory-manager-body--pinned">
+        <div data-stand="FullView">
+          "claude-config"
+-- view preview
+<div>
+  <div class="global-bundle">
+    <div data-stand="ConfirmDialog">
+    <div class="native-memory-manager-detail global-bundle-detail">
+      <div class="native-memory-manager-header">
+        <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-manager-back">
+          "← All global memory"
+        <span class="native-memory-manager-crumbs">
+          <span class="native-memory-manager-agent-name">
+            "Global Memory"
+          <span class="native-memory-manager-crumb-sep" aria-hidden="true">
+            "·"
+          <span class="native-memory-manager-filename global-bundle-crumb-name">
+            "Delivered to a Native agent"
+      <div class="global-bundle-error">
+        "Save failed"
+      <div class="native-memory-manager-body native-memory-manager-body--pinned">
+        <div data-stand="FullView">
+          "preview"
+-- view entry
+<div>
+  <div class="global-bundle">
+    <div data-stand="ConfirmDialog">
+    <div class="native-memory-manager-detail global-bundle-detail">
+      <div class="native-memory-manager-header">
+        <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-manager-back">
+          "← All global memory"
+        <span class="native-memory-manager-crumbs">
+          <span class="native-memory-manager-agent-name">
+            "Global Memory"
+          <span class="native-memory-manager-crumb-sep" aria-hidden="true">
+            "·"
+          <span class="native-memory-manager-filename global-bundle-crumb-name">
+            "Opened one"
+      <div class="global-bundle-error">
+        "Save failed"
+      <div class="native-memory-manager-body native-memory-manager-body--pinned">
+        <div data-stand="FullView">
+          "entry"
+-- an entry that is not there, no error
+<div>
+  <div class="global-bundle">
+    <div data-stand="ConfirmDialog">
+    <div class="native-memory-manager-detail global-bundle-detail">
+      <div class="native-memory-manager-header">
+        <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-manager-back">
+          "← All global memory"
+        <span class="native-memory-manager-crumbs">
+          <span class="native-memory-manager-agent-name">
+            "Global Memory"
+          <span class="native-memory-manager-crumb-sep" aria-hidden="true">
+            "·"
+          <span class="native-memory-manager-filename global-bundle-crumb-name">
+      <div class="native-memory-manager-body native-memory-manager-body--pinned">
+        <div data-stand="FullView">
+          "entry"
+model.close
+-- back to the tiles
+<div>
+  <div class="global-bundle">
+    <div data-stand="ConfirmDialog">
+    <div class="native-memory-manager-file-grid-view global-bundle-grid-view">
+      <p class="global-bundle-intro">
+        "Every agent inherits this at launch — takes effect after a restart. Drag entries to change their order."
+      <div data-stand="TokenStrip">
+      <div data-stand="ImportBanner">
+        <span data-cb="onImported">
+          "imported"
+      <div class="native-memory-manager-file-grid global-bundle-grid">
+        <div data-stand="MemoryTile" data-props="{\"badges\":\"[]\",\"data\":\"{\\\"id\\\":\\\"o1\\\",\\\"kind\\\":\\\"entry\\\"}\",\"draggable\":\"true\",\"icon\":\"\\\"fa-file-lines\\\"\",\"meta\":\"\\\"age100\\\"\",\"monoTitle\":\"false\",\"testId\":\"\\\"global-memory-tile\\\"\",\"title\":\"\\\"Entry o1\\\"\",\"tokens\":\"undefined\",\"tokensTitle\":\"undefined\"}" data-handlers="onDragEnd,onDragLeave,onDragOver,onDragStart,onDrop,onSelect" draggable="true">
+          <span data-cb="onSelect">
+            "select"
+        <div data-stand="MemoryTile" data-props="{\"data\":\"{\\\"kind\\\":\\\"preview\\\"}\",\"icon\":\"\\\"fa-layer-group\\\"\",\"meta\":\"\\\"1 entry\\\"\",\"monoTitle\":\"false\",\"testId\":\"\\\"global-memory-tile\\\"\",\"title\":\"\\\"Delivered to a Native agent\\\"\",\"tokens\":\"undefined\",\"tokensTitle\":\"undefined\"}" data-handlers="onSelect" class="memory-file-card--action">
+          <span data-cb="onSelect">
+            "select"
+        <div data-stand="MemoryTile" data-props="{\"data\":\"{\\\"kind\\\":\\\"add\\\"}\",\"icon\":\"\\\"fa-plus\\\"\",\"meta\":\"\\\"Appended to the end of the order\\\"\",\"monoTitle\":\"false\",\"testId\":\"\\\"global-memory-tile\\\"\",\"title\":\"\\\"+ Add memory\\\"\"}" data-handlers="onSelect" class="memory-file-card--action">
+          <span data-cb="onSelect">
+            "select"

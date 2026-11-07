@@ -16,7 +16,7 @@ The pane's turn, token, context, pending-message, failure, activity and attached
 
 ## 2. Scroll: one writer of the transcript's `scrollTop`
 
-Nothing under `view/agent/` writes the transcript scroller's position except `scroll/one-way-flow.ts`. It owns the follower (stay at the bottom while the content grows, never leave blank room below the latest content) and exports `scrollTranscriptTo` and `scrollTranscriptBy` for every caller that moves the transcript for its own reason: jump to a node, the older-history restore, keeping the rows on screen across a slice change (`virtualization/keep-on-screen.ts`), the zoom anchor (`virtualization/zoom-anchor-adapter.ts`), the hand-off.
+Nothing under `view/agent/` writes the transcript scroller's position except `scroll/one-way-flow.ts`. It owns the follower (stay at the bottom while the content grows, never leave blank room below the latest content) and exports `scrollTranscriptTo` and `scrollTranscriptBy` for every caller that moves the transcript for its own reason: jump to a node, the older-history restore, keeping the rows on screen across a slice change (`virtualization/keep-on-screen.ts`), the zoom anchor (`virtualization/zoom-anchor-adapter.ts`), the hand-off. The Messages panel's list is a second scroller and moves through the same file: `scrollMessagesTo` and `scrollMessagesBy` sit beside the transcript's two, and the panel only calls them.
 
 - **Enforced by** `scripts/check-transcript-scroll-writers.mjs` (CI). It fails on `.scrollTop =`, `.scrollTo(`, `.scrollBy(` or `.scrollIntoView(` in any other file under `view/agent/`. Its `EXEMPT` list names the files that scroll something that is not the transcript (a tool's preview box, the History tab's list, the slash-command picker's list), with the reason for each.
 - **The follow mechanism** is the controller in `frontend/app/scroll/` (`follow-controller.ts`, `follow-wiring.ts`, `follow-scroll.ts`) on the one-way-flow write path. The old pin/glide/shrink path, its `agent:onewayflow` setting and `legacyPreviewFollow` are gone, and dev and release run the same code.
@@ -46,7 +46,7 @@ Still large: `components/MyAgentsList.tsx` (1398), `stream-parser.ts` (1093) and
 ## 5. Where to put new code
 
 - A new fact about the turn, a failure, a token count or a pending message: a reducer command and field, not a signal. Read it through the pane's model.
-- Anything that moves the transcript: call `scrollTranscriptTo` / `scrollTranscriptBy`; if it scrolls a different element, add it to `EXEMPT` in the scroll check with the reason.
+- Anything that moves the transcript: call `scrollTranscriptTo` / `scrollTranscriptBy` (the Messages panel's list: `scrollMessagesTo` / `scrollMessagesBy`); if it scrolls a different element, add it to `EXEMPT` in the scroll check with the reason.
 - A new way a failure is raised: pick its `FailureSource`; if none fits, add the source and its rank in `failure-precedence.ts` first, with a test.
 - A lifecycle (mount, close, switch, bind): a hook under `hooks/`, wired from `agent-view.tsx`, not a block in the view.
 - A control (button, tab, field): the kit in `frontend/app/element/ui/` (`Button`, `IconButton`, `Tag`, ...), the same as everywhere else. `scripts/check-ui-primitives.mjs` also holds the pane to the shared scales (z-index, durations, font sizes, colours, focus rings): a value that has no token and is not on that script's allowlist, with a reason, fails the build. Hand-made `<button>`s in the pane are still being converted and are the one rule the pane is exempt from.

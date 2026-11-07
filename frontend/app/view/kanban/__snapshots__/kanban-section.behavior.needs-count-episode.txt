@@ -1,0 +1,17 @@
+subscribe accountavailability
+subscribe workqueue:changed
+rpc KanbanList
+subscribe agents:changed
+board#1 mounted
+needs count, no episode: 4
+board#1 unmounted
+unsubscribe agents:changed
+resize observer disconnected
+unsubscribe accountavailability
+unsubscribe workqueue:changed
+subscribe accountavailability
+subscribe workqueue:changed
+rpc KanbanList
+subscribe agents:changed
+board#2 mounted
+needs count, an episode covering the limited holder: 3

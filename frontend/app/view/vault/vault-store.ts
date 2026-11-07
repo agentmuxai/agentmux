@@ -16,6 +16,9 @@ import type { ImportPreview } from "@/types/rpc/ImportPreview";
 import type { ImportResult } from "@/types/rpc/ImportResult";
 import type { MappingNeeded } from "@/types/rpc/MappingNeeded";
 import type { VaultActivity } from "@/types/rpc/VaultActivity";
+import type { VaultChain } from "@/types/rpc/VaultChain";
+import type { VaultAgents } from "@/types/rpc/VaultAgents";
+import type { VaultInfo } from "@/types/rpc/VaultInfo";
 import type { VaultEntryInfo } from "@/types/rpc/VaultEntryInfo";
 import type { VaultVersionInfo } from "@/types/rpc/VaultVersionInfo";
 import type { UseRequest } from "@/types/rpc/UseRequest";
@@ -36,6 +39,8 @@ export interface NewVaultEntry {
     parts: Record<string, string>;
     /** The agent request this entry fills, if any. */
     request_id?: string;
+    /** The Vault it goes in (id or name); Personal when left out. */
+    vault?: string;
 }
 
 export interface VaultEntryChange {
@@ -60,16 +65,22 @@ async function call<T>(op: string, args: Record<string, unknown> = {}): Promise<
 
 const store = createRoot(() => {
     const [entries, setEntries] = createSignal<VaultEntryInfo[] | null>(null);
+    const [vaults, setVaults] = createSignal<VaultInfo[]>([]);
+    const [signinVaults, setSigninVaults] = createSignal<Record<string, string>>({});
     const [requests, setRequests] = createSignal<VaultRequest[]>([]);
     const [uses, setUses] = createSignal<UseRequest[]>([]);
     const [problem, setProblem] = createSignal<string | null>(null);
     const [error, setError] = createSignal<string | null>(null);
     const [loading, setLoading] = createSignal(false);
     const [changedMs, setChangedMs] = createSignal(0);
-    return { entries, setEntries, requests, setRequests, uses, setUses, problem, setProblem, error, setError, loading, setLoading, changedMs, setChangedMs };
+    return { entries, setEntries, vaults, setVaults, signinVaults, setSigninVaults, requests, setRequests, uses, setUses, problem, setProblem, error, setError, loading, setLoading, changedMs, setChangedMs };
 });
 
 export const vaultEntries = store.entries;
+/** The person's Vaults, in their order: Personal first. */
+export const vaultList = store.vaults;
+/** The Vault each browser profile (`personal` or `profile:<id>`) keeps its sign-ins in, when not Personal. */
+export const signinVaultOf = store.signinVaults;
 export const vaultRequests = store.requests;
 /** Agents' uses of an entry (filling a web form) waiting for the person to allow them. */
 export const vaultUses = store.uses;
@@ -83,8 +94,17 @@ export const vaultChangedMs = store.changedMs;
 export async function refreshVault(): Promise<void> {
     store.setLoading(true);
     try {
-        const data = await call<{ entries: VaultEntryInfo[]; problem: string | null; requests: VaultRequest[]; uses: UseRequest[] }>("list");
+        const data = await call<{
+            entries: VaultEntryInfo[];
+            vaults?: VaultInfo[];
+            signin_vaults?: Record<string, string>;
+            problem: string | null;
+            requests: VaultRequest[];
+            uses: UseRequest[];
+        }>("list");
         store.setEntries(data.entries);
+        store.setVaults(data.vaults ?? []);
+        store.setSigninVaults(data.signin_vaults ?? {});
         store.setProblem(data.problem);
         store.setRequests(data.requests);
         store.setUses(data.uses ?? []);
@@ -268,14 +288,26 @@ export async function deleteImportFile(pickId: string): Promise<void> {
     await relay({ pick_id: pickId });
 }
 
-export const commitImport = (token: string, duplicates: Duplicates) =>
-    call<{ result: ImportResult }>("import_commit", { token, duplicates }).then((r) => r.result);
+export const commitImport = (token: string, duplicates: Duplicates, vault?: string) =>
+    call<{ result: ImportResult }>("import_commit", { token, duplicates, ...(vault ? { vault } : {}) }).then((r) => r.result);
 export const cancelImport = (token: string) => call<unknown>("import_cancel", { token }).catch(() => {});
 export const suggestPassphrase = () => call<{ passphrase: string }>("suggest_passphrase").then((r) => r.passphrase);
 
 export const createEntry = (entry: NewVaultEntry) => call<{ id: string }>("create", { ...entry });
 export const updateEntry = (change: VaultEntryChange) => call<unknown>("update", { ...change });
 export const deleteEntry = (id: string) => call<unknown>("delete", { id });
+
+/** The wire form of a Vault's agents setting (`VaultAgents` is the form srv sends back). */
+const agentsBody = (agents: VaultAgents) =>
+    agents.mode === "named" ? { agents: "named", agent_ids: agents.agents } : { agents: agents.mode };
+export const createVault = (name: string, agents: VaultAgents) => call<{ vault: VaultInfo }>("vault_create", { name, ...agentsBody(agents) }).then((r) => r.vault);
+export const updateVault = (id: string, name: string, agents: VaultAgents) => call<unknown>("vault_update", { id, name, ...agentsBody(agents) });
+/** Deletes an empty Vault; srv refuses one that still holds entries. */
+export const deleteVault = (id: string) => call<unknown>("vault_delete", { id });
+/** Puts an entry in another Vault. Only the person does this: a move can open a value to more agents. */
+export const moveEntry = (id: string, vaultId: string) => call<unknown>("move_entry", { id, vault_id: vaultId });
+/** The Vault a browser profile saves its sign-ins to and offers them from. */
+export const setSigninVault = (profile: string, vaultId: string) => call<unknown>("signin_vault", { profile, vault_id: vaultId });
 /** An entry's earlier values, kept 7 days: when and by whom each was replaced, and its last characters. */
 export const loadVersions = (id: string) => call<{ versions: VaultVersionInfo[] }>("versions", { id }).then((r) => r.versions);
 /** Puts an earlier value back; the current one is kept in its place. */
@@ -300,6 +332,10 @@ export async function denyAllFrom(agent: string): Promise<void> {
         ...requests.map((r) => declineRequest(r.id).catch(() => {})),
     ]);
 }
+/** An entry's history, newest first. */
+export const loadHistory = (id: string) => call<{ history: VaultActivity[] }>("history", { id, limit: 500 }).then((r) => r.history);
+/** Whether the activity record still holds together. */
+export const loadChain = () => call<{ chain: VaultChain }>("history_check").then((r) => r.chain);
 export const loadActivity = (limit = 200) => call<{ activity: VaultActivity[] }>("activity", { limit }).then((r) => r.activity);
 /** An entry with standing permissions, from a read that needs no key (Warden's view). */
 export interface GrantedEntry {

@@ -1,0 +1,12 @@
+-- success at once
+  call AccountOAuthClientGet [{"provider":"google"}]
+  call AccountOAuthStart [{"provider":"google"}]
+  call ListIdentityAccounts [{}]
+  call onConnected [{"accountId":"acc-1","missingScopes":["https://www.googleapis.com/auth/calendar.events"],"email":"me@example.com"}]
+<div>
+  <div class="oauth-connect">
+    <div class="oauth-flow-status">
+      <div class="identity-key-actions">
+        <button type="button" class="ui-button ui-tone-neutral identity-btn identity-btn-secondary">
+          "Cancel"
+  note acc-1 {"missingScopes":["https://www.googleapis.com/auth/calendar.events"]}

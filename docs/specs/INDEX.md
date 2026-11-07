@@ -608,6 +608,7 @@ partial list.
 | [`SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16`](SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md) | Canonical Agent Identity/History Persistence Protocol — Synthesis with Mandatory ABF |
 | [`SPEC_AGENT_INPUT_HISTORY_2026_10_18`](SPEC_AGENT_INPUT_HISTORY_2026_10_18.md) | Spec: Agent input history that lives with the agent |
 | [`SPEC_AGENT_INSTALL_STAGE_2026_05_17`](SPEC_AGENT_INSTALL_STAGE_2026_05_17.md) | SPEC: Agent Install Stage |
+| [`SPEC_AGENT_MODEL_ROUTES_ANY_MODEL_SPAWN_AND_SWITCH_2026_11_06`](SPEC_AGENT_MODEL_ROUTES_ANY_MODEL_SPAWN_AND_SWITCH_2026_11_06.md) | Spec: an agent is a harness, a model route and a key: spawn on any model and switch the model in place |
 | [`SPEC_AGENT_OPEN_FIRST_SCREEN_THEN_REST_2026_10_19`](SPEC_AGENT_OPEN_FIRST_SCREEN_THEN_REST_2026_10_19.md) | Spec: opening an agent shows its first screen at once, and loads the rest afterwards |
 | [`SPEC_AGENT_OVERLAP_AWARENESS_2026_10_10`](SPEC_AGENT_OVERLAP_AWARENESS_2026_10_10.md) | SPEC: agents can see who else is working on the same thing |
 | [`SPEC_AGENT_OWN_BROWSER_PROFILE_2026_11_04`](SPEC_AGENT_OWN_BROWSER_PROFILE_2026_11_04.md) | SPEC: every agent browses with its own named, persistent profile (2026-11-04) |
@@ -730,9 +731,11 @@ partial list.
 | [`SPEC_HOST_UI_THREAD_HANG_WATCHDOG_2026_08_14`](SPEC_HOST_UI_THREAD_HANG_WATCHDOG_2026_08_14.md) | SPEC: Host UI-thread hang detection, forensic dump, and auto-recovery |
 | [`SPEC_IDENTITY_STORE_SPLIT_2026_08_17`](SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md) | SPEC: Split the multi-concern shared store — permanent global identity data vs. explicitly-disposable Armory test accounts |
 | [`SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09`](SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md) | Spec: Instruction and Memory Portability |
+| [`SPEC_ISOLATED_INSTALL_FOR_NON_NPM_CLIS_2026_11_05`](SPEC_ISOLATED_INSTALL_FOR_NON_NPM_CLIS_2026_11_05.md) | Spec: AgentMux installs its own isolated, pinned copy of all 19 agent CLIs |
 | [`SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02`](SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md) | SPEC: Cross-channel jekt trust — closing the last unverifiable same-machine tier |
 | [`SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01`](SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01.md) | SPEC: jekt delivery that tells the truth — receiver state, one mailbox, receipts |
 | [`SPEC_JEKT_HOLD_FOR_COLD_SESSIONS_2026_10_25`](SPEC_JEKT_HOLD_FOR_COLD_SESSIONS_2026_10_25.md) | Spec: hold a routine message for an agent whose session has gone cold |
+| [`SPEC_JEKT_SIDE_PANEL_RESEARCH_AND_DESIGN_2026_11_04`](SPEC_JEKT_SIDE_PANEL_RESEARCH_AND_DESIGN_2026_11_04.md) | Report: incoming jekts in a collapsible panel on the right of the agent pane |
 | [`SPEC_JOBS_AND_TEMPLATES_2026_10_24`](SPEC_JOBS_AND_TEMPLATES_2026_10_24.md) | SPEC: Jobs and templates: one ledger for everything that runs by itself |
 | [`SPEC_KANBAN_ACCEPT_ON_THE_OPERATORS_WORD_2026_10_23`](SPEC_KANBAN_ACCEPT_ON_THE_OPERATORS_WORD_2026_10_23.md) | Spec: a leader accepts, or sends back, a Kanban task when the operator tells it to |
 | [`SPEC_KANBAN_AGENTS_HOLD_AND_UNHOLD_2026_10_22`](SPEC_KANBAN_AGENTS_HOLD_AND_UNHOLD_2026_10_22.md) | Spec: agents put Kanban tasks on hold and take them off hold |
@@ -832,6 +835,7 @@ partial list.
 | [`SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09`](SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md) | User widgets and the widget API |
 | [`SPEC_VAULT_GENERATE_CAPTURE_AND_BROWSER_SIGNINS_2026_10_28`](SPEC_VAULT_GENERATE_CAPTURE_AND_BROWSER_SIGNINS_2026_10_28.md) | SPEC: secrets nobody types. The Vault generates, captures, delivers and rotates them, and the browser saves, generates and fills sign-ins |
 | [`SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19`](SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md) | SPEC: the Vault: one pane for the person's secrets, which agents use without seeing them |
+| [`SPEC_VAULT_PARITY_ENTRY_HISTORY_REASONS_AND_IMPORT_2026_11_06`](SPEC_VAULT_PARITY_ENTRY_HISTORY_REASONS_AND_IMPORT_2026_11_06.md) | SPEC: the Vault's feature set matches the secrets CLI: a reason and a history on every use and change, import from AWS Secrets Manager, verify and health |
 | [`SPEC_VAULT_REQUESTS_AS_CARDS_IN_THE_AGENT_PANE_2026_11_01`](SPEC_VAULT_REQUESTS_AS_CARDS_IN_THE_AGENT_PANE_2026_11_01.md) | SPEC: an agent's Vault and secrets requests ask inside its own pane, as a card with a 30-second veto, not as a window-wide modal |
 | [`SPEC_VAULT_SHARED_ACROSS_MACHINES_LAN_AND_CLOUD_2026_11_01`](SPEC_VAULT_SHARED_ACROSS_MACHINES_LAN_AND_CLOUD_2026_11_01.md) | SPEC: one Vault across a person's machines, by LAN or AgentMux Cloud, several Vaults per person, and the Vault's formal link to AWS Secrets Manager |
 | [`SPEC_VERSION_DRIFT_UPGRADES_AND_PROVIDER_HARNESS_TESTS_2026_10_01`](SPEC_VERSION_DRIFT_UPGRADES_AND_PROVIDER_HARNESS_TESTS_2026_10_01.md) | Version drift upgrades (2026-10-01 report) and provider harness tests |
@@ -1123,6 +1127,7 @@ partial list.
 | [`SPEC_COMPOSER_STRIP_AND_HOST_POLISH_2026_06_25`](SPEC_COMPOSER_STRIP_AND_HOST_POLISH_2026_06_25.md) | Spec: Composer Strip Polish + Context Compaction Indicator + Host Type Coloring |
 | [`SPEC_COMPOSER_STRIP_LAYOUT_MIC_CENTER_MODEL_DEFAULTS_2026_07_10`](SPEC_COMPOSER_STRIP_LAYOUT_MIC_CENTER_MODEL_DEFAULTS_2026_07_10.md) | SPEC: Composer-strip layout fixes, mic vertical centering, curated model defaults |
 | [`SPEC_COMPOSER_UX_POLISH_2026_04_15`](SPEC_COMPOSER_UX_POLISH_2026_04_15.md) | Spec: Composer UX Polish — controls above input, Claude-style status line |
+| [`SPEC_COMPUTER_USE_SKILLS_PRACTICE_VOICEMEETER_CANTABILE_2026_11_05`](SPEC_COMPUTER_USE_SKILLS_PRACTICE_VOICEMEETER_CANTABILE_2026_11_05.md) | SPEC: Practice time for building computer-use skills, and two new ones: Voicemeeter and Cantabile |
 | [`SPEC_CONSOLIDATE_FORGE_IDENTITY_INTO_AGENT_2026_04_13`](SPEC_CONSOLIDATE_FORGE_IDENTITY_INTO_AGENT_2026_04_13.md) | SPEC — Consolidate Forge + Identity into the Agent Pane |
 | [`SPEC_CONTAINER_PANE_SUPPORT_2026_06_11`](SPEC_CONTAINER_PANE_SUPPORT_2026_06_11.md) | SPEC: Container Pane Support |
 | [`SPEC_CONTEXT_VISIBILITY_2026_06_17`](SPEC_CONTEXT_VISIBILITY_2026_06_17.md) | SPEC: Context & Token Visibility — what we can show the user, and how |

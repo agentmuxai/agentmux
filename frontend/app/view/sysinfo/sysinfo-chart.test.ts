@@ -5,6 +5,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+    fadeLeftEnd,
     formatValue,
     niceCeil,
     resolveCssColor,
@@ -12,6 +13,7 @@ import {
     toAlignedData,
     withAlpha,
     xWindowSecs,
+    yLabelTexts,
     yRange,
 } from "./sysinfo-chart";
 import type { DataItem } from "./sysinfo-types";
@@ -104,5 +106,54 @@ describe("colors for the canvas", () => {
         expect(resolveCssColor(el, "var(--not-set, #123)")).toBe("#123");
         expect(resolveCssColor(el, "#fff")).toBe("#fff");
         el.remove();
+    });
+});
+
+describe("the y labels over the plot", () => {
+    it("labels the ticks inside the range, the lowest marked so it hangs above its line", () => {
+        const labels = yLabelTexts([-20, 0, 50, 100, 120], 0, 100, (v) => `${v}%`);
+        expect(labels).toEqual([
+            { text: "0%", value: 0, lowest: true },
+            { text: "50%", value: 50, lowest: false },
+            { text: "100%", value: 100, lowest: false },
+        ]);
+        expect(yLabelTexts([], 0, 100, String)).toEqual([]);
+    });
+
+    it("fades the plot's left end out with a gradient erase, and nothing else", () => {
+        const calls: string[] = [];
+        const stops: [number, string][] = [];
+        const ctx = {
+            globalCompositeOperation: "source-over",
+            fillStyle: "",
+            save: () => calls.push("save"),
+            restore: () => calls.push("restore"),
+            createLinearGradient: (x0: number, _y0: number, x1: number) => {
+                calls.push(`gradient ${x0}-${x1}`);
+                return { addColorStop: (o: number, c: string) => stops.push([o, c]) };
+            },
+            fillRect: (x: number, y: number, w: number, h: number) =>
+                calls.push(`fill ${x},${y},${w},${h} ${ctx.globalCompositeOperation}`),
+        } as unknown as CanvasRenderingContext2D;
+        fadeLeftEnd({ bbox: { left: 10, top: 20, width: 600, height: 150 }, ctx }, 80);
+        // Opaque (erases all) at the edge, clear (erases none) where the labels end.
+        expect(stops).toEqual([
+            [0, "rgba(0, 0, 0, 1)"],
+            [1, "rgba(0, 0, 0, 0)"],
+        ]);
+        expect(calls).toEqual(["gradient 10-90", "save", "fill 10,20,80,150 destination-out", "restore"]);
+    });
+
+    it("is no wider than the plot, and does nothing for none", () => {
+        const fills: number[] = [];
+        const ctx = {
+            save() {},
+            restore() {},
+            createLinearGradient: () => ({ addColorStop() {} }),
+            fillRect: (_x: number, _y: number, w: number) => fills.push(w),
+        } as unknown as CanvasRenderingContext2D;
+        fadeLeftEnd({ bbox: { left: 0, top: 0, width: 50, height: 10 }, ctx }, 80);
+        fadeLeftEnd({ bbox: { left: 0, top: 0, width: 50, height: 10 }, ctx }, 0);
+        expect(fills).toEqual([50]);
     });
 });

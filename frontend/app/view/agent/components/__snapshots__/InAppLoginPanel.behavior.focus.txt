@@ -1,0 +1,6 @@
+no link yet: paste input not focused
+link set, same frame: paste input not focused
+a frame later: paste input focused
+phase changed, same link: paste input focused
+new link: paste input focused
+link gone: paste input not focused

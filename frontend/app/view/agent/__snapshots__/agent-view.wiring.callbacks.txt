@@ -25,7 +25,7 @@ reconcileTurnActive(true)
 trackTurnJustEnded(true)
 reconcileTurnActive(false)
 trackTurnJustEnded(false)
-declareAuthHealthy()
+declareAuthHealthy(true)
 windowFocused = true
 trackTurnJustEnded: same
 commands.flushPendingControllerRefresh()

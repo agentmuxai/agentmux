@@ -1,0 +1,48 @@
+useTick 1000
+createPromotionClock
+taskOutcomesFor blk-1
+shellActivities
+subagentActivities blk-1
+toolActivities
+applyStreamOutcomes 1
+applyRegistryOutcomes 1 0
+backgroundTaskActivities 0 known=[known]
+shellActivities
+subagentActivities blk-1
+toolActivities
+applyStreamOutcomes 1
+applyRegistryOutcomes 1 2
+backgroundTaskActivities 2 known=[known]
+-- registry rows
+<div>
+  <div class="agent-activity-dock">
+    <div data-stand="ActivityRow" data-id="survivor" data-status="running" data-expanded="false" data-leaving="false">
+      <span data-cb="onToggle">
+        "toggle"
+      <span data-cb="onStop">
+        "stop"
+      <span data-cb="onDismiss">
+        "dismiss"
+    <div data-stand="ActivityRow" data-id="known" data-status="running" data-expanded="false" data-leaving="false">
+      <span data-cb="onToggle">
+        "toggle"
+      <span data-cb="onStop">
+        "stop"
+      <span data-cb="onDismiss">
+        "dismiss"
+shellActivities
+subagentActivities blk-1
+toolActivities
+applyStreamOutcomes 1
+applyRegistryOutcomes 1 0
+backgroundTaskActivities 0 known=[known]
+-- registry empty
+<div>
+  <div class="agent-activity-dock">
+    <div data-stand="ActivityRow" data-id="known" data-status="running" data-expanded="false" data-leaving="false">
+      <span data-cb="onToggle">
+        "toggle"
+      <span data-cb="onStop">
+        "stop"
+      <span data-cb="onDismiss">
+        "dismiss"

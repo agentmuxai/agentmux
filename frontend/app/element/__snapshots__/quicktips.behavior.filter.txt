@@ -1,0 +1,251 @@
+shortcutFor pane:magnify
+shortcutFor pane:changeConnection
+shortcutFor pane:close
+shortcutHelp
+keyPlatform
+getPlatform
+tipsFor darwin
+gestureLabels drag mac
+tipLabel drag mac
+gestureLabels swap mac
+tipLabel swap mac
+gestureLabels zoom mac
+tipLabel zoom mac
+shortcutFor pane:close
+shortcutFor pane:close
+-- close
+<div>
+  <div class="flex flex-col w-full gap-6 @container">
+    <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-highlightbg/30 to-transparent hover:from-accent-400/5 rounded-lg border border-border hover:border-accent-400/20 transition-colors duration-300">
+      <div class="flex items-center gap-2 text-xl font-bold">
+        <div class="w-1 h-6 bg-accent-400 rounded-full">
+        <span class="text-foreground">
+          "Header Icons"
+      <div class="grid grid-cols-[repeat(auto-fit,minmax(min(15rem,100%),1fr))] gap-3">
+        <div class="flex items-center gap-3 p-2 rounded-md hover:bg-hover transition-colors">
+          <div class="text-[20px] min-w-[32px] h-[32px] flex items-center justify-center rounded-md border [&_svg]:h-[16px] text-secondary bg-hover border-border [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary">
+            <i class="fa-solid fa-xmark fa-fw">
+          <div class="flex flex-col gap-0.5 flex-1">
+            <span class="text-[15px]">
+              "Close pane"
+            <div class="flex flex-row items-center">
+              <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-border whitespace-nowrap">
+                "Ctrl+close"
+    <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-highlightbg/30 to-transparent hover:from-accent-400/5 rounded-lg border border-border hover:border-accent-400/20 transition-colors duration-300">
+      <div class="flex items-center gap-2 text-xl font-bold">
+        <div class="w-1 h-6 bg-accent-400 rounded-full">
+        <span class="text-foreground">
+          "Keyboard Shortcuts"
+      <div class="columns-[17rem] gap-x-5">
+        <div class="flex flex-col gap-1.5 mb-6 break-inside-avoid">
+          <div class="text-sm text-accent-400 font-semibold uppercase tracking-wide mb-1">
+            "Panes"
+          <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
+            <span class="text-[15px]">
+              "Close the pane"
+            <div class="flex flex-row flex-wrap items-center gap-1">
+              <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-border whitespace-nowrap">
+                "Ctrl+W"
+filter "ctrl w"
+shortcutFor pane:magnify
+shortcutFor pane:changeConnection
+shortcutFor pane:close
+shortcutHelp
+keyPlatform
+getPlatform
+tipsFor darwin
+gestureLabels drag mac
+tipLabel drag mac
+gestureLabels swap mac
+tipLabel swap mac
+gestureLabels zoom mac
+tipLabel zoom mac
+-- keys of a shortcut
+<div>
+  <div class="flex flex-col w-full gap-6 @container">
+    <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-highlightbg/30 to-transparent hover:from-accent-400/5 rounded-lg border border-border hover:border-accent-400/20 transition-colors duration-300">
+      <div class="flex items-center gap-2 text-xl font-bold">
+        <div class="w-1 h-6 bg-accent-400 rounded-full">
+        <span class="text-foreground">
+          "Keyboard Shortcuts"
+      <div class="columns-[17rem] gap-x-5">
+        <div class="flex flex-col gap-1.5 mb-6 break-inside-avoid">
+          <div class="text-sm text-accent-400 font-semibold uppercase tracking-wide mb-1">
+            "Panes"
+          <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
+            <span class="text-[15px]">
+              "Close the pane"
+            <div class="flex flex-row flex-wrap items-center gap-1">
+              <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-border whitespace-nowrap">
+                "Ctrl+W"
+    <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-highlightbg/30 to-transparent hover:from-accent-400/5 rounded-lg border border-border hover:border-accent-400/20 transition-colors duration-300">
+      <div class="flex items-center gap-2 text-xl font-bold">
+        <div class="w-1 h-6 bg-accent-400 rounded-full">
+        <span class="text-foreground">
+          "Mouse and gestures"
+      <div class="columns-[17rem] gap-x-5">
+        <div class="quicktips-gestures flex flex-col gap-1.5 mb-6 break-inside-avoid">
+          <div class="text-sm text-accent-400 font-semibold uppercase tracking-wide mb-1">
+            "Terminal"
+          <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
+            <span class="text-[15px]">
+              "Gesture zoom"
+            <div class="flex flex-row flex-wrap items-center gap-1">
+              <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-border whitespace-nowrap">
+                "Ctrl+Wheel"
+filter "panes drag"
+shortcutFor pane:magnify
+shortcutFor pane:changeConnection
+shortcutFor pane:close
+shortcutHelp
+keyPlatform
+getPlatform
+tipsFor darwin
+gestureLabels drag mac
+tipLabel drag mac
+gestureLabels swap mac
+tipLabel swap mac
+gestureLabels zoom mac
+tipLabel zoom mac
+-- section and gesture
+<div>
+  <div class="flex flex-col w-full gap-6 @container">
+    <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-highlightbg/30 to-transparent hover:from-accent-400/5 rounded-lg border border-border hover:border-accent-400/20 transition-colors duration-300">
+      <div class="flex items-center gap-2 text-xl font-bold">
+        <div class="w-1 h-6 bg-accent-400 rounded-full">
+        <span class="text-foreground">
+          "Mouse and gestures"
+      <div class="columns-[17rem] gap-x-5">
+        <div class="quicktips-gestures flex flex-col gap-1.5 mb-6 break-inside-avoid">
+          <div class="text-sm text-accent-400 font-semibold uppercase tracking-wide mb-1">
+            "Panes"
+          <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
+            <span class="text-[15px]">
+              "Gesture drag"
+            <div class="flex flex-row flex-wrap items-center gap-1">
+              <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-border whitespace-nowrap">
+                "Drag"
+              <span class="text-secondary">
+                "or"
+              <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-border whitespace-nowrap">
+                "Alt+Drag"
+              <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-border whitespace-nowrap">
+                "Shift"
+              <span class="text-secondary text-[13px]">
+                "on the header"
+filter "web view gear"
+shortcutHelp
+shortcutFor pane:magnify
+shortcutFor pane:changeConnection
+shortcutFor pane:close
+keyPlatform
+getPlatform
+tipsFor darwin
+gestureLabels drag mac
+tipLabel drag mac
+gestureLabels swap mac
+tipLabel swap mac
+gestureLabels zoom mac
+tipLabel zoom mac
+-- a tip
+<div>
+  <div class="flex flex-col w-full gap-6 @container">
+    <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-highlightbg/30 to-transparent hover:from-accent-400/5 rounded-lg border border-border hover:border-accent-400/20 transition-colors duration-300">
+      <div class="flex items-center gap-2 text-xl font-bold">
+        <div class="w-1 h-6 bg-accent-400 rounded-full">
+        <span class="text-foreground">
+          "More Tips"
+      <div class="flex flex-col gap-2">
+        <div class="flex items-center gap-3 p-2 rounded-md hover:bg-hover transition-colors">
+          <div class="text-[20px] min-w-[32px] h-[32px] flex items-center justify-center rounded-md border [&_svg]:h-[16px] text-secondary bg-hover border-border [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary">
+            <i class="fa-solid fa-cog fa-fw">
+          <span>
+            <b>
+              "Web View"
+            "-"
+            "Click the gear in the web view to set your homepage"
+filter "discord"
+shortcutFor pane:magnify
+shortcutFor pane:changeConnection
+shortcutFor pane:close
+shortcutHelp
+keyPlatform
+getPlatform
+tipsFor darwin
+gestureLabels drag mac
+tipLabel drag mac
+gestureLabels swap mac
+tipLabel swap mac
+gestureLabels zoom mac
+tipLabel zoom mac
+-- a link
+<div>
+  <div class="flex flex-col w-full gap-6 @container">
+    <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-highlightbg/30 to-transparent hover:from-accent-400/5 rounded-lg border border-border hover:border-accent-400/20 transition-colors duration-300">
+      <div class="flex items-center gap-2 text-xl font-bold">
+        <div class="w-1 h-6 bg-accent-400 rounded-full">
+        <span class="text-foreground">
+          "Need More Help?"
+      <div class="grid grid-cols-[repeat(auto-fit,minmax(min(15rem,100%),1fr))] gap-2">
+        <div class="flex items-center gap-3 p-3 rounded-md bg-panel hover:bg-highlightbg transition-colors">
+          <div class="text-[20px] min-w-[32px] h-[32px] flex items-center justify-center rounded-md border [&_svg]:h-[16px] text-secondary bg-hover border-border [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary">
+            <i class="fa-brands fa-discord fa-fw">
+          <a target="_blank" rel="noopener" class="hover:text-accent-400 hover:underline transition-colors font-medium" href="https://discord.com/invite/96erama9Ar">
+            "Join Our Discord"
+filter "header icons"
+keyPlatform
+getPlatform
+tipsFor darwin
+gestureLabels drag mac
+tipLabel drag mac
+gestureLabels swap mac
+tipLabel swap mac
+gestureLabels zoom mac
+tipLabel zoom mac
+shortcutFor pane:magnify
+shortcutFor pane:changeConnection
+shortcutFor pane:close
+shortcutFor pane:magnify
+shortcutFor pane:magnify
+shortcutFor pane:changeConnection
+shortcutFor pane:close
+shortcutFor pane:close
+shortcutHelp
+-- section name of the icons
+<div>
+  <div class="flex flex-col w-full gap-6 @container">
+    <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-highlightbg/30 to-transparent hover:from-accent-400/5 rounded-lg border border-border hover:border-accent-400/20 transition-colors duration-300">
+      <div class="flex items-center gap-2 text-xl font-bold">
+        <div class="w-1 h-6 bg-accent-400 rounded-full">
+        <span class="text-foreground">
+          "Header Icons"
+      <div class="grid grid-cols-[repeat(auto-fit,minmax(min(15rem,100%),1fr))] gap-3">
+        <div class="flex items-center gap-3 p-2 rounded-md hover:bg-hover transition-colors">
+          <div class="text-[20px] min-w-[32px] h-[32px] flex items-center justify-center rounded-md border [&_svg]:h-[16px] text-secondary bg-hover border-border [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary">
+            <i class="fa-regular fa-window-maximize fa-fw">
+          <div class="flex flex-col gap-0.5 flex-1">
+            <span class="text-[15px]">
+              "Maximize a pane"
+            <div class="flex flex-row items-center">
+              <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-border whitespace-nowrap">
+                "Ctrl+magnify"
+        <div class="flex items-center gap-3 p-2 rounded-md hover:bg-hover transition-colors">
+          <div class="text-[20px] min-w-[32px] h-[32px] flex items-center justify-center rounded-md border [&_svg]:h-[16px] text-secondary bg-hover border-border [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary">
+            <i class="fa-solid fa-laptop fa-fw">
+          <div class="flex flex-col gap-0.5 flex-1">
+            <span class="text-[15px]">
+              "Change connection"
+        <div class="flex items-center gap-3 p-2 rounded-md hover:bg-hover transition-colors">
+          <div class="text-[20px] min-w-[32px] h-[32px] flex items-center justify-center rounded-md border [&_svg]:h-[16px] text-secondary bg-hover border-border [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary">
+            <i class="fa-solid fa-cog fa-fw">
+          <span class="text-[15px]">
+            "Pane Settings"
+        <div class="flex items-center gap-3 p-2 rounded-md hover:bg-hover transition-colors">
+          <div class="text-[20px] min-w-[32px] h-[32px] flex items-center justify-center rounded-md border [&_svg]:h-[16px] text-secondary bg-hover border-border [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary">
+            <i class="fa-solid fa-xmark fa-fw">
+          <div class="flex flex-col gap-0.5 flex-1">
+            <span class="text-[15px]">
+              "Close pane"
+            <div class="flex flex-row items-center">
+              <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-border whitespace-nowrap">
+                "Ctrl+close"

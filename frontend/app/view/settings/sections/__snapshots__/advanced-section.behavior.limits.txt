@@ -1,0 +1,8 @@
+set agent:container_memory null
+set agent:container_memory null
+set agent:container_memory 0
+set agent:container_memory 3072
+memory box after "lots": 2048
+memory box after "-1": 2048
+set agent:container_cpus 1.5
+cpus box after "many": auto

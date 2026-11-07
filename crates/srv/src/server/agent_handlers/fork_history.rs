@@ -45,14 +45,19 @@ pub(super) fn copy_fork_history(mstore: &Store, history: &HistoryService, cmd: &
     let gfs = crate::backend::agent_session::global_transcript_store()
         .ok_or_else(|| "copyforkhistory: no transcript store".to_string())?;
     let result = |copied: bool, reason: &str, bytes: u64| CopyForkHistoryResult { copied, reason: reason.to_string(), bytes };
-    Ok(match copy_parent_history(gfs, &cmd.source_id, &cmd.fork_id, &cmd.session_id, field)? {
+    let copied = match copy_parent_history(gfs, &cmd.source_id, &cmd.fork_id, &cmd.session_id, field)? {
         ForkHistory::Copied { bytes } => result(true, "", bytes),
         // Either way the session may be in the record: after a New conversation
         // the current zone is empty and the older sessions are in an archive.
         ForkHistory::NoParentHistory => older_session(gfs, history, cmd, field, "no_parent_history")?,
         ForkHistory::NotTheLastSession => older_session(gfs, history, cmd, field, "not_the_last_session")?,
         ForkHistory::ForkHasHistory => result(false, "fork_has_history", 0),
-    })
+    };
+    if copied.copied {
+        // The fork has history now: the History pane's agent list gains its row.
+        crate::backend::history_changed::mark();
+    }
+    Ok(copied)
 }
 
 /// A fork of an older session: the parent's history up to where that session

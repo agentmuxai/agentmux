@@ -12,6 +12,7 @@ const updateDownload = vi.fn();
 const upgradeRestart = vi.fn();
 const upgradeCancel = vi.fn();
 const storeCheck = vi.fn();
+const settings = vi.fn();
 const cameBack = vi.fn();
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
@@ -43,14 +44,17 @@ vi.mock("@/store/global", async (importOriginal) => {
         atoms: { updaterStatusAtom: status, updaterVersionAtom: version },
         getApi: () => ({ installAppUpdate, revealInFileExplorer, approvals: { storeUpdate }, listen: () => Promise.resolve(() => {}) }),
         openLink: (u: string) => openLink(u),
+        getSettingsKeyAtom: (key: string) => () => settings(key),
     };
 });
 
 import {
     acceptAppUpdate,
     appUpdate,
+    askStore,
     availableRelease,
     forgetStoreOffer,
+    storeAnswer,
     releaseDownload,
     setStoreStayed,
     stagedRelease,
@@ -86,7 +90,8 @@ beforeEach(() => {
     openLink.mockReset();
     installAppUpdate.mockReset();
     storeUpdate.mockReset().mockResolvedValue({ outcome: "fallback", message: "" });
-    storeCheck.mockReset().mockResolvedValue({ state: "available", message: "" });
+    storeCheck.mockReset().mockResolvedValue({ state: "available", message: "", version: "0.59.27" });
+    settings.mockReset();
     cameBack.mockReset().mockResolvedValue({ state: "none", from: "", target: "" });
     setStoreStayed(null);
     setNotifications([]);
@@ -431,28 +436,58 @@ describe("Maintenance: Check for update", () => {
 
 describe("Maintenance on a Microsoft Store install", () => {
     const STORE = { ...AVAILABLE, install: "windows-store", can_download: false };
+    const listed = (version: string) => ({ state: "available", message: "", version });
+    const STORE_PAGE = "ms-windows-store://pdp/?productid=9P9QCXNNCRK3";
+    const RELEASE_0_59_27 = "https://github.com/agentmuxai/agentmux/releases/tag/v0.59.27";
 
     it("offers the Store, never the release page or a download, once the Store lists the update", async () => {
         updateStatus.mockResolvedValue(STORE);
         render(() => <MaintenanceSection />);
         fireEvent.click(await screen.findByRole("button", { name: "Update in the Store" }));
-        // The Store is asked first (the default mock says it can't), then its page opens.
+        // The Store is asked to install (the default mock says it can't), then its page opens.
         await vi.waitFor(() => expect(openLink).toHaveBeenCalledTimes(1));
-        expect(openLink).toHaveBeenCalledWith("ms-windows-store://pdp/?productid=9P9QCXNNCRK3");
+        expect(openLink).toHaveBeenCalledWith(STORE_PAGE);
         expect(updateDownload).not.toHaveBeenCalled();
         expect(installAppUpdate).not.toHaveBeenCalled();
         expect(screen.queryByRole("button", { name: "Download" })).toBeNull();
         expect(storeCheck).toHaveBeenCalledTimes(1);
-        expect(screen.queryByText(/still reviewing/)).toBeNull();
     });
 
-    it("shows the chip only when the Store lists the update", async () => {
-        updateStatus.mockResolvedValue(STORE);
-        render(() => <UpdateStatus />);
-        expect(await screen.findByText("Update to 0.59.27")).toBeTruthy();
+    it("offers the version the Store lists, not GitHub's latest tag, and links that version's notes", async () => {
+        // GitHub's latest is newer than what the Store has: 0.59.29 was never submitted.
+        updateStatus.mockResolvedValue({ ...STORE, latest: "0.59.29", url: "https://github.com/agentmuxai/agentmux/releases/tag/v0.59.29" });
+        render(() => (
+            <>
+                <UpdateStatus />
+                <MaintenanceSection />
+            </>
+        ));
+        expect(await screen.findByText("v0.59.27 is in the Microsoft Store")).toBeTruthy();
+        expect(screen.getByText("Update to 0.59.27")).toBeTruthy();
+        expect(screen.queryByText(/0\.59\.29/)).toBeNull();
+        fireEvent.click(screen.getByRole("button", { name: "What's new" }));
+        expect(openLink).toHaveBeenCalledWith(RELEASE_0_59_27);
+        fireEvent.click(screen.getByRole("button", { name: "Update in the Store" }));
+        await vi.waitFor(() => expect(storeUpdate).toHaveBeenCalledWith("0.59.27"));
     });
 
-    it("when GitHub has the release but the Store doesn't yet: says so, with no button and no chip", async () => {
+    it("offers the update when GitHub knows of nothing newer, or was never asked", async () => {
+        // srv's check never ran (no GitHub answer): the Store still has the say.
+        updateStatus.mockResolvedValue({ state: "unknown", current: "0.59.26", checked_ms: 0, install: "windows-store", can_download: false });
+        render(() => (
+            <>
+                <UpdateStatus />
+                <MaintenanceSection />
+            </>
+        ));
+        expect(await screen.findByRole("button", { name: "Update in the Store" })).toBeTruthy();
+        expect(screen.getByText("Update to 0.59.27")).toBeTruthy();
+        // The notes link is built from the Store's version: no GitHub answer needed.
+        fireEvent.click(screen.getByRole("button", { name: "What's new" }));
+        expect(openLink).toHaveBeenCalledWith(RELEASE_0_59_27);
+    });
+
+    it("when GitHub has a release the Store doesn't list: says the Store has no newer version, with no button and no chip", async () => {
         storeCheck.mockResolvedValue({ state: "none", message: "" });
         updateStatus.mockResolvedValue(STORE);
         render(() => (
@@ -461,10 +496,48 @@ describe("Maintenance on a Microsoft Store install", () => {
                 <MaintenanceSection />
             </>
         ));
-        expect(await screen.findByText("v0.59.27 is released. The Microsoft Store is still reviewing it.")).toBeTruthy();
-        expect(screen.getByRole("button", { name: "What's new" })).toBeTruthy();
+        expect(await screen.findByText(/^The Microsoft Store has no newer version \(checked /)).toBeTruthy();
+        expect(screen.queryByText(/is released|still reviewing|0\.59\.27/)).toBeNull();
         expect(screen.queryByRole("button", { name: "Update in the Store" })).toBeNull();
+        expect(screen.queryByRole("button", { name: "What's new" })).toBeNull();
         expect(screen.queryByText("Update to 0.59.27")).toBeNull();
+        expect(screen.getByRole("button", { name: "Check for update" })).toBeTruthy();
+    });
+
+    it("a version the Store lists that is not newer than this one is no update", async () => {
+        for (const version of ["0.59.26", "0.59.25"]) {
+            forgetStoreOffer();
+            storeCheck.mockResolvedValue(listed(version));
+            updateStatus.mockResolvedValue(STORE);
+            render(() => <MaintenanceSection />);
+            expect(await screen.findByText(/^The Microsoft Store has no newer version/)).toBeTruthy();
+            expect(screen.queryByRole("button", { name: "Update in the Store" })).toBeNull();
+            cleanup();
+        }
+    });
+
+    it("compares versions as numbers: 0.59.100 is newer than 0.59.27", async () => {
+        acceptAppUpdate({ ...STORE, current: "0.59.27" });
+        storeCheck.mockResolvedValue(listed("0.59.100"));
+        render(() => <UpdateStatus />);
+        await askStore();
+        expect(await screen.findByText("Update to 0.59.100")).toBeTruthy();
+        expect(availableRelease()?.url).toBe("https://github.com/agentmuxai/agentmux/releases/tag/v0.59.100");
+    });
+
+    it("an update the Store lists without a readable version is still offered, without a version to name", async () => {
+        storeCheck.mockResolvedValue(listed(""));
+        updateStatus.mockResolvedValue(STORE);
+        render(() => (
+            <>
+                <UpdateStatus />
+                <MaintenanceSection />
+            </>
+        ));
+        expect(await screen.findByRole("button", { name: "Update in the Store" })).toBeTruthy();
+        // The chip and the panel's row both say so, with no version.
+        expect(screen.getAllByText("Update available")).toHaveLength(2);
+        expect(screen.queryByText(/Update to/)).toBeNull();
     });
 
     it("when the Store can't be asked: says that and why, and doesn't guess from GitHub", async () => {
@@ -476,7 +549,7 @@ describe("Maintenance on a Microsoft Store install", () => {
                 <MaintenanceSection />
             </>
         ));
-        expect(await screen.findByText(/Couldn't ask the Microsoft Store whether it has it \(no Store context: 0x80070490\)\./)).toBeTruthy();
+        expect(await screen.findByText("Couldn't ask the Microsoft Store (no Store context: 0x80070490).")).toBeTruthy();
         expect(screen.queryByRole("button", { name: "Update in the Store" })).toBeNull();
         expect(screen.queryByText("Update to 0.59.27")).toBeNull();
     });
@@ -485,7 +558,7 @@ describe("Maintenance on a Microsoft Store install", () => {
         storeCheck.mockResolvedValue({ state: "no_answer", message: "" });
         updateStatus.mockResolvedValue(STORE);
         render(() => <MaintenanceSection />);
-        expect(await screen.findByText("v0.59.27 is released. The Microsoft Store didn't answer; try again later.")).toBeTruthy();
+        expect(await screen.findByText("The Microsoft Store didn't answer; try again later.")).toBeTruthy();
         expect(screen.queryByRole("button", { name: "Update in the Store" })).toBeNull();
         expect(screen.queryByText("Update to 0.59.27")).toBeNull();
     });
@@ -494,34 +567,77 @@ describe("Maintenance on a Microsoft Store install", () => {
         storeCheck.mockRejectedValue(new Error("host went away"));
         updateStatus.mockResolvedValue(STORE);
         render(() => <MaintenanceSection />);
-        expect(await screen.findByText(/Couldn't ask the Microsoft Store whether it has it \(host went away\)/)).toBeTruthy();
+        expect(await screen.findByText("Couldn't ask the Microsoft Store (host went away).")).toBeTruthy();
         expect(screen.queryByRole("button", { name: "Update in the Store" })).toBeNull();
     });
 
-    it("Check again asks the Store again, and the button appears when it lists the update", async () => {
+    it("Check for update asks the Store, not GitHub, and the button appears when it lists the update", async () => {
         storeCheck.mockResolvedValue({ state: "none", message: "" });
         updateStatus.mockResolvedValue(STORE);
-        updateCheck.mockResolvedValue(STORE);
         render(() => <MaintenanceSection />);
-        expect(await screen.findByText(/still reviewing/)).toBeTruthy();
-        storeCheck.mockResolvedValue({ state: "available", message: "" });
-        fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+        expect(await screen.findByText(/^The Microsoft Store has no newer version/)).toBeTruthy();
+        storeCheck.mockResolvedValue(listed("0.59.27"));
+        fireEvent.click(screen.getByRole("button", { name: "Check for update" }));
         expect(await screen.findByRole("button", { name: "Update in the Store" })).toBeTruthy();
-        expect(screen.queryByText(/still reviewing/)).toBeNull();
+        expect(updateCheck).not.toHaveBeenCalled();
+        expect(screen.queryByText(/no newer version/)).toBeNull();
+        expect(storeCheck).toHaveBeenCalledTimes(2);
     });
 
-    it("asks the Store again later while it hasn't listed the release, so the button appears without a click", async () => {
-        vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    it("a status bar chip alone asks the Store a minute after the window starts, then every six hours", async () => {
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
         try {
-            storeCheck.mockResolvedValue({ state: "none", message: "" });
             updateStatus.mockResolvedValue(STORE);
-            render(() => <MaintenanceSection />);
-            expect(await screen.findByText(/still reviewing/)).toBeTruthy();
-            storeCheck.mockResolvedValue({ state: "available", message: "" });
-            vi.advanceTimersByTime(30 * 60 * 1000);
-            expect(await screen.findByRole("button", { name: "Update in the Store" })).toBeTruthy();
-            expect(screen.queryByText(/still reviewing/)).toBeNull();
+            render(() => <UpdateStatus />);
+            await vi.advanceTimersByTimeAsync(59_000);
+            expect(storeCheck).not.toHaveBeenCalled();
+            expect(screen.queryByText("Update to 0.59.27")).toBeNull();
+            await vi.advanceTimersByTimeAsync(1_000);
+            expect(storeCheck).toHaveBeenCalledTimes(1);
+            expect(screen.getByText("Update to 0.59.27")).toBeTruthy();
+            // The later asks are quiet: the answer on show stays until the new one comes.
+            storeCheck.mockResolvedValue({ state: "none", message: "" });
+            // Six hours after the window started (a minute is already gone).
+            await vi.advanceTimersByTimeAsync(6 * 60 * 60 * 1000 - 61_000);
+            expect(storeCheck).toHaveBeenCalledTimes(1);
+            await vi.advanceTimersByTimeAsync(1_000);
+            expect(storeCheck).toHaveBeenCalledTimes(2);
+            expect(storeAnswer()?.state).toBe("none");
+            expect(screen.queryByText("Update to 0.59.27")).toBeNull();
         } finally {
+            cleanup();
+            vi.useRealTimers();
+        }
+    });
+
+    it("with automatic update checks off, nothing asks the Store by itself; opening the panel still does", async () => {
+        settings.mockImplementation((key: string) => (key === "update:auto" ? false : undefined));
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+        try {
+            updateStatus.mockResolvedValue(STORE);
+            render(() => <UpdateStatus />);
+            await vi.advanceTimersByTimeAsync(7 * 60 * 60 * 1000);
+            expect(storeCheck).not.toHaveBeenCalled();
+            cleanup();
+            // Opening the version panel is a look the person asked for.
+            render(() => <MaintenanceSection />);
+            await vi.advanceTimersByTimeAsync(0);
+            expect(storeCheck).toHaveBeenCalledTimes(1);
+        } finally {
+            cleanup();
+            vi.useRealTimers();
+        }
+    });
+
+    it("does nothing with the Store on an install that isn't from it", async () => {
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+        try {
+            updateStatus.mockResolvedValue(AVAILABLE);
+            render(() => <UpdateStatus />);
+            await vi.advanceTimersByTimeAsync(7 * 60 * 60 * 1000);
+            expect(storeCheck).not.toHaveBeenCalled();
+        } finally {
+            cleanup();
             vi.useRealTimers();
         }
     });
@@ -574,12 +690,13 @@ describe("Maintenance on a Microsoft Store install", () => {
         expect(openLink).not.toHaveBeenCalled();
     });
 
-    it("tells a cancel or an update the Store doesn't have yet, without opening the page", async () => {
+    it("tells that the Store has no newer version after all, withdrawing the offer, without opening the page", async () => {
         updateStatus.mockResolvedValue(STORE);
-        storeUpdate.mockResolvedValue({ outcome: "none", message: "The Microsoft Store doesn't have this update yet." });
+        storeUpdate.mockResolvedValue({ outcome: "none", message: "The Microsoft Store has no newer version." });
         render(() => <MaintenanceSection />);
         fireEvent.click(await screen.findByRole("button", { name: "Update in the Store" }));
-        expect(await screen.findByText(/doesn't have this update yet/)).toBeTruthy();
+        await vi.waitFor(() => expect(screen.queryByRole("button", { name: "Update in the Store" })).toBeNull());
+        expect(screen.getAllByText(/The Microsoft Store has no newer version/).length).toBeGreaterThan(0);
         expect(openLink).not.toHaveBeenCalled();
     });
 
@@ -589,11 +706,11 @@ describe("Maintenance on a Microsoft Store install", () => {
         render(() => <MaintenanceSection />);
         fireEvent.click(await screen.findByRole("button", { name: "Update in the Store" }));
         expect(await screen.findByText("Couldn't ask the Store to install it (no Store context). Opened the Microsoft Store page to finish the update.")).toBeTruthy();
-        expect(openLink).toHaveBeenCalledWith("ms-windows-store://pdp/?productid=9P9QCXNNCRK3");
+        expect(openLink).toHaveBeenCalledWith(STORE_PAGE);
         openLink.mockReset();
         storeUpdate.mockRejectedValue(new Error("host went away"));
         fireEvent.click(screen.getByRole("button", { name: "Update in the Store" }));
-        await vi.waitFor(() => expect(openLink).toHaveBeenCalledWith("ms-windows-store://pdp/?productid=9P9QCXNNCRK3"));
+        await vi.waitFor(() => expect(openLink).toHaveBeenCalledWith(STORE_PAGE));
         // With no reason to give, the line still says the page was opened.
         expect(await screen.findByText("Opened the Microsoft Store page to finish the update.")).toBeTruthy();
     });
@@ -618,6 +735,16 @@ describe("Maintenance on a Microsoft Store install", () => {
         render(() => <MaintenanceSection />);
         expect(await screen.findByRole("button", { name: "Download" })).toBeTruthy();
         expect(screen.queryByText(/Microsoft Store/)).toBeNull();
+        expect(storeCheck).not.toHaveBeenCalled();
+    });
+
+    it("other installs still take GitHub's check", async () => {
+        updateStatus.mockResolvedValue({ ...AVAILABLE, state: "up-to-date" });
+        updateCheck.mockResolvedValue(AVAILABLE);
+        render(() => <MaintenanceSection />);
+        fireEvent.click(await screen.findByRole("button", { name: "Check for update" }));
+        expect(await screen.findByRole("button", { name: "Download" })).toBeTruthy();
+        expect(updateCheck).toHaveBeenCalledTimes(1);
         expect(storeCheck).not.toHaveBeenCalled();
     });
 });

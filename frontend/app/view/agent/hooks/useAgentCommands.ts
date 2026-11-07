@@ -86,7 +86,7 @@ export interface UseAgentCommandsOptions {
     setAuthNotice: (notice: string | null) => void;
     /** For /login to clear a stale `canRetry` on success — see
      *  `SlashCommandContext.notifyControllerHealthy`. */
-    notifyControllerHealthy: () => void;
+    notifyControllerHealthy: (provesAuth?: boolean) => void;
     /** For /login to restart a running controller onto the new
      *  credential — see `SlashCommandContext.forceControllerRefresh`. */
     forceControllerRefresh: () => Promise<boolean>;
@@ -569,7 +569,8 @@ function flushPendingControllerRefresh(opts: UseAgentCommandsOptions, s: Command
             }
         }
         if (refreshed) {
-            opts.notifyControllerHealthy();
+            // A refreshed controller proves a login only for a provider that can check one (Muse cannot).
+            opts.notifyControllerHealthy((opts.provider()?.authCheckCommand?.length ?? 0) > 0);
             // Clear only an "auth" failure: FailureCleared clears any
             // code, and an unrelated one (rate_limited, ...) is still
             // real. See failure/useAuthHealth.ts's declareAuthHealthy.

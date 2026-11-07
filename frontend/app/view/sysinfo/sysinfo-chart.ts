@@ -87,6 +87,45 @@ export function yRange(rows: DataItem[], yval: string, meta: TimeSeriesMeta | un
     return [min, max > min ? max : min + 1];
 }
 
+/** One y label: its text, the value it sits at, and whether it is the lowest (drawn above its line). */
+export interface YLabel {
+    text: string;
+    value: number;
+    lowest: boolean;
+}
+
+/** The y labels for the ticks inside `[min, max]`, each as `format` writes it. */
+export function yLabelTexts(splits: number[], min: number, max: number, format: (v: number) => string): YLabel[] {
+    const inside = splits.filter((v) => v >= min && v <= max);
+    const lowest = inside.length > 0 ? Math.min(...inside) : null;
+    return inside.map((value) => ({ text: format(value), value, lowest: value === lowest }));
+}
+
+/** The plot area of a uPlot chart, in canvas pixels, and the canvas to erase from. */
+interface FadeTarget {
+    bbox: { left: number; top: number; width: number; height: number };
+    ctx: CanvasRenderingContext2D;
+}
+
+/**
+ * Fades what is drawn in the plot's left `fadePx` canvas pixels out to nothing at the edge, by erasing it
+ * with a gradient: the series, like its area fades out at the bottom, and no colour of its own, so it
+ * suits every theme. The y labels, drawn over it, stay readable.
+ */
+export function fadeLeftEnd(u: FadeTarget, fadePx: number): void {
+    const { left, top, width, height } = u.bbox;
+    const w = Math.min(fadePx, width);
+    if (!(w > 0)) return;
+    const g = u.ctx.createLinearGradient(left, 0, left + w, 0);
+    g.addColorStop(0, "rgba(0, 0, 0, 1)");
+    g.addColorStop(1, "rgba(0, 0, 0, 0)");
+    u.ctx.save();
+    u.ctx.globalCompositeOperation = "destination-out";
+    u.ctx.fillStyle = g;
+    u.ctx.fillRect(left, top, w, height);
+    u.ctx.restore();
+}
+
 /** The time axis' labels, from uPlot's tick times and spacing (both in seconds). */
 export function timeAxisLabels(splitsSecs: number[], incrSecs: number): string[] {
     return splitsSecs.map((s) => formatTimeTick(s * 1000, incrSecs * 1000));

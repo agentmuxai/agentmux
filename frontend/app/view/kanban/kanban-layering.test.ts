@@ -3,8 +3,9 @@
 
 /**
  * The task drawer paints over the board. In the narrow list each section's head is sticky at
- * `--z-tab-name`; a drawer with no z-index of its own was cut across by those heads. jsdom does not
- * lay out SCSS, so this reads the two rules and the token values they name.
+ * `--z-tab-name`; a drawer with no z-index of its own was cut across by those heads. The drawer is the kit's
+ * SidePanel, so its rule is in `side-panel.scss` and the sticky head's in `kanban.scss`. jsdom does not lay out
+ * SCSS, so this reads the two rules and the token values they name.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -12,6 +13,7 @@ import { describe, expect, it } from "vitest";
 
 const appDir = join(__dirname, "..", "..");
 const kanban = readFileSync(join(__dirname, "kanban.scss"), "utf8");
+const sidePanel = readFileSync(join(appDir, "element", "ui", "side-panel.scss"), "utf8");
 const theme = readFileSync(join(appDir, "theme.scss"), "utf8");
 
 /** The `z-index` declared in the rule that starts with `selector` (first occurrence). */
@@ -31,7 +33,7 @@ function tokenValue(value: string | null): number | null {
 
 describe("the Kanban's layers", () => {
     it("paints the drawer over the sticky section heads, both from tokens", () => {
-        const drawer = tokenValue(zIndexOf(kanban, ".kanban-drawer {"));
+        const drawer = tokenValue(zIndexOf(sidePanel, ".ui-side-panel {"));
         const head = tokenValue(zIndexOf(kanban, ".kanban-column__head {\n        position: sticky"));
         expect(head).not.toBeNull();
         expect(drawer).not.toBeNull();
@@ -44,5 +46,6 @@ describe("the Kanban's layers", () => {
 
     it("declares no raw z-index", () => {
         expect(/z-index:\s*-?\d/.test(kanban)).toBe(false);
+        expect(/z-index:\s*-?\d/.test(sidePanel)).toBe(false);
     });
 });

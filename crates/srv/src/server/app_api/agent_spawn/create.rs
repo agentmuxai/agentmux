@@ -45,15 +45,32 @@ pub(super) fn find_template(state: &AppState, wanted: &str) -> Result<AgentDefin
         })
 }
 
-fn message(leader: &str, name: &str, template: &str, placement: &Placement, account: Option<&WorkerAccount>) -> String {
+fn message(leader: &str, name: &str, template: &str, placement: &Placement, account: Option<&WorkerAccount>, route_line: &str) -> String {
     let on = account.map(|a| format!(" on the account {}", one_line(&a.label, 80))).unwrap_or_default();
     format!(
-        "{} wants to add a new agent to My Agents: {}, from the template {}{}{on}. It is not started until someone starts it. Add it?",
+        "{} wants to add a new agent to My Agents: {}, from the template {}{}{on}.{route_line} It is not started until someone starts it. Add it?",
         one_line(leader, 60),
         one_line(name, 60),
         one_line(template, 60),
         placement.describe(),
     )
+}
+
+/// The route and model a created agent is asked to run on. A created agent has no leader to inherit from; the
+/// harness is its template's, so `harness` can only confirm it.
+fn pick_route(state: &AppState, req: &CreateAgentRequest, template: &AgentDefinition, provider: &str) -> Result<Option<crate::backend::model_gateway::ask::Picked>, SpawnError> {
+    if let Some(h) = req.route.harness.as_deref().map(str::trim).filter(|h| !h.is_empty()) {
+        if crate::backend::providers::resolve_provider_alias(h) != crate::backend::providers::resolve_provider_alias(provider) {
+            return Err(refuse(StatusCode::BAD_REQUEST, format!("INVALID_ARG: the template {} runs {provider}, not {h}; name a template for {h}", template.slug)));
+        }
+    }
+    let picked = crate::backend::model_gateway::ask::resolve(provider, req.route.route.as_deref(), req.model.as_deref(), None, route::key_present(state)).map_err(|e| {
+        if e.starts_with("KEY_MISSING") { refuse(StatusCode::CONFLICT, e) } else { refuse(StatusCode::BAD_REQUEST, format!("INVALID_ARG: {e}")) }
+    })?;
+    if picked.is_none() && req.model.as_deref().is_some_and(|m| !m.trim().is_empty()) {
+        return Err(refuse(StatusCode::BAD_REQUEST, "INVALID_ARG: model on create needs a route (see Agents routes); an agent on its harness's own sign-in picks its model when it runs"));
+    }
+    Ok(picked)
 }
 
 async fn create(state: &AppState, caller: Option<&crate::server::caller::Caller>, req: CreateAgentRequest) -> Result<serde_json::Value, SpawnError> {
@@ -65,20 +82,25 @@ async fn create(state: &AppState, caller: Option<&crate::server::caller::Caller>
     let template = find_template(state, &req.template)?;
     let placement = container::decide_here(state, &req.container, &leader.def, &template).await?;
     let provider = state.id_store.resolve_effective_provider_id(&template);
+    let picked = pick_route(state, &req, &template, &provider)?;
     // An account is linked when one is named, or the caller's can be used; an agent with none is bound at its first open.
-    let account = match choose_account(state, &leader, &provider, req.account.as_deref()) {
-        Ok(account) => Some(account),
-        Err(e) if req.account.is_some() => return Err(e),
-        Err(_) => None,
+    // An agent on a model route is billed to the route's key and has none.
+    let account = match (&picked, choose_account(state, &leader, &provider, req.account.as_deref())) {
+        (Some(_), _) if req.account.is_some() => return Err(refuse(StatusCode::BAD_REQUEST, "INVALID_ARG: an agent on a model route has no account; leave account out")),
+        (Some(_), _) => None,
+        (None, Ok(account)) => Some(account),
+        (None, Err(e)) if req.account.is_some() => return Err(e),
+        (None, Err(_)) => None,
     };
+    let route_line = picked.as_ref().map(crate::backend::model_gateway::ask::consent_line).unwrap_or_default();
 
     let provenance = blockcontroller::get_controller(&leader.block_id).and_then(|c| c.turn_provenance());
-    let asked_user = if crate::sagas::self_quit::gate(provenance.as_ref(), &req.user_instruction).is_err() {
+    let asked_user = if crate::sagas::self_quit::gate(provenance.as_ref(), &req.user_instruction).is_err() || picked.is_some() {
         tracing::info!(leader = %leader.def.name, "agent.create: asking the user");
         let question = json!({
             "kind": "consent",
             "title": format!("{} wants to add an agent", one_line(&leader.def.name, 60)),
-            "message": message(&leader.def.name, name, &template.name, &placement, account.as_ref()),
+            "message": message(&leader.def.name, name, &template.name, &placement, account.as_ref(), &route_line),
             "checkbox": "",
             "ok_label": "Add it",
             "cancel_label": "Don't",
@@ -88,7 +110,17 @@ async fn create(state: &AppState, caller: Option<&crate::server::caller::Caller>
         false
     };
 
-    make(state, &leader, &template, name, &placement, account.as_ref(), asked_user)
+    let mut made = make(state, &leader, &template, name, &placement, account.as_ref(), asked_user)?;
+    if let Some(p) = picked {
+        let id = made["agent_id"].as_str().unwrap_or_default().to_string();
+        crate::backend::model_gateway::launch::set_choice(&state.mstore, &id, &provider, p.route.id, p.model.id).map_err(|e| {
+            discard_created(state, &id);
+            refuse(StatusCode::INTERNAL_SERVER_ERROR, format!("the agent couldn't be given its model route, and was removed: {e}"))
+        })?;
+        made["route"] = json!(p.route.id);
+        made["model"] = json!(p.model.id);
+    }
+    Ok(made)
 }
 
 /// Make the agent, as `placement` says, and link its account; removed again if it can't be finished.

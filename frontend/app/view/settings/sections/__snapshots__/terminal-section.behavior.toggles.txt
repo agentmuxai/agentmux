@@ -1,0 +1,5 @@
+set term:copyonselect true
+set term:shiftenternewline true
+set term:allowbracketedpaste false
+set term:showstatsbadge false
+set term:predictiveecho false

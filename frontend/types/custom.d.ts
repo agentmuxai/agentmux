@@ -146,7 +146,7 @@ declare global {
         decideBrowserAttention(
             blockId: string,
             id: string,
-            decision: "done" | "approve" | "approve_always" | "cancel" | "give_back",
+            decision: "done" | "approve" | "approve_always" | "approve_ask" | "cancel" | "give_back",
         ): Promise<void>;
         /** The person's Bypass (`on`) or End bypass in an agent-driven browser
          *  pane's header. `agent` and `origins` are what the confirmation
@@ -185,8 +185,8 @@ declare global {
         appUpdate?(action: "download" | "restart" | "cancel", now?: boolean): Promise<unknown>;
         /** A Microsoft Store install: ask the Store to install the update; `fallback` means open the Store page instead. */
         storeUpdate?(version?: string): Promise<{ outcome: "installed" | "canceled" | "none" | "fallback"; message: string }>;
-        /** A Microsoft Store install: whether the Store itself lists an update (nothing is installed); `no_answer` means it never answered, `unknown` says why it couldn't be asked. */
-        storeUpdateCheck?(): Promise<{ state: "available" | "none" | "no_answer" | "unknown"; message: string }>;
+        /** A Microsoft Store install: whether the Store itself lists an update (nothing is installed); `version` is the Store package's version when it does (empty if unreadable); `no_answer` means it never answered, `unknown` says why it couldn't be asked. */
+        storeUpdateCheck?(): Promise<{ state: "available" | "none" | "no_answer" | "unknown"; message: string; version?: string }>;
         /** What the Store's last install left: the app came back `updated`, or `stayed` on the version the Store closed it on. */
         storeUpdateCameBack?(): Promise<{ state: "none" | "updated" | "stayed"; from: string; target: string }>;
         /** Forget the key a widget publisher is pinned to (Settings → Widgets),
@@ -329,6 +329,9 @@ declare global {
         stop(blockId: string): Promise<void>;
         /** Stop a running download of the pane (the strip's Cancel); an id the host no longer holds does nothing. */
         cancelDownload(blockId: string, downloadId: number): Promise<void>;
+        /** Save a link or an image of the page (the right-click menu): starts a download of `url` through the pane's
+         *  download handler. The host refuses an address that isn't http, https, blob or data. */
+        startDownload(blockId: string, url: string): Promise<void>;
         focus(blockId: string): Promise<void>;
         cut(blockId: string): Promise<void>;
         copy(blockId: string): Promise<void>;
@@ -812,6 +815,8 @@ declare global {
         title?: string;
         disabled?: boolean;
         noAction?: boolean;
+        /** A face wider than one icon: the header gives its buttons a fixed width, and this one sizes to its face. */
+        fitContent?: boolean;
     };
 
     type IconButtonDecl = IconButtonCommon & {
@@ -1030,6 +1035,8 @@ declare global {
             x?: number;
             y?: number;
             linkUrl?: string;
+            /** The picture under the click, when there is one. */
+            imageUrl?: string;
             selectionText?: string;
             isEditable?: boolean;
             canGoBack?: boolean;

@@ -122,8 +122,27 @@ describe("Overview", () => {
         expect(net).toBeDefined();
         expect(net.data[1]).toEqual([2.5, 2.5, 2.5]);
         expect(net.data[2]).toEqual([-0.4, -0.4, -0.4]);
-        // Its axis reads amounts, not negatives.
-        expect(net.opts.axes[1].values(null, [-1, 0, 1])).toEqual(["1.0 MB/s", "0 KB/s", "1.0 MB/s"]);
+        // Its labels read amounts, not negatives: the axis hands over its ticks, the chart writes them over the plot.
+        net.opts.axes[1].values(null, [-1, 0, 1]);
+        const plot = {
+            ctx: {
+                font: "",
+                measureText: () => ({ width: 10 }),
+                createLinearGradient: () => ({ addColorStop() {} }),
+                save() {},
+                restore() {},
+                fillRect() {},
+            },
+            bbox: { left: 0, top: 0, width: 400, height: 100 },
+            scales: { y: { min: -1, max: 1 } },
+            axes: [{}, { font: ["12px sans-serif"] }],
+            over: { offsetTop: 0 },
+            valToPos: (v: number) => 50 - v * 50,
+        };
+        net.opts.hooks.draw[0](plot);
+        const labels = [...document.querySelectorAll(".sysinfo-chart-ylabel")].map((l) => l.textContent);
+        expect(labels).toEqual(expect.arrayContaining(["1.0 MB/s", "0 KB/s"]));
+        expect(labels.some((l) => l?.startsWith("-"))).toBe(false);
     });
 
     it("lists every area's figures as a table, every core included", () => {

@@ -23,6 +23,10 @@ use crate::backend::blockcontroller::{
 
 use super::{argv::build_turn_argv, SubprocessController, SubprocessControllerInner, SubprocessSpawnConfig, SUBPROCESS_OUTPUT_SUBJECT};
 
+#[cfg(test)]
+#[path = "container_turn_tests.rs"]
+mod container_turn_tests;
+
 /// Wrap the CLI argv so it reads the turn prompt from `prompt_path`, a file
 /// already written into the container by
 /// [`ContainerManager::upload_turn_prompt`].

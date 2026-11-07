@@ -1,0 +1,5 @@
+rpc ListAgentDefinitions include_hidden=true
+rpc AgentInputHistoryTrash agent=a1
+rpc AgentInputHistory agent=a1 before=undefined limit=200
+rpc AgentInputHistorySearch agent=a1 query="msg" limit=200
+-- Show older buttons: 0

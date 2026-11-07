@@ -40,6 +40,12 @@ pub(super) const VAULT_SCHEMA: &str = "
         created_at INTEGER NOT NULL DEFAULT 0
     );
     INSERT OR IGNORE INTO db_vaults (id, name, agents, position) VALUES ('personal', 'Personal', 'all', 0);
+    -- The Vault each browser profile (`personal` or `profile:<id>`) saves its sign-ins to and offers
+    -- them from. A profile with no row uses Personal.
+    CREATE TABLE IF NOT EXISTS db_vault_signin_vaults (
+        profile  TEXT PRIMARY KEY,
+        vault_id TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS db_vault_activity (
         seq         INTEGER PRIMARY KEY AUTOINCREMENT,
         at          INTEGER NOT NULL,
@@ -106,9 +112,18 @@ pub(super) const VAULT_SCHEMA: &str = "
 ";
 
 /// Columns added after the Vault's tables first shipped, applied like the identity store's others.
-pub(super) const VAULT_ALTERS: [&str; 1] = [
+pub(super) const VAULT_ALTERS: [&str; 8] = [
     // Several Vaults: every entry made before belongs to `personal`.
     "ALTER TABLE db_vault_entries ADD COLUMN vault_id TEXT NOT NULL DEFAULT 'personal'",
+    // The entry's history (docs/specs/SPEC_VAULT_PARITY_ENTRY_HISTORY_REASONS_AND_IMPORT_2026_11_06.md §5): rows made
+    // before these columns keep the defaults, and have no hash.
+    "ALTER TABLE db_vault_activity ADD COLUMN version INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE db_vault_activity ADD COLUMN actor_kind TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE db_vault_activity ADD COLUMN host TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE db_vault_activity ADD COLUMN reason TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE db_vault_activity ADD COLUMN refs TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE db_vault_activity ADD COLUMN prev_hash TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE db_vault_activity ADD COLUMN hash TEXT NOT NULL DEFAULT ''",
 ];
 
 #[derive(Debug, Clone, PartialEq)]
@@ -144,8 +159,16 @@ pub struct VaultInfoRow {
 /// The Vault every entry made before Vaults existed belongs to.
 pub const PERSONAL_VAULT: &str = "personal";
 
-#[derive(Debug, Clone, PartialEq)]
+/// The actions that give an entry a new value: each one is the next version of it.
+pub const VALUE_SETTING: [&str; 6] = ["generated", "captured", "rotated", "replaced", "restored", "created"];
+
+/// The actions that hand an entry's value to a process, a form or a sign-in: each is made under the version then current.
+pub const VALUE_USES: [&str; 7] = ["filled a web form", "signed in", "ran a command", "revealed", "copied", "sent on sign-up", "filled on sign-up"];
+
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct VaultActivityRow {
+    /// Order on this machine; the store gives it.
+    pub seq: i64,
     pub at: i64,
     pub entry_id: String,
     pub entry_label: String,
@@ -155,6 +178,61 @@ pub struct VaultActivityRow {
     /// Where: a site, a command, a file name.
     pub target: String,
     pub outcome: String,
+    /// The entry's value version this event made or used; 0 for one that touches no value. The store gives it.
+    pub version: i64,
+    /// `agent`, `person` or `srv`.
+    pub actor_kind: String,
+    /// The machine's name.
+    pub host: String,
+    /// The agent's reason, one line.
+    pub reason: String,
+    /// Short references (a task, a PR), a JSON array, or empty.
+    pub refs: String,
+    /// The hash of the row before it in the chain, empty for the first chained row.
+    pub prev_hash: String,
+    /// This row's place in the chain; empty for a row made before the chain.
+    pub hash: String,
+}
+
+/// A row's hash in the chain: SHA-256 over the previous row's hash and the row's own fields, each with its length in
+/// front so two rows can't be cut into each other. No value goes in: a row holds none.
+pub fn activity_hash(prev: &str, r: &VaultActivityRow) -> String {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    let mut put = |bytes: &[u8]| {
+        h.update((bytes.len() as u64).to_le_bytes());
+        h.update(bytes);
+    };
+    put(prev.as_bytes());
+    for n in [r.seq, r.at, r.version] {
+        put(&n.to_le_bytes());
+    }
+    for t in [&r.entry_id, &r.entry_label, &r.actor_kind, &r.actor, &r.host, &r.action, &r.target, &r.outcome, &r.reason, &r.refs] {
+        put(t.as_bytes());
+    }
+    hex::encode(h.finalize())
+}
+
+const ACTIVITY_COLUMNS: &str = "seq, at, entry_id, entry_label, actor, action, target, outcome, version, actor_kind, host, reason, refs, prev_hash, hash";
+
+fn activity_of(r: &rusqlite::Row<'_>) -> rusqlite::Result<VaultActivityRow> {
+    Ok(VaultActivityRow {
+        seq: r.get(0)?,
+        at: r.get(1)?,
+        entry_id: r.get(2)?,
+        entry_label: r.get(3)?,
+        actor: r.get(4)?,
+        action: r.get(5)?,
+        target: r.get(6)?,
+        outcome: r.get(7)?,
+        version: r.get(8)?,
+        actor_kind: r.get(9)?,
+        host: r.get(10)?,
+        reason: r.get(11)?,
+        refs: r.get(12)?,
+        prev_hash: r.get(13)?,
+        hash: r.get(14)?,
+    })
 }
 
 const COLUMNS: &str = "id, kind, label, fields, tags, sealed, created_at, updated_at, last_used_at, vault_id";
@@ -355,8 +433,38 @@ impl Store {
             return Ok(false);
         }
         let n = tx.execute("DELETE FROM db_vaults WHERE id = ?1", params![id])?;
+        // A profile that saved its sign-ins there goes back to Personal.
+        tx.execute("DELETE FROM db_vault_signin_vaults WHERE vault_id = ?1", params![id])?;
         tx.commit()?;
         Ok(n > 0)
+    }
+
+    /// Each browser profile's sign-in Vault, for the profiles that have one other than Personal.
+    pub fn signin_vaults(&self) -> Result<Vec<(String, String)>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT profile, vault_id FROM db_vault_signin_vaults ORDER BY profile")?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// The Vault `profile` keeps its sign-ins in, if it is not Personal.
+    pub fn signin_vault(&self, profile: &str) -> Result<Option<String>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        Ok(conn.query_row("SELECT vault_id FROM db_vault_signin_vaults WHERE profile = ?1", params![profile], |r| r.get(0)).optional()?)
+    }
+
+    /// Sets the Vault `profile` keeps its sign-ins in; Personal clears the row.
+    pub fn signin_vault_set(&self, profile: &str, vault_id: &str) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        if vault_id == PERSONAL_VAULT {
+            conn.execute("DELETE FROM db_vault_signin_vaults WHERE profile = ?1", params![profile])?;
+        } else {
+            conn.execute(
+                "INSERT INTO db_vault_signin_vaults (profile, vault_id) VALUES (?1, ?2) ON CONFLICT(profile) DO UPDATE SET vault_id = ?2",
+                params![profile, vault_id],
+            )?;
+        }
+        Ok(())
     }
 
     /// Puts an entry in another Vault, keeping its id, versions and grants. False if there is no such entry.
@@ -434,34 +542,60 @@ impl Store {
         Ok(n > 0)
     }
 
-    pub fn vault_activity_add(&self, row: &VaultActivityRow) -> Result<(), StoreError> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "INSERT INTO db_vault_activity (at, entry_id, entry_label, actor, action, target, outcome) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![row.at, row.entry_id, row.entry_label, row.actor, row.action, row.target, row.outcome],
+    /// Appends a line to the activity log and chains it: the store gives it its `seq`, its `version` (the entry's
+    /// count of value-setting lines that went through, plus this one if it is one) and its place in the hash
+    /// chain, all in one transaction. Returns the line as stored.
+    pub fn vault_activity_add(&self, row: &VaultActivityRow) -> Result<VaultActivityRow, StoreError> {
+        let mut conn = self.conn.lock().unwrap();
+        // Immediate: the store is shared by every AgentMux process on the computer, and the chain's tip is read and then
+        // written, so a second process must wait (busy_timeout) rather than read the same tip and lose its line.
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let mut row = row.clone();
+        row.seq = tx
+            .query_row("SELECT seq FROM sqlite_sequence WHERE name = 'db_vault_activity'", [], |r| r.get::<_, i64>(0))
+            .optional()?
+            .unwrap_or(0)
+            + 1;
+        row.version = if row.entry_id.is_empty() { 0 } else { activity_version(&tx, &row)? };
+        row.prev_hash = tx
+            .query_row("SELECT hash FROM db_vault_activity WHERE hash != '' ORDER BY seq DESC LIMIT 1", [], |r| r.get::<_, String>(0))
+            .optional()?
+            .unwrap_or_default();
+        row.hash = activity_hash(&row.prev_hash, &row);
+        tx.execute(
+            "INSERT INTO db_vault_activity (seq, at, entry_id, entry_label, actor, action, target, outcome, version, actor_kind, host, reason, refs, prev_hash, hash) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+            params![
+                row.seq, row.at, row.entry_id, row.entry_label, row.actor, row.action, row.target, row.outcome, row.version, row.actor_kind, row.host,
+                row.reason, row.refs, row.prev_hash, row.hash
+            ],
         )?;
-        Ok(())
+        tx.commit()?;
+        Ok(row)
     }
 
     /// The latest `limit` activity rows, newest first.
     pub fn vault_activity_list(&self, limit: i64) -> Result<Vec<VaultActivityRow>, StoreError> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT at, entry_id, entry_label, actor, action, target, outcome FROM db_vault_activity \
-             ORDER BY seq DESC LIMIT ?1",
-        )?;
-        let rows = stmt.query_map(params![limit], |r| {
-            Ok(VaultActivityRow {
-                at: r.get(0)?,
-                entry_id: r.get(1)?,
-                entry_label: r.get(2)?,
-                actor: r.get(3)?,
-                action: r.get(4)?,
-                target: r.get(5)?,
-                outcome: r.get(6)?,
-            })
-        })?;
+        let mut stmt = conn.prepare(&format!("SELECT {ACTIVITY_COLUMNS} FROM db_vault_activity ORDER BY seq DESC LIMIT ?1"))?;
+        let rows = stmt.query_map(params![limit], activity_of)?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// Every activity row, oldest first: what the hash chain is checked over.
+    pub fn vault_activity_all(&self) -> Result<Vec<VaultActivityRow>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(&format!("SELECT {ACTIVITY_COLUMNS} FROM db_vault_activity ORDER BY seq"))?;
+        let rows = stmt.query_map([], activity_of)?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// One entry's latest `limit` activity rows of every action, from `since_ms` on (so a deleted entry whose id was
+    /// reused lends the new one none of its lines), newest first.
+    pub fn vault_activity_history(&self, entry_id: &str, since_ms: i64, limit: i64) -> Result<Vec<VaultActivityRow>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(&format!("SELECT {ACTIVITY_COLUMNS} FROM db_vault_activity WHERE entry_id = ?1 AND at >= ?2 ORDER BY seq DESC LIMIT ?3"))?;
+        let rows = stmt.query_map(params![entry_id, since_ms, limit], activity_of)?;
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
@@ -473,26 +607,36 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         let marks = vec!["?"; actions.len()].join(", ");
         let mut stmt = conn.prepare(&format!(
-            "SELECT at, entry_id, entry_label, actor, action, target, outcome FROM db_vault_activity \
-             WHERE entry_id = ? AND action IN ({marks}) AND at >= ? ORDER BY seq DESC LIMIT ?"
+            "SELECT {ACTIVITY_COLUMNS} FROM db_vault_activity WHERE entry_id = ? AND action IN ({marks}) AND at >= ? ORDER BY seq DESC LIMIT ?"
         ))?;
         let mut args: Vec<rusqlite::types::Value> = vec![entry_id.to_string().into()];
         args.extend(actions.iter().map(|a| rusqlite::types::Value::from(a.to_string())));
         args.push(since_ms.into());
         args.push(limit.into());
-        let rows = stmt.query_map(rusqlite::params_from_iter(args), |r| {
-            Ok(VaultActivityRow {
-                at: r.get(0)?,
-                entry_id: r.get(1)?,
-                entry_label: r.get(2)?,
-                actor: r.get(3)?,
-                action: r.get(4)?,
-                target: r.get(5)?,
-                outcome: r.get(6)?,
-            })
-        })?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(args), activity_of)?;
         Ok(rows.collect::<Result<_, _>>()?)
     }
+}
+
+/// The version `row` is made under: the number of the entry's value-setting lines that went through, one more when this
+/// is one. A line that touches no value is 0. Counts the lines since the entry was last deleted, so one whose id came
+/// round again starts at 1.
+fn activity_version(tx: &rusqlite::Transaction<'_>, row: &VaultActivityRow) -> Result<i64, StoreError> {
+    let sets = VALUE_SETTING.contains(&row.action.as_str());
+    if !sets && !VALUE_USES.contains(&row.action.as_str()) {
+        return Ok(0);
+    }
+    let since: i64 =
+        tx.query_row("SELECT COALESCE(MAX(seq), 0) FROM db_vault_activity WHERE entry_id = ?1 AND action = 'deleted'", params![row.entry_id], |r| r.get(0))?;
+    let marks = vec!["?"; VALUE_SETTING.len()].join(", ");
+    let mut args: Vec<rusqlite::types::Value> = vec![row.entry_id.clone().into(), since.into()];
+    args.extend(VALUE_SETTING.iter().map(|a| rusqlite::types::Value::from(a.to_string())));
+    let made: i64 = tx.query_row(
+        &format!("SELECT COUNT(*) FROM db_vault_activity WHERE entry_id = ? AND seq > ? AND outcome = 'done' AND action IN ({marks})"),
+        rusqlite::params_from_iter(args),
+        |r| r.get(0),
+    )?;
+    Ok(if sets && row.outcome == "done" { made + 1 } else { made })
 }
 
 #[cfg(test)]
@@ -613,10 +757,19 @@ mod tests {
                 action: action.to_string(),
                 target: String::new(),
                 outcome: "done".into(),
+                ..Default::default()
             })
             .unwrap();
         }
         let got = s.vault_activity_list(2).unwrap();
         assert_eq!(got.iter().map(|r| r.action.as_str()).collect::<Vec<_>>(), ["deleted", "changed"]);
+    }
+}
+
+impl Store {
+    /// Runs `sql` on the identity store: how a test stands in for someone editing the database by hand.
+    #[cfg(test)]
+    pub fn vault_run_sql_for_tests(&self, sql: &str) {
+        self.conn.lock().unwrap().execute_batch(sql).unwrap();
     }
 }

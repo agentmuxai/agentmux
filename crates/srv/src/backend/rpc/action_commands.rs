@@ -40,7 +40,7 @@ pub const ALWAYS: &[&str] = &[
     "fs.create", "fs.delete", "fs.op.cancel", "fs.op.resolve", "fs.op.start", "fs.open", "fs.rename", "fs.restore",
     "fs.trash", "github.connection", "github.installations", "globalmemory:import", "globalmemory:revert", "globalmemory:set_reach", "hidenamedagent", "history.reclaim",
     "identity.account.move_agents", "identity.account.upsert", "identity.ensureaccountdir", "identity.self.unlink",
-    "importagentfromclaw", "importagents", "install.cancel", "install.start", "installtool", "jobs.act", "jobs.reporters.add",
+    "importagentfromclaw", "importagents", "install.cancel", "install.start", "install.uninstall", "installtool", "jobs.act", "jobs.reporters.add",
     "jobs.reporters.forget", "jobs.save",
     "jobs.templates.approve", "jobs.templates.catalog.install", "jobs.templates.install", "jobs.templates.uninstall",
     "kanban.act", "linkagentidentity", "lspstart", "lspstop", "mcp.bind", "mcp.catalog.bind", "mcp.catalog.delete",

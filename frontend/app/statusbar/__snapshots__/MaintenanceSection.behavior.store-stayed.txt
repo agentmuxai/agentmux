@@ -1,0 +1,26 @@
+rpc AppUpdateStatus
+host storeUpdateCheck
+-- stayed
+<div>
+  <div class="instance-panel-section-title">
+    "Maintenance"
+    <span class="maintenance-badge">
+      "↓ 0.59.27"
+  <div class="maintenance-update-row">
+    <span class="maintenance-icon maintenance-icon--update">
+      "↓"
+    <span class="maintenance-row-text">
+      "v0.59.27 is in the Microsoft Store"
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+      "What's new"
+    <button type="button" class="ui-button ui-tone-accent ui-density-compact maintenance-btn maintenance-btn--primary">
+      "Update in the Store"
+  <div class="maintenance-row-text maintenance-row-text--dim">
+    "The Store closes AgentMux while it installs v0.59.27, then opens it again."
+  <div class="maintenance-row-text maintenance-row-text--error">
+    "The Store closed AgentMux to install v0.59.26, but this is still v0.59.25. Try Update in the Store again, or install it from the Microsoft Store app."
+  <div class="maintenance-update-row">
+    <span class="maintenance-row-text maintenance-row-text--dim">
+      "Checked <time>"
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+      "Check again"

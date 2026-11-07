@@ -475,7 +475,7 @@ describe("follow-state transition log (I4)", () => {
         wheelTo(s, 700);
         expect(s.scrollRef.dataset.followState).toBe("following");
         expect(followLines().slice(1)).toEqual([
-            "pane=abcdef1 following→detached cause=user-scroll gap=500px",
+            "pane=abcdef1 following→detached cause=user-scroll gap=500px input=gesture",
             "pane=abcdef1 detached→following cause=user-scroll-to-bottom gap=0px",
         ]);
     });

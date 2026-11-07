@@ -1,0 +1,6 @@
+subscribe accountavailability
+subscribe workqueue:changed
+rpc KanbanList
+subscribe agents:changed
+board#1 mounted
+rpc SetConfig {"kanban:reminders":false}

@@ -12,6 +12,9 @@ import type { VaultActivity } from "@/types/rpc/VaultActivity";
 import type { VaultRequest } from "@/types/rpc/VaultRequest";
 import type { VaultSection } from "@/types/rpc/VaultSection";
 import { VaultEntries } from "./vault-entries";
+import { VaultHistoryDialog, whoOf, whyOf } from "./vault-history";
+import { VaultManageDialog } from "./vault-manage";
+import { ALL_VAULTS, VaultPicker } from "./vault-vaults";
 import { VaultRequestsList } from "./vault-requests-list";
 import { VaultShown } from "./vault-reveal";
 import { VaultExportDialog } from "./vault-export";
@@ -31,12 +34,15 @@ import {
     setVaultOnScreen,
     vaultAvailable,
     vaultChangedMs,
+    vaultEntries,
     vaultError,
     vaultProblem,
+    vaultList,
     vaultRequests,
     type KeptSecret,
 } from "./vault-store";
 
+import "@/app/view/section-pane/section-pane.scss";
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
 import "./vault-view.scss";
 
@@ -123,8 +129,31 @@ function VaultKept(props: { visible: boolean }): JSX.Element {
     );
 }
 
+/** One line of the Activity tab; an entry that still exists opens its History. */
+function ActivityRow(props: { row: VaultActivity; onHistory: (a: VaultActivity) => void }): JSX.Element {
+    const a = () => props.row;
+    const exists = () => (vaultEntries() ?? []).some((e) => e.id === a().entry_id);
+    return (
+        <tr data-outcome={a().outcome}>
+            <td class="warden-manager-dim">{formatWhen(a().at)}</td>
+            <td>{whoOf(a())}</td>
+            <td>{a().action}</td>
+            <td>
+                <Show when={exists()} fallback={a().entry_label}>
+                    <Button density="compact" onClick={() => props.onHistory(a())}>
+                        {a().entry_label}
+                    </Button>
+                </Show>
+            </td>
+            <td class="warden-manager-dim">{a().target}</td>
+            <td class="warden-manager-dim">{whyOf(a())}</td>
+        </tr>
+    );
+}
+
 function VaultActivityLog(props: { visible: boolean }): JSX.Element {
     const [rows, setRows] = createSignal<VaultActivity[] | null>(null);
+    const [historyOf, setHistoryOf] = createSignal<VaultActivity | null>(null);
     const [error, setError] = createSignal<string | null>(null);
     const load = () =>
         loadActivity()
@@ -157,22 +186,16 @@ function VaultActivityLog(props: { visible: boolean }): JSX.Element {
                             <th>What</th>
                             <th>Entry</th>
                             <th>Where</th>
+                            <th>Why</th>
                         </tr>
                     </thead>
                     <tbody>
-                        <For each={rows()}>
-                            {(a) => (
-                                <tr data-outcome={a.outcome}>
-                                    <td class="warden-manager-dim">{formatWhen(a.at)}</td>
-                                    <td>{a.actor === "you" ? "You" : a.actor}</td>
-                                    <td>{a.action}</td>
-                                    <td>{a.entry_label}</td>
-                                    <td class="warden-manager-dim">{a.target}</td>
-                                </tr>
-                            )}
-                        </For>
+                        <For each={rows()}>{(a) => <ActivityRow row={a} onHistory={setHistoryOf} />}</For>
                     </tbody>
                 </table>
+            </Show>
+            <Show when={historyOf()}>
+                {(a) => <VaultHistoryDialog entryId={a().entry_id} label={a().entry_label} onClose={() => setHistoryOf(null)} />}
             </Show>
         </div>
     );
@@ -192,29 +215,9 @@ function focusedRequest(model: VaultViewModel): Accessor<string> {
     return focused;
 }
 
-export function VaultView(props: { model: VaultViewModel }): JSX.Element {
-    const model = props.model;
-    const section = model.sectionAtom;
-    const setSection = (id: VaultPaneSection) => model.setMeta({ "vault:section": id });
-    const [form, setForm] = createSignal<VaultFormTarget | null>(null);
-
-    const fill = (r: VaultRequest) => {
-        const kind = vaultKind(r.kind);
-        if (kind) setSection(kind.section);
-        setForm({ mode: "new", section: kind?.section ?? "personal", request: r });
-    };
-
-    // Only while shown: the list decrypts every entry, which can make the OS ask for the Vault key,
-    // so a Vault that is hidden (another tab) or closed never reads it.
-    createEffect(() => {
-        if (!vaultAvailable() || !model.shown()) return;
-        followVault();
-        onCleanup(holdVaultShown());
-    });
-
-    // While shown, renew srv's note that a Vault pane is on screen every 10 s
-    // (it lasts 30 s); clear it when hidden or closed. Notes go one at a time,
-    // so a quick hide and show can't land as show-then-clear.
+/** While shown, renews srv's note that a Vault pane is on screen every 10 s (it lasts 30 s) and clears
+ *  it when hidden or closed. Notes go one at a time, so a quick hide and show can't land as show-then-clear. */
+function keepOnScreenNoted(model: VaultViewModel): void {
     let sending: Promise<unknown> = Promise.resolve();
     const note = (on: boolean) => {
         sending = sending
@@ -230,6 +233,32 @@ export function VaultView(props: { model: VaultViewModel }): JSX.Element {
             note(false);
         });
     });
+}
+
+export function VaultView(props: { model: VaultViewModel }): JSX.Element {
+    const model = props.model;
+    const section = model.sectionAtom;
+    const setSection = (id: VaultPaneSection) => model.setMeta({ "vault:section": id });
+    const [form, setForm] = createSignal<VaultFormTarget | null>(null);
+    const [managing, setManaging] = createSignal(false);
+    // The Vault the lists are narrowed to; all of them when none is chosen or the chosen one is gone.
+    const vault = () => (vaultList().some((v) => v.id === model.vaultAtom()) ? model.vaultAtom() : ALL_VAULTS);
+
+    const fill = (r: VaultRequest) => {
+        const kind = vaultKind(r.kind);
+        if (kind) setSection(kind.section);
+        setForm({ mode: "new", section: kind?.section ?? "personal", request: r });
+    };
+
+    // Only while shown: the list decrypts every entry, which can make the OS ask for the Vault key,
+    // so a Vault that is hidden (another tab) or closed never reads it.
+    createEffect(() => {
+        if (!vaultAvailable() || !model.shown()) return;
+        followVault();
+        onCleanup(holdVaultShown());
+    });
+
+    keepOnScreenNoted(model);
 
     const focused = focusedRequest(model);
 
@@ -258,6 +287,7 @@ export function VaultView(props: { model: VaultViewModel }): JSX.Element {
                         <VaultPromptsNote onClose={() => model.setMeta({ "vault:prompts-read": true })} />
                     </Show>
                     <VaultRequestsList onFill={fill} focused={focused} />
+                    <VaultPicker value={vault()} onChange={(id) => model.setMeta({ "vault:vault": id || null })} onManage={() => setManaging(true)} />
                     <Show when={vaultError() ?? vaultProblem()}>
                         <div class="warden-manager-error vault-problem" role="alert">
                             ⚠ {vaultError() ?? vaultProblem()}
@@ -267,7 +297,7 @@ export function VaultView(props: { model: VaultViewModel }): JSX.Element {
                         <For each={ENTRY_SECTIONS}>
                             {(s) => (
                                 <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== s }}>
-                                    <VaultEntries section={s} />
+                                    <VaultEntries section={s} vault={vault()} />
                                 </div>
                             )}
                         </For>
@@ -283,7 +313,10 @@ export function VaultView(props: { model: VaultViewModel }): JSX.Element {
                         <VaultExportDialog onClose={() => model.openTransfer(null)} />
                     </Show>
                     <Show when={model.transfer() === "import"}>
-                        <VaultImportDialog onClose={() => model.openTransfer(null)} />
+                        <VaultImportDialog into={vault() || undefined} onClose={() => model.openTransfer(null)} />
+                    </Show>
+                    <Show when={managing()}>
+                        <VaultManageDialog onClose={() => setManaging(false)} />
                     </Show>
                 </Show>
             </div>

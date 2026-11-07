@@ -73,6 +73,12 @@ describe("toolNotes", () => {
         expect(behindUpstream.map((n) => n.text)).toEqual(["up to date", "pin 2.1.0 · upstream 2.3.0"]);
         expect(behindUpstream[1].title).toContain("Nothing for you to do");
     });
+
+    it("does not say there is nothing to do when the tool is behind the pin", () => {
+        const notes = toolNotes(facts(), drift("2.0.0", "2.1.0", "2.3.0"));
+        expect(notes.map((n) => n.text)).toEqual(["2.1.0 available", "pin 2.1.0 · upstream 2.3.0"]);
+        expect(notes[1].title).toBe("AgentMux pins 2.1.0; upstream has 2.3.0.");
+    });
 });
 
 describe("widgetStatus", () => {

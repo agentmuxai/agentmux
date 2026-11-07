@@ -24,6 +24,7 @@ export const KIND_CHIPS: { kind: string; label: string }[] = [
     { kind: "agent_start", label: "Starts" },
     { kind: "agent_end", label: "Ends" },
     { kind: "tool", label: "Tool calls" },
+    { kind: "turn", label: "Turns" },
     { kind: "thought", label: "Thoughts" },
 ];
 
@@ -45,14 +46,24 @@ export const RANGES: { value: AuditRange; label: string; ms: number }[] = [
  */
 const RANGE_STEP_MS = 60_000;
 
+/** Where the entries come from: this channel's, or every channel on this computer's. */
+export type AuditScope = "channel" | "machine";
+
+export const SCOPES: { value: AuditScope; label: string }[] = [
+    { value: "channel", label: "This channel" },
+    { value: "machine", label: "This machine" },
+];
+
 export interface AuditFilter {
     agent: string;
     kinds: ReadonlySet<string>;
     range: AuditRange;
     text: string;
+    scope: AuditScope;
 }
 
-export const emptyFilter = (agent = ""): AuditFilter => ({ agent, kinds: new Set(DEFAULT_KINDS), range: "all", text: "" });
+/** What the Audit shows until the filter is changed: this channel's entries, everything but the bulk. */
+export const emptyFilter = (agent = ""): AuditFilter => ({ agent, kinds: new Set(DEFAULT_KINDS), range: "all", text: "", scope: "channel" });
 
 /** The kinds as the query takes them: left out when they are the defaults, which are srv's too. */
 export function requestKinds(kinds: ReadonlySet<string>): string[] | undefined {
@@ -69,10 +80,64 @@ export function buildRequest(filter: AuditFilter, now: number, cursor?: string, 
         ...(requestKinds(filter.kinds) ? { kinds: requestKinds(filter.kinds) } : {}),
         ...(agent ? { agent_id: agent } : {}),
         ...(text ? { text } : {}),
+        scope: filter.scope,
         ...(span ? { since_ms: Math.floor((now - span) / RANGE_STEP_MS) * RANGE_STEP_MS } : {}),
         ...(cursor ? { cursor } : {}),
         ...(totals ? { totals: true } : {}),
     };
+}
+
+/** The entries that came from one channel, in the order of the list. */
+export interface AuditSection {
+    key: string;
+    /** "host · channel · version", as far as the entries say. */
+    label: string;
+    entries: AuditEntry[];
+}
+
+/**
+ * The list cut into one section per channel that wrote its entries, in the order each first appears (the newest
+ * first). An entry that names no channel is `own`'s (the channel that answered). Within a section the order is the
+ * list's, so paging in older entries adds to the sections, not to a new list.
+ */
+export function sectionsOf(entries: readonly AuditEntry[], own: string | undefined): AuditSection[] {
+    const sections = new Map<string, AuditSection>();
+    for (const entry of entries) {
+        const channel = entry.provenance?.channel ?? own ?? "";
+        let section = sections.get(channel);
+        if (!section) sections.set(channel, (section = { key: channel, label: "", entries: [] }));
+        section.entries.push(entry);
+    }
+    return [...sections.values()].map((s) => ({ ...s, label: sectionLabel(s) }));
+}
+
+function sectionLabel(section: AuditSection): string {
+    const named = (field: "host" | "version") => section.entries.find((e) => e.provenance?.[field])?.provenance?.[field];
+    // A channel with no name (a dev home) is left out; "this channel" is only for a section that says nothing at all.
+    return [named("host"), section.key, named("version")].filter(Boolean).join(" · ") || "this channel";
+}
+
+/** How many entries of `fresh` (the newest page) the list shown does not hold. */
+export function countNew(shown: readonly AuditEntry[], fresh: readonly AuditEntry[]): number {
+    const seen = new Set(shown.map((e) => e.id));
+    return fresh.filter((e) => !seen.has(e.id)).length;
+}
+
+/**
+ * `next` with the object of `previous` kept for every row that did not change, so a list that is read again
+ * every few moments redraws only the rows that are new or different.
+ */
+export function reuseRows(previous: readonly AuditEntry[], next: readonly AuditEntry[]): AuditEntry[] {
+    const before = new Map(previous.map((e) => [e.id, e]));
+    return next.map((e) => {
+        const old = before.get(e.id);
+        return old && JSON.stringify(old) === JSON.stringify(e) ? old : e;
+    });
+}
+
+/** The pill that jumps to the newest entries: a full page of them is "at least", since the rest is not asked for. */
+export function newPillLabel(count: number): string {
+    return count >= AUDIT_PAGE ? `${AUDIT_PAGE}+ new` : `${count} new`;
 }
 
 /** A row's failure shows in its colour; srv words a failed jekt or action as "failed" in the summary. */

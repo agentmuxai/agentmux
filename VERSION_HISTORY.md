@@ -1,5 +1,138 @@
 # AgentMux Version History
 
+## 0.60.19 — 2026-11-06
+
+- A sensitive message that needs your confirmation now shows a card in the agent's pane and rings the pane's waiting tone, instead of sitting in the transcript unnoticed
+- The agent pane can show its incoming jekts in a Messages panel beside the conversation, with a count, filters and the messages that need you above the list; off until turned on per pane from the command palette
+- Agent CLI installs through npm now use the public registry and ignore the person's own .npmrc
+- Split the agent pane's bottom panels into a state object and view parts, with what they draw and hand each panel pinned by tests; no change in behaviour
+- Agent panes: one resync of a block at a time (a double start spawned muse serve twice), and a turn on a provider with no sign-in check no longer shows Logged in
+- Add tests for the Vault import dialog ahead of splitting it
+- Split the Vault import dialog into small functions over a state object
+- srv: split the PtyShell create handler into named steps
+- Agent CLIs run only from AgentMux's own copy; a Use the CLI on my PATH switch on each CLI's Toolchain row runs your own copy instead
+- Dragging a pane tab shows a full-size landing rectangle instead of a thin line, the landing zone and the outlines of the other panes are much clearer, and the menu logo's cell is narrower.
+- Memory > Skills: the App skill card no longer overlaps its status dot, the filter row lines up, a skill for another platform says so, and the script pill and route numbers read clearly
+- Split the Jobs section's job history into a state module, view parts and a thin component, with its markup and calls pinned by a characterization test
+- The More menu stays open when a slow pointer crosses toward a submenu, instead of closing on a one-pixel step near where it left the row
+- A test or dev instance started with its own home keeps its secrets, the Vault key included, in files under that home instead of the person's OS keychain
+- Split the Memory pane's Global section into a state module, view parts and a thin component, with its markup and calls pinned by a characterization test
+- Split the object service handler into one function per method, with route tests for them
+- Terminal jobs (capture, background) read a quoted argument with spaces as one argument on Windows, as the drawer does
+- Vault: every entry has a history — each change and use with who, where, which version and why, in a chained record, in the pane and for agents (Vault history)
+- Split Settings > Widgets into a state module, view parts and a thin component, with its markup and calls pinned by a characterization test
+- Toolchain rows get Install and Uninstall for AgentMux's own copy of each agent CLI; the new-agent note no longer lists CLIs you must install yourself
+- Split Settings > Advanced into its setting groups, with its markup and writes pinned by a characterization test
+- In a narrow agent pane the Messages panel opens over the conversation from a header button instead of taking a column
+- feat(agents): model gateway in srv: a harness on a model route reaches its model through srv, which adds the key from the Vault
+- Split Settings > Terminal into its setting groups, with its markup and writes pinned by a characterization test
+- Split the Kanban act handler into one method per move, with tests for the moves that had none
+- Add tests for the Vault export dialog ahead of splitting it
+- The low-disk notice goes only to agents with large build folders and to the host's steward, once per real drop, says which rule tripped, and only a critical level starts a turn
+- Split the Vault export dialog into small functions over a state object
+- Split the agent failure classifier into an ordered list of rules, with tests for their order and fallbacks
+- Add tests for the agent session stats panel ahead of splitting it
+- Split the block-file range read into its steps, with tests for its sources, windows and trims
+- feat(agents): Agents spawn, create and update take harness, route and model; Agents routes lists the model routes; an agent on a route needs no account
+- Split the agent session stats panel into small functions over a state object
+- Split the token usage popover into a state module, view parts and a thin component, with its markup and calls pinned by a characterization test
+- Split the agent picker into a state module, view parts and a thin component, with its markup, wiring and hook order pinned by a characterization test
+- Split the CreateWindow handler into its steps, with tests for its workspace, label and restore paths
+- Split the pinned activity row into a state object and view parts, with no change in behaviour
+- Split the pinned activity dock into a state object and view parts, with no change in behaviour
+- Split the Help pane's content into a filter model and view parts, with no change in behaviour
+- Add tests for the Tower processes table ahead of splitting it
+- Split the Tower processes table into small functions over a state object
+- Split the MuxBus claim-and-deliver step of a pull into named steps (claim, verify, request, files); behaviour unchanged
+- Split the persistent agent controller eager-resume attempt into named steps (stores, launch parts, admission, gate, settle); behaviour unchanged
+- Add tests for the My agents row panel ahead of splitting it
+- Split the My agents row panel into small functions over a state object
+- Split the subagent watcher transcript-change handler into named steps (identify, read, record, announce); behaviour unchanged
+- Add tests for the Kanban board ahead of splitting it
+- Split the Kanban board into small functions over a state object
+- Split the provider auth-login spawn engine into named steps (login state, piped run, PTY run, settle); behaviour unchanged
+- Split the logo menu into a state object and view parts, with no change in behaviour
+- Split the dev-mode reducer dispatch panel into a state object and small view functions, with no change in behaviour
+- Split the Sounds settings section into groups of rows, with no change in behaviour
+- Split the connection picker into a state object and item builders, with no change in behaviour
+- Split the Notifications settings section into groups of rows, with no change in behaviour
+- Split the agents consolidation backfill into named passes (no behaviour change)
+- Add path tests for the agent picker's definition card
+- Split the agent picker's definition card into small functions over a state object
+- Split the diag panel's agent-pane perf section into a polling hook and one view per table (no behaviour change)
+- Removed the vendor-installer button's code: every agent CLI is now installed by AgentMux itself, so the table was empty
+- The Audit's totals count the tool, turn and thought rows (so a turn's cost shows), and a row's cost stays visible at mid widths
+- Right-click a link or an image in a browser pane to save it: Save link as… and Save image as… open the Save As dialog and show the download strip
+
+## 0.60.18 — 2026-11-06
+
+- Dragging a pane tab out of its window on Windows now shows the pane following the cursor, and the floating window opens where it was dropped
+- On Windows, dragging a tab or pane out of the window shows a normal arrow instead of the circle-slash cursor
+- feat(packs): per-application knowledge packs for computer use (Word, Excel, Ableton Live, WaveLab, Blender) as example skills, with the format spec and the research report
+- Editor session test: the language-server change debounce follows the test's own sleeps, so a loaded machine no longer changes the logs
+- srv: split the block controller's resync_controller into named steps
+- A submenu no longer closes while the pointer travels diagonally toward it across the row below, in context menus, title-bar menus and the kit Menu
+- Ctrl+F in an agent pane now opens a hidden run that holds the match, and closes it again when the search ends
+- New agent: Run installs Kimi, Antigravity, Grok Build, Aider and Muse Code with the vendor's own installer, after you approve it (srv downloads the script, shows its hash, runs that file; cancel stops it); goose's Windows install command for a copy you install yourself points at a file that exists
+- Split the pane open handler into named steps with direct tests
+- Fix a window that starts with Animations Off staying blank, and an error on every Animations change (a 0.60.17 regression)
+- The Audit pane shows new entries as srv writes them, with Pause and an N new pill, instead of asking every 5 seconds
+- Toolchain: an agent CLI behind its pin can be updated from its card; cards show their full name in a tooltip
+- Rename packs to computer-use skills in the packs spec (Memory > Skills with an App filter), and add the public skill repository spec and the prior-art report
+- The agent picker's Open it reveals an agent's pane in a closed workspace instead of opening a second one
+- The Vault pane can hold several Vaults on one computer: pick one, move an entry between them, say which agents may use each, import into one, and choose the Vault each browser profile keeps its sign-ins in
+- Layouts no longer store the unused leaforder field (nothing read it); older saved layouts still open
+- History (agents) now updates live while an agent's transcript grows, a conversation is archived or an agent changes, without pressing Refresh
+- AgentMux installs goose itself: it downloads the pinned release, checks its checksum and keeps its own copy, so the agent pane offers Install instead of asking you to install goose
+- A check keeps window modals to the app-wide ones: a new dialog about one pane has to be a pane modal
+- Add tests for the memory reinjection controller's races and the flags it releases, no code change
+- Split the memory reinjection controller into small functions over a state object, behaviour unchanged
+- An agent's request to control a native app is a card in its own pane instead of a window prompt
+- Open on a parked agent whose workspace still exists reopens that workspace in a window with its pane focused; only a deleted workspace moves the pane into the current tab
+- Agents list: an agent running in a pane of a closed workspace no longer reads stopped while its runtime state is idle
+- A sensitive message that needs your confirmation now shows a card in the agent's pane and rings the pane's waiting tone, instead of sitting in the transcript unnoticed
+- The docs screenshot capture scripts find the menus and the new-agent form again (menu selector, scrolling a 1280x800 window)
+- Computer-use skills backend (stage 2): a skill can carry a manifest, files beside its SKILL.md, reference crops and test records; Skills get reads a file, Skills record adds a test record, Desktop apps points at the skill for a window, and a skill folder imports whole.
+- A shared side panel in the UI kit, used by the Kanban's task drawer (no change to how the drawer looks)
+- Workspaces: switching workspace keeps the old workspace's agents running (parked) and switching back puts them in their tabs
+- A web-terminal grant can ask the person about each line: the agent's line is typed, shown in the pane with Run it and Don't run, and erased if they say no
+- Add tests for the failed-turn recovery's timing, races and the marks it keeps, no code change
+- Split the failed-turn recovery into small functions over a state object, behaviour unchanged
+- The first GitHub connect is one trip to GitHub's install page when no installation is linked yet, instead of an authorize page and then an install page
+- A narrow pane header keeps Close reachable and the status bar stays on one line at high chrome zoom; icon-only Settings tabs wrap instead of overlapping
+- Agent panes: a pane's tab strip lists only its own tabs; an agent open in another pane is no longer drawn as a tab of this one
+- task dev: ports are claimed so two runs cannot share a Vite, and the window waits for its own dev server
+- srv: split the object store's run_object_schema into named steps
+- Add tests for the drone canvas gestures ahead of splitting it
+- AgentMux installs Aider and Kimi itself: a pinned uv, a private Python and hash-checked packages, so the agent pane offers Install instead of asking you to run a script
+- srv: split the reactive handler's deliver_audited into named steps
+- Shortcuts pane: zoom like the other panes (Ctrl+scroll, Ctrl/Cmd +/-/0), and the filter and hint bar no longer sit over the tiles in short or narrow panes
+- Split the drone canvas into small functions over a state object
+- srv: split the shared and identity stores' schema functions into named steps
+- srv: split the persistent controller's run_stdout_reader into named steps
+- Add tests for the My agents row panels ahead of splitting them
+- Split the My agents row panels into small functions over a state object
+- srv: restore comments that earlier splits of the shell start and the jekt forward left behind
+- A renderer recycle that can't save a pane's state now says which pane and why, and a pane with nothing of its own to save no longer blocks it
+- Kanban: KanbanSection is split into a state object and view parts (359 -> 53 lines), with its behaviour pinned by tests
+- OAuth connect panel: OAuthConnectPanel is split into a state object and view parts (392 -> 54 lines), with its behaviour pinned by tests
+- Maintenance section: MaintenanceSection is split into a state object and view parts (356 -> 30 lines), with its behaviour pinned by tests
+- srv: split the ACP controller's spawn_process into named steps
+- Attachment tray: AttachmentTray is split into a state object and view parts (361 -> 46 lines), with its behaviour pinned by tests
+- AgentMux installs Grok Build itself: a pinned release, downloaded and hash-checked, in AgentMux's own folder
+- Split the History Typed pane into a state object and view parts, with its markup and calls pinned by tests; no change in behaviour
+- Add tests for the Outdated agent ids card ahead of splitting it
+- srv: split the persistent controller's process waiter into named steps
+- AgentMux installs Antigravity and Muse Code itself: pinned releases, downloaded and hash-checked, in AgentMux's own folder
+- Split the image viewer into a state object and view parts, with its markup and calls pinned by tests; no change in behaviour
+- srv: split the identity spawn gate (inject_identity_env_with_broker) into named steps
+- Split the host popover panel into a state object and view parts, with its markup and calls pinned by tests; no change in behaviour
+- Split the Outdated agent ids card into small functions over a state object
+- srv: split the bundle importer's parse_bundle_import_with_budget into named steps
+- Split the browser pane's driven-by strip into a state object and view parts, with its markup and calls pinned by tests; no change in behaviour
+- Split the agent identity links panel into a state object and view parts, with its markup and calls pinned by tests; no change in behaviour
+- Memory > Skills: an App skill badge, an All | App skills filter, and an App skill detail (routes, files, tests, reference crops and their drift)
+
 ## 0.60.17 — 2026-11-05
 
 - The Swarm's Broadcast and Supervise are two sections that open on their own, the list is one list with a labelled part per host, and the sections and the list scroll as one container with a single scrollbar

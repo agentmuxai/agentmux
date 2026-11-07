@@ -40,6 +40,7 @@ pub mod frames;
 pub mod hibernation;
 pub mod hidden_choices;
 pub mod key_typing;
+pub mod last_input;
 pub mod page_state;
 pub mod page_url;
 pub mod ref_tables;
@@ -70,6 +71,7 @@ pub fn register_routes(router: Router<Arc<AppState>>) -> Router<Arc<AppState>> {
         .route("/agentmux/browser/focus_info", post(routes::focus_info))
         .route("/agentmux/browser/eval", post(routes::eval))
         .route("/agentmux/browser/page_url", post(page_url::page_url_route))
+        .route("/agentmux/browser/last_input", post(last_input::last_input_route))
         .route("/agentmux/browser/snapshot", post(act::snapshot_route))
         .route("/agentmux/browser/find", post(act::find_route))
         .route("/agentmux/browser/act", post(act::act_route))

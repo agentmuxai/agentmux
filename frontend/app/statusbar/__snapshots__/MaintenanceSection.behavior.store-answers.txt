@@ -1,0 +1,57 @@
+rpc AppUpdateStatus
+host storeUpdateCheck
+-- store available
+<div>
+  <div class="instance-panel-section-title">
+    "Maintenance"
+    <span class="maintenance-badge">
+      "↓ 0.59.27"
+  <div class="maintenance-update-row">
+    <span class="maintenance-icon maintenance-icon--update">
+      "↓"
+    <span class="maintenance-row-text">
+      "v0.59.27 is in the Microsoft Store"
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+      "What's new"
+    <button type="button" class="ui-button ui-tone-accent ui-density-compact maintenance-btn maintenance-btn--primary">
+      "Update in the Store"
+  <div class="maintenance-row-text maintenance-row-text--dim">
+    "The Store closes AgentMux while it installs v0.59.27, then opens it again."
+  <div class="maintenance-update-row">
+    <span class="maintenance-row-text maintenance-row-text--dim">
+      "Checked <time>"
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+      "Check again"
+rpc AppUpdateStatus
+host storeUpdateCheck
+-- store none
+<div>
+  <div class="instance-panel-section-title">
+    "Maintenance"
+  <div class="maintenance-update-row">
+    <span class="maintenance-row-text maintenance-row-text--dim">
+      "The Microsoft Store has no newer version (checked <time>)"
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+      "Check for update"
+rpc AppUpdateStatus
+host storeUpdateCheck
+-- store no answer
+<div>
+  <div class="instance-panel-section-title">
+    "Maintenance"
+  <div class="maintenance-update-row">
+    <span class="maintenance-row-text maintenance-row-text--dim">
+      "The Microsoft Store didn't answer; try again later."
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+      "Check for update"
+rpc AppUpdateStatus
+host storeUpdateCheck
+-- store unknown
+<div>
+  <div class="instance-panel-section-title">
+    "Maintenance"
+  <div class="maintenance-update-row">
+    <span class="maintenance-row-text maintenance-row-text--dim">
+      "Couldn't ask the Microsoft Store (offline)."
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+      "Check for update"

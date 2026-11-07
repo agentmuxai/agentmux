@@ -1,0 +1,4 @@
+rpc ListAllAgentIdentities
+subscribeAccountChanges
+subscribe agentidentities:changed:claude-agent
+GetBundle calls: 0

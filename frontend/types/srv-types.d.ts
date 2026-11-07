@@ -553,7 +553,7 @@ declare global {
     // waveobj.MetaTSType
     type BrowserAttention = {
         id: string;
-        kind: "handoff" | "approval" | "navigation" | "bypass" | "dialog" | "notice";
+        kind: "handoff" | "approval" | "navigation" | "bypass" | "dialog" | "line" | "notice";
         agent?: string;
         /** Hand-off: what the user should do. */
         reason?: string;
@@ -582,6 +582,13 @@ declare global {
         minutes?: number;
         /** Bypass: what it would allow besides committing clicks, e.g. `terminal`. */
         powers?: string[];
+        /** Line: the terminal line the agent typed, as read back from the terminal with
+         *  hidden characters written out (`\u{1b}`); `long` when it needs "Show all"; and the
+         *  terminal's last rows, which are page content. `reason` is the agent's why.
+         *  SPEC_BROWSER_WEB_TERMINAL_TYPING_2026_10_23.md §4.4. */
+        line?: string;
+        long?: boolean;
+        rows?: string[];
         /** Dialog: the page's own question, its words untrusted (they're shown as
          *  the page's, never as AgentMux's), and which kind it is. `origin` is the
          *  site that asked. SPEC_BROWSER_PANE_NATIVE_DIALOGS_2026_10_17.md §4.4. */
@@ -959,6 +966,8 @@ declare global {
         "kanban:collapsed"?: string[];
         // The Vault's own section, within the Vault pane.
         "vault:section"?: "personal" | "cards" | "api-keys" | "logins" | "notes" | "kept" | "activity";
+        // The Vault the lists are narrowed to, by id; none for all of them (vault-model.ts).
+        "vault:vault"?: string | null;
         // An agent's Vault request to open the form for (vault-model.ts); cleared once shown.
         "vault:request"?: string | null;
         // The note on what may ask the person, dismissed (vault-model.ts).
@@ -1238,6 +1247,7 @@ declare global {
         "attachments:retentiondays"?: number;
         "agent:askquestiontimeoutms"?: number;
         "agent:compactat"?: number;
+        "cli:usepath"?: string[];
         "agent:subagentmodel"?: string;
         "agent:exploremodel"?: string;
         "agent:compacthints"?: boolean;
