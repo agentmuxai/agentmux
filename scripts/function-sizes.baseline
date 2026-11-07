@@ -350,7 +350,6 @@
 176 frontend/app/element/markdown-media.tsx::LocalAV
 113 frontend/app/element/markdown-util.ts::transformBlocks
 257 frontend/app/element/modal.tsx::Modal
-180 frontend/app/element/search.tsx::SearchComponent
 155 frontend/app/element/strip-reveal-controller.ts::createStripReveal
 148 frontend/app/element/title-tooltip.ts::initTitleTooltips
 159 frontend/app/element/tooltip.tsx::TooltipInner
@@ -493,7 +492,6 @@
 101 frontend/app/view/warden-jobs/job-editor-fields.tsx::PolicySection
 102 frontend/app/view/warden-jobs/job-editor-fields.tsx::WhatSection
 146 frontend/app/view/warden-jobs/job-template-approval.tsx::TemplateApproval
-180 frontend/app/view/warden-jobs/job-update-diff.tsx::JobUpdateDiff
 137 frontend/app/view/warden-jobs/warden-jobs-manager.tsx::WardenJobsManager
 107 frontend/app/window/pane-media-capture-indicator.tsx::PaneMediaCaptureIndicator
 117 frontend/app/window/titlebar-context-menu.tsx::TitleBarContextMenu
