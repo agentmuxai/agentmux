@@ -241,6 +241,8 @@ async fn route_command(
         // What went wrong and what AgentMux did about it (SPEC_RECOVERY_NOTICES_AND_TOASTS §4.2).
         "incidents_list" => crate::commands::incidents::incidents_list(),
         "incident_acknowledge" => crate::commands::incidents::incident_acknowledge(state, args),
+        // The keys the app wants forwarded out of a focused browser pane (SPEC_KEYBOARD_SHORTCUTS_SETTINGS §7).
+        "set_host_keys" => crate::client::host_keys::set_host_keys(args),
         "minimize_window" => commands::window::minimize_window(state, args),
         "maximize_window" => commands::window::maximize_window(state, args),
         "toggle_floating_maximize" => commands::window::toggle_floating_maximize(state, args),
@@ -678,10 +680,7 @@ async fn route_command(
             state.browser_panes.stop(block_id, state);
             Ok(serde_json::json!(true))
         }
-        "browser_download_cancel" | "browser_download_start" => {
-            crate::client::downloads::run_command(state, cmd, args);
-            Ok(serde_json::json!(true))
-        }
+        "browser_download_cancel" | "browser_download_start" => { crate::client::downloads::run_command(state, cmd, args); Ok(serde_json::json!(true)) }
         "browser_pane_print" => {
             let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
             state.browser_panes.print(block_id, state);

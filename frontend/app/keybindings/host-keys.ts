@@ -4,10 +4,13 @@
 // The app shortcuts the host forwards out of a focused browser pane
 // (docs/reports/REPORT_KEYBINDINGS_AUDIT_AND_CONSOLIDATION_2026_10_04.md §6.5).
 // A browser pane is a native CEF child window, so its keys never reach the
-// app's DOM listeners; crates/cef reads host-keys.json, which this generates.
+// app's DOM listeners; crates/cef starts from host-keys.json, which this
+// generates from the defaults, and replaces it with the list `hostKeysOf`
+// gives for the person's own keybindings (store/host-keys-push.ts).
 
-import { DEFAULT_KEYBINDINGS, rowKeys, type KeyBindingRow } from "./defaults";
+import type { KeyBindingRow } from "./defaults";
 import { parseKey, type KeyPlatform, type KeySpec } from "./keys";
+import { compileRows } from "./registry";
 
 export interface HostKey {
     command: string;
@@ -76,17 +79,29 @@ function forwards(row: KeyBindingRow): boolean {
     return terms.every((t) => t === "!docTabsHost" || /^viewType\s*!=/.test(t));
 }
 
-export function hostKeys(platform: KeyPlatform): HostKey[] {
+const FUNCTION_KEYS = new Set(Array.from({ length: 12 }, (_, i) => 0x70 + i));
+
+/** A key of the person's own that the page can't be typing: with Ctrl, Alt or Meta, or a function key. A bare letter
+ *  or Shift+letter, forwarded, would take every such key from every page. */
+function notTyping(k: KeySpec, vk: number): boolean {
+    return k.ctrl || k.alt || k.meta || FUNCTION_KEYS.has(vk);
+}
+
+/** The keys to forward for `rows`: each row as the keybindings resolve it (`user`: from the person's setting). */
+export function hostKeysOf(rows: { row: KeyBindingRow; source: string; user?: boolean }[], platform: KeyPlatform): HostKey[] {
     const out: HostKey[] = [];
-    for (const row of DEFAULT_KEYBINDINGS) {
+    for (const { row, source, user } of rows) {
         if (!forwards(row)) continue;
-        for (const source of rowKeys(row, platform)) {
-            if (source.includes(" ")) continue; // chords
-            const k = parseKey(source, platform);
-            const vk = vkOf(k);
-            if (vk == null) continue;
-            out.push({ command: row.command, source, ctrl: k.ctrl, shift: k.shift, alt: k.alt, meta: k.meta, vk });
-        }
+        if (source.includes(" ")) continue; // chords
+        const k = parseKey(source, platform);
+        const vk = vkOf(k);
+        if (vk == null || (user && !notTyping(k, vk))) continue;
+        out.push({ command: row.command, source, ctrl: k.ctrl, shift: k.shift, alt: k.alt, meta: k.meta, vk });
     }
     return out;
+}
+
+/** The default table's keys: what host-keys.json holds. */
+export function hostKeys(platform: KeyPlatform): HostKey[] {
+    return hostKeysOf(compileRows(platform, []), platform);
 }
