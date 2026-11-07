@@ -14,7 +14,9 @@ import {
 } from "@/app/keybindings/app-api";
 import type { KeyEventLike } from "@/app/keybindings/keys";
 import { chordLeaderOf, commandForKey, DOC_TAB_HOSTS, resolveKey, type KeyContext, type ResolvedBinding } from "@/app/keybindings/registry";
+import type { AgentResetRequest, AgentSetRequest } from "@/app/keybindings/agent-edit";
 import { commandRegistry } from "@/app/store/command-registry";
+import type { AgentEditResult } from "@/app/store/keybinding-agent-edit";
 import { atoms, getApi, setControlShiftDelayAtom } from "@/app/store/global";
 import { getBlockComponentModel } from "@/app/store/block-component-registry";
 import { getLayoutModelForStaticTab } from "@/layout/index";
@@ -370,6 +372,12 @@ export function installShortcutApi() {
             const refused = "commands" in plan ? await paneRefusal(target ?? focusedBlockId(), plan.commands) : undefined;
             return refused ? { reason: refused } : plan;
         },
+        // SetShortcut and ResetShortcuts: an agent's change to the person's keys, which they are told of and can undo.
+        // The store that writes and tells the person loads when an agent first asks, not with every key handler.
+        set: async (req: AgentSetRequest, agent: string): Promise<AgentEditResult | { changed: false; reason: string }> =>
+            operatorPromptOpen() ? { changed: false, reason: OPERATOR_PROMPT_OPEN } : (await import("@/app/store/keybinding-agent-edit")).agentSetShortcut(req, agent),
+        reset: async (req: AgentResetRequest, agent: string): Promise<AgentEditResult | { changed: false; reason: string }> =>
+            operatorPromptOpen() ? { changed: false, reason: OPERATOR_PROMPT_OPEN } : (await import("@/app/store/keybinding-agent-edit")).agentResetShortcuts(req, agent),
         focus: (blockId: string): Promise<boolean> => focusPaneForApi(blockId),
         focused: focusedBlockId,
         last: () => lastResolvedCommand(),

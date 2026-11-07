@@ -61,8 +61,9 @@ pub(super) const ALWAYS: &[&str] = &[
     "POST /api/v1/ui/browser/release", "POST /api/v1/ui/browser/request_bypass", "POST /api/v1/ui/browser/retake", "POST /api/v1/ui/browser/set_files", "POST /api/v1/ui/browser/signin",
     "POST /api/v1/ui/browser/take_control",
     "POST /api/v1/ui/browser/capture", "POST /api/v1/ui/browser/terminal", "POST /api/v1/ui/browser/vault_fill",
-    "POST /api/v1/ui/click", "POST /api/v1/ui/shortcuts/press", "POST /api/v1/ui/shortcuts/run", "POST /api/v1/vault/generate",
-    "POST /api/v1/vault/import", "POST /api/v1/vault/request", "POST /api/v1/vault/rotate", "POST /api/v1/widgets/install",
+    "POST /api/v1/ui/click", "POST /api/v1/ui/shortcuts/press", "POST /api/v1/ui/shortcuts/reset", "POST /api/v1/ui/shortcuts/run", "POST /api/v1/ui/shortcuts/set", "POST /api/v1/vault/generate",
+    "POST /api/v1/vault/import", "POST /api/v1/vault/request",
+    "POST /api/v1/vault/update", "POST /api/v1/vault/rotate", "POST /api/v1/widgets/install",
     "POST /api/v1/window/focus", "POST /api/v1/window/name", "POST /api/v1/work-claims",
     "POST /api/v1/work-claims/release", "POST /api/v1/workspace/name",
     "POST /api/v1/agent/detach", "POST /api/v1/agent/start", "POST /api/v1/agent/stop", "POST /api/v1/agent/delete",
@@ -101,7 +102,8 @@ pub(super) const NEVER: &[&str] = &[
     "POST /api/v1/shell/status", "POST /api/v1/ui/browser/actions", "POST /api/v1/ui/browser/dialogs",
     "POST /api/v1/ui/browser/find", "POST /api/v1/ui/browser/focus_info", "POST /api/v1/ui/browser/handoff_status", "POST /api/v1/ui/browser/snapshot",
     "POST /api/v1/ui/browser/wait_for", "POST /api/v1/ui/query", "POST /api/v1/ui/record", "POST /api/v1/ui/screenshot",
-    "POST /api/v1/ui/shortcuts/list", "POST /api/v1/vault/history", "POST /api/v1/vault/list", "POST /webhook/whatsapp",
+    "POST /api/v1/ui/shortcuts/list", "POST /api/v1/vault/health", "POST /api/v1/vault/history", "POST /api/v1/vault/list", "POST /api/v1/vault/show",
+    "POST /api/v1/vault/verify", "POST /webhook/whatsapp",
 ];
 
 /// How `route` (`"METHOD /template"`) is recorded; `None` for a route in no list.

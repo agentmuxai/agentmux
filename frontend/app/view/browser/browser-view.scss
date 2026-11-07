@@ -662,8 +662,13 @@ $browser-nav-stack-below: 388px;
     font-size: var(--text-sm);
 }
 
+// A row wraps when the pane is narrow (at 150% chrome zoom a 288px pane is 192 CSS px): the name keeps a
+// readable minimum and ellipsizes, the status gives way next, and the buttons drop to a line of their own
+// instead of pushing the name out of the row or past the pane's edge.
 .browser-download-row {
     display: flex;
+    flex-wrap: wrap;
+    row-gap: var(--space-1);
     align-items: center;
     gap: var(--space-2);
     padding: var(--space-1) var(--space-4);
@@ -672,7 +677,8 @@ $browser-nav-stack-below: 388px;
 
     .browser-download-name {
         flex: 0 1 auto;
-        min-width: 0;
+        min-width: min(8ch, 100%);
+        max-width: 100%;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -680,22 +686,36 @@ $browser-nav-stack-below: 388px;
     }
 
     .browser-download-progress {
+        flex: 0 1 auto;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
         color: var(--secondary-text-color);
         white-space: nowrap;
     }
 
     .browser-download-failed {
+        flex: 1 1 12ch;
+        min-width: 0;
+        overflow: hidden;
+        overflow-wrap: anywhere;
+        // At most two lines; the whole reason is the line's title.
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
         color: var(--error-text-color);
     }
 
     .browser-download-actions {
         display: flex;
+        flex-shrink: 0;
         gap: var(--space-1);
         margin-left: auto;
         white-space: nowrap;
     }
 
     .browser-download-dismiss {
+        flex-shrink: 0;
         margin-left: auto;
     }
 

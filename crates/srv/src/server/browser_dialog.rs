@@ -255,6 +255,10 @@ fn notice_words(notice: &str, shown: &str) -> (String, &'static str) {
             format!("a download was not saved: {shown}"),
             "nothing was written to disk; if the file is needed, tell the person",
         ),
+        "auth_expired" => (
+            format!("the sign-in prompt for {shown} timed out after 5 minutes without an answer"),
+            "The person is asked for a username and password in the app; nothing the agent can do answers it. Load the page again to ask again, or tell the person you need it",
+        ),
         _ => (format!("the host refused something: {shown}"), "the host refused it"),
     }
 }
@@ -462,6 +466,8 @@ mod tests {
         assert!(what.contains("mailto:") && why.contains("tell the person") && !what.contains("program"), "{what} / {why}");
         let (what, why) = notice_words("certificate_error", "expired.example");
         assert!(what.contains("expired.example") && why.contains("certificate warning"), "{what} / {why}");
+        let (what, why) = notice_words("auth_expired", "intranet.example:8080");
+        assert!(what.contains("intranet.example:8080") && what.contains("5 minutes") && why.contains("Load the page again"), "{what} / {why}");
     }
 
     #[test]

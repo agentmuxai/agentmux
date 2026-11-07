@@ -28,7 +28,7 @@ describe("a window modal from a file that is not in KEEP", () => {
             "/>",
             "<ConfirmModal",
             "  open",
-            '  scope="tab"',
+            '  scope="pane"',
             "/>",
             "",
         ].join("\n");
@@ -50,6 +50,21 @@ describe("a window modal from a file that is not in KEEP", () => {
     it("an apostrophe in JSX text does not swallow the code after it", () => {
         const src = ["<p>Don't allow</p>", "openModal(X);", "// it's fine", ""].join("\n");
         expect(rules("frontend/app/view/a.tsx", src)).toEqual(["openModal:2"]);
+    });
+
+    it("flags an explicit tab scope: a question about one pane is the pane's", () => {
+        expect(rules("frontend/app/view/a.tsx", `<ConfirmModal scope="tab" />
+open({ scope: "tab" });`)).toEqual([
+            "tabScope:1",
+            "tabScope:2",
+        ]);
+        expect(rules("frontend/app/view/a.tsx", '<ConfirmModal scope="pane" />')).toEqual([]);
+    });
+
+    it("allows the tab's own modal layer, once", () => {
+        expect(rules("frontend/app/tab/tabcontent.tsx", '<ModalLayer scope="tab">')).toEqual([]);
+        expect(rules("frontend/app/tab/tabcontent.tsx", `<ModalLayer scope="tab">
+<ConfirmModal scope="tab" />`)).toEqual(["tabScope:2"]);
     });
 
     it("flags an explicit window scope, as a prop and as an option", () => {

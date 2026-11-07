@@ -13,6 +13,8 @@
 - 2026-11-04, Agent1@narko: row 5 done: an agent's widget-install request is an operator-only card in its own pane (`block/widget-install-card.tsx`), from a new `block_id` on srv's `WidgetInstallRequest` (the pane `widget_agent_handlers.rs` already knew); srv's attention event for that pane gives the tone. A request naming no pane (a bundle import) is still the window prompt. Row 3 (the Vault cards, Agent2-6's) is the only one left.
 - 2026-11-04, Agent1@narko: row 10 done: closing a pane with busy agents, or a page that would ask "Leave site?", asks as a tab modal inside the tab (`tab/tab-close-confirms.tsx`; they were drawn outside the tab's modal layer).
 
+- 2026-11-07, Camper@narko: row 10 revised, on the operator's rule that a modal's reach matches the scope of its issue ("window-wide modals should only pertain to window-wide issues. pane-scoped modals should scope to just the pane"): closing a PANE with busy agents, or a page that would ask "Leave site?", asks in that pane (`tab/pane-close-confirms.tsx`, `askInPane`), not in the tab. Closing a TAB stays the one tab-wide close (a window modal). `check-window-modals.mjs` now also fails on a new explicit tab scope.
+
 The operator, 2026-11-02: "when choosing to sign in via the agent pane, lets have the modal be a pane (not a window) modal. Same when oauth login from connectors. in fact, lets audit all the times we use window modals, they should be very rarely used".
 
 ## 1. What there is today (read from origin/main, 7bce3020c)

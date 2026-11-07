@@ -10,8 +10,10 @@ import { Button, FilterInput, Kbd, Pill, Select, Switch } from "@/app/element/ui
 import { formatKey, type KeyPlatform } from "@/app/keybindings/keys";
 import type { CommandBindings, KeybindingIssue } from "@/app/keybindings/registry";
 import { SectionHeader } from "../settings-controls";
+import { KeySearch } from "./keyboard-key-search";
 import { KeyRecorder } from "./keyboard-recorder";
 import { KEYBOARD_SETTINGS } from "./keyboard-settings-index";
+import { KeyboardTransfer } from "./keyboard-transfer";
 import { removeEntry, resetCommand, unbindCommand, type CategoryBlock, type CategoryFilter, type KeyboardFilters, type ShortcutRow } from "./keyboard-section-state";
 import type { KeyCategory } from "@/app/keybindings/defaults";
 
@@ -31,6 +33,7 @@ export function KeyboardToolbar(p: {
     f: KeyboardFilters;
     categories: KeyCategory[];
     changed: number;
+    edit: KeyboardEdit;
     onResetAll: () => void;
     setSearchRef: (el: HTMLInputElement) => void;
 }): JSX.Element {
@@ -45,6 +48,7 @@ export function KeyboardToolbar(p: {
                 inputRef={p.setSearchRef}
                 testId="kb-search"
             />
+            <KeySearch f={p.f} platform={p.edit.platform} />
             <Select
                 class="setting-select"
                 ariaLabel="Category"
@@ -69,6 +73,7 @@ export function KeyboardToolbar(p: {
             >
                 {confirming() ? "Click again to reset all" : "Reset all"}
             </Button>
+            <KeyboardTransfer edit={p.edit} />
         </div>
     );
 }
