@@ -14,10 +14,41 @@
  *   Enter        → next match
  *   Shift+Enter  → previous match
  *   Escape       → close
+ * F3 and Shift+F3 step too: the pane's keyboard hook handles them (hooks/useAgentKeyboard.ts), with the field
+ * focused or not. The count is announced through a polite live region that changes at most every
+ * LIVE_COUNT_MS, so typing does not read out every count (SPEC_AGENT_PANE_SEARCH_AND_DIM_MODE_2026_11_06 §4.6).
  */
 
-import { Show, type Accessor, type JSX } from "solid-js";
+import { createEffect, createSignal, on, onCleanup, Show, untrack, type Accessor, type JSX } from "solid-js";
 import { IconButton, TextInput } from "@/app/element/ui";
+
+/** The announced count changes at most this often. */
+export const LIVE_COUNT_MS = 400;
+
+/** A value that follows `source` at once the first time and at most once per `ms` after, ending on the latest. */
+function createThrottled<T>(source: Accessor<T>, ms: number): Accessor<T> {
+    const [value, setValue] = createSignal<T>(untrack(source));
+    let last = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    createEffect(
+        on(
+            source,
+            (next) => {
+                clearTimeout(timer);
+                const wait = ms - (Date.now() - last);
+                const apply = () => {
+                    last = Date.now();
+                    setValue(() => next);
+                };
+                if (wait <= 0) apply();
+                else timer = setTimeout(apply, wait);
+            },
+            { defer: true }
+        )
+    );
+    onCleanup(() => clearTimeout(timer));
+    return value;
+}
 
 export interface AgentSearchBarProps {
     visible: Accessor<boolean>;
@@ -53,9 +84,11 @@ export const AgentSearchBar = (props: AgentSearchBarProps): JSX.Element => {
         return `${props.matchIndex() + 1} of ${count}`;
     };
 
+    const announced = createThrottled(counterText, LIVE_COUNT_MS);
+
     return (
         <Show when={props.visible()}>
-            <div class="agent-search-bar">
+            <div class="agent-search-bar" role="search" aria-label="Find in conversation">
                 <TextInput
                     variant="plain"
                     ref={(el) => {
@@ -67,14 +100,20 @@ export const AgentSearchBar = (props: AgentSearchBarProps): JSX.Element => {
                     class="agent-search-input"
                     type="text"
                     placeholder="Search messages..."
+                    aria-label="Find in conversation"
                     onInput={(e) => {
                         props.onSearch(e.currentTarget.value);
                     }}
                     onKeyDown={handleKeyDown}
                 />
-                <span class="agent-search-counter">{counterText()}</span>
-                <IconButton icon="caret-up" label="Previous match (Shift+Enter)" density="compact" onClick={() => props.onPrev()} />
-                <IconButton icon="caret-down" label="Next match (Enter)" density="compact" onClick={() => props.onNext()} />
+                <span class="agent-search-counter" aria-hidden="true">
+                    {counterText()}
+                </span>
+                <span class="sr-only agent-search-live" role="status" aria-live="polite">
+                    {announced()}
+                </span>
+                <IconButton icon="caret-up" label="Previous match (Shift+Enter, Shift+F3)" density="compact" onClick={() => props.onPrev()} />
+                <IconButton icon="caret-down" label="Next match (Enter, F3)" density="compact" onClick={() => props.onNext()} />
                 <IconButton icon="xmark" label="Close search (Esc)" density="compact" onClick={() => props.onClose()} />
             </div>
         </Show>

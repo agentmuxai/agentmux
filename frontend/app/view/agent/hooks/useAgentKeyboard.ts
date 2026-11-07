@@ -13,8 +13,8 @@
  * `focusedBlockId()`, whose text-selection fallback sent a Ctrl+F typed in
  * pane B to pane A whenever text was left selected in A.
  *
- * Ctrl+F — toggle the search bar. Second press closes it (caller's
- *          `onToggleSearch` is responsible for clearing state).
+ * Ctrl+F — open the search bar, or put the caret in its field when it is open (the caller's `onToggleSearch`).
+ * F3     — next match while the bar is open; Shift+F3 the previous one.
  * Alt+V  — cycle the pane's view (Full, Standard, Replies); Alt+Shift+V clears the pane's own view.
  *          Matched by key code: on macOS Option+V types a character.
  */
@@ -27,6 +27,10 @@ export interface UseAgentKeyboardOptions {
     blockId: string;
     /** Called on Ctrl+F when this pane is focused. */
     onToggleSearch: () => void;
+    /** Whether the search bar is open: F3 steps only then. */
+    searchOpen?: () => boolean;
+    /** F3 (forward) and Shift+F3 (backward) with the bar open. */
+    onStepSearch?: (backward: boolean) => void;
     /** Alt+V. */
     onCycleView?: () => void;
     /** Alt+Shift+V. */
@@ -41,6 +45,11 @@ export function useAgentKeyboard(opts: UseAgentKeyboardOptions): void {
             if (isModKey(e) && e.key === "f") {
                 e.preventDefault();
                 opts.onToggleSearch();
+                return;
+            }
+            if (e.key === "F3" && !e.altKey && !e.ctrlKey && !e.metaKey && opts.searchOpen?.()) {
+                e.preventDefault();
+                opts.onStepSearch?.(e.shiftKey);
                 return;
             }
             if (e.altKey && !e.ctrlKey && !e.metaKey && e.code === "KeyV") {

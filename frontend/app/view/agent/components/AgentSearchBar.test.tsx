@@ -3,8 +3,8 @@
 
 import { cleanup, render } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { AgentSearchBar } from "./AgentSearchBar";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { AgentSearchBar, LIVE_COUNT_MS } from "./AgentSearchBar";
 
 afterEach(cleanup);
 
@@ -54,5 +54,43 @@ describe("AgentSearchBar", () => {
         expect(props.onNext).toHaveBeenCalledOnce();
         expect(props.onPrev).toHaveBeenCalledOnce();
         expect(props.onClose).toHaveBeenCalledOnce();
+    });
+});
+
+describe("AgentSearchBar: for assistive technology", () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    it("is a labelled search region with a labelled field", () => {
+        const { view } = bar(3, 0);
+        const region = view.container.querySelector("[role=search]");
+        expect(region?.getAttribute("aria-label")).toBe("Find in conversation");
+        expect(view.container.querySelector("input")?.getAttribute("aria-label")).toBe("Find in conversation");
+    });
+
+    it("announces the count in a polite status region, and hides the visible counter from readers", () => {
+        const { view } = bar(41, 2);
+        const live = view.container.querySelector(".agent-search-live") as HTMLElement;
+        expect(live.getAttribute("role")).toBe("status");
+        expect(live.getAttribute("aria-live")).toBe("polite");
+        expect(live.textContent).toBe("3 of 41");
+        expect(view.container.querySelector(".agent-search-counter")?.getAttribute("aria-hidden")).toBe("true");
+    });
+
+    it("changes the announcement at most once per interval, ending on the latest count", () => {
+        const { view, setC, setI } = bar(10, 0);
+        const live = () => view.container.querySelector(".agent-search-live")?.textContent;
+        vi.advanceTimersByTime(LIVE_COUNT_MS);
+        // Typing: the count changes five times inside the interval.
+        for (let n = 9; n >= 5; n--) {
+            setC(n);
+            setI(0);
+            vi.advanceTimersByTime(20);
+        }
+        expect(view.container.querySelector(".agent-search-counter")?.textContent).toBe("1 of 5");
+        // The first change is announced at once, the rest wait for the interval.
+        expect(live()).toBe("1 of 9");
+        vi.advanceTimersByTime(LIVE_COUNT_MS);
+        expect(live()).toBe("1 of 5");
     });
 });
