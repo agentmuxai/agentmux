@@ -1,0 +1,174 @@
+useTick 1000
+createPromotionClock
+taskOutcomesFor blk-1
+shellActivities
+subagentActivities blk-1
+toolActivities
+applyStreamOutcomes 7
+applyRegistryOutcomes 7 0
+backgroundTaskActivities 0 known=[s1,s2,s3,s4,c1,u1,t1]
+-- three inline, four more
+<div>
+  <div class="agent-activity-dock">
+    <div data-stand="ActivityRow" data-id="t1" data-status="running" data-expanded="false" data-leaving="false">
+      <span data-cb="onToggle">
+        "toggle"
+      <span data-cb="onStop">
+        "stop"
+      <span data-cb="onDismiss">
+        "dismiss"
+    <div data-stand="ActivityRow" data-id="u1" data-status="running" data-expanded="false" data-leaving="false">
+      <span data-cb="onToggle">
+        "toggle"
+      <span data-cb="onStop">
+        "stop"
+      <span data-cb="onDismiss">
+        "dismiss"
+    <div data-stand="ActivityRow" data-id="c1" data-status="running" data-expanded="false" data-leaving="false">
+      <span data-cb="onToggle">
+        "toggle"
+      <span data-cb="onStop">
+        "stop"
+      <span data-cb="onDismiss">
+        "dismiss"
+    <span data-stand="Button" data-cb="onClick" data-variant="row" data-density="compact" data-class="agent-activity-overflow">
+      "▸ 4 more (4 shells)"
+Button onClick
+-- overflow open
+<div>
+  <div class="agent-activity-dock">
+    <div data-stand="ActivityRow" data-id="t1" data-status="running" data-expanded="false" data-leaving="false">
+      <span data-cb="onToggle">
+        "toggle"
+      <span data-cb="onStop">
+        "stop"
+      <span data-cb="onDismiss">
+        "dismiss"
+    <div data-stand="ActivityRow" data-id="u1" data-status="running" data-expanded="false" data-leaving="false">
+      <span data-cb="onToggle">
+        "toggle"
+      <span data-cb="onStop">
+        "stop"
+      <span data-cb="onDismiss">
+        "dismiss"
+    <div data-stand="ActivityRow" data-id="c1" data-status="running" data-expanded="false" data-leaving="false">
+      <span data-cb="onToggle">
+        "toggle"
+      <span data-cb="onStop">
+        "stop"
+      <span data-cb="onDismiss">
+        "dismiss"
+    <div data-stand="ActivityRow" data-id="s4" data-status="running" data-expanded="false" data-leaving="false">
+      <span data-cb="onToggle">
+        "toggle"
+      <span data-cb="onStop">
+        "stop"
+      <span data-cb="onDismiss">
+        "dismiss"
+    <div data-stand="ActivityRow" data-id="s3" data-status="running" data-expanded="false" data-leaving="false">
+      <span data-cb="onToggle">
+        "toggle"
+      <span data-cb="onStop">
+        "stop"
+      <span data-cb="onDismiss">
+        "dismiss"
+    <div data-stand="ActivityRow" data-id="s2" data-status="running" data-expanded="false" data-leaving="false">
+      <span data-cb="onToggle">
+        "toggle"
+      <span data-cb="onStop">
+        "stop"
+      <span data-cb="onDismiss">
+        "dismiss"
+    <div data-stand="ActivityRow" data-id="s1" data-status="running" data-expanded="false" data-leaving="false">
+      <span data-cb="onToggle">
+        "toggle"
+      <span data-cb="onStop">
+        "stop"
+      <span data-cb="onDismiss">
+        "dismiss"
+    <span data-stand="Button" data-cb="onClick" data-variant="row" data-density="compact" data-class="agent-activity-overflow">
+      "▾ fewer"
+ActivityRow s2 onToggle
+Button onClick
+-- closed, the expanded row stays
+<div>
+  <div class="agent-activity-dock">
+    <div data-stand="ActivityRow" data-id="s2" data-status="running" data-expanded="true" data-leaving="false">
+      <span data-cb="onToggle">
+        "toggle"
+      <span data-cb="onStop">
+        "stop"
+      <span data-cb="onDismiss">
+        "dismiss"
+    <div data-stand="ActivityRow" data-id="t1" data-status="running" data-expanded="false" data-leaving="false">
+      <span data-cb="onToggle">
+        "toggle"
+      <span data-cb="onStop">
+        "stop"
+      <span data-cb="onDismiss">
+        "dismiss"
+    <div data-stand="ActivityRow" data-id="u1" data-status="running" data-expanded="false" data-leaving="false">
+      <span data-cb="onToggle">
+        "toggle"
+      <span data-cb="onStop">
+        "stop"
+      <span data-cb="onDismiss">
+        "dismiss"
+    <span data-stand="Button" data-cb="onClick" data-variant="row" data-density="compact" data-class="agent-activity-overflow">
+      "▸ 4 more (1 cron · 3 shells)"
+ActivityRow s2 onToggle
+-- collapsed again
+<div>
+  <div class="agent-activity-dock">
+    <div data-stand="ActivityRow" data-id="t1" data-status="running" data-expanded="false" data-leaving="false">
+      <span data-cb="onToggle">
+        "toggle"
+      <span data-cb="onStop">
+        "stop"
+      <span data-cb="onDismiss">
+        "dismiss"
+    <div data-stand="ActivityRow" data-id="u1" data-status="running" data-expanded="false" data-leaving="false">
+      <span data-cb="onToggle">
+        "toggle"
+      <span data-cb="onStop">
+        "stop"
+      <span data-cb="onDismiss">
+        "dismiss"
+    <div data-stand="ActivityRow" data-id="c1" data-status="running" data-expanded="false" data-leaving="false">
+      <span data-cb="onToggle">
+        "toggle"
+      <span data-cb="onStop">
+        "stop"
+      <span data-cb="onDismiss">
+        "dismiss"
+    <span data-stand="Button" data-cb="onClick" data-variant="row" data-density="compact" data-class="agent-activity-overflow">
+      "▸ 4 more (4 shells)"
+shellActivities
+subagentActivities blk-1
+toolActivities
+applyStreamOutcomes 4
+applyRegistryOutcomes 4 0
+backgroundTaskActivities 0 known=[s1,s2,u1,t1]
+shellActivities
+subagentActivities blk-1
+toolActivities
+applyStreamOutcomes 2
+applyRegistryOutcomes 2 0
+backgroundTaskActivities 0 known=[s1,s2]
+-- back under the cap
+<div>
+  <div class="agent-activity-dock">
+    <div data-stand="ActivityRow" data-id="s2" data-status="running" data-expanded="false" data-leaving="false">
+      <span data-cb="onToggle">
+        "toggle"
+      <span data-cb="onStop">
+        "stop"
+      <span data-cb="onDismiss">
+        "dismiss"
+    <div data-stand="ActivityRow" data-id="s1" data-status="running" data-expanded="false" data-leaving="false">
+      <span data-cb="onToggle">
+        "toggle"
+      <span data-cb="onStop">
+        "stop"
+      <span data-cb="onDismiss">
+        "dismiss"

@@ -1,0 +1,49 @@
+useTick 1000
+createPromotionClock
+taskOutcomesFor blk-1
+shellActivities
+subagentActivities blk-1
+toolActivities
+applyStreamOutcomes 0
+applyRegistryOutcomes 0 0
+backgroundTaskActivities 0 known=[]
+-- no activities
+<div>
+shellActivities
+subagentActivities blk-1
+toolActivities
+applyStreamOutcomes 4
+applyRegistryOutcomes 4 0
+backgroundTaskActivities 0 known=[done-1,run-old,err-1,stopped-1]
+shellActivities
+subagentActivities blk-1
+toolActivities
+applyStreamOutcomes 5
+applyRegistryOutcomes 5 0
+backgroundTaskActivities 0 known=[done-1,run-old,err-1,stopped-1,run-new]
+-- mixed
+<div>
+  <div class="agent-activity-dock">
+    <div data-stand="ActivityRow" data-id="run-new" data-status="running" data-expanded="false" data-leaving="false">
+      <span data-cb="onToggle">
+        "toggle"
+      <span data-cb="onStop">
+        "stop"
+      <span data-cb="onDismiss">
+        "dismiss"
+    <div data-stand="ActivityRow" data-id="run-old" data-status="running" data-expanded="false" data-leaving="false">
+      <span data-cb="onToggle">
+        "toggle"
+      <span data-cb="onStop">
+        "stop"
+      <span data-cb="onDismiss">
+        "dismiss"
+    <div data-stand="ActivityRow" data-id="err-1" data-status="error" data-expanded="false" data-leaving="false">
+      <span data-cb="onToggle">
+        "toggle"
+      <span data-cb="onStop">
+        "stop"
+      <span data-cb="onDismiss">
+        "dismiss"
+    <span data-stand="Button" data-cb="onClick" data-variant="row" data-density="compact" data-class="agent-activity-overflow">
+      "▸ 2 more (2 shells)"
