@@ -112,7 +112,9 @@ fn downloads_dir(workdir: &Path) -> Result<PathBuf, String> {
     }
     let real = std::fs::canonicalize(&dir).map_err(|e| format!("the downloads folder couldn't be read: {e}"))?;
     if real.starts_with(&root) {
-        Ok(real)
+        // Not `canonicalize`'s Windows extended-length form (a leading backslash pair, a question mark and a
+        // backslash): CEF's download into such a path was interrupted at once with 0 bytes in a real run.
+        Ok(PathBuf::from(shown(&real)))
     } else {
         Err("the workspace's downloads folder is outside the workspace".into())
     }
@@ -313,7 +315,8 @@ mod tests {
         let first = target(ws.path(), "report.pdf", 13).unwrap().0;
         assert_eq!(first.file_name().unwrap(), "report.pdf");
         assert_eq!(first.parent().unwrap().file_name().unwrap(), "downloads");
-        assert!(first.starts_with(std::fs::canonicalize(ws.path()).unwrap()));
+        assert!(first.starts_with(shown(&std::fs::canonicalize(ws.path()).unwrap())));
+        assert!(!first.to_string_lossy().starts_with("\\\\?"), "{first:?}");
         std::fs::write(&first, b"x").unwrap();
         assert_eq!(target(ws.path(), "report.pdf", 13).unwrap().0.file_name().unwrap(), "report (1).pdf");
         std::fs::write(first.with_file_name("report (1).pdf"), b"x").unwrap();
