@@ -1,0 +1,353 @@
+onMuxEvent sysinfo local
+sysinfo with a disk
+parseDiskVolumes 2
+-- CPU panel open
+<div>
+  <div class="status-bar-item system-stats">
+    <button type="button" class="stat-mono stat-cpu stat-cpu-button" data-tip="Per-core CPU usage" aria-label="CPU usage, click for per-core breakdown" aria-haspopup="dialog" style="color: var(--cpu-20);" aria-expanded="true">
+      "CPU"
+      "20"
+      "%"
+    <div data-stand="CpuCoresPopover" data-anchor="stat-mono stat-cpu stat-cpu-button">
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-mem" data-tip="Memory used and total" aria-label="Memory usage" style="color: var(--secondary-text-color);">
+      "Mem"
+      "0M"
+      "/"
+      "0M"
+    <span class="stat-separator">
+      "|"
+    <button type="button" class="stat-mono stat-watch-disk stat-disk-button" aria-label="Free disk space, click for per-drive breakdown" aria-haspopup="dialog" style="color: var(--watch-55-null);" data-tip="2 volumes" aria-expanded="false">
+      "Disk"
+      "55"
+      "%"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-net stat-idle" data-tip="Network upload and download" aria-label="Network traffic">
+      <span class="stat-disk-arrow">
+        "↑"
+      "0K"
+      <span class="stat-disk-arrow">
+        "↓"
+      "0K"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-disk stat-idle" data-tip="Disk read and write" aria-label="Disk I/O">
+      <span class="stat-disk-arrow">
+        "R"
+      "0K"
+      <span class="stat-disk-arrow">
+        "W"
+      "0K"
+-- CPU panel closed by the button
+<div>
+  <div class="status-bar-item system-stats">
+    <button type="button" class="stat-mono stat-cpu stat-cpu-button" data-tip="Per-core CPU usage" aria-label="CPU usage, click for per-core breakdown" aria-haspopup="dialog" style="color: var(--cpu-20);" aria-expanded="false">
+      "CPU"
+      "20"
+      "%"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-mem" data-tip="Memory used and total" aria-label="Memory usage" style="color: var(--secondary-text-color);">
+      "Mem"
+      "0M"
+      "/"
+      "0M"
+    <span class="stat-separator">
+      "|"
+    <button type="button" class="stat-mono stat-watch-disk stat-disk-button" aria-label="Free disk space, click for per-drive breakdown" aria-haspopup="dialog" style="color: var(--watch-55-null);" data-tip="2 volumes" aria-expanded="false">
+      "Disk"
+      "55"
+      "%"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-net stat-idle" data-tip="Network upload and download" aria-label="Network traffic">
+      <span class="stat-disk-arrow">
+        "↑"
+      "0K"
+      <span class="stat-disk-arrow">
+        "↓"
+      "0K"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-disk stat-idle" data-tip="Disk read and write" aria-label="Disk I/O">
+      <span class="stat-disk-arrow">
+        "R"
+      "0K"
+      <span class="stat-disk-arrow">
+        "W"
+      "0K"
+CpuCoresPopover onClose
+-- CPU panel closed by the panel
+<div>
+  <div class="status-bar-item system-stats">
+    <button type="button" class="stat-mono stat-cpu stat-cpu-button" data-tip="Per-core CPU usage" aria-label="CPU usage, click for per-core breakdown" aria-haspopup="dialog" style="color: var(--cpu-20);" aria-expanded="false">
+      "CPU"
+      "20"
+      "%"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-mem" data-tip="Memory used and total" aria-label="Memory usage" style="color: var(--secondary-text-color);">
+      "Mem"
+      "0M"
+      "/"
+      "0M"
+    <span class="stat-separator">
+      "|"
+    <button type="button" class="stat-mono stat-watch-disk stat-disk-button" aria-label="Free disk space, click for per-drive breakdown" aria-haspopup="dialog" style="color: var(--watch-55-null);" data-tip="2 volumes" aria-expanded="false">
+      "Disk"
+      "55"
+      "%"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-net stat-idle" data-tip="Network upload and download" aria-label="Network traffic">
+      <span class="stat-disk-arrow">
+        "↑"
+      "0K"
+      <span class="stat-disk-arrow">
+        "↓"
+      "0K"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-disk stat-idle" data-tip="Disk read and write" aria-label="Disk I/O">
+      <span class="stat-disk-arrow">
+        "R"
+      "0K"
+      <span class="stat-disk-arrow">
+        "W"
+      "0K"
+-- Disk panel open
+<div>
+  <div class="status-bar-item system-stats">
+    <button type="button" class="stat-mono stat-cpu stat-cpu-button" data-tip="Per-core CPU usage" aria-label="CPU usage, click for per-core breakdown" aria-haspopup="dialog" style="color: var(--cpu-20);" aria-expanded="false">
+      "CPU"
+      "20"
+      "%"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-mem" data-tip="Memory used and total" aria-label="Memory usage" style="color: var(--secondary-text-color);">
+      "Mem"
+      "0M"
+      "/"
+      "0M"
+    <span class="stat-separator">
+      "|"
+    <button type="button" class="stat-mono stat-watch-disk stat-disk-button" aria-label="Free disk space, click for per-drive breakdown" aria-haspopup="dialog" style="color: var(--watch-55-null);" data-tip="2 volumes" aria-expanded="true">
+      "Disk"
+      "55"
+      "%"
+    <div data-stand="DiskVolumesPopover" data-anchor="stat-mono stat-watch-disk stat-disk-button" data-volumes="v0,v1">
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-net stat-idle" data-tip="Network upload and download" aria-label="Network traffic">
+      <span class="stat-disk-arrow">
+        "↑"
+      "0K"
+      <span class="stat-disk-arrow">
+        "↓"
+      "0K"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-disk stat-idle" data-tip="Disk read and write" aria-label="Disk I/O">
+      <span class="stat-disk-arrow">
+        "R"
+      "0K"
+      <span class="stat-disk-arrow">
+        "W"
+      "0K"
+sysinfo a second volume
+parseDiskVolumes 4
+-- Disk panel after another reading
+<div>
+  <div class="status-bar-item system-stats">
+    <button type="button" class="stat-mono stat-cpu stat-cpu-button" data-tip="Per-core CPU usage" aria-label="CPU usage, click for per-core breakdown" aria-haspopup="dialog" style="color: var(--cpu-20);" aria-expanded="false">
+      "CPU"
+      "20"
+      "%"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-mem" data-tip="Memory used and total" aria-label="Memory usage" style="color: var(--secondary-text-color);">
+      "Mem"
+      "0M"
+      "/"
+      "0M"
+    <span class="stat-separator">
+      "|"
+    <button type="button" class="stat-mono stat-watch-disk stat-disk-button" aria-label="Free disk space, click for per-drive breakdown" aria-haspopup="dialog" style="color: var(--watch-55-null);" data-tip="4 volumes" aria-expanded="true">
+      "Disk"
+      "55"
+      "%"
+    <div data-stand="DiskVolumesPopover" data-anchor="stat-mono stat-watch-disk stat-disk-button" data-volumes="v0,v1,v2,v3">
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-net stat-idle" data-tip="Network upload and download" aria-label="Network traffic">
+      <span class="stat-disk-arrow">
+        "↑"
+      "0K"
+      <span class="stat-disk-arrow">
+        "↓"
+      "0K"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-disk stat-idle" data-tip="Disk read and write" aria-label="Disk I/O">
+      <span class="stat-disk-arrow">
+        "R"
+      "0K"
+      <span class="stat-disk-arrow">
+        "W"
+      "0K"
+-- both panels open
+<div>
+  <div class="status-bar-item system-stats">
+    <button type="button" class="stat-mono stat-cpu stat-cpu-button" data-tip="Per-core CPU usage" aria-label="CPU usage, click for per-core breakdown" aria-haspopup="dialog" style="color: var(--cpu-20);" aria-expanded="true">
+      "CPU"
+      "20"
+      "%"
+    <div data-stand="CpuCoresPopover" data-anchor="stat-mono stat-cpu stat-cpu-button">
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-mem" data-tip="Memory used and total" aria-label="Memory usage" style="color: var(--secondary-text-color);">
+      "Mem"
+      "0M"
+      "/"
+      "0M"
+    <span class="stat-separator">
+      "|"
+    <button type="button" class="stat-mono stat-watch-disk stat-disk-button" aria-label="Free disk space, click for per-drive breakdown" aria-haspopup="dialog" style="color: var(--watch-55-null);" data-tip="4 volumes" aria-expanded="true">
+      "Disk"
+      "55"
+      "%"
+    <div data-stand="DiskVolumesPopover" data-anchor="stat-mono stat-watch-disk stat-disk-button" data-volumes="v0,v1,v2,v3">
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-net stat-idle" data-tip="Network upload and download" aria-label="Network traffic">
+      <span class="stat-disk-arrow">
+        "↑"
+      "0K"
+      <span class="stat-disk-arrow">
+        "↓"
+      "0K"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-disk stat-idle" data-tip="Disk read and write" aria-label="Disk I/O">
+      <span class="stat-disk-arrow">
+        "R"
+      "0K"
+      <span class="stat-disk-arrow">
+        "W"
+      "0K"
+DiskVolumesPopover onClose
+-- Disk panel closed by the panel
+<div>
+  <div class="status-bar-item system-stats">
+    <button type="button" class="stat-mono stat-cpu stat-cpu-button" data-tip="Per-core CPU usage" aria-label="CPU usage, click for per-core breakdown" aria-haspopup="dialog" style="color: var(--cpu-20);" aria-expanded="true">
+      "CPU"
+      "20"
+      "%"
+    <div data-stand="CpuCoresPopover" data-anchor="stat-mono stat-cpu stat-cpu-button">
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-mem" data-tip="Memory used and total" aria-label="Memory usage" style="color: var(--secondary-text-color);">
+      "Mem"
+      "0M"
+      "/"
+      "0M"
+    <span class="stat-separator">
+      "|"
+    <button type="button" class="stat-mono stat-watch-disk stat-disk-button" aria-label="Free disk space, click for per-drive breakdown" aria-haspopup="dialog" style="color: var(--watch-55-null);" data-tip="4 volumes" aria-expanded="false">
+      "Disk"
+      "55"
+      "%"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-net stat-idle" data-tip="Network upload and download" aria-label="Network traffic">
+      <span class="stat-disk-arrow">
+        "↑"
+      "0K"
+      <span class="stat-disk-arrow">
+        "↓"
+      "0K"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-disk stat-idle" data-tip="Disk read and write" aria-label="Disk I/O">
+      <span class="stat-disk-arrow">
+        "R"
+      "0K"
+      <span class="stat-disk-arrow">
+        "W"
+      "0K"
+-- Disk panel toggled shut
+<div>
+  <div class="status-bar-item system-stats">
+    <button type="button" class="stat-mono stat-cpu stat-cpu-button" data-tip="Per-core CPU usage" aria-label="CPU usage, click for per-core breakdown" aria-haspopup="dialog" style="color: var(--cpu-20);" aria-expanded="true">
+      "CPU"
+      "20"
+      "%"
+    <div data-stand="CpuCoresPopover" data-anchor="stat-mono stat-cpu stat-cpu-button">
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-mem" data-tip="Memory used and total" aria-label="Memory usage" style="color: var(--secondary-text-color);">
+      "Mem"
+      "0M"
+      "/"
+      "0M"
+    <span class="stat-separator">
+      "|"
+    <button type="button" class="stat-mono stat-watch-disk stat-disk-button" aria-label="Free disk space, click for per-drive breakdown" aria-haspopup="dialog" style="color: var(--watch-55-null);" data-tip="4 volumes" aria-expanded="false">
+      "Disk"
+      "55"
+      "%"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-net stat-idle" data-tip="Network upload and download" aria-label="Network traffic">
+      <span class="stat-disk-arrow">
+        "↑"
+      "0K"
+      <span class="stat-disk-arrow">
+        "↓"
+      "0K"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-disk stat-idle" data-tip="Disk read and write" aria-label="Disk I/O">
+      <span class="stat-disk-arrow">
+        "R"
+      "0K"
+      <span class="stat-disk-arrow">
+        "W"
+      "0K"
+sysinfo the free share goes away
+parseDiskVolumes 0
+-- the Disk readout gone
+<div>
+  <div class="status-bar-item system-stats">
+    <button type="button" class="stat-mono stat-cpu stat-cpu-button" data-tip="Per-core CPU usage" aria-label="CPU usage, click for per-core breakdown" aria-haspopup="dialog" style="color: var(--cpu-20);" aria-expanded="true">
+      "CPU"
+      "20"
+      "%"
+    <div data-stand="CpuCoresPopover" data-anchor="stat-mono stat-cpu stat-cpu-button">
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-mem" data-tip="Memory used and total" aria-label="Memory usage" style="color: var(--secondary-text-color);">
+      "Mem"
+      "0M"
+      "/"
+      "0M"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-net stat-idle" data-tip="Network upload and download" aria-label="Network traffic">
+      <span class="stat-disk-arrow">
+        "↑"
+      "0K"
+      <span class="stat-disk-arrow">
+        "↓"
+      "0K"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-disk stat-idle" data-tip="Disk read and write" aria-label="Disk I/O">
+      <span class="stat-disk-arrow">
+        "R"
+      "0K"
+      <span class="stat-disk-arrow">
+        "W"
+      "0K"
