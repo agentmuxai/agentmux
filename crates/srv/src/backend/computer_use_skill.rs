@@ -53,6 +53,8 @@ pub struct Bundle {
     /// The `SKILL.md` name, which is also the folder name.
     pub name: String,
     pub description: String,
+    /// `SKILL.md` as written, frontmatter included: the content hash covers it.
+    pub skill_md: String,
     /// The `SKILL.md` body without its frontmatter: what `db_skills.content` holds.
     pub content: String,
     pub info: SkillAppInfo,
@@ -72,10 +74,15 @@ fn is_name(s: &str) -> bool {
         && s.split('-').all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit()))
 }
 
+/// `1.2.3`, with an optional `-prerelease` and `+build`, each of letters, digits, dots and hyphens: the version ends up in
+/// file names and a pass record's key, so nothing else may ride along after the numbers.
 fn is_semver(s: &str) -> bool {
     let core = s.split(['-', '+']).next().unwrap_or("");
     let parts: Vec<&str> = core.split('.').collect();
-    parts.len() == 3 && parts.iter().all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+    let tail = &s[core.len()..];
+    parts.len() == 3
+        && parts.iter().all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+        && tail.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'+'))
 }
 
 fn ext_of(path: &str) -> String {
@@ -420,7 +427,7 @@ pub fn read_folder(dir: &Path) -> Result<Bundle, String> {
         None => Vec::new(),
         Some(t) => serde_json::from_str::<Vec<VerifiedRecord>>(&t).map_err(|e| format!("{VERIFIED_FILE}: {e}"))?,
     };
-    Ok(Bundle { name, description, content, info, manifest_json, content_hash: content_hash(&all), files, signature, verified })
+    Ok(Bundle { name, description, skill_md, content, info, manifest_json, content_hash: content_hash(&all), files, signature, verified })
 }
 
 /// Whether `exe` (an executable name as `Desktop apps` lists it) is one this skill's app runs as on `platform`.
@@ -489,6 +496,7 @@ pub fn install(
 ) -> Result<(), crate::backend::storage::error::StoreError> {
     catalog.skill_app_set(skill_id, &b.info, &b.manifest_json, &b.content_hash, &b.files, now_ms)?;
     catalog.skill_signer_set(skill_id, signer)?;
+    catalog.skill_origin_set(skill_id, &b.skill_md, b.signature.as_deref())?;
     for r in &b.verified {
         catalog.skill_verified_append(skill_id, r, "import", now_ms)?;
     }
@@ -536,4 +544,4 @@ pub fn sibling_files(skills: &[AgentSkill], catalog: &Store) -> Vec<AgentConfigF
 
 #[cfg(test)]
 #[path = "computer_use_skill_tests.rs"]
-mod tests;
+pub(crate) mod tests;

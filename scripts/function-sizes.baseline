@@ -397,7 +397,6 @@
 116 frontend/app/view/agent/components/AgentDocumentView.tsx::AgentDocumentView
 116 frontend/app/view/agent/components/AgentEnvPanel.tsx::AgentEnvPanel
 167 frontend/app/view/agent/components/AgentFooter.tsx::AgentFooter
-178 frontend/app/view/agent/components/AgentSeatPanel.tsx::AgentSeatPanel
 120 frontend/app/view/agent/components/AgentSessionNotices.tsx::AgentSessionNotices
 126 frontend/app/view/agent/components/AgentShellInfoPanel.tsx::AgentShellInfoPanel
 148 frontend/app/view/agent/components/BtwOverlay.tsx::BtwOverlay
@@ -455,7 +454,6 @@
 112 frontend/app/view/native-memory/NativeMemoryCreate.tsx::NativeMemoryCreate
 150 frontend/app/view/native-memory/NativeMemoryFileView.tsx::NativeMemoryFileView
 154 frontend/app/view/remotes/remotes-view.tsx::Detail
-175 frontend/app/view/settings/sections/agent-site-grants.tsx::AgentSiteGrants
 128 frontend/app/view/settings/sections/animations-section.tsx::AnimationsSection
 166 frontend/app/view/settings/sections/appearance-section.tsx::AppearanceSection
 120 frontend/app/view/settings/sections/browser-section.tsx::BrowserSection

@@ -41,6 +41,11 @@ const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS db_skill_app (
         skill_id   TEXT PRIMARY KEY,
         signer_key TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS db_skill_origin (
+        skill_id  TEXT PRIMARY KEY,
+        skill_md  TEXT NOT NULL,
+        signature TEXT
+    );
     CREATE TABLE IF NOT EXISTS db_skill_publisher_pin (
         publisher  TEXT PRIMARY KEY,
         public_key TEXT NOT NULL,
@@ -447,6 +452,35 @@ impl Store {
         Ok(())
     }
 
+    /// The manifest as the skill was installed with it.
+    pub fn skill_manifest_get(&self, skill_id: &str) -> Result<Option<String>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute_batch(SCHEMA)?;
+        Ok(conn.query_row("SELECT manifest FROM db_skill_app WHERE skill_id = ?1", params![skill_id], |r| r.get(0)).optional()?)
+    }
+
+    /// Keep the `SKILL.md` and `skill.sig` a skill was installed from, as written. The content hash covers `SKILL.md`, so
+    /// an export can only carry the publisher's signature if it writes those exact bytes back.
+    pub fn skill_origin_set(&self, skill_id: &str, skill_md: &str, signature: Option<&str>) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute_batch(SCHEMA)?;
+        conn.execute(
+            "INSERT INTO db_skill_origin (skill_id, skill_md, signature) VALUES (?1, ?2, ?3)
+             ON CONFLICT(skill_id) DO UPDATE SET skill_md = excluded.skill_md, signature = excluded.signature",
+            params![skill_id, skill_md, signature],
+        )?;
+        Ok(())
+    }
+
+    /// The `SKILL.md` and `skill.sig` the skill was installed from; `None` for one installed before they were kept.
+    pub fn skill_origin_get(&self, skill_id: &str) -> Result<Option<(String, Option<String>)>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute_batch(SCHEMA)?;
+        Ok(conn
+            .query_row("SELECT skill_md, signature FROM db_skill_origin WHERE skill_id = ?1", params![skill_id], |r| Ok((r.get(0)?, r.get(1)?)))
+            .optional()?)
+    }
+
     /// Publisher → the key it is pinned to (the first key a person approved a script of its for).
     pub fn skill_publisher_pins(&self) -> Result<crate::backend::widget::signature::Pins, StoreError> {
         let conn = self.conn.lock().unwrap();
@@ -501,6 +535,7 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         conn.execute_batch(SCHEMA)?;
         conn.execute("DELETE FROM db_skill_signature WHERE skill_id = ?1", params![skill_id])?;
+        conn.execute("DELETE FROM db_skill_origin WHERE skill_id = ?1", params![skill_id])?;
         conn.execute("DELETE FROM db_skill_app WHERE skill_id = ?1", params![skill_id])?;
         conn.execute("DELETE FROM db_skill_file WHERE skill_id = ?1", params![skill_id])?;
         conn.execute("DELETE FROM db_skill_verified WHERE skill_id = ?1", params![skill_id])?;

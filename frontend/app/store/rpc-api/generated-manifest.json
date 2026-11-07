@@ -1373,6 +1373,10 @@
             "method": "SkillCatalogAppScriptCommand"
         },
         {
+            "command": "skill.catalog.export",
+            "method": "SkillCatalogExportCommand"
+        },
+        {
             "command": "skill.catalog.bind",
             "method": "SkillCatalogBindCommand"
         },

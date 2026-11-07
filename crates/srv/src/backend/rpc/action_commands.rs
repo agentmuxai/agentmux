@@ -51,7 +51,7 @@ pub const ALWAYS: &[&str] = &[
     "remotesetconfig", "remotetest", "renameagentdefinitiontitle", "renameeditorfile", "reorderglobalbrain",
     "reseedagents", "routeannounce", "routeunannounce", "runclilogin", "rundrone", "sensitive.decide", "session:archive",
     "session:restore", "setagentbundles", "setagentcontent", "setconfig", "shellexec", "shellstop", "skill.bind",
-    "skill.catalog.app_script", "skill.catalog.bind", "skill.catalog.bind_all", "skill.catalog.bind_to_bundle", "skill.catalog.delete",
+    "skill.catalog.app_script", "skill.catalog.bind", "skill.catalog.bind_all", "skill.catalog.bind_to_bundle", "skill.catalog.delete", "skill.catalog.export",
     "skill.catalog.import_commit", "skill.catalog.import_preview", "skill.catalog.set_opt_out", "skill.catalog.set_reach",
     "skill.catalog.unbind",
     "skill.catalog.unbind_from_bundle", "skill.catalog.upsert", "skill.catalog.upsert_for_bundle", "skill.delete",

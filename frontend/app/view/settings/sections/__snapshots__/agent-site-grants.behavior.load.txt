@@ -1,0 +1,87 @@
+store.follow
+-- loading
+<div>
+  <div class="setting-row agent-site-grants" id="setting-browser.agent_sites">
+    <div class="setting-devices-description">
+      "What an agent may do on a site without asking each time, until you revoke it. Every row lets the agent make committing clicks there without asking (a payment still asks). Add Terminal to let it type and run commands in a web terminal there, such as Cloud Shell: nobody checks each line, so Stop, Pause and Take over in the pane are how you stop it, and Revoke here ends it at once. Tick "ask me for each line" instead to be shown every line in the pane, with Run it and Don't run, before it goes in."
+    <div data-stand="Notice" data-tone="warning">
+      <b>
+        "One limit of the Terminal power"
+      "A line already on its way can't be stopped."
+    <div class="setting-devices-empty">
+      "Loading…"
+-- the load failed
+<div>
+  <div class="setting-row agent-site-grants" id="setting-browser.agent_sites">
+    <div class="setting-devices-description">
+      "What an agent may do on a site without asking each time, until you revoke it. Every row lets the agent make committing clicks there without asking (a payment still asks). Add Terminal to let it type and run commands in a web terminal there, such as Cloud Shell: nobody checks each line, so Stop, Pause and Take over in the pane are how you stop it, and Revoke here ends it at once. Tick "ask me for each line" instead to be shown every line in the pane, with Run it and Don't run, before it goes in."
+    <div data-stand="Notice" data-tone="warning">
+      <b>
+        "One limit of the Terminal power"
+      "A line already on its way can't be stopped."
+    <div class="settings-config-error" role="alert">
+      "Couldn't load the agents on sites: srv is down"
+-- loaded
+<div>
+  <div class="setting-row agent-site-grants" id="setting-browser.agent_sites">
+    <div class="setting-devices-description">
+      "What an agent may do on a site without asking each time, until you revoke it. Every row lets the agent make committing clicks there without asking (a payment still asks). Add Terminal to let it type and run commands in a web terminal there, such as Cloud Shell: nobody checks each line, so Stop, Pause and Take over in the pane are how you stop it, and Revoke here ends it at once. Tick "ask me for each line" instead to be shown every line in the pane, with Run it and Don't run, before it goes in."
+    <div data-stand="Notice" data-tone="warning">
+      <b>
+        "One limit of the Terminal power"
+      "A line already on its way can't be stopped."
+    <ul class="agent-site-grants-list" aria-label="Agents on sites">
+      <li class="agent-site-grant">
+        <div class="agent-site-grant-who">
+          <span class="agent-site-grant-agent">
+            "Naki-2"
+          <span class="agent-site-grant-site">
+            "shell.cloud.google.com (and ssh.cloud.google.com)"
+          <span class="agent-site-grant-when">
+            "granted"
+            "3 h ago"
+        <div class="agent-site-grant-powers" role="group" aria-label="What Naki-2 may do on shell.cloud.google.com (and ssh.cloud.google.com)">
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Terminal: type and run commands for Naki-2 on shell.cloud.google.com (and ssh.cloud.google.com)" checked=true>
+            <span>
+              "Terminal: type and run commands"
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Terminal: ask me for each line for Naki-2 on shell.cloud.google.com (and ssh.cloud.google.com)" checked=false>
+            <span>
+              "Terminal: ask me for each line"
+          <span class="agent-site-grant-power agent-site-grant-power-fixed">
+            "Committing clicks"
+        <span data-stand="Button" data-disabled="false" data-aria-label="Revoke Naki-2 on shell.cloud.google.com (and ssh.cloud.google.com)">
+          "Revoke"
+    <div class="agent-site-grants-add">
+      <div data-stand="Select" data-aria-label="Agent to give a standing grant" data-value="">
+        <span data-option="">
+          "Choose an agent…"
+        <span data-option="agent1">
+          "Agent1"
+        <span data-option="naki-2">
+          "Naki-2"
+        <span data-option="nameless">
+          "nameless"
+      <input data-stand="TextInput" data-detached="true" aria-label="Site" placeholder="shell.example.com" data-value="">
+      <label class="agent-site-grant-power">
+        <input type="checkbox" checked=false>
+        <span>
+          "Terminal: type and run commands"
+      <label class="agent-site-grant-power">
+        <input type="checkbox" disabled="" checked=false>
+        <span>
+          "and show me each line first"
+      <span data-stand="Button" data-disabled="true">
+        "Allow"
+    <div class="agent-site-grants-presets" role="group" aria-label="Consoles">
+      <span class="agent-site-grants-presets-label">
+        "Consoles, with the terminal:"
+      <span data-stand="Button" data-disabled="true" data-title="https://shell.cloud.google.com. Not yet checked.">
+        "Google Cloud Shell"
+      <span class="setting-devices-empty">
+        "Choose an agent first."
+store: events=["BrowserGrantsChanged","AgentsChanged"] initial=null
+BrowserGrantsListCommand null
+ListAgentDefinitionsCommand {"is_seeded":0}
+load -> {"grants":{"rows":[{"id":"r1","agent":"naki-2","origins":["https://shell.cloud.google.com","https://ssh.cloud.google.com"],"powers":["terminal"],"granted_at_ms":1799989200000}],"presets":[{"id":"google-cloud-shell","label":"Google Cloud Shell","sites":["https://shell.cloud.google.com"],"note":"Not yet checked."}],"powers":["terminal","terminal_ask"]},"agents":[{"id":"id-naki-2","slug":"naki-2","name":"Naki-2","updated_at":10},{"id":"id-agent1","slug":"agent1","name":"Agent1","last_active_at":900},{"id":"id-nameless","slug":"nameless","name":"","updated_at":5}]}
