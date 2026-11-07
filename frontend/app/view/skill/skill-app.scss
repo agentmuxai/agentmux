@@ -96,3 +96,11 @@
         @include mixins.focus-ring;
     }
 }
+
+.skill-app-export {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-1);
+    margin-top: var(--space-1);
+}

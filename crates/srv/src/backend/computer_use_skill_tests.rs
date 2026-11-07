@@ -8,7 +8,7 @@ const SKILL_MD: &str = "---\nname: acme-word\ndescription: Use when driving Word
 const TEST_JSON: &str = "{\"skill\":\"acme.word\",\"task\":\"t\",\"steps\":[],\"verify\":[\"a\"]}\n";
 const PY: &str = "print('hi')\n";
 
-fn manifest(version: &str, extra: &str) -> String {
+pub(crate) fn manifest(version: &str, extra: &str) -> String {
     format!(
         r#"{{"schema":"computer-use-skill/v1","publisher":"acme","id":"word","name":"Word","version":"{version}",
 "changelog":[{{"version":"{version}","date":"2026-11-05","by":"x","change":"first"}}],
@@ -29,11 +29,11 @@ fn folder(files: &[(&str, &str)]) -> (tempfile::TempDir, std::path::PathBuf) {
     (tmp, dir)
 }
 
-fn base_files(m: &str) -> Vec<(&'static str, String)> {
+pub(crate) fn base_files(m: &str) -> Vec<(&'static str, String)> {
     vec![("SKILL.md", SKILL_MD.to_string()), (MANIFEST, m.to_string()), ("test.json", TEST_JSON.to_string())]
 }
 
-fn read(files: &[(&str, String)]) -> Result<Bundle, String> {
+pub(crate) fn read(files: &[(&str, String)]) -> Result<Bundle, String> {
     let refs: Vec<(&str, &str)> = files.iter().map(|(p, t)| (*p, t.as_str())).collect();
     let (_tmp, dir) = folder(&refs);
     read_folder(&dir)
@@ -291,7 +291,7 @@ fn a_crop_without_tags_a_wrong_hash_or_outside_references_is_refused() {
 
 // ── install, import, launch files and the Desktop pointer ───────────────────────────────────
 
-fn catalog() -> Store {
+pub(crate) fn catalog() -> Store {
     let s = Store::open_in_memory().unwrap();
     s.apply_identity_schema_for_tests().unwrap();
     s
@@ -464,7 +464,7 @@ fn a_name_the_folder_uses_is_reserved_in_any_letters_and_never_written_beside_sk
     assert_eq!(paths, vec![".claude/skills/acme-word/test.json"]);
 }
 
-fn signed_with_script(seed: u8, version: &str) -> Bundle {
+pub(crate) fn signed_with_script(seed: u8, version: &str) -> Bundle {
     use crate::backend::widget::signature::{test_keys, COMPUTER_USE_SKILL};
     let listed = manifest(version, &format!(r#","scripts":[{{"path":"scripts/run.py","sha256":"{}","purpose":"test","needs":["python"]}}]"#, sha256_hex(PY.as_bytes())));
     let mut files = base_files(&listed);
@@ -545,7 +545,7 @@ fn a_script_of_a_skill_signed_by_another_key_than_the_pin_cannot_be_approved() {
 }
 
 /// What the importer does: check the signature, then install with the key it returned.
-fn install_checked(c: &Store, skill_id: &str, b: &Bundle, now_ms: i64) -> Result<(), crate::backend::storage::error::StoreError> {
+pub(crate) fn install_checked(c: &Store, skill_id: &str, b: &Bundle, now_ms: i64) -> Result<(), crate::backend::storage::error::StoreError> {
     let signer = check_signature(c, b).expect("the bundle passes the signature check");
     install(c, skill_id, b, signer.as_deref(), now_ms)
 }

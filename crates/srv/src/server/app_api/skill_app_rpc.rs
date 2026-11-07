@@ -9,11 +9,14 @@
 
 use super::*;
 use crate::backend::storage::skill_app::{ScriptApproval, ScriptOutcome};
-use crate::backend::rpc_types::{CommandSkillCatalogAppFileData, CommandSkillCatalogAppScriptData, SkillAppFile, SkillAppScriptResult};
+use crate::backend::rpc_types::{
+    CommandSkillCatalogAppFileData, CommandSkillCatalogAppScriptData, CommandSkillCatalogExportData, SkillAppFile, SkillAppScriptResult, SkillExportResult,
+};
 
 pub(super) fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_app_file(engine, state);
     register_app_script(engine, state);
+    register_export(engine, state);
 }
 
 fn global_app_skill(store: &crate::backend::storage::store::Store, id: &str, what: &str) -> Result<(), String> {
@@ -65,6 +68,36 @@ fn register_app_script(engine: &Arc<WshRpcEngine>, state: &AppState) {
             tracing::info!(skill = %req.skill_id, path = %req.path, approved = req.approved, "skill: a script was {} in Memory", if req.approved { "approved" } else { "revoked" });
             broker.publish_event::<crate::backend::mps_events::SkillsChanged>(&(), vec![], 0);
             Ok(SkillAppScriptResult { approved: req.approved })
+        }
+    });
+}
+
+/// A name in `dir` that does not exist yet: `name`, else `name (2)`, `name (3)` ... before the extension.
+fn unused_name(dir: &std::path::Path, filename: &str) -> std::path::PathBuf {
+    let first = dir.join(filename);
+    if !first.exists() {
+        return first;
+    }
+    let (stem, ext) = filename.rsplit_once('.').unwrap_or((filename, ""));
+    (2..)
+        .map(|n| dir.join(format!("{stem} ({n}).{ext}")))
+        .find(|p| !p.exists())
+        .expect("an unused name")
+}
+
+fn register_export(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let identity_store = state.identity_store.clone();
+    engine.register_typed(COMMAND_SKILL_CATALOG_EXPORT, move |req: CommandSkillCatalogExportData, _ctx| {
+        let identity_store = identity_store.clone();
+        async move {
+            const E: &str = "skill.catalog.export";
+            global_app_skill(&identity_store, &req.skill_id, E)?;
+            let exported = crate::backend::skill_file::export(&identity_store, &req.skill_id).map_err(|e| format!("{E}: {e}"))?;
+            let dir = dirs::download_dir().or_else(dirs::home_dir).ok_or_else(|| format!("{E}: this computer has no Downloads folder"))?;
+            let path = unused_name(&dir, &exported.filename);
+            std::fs::write(&path, &exported.bytes).map_err(|e| format!("{E}: {}: {e}", path.display()))?;
+            tracing::info!(skill = %req.skill_id, path = %path.display(), signed = exported.signed, "skill: exported as a .skill file");
+            Ok(SkillExportResult { path: path.to_string_lossy().to_string(), signed: exported.signed })
         }
     });
 }

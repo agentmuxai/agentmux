@@ -18,6 +18,7 @@ import {
     referenceDrift,
     type AppFilter,
 } from "./skill-app-model";
+import { ExportSkill } from "./skill-app-export";
 import { ScriptReview } from "./skill-app-scripts";
 import "./skill-app.scss";
 
@@ -131,6 +132,7 @@ export function SkillAppDetail(p: { skillId: string; app: SkillApp }): JSX.Eleme
                     </For>
                 </ul>
             </Show>
+            <ExportSkill skillId={p.skillId} />
         </section>
     );
 }

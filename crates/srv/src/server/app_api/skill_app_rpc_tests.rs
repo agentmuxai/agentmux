@@ -1,6 +1,7 @@
 //! `skill.catalog.app_file` and `skill.catalog.app_script`: read a script, approve it, revoke it.
 
 use super::super::*;
+use super::unused_name;
 use crate::backend::rpc_types::*;
 use serde_json::{json, Value};
 
@@ -75,4 +76,35 @@ async fn a_script_is_read_then_approved_and_revoked_and_nothing_else_can_be() {
     let plain = call(&state, COMMAND_SKILL_CATALOG_UPSERT, json!({"name": "plain-app-rpc-t", "skill_type": "agent-skill"})).await.unwrap();
     let e = call(&state, COMMAND_SKILL_CATALOG_APP_SCRIPT, json!({"skill_id": plain["id"], "path": "x", "approved": true, "sha256": ""})).await.unwrap_err();
     assert!(e.contains("not a computer-use skill"), "{e}");
+}
+
+#[tokio::test]
+async fn a_skill_file_is_previewed_like_a_folder_with_its_scripts_and_signature() {
+    let state = crate::server::tests::test_state();
+    let id = import_with_script(&state).await;
+    let exported = crate::backend::skill_file::export(&state.identity_store, &id).unwrap();
+    assert_eq!(exported.filename, "acmeappr-wordt-1.0.0.skill");
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join(&exported.filename);
+    std::fs::write(&file, &exported.bytes).unwrap();
+
+    let source = json!({"kind": "file", "location": file.to_string_lossy(), "git_ref": "", "item_key": ""});
+    let p = call(&state, COMMAND_SKILL_CATALOG_IMPORT_PREVIEW, json!({"source": source})).await.unwrap();
+    let item = &p["items"][0];
+    assert_eq!(item["name"], "acmeappr-wordt");
+    assert_eq!(item["status"], "same", "the exported skill is what the catalog already holds: {p}");
+    assert_eq!(item["app"]["scripts"][0]["purpose"], "open a file");
+
+    let missing = json!({"kind": "file", "location": dir.path().join("nope.skill").to_string_lossy(), "git_ref": "", "item_key": ""});
+    assert!(call(&state, COMMAND_SKILL_CATALOG_IMPORT_PREVIEW, json!({"source": missing})).await.is_err());
+}
+
+#[test]
+fn an_export_never_overwrites_a_file_that_is_there() {
+    let dir = tempfile::tempdir().unwrap();
+    assert_eq!(unused_name(dir.path(), "a-b-1.0.0.skill"), dir.path().join("a-b-1.0.0.skill"));
+    std::fs::write(dir.path().join("a-b-1.0.0.skill"), b"x").unwrap();
+    assert_eq!(unused_name(dir.path(), "a-b-1.0.0.skill"), dir.path().join("a-b-1.0.0 (2).skill"));
+    std::fs::write(dir.path().join("a-b-1.0.0 (2).skill"), b"x").unwrap();
+    assert_eq!(unused_name(dir.path(), "a-b-1.0.0.skill"), dir.path().join("a-b-1.0.0 (3).skill"));
 }
