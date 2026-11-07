@@ -246,6 +246,8 @@ import type { CommandSetContainerLimitsData } from "@/types/rpc/CommandSetContai
 import type { CommandShellExecData } from "@/types/rpc/CommandShellExecData";
 import type { CommandShellStatusData } from "@/types/rpc/CommandShellStatusData";
 import type { CommandShellStopData } from "@/types/rpc/CommandShellStopData";
+import type { CommandSkillCatalogAppFileData } from "@/types/rpc/CommandSkillCatalogAppFileData";
+import type { CommandSkillCatalogAppScriptData } from "@/types/rpc/CommandSkillCatalogAppScriptData";
 import type { CommandSkillCatalogBindAllData } from "@/types/rpc/CommandSkillCatalogBindAllData";
 import type { CommandSkillCatalogImportCommitData } from "@/types/rpc/CommandSkillCatalogImportCommitData";
 import type { CommandSkillCatalogImportPreviewData } from "@/types/rpc/CommandSkillCatalogImportPreviewData";
@@ -503,6 +505,8 @@ import type { Skill } from "@/types/rpc/Skill";
 import type { SkillAgentBindingData } from "@/types/rpc/SkillAgentBindingData";
 import type { SkillAgentItemData } from "@/types/rpc/SkillAgentItemData";
 import type { SkillAgentScopeData } from "@/types/rpc/SkillAgentScopeData";
+import type { SkillAppFile } from "@/types/rpc/SkillAppFile";
+import type { SkillAppScriptResult } from "@/types/rpc/SkillAppScriptResult";
 import type { SkillBindAllResult } from "@/types/rpc/SkillBindAllResult";
 import type { SkillBindResult } from "@/types/rpc/SkillBindResult";
 import type { SkillBundleBindingData } from "@/types/rpc/SkillBundleBindingData";
@@ -2463,6 +2467,22 @@ export const GeneratedApi = {
   // command "skill.bind"
   SkillBindCommand(client: RpcClient, data: SkillAgentBindingData, opts?: RpcOpts): Promise<SkillBindResult> {
     return client.rpcCall("skill.bind", data, opts);
+  },
+  // command "skill.catalog.app_file"
+  SkillCatalogAppFileCommand(
+    client: RpcClient,
+    data: CommandSkillCatalogAppFileData,
+    opts?: RpcOpts
+  ): Promise<SkillAppFile> {
+    return client.rpcCall("skill.catalog.app_file", data, opts);
+  },
+  // command "skill.catalog.app_script"
+  SkillCatalogAppScriptCommand(
+    client: RpcClient,
+    data: CommandSkillCatalogAppScriptData,
+    opts?: RpcOpts
+  ): Promise<SkillAppScriptResult> {
+    return client.rpcCall("skill.catalog.app_script", data, opts);
   },
   // command "skill.catalog.bind"
   SkillCatalogBindCommand(client: RpcClient, data: SkillAgentBindingData, opts?: RpcOpts): Promise<SkillBindResult> {

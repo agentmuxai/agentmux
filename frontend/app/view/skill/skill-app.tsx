@@ -6,18 +6,19 @@
  * the detail of a computer-use skill: where it came from, its route, files, tests and reference crops.
  */
 
-import { For, Show, type JSX } from "solid-js";
+import { createSignal, For, Show, type JSX } from "solid-js";
 import { Pill, SegmentedControl } from "@/app/element/ui";
 import type { SkillApp } from "@/types/rpc/SkillApp";
 import {
     appPlatform,
     appStatus,
+    describeSignature,
     fileSize,
     pillTone,
     referenceDrift,
-    scriptState,
     type AppFilter,
 } from "./skill-app-model";
+import { ScriptReview } from "./skill-app-scripts";
 import "./skill-app.scss";
 
 export function AppFilterRow(p: { value: AppFilter; onChange: (v: AppFilter) => void }): JSX.Element {
@@ -38,10 +39,19 @@ export function AppFilterRow(p: { value: AppFilter; onChange: (v: AppFilter) => 
 const dash = (s: string) => (s ? s : "—");
 
 /** The detail of a computer-use skill, below the usual skill facts. */
-export function SkillAppDetail(p: { app: SkillApp }): JSX.Element {
+export function SkillAppDetail(p: { skillId: string; app: SkillApp }): JSX.Element {
     const platform = appPlatform();
     const status = () => appStatus(p.app, platform);
     const drift = () => referenceDrift(p.app, platform);
+    const signature = () => describeSignature(p.app.signature);
+    // Which scripts' Review panels are open, kept here because an approval rebuilds the rows below.
+    const [reviewing, setReviewing] = createSignal<ReadonlySet<string>>(new Set());
+    const toggle = (path: string) =>
+        setReviewing((cur) => {
+            const next = new Set(cur);
+            if (!next.delete(path)) next.add(path);
+            return next;
+        });
     return (
         <section class="skill-app" aria-label="App skill">
             <h4 class="skill-app-title">
@@ -51,8 +61,11 @@ export function SkillAppDetail(p: { app: SkillApp }): JSX.Element {
                 {p.app.vendor} · version {p.app.version}
             </h4>
             <p class="skill-app-line">
-                Published by {p.app.publisher}
-                {p.app.content_hash ? "" : " (no signature came with it)"}. Works on {p.app.platforms.join(", ") || "no platform listed"}.
+                Published by {p.app.publisher}. Works on {p.app.platforms.join(", ") || "no platform listed"}.
+            </p>
+            <p class={`skill-app-line${signature().tone === "warn" ? " skill-app-warn" : ""}`}>
+                <i class={`fa-solid ${signature().tone === "warn" ? "fa-triangle-exclamation" : "fa-signature"}`} aria-hidden="true" />{" "}
+                {signature().text}
             </p>
             <p class="skill-app-line">
                 <Pill tone={pillTone(status().tone)}>{status().label}</Pill> on this machine
@@ -79,12 +92,14 @@ export function SkillAppDetail(p: { app: SkillApp }): JSX.Element {
                     {(f) => (
                         <li>
                             {f.path} <span class="skill-app-muted">{fileSize(f.bytes)}</span>
-                            <Show when={scriptState(f)}>
-                                {(s) => (
-                                    <Pill tone="warn" title={f.approved ? undefined : "Never given to an agent until you approve it"}>
-                                        {s()}
-                                    </Pill>
-                                )}
+                            <Show when={f.script}>
+                                <ScriptReview
+                                    skillId={p.skillId}
+                                    file={f}
+                                    info={p.app.scripts.find((x) => x.path === f.path)}
+                                    open={reviewing().has(f.path)}
+                                    onToggle={() => toggle(f.path)}
+                                />
                             </Show>
                         </li>
                     )}

@@ -1,0 +1,36 @@
+model.setSelectedPath /home/a/src/main.ts
+onFileDblClick /home/a/src/main.ts
+onFocusEditor
+Enter: prevented=true selected=/home/a/src/main.ts focus elsewhere
+onFileDblClick /home/a/src/main.ts
+ : prevented=true selected=/home/a/src/main.ts focus elsewhere
+model.setSelectedPath /home/a/docs
+model.toggleExpand /home/a/docs
+ListEditorDirCommand /home/a/docs
+Enter: prevented=true selected=/home/a/docs focus elsewhere
+model.toggleExpand /home/a/docs
+ : prevented=true selected=/home/a/docs focus elsewhere
+model.setSelectedPath /home/a/src/util.ts
+onStartRename /home/a/src/util.ts
+F2: prevented=true selected=/home/a/src/util.ts focus elsewhere
+model.setSelectedPath /home/a
+F2: prevented=false selected=/home/a focus elsewhere
+onFocusEditor
+Escape: prevented=true selected=/home/a focus elsewhere
+model.setSelectedPath /home/a/src/util.ts
+model.setSelectedPath /home/a/src/util.ts
+u: prevented=true selected=/home/a/src/util.ts focus on /home/a/src/util.ts
+model.setSelectedPath /home/a/src/util.ts
+t: prevented=true selected=/home/a/src/util.ts focus on /home/a/src/util.ts
+a +ctrl: prevented=false selected=/home/a/src/util.ts focus on /home/a/src/util.ts
+x: prevented=false selected=/home/a/src/util.ts focus on /home/a/src/util.ts
+Tab: prevented=false selected=/home/a/src/util.ts focus on /home/a/src/util.ts
+Shift: prevented=false selected=/home/a/src/util.ts focus on /home/a/src/util.ts
+already prevented: selected=/home/a/src/util.ts
+model.setSelectedPath /home/a/src/main.ts
+onFileDblClick /home/a/src/main.ts
+Enter: prevented=true selected=/home/a/src/main.ts focus elsewhere
+F2: prevented=false selected=/home/a/src/main.ts focus elsewhere
+Escape: prevented=false selected=/home/a/src/main.ts focus elsewhere
+onFileDblClick /home/a/src/main.ts
+ : prevented=true selected=/home/a/src/main.ts focus elsewhere
