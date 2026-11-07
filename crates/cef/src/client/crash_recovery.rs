@@ -452,6 +452,32 @@ impl AgentMuxHandler {
     /// (sync no — CEF aborts the request).
     ///
     /// Phase α of SPEC_BROWSER_PANE_HTTP_BASIC_AUTH_2026_05_18.md.
+    /// [DIAG] Top-of-`on_auth_credentials` entry log — fires unconditionally before every early-return
+    /// so we can confirm whether CEF is invoking the callback at all for a given URL. The reagent-merged
+    /// browser-pane auth flow (#906) appeared to fail silently for some sites in dev mode (e.g.
+    /// https://protected.example.com returns ERR_INVALID_AUTH_CREDENTIALS without `[browser-pane-auth]`
+    /// ever logging). This entry log narrows the diagnosis:
+    ///   - Visible → CEF is calling the callback; early return below OR downstream path is the problem.
+    ///   - Not visible → CEF is suppressing the call entirely (caching, security policy, missing vtable
+    ///     wire-up).
+    fn log_auth_entry(
+        origin_url: Option<&CefString>,
+        host: Option<&CefString>,
+        port: ::std::os::raw::c_int,
+        realm: Option<&CefString>,
+        is_proxy: bool,
+        has_browser: bool,
+        has_callback: bool,
+    ) {
+        let origin_dbg = origin_url.map(CefString::to_string).unwrap_or_default();
+        let host_dbg = host.map(CefString::to_string).unwrap_or_default();
+        let realm_dbg = realm.map(CefString::to_string).unwrap_or_default();
+        tracing::info!(
+            "[browser-pane-auth][ENTRY] origin={:?} host={:?}:{} realm={:?} is_proxy={} has_browser={} has_callback={}",
+            origin_dbg, host_dbg, port, realm_dbg, is_proxy, has_browser, has_callback,
+        );
+    }
+
     pub(crate) fn on_auth_credentials(
         &mut self,
         browser: Option<&mut Browser>,
@@ -463,34 +489,7 @@ impl AgentMuxHandler {
         _scheme: Option<&CefString>,
         callback: Option<&mut AuthCallback>,
     ) -> ::std::os::raw::c_int {
-        // [DIAG] Top-of-function entry log — fires unconditionally before
-        // every early-return so we can confirm whether CEF is invoking
-        // the callback at all for a given URL. The reagent-merged
-        // browser-pane auth flow (#906) appeared to fail silently for
-        // some sites in dev mode (e.g. https://protected.example.com returns
-        // ERR_INVALID_AUTH_CREDENTIALS without `[browser-pane-auth]`
-        // ever logging). This entry log narrows the diagnosis:
-        //   - Visible → CEF is calling the callback; early return below
-        //     OR downstream path is the problem.
-        //   - Not visible → CEF is suppressing the call entirely
-        //     (caching, security policy, missing vtable wire-up).
-        // Logs `origin/host/port/realm/is_proxy/has_browser/has_callback`
-        // so all the discriminators are captured even on the silent-
-        // decline branches that follow.
-        let origin_dbg = origin_url.map(CefString::to_string).unwrap_or_default();
-        let host_dbg = host.map(CefString::to_string).unwrap_or_default();
-        let realm_dbg = realm.map(CefString::to_string).unwrap_or_default();
-        tracing::info!(
-            "[browser-pane-auth][ENTRY] origin={:?} host={:?}:{} realm={:?} \
-             is_proxy={} has_browser={} has_callback={}",
-            origin_dbg,
-            host_dbg,
-            port,
-            realm_dbg,
-            is_proxy != 0,
-            browser.is_some(),
-            callback.is_some(),
-        );
+        Self::log_auth_entry(origin_url, host, port, realm, is_proxy != 0, browser.is_some(), callback.is_some());
 
         // Resolve the pane block_id from the browser ref. If this isn't
         // a browser-pane browser (i.e. it's the host frontend's browser),
@@ -541,6 +540,7 @@ impl AgentMuxHandler {
             request_id.clone(),
             block_id.clone(),
             cb.clone(),
+            super::agent_notice::on_auth_expired(&self.state, &block_id, &host_str),
         );
 
         // Hand off to the credential broker: identity-resolve → stored-
