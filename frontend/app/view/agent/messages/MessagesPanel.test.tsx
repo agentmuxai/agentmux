@@ -201,6 +201,17 @@ describe("MessagesPanel", () => {
         field.remove();
     });
 
+    it("leaves the keyboard where the person put it when the stored state changes while it is open (seen moves)", async () => {
+        const { controls, view } = mount([jekt()]);
+        await Promise.resolve();
+        const head = view.container.querySelector<HTMLElement>(".messages-row__head")!;
+        head.focus();
+        expect(document.activeElement).toBe(head);
+        controls.patch({ seen: 99_999 });
+        await Promise.resolve();
+        expect(document.activeElement).toBe(head);
+    });
+
     it("does not offer Show in conversation for a message the conversation leaves out", () => {
         const held = jekt({ message: "held in the panel" });
         const c = controlsFor();

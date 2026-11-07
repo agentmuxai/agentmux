@@ -94,8 +94,10 @@ function MessagesDock(props: MessagesPanelProps): JSX.Element {
     };
     // Opened, the panel takes the keyboard: Esc then shuts it instead of reaching the pane. Not from under a text
     // field: a search that finds its match in a held message opens the panel while the person is still typing.
+    // Keyed on the boolean: `state()` is a new object whenever the stored meta changes (`seen` moves while it is open).
+    const isOpen = createMemo(() => controls.state().open);
     createEffect(() => {
-        if (!controls.state().open) return;
+        if (!isOpen()) return;
         const typing = document.activeElement;
         if (typing instanceof HTMLElement && !dock?.contains(typing) && typing.matches("input, textarea, [contenteditable]"))
             return;
