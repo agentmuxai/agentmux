@@ -22,7 +22,7 @@ import { useJektsAwaitingYou } from "./hooks/useJektsAwaitingYou";
 import { usePtyWidth } from "./hooks/usePtyWidth";
 import { useScrollToNode } from "./hooks/useScrollToNode";
 import { createSearchReveal } from "./search-reveal";
-import { topRowId } from "./search/transcript-index";
+import { rawIdAtOrAfter, topRowId } from "./search/transcript-index";
 
 export function usePaneInput(p: { found: PaneFoundation; model: AgentViewModel; shown: ReturnType<typeof useShownDocument>; late: PaneLate }) {
     const { found, model, late } = p;
@@ -51,7 +51,9 @@ export function usePaneInput(p: { found: PaneFoundation; model: AgentViewModel; 
         onNoMatch: reveal.release,
         topNodeId: () => {
             const at = layoutSnapshot(model.blockId);
-            return at ? topRowId(found.layoutView()?.rows ?? [], at.scrollTop) : null;
+            const top = at ? topRowId(found.layoutView()?.rows ?? [], at.scrollTop) : null;
+            // The rows on screen include hidden-run lines and dividers that the document holds under no id of their own.
+            return rawIdAtOrAfter(p.shown.shownDocument(), top, new Set(paneModel.document().map((n) => n.id)));
         },
     });
 

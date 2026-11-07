@@ -124,6 +124,24 @@ export function firstMatchFrom(matches: readonly string[], order: readonly strin
     return at < 0 ? 0 : at;
 }
 
+/**
+ * The document row to start from for the shown row `topId`: the screen shows hidden-run lines and day dividers that
+ * the document does not hold under their own ids, so a run stands for its first hidden row and a divider for the
+ * next row that is in the document. Null when `topId` is not shown or nothing at or after it is in the document.
+ */
+export function rawIdAtOrAfter(shown: readonly DocumentNode[], topId: string | null, raw: ReadonlySet<string>): string | null {
+    const start = topId === null ? -1 : shown.findIndex((n) => n.id === topId);
+    if (start < 0) return null;
+    for (let i = start; i < shown.length; i++) {
+        const node = shown[i];
+        if (node.type === "hidden_run") {
+            const held = node.hiddenIds.find((id) => raw.has(id));
+            if (held !== undefined) return held;
+        } else if (raw.has(node.id)) return node.id;
+    }
+    return null;
+}
+
 /** The id of the row at the top of the screen: the first whose bottom edge is below `scrollTop`. */
 export function topRowId(rows: readonly { nodeId: string; end: number }[], scrollTop: number): string | null {
     for (const row of rows) if (row.end > scrollTop) return row.nodeId;

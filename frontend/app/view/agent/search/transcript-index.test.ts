@@ -7,6 +7,7 @@ import {
     createTranscriptIndex,
     firstMatchFrom,
     FOLD_CAP,
+    rawIdAtOrAfter,
     searchableText,
     topRowId,
     type PassClock,
@@ -164,6 +165,39 @@ describe("firstMatchFrom", () => {
 
     it("answers -1 with no matches", () => {
         expect(firstMatchFrom([], order, "a")).toBe(-1);
+    });
+});
+
+describe("rawIdAtOrAfter", () => {
+    const run = (id: string, hiddenIds: string[]) =>
+        ({ type: "hidden_run", id, counts: [], failed: 0, open: false, hiddenIds }) as DocumentNode;
+    const divider = { type: "day_divider", id: "day:1" } as unknown as DocumentNode;
+    const raw = new Set(["a", "t1", "t2", "b"]);
+    const shown = [md("a", ""), divider, run("hidden-run:t1", ["t1", "t2"]), md("b", "")];
+
+    it("is the row itself when the document holds it", () => {
+        expect(rawIdAtOrAfter(shown, "a", raw)).toBe("a");
+        expect(rawIdAtOrAfter(shown, "b", raw)).toBe("b");
+    });
+
+    it("stands a hidden-run line for its first hidden row", () => {
+        expect(rawIdAtOrAfter(shown, "hidden-run:t1", raw)).toBe("t1");
+    });
+
+    it("stands a divider for the next row the document holds", () => {
+        expect(rawIdAtOrAfter(shown, "day:1", raw)).toBe("t1");
+    });
+
+    it("is null for a row that is not shown, or when nothing after it is in the document", () => {
+        expect(rawIdAtOrAfter(shown, "gone", raw)).toBeNull();
+        expect(rawIdAtOrAfter(shown, null, raw)).toBeNull();
+        expect(rawIdAtOrAfter([divider], "day:1", raw)).toBeNull();
+    });
+
+    it("lets a start from a hidden-run line find the first match after it, not the first in the document", () => {
+        const order = ["a", "t1", "t2", "b"];
+        const top = rawIdAtOrAfter(shown, "hidden-run:t1", raw);
+        expect(firstMatchFrom(["a", "b"], order, top)).toBe(1);
     });
 });
 
