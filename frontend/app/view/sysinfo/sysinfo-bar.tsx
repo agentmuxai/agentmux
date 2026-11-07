@@ -16,11 +16,12 @@
  */
 
 import type { JSX } from "solid-js";
-import { onCleanup, onMount, Show } from "solid-js";
+import { createEffect, on, onCleanup, onMount, Show, useContext } from "solid-js";
 
 import { IconButton, SegmentedControl } from "@/app/element/ui";
 
 import { windowChoices } from "./sysinfo-overview-data";
+import { SysinfoZoomContext } from "./sysinfo-zoom";
 
 export type SysinfoBarProps = {
     /** The views this mode offers, the one shown, and a way to change it. */
@@ -45,9 +46,13 @@ export type SysinfoBarProps = {
 
 export function SysinfoBar(props: SysinfoBarProps): JSX.Element {
     let actions!: HTMLDivElement;
+    // On-screen width (the row is zoomed), not the element's own CSS width.
+    const report = () => props.onActionsWidth?.(Math.ceil(actions.getBoundingClientRect().width));
+    // A change of the pane's zoom doesn't resize the element (the observer below reports its CSS size), so
+    // it is measured again by hand: otherwise the titles keep the width the buttons had at the old zoom.
+    const zoom = useContext(SysinfoZoomContext);
+    createEffect(on(zoom, () => actions && report(), { defer: true }));
     onMount(() => {
-        // On-screen width (the row is zoomed), not the element's own CSS width.
-        const report = () => props.onActionsWidth?.(Math.ceil(actions.getBoundingClientRect().width));
         report();
         if (typeof ResizeObserver === "undefined") return;
         const observer = new ResizeObserver(report);
