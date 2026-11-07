@@ -454,13 +454,6 @@ fn pane_shortcut_before_app_keys(primary: bool, alt: bool, shift: bool, vk: i32)
     browser_pane_shortcut_for(primary, alt, shift, vk).filter(|s| *s == BrowserPaneShortcut::NewIncognito)
 }
 
-/// Resolve the focused pane's `block_id` and run `shortcut` against it —
-/// either by emitting an event the frontend reacts to (`FocusAddress`, which
-/// needs to move DOM focus in the host webview) or by calling straight into
-/// `BrowserPaneManager` (`Reload`/`GoBack`/`GoForward`, the same methods the
-/// nav-bar buttons already use via IPC — see `ipc.rs`'s `browser_pane_go_back`
-/// etc.), so this stays consistent with the existing back/forward/reload path
-/// instead of poking CEF's `Browser` directly.
 /// A key pressed in a browser pane's page: the person is using it (srv's retake rule reads it,
 /// `browser_api::last_input`).
 fn note_person_key(inner: &Arc<Mutex<AgentMuxHandler>>, browser: Option<&Browser>) {
@@ -476,6 +469,13 @@ fn note_person_key(inner: &Arc<Mutex<AgentMuxHandler>>, browser: Option<&Browser
     }
 }
 
+/// Resolve the focused pane's `block_id` and run `shortcut` against it —
+/// either by emitting an event the frontend reacts to (`FocusAddress`, which
+/// needs to move DOM focus in the host webview) or by calling straight into
+/// `BrowserPaneManager` (`Reload`/`GoBack`/`GoForward`, the same methods the
+/// nav-bar buttons already use via IPC — see `ipc.rs`'s `browser_pane_go_back`
+/// etc.), so this stays consistent with the existing back/forward/reload path
+/// instead of poking CEF's `Browser` directly.
 fn run_browser_pane_shortcut(
     inner: &Arc<Mutex<AgentMuxHandler>>,
     browser: Option<&mut Browser>,
