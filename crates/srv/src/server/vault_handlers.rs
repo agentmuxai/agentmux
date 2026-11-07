@@ -513,7 +513,7 @@ fn hold_use(body: &Value) -> Result<(Value, bool), String> {
 
 /// Who the request says is asking, and its pane: the agent whose signature
 /// verified, else a plain "not a verified agent".
-fn asking_agent(state: &AppState, auth: Option<&agentmux_common::api_types::UiAutomationAuth>) -> (String, Option<String>) {
+pub(super) fn asking_agent(state: &AppState, auth: Option<&agentmux_common::api_types::UiAutomationAuth>) -> (String, Option<String>) {
     const UNVERIFIED: &str = "Something on this computer (not a verified agent)";
     match auth.map(|a| (a, super::ui_handlers::verified_block_id(state, None, a))) {
         Some((a, Ok(pane))) => (a.agent_id.chars().take(64).collect(), Some(pane)),

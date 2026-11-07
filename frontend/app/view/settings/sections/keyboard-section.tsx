@@ -40,6 +40,7 @@ export function KeyboardSection(): JSX.Element {
             if (!request) return;
             clearKeyboardRowRequest();
             f.setQuery("");
+            f.setKey("");
             f.setCategory("all");
             f.setChangedOnly(false);
             if (!request.command) return;
@@ -91,6 +92,7 @@ export function KeyboardSection(): JSX.Element {
                         f={f}
                         categories={categoriesOf(view())}
                         changed={changedCount(view())}
+                        edit={edit}
                         onResetAll={() => set("keybindings", [])}
                         setSearchRef={(el) => (search = el)}
                     />
