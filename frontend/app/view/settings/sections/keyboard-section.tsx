@@ -40,6 +40,7 @@ export function KeyboardSection(): JSX.Element {
             if (!request) return;
             clearKeyboardRowRequest();
             f.setQuery("");
+            f.setKey("");
             f.setCategory("all");
             f.setChangedOnly(false);
             if (!request.command) return;
@@ -68,6 +69,8 @@ export function KeyboardSection(): JSX.Element {
             return;
         }
         if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+        // The recorder's own controls (the picker, its buttons) keep their arrow keys.
+        if (target.closest(".kb-recorder")) return;
         const lines = [...(e.currentTarget as HTMLElement).querySelectorAll<HTMLElement>("[data-kb-row]")];
         const at = lines.indexOf(target.closest<HTMLElement>("[data-kb-row]") as HTMLElement);
         if (at < 0 && !(target instanceof HTMLInputElement)) return;
@@ -89,6 +92,7 @@ export function KeyboardSection(): JSX.Element {
                         f={f}
                         categories={categoriesOf(view())}
                         changed={changedCount(view())}
+                        edit={edit}
                         onResetAll={() => set("keybindings", [])}
                         setSearchRef={(el) => (search = el)}
                     />

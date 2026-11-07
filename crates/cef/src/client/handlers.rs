@@ -1288,19 +1288,21 @@ wrap_permission_handler! {
             &self,
             browser: Option<&mut Browser>,
             _prompt_id: u64,
-            _requesting_origin: Option<&CefString>,
+            requesting_origin: Option<&CefString>,
             requested_permissions: u32,
             callback: Option<&mut PermissionPromptCallback>,
         ) -> ::std::os::raw::c_int {
-            if !super::downloads::is_multiple_downloads_prompt(requested_permissions) {
-                return 0;
-            }
             let (Some(cb), Some(block_id)) = (callback, browser.and_then(|b| self.state.block_id_for_browser(b))) else {
                 return 0;
             };
-            tracing::info!(target: "pane-download", %block_id, "allowing the page's further downloads: each still asks where to save");
-            cb.cont(PermissionRequestResult::ACCEPT);
-            1
+            if super::downloads::is_multiple_downloads_prompt(requested_permissions) {
+                tracing::info!(target: "pane-download", %block_id, "allowing the page's further downloads: each still asks where to save");
+                cb.cont(PermissionRequestResult::ACCEPT);
+                return 1;
+            }
+            // A location or notification prompt in a pane an agent drives goes through the countdown.
+            let origin = requesting_origin.map(|s| s.to_string()).unwrap_or_default();
+            ::std::os::raw::c_int::from(super::agent_permission::hold_prompt(&self.state, cb, &block_id, &origin, requested_permissions))
         }
     }
 }
