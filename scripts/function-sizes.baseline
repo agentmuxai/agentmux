@@ -197,7 +197,6 @@
 129 crates/srv/src/backend/storage/agents/definition.rs::Store::agent_def_find_or_insert
 239 crates/srv/src/backend/storage/agents/instance.rs::Store::instance_create
 136 crates/srv/src/backend/storage/agents/instance.rs::Store::instance_get_active_for_block
-399 crates/srv/src/backend/storage/agents_consolidate.rs::run_consolidate_migration
 208 crates/srv/src/backend/storage/bundles.rs::Store::bundle_reseed_system_if_owned_unobserved
 102 crates/srv/src/backend/storage/bundles.rs::Store::bundle_upsert_with_version_based_unobserved
 183 crates/srv/src/backend/storage/filestore/counter.rs::FileStore::append_in_tx
