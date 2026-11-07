@@ -741,11 +741,37 @@ describe("KanbanBoard: Backlog and Spec'd, grouped by the agent each task waits 
         expect(column("Backlog").querySelectorAll(".kanban-group")).toHaveLength(1);
     });
 
-    it("keeps a group mounted when the board refreshes", () => {
-        const { unmount } = mount({ tasks: [waiting(1, "Amy")], agents: [agent("Amy")] });
-        const before = column("Backlog").querySelector(".kanban-group");
-        unmount();
-        expect(before).toBeTruthy();
+    it("keeps a group mounted, and its drop target registered, while its tasks change", () => {
+        const amy = agent("Amy");
+        const [tasks, setTasks] = createSignal<KanbanTask[]>([waiting(1, "Amy")]);
+        render(() => (
+            <KanbanBoard
+                tasks={tasks()}
+                untracked={[]}
+                agents={[amy]}
+                holding={() => undefined}
+                reviewLimit={0}
+                reviewTotal={0}
+                model={{ act: vi.fn() } as unknown as KanbanModel}
+                now={NOW}
+                onOpen={vi.fn()}
+                onOpenAgent={vi.fn()}
+            />
+        ));
+        const groups = () => Array.from(column("Backlog").querySelectorAll(".kanban-group"));
+        const before = groups();
+        const registered = [...targets];
+        expect(before).toHaveLength(2);
+        setTasks([waiting(1, "Amy"), waiting(2, "Amy")]);
+        expect(within(column("Backlog")).getByTestId("card-2")).toBeInTheDocument();
+        expect(groups()).toEqual(before);
+        expect(groups().every((g, i) => g === before[i])).toBe(true);
+        expect(targets.length).toBe(registered.length);
+        expect(targets.every((t, i) => t === registered[i])).toBe(true);
+        setTasks([]);
+        expect(groups()).toHaveLength(1);
+        expect(groups()[0]).toBe(before[1]);
+        expect(before[0].isConnected).toBe(false);
     });
 });
 
