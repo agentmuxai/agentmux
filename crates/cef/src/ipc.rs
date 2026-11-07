@@ -856,6 +856,10 @@ async fn route_command(
             let auth_key = state.auth_key.lock().clone();
             let ipc_token = state.ipc_token.clone();
             tracing::info!("[ipc] app_update_action action={} now={}", body["action"], body["now"]);
+            if body["action"] == "restart" {
+                // The launcher's "Restart to upgrade?" dialog follows; let it come to the front.
+                crate::parent_process::allow_launcher_foreground();
+            }
             tokio::task::spawn_blocking(move || {
                 crate::client::backend_app_update(&web_endpoint, &auth_key, &ipc_token, &body)
             })
@@ -876,6 +880,9 @@ async fn route_command(
             let auth_key = state.auth_key.lock().clone();
             let ipc_token = state.ipc_token.clone();
             tracing::info!("[ipc] upgrade_request_decide id={} accept={}", body["id"], body["accept"]);
+            if body["accept"] == true {
+                crate::parent_process::allow_launcher_foreground();
+            }
             let relayed: Result<(), String> = tokio::task::spawn_blocking(move || {
                 crate::client::backend_upgrade_request(&web_endpoint, &auth_key, &ipc_token, &body)
             })
