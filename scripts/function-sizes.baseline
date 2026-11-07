@@ -473,7 +473,6 @@
 166 frontend/app/view/settings/sections/appearance-section.tsx::AppearanceSection
 120 frontend/app/view/settings/sections/browser-section.tsx::BrowserSection
 171 frontend/app/view/settings/sections/devices-section.tsx::DevicesSection
-185 frontend/app/view/settings/sections/notifications-section.tsx::NotificationsSection
 109 frontend/app/view/settings/sections/pinned-senders.tsx::PinnedSenders
 201 frontend/app/view/settings/sections/sounds-section.tsx::SoundsSection
 114 frontend/app/view/settings/sections/widget-bar-settings.tsx::WidgetBarSettings
