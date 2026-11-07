@@ -102,6 +102,9 @@ impl AgentMuxHandler {
         let x = p.xcoord();
         let y = p.ycoord();
         let link_url = CefString::from(&p.link_url()).to_string();
+        // The picture under the click, for "Save image as…": only a real image (a video or a plain
+        // element has a source of its own that is not a picture to keep).
+        let image_url = if p.media_type() == ContextMenuMediaType::IMAGE { CefString::from(&p.source_url()).to_string() } else { String::new() };
         let page_url = CefString::from(&p.page_url()).to_string();
         let selection_text = CefString::from(&p.selection_text()).to_string();
         let is_editable = p.is_editable() != 0;
@@ -119,6 +122,7 @@ impl AgentMuxHandler {
                 "x": x,
                 "y": y,
                 "link_url": link_url,
+                "image_url": image_url,
                 "page_url": page_url,
                 "selection_text": selection_text,
                 "is_editable": is_editable,

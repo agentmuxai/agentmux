@@ -87,6 +87,17 @@ impl BrowserPaneManager {
         }
     }
 
+    /// "Save link as…" / "Save image as…": CEF starts a download of `url` in this pane's browser, which
+    /// comes back through the pane's download handler like a click on a download link (the Save As
+    /// dialog, the strip). Only addresses `download_url_allowed` accepts.
+    pub fn start_download(&self, block_id: &str, url: &str, state: &Arc<AppState>) {
+        if !crate::client::downloads::download_url_allowed(url) {
+            return;
+        }
+        if let Some(b) = self.live_browser(state, block_id) {
+            if let Some(host) = b.host() { host.start_download(Some(&CefString::from(url))); }
+        }
+    }
     /// "Print" from the unified browser-pane context menu
     /// (SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15.md) — CEF's own
     /// print UI for the pane's current page, same as `CefBrowserHost::Print`
