@@ -1,0 +1,247 @@
+useTick 1000
+keyCommands.set dev:diagnostics
+toggle shortcut
+shortcutFor dev:diagnostics
+handler returned true
+-- five records
+<div>
+  <div style="position: fixed; bottom: 8px; left: 8px; background-color: rgba(20, 20, 20, 0.94); color: rgb(208, 208, 208); font-family: Menlo, Consolas, monospace; font-size: 11px; padding: 8px 10px; border-radius: 6px; width: 560px; max-height: 60vh; display: flex; flex-direction: column; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5); border: 1px solid rgb(68, 68, 68); z-index: 999998;">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+      <div style="font-weight:bold;color:#7af">
+        "🔬 Reducer Dispatch Ring"
+      <span style="color:#777">
+        "("
+        "5"
+        "total —"
+        "<dev:diagnostics>"
+        ")"
+    <div style="display:flex;gap:6px;margin-bottom:6px;align-items:center">
+      <select style="background-color:#222;color:#d0d0d0;border:1px solid #444;border-radius:3px;padding:2px 4px;font-family:inherit;font-size:inherit">
+        <option value="">
+          "all slices"
+        <option value="agent-pane-state">
+          "agent-pane-state"
+        <option value="browser-pane-state">
+          "browser-pane-state"
+        <option value="launcher-event">
+          "launcher-event"
+        <option value="layout">
+          "layout"
+      <input data-stand="TextInput" data-variant="plain" data-placeholder="filter by key…" data-value="" style="flex: 1 1 0%; background-color: rgb(34, 34, 34); color: rgb(208, 208, 208); border: 1px solid rgb(68, 68, 68); border-radius: 3px; padding: 2px 6px; font-family: inherit; font-size: inherit;">
+      <span data-stand="Button" data-density="compact" data-title="Wipe the dispatch ring (dev only)">
+        "clear"
+    <div style="overflow-y:auto;flex:1;border-top:1px solid #333;padding-top:4px">
+      <table style="width:100%;border-collapse:collapse">
+        <thead>
+          <tr style="color:#888">
+            <th style="text-align: left; padding: 2px 6px; font-weight: normal; border-bottom: 1px solid rgb(51, 51, 51);">
+              "age"
+            <th style="text-align: left; padding: 2px 6px; font-weight: normal; border-bottom: 1px solid rgb(51, 51, 51);">
+              "slice"
+            <th style="text-align: left; padding: 2px 6px; font-weight: normal; border-bottom: 1px solid rgb(51, 51, 51);">
+              "key"
+            <th style="text-align: left; padding: 2px 6px; font-weight: normal; border-bottom: 1px solid rgb(51, 51, 51);">
+              "command"
+            <th style="text-align: left; padding: 2px 6px; font-weight: normal; border-bottom: 1px solid rgb(51, 51, 51);">
+              "source"
+            <th style="text-align: left; padding: 2px 6px; font-weight: normal; border-bottom: 1px solid rgb(51, 51, 51);">
+              "events"
+        <tbody>
+          <tr>
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              "2.5s ago"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              <span style="color:#aaa">
+                "launcher-event"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              "kkkkkkk"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              <span style="color:#7af">
+                "PaneClicked"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              "src:mouse"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              "4"
+          <tr>
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              "5ms ago"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              <span style="color:#aaa">
+                "layout"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              "ZZZ"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              <span style="color:#7af">
+                "?"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              "src:keyboard"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              "1"
+          <tr>
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              "2.1min ago"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              <span style="color:#aaa">
+                "agent-pane-state"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              "k2"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              <span style="color:#7af">
+                "?"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              "src:rpc"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              "3"
+          <tr>
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              "400ms ago"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              <span style="color:#aaa">
+                "browser-pane-state"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              "—"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              <span style="color:#7af">
+                "?"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              "src:menu"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              "0"
+          <tr>
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              "59.0s ago"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              <span style="color:#aaa">
+                "layout"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              "abcdefg"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              <span style="color:#7af">
+                "Navigate"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              "src:keyboard"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              "2"
+    <div data-stand="AgentPanePerfSection">
+select.value=""
+-- a second later: only the ages move
+<div>
+  <div style="position: fixed; bottom: 8px; left: 8px; background-color: rgba(20, 20, 20, 0.94); color: rgb(208, 208, 208); font-family: Menlo, Consolas, monospace; font-size: 11px; padding: 8px 10px; border-radius: 6px; width: 560px; max-height: 60vh; display: flex; flex-direction: column; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5); border: 1px solid rgb(68, 68, 68); z-index: 999998;">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+      <div style="font-weight:bold;color:#7af">
+        "🔬 Reducer Dispatch Ring"
+      <span style="color:#777">
+        "("
+        "5"
+        "total —"
+        "<dev:diagnostics>"
+        ")"
+    <div style="display:flex;gap:6px;margin-bottom:6px;align-items:center">
+      <select style="background-color:#222;color:#d0d0d0;border:1px solid #444;border-radius:3px;padding:2px 4px;font-family:inherit;font-size:inherit">
+        <option value="">
+          "all slices"
+        <option value="agent-pane-state">
+          "agent-pane-state"
+        <option value="browser-pane-state">
+          "browser-pane-state"
+        <option value="launcher-event">
+          "launcher-event"
+        <option value="layout">
+          "layout"
+      <input data-stand="TextInput" data-variant="plain" data-placeholder="filter by key…" data-value="" style="flex: 1 1 0%; background-color: rgb(34, 34, 34); color: rgb(208, 208, 208); border: 1px solid rgb(68, 68, 68); border-radius: 3px; padding: 2px 6px; font-family: inherit; font-size: inherit;">
+      <span data-stand="Button" data-density="compact" data-title="Wipe the dispatch ring (dev only)">
+        "clear"
+    <div style="overflow-y:auto;flex:1;border-top:1px solid #333;padding-top:4px">
+      <table style="width:100%;border-collapse:collapse">
+        <thead>
+          <tr style="color:#888">
+            <th style="text-align: left; padding: 2px 6px; font-weight: normal; border-bottom: 1px solid rgb(51, 51, 51);">
+              "age"
+            <th style="text-align: left; padding: 2px 6px; font-weight: normal; border-bottom: 1px solid rgb(51, 51, 51);">
+              "slice"
+            <th style="text-align: left; padding: 2px 6px; font-weight: normal; border-bottom: 1px solid rgb(51, 51, 51);">
+              "key"
+            <th style="text-align: left; padding: 2px 6px; font-weight: normal; border-bottom: 1px solid rgb(51, 51, 51);">
+              "command"
+            <th style="text-align: left; padding: 2px 6px; font-weight: normal; border-bottom: 1px solid rgb(51, 51, 51);">
+              "source"
+            <th style="text-align: left; padding: 2px 6px; font-weight: normal; border-bottom: 1px solid rgb(51, 51, 51);">
+              "events"
+        <tbody>
+          <tr>
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              "3.5s ago"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              <span style="color:#aaa">
+                "launcher-event"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              "kkkkkkk"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              <span style="color:#7af">
+                "PaneClicked"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              "src:mouse"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              "4"
+          <tr>
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              "1.0s ago"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              <span style="color:#aaa">
+                "layout"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              "ZZZ"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              <span style="color:#7af">
+                "?"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              "src:keyboard"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              "1"
+          <tr>
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              "2.1min ago"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              <span style="color:#aaa">
+                "agent-pane-state"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              "k2"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              <span style="color:#7af">
+                "?"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              "src:rpc"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              "3"
+          <tr>
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              "1.4s ago"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              <span style="color:#aaa">
+                "browser-pane-state"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              "—"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              <span style="color:#7af">
+                "?"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              "src:menu"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              "0"
+          <tr>
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              "1.0min ago"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              <span style="color:#aaa">
+                "layout"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              "abcdefg"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              <span style="color:#7af">
+                "Navigate"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              "src:keyboard"
+            <td style="padding: 2px 6px; white-space: nowrap; vertical-align: top;">
+              "2"
+    <div data-stand="AgentPanePerfSection">
+select.value=""
