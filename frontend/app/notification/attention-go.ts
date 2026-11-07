@@ -16,16 +16,24 @@ import type { AttentionItem } from "./attention-list";
 
 type Goer = Pick<AttentionItem, "blockId" | "name" | "agentId">;
 
-/** Whether this window already knows the item's agent runs with no pane. The label of its button, not the click's rule. */
-export function isParkedItem(item: Pick<AttentionItem, "blockId">): boolean {
-    return isParkedMeta(MOS.getObjectValue<Block>(MOS.makeORef("block", item.blockId))?.meta);
+/** Whether the click opens the agent: it has an agent id and this window already knows its block is parked. The label of its button. */
+export function isParkedItem(item: Pick<AttentionItem, "blockId" | "agentId">): boolean {
+    return !!item.agentId && isParkedMeta(MOS.getObjectValue<Block>(MOS.makeORef("block", item.blockId))?.meta);
+}
+
+/** The block's meta, loaded when this window has not got it yet; absent when it cannot be loaded (the click then reveals). */
+async function blockMeta(blockId: string): Promise<Record<string, unknown> | undefined> {
+    const oref = MOS.makeORef("block", blockId);
+    try {
+        return (MOS.getObjectValue<Block>(oref) ?? (await MOS.reloadMuxObject<Block>(oref)))?.meta;
+    } catch {
+        return undefined;
+    }
 }
 
 /** Take the person to `item`; resolves once the pane is shown or the agent is opened. */
 export async function goToAttention(item: Goer): Promise<void> {
-    const oref = MOS.makeORef("block", item.blockId);
-    const block = MOS.getObjectValue<Block>(oref) ?? (await MOS.reloadMuxObject<Block>(oref));
-    if (item.agentId && isParkedMeta(block?.meta)) {
+    if (item.agentId && isParkedMeta(await blockMeta(item.blockId))) {
         const why = await openAgentInActiveTab({ agent_id: item.agentId, name: item.name });
         if (why) {
             pushNotification({

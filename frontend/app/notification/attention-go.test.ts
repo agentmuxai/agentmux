@@ -3,6 +3,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const blocks = vi.hoisted(() => new Map<string, { meta?: Record<string, unknown> }>());
+const failing = vi.hoisted(() => new Set<string>());
 const reveal = vi.hoisted(() => vi.fn());
 const openAgent = vi.hoisted(() => vi.fn());
 const push = vi.hoisted(() => vi.fn());
@@ -11,7 +12,10 @@ vi.mock("@/app/store/global", () => ({
     MOS: {
         makeORef: (t: string, id: string) => `${t}:${id}`,
         getObjectValue: (oref: string) => blocks.get(oref.split(":")[1]),
-        reloadMuxObject: async (oref: string) => blocks.get(oref.split(":")[1]),
+        reloadMuxObject: async (oref: string) => {
+            if (failing.has(oref.split(":")[1])) throw new Error("no such block");
+            return blocks.get(oref.split(":")[1]);
+        },
     },
     pushNotification: push,
 }));
@@ -22,6 +26,7 @@ import { goToAttention, isParkedItem } from "./attention-go";
 
 beforeEach(() => {
     blocks.clear();
+    failing.clear();
     reveal.mockReset();
     openAgent.mockReset();
     push.mockReset();
@@ -60,11 +65,19 @@ describe("goToAttention", () => {
         expect(reveal).toHaveBeenCalledWith("b1", { source: "attention" });
     });
 
-    it("labels a parked agent from what this window already has", () => {
+    it("reveals when the block cannot be loaded, instead of failing the click", async () => {
+        failing.add("gone");
+        await goToAttention({ blockId: "gone", name: "Korp", agentId: "korp" });
+        expect(reveal).toHaveBeenCalledWith("gone", { source: "attention" });
+        expect(openAgent).not.toHaveBeenCalled();
+    });
+
+    it("labels a parked agent from what this window already has, and only when the click would open it", () => {
         blocks.set("b1", { meta: { "agent:parked": true } });
         blocks.set("b2", { meta: {} });
-        expect(isParkedItem({ blockId: "b1" })).toBe(true);
-        expect(isParkedItem({ blockId: "b2" })).toBe(false);
-        expect(isParkedItem({ blockId: "unknown" })).toBe(false);
+        expect(isParkedItem({ blockId: "b1", agentId: "korp" })).toBe(true);
+        expect(isParkedItem({ blockId: "b1" })).toBe(false);
+        expect(isParkedItem({ blockId: "b2", agentId: "korp" })).toBe(false);
+        expect(isParkedItem({ blockId: "unknown", agentId: "korp" })).toBe(false);
     });
 });

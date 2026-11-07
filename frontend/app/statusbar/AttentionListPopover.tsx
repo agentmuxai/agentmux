@@ -10,11 +10,10 @@
 import { AnchoredPopover, type PopoverAnchor } from "@/app/element/anchored-popover";
 import { Button } from "@/app/element/ui";
 import { useTick } from "@/app/hook/useTick";
-import { formatLocale } from "@/app/i18n/i18n";
 import { goToAttention, isParkedItem } from "@/app/notification/attention-go";
 import { attentionTint, type AttentionItem } from "@/app/notification/attention-list";
-import { formatRelativeTime } from "@/util/format-time";
 import { createMemo, For, Show, type Accessor, type JSX } from "solid-js";
+import { waitedFor } from "./waited-for";
 
 export interface AttentionListPopoverProps {
     anchor: PopoverAnchor;
@@ -23,11 +22,6 @@ export interface AttentionListPopoverProps {
     onOpenSwarm: () => void;
     /** What a row's button runs; default takes the person to the pane. */
     go?: (item: AttentionItem) => void;
-}
-
-/** How long a row has waited, "now" below a minute. */
-export function waitedFor(since: number, now: number): string {
-    return formatRelativeTime(since, now, { locale: formatLocale(), nowBelowSecs: 60 });
 }
 
 export const AttentionListPopover = (props: AttentionListPopoverProps): JSX.Element => {
