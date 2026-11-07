@@ -46,9 +46,9 @@ function workspaceAction(run: (m: typeof import("./workspaces")) => Promise<void
     return () => fireAndForget(async () => run(await import("./workspaces")));
 }
 
-        // Both act on this window only (SPEC_PER_WINDOW_THEME_AND_OPACITY_
-        // 2026_10_12). Settings → Appearance holds the default for windows
-        // that have no value of their own.
+// Theme and Opacity both act on this window only (SPEC_PER_WINDOW_THEME_AND_OPACITY_
+// 2026_10_12). Settings → Appearance holds the default for windows
+// that have no value of their own.
 function buildThemeItems(): MenuItem[] {
     return THEME_OPTIONS.map((opt) => ({
         label: opt.label,
