@@ -16,19 +16,22 @@ use crate::backend::rpc_types::{
     COMMAND_LINK_AGENT_IDENTITY, COMMAND_UNLINK_AGENT_IDENTITY,
     COMMAND_LIST_AGENT_IDENTITIES, COMMAND_LIST_ALL_AGENT_IDENTITIES,
     COMMAND_LIST_NAMED_AGENTS, COMMAND_HIDE_NAMED_AGENT,
-    CommandListNamedAgentsData, CommandHideNamedAgentData, HideNamedAgentResult,
-    NamedAgentRow,
+    CommandHideNamedAgentData,
     CommandListIdentityAccountsData, CommandGetIdentityAccountData,
     CommandDeleteIdentityAccountData,
     CommandLinkAgentIdentityData, CommandUnlinkAgentIdentityData,
     CommandListAgentIdentitiesData, CommandListAllAgentIdentitiesData,
-    UnlinkAgentIdentityResult, AccountOAuthCancelResult,
 };
 use crate::backend::storage::store::{
-    AgentIdentityLink, AgentInstance, IdentityAccount, SecretRef,
+    IdentityAccount, SecretRef,
 };
 
 use super::super::AppState;
+
+mod accounts;
+mod links;
+mod named_agents;
+mod oauth;
 
 /// Refuses to persist an OAuth account bound directly to its provider's
 /// ambient home dir (e.g. `~/.claude`) — nothing downstream validates
@@ -346,833 +349,127 @@ fn register_github_installations(engine: &Arc<WshRpcEngine>, state: &AppState) {
 }
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    // ---- Identity account CRUD ----
-    // id_store: routes to shared/store.db when available so accounts survive
-    // version upgrades. Falls back to mstore transparently.
+    register_accounts(engine, state);
+    register_oauth(engine, state);
+    register_agent_links(engine, state);
+    register_named_agents(engine, state);
+}
 
-    let mstore = state.id_store.clone();
-    let identity_store = state.identity_store.clone();
-    engine.register_typed(
-        COMMAND_LIST_IDENTITY_ACCOUNTS,
-        move |cmd: CommandListIdentityAccountsData, _ctx| {
-            let mstore = mstore.clone();
-            let identity_store = identity_store.clone();
-            async move {
-                // On the blocking pool: the backfill below reads each OAuth
-                // account's `.claude.json` and canonicalizes its dir (muxreview
-                // P1 on #3617), like this file's other fs/keyring calls.
-                tokio::task::spawn_blocking(move || {
-                let mut accounts = mstore
-                    .identity_list(cmd.provider.as_deref())
-                    .map_err(|e| format!("listidentityaccounts: {e}"))?;
-                // SPEC_ACCOUNT_EMAIL_IN_ARMORY_2026_09_23.md §4: backfill each
-                // OAuth account's login email from its own config dir, so
-                // accounts signed in before #3541 — and every Claude login,
-                // whose transcript prints no email — show it. Written only
-                // when it changed, and only that one field, in this store and
-                // the global mirror (a full upsert here could re-create an
-                // account deleted since the list, undo a status written
-                // meanwhile, or repoint the mirror's `secret_ref`). A failed
-                // write still returns the email.
-                for account in &mut accounts {
-                    let before = account.context.get("email").and_then(|e| e.as_str()).unwrap_or("").to_string();
-                    if let Some(email) = crate::identity::account_email::refresh_account_email(account) {
-                        // Another address is another group (the store drops the number the same way).
-                        if !crate::identity::account_numbering::same_email(&before, &email) {
-                            if let Some(ctx) = account.context.as_object_mut() {
-                                ctx.remove("seq");
-                                ctx.remove("seqmax");
-                            }
-                        }
-                        for store in [&mstore, &identity_store] {
-                            if let Err(e) = store.identity_set_context_email(&account.id, &email) {
-                                tracing::warn!(target: "identity", account_id = %account.id, error = %e, "listidentityaccounts: email backfill write failed");
-                            }
-                        }
-                    }
-                }
-                // #4936 §3.3: give each account that shares a provider and email
-                // with another a number that stays its own. Computed over the
-                // unfiltered list, so a provider filter can't renumber a group.
-                // One allocation at a time, from a fresh read: two overlapping lists must not
-                // both plan the same number, or the one written last renumbers what the first returned.
-                static NUMBERING: std::sync::Mutex<()> = std::sync::Mutex::new(());
-                let _numbering = NUMBERING.lock().unwrap_or_else(|e| e.into_inner());
-                let all = mstore.identity_list(None).unwrap_or_default();
-                for u in crate::identity::account_numbering::numbering_updates(&all) {
-                    for store in [&mstore, &identity_store] {
-                        if let Err(e) = store.identity_set_context_numbering(&u.id, u.seq, u.high) {
-                            tracing::warn!(target: "identity", account_id = %u.id, error = %e, "listidentityaccounts: number write failed");
-                        }
-                    }
-                }
-                // Answer with the numbers as stored now, including any a list that ran just
-                // before this one allocated.
-                let numbered = mstore.identity_list(None).unwrap_or_default();
-                for a in &mut accounts {
-                    let Some(stored) = numbered.iter().find(|n| n.id == a.id) else { continue };
-                    for key in ["seq", "seqmax"] {
-                        match stored.context.get(key) {
-                            Some(v) => {
-                                if !a.context.is_object() {
-                                    a.context = serde_json::json!({});
-                                }
-                                a.context[key] = v.clone();
-                            }
-                            None => {
-                                if let Some(ctx) = a.context.as_object_mut() {
-                                    ctx.remove(key);
-                                }
-                            }
-                        }
-                    }
-                }
-                Ok(accounts)
-                })
-                .await
-                .map_err(|e| format!("listidentityaccounts: task: {e}"))?
-            }
-        },
-    );
-
-    let mstore = state.id_store.clone();
-    engine.register_typed(
-        COMMAND_GET_IDENTITY_ACCOUNT,
-        move |cmd: CommandGetIdentityAccountData, _ctx| {
-            let mstore = mstore.clone();
-            async move {
-                match mstore
-                    .identity_get(&cmd.id)
-                    .map_err(|e| format!("getidentityaccount: {e}"))?
-                {
-                    Some(a) => Ok(a),
-                    None => Err(format!("getidentityaccount: not found id={}", cmd.id)),
-                }
-            }
-        },
-    );
-
-    let mstore = state.id_store.clone();
-    let identity_store = state.identity_store.clone();
-    let broker = state.broker.clone();
-    // `Value` request: callers send a partial account (generated-manifest.json
-    // keeps `Partial<IdentityAccount>`), which this parses into IdentityAccount.
-    engine.register_typed(COMMAND_UPSERT_IDENTITY_ACCOUNT, move |data: serde_json::Value, _ctx| {
+/// Identity account CRUD. `id_store` routes to shared/store.db when available so accounts survive version
+/// upgrades, and falls back to `mstore` transparently.
+fn register_accounts(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let (mstore, identity_store, broker) = (state.id_store.clone(), state.identity_store.clone(), state.broker.clone());
+    {
+        let (mstore, identity_store) = (mstore.clone(), identity_store.clone());
+        engine.register_typed(COMMAND_LIST_IDENTITY_ACCOUNTS, move |cmd: CommandListIdentityAccountsData, _ctx| {
+            accounts::list_identity_accounts(mstore.clone(), identity_store.clone(), cmd.provider)
+        });
+    }
+    {
         let mstore = mstore.clone();
-        let identity_store = identity_store.clone();
-        let broker = broker.clone();
-        async move {
-                // Accept the full IdentityAccount payload. Missing `id` → mint
-                // a fresh UUID; `created_at` and `updated_at` are server-set
-                // so callers don't have to know the current time.
-                let mut account: IdentityAccount = serde_json::from_value(data)
-                    .map_err(|e| format!("upsertidentityaccount: {e}"))?;
-                reject_ambient_home_dir_binding(&account)?;
-                if account.id.is_empty() {
-                    account.id = uuid::Uuid::new_v4().to_string();
-                }
-                let now = agentmux_common::time::now_ms();
-                if account.created_at == 0 {
-                    account.created_at = now;
-                }
-                account.updated_at = now;
-                // identity_upsert_with_mirror — reagentx P0 review on PR
-                // #2632.
-                mstore
-                    .identity_upsert_with_mirror(&identity_store, &account)
-                    .map_err(|e| format!("upsertidentityaccount: {e}"))?;
-                broker.publish_event::<crate::backend::mps_events::IdentityAccountsChanged>(&(), vec![], 0);
-                Ok(account)
-        }
-    });
-
-    // Connectors → Accounts: validate (optional) + securely store an API key.
-    // The plaintext goes to the OS keychain; the DB row keeps only the
-    // SecretRef::Keychain pointer + masked tail + non-secret metadata.
-    // See docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §5/§6.
-    let mstore = state.id_store.clone();
-    let identity_store = state.identity_store.clone();
-    let broker = state.broker.clone();
-    // `Value` request, parsed into VerifyKeyReq below; the stub keeps its type.
-    engine.register_typed(COMMAND_ACCOUNT_KEY_VERIFY, move |data: serde_json::Value, _ctx| {
-        let mstore = mstore.clone();
-        let identity_store = identity_store.clone();
-        let broker = broker.clone();
-        async move {
-                // NB: `req.api_key` is a secret — never log `req`.
-                let req: VerifyKeyReq = serde_json::from_value(data)
-                    .map_err(|e| format!("account.key.verify: {e}"))?;
-
-                // New account (mint id) vs. key replacement on an existing
-                // account. Rollback semantics differ: see the upsert below.
-                let is_new = req.account_id.is_empty();
-                let account_id = if is_new {
-                    uuid::Uuid::new_v4().to_string()
-                } else {
-                    req.account_id.clone()
-                };
-
-                // Optional live validation — the single outbound probe, fired
-                // only when the user clicked "Validate" (validate=true).
-                let (status, metadata, masked_tail, valid) = if req.validate {
-                    let outcome =
-                        crate::identity::key_validator::validate(&req.provider, &req.api_key).await;
-                    if !outcome.valid {
-                        // Nothing stored — surface a structured error so the UI
-                        // stays in the entry state.
-                        return Ok(AccountKeyVerifyResult {
-                            valid: false,
-                            error: Some(outcome.error.unwrap_or_else(|| "validation failed".to_string())),
-                            account_id: None,
-                            masked_tail: None,
-                            status: None,
-                            metadata: None,
-                        });
-                    }
-                    ("valid".to_string(), outcome.metadata, outcome.masked_tail, true)
-                } else {
-                    (
-                        "unknown".to_string(),
-                        serde_json::json!({}),
-                        crate::identity::key_validator::masked_tail(&req.api_key),
-                        false,
-                    )
-                };
-
-                // Store the plaintext in the OS keychain; the DB never sees it.
-                // `keyring` is blocking (sync D-Bus on Linux), so run it off the
-                // async runtime worker via spawn_blocking.
-                {
-                    let aid = account_id.clone();
-                    let key = req.api_key.clone();
-                    tokio::task::spawn_blocking(move || {
-                        crate::identity::secret_store::put(&aid, &key)
-                    })
-                    .await
-                    .map_err(|e| format!("account.key.verify: keychain task: {e}"))?
-                    .map_err(|e| format!("account.key.verify: {e}"))?;
-                }
-
-                // Fetch the existing row once (replacement path) — preserves
-                // created_at and any previously-stored context.
-                let existing = mstore.identity_get(&account_id).ok().flatten();
-
-                // Non-secret context, merged so nothing the user set is lost:
-                //   existing context  →  user-entered context  →  validation
-                //   metadata  →  masked tail.
-                let mut context = existing
-                    .as_ref()
-                    .map(|a| a.context.clone())
-                    .unwrap_or_else(|| serde_json::json!({}));
-                if !context.is_object() {
-                    context = serde_json::json!({});
-                }
-                merge_json_object(&mut context, &req.context);
-                merge_json_object(&mut context, &metadata);
-                if let serde_json::Value::Object(ref mut m) = context {
-                    m.insert("masked_tail".to_string(), serde_json::json!(masked_tail));
-                }
-
-                let now = agentmux_common::time::now_ms();
-                let created_at = existing
-                    .as_ref()
-                    .map(|a| a.created_at)
-                    .filter(|&c| c != 0)
-                    .unwrap_or(now);
-
-                let account = IdentityAccount {
-                    id: account_id.clone(),
-                    name: req.name.clone(),
-                    provider: req.provider.clone(),
-                    kind: if req.kind.is_empty() { "api_key".to_string() } else { req.kind.clone() },
-                    display_name: req.display_name.clone(),
-                    secret_ref: SecretRef::Keychain {
-                        service: crate::identity::secret_store::SERVICE.to_string(),
-                        account: crate::identity::secret_store::account_key(&account_id),
-                    },
-                    context,
-                    status,
-                    created_at,
-                    updated_at: now,
-                };
-                // identity_upsert_with_mirror — reagentx P0 review on PR #2632.
-                if let Err(e) = mstore.identity_upsert_with_mirror(&identity_store, &account) {
-                    // DB write failed after the keychain write.
-                    //  - New account: nothing references the secret yet, so
-                    //    roll it back to avoid an orphan with no DB row.
-                    //  - Replacement: the existing DB row still points at this
-                    //    keychain entry. Deleting it would destroy the
-                    //    previously-working credential; leave the (now
-                    //    overwritten) secret in place — resolution still works
-                    //    with the new key, and the user can retry to fix
-                    //    metadata. So only roll back for new accounts.
-                    if is_new {
-                        let aid = account_id.clone();
-                        if let Err(de) = tokio::task::spawn_blocking(move || {
-                            crate::identity::secret_store::delete(&aid)
-                        })
-                        .await
-                        .unwrap_or_else(|je| Err(format!("join: {je}")))
-                        {
-                            tracing::warn!(
-                                target: "identity",
-                                "rollback of orphaned keychain secret for {} failed: {de}",
-                                account_id,
-                            );
-                        }
-                    }
-                    return Err(format!("account.key.verify: {e}"));
-                }
-                broker.publish_event::<crate::backend::mps_events::IdentityAccountsChanged>(&(), vec![], 0);
-                // A key the provider just accepted proves the account works (#2237).
-                if valid {
-                    crate::server::account_episodes::after_sign_in(&account_id);
-                }
-                Ok(AccountKeyVerifyResult {
-                    valid,
-                    error: None,
-                    account_id: Some(account_id),
-                    masked_tail: Some(account.context.get("masked_tail").cloned().unwrap_or_default()),
-                    status: Some(account.status),
-                    metadata: Some(account.context),
-                })
-        }
-    });
-
-    // ── Service OAuth ──
-    // start: resolve config + client (gates on "not configured"), spawn the
-    // flow, return session id + initial status. poll/cancel drive the rest.
-    // With `accountId` it authorizes that account again (more scopes, or a
-    // reconnect) instead of creating one. Spec G0 of
-    // docs/specs/SPEC_GOOGLE_CONNECTORS_GMAIL_CALENDAR_DRIVE_2026_10_14.md.
-    let oauth_mstore = state.id_store.clone();
-    let oauth_identity_store = state.identity_store.clone();
-    // `Value` request, parsed into OAuthStartReq below; the stub keeps its type.
-    engine.register_typed(COMMAND_ACCOUNT_OAUTH_START, move |data: serde_json::Value, _ctx| {
-        let mstore = oauth_mstore.clone();
-        let identity_store = oauth_identity_store.clone();
-        async move {
-                use crate::identity::oauth_client::FlowTarget;
-                // NB: `req.client_secret` is a secret — never log `req`.
-                let req: OAuthStartReq = serde_json::from_value(data)
-                    .map_err(|e| format!("account.oauth.start: {e}"))?;
-                let failed = |e: String| -> Result<AccountOAuthStartResult, String> {
-                    Ok(AccountOAuthStartResult { session_id: None, status: None, error: Some(e) })
-                };
-                let byo = match byo_from_req(&req) {
-                    Ok(b) => b,
-                    Err(e) => return failed(e),
-                };
-                let target = match req.account_id.as_deref().filter(|s| !s.is_empty()) {
-                    None => FlowTarget::New { name: req.name.clone() },
-                    Some(id) => match mstore.identity_get(id) {
-                        Ok(Some(acct)) => FlowTarget::Existing(acct),
-                        Ok(None) => return failed(format!("account {id} not found")),
-                        Err(e) => return failed(format!("account {id} could not be read: {e}")),
-                    },
-                };
-                // The user's saved client, when none came with the request. A
-                // keychain that can't be read means none: the panel asks again.
-                let saved = if byo.is_some() {
-                    None
-                } else {
-                    let provider = req.provider.clone();
-                    let loaded = tokio::task::spawn_blocking(move || crate::identity::oauth_tokens::load_saved_client(&provider))
-                        .await
-                        .map_err(|e| format!("keychain task: {e}"))
-                        .and_then(|r| r);
-                    match loaded {
-                        Ok(saved) => saved,
-                        Err(e) => {
-                            tracing::warn!(target: "identity", provider = %req.provider, error = %e, "account.oauth.start: the saved OAuth client could not be read");
-                            None
-                        }
-                    }
-                };
-                // GitHub connects through the broker when signed in to AgentMux Cloud.
-                let cloud_signed_in = if req.provider == crate::identity::github_connect::PROVIDER {
-                    let store = mstore.clone();
-                    tokio::task::spawn_blocking(move || store.muxbus_load().ok().flatten().is_some()).await.unwrap_or(false)
-                } else {
-                    false
-                };
-                let opts = panel_start_options(&req, target, byo, saved, cloud_signed_in);
-                match crate::identity::oauth_client::start(&req.provider, opts, mstore, identity_store) {
-                    Ok((session_id, status)) => Ok(AccountOAuthStartResult {
-                        session_id: Some(session_id),
-                        status: Some(oauth_status_wire(&status)),
-                        error: None,
-                    }),
-                    // "not configured" / unknown provider surface as a clean
-                    // error field, not an RPC failure, so the UI can show it.
-                    Err(e) => failed(e),
-                }
-        }
-    });
-
-    // The user's own OAuth client saved for a provider (D8): whether there is
-    // one, and forgetting it. Accounts made with it keep refreshing: each
-    // keeps its own copy of what a refresh needs.
-    engine.register_typed(COMMAND_ACCOUNT_OAUTH_CLIENT_GET, move |req: OAuthClientReq, _ctx| async move {
-        let (builtin_available, offered_services) = builtin_client_of(&req.provider)?;
-        let provider = req.provider.clone();
-        let saved = tokio::task::spawn_blocking(move || crate::identity::oauth_tokens::load_saved_client(&provider))
-            .await
-            .map_err(|e| format!("account.oauth.client.get: keychain task: {e}"))?
-            .map_err(|e| format!("account.oauth.client.get: {e}"))?;
-        Ok(AccountOAuthClientInfo {
-            saved: saved.is_some(),
-            client_id: saved.as_ref().map(|c| c.client_id.clone()),
-            has_secret: saved.as_ref().is_some_and(|c| c.client_secret.is_some()),
-            mode: saved.as_ref().map(|c| c.mode.as_str().to_string()),
-            builtin_available,
-            offered_services,
-        })
-    });
-
-    engine.register_typed(COMMAND_ACCOUNT_OAUTH_CLIENT_CLEAR, move |req: OAuthClientReq, _ctx| async move {
-        if crate::identity::oauth_client::config_for(&req.provider).is_none() {
-            return Err(format!("account.oauth.client.clear: unknown OAuth provider: {}", req.provider));
-        }
-        let provider = req.provider.clone();
-        let cleared = tokio::task::spawn_blocking(move || crate::identity::oauth_tokens::clear_saved_client(&provider))
-            .await
-            .map_err(|e| format!("account.oauth.client.clear: keychain task: {e}"))?
-            .map_err(|e| format!("account.oauth.client.clear: {e}"))?;
-        tracing::info!(target: "identity", provider = %req.provider, cleared, "account.oauth.client.clear: saved OAuth client forgotten");
-        Ok(AccountOAuthClientClearResult { cleared })
-    });
-
-    // What the broker says about the GitHub connection; a grant it says is gone marks the
-    // brokered account as needing to be connected again (spec §5.7).
-    let github_mstore = state.id_store.clone();
-    let github_identity_store = state.identity_store.clone();
-    engine.register_typed(COMMAND_GITHUB_CONNECTION, move |_req: GithubConnectionReq, _ctx| {
-        let mstore = github_mstore.clone();
-        let identity_store = github_identity_store.clone();
-        async move { Ok(crate::identity::github_connect::sync_connection(&mstore, &identity_store).await) }
-    });
-    register_github_installations(engine, state);
-    // The response stays `Value`: oauth_status_wire builds it, and the frontend
-    // models it as OAuthFlowStatus (generated-manifest.json `returns`).
-    engine.register_typed(COMMAND_ACCOUNT_OAUTH_POLL, move |req: OAuthSessionReq, _ctx| {
-        async move {
-                match crate::identity::oauth_client::manager().poll(&req.session_id) {
-                    Some(s) => Ok(oauth_status_wire(&s)),
-                    None => Err(format!("account.oauth.poll: unknown session {}", req.session_id)),
-                }
-        }
-    });
-
-    engine.register_typed(
-        COMMAND_ACCOUNT_OAUTH_CANCEL,
-        move |req: OAuthSessionReq, _ctx| {
-            async move {
-                let cancelled = crate::identity::oauth_client::manager().cancel(&req.session_id);
-                Ok(AccountOAuthCancelResult { cancelled })
-            }
-        },
-    );
-
-    let mstore = state.id_store.clone();
-    let identity_store = state.identity_store.clone();
-    let broker = state.broker.clone();
+        engine.register_typed(COMMAND_GET_IDENTITY_ACCOUNT, move |cmd: CommandGetIdentityAccountData, _ctx| {
+            let mstore = mstore.clone();
+            async move { accounts::get_identity_account(&mstore, &cmd.id) }
+        });
+    }
+    // `Value` request: callers send a partial account (generated-manifest.json keeps `Partial<IdentityAccount>`),
+    // which is parsed into an `IdentityAccount`.
+    {
+        let (mstore, identity_store, broker) = (mstore.clone(), identity_store.clone(), broker.clone());
+        engine.register_typed(COMMAND_UPSERT_IDENTITY_ACCOUNT, move |data: serde_json::Value, _ctx| {
+            let (mstore, identity_store, broker) = (mstore.clone(), identity_store.clone(), broker.clone());
+            async move { accounts::upsert_identity_account(&mstore, &identity_store, &broker, data) }
+        });
+    }
+    // `Value` request, parsed into `VerifyKeyReq`; the stub keeps its type.
+    {
+        let (mstore, identity_store, broker) = (mstore.clone(), identity_store.clone(), broker.clone());
+        engine.register_typed(COMMAND_ACCOUNT_KEY_VERIFY, move |data: serde_json::Value, _ctx| {
+            accounts::verify_account_key(mstore.clone(), identity_store.clone(), broker.clone(), data)
+        });
+    }
     engine.register_typed(COMMAND_DELETE_IDENTITY_ACCOUNT, move |cmd: CommandDeleteIdentityAccountData, _ctx| {
         let (mstore, identity_store, broker) = (mstore.clone(), identity_store.clone(), broker.clone());
         async move { super::identity_delete::delete_identity_account(&mstore, &identity_store, &broker, &cmd.id, cmd.require_revoke).await }
     });
+}
 
-    // ---- Agent ↔ Identity junction ----
-
-    let mstore = state.identity_store.clone();
-    let broker = state.broker.clone();
-    let (panes, event_bus) = (state.mstore.clone(), state.event_bus.clone());
-    engine.register_typed(
-        COMMAND_LINK_AGENT_IDENTITY,
-        move |cmd: CommandLinkAgentIdentityData, _ctx| {
-            let mstore = mstore.clone();
-            let broker = broker.clone();
-            let (panes, event_bus) = (panes.clone(), event_bus.clone());
-            async move {
-                // Read before the link changes: an old pane counts against
-                // the agent's current links (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §6.3).
-                let failed = crate::server::account_episodes::failed_panes(&panes, &mstore, &cmd.agent_id, &cmd.provider);
-                mstore
-                    .agent_identity_link(&cmd.agent_id, &cmd.account_id, &cmd.provider)
-                    .map_err(|e| format!("linkagentidentity: {e}"))?;
-                crate::server::account_episodes::after_rebind(&panes, &event_bus, failed, &cmd.account_id);
-                broker.publish_event_for::<crate::backend::mps_events::AgentIdentitiesChanged>(&cmd.agent_id, &(), vec![], 0);
-                // See app_api/identity.rs's identical call for why this is
-                // needed: watch_agent's one-shot config-dir resolution can
-                // race ahead of this exact binding.
-                if let Some(watcher) = crate::backend::subagent_watcher::global() {
-                    watcher.recheck_all_watched_agents();
-                }
-                Ok(())
-            }
-        },
-    );
-
-    let mstore = state.identity_store.clone();
-    let broker = state.broker.clone();
-    let (panes, event_bus) = (state.mstore.clone(), state.event_bus.clone());
-    engine.register_typed(
-        COMMAND_UNLINK_AGENT_IDENTITY,
-        move |cmd: CommandUnlinkAgentIdentityData, _ctx| {
-            let mstore = mstore.clone();
-            let broker = broker.clone();
-            let (panes, event_bus) = (panes.clone(), event_bus.clone());
-            async move {
-                let failed = crate::server::account_episodes::failed_panes(&panes, &mstore, &cmd.agent_id, &cmd.provider);
-                let removed = mstore
-                    .agent_identity_unlink(&cmd.agent_id, &cmd.provider)
-                    .map_err(|e| format!("unlinkagentidentity: {e}"))?;
-                // info!, not debug!: the production filter is
-                // "agentmuxsrv=info,info" (reagent P1, PR #2143).
-                // "identity.unlink:" is `muxlog auth` vocabulary.
-                tracing::info!(
-                    agent_id = %cmd.agent_id,
-                    provider = %cmd.provider,
-                    unlinked = removed,
-                    "identity.unlink: agent-identity link removed (unlinkagentidentity)"
-                );
-                if removed {
-                    // A silent unlink is the first half of a rebind (alias rows), the link that follows
-                    // clears; a real one leaves the agent without an account, so its old limit goes.
-                    if !cmd.silent {
-                        crate::server::account_episodes::after_rebind(&panes, &event_bus, failed, "");
-                    }
-                    broker.publish_event_for::<crate::backend::mps_events::AgentIdentitiesChanged>(&cmd.agent_id, &(), vec![], 0);
-                    // Spec §3 names unlink alongside delete: a live process
-                    // for this agent still holds the unlinked account's
-                    // tokens until restarted — same disclosure chip. Skipped
-                    // for `silent` unlinks (alias migration, not a real
-                    // unbind — see CommandUnlinkAgentIdentityData's doc
-                    // comment; reagent P2 on PR #2414).
-                    if !cmd.silent {
-                        let revoked = crate::backend::mps_events::CredentialsRevokedEvent {
-                            credentials_revoked: true,
-                            provider: cmd.provider.clone(),
-                            account_id: None,
-                        };
-                        broker.publish_event_for::<crate::backend::mps_events::AgentCredentialsRevoked>(&cmd.agent_id, &revoked, vec![], 0);
-                    }
-                }
-                Ok(UnlinkAgentIdentityResult { unlinked: removed })
-            }
-        },
-    );
-
-    let mstore = state.identity_store.clone();
-    engine.register_typed(
-        COMMAND_LIST_AGENT_IDENTITIES,
-        move |cmd: CommandListAgentIdentitiesData, _ctx| {
-            let mstore = mstore.clone();
-            async move {
-                let rows = mstore
-                    .agent_identity_list_for_agent(&cmd.agent_id)
-                    .map_err(|e| format!("listagentidentities: {e}"))?;
-                Ok(rows)
-            }
-        },
-    );
-
-    // Every direct link across every agent — see the constant's doc comment.
-    let mstore = state.identity_store.clone();
-    engine.register_typed(
-        COMMAND_LIST_ALL_AGENT_IDENTITIES,
-        move |_req: CommandListAllAgentIdentitiesData, _ctx| {
-            let mstore = mstore.clone();
-            async move {
-                let rows = mstore
-                    .agent_identity_list_all()
-                    .map_err(|e| format!("listallagentidentities: {e}"))?;
-                Ok(rows)
-            }
-        },
-    );
-
-    // ---- v8: named agent continuation ----
-
-    // listnamedagents — powers the picker's My Agents and the Files
-    // pane. Joins instance rows with the definition, account and
-    // bundle names so the frontend renders without follow-ups.
-    let mstore = state.mstore.clone();
-    let id_store_lna = state.id_store.clone();
-    let identity_store_lna = state.identity_store.clone();
-    // `Value` request: a malformed one means the defaults (unwrap_or_default).
-    engine.register_typed(COMMAND_LIST_NAMED_AGENTS, move |data: serde_json::Value, _ctx| {
-        let mstore = mstore.clone();
-        let id_store = id_store_lna.clone();
-        let identity_store = identity_store_lna.clone();
-        async move {
-                let cmd: CommandListNamedAgentsData =
-                    serde_json::from_value(data).unwrap_or_default();
-                let limit = if cmd.limit == 0 {
-                    200
-                } else {
-                    cmd.limit.min(1000)
-                };
-                // Resolve names once per response. With ≤200 rows and
-                // typical account/bundle counts in the low dozens, a
-                // linear lookup on cached lists beats per-row
-                // round-trips through the store.
-                let defs = mstore
-                    .agent_def_list()
-                    .map_err(|e| format!("listnamedagents: agent_def_list: {e}"))?;
-                let memories = id_store
-                    .bundle_list()
-                    .map_err(|e| format!("listnamedagents: bundle_list: {e}"))?;
-
-                // Identity display names resolve off the direct
-                // agent<->account links (db_agent_identity_links /
-                // db_accounts) now, not the retired bundle tables — see
-                // SPEC_ARMORY_PHASE4_STORAGE_RENAME_COMPLETION_2026_07_12.md
-                // §4 item 2. Bulk-fetched once and grouped by
-                // definition_id rather than queried per-row.
-                let agent_identity_links = identity_store
-                    .agent_identity_list_all()
-                    .map_err(|e| format!("listnamedagents: agent_identity_links: {e}"))?;
-                let accounts = id_store
-                    .identity_list(None)
-                    .map_err(|e| format!("listnamedagents: accounts: {e}"))?;
-                let own_ids: std::collections::HashSet<&str> = accounts.iter().map(|a| a.id.as_str()).collect();
-                let mut mirror_failed = false;
-                let mirror_accounts: Vec<IdentityAccount> =
-                    if agent_identity_links.iter().any(|l| !own_ids.contains(l.account_id.as_str())) {
-                        identity_store.identity_list(None).unwrap_or_else(|e| {
-                            tracing::warn!(error = %e, "listnamedagents: the global account mirror could not be read");
-                            mirror_failed = true;
-                            Vec::new()
-                        })
-                    } else {
-                        Vec::new()
-                    };
-                let account_names = super::account_label::names_by_id(&accounts, &mirror_accounts);
-                let mut links_by_agent: std::collections::HashMap<&str, Vec<&AgentIdentityLink>> =
-                    std::collections::HashMap::new();
-                for link in &agent_identity_links {
-                    links_by_agent
-                        .entry(link.agent_id.as_str())
-                        .or_default()
-                        .push(link);
-                }
-                let resolve_identity_name = |definition_id: &str| -> String {
-                    super::account_label::account_line(
-                        links_by_agent.get(definition_id).map(|v| v.as_slice()),
-                        &account_names,
-                        super::account_label::Degraded { links: false, accounts: mirror_failed },
-                    )
-                    .text
-                };
-
-                // PR B — read from the cross-version registry when
-                // it's available. Falls back to SQLite when the
-                // registry couldn't be resolved at startup (CI / odd
-                // environments). SQLite remains authoritative for
-                // PR B (parallel-write is still active); the choice
-                // here just affects which surface gets surfaced.
-                let rows: Vec<NamedAgentRow> = match mstore.shared_agent_registry() {
-                    Some(reg) => {
-                        // Re-join relative working_dir against the CURRENT
-                        // channel's agents dir (symmetric with the write
-                        // mirror), not the registry's own parent — P0.3
-                        // re-roots the registry out of channels/<ch>/agents/.
-                        let agents_root = mstore.registry_agents_base();
-                        let mut records = reg
-                            .list_active()
-                            .map_err(|e| format!("listnamedagents: registry: {e}"))?;
-                        if let Some(def_filter) = cmd.definition_id.as_deref() {
-                            records.retain(|r| r.data.definition_id == def_filter);
-                        }
-                        records.sort_by(|a, b| {
-                            b.data
-                                .last_launched_at_ms
-                                .cmp(&a.data.last_launched_at_ms)
-                        });
-                        records.truncate(limit);
-                        // Pre-fetch all candidate same-version rows
-                        // ONCE so enrichment doesn't issue N+1 queries.
-                        // Indexed by instance_id; rows that aren't in
-                        // current SQLite fall through to sentinels.
-                        // Registry enrichment: keep head-of-chain
-                        // only. The registry mirror itself excludes
-                        // continuations (see
-                        // `registry_upsert_if_named`), so the SQLite
-                        // side must match — else under the `limit`
-                        // truncation continuation rows displace
-                        // registry-head rows and the merge-by-id
-                        // enrichment misses, silently downgrading
-                        // running-state badges and block_id_hints to
-                        // "available" / empty.
-                        let sqlite_rows: Vec<AgentInstance> = mstore
-                            .instance_list_named(
-                                records.len().max(1),
-                                cmd.definition_id.as_deref(),
-                                /* identity_id */ None,
-                                /* include_continuations */ false,
-                            )
-                            .unwrap_or_default();
-                        let sqlite_by_id: std::collections::HashMap<&str, &AgentInstance> =
-                            sqlite_rows.iter().map(|i| (i.id.as_str(), i)).collect();
-                        records
-                            .into_iter()
-                            .map(|rec| {
-                                let d = rec.data;
-                                let def = defs.iter().find(|x| x.id == d.definition_id);
-                                let identity_id_str =
-                                    d.identity_id.clone().unwrap_or_default();
-                                let memory_id_str = d.memory_id.clone().unwrap_or_default();
-                                let identity_name = resolve_identity_name(&d.definition_id);
-                                let memory_name = if memory_id_str.is_empty() {
-                                    "(vanilla CLI)".to_string()
-                                } else {
-                                    memories
-                                        .iter()
-                                        .find(|m| m.id == memory_id_str)
-                                        .map(|m| m.name.clone())
-                                        .unwrap_or_else(|| "(missing memory)".to_string())
-                                };
-                                // Reconstruct the absolute working_directory.
-                                // v3 records carry their SOURCE channel agents
-                                // dir, so a row from another channel resolves
-                                // to its real workspace; legacy (v1/v2) records
-                                // fall back to the current channel base — the
-                                // pre-P0.4 behavior (correct for same-channel
-                                // rows, which is all v1/v2 could represent).
-                                let working_directory = if let Some(src) =
-                                    d.source_agents_base.as_deref()
-                                {
-                                    std::path::Path::new(src)
-                                        .join(&d.working_dir)
-                                        .to_string_lossy()
-                                        .to_string()
-                                } else {
-                                    match agents_root.as_ref() {
-                                        Some(root) => root
-                                            .join(&d.working_dir)
-                                            .to_string_lossy()
-                                            .to_string(),
-                                        None => d.working_dir.clone(),
-                                    }
-                                };
-                                // Same-version enrichment: if this id
-                                // also exists in current SQLite, the
-                                // row carries runtime state (block_id
-                                // for focus-existing-pane, status,
-                                // ended_at) that the registry
-                                // intentionally doesn't track.
-                                // Cross-version rows fall through with
-                                // sentinel "available" status and
-                                // empty block_id_hint.
-                                let (block_id_hint, status, ended_at) =
-                                    match sqlite_by_id.get(d.instance_id.as_str()) {
-                                        Some(inst) => (
-                                            inst.block_id.clone(),
-                                            inst.status.clone(),
-                                            inst.ended_at,
-                                        ),
-                                        None => (String::new(), "available".to_string(), 0),
-                                    };
-                                NamedAgentRow {
-                                    instance_id: d.instance_id,
-                                    instance_name: d.instance_name,
-                                    definition_id: d.definition_id.clone(),
-                                    definition_name: def
-                                        .map(|x| x.name.clone())
-                                        .unwrap_or_else(|| "(missing definition)".to_string()),
-                                    provider: def
-                                        .map(|x| x.provider.clone())
-                                        .unwrap_or_default(),
-                                    working_directory,
-                                    identity_id: identity_id_str,
-                                    identity_name,
-                                    memory_id: memory_id_str,
-                                    memory_name,
-                                    started_at: d.last_launched_at_ms,
-                                    ended_at,
-                                    status,
-                                    block_id_hint,
-                                }
-                            })
-                            .collect()
-                    }
-                    None => {
-                        // No-registry fallback: drives the launch
-                        // modal's "Continue agent" dropdown directly.
-                        // One entry per chain root, mirroring the
-                        // registry path's semantics.
-                        let instances = mstore
-                            .instance_list_named(
-                                limit,
-                                cmd.definition_id.as_deref(),
-                                /* identity_id */ None,
-                                /* include_continuations */ false,
-                            )
-                            .map_err(|e| format!("listnamedagents: {e}"))?;
-                        instances
-                            .into_iter()
-                            .map(|inst| {
-                                let def = defs.iter().find(|d| d.id == inst.definition_id);
-                                let identity_name = resolve_identity_name(&inst.definition_id);
-                                let memory_name = if inst.memory_id.is_empty() {
-                                    "(vanilla CLI)".to_string()
-                                } else {
-                                    memories
-                                        .iter()
-                                        .find(|m| m.id == inst.memory_id)
-                                        .map(|m| m.name.clone())
-                                        .unwrap_or_else(|| "(missing memory)".to_string())
-                                };
-                                NamedAgentRow {
-                                    instance_id: inst.id,
-                                    instance_name: inst.instance_name,
-                                    definition_id: inst.definition_id.clone(),
-                                    definition_name: def
-                                        .map(|d| d.name.clone())
-                                        .unwrap_or_else(|| "(missing definition)".to_string()),
-                                    provider: def
-                                        .map(|d| d.provider.clone())
-                                        .unwrap_or_default(),
-                                    working_directory: inst.working_directory,
-                                    identity_id: inst.identity_id,
-                                    identity_name,
-                                    memory_id: inst.memory_id,
-                                    memory_name,
-                                    started_at: inst.started_at,
-                                    ended_at: inst.ended_at,
-                                    status: inst.status,
-                                    block_id_hint: inst.block_id,
-                                }
-                            })
-                            .collect()
-                    }
-                };
-
-                Ok(rows)
-        }
+/// Service OAuth, and the GitHub connection that rides on it.
+fn register_oauth(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let (mstore, identity_store) = (state.id_store.clone(), state.identity_store.clone());
+    {
+        let (mstore, identity_store) = (mstore.clone(), identity_store.clone());
+        // `Value` request, parsed into `OAuthStartReq`; the stub keeps its type.
+        engine.register_typed(COMMAND_ACCOUNT_OAUTH_START, move |data: serde_json::Value, _ctx| {
+            oauth::start_oauth(mstore.clone(), identity_store.clone(), data)
+        });
+    }
+    engine.register_typed(COMMAND_ACCOUNT_OAUTH_CLIENT_GET, move |req: OAuthClientReq, _ctx| oauth::oauth_client_info(req));
+    engine.register_typed(COMMAND_ACCOUNT_OAUTH_CLIENT_CLEAR, move |req: OAuthClientReq, _ctx| oauth::clear_oauth_client(req));
+    engine.register_typed(COMMAND_ACCOUNT_OAUTH_POLL, move |req: OAuthSessionReq, _ctx| async move { oauth::poll_oauth(&req) });
+    engine.register_typed(COMMAND_ACCOUNT_OAUTH_CANCEL, move |req: OAuthSessionReq, _ctx| async move { Ok(oauth::cancel_oauth(&req)) });
+    // What the broker says about the GitHub connection; a grant it says is gone marks the brokered account as
+    // needing to be connected again (spec §5.7).
+    engine.register_typed(COMMAND_GITHUB_CONNECTION, move |_req: GithubConnectionReq, _ctx| {
+        let (mstore, identity_store) = (mstore.clone(), identity_store.clone());
+        async move { Ok(crate::identity::github_connect::sync_connection(&mstore, &identity_store).await) }
     });
+    register_github_installations(engine, state);
+}
 
-    // hidenamedagent — soft-delete (sets display_hidden = 1) so the
-    // row disappears from the dropdown. Working dir stays on disk.
-    let mstore = state.mstore.clone();
-    let broker = state.broker.clone();
-    engine.register_typed(
-        COMMAND_HIDE_NAMED_AGENT,
-        move |cmd: CommandHideNamedAgentData, _ctx| {
-            let mstore = mstore.clone();
-            let broker = broker.clone();
+/// The agent ↔ identity junction.
+fn register_agent_links(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let deps = Arc::new(links::LinkDeps {
+        identity_store: state.identity_store.clone(),
+        broker: state.broker.clone(),
+        panes: state.mstore.clone(),
+        event_bus: state.event_bus.clone(),
+    });
+    {
+        let deps = deps.clone();
+        engine.register_typed(COMMAND_LINK_AGENT_IDENTITY, move |cmd: CommandLinkAgentIdentityData, _ctx| {
+            let deps = deps.clone();
+            async move { links::link_agent_identity(&deps, &cmd) }
+        });
+    }
+    {
+        let deps = deps.clone();
+        engine.register_typed(COMMAND_UNLINK_AGENT_IDENTITY, move |cmd: CommandUnlinkAgentIdentityData, _ctx| {
+            let deps = deps.clone();
+            async move { links::unlink_agent_identity(&deps, &cmd) }
+        });
+    }
+    {
+        let deps = deps.clone();
+        engine.register_typed(COMMAND_LIST_AGENT_IDENTITIES, move |cmd: CommandListAgentIdentitiesData, _ctx| {
+            let deps = deps.clone();
             async move {
-                let hidden = mstore
-                    .instance_set_hidden(&cmd.id, true)
-                    .map_err(|e| format!("hidenamedagent: {e}"))?;
-                if hidden {
-                    broker.publish_event::<crate::backend::mps_events::NamedAgentsChanged>(&(), vec![], 0);
-                }
-                Ok(HideNamedAgentResult { hidden })
+                deps.identity_store.agent_identity_list_for_agent(&cmd.agent_id).map_err(|e| format!("listagentidentities: {e}"))
             }
-        },
-    );
+        });
+    }
+    // Every direct link across every agent: see the constant's doc comment.
+    engine.register_typed(COMMAND_LIST_ALL_AGENT_IDENTITIES, move |_req: CommandListAllAgentIdentitiesData, _ctx| {
+        let deps = deps.clone();
+        async move { deps.identity_store.agent_identity_list_all().map_err(|e| format!("listallagentidentities: {e}")) }
+    });
+}
+
+/// Named agent continuation (v8).
+fn register_named_agents(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let (mstore, id_store, identity_store) = (state.mstore.clone(), state.id_store.clone(), state.identity_store.clone());
+    let broker = state.broker.clone();
+    {
+        let mstore = mstore.clone();
+        engine.register_typed(COMMAND_LIST_NAMED_AGENTS, move |data: serde_json::Value, _ctx| {
+            let (mstore, id_store, identity_store) = (mstore.clone(), id_store.clone(), identity_store.clone());
+            async move { named_agents::list_named_agents(&mstore, &id_store, &identity_store, data) }
+        });
+    }
+    engine.register_typed(COMMAND_HIDE_NAMED_AGENT, move |cmd: CommandHideNamedAgentData, _ctx| {
+        let (mstore, broker) = (mstore.clone(), broker.clone());
+        async move { named_agents::hide_named_agent(&mstore, &broker, &cmd.id) }
+    });
 }
 
 #[cfg(test)]
