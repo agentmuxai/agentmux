@@ -281,6 +281,24 @@ describe("AuditManager", () => {
         expect(query.mock.calls.length).toBeGreaterThan(before);
     });
 
+    it("asks for this channel's entries first, and for every channel's, in a section each, when This machine is picked", async () => {
+        query.mockResolvedValue(page([entry({ id: "a", summary: "dev one", provenance: { channel: "dev" } })], { channel: "dev" }));
+        render(() => <AuditManager paneBlockId="pane-1" />);
+        await waitFor(() => expect(screen.getByText("dev one")).toBeInTheDocument());
+        expect(query.mock.calls[0][0].scope).toBe("channel");
+        expect(screen.queryByRole("heading", { level: 3 })).toBeNull();
+
+        query.mockResolvedValue(
+            page([entry({ id: "b", summary: "stable one", provenance: { channel: "stable", host: "narko" } }), entry({ id: "a", summary: "dev one", provenance: { channel: "dev" } })], {
+                channel: "dev",
+            })
+        );
+        fireEvent.click(screen.getByRole("radio", { name: "This machine" }));
+        await waitFor(() => expect(screen.getByText("stable one")).toBeInTheDocument());
+        expect(query.mock.calls.at(-1)![0].scope).toBe("machine");
+        expect(screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual(["narko · stable", "dev"]);
+    });
+
     it("shows an error from the query", async () => {
         query.mockRejectedValue(new Error("audit.query: unknown kind"));
         render(() => <AuditManager paneBlockId="pane-1" />);

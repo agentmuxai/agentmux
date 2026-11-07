@@ -5,22 +5,24 @@
 // and end, read from `audit.query` a page at a time with filters, and below it what agents did with the
 // person's secrets (vault-secrets.tsx). The list and how new entries reach it are audit-list.ts.
 
-import { createEffect, createMemo, createSignal, For, on, onCleanup, Show, untrack, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, on, onCleanup, Show, untrack, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
 
-import { Button, FilterInput, Select } from "@/app/element/ui";
+import { Button, FilterInput, Select, SegmentedControl } from "@/app/element/ui";
 import { VaultSecrets } from "@/app/view/vault/vault-secrets";
+import { AuditFeed } from "./audit-feed";
+import { AuditKindChips } from "./audit-kind-chips";
 import { createAuditList } from "./audit-list";
-import { AuditRow } from "./audit-row";
 import {
     emptyFilter,
-    KIND_CHIPS,
     newPillLabel,
     notRecordedNote,
     RANGES,
+    SCOPES,
     totalsLabel,
     type AuditFilter,
     type AuditRange,
+    type AuditScope,
 } from "./audit-shared";
 
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
@@ -77,6 +79,13 @@ export const AuditManager = (props: { paneBlockId: string; visible?: boolean; ag
         <div class="warden-manager-body" ref={body}>
             <p class="warden-manager-summary">Every jekt, fleet action, registration and agent start and end, most recent first</p>
             <div class="audit-filter-bar">
+                <SegmentedControl
+                    options={SCOPES}
+                    value={filter().scope}
+                    onChange={(scope) => set({ scope: scope as AuditScope })}
+                    density="compact"
+                    ariaLabel="Whose entries"
+                />
                 <FilterInput
                     value={agentText()}
                     onInput={(agent) => {
@@ -103,20 +112,7 @@ export const AuditManager = (props: { paneBlockId: string; visible?: boolean; ag
                     ariaLabel="How far back"
                 />
             </div>
-            <div class="audit-kind-chips" role="group" aria-label="Kinds of entry">
-                <For each={KIND_CHIPS}>
-                    {(chip) => (
-                        <Button
-                            tone="quiet"
-                            density="compact"
-                            pressed={filter().kinds.has(chip.kind)}
-                            onClick={() => toggleKind(chip.kind)}
-                        >
-                            {chip.label}
-                        </Button>
-                    )}
-                </For>
-            </div>
+            <AuditKindChips kinds={filter().kinds} onToggle={toggleKind} />
             <div class="audit-live-bar">
                 <Button
                     tone="quiet"
@@ -144,9 +140,7 @@ export const AuditManager = (props: { paneBlockId: string; visible?: boolean; ag
                 when={!empty()}
                 fallback={<div class="warden-section-stub">{list.loading() ? "Loading…" : "No entries match."}</div>}
             >
-                <ul class="audit-feed">
-                    <For each={list.entries()}>{(entry) => <AuditRow entry={entry} now={now()} paneBlockId={props.paneBlockId} />}</For>
-                </ul>
+                <AuditFeed entries={list.entries()} sectioned={filter().scope === "machine"} channel={list.channel()} now={now()} paneBlockId={props.paneBlockId} />
                 <Show when={list.cursor()}>
                     <div class="audit-more">
                         <Button tone="quiet" density="compact" icon="arrow-down" busy={list.loadingMore()} onClick={() => void list.loadMore()}>

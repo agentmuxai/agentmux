@@ -14,87 +14,27 @@
  * See docs/specs/SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md.
  */
 
-import { Button } from "@/element/button";
-import { TextInput } from "@/app/element/ui/inputs";
-import { loginBackend } from "../flows/login-backend";
-import { getApi } from "@/app/store/global";
-import { readText as clipboardReadText, writeText as clipboardWriteText } from "@/util/clipboard";
-import { createEffect, createSignal, Show, type JSX } from "solid-js";
+import { Show, type JSX } from "solid-js";
 import "./InAppLoginPanel.scss";
-import { tip } from "@/app/element/tip";
+import { AuthorizeStep, LoginActions, PasteStep } from "./InAppLoginPanelParts";
+import {
+    createLoginPaste,
+    phaseText,
+    type InAppLoginPanelProps,
+    type InAppLoginPhase,
+} from "./InAppLoginPanelState";
 
-/** Live phase of the in-app login session, surfaced as a status line. */
-export type InAppLoginPhase = "starting" | "waiting-authorize" | "fallback" | "terminal-polling";
-
-export interface InAppLoginPanelProps {
-    providerId: string;
-    providerLabel: string;
-    authUrl: string | undefined;
-    phase: InAppLoginPhase;
-    onCancel: () => void;
-    onUseTerminal: () => void;
-}
+export type { InAppLoginPanelProps, InAppLoginPhase };
 
 export const InAppLoginPanel = (p: InAppLoginPanelProps): JSX.Element => {
-    const [pasteCode, setPasteCode] = createSignal("");
-    const [pasting, setPasting] = createSignal(false);
-    const [pasteResult, setPasteResult] = createSignal<string | null>(null);
-    let inputRef: HTMLInputElement | undefined;
-
-    // Grab focus when the paste input appears (same rationale as
-    // AuthUrlBox/AgentDocumentView: a pasted code must land HERE, not
-    // whatever field held focus before). Deferred a frame so it wins the
-    // host's own focus management; fires once per URL appearance.
-    createEffect(() => {
-        if (p.authUrl) {
-            requestAnimationFrame(() => inputRef?.focus());
-        }
-    });
-
-    const submitCode = async (explicit?: string): Promise<void> => {
-        // Read from the live input element as a fallback (mirrors
-        // AuthUrlBox): if focus desynced and the controlled signal missed
-        // the paste, the DOM value still holds it.
-        const code = (explicit ?? inputRef?.value ?? pasteCode()).trim();
-        if (!code) return;
-        setPasting(true);
-        setPasteResult(null);
-        try {
-            // Delivered to the login child's stdin via the host's
-            // set_provider_auth → CliLoginStdin::write_line plumbing; the
-            // session's completion poll (inside runProviderLogin) then
-            // observes the CLI finishing. SECURITY: the code is single-use
-            // and PKCE-bound to the spawned process (spec §5) — never logged.
-            await loginBackend().submitCode(p.providerId, code);
-            setPasteResult("Code accepted — signing you in…");
-            setPasteCode("");
-        } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            setPasteResult(`Error: ${msg}`);
-        } finally {
-            setPasting(false);
-        }
-    };
-
-    const phaseText = (): string => {
-        switch (p.phase) {
-            case "starting":
-                return `Starting ${p.providerLabel} sign-in — requesting a sign-in link…`;
-            case "waiting-authorize":
-                return "Waiting for you to authorize in the browser — we'll detect it automatically.";
-            case "fallback":
-                return "No sign-in link appeared — trying your existing login, then a terminal…";
-            case "terminal-polling":
-                return "A terminal window opened — finish the login there.";
-        }
-    };
+    const s = createLoginPaste(p);
 
     return (
         <div class="in-app-login-waiting">
             <div class="in-app-login-waiting-title">
                 🔐 Sign in to {p.providerLabel}
             </div>
-            <div class="in-app-login-hint">{phaseText()}</div>
+            <div class="in-app-login-hint">{phaseText(p.phase, p.providerLabel)}</div>
             {/* reagent P1 on PR #2410: gate on phase too, not just authUrl's
                 presence. "Use terminal instead" kills the tier-1 login child
                 (cancelCliLogin) and moves phase to "fallback"/"terminal-
@@ -115,118 +55,12 @@ export const InAppLoginPanel = (p: InAppLoginPanelProps): JSX.Element => {
             >
                 {(url) => (
                     <>
-                        <div class="in-app-login-step">
-                            <div class="in-app-login-url-label">
-                                1 · Authorize in your browser
-                            </div>
-                            <div class="in-app-login-hint">
-                                Your browser should have opened automatically. If it didn't, copy this backup link and open it manually:
-                            </div>
-                            <div class="in-app-login-url-row">
-                                <code class="in-app-login-url-text" {...tip(url())}>
-                                    {url()}
-                                </code>
-                            </div>
-                            <div class="in-app-login-url-actions">
-                                <Button
-                                    className="grey solid"
-                                    onClick={() => {
-                                        try {
-                                            getApi().openExternal(url());
-                                        } catch (e) {
-                                            console.warn(`[auth-diag] openExternal failed: ${(e as Error)?.message ?? String(e)}`);
-                                        }
-                                    }}
-                                >
-                                    Open link
-                                </Button>
-                                <Button
-                                    className="grey solid"
-                                    onClick={() => {
-                                        // CEF clipboard wrapper, not navigator.clipboard —
-                                        // SPEC_UNIFIED_CLIPBOARD_2026_05_18.md §3.3.
-                                        void clipboardWriteText(url()).catch((err) =>
-                                            console.log("clipboard write failed", err),
-                                        );
-                                    }}
-                                >
-                                    Copy link
-                                </Button>
-                            </div>
-                        </div>
-                        <div class="in-app-login-step">
-                            <div class="in-app-login-url-label">
-                                2 · Paste the authorization code
-                            </div>
-                            <div class="in-app-login-hint">
-                                After you authorize, the page shows a code — paste it here:
-                            </div>
-                            <div class="in-app-login-callback-row">
-                                <TextInput
-                                    variant="plain"
-                                    ref={inputRef}
-                                    class="in-app-login-url-input"
-                                    placeholder="Paste the authorization code…"
-                                    value={pasteCode()}
-                                    onInput={(e) => setPasteCode(e.currentTarget.value)}
-                                    onKeyDown={(e) => {
-                                        if (e.key === "Enter") void submitCode();
-                                    }}
-                                    onPaste={(e) => {
-                                        // Auto-submit on paste — pasting the code IS the
-                                        // intent to submit (same UX as AuthUrlBox).
-                                        const text = (e.clipboardData?.getData("text") ?? "").trim();
-                                        if (text) {
-                                            setPasteCode(text);
-                                            void submitCode(text);
-                                        }
-                                    }}
-                                />
-                                <Button
-                                    className="grey solid"
-                                    title="Paste from clipboard and submit"
-                                    onClick={() => {
-                                        clipboardReadText()
-                                            .then((text) => {
-                                                const trimmed = (text ?? "").trim();
-                                                if (trimmed) {
-                                                    setPasteCode(trimmed);
-                                                    void submitCode(trimmed);
-                                                }
-                                            })
-                                            .catch(() => {
-                                                setPasteResult("Could not read clipboard — paste manually");
-                                            });
-                                    }}
-                                >
-                                    Paste &amp; submit
-                                </Button>
-                                <Button
-                                    className="grey solid"
-                                    onClick={() => void submitCode()}
-                                    disabled={pasting()}
-                                >
-                                    {pasting() ? "…" : "Submit"}
-                                </Button>
-                            </div>
-                            <Show when={pasteResult()}>
-                                <div class="in-app-login-hint">{pasteResult()}</div>
-                            </Show>
-                        </div>
+                        <AuthorizeStep url={url} />
+                        <PasteStep s={s} />
                     </>
                 )}
             </Show>
-            <div class="in-app-login-actions">
-                <Button onClick={() => p.onCancel()}>Cancel login</Button>
-                {/* Explicit terminal fallback — never auto-launched (spec
-                    §3.2). Hidden once the flow is already in the terminal
-                    tiers, where the request would only abort a live poll. */}
-                <Show when={p.phase === "starting" || p.phase === "waiting-authorize"}>
-                    <Button className="grey" onClick={() => p.onUseTerminal()}>
-                        Use terminal instead
-                    </Button>
-                </Show>
-            </div>
+            <LoginActions p={p} />
         </div>
     );
 };

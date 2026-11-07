@@ -208,7 +208,7 @@
 139 crates/srv/src/backend/supervisor/watcher.rs::Supervisor::evaluate
 103 crates/srv/src/backend/swarm_remote.rs::lan_hosts
 167 crates/srv/src/backend/sysinfo.rs::log_memory_attribution
-229 crates/srv/src/backend/sysinfo.rs::run_sysinfo_loop
+218 crates/srv/src/backend/sysinfo.rs::run_sysinfo_loop
 106 crates/srv/src/backend/tool_store.rs::get_tool_statuses
 142 crates/srv/src/backend/tool_store.rs::install_tool
 123 crates/srv/src/backend/tower/memory.rs::build
@@ -403,7 +403,6 @@
 126 frontend/app/view/agent/components/AgentShellInfoPanel.tsx::AgentShellInfoPanel
 148 frontend/app/view/agent/components/BtwOverlay.tsx::BtwOverlay
 130 frontend/app/view/agent/components/HiddenTemplatesSection.tsx::HiddenTemplatesSection
-195 frontend/app/view/agent/components/InAppLoginPanel.tsx::InAppLoginPanel
 157 frontend/app/view/agent/components/InputHistorySearch.tsx::InputHistorySearch
 193 frontend/app/view/agent/components/MarkdownBlock.tsx::MarkdownBlock
 141 frontend/app/view/agent/components/MyAgentsList.tsx::MyAgentsList
@@ -440,7 +439,7 @@
 116 frontend/app/view/agent/stream-parser.ts::ClaudeCodeStreamParser::eventToNode
 232 frontend/app/view/agent/useAgentStream.ts::useAgentStream
 116 frontend/app/view/agent/virtualization/held-release.ts::useScrolledOffRelease
-132 frontend/app/view/audit/audit-manager.tsx::AuditManager
+124 frontend/app/view/audit/audit-manager.tsx::AuditManager
 101 frontend/app/view/browser/browser-profile-menu.tsx::BrowserProfileButton
 141 frontend/app/view/browser/use-browser-auth.ts::useBrowserAuth
 148 frontend/app/view/browser/use-freeze-frame.ts::useFreezeFrame
@@ -475,10 +474,10 @@
 153 frontend/app/view/swarm/swarm-model.ts::SwarmViewModel::constructor
 165 frontend/app/view/swarm/swarm-view.tsx::AgentRow
 129 frontend/app/view/swarm/swarm-view.tsx::SubagentRow
-166 frontend/app/view/sysinfo/sysinfo-focus.tsx::FocusView
+161 frontend/app/view/sysinfo/sysinfo-focus.tsx::FocusView
 127 frontend/app/view/sysinfo/sysinfo-model.ts::sampleReducer
-198 frontend/app/view/sysinfo/sysinfo-plot.tsx::TimeChart
-146 frontend/app/view/sysinfo/sysinfo-view.tsx::SysinfoViewInner
+190 frontend/app/view/sysinfo/sysinfo-plot.tsx::TimeChart
+143 frontend/app/view/sysinfo/sysinfo-view.tsx::SysinfoViewInner
 290 frontend/app/view/term/term.tsx::TerminalView
 224 frontend/app/view/term/termViewModel.ts::TermViewModel::constructor
 127 frontend/app/view/term/termwrap.ts::TermWrap::constructor

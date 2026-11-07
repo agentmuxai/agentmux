@@ -1,6 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { phraseCommand } from "@/app/agent-model/command-phrase";
+
 /**
  * What a running tool call is doing, in words, for the working row's live
  * status. Prefers the words the model already wrote for exactly this: Bash's
@@ -63,7 +65,7 @@ export function toolActivity(name: string, params: Record<string, unknown> | und
             const description = str(p.description);
             if (description) return { family: "bash", label: clip(asProgressive(description)) };
             const command = str(p.command);
-            return { family: "bash", label: command ? `Running ${clip(command.split(/\s+/)[0] ?? command, 40)}` : "Running a command" };
+            return { family: "bash", label: command ? clip(asProgressive(phraseCommand(command))) : "Running a command" };
         }
         case "Agent":
         case "Task": {
