@@ -140,7 +140,7 @@ describe("Unbind", () => {
         render(() => <KeyboardSection />);
         fireEvent.click(document.querySelector('[data-group="Go to tab 1–8"] button')!);
         const member = line("tab:goto:3");
-        fireEvent.click(member.querySelector("button")!);
+        fireEvent.click(member.querySelector('button[aria-label^="Unbind"]')!);
         // What saving does: the setting changes and every line is built again from the new view.
         useEntries(h.writes[0][1] as unknown[]);
         expect(line("tab:goto:3")).toBe(member);
