@@ -22,7 +22,7 @@
 # scope per spec §3's surface inventory; they are autocomplete/search-result
 # dropdowns bound to a text input, not anchored pop-up menus):
 #   - suggestion/suggestion.tsx
-#   - element/search.tsx
+#   - element/search-state.ts
 #
 # Usage:
 #   bash scripts/check-menu-positioning.sh
@@ -43,7 +43,7 @@ ALLOWLIST=(
     "frontend/app/element/tooltip.tsx"
     "frontend/app/element/title-tooltip.ts"
     "frontend/app/suggestion/suggestion.tsx"
-    "frontend/app/element/search.tsx"
+    "frontend/app/element/search-state.ts"
 )
 
 is_allowed() {
