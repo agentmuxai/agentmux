@@ -876,4 +876,70 @@
         font-size: var(--text-xs);
         color: var(--error-text-color);
     }
+
+    // The recorder opens under its line: a field to press the shortcut in, what it collides with, and the choices.
+    .kb-recorder {
+        display: flex;
+        flex: 1 0 100%;
+        flex-direction: column;
+        gap: var(--space-2);
+        padding: var(--space-2) var(--space-3);
+        border-left: 2px solid var(--accent-line);
+    }
+
+    .kb-recorder-status {
+        margin: 0;
+        font-size: var(--text-xs);
+        color: var(--secondary-text-color);
+    }
+
+    .kb-recorder-field {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: var(--space-2);
+
+        .kb-capture {
+            flex: 1 1 12rem;
+            min-width: 0;
+        }
+    }
+
+    .kb-recorder-findings {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        font-size: var(--text-xs);
+    }
+
+    .kb-recorder-finding--error {
+        color: var(--error-text-color);
+    }
+
+    .kb-recorder-finding--warn {
+        color: var(--warning-text-color);
+    }
+
+    .kb-recorder-finding--note {
+        color: var(--secondary-text-color);
+    }
+
+    .kb-recorder-choices {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: var(--space-2) var(--space-4);
+        font-size: var(--text-sm);
+    }
+
+    .kb-recorder-choice {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-2);
+    }
+
+    .kb-recorder-actions {
+        display: flex;
+        gap: var(--space-2);
+    }
 }
