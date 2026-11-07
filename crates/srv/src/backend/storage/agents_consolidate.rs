@@ -1079,4 +1079,294 @@ mod tests {
         assert!(stats.already_done, "a marker backed by real data must still short-circuit");
         assert_eq!(count_agents(&conn, "1=1"), 1, "must not double-insert");
     }
+
+    // ── Row-level characterisation of every pass ────────────────────────────
+
+    const AGENT_COLUMNS: &str = "id, name, icon, description, is_template, parent_template_id, \
+        provider, provider_flags, shell, environment, agent_type, agent_bus_id, accounts, \
+        auto_start, restart_on_crash, idle_timeout_minutes, slug, branch_label, \
+        identity_id, memory_id, working_directory, github_context, instance_name, \
+        created_at, updated_at, is_seeded, user_hidden";
+
+    /// One `db_agents` row as `|`-joined text, columns in `AGENT_COLUMNS` order.
+    fn row_of(conn: &Connection, id: &str) -> String {
+        let cols: Vec<String> = AGENT_COLUMNS
+            .split(',')
+            .map(|c| format!("CAST({} AS TEXT)", c.trim()))
+            .collect();
+        let sql = format!("SELECT {} FROM db_agents WHERE id = ?1", cols.join(", "));
+        conn.query_row(&sql, params![id], |r| {
+            let mut parts = Vec::new();
+            for i in 0..27 {
+                parts.push(r.get::<_, String>(i)?);
+            }
+            Ok(parts.join("|"))
+        })
+        .unwrap()
+    }
+
+    /// A definition with a distinct value in every column.
+    fn rich_def(conn: &Connection, id: &str, name: &str, is_seeded: i64, parent_id: &str) {
+        conn.execute(
+            "INSERT INTO db_agent_definitions
+                (id, slug, name, icon, provider, description, working_directory, shell,
+                 provider_flags, auto_start, restart_on_crash, idle_timeout_minutes,
+                 created_at, agent_type, environment, agent_bus_id, is_seeded, accounts,
+                 parent_id, branch_label, updated_at)
+             VALUES (?1, ?1, ?2, 'ic', 'prov', 'descr', '/def/wd', 'zsh',
+                     '--fl', 1, 1, 7,
+                     111, 'sub', 'K=V', 'bus-9', ?3, 'acct-1',
+                     ?4, 'br-1', 222)",
+            params![id, name, is_seeded, parent_id],
+        )
+        .unwrap();
+    }
+
+    /// An instance with a distinct value in every column the backfill copies.
+    fn rich_instance(
+        conn: &Connection,
+        id: &str,
+        definition_id: &str,
+        parent_instance_id: &str,
+        instance_name: &str,
+        created_at: i64,
+        display_hidden: bool,
+    ) {
+        conn.execute(
+            "INSERT INTO db_agent_instances
+                (id, definition_id, parent_instance_id, block_id, session_id, status,
+                 github_context, started_at, ended_at, created_at, identity_id, memory_id,
+                 instance_name, working_directory, display_hidden)
+             VALUES (?1, ?2, ?3, 'blk', 'sess', 'running', 'ghc', 1, 0, ?4, 'idn', 'mem',
+                     ?5, '/inst/wd', ?6)",
+            params![id, definition_id, parent_instance_id, created_at, instance_name, display_hidden as i64],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_seeded_definition_becomes_a_template_carrying_every_column() {
+        let mut conn = fresh_conn();
+        // The parent id is set on purpose: a template ignores it.
+        rich_def(&conn, "tpl", "Tpl", 1, "ignored-parent");
+        run_consolidate_migration(&mut conn, None).unwrap();
+        assert_eq!(
+            row_of(&conn, "tpl"),
+            "tpl|Tpl|ic|descr|1||prov|--fl|zsh|K=V|sub|bus-9|acct-1|1|1|7|tpl|br-1|||/def/wd|||111|222|1|0"
+        );
+    }
+
+    #[test]
+    fn an_unseeded_definition_becomes_a_user_clone_of_its_parent() {
+        let mut conn = fresh_conn();
+        rich_def(&conn, "tpl", "Tpl", 1, "");
+        rich_def(&conn, "usr", "Usr", 0, "tpl");
+        run_consolidate_migration(&mut conn, None).unwrap();
+        assert_eq!(
+            row_of(&conn, "usr"),
+            "usr|Usr|ic|descr|0|tpl|prov|--fl|zsh|K=V|sub|bus-9|acct-1|1|1|7|usr|br-1|||/def/wd|||111|222|0|0"
+        );
+    }
+
+    #[test]
+    fn an_instance_of_a_template_becomes_a_user_clone_keyed_by_the_instance() {
+        let mut conn = fresh_conn();
+        rich_def(&conn, "tpl", "Tpl", 1, "");
+        rich_instance(&conn, "i1", "tpl", "", "Inst", 555, true);
+        let stats = run_consolidate_migration(&mut conn, None).unwrap();
+        assert_eq!(stats.instances_as_clone_inserted, 1);
+        // Definition fields from the template, bindings and timestamps from the
+        // instance; the clone is never seeded even though its template is.
+        assert_eq!(
+            row_of(&conn, "i1"),
+            "i1|Inst|ic|descr|0|tpl|prov|--fl|zsh|K=V|sub|bus-9|acct-1|1|1|7|tpl|br-1|idn|mem|/inst/wd|ghc|Inst|555|555|0|1"
+        );
+    }
+
+    #[test]
+    fn two_instances_of_one_template_each_get_their_own_clone() {
+        let mut conn = fresh_conn();
+        rich_def(&conn, "tpl", "Tpl", 1, "");
+        rich_instance(&conn, "i1", "tpl", "", "One", 100, false);
+        rich_instance(&conn, "i2", "tpl", "", "Two", 200, false);
+        let stats = run_consolidate_migration(&mut conn, None).unwrap();
+        assert_eq!(stats.instances_as_clone_inserted, 2);
+        assert_eq!(stats.instances_collision_warned, 0);
+        assert_eq!(count_agents(&conn, "is_template = 0"), 2);
+    }
+
+    #[test]
+    fn folding_an_instance_into_a_user_clone_rewrites_only_the_binding_columns() {
+        let mut conn = fresh_conn();
+        rich_def(&conn, "tpl", "Tpl", 1, "");
+        rich_def(&conn, "usr", "Usr", 0, "tpl");
+        // Launched after the definition was last edited (222).
+        rich_instance(&conn, "i2", "usr", "", "Folded", 333, false);
+        let stats = run_consolidate_migration(&mut conn, None).unwrap();
+        assert_eq!(stats.instances_folded_into_def, 1);
+        assert_eq!(
+            row_of(&conn, "usr"),
+            "usr|Folded|ic|descr|0|tpl|prov|--fl|zsh|K=V|sub|bus-9|acct-1|1|1|7|usr|br-1|idn|mem|/inst/wd|ghc|Folded|111|333|0|0"
+        );
+        // No row is keyed by the folded instance.
+        assert_eq!(count_agents(&conn, "id = 'i2'"), 0);
+    }
+
+    #[test]
+    fn an_unnamed_instance_folds_in_under_its_definitions_name() {
+        let mut conn = fresh_conn();
+        rich_def(&conn, "tpl", "Tpl", 1, "");
+        rich_def(&conn, "usr", "Usr", 0, "tpl");
+        rich_instance(&conn, "i2", "usr", "", "", 333, true);
+        run_consolidate_migration(&mut conn, None).unwrap();
+        assert_eq!(
+            row_of(&conn, "usr"),
+            "usr|Usr|ic|descr|0|tpl|prov|--fl|zsh|K=V|sub|bus-9|acct-1|1|1|7|usr|br-1|idn|mem|/inst/wd|ghc||111|333|0|1"
+        );
+    }
+
+    #[test]
+    fn three_instances_on_one_user_clone_fold_the_newest_and_warn_twice() {
+        let mut conn = fresh_conn();
+        rich_def(&conn, "tpl", "Tpl", 1, "");
+        rich_def(&conn, "usr", "Usr", 0, "tpl");
+        rich_instance(&conn, "old", "usr", "", "Old", 100, false);
+        rich_instance(&conn, "mid", "usr", "", "Mid", 200, false);
+        rich_instance(&conn, "new", "usr", "", "New", 300, false);
+        let stats = run_consolidate_migration(&mut conn, None).unwrap();
+        assert_eq!(stats.instances_folded_into_def, 1);
+        assert_eq!(stats.instances_collision_warned, 2);
+        assert_eq!(row_of(&conn, "usr").split('|').nth(22), Some("New"));
+    }
+
+    #[test]
+    fn a_newer_continuation_row_does_not_use_up_the_fold_slot() {
+        let mut conn = fresh_conn();
+        rich_def(&conn, "tpl", "Tpl", 1, "");
+        rich_def(&conn, "usr", "Usr", 0, "tpl");
+        rich_instance(&conn, "real", "usr", "", "Real", 100, false);
+        rich_instance(&conn, "cont", "usr", "real", "Cont", 900, false);
+        let stats = run_consolidate_migration(&mut conn, None).unwrap();
+        assert_eq!(stats.instances_skipped_continuation, 1);
+        assert_eq!(stats.instances_collision_warned, 0);
+        assert_eq!(stats.instances_folded_into_def, 1);
+        assert_eq!(row_of(&conn, "usr").split('|').nth(22), Some("Real"));
+    }
+
+    #[test]
+    fn an_instance_with_no_definition_is_skipped_and_counted() {
+        let mut conn = fresh_conn();
+        // The cascade would have removed this row; switch the key check off to
+        // get one that survived.
+        conn.execute_batch("PRAGMA foreign_keys=OFF;").unwrap();
+        rich_def(&conn, "tpl", "Tpl", 1, "");
+        rich_instance(&conn, "orphan", "ghost", "", "Orphan", 100, false);
+        let stats = run_consolidate_migration(&mut conn, None).unwrap();
+        assert_eq!(stats.instances_skipped_no_definition, 1);
+        assert_eq!(stats.instances_skipped_continuation, 0);
+        assert_eq!(stats.instances_as_clone_inserted, 0);
+        assert_eq!(count_agents(&conn, "1 = 1"), 1);
+    }
+
+    #[test]
+    fn an_orphaned_continuation_row_counts_as_a_continuation_not_an_orphan() {
+        let mut conn = fresh_conn();
+        conn.execute_batch("PRAGMA foreign_keys=OFF;").unwrap();
+        rich_instance(&conn, "cont", "ghost", "parent", "Cont", 100, false);
+        // No definitions at all: the table exists but is empty, so the pass runs.
+        let stats = run_consolidate_migration(&mut conn, None).unwrap();
+        assert_eq!(stats.instances_skipped_continuation, 1);
+        assert_eq!(stats.instances_skipped_no_definition, 0);
+    }
+
+    #[test]
+    fn a_missing_instances_table_still_backfills_the_definitions() {
+        let mut conn = fresh_conn();
+        conn.execute_batch("DROP TABLE db_agent_instances;").unwrap();
+        rich_def(&conn, "tpl", "Tpl", 1, "");
+        rich_def(&conn, "usr", "Usr", 0, "tpl");
+        let tmp = tempfile::tempdir().unwrap();
+        let stats = run_consolidate_migration(&mut conn, Some(tmp.path())).unwrap();
+        assert_eq!(stats.templates_inserted, 1);
+        assert_eq!(stats.user_defs_inserted, 1);
+        assert_eq!(stats.instances_as_clone_inserted, 0);
+        assert_eq!(count_agents(&conn, "1 = 1"), 2);
+        assert!(tmp.path().join(CONSOLIDATE_MARKER).exists());
+    }
+
+    #[test]
+    fn a_missing_definitions_table_returns_empty_stats_and_writes_no_marker() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        run_object_schema(&conn).unwrap();
+        conn.execute_batch("CREATE TABLE db_agent_instances (id TEXT PRIMARY KEY);").unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let stats = run_consolidate_migration(&mut conn, Some(tmp.path())).unwrap();
+        assert_eq!(stats, ConsolidateStats::default());
+        assert!(!tmp.path().join(CONSOLIDATE_MARKER).exists());
+    }
+
+    #[test]
+    fn a_completed_run_writes_the_marker_even_with_nothing_to_move() {
+        let mut conn = fresh_conn();
+        let tmp = tempfile::tempdir().unwrap();
+        let stats = run_consolidate_migration(&mut conn, Some(tmp.path())).unwrap();
+        assert_eq!(stats, ConsolidateStats::default());
+        assert_eq!(std::fs::read(tmp.path().join(CONSOLIDATE_MARKER)).unwrap(), b"phase3a");
+    }
+
+    #[test]
+    fn a_marker_that_cannot_be_written_does_not_fail_the_run() {
+        let mut conn = fresh_conn();
+        rich_def(&conn, "tpl", "Tpl", 1, "");
+        let tmp = tempfile::tempdir().unwrap();
+        let missing = tmp.path().join("no-such-dir");
+        let stats = run_consolidate_migration(&mut conn, Some(&missing)).unwrap();
+        assert_eq!(stats.templates_inserted, 1);
+        assert_eq!(count_agents(&conn, "1 = 1"), 1);
+        assert!(!missing.exists());
+    }
+
+    #[test]
+    fn a_failure_part_way_rolls_everything_back_and_leaves_no_marker() {
+        let mut conn = fresh_conn();
+        rich_def(&conn, "tpl", "Tpl", 1, "");
+        rich_instance(&conn, "i1", "tpl", "", "Inst", 100, false);
+        // The template inserts fine; the clone for the instance is refused.
+        conn.execute_batch(
+            "CREATE TRIGGER refuse_clone BEFORE INSERT ON db_agents
+             WHEN NEW.id = 'i1'
+             BEGIN SELECT RAISE(ABORT, 'refused'); END;",
+        )
+        .unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(run_consolidate_migration(&mut conn, Some(tmp.path())).is_err());
+        assert_eq!(count_agents(&conn, "1 = 1"), 0, "the template insert must roll back too");
+        assert!(!tmp.path().join(CONSOLIDATE_MARKER).exists());
+
+        // The next start retries from scratch.
+        conn.execute_batch("DROP TRIGGER refuse_clone;").unwrap();
+        let stats = run_consolidate_migration(&mut conn, Some(tmp.path())).unwrap();
+        assert_eq!(stats.templates_inserted, 1);
+        assert_eq!(stats.instances_as_clone_inserted, 1);
+        assert_eq!(count_agents(&conn, "1 = 1"), 2);
+        assert!(tmp.path().join(CONSOLIDATE_MARKER).exists());
+    }
+
+    #[test]
+    fn running_twice_without_a_marker_replaces_rows_instead_of_failing() {
+        let mut conn = fresh_conn();
+        rich_def(&conn, "tpl", "Tpl", 1, "");
+        rich_def(&conn, "usr", "Usr", 0, "tpl");
+        rich_instance(&conn, "i1", "tpl", "", "Inst", 100, false);
+        rich_instance(&conn, "i2", "usr", "", "Folded", 333, false);
+        let first = run_consolidate_migration(&mut conn, None).unwrap();
+        let rows_after_first: Vec<String> =
+            ["tpl", "usr", "i1"].iter().map(|id| row_of(&conn, id)).collect();
+        let second = run_consolidate_migration(&mut conn, None).unwrap();
+        assert_eq!(first, second);
+        let rows_after_second: Vec<String> =
+            ["tpl", "usr", "i1"].iter().map(|id| row_of(&conn, id)).collect();
+        assert_eq!(rows_after_first, rows_after_second);
+        assert_eq!(count_agents(&conn, "1 = 1"), 3);
+    }
 }
