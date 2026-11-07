@@ -66,6 +66,12 @@ describe("Help", () => {
         expect(entry("tab:close")).toMatchObject({ keys: [], unbound: true, defaults: ["Ctrl+Alt+Shift+W", "Ctrl+F4"] });
     });
 
+    it("does not list a command that never had a key on this platform", () => {
+        const all = helpSections("other").flatMap((s) => s.entries);
+        expect(all.some((e) => e.command === "pane:refocus")).toBe(false);
+        expect(all.some((e) => e.unbound)).toBe(false);
+    });
+
     it("keeps a grouped line while any of its commands has a key", () => {
         setUserKeybindings([{ command: "-tab:goto:3", platform: "other" }]);
         const group = helpSections("other").flatMap((s) => s.entries).filter((e) => e.label === "Go to tab 1–8");

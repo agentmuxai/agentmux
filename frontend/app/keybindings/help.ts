@@ -74,7 +74,7 @@ export function helpSections(platform: KeyPlatform): HelpSection[] {
         const known = entries.get(v.helpGroup ?? v.command);
         if (known) {
             if (!v.helpGroup && v.changed && v.defaults.length > 0) known.entry.defaults = defaultsOf(v.defaults);
-        } else if (v.unbound) {
+        } else if (v.unbound && v.changed) {
             const entry: HelpEntry = { label: v.helpGroup ?? v.label, keys: [], command: v.command, unbound: true };
             if (v.defaults.length > 0 && !v.helpGroup) entry.defaults = defaultsOf(v.defaults);
             entries.set(v.helpGroup ?? v.command, { category: v.category, entry, groupKeys: [] });
