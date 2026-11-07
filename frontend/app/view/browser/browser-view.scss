@@ -651,7 +651,10 @@ $browser-nav-stack-below: 388px;
     }
 }
 
+// Follows chrome zoom like the address bar above it, so at 150% the strip's text and buttons grow with
+// the rest of the chrome (a Linux look check found it staying at 100%).
 .browser-downloads {
+    zoom: var(--zoomfactor);
     display: flex;
     flex-direction: column;
     flex-shrink: 0;
