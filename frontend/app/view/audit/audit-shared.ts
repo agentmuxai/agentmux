@@ -113,7 +113,8 @@ export function sectionsOf(entries: readonly AuditEntry[], own: string | undefin
 
 function sectionLabel(section: AuditSection): string {
     const named = (field: "host" | "version") => section.entries.find((e) => e.provenance?.[field])?.provenance?.[field];
-    return [named("host"), section.key || "this channel", named("version")].filter(Boolean).join(" · ");
+    // A channel with no name (a dev home) is left out; "this channel" is only for a section that says nothing at all.
+    return [named("host"), section.key, named("version")].filter(Boolean).join(" · ") || "this channel";
 }
 
 /** How many entries of `fresh` (the newest page) the list shown does not hold. */

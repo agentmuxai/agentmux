@@ -154,5 +154,7 @@ describe("sections", () => {
         expect(full.label).toBe("narko · stable · 0.60.19");
         expect(bare.label).toBe("dev");
         expect(sectionsOf([from("c")], undefined)[0].label).toBe("this channel");
+        // A channel with no name is left out of the label, not named "this channel" between a host and a version.
+        expect(sectionsOf([from("d", "", { host: "starpower", version: "0.60.19" })], undefined)[0].label).toBe("starpower · 0.60.19");
     });
 });
