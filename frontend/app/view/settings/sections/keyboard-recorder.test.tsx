@@ -173,6 +173,27 @@ describe("saving", () => {
     });
 });
 
+describe("the recorder's own controls", () => {
+    it("keep their arrow keys: the picker does not send the focus to another line", () => {
+        render(() => <KeyboardSection />);
+        open();
+        const picker = screen.getByLabelText("Where this shortcut works");
+        picker.focus();
+        expect(fireEvent.keyDown(picker, { key: "ArrowDown" })).toBe(true);
+        expect(document.activeElement).toBe(picker);
+    });
+
+    it("say why an AltGr character is not recorded", () => {
+        render(() => <KeyboardSection />);
+        const input = open();
+        press(input, "@", "KeyQ", { ctrlKey: true, altKey: true, modifierAltGraph: true });
+        expect(input.value).toBe("");
+        expect(document.body.textContent).toContain("AltGr types a character on this keyboard");
+        press(input, "y", "KeyY", { ctrlKey: true, shiftKey: true });
+        expect(document.body.textContent).not.toContain("AltGr types a character on this keyboard");
+    });
+});
+
 describe("collisions", () => {
     it("names the command that has the key, and takes it only on Replace", () => {
         render(() => <KeyboardSection />);
@@ -197,6 +218,28 @@ describe("collisions", () => {
         expect(screen.queryByRole("button", { name: "Replace" })).toBeNull();
         fireEvent.click(button("Save"));
         expect(h.writes[0][1]).toContainEqual({ command: "tab:new", key: "ctrl+shift+c", when: "!terminalFocus", platform: "other" });
+    });
+});
+
+describe("what the recorder says follows what is recorded", () => {
+    it("drops the plain-key refusal as soon as plain keys are allowed", () => {
+        render(() => <KeyboardSection />);
+        press(open(), "t", "KeyT");
+        expect(document.body.textContent).toContain("A plain key would fire while you type");
+        fireEvent.click(screen.getByRole("switch", { name: "Allow plain keys" }));
+        expect(document.body.textContent).not.toContain("A plain key would fire while you type");
+    });
+
+    it("drops a collision when a second key makes the shortcut a different one", () => {
+        render(() => <KeyboardSection />);
+        const input = open();
+        press(input, "W", "KeyW", { ctrlKey: true, shiftKey: true });
+        expect(document.body.textContent).toContain("is already Close pane");
+        press(input, "k", "KeyK", { ctrlKey: true });
+        expect(input.value).toBe("Ctrl+Shift+W then Ctrl+K");
+        expect(document.body.textContent).not.toContain("is already Close pane");
+        // Now it is a chord whose first step Close pane uses on its own.
+        expect(document.body.textContent).toContain("Close pane uses Ctrl+Shift+W on its own, so this two-step shortcut could never start.");
     });
 });
 

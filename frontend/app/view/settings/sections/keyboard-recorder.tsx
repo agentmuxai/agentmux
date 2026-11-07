@@ -5,32 +5,32 @@
 // §4.5, §5): the person presses the new shortcut, sees what it collides with, and saves it. The rules are in
 // keyboard-recorder-state.ts; this is the field and its choices.
 
-import { createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
 
 import { Button, Select, Switch, TextInput } from "@/app/element/ui";
 import { captureKey } from "@/app/keybindings/capture";
 import { formatKey, type KeyPlatform } from "@/app/keybindings/keys";
 import type { CommandBindings } from "@/app/keybindings/registry";
-import { disableGlobalKeybindings, enableGlobalKeybindings } from "@/app/store/keymodel";
+import { useKeyCapture } from "./keyboard-capture-field";
 import type { KeyboardEdit } from "./keyboard-section-parts";
 import { committed, conflictText, MAX_STEPS, ownWhen, propose, recorderStatus, verdictOf, whereChoices, type Proposal, type Verdict } from "./keyboard-recorder-state";
 
 /** Why a key cannot be saved, or the conflicts it has, under the field. */
 function Findings(p: { proposal: Proposal; mine: string; platform: KeyPlatform }): JSX.Element {
-    const { proposal, platform } = p;
+    // Read through `p` each time: the proposal changes while this stays on screen (a switch, a second key).
     return (
         <ul class="kb-recorder-findings" role="list">
-            <Show when={proposal.refusedPlain}>
+            <Show when={p.proposal.refusedPlain}>
                 <li class="kb-recorder-finding--error">A plain key would fire while you type. Allow plain keys below to use it; it then works only outside text fields and terminals.</li>
             </Show>
-            <Show when={proposal.blocked}>
-                <li class="kb-recorder-finding--error">{proposal.blocked!.reason}. It cannot be used.</li>
+            <Show when={p.proposal.blocked}>
+                <li class="kb-recorder-finding--error">{p.proposal.blocked!.reason}. It cannot be used.</li>
             </Show>
-            <Show when={proposal.warned}>
-                <li class="kb-recorder-finding--warn">{proposal.warned!.reason}.</li>
+            <Show when={p.proposal.warned}>
+                <li class="kb-recorder-finding--warn">{p.proposal.warned!.reason}.</li>
             </Show>
-            <For each={proposal.plan.conflicts}>
-                {(c) => <li class={c.blocking ? "kb-recorder-finding--error" : "kb-recorder-finding--note"}>{conflictText(c, p.mine, platform)}</li>}
+            <For each={p.proposal.plan.conflicts}>
+                {(c) => <li class={c.blocking ? "kb-recorder-finding--error" : "kb-recorder-finding--note"}>{conflictText(c, p.mine, p.platform)}</li>}
             </For>
         </ul>
     );
@@ -106,6 +106,7 @@ export function KeyRecorder(p: { c: () => CommandBindings; edit: KeyboardEdit; o
     const [where, setWhere] = createSignal(ownWhen(c().command));
     const [allowPlain, setAllowPlain] = createSignal(false);
     const [confirmed, setConfirmed] = createSignal(false);
+    const [altGr, setAltGr] = createSignal(false);
     let field: HTMLInputElement | undefined;
 
     const proposal = createMemo(() => propose(edit.entries(), c().command, steps(), { keepCurrent: keepCurrent(), where: where(), allowPlain: allowPlain() }, edit.platform));
@@ -119,6 +120,7 @@ export function KeyRecorder(p: { c: () => CommandBindings; edit: KeyboardEdit; o
     };
     const record = (key: string) => {
         setConfirmed(false);
+        setAltGr(false);
         setSteps(steps().length >= MAX_STEPS ? [key] : [...steps(), key]);
     };
 
@@ -135,16 +137,9 @@ export function KeyRecorder(p: { c: () => CommandBindings; edit: KeyboardEdit; o
         if (alone && e.key === "Enter") return verdict() === "save" ? save(false) : undefined;
         const got = captureKey(e);
         if ("key" in got) record(got.key);
+        else if (got.ignored === "altgr") setAltGr(true);
     };
-    onMount(() => {
-        disableGlobalKeybindings();
-        field?.addEventListener("keydown", onKeyDown, true);
-        field?.focus();
-    });
-    onCleanup(() => {
-        field?.removeEventListener("keydown", onKeyDown, true);
-        enableGlobalKeybindings();
-    });
+    useKeyCapture(() => field, onKeyDown);
 
     return (
         <div
@@ -161,6 +156,9 @@ export function KeyRecorder(p: { c: () => CommandBindings; edit: KeyboardEdit; o
             <p class="kb-recorder-status" role="status" aria-live="polite">
                 {recorderStatus(c().label, proposal(), verdict(), edit.platform)}
             </p>
+            <Show when={altGr()}>
+                <p class="kb-recorder-finding--note">AltGr types a character on this keyboard, so it cannot be part of a shortcut. Try Ctrl or Alt on their own.</p>
+            </Show>
             <div class="kb-recorder-field">
                 <TextInput
                     detached

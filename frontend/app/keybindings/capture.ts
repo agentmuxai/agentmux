@@ -13,7 +13,7 @@ export interface CaptureEvent extends KeyEventLike {
 }
 
 /** The key as a setting string, or why the press is not a shortcut. */
-export type Captured = { key: string } | { ignored: "modifier" | "composing" | "repeat" | "unknown" };
+export type Captured = { key: string } | { ignored: "modifier" | "composing" | "repeat" | "altgr" | "unknown" };
 
 const MODIFIER_KEYS = new Set(["Control", "Shift", "Alt", "Meta", "AltGraph", "OS", "Hyper", "Super", "CapsLock", "NumLock", "ScrollLock", "Fn", "FnLock"]);
 /** Keys whose `key` says nothing about which key it was: the physical key is used instead. */
@@ -34,11 +34,14 @@ function tokenOf(e: CaptureEvent): string | null {
 }
 
 /** A recorded press: modifiers in a fixed order (Ctrl, Alt, Shift, Meta), then the key. A modifier alone, a press
- *  while an input method is composing and a key held down are not shortcuts. */
+ *  while an input method is composing, a key held down and an AltGr character are not shortcuts. */
 export function captureKey(e: CaptureEvent): Captured {
     if (e.isComposing || e.key === "Process") return { ignored: "composing" };
     if (e.repeat) return { ignored: "repeat" };
     if (MODIFIER_KEYS.has(e.key)) return { ignored: "modifier" };
+    // AltGr (Ctrl+Alt on Windows) that types a character: the dispatcher never matches it as a shortcut (`matchKey`),
+    // so recording it would save a key that cannot fire.
+    if (e.getModifierState?.("AltGraph") && e.key.length === 1 && !/^[a-zA-Z]$/.test(e.key)) return { ignored: "altgr" };
     const token = tokenOf(e);
     if (!token) return { ignored: "unknown" };
     const mods = [e.ctrlKey && "ctrl", e.altKey && "alt", e.shiftKey && "shift", e.metaKey && "meta"].filter(Boolean);
