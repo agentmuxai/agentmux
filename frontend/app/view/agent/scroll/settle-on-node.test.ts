@@ -10,7 +10,7 @@ import {
 } from "./settle-on-node";
 
 /** A page of 16 ms frames, a clock that moves with them, and a position the settler writes. */
-function page(aims: (frame: number) => number | null) {
+function page(aims: (frame: number) => number | null, ready: (frame: number) => boolean = () => true) {
     let clock = 0;
     let frames = 0;
     let pending: (() => void) | null = null;
@@ -25,6 +25,7 @@ function page(aims: (frame: number) => number | null) {
         write: (top) => writes.push(top),
         userActive: () => host.user,
         viewKey: () => host.key,
+        ready: () => ready(frames),
         frame: (cb) => {
             pending = cb;
             return 1;
@@ -78,6 +79,33 @@ describe("createNodeSettler", () => {
         expect(p.writes).toEqual([1000, 1400, 1460]);
         expect(s.active()).toBe(false);
         expect(p.frames()).toBe(4 + SETTLE_NODE_QUIET_FRAMES);
+    });
+
+    it("does not take a held aim as landed while the layout has not caught up, however many frames pass", () => {
+        // The window follows the scroll position late: the aim holds, but the rows are not measured until frame 9.
+        const p = page(
+            () => 1000,
+            (f) => f >= 9
+        );
+        const s = createNodeSettler(p.h);
+        s.start();
+        p.run();
+        expect(p.frames()).toBe(9 + SETTLE_NODE_QUIET_FRAMES - 1);
+        expect(p.writes).toEqual([1000]);
+        expect(s.active()).toBe(false);
+    });
+
+    it("re-aims while not ready, and the time limit still ends a layout that never gets ready", () => {
+        const p = page(
+            (f) => 1000 + (f < 4 ? 0 : 300),
+            () => false
+        );
+        const s = createNodeSettler(p.h);
+        s.start();
+        p.run(500);
+        expect(p.writes).toEqual([1000, 1300]);
+        expect(p.now()).toBeGreaterThanOrEqual(SETTLE_NODE_MAX_MS);
+        expect(s.active()).toBe(false);
     });
 
     it("ignores a change under a pixel", () => {

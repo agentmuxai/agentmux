@@ -15,8 +15,8 @@
  * through `scrollTranscriptTo`, the one scroll writer.
  */
 
-/** Longest a jump keeps re-aiming. */
-export const SETTLE_NODE_MAX_MS = 600;
+/** Longest a jump keeps re-aiming. A slow machine measures the rows it has drawn a few frames late. */
+export const SETTLE_NODE_MAX_MS = 1000;
 /** Frames in a row with the aim unchanged before the jump is taken as landed. */
 export const SETTLE_NODE_QUIET_FRAMES = 3;
 /** An aim that differs by less than this many px is the same aim. */
@@ -31,6 +31,12 @@ export interface NodeSettlerHost {
     userActive: () => boolean;
     /** Changes when a zoom change or a resize voids the aim. */
     viewKey: () => string;
+    /**
+     * The layout has caught up with where the transcript is and has a height for every row in its window. Until it
+     * has, an aim that holds only means the news has not arrived: the window follows the scroll position a frame
+     * or more after a write, and the rows it draws are measured a frame after that.
+     */
+    ready: () => boolean;
     frame: (cb: () => void) => number;
     cancelFrame: (id: number) => void;
     now: () => number;
@@ -80,7 +86,8 @@ export function createNodeSettler(host: NodeSettlerHost): NodeSettler {
                     aimed = aim;
                     quiet = 0;
                 } else if (aim !== null) {
-                    quiet++;
+                    // The aim holding counts only once the layout has caught up with where the page is.
+                    quiet = host.ready() ? quiet + 1 : 0;
                 }
                 if (quiet >= SETTLE_NODE_QUIET_FRAMES || host.now() - startedAt >= SETTLE_NODE_MAX_MS) return stop();
                 raf = host.frame(tick);
