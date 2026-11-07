@@ -1246,8 +1246,8 @@ pub async fn run_sysinfo_loop(
             net_state.get_net_data(net_totals, &mut values);
             get_disk_data(&disks, elapsed_secs, &mut values);
             // Must follow get_disk_data: it summarises the per-volume figures that
-            // call just wrote. The Windows equivalent already ran inside
-            // block_in_place above (it makes a real syscall); this one does not.
+            // call just wrote. The Windows equivalent already ran with the
+            // machine reads above (it makes a real syscall); this one does not.
             #[cfg(not(target_os = "windows"))]
             get_watch_volume_data(&disks, &mut values);
 

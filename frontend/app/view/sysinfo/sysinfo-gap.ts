@@ -17,6 +17,12 @@ import type { DataItem } from "./sysinfo-types";
 /** The sample key for the milliseconds its rates average over (srv's `SAMPLE_WINDOW_KEY`). */
 export const SAMPLE_WINDOW_KEY = "sample:window_ms";
 
+/** Set on the row `gapBetween` adds to draw a step: not a sample, so a merge and the window figures skip it. */
+export const STEP_KEY = "step";
+
+/** Whether `row` is a step row, not a sample srv took. */
+export const isStepRow = (row: DataItem): boolean => row[STEP_KEY] === 1;
+
 /** A window may fall this far short of its gap (clock rounding between srv and the pane) and still cover it. */
 const COVER_SLACK_MS = 500;
 /** A gap longer than this is an outage, not a late tick, whatever its window says (a sleeping machine, a hung srv). */
@@ -42,7 +48,7 @@ export type GapMarker = (ts: number) => DataItem;
  */
 export function gapBetween(prev: DataItem, cur: DataItem, blank: GapMarker): DataItem[] {
     if (!coversGap(prev, cur)) return [blank(prev.ts + 1), blank(cur.ts - 1)];
-    const step: DataItem = { ts: prev.ts + 1 };
+    const step: DataItem = { ts: prev.ts + 1, [STEP_KEY]: 1 };
     for (const key of Object.keys(cur)) {
         if (key === "ts") continue;
         step[key] = isWindowAverage(key) ? cur[key] : (prev[key] ?? cur[key]);

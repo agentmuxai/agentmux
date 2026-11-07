@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 
 import { sampleReducer } from "./sysinfo-model";
-import { coversGap, MAX_COVERED_GAP_MS, SAMPLE_WINDOW_KEY } from "./sysinfo-gap";
+import { coversGap, isStepRow, MAX_COVERED_GAP_MS, SAMPLE_WINDOW_KEY } from "./sysinfo-gap";
 import type { DataItem } from "./sysinfo-types";
 
 const sample = (ts: number, cpu: number, window = 1000, mem = 8): DataItem => ({
@@ -88,5 +88,30 @@ describe("a backfill", () => {
             numPoints: 120,
         });
         expect(merged).toBe(rows);
+    });
+});
+
+describe("the step row", () => {
+    const late = () => {
+        let rows = append([], sample(1000, 10));
+        rows = append(rows, sample(2000, 12));
+        return append(rows, sample(7000, 96, 5000));
+    };
+
+    it("is marked, so it is not a sample", () => {
+        const rows = late();
+        expect(rows.filter(isStepRow).map((r) => r.ts)).toEqual([2001]);
+        expect(rows.filter((r) => !isStepRow(r) && r.blank !== 1)).toHaveLength(3);
+    });
+
+    it("is not read as a sample by a merge: one that adds nothing returns the series, one that adds a sample keeps one step", () => {
+        const rows = late();
+        const same = sampleReducer(rows, { type: "MERGE", items: [sample(1000, 10), sample(2000, 12)], intervalSecs: 1, numPoints: 120 });
+        expect(same).toBe(rows);
+        const more = sampleReducer(rows, { type: "MERGE", items: [sample(500, 9)], intervalSecs: 1, numPoints: 120 });
+        expect(more.filter(isStepRow)).toHaveLength(1);
+        const again = sampleReducer(more, { type: "MERGE", items: [sample(400, 8)], intervalSecs: 1, numPoints: 120 });
+        expect(again.filter(isStepRow)).toHaveLength(1);
+        expect(new Set(again.map((r) => r.ts)).size).toBe(again.length);
     });
 });

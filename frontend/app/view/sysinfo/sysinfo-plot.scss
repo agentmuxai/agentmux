@@ -30,7 +30,8 @@
     top: var(--sysinfo-text-inset, 1px);
     left: 0;
     right: 0;
-    padding: 0 var(--sysinfo-text-inset, 1px);
+    // Left of the title: the top y label's width (sysinfo-plot.tsx), so the two don't overlap on the top line.
+    padding: 0 var(--sysinfo-text-inset, 1px) 0 calc(var(--sysinfo-ylabel-w, 0px) + var(--sysinfo-text-inset, 1px));
     z-index: var(--z-over-content);
     font-size: calc(var(--text-xs) * var(--sysinfo-zoom));
     line-height: calc(12px * var(--sysinfo-zoom));

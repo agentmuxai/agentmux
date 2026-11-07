@@ -293,6 +293,9 @@ describe("SingleLinePlot text zoom and placement", () => {
         expect(labels.map((l) => l.style.transform)).toEqual(["translateY(-100%)", "translateY(-50%)", "translateY(-50%)"]);
         // Widest label "100%" is 28px; plus the 1px inset and the 8px margin: 37px of fade, from the edge.
         expect(erased).toEqual(["0+37 destination-out"]);
+        // The title keeps to the right of the labels: the chart carries their width for it.
+        const chartEl = container.querySelector(".sysinfo-chart") as HTMLElement;
+        expect(chartEl.style.getPropertyValue("--sysinfo-ylabel-w")).toBe("29px");
     });
 
     it("draws neither labels nor fade where a neighbour has them", async () => {
@@ -304,5 +307,6 @@ describe("SingleLinePlot text zoom and placement", () => {
         opts.hooks.draw[0](drawnPlot(erased));
         expect(container.querySelectorAll(".sysinfo-chart-ylabel")).toHaveLength(0);
         expect(erased).toEqual([]);
+        expect((container.querySelector(".sysinfo-chart") as HTMLElement).style.getPropertyValue("--sysinfo-ylabel-w")).toBe("");
     });
 });

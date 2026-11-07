@@ -65,15 +65,21 @@ function edgeSafe(u: uPlot, splits: number[], labels: string[]): string[] {
     });
 }
 
+/** The widest y label's width, set on the chart for its title (sysinfo-plot.scss). */
+const YLABEL_WIDTH_VAR = "--sysinfo-ylabel-w";
+
 /** The y labels over the plot's left end, and the fade under them; none, and nothing is drawn or faded. */
 function placeYLabels(u: uPlot, into: HTMLElement, labels: YLabel[]): void {
     if (labels.length === 0) {
         into.replaceChildren();
+        into.parentElement?.style.removeProperty(YLABEL_WIDTH_VAR);
         return;
     }
     u.ctx.font = (u.axes[1] as any).font[0];
     const widest = Math.max(...labels.map((l) => u.ctx.measureText(l.text).width)) / uPlot.pxRatio;
     fadeLeftEnd(u, (widest + TEXT_INSET_PX + FADE_EXTRA_PX) * uPlot.pxRatio);
+    // The title shares the top line with the top label: it keeps to the right of it.
+    into.parentElement?.style.setProperty(YLABEL_WIDTH_VAR, `${Math.ceil(widest) + TEXT_INSET_PX}px`);
     into.replaceChildren(
         ...labels.map((l) => {
             const el = document.createElement("div");

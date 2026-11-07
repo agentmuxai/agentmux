@@ -18,7 +18,7 @@ import type { ConnStatus } from "@/types/rpc/ConnStatus";
 import { GapBackfiller } from "./sysinfo-backfill";
 import { type AreaChoice, FOCUS_CHOICES, MAX_WINDOW_POINTS, toAreaChoice } from "./sysinfo-overview-data";
 import { AreaPlotType, DataItem, DefaultNumPoints, DefaultPlotMeta, DefaultPlotType, PlotTypes, SIMPLE_VIEWS } from "./sysinfo-types";
-import { coversGap, gapBetween } from "./sysinfo-gap";
+import { coversGap, gapBetween, isStepRow } from "./sysinfo-gap";
 import { convertTimeSeriesToDataItem, getGapThresholdMs } from "./sysinfo-util";
 
 // ---------------------------------------------------------------------------
@@ -152,7 +152,7 @@ export function sampleReducer(state: DataItem[], action: SampleAction): DataItem
         let known = 0;
         let newest = -Infinity;
         for (const d of state) {
-            if (d.blank === 1) continue;
+            if (d.blank === 1 || isStepRow(d)) continue;
             byTs.set(d.ts, d);
             known++;
             newest = Math.max(newest, d.ts);

@@ -151,7 +151,7 @@ function SysinfoViewInner(props: SysinfoViewProps): JSX.Element {
     const columns = () => (cols2() ? 2 : 1);
     // Where each chart's text goes (sysinfo-layout.ts): time labels on the bottom
     // row only, y labels on the left column only when every chart shares 0–100%,
-    // one y-axis width per column so the plots line up.
+    // and the plots run to both edges, so they line up without a shared axis.
     const sameRange = createMemo(() => sharesPercentRange(yvals()));
 
     // The pane's zoom scales Sysinfo's text, not its charts (SysinfoZoomContext).
