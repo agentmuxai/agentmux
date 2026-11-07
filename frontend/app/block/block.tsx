@@ -684,7 +684,7 @@ function Block(props: BlockProps): JSX.Element {
     // One cover, two sources: the controller until it goes live, this block's
     // own re-cover cycle afterwards.
     const coverPhase = (): PaneReadinessPhase => (readiness.phase() === "live" ? reCoverPhase() : readiness.phase());
-    logCoverPhases(props.nodeModel.blockId, coverPhase, () => (readiness.phase() === "live" ? "re-cover" : "controller"));
+    logCoverPhases(props.nodeModel.blockId, { controller: readiness.phase, reCover: reCoverPhase });
 
     // Cross-fade the cover out on top of the real content instead of an instant
     // hard cut (SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md §2.3/§4

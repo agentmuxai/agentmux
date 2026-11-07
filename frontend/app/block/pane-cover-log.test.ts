@@ -23,18 +23,19 @@ describe("coverLogLine", () => {
 });
 
 describe("logCoverPhases", () => {
-    it("writes one [pane-cover] line per change of phase, with the source at that moment", () => {
+    it("writes one [pane-cover] line per change of phase, each under its own source", () => {
         const info = vi.spyOn(console, "info").mockImplementation(() => {});
-        const [phase, setPhase] = createSignal<PaneReadinessPhase>("assembling");
-        const [source, setSource] = createSignal<"controller" | "re-cover">("controller");
+        const [controller, setController] = createSignal<PaneReadinessPhase>("assembling");
+        const [reCover, setReCover] = createSignal<PaneReadinessPhase>("live");
         const dispose = createRoot((d) => {
-            logCoverPhases("0123456789", phase, source);
+            logCoverPhases("0123456789", { controller, reCover });
             return d;
         });
-        setPhase("revealing");
-        setPhase("live");
-        setSource("re-cover");
-        setPhase("assembling"); // a subagent "started" re-covers the pane
+        setController("revealing");
+        setController("live"); // the controller's own last step is not a re-cover
+        setReCover("assembling"); // a subagent "started" re-covers the pane
+        setReCover("revealing");
+        setReCover("live");
         dispose();
         const lines = info.mock.calls.filter((c) => c[0] === "[pane-cover]").map((c) => String(c[1]).replace(/ t=\d+ms$/, ""));
         expect(lines).toEqual([
@@ -42,6 +43,8 @@ describe("logCoverPhases", () => {
             "block=0123456 assembling→revealing src=controller",
             "block=0123456 revealing→live src=controller",
             "block=0123456 live→assembling src=re-cover",
+            "block=0123456 assembling→revealing src=re-cover",
+            "block=0123456 revealing→live src=re-cover",
         ]);
     });
 });

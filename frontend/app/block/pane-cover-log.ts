@@ -7,7 +7,7 @@
  * sources, the readiness controller (assembly, once) and the block's own re-cover (every subagent "started" event);
  * before this log nothing recorded the second, and a forced reveal was the only line the first one wrote.
  */
-import { createEffect, on } from "solid-js";
+import { createEffect, on, untrack } from "solid-js";
 import type { PaneReadinessPhase } from "@/app/store/pane-readiness";
 
 export type CoverSource = "controller" | "re-cover";
@@ -23,12 +23,31 @@ export function coverLogLine(
     return `block=${blockId.slice(0, 7)} ${prev ?? "mount"}→${next} src=${source} t=${Math.round(sinceMountMs)}ms`;
 }
 
-/** Logs every change of `phase`. Call during component setup (it creates an effect). */
-export function logCoverPhases(blockId: string, phase: () => PaneReadinessPhase, source: () => CoverSource): void {
+/**
+ * Logs every change of either source's phase, each under its own source: the controller's from mount, the
+ * re-cover's from its first change (it starts out `live`, which is not a change). Reading the source from
+ * "which one is live now" would call the controller's own last step (revealing to live) a re-cover.
+ * Call during component setup (it creates effects).
+ */
+export function logCoverPhases(
+    blockId: string,
+    phases: { controller: () => PaneReadinessPhase; reCover: () => PaneReadinessPhase }
+): void {
     const mountedAt = performance.now();
+    const log = (source: CoverSource, prev: PaneReadinessPhase | undefined, next: PaneReadinessPhase) => {
+        console.info("[pane-cover]", coverLogLine(blockId, prev, next, source, performance.now() - mountedAt));
+    };
+    createEffect(on(phases.controller, (next, prev) => log("controller", prev, next)));
+    // `on` hands a deferred effect no previous value on its first run, so the re-cover keeps its own.
+    let reCoverPrev = untrack(phases.reCover);
     createEffect(
-        on(phase, (next, prev) => {
-            console.info("[pane-cover]", coverLogLine(blockId, prev, next, source(), performance.now() - mountedAt));
-        })
+        on(
+            phases.reCover,
+            (next) => {
+                log("re-cover", reCoverPrev, next);
+                reCoverPrev = next;
+            },
+            { defer: true }
+        )
     );
 }
