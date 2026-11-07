@@ -3,10 +3,12 @@
 
 /** Sysinfo's control row, the same in the simple and the Advanced views. */
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SysinfoBar, type SysinfoBarProps } from "./sysinfo-bar";
 import { FOCUS_CHOICES } from "./sysinfo-overview-data";
+import { SysinfoZoomContext } from "./sysinfo-zoom";
 
 afterEach(() => cleanup());
 
@@ -137,5 +139,38 @@ describe("SysinfoBar", () => {
             />
         ));
         expect(charts.container.querySelector(".sysinfo-bar")?.classList.contains("sysinfo-bar--in-flow")).toBe(false);
+    });
+
+    it("measures the action buttons again when the pane's zoom changes, so the titles keep clear of them", () => {
+        // The row is zoomed by CSS, so the observer (which reports the element's own size) never fires for it.
+        const [zoom, setZoom] = createSignal(1);
+        const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+            const width = this.classList.contains("sysinfo-bar-actions") ? 90 * zoom() : 0;
+            return { width } as DOMRect;
+        });
+        const onActionsWidth = vi.fn();
+        render(() => (
+            <SysinfoZoomContext.Provider value={zoom}>
+                <SysinfoBar
+                    views={FOCUS_CHOICES}
+                    view="cpu"
+                    onView={vi.fn()}
+                    windowSecs={120}
+                    intervalSecs={1}
+                    onWindow={vi.fn()}
+                    paused={false}
+                    onPause={vi.fn()}
+                    controls
+                    onControls={vi.fn()}
+                    table={false}
+                    onTable={vi.fn()}
+                    onActionsWidth={onActionsWidth}
+                />
+            </SysinfoZoomContext.Provider>
+        ));
+        expect(onActionsWidth).toHaveBeenLastCalledWith(90);
+        setZoom(1.5);
+        expect(onActionsWidth).toHaveBeenLastCalledWith(135);
+        rect.mockRestore();
     });
 });
