@@ -1,0 +1,28 @@
+getAttachmentDraft blk-1
+useComposerPaste blk-1 draft-blk-1 undefined
+historyAgentId {"agent":"agent-7"}
+agentHistory agent-7
+watchAgentHistory agent-7
+useComposerPlaceholder blk-1 Claude
+useComposerRestore blk-1 undefined
+setComposerValue "restored text" {"block":"blk-1","agent":"agent-7","draft":"draft-blk-1","sent":["agent one","agent two","agent three"],"hist":{"pos":3,"draft":""},"esc":null,"composing":false,"scroll":false,"prefix":null,"index":0,"completions":[]}
+useComposerVoiceHandle blk-1 undefined
+useComposerFocusHandle blk-1 undefined
+AttachmentTray draft-blk-1
+restoreDraftOnMount {"block":"blk-1","agent":"agent-7","draft":"draft-blk-1","sent":["agent one","agent two","agent three"],"hist":{"pos":3,"draft":""},"esc":null,"composing":false,"scroll":false,"prefix":null,"index":0,"completions":[],"textarea":"TEXTAREA"}
+-- view model
+<div>
+  <div class="agent-footer">
+    <div class="agent-input-container">
+      <div data-stand="AttachmentTray" data-draft="draft-blk-1">
+        <span data-stand="focus">
+      <textarea data-raw-text-field="the prompt composer: a surface of its own that grows with its text and takes IME composition, paste and the history keys itself, not a form field" aria-label="Message the agent" rows="1" spellcheck="false" class="agent-input" placeholder="Send message to Claude">
+      <div class="agent-input-mic">
+        <span data-stand="MicButton" data-block-id="blk-1" data-handle="{\"voice\":true}" data-title="Speak into this agent (<pane:voice>)">
+movedCursor 3 3 older 2 0
+movedCursor 5 3 newer 1 3
+AttachmentTray focusComposer
+handleKeyDown f {"block":"blk-1","agent":"agent-7","draft":"draft-blk-1","sent":["agent one","agent two","agent three"],"hist":{"pos":6,"draft":""},"esc":null,"composing":false,"scroll":false,"prefix":null,"index":0,"completions":[],"textarea":"TEXTAREA"}
+focusLast
+unwatch
+unmounted

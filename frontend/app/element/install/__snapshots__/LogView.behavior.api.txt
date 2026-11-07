@@ -1,0 +1,36 @@
+requestAnimationFrame
+createFollowScroll pin,loadOlder,hasOlderHistory,loadingOlder,transition
+ResizeObserver observe
+frames 1
+observed content {"scrollTop":0,"scrollHeight":8000,"clientHeight":160}
+noteGeometry {"scrollTop":8000,"scrollHeight":8000,"clientHeight":160}
+jumpToNode line-300
+-- scrolled to line 300: 50 rows, first "line 278", last "line 327", window translateY(4448px), spacer 8000px, scrollTop 4768
+jumpToNode line-1
+-- scrolled to line 1 (clamped at the top): 30 rows, first "line 0", last "line 29", window translateY(0px), spacer 8000px, scrollTop 0
+requestAnimationFrame
+jumpToNode line-300
+-- scrolled to line 300 with a marker row: 50 rows, first "line 278", last "line 327", window translateY(4464px), spacer 8016px, scrollTop 4784
+requestAnimationFrame
+frames 2
+observed content {"scrollTop":40,"scrollHeight":8000,"clientHeight":320}
+noteGeometry {"scrollTop":8000,"scrollHeight":8000,"clientHeight":320}
+observed content {"scrollTop":8000,"scrollHeight":8000,"clientHeight":320}
+noteGeometry {"scrollTop":8000,"scrollHeight":8000,"clientHeight":320}
+-- refreshed: 21 rows, first "line 479", last "line 499", window translateY(7680px), spacer 8016px, scrollTop 8000
+ResizeObserver disconnect
+dispose
+requestAnimationFrame
+createFollowScroll pin,loadOlder,hasOlderHistory,loadingOlder,transition
+ResizeObserver observe
+-- no api asked for
+<div>
+  <div class="install-log" role="log" aria-label="Install output" tabindex="0">
+    <div class="install-log-spacer" style="height: 48px;">
+      <div class="install-log-window" style="transform: translateY(0px);">
+        <div class="install-log-line" data-tone="normal">
+          "line 0"
+        <div class="install-log-line" data-tone="normal">
+          "line 1"
+        <div class="install-log-line" data-tone="normal">
+          "line 2"

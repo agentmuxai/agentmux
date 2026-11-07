@@ -6,6 +6,7 @@
  * from the manifest and the pass records srv sends with the skill. Pure: no RPC, no signals.
  */
 
+import type { AppSkillCatalogEntry } from "@/types/rpc/AppSkillCatalogEntry";
 import type { SkillApp } from "@/types/rpc/SkillApp";
 import type { SkillCatalogItem } from "@/types/rpc/SkillCatalogItem";
 import type { VerifiedRecord } from "@/types/rpc/VerifiedRecord";
@@ -121,4 +122,26 @@ export function describeSignature(sig: WidgetSignatureInfo): { text: string; ton
         default:
             return { tone: "neutral", text: "Not signed: AgentMux can't tell who made it." };
     }
+}
+
+/**
+ * What a catalog entry says about itself on this platform, from the tests the catalog records for this version of
+ * the skill: the newest decides, the same as for an installed skill. "Not tested yet" is a normal state.
+ */
+export function catalogStatus(entry: AppSkillCatalogEntry, platform: string): AppStatus {
+    if (entry.platforms.length > 0 && !entry.platforms.includes(platform)) {
+        return { tone: "idle", label: `for ${entry.platforms.join(", ")} only` };
+    }
+    const mine = entry.verification.filter((r) => r.skillVersion === entry.version);
+    const here = mine
+        .map((r, i) => ({ r, i }))
+        .filter(({ r }) => r.platform === platform)
+        .sort((a, b) => (a.r.date === b.r.date ? a.i - b.i : a.r.date < b.r.date ? -1 : 1))
+        .map(({ r }) => r);
+    const last = here[here.length - 1];
+    if (last) {
+        return last.result === "pass" ? { tone: "ok", label: `verified ${last.appVersion}` } : { tone: "error", label: `failed on ${last.appVersion}` };
+    }
+    const elsewhere = mine.find((r) => r.result === "pass");
+    return { tone: "idle", label: elsewhere ? `tested on ${elsewhere.platform} only` : "not tested yet" };
 }
