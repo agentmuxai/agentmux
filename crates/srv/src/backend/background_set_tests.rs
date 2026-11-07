@@ -83,6 +83,27 @@ fn the_set_lists_the_declared_shell_before_the_trees_left_behind() {
 }
 
 #[test]
+fn a_declared_shell_whose_process_is_tracked_is_counted_once() {
+    // The shell's own tree (cargo test and the rustc under it) comes out as the shell, not also as a left-behind tree.
+    let members = [
+        proc(77, None, "cargo", "cargo test", NOW - 60_000),
+        proc(78, Some(77), "rustc", "rustc --test", NOW - 59_000),
+        proc(90, None, "node", "node server.js", NOW - 60_000),
+    ];
+    let tasks = [task(Some(77), (NOW - 60_000) as i64, BackgroundTaskStatus::Running)];
+    let set = set_of(NOW, &tasks, &members);
+    assert_eq!(set.iter().map(|i| (i.kind, i.label.as_str())).collect::<Vec<_>>(), [(Kind::Shell, "cargo test"), (Kind::Process, "node server.js")]);
+}
+
+#[test]
+fn a_tree_is_kept_when_its_row_is_not_running() {
+    let members = [proc(77, None, "cargo", "cargo test", NOW - 60_000)];
+    let tasks = [task(Some(77), (NOW - 60_000) as i64, BackgroundTaskStatus::Done)];
+    let set = set_of(NOW, &tasks, &members);
+    assert_eq!(set.iter().map(|i| i.kind).collect::<Vec<_>>(), [Kind::Process], "a finished row claims nothing");
+}
+
+#[test]
 fn changes_names_who_entered_who_left_and_keeps_when_each_began() {
     let mut before = HashMap::new();
     let now = HashMap::from([("a".to_string(), 100u64), ("b".to_string(), 100u64)]);

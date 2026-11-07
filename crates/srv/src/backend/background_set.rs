@@ -78,10 +78,30 @@ pub fn from_tasks(now_ms: i64, tasks: &[BackgroundTask], members: &[TrackedProce
         .collect()
 }
 
-/// Everything one agent has in the background now: the declared shells, then the trees left behind.
+/// `members` without the processes of a declared shell's tree: its pid and everything below it. The shell
+/// is counted once, as the shell.
+fn without_declared(tasks: &[BackgroundTask], members: &[TrackedProcess]) -> Vec<TrackedProcess> {
+    let mut claimed: Vec<u32> = members
+        .iter()
+        .filter(|m| tasks.iter().any(|t| t.status == BackgroundTaskStatus::Running && t.pid == Some(i64::from(m.pid))))
+        .map(|m| m.pid)
+        .collect();
+    let mut i = 0;
+    while i < claimed.len() {
+        let parent = claimed[i];
+        let children: Vec<u32> =
+            members.iter().filter(|m| m.parent_pid == Some(parent) && !claimed.contains(&m.pid)).map(|m| m.pid).collect();
+        claimed.extend(children);
+        i += 1;
+    }
+    members.iter().filter(|m| !claimed.contains(&m.pid)).cloned().collect()
+}
+
+/// Everything one agent has in the background now: the declared shells, then the trees left behind that
+/// are not one of those shells.
 pub fn set_of(now_ms: u64, tasks: &[BackgroundTask], members: &[TrackedProcess]) -> Vec<Item> {
     let mut items = from_tasks(now_ms as i64, tasks, members);
-    items.extend(from_tracker(now_ms, members));
+    items.extend(from_tracker(now_ms, &without_declared(tasks, members)));
     items
 }
 
