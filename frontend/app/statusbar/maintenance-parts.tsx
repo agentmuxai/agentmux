@@ -26,7 +26,7 @@ function AvailableRow(props: Part): JSX.Element {
         <Show when={m.updaterStatus() === "available"}>
             <span class="maintenance-icon maintenance-icon--update">↓</span>
             <span class="maintenance-row-text">
-                {m.storeLine() ?? (m.updaterVersion() ? `v${m.updaterVersion()} is out` : "Update available")}
+                {m.updaterVersion() ? (viaStore() ? `v${m.updaterVersion()} is in the Microsoft Store` : `v${m.updaterVersion()} is out`) : "Update available"}
             </span>
             <Button density="compact" class="maintenance-btn" onClick={() => void openLink(releaseNotesUrl(m.updaterVersion()))}>
                 What's new
