@@ -7,7 +7,7 @@
 
 import { createSignal } from "solid-js";
 
-import { formatKey, type KeyPlatform } from "@/app/keybindings/keys";
+import { formatKey, keyId, type KeyPlatform } from "@/app/keybindings/keys";
 import { planChange } from "@/app/keybindings/edit";
 import { defaultKeysOf, type CommandBindings, type KeybindingIssue } from "@/app/keybindings/registry";
 import type { KeyCategory } from "@/app/keybindings/defaults";
@@ -18,6 +18,8 @@ export type CategoryFilter = KeyCategory | "all";
 
 export interface ShortcutFilters {
     query: string;
+    /** A key (or chord) the person pressed to look for: only commands whose keys start with it. */
+    key: string;
     category: CategoryFilter;
     changedOnly: boolean;
 }
@@ -43,6 +45,15 @@ export function categoriesOf(view: CommandBindings[]): KeyCategory[] {
     return CATEGORY_ORDER.filter((c) => present.has(c));
 }
 
+/** Whether any of `keys` is `pressed` or a chord that starts with it, whatever the spelling ("mod+t" is "ctrl+t"). */
+export function keysStartWith(keys: string[], pressed: string, platform: KeyPlatform): boolean {
+    const want = pressed.split(" ").map((s) => keyId(s, platform));
+    return keys.some((k) => {
+        const have = k.split(" ").map((s) => keyId(s, platform));
+        return want.length <= have.length && want.every((id, i) => id === have[i]);
+    });
+}
+
 const wordsOf = (v: CommandBindings, platform: KeyPlatform): string[] => [
     v.label,
     v.helpGroup ?? "",
@@ -64,6 +75,7 @@ export function shortcutBlocks(view: CommandBindings[], filters: ShortcutFilters
         if (v.devOnly) continue;
         if (filters.category !== "all" && v.category !== filters.category) continue;
         if (filters.changedOnly && !v.changed) continue;
+        if (filters.key && !keysStartWith(v.keys, filters.key, platform)) continue;
         if (!matchesEveryWord(filters.query, ...wordsOf(v, platform))) continue;
         const rows = blocks.get(v.category) ?? new Map<string, ShortcutRow>();
         blocks.set(v.category, rows);
@@ -102,7 +114,18 @@ export function createKeyboardFilters() {
     const [query, setQuery] = createSignal("");
     const [category, setCategory] = createSignal<CategoryFilter>("all");
     const [changedOnly, setChangedOnly] = createSignal(false);
-    return { query, setQuery, category, setCategory, changedOnly, setChangedOnly, filters: (): ShortcutFilters => ({ query: query(), category: category(), changedOnly: changedOnly() }) };
+    const [key, setKey] = createSignal("");
+    return {
+        query,
+        setQuery,
+        category,
+        setCategory,
+        changedOnly,
+        setChangedOnly,
+        key,
+        setKey,
+        filters: (): ShortcutFilters => ({ query: query(), key: key(), category: category(), changedOnly: changedOnly() }),
+    };
 }
 
 export type KeyboardFilters = ReturnType<typeof createKeyboardFilters>;
