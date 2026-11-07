@@ -303,6 +303,10 @@ pub(crate) fn backend_upgrade_request(
     ipc_token: &str,
     body: &serde_json::Value,
 ) -> Result<(), String> {
+    if body["accept"] == true {
+        // The launcher's confirmation follows; let it come to the front.
+        crate::parent_process::allow_launcher_foreground();
+    }
     post_as_host(web_endpoint, auth_key, ipc_token, "/api/v1/host/upgrade_request", body)
         .map(|_| ())
         .map_err(|e| format!("srv refused the answer: {e}"))
@@ -358,6 +362,10 @@ pub(crate) fn backend_app_update(
     ipc_token: &str,
     body: &serde_json::Value,
 ) -> Result<serde_json::Value, String> {
+    if body["action"] == "restart" {
+        // The launcher's confirmation follows; let it come to the front.
+        crate::parent_process::allow_launcher_foreground();
+    }
     let raw = post_as_host(web_endpoint, auth_key, ipc_token, "/api/v1/host/app_update", body).map_err(|e| srv_error(&e))?;
     let parsed: serde_json::Value =
         serde_json::from_str(&raw).map_err(|e| format!("srv answered something that isn't JSON: {e}"))?;

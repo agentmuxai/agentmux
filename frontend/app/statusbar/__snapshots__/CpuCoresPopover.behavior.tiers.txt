@@ -1,0 +1,186 @@
+onMuxEvent sysinfo local
+sysinfo 16 cores
+16 cores: class=cpu-cores-popover cpu-cores-popover--rows width=260px list=cpu-cores-list heatmap=no legend=no
+sysinfo 17 cores
+17 cores: class=cpu-cores-popover cpu-cores-popover--cells width=360px list=cpu-cores-list cpu-cores-grid heatmap=no legend=no
+sysinfo 64 cores
+64 cores: class=cpu-cores-popover cpu-cores-popover--cells width=360px list=cpu-cores-list cpu-cores-grid heatmap=no legend=no
+sysinfo 65 cores
+65 cores: class=cpu-cores-popover cpu-cores-popover--heat width=360px list=none heatmap=yes legend=yes
+sysinfo 16 cores
+16 cores: class=cpu-cores-popover cpu-cores-popover--rows width=260px list=cpu-cores-list heatmap=no legend=no
+sysinfo 20 cores
+-- twenty cores as cells
+<div>
+  <div data-stand="AnchoredPopover" data-placement="top-end" class="cpu-cores-popover cpu-cores-popover--cells" role="dialog" aria-label="Per-core CPU usage" style="width: 360px;">
+    <div class="cpu-cores-header">
+      <span class="cpu-cores-title">
+        "CPU Usage"
+      <span class="cpu-cores-aggregate" style="color: var(--secondary-text-color);">
+        "avg"
+        "43"
+        "%"
+    <div class="cpu-cores-subtitle">
+      <span>
+        "20 cores"
+    <div class="cpu-cores-list cpu-cores-grid">
+      <div class="cpu-core">
+        <span class="cpu-core-label">
+          "C0"
+        <span class="cpu-core-bar" aria-hidden="true">
+          <span class="cpu-core-bar-fill" style="width: 0%; background-color: color-mix(in srgb, var(--warning-color) 0%, var(--cpu-idle-color));">
+        <span class="cpu-core-pct" style="color: color-mix(in srgb, var(--warning-color) 0%, var(--cpu-idle-color));">
+          "0"
+          "%"
+      <div class="cpu-core">
+        <span class="cpu-core-label">
+          "C1"
+        <span class="cpu-core-bar" aria-hidden="true">
+          <span class="cpu-core-bar-fill" style="width: 5.2631578947368425%; background-color: color-mix(in srgb, var(--warning-color) 11%, var(--cpu-idle-color));">
+        <span class="cpu-core-pct" style="color: color-mix(in srgb, var(--warning-color) 11%, var(--cpu-idle-color));">
+          "5"
+          "%"
+      <div class="cpu-core">
+        <span class="cpu-core-label">
+          "C2"
+        <span class="cpu-core-bar" aria-hidden="true">
+          <span class="cpu-core-bar-fill" style="width: 10.526315789473685%; background-color: color-mix(in srgb, var(--warning-color) 21%, var(--cpu-idle-color));">
+        <span class="cpu-core-pct" style="color: color-mix(in srgb, var(--warning-color) 21%, var(--cpu-idle-color));">
+          "11"
+          "%"
+      <div class="cpu-core">
+        <span class="cpu-core-label">
+          "C3"
+        <span class="cpu-core-bar" aria-hidden="true">
+          <span class="cpu-core-bar-fill" style="width: 15.789473684210526%; background-color: color-mix(in srgb, var(--warning-color) 32%, var(--cpu-idle-color));">
+        <span class="cpu-core-pct" style="color: color-mix(in srgb, var(--warning-color) 32%, var(--cpu-idle-color));">
+          "16"
+          "%"
+      <div class="cpu-core">
+        <span class="cpu-core-label">
+          "C4"
+        <span class="cpu-core-bar" aria-hidden="true">
+          <span class="cpu-core-bar-fill" style="width: 21.05263157894737%; background-color: color-mix(in srgb, var(--warning-color) 42%, var(--cpu-idle-color));">
+        <span class="cpu-core-pct" style="color: color-mix(in srgb, var(--warning-color) 42%, var(--cpu-idle-color));">
+          "21"
+          "%"
+      <div class="cpu-core">
+        <span class="cpu-core-label">
+          "C5"
+        <span class="cpu-core-bar" aria-hidden="true">
+          <span class="cpu-core-bar-fill" style="width: 26.31578947368421%; background-color: color-mix(in srgb, var(--warning-color) 53%, var(--cpu-idle-color));">
+        <span class="cpu-core-pct" style="color: color-mix(in srgb, var(--warning-color) 53%, var(--cpu-idle-color));">
+          "26"
+          "%"
+      <div class="cpu-core">
+        <span class="cpu-core-label">
+          "C6"
+        <span class="cpu-core-bar" aria-hidden="true">
+          <span class="cpu-core-bar-fill" style="width: 31.57894736842105%; background-color: color-mix(in srgb, var(--warning-color) 63%, var(--cpu-idle-color));">
+        <span class="cpu-core-pct" style="color: color-mix(in srgb, var(--warning-color) 63%, var(--cpu-idle-color));">
+          "32"
+          "%"
+      <div class="cpu-core">
+        <span class="cpu-core-label">
+          "C7"
+        <span class="cpu-core-bar" aria-hidden="true">
+          <span class="cpu-core-bar-fill" style="width: 36.8421052631579%; background-color: color-mix(in srgb, var(--warning-color) 74%, var(--cpu-idle-color));">
+        <span class="cpu-core-pct" style="color: color-mix(in srgb, var(--warning-color) 74%, var(--cpu-idle-color));">
+          "37"
+          "%"
+      <div class="cpu-core">
+        <span class="cpu-core-label">
+          "C8"
+        <span class="cpu-core-bar" aria-hidden="true">
+          <span class="cpu-core-bar-fill" style="width: 42.10526315789474%; background-color: color-mix(in srgb, var(--warning-color) 84%, var(--cpu-idle-color));">
+        <span class="cpu-core-pct" style="color: color-mix(in srgb, var(--warning-color) 84%, var(--cpu-idle-color));">
+          "42"
+          "%"
+      <div class="cpu-core">
+        <span class="cpu-core-label">
+          "C9"
+        <span class="cpu-core-bar" aria-hidden="true">
+          <span class="cpu-core-bar-fill" style="width: 47.36842105263158%; background-color: color-mix(in srgb, var(--warning-color) 95%, var(--cpu-idle-color));">
+        <span class="cpu-core-pct" style="color: color-mix(in srgb, var(--warning-color) 95%, var(--cpu-idle-color));">
+          "47"
+          "%"
+      <div class="cpu-core">
+        <span class="cpu-core-label">
+          "C10"
+        <span class="cpu-core-bar" aria-hidden="true">
+          <span class="cpu-core-bar-fill" style="width: 52.63157894736842%; background-color: color-mix(in srgb, var(--error-color) 5%, var(--warning-color));">
+        <span class="cpu-core-pct" style="color: color-mix(in srgb, var(--error-color) 5%, var(--warning-color));">
+          "53"
+          "%"
+      <div class="cpu-core">
+        <span class="cpu-core-label">
+          "C11"
+        <span class="cpu-core-bar" aria-hidden="true">
+          <span class="cpu-core-bar-fill" style="width: 57.89473684210526%; background-color: color-mix(in srgb, var(--error-color) 16%, var(--warning-color));">
+        <span class="cpu-core-pct" style="color: color-mix(in srgb, var(--error-color) 16%, var(--warning-color));">
+          "58"
+          "%"
+      <div class="cpu-core">
+        <span class="cpu-core-label">
+          "C12"
+        <span class="cpu-core-bar" aria-hidden="true">
+          <span class="cpu-core-bar-fill" style="width: 63.1578947368421%; background-color: color-mix(in srgb, var(--error-color) 26%, var(--warning-color));">
+        <span class="cpu-core-pct" style="color: color-mix(in srgb, var(--error-color) 26%, var(--warning-color));">
+          "63"
+          "%"
+      <div class="cpu-core">
+        <span class="cpu-core-label">
+          "C13"
+        <span class="cpu-core-bar" aria-hidden="true">
+          <span class="cpu-core-bar-fill" style="width: 68.42105263157895%; background-color: color-mix(in srgb, var(--error-color) 37%, var(--warning-color));">
+        <span class="cpu-core-pct" style="color: color-mix(in srgb, var(--error-color) 37%, var(--warning-color));">
+          "68"
+          "%"
+      <div class="cpu-core">
+        <span class="cpu-core-label">
+          "C14"
+        <span class="cpu-core-bar" aria-hidden="true">
+          <span class="cpu-core-bar-fill" style="width: 73.6842105263158%; background-color: color-mix(in srgb, var(--error-color) 47%, var(--warning-color));">
+        <span class="cpu-core-pct" style="color: color-mix(in srgb, var(--error-color) 47%, var(--warning-color));">
+          "74"
+          "%"
+      <div class="cpu-core">
+        <span class="cpu-core-label">
+          "C15"
+        <span class="cpu-core-bar" aria-hidden="true">
+          <span class="cpu-core-bar-fill" style="width: 78.94736842105263%; background-color: color-mix(in srgb, var(--error-color) 58%, var(--warning-color));">
+        <span class="cpu-core-pct" style="color: color-mix(in srgb, var(--error-color) 58%, var(--warning-color));">
+          "79"
+          "%"
+      <div class="cpu-core">
+        <span class="cpu-core-label">
+          "C16"
+        <span class="cpu-core-bar" aria-hidden="true">
+          <span class="cpu-core-bar-fill" style="width: 84.21052631578948%; background-color: color-mix(in srgb, var(--error-color) 68%, var(--warning-color));">
+        <span class="cpu-core-pct" style="color: color-mix(in srgb, var(--error-color) 68%, var(--warning-color));">
+          "84"
+          "%"
+      <div class="cpu-core">
+        <span class="cpu-core-label">
+          "C17"
+        <span class="cpu-core-bar" aria-hidden="true">
+          <span class="cpu-core-bar-fill" style="width: 89.47368421052632%; background-color: color-mix(in srgb, var(--error-color) 79%, var(--warning-color));">
+        <span class="cpu-core-pct" style="color: color-mix(in srgb, var(--error-color) 79%, var(--warning-color));">
+          "89"
+          "%"
+      <div class="cpu-core">
+        <span class="cpu-core-label">
+          "C18"
+        <span class="cpu-core-bar" aria-hidden="true">
+          <span class="cpu-core-bar-fill" style="width: 94.73684210526316%; background-color: color-mix(in srgb, var(--error-color) 89%, var(--warning-color));">
+        <span class="cpu-core-pct" style="color: color-mix(in srgb, var(--error-color) 89%, var(--warning-color));">
+          "95"
+          "%"
+      <div class="cpu-core">
+        <span class="cpu-core-label">
+          "C19"
+        <span class="cpu-core-bar" aria-hidden="true">
+          <span class="cpu-core-bar-fill" style="width: 100%; background-color: color-mix(in srgb, var(--error-color) 100%, var(--warning-color));">
+        <span class="cpu-core-pct" style="color: color-mix(in srgb, var(--error-color) 100%, var(--warning-color));">
+          "100"
+          "%"

@@ -225,12 +225,15 @@ fn check_package(_: &Path, _: &str, _: &str, _: &Path, _: &Path) -> Result<Stage
 /// request closes the open one, and a dialog closes itself (as No) once its
 /// time is up. A Yes that slips past either is told it expired.
 /// `stopping` lists what agents left running that the restart stops
-/// ([`stopping_note`]); the dialog names it.
+/// ([`stopping_note`]); the dialog names it. `host_pid` is the host's process
+/// id: on Windows the dialog sits over the host's window, so it comes up in
+/// front of the person instead of waiting on the taskbar.
 pub fn ask_then(
     version: String,
     staged: Staged,
     stopping: Vec<String>,
     data_dir: PathBuf,
+    host_pid: Option<u32>,
     on_yes: impl FnOnce(Staged) + Send + 'static,
 ) {
     let ask = LATEST_ASK.fetch_add(1, Ordering::SeqCst) + 1;
@@ -245,7 +248,7 @@ pub fn ask_then(
                 dismiss(thread);
             }
         });
-        let yes = confirm(&version, &staged, &stopping);
+        let yes = confirm(&version, &staged, &stopping, host_pid);
         let _ = DIALOG_THREAD.compare_exchange(thread, 0, Ordering::SeqCst, Ordering::SeqCst);
         let latest = LATEST_ASK.load(Ordering::SeqCst);
         if !yes {
@@ -394,7 +397,7 @@ fn stopping_paragraph(stopping: &[String]) -> String {
 }
 
 #[cfg(target_os = "windows")]
-fn confirm(version: &str, staged: &Staged, stopping: &[String]) -> bool {
+fn confirm(version: &str, staged: &Staged, stopping: &[String], host_pid: Option<u32>) -> bool {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         MessageBoxW, IDYES, MB_DEFBUTTON2, MB_ICONQUESTION, MB_SETFOREGROUND, MB_TOPMOST, MB_YESNO,
@@ -412,9 +415,13 @@ fn confirm(version: &str, staged: &Staged, stopping: &[String]) -> bool {
     };
     let wide = |s: &str| std::ffi::OsStr::new(s).encode_wide().chain(Some(0)).collect::<Vec<u16>>();
     let (title, body) = (wide(DIALOG_TITLE), wide(&body));
+    // Over the host's window, so it comes up in front (upgrade_window.rs). Nothing a page or an
+    // agent can reach answers it: it is a window of this process, answered by the person.
+    let owner = host_pid.and_then(crate::upgrade_window::host_window);
+    crate::log(&format!("upgrade: asking over {}", owner.map_or("no window".to_string(), |h| format!("host window {h:#x}"))));
     let answer = unsafe {
         MessageBoxW(
-            std::ptr::null_mut(),
+            owner.map_or(std::ptr::null_mut(), |h| h as _),
             body.as_ptr(),
             title.as_ptr(),
             MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2 | MB_SETFOREGROUND | MB_TOPMOST,
@@ -429,7 +436,7 @@ fn confirm(version: &str, staged: &Staged, stopping: &[String]) -> bool {
 /// once the install helper has accepted the file and is waiting for this
 /// launcher to quit.
 #[cfg(target_os = "linux")]
-fn confirm(version: &str, staged: &Staged, stopping: &[String]) -> bool {
+fn confirm(version: &str, staged: &Staged, stopping: &[String], _host_pid: Option<u32>) -> bool {
     let asked = Instant::now();
     let shown = match staged {
         Staged::Launcher(p) if p.file_name().is_some_and(|n| n == "agentmux.sh") => p.parent().unwrap_or(p),
@@ -450,7 +457,7 @@ fn confirm(version: &str, staged: &Staged, stopping: &[String]) -> bool {
 
 /// macOS: a native dialog through `osascript` (`upgrade_macos::confirm`).
 #[cfg(target_os = "macos")]
-fn confirm(version: &str, staged: &Staged, stopping: &[String]) -> bool {
+fn confirm(version: &str, staged: &Staged, stopping: &[String], _host_pid: Option<u32>) -> bool {
     let body = match staged {
         Staged::MacDmg(up) => crate::upgrade_macos::question(up, &stopping_paragraph(stopping)),
         Staged::Launcher(p) | Staged::Installer { installer: p, .. } => restart_question(version, p, stopping),
@@ -459,7 +466,7 @@ fn confirm(version: &str, staged: &Staged, stopping: &[String]) -> bool {
 }
 
 #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
-fn confirm(_version: &str, _staged: &Staged, _stopping: &[String]) -> bool {
+fn confirm(_version: &str, _staged: &Staged, _stopping: &[String], _host_pid: Option<u32>) -> bool {
     false
 }
 

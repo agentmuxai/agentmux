@@ -60,6 +60,7 @@ pub fn select_app(state: &Arc<AppState>, window: &str) {
 /// A click in pane `block`'s page, seen as it is dispatched (UI thread): the
 /// page gets the keyboard before the click lands.
 pub fn pane_pointer_down(state: &Arc<AppState>, block: &str) {
+    crate::browser_api::last_input::note(block);
     if let Some(window) = state.browser_pane_window_label(block) {
         dispatch(state, &window, Event::PanePointerDown(block.to_string()), Run::Now);
     }
@@ -80,6 +81,7 @@ pub fn pane_chosen(state: &Arc<AppState>, block: &str) {
         tracing::debug!("[input] win={window} focus on pane:{block} before it is live: not a choice");
         return;
     }
+    crate::browser_api::last_input::note(block);
     dispatch(state, &window, Event::PanePointerDown(block.to_string()), Run::Posted);
 }
 
