@@ -77,11 +77,19 @@ function reservedProblem(key: string, platform: KeyPlatform): string | null {
     return r.tier === "blocked" ? `${shown} cannot be used: ${r.reason}` : `${shown}: ${r.reason}. Ask the person to set it in Settings, where they can confirm it`;
 }
 
-/** A bare letter, digit or punctuation key would type into every text field and terminal unless it is limited to
- *  where the person is not typing: the Settings recorder asks the person to allow it, so an agent leaves it to them. */
+/** A key with no Ctrl, Alt or Meta that the person types or edits with: a letter, digit or punctuation key, or a named
+ *  one (Enter, Backspace, Tab, the arrows, Home, End...) but a function key. */
+function typesOrEdits(step: string, platform: KeyPlatform): boolean {
+    if (isPlainKey(step, platform)) return true;
+    const k = parseKey(step, platform);
+    return k.named != null && !k.ctrl && !k.alt && !k.meta && !/^F\d{1,2}$/.test(k.named);
+}
+
+/** Such a key would run the command in every text field and terminal unless it is limited to where the person is
+ *  not typing: the Settings recorder asks the person to allow it, so an agent leaves it to them. */
 function plainProblem(key: string, platform: KeyPlatform): string | null {
-    if (!isPlainKey(key.split(" ")[0], platform)) return null;
-    return `${formatKey(key, platform)} is a key the person types with. Ask the person to set it in Settings, where they can allow plain keys`;
+    if (!typesOrEdits(key.split(" ")[0], platform)) return null;
+    return `${formatKey(key, platform)} is a key the person types or edits with. Ask the person to set it in Settings, where they can allow plain keys`;
 }
 
 /** What `req` does to `entries`, or why not. */

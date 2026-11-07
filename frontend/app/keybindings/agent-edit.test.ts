@@ -50,13 +50,13 @@ describe("planAgentSet", () => {
     });
 
     it("leaves a key the person types with to the person: it would type into every text field and terminal", () => {
-        for (const key of ["a", "5", "shift+a", "code:Space", "a ctrl+k"]) {
+        for (const key of ["a", "5", "shift+a", "code:Space", "a ctrl+k", "Enter", "Backspace", "Tab", "Home", "ArrowUp", "shift+ArrowLeft"]) {
             const plan = planAgentSet([], { command: "tab:new", bindings: [key] }, "other");
             expect(plan, key).toMatchObject({ changed: false });
             expect((plan as { reason: string }).reason, key).toContain("Ask the person to set it in Settings");
         }
-        // Function keys, arrows and keys with Ctrl, Alt or Meta are not typing.
-        for (const key of ["F9", "ctrl+alt+9", "alt+shift+a"]) {
+        // Function keys and keys with Ctrl, Alt or Meta are not typing.
+        for (const key of ["F9", "ctrl+alt+9", "alt+shift+a", "alt+ArrowUp"]) {
             expect(planAgentSet([], { command: "tab:new", bindings: [key] }, "other"), key).toMatchObject({ changed: true });
         }
     });
