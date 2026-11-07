@@ -22,6 +22,7 @@ import "./sysinfo-plot.scss";
 import { SysinfoZoomContext } from "./sysinfo-zoom";
 
 import {
+    fadeLeftEnd,
     formatValue,
     resolveCssColor,
     type SeriesSpec,
@@ -29,9 +30,11 @@ import {
     toSeriesData,
     withAlpha,
     xWindowSecs,
+    type YLabel,
+    yLabelTexts,
     yRange,
 } from "./sysinfo-chart";
-import { axisFontPx, BARE_AXIS_PX, minFullChartPx, TICK_GAP_PX, TICK_PX, timeAxisPx, topPaddingPx } from "./sysinfo-layout";
+import { axisFontPx, FADE_EXTRA_PX, minFullChartPx, TICK_GAP_PX, TICK_PX, timeAxisPx, topPaddingPx } from "./sysinfo-layout";
 import { figures, titled, unitFormat } from "./sysinfo-overview-data";
 import type { DataItem } from "./sysinfo-types";
 
@@ -47,30 +50,9 @@ const Y_LABEL_SPACE_PX = 30;
 
 
 /**
- * Width of a y axis that fits its widest label (uPlot's own sizing recipe). It
- * reports that width (`report`) and takes at least `min()`: its column's widest,
- * so the plots in a column line up.
- */
-const yAxisSize =
-    (min: () => number, report: (w: number) => void) =>
-    (self: uPlot, values: string[] | null, axisIdx: number, cycleNum: number) => {
-        const axis = self.axes[axisIdx];
-        if (cycleNum > 1) return (axis as any)._size;
-        let size = (axis.ticks?.size ?? 0) + (axis.gap ?? 0);
-        const longest = (values ?? []).reduce((a, v) => (v.length > a.length ? v : a), "");
-        if (longest !== "") {
-            self.ctx.font = (axis as any).font[0];
-            size += self.ctx.measureText(longest).width / devicePixelRatio;
-        }
-        const natural = Math.ceil(size);
-        report(natural);
-        return Math.max(min(), natural);
-    };
-
-/**
- * The time labels, with the ones that would cross the plot's right edge left
- * blank (their ticks stay): the plot runs to the edge, and a label centred on a
- * tick near it would be cut off.
+ * The time labels, with the ones that would cross either of the plot's edges left
+ * blank (their ticks stay): the plot runs to both, and a label centred on a tick
+ * near one would be cut off.
  */
 function edgeSafe(u: uPlot, splits: number[], labels: string[]): string[] {
     const right = u.bbox.width / uPlot.pxRatio;
@@ -78,8 +60,55 @@ function edgeSafe(u: uPlot, splits: number[], labels: string[]): string[] {
     u.ctx.font = (u.axes[0] as any).font[0];
     return labels.map((label, i) => {
         const half = u.ctx.measureText(label).width / uPlot.pxRatio / 2;
-        return u.valToPos(splits[i], "x") + half + TEXT_INSET_PX > right ? "" : label;
+        const x = u.valToPos(splits[i], "x");
+        return x + half + TEXT_INSET_PX > right || x - half - TEXT_INSET_PX < 0 ? "" : label;
     });
+}
+
+/** The widest y label's width, set on the chart for its title (sysinfo-plot.scss). */
+const YLABEL_WIDTH_VAR = "--sysinfo-ylabel-w";
+
+/** The y labels over the plot's left end, and the fade under them; none, and nothing is drawn or faded. */
+function placeYLabels(u: uPlot, into: HTMLElement, labels: YLabel[]): void {
+    if (labels.length === 0) {
+        into.replaceChildren();
+        into.parentElement?.style.removeProperty(YLABEL_WIDTH_VAR);
+        return;
+    }
+    u.ctx.font = (u.axes[1] as any).font[0];
+    const widest = Math.max(...labels.map((l) => u.ctx.measureText(l.text).width)) / uPlot.pxRatio;
+    fadeLeftEnd(u, (widest + TEXT_INSET_PX + FADE_EXTRA_PX) * uPlot.pxRatio);
+    // The title shares the top line with the top label: it keeps to the right of it.
+    into.parentElement?.style.setProperty(YLABEL_WIDTH_VAR, `${Math.ceil(widest) + TEXT_INSET_PX}px`);
+    into.replaceChildren(
+        ...labels.map((l) => {
+            const el = document.createElement("div");
+            el.className = "sysinfo-chart-ylabel";
+            el.textContent = l.text;
+            el.style.top = `${u.over.offsetTop + u.valToPos(l.value, "y")}px`;
+            // The lowest hangs above its line, not over the time axis.
+            el.style.transform = l.lowest ? "translateY(-100%)" : "translateY(-50%)";
+            return el;
+        })
+    );
+}
+
+/**
+ * The y axis: it draws the grid and reports its ticks (`onSplits`), and has no width and no labels of its own.
+ * The plot runs under the labels, which `placeYLabels` puts over it.
+ */
+function yAxisOptions(base: Pick<uPlot.Axis, "stroke" | "font" | "grid">, space: number, onSplits: (splits: number[]) => void): uPlot.Axis {
+    return {
+        ...base,
+        size: 0,
+        gap: 0,
+        ticks: { show: false },
+        space,
+        values: (_u, splits) => {
+            onSplits(splits);
+            return splits.map(() => "");
+        },
+    };
 }
 
 export type TimeChartProps = {
@@ -99,12 +128,8 @@ export type TimeChartProps = {
     sparkline?: boolean;
     /** `false`: no time labels, for a chart stacked above another that has them. */
     timeAxis?: boolean;
-    /** `false`: tick marks but no y labels, for a chart whose row neighbour on the left has the same range. */
+    /** `false`: no y labels, for a chart whose row neighbour on the left has the same range. */
     yLabels?: boolean;
-    /** Least y-axis width: its column's widest, so the plots line up. */
-    axisWidth?: number;
-    /** The y-axis width this chart's own labels need. */
-    onAxisWidth?: (width: number) => void;
     /** In the pane's top row: the title keeps clear of the floating buttons. */
     top?: boolean;
     /** The chart's name and figures, centred over the top of the plot. */
@@ -115,12 +140,14 @@ export type TimeChartProps = {
 /**
  * A time chart of one or more series, the ones marked `below` drawn under the
  * axis. It runs flush to the edges of its box (so to the pane's): the plot and
- * the line touch the right edge, axes are only as wide as their labels, and text
- * sits TEXT_INSET_PX in.
+ * the line touch the left and right edges, and text sits TEXT_INSET_PX in. The
+ * y labels are drawn over the plot's left end, which fades out under them
+ * (`fadeLeftEnd`), so the series runs to the edge and the labels stay readable.
  */
 export function TimeChart(props: TimeChartProps): JSX.Element {
     let container!: HTMLDivElement;
     let tip!: HTMLDivElement;
+    let yAxis!: HTMLDivElement;
     let chart: uPlot | null = null;
     const [size, setSize] = createSignal({ width: 0, height: 0 });
     const zoom = useContext(SysinfoZoomContext);
@@ -128,6 +155,8 @@ export function TimeChart(props: TimeChartProps): JSX.Element {
     const bare = createMemo(
         () => !!props.sparkline || (size().height > 0 && size().height < minFullChartPx(zoom(), props.timeAxis !== false))
     );
+    // The y axis' tick values, kept for the labels drawn over the plot.
+    let ySplits: number[] = [];
     // What the scales read; updated before each setData.
     let xWindow: [number, number] = [0, 1];
     let yWindow: [number, number] = [0, 100];
@@ -160,6 +189,17 @@ export function TimeChart(props: TimeChartProps): JSX.Element {
         tip.style.top = `${Math.max(0, u.over.offsetTop + u.valToPos(anchor, "y") - 30)}px`;
     };
 
+    /** After uPlot has drawn the plot: the fade at its left end, then the y labels over it. */
+    const drawYLabels = (u: uPlot) => {
+        const labels =
+            bare() || props.yLabels === false
+                ? []
+                : yLabelTexts(ySplits, u.scales.y.min ?? 0, u.scales.y.max ?? 1, (v) =>
+                      (props.axisFormat ?? props.format)(Math.abs(v))
+                  );
+        placeYLabels(u, yAxis, labels);
+    };
+
     const options = (width: number, height: number): uPlot.Options => {
         const muted = resolveCssColor(container, "var(--grey-text-color)");
         const grid = { stroke: withAlpha(muted, 0.25), width: 1 };
@@ -173,9 +213,9 @@ export function TimeChart(props: TimeChartProps): JSX.Element {
             width,
             height,
             legend: { show: false },
-            // Nothing on the right: the plot ends at the edge (a label that would
-            // cross it is dropped, see `edgeSafe`). The top keeps room for the top y label.
-            ...(bare() ? {} : { padding: [topPaddingPx(z), 0, null, TEXT_INSET_PX] as uPlot.Padding }),
+            // Nothing on either side: the plot runs to both edges (a time label that would
+            // cross the right one is dropped, see `edgeSafe`). The top keeps room for the top y label.
+            ...(bare() ? {} : { padding: [topPaddingPx(z), 0, null, 0] as uPlot.Padding }),
             cursor: {
                 // Only the time is shared: each chart has its own y scale, and by
                 // default uPlot would also draw the hovered chart's y value on the others.
@@ -201,26 +241,7 @@ export function TimeChart(props: TimeChartProps): JSX.Element {
                               timeLabels ? edgeSafe(u, splits, timeAxisLabels(splits, incr)) : splits.map(() => ""),
                           size: timeAxisPx(z, timeLabels),
                       },
-                      {
-                          stroke: muted,
-                          font,
-                          grid,
-                          ticks,
-                          gap,
-                          space: Math.round(Y_LABEL_SPACE_PX * z),
-                          size:
-                              props.yLabels === false
-                                  ? BARE_AXIS_PX
-                                  : yAxisSize(
-                                        () => props.axisWidth ?? 0,
-                                        (w) => queueMicrotask(() => props.onAxisWidth?.(w))
-                                    ),
-                          // Below the axis is still an amount: no minus signs.
-                          values: (_u, splits) =>
-                              props.yLabels === false
-                                  ? splits.map(() => "")
-                                  : splits.map((v) => (props.axisFormat ?? props.format)(Math.abs(v))),
-                      },
+                      yAxisOptions({ stroke: muted, font, grid }, Math.round(Y_LABEL_SPACE_PX * z), (splits) => (ySplits = splits)),
                   ],
             series: [
                 {},
@@ -245,7 +266,7 @@ export function TimeChart(props: TimeChartProps): JSX.Element {
                     } as uPlot.Series;
                 }),
             ],
-            hooks: { setCursor: [(u) => showTip(u)] },
+            hooks: { setCursor: [(u) => showTip(u)], draw: [(u) => drawYLabels(u)] },
         };
     };
 
@@ -263,8 +284,6 @@ export function TimeChart(props: TimeChartProps): JSX.Element {
         const { width, height } = size();
         if (width <= 0 || height <= 0) return;
         chart = new uPlot(options(width, height), windows(), container);
-        // No y labels to measure: say so, so an old width doesn't keep the column wide.
-        if (bare() || props.yLabels === false) queueMicrotask(() => props.onAxisWidth?.(0));
     };
 
     onMount(() => {
@@ -303,8 +322,6 @@ export function TimeChart(props: TimeChartProps): JSX.Element {
             defer: true,
         })
     );
-    // The column's y-axis width changed: lay the axes out again, keeping the paths.
-    createEffect(on(() => props.axisWidth, () => chart?.redraw(false, true), { defer: true }));
 
     return (
         <div class={`sysinfo-chart ${props.top ? "sysinfo-chart--top" : ""} ${props.class ?? ""}`}>
@@ -312,6 +329,7 @@ export function TimeChart(props: TimeChartProps): JSX.Element {
                 <div class="sysinfo-chart-title">{props.title}</div>
             </Show>
             <div ref={container} class="sysinfo-chart-canvas" />
+            <div ref={yAxis} class="sysinfo-chart-yaxis" />
             <div ref={tip} class="sysinfo-chart-tip" style={{ display: "none" }} />
         </div>
     );
@@ -327,7 +345,7 @@ type SingleLinePlotProps = {
     targetLen: number;
     intervalSecs: number;
     syncKey?: string;
-} & Pick<TimeChartProps, "timeAxis" | "yLabels" | "top" | "axisWidth" | "onAxisWidth">;
+} & Pick<TimeChartProps, "timeAxis" | "yLabels" | "top">;
 
 /**
  * One metric, as a simple view shows it: titled with its figures now and over
@@ -357,8 +375,6 @@ export function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
             timeAxis={props.timeAxis}
             yLabels={props.yLabels}
             top={props.top}
-            axisWidth={props.axisWidth}
-            onAxisWidth={props.onAxisWidth}
             class="sysinfo-grid-chart"
         />
     );
