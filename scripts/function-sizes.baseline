@@ -419,7 +419,6 @@
 193 frontend/app/view/agent/components/MarkdownBlock.tsx::MarkdownBlock
 141 frontend/app/view/agent/components/MyAgentsList.tsx::MyAgentsList
 171 frontend/app/view/agent/components/MyAgentsRow.tsx::MyAgentsRow
-241 frontend/app/view/agent/components/MyAgentsRowPanel.tsx::MyAgentsRowPanel
 147 frontend/app/view/agent/components/PersistentShellBlock.tsx::PersistentShellBlock
 130 frontend/app/view/agent/components/SeatRosterImport.tsx::SeatRosterImport
 108 frontend/app/view/agent/components/SlashCommandPicker.tsx::SlashCommandPicker
