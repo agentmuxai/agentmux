@@ -1,0 +1,115 @@
+GetContainerLimitsCommand {"agent_id":"agent-1"}
+-- load failed
+<div>
+  <div class="agent-primitive-modal-detail agent-container-limits-panel" data-testid="agent-container-limits-panel">
+    <div class="agent-primitive-modal-readonly">
+      <p class="agent-primitive-modal-global-note">
+        "How much of Docker's memory and CPU"
+        "Claude"
+        "'s container may use. A change reaches the running container at once; nothing restarts."
+      <div data-stand="Field" data-label="Memory" data-layout="stacked">
+        <div class="agent-container-limits-row">
+          <select data-stand="Select" data-value="auto" disabled="" data-testid="container-limits-memory-mode">
+            <option>
+              "Automatic"
+            <option>
+              "Set a limit"
+            <option>
+              "No limit"
+      <div data-stand="Field" data-label="CPUs" data-layout="stacked">
+        <div class="agent-container-limits-row">
+          <select data-stand="Select" data-value="auto" disabled="" data-testid="container-limits-cpus-mode">
+            <option>
+              "Automatic"
+            <option>
+              "Set a limit"
+            <option>
+              "No limit"
+      <div data-stand="AgentContainerCaches" data-agent-id="agent-1" data-agent-name="Claude">
+      <div class="agent-primitive-modal-error" role="alert">
+        "srv is down"
+      <div class="agent-primitive-modal-actions">
+        <span data-stand="Button" data-busy="false" data-disabled="false">
+          "Retry"
+      <div class="agent-primitive-modal-actions">
+        <span data-stand="Button" data-tone="accent" data-busy="false" data-disabled="true">
+          "Save"
+Button "Retry" click
+GetContainerLimitsCommand {"agent_id":"agent-1"}
+-- a plain refusal
+<div>
+  <div class="agent-primitive-modal-detail agent-container-limits-panel" data-testid="agent-container-limits-panel">
+    <div class="agent-primitive-modal-readonly">
+      <p class="agent-primitive-modal-global-note">
+        "How much of Docker's memory and CPU"
+        "Claude"
+        "'s container may use. A change reaches the running container at once; nothing restarts."
+      <div data-stand="Field" data-label="Memory" data-layout="stacked">
+        <div class="agent-container-limits-row">
+          <select data-stand="Select" data-value="auto" disabled="" data-testid="container-limits-memory-mode">
+            <option>
+              "Automatic"
+            <option>
+              "Set a limit"
+            <option>
+              "No limit"
+      <div data-stand="Field" data-label="CPUs" data-layout="stacked">
+        <div class="agent-container-limits-row">
+          <select data-stand="Select" data-value="auto" disabled="" data-testid="container-limits-cpus-mode">
+            <option>
+              "Automatic"
+            <option>
+              "Set a limit"
+            <option>
+              "No limit"
+      <div data-stand="AgentContainerCaches" data-agent-id="agent-1" data-agent-name="Claude">
+      <div class="agent-primitive-modal-error" role="alert">
+        "plain refusal"
+      <div class="agent-primitive-modal-actions">
+        <span data-stand="Button" data-busy="false" data-disabled="false">
+          "Retry"
+      <div class="agent-primitive-modal-actions">
+        <span data-stand="Button" data-tone="accent" data-busy="false" data-disabled="true">
+          "Save"
+Button "Retry" click
+GetContainerLimitsCommand {"agent_id":"agent-1"}
+-- loaded
+<div>
+  <div class="agent-primitive-modal-detail agent-container-limits-panel" data-testid="agent-container-limits-panel">
+    <div class="agent-primitive-modal-readonly">
+      <p class="agent-primitive-modal-global-note">
+        "How much of Docker's memory and CPU"
+        "Claude"
+        "'s container may use. A change reaches the running container at once; nothing restarts."
+      <div data-stand="Field" data-label="Memory" data-layout="stacked">
+        <div class="agent-container-limits-row">
+          <select data-stand="Select" data-value="custom" data-testid="container-limits-memory-mode">
+            <option>
+              "Automatic"
+            <option>
+              "Set a limit"
+            <option>
+              "No limit"
+          <input data-stand="TextInput" class="setting-number" inputmode="decimal" data-value="4" data-testid="container-limits-memory-amount">
+          <span>
+            "GB"
+        <p class="agent-primitive-modal-global-note" data-testid="container-limits-memory-note">
+          "In force now: 4 GB of the 8 GB Docker has."
+      <div data-stand="Field" data-label="CPUs" data-layout="stacked">
+        <div class="agent-container-limits-row">
+          <select data-stand="Select" data-value="custom" data-testid="container-limits-cpus-mode">
+            <option>
+              "Automatic"
+            <option>
+              "Set a limit"
+            <option>
+              "No limit"
+          <input data-stand="TextInput" class="setting-number" inputmode="decimal" data-value="2" data-testid="container-limits-cpus-amount">
+          <span>
+            "CPUs"
+        <p class="agent-primitive-modal-global-note" data-testid="container-limits-cpus-note">
+          "In force now: 2 of 8 CPUs."
+      <div data-stand="AgentContainerCaches" data-agent-id="agent-1" data-agent-name="Claude">
+      <div class="agent-primitive-modal-actions">
+        <span data-stand="Button" data-tone="accent" data-busy="false" data-disabled="true">
+          "Save"
