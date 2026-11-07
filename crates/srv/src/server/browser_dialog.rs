@@ -152,7 +152,7 @@ fn log() -> std::sync::MutexGuard<'static, HashMap<String, VecDeque<Value>>> {
     L.get_or_init(Default::default).lock().unwrap_or_else(|p| p.into_inner())
 }
 
-fn record(agent: &str, target: &str, kind: &str, message: &str, decision: &str, reason: &str) {
+pub(crate) fn record(agent: &str, target: &str, kind: &str, message: &str, decision: &str, reason: &str) {
     tracing::info!(agent_id = %agent, target = %target, kind = %kind, decision = %decision, reason = %reason, "[browser-dialog] page dialog");
     if agent.is_empty() {
         return;
