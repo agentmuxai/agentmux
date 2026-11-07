@@ -239,8 +239,8 @@ fn chooser_reason(ask: &str) -> String {
 fn notice_words(notice: &str, shown: &str) -> (String, &'static str) {
     match notice {
         "external_protocol" => (
-            format!("the page tried to open a program with a {shown}: link"),
-            "AgentMux never hands a page's link to a program on the computer. If the task needs that program, tell the person; don't look for another way in",
+            format!("a navigation to a {shown}: address was refused"),
+            "AgentMux only loads web pages in a pane, and never hands an address to a program on the computer (mailto:, zoommtg: and the like) or opens a local file by address. If the task needs one, tell the person; don't look for another way in",
         ),
         "certificate_error" => (
             format!("{shown} has a certificate that isn't trusted"),
@@ -435,7 +435,7 @@ mod tests {
     #[test]
     fn a_refused_link_or_certificate_tells_the_agent_what_to_do_instead() {
         let (what, why) = notice_words("external_protocol", "mailto");
-        assert!(what.contains("mailto:") && why.contains("tell the person"), "{what} / {why}");
+        assert!(what.contains("mailto:") && why.contains("tell the person") && !what.contains("program"), "{what} / {why}");
         let (what, why) = notice_words("certificate_error", "expired.example");
         assert!(what.contains("expired.example") && why.contains("certificate warning"), "{what} / {why}");
     }

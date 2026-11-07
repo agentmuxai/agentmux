@@ -44,9 +44,8 @@ pub(super) fn tell(state: &Arc<crate::state::AppState>, browser: &Browser, kind:
     if !due(&target, kind, Instant::now()) {
         return;
     }
-    let origin = crate::browser_pane::callbacks::main_frame_url(browser);
     tracing::info!(target = %target, kind, "browser pane: refused something in an agent-driven pane and told the agent");
-    super::jsdialog::notify(state, serde_json::json!({ "target": target, "notice": kind, "message": shown(kind, url), "origin": origin }));
+    super::jsdialog::notify(state, serde_json::json!({ "target": target, "notice": kind, "message": shown(kind, url) }));
 }
 
 /// [`tell`] for a navigation the handler cancels: returns 1, `on_before_browse`'s "cancel".
