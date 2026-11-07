@@ -155,7 +155,7 @@ async fn a_declined_request_says_so() {
     let app = app().await;
     let ask = {
         let app = app.clone();
-        tokio::spawn(async move { send(&app, post("/api/v1/vault/request", &[], json!({ "kind": "ssn", "label": "Declined one", "wait_secs": 20 }))).await })
+        tokio::spawn(async move { send(&app, post("/api/v1/vault/request", &[], json!({ "kind": "ssn", "label": "Declined one", "reason": "need it to file the form", "wait_secs": 20 }))).await })
     };
     let mut id = None;
     for _ in 0..100 {

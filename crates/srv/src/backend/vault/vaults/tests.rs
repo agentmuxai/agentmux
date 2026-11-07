@@ -139,7 +139,8 @@ fn generate_goes_to_the_named_vault_or_the_agents_first_one() {
     let req = |vault: Option<&str>| GenerateRequest {
         kind: "api-key".into(),
         label: format!("Key {}", vault.unwrap_or("default")),
-        why: String::new(),
+        why: "a key for the staging site".into(),
+        reason: None,
         fields: Default::default(),
         rules: Default::default(),
         expires: None,

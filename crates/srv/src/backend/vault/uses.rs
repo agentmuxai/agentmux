@@ -44,6 +44,9 @@ pub struct UseRequest {
     /// Why the person is being asked: it is a new site, or the field doesn't look
     /// like what the entry is.
     pub reason: String,
+    /// The agent's own reason for asking, one line of at most 300 characters; shown as "<agent> says: ...",
+    /// never used to decide anything. Empty for a use no agent asked for.
+    pub agent_reason: String,
     /// There is no entry yet: the person types the value in the prompt, and may
     /// keep it in the Vault (spec section 6.5).
     pub needs_value: bool,

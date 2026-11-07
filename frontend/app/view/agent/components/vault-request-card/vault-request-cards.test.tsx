@@ -46,6 +46,7 @@ const use = (over: Partial<UseRequest> = {}): UseRequest => ({
     field: "GH_TOKEN (value)",
     offer_always: true,
     reason: "it is the first time Builder runs a command with this entry",
+    agent_reason: "check the build output for task 27968",
     needs_value: false,
     kind: "api-key",
     command: "gh release create v1",

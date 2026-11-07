@@ -132,7 +132,8 @@ fn the_rotation_task_goes_to_the_agent_that_made_the_value() {
     let req = GenerateRequest {
         kind: "api-key".into(),
         label: "Deploy token".into(),
-        why: String::new(),
+        why: "a token for the test".into(),
+        reason: None,
         fields: Default::default(),
         rules: Default::default(),
         expires: Some("2026-12-01".into()),
@@ -157,7 +158,8 @@ fn a_much_used_key_is_still_reminded_once_and_its_maker_still_known() {
     let req = GenerateRequest {
         kind: "api-key".into(),
         label: "Busy token".into(),
-        why: String::new(),
+        why: "a token for the test".into(),
+        reason: None,
         fields: Default::default(),
         rules: Default::default(),
         expires: Some("2026-12-01".into()),
@@ -226,7 +228,8 @@ fn an_entry_made_again_under_a_deleted_ones_id_inherits_none_of_its_reminders() 
     let req = GenerateRequest {
         kind: "api-key".into(),
         label: "Stripe".into(),
-        why: String::new(),
+        why: "a token for the test".into(),
+        reason: None,
         fields: Default::default(),
         rules: Default::default(),
         expires: Some("2026-11-20".into()),
@@ -251,7 +254,8 @@ fn a_value_the_person_put_in_is_theirs_to_rotate() {
     let req = GenerateRequest {
         kind: "api-key".into(),
         label: "Deploy token".into(),
-        why: String::new(),
+        why: "a token for the test".into(),
+        reason: None,
         fields: Default::default(),
         rules: Default::default(),
         expires: Some("2026-11-20".into()),

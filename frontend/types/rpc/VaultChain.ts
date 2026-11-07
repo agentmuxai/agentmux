@@ -17,6 +17,11 @@ checked: number,
  */
 before_chain: number, 
 /**
+ * How many lines after the chain began have no place in it and look like what an older AgentMux sharing this
+ * computer's store writes (it doesn't know the chain). They are not checked, and are shown as a count.
+ */
+unchained_after: number, 
+/**
  * The first line found wrong, when not intact.
  */
 broken_at: number | null, 
