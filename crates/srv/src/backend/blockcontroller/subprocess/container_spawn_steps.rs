@@ -272,7 +272,7 @@ impl Turn {
         if let Some(ref b) = broker {
             let status = {
                 let inner = inner_arc.lock().unwrap();
-                SubprocessController::build_status_snapshot(&inner, &block_id, true)
+                SubprocessController::build_status_snapshot(&inner, block_id, true)
             };
             publish_controller_status(b, &status);
         }
@@ -378,9 +378,9 @@ impl Turn {
                 // Into the agent's global zone too, like every other
                 // record: that is what the pane reads on reload
                 // (Phase 5a-3c).
-                let global_zone = crate::backend::transcript::append::resolve_global_output_zone(&mstore, &block_id);
+                let global_zone = crate::backend::transcript::append::resolve_global_output_zone(mstore, block_id);
                 shell::handle_append_block_file(
-                    b, &block_id, SUBPROCESS_OUTPUT_SUBJECT,
+                    b, block_id, SUBPROCESS_OUTPUT_SUBJECT,
                     format!("{error_frame}\n").as_bytes(),
                     filestore.as_ref(), global_zone.as_deref(),
                 );
@@ -406,7 +406,7 @@ impl Turn {
         if let Some(ref b) = broker {
             let status = {
                 let inner = inner_arc.lock().unwrap();
-                SubprocessController::build_status_snapshot(&inner, &block_id, false)
+                SubprocessController::build_status_snapshot(&inner, block_id, false)
             };
             publish_controller_status(b, &status);
         }
@@ -426,11 +426,11 @@ impl Turn {
                 ) {
                     tracing::warn!(error = %e, "failed to spawn queued container turn");
                     SubprocessController::publish_queued_spawn_error(
-                        &block_id,
+                        block_id,
                         &e,
-                        &broker,
-                        &filestore,
-                        &mstore,
+                        broker,
+                        filestore,
+                        mstore,
                     );
                 }
             }
@@ -466,7 +466,7 @@ impl Turn {
         // so every container-exec `output` line is also mirrored to the
         // cross-channel store. `None` for non-agent blocks.
         let global_output_zone =
-            crate::backend::transcript::append::resolve_global_output_zone(&mstore, &block_id);
+            crate::backend::transcript::append::resolve_global_output_zone(mstore, block_id);
 
         tracing::info!(block_id = %block_id, "container exec output reader started");
 
@@ -487,7 +487,7 @@ impl Turn {
                         None => {
                             // Stream ended — flush any remaining partial line.
                             if !line_buf.trim().is_empty() {
-                                SubprocessController::publish_line(&line_buf, &block_id, &session_id_field, &inner_arc, &mstore, &event_bus, &broker, &filestore, &mut stats, global_output_zone.as_deref(), &mut read.last_result_frame, &mut read.last_inband_error, &mut parked_notices_due);
+                                SubprocessController::publish_line(&line_buf, block_id, &session_id_field, inner_arc, mstore, event_bus, broker, filestore, &mut stats, global_output_zone.as_deref(), &mut read.last_result_frame, &mut read.last_inband_error, &mut parked_notices_due);
                             }
                             tracing::info!(block_id = %block_id, "container exec output EOF");
                             break;
@@ -513,7 +513,7 @@ impl Turn {
                             for ch in chunk.chars() {
                                 if ch == '\n' {
                                     if !line_buf.trim().is_empty() {
-                                        SubprocessController::publish_line(&line_buf, &block_id, &session_id_field, &inner_arc, &mstore, &event_bus, &broker, &filestore, &mut stats, global_output_zone.as_deref(), &mut read.last_result_frame, &mut read.last_inband_error, &mut parked_notices_due);
+                                        SubprocessController::publish_line(&line_buf, block_id, &session_id_field, inner_arc, mstore, event_bus, broker, filestore, &mut stats, global_output_zone.as_deref(), &mut read.last_result_frame, &mut read.last_inband_error, &mut parked_notices_due);
                                     }
                                     line_buf.clear();
                                 } else {
@@ -541,7 +541,7 @@ impl Turn {
         // Best-effort: actually terminate the in-container process.
         // Even if this fails (e.g. no procps on an old image), we
         // still break + finalize so AgentMux honours the stop.
-        if let Err(e) = cm.signal_exec_process(&container_name, &kill_pattern, force).await {
+        if let Err(e) = cm.signal_exec_process(container_name, kill_pattern, force).await {
             tracing::warn!(block_id = %block_id, error = %e, "container interrupt pkill failed");
         }
         // The wrapper carries the `rm -f`, and `pkill -f
@@ -553,14 +553,14 @@ impl Turn {
         // container that outlives the turn (codex P2,
         // PR #2883). Clean up from out here, where nothing was
         // killed.
-        cm.remove_turn_prompt(&container_name, &prompt_path_for_kill).await;
+        cm.remove_turn_prompt(container_name, prompt_path_for_kill).await;
     }
 
     /// Log the CLI's stderr and keep its last lines for classifying a failure.
     fn note_stderr(&self, message: &[u8], stderr_tail: &mut Vec<String>) {
         let block_id = &self.block_id;
         // Log stderr but don't publish as blockfile output.
-        let s = String::from_utf8_lossy(&message);
+        let s = String::from_utf8_lossy(message);
         for line in s.lines() {
             if !line.trim().is_empty() {
                 tracing::info!(block_id = %block_id, stderr = %line, "container exec stderr");
@@ -603,7 +603,7 @@ impl Turn {
         } else if stream_errored {
             1
         } else {
-            match cm.inspect_exec(&exec_id).await {
+            match cm.inspect_exec(exec_id).await {
                 Ok(Some(code)) => code as i32,
                 Ok(None) => {
                     tracing::warn!(block_id = %block_id, "inspect_exec returned no exit code; treating turn as failed");
@@ -629,8 +629,8 @@ impl Turn {
         // A memory kill in the container is often a child of the CLI (the `cargo` of a Bash tool), so the turn may
         // have ended cleanly: the pane says so either way, and a turn that died of it says why.
         if !killed {
-            if let Some(event) = cm.oom_since(&container_name, oom_before).await {
-                crate::backend::container::oom::note_in_pane(&event, &block_id, &broker, &filestore, &mstore);
+            if let Some(event) = cm.oom_since(container_name, oom_before).await {
+                crate::backend::container::oom::note_in_pane(&event, block_id, broker, filestore, mstore);
                 if let Some(failure) = run_failure.as_mut() {
                     crate::backend::container::oom::explain_failure(failure, &event);
                 }
@@ -661,7 +661,7 @@ impl Turn {
         if let Some(ref b) = broker {
             let status = {
                 let inner = inner_arc.lock().unwrap();
-                SubprocessController::build_status_snapshot(&inner, &block_id, false)
+                SubprocessController::build_status_snapshot(&inner, block_id, false)
             };
             publish_controller_status(b, &status);
         }
@@ -678,8 +678,8 @@ impl Turn {
         // persisted failure is cleared after a later successful turn — this
         // call handles both cases regardless of whether run_failure is
         // Some or None. Mirrors host_spawn.rs's process_waiter.
-        core::persist_last_failure(&block_id, run_failure.as_ref(), &mstore, &event_bus);
-        core::report_provider_turn(&block_id, run_failure.as_ref(), &mstore);
+        core::persist_last_failure(block_id, run_failure.as_ref(), mstore, event_bus);
+        core::report_provider_turn(block_id, run_failure.as_ref(), mstore);
         // A finished turn is when the agent's running summary may be due for an update (a host agent's
         // persistent reader does this; without it a container agent never got one, so a compaction
         // delivered its memory but no summary).
@@ -690,7 +690,7 @@ impl Turn {
         // Surface the classified failure cause to the pane. persist:1 so
         // reconnecting subscribers also receive the last failure without a
         // separate meta read (belt-and-suspenders with the meta write above).
-        if let (Some(failure), Some(ref b)) = (run_failure.as_ref(), broker.as_ref()) {
+        if let (Some(failure), Some(b)) = (run_failure.as_ref(), broker.as_ref()) {
             b.publish_event::<crate::backend::mps_events::AgentFailed>(failure, vec![format!("block:{}", block_id)], 1);
         }
     }
@@ -728,11 +728,11 @@ impl Turn {
                 ) {
                     tracing::warn!(error = %e, "failed to spawn queued container turn");
                     SubprocessController::publish_queued_spawn_error(
-                        &block_id,
+                        block_id,
                         &e,
-                        &broker,
-                        &filestore,
-                        &mstore,
+                        broker,
+                        filestore,
+                        mstore,
                     );
                 }
             }
