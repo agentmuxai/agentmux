@@ -704,7 +704,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         pinnedVersion: "1.54.0",
         versionSource: { kind: "github-release", repo: "aaif-goose/goose" },
         docsUrl: "https://goose-docs.ai/docs/getting-started/installation",
-        windowsInstallCommand: "irm https://raw.githubusercontent.com/aaif-goose/goose/main/download_cli.ps1 | iex",
+        windowsInstallCommand: "irm https://github.com/aaif-goose/goose/releases/download/stable/download_cli.ps1 | iex",
         unixInstallCommand: "curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | CONFIGURE=false bash",
         icon: "terminal",
         authConfigDirEnvVar: "GOOSE_PATH_ROOT",

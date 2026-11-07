@@ -404,8 +404,6 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/srv/src/server/system_install_handlers.rs", "&step.program", 1,
      "no-window: calls no_window()/creation_flags in this file"),
-    ("crates/srv/src/server/vendor_install_handlers.rs", "&plan.program", 1,
-     "no-window: calls no_window()/creation_flags in this file"),
     ("crates/srv/src/server/voice.rs", "&cli", 1,
      "no-window: calls no_window()/creation_flags in this file"),
 ];
