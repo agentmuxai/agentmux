@@ -118,6 +118,14 @@ function pointInTriangle(pt: Point, v1: Point, v2: Point, v3: Point): boolean {
 const TRIANGLE_BASE_MARGIN_PX = 16;
 
 /**
+ * A pointer this close to the apex is still on its way. Near the apex the triangle is narrower than a pixel, and a
+ * slow hand reports whole pixels, so one step straight down (or any step the rounding turns the wrong way) lands
+ * outside it although the path is aimed at the submenu. A few pixels of leeway there lose nothing: a pointer
+ * that really leaves is far past it within a frame or two.
+ */
+const APEX_GRACE_PX = 12;
+
+/**
  * The safe triangle: apex at the point the cursor left the trigger row, base
  * along whichever submenu edge faces that point (a little longer than the
  * edge, by `TRIANGLE_BASE_MARGIN_PX`). Submenus in this app always
@@ -126,6 +134,7 @@ const TRIANGLE_BASE_MARGIN_PX = 16;
  * future top/bottom placement without needing a second code path.
  */
 function isInsideSafeTriangle(apex: Point, cursor: Point, submenuRect: DOMRect): boolean {
+    if (Math.hypot(cursor.x - apex.x, cursor.y - apex.y) <= APEX_GRACE_PX) return true;
     const m = TRIANGLE_BASE_MARGIN_PX;
     let corner1: Point;
     let corner2: Point;
