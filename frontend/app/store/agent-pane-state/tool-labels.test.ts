@@ -16,7 +16,7 @@ describe("toolActivity", () => {
     });
 
     it("falls back to the command's program, never the whole command", () => {
-        expect(toolActivity("Bash", { command: "npm run build -- --watch" }).label).toBe("Running npm");
+        expect(toolActivity("Bash", { command: "npm run build -- --watch" }).label).toBe("Building with npm");
         expect(toolActivity("Bash", {}).label).toBe("Running a command");
     });
 
