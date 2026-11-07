@@ -5,7 +5,7 @@
 // and end, read from `audit.query` a page at a time with filters, and below it what agents did with the
 // person's secrets (vault-secrets.tsx). The list and how new entries reach it are audit-list.ts.
 
-import { createEffect, createMemo, createSignal, For, on, onCleanup, Show, untrack, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, on, onCleanup, Show, untrack, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
 
 import { Button, FilterInput, Select, SegmentedControl } from "@/app/element/ui";

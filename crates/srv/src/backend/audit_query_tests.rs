@@ -432,7 +432,8 @@ impl TwoFiles {
         let uid = |slug: &str| Some(format!("uid-{slug}"));
         let none = |_: &str| None;
         let exists = |_: &str| false;
-        let src = Sources { channel: "dev",
+        let src = Sources {
+            channel: "dev",
             jekt_file: self.shared.as_deref(),
             own_file: self.own.as_deref(),
             activity_dir: None,
@@ -561,7 +562,8 @@ impl Activity {
         let uid = |slug: &str| Some(format!("uid-{slug}"));
         let none = |_: &str| None;
         let exists = |b: &str| b == "block-Maricon-2";
-        let src = Sources { channel: "dev",
+        let src = Sources {
+            channel: "dev",
             jekt_file: self.jekts.as_deref(),
             own_file: None,
             activity_dir: Some(&self.activity_dir),
