@@ -25,7 +25,6 @@ import {
     mirroredRange,
     titled,
     volumes,
-    windowStats,
     withBusiestCore,
 } from "./sysinfo-overview-data";
 import { TimeChart } from "./sysinfo-plot-lazy";
@@ -47,162 +46,212 @@ type FocusProps = {
 };
 
 
-export function FocusView(props: FocusProps): JSX.Element {
+// Committed memory is read against its limit, so its scale ends there.
+const commitMeta = { ...DefaultPlotMeta["mem:used"], maxy: "mem:commit:total", autoMaxY: false } as TimeSeriesMeta;
+
+function createFocusState(props: FocusProps) {
     const rows = () => props.plotData;
     const latest = () => rows()[rows().length - 1];
     const cores = createMemo(() => coreKeys(latest()));
     const cpuRows = createMemo(() => (props.area === "cpu" ? withBusiestCore(rows(), cores()) : rows()));
     const hasCommit = () => latest()?.["mem:commit:total"] > 0;
-    // Committed memory is read against its limit, so its scale ends there.
-    const commitMeta = { ...DefaultPlotMeta["mem:used"], maxy: "mem:commit:total", autoMaxY: false } as TimeSeriesMeta;
+    return { props, rows, latest, cores, cpuRows, hasCommit };
+}
 
+type FocusState = ReturnType<typeof createFocusState>;
 
+// The title is read inside the chart, so new samples change its text, not the chart.
+function focusChart(
+    s: FocusState,
+    title: () => string,
+    series: SeriesSpec[],
+    range: (r: DataItem[]) => [number, number],
+    format: (v: number) => string,
+    opts: { data?: () => DataItem[]; timeAxis?: () => boolean; top?: boolean } = {}
+) {
+    return (
+        <TimeChart
+            plotData={(opts.data ?? s.rows)()}
+            series={series}
+            yRange={range}
+            format={format}
+            targetLen={s.props.targetLen}
+            intervalSecs={s.props.intervalSecs}
+            syncKey={s.props.syncKey}
+            title={title()}
+            timeAxis={opts.timeAxis?.() ?? false}
+            top={opts.top}
+            class="sysinfo-focus-chart"
+        />
+    );
+}
 
-    // The title is read inside the chart, so new samples change its text, not the chart.
-    const chart = (
-        title: () => string,
-        series: SeriesSpec[],
-        range: (r: DataItem[]) => [number, number],
-        format: (v: number) => string,
-        opts: { data?: () => DataItem[]; timeAxis?: () => boolean; top?: boolean } = {}
-    ) => {
-        return (
-            <TimeChart
-                plotData={(opts.data ?? rows)()}
-                series={series}
-                yRange={range}
-                format={format}
-                targetLen={props.targetLen}
-                intervalSecs={props.intervalSecs}
-                syncKey={props.syncKey}
-                title={title()}
-                timeAxis={opts.timeAxis?.() ?? false}
-                top={opts.top}
-                class="sysinfo-focus-chart"
-            />
-        );
-    };
+function CpuCharts({ s }: { s: FocusState }): JSX.Element {
+    return (
+        <>
+            {focusChart(
+                s,
+                () => titled("CPU", figures(s.rows(), "cpu", pct)),
+                [{ key: "cpu", label: "CPU", color: CPU }],
+                () => [0, 100],
+                pct,
+                { timeAxis: () => s.cores().length === 0, top: true }
+            )}
+            <Show when={s.cores().length > 0}>
+                {focusChart(
+                    s,
+                    () => titled("Busiest core", figures(s.cpuRows(), BUSIEST_CORE, pct)),
+                    [
+                        { key: BUSIEST_CORE, label: "Busiest core", color: OUT },
+                        { key: "cpu", label: "Average", color: CPU },
+                    ],
+                    () => [0, 100],
+                    pct,
+                    { data: s.cpuRows, timeAxis: () => true }
+                )}
+                <div class="sysinfo-focus-chart sysinfo-overview-cores">
+                    <div class="sysinfo-chart-title">{`Cores (${s.cores().length})`}</div>
+                    <CoreHeatmap
+                        plotData={s.rows()}
+                        cores={s.cores()}
+                        color={CPU}
+                        targetLen={s.props.targetLen}
+                        intervalSecs={s.props.intervalSecs}
+                    />
+                </div>
+            </Show>
+        </>
+    );
+}
+
+function MemCharts({ s }: { s: FocusState }): JSX.Element {
+    return (
+        <>
+            {focusChart(
+                s,
+                () => titled("Used", figures(s.rows(), "mem:used", formatGB)),
+                [{ key: "mem:used", label: "Used", color: MEM }],
+                (r) => yRange(r, "mem:used", DefaultPlotMeta["mem:used"]),
+                formatGB,
+                { top: true }
+            )}
+            {focusChart(
+                s,
+                () => titled("Available", figures(s.rows(), "mem:available", formatGB)),
+                [{ key: "mem:available", label: "Available", color: MEM }],
+                (r) => yRange(r, "mem:available", DefaultPlotMeta["mem:used"]),
+                formatGB,
+                { timeAxis: () => !s.hasCommit() }
+            )}
+            <Show when={s.hasCommit()}>
+                {focusChart(
+                    s,
+                    () => titled("Committed", figures(s.rows(), "mem:commit:used", formatGB)),
+                    [{ key: "mem:commit:used", label: "Committed", color: OUT }],
+                    (r) => yRange(r, "mem:commit:used", commitMeta),
+                    formatGB,
+                    { timeAxis: () => true }
+                )}
+            </Show>
+        </>
+    );
+}
+
+function DiskCharts({ s }: { s: FocusState }): JSX.Element {
+    return (
+        <>
+            {focusChart(
+                s,
+                () => "Read above, write below",
+                [
+                    { key: "disk:read", label: "Read", color: IN },
+                    { key: "disk:write", label: "Write", color: OUT, below: true },
+                ],
+                (r) => mirroredRange(r, "disk:read", "disk:write", 1),
+                formatRate,
+                { top: true }
+            )}
+            {focusChart(
+                s,
+                () => titled("Read", figures(s.rows(), "disk:read", formatRate)),
+                [{ key: "disk:read", label: "Read", color: IN }],
+                (r) => yRange(r, "disk:read", DefaultPlotMeta["disk:read"]),
+                formatRate
+            )}
+            {focusChart(
+                s,
+                () => titled("Write", figures(s.rows(), "disk:write", formatRate)),
+                [{ key: "disk:write", label: "Write", color: OUT }],
+                (r) => yRange(r, "disk:write", DefaultPlotMeta["disk:write"]),
+                formatRate,
+                { timeAxis: () => true }
+            )}
+            <Show when={volumes(s.latest()).length > 0}>
+                <ul class="sysinfo-focus-volumes" aria-label="Volumes">
+                    <For each={volumes(s.latest())}>
+                        {(v) => (
+                            <li>
+                                <span class="sysinfo-focus-volume-name">{v.mount}</span>
+                                {`${formatGB(v.freeGB)} free of ${formatGB(v.totalGB)}`}
+                            </li>
+                        )}
+                    </For>
+                </ul>
+            </Show>
+        </>
+    );
+}
+
+function NetCharts({ s }: { s: FocusState }): JSX.Element {
+    return (
+        <>
+            {focusChart(
+                s,
+                () => "In above, out below",
+                [
+                    { key: "net:bytesrecv", label: "In", color: IN },
+                    { key: "net:bytessent", label: "Out", color: OUT, below: true },
+                ],
+                (r) => mirroredRange(r, "net:bytesrecv", "net:bytessent", 1),
+                formatRate,
+                { top: true }
+            )}
+            {focusChart(
+                s,
+                () => titled("In", figures(s.rows(), "net:bytesrecv", formatRate)),
+                [{ key: "net:bytesrecv", label: "In", color: IN }],
+                (r) => yRange(r, "net:bytesrecv", DefaultPlotMeta["net:bytesrecv"]),
+                formatRate
+            )}
+            {focusChart(
+                s,
+                () => titled("Out", figures(s.rows(), "net:bytessent", formatRate)),
+                [{ key: "net:bytessent", label: "Out", color: OUT }],
+                (r) => yRange(r, "net:bytessent", DefaultPlotMeta["net:bytessent"]),
+                formatRate,
+                { timeAxis: () => true }
+            )}
+        </>
+    );
+}
+
+export function FocusView(props: FocusProps): JSX.Element {
+    const s = createFocusState(props);
 
     return (
         <div class="sysinfo-focus">
             <Switch>
                 <Match when={props.area === "cpu"}>
-                    {chart(
-                        () => titled("CPU", figures(rows(), "cpu", pct)),
-                        [{ key: "cpu", label: "CPU", color: CPU }],
-                        () => [0, 100],
-                        pct,
-                        { timeAxis: () => cores().length === 0, top: true }
-                    )}
-                    <Show when={cores().length > 0}>
-                        {chart(
-                            () => titled("Busiest core", figures(cpuRows(), BUSIEST_CORE, pct)),
-                            [
-                                { key: BUSIEST_CORE, label: "Busiest core", color: OUT },
-                                { key: "cpu", label: "Average", color: CPU },
-                            ],
-                            () => [0, 100],
-                            pct,
-                            { data: cpuRows, timeAxis: () => true }
-                        )}
-                        <div class="sysinfo-focus-chart sysinfo-overview-cores">
-                            <div class="sysinfo-chart-title">{`Cores (${cores().length})`}</div>
-                            <CoreHeatmap
-                                plotData={rows()}
-                                cores={cores()}
-                                color={CPU}
-                                targetLen={props.targetLen}
-                                intervalSecs={props.intervalSecs}
-                            />
-                        </div>
-                    </Show>
+                    <CpuCharts s={s} />
                 </Match>
                 <Match when={props.area === "mem"}>
-                    {chart(
-                        () => titled("Used", figures(rows(), "mem:used", formatGB)),
-                        [{ key: "mem:used", label: "Used", color: MEM }],
-                        (r) => yRange(r, "mem:used", DefaultPlotMeta["mem:used"]),
-                        formatGB,
-                        { top: true }
-                    )}
-                    {chart(
-                        () => titled("Available", figures(rows(), "mem:available", formatGB)),
-                        [{ key: "mem:available", label: "Available", color: MEM }],
-                        (r) => yRange(r, "mem:available", DefaultPlotMeta["mem:used"]),
-                        formatGB,
-                        { timeAxis: () => !hasCommit() }
-                    )}
-                    <Show when={hasCommit()}>
-                        {chart(
-                            () => titled("Committed", figures(rows(), "mem:commit:used", formatGB)),
-                            [{ key: "mem:commit:used", label: "Committed", color: OUT }],
-                            (r) => yRange(r, "mem:commit:used", commitMeta),
-                            formatGB,
-                            { timeAxis: () => true }
-                        )}
-                    </Show>
+                    <MemCharts s={s} />
                 </Match>
                 <Match when={props.area === "disk"}>
-                    {chart(
-                        () => "Read above, write below",
-                        [
-                            { key: "disk:read", label: "Read", color: IN },
-                            { key: "disk:write", label: "Write", color: OUT, below: true },
-                        ],
-                        (r) => mirroredRange(r, "disk:read", "disk:write", 1),
-                        formatRate,
-                        { top: true }
-                    )}
-                    {chart(
-                        () => titled("Read", figures(rows(), "disk:read", formatRate)),
-                        [{ key: "disk:read", label: "Read", color: IN }],
-                        (r) => yRange(r, "disk:read", DefaultPlotMeta["disk:read"]),
-                        formatRate
-                    )}
-                    {chart(
-                        () => titled("Write", figures(rows(), "disk:write", formatRate)),
-                        [{ key: "disk:write", label: "Write", color: OUT }],
-                        (r) => yRange(r, "disk:write", DefaultPlotMeta["disk:write"]),
-                        formatRate,
-                        { timeAxis: () => true }
-                    )}
-                    <Show when={volumes(latest()).length > 0}>
-                        <ul class="sysinfo-focus-volumes" aria-label="Volumes">
-                            <For each={volumes(latest())}>
-                                {(v) => (
-                                    <li>
-                                        <span class="sysinfo-focus-volume-name">{v.mount}</span>
-                                        {`${formatGB(v.freeGB)} free of ${formatGB(v.totalGB)}`}
-                                    </li>
-                                )}
-                            </For>
-                        </ul>
-                    </Show>
+                    <DiskCharts s={s} />
                 </Match>
                 <Match when={props.area === "net"}>
-                    {chart(
-                        () => "In above, out below",
-                        [
-                            { key: "net:bytesrecv", label: "In", color: IN },
-                            { key: "net:bytessent", label: "Out", color: OUT, below: true },
-                        ],
-                        (r) => mirroredRange(r, "net:bytesrecv", "net:bytessent", 1),
-                        formatRate,
-                        { top: true }
-                    )}
-                    {chart(
-                        () => titled("In", figures(rows(), "net:bytesrecv", formatRate)),
-                        [{ key: "net:bytesrecv", label: "In", color: IN }],
-                        (r) => yRange(r, "net:bytesrecv", DefaultPlotMeta["net:bytesrecv"]),
-                        formatRate
-                    )}
-                    {chart(
-                        () => titled("Out", figures(rows(), "net:bytessent", formatRate)),
-                        [{ key: "net:bytessent", label: "Out", color: OUT }],
-                        (r) => yRange(r, "net:bytessent", DefaultPlotMeta["net:bytessent"]),
-                        formatRate,
-                        { timeAxis: () => true }
-                    )}
+                    <NetCharts s={s} />
                 </Match>
             </Switch>
         </div>
