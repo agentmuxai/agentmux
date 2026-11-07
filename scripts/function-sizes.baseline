@@ -368,7 +368,6 @@
 139 frontend/app/statusbar/BackendStatus.tsx::BackendStatus
 128 frontend/app/statusbar/BackendStatus.tsx::BackendStatusPanel
 140 frontend/app/statusbar/HostPopover.tsx::HostPopover
-171 frontend/app/statusbar/SystemStats.tsx::SystemStats
 145 frontend/app/store/agent-document/reducer.ts::scrubOrphanedInProgress
 258 frontend/app/store/agent-pane-state-store.ts::dispatch
 118 frontend/app/store/agent-pane-state/reducer-failure.ts::onCompactionBoundary
