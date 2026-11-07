@@ -22,7 +22,7 @@ import { userInThisWindow } from "@/app/store/input-owner";
 import { openConnectors, openMemory } from "@/app/store/section-panes";
 import { runViewAction } from "@/app/store/view-actions";
 import { openOrFocusPaneByView } from "@/app/store/block-component-registry";
-import { openKeyboardSettings } from "@/app/view/settings/open-settings";
+import { openKeyboardSettings } from "@/app/store/keyboard-focus-request";
 import { toggleStatusBar } from "@/app/statusbar/status-bar-visibility";
 import { devModeOn, toggleDevMode } from "@/app/store/dev-mode";
 import { paneHistoryBack, paneHistoryForward } from "@/app/store/pane-history";

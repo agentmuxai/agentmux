@@ -7,7 +7,7 @@ import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const openKeyboardSettings = vi.hoisted(() => vi.fn());
-vi.mock("@/app/view/settings/open-settings", () => ({ openKeyboardSettings }));
+vi.mock("@/app/store/keyboard-focus-request", () => ({ openKeyboardSettings }));
 vi.mock("@/app/keybindings", () => ({
     keyPlatform: () => "other",
     shortcutFor: (command: string) => (command === "pane:close" ? "⌘W" : ""),

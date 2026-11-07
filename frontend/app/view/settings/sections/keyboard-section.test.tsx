@@ -23,7 +23,7 @@ vi.mock("../settings-controls", async (orig) => {
 
 import { setUserKeybindings } from "@/app/keybindings/registry";
 import * as global from "@/app/store/global";
-import { requestKeyboardRow } from "../keyboard-focus-request";
+import { requestKeyboardRow } from "@/app/store/keyboard-focus-request";
 import { KeyboardSection } from "./keyboard-section";
 
 const setSettings = (global as unknown as { __setSettings: (v: unknown) => void }).__setSettings;

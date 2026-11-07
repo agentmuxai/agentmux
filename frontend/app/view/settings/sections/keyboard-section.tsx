@@ -17,7 +17,7 @@ import { categoriesOf, changedCount, createKeyboardFilters, otherEntries, shortc
 import { KeyboardToolbar, OtherEntries, ShortcutList, type KeyboardEdit } from "./keyboard-section-parts";
 import { EmptyState } from "@/app/element/ui";
 import { DURATION_LINGER_MS } from "@/app/motion/tokens";
-import { clearKeyboardRowRequest, keyboardRowRequest } from "../keyboard-focus-request";
+import { clearKeyboardRowRequest, keyboardRowRequest } from "@/app/store/keyboard-focus-request";
 
 export { KEYBOARD_SETTINGS } from "./keyboard-settings-index";
 

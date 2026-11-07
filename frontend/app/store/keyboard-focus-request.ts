@@ -7,6 +7,8 @@
 
 import { createSignal } from "solid-js";
 
+import { openOrFocusPaneByView } from "./block-component-registry";
+
 const [request, setRequest] = createSignal<{ command: string | null } | null>(null);
 
 export const keyboardRowRequest = request;
@@ -15,3 +17,9 @@ export const keyboardRowRequest = request;
 export const requestKeyboardRow = (command: string | null): void => void setRequest(() => ({ command }));
 
 export const clearKeyboardRowRequest = (): void => void setRequest(() => null);
+
+/** Open Settings at Keyboard shortcuts, scrolled to `command`'s line when one is given. */
+export function openKeyboardSettings(command?: string): Promise<void> {
+    requestKeyboardRow(command ?? null);
+    return openOrFocusPaneByView("settings", { meta: { view: "settings", "settings:section": "keyboard" } }, { "settings:section": "keyboard" });
+}

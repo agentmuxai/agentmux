@@ -4,7 +4,7 @@
 
 import { shortcutFor } from "@/app/keybindings";
 import { Button } from "@/app/element/ui";
-import { openKeyboardSettings } from "@/app/view/settings/open-settings";
+import { openKeyboardSettings } from "@/app/store/keyboard-focus-request";
 import { cn } from "@/util/util";
 import { For, JSX, Show } from "solid-js";
 import type { QuickTipsState } from "./quicktips-state";
