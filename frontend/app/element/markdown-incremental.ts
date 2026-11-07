@@ -220,3 +220,43 @@ export function trimPartialInlineTag(text: string): string {
     const m = PARTIAL_SPAN_TAG.exec(text);
     return m ? text.slice(0, m.index) : text;
 }
+
+/** A link whose destination is still being typed, at the end of the last line: `[label](https://…`. */
+const PARTIAL_LINK = /\[([^[\]\n]*)\]\(([^()\n]*)$/;
+
+/** An image still being typed, from its `![` to the end of the last line: `![alt`, `![alt]`, `![alt](path`. */
+const PARTIAL_IMAGE = /!\[[^[\]\n]*(?:\](?:\([^()\n]*)?)?$/;
+
+/** Whether `index` in `text` is inside an open code fence, or an open inline code span on its own line. */
+function insideOpenCode(text: string, index: number): boolean {
+    const lineStart = text.lastIndexOf("\n", index) + 1;
+    const fences = text.slice(0, lineStart).match(/^ {0,3}(?:`{3,}|~{3,})/gm)?.length ?? 0;
+    if (fences % 2 === 1) return true;
+    return (text.slice(lineStart, index).match(/`/g)?.length ?? 0) % 2 === 1;
+}
+
+/**
+ * Renders a link whose destination is still being typed in its compact form from the first character of
+ * the destination, in a STREAMING tail. Markdown shows `[label](https://long/url` as literal text until
+ * its `)` arrives, then replaces the whole run with the label: a long raw string that collapses to a short
+ * one, so the rows below it (and a pane following the bottom) jump back. The label stands as a link with a
+ * placeholder destination, and an image that is not complete yet is held back from its `![` (it grows into place).
+ *
+ * Only for the open tail while streaming, and never inside a code fence or an inline code span.
+ */
+export function settleOpenLink(text: string): string {
+    const lineStart = text.lastIndexOf("\n") + 1;
+    const line = text.slice(lineStart);
+    const image = PARTIAL_IMAGE.exec(line);
+    const link = image ? null : PARTIAL_LINK.exec(line);
+    const found = image ?? link;
+    if (!found) return text;
+    const at = lineStart + found.index;
+    if (insideOpenCode(text, at)) return text;
+    return link ? `${text.slice(0, at)}[${link[1]}](#)` : text.slice(0, at);
+}
+
+/** The open tail as it is shown while streaming: no half-typed tag, no raw link destination (see both). */
+export function settleOpenTail(text: string): string {
+    return settleOpenLink(trimPartialInlineTag(text));
+}

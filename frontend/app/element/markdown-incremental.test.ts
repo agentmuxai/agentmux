@@ -19,7 +19,7 @@ import remarkParse from "remark-parse";
 import remarkGfm from "remark-gfm";
 import remarkRehype from "remark-rehype";
 import rehypeRaw from "rehype-raw";
-import { findSafeSplitPoint, trimPartialInlineTag } from "./markdown-incremental";
+import { findSafeSplitPoint, settleOpenLink, settleOpenTail, trimPartialInlineTag } from "./markdown-incremental";
 
 const PAD = "Filler paragraph that exists only to clear the minimum prefix length.\n\n".repeat(12);
 
@@ -262,5 +262,49 @@ describe("trimPartialInlineTag", () => {
         ["done <span> and more", "text after a complete tag"],
     ])("leaves %j alone (%s)", (input) => {
         expect(trimPartialInlineTag(input)).toBe(input);
+    });
+});
+
+// A link's destination is shown compact from its first character while streaming, not raw until its `)`.
+describe("settleOpenLink", () => {
+    it.each([
+        ["See [the notes](", "See [the notes](#)"],
+        ["See [the notes](https://example.com/a/very/long/pa", "See [the notes](#)"],
+        ['See [it](https://example.com/x "the ti', "See [it](#)"],
+        ["- item\n- see [doc](https://example.com/a/b", "- item\n- see [doc](#)"],
+        ["[a](https://x.test/a) and [b](https://x.test/b", "[a](https://x.test/a) and [b](#)"],
+    ])("settles the open destination at the end of %j", (input, expected) => {
+        expect(settleOpenLink(input)).toBe(expected);
+    });
+
+    it("holds back an image that is not complete yet", () => {
+        expect(settleOpenLink("Here: ![the toolbar](C:/shots/toolbar-af")).toBe("Here: ");
+        expect(settleOpenLink("Here: ![the toolbar")).toBe("Here: ");
+        expect(settleOpenLink("Here: ![the toolbar]")).toBe("Here: ");
+        expect(settleOpenLink("Here: ![the toolbar")).toBe("Here: ");
+        expect(settleOpenLink("Here: ![the toolbar]")).toBe("Here: ");
+    });
+
+    it.each([
+        ["See [the notes](https://example.com/a)", "a finished link"],
+        ["See [the notes](https://example.com/a) and more", "text after a finished link"],
+        ["See [the notes", "a label still being typed"],
+        ["See [the notes]", "a label with no destination"],
+        ["See [the notes]\n(https://example.com", "a destination on the next line"],
+        ["```js\nconst v = pick[i](args", "inside an open code fence"],
+        ["~~~\nconst v = pick[i](args", "inside an open tilde fence"],
+        ["Call `pick[i](args", "inside an open inline code span"],
+        ["a [b](c(d", "a destination with an open parenthesis"],
+    ])("leaves %j alone (%s)", (input) => {
+        expect(settleOpenLink(input)).toBe(input);
+    });
+
+    it("works after a closed fence", () => {
+        expect(settleOpenLink("```js\nx\n```\nSee [it](https://example.com/a")).toBe("```js\nx\n```\nSee [it](#)");
+    });
+
+    it("settleOpenTail applies the tag trim and the link settle together", () => {
+        expect(settleOpenTail('See [it](https://example.com/a <span class="am-o')).toBe("See [it](#)");
+        expect(settleOpenTail("done <span")).toBe("done ");
     });
 });
