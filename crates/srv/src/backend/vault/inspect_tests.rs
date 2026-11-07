@@ -8,6 +8,7 @@ use chrono::NaiveDate;
 use zeroize::Zeroizing;
 
 use super::*;
+use crate::backend::vault::{signins, signups};
 use crate::backend::vault::history::Asker;
 use crate::backend::vault::vaults::VaultAgents;
 use crate::backend::vault::{create, create_in, reveal, update, EntryChange, NewEntry};
@@ -126,15 +127,37 @@ fn update_refuses_without_a_reason_a_field_the_kind_lacks_a_bad_date_and_the_per
     for reason in [None, Some("".to_string()), Some("tidy".to_string())] {
         assert!(update_details(&s, &UpdateRequest { reason, label: Some("New".into()), ..asked(&id) }, "builder").unwrap_err().contains("reason"));
     }
-    assert!(update_details(&s, &with(&[("site", "x")]), "builder").unwrap_err().contains("no field"));
+    assert!(update_details(&s, &with(&[("owner", "x")]), "builder").unwrap_err().contains("no field"));
     assert!(update_details(&s, &with(&[("expires", "next week")]), "builder").is_err());
 
     let login = create(&s, NewEntry { kind: "login".into(), label: "Intranet".into(), fields: Default::default(), tags: vec![], parts: seal::Parts([("password".to_string(), "pw-1".to_string())].into()) }).unwrap();
-    for field in ["profile", "proxy"] {
+    for field in ["site", "realm", "profile", "proxy"] {
         let err = update_details(&s, &UpdateRequest { fields: [(field.to_string(), "yes".to_string())].into(), ..asked(&login) }, "builder").unwrap_err();
-        assert!(err.contains("the person sets it"), "{err}");
+        assert!(err.contains("the person sets it"), "{field}: {err}");
     }
     assert_eq!(history::history_for(&s, &id, Asker::Person, 20).unwrap().iter().filter(|r| r.action == CHANGED_DETAILS).count(), 0, "a refused change leaves no line");
+}
+
+#[test]
+fn an_agent_cannot_add_or_clear_the_tags_agentmux_sets_to_keep_a_sign_in_from_being_offered() {
+    let s = store();
+    let refused = signins::REFUSED.to_string();
+    let id = create(&s, NewEntry { tags: vec![refused.clone(), "work".into()], ..entry("Stripe", &[]) }).unwrap();
+
+    // Replacing the tags keeps the reserved one the entry has.
+    let done = update_details(&s, &UpdateRequest { tags: Some(vec!["payments".into()]), ..asked(&id) }, "builder").unwrap();
+    assert_eq!(done.changed, ["tags"]);
+    let shown = show(&s, &id, Some("builder"), &key(), today()).unwrap();
+    assert_eq!(shown.tags, ["payments".to_string(), refused.clone()]);
+    // Clearing every tag leaves it too, so that is not a change.
+    let cleared = update_details(&s, &UpdateRequest { tags: Some(vec![]), ..asked(&id) }, "builder").unwrap();
+    assert_eq!(cleared.changed, ["tags"], "only the agent's own tag went");
+    assert_eq!(show(&s, &id, Some("builder"), &key(), today()).unwrap().tags, [refused]);
+
+    // Asking for a reserved tag the entry lacks is refused.
+    let plain = create(&s, entry("Plain", &[])).unwrap();
+    let err = update_details(&s, &UpdateRequest { tags: Some(vec![signups::UNCONFIRMED.to_string()]), ..asked(&plain) }, "builder").unwrap_err();
+    assert!(err.contains("set by AgentMux"), "{err}");
 }
 
 #[test]

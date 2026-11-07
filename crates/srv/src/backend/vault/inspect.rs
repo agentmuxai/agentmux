@@ -12,7 +12,7 @@ use agentmux_common::time::now_ms;
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroize;
 
-use super::{expiry, history, kinds, record_line, seal, signins, validate, vaults, Line, Parts};
+use super::{expiry, history, kinds, record_line, seal, signins, signups, validate, vaults, Line, Parts};
 use crate::backend::storage::store::Store;
 use crate::backend::storage::vault::{VaultRow, VALUE_SETTING};
 
@@ -142,10 +142,25 @@ pub struct Updated {
     pub changed: Vec<String>,
 }
 
-/// Fields that say which browser profile an entry's sign-in belongs to: the person's to set (like choosing a
-/// sign-in Vault), not an agent's.
+/// Fields that say where a saved sign-in is offered (the site, the realm, which browser profile, a proxy): the
+/// person's to set, like choosing a sign-in Vault. An agent that could change them could point a login's password at
+/// a site of its own.
 fn person_only(field: &str) -> bool {
-    field == signins::PROFILE || field == signins::PROXY
+    [signins::SITE, signins::REALM, signins::PROFILE, signins::PROXY].contains(&field)
+}
+
+/// Tags AgentMux itself sets to keep a sign-in from being offered (the site refused it, or it was made on a sign-up
+/// and not yet sent): an agent can neither add nor clear them.
+const RESERVED_TAGS: [&str; 2] = [signins::REFUSED, signups::UNCONFIRMED];
+
+/// The tags after `asked` replaces `now`: the reserved ones the entry has stay, and asking for one it lacks is refused.
+fn apply_tags(now: &[String], asked: &[String]) -> Result<Vec<String>, String> {
+    if let Some(tag) = asked.iter().find(|t| RESERVED_TAGS.contains(&t.as_str()) && !now.contains(t)) {
+        return Err(format!("the tag {tag:?} is set by AgentMux, not by an agent"));
+    }
+    let mut tags: Vec<String> = asked.iter().filter(|t| !RESERVED_TAGS.contains(&t.as_str())).cloned().collect();
+    tags.extend(now.iter().filter(|t| RESERVED_TAGS.contains(&t.as_str())).cloned());
+    Ok(tags)
 }
 
 /// The fields after `asked` is applied to `now`: a value is trimmed, an empty one removes the field.
@@ -153,7 +168,7 @@ fn apply_fields(kind: &kinds::Kind, now: &BTreeMap<String, String>, asked: &BTre
     let mut fields = now.clone();
     for (name, value) in asked {
         if person_only(name) {
-            return Err(format!("{name} says which browser profile a sign-in belongs to: the person sets it in the Vault pane"));
+            return Err(format!("{name} decides where a saved sign-in is offered: the person sets it in the Vault pane"));
         }
         if !kind.fields.contains(&name.as_str()) {
             return Err(format!("a {} entry has no field {name:?}", kind.name));
@@ -199,9 +214,10 @@ pub fn update_details(store: &Store, req: &UpdateRequest, agent: &str) -> Result
     let kind = kinds::kind(&row.kind).ok_or_else(|| format!("entry {} has an unknown kind", row.id))?;
     let label = req.label.as_deref().map(str::trim).filter(|l| !l.is_empty()).unwrap_or(&row.label).to_string();
     let fields = apply_fields(kind, &fields_of(&row), &req.fields)?;
-    let tags: Vec<String> = match &req.tags {
-        Some(tags) => tags.iter().map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect(),
-        None => serde_json::from_str(&row.tags).unwrap_or_default(),
+    let had: Vec<String> = serde_json::from_str(&row.tags).unwrap_or_default();
+    let tags = match &req.tags {
+        Some(tags) => apply_tags(&had, &tags.iter().map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect::<Vec<_>>())?,
+        None => had,
     };
     validate(kind, &label, &fields, &tags, &Parts::default())?;
     let changed = what_changed(&row, &label, &fields, &tags);
