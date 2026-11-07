@@ -1,30 +1,24 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createEffect, createSignal, For, on, Show, type Accessor, type JSX } from "solid-js";
-import type { Account, IdentityViewModel } from "./identity-model";
-import {
-    accountLabel,
-    KIND_LABELS,
-    PROVIDER_LABELS,
-    revokeFailureText,
-    revokesOnDelete,
-} from "./identity-model";
+import { ConfirmModal } from "@/app/element/confirm-modal";
+import { tip } from "@/app/element/tip";
+import { Button, IconButton, openMenuAt, Tag } from "@/app/element/ui";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
+import { accountStatus } from "@/app/view/accounts/account-card";
+import { OAuthAccountSection } from "@/app/view/accounts/OAuthAccountSection";
+import { brandForProvider, isCliOAuthProvider } from "@/app/view/accounts/provider-brand";
 import { useAgentDefinitions } from "@/app/view/agent/components/AgentPicker";
 import { ProviderLogo } from "@/element/ProviderLogo";
-import { RpcApi } from "@/app/store/rpc-api";
 import type { AgentIdentityLink } from "@/types/rpc/AgentIdentityLink";
-import { TabRpcClient } from "@/app/store/rpc-util";
-import { brandForProvider, isCliOAuthProvider } from "@/app/view/accounts/provider-brand";
+import { createEffect, createSignal, For, on, Show, type Accessor, type JSX } from "solid-js";
 import { agentsUsingAccount, linksRevision, type AccountAgent } from "./account-agents";
 import { failoverToggle } from "./account-failover";
 import { buildAccountRowMenu } from "./bind-to-agent-menu";
-import { ConfirmModal } from "@/app/element/confirm-modal";
+import type { Account, IdentityViewModel } from "./identity-model";
+import { accountLabel, KIND_LABELS, PROVIDER_LABELS, revokeFailureText, revokesOnDelete } from "./identity-model";
 import "./identity-view.scss";
-import { Button, IconButton, openMenuAt, Tag } from "@/app/element/ui";
-import { accountStatus } from "@/app/view/accounts/account-card";
-import { OAuthAccountSection } from "@/app/view/accounts/OAuthAccountSection";
-import { tip } from "@/app/element/tip";
 
 // CLI providers whose config dir holds conversation history that a delete
 // keeps: those with a `history_native_subdir` in
@@ -50,7 +44,10 @@ export function AccountsTab({ model }: { model: IdentityViewModel }): JSX.Elemen
     const handleRowContextMenu = (account: Account, e: MouseEvent) => {
         e.preventDefault();
         e.stopPropagation();
-        openMenuAt(buildAccountRowMenu(account, () => model.requestDelete(account), failoverToggle(account)), e);
+        openMenuAt(
+            buildAccountRowMenu(account, () => model.requestDelete(account), failoverToggle(account)),
+            e
+        );
     };
 
     // A click on the open row closes its panel; on another row, moves it.
@@ -128,9 +125,16 @@ export function AccountDeleteNotice({ model }: { model: IdentityViewModel }): JS
             <Show when={model.deleteNoticeAtom()}>
                 {(notice) => (
                     <div class="identity-delete-notice" role="status" aria-live="polite">
-                        <span class="identity-delete-notice-icon" aria-hidden="true">⚠</span>
+                        <span class="identity-delete-notice-icon" aria-hidden="true">
+                            ⚠
+                        </span>
                         <span class="identity-delete-notice-text">{notice()}</span>
-                        <IconButton icon="xmark" label="Dismiss" density="compact" onClick={() => model.dismissDeleteNotice()} />
+                        <IconButton
+                            icon="xmark"
+                            label="Dismiss"
+                            density="compact"
+                            onClick={() => model.dismissDeleteNotice()}
+                        />
                     </div>
                 )}
             </Show>
@@ -150,9 +154,16 @@ export function AccountDeleteNotice({ model }: { model: IdentityViewModel }): JS
                     };
                     return (
                         <div class="identity-delete-notice" role="alert">
-                            <span class="identity-delete-notice-icon" aria-hidden="true">⚠</span>
+                            <span class="identity-delete-notice-icon" aria-hidden="true">
+                                ⚠
+                            </span>
                             <span class="identity-delete-notice-text">{revokeFailureText(failure())}</span>
-                            <Button density="compact" busy={busy() === "retry"} disabled={!!busy()} onClick={() => void run("retry")}>
+                            <Button
+                                density="compact"
+                                busy={busy() === "retry"}
+                                disabled={!!busy()}
+                                onClick={() => void run("retry")}
+                            >
                                 Try again
                             </Button>
                             <Button
@@ -164,7 +175,12 @@ export function AccountDeleteNotice({ model }: { model: IdentityViewModel }): JS
                             >
                                 Remove anyway
                             </Button>
-                            <IconButton icon="xmark" label="Dismiss" density="compact" onClick={() => model.dismissRevokeFailure()} />
+                            <IconButton
+                                icon="xmark"
+                                label="Dismiss"
+                                density="compact"
+                                onClick={() => model.dismissRevokeFailure()}
+                            />
                         </div>
                     );
                 }}
@@ -247,44 +263,58 @@ function useAccountAgents(account: Account): Accessor<AccountAgent[]> {
                     if (mine === seq) setLinks(rows);
                 })
                 .catch(() => {});
-        }),
+        })
     );
     return () => agentsUsingAccount(account.id, agents(), links());
 }
 
 // ── Account detail panel (opens under its row) ───────────────────────────────
 
-export function AccountDetailPanel({ model, account }: { model: IdentityViewModel; account: Account }): JSX.Element {
-    const usedBy = useAccountAgents(account);
-    let panelRef: HTMLDivElement | undefined;
+interface PanelState {
+    model: IdentityViewModel;
+    account: Account;
+    usedBy: Accessor<AccountAgent[]>;
+    panel: HTMLDivElement | undefined;
+}
 
-    // Bring the whole panel into view without jumping its row to the top.
-    // Not scrollIntoView: it also scrolls every scrollable ancestor (see
-    // REPORT_LAN_UNDISCOVERABLE_AND_PAGE_SHIFT_2026_10_04.md §3).
+function createPanelState(model: IdentityViewModel, account: Account): PanelState {
+    return { model, account, usedBy: useAccountAgents(account), panel: undefined };
+}
+
+/** Bring the whole panel into view without jumping its row to the top.
+ *  Not scrollIntoView: it also scrolls every scrollable ancestor (see
+ *  REPORT_LAN_UNDISCOVERABLE_AND_PAGE_SHIFT_2026_10_04.md §3). */
+function scrollIntoViewOnOpen(s: PanelState) {
+    const { account } = s;
     createEffect(
         on(
             () => account.id,
             () =>
                 requestAnimationFrame(() => {
-                    const scroller = findScrollParent(panelRef);
+                    const scroller = findScrollParent(s.panel);
                     const row = document.getElementById(`identity-account-row-${account.id}`);
-                    if (!panelRef || !scroller || !row) return;
-                    const p = panelRef.getBoundingClientRect();
-                    const s = scroller.getBoundingClientRect();
-                    if (p.bottom <= s.bottom) return;
+                    if (!s.panel || !scroller || !row) return;
+                    const p = s.panel.getBoundingClientRect();
+                    const sc = scroller.getBoundingClientRect();
+                    if (p.bottom <= sc.bottom) return;
                     // Scroll so the panel's bottom shows, but never past the
                     // row's top. Rects are zoomed viewport px; scrollTop is
                     // the scroller's own px.
-                    const zoom = scroller.offsetHeight > 0 ? s.height / scroller.offsetHeight : 1;
-                    const delta = Math.min(p.bottom - s.bottom, row.getBoundingClientRect().top - s.top);
+                    const zoom = scroller.offsetHeight > 0 ? sc.height / scroller.offsetHeight : 1;
+                    const delta = Math.min(p.bottom - sc.bottom, row.getBoundingClientRect().top - sc.top);
                     if (delta > 0) scroller.scrollTop += delta / zoom;
-                }),
-        ),
+                })
+        )
     );
+}
+
+export function AccountDetailPanel({ model, account }: { model: IdentityViewModel; account: Account }): JSX.Element {
+    const s = createPanelState(model, account);
+    scrollIntoViewOnOpen(s);
 
     return (
         <div
-            ref={panelRef}
+            ref={(el) => (s.panel = el)}
             id={`identity-account-panel-${account.id}`}
             class="identity-account-panel"
             role="region"
@@ -297,18 +327,42 @@ export function AccountDetailPanel({ model, account }: { model: IdentityViewMode
                 }
             }}
         >
-            <div class="identity-detail-meta-row">
-                <span class="identity-detail-meta-label">
-                    <Show when={account.display_name}>
-                        <span class="identity-detail-subname">{account.display_name}</span>
-                    </Show>
-                </span>
-                <span class={`${STATUS_DOT[account.status] ?? STATUS_DOT["unknown"]} detail-status`} {...tip(account.status, { label: true })} />
-                <span class="identity-detail-status-text" data-status={account.status}>
-                    {accountStatus(account.status).label}
-                </span>
-            </div>
+            <PanelMeta s={s} />
+            <ProviderFields s={s} />
+            <SecretFields s={s} />
+            <ContextFields s={s} />
+            <OAuthAccountSection account={account} />
+            <UsedBy s={s} />
+            <DetailField label="Created" value={new Date(account.created_at).toLocaleString()} />
+            <PanelActions s={s} />
+        </div>
+    );
+}
 
+function PanelMeta({ s }: { s: PanelState }) {
+    const { account } = s;
+    return (
+        <div class="identity-detail-meta-row">
+            <span class="identity-detail-meta-label">
+                <Show when={account.display_name}>
+                    <span class="identity-detail-subname">{account.display_name}</span>
+                </Show>
+            </span>
+            <span
+                class={`${STATUS_DOT[account.status] ?? STATUS_DOT["unknown"]} detail-status`}
+                {...tip(account.status, { label: true })}
+            />
+            <span class="identity-detail-status-text" data-status={account.status}>
+                {accountStatus(account.status).label}
+            </span>
+        </div>
+    );
+}
+
+function ProviderFields({ s }: { s: PanelState }) {
+    const { account } = s;
+    return (
+        <>
             {/* Resolve the label via the brand so CLI-OAuth accounts surface "via <CLI>" —
                 except Claude, whose underlying CLI tool ("Claude Code") is an
                 implementation detail this surface deliberately doesn't expose;
@@ -322,7 +376,14 @@ export function AccountDetailPanel({ model, account }: { model: IdentityViewMode
                 }`}
             />
             <DetailField label="Kind" value={KIND_LABELS[account.kind]} />
+        </>
+    );
+}
 
+function SecretFields({ s }: { s: PanelState }) {
+    const { account } = s;
+    return (
+        <>
             <div class="identity-detail-section">Secret</div>
             {/* `?.` guards throughout: an account whose secret_ref shape the
                 frontend doesn't know yet must degrade to "unknown", not crash
@@ -351,7 +412,14 @@ export function AccountDetailPanel({ model, account }: { model: IdentityViewMode
                     <DetailField label="Config dir" value={account.secret_ref?.dir ?? ""} />
                 </Show>
             </Show>
+        </>
+    );
+}
 
+function ContextFields({ s }: { s: PanelState }) {
+    const { account } = s;
+    return (
+        <>
             <Show when={account.context.github_username}>
                 <div class="identity-detail-section">GitHub</div>
                 <DetailField label="Username" value={account.context.github_username!} />
@@ -378,15 +446,17 @@ export function AccountDetailPanel({ model, account }: { model: IdentityViewMode
             <Show when={account.context.description}>
                 <DetailField label="Notes" value={account.context.description!} />
             </Show>
-            <OAuthAccountSection account={account} />
+        </>
+    );
+}
 
+function UsedBy({ s }: { s: PanelState }) {
+    return (
+        <>
             <div class="identity-detail-section">Used by</div>
-            <Show
-                when={usedBy().length > 0}
-                fallback={<span class="identity-detail-empty">No agents</span>}
-            >
+            <Show when={s.usedBy().length > 0} fallback={<span class="identity-detail-empty">No agents</span>}>
                 <ul class="identity-agent-chips" aria-label="Agents using this account">
-                    <For each={usedBy()}>
+                    <For each={s.usedBy()}>
                         {(agent) => (
                             <li class="identity-agent-use">
                                 <Tag>{agent.name}</Tag>
@@ -395,27 +465,38 @@ export function AccountDetailPanel({ model, account }: { model: IdentityViewMode
                     </For>
                 </ul>
             </Show>
+        </>
+    );
+}
 
-            <DetailField label="Created" value={new Date(account.created_at).toLocaleString()} />
-
-            <div class="identity-account-panel-actions">
-                <Show when={account.status === "expired" && account.kind !== "oauth"}>
-                    <Button tone="accent" class="identity-btn identity-btn-primary" onClick={() => model.openEditForm(account)}>
-                        Reauth
-                    </Button>
-                </Show>
-                <Show when={account.status === "unknown" && account.secret_ref?.backend === "keychain"}>
-                    <Button tone="accent" class="identity-btn identity-btn-primary" onClick={() => model.openEditForm(account)}>
-                        Validate…
-                    </Button>
-                </Show>
-                <Button class="identity-btn identity-btn-secondary" onClick={() => model.openEditForm(account)}>
-                    Edit
+function PanelActions({ s }: { s: PanelState }) {
+    const { model, account } = s;
+    return (
+        <div class="identity-account-panel-actions">
+            <Show when={account.status === "expired" && account.kind !== "oauth"}>
+                <Button
+                    tone="accent"
+                    class="identity-btn identity-btn-primary"
+                    onClick={() => model.openEditForm(account)}
+                >
+                    Reauth
                 </Button>
-                <Button tone="danger" class="identity-btn identity-btn-danger" onClick={() => model.requestDelete(account)}>
-                    Delete account…
+            </Show>
+            <Show when={account.status === "unknown" && account.secret_ref?.backend === "keychain"}>
+                <Button
+                    tone="accent"
+                    class="identity-btn identity-btn-primary"
+                    onClick={() => model.openEditForm(account)}
+                >
+                    Validate…
                 </Button>
-            </div>
+            </Show>
+            <Button class="identity-btn identity-btn-secondary" onClick={() => model.openEditForm(account)}>
+                Edit
+            </Button>
+            <Button tone="danger" class="identity-btn identity-btn-danger" onClick={() => model.requestDelete(account)}>
+                Delete account…
+            </Button>
         </div>
     );
 }
@@ -439,7 +520,8 @@ export function DeleteAccountConfirm({ model, account }: { model: IdentityViewMo
     const keepsHistory = backend === "oauth_config_dir" && PROVIDERS_WITH_KEPT_HISTORY.has(account.provider);
     // srv signs a Google OAuth account out at Google before deleting it.
     const signsOut = revokesOnDelete(account) && account.provider === "google";
-    const isKey = !revokesOnDelete(account) && (backend === "keychain" || backend === "env" || backend === "secrets_manager");
+    const isKey =
+        !revokesOnDelete(account) && (backend === "keychain" || backend === "env" || backend === "secrets_manager");
     const grantStays = revokesOnDelete(account) && !signsOut;
     const providerName = PROVIDER_LABELS[brandForProvider(account.provider)] ?? account.provider;
     const editing = () => model.formOpenAtom() && model.editingAccountAtom()?.id === account.id;
@@ -457,9 +539,9 @@ export function DeleteAccountConfirm({ model, account }: { model: IdentityViewMo
                 <p>AgentMux forgets this account and removes its saved login from this computer.</p>
                 <Show when={usedBy().length > 0}>
                     <p>
-                        Used by {usedBy().length === 1 ? "1 agent" : `${usedBy().length} agents`}: {usedBy().join(", ")}.
-                        They will need another account: the login email in an agent's composer switches it. Any that are
-                        running keep working until they restart.
+                        Used by {usedBy().length === 1 ? "1 agent" : `${usedBy().length} agents`}: {usedBy().join(", ")}
+                        . They will need another account: the login email in an agent's composer switches it. Any that
+                        are running keep working until they restart.
                     </p>
                 </Show>
                 <Show when={keepsHistory}>
