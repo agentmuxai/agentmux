@@ -67,6 +67,17 @@ pub(crate) fn what_it_takes(f: &Facts) -> Result<Need, String> {
     }
 }
 
+/// How long the person has left the pane alone, for [`Facts::since_input`]: the later of their last input in the page and
+/// their Take over click, which the host does not see. A pane the person took over from an agent, whose takeover srv no
+/// longer remembers (it restarted), is not known to be quiet.
+fn quiet_for(since_input: Option<Duration>, since_takeover: Option<Duration>, person_took: bool) -> Option<Duration> {
+    match (since_input, since_takeover) {
+        (Some(i), Some(t)) => Some(i.min(t)),
+        (_, None) if person_took => None,
+        (i, _) => i,
+    }
+}
+
 fn trimmed(v: &Option<String>) -> Option<&str> {
     v.as_deref().map(str::trim).filter(|s| !s.is_empty())
 }
@@ -110,22 +121,24 @@ pub(crate) async fn handle_ui_browser_take_control(
     if let Err(e) = crate::server::browser_identity::check_agent_may_use(&block.meta, &owner_id) {
         return err_response(StatusCode::FORBIDDEN, format!("{e}: switch on Agents may use it for that profile in Settings → Browser, or ask the user to"));
     }
+    let person_took = browser_owner::driver_of(&block.meta).as_deref() == Some("person");
+    let since_input = crate::server::browser_retake::since_person_input(&state, pane).await;
     let facts = Facts {
         personal: crate::server::browser_identity::browsing_as(&block.meta) == "personal",
         in_container: crate::server::browser_identity::in_container(&state, &own),
         driven_by: driven_by.as_deref(),
-        since_input: crate::server::browser_retake::since_person_input(&state, pane).await,
+        since_input: quiet_for(since_input, browser_owner::taken_over_ago(pane), person_took),
     };
     let need = match what_it_takes(&facts) {
         Ok(n) => n,
         Err(e) => return err_response(StatusCode::FORBIDDEN, e),
     };
-    let current_url = crate::server::browser_bypass_routes::page_url(&state, pane).await.unwrap_or_default();
-    let limit = match crate::server::browser_allowlist::list_for_open(req.allowed_origins.as_deref(), &current_url) {
-        Ok(Some(list)) => Some(list),
-        Ok(None) => agentmux_common::allowed_origins::target_origin(&current_url).map(|o| vec![o]),
+    let current_url = crate::server::browser_bypass_routes::page_url(&state, pane).await;
+    let limit = match site_limit(req.allowed_origins.as_deref(), &current_url) {
+        Ok(list) => list,
         Err(e) => return err_response(StatusCode::BAD_REQUEST, e),
     };
+    let current_url = current_url.unwrap_or_default();
     let how = match need {
         Need::Nothing => How::Allowed,
         Need::Ask(why) => match ask_the_person(&state, pane, agent, &why).await {
@@ -143,11 +156,11 @@ pub(crate) async fn handle_ui_browser_take_control(
     }
     // The header reads these keys: written before the agent drives, so the person never sees it driving unlabelled.
     let mut meta = browser_owner::took_control_meta(agent);
-    crate::server::browser_allowlist::mirror(&mut meta, limit.as_deref());
+    crate::server::browser_allowlist::mirror(&mut meta, Some(&limit));
     if let Err(e) = crate::server::http_shell::broadcast_meta_update(&state, pane, &meta) {
         return err_response(StatusCode::INTERNAL_SERVER_ERROR, format!("couldn't show you as the pane's driver: {e}"));
     }
-    crate::server::browser_allowlist::limit_new_pane(&state, pane, limit.clone()).await;
+    crate::server::browser_allowlist::limit_new_pane(&state, pane, Some(limit.clone())).await;
     browser_owner::record(pane, agent);
     let browsing_as = crate::server::browser_identity::browsing_as(&block.meta);
     let last = facts.since_input.filter(|d| *d != Duration::MAX).map_or("never".to_string(), |d| format!("{} s ago", d.as_secs()));
@@ -155,6 +168,23 @@ pub(crate) async fn handle_ui_browser_take_control(
     tracing::info!(agent_id = %agent, pane = %pane, profile = %browsing_as, "[browser-owner] agent took control of the pane");
     let data = json!({ "pane": pane, "already": false, "browsing_as": browsing_as, "limited_to": limit, "url": current_url });
     (StatusCode::OK, Json(json!({ "ok": true, "data": data }))).into_response()
+}
+
+/// The sites a pane taken is limited to: those the agent passed, else the site the page is on. A pane that shows no web page
+/// (blank, a browser page) or whose address can't be read has no site to limit it to, and is not taken without a list: a
+/// taken pane is never left unlimited by accident.
+fn site_limit(asked: Option<&[String]>, page: &Result<String, String>) -> Result<Vec<String>, String> {
+    if let Some(entries) = asked {
+        let list = agentmux_common::allowed_origins::parse_list(entries).map_err(|e| format!("allowed_origins: {e}"))?;
+        if list.is_empty() {
+            return Err("allowed_origins is empty: list the sites the pane may go to".to_string());
+        }
+        return Ok(list);
+    }
+    let url = page.as_deref().map_err(|e| format!("couldn't read the pane's address ({e}): pass allowed_origins, the sites it may go to"))?;
+    agentmux_common::allowed_origins::target_origin(url)
+        .map(|o| vec![o])
+        .ok_or_else(|| "the pane isn't showing a web page to limit it to: pass allowed_origins, the sites it may go to".to_string())
 }
 
 /// Put "X wants to drive this pane" up in the pane and wait for the person: Ok when they allow it, else the response to
@@ -223,11 +253,15 @@ mod tests {
 
     /// A host that answers `page_url` and `last_input` (null: the person never used the page), on a port of its own.
     async fn fake_host(state: &AppState, idle_secs: Option<u64>) {
+        fake_host_on(state, idle_secs, "https://example.com/a").await;
+    }
+
+    async fn fake_host_on(state: &AppState, idle_secs: Option<u64>, url: &'static str) {
         use axum::{routing::post, Router};
         let app = Router::new()
             .route(
                 "/agentmux/browser/page_url",
-                post(|Json(_b): Json<serde_json::Value>| async { Json(json!({ "ok": true, "data": { "url": "https://example.com/a" } })) }),
+                post(move |Json(_b): Json<serde_json::Value>| async move { Json(json!({ "ok": true, "data": { "url": url } })) }),
             )
             .route(
                 "/agentmux/browser/last_input",
@@ -311,6 +345,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_pane_that_shows_no_web_page_is_not_taken_without_a_list_of_sites() {
+        let state = test_state();
+        fake_host_on(&state, Some(120), "about:blank").await;
+        let (agent, pane) = agent_and_pane(&state, false);
+        assert_eq!(take(&state, &agent, &pane).await, StatusCode::BAD_REQUEST);
+        assert!(browser_owner::owner_of(&pane).is_none());
+        let asked = Some(vec!["example.com".to_string()]);
+        let req = UiBrowserTakeControlRequest { auth: auth(&state, &agent), pane: Some(pane.clone()), allowed_origins: asked };
+        let status = handle_ui_browser_take_control(State(state.clone()), None, Json(req)).await.into_response().status();
+        assert_eq!(status, StatusCode::OK, "with the sites it may go to");
+        browser_owner::forget(&pane);
+        crate::server::browser_allowlist::drop_pane(&pane);
+    }
+
+    #[tokio::test]
+    async fn a_pane_the_person_just_took_over_asks_even_if_they_only_read_it() {
+        let state = test_state();
+        fake_host(&state, None).await;
+        let (previous, pane) = agent_and_pane(&state, false);
+        let (agent, _) = agent_and_pane(&state, false);
+        browser_owner::record(&pane, &previous);
+        let mut clear = MetaMapType::new();
+        clear.insert(browser_owner::OWNER_META_KEY.to_string(), serde_json::Value::Null);
+        browser_owner::guard_client_meta_write(&format!("block:{pane}"), &clear).unwrap();
+        let answered = person_answers(&state, &pane, Answer::Cancelled);
+        assert_eq!(take(&state, &agent, &pane).await, StatusCode::FORBIDDEN, "took it over a moment ago, never touched the page");
+        answered.await.unwrap();
+        browser_owner::age_lost(&pane, Duration::from_secs(61));
+        assert_eq!(take(&state, &agent, &pane).await, StatusCode::OK, "61 s since the takeover and no input");
+        browser_owner::forget(&pane);
+        crate::server::browser_allowlist::drop_pane(&pane);
+    }
+
+    #[tokio::test]
     async fn a_pane_with_the_persons_own_sign_ins_waits_for_their_yes() {
         let state = test_state();
         fake_host(&state, Some(120)).await;
@@ -359,6 +427,30 @@ mod tests {
         assert_eq!(take(&state, &agent, "no-such-pane").await, StatusCode::NOT_FOUND);
     }
 
+
+    #[test]
+    fn the_persons_takeover_click_counts_as_a_touch_of_the_pane() {
+        let (s, m) = (|n| Some(D::from_secs(n)), D::MAX);
+        assert_eq!(quiet_for(Some(m), s(5), true), s(5), "took it over 5 s ago and only read the page");
+        assert_eq!(quiet_for(s(300), s(900), true), s(300), "typed 5 min ago, took it over before that");
+        assert_eq!(quiet_for(Some(m), None, true), None, "taken over, and srv forgot when: not known to be quiet");
+        assert_eq!(quiet_for(Some(m), None, false), Some(m), "never taken over from an agent");
+        assert_eq!(quiet_for(None, s(900), true), None, "the host could not say");
+    }
+
+    #[test]
+    fn a_taken_pane_is_limited_to_the_sites_asked_for_or_the_one_it_is_on() {
+        let page = |u: &str| Ok::<String, String>(u.to_string());
+        let asked = vec!["github.com".to_string(), "*.example.org".to_string()];
+        let list = site_limit(Some(&asked), &page("https://elsewhere.test/x")).unwrap();
+        assert_eq!(list.len(), 2, "the list the agent passed, wherever the page is now");
+        assert_eq!(site_limit(None, &page("https://example.com/a?b=1")).unwrap(), vec!["https://example.com".to_string()]);
+        assert!(site_limit(None, &page("about:blank")).unwrap_err().contains("pass allowed_origins"), "no site to limit it to");
+        assert!(site_limit(None, &Err("timed out".to_string())).unwrap_err().contains("couldn't read"), "address unreadable");
+        assert!(site_limit(Some(&[]), &page("https://example.com")).unwrap_err().contains("empty"));
+        assert!(site_limit(Some(&["not a site".to_string()]), &page("https://example.com")).is_err());
+        assert!(site_limit(Some(&asked), &Err("x".to_string())).is_ok(), "a list needs no address");
+    }
 
     /// The table of §2.2 and §2.3: who is refused, who is asked, who walks in.
     #[test]

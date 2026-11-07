@@ -175,6 +175,11 @@ pub(crate) fn lost_message(pane: &str, agent_id: &str) -> Option<String> {
     ))
 }
 
+/// How long ago the person took `block_id` over from an agent, if srv remembers it (not after a restart).
+pub(crate) fn taken_over_ago(block_id: &str) -> Option<std::time::Duration> {
+    lost().lock().unwrap_or_else(|p| p.into_inner()).get(block_id).map(|e| e.at.elapsed())
+}
+
 /// Make the person's takeover of `block_id` `by` older, for a test of the idle rule.
 #[cfg(test)]
 pub(crate) fn age_lost(block_id: &str, by: std::time::Duration) {
@@ -292,7 +297,8 @@ pub(crate) fn released_meta() -> MetaMapType {
 /// has not got it back, or None for a pane no agent has driven.
 pub(crate) fn driver_of(meta: &MetaMapType) -> Option<String> {
     let text = |k: &str| meta.get(k).and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty());
-    text(OWNER_META_KEY).map(str::to_string).or_else(|| text(LAST_DRIVER_META_KEY).map(|_| "person".to_string()))
+    let gave_back = text(GIVEN_BACK_META_KEY).is_some();
+    text(OWNER_META_KEY).map(str::to_string).or_else(|| text(LAST_DRIVER_META_KEY).filter(|_| !gave_back).map(|_| "person".to_string()))
 }
 
 /// Every pane an agent owns. The host keeps a copy, to decide inside
@@ -816,6 +822,9 @@ mod tests {
         assert_eq!(driver_of(&m).as_deref(), Some("lark"));
         m.insert(OWNER_META_KEY.into(), serde_json::Value::Null);
         assert_eq!(driver_of(&m).as_deref(), Some("person"), "taken over from lark");
+        m.insert(GIVEN_BACK_META_KEY.into(), json!("lark"));
+        assert_eq!(driver_of(&m), None, "given back: nobody drives it");
+        m.remove(GIVEN_BACK_META_KEY);
         for (k, v) in released_meta() {
             assert!(v.is_null(), "{k}");
             m.insert(k, v);
