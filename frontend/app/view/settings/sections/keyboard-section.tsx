@@ -43,7 +43,10 @@ export function KeyboardSection(): JSX.Element {
             f.setCategory("all");
             f.setChangedOnly(false);
             if (!request.command) return;
+            // A command of a help group (Go to tab 1–8) has no line until its group is open.
+            const group = view().find((v) => v.command === request.command)?.helpGroup;
             queueMicrotask(() => {
+                if (group) body?.querySelector<HTMLElement>(`[data-group="${CSS.escape(group)}"] [aria-expanded="false"]`)?.click();
                 const line = body?.querySelector<HTMLElement>(`[data-command="${CSS.escape(request.command!)}"]`);
                 if (!line) return;
                 line.scrollIntoView({ block: "center" });
@@ -54,10 +57,12 @@ export function KeyboardSection(): JSX.Element {
         })
     );
 
-    // "/" jumps to the search; the arrow keys walk the lines (each is a stop of its own, not a tab stop).
+    // "/" jumps to the search (not Ctrl+/ or Cmd+/, which is Help's); the arrow keys walk the lines (each is a stop
+    // of its own, not a tab stop).
     const onKeyDown = (e: KeyboardEvent) => {
         const target = e.target as HTMLElement;
-        if (e.key === "/" && !(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) {
+        const plain = !e.ctrlKey && !e.metaKey && !e.altKey;
+        if (e.key === "/" && plain && !(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) {
             e.preventDefault();
             search?.focus();
             return;

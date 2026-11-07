@@ -193,6 +193,15 @@ describe("the keyboard", () => {
         fireEvent.keyDown(first, { key: "/" });
         expect(document.activeElement).toBe(screen.getByLabelText("Search shortcuts by action or key"));
     });
+
+    it("leaves Ctrl+/ and Cmd+/ to Help's shortcut", () => {
+        render(() => <KeyboardSection />);
+        const first = document.querySelector<HTMLElement>("[data-kb-row]")!;
+        first.focus();
+        expect(fireEvent.keyDown(first, { key: "/", ctrlKey: true })).toBe(true);
+        expect(fireEvent.keyDown(first, { key: "/", metaKey: true })).toBe(true);
+        expect(document.activeElement).toBe(first);
+    });
 });
 
 describe("Help's links", () => {
@@ -206,5 +215,14 @@ describe("Help's links", () => {
         expect(scroll).toHaveBeenCalled();
         expect(document.activeElement).toBe(line("tab:new"));
         expect((screen.getByLabelText("Search shortcuts by action or key") as HTMLInputElement).value).toBe("");
+    });
+
+    it("open the group of a command that has no line of its own until then", async () => {
+        Element.prototype.scrollIntoView = vi.fn();
+        render(() => <KeyboardSection />);
+        expect(line("tab:goto:3")).toBeNull();
+        requestKeyboardRow("tab:goto:3");
+        await Promise.resolve();
+        expect(document.activeElement).toBe(line("tab:goto:3"));
     });
 });
