@@ -1,0 +1,196 @@
+-- a leader
+<div>
+  <div class="agent-primitive-modal-detail agent-seat-panel" data-testid="agent-seat-panel">
+    <div class="agent-primitive-modal-readonly">
+      <p class="agent-primitive-modal-global-note">
+        "AgentX"
+        "'s seat: its role, whom it reports to and what it owns. Only you set it; agents read it."
+      <div class="agent-seat-panel-form">
+        <div data-stand="Field" data-label="Role" data-layout="stacked">
+          <div data-stand="Select" data-value="leader">
+            <span data-option="" data-disabled="true">
+              "Choose a role…"
+            <span data-option="leader" data-disabled="false">
+              "Leader"
+            <span data-option="worker" data-disabled="false">
+              "Worker"
+            <span data-option="specialist" data-disabled="false">
+              "Specialist"
+            <span data-option="platform_tester" data-disabled="false">
+              "Platform tester"
+            <span data-option="analyst" data-disabled="false">
+              "Analyst"
+            <span data-option="super" data-disabled="false">
+              "Super agent"
+        <div data-stand="Field" data-label="Qualifier" data-layout="stacked" data-hint="Shown after the role, e.g. \"product\".">
+          <input data-stand="TextInput" data-value="product" maxlength="40" placeholder="product">
+        <div data-stand="Field" data-label="Reports to" data-layout="stacked">
+          <div data-stand="Select" data-value="">
+            <span data-option="" data-disabled="false">
+              "The operator"
+            <span data-option="uid-o" data-disabled="false">
+              "Opaz"
+            <span data-option="uid-c" data-disabled="false">
+              "Camper"
+            <span data-option="uid-a" data-disabled="false">
+              "AgentA"
+        <div data-stand="Field" data-label="Area" data-layout="stacked" data-hint="One line: what it owns.">
+          <input data-stand="TextInput" data-value="agent pane" maxlength="120" placeholder="panes, layout, tabs">
+      <div class="agent-primitive-modal-actions">
+        <span data-stand="Button" data-tone="danger" data-busy="false" data-disabled="false">
+          "Clear"
+        <span data-stand="Button" data-tone="accent" data-busy="false" data-disabled="false">
+          "Save"
+      <div class="agent-seat-panel-roster">
+        <span data-stand="Button" data-icon="file-import" data-busy="undefined" data-disabled="undefined">
+          "Import roster…"
+      <div class="agent-primitive-modal-actions">
+        <span data-stand="Button" data-busy="undefined" data-disabled="undefined">
+          "Close"
+-- a lead this machine can't name
+-- an unknown lead
+<div>
+  <div class="agent-primitive-modal-detail agent-seat-panel" data-testid="agent-seat-panel">
+    <div class="agent-primitive-modal-readonly">
+      <p class="agent-primitive-modal-global-note">
+        "AgentX"
+        "'s seat: its role, whom it reports to and what it owns. Only you set it; agents read it."
+      <div class="agent-seat-panel-form">
+        <div data-stand="Field" data-label="Role" data-layout="stacked">
+          <div data-stand="Select" data-value="leader">
+            <span data-option="" data-disabled="true">
+              "Choose a role…"
+            <span data-option="leader" data-disabled="false">
+              "Leader"
+            <span data-option="worker" data-disabled="false">
+              "Worker"
+            <span data-option="specialist" data-disabled="false">
+              "Specialist"
+            <span data-option="platform_tester" data-disabled="false">
+              "Platform tester"
+            <span data-option="analyst" data-disabled="false">
+              "Analyst"
+            <span data-option="super" data-disabled="false">
+              "Super agent"
+        <div data-stand="Field" data-label="Qualifier" data-layout="stacked" data-hint="Shown after the role, e.g. \"product\".">
+          <input data-stand="TextInput" data-value="product" maxlength="40" placeholder="product">
+        <div data-stand="Field" data-label="Reports to" data-layout="stacked">
+          <div data-stand="Select" data-value="uid-elsewhere">
+            <span data-option="" data-disabled="false">
+              "The operator"
+            <span data-option="uid-elsewhere" data-disabled="false">
+              "An agent not on this machine"
+            <span data-option="uid-o" data-disabled="false">
+              "Opaz"
+            <span data-option="uid-c" data-disabled="false">
+              "Camper"
+            <span data-option="uid-a" data-disabled="false">
+              "AgentA"
+        <div data-stand="Field" data-label="Area" data-layout="stacked" data-hint="One line: what it owns.">
+          <input data-stand="TextInput" data-value="agent pane" maxlength="120" placeholder="panes, layout, tabs">
+      <div class="agent-primitive-modal-actions">
+        <span data-stand="Button" data-tone="danger" data-busy="false" data-disabled="false">
+          "Clear"
+        <span data-stand="Button" data-tone="accent" data-busy="false" data-disabled="false">
+          "Save"
+      <div class="agent-seat-panel-roster">
+        <span data-stand="Button" data-icon="file-import" data-busy="undefined" data-disabled="undefined">
+          "Import roster…"
+-- from spawn
+-- from spawn
+<div>
+  <div class="agent-primitive-modal-detail agent-seat-panel" data-testid="agent-seat-panel">
+    <div class="agent-primitive-modal-readonly">
+      <p class="agent-primitive-modal-global-note">
+        "AgentX"
+        "'s seat: its role, whom it reports to and what it owns. Only you set it; agents read it."
+      <p class="agent-seat-panel-from-spawn" data-testid="agent-seat-from-spawn">
+        "From spawn: it reports to the agent that spawned it. Save to give it a seat of its own."
+      <div class="agent-seat-panel-form">
+        <div data-stand="Field" data-label="Role" data-layout="stacked">
+          <div data-stand="Select" data-value="worker">
+            <span data-option="" data-disabled="true">
+              "Choose a role…"
+            <span data-option="leader" data-disabled="false">
+              "Leader"
+            <span data-option="worker" data-disabled="false">
+              "Worker"
+            <span data-option="specialist" data-disabled="false">
+              "Specialist"
+            <span data-option="platform_tester" data-disabled="false">
+              "Platform tester"
+            <span data-option="analyst" data-disabled="false">
+              "Analyst"
+            <span data-option="super" data-disabled="false">
+              "Super agent"
+        <div data-stand="Field" data-label="Qualifier" data-layout="stacked" data-hint="Shown after the role, e.g. \"product\".">
+          <input data-stand="TextInput" data-value="" maxlength="40" placeholder="product">
+        <div data-stand="Field" data-label="Reports to" data-layout="stacked">
+          <div data-stand="Select" data-value="">
+            <span data-option="" data-disabled="false">
+              "The operator"
+            <span data-option="uid-o" data-disabled="false">
+              "Opaz"
+            <span data-option="uid-c" data-disabled="false">
+              "Camper"
+            <span data-option="uid-a" data-disabled="false">
+              "AgentA"
+        <div data-stand="Field" data-label="Area" data-layout="stacked" data-hint="One line: what it owns.">
+          <input data-stand="TextInput" data-value="" maxlength="120" placeholder="panes, layout, tabs">
+      <div class="agent-primitive-modal-actions">
+        <span data-stand="Button" data-tone="danger" data-busy="false" data-disabled="false">
+          "Clear"
+        <span data-stand="Button" data-tone="accent" data-busy="false" data-disabled="false">
+          "Save"
+      <div class="agent-seat-panel-roster">
+        <span data-stand="Button" data-icon="file-import" data-busy="undefined" data-disabled="undefined">
+          "Import roster…"
+-- no seat
+-- no seat yet
+<div>
+  <div class="agent-primitive-modal-detail agent-seat-panel" data-testid="agent-seat-panel">
+    <div class="agent-primitive-modal-readonly">
+      <p class="agent-primitive-modal-global-note">
+        "AgentX"
+        "'s seat: its role, whom it reports to and what it owns. Only you set it; agents read it."
+      <p class="agent-primitive-modal-global-note">
+        "No seat yet."
+      <div class="agent-seat-panel-form">
+        <div data-stand="Field" data-label="Role" data-layout="stacked">
+          <div data-stand="Select" data-value="">
+            <span data-option="" data-disabled="true">
+              "Choose a role…"
+            <span data-option="leader" data-disabled="false">
+              "Leader"
+            <span data-option="worker" data-disabled="false">
+              "Worker"
+            <span data-option="specialist" data-disabled="false">
+              "Specialist"
+            <span data-option="platform_tester" data-disabled="false">
+              "Platform tester"
+            <span data-option="analyst" data-disabled="false">
+              "Analyst"
+            <span data-option="super" data-disabled="false">
+              "Super agent"
+        <div data-stand="Field" data-label="Qualifier" data-layout="stacked" data-hint="Shown after the role, e.g. \"product\".">
+          <input data-stand="TextInput" data-value="" maxlength="40" placeholder="product">
+        <div data-stand="Field" data-label="Reports to" data-layout="stacked">
+          <div data-stand="Select" data-value="">
+            <span data-option="" data-disabled="false">
+              "The operator"
+            <span data-option="uid-o" data-disabled="false">
+              "Opaz"
+            <span data-option="uid-c" data-disabled="false">
+              "Camper"
+            <span data-option="uid-a" data-disabled="false">
+              "AgentA"
+        <div data-stand="Field" data-label="Area" data-layout="stacked" data-hint="One line: what it owns.">
+          <input data-stand="TextInput" data-value="" maxlength="120" placeholder="panes, layout, tabs">
+      <div class="agent-primitive-modal-actions">
+        <span data-stand="Button" data-tone="danger" data-busy="false" data-disabled="true">
+          "Clear"
+        <span data-stand="Button" data-tone="accent" data-busy="false" data-disabled="true">
+          "Save"
+      <div class="agent-seat-panel-roster">
+        <span data-stand="Button" data-icon="file-import" data-busy="undefined" data-disabled="undefined">
+          "Import roster…"
