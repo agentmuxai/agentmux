@@ -1,0 +1,37 @@
+useTick 1000
+keyCommands.set dev:diagnostics
+-- hidden
+<div>
+toggle shortcut
+shortcutFor dev:diagnostics
+handler returned true
+-- open, nothing recorded
+<div>
+  <div style="position: fixed; bottom: 8px; left: 8px; background-color: rgba(20, 20, 20, 0.94); color: rgb(208, 208, 208); font-family: Menlo, Consolas, monospace; font-size: 11px; padding: 8px 10px; border-radius: 6px; width: 560px; max-height: 60vh; display: flex; flex-direction: column; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5); border: 1px solid rgb(68, 68, 68); z-index: 999998;">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+      <div style="font-weight:bold;color:#7af">
+        "🔬 Reducer Dispatch Ring"
+      <span style="color:#777">
+        "("
+        "0"
+        "total —"
+        "<dev:diagnostics>"
+        ")"
+    <div style="display:flex;gap:6px;margin-bottom:6px;align-items:center">
+      <select style="background-color:#222;color:#d0d0d0;border:1px solid #444;border-radius:3px;padding:2px 4px;font-family:inherit;font-size:inherit">
+        <option value="">
+          "all slices"
+      <input data-stand="TextInput" data-variant="plain" data-placeholder="filter by key…" data-value="" style="flex: 1 1 0%; background-color: rgb(34, 34, 34); color: rgb(208, 208, 208); border: 1px solid rgb(68, 68, 68); border-radius: 3px; padding: 2px 6px; font-family: inherit; font-size: inherit;">
+      <span data-stand="Button" data-density="compact" data-title="Wipe the dispatch ring (dev only)">
+        "clear"
+    <div style="overflow-y:auto;flex:1;border-top:1px solid #333;padding-top:4px">
+      <div style="color:#888;padding:8px">
+        "No dispatches recorded yet."
+    <div data-stand="AgentPanePerfSection">
+select.value=""
+toggle shortcut
+handler returned true
+-- shut again
+<div>
+keyCommands.delete dev:diagnostics
+keyCommands has it: false

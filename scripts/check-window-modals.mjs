@@ -40,7 +40,7 @@ export const KEEP = new Map([
     ["frontend/app/block/desktop-requests.tsx", { openModal: 1, why: "a desktop-control request that names no pane; one from an agent is a card in its pane" }],
     ["frontend/app/block/widget-install-requests.tsx", { openModal: 1, confirmModal: 1, why: "an install request with no agent pane (Settings, the CLI) has no pane to ask in; one from an agent is a card" }],
     ["frontend/app/store/open-command-palette.ts", { openModal: 1, why: "the command palette is an app-wide launcher" }],
-    ["frontend/app/window/logo-menu.tsx", { openModal: 1, why: "the command palette entry of the logo menu" }],
+    ["frontend/app/window/logo-menu-state.ts", { openModal: 1, why: "the command palette entry of the logo menu" }],
     ["frontend/app/statusbar/ConfigStatus.tsx", { openModal: 1, why: "the config error: the status bar is the window's" }],
     ["frontend/app/store/ui-event-subs.ts", { openModal: 1, why: "srv's user-input request carries no pane or agent" }],
     ["frontend/app/statusbar/TokenBreakdownPopover.tsx", { confirmModal: 1, why: "reset the token counter: the status bar is the window's" }],

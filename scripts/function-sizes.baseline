@@ -290,8 +290,6 @@
 146 crates/srv/src/server/http_viewer.rs::feed_stream
 133 crates/srv/src/server/http_viewer_input.rs::handle_viewer_input
 106 crates/srv/src/server/identity_auth_dirs.rs::compute_and_ensure_account_dir
-326 crates/srv/src/server/identity_auth_spawn.rs::spawn_auth_cli
-404 crates/srv/src/server/identity_auth_spawn.rs::spawn_auth_cli_pty
 332 crates/srv/src/server/install_handlers.rs::spawn_install_task
 102 crates/srv/src/server/jekt_files.rs::receive
 105 crates/srv/src/server/jekt_hold.rs::hold_with_reason
@@ -336,7 +334,6 @@
 235 frontend/app/block/sandboxed-widget-host.tsx::createSandboxedInstance
 202 frontend/app/block/widget-bridge.ts::answer
 203 frontend/app/devtools/agent-pane-perf-section.tsx::AgentPanePerfSection
-206 frontend/app/devtools/diag-panel.tsx::DiagPanel
 106 frontend/app/drag/CrossWindowDragMonitor.darwin.tsx::performTearOff
 159 frontend/app/drag/CrossWindowDragMonitor.linux.tsx::performTearOff
 158 frontend/app/drag/CrossWindowDragMonitor.win32.tsx::CrossWindowDragMonitor
@@ -511,8 +508,6 @@
 146 frontend/app/view/warden-jobs/job-template-approval.tsx::TemplateApproval
 180 frontend/app/view/warden-jobs/job-update-diff.tsx::JobUpdateDiff
 137 frontend/app/view/warden-jobs/warden-jobs-manager.tsx::WardenJobsManager
-218 frontend/app/window/logo-menu.tsx::LogoMenu
-157 frontend/app/window/logo-menu.tsx::menuItems
 190 frontend/app/window/more-dropdown.tsx::MoreDropdown
 107 frontend/app/window/pane-media-capture-indicator.tsx::PaneMediaCaptureIndicator
 117 frontend/app/window/titlebar-context-menu.tsx::TitleBarContextMenu
