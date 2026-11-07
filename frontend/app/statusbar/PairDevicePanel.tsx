@@ -8,188 +8,19 @@
 // it and shows another. Pairing needs LAN discovery on, because the device
 // connects over this network.
 
-import { Button } from "@/app/element/ui";
-import { RpcApi } from "@/app/store/rpc-api";
-import { TabRpcClient } from "@/app/store/rpc-util";
-import { viewerPairedAtom } from "@/store/global";
-import { writeText } from "@/util/clipboard";
-import { createEffect, createMemo, createSignal, on, onCleanup, Show, type Accessor, type JSX } from "solid-js";
+import type { Accessor, JSX } from "solid-js";
+import { PairButtons, PairCode, PairNotes } from "./PairDevicePanelParts";
+import { createPairDevice } from "./PairDevicePanelState";
 
-type Pairing = { url: string; expiresMs: number };
-
-/** `m:ss` left until `expiresMs`, or null once it has passed. */
-export function countdown(expiresMs: number, nowMs: number): string | null {
-    const left = Math.ceil((expiresMs - nowMs) / 1000);
-    if (left <= 0) return null;
-    return `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
-}
+export { countdown } from "./PairDevicePanelState";
 
 export function PairDevicePanel(props: { lanDiscoveryEnabled: Accessor<boolean> }): JSX.Element {
-    const [pairing, setPairing] = createSignal<Pairing | null>(null);
-    const [error, setError] = createSignal<string | null>(null);
-    const [busy, setBusy] = createSignal(false);
-    // "Copy link" said so; a new code needs copying again.
-    const [copied, setCopied] = createSignal(false);
-    createEffect(on(pairing, () => setCopied(false)));
-    const [paired, setPaired] = createSignal<string | null>(null);
-    const [now, setNow] = createSignal(Date.now());
-    let canvas: HTMLCanvasElement | undefined;
-    // The QR library loads with the first code; if it can't, the panel says so
-    // and offers to try again (bumping `qrAttempt` re-runs the draw).
-    const [qrFailed, setQrFailed] = createSignal(false);
-    const [qrAttempt, setQrAttempt] = createSignal(0);
-
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    onCleanup(() => window.clearInterval(timer));
-
-    const left = () => {
-        const p = pairing();
-        return p ? countdown(p.expiresMs, now()) : null;
-    };
-    const live = createMemo(() => left() !== null);
-
-    const start = async () => {
-        setBusy(true);
-        setError(null);
-        setPaired(null);
-        try {
-            const r = await RpcApi.ViewerPairStartCommand(TabRpcClient);
-            setPairing({ url: r.url, expiresMs: r.expires_ms });
-            setNow(Date.now());
-        } catch (e) {
-            setPairing(null);
-            setError(String(e instanceof Error ? e.message : e));
-        } finally {
-            setBusy(false);
-        }
-    };
-
-    // A device paired while the QR is up: say so and take the QR down (its
-    // code is spent).
-    createEffect(
-        on(
-            viewerPairedAtom,
-            (p) => {
-                if (!p || !pairing()) return;
-                setPairing(null);
-                setPaired(p.deviceName);
-            },
-            { defer: true }
-        )
-    );
-
-    // LAN turned off: the listener is gone, so is the QR's use.
-    createEffect(() => {
-        if (!props.lanDiscoveryEnabled()) setPairing(null);
-    });
-
-    createEffect(() => {
-        const p = pairing();
-        qrAttempt();
-        if (!p || !live() || !canvas) return;
-        const target = canvas;
-        // Loaded when a code is first drawn, not at startup
-        // (SPEC_FRONTEND_BUNDLE_SPLITTING_2026_10_21.md §5).
-        import("qrcode")
-            .then(({ default: QRCode }) => {
-                // Pairing may have ended, or a new code replaced this one, meanwhile.
-                if (pairing() !== p || !live()) return;
-                setQrFailed(false);
-                QRCode.toCanvas(target, p.url, { width: 176, margin: 1 }, (err) => {
-                    // Never log the URL: it carries the pairing code.
-                    if (err) console.error("[PairDevicePanel] failed to render the pairing QR code:", err.message);
-                });
-            })
-            .catch((err) => {
-                console.error("[PairDevicePanel] failed to load the QR code library:", err?.message ?? err);
-                setQrFailed(true);
-            });
-    });
-
+    const s = createPairDevice(props);
     return (
         <div class="status-bar-pair" data-testid="pair-device">
-            <div class="status-bar-popover-row" style={{ "padding-left": "12px" }}>
-                <Show
-                    when={pairing()}
-                    fallback={
-                        <Button
-                            density="compact"
-                            disabled={!props.lanDiscoveryEnabled() || busy()}
-                            onClick={() => void start()}
-                        >
-                            Pair a device
-                        </Button>
-                    }
-                >
-                    <Button density="compact" onClick={() => setPairing(null)}>
-                        Hide
-                    </Button>
-                    <Button density="compact" disabled={busy()} onClick={() => void start()}>
-                        New code
-                    </Button>
-                    <Button
-                        density="compact"
-                        disabled={!live()}
-                        onClick={() => {
-                            const p = pairing();
-                            if (!p) return;
-                            // Through the host: CEF blocks navigator.clipboard.
-                            writeText(p.url).then(
-                                () => setCopied(true),
-                                () => setError("Couldn't copy the link to the clipboard.")
-                            );
-                        }}
-                    >
-                        {copied() ? "Copied" : "Copy link"}
-                    </Button>
-                </Show>
-            </div>
-            <Show when={!props.lanDiscoveryEnabled()}>
-                <div class="status-bar-pair-note">
-                    Turn on LAN discovery to pair a device: AgentMux Mobile connects to this computer over your local
-                    network.
-                </div>
-            </Show>
-            <Show when={error()}>
-                <div class="status-bar-pair-note status-bar-pair-note--warn" role="alert">
-                    ⚠ {error()}
-                </div>
-            </Show>
-            <Show when={paired()}>
-                <div class="status-bar-pair-note" role="status">
-                    Paired {paired()}. Settings › Paired devices lists it.
-                </div>
-            </Show>
-            <Show when={pairing()}>
-                <Show
-                    when={live()}
-                    fallback={
-                        <div class="status-bar-pair-note" role="status">
-                            This code expired. Choose New code to show another.
-                        </div>
-                    }
-                >
-                    <div class="status-bar-qr-panel">
-                        <canvas ref={canvas} class="status-bar-qr-canvas" aria-label="Pairing QR code" />
-                        <Show when={qrFailed()}>
-                            <div class="status-bar-pair-note status-bar-pair-note--warn" role="alert">
-                                ⚠ The QR code couldn't be drawn. Copy link still works.{" "}
-                                <Button density="compact" onClick={() => setQrAttempt((n) => n + 1)}>
-                                    Try again
-                                </Button>
-                            </div>
-                        </Show>
-                        <div class="status-bar-qr-note" data-testid="pair-countdown">
-                            Scan with AgentMux Mobile. Works once, for {left()}.
-                        </div>
-                        <div class="status-bar-qr-note">
-                            Pairing lets that device watch this computer's agents, read-only (and its processes, if you
-                            share them in Tower). Show this code only to your own devices. Another AgentMux computer
-                            pairs with the copied link, in its Tower.
-                        </div>
-                    </div>
-                </Show>
-            </Show>
+            <PairButtons s={s} lan={props.lanDiscoveryEnabled} />
+            <PairNotes s={s} lan={props.lanDiscoveryEnabled} />
+            <PairCode s={s} />
         </div>
     );
 }
