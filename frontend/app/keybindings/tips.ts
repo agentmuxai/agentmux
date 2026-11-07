@@ -436,7 +436,7 @@ export const TIPS: TipRow[] = [
         gesture: "key:Enter / shift+key:Enter",
         where: "in a find bar",
         label: "Next / previous match",
-        source: { file: "frontend/app/element/search.tsx", anchor: "shiftKey" },
+        source: { file: "frontend/app/element/search-state.ts", anchor: "shiftKey" },
     },
 
     // ── Browser ──

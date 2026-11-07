@@ -60,11 +60,11 @@ vi.mock("@/app/element/ui/DeclIconButton", () => ({
             title={p.decl.title}
             disabled={p.decl.disabled ?? false}
             data-active={p.decl.elemtype === "toggleiconbutton" ? String(p.decl.active()) : undefined}
-            onClick={() => {
+            onClick={(e) => {
                 log(`DeclIconButton ${p.decl.title} click`);
                 if (p.decl.disabled) return;
                 if (p.decl.elemtype === "toggleiconbutton") p.decl.active._set(!p.decl.active());
-                else p.decl.click?.();
+                else p.decl.click?.(e);
             }}
         />
     ),
