@@ -973,6 +973,22 @@ wrap_request_handler! {
             self.inner.lock().on_render_process_responsive(browser);
         }
 
+        // A site whose certificate is not trusted: refused as before (0), and an agent driving the pane is told.
+        fn on_certificate_error(
+            &self,
+            browser: Option<&mut Browser>,
+            _cert_error: Errorcode,
+            request_url: Option<&CefString>,
+            _ssl_info: Option<&mut Sslinfo>,
+            _callback: Option<&mut Callback>,
+        ) -> ::std::os::raw::c_int {
+            let state = self.inner.lock().state.clone();
+            if let Some(b) = browser.as_deref() {
+                super::agent_notice::tell(&state, b, "certificate_error", &request_url.map(|u| u.to_string()).unwrap_or_default());
+            }
+            0
+        }
+
         // HTTP Basic / Digest auth challenge. Phase α of
         // SPEC_BROWSER_PANE_HTTP_BASIC_AUTH_2026_05_18.md. Returns 1
         // (async) so CEF holds the request open while we surface the
