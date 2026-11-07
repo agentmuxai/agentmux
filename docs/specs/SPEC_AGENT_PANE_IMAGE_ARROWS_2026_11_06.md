@@ -1,7 +1,7 @@
 # Spec: an image opened from an agent message steps through that message's other images with the arrow keys
 
 Task #23512 (spec), build #23513. Author: Agent2-5@narko, 2026-11-06. Written against origin/main `5bc5d2d8`.
-Status: draft for the operator's OK. Not committed (a spec ships with the build PR).
+**Status:** implemented in PR #6758 (approved by the operator, Q1-Q7 as recommended, 2026-11-07). Verified 2026-11-07.
 
 ## 1. What it is today
 
