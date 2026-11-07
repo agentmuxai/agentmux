@@ -18,13 +18,12 @@ import { createBlock } from "@/store/block-layout-actions";
 import * as services from "@/store/services";
 import * as MOS from "@/store/mos";
 import { buildPaneWidgetMenuItems } from "@/app/window/action-widgets-config";
-import { TabCloseConfirms } from "@/app/tab/tab-close-confirms";
+import { askInPane, CloseBusyConfirm, LeaveSiteConfirm } from "@/app/tab/pane-close-confirms";
 import {
     busyMembers,
     closesWithShutdownLog,
     describeBusyMember,
     membersToProbe,
-    type BusyMember,
     type PaneCloseProbe,
 } from "@/app/tab/pane-close-guard";
 import { closeWithShutdownLog, isClosingWithLog } from "@/app/view/agent/shutdown/close-with-log";
@@ -34,13 +33,12 @@ import {
     leavePrompts,
     notePersonClose,
     siteOf,
-    type LeavePrompt,
     type LeaveProbe,
 } from "@/app/view/browser/leave-prompt";
 import { pushFlashError } from "@/app/store/flash-notifications";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { createMemo, createSignal, onCleanup, Show } from "solid-js";
+import { createMemo, Show } from "solid-js";
 import type { JSX } from "solid-js";
 
 /**
@@ -99,47 +97,6 @@ const leaveProbe: LeaveProbe = {
         siteOf(MOS.getObjectValue<MuxObj>(MOS.makeORef("block", blockId))?.meta?.["url"] as string | undefined),
 };
 
-type PendingClose = { busy: BusyMember[]; resolve: (close: boolean) => void };
-type PendingLeave = { leaving: LeavePrompt[]; resolve: (close: boolean) => void };
-
-/** The two confirmations a pane's close can wait on, each a queue answered in order. */
-function createClosePrompts() {
-    // Queue, not a single slot: two busy panes closed in quick succession
-    // each get their own answer, in order. A single slot let the second
-    // prompt overwrite the first, whose close then waited forever
-    // (reagent P1 on #3422).
-    const [pendingCloses, setPendingCloses] = createSignal<PendingClose[]>([]);
-    const pendingClose = () => pendingCloses()[0] ?? null;
-    const answerPendingClose = (close: boolean) => {
-        const [head, ...rest] = pendingCloses();
-        setPendingCloses(rest);
-        head?.resolve(close);
-    };
-    // A tab that goes away with prompts still open cancels them, rather than
-    // leaving their closes waiting forever.
-    onCleanup(() => {
-        for (const pending of pendingCloses()) pending.resolve(false);
-        for (const pending of pendingLeaves()) pending.resolve(false);
-    });
-
-    // The same for a browser page that would ask "Leave site?" when its pane
-    // is closed by the person: AgentMux's own dialog, naming the site.
-    const [pendingLeaves, setPendingLeaves] = createSignal<PendingLeave[]>([]);
-    const pendingLeave = () => pendingLeaves()[0] ?? null;
-    const answerPendingLeave = (close: boolean) => {
-        const [head, ...rest] = pendingLeaves();
-        setPendingLeaves(rest);
-        head?.resolve(close);
-    };
-    const askBusy = (busy: BusyMember[]) =>
-        new Promise<boolean>((resolve) => setPendingCloses((q) => [...q, { busy, resolve }]));
-    const askLeave = (leaving: LeavePrompt[]) =>
-        new Promise<boolean>((resolve) => setPendingLeaves((q) => [...q, { leaving, resolve }]));
-    return { pendingClose, answerPendingClose, pendingLeave, answerPendingLeave, askBusy, askLeave };
-}
-
-type ClosePrompts = ReturnType<typeof createClosePrompts>;
-
 // Every block in the closed leaf, not just the visible one — closing a
 // pane that holds several tabs used to leave every background tab's
 // agent running with no pane. `closeBlockInStack` passes `{ blockId }`
@@ -182,7 +139,6 @@ async function onNodeDelete(data: TabLayoutData) {
 // `hooks.asking` marks a person's answer being awaited, when the prompt is the indicator.
 async function beforeNodeDelete(
     props: { tabId: string },
-    prompts: ClosePrompts,
     data: TabLayoutData,
     hooks?: BeforeDeleteHooks
 ): Promise<boolean> {
@@ -195,7 +151,7 @@ async function beforeNodeDelete(
     );
     const busy = await busyMembers(membersToProbe(blockIds, isAgentBlock, (id) => parked.has(id)), paneCloseProbe);
     if (busy.length > 0) {
-        const answer = prompts.askBusy(busy);
+        const answer = askInPane(props.tabId, blockIds[0], "close-busy", CloseBusyConfirm, { busy });
         if (!(await (hooks ? hooks.asking(answer) : answer))) {
             notKept(busy.map(describeBusyMember).join("; "));
             return false;
@@ -203,7 +159,7 @@ async function beforeNodeDelete(
     }
     const leaving = await leavePrompts(blockIds, leaveProbe);
     if (leaving.length > 0) {
-        const answer = prompts.askLeave(leaving);
+        const answer = askInPane(props.tabId, blockIds[0], "close-leave", LeaveSiteConfirm, { leaving });
         if (!(await (hooks ? hooks.asking(answer) : answer))) {
             notKept(describeLeave(leaving));
             return false;
@@ -223,7 +179,6 @@ async function beforeNodeDelete(
 
 function buildTileLayoutContents(
     props: { tabId: string },
-    prompts: ClosePrompts,
     tileGapSize: () => number | undefined
 ): TileLayoutContents {
     const renderContent: ContentRenderer = (nodeModel: NodeModel) => {
@@ -243,8 +198,7 @@ function buildTileLayoutContents(
         renderPreview,
         tabId: props.tabId,
         onNodeDelete,
-        beforeNodeDelete: (data: TabLayoutData, hooks?: BeforeDeleteHooks) =>
-            beforeNodeDelete(props, prompts, data, hooks),
+        beforeNodeDelete: (data: TabLayoutData, hooks?: BeforeDeleteHooks) => beforeNodeDelete(props, data, hooks),
         gapSizePx: tileGapSize(),
     };
 }
@@ -259,12 +213,9 @@ function createTabState(props: { tabId: string }) {
         return settings["window:tilegapsize"];
     });
 
-    const prompts = createClosePrompts();
-    const tileLayoutContents = createMemo<TileLayoutContents>(() =>
-        buildTileLayoutContents(props, prompts, tileGapSize)
-    );
+    const tileLayoutContents = createMemo<TileLayoutContents>(() => buildTileLayoutContents(props, tileGapSize));
     const isEmpty = createMemo(() => (tabData()?.blockids?.length ?? 0) === 0);
-    return { tabAtom, tabData, prompts, tileLayoutContents, isEmpty };
+    return { tabAtom, tabData, tileLayoutContents, isEmpty };
 }
 
 type TabState = ReturnType<typeof createTabState>;
@@ -307,7 +258,6 @@ function TabContent(props: { tabId: string }): JSX.Element {
 }
 
 function TabPanes({ s }: { s: TabState }): JSX.Element {
-    const p = s.prompts;
     return (
         <ModalLayer scope="tab">
             <TileLayout
@@ -315,7 +265,6 @@ function TabPanes({ s }: { s: TabState }): JSX.Element {
                 tabAtom={s.tabAtom()}
                 getCursorPoint={getApi().getCursorPoint}
             />
-            <TabCloseConfirms busy={p.pendingClose} leave={p.pendingLeave} answerBusy={p.answerPendingClose} answerLeave={p.answerPendingLeave} />
         </ModalLayer>
     );
 }
