@@ -92,10 +92,14 @@ function MessagesDock(props: MessagesPanelProps): JSX.Element {
         // Back to the bar it came from, so the keyboard is not left on a panel that is gone.
         queueMicrotask(() => dock?.querySelector<HTMLElement>(".messages-rail__button")?.focus());
     };
-    // Opened, the panel takes the keyboard: Esc then shuts it instead of reaching the pane.
+    // Opened, the panel takes the keyboard: Esc then shuts it instead of reaching the pane. Not from under a text
+    // field: a search that finds its match in a held message opens the panel while the person is still typing.
     createEffect(() => {
-        if (controls.state().open)
-            queueMicrotask(() => dock?.querySelector<HTMLElement>(".ui-side-panel__head button")?.focus());
+        if (!controls.state().open) return;
+        const typing = document.activeElement;
+        if (typing instanceof HTMLElement && !dock?.contains(typing) && typing.matches("input, textarea, [contenteditable]"))
+            return;
+        queueMicrotask(() => dock?.querySelector<HTMLElement>(".ui-side-panel__head button")?.focus());
     });
     // The bar is a column of its own beside the conversation; the opened panel lies over the conversation along the
     // pane's right edge, like the Kanban's task drawer, so opening it never moves the conversation.

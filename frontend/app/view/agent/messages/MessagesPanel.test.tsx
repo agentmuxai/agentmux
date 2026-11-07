@@ -189,6 +189,18 @@ describe("MessagesPanel", () => {
         expect(document.activeElement).toBe(view.container.querySelector(".messages-rail__button"));
     });
 
+    it("opens without taking the keyboard from a text field (a search match in a held message opens it mid-typing)", async () => {
+        const field = document.createElement("input");
+        document.body.appendChild(field);
+        field.focus();
+        const { controls, view } = mount([jekt()], controlsFor({ open: false }));
+        controls.showInPanel("j1");
+        await Promise.resolve();
+        expect(view.container.querySelector(".messages-panel")).toBeTruthy();
+        expect(document.activeElement).toBe(field);
+        field.remove();
+    });
+
     it("does not offer Show in conversation for a message the conversation leaves out", () => {
         const held = jekt({ message: "held in the panel" });
         const c = controlsFor();

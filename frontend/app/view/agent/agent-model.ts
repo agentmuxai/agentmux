@@ -191,8 +191,7 @@ export class AgentViewModel {
         // Personal memory entries live in the right-click menu
         // (agent-body-menu.ts), and the account, MCP and skill bindings in
         // Connectors and Memory (SPEC_DROP_THE_AGENT_STASH_2026_10_24.md, D6).
-        // The one exception is a narrow pane's Messages button, which the panel puts there itself.
-        // The find magnifier comes first, then the Messages button (a narrow pane's).
+        // The one exception is the find magnifier (search/search-bridge.ts).
         this.endIconButtons = () => searchHeaderButtons(blockId);
 
         // Last, once every field exists: registering notifies readers of

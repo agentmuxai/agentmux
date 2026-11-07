@@ -80,8 +80,6 @@ function flipRow(
     else if (t === "collapse") on.onToggleCollapse(node.id);
 }
 
-
-
 /** The last time each distinct row error was logged, so a row that throws on
  *  every store write doesn't flood the log. */
 const rowErrorLoggedAt = new Map<string, number>();
