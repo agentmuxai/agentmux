@@ -8,7 +8,7 @@
 
 import type { KeyBindingRow, KeyCategory } from "./defaults";
 import { formatKey, parseKey, sameKey, type KeyPlatform, type KeySpec } from "./keys";
-import { effectiveRows } from "./registry";
+import { bindingsView, effectiveRows } from "./registry";
 
 /** A shortcut as the Help pane shows it on this platform. */
 export interface ShortcutInfo {
@@ -19,6 +19,12 @@ export interface ShortcutInfo {
     keys: string[];
     /** The same keys in the table's syntax, for PressKeys ("ctrl+shift+d"). */
     raw: string[];
+    /** The keys the table gives the command on this platform, in the same syntax, so a person's own key can be told from a default. */
+    defaults: string[];
+    /** The person's keys differ from the defaults. */
+    changed: boolean;
+    /** The command has no key now. It still runs by name (RunCommand). */
+    unbound: boolean;
     when?: string;
     /** The pane whose own handler runs this command, if any. */
     pane?: string;
@@ -118,7 +124,7 @@ export function listShortcuts(platform: KeyPlatform): ShortcutInfo[] {
         if (row.devOnly) continue;
         let info = byRow.get(row);
         if (!info) {
-            info = { command: row.command, label: row.label, category: row.category, keys: [], raw: [] };
+            info = { command: row.command, label: row.label, category: row.category, keys: [], raw: [], defaults: [], changed: false, unbound: false };
             if (row.when) info.when = row.when;
             if (row.pane) info.pane = row.pane;
             byRow.set(row, info);
@@ -126,7 +132,20 @@ export function listShortcuts(platform: KeyPlatform): ShortcutInfo[] {
         info.keys.push(formatKey(source, platform));
         info.raw.push(source);
     }
-    return [...byRow.values()];
+    const out = [...byRow.values()];
+    const view = new Map(bindingsView(platform).map((v) => [v.command, v]));
+    for (const info of out) {
+        const v = view.get(info.command);
+        if (v) Object.assign(info, { defaults: v.defaults, changed: v.changed });
+    }
+    // A command the person left with no key is still a command: it runs by name and the list says so.
+    for (const v of view.values()) {
+        if (!(v.unbound && v.changed) || v.devOnly) continue;
+        const info: ShortcutInfo = { command: v.command, label: v.label, category: v.category, keys: [], raw: [], defaults: v.defaults, changed: v.changed, unbound: true };
+        if (v.pane) info.pane = v.pane;
+        out.push(info);
+    }
+    return out;
 }
 
 /** Everything `runCommand` needs from the app, so tests can stand in for it. */
