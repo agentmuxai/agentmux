@@ -1,0 +1,91 @@
+Modal open=true scope=pane size=fit panelClass=agent-attachment-lightbox__panel
+useAttachmentUrl send id=undefined
+useAttachmentText thumb id=a1
+initialFocus -> agent-attachment-lightbox__dialog
+-- loading
+<div>
+  <div data-stand="Modal" data-aria-label="File 1: notes.txt">
+    <div class="agent-attachment-lightbox__dialog" tabindex="-1">
+      <div class="agent-attachment-lightbox__image">
+        <span class="agent-attachment-lightbox__missing">
+          "Loading…"
+      <div class="agent-attachment-lightbox__bar">
+        <span class="agent-attachment-lightbox__title" data-tip="notes.txt">
+          <span class="num">
+            "1"
+          "notes.txt"
+        <span class="agent-attachment-lightbox__meta">
+          "Text"
+          "·"
+          "12 B"
+        <span class="agent-attachment-lightbox__actions">
+          <span data-stand="IconButton" data-icon="xmark" data-label="Close preview" data-tooltip="false" data-title="Close (Esc)">
+-- whole file, no note
+<div>
+  <div data-stand="Modal" data-aria-label="File 1: notes.txt">
+    <div class="agent-attachment-lightbox__dialog" tabindex="-1">
+      <div class="agent-attachment-lightbox__image">
+        <div class="agent-attachment-lightbox__text">
+          <pre>
+            "hello
+world"
+      <div class="agent-attachment-lightbox__bar">
+        <span class="agent-attachment-lightbox__title" data-tip="notes.txt">
+          <span class="num">
+            "1"
+          "notes.txt"
+        <span class="agent-attachment-lightbox__meta">
+          "Text"
+          "·"
+          "12 B"
+        <span class="agent-attachment-lightbox__actions">
+          <span data-stand="IconButton" data-icon="xmark" data-label="Close preview" data-tooltip="false" data-title="Close (Esc)">
+-- cut
+Modal open=true scope=pane size=fit panelClass=agent-attachment-lightbox__panel
+useAttachmentUrl send id=undefined
+useAttachmentText thumb id=a1
+initialFocus -> agent-attachment-lightbox__dialog
+-- the first lines, with the note
+<div>
+  <div data-stand="Modal" data-aria-label="File 1: notes.txt">
+    <div class="agent-attachment-lightbox__dialog" tabindex="-1">
+      <div class="agent-attachment-lightbox__image">
+        <div class="agent-attachment-lightbox__text">
+          <pre>
+            "hello"
+          <span class="note">
+            "The first lines. The agent gets the whole file."
+      <div class="agent-attachment-lightbox__bar">
+        <span class="agent-attachment-lightbox__title" data-tip="notes.txt">
+          <span class="num">
+            "1"
+          "notes.txt"
+        <span class="agent-attachment-lightbox__meta">
+          "Text"
+          "·"
+          "4.9 KB"
+        <span class="agent-attachment-lightbox__actions">
+          <span data-stand="IconButton" data-icon="xmark" data-label="Close preview" data-tooltip="false" data-title="Close (Esc)">
+-- gone
+Modal open=true scope=pane size=fit panelClass=agent-attachment-lightbox__panel
+useAttachmentUrl send id=undefined
+useAttachmentText thumb id=a1
+initialFocus -> agent-attachment-lightbox__dialog
+-- missing
+<div>
+  <div data-stand="Modal" data-aria-label="File 1: notes.txt">
+    <div class="agent-attachment-lightbox__dialog" tabindex="-1">
+      <div class="agent-attachment-lightbox__image">
+        <span class="agent-attachment-lightbox__missing">
+          "This file is no longer available."
+      <div class="agent-attachment-lightbox__bar">
+        <span class="agent-attachment-lightbox__title" data-tip="notes.txt">
+          <span class="num">
+            "1"
+          "notes.txt"
+        <span class="agent-attachment-lightbox__meta">
+          "Text"
+          "·"
+          "12 B"
+        <span class="agent-attachment-lightbox__actions">
+          <span data-stand="IconButton" data-icon="xmark" data-label="Close preview" data-tooltip="false" data-title="Close (Esc)">
