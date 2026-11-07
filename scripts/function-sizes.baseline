@@ -440,7 +440,6 @@
 126 frontend/app/view/native-memory/MemoryAdoptionPanel.tsx::MemoryAdoptionPanel
 112 frontend/app/view/native-memory/NativeMemoryCreate.tsx::NativeMemoryCreate
 150 frontend/app/view/native-memory/NativeMemoryFileView.tsx::NativeMemoryFileView
-154 frontend/app/view/remotes/remotes-view.tsx::Detail
 128 frontend/app/view/settings/sections/animations-section.tsx::AnimationsSection
 120 frontend/app/view/settings/sections/browser-section.tsx::BrowserSection
 109 frontend/app/view/settings/sections/pinned-senders.tsx::PinnedSenders
