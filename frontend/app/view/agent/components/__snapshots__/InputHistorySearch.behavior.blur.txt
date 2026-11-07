@@ -1,0 +1,7 @@
+scrollIntoView Nothing type {"block":"nearest"}
+AgentInputHistoryCommand {"agent_id":"agent-1","limit":50}
+-- focus moved to a button inside
+onDone undefined
+-- focus moved outside
+onDone undefined
+-- focus moved nowhere
