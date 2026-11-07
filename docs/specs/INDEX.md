@@ -651,6 +651,7 @@ partial list.
 | [`SPEC_ARMORY_NAMING_CONSOLIDATION_2026_09_09`](SPEC_ARMORY_NAMING_CONSOLIDATION_2026_09_09.md) | Spec: Armory Naming Consolidation — Bundle vs Memory |
 | [`SPEC_ASK_USER_QUESTION_2026_06_15`](SPEC_ASK_USER_QUESTION_2026_06_15.md) | SPEC: AskUserQuestion — interactive agent questions in the agent pane |
 | [`SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02`](SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02.md) | Spec: an orthogonal "attached task" status axis, sibling to `TurnPhase` |
+| [`SPEC_ATTENTION_TOAST_WITH_LINK_TO_AGENT_2026_11_02`](SPEC_ATTENTION_TOAST_WITH_LINK_TO_AGENT_2026_11_02.md) | Spec: when something waits on you, you can see what, where, and one click takes you to it |
 | [`SPEC_AUDIT_LIVE_LOG_OF_EVERY_AGENT_ACTION_2026_11_03`](SPEC_AUDIT_LIVE_LOG_OF_EVERY_AGENT_ACTION_2026_11_03.md) | Spec: the Audit as a live log of every agent action |
 | [`SPEC_BACKGROUND_TASK_STRUCTURED_FEED_AND_SWARM_OWNERSHIP_2026_09_27`](SPEC_BACKGROUND_TASK_STRUCTURED_FEED_AND_SWARM_OWNERSHIP_2026_09_27.md) | Spec: Background tasks from the CLI's structured task feed, owned in Swarm |
 | [`SPEC_BACKGROUND_UPDATES_ONE_CLICK_RESTART_2026_11_03`](SPEC_BACKGROUND_UPDATES_ONE_CLICK_RESTART_2026_11_03.md) | Spec: background updates, one "Restart to update" click |
