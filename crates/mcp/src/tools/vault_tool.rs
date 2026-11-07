@@ -29,6 +29,32 @@ async fn history(arguments: &Value, cx: &ToolCtx<'_>, base: &str) -> Result<Stri
     Ok(serde_json::to_string_pretty(&result).unwrap_or_default())
 }
 
+/// `show`, `verify` and `health` read the Vault; `update` changes an entry's details. None returns a value.
+async fn inspect(action: &str, arguments: &Value, cx: &ToolCtx<'_>, base: &str) -> Result<String> {
+    let text = |k: &str| arguments.get(k).and_then(Value::as_str);
+    let auth = crate::identity::sign_ui_automation_auth();
+    let body = match action {
+        "show" | "verify" => {
+            if action == "show" && text("id").is_none_or(|i| i.trim().is_empty()) {
+                anyhow::bail!("Vault show needs an id: the entry to look at (list shows them)");
+            }
+            json!({ "id": text("id"), "auth": auth.ok() })
+        }
+        "update" => json!({
+            "id": text("id").filter(|i| !i.trim().is_empty()).ok_or_else(|| anyhow::anyhow!("Vault update needs an id: the entry to change (list shows them)"))?,
+            "label": text("label"),
+            "fields": arguments.get("fields").filter(|f| f.is_object()).cloned().unwrap_or_else(|| json!({})),
+            "tags": arguments.get("tags").cloned(),
+            "reason": text("reason"),
+            "auth": auth.map_err(|e| anyhow::anyhow!("Vault update needs this agent's signed identity: {e}"))?,
+        }),
+        _ => json!({ "auth": auth.ok() }),
+    };
+    let what = format!("Vault {action}");
+    let result = crate::srv_http::srv_post_json(cx.client, &format!("{base}/api/v1/vault/{action}"), cx.auth_key, &body, &what).await?;
+    Ok(serde_json::to_string_pretty(&result).unwrap_or_default())
+}
+
 /// `import`: copy a secret from AWS Secrets Manager into the Vault. The person is asked once; the agent gets ids and names.
 async fn import(arguments: &Value, cx: &ToolCtx<'_>, base: &str) -> Result<String> {
     let source = arguments.get("source").cloned().unwrap_or(Value::Null);
@@ -161,7 +187,8 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 }
                 "history" => history(arguments, cx, base).await,
                 "import" => import(arguments, cx, base).await,
-                other => anyhow::bail!("Vault: unknown action {other:?}; use list, request, generate, rotate, history or import"),
+                action @ ("show" | "update" | "verify" | "health") => inspect(action, arguments, cx, base).await,
+                other => anyhow::bail!("Vault: unknown action {other:?}; use list, request, generate, rotate, history, import, show, update, verify or health"),
             }
         }
         _ => Err(not_in_family()),
@@ -176,7 +203,7 @@ mod tests {
     fn the_schema_lists_every_action_and_every_kind_srv_knows() {
         let schema: Value = serde_json::from_str(crate::tool_schemas::VAULT_TOOL).unwrap();
         let actions = &schema["inputSchema"]["properties"]["action"]["enum"];
-        assert_eq!(actions, &json!(["list", "request", "generate", "rotate", "history", "import"]));
+        assert_eq!(actions, &json!(["list", "request", "generate", "rotate", "history", "import", "show", "update", "verify", "health"]));
         // srv's catalog (backend/vault/kinds.rs) is the source; this list
         // must name the same kinds.
         let srv = include_str!("../../../srv/src/backend/vault/kinds.rs");
