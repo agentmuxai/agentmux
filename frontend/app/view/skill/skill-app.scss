@@ -76,6 +76,11 @@
     border-radius: var(--radius-md);
 }
 
+// The hash is one unbroken word: let it wrap at a narrow pane instead of running past the border.
+.skill-app-script .skill-app-line {
+    overflow-wrap: anywhere;
+}
+
 .skill-app-source {
     margin: 0;
     max-height: 16rem;
