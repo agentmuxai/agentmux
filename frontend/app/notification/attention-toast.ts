@@ -102,9 +102,13 @@ export function createAttentionToast(deps: AttentionToastDeps): { update: () => 
     // Closed with its X: those requests do not bring it back.
     let dismissed = new Set<string>();
     let shown = false;
+    // What the toast on screen says. The list re-reads on every agent event, and a toast pushed again, unchanged,
+    // would be read out again by a screen reader.
+    let said = "";
     const hide = () => {
         if (shown) deps.remove(ATTENTION_TOAST_ID);
         shown = false;
+        said = "";
     };
     return {
         update() {
@@ -124,9 +128,13 @@ export function createAttentionToast(deps: AttentionToastDeps): { update: () => 
             // A window that is not in front starts none (the OS notification is the signal) but leaves the one it has:
             // the request it names still waits.
             if (!(isNew && deps.inFront()) && !shown) return;
+            const says = JSON.stringify(items.map((i) => [i.blockId, i.name, i.color, i.what, i.local]));
+            if (shown && says === said) return;
+            said = says;
             const toast = buildToast(items, deps.reveal, deps.setAction, deps.tint);
             toast.onClose = () => {
                 shown = false;
+                said = "";
                 for (const i of items) dismissed.add(i.blockId);
             };
             shown = true;

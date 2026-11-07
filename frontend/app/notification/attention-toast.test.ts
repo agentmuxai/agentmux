@@ -131,6 +131,18 @@ describe("the attention toast", () => {
         expect(h.removed).toHaveLength(1);
     });
 
+    it("does not push the toast again while what it says is unchanged (a screen reader would read it out again)", () => {
+        const h = harness();
+        h.wait(START_GRACE_MS);
+        h.set([item("b1")]);
+        h.set([item("b1")]);
+        h.wait(20_000);
+        h.set([item("b1")]);
+        expect(h.pushed).toHaveLength(1);
+        h.set([item("b1", { what: "asks to approve a Bash call" })]);
+        expect(h.pushed).toHaveLength(2);
+    });
+
     it("drops an answered agent from the toast and keeps the rest", () => {
         const h = harness();
         h.wait(START_GRACE_MS);
