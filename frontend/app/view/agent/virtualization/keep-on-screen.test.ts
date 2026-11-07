@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { LayoutView } from "@/app/store/agent-pane-layout-store";
-import { keptScrollTop, onScreenRows } from "./keep-on-screen";
+import { atBottomOf, keptScrollTop, onScreenRows } from "./keep-on-screen";
 
 /** A view of rows `ids`, each `px` tall with a 4 px gap, windowed to all rows. */
 function view(ids: string[], px = 100, margin = 0): LayoutView {
@@ -47,5 +47,13 @@ describe("keep-on-screen (SPEC_AGENT_PANE_NO_CATCH_UP_MOTION_2026_10_15.md §4.1
         expect(keptScrollTop(rows, view(["x", "y"]), 120)).toBeNull();
         expect(keptScrollTop([], view(["a"]), 0)).toBeNull();
         expect(onScreenRows(view(["a"]), 0, 0)).toEqual([]); // not laid out yet
+    });
+
+    it("knows a viewport at the bottom, within the follow controller's reattach distance", () => {
+        const v = view(["a", "b", "c", "d"]); // 416 px of rows
+        expect(atBottomOf(v, 116, 300)).toBe(true); // flush with the end
+        expect(atBottomOf(v, 100, 300)).toBe(true); // 16 px short
+        expect(atBottomOf(v, 50, 300)).toBe(false);
+        expect(atBottomOf(null, 0, 300)).toBe(false);
     });
 });
