@@ -1,0 +1,44 @@
+requestAnimationFrame
+createFollowScroll pin,loadOlder,hasOlderHistory,loadingOlder,transition
+ResizeObserver observe
+-- three lines
+<div>
+  <div class="install-log" role="log" aria-label="Install output" tabindex="0">
+    <div class="install-log-spacer" style="height: 64px;">
+      <div class="install-log-window" style="transform: translateY(0px);">
+        <div class="install-log-line" data-tone="normal">
+          "plain"
+        <div class="install-log-line" data-tone="error">
+          <span class="log-fg-red">
+            "red"
+          "then plain"
+        <div class="install-log-line" data-tone="command">
+          "$ npm install"
+        <div class="install-log-line" data-tone="warning">
+          "careful"
+requestAnimationFrame
+-- four earlier lines trimmed
+<div>
+  <div class="install-log" role="log" aria-label="Install output" tabindex="0">
+    <div class="install-log-spacer" style="height: 80px;">
+      <div class="install-log-window" style="transform: translateY(0px);">
+        <div class="install-log-line" data-tone="marker">
+          "… 4 earlier lines trimmed"
+        <div class="install-log-line" data-tone="normal">
+          "plain"
+        <div class="install-log-line" data-tone="error">
+          <span class="log-fg-red">
+            "red"
+          "then plain"
+        <div class="install-log-line" data-tone="command">
+          "$ npm install"
+        <div class="install-log-line" data-tone="warning">
+          "careful"
+ResizeObserver disconnect
+dispose
+requestAnimationFrame
+createFollowScroll pin,loadOlder,hasOlderHistory,loadingOlder,transition
+ResizeObserver observe
+-- 500 lines, no layout: 33 rows, first "line 0", last "line 32", window translateY(0px), spacer 8000px, scrollTop 0
+scrolled {"scrollTop":0,"scrollHeight":0,"clientHeight":320} detach=false
+-- after the box has a height of 320: 40 rows, first "line 0", last "line 39", window translateY(0px), spacer 8000px, scrollTop 0
