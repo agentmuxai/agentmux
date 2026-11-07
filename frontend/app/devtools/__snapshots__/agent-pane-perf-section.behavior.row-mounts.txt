@@ -1,0 +1,96 @@
+agentPerfStore.snapshot
+-- row mount table
+<div>
+  <div style="margin-top:8px;padding-top:8px;border-top:1px solid #333">
+    <div style="font-weight:bold;color:#7af;margin-bottom:4px">
+      "📊 Agent Pane Perf"
+    <div style="margin-bottom:6px">
+      <div style="color:#aaa;font-size:10px;margin-bottom:2px">
+        "Row mount duration (last 64 per kind)"
+      <table style="font-size:10px;border-collapse:collapse;width:100%">
+        <thead>
+          <tr style="color:#888">
+            <th style="text-align:left;padding:1px 4px">
+              "kind"
+            <th style="text-align:right;padding:1px 4px">
+              "p50"
+            <th style="text-align:right;padding:1px 4px">
+              "p95"
+            <th style="text-align:right;padding:1px 4px">
+              "max"
+            <th style="text-align:right;padding:1px 4px">
+              "n"
+            <th style="text-align:right;padding:1px 4px">
+              "est-miss"
+        <tbody>
+          <tr>
+            <td style="padding:1px 4px">
+              "tool-call"
+            <td style="padding:1px 4px;text-align:right">
+              "12"
+            <td style="padding:1px 4px;text-align:right">
+              "89"
+            <td style="padding:1px 4px;text-align:right">
+              "120"
+            <td style="padding:1px 4px;text-align:right;color:#888">
+              "30"
+            <td style="padding: 1px 4px; text-align: right; color: rgb(102, 204, 136);">
+              "20%"
+          <tr>
+            <td style="padding:1px 4px">
+              "diff"
+            <td style="padding:1px 4px;text-align:right">
+              "9.9"
+            <td style="padding:1px 4px;text-align:right">
+              "10"
+            <td style="padding:1px 4px;text-align:right">
+              "10"
+            <td style="padding:1px 4px;text-align:right;color:#888">
+              "7"
+            <td style="padding: 1px 4px; text-align: right; color: rgb(255, 170, 102);">
+              "20%"
+              "⚠"
+          <tr>
+            <td style="padding:1px 4px">
+              "text"
+            <td style="padding:1px 4px;text-align:right">
+              "1.2"
+            <td style="padding:1px 4px;text-align:right">
+              "4.6"
+            <td style="padding:1px 4px;text-align:right">
+              "10.0"
+            <td style="padding:1px 4px;text-align:right;color:#888">
+              "64"
+            <td style="padding: 1px 4px; text-align: right; color: rgb(102, 204, 136);">
+              "4%"
+          <tr>
+            <td style="padding:1px 4px">
+              "image"
+            <td style="padding:1px 4px;text-align:right">
+              "0.0"
+            <td style="padding:1px 4px;text-align:right">
+              "4.6"
+            <td style="padding:1px 4px;text-align:right">
+              "5.0"
+            <td style="padding:1px 4px;text-align:right;color:#888">
+              "1"
+            <td style="padding: 1px 4px; text-align: right; color: rgb(102, 204, 136);">
+              "0%"
+          <tr>
+            <td style="padding:1px 4px">
+              "thinking"
+            <td style="padding:1px 4px;text-align:right">
+              "—"
+            <td style="padding:1px 4px;text-align:right">
+              "—"
+            <td style="padding:1px 4px;text-align:right">
+              "—"
+            <td style="padding:1px 4px;text-align:right;color:#888">
+              "2"
+            <td style="padding: 1px 4px; text-align: right; color: rgb(255, 170, 102);">
+              "55%"
+              "⚠"
+      <div style="color:#666;font-size:9px;margin-top:2px">
+        "est-miss = pct measured outside ±"
+        "30%"
+        "of estimate"

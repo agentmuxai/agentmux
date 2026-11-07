@@ -668,8 +668,72 @@ mod vault_hold_tests {
     }
 }
 
+/// The pane's download commands from the frontend. Cancel is the strip's: the host holds the callback, so the
+/// page and the strip name only a pane and a download id, and an id the host no longer holds does nothing
+/// (spec §5). Start is the right-click menu's "Save link as…" / "Save image as…" (`start_download` checks the
+/// address, which is the page's text).
+pub fn run_command(state: &std::sync::Arc<crate::state::AppState>, cmd: &str, args: &serde_json::Value) {
+    let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
+    match cmd {
+        "browser_download_cancel" => {
+            let id = args.get("download_id").and_then(|v| v.as_u64()).and_then(|v| u32::try_from(v).ok());
+            if let Some(id) = id {
+                cancel_download(block_id, id);
+            }
+        }
+        "browser_download_start" => {
+            let url = args.get("url").and_then(|v| v.as_str()).unwrap_or("");
+            state.browser_panes.start_download(block_id, url, state);
+        }
+        _ => {}
+    }
+}
+
+/// The most a link's or image's address can be for "Save link as…" / "Save image as…" (a `data:` image can be long).
+const MAX_SAVE_URL_BYTES: usize = 2 * 1024 * 1024;
+
+/// Whether a page's link or image address may be saved from the right-click menu. The menu hands the host
+/// text the page chose, so only the schemes a page can already show a person go further: not `file:`,
+/// `javascript:`, `chrome:` or anything that opens another program.
+pub fn download_url_allowed(url: &str) -> bool {
+    if url.len() > MAX_SAVE_URL_BYTES || url.chars().any(char::is_control) {
+        return false;
+    }
+    let lower = url.get(..8).unwrap_or(url).to_ascii_lowercase();
+    ["http://", "https://", "blob:", "data:"].iter().any(|scheme| lower.starts_with(scheme))
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_the_schemes_a_page_can_show_a_person_can_be_saved_from_the_menu() {
+        for ok in ["http://example.com/a.pdf", "https://example.com/p.png?x=1", "HTTPS://EXAMPLE.COM/", "blob:https://example.com/0f1e", "data:image/png;base64,iVBOR"] {
+            assert!(download_url_allowed(ok), "{ok}");
+        }
+        for bad in [
+            "",
+            "file:///C:/Windows/win.ini",
+            "javascript:alert(1)",
+            "chrome://settings",
+            "view-source:https://example.com/",
+            "ftp://example.com/a",
+            "ms-msdt:/id",
+            "//example.com/a",
+            "https//example.com",
+            "https://example.com/a\nb",
+            "https://example.com/\u{0}",
+        ] {
+            assert!(!download_url_allowed(bad), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn an_address_past_the_cap_is_refused() {
+        let long = format!("data:image/png;base64,{}", "A".repeat(MAX_SAVE_URL_BYTES));
+        assert!(!download_url_allowed(&long));
+        assert!(download_url_allowed(&format!("https://example.com/{}", "a".repeat(2000))));
+    }
+
     use super::*;
 
     #[test]

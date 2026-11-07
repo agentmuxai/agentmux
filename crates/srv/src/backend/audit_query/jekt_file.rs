@@ -8,8 +8,6 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
-use crate::backend::reactive::types::AuditLogEntry;
-
 /// How much of the file is read at a time.
 const CHUNK: u64 = 64 * 1024;
 
@@ -93,7 +91,7 @@ pub(super) fn entries<T: serde::de::DeserializeOwned>(path: &Path, end: Option<u
 
 /// Calls `each` with every entry from byte `from` on, oldest first, and returns where the last complete line
 /// ends: a line the writer hasn't finished isn't read, and is the next scan's first.
-pub(super) fn scan(path: &Path, from: u64, mut each: impl FnMut(AuditLogEntry)) -> std::io::Result<u64> {
+pub(super) fn scan<T: serde::de::DeserializeOwned>(path: &Path, from: u64, mut each: impl FnMut(T)) -> std::io::Result<u64> {
     use std::io::BufRead;
     let mut file = File::open(path)?;
     file.seek(SeekFrom::Start(from))?;
@@ -106,7 +104,7 @@ pub(super) fn scan(path: &Path, from: u64, mut each: impl FnMut(AuditLogEntry)) 
             return Ok(at);
         }
         at += n as u64;
-        if let Ok(entry) = serde_json::from_slice::<AuditLogEntry>(&line) {
+        if let Ok(entry) = serde_json::from_slice::<T>(&line) {
             each(entry);
         }
     }
@@ -115,6 +113,7 @@ pub(super) fn scan(path: &Path, from: u64, mut each: impl FnMut(AuditLogEntry)) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::reactive::types::AuditLogEntry;
 
     fn file_of(lines: &[&str], trailing_newline: bool) -> (tempfile::TempDir, std::path::PathBuf) {
         let dir = tempfile::tempdir().unwrap();
@@ -177,12 +176,12 @@ mod tests {
         let line = |ts: u64| format!("{}\n", serde_json::json!({"timestamp": ts, "target_agent": "x", "block_id": "", "message_hash": "", "message_length": 0, "success": true, "request_id": ""}));
         std::fs::write(&path, format!("{}{}{{\"timestamp\":3", line(1), line(2))).unwrap();
         let mut seen = Vec::new();
-        let end = scan(&path, 0, |e| seen.push(e.timestamp)).unwrap();
+        let end = scan(&path, 0, |e: AuditLogEntry| seen.push(e.timestamp)).unwrap();
         assert_eq!((seen.clone(), end), (vec![1, 2], (line(1).len() + line(2).len()) as u64));
         // Finished, it is read from where the scan stopped.
         std::fs::write(&path, format!("{}{}{}", line(1), line(2), line(3))).unwrap();
         seen.clear();
-        scan(&path, end, |e| seen.push(e.timestamp)).unwrap();
+        scan(&path, end, |e: AuditLogEntry| seen.push(e.timestamp)).unwrap();
         assert_eq!(seen, [3]);
     }
 

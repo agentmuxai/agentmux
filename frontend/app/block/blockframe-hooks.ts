@@ -140,6 +140,7 @@ export function useBodyContextMenu(opts: {
             x: number;
             y: number;
             link_url: string;
+            image_url?: string;
             selection_text: string;
             is_editable: boolean;
             can_go_back: boolean;
@@ -164,6 +165,7 @@ export function useBodyContextMenu(opts: {
                 x: payload.x,
                 y: payload.y,
                 linkUrl: payload.link_url || undefined,
+                imageUrl: payload.image_url || undefined,
                 selectionText: payload.selection_text || undefined,
                 isEditable: payload.is_editable,
                 canGoBack: payload.can_go_back,

@@ -723,3 +723,32 @@ fn old_lines_read_as_before_and_say_their_tier_only_where_they_prove_it() {
     let tiers: Vec<_> = got.iter().map(|e| e.provenance.as_ref().map(|p| (p.tier.clone(), p.tier_inferred, p.channel.clone()))).collect();
     assert_eq!(tiers, vec![Some((Some("cloud".to_string()), Some(true), None)), Some((None, None, Some("dev".to_string())))]);
 }
+
+#[test]
+fn totals_count_the_activity_rows_the_kinds_ask_for_and_carry_on_as_a_day_file_grows() {
+    use crate::backend::rpc_types::AuditCost;
+    let measured = |input, output| Some(AuditCost { input, cache_read: 0, output, usd: None, basis: "measured".into() });
+    let mut turn = activity_row(T0 + 1_000, "turn", "turn ended (success)");
+    turn.cost = measured(100, 50);
+    let a = Activity::new(&[activity_row(T0, "tool", "Bash cargo test"), turn], None);
+    let totals = |agent: Option<&str>| {
+        let req = AuditQueryReq { kinds: kinds(&["tool", "turn"]), agent_id: agent.map(str::to_string), totals: Some(true), ..Default::default() };
+        a.run(req).unwrap().totals.unwrap()
+    };
+
+    // The default kinds leave them out, so the list's totals are what they were.
+    assert_eq!(a.run(AuditQueryReq { totals: Some(true), ..Default::default() }).unwrap().totals.unwrap().entries, 0);
+    let both = totals(None);
+    assert_eq!((both.entries, both.input, both.output, both.estimated), (2, 100, 50, false), "a turn's cost is in the totals");
+    assert_eq!(totals(Some("maricon-2")).entries, 2, "a row names its agent by UID: the filter's slug still finds it");
+    assert_eq!(totals(Some("nobody")).entries, 0);
+
+    // The day's file is appended to: the next ask reads only what was written since.
+    let mut next = activity_row(T0 + 2_000, "turn", "turn ended (success)");
+    next.cost = measured(200, 0);
+    let mut file = std::fs::OpenOptions::new().append(true).open(a.activity_dir.join("activity-2023-11-14.jsonl")).unwrap();
+    std::io::Write::write_all(&mut file, format!("{}
+", serde_json::to_string(&next).unwrap()).as_bytes()).unwrap();
+    let grown = totals(None);
+    assert_eq!((grown.entries, grown.input, grown.output), (3, 300, 50));
+}

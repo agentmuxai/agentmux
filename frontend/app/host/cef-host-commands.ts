@@ -83,6 +83,9 @@ export const cefBrowserPanes: BrowserPaneHostApi = {
     cancelDownload: async (blockId, downloadId) => {
         await invokeCommand("browser_download_cancel", { block_id: blockId, download_id: downloadId });
     },
+    startDownload: async (blockId, url) => {
+        await invokeCommand("browser_download_start", { block_id: blockId, url });
+    },
     hibernationCheck: (blockId, beforeunload) =>
         invokeCommand<BrowserHibernationCheck>("browser_pane_hibernation_check", { block_id: blockId, beforeunload }),
     discard: (blockId, op) =>

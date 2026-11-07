@@ -422,6 +422,19 @@ describe("closeForPeer: a peer row entered on the way to the open submenu (#2413
         expect(onClose).not.toHaveBeenCalled();
     });
 
+    it("holds through a slow hand's whole-pixel steps next to the leave point, and closes for one that really leaves", () => {
+        const settled = vi.fn();
+        controller.closeForPeer(ENTER_PEER, settled);
+        // Aimed at the submenu, but the rounding gives a step straight down and one straight back, beside the apex.
+        moveTo(200, 141);
+        moveTo(200, 142);
+        moveTo(201, 143);
+        expect(onClose).not.toHaveBeenCalled();
+        moveTo(200, 160); // straight down, away from the submenu
+        expect(onClose).toHaveBeenCalledOnce();
+        expect(settled).toHaveBeenCalledOnce();
+    });
+
     it("closes once the pointer stops moving inside the triangle for the safety timeout", () => {
         const settled = vi.fn();
         controller.closeForPeer(ENTER_PEER, settled);

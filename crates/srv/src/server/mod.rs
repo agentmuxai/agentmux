@@ -30,8 +30,6 @@ pub mod install_handlers;
 mod lsp_handlers;
 mod system_install_handlers;
 mod uninstall_handlers;
-mod vendor_install_catalog;
-mod vendor_install_handlers;
 mod messagebus;
 // pub(crate): muxbus::cloud_subscriber (the WAN delivery path) calls
 // resolve_transcript_request_tier_fields directly — see that function's
