@@ -576,8 +576,9 @@ pub(crate) async fn handle_vault_request(State(state): State<AppState>, Json(bod
         requests::Asked::Waiting { request_id, new, answer } => {
             if new {
                 let store = state.identity_store.clone();
-                let (label, agent, kind) = (label.clone(), agent.clone(), body.kind.clone());
-                let _ = tokio::task::spawn_blocking(move || vault::record(&store, "", &label, &agent, "requested an entry", &kind, "asked")).await;
+                let (label, agent, kind, reason) = (label.clone(), agent.clone(), body.kind.clone(), reason.clone());
+                let line = move || vault::record_line(&store, vault::Line { entry_id: "", label: &label, actor: &agent, action: "requested an entry", target: &kind, outcome: "asked", reason: &reason });
+                let _ = tokio::task::spawn_blocking(line).await;
                 publish(&state);
             }
             (request_id, answer)

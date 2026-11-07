@@ -9,6 +9,7 @@
 //! the Vault makes itself (`generate`), which no one has seen. Everything here
 //! is blocking (the store, the keychain): call it off the async runtime.
 
+pub mod aws_import;
 pub mod capture;
 pub mod expiry;
 pub mod files;
@@ -329,7 +330,14 @@ fn insert_in(store: &Store, entry: NewEntry, actor: &str, action: &str, target: 
 }
 
 /// [`insert_in`], recording the agent's `reason` for making the entry.
-fn insert_in_why(store: &Store, mut entry: NewEntry, actor: &str, action: &str, target: &str, vault_id: &str, reason: &str) -> Result<String, String> {
+fn insert_in_why(store: &Store, entry: NewEntry, actor: &str, action: &str, target: &str, vault_id: &str, reason: &str) -> Result<String, String> {
+    let (id, label) = insert_unrecorded(store, entry, vault_id)?;
+    record_line(store, Line { entry_id: &id, label: &label, actor, action, target, outcome: "done", reason });
+    Ok(id)
+}
+
+/// Saves a new entry in the Vault `vault_id` and leaves the record of it to the caller: its id and label.
+fn insert_unrecorded(store: &Store, mut entry: NewEntry, vault_id: &str) -> Result<(String, String), String> {
     store.vault_info(vault_id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no Vault {vault_id}"))?;
     let kind = kinds::kind(&entry.kind).ok_or_else(|| format!("unknown kind {:?}", entry.kind))?;
     drop_empty(&mut entry.parts);
@@ -356,8 +364,7 @@ fn insert_in_why(store: &Store, mut entry: NewEntry, actor: &str, action: &str, 
         vault_id: vault_id.to_string(),
     };
     store.vault_insert(&row).map_err(|e| e.to_string())?;
-    record_line(store, Line { entry_id: &id, label: &label, actor, action, target, outcome: "done", reason });
-    Ok(id)
+    Ok((id, label))
 }
 
 /// The kinds `generate` makes, and the part it fills: a value no person needs to

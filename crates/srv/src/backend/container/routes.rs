@@ -57,6 +57,7 @@ mod tests {
             "/api/v1/vault",
             "/api/v1/vault/generate",
             "/api/v1/vault/history",
+            "/api/v1/vault/import",
             "/api/v1/vault/request",
             "/api/v1/ui/browser/open",
             "/api/v1/ui/browser/snapshot",
