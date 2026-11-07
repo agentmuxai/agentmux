@@ -67,7 +67,7 @@ fn count_recent(times: &mut VecDeque<Instant>, now: Instant) -> usize {
 
 /// The pane and target a dialog in `browser` is for, when an agent drives
 /// that pane and hasn't handed it to the person.
-fn driven(state: &Arc<crate::state::AppState>, browser: &Browser) -> Option<(String, String)> {
+pub(super) fn driven(state: &Arc<crate::state::AppState>, browser: &Browser) -> Option<(String, String)> {
     let (pane, target) = super::allowed_origins::pane_and_target(state, browser)?;
     if !state.owned_panes.lock().contains(&pane) || handoff().lock().contains(&pane) {
         return None;
@@ -127,7 +127,7 @@ fn report(state: &Arc<crate::state::AppState>, id: String, body: serde_json::Val
 
 /// Tell srv something it only records (a flood, a dialog that ended). Fire
 /// and forget, on its own thread.
-fn notify(state: &Arc<crate::state::AppState>, body: serde_json::Value) {
+pub(super) fn notify(state: &Arc<crate::state::AppState>, body: serde_json::Value) {
     let web_endpoint = state.backend_endpoints.lock().web_endpoint.clone();
     let auth_key = state.auth_key.lock().clone();
     let ipc_token = state.ipc_token.clone();
