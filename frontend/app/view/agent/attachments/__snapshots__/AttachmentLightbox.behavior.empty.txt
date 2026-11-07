@@ -1,0 +1,19 @@
+Modal open=true scope=pane size=fit panelClass=agent-attachment-lightbox__panel
+useAttachmentUrl send id=a1
+useAttachmentText thumb id=undefined
+initialFocus -> agent-attachment-lightbox__dialog
+useAttachmentUrl send id=undefined
+useAttachmentText thumb id=undefined
+onClose
+-- no items
+<div>
+  <div data-stand="Modal" data-aria-label="File undefined: undefined">
+    <div class="agent-attachment-lightbox__dialog" tabindex="-1">
+      <div class="agent-attachment-lightbox__image">
+        <span class="agent-attachment-lightbox__missing">
+          "This file is no longer available."
+      <div class="agent-attachment-lightbox__bar">
+        <span class="agent-attachment-lightbox__title">
+          <span class="num">
+        <span class="agent-attachment-lightbox__actions">
+          <span data-stand="IconButton" data-icon="xmark" data-label="Close preview" data-tooltip="false" data-title="Close (Esc)">

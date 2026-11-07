@@ -387,7 +387,6 @@
 104 frontend/app/util/submenu-hover.ts::createSubmenuHover
 104 frontend/app/view/accounts/GoogleServicesSection.tsx::GoogleServicesSection
 130 frontend/app/view/accounts/accounts-manager.tsx::AccountsManager
-170 frontend/app/view/agent/attachments/AttachmentLightbox.tsx::AttachmentLightbox
 101 frontend/app/view/agent/attachments/AttachmentTile.tsx::AttachmentTile
 143 frontend/app/view/agent/buildRuntimeArgs.ts::buildRuntimeArgs
 140 frontend/app/view/agent/cli-notice.ts::parseCliNoticeFrame
@@ -448,7 +447,6 @@
 118 frontend/app/view/global-bundle/GlobalMemoryFullView.tsx::EntryView
 147 frontend/app/view/history/history-agents.tsx::HistoryAgents
 165 frontend/app/view/identity/identity-accounts-tab.tsx::AccountDetailPanel
-168 frontend/app/view/kanban/kanban-card.tsx::KanbanCard
 143 frontend/app/view/memory-editor/MemoryHistory.tsx::MemoryHistory
 126 frontend/app/view/native-memory/MemoryAdoptionPanel.tsx::MemoryAdoptionPanel
 112 frontend/app/view/native-memory/NativeMemoryCreate.tsx::NativeMemoryCreate

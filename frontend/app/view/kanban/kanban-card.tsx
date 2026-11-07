@@ -5,17 +5,19 @@
 // working with no task (§6.6).
 
 import { draggable } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
-import { createMemo, For, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { type Accessor, createMemo, For, type JSX, onCleanup, onMount, Show } from "solid-js";
 
+import { seatTooltipLine } from "@/app/agent-model/seat-format";
 import { kanbanCardItemType } from "@/app/drag/drag-types";
 import { Button, Pill, StatusDot, type StatusTone } from "@/app/element/ui";
 import { MOS } from "@/app/store/global";
-import { seatTooltipLine } from "@/app/agent-model/seat-format";
 import { formatAge } from "@/app/view/warden-shared/warden-shared";
 
+import { tip } from "@/app/element/tip";
 import { agentColor } from "./kanban-colors";
 import {
     checklistProgress,
+    type ColumnId,
     columnOf,
     isResearchKind,
     needsReason,
@@ -27,7 +29,6 @@ import {
 import { CardMedia } from "./kanban-media";
 import { seatOf, useSeatIndex } from "./kanban-seats";
 import type { KanbanAfter, KanbanAgent, KanbanAgentState, KanbanTask } from "./kanban-types";
-import { tip } from "@/app/element/tip";
 
 /** A linked task's state, as a card's pill says it. */
 const LINK_WORDS: Record<string, string> = {
@@ -97,22 +98,39 @@ export function AgentChip(props: {
                 tone={agentTone(props.agent?.state)}
                 label={`${props.name}: ${agentStateWords(props.agent?.state)}`}
             />
-            <span class="kanban-agent-chip__name" style={nameColor() ? { "--kanban-agent-text": nameColor() } : undefined}>
+            <span
+                class="kanban-agent-chip__name"
+                style={nameColor() ? { "--kanban-agent-text": nameColor() } : undefined}
+            >
                 {props.name}
             </span>
         </span>
     );
 }
 
-export function KanbanCard(props: {
+interface KanbanCardProps {
     task: KanbanTask;
     now: number;
     agents: KanbanAgent[];
     /** The colours of agents not running here, by uid (`agent_colors`). */
     colors?: Record<string, string>;
     onOpen: (t: KanbanTask) => void;
-}): JSX.Element {
-    let el: HTMLDivElement | undefined;
+}
+
+/** What a card's parts share: its task, its column, why it needs you, who has it, and its edge colour. */
+interface CardState {
+    props: KanbanCardProps;
+    t: () => KanbanTask;
+    column: Accessor<ColumnId>;
+    reason: Accessor<string | null>;
+    who: Accessor<{ name: string; agent: KanbanAgent | null | undefined; uid: string | undefined } | null>;
+    stripe: Accessor<string | undefined>;
+    open: () => void;
+    /** The card's element, once it is in the page. */
+    el: { current: HTMLDivElement | undefined };
+}
+
+function createCardState(props: KanbanCardProps): CardState {
     const t = () => props.task;
     const column = createMemo(() => columnOf(t()));
     const reason = createMemo(() => needsReason(t()));
@@ -132,7 +150,24 @@ export function KanbanCard(props: {
         const w = who();
         return w ? agentColor(w.agent, w.uid, props.colors) : undefined;
     });
+    const s: CardState = {
+        props,
+        t,
+        column,
+        reason,
+        who,
+        stripe,
+        open: () => props.onOpen(t()),
+        el: { current: undefined },
+    };
+    makeDraggable(s);
+    return s;
+}
+
+function makeDraggable(s: CardState) {
+    const { t, column } = s;
     onMount(() => {
+        const el = s.el.current;
         // Only a waiting task moves by drag: to another agent, to Anyone, or onto an agent to start it.
         if (!el || (column() !== "backlog" && column() !== "specd")) return;
         const cleanup = draggable({
@@ -141,10 +176,14 @@ export function KanbanCard(props: {
         });
         onCleanup(cleanup);
     });
-    const open = () => props.onOpen(t());
+}
+
+export function KanbanCard(props: KanbanCardProps): JSX.Element {
+    const s = createCardState(props);
+    const { t, column, stripe, open } = s;
     return (
         <div
-            ref={el}
+            ref={(el) => (s.el.current = el)}
             class="kanban-card"
             classList={{
                 "kanban-card--held": t().state === "held",
@@ -167,6 +206,26 @@ export function KanbanCard(props: {
                 <span class="kanban-card__num">#{t().card.num}</span>
                 <span class="kanban-card__text">{t().title}</span>
             </div>
+            <ReasonOrNote s={s} />
+            <CardMedia task={t()} />
+            <div class="kanban-card__meta">
+                <WhoChip s={s} />
+                <LinkPills s={s} />
+                <StatusPills s={s} />
+                <FactPills s={s} />
+            </div>
+            <div class="kanban-card__foot">
+                <span>from {requestedBy(t())}</span>
+                <span {...tip("Since it last moved")}>{formatAge(Math.max(0, props.now - t().updated_at))}</span>
+            </div>
+        </div>
+    );
+}
+
+function ReasonOrNote({ s }: { s: CardState }) {
+    const { t, reason } = s;
+    return (
+        <>
             <Show when={reason()}>
                 {(r) => (
                     <div class="kanban-card__reason">
@@ -178,98 +237,122 @@ export function KanbanCard(props: {
             <Show when={!reason() && t().card.note}>
                 <div class="kanban-card__note">{t().card.note}</div>
             </Show>
-            <CardMedia task={t()} />
-            <div class="kanban-card__meta">
-                <Show when={who()}>
-                    {(w) => (
-                        <AgentChip name={w().name} agent={w().agent} uid={w().uid} colors={props.colors} showSeat />
-                    )}
-                </Show>
-                <Show when={t().state === "held"}>
-                    <Pill icon="pause">on hold</Pill>
-                </Show>
-                {/* Its spec: "spec #1103 · in review", then "· accepted" once it is Spec'd. */}
-                <For each={(t().card.after ?? []).filter((a) => isResearchKind(a.kind))}>
-                    {(a) => (
-                        <Pill icon="file-lines" title={`${a.kind} #${a.num} ${a.title}`}>
-                            {`${a.kind?.trim().toLowerCase()} #${a.num} · ${linkWord(a)}`}
+        </>
+    );
+}
+
+function WhoChip({ s }: { s: CardState }) {
+    const { props, who } = s;
+    return (
+        <Show when={who()}>
+            {(w) => <AgentChip name={w().name} agent={w().agent} uid={w().uid} colors={props.colors} showSeat />}
+        </Show>
+    );
+}
+
+/** On hold, the specs it comes from, what it starts after, and (for a spec) the builds that start after it. */
+function LinkPills({ s }: { s: CardState }) {
+    const { t, column } = s;
+    return (
+        <>
+            <Show when={t().state === "held"}>
+                <Pill icon="pause">on hold</Pill>
+            </Show>
+            {/* Its spec: "spec #1103 · in review", then "· accepted" once it is Spec'd. */}
+            <For each={(t().card.after ?? []).filter((a) => isResearchKind(a.kind))}>
+                {(a) => (
+                    <Pill icon="file-lines" title={`${a.kind} #${a.num} ${a.title}`}>
+                        {`${a.kind?.trim().toLowerCase()} #${a.num} · ${linkWord(a)}`}
+                    </Pill>
+                )}
+            </For>
+            <Show
+                when={
+                    (column() === "backlog" || column() === "specd") &&
+                    waitingOn(t()).filter((a) => !isResearchKind(a.kind)).length > 0
+                }
+            >
+                <Pill
+                    icon="hourglass-half"
+                    title={`Starts after ${waitingOn(t())
+                        .filter((a) => !isResearchKind(a.kind))
+                        .map((a) => `#${a.num} ${a.title}`)
+                        .join(", ")}: nobody takes it until then`}
+                >
+                    {`after #${waitingOn(t())
+                        .filter((a) => !isResearchKind(a.kind))
+                        .map((a) => a.num)
+                        .join(", #")}`}
+                </Pill>
+            </Show>
+            {/* A spec's build: what accepting it unlocks. */}
+            <Show when={isResearchKind(t().kind)}>
+                <For each={t().card.followers ?? []}>
+                    {(f) => (
+                        <Pill icon="arrow-right" title={`#${f.num} ${f.title}: ${linkWord(f)}`}>
+                            {`build #${f.num}`}
                         </Pill>
                     )}
                 </For>
-                <Show
-                    when={
-                        (column() === "backlog" || column() === "specd") &&
-                        waitingOn(t()).filter((a) => !isResearchKind(a.kind)).length > 0
-                    }
-                >
-                    <Pill
-                        icon="hourglass-half"
-                        title={`Starts after ${waitingOn(t())
-                            .filter((a) => !isResearchKind(a.kind))
-                            .map((a) => `#${a.num} ${a.title}`)
-                            .join(", ")}: nobody takes it until then`}
-                    >
-                        {`after #${waitingOn(t())
-                            .filter((a) => !isResearchKind(a.kind))
-                            .map((a) => a.num)
-                            .join(", #")}`}
+            </Show>
+        </>
+    );
+}
+
+/** What the task is, and where its work has got to: the release, the merge, a cancel. */
+function StatusPills({ s }: { s: CardState }) {
+    const { t, column } = s;
+    return (
+        <>
+            <Show when={column() === "needs" || column() === "review"}>
+                <Pill title="What this task is">{stageWord(t())}</Pill>
+            </Show>
+            <Show when={t().card.pr?.released_in}>
+                {(tag) => (
+                    <Pill icon="box" tone="ok" title="Shipped in this release">
+                        {tag()}
                     </Pill>
-                </Show>
-                {/* A spec's build: what accepting it unlocks. */}
-                <Show when={isResearchKind(t().kind)}>
-                    <For each={t().card.followers ?? []}>
-                        {(f) => (
-                            <Pill icon="arrow-right" title={`#${f.num} ${f.title}: ${linkWord(f)}`}>
-                                {`build #${f.num}`}
-                            </Pill>
-                        )}
-                    </For>
-                </Show>
-                <Show when={column() === "needs" || column() === "review"}>
-                    <Pill title="What this task is">{stageWord(t())}</Pill>
-                </Show>
-                <Show when={t().card.pr?.released_in}>
-                    {(tag) => (
-                        <Pill icon="box" tone="ok" title="Shipped in this release">
-                            {tag()}
-                        </Pill>
-                    )}
-                </Show>
-                <Show when={column() === "merged" && t().card.pr?.merged_at}>
-                    <Pill icon="code-merge" title="Its PR merged">
-                        merged
+                )}
+            </Show>
+            <Show when={column() === "merged" && t().card.pr?.merged_at}>
+                <Pill icon="code-merge" title="Its PR merged">
+                    merged
+                </Pill>
+            </Show>
+            <Show when={t().state === "cancelled"}>
+                <Pill icon="ban">cancelled</Pill>
+            </Show>
+        </>
+    );
+}
+
+/** Who accepted it, its checklist, its PR, how often it was taken, and its repository. */
+function FactPills({ s }: { s: CardState }) {
+    const { t } = s;
+    return (
+        <>
+            <Show when={t().accepted_by}>
+                {(a) => (
+                    <Pill icon="user-check" title={`Accepted by ${a().name}.${a().said ? ` ${a().said}` : ""}`}>
+                        {`accepted by ${a().name}`}
                     </Pill>
-                </Show>
-                <Show when={t().state === "cancelled"}>
-                    <Pill icon="ban">cancelled</Pill>
-                </Show>
-                <Show when={t().accepted_by}>
-                    {(a) => (
-                        <Pill icon="user-check" title={`Accepted by ${a().name}.${a().said ? ` ${a().said}` : ""}`}>
-                            {`accepted by ${a().name}`}
-                        </Pill>
-                    )}
-                </Show>
-                <Show when={checklistProgress(t())}>{(p) => <Pill icon="list-check">{p()}</Pill>}</Show>
-                <Show when={t().card.pr_url}>
-                    <Pill icon="code-pull-request" tone="accent" title={t().card.pr_url}>
-                        {prLabel(t().card.pr_url)}
-                    </Pill>
-                </Show>
-                <Show when={t().attempts > 1}>
-                    <Pill title={`Taken ${t().attempts} times; it is parked as failed after ${t().max_attempts} attempts`}>
-                        {`attempt ${t().attempts}/${t().max_attempts}`}
-                    </Pill>
-                </Show>
-                <Show when={t().card.repo}>
-                    <span class="kanban-card__repo">{t().card.repo.replace(/^local:.*[\\/]/, "")}</span>
-                </Show>
-            </div>
-            <div class="kanban-card__foot">
-                <span>from {requestedBy(t())}</span>
-                <span {...tip("Since it last moved")}>{formatAge(Math.max(0, props.now - t().updated_at))}</span>
-            </div>
-        </div>
+                )}
+            </Show>
+            <Show when={checklistProgress(t())}>{(p) => <Pill icon="list-check">{p()}</Pill>}</Show>
+            <Show when={t().card.pr_url}>
+                <Pill icon="code-pull-request" tone="accent" title={t().card.pr_url}>
+                    {prLabel(t().card.pr_url)}
+                </Pill>
+            </Show>
+            <Show when={t().attempts > 1}>
+                <Pill title={`Taken ${t().attempts} times; it is parked as failed after ${t().max_attempts} attempts`}>
+                    {`attempt ${t().attempts}/${t().max_attempts}`}
+                </Pill>
+            </Show>
+            <Show when={t().card.repo}>
+                <span class="kanban-card__repo">{t().card.repo.replace(/^local:.*[\\/]/, "")}</span>
+            </Show>
+        </>
     );
 }
 
