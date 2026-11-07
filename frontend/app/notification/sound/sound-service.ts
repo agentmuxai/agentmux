@@ -31,6 +31,7 @@ import { createEffect, createRoot } from "solid-js";
 import { notify, subscribeSoundEvents, type SoundEvent } from "./sound-events";
 import { mayPlayFromBus, SOUNDS, type SoundDef, type SoundId } from "./sounds";
 import { SoundPlayer } from "./sound-player";
+import { noteSound } from "./sound-history";
 import { audibleFlashDelayMs, flashPatternForCategory, flashPatternForSyllable } from "./flash-patterns";
 import { paramsForTool } from "./tool-tones";
 import { TOOL_TONE_COALESCE_MS, ToolTonesPlayer } from "./tool-tones-player";
@@ -205,7 +206,7 @@ export function installSoundService(): () => void {
         lastFiredAt.set(ev.id, now);
         let startAt: number | null = null;
         try {
-            startAt = player.play(def, ev.override?.gain ?? 1);
+            startAt = playEventSound(def, ev);
         } catch (e) {
             console.warn(`[sound] play threw for ${ev.id}`, e);
         }
@@ -236,6 +237,13 @@ export function installSoundService(): () => void {
         document.removeEventListener("keydown", primeOnce, true);
         installed = false;
     };
+}
+
+/** Plays an event sound and notes it, for the Audit's "who was that", when it was heard (the player is primed). */
+function playEventSound(def: SoundDef, ev: SoundEvent): number | null {
+    const startAt = player.play(def, ev.override?.gain ?? 1);
+    if (startAt !== null && ev.sourceBlockId) noteSound({ blockId: ev.sourceBlockId, event: ev.id, at: Date.now() });
+    return startAt;
 }
 
 function mapAgentPaneEvent(blockId: string, event: AgentPaneEvent): void {
@@ -411,6 +419,7 @@ function playToolToneIfAllowed(blockId: string, tool: string): void {
     if (ctx && toolTones.isAttached()) {
         try {
             startAt = toolTones.play(ctx, tool);
+            noteSound({ blockId, event: "tool", tool, at: Date.now() });
         } catch (e) {
             console.warn(`[sound] tool-tone play threw for ${tool}`, e);
         }
