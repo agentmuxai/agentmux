@@ -1,7 +1,7 @@
 # Spec: Settings > Keyboard shortcuts: rebind every shortcut, with Help and the rest following live (#1861)
 
 **Date:** 2026-11-06 · **Owner:** AgentA (shortcuts and Help work), at the request of AgentY and the operator (2026-11-06: "we want to be able to set the keybindings. it would be a new view in settings. in that case, the help panel would reactively show the shortcuts set in the settings and the default is what we have today. use latest best practices for managing the UI").
-**Status:** proposed. Nothing in this spec is built. The build (#1862) starts when this task is approved.
+**Status:** active, approved by the operator 2026-11-07 (decisions D1-D10 as recommended). Phase K0 shipped in PR #6762 (`bindingsView`, `planChange`, `conflictsFor`, reserved keys); K1-K5 are not started.
 **Written against:** `origin/main` @ `7b6b4790f` (2026-11-06).
 **Builds on:** `docs/reports/REPORT_KEYBINDINGS_AUDIT_AND_CONSOLIDATION_2026_10_04.md` (§6 "One framework", §11 best practices), `docs/specs/PLAN_SHORTCUTS_VERIFIED_AND_APP_API_2026_10_10.md`, `docs/specs/PLAN_SHORTCUT_KINKS_2026_10_10.md`, `docs/keybindings.md` (generated).
 
