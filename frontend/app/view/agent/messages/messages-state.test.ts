@@ -14,6 +14,7 @@ vi.mock("@/app/store/block-meta", () => ({
 }));
 
 import type { DocumentNode } from "@/app/agent-model/node-types";
+import { deriveDisplayNodes, isForcedRow, VIEW_PRESETS } from "../virtualization/verbosity";
 import {
     createMessagesPanelControls,
     DEFAULT_MESSAGES_STATE,
@@ -108,6 +109,24 @@ describe("what the conversation leaves to the panel", () => {
         meta.value = { enabled: true };
         expect(withoutPanelJekts(nodes, "b1", () => false).map((n) => n.id)).toEqual(["b", "s"]);
         expect(withoutPanelJekts(nodes, "b1", (n) => n.id === "c").map((n) => n.id)).toEqual(["b", "c", "s"]);
+    });
+
+    it("leaves no run line for the jekts it took, in a view that folds jekts away", () => {
+        meta.value = { enabled: true };
+        const jekt = (id: string) => j(id, { tier: "coord", trust: "host-verified" });
+        const shown = deriveDisplayNodes(
+            withoutPanelJekts([jekt("a"), jekt("c")], "b1", isForcedRow),
+            VIEW_PRESETS.replies,
+            { pinnedNodes: new Set(), heldOpenNodes: new Set() }
+        );
+        expect(shown).toEqual([]);
+        // The same view with the panel off folds them into one run line, as before.
+        meta.value = { enabled: false };
+        const off = deriveDisplayNodes(withoutPanelJekts([jekt("a"), jekt("c")], "b1", isForcedRow), VIEW_PRESETS.replies, {
+            pinnedNodes: new Set(),
+            heldOpenNodes: new Set(),
+        });
+        expect(off.map((n) => n.type)).toEqual(["hidden_run"]);
     });
 
     it("keeps every row while the panel is off for the pane", () => {

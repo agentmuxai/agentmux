@@ -136,9 +136,14 @@ export function useShownDocument(found: PaneFoundation, model: AgentViewModel, a
         setDocumentState: (update) => agentAtoms().documentStateAtom[1](update),
     });
     onCleanup(registerAgentViewControls(model.blockId, viewControls));
-    // The Messages panel holds the incoming jekts: the conversation leaves them out (messages/messages-state.ts).
+    // The Messages panel holds the incoming jekts: the conversation leaves them out (messages/messages-state.ts),
+    // before the view folds rows into runs, so a hidden run never counts or holds a jekt that the panel has.
     const shownDocument = createMemo(() =>
-        withoutPanelJekts(deriveDisplayNodes(markResolvedAuthErrors(displayDocument()), viewControls.resolved().view, agentAtoms().documentStateAtom[0]()), model.blockId, isForcedRow)
+        deriveDisplayNodes(
+            withoutPanelJekts(markResolvedAuthErrors(displayDocument()), model.blockId, isForcedRow),
+            viewControls.resolved().view,
+            agentAtoms().documentStateAtom[0]()
+        )
     );
 
     // Read-only; writes dispatch through the document store so its slot state stays in sync.
