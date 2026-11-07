@@ -1,0 +1,91 @@
+agentPerfStore.snapshot
+-- shifts and misses
+<div>
+  <div style="margin-top:8px;padding-top:8px;border-top:1px solid #333">
+    <div style="font-weight:bold;color:#7af;margin-bottom:4px">
+      "📊 Agent Pane Perf"
+    <div style="margin-bottom:6px">
+      <div style="color:#aaa;font-size:10px">
+        "Layout shifts in agent pane (last"
+        "7"
+        ")"
+      <div style="font-size:10px;color:#bbb;padding-left:8px">
+        "999ms"
+        "ago:"
+        "0.1000"
+      <div style="font-size:10px;color:#bbb;padding-left:8px">
+        "1.0s"
+        "ago:"
+        "0.0200"
+      <div style="font-size:10px;color:#bbb;padding-left:8px">
+        "60.0s"
+        "ago:"
+        "0.0030"
+      <div style="font-size:10px;color:#bbb;padding-left:8px">
+        "1.0min"
+        "ago:"
+        "0.0004"
+      <div style="font-size:10px;color:#bbb;padding-left:8px">
+        "2.5min"
+        "ago:"
+        "1.0000"
+    <div>
+      <div style="color:#aaa;font-size:10px">
+        "Recent estimator misses (last"
+        "6"
+        ")"
+      <div style="font-size:10px;color:#bbb;padding-left:8px">
+        "10ms"
+        "ago:"
+        "text"
+        "— est"
+        "100"
+        "px, actual"
+        "150"
+        "px ("
+        "50%"
+        ")"
+      <div style="font-size:10px;color:#bbb;padding-left:8px">
+        "2.5s"
+        "ago:"
+        "tool-call"
+        "— est"
+        "80"
+        "px, actual"
+        "34"
+        "px ("
+        "58%"
+        ")"
+      <div style="font-size:10px;color:#bbb;padding-left:8px">
+        "1.5min"
+        "ago:"
+        "diff"
+        "— est"
+        "10"
+        "px, actual"
+        "30"
+        "px ("
+        "200%"
+        ")"
+      <div style="font-size:10px;color:#bbb;padding-left:8px">
+        "1.5min"
+        "ago:"
+        "image"
+        "— est"
+        "1"
+        "px, actual"
+        "2"
+        "px ("
+        "100%"
+        ")"
+      <div style="font-size:10px;color:#bbb;padding-left:8px">
+        "1.5min"
+        "ago:"
+        "text"
+        "— est"
+        "2"
+        "px, actual"
+        "3"
+        "px ("
+        "50%"
+        ")"

@@ -678,15 +678,8 @@ async fn route_command(
             state.browser_panes.stop(block_id, state);
             Ok(serde_json::json!(true))
         }
-        "browser_download_cancel" => {
-            // The strip's Cancel. The host holds the callback, so the page
-            // and the strip name only a pane and a download id; an id the
-            // host no longer holds does nothing (spec §5).
-            let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
-            let download_id = args.get("download_id").and_then(|v| v.as_u64()).and_then(|v| u32::try_from(v).ok());
-            if let Some(id) = download_id {
-                crate::client::downloads::cancel_download(block_id, id);
-            }
+        "browser_download_cancel" | "browser_download_start" => {
+            crate::client::downloads::run_command(state, cmd, args);
             Ok(serde_json::json!(true))
         }
         "browser_pane_print" => {

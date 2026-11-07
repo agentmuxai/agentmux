@@ -15,7 +15,7 @@ use crate::backend::audit_activity::{day_files, ActivityRow, DayFile};
 use crate::backend::rpc_types::{AuditEntry, AuditHistoryLink, AuditLinks, AuditPaneLink};
 
 /// The start of the day after `day`, in Unix ms: a file whose day ended before the window started holds nothing of it.
-fn day_end_ms(day: &str) -> u64 {
+pub(super) fn day_end_ms(day: &str) -> u64 {
     chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d")
         .ok()
         .and_then(|d| d.succ_opt())
@@ -24,7 +24,7 @@ fn day_end_ms(day: &str) -> u64 {
 }
 
 /// The Audit's entry for `row`, which is the line starting at byte `at` of the file for `day` in the folder tagged `tag`.
-fn entry_of(tag: char, day: &str, at: u64, row: &ActivityRow, ctx: &Ctx) -> AuditEntry {
+pub(super) fn entry_of(tag: char, day: &str, at: u64, row: &ActivityRow, ctx: &Ctx) -> AuditEntry {
     let slug = (ctx.slug_of_uid)(&row.agent).unwrap_or_else(|| row.agent.clone());
     AuditEntry {
         id: format!("a{tag}{day}:{at:016x}"),

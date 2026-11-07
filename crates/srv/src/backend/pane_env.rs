@@ -553,8 +553,6 @@ mod spawn_site_coverage {
          "sanitized: package-manager install step, sanitize_external_command"),
         ("src/server/system_install_handlers.rs", "program", 1,
          "not a spawn: appears inside this module's header comment describing the argv rule"),
-        ("src/server/vendor_install_handlers.rs", "&plan.program", 1,
-         "sanitized: vendor CLI installer (the downloaded script, or pip), sanitize_external_command"),
         ("src/server/voice.rs", "&cli", 1,
          "sanitized: voice CLI, sanitize_process_command"),
         ("src/test_support.rs", "\"rustc\"", 1,
