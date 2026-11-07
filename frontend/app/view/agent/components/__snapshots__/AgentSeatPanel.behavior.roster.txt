@@ -1,0 +1,115 @@
+Button "Import roster…" click
+SeatRosterImport agents=[{"id":"uid-x","name":"AgentX"},{"id":"uid-c","name":"Camper"},{"id":"uid-o","name":"Opaz"},{"id":"uid-a","name":"AgentA"}]
+-- importing
+<div>
+  <div class="agent-primitive-modal-detail agent-seat-panel" data-testid="agent-seat-panel">
+    <div class="agent-primitive-modal-readonly">
+      <p class="agent-primitive-modal-global-note">
+        "AgentX"
+        "'s seat: its role, whom it reports to and what it owns. Only you set it; agents read it."
+      <div class="agent-seat-panel-form">
+        <div data-stand="Field" data-label="Role" data-layout="stacked">
+          <div data-stand="Select" data-value="leader">
+            <span data-option="" data-disabled="true">
+              "Choose a role…"
+            <span data-option="leader" data-disabled="false">
+              "Leader"
+            <span data-option="worker" data-disabled="false">
+              "Worker"
+            <span data-option="specialist" data-disabled="false">
+              "Specialist"
+            <span data-option="platform_tester" data-disabled="false">
+              "Platform tester"
+            <span data-option="analyst" data-disabled="false">
+              "Analyst"
+            <span data-option="super" data-disabled="false">
+              "Super agent"
+        <div data-stand="Field" data-label="Qualifier" data-layout="stacked" data-hint="Shown after the role, e.g. \"product\".">
+          <input data-stand="TextInput" data-value="product" maxlength="40" placeholder="product">
+        <div data-stand="Field" data-label="Reports to" data-layout="stacked">
+          <div data-stand="Select" data-value="">
+            <span data-option="" data-disabled="false">
+              "The operator"
+            <span data-option="uid-o" data-disabled="false">
+              "Opaz"
+            <span data-option="uid-c" data-disabled="false">
+              "Camper"
+            <span data-option="uid-a" data-disabled="false">
+              "AgentA"
+        <div data-stand="Field" data-label="Area" data-layout="stacked" data-hint="One line: what it owns.">
+          <input data-stand="TextInput" data-value="agent pane" maxlength="120" placeholder="panes, layout, tabs">
+      <div class="agent-primitive-modal-actions">
+        <span data-stand="Button" data-tone="danger" data-busy="false" data-disabled="false">
+          "Clear"
+        <span data-stand="Button" data-tone="accent" data-busy="false" data-disabled="false">
+          "Save"
+      <div class="agent-seat-panel-roster">
+        <div data-stand="SeatRosterImport">
+      <div class="agent-primitive-modal-actions">
+        <span data-stand="Button" data-busy="undefined" data-disabled="undefined">
+          "Close"
+-- done importing
+<div>
+  <div class="agent-primitive-modal-detail agent-seat-panel" data-testid="agent-seat-panel">
+    <div class="agent-primitive-modal-readonly">
+      <p class="agent-primitive-modal-global-note">
+        "AgentX"
+        "'s seat: its role, whom it reports to and what it owns. Only you set it; agents read it."
+      <div class="agent-seat-panel-form">
+        <div data-stand="Field" data-label="Role" data-layout="stacked">
+          <div data-stand="Select" data-value="leader">
+            <span data-option="" data-disabled="true">
+              "Choose a role…"
+            <span data-option="leader" data-disabled="false">
+              "Leader"
+            <span data-option="worker" data-disabled="false">
+              "Worker"
+            <span data-option="specialist" data-disabled="false">
+              "Specialist"
+            <span data-option="platform_tester" data-disabled="false">
+              "Platform tester"
+            <span data-option="analyst" data-disabled="false">
+              "Analyst"
+            <span data-option="super" data-disabled="false">
+              "Super agent"
+        <div data-stand="Field" data-label="Qualifier" data-layout="stacked" data-hint="Shown after the role, e.g. \"product\".">
+          <input data-stand="TextInput" data-value="product" maxlength="40" placeholder="product">
+        <div data-stand="Field" data-label="Reports to" data-layout="stacked">
+          <div data-stand="Select" data-value="">
+            <span data-option="" data-disabled="false">
+              "The operator"
+            <span data-option="uid-o" data-disabled="false">
+              "Opaz"
+            <span data-option="uid-c" data-disabled="false">
+              "Camper"
+            <span data-option="uid-a" data-disabled="false">
+              "AgentA"
+        <div data-stand="Field" data-label="Area" data-layout="stacked" data-hint="One line: what it owns.">
+          <input data-stand="TextInput" data-value="agent pane" maxlength="120" placeholder="panes, layout, tabs">
+      <div class="agent-primitive-modal-actions">
+        <span data-stand="Button" data-tone="danger" data-busy="false" data-disabled="false">
+          "Clear"
+        <span data-stand="Button" data-tone="accent" data-busy="false" data-disabled="false">
+          "Save"
+      <div class="agent-seat-panel-roster">
+        <span data-stand="Button" data-icon="file-import" data-busy="undefined" data-disabled="undefined">
+          "Import roster…"
+      <div class="agent-primitive-modal-actions">
+        <span data-stand="Button" data-busy="undefined" data-disabled="undefined">
+          "Close"
+Button "Close" click
+onClose
+-- the import without a saved agent
+Button "Import roster…" click
+SeatRosterImport agents=[{"id":"uid-other","name":"Other"}]
+-- importing, no saved agent
+<div>
+  <div class="agent-primitive-modal-detail agent-seat-panel" data-testid="agent-seat-panel">
+    <div class="agent-primitive-modal-readonly">
+      <p class="agent-primitive-modal-global-note">
+        "AgentX"
+        "'s seat: its role, whom it reports to and what it owns. Only you set it; agents read it."
+      <p class="agent-primitive-modal-global-note">
+        "This pane has no saved agent, so it has no seat."
+      <div class="agent-seat-panel-roster">
+        <div data-stand="SeatRosterImport">
