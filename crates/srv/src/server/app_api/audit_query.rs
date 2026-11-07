@@ -30,7 +30,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let block_exists = |id: &str| state.mstore.get::<crate::backend::obj::Block>(id).ok().flatten().is_some();
                 let file = crate::backend::reactive::audit_store::shared_path_for_reading();
                 let own = crate::backend::reactive::audit_store::own_path();
+                let channel = std::env::var("AGENTMUX_INSTANCE_CHANNEL").unwrap_or_default();
                 let src = Sources {
+                    channel: &channel,
                     jekt_file: file.as_deref(),
                     own_file: own.as_deref(),
                     activity_dir: file.as_deref().and_then(Path::parent),
