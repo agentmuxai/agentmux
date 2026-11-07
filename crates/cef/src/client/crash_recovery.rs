@@ -440,18 +440,6 @@ impl AgentMuxHandler {
         }
     }
 
-    /// CEF asks the embedder for HTTP Basic / Digest credentials on a
-    /// 401/407. Browser-pane requests get surfaced to the renderer via
-    /// `browser-pane-auth-required` so the user can type credentials;
-    /// non-browser-pane requests (the main host window's frontend
-    /// load) are declined — those shouldn't hit auth-challenged
-    /// resources, and silently failing matches the prior behavior.
-    ///
-    /// Returns 1 (async — we'll resolve the callback via
-    /// `browser_pane_auth_submit` / `browser_pane_auth_cancel`) or 0
-    /// (sync no — CEF aborts the request).
-    ///
-    /// Phase α of SPEC_BROWSER_PANE_HTTP_BASIC_AUTH_2026_05_18.md.
     /// [DIAG] Top-of-`on_auth_credentials` entry log — fires unconditionally before every early-return
     /// so we can confirm whether CEF is invoking the callback at all for a given URL. The reagent-merged
     /// browser-pane auth flow (#906) appeared to fail silently for some sites in dev mode (e.g.
@@ -478,6 +466,18 @@ impl AgentMuxHandler {
         );
     }
 
+    /// CEF asks the embedder for HTTP Basic / Digest credentials on a
+    /// 401/407. Browser-pane requests get surfaced to the renderer via
+    /// `browser-pane-auth-required` so the user can type credentials;
+    /// non-browser-pane requests (the main host window's frontend
+    /// load) are declined — those shouldn't hit auth-challenged
+    /// resources, and silently failing matches the prior behavior.
+    ///
+    /// Returns 1 (async — we'll resolve the callback via
+    /// `browser_pane_auth_submit` / `browser_pane_auth_cancel`) or 0
+    /// (sync no — CEF aborts the request).
+    ///
+    /// Phase α of SPEC_BROWSER_PANE_HTTP_BASIC_AUTH_2026_05_18.md.
     pub(crate) fn on_auth_credentials(
         &mut self,
         browser: Option<&mut Browser>,
