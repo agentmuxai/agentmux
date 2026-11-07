@@ -822,3 +822,7 @@ async fn confirm_authenticated(
         _ => false,
     }
 }
+
+#[cfg(test)]
+#[path = "identity_auth_spawn_tests.rs"]
+mod tests;
