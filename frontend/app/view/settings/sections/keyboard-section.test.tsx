@@ -136,6 +136,18 @@ describe("Unbind", () => {
         expect(h.writes).toEqual([["keybindings", [{ command: "-tab:close", platform: "other" }]]]);
     });
 
+    it("keeps an opened group open, and its line focused, after a member changes", () => {
+        render(() => <KeyboardSection />);
+        fireEvent.click(document.querySelector('[data-group="Go to tab 1–8"] button')!);
+        const member = line("tab:goto:3");
+        fireEvent.click(member.querySelector("button")!);
+        // What saving does: the setting changes and every line is built again from the new view.
+        useEntries(h.writes[0][1] as unknown[]);
+        expect(line("tab:goto:3")).toBe(member);
+        expect(text(member)).toContain("Not set");
+        expect(document.activeElement).toBe(member);
+    });
+
     it("shows a command with no key as Not set", () => {
         useEntries([{ command: "-tab:close", platform: "other" }]);
         render(() => <KeyboardSection />);
@@ -168,6 +180,23 @@ describe("entries that could not be used", () => {
         expect(text(line("tab:new"))).toContain("a chord is at most two keys");
         fireEvent.click(button("Remove entry 0"));
         expect(h.writes).toEqual([["keybindings", [{ command: "-pane:close", platform: "other" }]]]);
+    });
+
+    it("of a closed group show on the group line", () => {
+        useEntries([{ command: "tab:goto:3", key: "a b c" }]);
+        render(() => <KeyboardSection />);
+        expect(line("tab:goto:3")).toBeNull();
+        expect(text(document.querySelector('[data-group="Go to tab 1–8"]')!.parentElement)).toContain("a chord is at most two keys");
+        fireEvent.click(button("Remove entry 0"));
+        expect(h.writes).toEqual([["keybindings", []]]);
+    });
+
+    it("of a developer-only command go under Other entries, where they can be removed", () => {
+        useEntries([{ command: "dev:perfHud", key: "a b c" }]);
+        render(() => <KeyboardSection />);
+        expect(text(screen.getByRole("region", { name: "Other entries" }))).toContain("a chord is at most two keys");
+        fireEvent.click(button("Remove entry 0"));
+        expect(h.writes).toEqual([["keybindings", []]]);
     });
 
     it("go under Other entries when no command in the list is named", () => {

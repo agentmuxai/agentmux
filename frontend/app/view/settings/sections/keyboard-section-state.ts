@@ -78,9 +78,9 @@ export function shortcutBlocks(view: CommandBindings[], filters: ShortcutFilters
 /** How many commands differ from their defaults. */
 export const changedCount = (view: CommandBindings[]): number => view.filter((v) => !v.devOnly && v.changed).length;
 
-/** The skipped entries that name no command the list shows: they go under "Other entries". */
+/** The skipped entries that name no command the list shows (not a developer-only one): they go under "Other entries". */
 export function otherEntries(issues: KeybindingIssue[], view: CommandBindings[]): KeybindingIssue[] {
-    const shown = new Set(view.map((v) => v.command));
+    const shown = new Set(view.filter((v) => !v.devOnly).map((v) => v.command));
     return issues.filter((i) => !shown.has(i.command));
 }
 
