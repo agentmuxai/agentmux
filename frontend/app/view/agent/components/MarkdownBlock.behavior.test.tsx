@@ -37,7 +37,7 @@ vi.mock("@/app/element/ui/Button", () => ({
             data-stand="Button"
             data-variant={p.variant}
             data-class={p.class}
-            aria-expanded={String(p["aria-expanded"])}
+            aria-expanded={p["aria-expanded"] ? "true" : "false"}
             onClick={() => (log("Button onClick"), p.onClick?.())}
         >
             {p.children}
