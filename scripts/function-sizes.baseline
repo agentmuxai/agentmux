@@ -508,8 +508,6 @@
 146 frontend/app/view/warden-jobs/job-template-approval.tsx::TemplateApproval
 180 frontend/app/view/warden-jobs/job-update-diff.tsx::JobUpdateDiff
 137 frontend/app/view/warden-jobs/warden-jobs-manager.tsx::WardenJobsManager
-218 frontend/app/window/logo-menu.tsx::LogoMenu
-157 frontend/app/window/logo-menu.tsx::menuItems
 190 frontend/app/window/more-dropdown.tsx::MoreDropdown
 107 frontend/app/window/pane-media-capture-indicator.tsx::PaneMediaCaptureIndicator
 117 frontend/app/window/titlebar-context-menu.tsx::TitleBarContextMenu

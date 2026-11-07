@@ -39,7 +39,7 @@
   "tab/tab-close-confirm-modal.tsx": {
     "window-scope": 1
   },
-  "window/logo-menu.tsx": {
+  "window/logo-menu-state.ts": {
     "open-modal": 1
   },
   "window/window-close-confirm.tsx": {
