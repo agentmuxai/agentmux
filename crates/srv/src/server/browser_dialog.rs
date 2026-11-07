@@ -246,6 +246,15 @@ fn notice_words(notice: &str, shown: &str) -> (String, &'static str) {
             format!("{shown} has a certificate that isn't trusted"),
             "AgentMux doesn't continue past a certificate warning, and nothing the agent can do clicks through it. Tell the person which site and why you need it",
         ),
+        // `shown` is the host's own words: `<name> (<size>) to <path>`, or why nothing was saved.
+        "download_saved" => (
+            format!("saved {shown}"),
+            "AgentMux saved it into your workspace's downloads folder without a dialog; it was not opened and nothing was made executable",
+        ),
+        "download_refused" => (
+            format!("a download was not saved: {shown}"),
+            "nothing was written to disk; if the file is needed, tell the person",
+        ),
         "auth_expired" => (
             format!("the sign-in prompt for {shown} timed out after 5 minutes without an answer"),
             "The person is asked for a username and password in the app; nothing the agent can do answers it. Load the page again to ask again, or tell the person you need it",
@@ -292,7 +301,13 @@ pub(crate) async fn handle_host_browser_dialog(
     if let Some(notice) = body.get("notice").and_then(|v| v.as_str()) {
         // Something the host refused in the pane (a link to a program, an untrusted certificate): the agent is told.
         let (what, reason) = notice_words(notice, &message);
-        record(&agent, &target, notice, &what, "blocked", reason);
+        let saved = notice == "download_saved";
+        record(&agent, &target, notice, &what, if saved { "saved" } else { "blocked" }, reason);
+        if notice.starts_with("download_") {
+            // A download is also an action in the pane's log, with the person's header.
+            let how = if saved { crate::server::browser_actions::How::Allowed } else { crate::server::browser_actions::How::Refused(message.clone()) };
+            crate::server::browser_actions::note(&banner_at, &agent, crate::server::browser_actions::Kind::Download).detail(&message).how(how).record(&state);
+        }
         return answered("cancel");
     }
     if flag("suppressed") {
@@ -434,6 +449,15 @@ mod tests {
         assert!(take_ended("dlg-test-ended-1"));
         assert!(!take_ended("dlg-test-ended-1"));
         assert!(!take_ended("dlg-test-never"));
+    }
+
+    #[test]
+    fn a_saved_or_refused_download_is_told_to_the_agent_in_the_host_s_words() {
+        let (what, why) = notice_words("download_saved", "report.pdf (13 bytes) to /w/downloads/report.pdf");
+        assert_eq!(what, "saved report.pdf (13 bytes) to /w/downloads/report.pdf");
+        assert!(why.contains("without a dialog") && why.contains("not opened"), "{why}");
+        let (what, why) = notice_words("download_refused", "report.pdf is 900 MB, over the 500 MB limit");
+        assert!(what.contains("not saved") && what.contains("over the 500 MB limit") && why.contains("tell the person"), "{what} / {why}");
     }
 
     #[test]
