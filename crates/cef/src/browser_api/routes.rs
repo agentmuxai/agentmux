@@ -1025,6 +1025,9 @@ pub struct OwnedPanesReq {
     /// The panes handed to the person: their page dialogs stay the browser's own.
     #[serde(default)]
     pub handoff: Vec<String>,
+    /// Each agent-owned pane's workspace: where its downloads may be saved without a dialog.
+    #[serde(default)]
+    pub download_workdirs: std::collections::HashMap<String, String>,
     /// The `browser:identity` values blocks still use: other jars are dropped
     /// (SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09.md §6). Absent from an
     /// older srv: keep every jar.
@@ -1073,6 +1076,7 @@ pub async fn owned_panes(
         owned.extend(req.panes);
     }
     crate::client::jsdialog::set_handoff(req.handoff);
+    crate::client::agent_downloads::set_workdirs(req.download_workdirs);
     crate::client::allowed_origins::replace_lists_confirmed(&state.site_limits, req.allowed, &req.unlimited);
     // A pane whose question is over reports its attempts again.
     state.site_limits.reports.lock().retain(|p| req.asking.contains(p));
