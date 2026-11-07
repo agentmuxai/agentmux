@@ -14,6 +14,7 @@ import {
     appStatus,
     describeSignature,
     fileSize,
+    osNames,
     pillTone,
     referenceDrift,
     type AppFilter,
@@ -62,7 +63,7 @@ export function SkillAppDetail(p: { skillId: string; app: SkillApp }): JSX.Eleme
                 {p.app.vendor} · version {p.app.version}
             </h4>
             <p class="skill-app-line">
-                Published by {p.app.publisher}. Works on {p.app.platforms.join(", ") || "no platform listed"}.
+                Published by {p.app.publisher}. Works on {osNames(p.app.platforms) || "no platform listed"}.
             </p>
             <p class={`skill-app-line${signature().tone === "warn" ? " skill-app-warn" : ""}`}>
                 <i class={`fa-solid ${signature().tone === "warn" ? "fa-triangle-exclamation" : "fa-signature"}`} aria-hidden="true" />{" "}

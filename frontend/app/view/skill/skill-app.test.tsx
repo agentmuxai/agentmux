@@ -126,7 +126,7 @@ describe("App skill status", () => {
         const older = app({ verified: [record({ skillVersion: "0.9.0" })] });
         expect(appStatus(older as never, "windows")).toEqual({ tone: "idle", label: "not tested yet" });
         expect(recordsFor(older as never, "windows")).toEqual([]);
-        expect(appStatus(app({ platforms: ["windows", "macos"] }) as never, "macos")).toEqual({ tone: "idle", label: "tested on windows only" });
+        expect(appStatus(app({ platforms: ["windows", "macos"] }) as never, "macos")).toEqual({ tone: "idle", label: "tested on Windows only" });
     });
 
     it("says how many reference crops were taken on an older app version than the last pass", () => {
@@ -140,8 +140,8 @@ describe("App skill status", () => {
     });
 
     it("a skill for another platform's app says so instead of 'not tested yet'", () => {
-        expect(appStatus(app() as never, "macos")).toEqual({ tone: "idle", label: "for windows only" });
-        expect(appStatus(app({ platforms: [] }) as never, "macos").label).toBe("tested on windows only");
+        expect(appStatus(app() as never, "macos")).toEqual({ tone: "idle", label: "for Windows only" });
+        expect(appStatus(app({ platforms: [] }) as never, "macos").label).toBe("tested on Windows only");
     });
 
     it("the App filter keeps only the skills with a manifest", () => {

@@ -79,10 +79,10 @@ describe("catalog status", () => {
             ],
         });
         expect(catalogStatus(e as never, "windows")).toEqual({ tone: "error", label: "failed on 16.1" });
-        expect(catalogStatus(e as never, "macos")).toEqual({ tone: "idle", label: "tested on windows only" });
+        expect(catalogStatus(e as never, "macos")).toEqual({ tone: "idle", label: "tested on Windows only" });
         expect(catalogStatus(entry() as never, "windows")).toEqual({ tone: "ok", label: "verified 16.0" });
-        expect(catalogStatus(entry({ platforms: ["windows"] }) as never, "linux")).toEqual({ tone: "idle", label: "for windows only" });
-        expect(catalogStatus(entry({ platforms: [] }) as never, "macos").label).toBe("tested on windows only");
+        expect(catalogStatus(entry({ platforms: ["windows"] }) as never, "linux")).toEqual({ tone: "idle", label: "for Windows only" });
+        expect(catalogStatus(entry({ platforms: [] }) as never, "macos").label).toBe("tested on Windows only");
     });
 });
 
@@ -120,6 +120,24 @@ describe("Browse the catalog", () => {
         const wavelab = within(list).getByRole("listitem", { name: "WaveLab" });
         expect(wavelab.textContent).toContain("newer than the catalog's 1.0.0");
         expect(within(wavelab).queryByRole("button")).toBeNull();
+    });
+
+    it("offers no Install for a skill that is for another OS, and says which OS it needs", async () => {
+        rpc.AppSkillsCatalogCommand.mockResolvedValue({
+            items: [
+                item({}, { id: "acme.logic", name: "Logic", platforms: ["macos"] }),
+                item({ state: "update", installed_version: "0.9.0", skill_id: "k9" }, { id: "acme.reaper", name: "Reaper", platforms: ["macos", "linux"] }),
+                item({}, { id: "acme.any", name: "Anything", platforms: [] }),
+            ],
+        });
+        const list = await openBrowse();
+        const logic = within(list).getByRole("listitem", { name: "Logic" });
+        expect(within(logic).queryByRole("button")).toBeNull();
+        expect(logic.textContent).toContain("Needs macOS; this computer runs Windows, so it is not offered here.");
+        const reaper = within(list).getByRole("listitem", { name: "Reaper" });
+        expect(within(reaper).queryByRole("button")).toBeNull();
+        expect(reaper.textContent).toContain("Needs macOS or Linux");
+        expect(within(within(list).getByRole("listitem", { name: "Anything" })).getByRole("button", { name: "Install" })).toBeTruthy();
     });
 
     it("Install sends the id, says the scripts are not approved yet, and opens the skill", async () => {
