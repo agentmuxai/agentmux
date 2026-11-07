@@ -1,0 +1,15 @@
+requestAnimationFrame
+createFollowScroll pin,loadOlder,hasOlderHistory,loadingOlder,transition
+ResizeObserver observe
+machine options: undefined false false undefined
+-- mounted: 30 rows, first "line 0", last "line 29", window translateY(0px), spacer 8000px, scrollTop 0
+scrolled {"scrollTop":1600,"scrollHeight":8000,"clientHeight":160} detach=false
+-- scrolled to 1600: 50 rows, first "line 80", last "line 129", window translateY(1280px), spacer 8000px, scrollTop 1600
+scrolled {"scrollTop":3200,"scrollHeight":8000,"clientHeight":160} detach=true
+-- scrolled to 3200 in a gesture window: 50 rows, first "line 180", last "line 229", window translateY(2880px), spacer 8000px, scrollTop 3200
+scrolled {"scrollTop":3300,"scrollHeight":8000,"clientHeight":160} detach=true
+-- resized to 480: 71 rows, first "line 186", last "line 256", window translateY(2976px), spacer 8000px, scrollTop 3300
+-- resized to nothing keeps the last height: 71 rows, first "line 186", last "line 256", window translateY(2976px), spacer 8000px, scrollTop 3300
+ResizeObserver disconnect
+dispose
+unmounted
