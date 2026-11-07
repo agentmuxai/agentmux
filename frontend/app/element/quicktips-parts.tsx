@@ -110,7 +110,13 @@ export const ShortcutsCard = ({ s }: { s: QuickTipsState }): JSX.Element => {
                                         <span class="text-[15px]">{entry.label}</span>
                                         <div class="flex flex-row flex-wrap items-center gap-1">
                                             <For each={entry.keys}>{(k) => <KeyCap>{k}</KeyCap>}</For>
+                                            <Show when={entry.unbound}>
+                                                <span class="quicktips-unbound text-secondary">Not set</span>
+                                            </Show>
                                         </div>
+                                        <Show when={entry.defaults}>
+                                            <div class="quicktips-default text-[13px] text-secondary">Default: {entry.defaults!.join(", ")}</div>
+                                        </Show>
                                     </div>
                                 )}
                             </For>

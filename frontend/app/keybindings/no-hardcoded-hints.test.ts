@@ -51,3 +51,21 @@ describe("shortcut hints", () => {
         expect(offenders).toEqual([]);
     });
 });
+
+// A key read once at load never follows the person's rebinding (SPEC_KEYBOARD_SHORTCUTS_SETTINGS_2026_11_06.md §6.1).
+// The helpers are reactive, so a call in JSX, a memo or a function that runs when it is needed is fine; a
+// module-level `const x = shortcutFor(...)` is read once, when the file loads.
+describe("shortcut helpers", () => {
+    it("are not called at module top level", () => {
+        const atLoad = /^(?:export\s+)?(?:const|let|var)\s+[^=]*=(?!.*(?:=>|function\b)).*\b(?:shortcutFor|codeMirrorKeys)\(/;
+        const offenders: string[] = [];
+        for (const file of sources(FRONTEND)) {
+            readFileSync(file, "utf8")
+                .split("\n")
+                .forEach((line, i) => {
+                    if (atLoad.test(line)) offenders.push(`${relative(FRONTEND, file)}:${i + 1}: ${line.trim()}`);
+                });
+        }
+        expect(offenders).toEqual([]);
+    });
+});

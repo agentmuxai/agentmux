@@ -6,11 +6,17 @@
 
 import type { KeyCategory } from "./defaults";
 import { formatKey, type KeyPlatform } from "./keys";
-import { effectiveRows } from "./registry";
+import { bindingsView, effectiveRows } from "./registry";
 
 export interface HelpEntry {
     label: string;
     keys: string[];
+    /** The command, or the first of a group's commands: what Settings opens a row for. */
+    command: string;
+    /** The default keys, when the person changed them (a group shows none). */
+    defaults?: string[];
+    /** The person removed every key: Help says "Not set". */
+    unbound?: boolean;
 }
 
 export interface HelpSection {
@@ -51,7 +57,7 @@ export function helpSections(platform: KeyPlatform): HelpSection[] {
         const id = row.helpGroup ?? row.command;
         let e = entries.get(id);
         if (!e) {
-            e = { category: row.category, entry: { label: row.helpGroup ?? row.label, keys: [] }, groupKeys: [] };
+            e = { category: row.category, entry: { label: row.helpGroup ?? row.label, keys: [], command: row.command }, groupKeys: [] };
             entries.set(id, e);
         }
         if (row.helpGroup) {
@@ -59,6 +65,19 @@ export function helpSections(platform: KeyPlatform): HelpSection[] {
         } else {
             const suffix = row.when === "terminalFocus" && row.category !== "Terminal" ? " (in a terminal)" : "";
             for (const k of keys.slice(0, 2)) e.entry.keys.push(formatKey(k, platform) + suffix);
+        }
+    }
+    // What the person changed: the default beside a key they replaced, and a command they left with no key.
+    const defaultsOf = (keys: string[]) => keys.slice(0, 2).map((k) => formatKey(k, platform));
+    for (const v of bindingsView(platform)) {
+        if (v.devOnly) continue;
+        const known = entries.get(v.helpGroup ?? v.command);
+        if (known) {
+            if (!v.helpGroup && v.changed && v.defaults.length > 0) known.entry.defaults = defaultsOf(v.defaults);
+        } else if (v.unbound && v.changed) {
+            const entry: HelpEntry = { label: v.helpGroup ?? v.label, keys: [], command: v.command, unbound: true };
+            if (v.defaults.length > 0 && !v.helpGroup) entry.defaults = defaultsOf(v.defaults);
+            entries.set(v.helpGroup ?? v.command, { category: v.category, entry, groupKeys: [] });
         }
     }
     const sections = new Map<KeyCategory, HelpEntry[]>();
