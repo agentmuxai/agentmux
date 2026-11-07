@@ -789,3 +789,7 @@ impl SubagentWatcher {
         });
     }
 }
+
+#[cfg(test)]
+#[path = "jsonl_change_tests.rs"]
+mod change_tests;
