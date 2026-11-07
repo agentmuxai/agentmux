@@ -11,8 +11,14 @@
 
 .window-grip {
     flex: 0 0 31px;
-    height: 100%;
+    // Centred in the window header (33 px), not in the strip's row: .window-header
+    // keeps a --space-1-5 padding on top and .system-status a hairline below, so a
+    // stretched 100% box would sit that much lower than the header's centre. The
+    // negative margins grow the box to the header's own top and bottom edges.
+    height: auto;
     align-self: stretch;
+    margin-top: calc(-1 * var(--space-1-5));
+    margin-bottom: calc(-1 * var(--snap-chrome));
     @include mixins.flex-center;
     font-size: var(--text-sm);
     color: var(--secondary-text-color);

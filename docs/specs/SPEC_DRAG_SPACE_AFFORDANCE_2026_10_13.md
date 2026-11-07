@@ -110,7 +110,7 @@ A known failure mode: a panel-header drag that moves the whole window instead of
 ### 5.1 Window header: a dim grip in the existing drag square (owner's choice)
 
 - **Where:** inside `.tab-bar-fill`, centred in its first `--tab-bar-drag-gutter` (32 px), right after the last tab's separator (§5.5). The square stays where it is: the existing slot the owner pointed to, inside the scrolling strip, as `SPEC_TAB_BAR_DRAG_GUTTER_2026_10_04.md` built it.
-- **Glyph:** the 4×3 dot grip (§5.6), 12 px, `--secondary-text-color` at opacity 0.35; 0.7 while the square is hovered.
+- **Glyph:** the 4×4 dot grip (§5.6), 16 px tall, `--secondary-text-color` at opacity 0.35; 0.7 while the square is hovered. Centred in the window header (33 px, its top padding and bottom hairline included), so the space above the dots equals the space below.
 - **Takes no events** (`pointer-events: none`): a press on the grip is a press on the fill, so dragging, double-click and right-click work exactly as before. `aria-hidden`.
 - **Default arrow cursor**, as on every native title bar; no tooltip.
 - Unchanged: the 32 px minimum, `TitleBarContextMenu` on right-click, double-click to maximize.
@@ -157,6 +157,8 @@ Owner, 2026-10-13: "there is a missing seperator at the end of the last window t
 ### 5.6 The glyph: 4×3 dots (owner, 2026-10-13)
 
 After trying the 2×3 `grip-vertical` in `task dev`, the owner asked for "3x3", then "a 4x3 but joining 2": two 2×3 grips side by side. Font Awesome Free has neither (`grip` is 3×2, `grip-vertical` 2×3), so [`frontend/app/element/GripDots.tsx`](../../frontend/app/element/GripDots.tsx) draws it: an inline SVG of twelve dots, four columns by three rows on a 4-unit pitch, `currentColor`, 1em tall. Both grips use it. A wide block of dots reads as "grab here" without a single column's row-reorder connotation, and stays clear of the kebab and hamburger shapes (§4.5).
+
+Owner, 2026-11-07: "lets make the window grip taller, can you add 1 more row of dots ... so pane grips are 4x3 and window grips 4x4", and "lets ensure the new grips on windows are vertically centered across the platforms". `GripDots` takes `rows` (3, the default, or 4); the window's grip passes 4, which adds a row on the same 4-unit pitch with the same dots (`viewBox` 16×16, 1.333em tall at the grip's 12 px: 16 px). The panes' grips stay 4×3.
 
 ### 5.7 Edge fades on overflowing tab strips (owner, 2026-10-13)
 
