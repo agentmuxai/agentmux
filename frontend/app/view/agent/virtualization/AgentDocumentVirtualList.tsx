@@ -840,9 +840,18 @@ function layoutIsReady(props: AgentDocumentVirtualListProps, s: ListState): bool
 function createJumpSettler(props: AgentDocumentVirtualListProps, s: ListState): { start: (nodeId: string) => void } {
     let target = "";
     const aimAt = (nodeId: string): number | null => {
-        const row = props.layoutView?.()?.rows[props.viewState.indexOf(nodeId)];
-        if (!row || !s.scrollRef) return null;
-        return Math.max(0, row.start - s.scrollRef.clientHeight / 2 + row.height / 2); // perf:allow-layout-read — a jump the person asked for, at most a few frames
+        if (!s.scrollRef) return null;
+        const idx = props.viewState.indexOf(nodeId);
+        if (idx >= s.partition().splitIndex) {
+            // The streaming tail is drawn outside the virtualiser: its rows sit where the page puts them, after the
+            // virtualised region's height, which changes as rows above are measured.
+            const el = s.scrollRef.querySelector<HTMLElement>(`[data-node-id="${nodeId}"]`);
+            if (!el) return null;
+            return Math.max(0, el.offsetTop - s.scrollRef.clientHeight / 2 + el.clientHeight / 2); // perf:allow-layout-read — a jump the person asked for, at most a few frames
+        }
+        const row = props.layoutView?.()?.rows[idx];
+        if (!row) return null;
+        return Math.max(0, row.start - s.scrollRef.clientHeight / 2 + row.height / 2); // perf:allow-layout-read — same
     };
     s.settleNode = createNodeSettler({
         aim: () => aimAt(target),
@@ -917,8 +926,13 @@ function useScrollCommands(props: AgentDocumentVirtualListProps, s: ListState): 
             if (!el) return;
             const elTop = el.offsetTop; // perf:allow-layout-read — user-initiated scrollToNode
             const center = elTop - s.scrollRef.clientHeight / 2 + el.clientHeight / 2; // perf:allow-layout-read — user-initiated scrollToNode
-            if (offsetPx == null) scrollTranscriptTo(s.scrollRef, Math.max(0, center), "smooth");
-            else scrollTranscriptTo(s.scrollRef, Math.max(0, elTop + offsetPx));
+            const top = s.scrollRef.scrollTop; // perf:allow-layout-read — user-initiated scrollToNode
+            const onScreen = elTop >= top && elTop + el.clientHeight <= top + s.scrollRef.clientHeight; // perf:allow-layout-read — user-initiated scrollToNode
+            if (offsetPx != null) scrollTranscriptTo(s.scrollRef, Math.max(0, elTop + offsetPx));
+            else if (onScreen) scrollTranscriptTo(s.scrollRef, Math.max(0, center), "smooth");
+            // Off screen: the rows above are estimates until drawn, so where the tail sits moves as they are
+            // measured; one aim from now would land short (clamped at the bottom), so it settles instead.
+            else settler.start(nodeId);
         }
     };
 
