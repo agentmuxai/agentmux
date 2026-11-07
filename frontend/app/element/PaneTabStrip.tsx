@@ -253,17 +253,18 @@ export interface PaneTabStripProps<T> {
     docDrag?: DocTabDrag;
 }
 
-export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
-    let stripRef: HTMLDivElement | undefined;
+/** What a strip keeps for itself: its element, the scroll fades and the reveal of its selected tab. */
+function createStripState<T>(props: PaneTabStripProps<T>) {
+    const refs: { strip?: HTMLDivElement } = {};
 
     // Edge fades while the tabs overflow (scroll-edge-fade, PaneTabStrip.scss).
     // The selected tab sitting flush at the left edge drops the left fade, so it is not dimmed.
     const edges = createScrollEdges(
-        () => stripRef,
+        () => refs.strip,
         () => {
             const id = props.activeId;
-            if (id == null || !stripRef) return undefined;
-            for (const el of stripRef.querySelectorAll<HTMLElement>("[data-tab-id]")) if (el.dataset.tabId === id) return el;
+            if (id == null || !refs.strip) return undefined;
+            for (const el of refs.strip.querySelectorAll<HTMLElement>("[data-tab-id]")) if (el.dataset.tabId === id) return el;
             return undefined;
         }
     );
@@ -274,13 +275,13 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
     const windowDisplayed = useWindowTabDisplayed();
     const blockVisibility = props.docDrag ? usePaneTabVisibility(props.docDrag.blockId) : undefined;
     const reveal = createStripReveal({
-        strip: () => stripRef,
+        strip: () => refs.strip,
         activeId: () => props.activeId,
         tabIds: () => props.tabs.map(props.getId),
         shown: () => windowDisplayed() && (blockVisibility?.() ?? "active") === "active",
         overflows: () => edges.moreLeft() || edges.moreRight(),
     });
-    registerStripWithPane(() => stripRef, reveal);
+    registerStripWithPane(() => refs.strip, reveal);
     // A new selection may leave the strip where it was (already flush, or hidden until shown): measure the fade again.
     const shown = () => windowDisplayed() && (blockVisibility?.() ?? "active") === "active";
     createEffect(
@@ -288,19 +289,14 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
             if (shown()) edges.remeasure();
         }, { defer: true })
     );
+    return { refs, edges, reveal };
+}
+type StripState = ReturnType<typeof createStripState>;
 
-    const { foreignHover, flash, incoming, highlightStrip } = useForeignTabDrop(props, () => stripRef);
-
-    useStripWidthAnimation({
-        stripEl: () => stripRef,
-        tabCount: () => props.tabs.length,
-        animateWidth: () => props.animateWidth,
-        reveal,
-    });
-
-    // A document tab in front closed (×, Ctrl+W, a menu, moved away): the
-    // tab that takes its place plays the landing cue, so the change shows even
-    // when the tabs around it read the same. Document strips only.
+// A document tab in front closed (×, Ctrl+W, a menu, moved away): the
+// tab that takes its place plays the landing cue, so the change shows even
+// when the tabs around it read the same. Document strips only.
+function trackLanding<T>(props: PaneTabStripProps<T>): void {
     createEffect(
         on(
             () => [props.activeId, props.tabs.map(props.getId)] as const,
@@ -312,8 +308,84 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
             }
         )
     );
+}
 
-    useStripScrollInput(() => stripRef, reveal);
+function StripTabs<T>(props: { strip: PaneTabStripProps<T> }): JSX.Element {
+    const p = props.strip;
+    return (
+        <For each={p.tabs}>
+            {(tab) => (
+                <PaneTabStripItem
+                    tab={tab}
+                    active={p.activeId === p.getId(tab)}
+                    getId={p.getId}
+                    getLabel={p.getLabel}
+                    getIcon={p.getIcon}
+                    getTooltip={p.getTooltip}
+                    getTooltipDetail={p.getTooltipDetail}
+                    getTooltipSeat={p.getTooltipSeat}
+                    getAttention={p.getAttention}
+                    getTabClass={p.getTabClass}
+                    getColor={p.getColor}
+                    flashOnActivity={p.flashOnActivity}
+                    useProgress={p.useProgress}
+                    collapsed={p.collapsed}
+                    isClosing={p.isClosing}
+                    onContextMenu={p.onTabContextMenu}
+                    onActivate={p.onActivate}
+                    onSelect={p.onSelect}
+                    selection={p.selection}
+                    onClose={p.onClose}
+                    onDoubleClick={p.onTabDoubleClick}
+                    renderLabel={p.renderLabel}
+                    onReorder={p.onReorder}
+                    paneKey={p.paneKey}
+                    sourceTabId={p.sourceTabId}
+                    docDrag={p.docDrag}
+                />
+            )}
+        </For>
+    );
+}
+
+function AddButton<T>(props: { strip: PaneTabStripProps<T> }): JSX.Element {
+    const p = props.strip;
+    return (
+        <Tooltip divClassName="pane-tab-strip-add-tip" content={p.addTitle ?? "New tab"} delayMs={0}>
+            <button
+                type="button"
+                class={`pane-tab-strip-add${p.addLabel ? " pane-tab-strip-add-labeled" : ""}`}
+                aria-label={p.addLabel ?? p.addTitle ?? "New tab"}
+                onClick={(e) => p.onAdd!(e)}
+            >
+                {/* Drawn, not a "+" character: a glyph is centred by its
+                    font's line box, not its ink, so it sat off centre
+                    (PaneTabStrip.scss's .pane-tab-strip-add-glyph). The
+                    button's aria-label names it. */}
+                <span class="pane-tab-strip-add-glyph" aria-hidden="true" />
+                <Show when={p.addLabel}>
+                    <span class="pane-tab-strip-add-label">{p.addLabel}</span>
+                </Show>
+            </button>
+        </Tooltip>
+    );
+}
+
+export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
+    const s: StripState = createStripState(props);
+
+    const { foreignHover, flash, incoming, highlightStrip } = useForeignTabDrop(props, () => s.refs.strip);
+
+    useStripWidthAnimation({
+        stripEl: () => s.refs.strip,
+        tabCount: () => props.tabs.length,
+        animateWidth: () => props.animateWidth,
+        reveal: s.reveal,
+    });
+
+    trackLanding(props);
+
+    useStripScrollInput(() => s.refs.strip, s.reveal);
 
     return (
         <div
@@ -322,11 +394,11 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                 "pane-tab-strip--foreign-hover": foreignHover() && highlightStrip(),
                 "pane-tab-strip--no-blink": foreignHover() && highlightStrip() && flash() === "steady",
                 "pane-tab-strip--no-invert": foreignHover() && highlightStrip() && flash() === "plain",
-                "has-more-left": edges.moreLeft(),
-                "has-more-right": edges.moreRight(),
-                "pane-tab-strip--flush-left": edges.flushLeft(),
+                "has-more-left": s.edges.moreLeft(),
+                "has-more-right": s.edges.moreRight(),
+                "pane-tab-strip--flush-left": s.edges.flushLeft(),
             }}
-            ref={(el) => { stripRef = el; }}
+            ref={(el) => { s.refs.strip = el; }}
             // Double-click inside the strip should never bubble up and
             // maximize the pane — matches the icon-toggle pattern from
             // blockframe.tsx. True for every consumer, not just the editor.
@@ -344,67 +416,18 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                 pane's edge-anchored `right: 0` never needs platform-
                 specific zoom compensation); only this inner layer scales. */}
             <div class="pane-tab-strip-inner">
-                <For each={props.tabs}>
-                    {(tab) => (
-                        <PaneTabStripItem
-                            tab={tab}
-                            active={props.activeId === props.getId(tab)}
-                            getId={props.getId}
-                            getLabel={props.getLabel}
-                            getIcon={props.getIcon}
-                            getTooltip={props.getTooltip}
-                            getTooltipDetail={props.getTooltipDetail}
-                            getTooltipSeat={props.getTooltipSeat}
-                            getAttention={props.getAttention}
-                            getTabClass={props.getTabClass}
-                            getColor={props.getColor}
-                            flashOnActivity={props.flashOnActivity}
-                            useProgress={props.useProgress}
-                            collapsed={props.collapsed}
-                            isClosing={props.isClosing}
-                            onContextMenu={props.onTabContextMenu}
-                            onActivate={props.onActivate}
-                            onSelect={props.onSelect}
-                            selection={props.selection}
-                            onClose={props.onClose}
-                            onDoubleClick={props.onTabDoubleClick}
-                            renderLabel={props.renderLabel}
-                            onReorder={props.onReorder}
-                            paneKey={props.paneKey}
-                            sourceTabId={props.sourceTabId}
-                            docDrag={props.docDrag}
-                        />
-                    )}
-                </For>
+                <StripTabs strip={props} />
                 <Show when={foreignHover() && incoming()}>
                     {/* Where the tab(s) being dragged here land: after the last tab, as the drop appends them. */}
                     <div class="pane-tab pane-tab--incoming" aria-hidden="true">
                         <span class="pane-tab-label">{incoming()}</span>
                     </div>
                 </Show>
+                {/* Tooltip (Portal-based), same reason as the per-tab one: native `title` is slow/inconsistent
+                    in CEF. delayMs={0} — instant, matching the status bar's own tooltip feel (that one's a
+                    separate data-tip/Portal system, but the same "no perceptible delay" intent). */}
                 <Show when={props.onAdd}>
-                    {/* Tooltip (Portal-based), same reason as the per-tab one
-                        above: native `title` is slow/inconsistent in CEF.
-                        delayMs={0} — instant, matching the status bar's own
-                        tooltip feel (that one's a separate data-tip/Portal
-                        system, but the same "no perceptible delay" intent). */}
-                    <Tooltip divClassName="pane-tab-strip-add-tip" content={props.addTitle ?? "New tab"} delayMs={0}>
-                        <button
-                            type="button"
-                            class={`pane-tab-strip-add${props.addLabel ? " pane-tab-strip-add-labeled" : ""}`}
-                            aria-label={props.addLabel ?? props.addTitle ?? "New tab"}
-                            onClick={(e) => props.onAdd!(e)}
-                        >
-                            {/* Drawn, not a "+" character: a glyph is centred by its
-                                font's line box, not its ink, so it sat off centre
-                                (PaneTabStrip.scss's .pane-tab-strip-add-glyph). The
-                                button's aria-label names it. */}
-                            <span class="pane-tab-strip-add-glyph" aria-hidden="true" />
-                            <Show when={props.addLabel}>
-                                <span class="pane-tab-strip-add-label">{props.addLabel}</span>
-                            </Show>
-                        </button>
-                    </Tooltip>
+                    <AddButton strip={props} />
                 </Show>
             </div>
         </div>
