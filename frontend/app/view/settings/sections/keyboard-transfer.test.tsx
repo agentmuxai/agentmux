@@ -81,7 +81,7 @@ describe("Import", () => {
         fireEvent.click(button("Import…"));
         paste('[{"command":"-tab:new","platform":"other"},{"command":"tab:new","key":"ctrl+shift+y","platform":"other"},{"command":"tab:ner","key":"x"}]');
         expect(preview()).toBe("2 entries to import; 1 command with keys of your own that merging replaces; 1 not usable, skipped.");
-        expect(screen.getByText('Entry 2: unknown command "tab:ner"')).toBeTruthy();
+        expect(screen.getByText('Entry 3: unknown command "tab:ner"')).toBeTruthy();
         expect(h.writes).toEqual([]);
     });
 
@@ -114,6 +114,16 @@ describe("Import", () => {
         expect(h.writes).toEqual([]);
         fireEvent.click(button("Click again to replace all"));
         expect(h.writes).toEqual([["keybindings", [{ command: "-tab:close", platform: "other" }]]]);
+    });
+
+    it("clears the note of the last import when a new one opens", () => {
+        render(() => <KeyboardSection />);
+        fireEvent.click(button("Import…"));
+        paste('[{"command":"-tab:close","platform":"other"}]');
+        fireEvent.click(button("Merge"));
+        expect(screen.getByText("Imported 1 entry.")).toBeTruthy();
+        fireEvent.click(button("Import…"));
+        expect(screen.queryByText("Imported 1 entry.")).toBeNull();
     });
 
     it("closes without writing on Cancel", () => {

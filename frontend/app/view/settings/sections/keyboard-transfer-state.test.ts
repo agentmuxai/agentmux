@@ -47,6 +47,21 @@ describe("previewImport", () => {
         expect(p.unusable).toEqual([{ index: 3, message: 'unknown command "tab:ner"' }]);
     });
 
+    it("refuses a key the system takes before the app, as the recorder does, but not an unbind of it", () => {
+        const p = previewImport([], [
+            { command: "tab:close", key: "meta+q", platform: "mac" },
+            { command: "tab:close", key: "alt+F4" },
+            { command: "-tab:close", key: "meta+q", platform: "mac" },
+            { command: "tab:close", key: "ctrl+alt+t", platform: "other" },
+            { command: "tab:close", key: "meta+q", platform: "other" },
+        ]);
+        expect(p.unusable.map((u) => u.index)).toEqual([0, 1, 4]);
+        expect(p.unusable[0].message).toMatch(/^meta\+q cannot be used: AgentMux's own menu takes/);
+        expect(p.unusable[1].message).toMatch(/^alt\+F4 cannot be used: Windows takes Alt\+F4/);
+        // An unbind, and a key only the desktop often takes (the recorder asks "Use it anyway"), are imported.
+        expect(p.usable).toHaveLength(2);
+    });
+
     it("counts the commands whose keys of your own the import replaces", () => {
         // New tab has entries of its own that differ; Next tab has none.
         expect(previewImport(CURRENT, incoming).replaced).toBe(1);

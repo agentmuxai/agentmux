@@ -5,7 +5,9 @@
 // the format is the `keybindings` array as it is in settings.json, so there is no second file to keep. These are plain
 // functions: what an import would change, and the setting once it is merged or replaces the old one.
 
+import type { KeyPlatform } from "@/app/keybindings/keys";
 import { entryIssue } from "@/app/keybindings/registry";
+import { reservedFor } from "@/app/keybindings/reserved";
 
 /** What a pasted text holds: the entries, or why it cannot be read. */
 export type Parsed = { entries: unknown[] } | { error: string };
@@ -46,12 +48,26 @@ function groupOf(entry: unknown): string {
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
+/** Why a usable entry must still not be imported: its key is one the system takes before the app (the recorder refuses
+ *  it too). An entry with no `platform` counts on both; an unbind is harmless. Keys the desktop only often takes are
+ *  allowed, as the recorder allows them once confirmed. */
+function blockedReason(entry: unknown): string | null {
+    const { command, key, platform } = entry as { command: string; key?: string; platform?: string };
+    if (command.startsWith("-") || !key) return null;
+    for (const p of platform ? [platform] : ["mac", "other"]) {
+        const r = reservedFor(key, p as KeyPlatform);
+        if (r?.tier === "blocked") return `${key} cannot be used: ${r.reason}`;
+    }
+    return null;
+}
+
 /** What importing `incoming` into `current` would do. */
 export function previewImport(current: unknown[], incoming: unknown[]): ImportPreview {
     const usable: unknown[] = [];
     const unusable: ImportPreview["unusable"] = [];
     incoming.forEach((e, index) => {
-        const message = entryIssue(e);
+        // The reserved-key check only reads an entry the registry accepts.
+        const message = entryIssue(e) ?? blockedReason(e);
         if (message == null) usable.push(e);
         else unusable.push({ index, message });
     });

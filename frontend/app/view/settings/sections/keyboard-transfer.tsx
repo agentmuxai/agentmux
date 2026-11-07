@@ -43,7 +43,7 @@ function ImportPanel(p: { edit: KeyboardEdit; onDone: (note: string) => void; on
             </p>
             <Show when={preview() && preview()!.unusable.length > 0}>
                 <ul class="kb-import-unusable" role="list">
-                    <For each={preview()!.unusable.slice(0, 5)}>{(u) => <li>Entry {u.index}: {u.message}</li>}</For>
+                    <For each={preview()!.unusable.slice(0, 5)}>{(u) => <li>Entry {u.index + 1}: {u.message}</li>}</For>
                 </ul>
             </Show>
             <div class="kb-import-actions">
@@ -79,7 +79,13 @@ export function KeyboardTransfer(p: { edit: KeyboardEdit }): JSX.Element {
     return (
         <>
             <Button onClick={exportNow}>Export</Button>
-            <Button aria-expanded={open()} onClick={() => setOpen(!open())}>
+            <Button
+                aria-expanded={open()}
+                onClick={() => {
+                    setNote("");
+                    setOpen(!open());
+                }}
+            >
                 Import…
             </Button>
             <span class="kb-transfer-note" role="status" aria-live="polite">
