@@ -160,6 +160,8 @@ pub(crate) async fn handle_ui_browser_take_control(
     if let Err(e) = crate::server::http_shell::broadcast_meta_update(&state, pane, &meta) {
         return err_response(StatusCode::INTERNAL_SERVER_ERROR, format!("couldn't show you as the pane's driver: {e}"));
     }
+    // Its old chain (the previous driver's popups share its list) keeps the old list; the pane starts one of its own.
+    crate::server::browser_allowlist::leave_chain(pane);
     crate::server::browser_allowlist::limit_new_pane(&state, pane, Some(limit.clone())).await;
     browser_owner::record(pane, agent);
     let browsing_as = crate::server::browser_identity::browsing_as(&block.meta);
