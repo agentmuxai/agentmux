@@ -168,8 +168,15 @@ describe("AgentCountsStatus", () => {
             setRows([agent("a", "idle")]);
             expect(screen.queryByRole("dialog")).toBeNull();
             expect(screen.queryByText(/waiting on you/)).toBeNull();
+            // The next request does not open the list unasked.
+            setItems([item("b2")]);
+            expect(screen.queryByRole("dialog")).toBeNull();
+            expect(screen.getByRole("button", { name: /waiting on you/ }).getAttribute("aria-expanded")).toBe("false");
+            setItems([]);
             setRows([]);
             expect(screen.queryByRole("button")).toBeNull();
+            setItems([item("b3")]);
+            expect(screen.queryByRole("dialog")).toBeNull();
         });
     });
 });

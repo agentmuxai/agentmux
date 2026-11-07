@@ -6,7 +6,7 @@ import { runtimeCounts, type AgentRuntimeCounts } from "@/app/store/agent-runtim
 import { sharedAgentRuntime } from "@/app/store/agent-runtime-live";
 import { openOrFocusPaneByView } from "@/app/store/block-component-registry";
 import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
-import { createMemo, createSignal, onCleanup, Show, type Accessor, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, Show, type Accessor, type JSX } from "solid-js";
 import { AttentionListPopover } from "./AttentionListPopover";
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
@@ -37,6 +37,10 @@ export function AgentCountsStatus(props: {
         return { running: c.running, waiting: Math.max(c.waiting, items().length) };
     });
     const [open, setOpen] = createSignal(false);
+    // The list is for what waits: with nothing left it is closed for good, so the next request does not open it unasked.
+    createEffect(() => {
+        if (counts().waiting === 0) setOpen(false);
+    });
     let ref: HTMLDivElement | undefined;
     // A narrow bar can hide the entry while its list is open; the list has no anchor then and would jump to a corner.
     const watchAnchor = (el: HTMLDivElement) => {
