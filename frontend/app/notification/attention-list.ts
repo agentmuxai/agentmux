@@ -8,6 +8,8 @@
  * feed names it; the registry's words win.
  */
 
+import { paneRoleColor } from "@/app/block/pane-color-scheme";
+import { isLightThemeActive } from "@/app/block/pane-identity";
 import { sharedAgentRuntime } from "@/app/store/agent-runtime-live";
 import { MOS, workspace } from "@/app/store/global";
 import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
@@ -18,6 +20,8 @@ export interface AttentionItem {
     blockId: string;
     /** The agent's name, or "An agent" when srv has no row for the pane. */
     name: string;
+    /** The agent's id, when srv has a row for the pane: what "Open" needs for an agent that has no pane. */
+    agentId?: string;
     /** The agent's pane colour, from the shared palette, once it has had one. */
     color?: string;
     /** What it wants, in a few words, led by a verb. */
@@ -27,6 +31,9 @@ export interface AttentionItem {
     /** False only when the pane is known to be in another window; a pane this window cannot place counts as here. */
     local: boolean;
 }
+
+/** An agent colour as readable text on the toast and the list in the current theme (the palette identity colour). */
+export const attentionTint = (hex?: string) => paneRoleColor(undefined, hex, isLightThemeActive(), "identity");
 
 /** What an agent that srv says waits on the user, with no words of its own, wants. */
 const REMOTE_WHAT = "is waiting for you";
@@ -45,6 +52,7 @@ export function mergeAttention(
         return {
             blockId: p.blockId,
             name: row?.name || "An agent",
+            agentId: row?.agent_id,
             color: row?.color,
             what: p.what,
             since: p.since,
@@ -57,6 +65,7 @@ export function mergeAttention(
         items.push({
             blockId: r.block_id,
             name: r.name || "An agent",
+            agentId: r.agent_id,
             color: r.color,
             what: REMOTE_WHAT,
             since: seen(r.block_id),
