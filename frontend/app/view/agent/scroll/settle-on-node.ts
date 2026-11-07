@@ -15,8 +15,12 @@
  * through `scrollTranscriptTo`, the one scroll writer.
  */
 
-/** Longest a jump keeps re-aiming. A slow machine measures the rows it has drawn a few frames late. */
-export const SETTLE_NODE_MAX_MS = 1000;
+/**
+ * Longest a jump keeps re-aiming. It ends sooner, as soon as the aim has held while the layout is ready; this is
+ * only the stop for a layout that never gets there. Rows drawn for the first time (markdown, code) take hundreds of
+ * ms each on a cold pane, and a long jump goes through several such windows: a limit near a second ended jumps short.
+ */
+export const SETTLE_NODE_MAX_MS = 5000;
 /** Frames in a row with the aim unchanged before the jump is taken as landed. */
 export const SETTLE_NODE_QUIET_FRAMES = 3;
 /** An aim that differs by less than this many px is the same aim. */
