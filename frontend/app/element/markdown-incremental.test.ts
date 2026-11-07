@@ -281,8 +281,12 @@ describe("settleOpenLink", () => {
         expect(settleOpenLink("Here: ![the toolbar](C:/shots/toolbar-af")).toBe("Here: ");
         expect(settleOpenLink("Here: ![the toolbar")).toBe("Here: ");
         expect(settleOpenLink("Here: ![the toolbar]")).toBe("Here: ");
-        expect(settleOpenLink("Here: ![the toolbar")).toBe("Here: ");
-        expect(settleOpenLink("Here: ![the toolbar]")).toBe("Here: ");
+        expect(settleOpenLink("Here: ![the toolbar](")).toBe("Here: ");
+    });
+
+    it("holds back only the image still being typed, after a finished one", () => {
+        expect(settleOpenLink("![a](x) then ![b](y")).toBe("![a](x) then ");
+        expect(settleOpenLink("![a](x) then [b](y")).toBe("![a](x) then [b](#)");
     });
 
     it.each([
