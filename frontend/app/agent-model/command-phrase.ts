@@ -128,11 +128,56 @@ function segments(command: string): string[] {
     return out;
 }
 
-/** Words of one segment, quotes removed. */
+/** Words of one segment, quotes removed; `NAME="a b"` stays one word. */
 function words(segment: string): string[] {
     const out: string[] = [];
-    const re = /"([^"]*)"|'([^']*)'|(\S+)/g;
-    for (let m = re.exec(segment); m; m = re.exec(segment)) out.push(m[1] ?? m[2] ?? m[3]);
+    const re = /([A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'))|"([^"]*)"|'([^']*)'|(\S+)/g;
+    for (let m = re.exec(segment); m; m = re.exec(segment)) out.push(m[1] ?? m[2] ?? m[3] ?? m[4]);
+    return out;
+}
+
+/** Flags that take a value as the next word: that value is not a subcommand, a program or a user. */
+const VALUE_FLAGS = new Set([
+    "-C",
+    "-n",
+    "-u",
+    "-g",
+    "-p",
+    "-f",
+    "-c",
+    "-o",
+    "-w",
+    "-R",
+    "-m",
+    "-H",
+    "-e",
+    "--prefix",
+    "--namespace",
+    "--user",
+    "--manifest-path",
+    "--workspace",
+    "--project",
+    "--profile",
+    "--region",
+    "--context",
+    "--cwd",
+    "--cd",
+    "--dir",
+    "--directory",
+    "--repo",
+    "--reason",
+    "--package",
+    "--filter",
+]);
+
+/** The words that are not flags, with the value of each value-taking flag left out too. */
+function plainWords(ws: string[]): string[] {
+    const out: string[] = [];
+    for (let i = 0; i < ws.length; i++) {
+        if (ws[i].startsWith("-")) {
+            if (VALUE_FLAGS.has(ws[i])) i++;
+        } else out.push(ws[i]);
+    }
     return out;
 }
 
@@ -162,7 +207,7 @@ function folderName(dir: string): string | null {
 /** A wrapper's own flags (`sudo -E`) are not the program. */
 function skipFlags(ws: string[]): string[] {
     let w = ws;
-    while (w[0]?.startsWith("-")) w = w.slice(1);
+    while (w[0]?.startsWith("-")) w = VALUE_FLAGS.has(w[0]) ? w.slice(2) : w.slice(1);
     return w;
 }
 
@@ -187,6 +232,19 @@ function unwrap(ws: string[]): string[] {
     }
 }
 
+/** The script an interpreter runs, or undefined when it runs inline code or standard input. */
+function interpreterScript(args: string[]): string | undefined {
+    for (let i = 0; i < args.length; i++) {
+        const a = args[i];
+        if (["-e", "--eval", "-p", "--print", "-c", "-x"].includes(a)) return undefined;
+        if (a === "-m") return args[i + 1];
+        if (a === "-" || a.startsWith("<")) return undefined;
+        if (a.startsWith("-")) continue;
+        return a;
+    }
+    return undefined;
+}
+
 function phraseSegment(ws: string[], dir: string | null, depth: number): string {
     const w = unwrap(ws);
     const first = w[0];
@@ -194,7 +252,7 @@ function phraseSegment(ws: string[], dir: string | null, depth: number): string 
     const program = programOf(first);
     const where = dir ? ` in ${dir}` : "";
     const args = w.slice(1);
-    const plain = args.filter((a) => !a.startsWith("-"));
+    const plain = plainWords(args);
 
     // A shell given a command string: the string is what runs.
     const dashC = args.findIndex((a) => /^-(c|lc|command)$/i.test(a));
@@ -213,7 +271,8 @@ function phraseSegment(ws: string[], dir: string | null, depth: number): string 
         if (inner) return inner;
     }
     if (INTERPRETERS.has(program)) {
-        const script = plain[0];
+        // Inline code (-e, -c, -p), standard input (`-`, a heredoc) and `-m module` name no script file.
+        const script = interpreterScript(args);
         return script
             ? `Run ${baseName(script).replace(/\.(mjs|cjs|js|ts|py|sh|ps1)$/i, "")}${where}`
             : `Run ${program}${where}`;
@@ -235,12 +294,44 @@ function phraseSegment(ws: string[], dir: string | null, depth: number): string 
     return `Run ${/^[\w.+-]+$/.test(program) ? program : "a program"}${where}`;
 }
 
+/** Shell keywords that open a construct: the segment names no program. */
+const SHELL_OPENERS = new Set([
+    "if",
+    "elif",
+    "while",
+    "until",
+    "for",
+    "select",
+    "case",
+    "function",
+    "fi",
+    "done",
+    "esac",
+    "}",
+    ")",
+]);
+/** Keywords that only lead the command after them: `then echo hi`, `do make`. */
+const SHELL_LEADERS = new Set(["then", "else", "do", "{", "!", "(", "time"]);
+
+/** A segment's words without the shell syntax around the command: `(`, `)`, `!`, redirections, `then`/`do`. */
+function commandWords(seg: string): string[] {
+    let ws = words(seg.replace(/^\(+\s*/, "").replace(/\s*\)+$/, ""));
+    for (;;) {
+        const first = ws[0];
+        if (first === undefined) return ws;
+        if (SHELL_LEADERS.has(first)) ws = ws.slice(1);
+        else if (/^(\d*|&)>>?$/.test(first) || /^\d*<$/.test(first)) ws = ws.slice(2);
+        else if (/^(\d*|&)>>?[^\s]/.test(first) || /^\d*<[^<\s]/.test(first)) ws = ws.slice(1);
+        else return ws;
+    }
+}
+
 function phraseCommandAt(command: string, depth: number, outerDir: string | null): string {
     let dir = outerDir;
     for (const seg of segments(command)) {
-        const ws = words(seg);
+        const ws = commandWords(seg);
         const first = ws[0];
-        if (first === undefined) continue;
+        if (first === undefined || SHELL_OPENERS.has(first)) continue;
         const name = programOf(first);
         if (name === "cd" || name === "pushd" || name === "set-location" || name === "sl") {
             const target = ws.slice(1).find((a) => !/^\/[a-z]$/i.test(a) && !a.startsWith("-"));

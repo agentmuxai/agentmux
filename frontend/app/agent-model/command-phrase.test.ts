@@ -63,6 +63,34 @@ describe("phraseCommand", () => {
         expect(phraseCommand(`npm run ${"x".repeat(200)}`).length).toBeLessThanOrEqual(80);
     });
 
+    it("names no script for an interpreter given inline code, a heredoc or standard input", () => {
+        expect(phraseCommand("python - <<'PY'\nprint(1)\nPY")).toBe("Run python");
+        expect(phraseCommand('node -e "console.log(1)"')).toBe("Run node");
+        expect(phraseCommand("python3 -c 'import os'")).toBe("Run python3");
+        expect(phraseCommand("python -m pytest -x")).toBe("Run pytest");
+    });
+
+    it("reads an assignment with a quoted value as one word", () => {
+        expect(phraseCommand('FOO="a b" cargo test')).toBe("Run cargo test");
+        expect(phraseCommand("FOO='x y' BAR=\"1 2\" git status")).toBe("Run git status");
+    });
+
+    it("looks past shell syntax: keywords, subshells, negation and redirections", () => {
+        expect(phraseCommand("if [ -f x ]; then echo hi; fi")).toBe("Print text");
+        expect(phraseCommand("for f in *.ts; do echo $f; done")).toBe("Print text");
+        expect(phraseCommand("2>&1 cargo test")).toBe("Run cargo test");
+        expect(phraseCommand("> out.txt echo hi")).toBe("Print text");
+        expect(phraseCommand("! git diff --quiet")).toBe("Run git diff");
+        expect(phraseCommand("(cd foo && make)")).toBe("Run make in foo");
+    });
+
+    it("never takes the value of a flag for the subcommand, the program or the folder", () => {
+        expect(phraseCommand("kubectl -n prod get pods")).toBe("Run kubectl get");
+        expect(phraseCommand("make -C sub test")).toBe("Run make test");
+        expect(phraseCommand("npm --prefix foo run build")).toBe("Build with npm");
+        expect(phraseCommand("sudo -u bob ls")).toBe("List files");
+    });
+
     it("falls back to a plain phrase when nothing can be named", () => {
         expect(phraseCommand("")).toBe("Run a shell command");
         expect(phraseCommand(undefined)).toBe("Run a shell command");
