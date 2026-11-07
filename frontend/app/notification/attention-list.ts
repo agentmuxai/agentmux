@@ -29,7 +29,7 @@ export interface AttentionItem {
 }
 
 /** What an agent that srv says waits on the user, with no words of its own, wants. */
-const REMOTE_WHAT = "needs you";
+const REMOTE_WHAT = "is waiting for you";
 
 /** The items, oldest first, from this window's registry `panes` and srv's `rows`. A pure join, for tests. */
 export function mergeAttention(

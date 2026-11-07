@@ -12,6 +12,8 @@
  * X does not answer anything and does not bring it back; a request that comes after does.
  */
 
+import { paneRoleColor } from "@/app/block/pane-color-scheme";
+import { isLightThemeActive } from "@/app/block/pane-identity";
 import { pushNotification, removeNotificationById } from "@/app/store/flash-notifications";
 import { focusManager } from "@/app/store/focusManager";
 import { getSettingsKeyAtom } from "@/app/store/global";
@@ -26,6 +28,8 @@ export const ATTENTION_TOAST_ID = "attention:waiting";
 export const TOAST_MAX_LINKS = 5;
 /** What was already waiting this soon after the window opened is not new: srv's rows arrive a moment late. */
 export const START_GRACE_MS = 4000;
+/** A request that leaves the list and returns within this long is not new. */
+export const RETURN_MS = 5000;
 
 export interface AttentionToastDeps {
     items: () => AttentionItem[];
@@ -40,6 +44,8 @@ export interface AttentionToastDeps {
     /** Registers what a toast button runs. */
     setAction: (key: string, fn: () => void) => void;
     reveal: (blockId: string) => void;
+    /** An agent's colour as readable text on the toast in the current theme; absent, the colour as given. */
+    tint?: (hex?: string) => string | undefined;
     now: () => number;
     graceMs?: number;
 }
@@ -50,7 +56,8 @@ const goKey = (blockId: string) => `attention:go:${blockId}`;
 export function buildToast(
     items: AttentionItem[],
     reveal: (blockId: string) => void,
-    setAction: AttentionToastDeps["setAction"]
+    setAction: AttentionToastDeps["setAction"],
+    tint: (hex?: string) => string | undefined = (hex) => hex
 ): NotificationType {
     const shown = items.slice(0, TOAST_MAX_LINKS);
     for (const i of shown) setAction(goKey(i.blockId), () => reveal(i.blockId));
@@ -63,7 +70,7 @@ export function buildToast(
             type: "warning",
             persistent: true,
             title: i.name,
-            titleColor: i.color,
+            titleColor: tint(i.color),
             message: `${i.what}${where(i)}`,
             timestamp: "",
             live: "status",
@@ -89,43 +96,41 @@ export function buildToast(
 /** The toast's controller: call `update()` whenever the list, the setting or the window's focus changes. */
 export function createAttentionToast(deps: AttentionToastDeps): { update: () => void } {
     const startedAt = deps.now();
-    let known = new Set<string>();
+    // When each request was last in the list this toast considers. One that leaves and comes back within
+    // `RETURN_MS` (srv's rows flicker while another window reveals a pane) is the same request, not a new one.
+    const known = new Map<string, number>();
     // Closed with its X: those requests do not bring it back.
     let dismissed = new Set<string>();
     let shown = false;
+    const hide = () => {
+        if (shown) deps.remove(ATTENTION_TOAST_ID);
+        shown = false;
+    };
     return {
         update() {
+            const now = deps.now();
             const all = deps.items();
-            const ids = new Set(all.map((i) => i.blockId));
-            const fresh = [...ids].filter((id) => !known.has(id) && !dismissed.has(id));
-            const inGrace = deps.now() - startedAt < (deps.graceMs ?? START_GRACE_MS);
-            known = ids;
-            dismissed = new Set([...dismissed].filter((id) => ids.has(id)));
+            dismissed = new Set([...dismissed].filter((id) => all.some((i) => i.blockId === id)));
+            // The pane the person is looking at in the front window shows its own request: it is not considered, so
+            // it is new when they look away.
             const focused = deps.inFront() ? deps.focusedBlock() : null;
-            // The pane the person is looking at in the front window shows its own request.
-            const items = all.filter((i) => !dismissed.has(i.blockId) && i.blockId !== focused);
-            if (items.length === 0) {
-                if (shown) deps.remove(ATTENTION_TOAST_ID);
-                shown = false;
-                return;
-            }
-            if (!deps.enabled()) {
-                // Turned off while it shows: it goes.
-                if (shown) deps.remove(ATTENTION_TOAST_ID);
-                shown = false;
-                return;
-            }
-            const isNew = fresh.length > 0 && !inGrace;
+            const items = all.filter((i) => i.blockId !== focused && !dismissed.has(i.blockId));
+            const fresh = items.filter((i) => !known.has(i.blockId));
+            for (const i of items) known.set(i.blockId, now);
+            for (const [id, last] of known)
+                if (!items.some((i) => i.blockId === id) && now - last > RETURN_MS) known.delete(id);
+            if (items.length === 0 || !deps.enabled()) return hide();
+            const isNew = fresh.length > 0 && now - startedAt >= (deps.graceMs ?? START_GRACE_MS);
             // A window that is not in front starts none (the OS notification is the signal) but leaves the one it has:
             // the request it names still waits.
             if (!(isNew && deps.inFront()) && !shown) return;
-            const toast = buildToast(items, deps.reveal, deps.setAction);
+            const toast = buildToast(items, deps.reveal, deps.setAction, deps.tint);
             toast.onClose = () => {
                 shown = false;
                 for (const i of items) dismissed.add(i.blockId);
             };
             shown = true;
-            deps.push({ ...toast, timestamp: new Date(deps.now()).toISOString() });
+            deps.push({ ...toast, timestamp: new Date(now).toISOString() });
         },
     };
 }
@@ -148,6 +153,7 @@ export function installAttentionToast(): void {
             remove: removeNotificationById,
             setAction: setNotificationAction,
             reveal: (blockId) => void revealBlock(blockId, { source: "attention" }),
+            tint: (hex) => paneRoleColor(undefined, hex, isLightThemeActive(), "identity"),
             now: Date.now,
         });
         createEffect(() => toast.update());

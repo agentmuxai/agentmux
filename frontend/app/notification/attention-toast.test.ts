@@ -6,6 +6,7 @@ import {
     ATTENTION_TOAST_ID,
     buildToast,
     createAttentionToast,
+    RETURN_MS,
     START_GRACE_MS,
     TOAST_MAX_LINKS,
 } from "./attention-toast";
@@ -15,6 +16,8 @@ vi.mock("@/app/store/focusManager", () => ({ focusManager: { blockFocusAtom: () 
 vi.mock("@/app/store/flash-notifications", () => ({ pushNotification: () => {}, removeNotificationById: () => {} }));
 vi.mock("@/app/util/reveal-block", () => ({ revealBlock: () => {} }));
 vi.mock("@/app/window/window-focus", () => ({ makeWindowFocusSignal: () => () => true }));
+vi.mock("@/app/block/pane-color-scheme", () => ({ paneRoleColor: () => undefined }));
+vi.mock("@/app/block/pane-identity", () => ({ isLightThemeActive: () => false }));
 vi.mock("./usenotification", () => ({ setNotificationAction: () => {} }));
 vi.mock("./attention-list", () => ({ attentionItems: () => [] }));
 
@@ -180,5 +183,41 @@ describe("the attention toast", () => {
         expect(h.pushed).toEqual([]);
         h.set([item("b1"), item("b2")]);
         expect(h.last()).toMatchObject({ title: "Agent-b2" });
+    });
+
+    it("shows a request that came while the person was on its pane once they look away", () => {
+        const h = harness({ focused: "b1" });
+        h.wait(START_GRACE_MS);
+        h.set([item("b1")]);
+        expect(h.pushed).toEqual([]);
+        h.state.focused = "other";
+        h.set([item("b1")]);
+        expect(h.last()).toMatchObject({ title: "Agent-b1" });
+    });
+
+    it("does not count a request that leaves the list and returns at once as new", () => {
+        const h = harness();
+        h.wait(START_GRACE_MS);
+        h.set([item("b1")]);
+        h.last().onClose!();
+        h.set([]);
+        h.wait(RETURN_MS - 1);
+        h.set([item("b1")]);
+        expect(h.pushed).toHaveLength(1);
+        h.set([]);
+        h.wait(RETURN_MS + 1);
+        h.set([]);
+        h.set([item("b1")]);
+        expect(h.pushed).toHaveLength(2);
+    });
+
+    it("draws the agent's name in the colour the theme can read", () => {
+        const toast = buildToast(
+            [item("b1", { color: "#3b82f6" })],
+            () => {},
+            () => {},
+            (hex) => `tint(${hex})`
+        );
+        expect(toast.titleColor).toBe("tint(#3b82f6)");
     });
 });

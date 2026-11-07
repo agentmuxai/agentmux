@@ -48,7 +48,7 @@ describe("mergeAttention", () => {
             ["b1", true],
             ["b2", false],
         ]);
-        expect(items[1]).toMatchObject({ name: "Clare", what: "needs you", since: 500 });
+        expect(items[1]).toMatchObject({ name: "Clare", what: "is waiting for you", since: 500 });
     });
 
     it("says a pane is in another window only when this window knows it is not here", () => {

@@ -35,7 +35,7 @@ export function PaneRequestDock(props: { blockId: string }): JSX.Element {
     const rest = createMemo(() => cards().filter((r) => r !== shown()));
     return (
         <Show when={shown()}>
-            <div class="pane-request-dock" data-testid="pane-request-dock" data-operator-only="" role="region" aria-label="Waiting for you">
+            <div class="pane-request-dock" data-testid="pane-request-dock" data-toast-avoid data-operator-only="" role="region" aria-label="Waiting for you">
                 <Show when={shown()} keyed>
                     {(r) => <Drawn request={r} />}
                 </Show>
