@@ -46,14 +46,24 @@ export const RANGES: { value: AuditRange; label: string; ms: number }[] = [
  */
 const RANGE_STEP_MS = 60_000;
 
+/** Where the entries come from: this channel's, or every channel on this computer's. */
+export type AuditScope = "channel" | "machine";
+
+export const SCOPES: { value: AuditScope; label: string }[] = [
+    { value: "channel", label: "This channel" },
+    { value: "machine", label: "This machine" },
+];
+
 export interface AuditFilter {
     agent: string;
     kinds: ReadonlySet<string>;
     range: AuditRange;
     text: string;
+    scope: AuditScope;
 }
 
-export const emptyFilter = (agent = ""): AuditFilter => ({ agent, kinds: new Set(DEFAULT_KINDS), range: "all", text: "" });
+/** What the Audit shows until the filter is changed: this channel's entries, everything but the bulk. */
+export const emptyFilter = (agent = ""): AuditFilter => ({ agent, kinds: new Set(DEFAULT_KINDS), range: "all", text: "", scope: "channel" });
 
 /** The kinds as the query takes them: left out when they are the defaults, which are srv's too. */
 export function requestKinds(kinds: ReadonlySet<string>): string[] | undefined {
@@ -70,10 +80,40 @@ export function buildRequest(filter: AuditFilter, now: number, cursor?: string, 
         ...(requestKinds(filter.kinds) ? { kinds: requestKinds(filter.kinds) } : {}),
         ...(agent ? { agent_id: agent } : {}),
         ...(text ? { text } : {}),
+        scope: filter.scope,
         ...(span ? { since_ms: Math.floor((now - span) / RANGE_STEP_MS) * RANGE_STEP_MS } : {}),
         ...(cursor ? { cursor } : {}),
         ...(totals ? { totals: true } : {}),
     };
+}
+
+/** The entries that came from one channel, in the order of the list. */
+export interface AuditSection {
+    key: string;
+    /** "host · channel · version", as far as the entries say. */
+    label: string;
+    entries: AuditEntry[];
+}
+
+/**
+ * The list cut into one section per channel that wrote its entries, in the order each first appears (the newest
+ * first). An entry that names no channel is `own`'s (the channel that answered). Within a section the order is the
+ * list's, so paging in older entries adds to the sections, not to a new list.
+ */
+export function sectionsOf(entries: readonly AuditEntry[], own: string | undefined): AuditSection[] {
+    const sections = new Map<string, AuditSection>();
+    for (const entry of entries) {
+        const channel = entry.provenance?.channel ?? own ?? "";
+        let section = sections.get(channel);
+        if (!section) sections.set(channel, (section = { key: channel, label: "", entries: [] }));
+        section.entries.push(entry);
+    }
+    return [...sections.values()].map((s) => ({ ...s, label: sectionLabel(s) }));
+}
+
+function sectionLabel(section: AuditSection): string {
+    const named = (field: "host" | "version") => section.entries.find((e) => e.provenance?.[field])?.provenance?.[field];
+    return [named("host"), section.key || "this channel", named("version")].filter(Boolean).join(" · ");
 }
 
 /** How many entries of `fresh` (the newest page) the list shown does not hold. */

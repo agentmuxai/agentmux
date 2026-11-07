@@ -83,7 +83,7 @@ impl World {
         let uid = |slug: &str| Some(format!("uid-{slug}"));
         let pane = |slug: &str| (slug == "korp").then(|| "live-korp".to_string());
         let exists = |b: &str| b == "block-Maricon-2";
-        let src = Sources { own_file: None, activity_dir: None, own_activity_dir: None, jekt_file: Some(&self.jekts), segments: Some(&self.store), ctx: Ctx { slug_of_uid: &slug, uid_of_slug: &uid, pane_of_agent: &pane, block_exists: &exists } };
+        let src = Sources { channel: "dev", own_file: None, activity_dir: None, own_activity_dir: None, jekt_file: Some(&self.jekts), segments: Some(&self.store), ctx: Ctx { slug_of_uid: &slug, uid_of_slug: &uid, pane_of_agent: &pane, block_exists: &exists } };
         query(&src, &req)
     }
 
@@ -146,7 +146,7 @@ fn a_name_the_registry_does_not_know_gets_no_history_button() {
     let uid = |slug: &str| (slug == "korp").then(|| "uid-korp".to_string());
     let pane = |_: &str| None;
     let exists = |_: &str| false;
-    let src = Sources { own_file: None, activity_dir: None, own_activity_dir: None, jekt_file: Some(&world.jekts), segments: Some(&world.store), ctx: Ctx { slug_of_uid: &slug, uid_of_slug: &uid, pane_of_agent: &pane, block_exists: &exists } };
+    let src = Sources { channel: "dev", own_file: None, activity_dir: None, own_activity_dir: None, jekt_file: Some(&world.jekts), segments: Some(&world.store), ctx: Ctx { slug_of_uid: &slug, uid_of_slug: &uid, pane_of_agent: &pane, block_exists: &exists } };
     let entry = query(&src, &AuditQueryReq::default()).unwrap().entries.remove(0);
     assert!(entry.from.unwrap().links.history.is_some());
     assert!(entry.to.unwrap().links.history.is_none(), "the reader opens an agent by UID: with none there is nothing to open");
@@ -248,7 +248,7 @@ fn a_bad_cursor_or_kind_is_refused_and_a_missing_file_is_an_empty_audit() {
     let slug = |_: &str| None;
     let none = |_: &str| None;
     let exists = |_: &str| false;
-    let src = Sources { own_file: None, activity_dir: None, own_activity_dir: None, jekt_file: Some(Path::new("/nonexistent/jekt-audit.jsonl")), segments: None, ctx: Ctx { slug_of_uid: &slug, uid_of_slug: &none, pane_of_agent: &none, block_exists: &exists } };
+    let src = Sources { channel: "dev", own_file: None, activity_dir: None, own_activity_dir: None, jekt_file: Some(Path::new("/nonexistent/jekt-audit.jsonl")), segments: None, ctx: Ctx { slug_of_uid: &slug, uid_of_slug: &none, pane_of_agent: &none, block_exists: &exists } };
     assert!(query(&src, &AuditQueryReq::default()).unwrap().entries.is_empty());
 }
 
@@ -432,7 +432,7 @@ impl TwoFiles {
         let uid = |slug: &str| Some(format!("uid-{slug}"));
         let none = |_: &str| None;
         let exists = |_: &str| false;
-        let src = Sources {
+        let src = Sources { channel: "dev",
             jekt_file: self.shared.as_deref(),
             own_file: self.own.as_deref(),
             activity_dir: None,
@@ -561,7 +561,7 @@ impl Activity {
         let uid = |slug: &str| Some(format!("uid-{slug}"));
         let none = |_: &str| None;
         let exists = |b: &str| b == "block-Maricon-2";
-        let src = Sources {
+        let src = Sources { channel: "dev",
             jekt_file: self.jekts.as_deref(),
             own_file: None,
             activity_dir: Some(&self.activity_dir),
@@ -751,4 +751,38 @@ fn totals_count_the_activity_rows_the_kinds_ask_for_and_carry_on_as_a_day_file_g
 ", serde_json::to_string(&next).unwrap()).as_bytes()).unwrap();
     let grown = totals(None);
     assert_eq!((grown.entries, grown.input, grown.output), (3, 300, 50));
+}
+
+#[test]
+fn the_channel_scope_keeps_what_this_channel_wrote_and_what_names_no_channel() {
+    let named = |ts, channel: &str| AuditLogEntry { channel: Some(channel.into()), ..audit_entry(ts, "Korp", "Opaz") };
+    let world = World::new(&[named(1_000, "dev"), named(2_000, "stable"), audit_entry(3_000, "Korp", "Opaz")]);
+    let stamps = |scope: Option<&str>| world.all(AuditQueryReq { scope: scope.map(str::to_string), ..Default::default() }).iter().map(|e| e.ts_ms).collect::<Vec<_>>();
+
+    assert_eq!(stamps(Some("channel")), vec![3_000, 1_000], "the other channel's line is out; a line that names none is in");
+    assert_eq!(stamps(Some("machine")), vec![3_000, 2_000, 1_000]);
+    assert_eq!(stamps(None), vec![3_000, 2_000, 1_000], "no scope is every channel here, as before the scope existed");
+
+    // The totals follow the scope, and the answer says which channel gave it.
+    let totals = |scope: &str| world.run(AuditQueryReq { scope: Some(scope.into()), totals: Some(true), ..Default::default() }).unwrap();
+    assert_eq!(totals("channel").totals.unwrap().entries, 2);
+    assert_eq!(totals("machine").totals.unwrap().entries, 3);
+    assert_eq!(totals("channel").channel.as_deref(), Some("dev"));
+    assert!(world.run(AuditQueryReq { scope: Some("lan".into()), ..Default::default() }).unwrap_err().contains("unknown scope"));
+}
+
+#[test]
+fn the_channel_scope_applies_to_activity_rows_and_their_totals() {
+    let mut other = activity_row(T0 + 1_000, "turn", "turn ended (success)");
+    other.channel = Some("stable".into());
+    let a = Activity::new(&[activity_row(T0, "tool", "Bash cargo test"), other], None);
+    let ask = |scope: &str| a.run(AuditQueryReq { kinds: kinds(&["tool", "turn"]), scope: Some(scope.into()), totals: Some(true), ..Default::default() }).unwrap();
+
+    let mine = ask("channel");
+    assert_eq!(mine.entries.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>(), vec!["tool"]);
+    assert_eq!(mine.totals.unwrap().entries, 1);
+    let all = ask("machine");
+    assert_eq!(all.entries.len(), 2);
+    assert_eq!(all.totals.unwrap().entries, 2);
+    assert_eq!(all.entries[0].provenance.as_ref().and_then(|p| p.channel.as_deref()), Some("stable"), "an activity row says which channel wrote it");
 }
