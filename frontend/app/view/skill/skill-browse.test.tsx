@@ -122,14 +122,25 @@ describe("Browse the catalog", () => {
     });
 
     it("Install sends the id, says the scripts are not approved yet, and opens the skill", async () => {
-        rpc.AppSkillsCatalogCommand.mockResolvedValue({ items: [item()] });
-        rpc.AppSkillsCatalogInstallCommand.mockResolvedValue({ skill_id: "new-1", name: "agentmux-word", version: "1.0.0", updated: false });
+        // Every read returns new objects, as the real catalog does, and once installed the skill shows as current.
+        let installed = false;
+        rpc.AppSkillsCatalogCommand.mockImplementation(async () => ({
+            items: [installed ? item({ state: "current", installed_version: "1.0.0", skill_id: "new-1" }) : item()],
+        }));
         const list = await openBrowse();
+        rpc.AppSkillsCatalogInstallCommand.mockImplementation(async () => {
+            installed = true;
+            return { skill_id: "new-1", name: "agentmux-word", version: "1.0.0", updated: false };
+        });
         fireEvent.click(within(list).getByRole("button", { name: "Install" }));
         const status = await within(list).findByRole("status");
         expect(status.textContent).toContain("Installed agentmux-word 1.0.0. Its scripts are not approved yet");
+        // The list is read again after the install and its rows are rebuilt: the note must still be there.
+        await vi.waitFor(() => expect(rpc.AppSkillsCatalogCommand.mock.calls.length).toBeGreaterThan(1));
+        await vi.waitFor(() => expect(within(list).getByRole("listitem", { name: "Word" }).textContent).toContain("Installed here at version 1.0.0."));
+        expect(within(list).getByRole("status").textContent).toContain("Its scripts are not approved yet");
         expect(rpc.AppSkillsCatalogInstallCommand).toHaveBeenCalledWith({}, { id: "agentmux.word" });
-        fireEvent.click(within(status).getByRole("button", { name: "Open it" }));
+        fireEvent.click(within(within(list).getByRole("status")).getByRole("button", { name: "Open it" }));
         expect(screen.queryByRole("list", { name: "Skills in the catalog" })).toBeNull();
     });
 

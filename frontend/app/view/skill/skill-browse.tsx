@@ -48,10 +48,18 @@ function BadgePill(p: { item: AppSkillCatalogItem }): JSX.Element {
     );
 }
 
-function BrowseItem(p: { item: AppSkillCatalogItem; onInstalled: (skillId: string) => void; onChanged: () => void }): JSX.Element {
+/** What an install told the person, kept by the list under the entry's id so it outlives the row being rebuilt. */
+type InstallResult = { skillId: string; text: string };
+
+function BrowseItem(p: {
+    item: AppSkillCatalogItem;
+    done: InstallResult | undefined;
+    onDone: (id: string, r: InstallResult | undefined) => void;
+    onInstalled: (skillId: string) => void;
+    onChanged: () => void;
+}): JSX.Element {
     const [busy, setBusy] = createSignal(false);
     const [error, setError] = createSignal("");
-    const [done, setDone] = createSignal<{ skillId: string; text: string } | null>(null);
     const platform = appPlatform();
     const status = () => catalogStatus(p.item.entry, platform);
     const action = () => installAction(p.item);
@@ -59,10 +67,10 @@ function BrowseItem(p: { item: AppSkillCatalogItem; onInstalled: (skillId: strin
     async function install(): Promise<void> {
         setBusy(true);
         setError("");
-        setDone(null);
+        p.onDone(p.item.entry.id, undefined);
         try {
             const r = await RpcApi.AppSkillsCatalogInstallCommand(TabRpcClient, { id: p.item.entry.id });
-            setDone({
+            p.onDone(p.item.entry.id, {
                 skillId: r.skill_id,
                 text: `${r.updated ? "Updated" : "Installed"} ${r.name} ${r.version}. Its scripts are not approved yet: review them in the skill's detail.`,
             });
@@ -115,7 +123,7 @@ function BrowseItem(p: { item: AppSkillCatalogItem; onInstalled: (skillId: strin
                     </div>
                 )}
             </Show>
-            <Show when={done()}>
+            <Show when={p.done}>
                 {(d) => (
                     <p class="skill-app-line" role="status">
                         {d().text}{" "}
@@ -143,6 +151,8 @@ export function SkillBrowse(p: { catalog: SkillCatalogModel; onOpen: (skillId: s
         () => p.catalog.revisionAtom(),
         () => RpcApi.AppSkillsCatalogCommand(TabRpcClient, {}),
     );
+    // An install refreshes the list, which rebuilds the rows: what it said is kept here, not in the row.
+    const [done, setDone] = createSignal<Record<string, InstallResult | undefined>>({});
     // Reading a resource that failed throws, so the list is read only while there is no error.
     const items = () => (list.error ? undefined : list());
     return (
@@ -168,7 +178,15 @@ export function SkillBrowse(p: { catalog: SkillCatalogModel; onOpen: (skillId: s
                 {(l) => (
                     <ul class="skill-browse-list" aria-label="Skills in the catalog">
                         <For each={l().items} fallback={<li class="skill-app-muted">The catalog has no skills yet.</li>}>
-                            {(item) => <BrowseItem item={item} onInstalled={p.onOpen} onChanged={() => void p.catalog.refresh()} />}
+                            {(item) => (
+                                <BrowseItem
+                                    item={item}
+                                    done={done()[item.entry.id]}
+                                    onDone={(id, r) => setDone((all) => ({ ...all, [id]: r }))}
+                                    onInstalled={p.onOpen}
+                                    onChanged={() => void p.catalog.refresh()}
+                                />
+                            )}
                         </For>
                     </ul>
                 )}

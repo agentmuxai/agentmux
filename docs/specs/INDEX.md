@@ -1101,7 +1101,6 @@ partial list.
 | [`SPEC_AGENT_PANE_STATUS_GRADIENT_2026_06_14`](SPEC_AGENT_PANE_STATUS_GRADIENT_2026_06_14.md) | SPEC: Agent Pane — Status Zones Reorganization + Gradient Progress Bar |
 | [`SPEC_AGENT_PICKER_TEMPLATE_SECTION_CLEANUP_2026_08_22`](SPEC_AGENT_PICKER_TEMPLATE_SECTION_CLEANUP_2026_08_22.md) | Spec: "New Agent" heading + harness-only icons in the template section |
 | [`SPEC_AGENT_PICKER_TILE_GRID_2026_06_17`](SPEC_AGENT_PICKER_TILE_GRID_2026_06_17.md) | Agent picker: tile-grid layout |
-| [`SPEC_AGENT_STATE_BACKGROUND_WORK_2026_11_01`](SPEC_AGENT_STATE_BACKGROUND_WORK_2026_11_01.md) | Spec: a new agent state beside Working and Idle: Background |
 | [`SPEC_AGENT_STATUS_LABELS_2026_06_27`](SPEC_AGENT_STATUS_LABELS_2026_06_27.md) | Agent Status Labels — Richer Working State UX |
 | [`SPEC_AGENT_SYSTEM_MANAGEMENT_API_2026_07_04`](SPEC_AGENT_SYSTEM_MANAGEMENT_API_2026_07_04.md) | Agent API: System Management Surface (reload, process/render diagnostics, saga health) |
 | [`SPEC_AGENT_TOOL_STORE_2026_04_15`](SPEC_AGENT_TOOL_STORE_2026_04_15.md) | Spec: Agent Tool Store — managed CLI tool availability for agent panes |
@@ -1125,8 +1124,6 @@ partial list.
 | [`SPEC_BROWSER_PANE_Z_ORDER_2026_04_21`](SPEC_BROWSER_PANE_Z_ORDER_2026_04_21.md) | Spec: Browser pane Z-order fixes |
 | [`SPEC_BUILDER_MACOS_LINUX_CI_2026_06_24`](SPEC_BUILDER_MACOS_LINUX_CI_2026_06_24.md) | SPEC: agentmux-builder — macOS + Linux CI Release Workflows |
 | [`SPEC_CEF_LOG_ROBUSTNESS_2026_06_20`](SPEC_CEF_LOG_ROBUSTNESS_2026_06_20.md) | SPEC: Harden two CEF-init log errors (cache_path + debug-port bind) |
-| [`SPEC_CLOSING_A_WINDOW_TAB_OR_PANE_NEVER_SHUTS_AN_AGENT_DOWN_2026_10_29`](SPEC_CLOSING_A_WINDOW_TAB_OR_PANE_NEVER_SHUTS_AN_AGENT_DOWN_2026_10_29.md) | Spec: closing a window, a tab or a pane never shuts an agent down; shutdown is its own act |
-| [`SPEC_COMPACTION_IN_FLIGHT_STATE_SNAPSHOT_2026_10_27`](SPEC_COMPACTION_IN_FLIGHT_STATE_SNAPSHOT_2026_10_27.md) | Compaction In-Flight State Snapshot: AgentMux Drains for the Agent |
 | [`SPEC_COMPOSER_STRIP_AND_HOST_POLISH_2026_06_25`](SPEC_COMPOSER_STRIP_AND_HOST_POLISH_2026_06_25.md) | Spec: Composer Strip Polish + Context Compaction Indicator + Host Type Coloring |
 | [`SPEC_COMPOSER_STRIP_LAYOUT_MIC_CENTER_MODEL_DEFAULTS_2026_07_10`](SPEC_COMPOSER_STRIP_LAYOUT_MIC_CENTER_MODEL_DEFAULTS_2026_07_10.md) | SPEC: Composer-strip layout fixes, mic vertical centering, curated model defaults |
 | [`SPEC_COMPOSER_UX_POLISH_2026_04_15`](SPEC_COMPOSER_UX_POLISH_2026_04_15.md) | Spec: Composer UX Polish — controls above input, Claude-style status line |
@@ -1226,7 +1223,6 @@ partial list.
 | [`SPEC_SPLASH_SCREEN_BORDER_2026_08_25`](SPEC_SPLASH_SCREEN_BORDER_2026_08_25.md) | SPEC — Splash screen: add a darkened 2px border, across all 3 platforms |
 | [`SPEC_SPLASH_STARTUP_TELEMETRY_2026_06_25`](SPEC_SPLASH_STARTUP_TELEMETRY_2026_06_25.md) | Spec: Splash Screen Startup Telemetry |
 | [`SPEC_SPLASH_USERINFO_AND_DISABLE_2026_06_21`](SPEC_SPLASH_USERINFO_AND_DISABLE_2026_06_21.md) | SPEC: Splash user-info footer + "disable splash" setting |
-| [`SPEC_SRV_SENDS_HELD_COMPOSER_INPUT_FOR_PANES_WITH_NO_VIEW_2026_10_29`](SPEC_SRV_SENDS_HELD_COMPOSER_INPUT_FOR_PANES_WITH_NO_VIEW_2026_10_29.md) | Spec: srv sends the operator's held composer input when the agent has no pane |
 | [`SPEC_STARTUP_HOVER_EXPANSION_ANCHOR_2026_05_24`](SPEC_STARTUP_HOVER_EXPANSION_ANCHOR_2026_05_24.md) | SPEC: Anchor the startup-injection summary at the cursor during hover-expand |
 | [`SPEC_STATUSBAR_CPU_CORES_PANEL_2026_06_15`](SPEC_STATUSBAR_CPU_CORES_PANEL_2026_06_15.md) | SPEC: Status-bar CPU → per-core panel |
 | [`SPEC_STATUS_BAR_POPOVER_AIRSPACE_CLIP_2026_08_17`](SPEC_STATUS_BAR_POPOVER_AIRSPACE_CLIP_2026_08_17.md) | SPEC — Status bar popovers: fix native browser-pane airspace occlusion |
