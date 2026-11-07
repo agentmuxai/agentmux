@@ -56,7 +56,7 @@ const fn op(
 
 /// The operations. 30 s by default; a restart of AgentMux is critical and
 /// gets the longest window.
-pub const OPS: [OpSpec; 14] = [
+pub const OPS: [OpSpec; 15] = [
     op("stop_agents", "stop agents", ("Keep running", "Close now"), 15, false, &["target"]),
     op("close_pane", "close a pane", ("Keep running", "Close now"), 15, false, &["target"]),
     op("quit_agentmux", "close this AgentMux", ("Keep open", "Close now"), MAX_WINDOW_SECS, true, &[]),
@@ -70,6 +70,17 @@ pub const OPS: [OpSpec; 14] = [
     op("job_template_approve", "approve a job template", ("Don't approve", "Approve now"), 30, true, &["template", "publisher"]),
     op("tower_pair", "pair a device", ("Don't pair", "Pair now"), 30, true, &["device"]),
     op("resume_agent_browsing", "let agents browse again", ("Keep paused", "Resume now"), 30, true, &[]),
+    // An agent answers a prompt an app or a page put up (docs/reports/REPORT_AGENTS_AND_OS_PROMPTS_2026_11_07.md
+    // §4). One window for the row, so it carries only the medium level for now (a browser permission);
+    // the 15 s low and 60 s high levels need rows or a per-level window when their callers arrive.
+    op(
+        "os_prompt_answer",
+        "answer a prompt for an agent",
+        ("Don't answer", "Answer now"),
+        30,
+        true,
+        &["agent", "app", "window", "prompt", "answer", "level", "reason"],
+    ),
     // Removes only what a build recreates (cargo `target` folders of idle clones, old incremental caches).
     op("disk_cleanup", "clear idle agents' build folders on this computer", ("Keep them", "Clear now"), 30, true, &[]),
 ];
