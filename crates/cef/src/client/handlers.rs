@@ -461,6 +461,21 @@ fn pane_shortcut_before_app_keys(primary: bool, alt: bool, shift: bool, vk: i32)
 /// nav-bar buttons already use via IPC — see `ipc.rs`'s `browser_pane_go_back`
 /// etc.), so this stays consistent with the existing back/forward/reload path
 /// instead of poking CEF's `Browser` directly.
+/// A key pressed in a browser pane's page: the person is using it (srv's retake rule reads it,
+/// `browser_api::last_input`).
+fn note_person_key(inner: &Arc<Mutex<AgentMuxHandler>>, browser: Option<&Browser>) {
+    let Some(browser) = browser else { return };
+    let handler = inner.lock();
+    if !handler.is_browser_pane {
+        return;
+    }
+    let state = handler.state.clone();
+    drop(handler);
+    if let Some(block_id) = crate::browser_pane::callbacks::resolve_pane_block_id(&state, browser) {
+        crate::browser_api::last_input::note(&block_id);
+    }
+}
+
 fn run_browser_pane_shortcut(
     inner: &Arc<Mutex<AgentMuxHandler>>,
     browser: Option<&mut Browser>,
@@ -528,6 +543,9 @@ fn handle_pre_key_event(
 ) -> ::std::os::raw::c_int {
     let Some(ev) = event else { return 0 };
     let ctrl = (ev.modifiers & EVENTFLAG_CONTROL_DOWN) != 0;
+    if ev.type_ == KeyEventType::RAWKEYDOWN {
+        note_person_key(inner, browser.as_deref());
+    }
 
     // App shortcuts out of a browser pane, before the page sees the key (and
     // before the Ctrl+P check below, which would also catch Ctrl+Shift+P).

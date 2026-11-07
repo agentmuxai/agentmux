@@ -54,7 +54,14 @@ pub(crate) async fn handle_ui_browser_retake(
         }
         None => {}
     }
-    if let Err(e) = browser_owner::may_retake(&block, pane, agent) {
+    // The person's Give back is not the only way back: a pane they have left alone for a minute is the agent's again.
+    // Asked only when that is what decides, so a pane given back or never lost costs no host call.
+    let since_input = if browser_owner::takeover_in_use(&block, pane, agent).is_some() {
+        since_person_input(&state, pane).await
+    } else {
+        None
+    };
+    if let Err(e) = browser_owner::may_retake(&block, pane, agent, since_input) {
         return err_response(StatusCode::CONFLICT, e);
     }
     // The person's Take over ended the pane's site limit; the pane's header still names it, so the limit comes back
@@ -69,6 +76,27 @@ pub(crate) async fn handle_ui_browser_retake(
     browser_owner::record(pane, agent);
     tracing::info!(agent_id = %agent, pane = %pane, "[browser-owner] agent retook the pane");
     (StatusCode::OK, Json(json!({ "ok": true, "data": { "pane": pane, "already": false } }))).into_response()
+}
+
+/// How long ago the host last saw the person use `pane`'s page (`Duration::MAX` if it never has), or None when the host
+/// cannot say, which keeps the pane the person's until they give it back.
+async fn since_person_input(state: &AppState, pane: &str) -> Option<std::time::Duration> {
+    let host = crate::server::ui_handlers::get_host_ipc(state).await.ok()?;
+    // Not `post_to_host_awake`: a sleeping pane has no page to use, and asking must not wake it.
+    let answer = crate::server::host_http::post_to_host(
+        &state.http_client,
+        &host,
+        "last_input",
+        json!({ "block_id": pane }),
+        Some(std::time::Duration::from_secs(5)),
+    )
+    .await
+    .ok()?;
+    if answer.get("ok").and_then(|v| v.as_bool()) != Some(true) {
+        return None;
+    }
+    let idle = answer.pointer("/data/idle_secs")?;
+    Some(idle.as_u64().map_or(std::time::Duration::MAX, std::time::Duration::from_secs))
 }
 
 /// The sites the pane was limited to, as its header recorded them (`browser:allowed_origins`).
@@ -188,6 +216,57 @@ mod tests {
 
         // Already driving it: fine, and nothing changes.
         assert_eq!(retake_status(&state, &agent, &pane).await, StatusCode::OK);
+        browser_owner::forget(&pane);
+    }
+
+    /// A host that answers `last_input` with `idle_secs` (null: the person never used the page), on a port of its own.
+    async fn fake_host(state: &AppState, idle_secs: Option<u64>) {
+        use axum::{routing::post, Router};
+        let app = Router::new().route(
+            "/agentmux/browser/last_input",
+            post(move |Json(_b): Json<serde_json::Value>| async move {
+                Json(json!({ "ok": true, "data": { "idle_secs": idle_secs } }))
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        *state.host_ipc.lock().await = Some(crate::server::state::HostIpc { port, token: "host-ipc-token".into() });
+    }
+
+    #[tokio::test]
+    async fn a_pane_the_person_has_left_alone_for_a_minute_is_retaken_without_give_back() {
+        let state = test_state();
+        let own = uuid::Uuid::new_v4().to_string();
+        let pane = uuid::Uuid::new_v4().to_string();
+        crate::server::browser_attention::tests::browser_block(&state, &own);
+        crate::server::browser_attention::tests::browser_block(&state, &pane);
+        let agent = format!("retake-{}", uuid::Uuid::new_v4());
+        state.reactive_handler.register_agent(&agent, &own, None).unwrap();
+        browser_owner::record(&pane, &agent);
+        browser_owner::guard_client_meta_write(&format!("block:{pane}"), &clear(browser_owner::OWNER_META_KEY)).unwrap();
+
+        // No host to ask: only Give back counts.
+        assert_eq!(retake_status(&state, &agent, &pane).await, StatusCode::CONFLICT, "the host cannot say");
+
+        // The person typed 5 s ago: still theirs, even though they took it over long ago.
+        browser_owner::age_lost(&pane, std::time::Duration::from_secs(600));
+        fake_host(&state, Some(5)).await;
+        assert_eq!(retake_status(&state, &agent, &pane).await, StatusCode::CONFLICT, "typed 5 s ago");
+
+        // Idle 120 s, and the Take over was longer ago still: the agent's again.
+        fake_host(&state, Some(120)).await;
+        assert_eq!(retake_status(&state, &agent, &pane).await, StatusCode::OK, "idle 120 s");
+        assert_eq!(browser_owner::owner_of(&pane).as_deref(), Some(agent.as_str()));
+        browser_owner::forget(&pane);
+
+        // Never used the page since the host started: counts from the Take over click.
+        browser_owner::record(&pane, &agent);
+        browser_owner::guard_client_meta_write(&format!("block:{pane}"), &clear(browser_owner::OWNER_META_KEY)).unwrap();
+        fake_host(&state, None).await;
+        assert_eq!(retake_status(&state, &agent, &pane).await, StatusCode::CONFLICT, "took over just now");
+        browser_owner::age_lost(&pane, std::time::Duration::from_secs(61));
+        assert_eq!(retake_status(&state, &agent, &pane).await, StatusCode::OK, "took over 61 s ago, never touched the page");
         browser_owner::forget(&pane);
     }
 
