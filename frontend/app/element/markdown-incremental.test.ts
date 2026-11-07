@@ -303,6 +303,20 @@ describe("settleOpenLink", () => {
         expect(settleOpenLink(input)).toBe(input);
     });
 
+    it("reads fences by the CommonMark rules: an inner fence line in a longer fence is content", () => {
+        // A four-backtick fence holding a "```js" line is still open at the link: it stays as typed.
+        const inside = "````md\n```js\nconst v = pick[i](args";
+        expect(settleOpenLink(inside)).toBe(inside);
+        // Once the outer fence has closed, the link after it settles as usual.
+        expect(settleOpenLink("````md\n```js\nx\n````\nSee [it](https://example.com/a")).toBe(
+            "````md\n```js\nx\n````\nSee [it](#)"
+        );
+        // A shorter run does not close a longer fence, and a closer has no info string.
+        expect(settleOpenLink("~~~~\n~~~\ny\n~~~ js\nsee [it](https://e.test/a")).toBe(
+            "~~~~\n~~~\ny\n~~~ js\nsee [it](https://e.test/a"
+        );
+    });
+
     it("works after a closed fence", () => {
         expect(settleOpenLink("```js\nx\n```\nSee [it](https://example.com/a")).toBe("```js\nx\n```\nSee [it](#)");
     });

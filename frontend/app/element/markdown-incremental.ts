@@ -227,11 +227,34 @@ const PARTIAL_LINK = /\[([^[\]\n]*)\]\(([^()\n]*)$/;
 /** An image still being typed, from its `![` to the end of the last line: `![alt`, `![alt]`, `![alt](path`. */
 const PARTIAL_IMAGE = /!\[[^[\]\n]*(?:\](?:\([^()\n]*)?)?$/;
 
+/**
+ * Whether a code fence is still open at the start of the line at `lineStart`. The same rules as
+ * `findSafeSplitPoint`'s scan (CommonMark §4.5): a fence opens on a run of three or more backticks or tildes
+ * indented at most 3 spaces (a backtick run whose info string has a backtick is an inline span), and closes
+ * only on a run of the same character, at least as long, with nothing after it. So an inner "```js" line in
+ * a four-backtick fence is content, not a close.
+ */
+function fenceOpenAt(text: string, lineStart: number): boolean {
+    let char = "";
+    let len = 0;
+    for (const line of text.slice(0, lineStart).split("\n")) {
+        const indent = line.length - line.trimStart().length;
+        const run = indent <= 3 ? /^(`{3,}|~{3,})(.*)$/.exec(line.trimEnd().slice(indent)) : null;
+        if (!run) continue;
+        if (char) {
+            if (run[2].trim() === "" && run[1][0] === char && run[1].length >= len) char = "";
+        } else if (!(run[1][0] === "`" && run[2].includes("`"))) {
+            char = run[1][0];
+            len = run[1].length;
+        }
+    }
+    return char !== "";
+}
+
 /** Whether `index` in `text` is inside an open code fence, or an open inline code span on its own line. */
 function insideOpenCode(text: string, index: number): boolean {
     const lineStart = text.lastIndexOf("\n", index) + 1;
-    const fences = text.slice(0, lineStart).match(/^ {0,3}(?:`{3,}|~{3,})/gm)?.length ?? 0;
-    if (fences % 2 === 1) return true;
+    if (fenceOpenAt(text, lineStart)) return true;
     return (text.slice(lineStart, index).match(/`/g)?.length ?? 0) % 2 === 1;
 }
 
