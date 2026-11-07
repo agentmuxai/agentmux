@@ -1,0 +1,48 @@
+-- a device paired with no code up: nothing
+<div>
+  <div class="status-bar-pair" data-testid="pair-device">
+    <div class="status-bar-popover-row" style="padding-left:12px">
+      <span data-stand="Button" data-density="compact" data-disabled="false">
+        "Pair a device"
+Button "Pair a device" click
+ViewerPairStartCommand
+toCanvas canvas agentmux://pair?v=1&host=198.51.100.7&code=ABCDEFGH23 {"width":176,"margin":1}
+-- paired while the code was up
+<div>
+  <div class="status-bar-pair" data-testid="pair-device">
+    <div class="status-bar-popover-row" style="padding-left:12px">
+      <span data-stand="Button" data-density="compact" data-disabled="false">
+        "Pair a device"
+    <div class="status-bar-pair-note" role="status">
+      "Paired"
+      "Pat's phone"
+      ". Settings › Paired devices lists it."
+Button "Pair a device" click
+ViewerPairStartCommand
+toCanvas canvas agentmux://pair?v=1&host=198.51.100.7&code=ABCDEFGH23 {"width":176,"margin":1}
+-- a new code: the note is gone
+<div>
+  <div class="status-bar-pair" data-testid="pair-device">
+    <div class="status-bar-popover-row" style="padding-left:12px">
+      <span data-stand="Button" data-density="compact" data-disabled="undefined">
+        "Hide"
+      <span data-stand="Button" data-density="compact" data-disabled="false">
+        "New code"
+      <span data-stand="Button" data-density="compact" data-disabled="false">
+        "Copy link"
+    <div class="status-bar-qr-panel">
+      <canvas class="status-bar-qr-canvas" aria-label="Pairing QR code">
+      <div class="status-bar-qr-note" data-testid="pair-countdown">
+        "Scan with AgentMux Mobile. Works once, for"
+        "2:00"
+        "."
+      <div class="status-bar-qr-note">
+        "Pairing lets that device watch this computer's agents, read-only (and its processes, if you share them in Tower). Show this code only to your own devices. Another AgentMux computer pairs with the copied link, in its Tower."
+-- LAN discovery turned off
+<div>
+  <div class="status-bar-pair" data-testid="pair-device">
+    <div class="status-bar-popover-row" style="padding-left:12px">
+      <span data-stand="Button" data-density="compact" data-disabled="true">
+        "Pair a device"
+    <div class="status-bar-pair-note">
+      "Turn on LAN discovery to pair a device: AgentMux Mobile connects to this computer over your local network."

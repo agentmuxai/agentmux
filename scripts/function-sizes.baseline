@@ -368,7 +368,6 @@
 139 frontend/app/statusbar/BackendStatus.tsx::BackendStatus
 128 frontend/app/statusbar/BackendStatus.tsx::BackendStatusPanel
 140 frontend/app/statusbar/HostPopover.tsx::HostPopover
-169 frontend/app/statusbar/PairDevicePanel.tsx::PairDevicePanel
 171 frontend/app/statusbar/SystemStats.tsx::SystemStats
 145 frontend/app/store/agent-document/reducer.ts::scrubOrphanedInProgress
 258 frontend/app/store/agent-pane-state-store.ts::dispatch
@@ -453,9 +452,7 @@
 150 frontend/app/view/native-memory/NativeMemoryFileView.tsx::NativeMemoryFileView
 154 frontend/app/view/remotes/remotes-view.tsx::Detail
 128 frontend/app/view/settings/sections/animations-section.tsx::AnimationsSection
-166 frontend/app/view/settings/sections/appearance-section.tsx::AppearanceSection
 120 frontend/app/view/settings/sections/browser-section.tsx::BrowserSection
-171 frontend/app/view/settings/sections/devices-section.tsx::DevicesSection
 109 frontend/app/view/settings/sections/pinned-senders.tsx::PinnedSenders
 114 frontend/app/view/settings/sections/widget-bar-settings.tsx::WidgetBarSettings
 104 frontend/app/view/settings/sections/widget-catalog.tsx::WidgetCatalog

@@ -1,0 +1,32 @@
+hostHas windowTransparency
+-- defaults
+<div>
+  <div class="settings-section-body">
+    <div data-stand="SettingRow" data-id="appearance.theme" data-indent="false" data-label="Theme" data-description="Default UI color theme, for windows without one of their own (the ☰ menu sets one window's)">
+      <div data-stand="Select" class="setting-select" data-value="default">
+        <option value="default">
+          "Default"
+        <option value="dark">
+          "Dark"
+    <div data-stand="LanguageRow">
+    <div data-stand="SettingRow" data-id="appearance.splash" data-indent="false" data-label="Startup splash screen" data-description="Show the AgentMux splash while the app starts. Applies at the next launch — the launcher reads this before the app itself is running.">
+      <span data-stand="ToggleControl" data-checked="true">
+    <div data-stand="SettingRow" data-id="appearance.transparency" data-indent="false" data-label="Window transparency" data-description="Enable background transparency and blur">
+      <span data-stand="ToggleControl" data-checked="false">
+    <div data-stand="SettingRow" data-id="appearance.pane_gap" data-indent="false" data-label="Pane gap size" data-description="Pixels between tiled panes (0–20)">
+      <span data-stand="NumberControl" class="setting-number" data-min="0" data-max="20" data-step="1" data-parse="int" data-value="3">
+    <div data-stand="SettingRow" data-id="appearance.bg_color" data-indent="false" data-label="Background color" data-description="Custom background color override (hex). Leave blank to use the theme default.">
+      <input data-stand="TextInput" class="setting-text" type="text" data-value="" placeholder="#1a1a1a">
+    <h3 data-stand="SectionHeader">
+      "Pane hover-magnify"
+    <div data-stand="SettingRow" data-id="appearance.magnified_opacity" data-indent="false" data-label="Magnified opacity" data-description="Background opacity of a pane while magnified (0–1)">
+      <span data-stand="SliderControl" data-min="0" data-max="1" data-step="0.05" data-value="1">
+    <div data-stand="SettingRow" data-id="appearance.magnified_size" data-indent="false" data-label="Magnified size" data-description="Scale factor applied to a pane while magnified">
+      <span data-stand="NumberControl" class="setting-number setting-number--wide" data-min="1" data-step="0.1" data-value="1.5">
+    <div data-stand="SettingRow" data-id="appearance.magnified_blur_primary" data-indent="false" data-label="Magnified blur (primary)" data-description="Backdrop blur, in pixels, applied to the magnified pane itself">
+      <span data-stand="NumberControl" class="setting-number" data-min="0" data-step="1" data-parse="int" data-value="0">
+    <div data-stand="SettingRow" data-id="appearance.magnified_blur_secondary" data-indent="false" data-label="Magnified blur (secondary)" data-description="Backdrop blur, in pixels, applied to the other panes behind it">
+      <span data-stand="NumberControl" class="setting-number" data-min="0" data-step="1" data-parse="int" data-value="0">
+    <h3 data-stand="SectionHeader">
+      "Widget colors"
+    <div data-stand="WidgetColorsSettings" data-id="appearance.widget_colors" data-label="Widget colors" data-description="The color of every pane of each widget type: its border, tabs and header. A pane's own Pane Color and an agent's color still win.">
