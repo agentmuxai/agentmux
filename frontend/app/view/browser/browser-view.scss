@@ -471,6 +471,11 @@ $browser-nav-stack-below: 388px;
         }
     }
 
+    // "(took control)" never splits across two lines.
+    .browser-took-control {
+        white-space: nowrap;
+    }
+
     .browser-limited-to,
     .browser-bypass-ended {
         color: var(--secondary-text-color);
