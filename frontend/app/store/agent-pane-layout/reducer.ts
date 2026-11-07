@@ -375,8 +375,11 @@ export function windowRangeOf(
 ): WindowRange {
     if (pos.length === 0) return { startIndex: 0, endIndex: -1 };
 
-    const top = scrollTop;
-    const bottom = scrollTop + viewportPx;
+    // A scroll position past the last row (the content shrank under it: a re-measure, a removal) shows the
+    // last screenful, as the browser does once it clamps the position: never an empty window over rows.
+    const contentEnd = pos[pos.length - 1].end;
+    const top = scrollTop >= contentEnd ? Math.max(0, contentEnd - Math.max(viewportPx, 1)) : scrollTop;
+    const bottom = top + viewportPx;
 
     // First row whose `end > top` (lowest index still visible at the top edge).
     let lo = 0;

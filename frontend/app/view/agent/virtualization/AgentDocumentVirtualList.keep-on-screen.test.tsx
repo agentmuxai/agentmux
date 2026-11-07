@@ -131,6 +131,15 @@ describe("AgentDocumentVirtualList: rows on screen stay put when rows above are 
         for (const id of before) expect(ids).toContain(id);
     });
 
+    it("does not write the scroll position of a pane at the bottom (the follow flow keeps it there)", () => {
+        const { view, setNodes, scroller } = setup(STREAMING_BUFFER_SIZE + 40);
+        const viewportPx = 300;
+        dispatch(BID, { type: "Scrolled", scrollTop: view()!.totalSize - viewportPx, viewportPx });
+        scroller().scrollTop = 123; // where the follow flow has put the scroller: not the slice's position
+        setNodes((prev) => prev.slice(10)); // a roll-off above moves every row up
+        expect(scroller().scrollTop).toBe(123);
+    });
+
     it("leaves the scroll position alone for an append", () => {
         const { view, setNodes } = setup(STREAMING_BUFFER_SIZE + 40);
         dispatch(BID, { type: "Scrolled", scrollTop: 900, viewportPx: 300 });
