@@ -246,7 +246,7 @@ describe("Signature and script approval", () => {
         expect(rpc.SkillCatalogAppFileCommand).toHaveBeenCalledWith({}, { skill_id: "k1", path: "scripts/run.py" });
         fireEvent.click(within(panel).getByRole("button", { name: "Approve script" }));
         await vi.waitFor(() =>
-            expect(rpc.SkillCatalogAppScriptCommand).toHaveBeenCalledWith({}, { skill_id: "k1", path: "scripts/run.py", approved: true }),
+            expect(rpc.SkillCatalogAppScriptCommand).toHaveBeenCalledWith({}, { skill_id: "k1", path: "scripts/run.py", approved: true, sha256: "e".repeat(64) }),
         );
     });
 
@@ -259,7 +259,7 @@ describe("Signature and script approval", () => {
         fireEvent.click(within(detail).getByRole("button", { name: "Review" }));
         fireEvent.click(await within(detail).findByRole("button", { name: "Revoke approval" }));
         expect((await within(detail).findByRole("alert")).textContent).toBe("script changed");
-        expect(rpc.SkillCatalogAppScriptCommand).toHaveBeenCalledWith({}, { skill_id: "k1", path: "scripts/run.py", approved: false });
+        expect(rpc.SkillCatalogAppScriptCommand).toHaveBeenCalledWith({}, { skill_id: "k1", path: "scripts/run.py", approved: false, sha256: "e".repeat(64) });
     });
 
     it("the Review panel stays open when an approval makes the detail rebuild its rows", async () => {

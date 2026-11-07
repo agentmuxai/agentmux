@@ -60,14 +60,19 @@ async fn a_script_is_read_then_approved_and_revoked_and_nothing_else_can_be() {
 
     let approved = |state: &AppState| state.identity_store.skill_files(&id).unwrap().into_iter().find(|f| f.path == "scripts/run.py").unwrap().approved;
     assert!(!approved(&state), "an imported script starts unapproved");
-    call(&state, COMMAND_SKILL_CATALOG_APP_SCRIPT, json!({"skill_id": id, "path": "scripts/run.py", "approved": true})).await.unwrap();
+    let sha = crate::backend::computer_use_skill::sha256_hex(SCRIPT.as_bytes());
+    // Only the text that was read can be approved.
+    let e = call(&state, COMMAND_SKILL_CATALOG_APP_SCRIPT, json!({"skill_id": id, "path": "scripts/run.py", "approved": true, "sha256": "0".repeat(64)})).await.unwrap_err();
+    assert!(e.contains("not the text you reviewed"), "{e}");
+    assert!(!approved(&state));
+    call(&state, COMMAND_SKILL_CATALOG_APP_SCRIPT, json!({"skill_id": id, "path": "scripts/run.py", "approved": true, "sha256": sha})).await.unwrap();
     assert!(approved(&state));
-    call(&state, COMMAND_SKILL_CATALOG_APP_SCRIPT, json!({"skill_id": id, "path": "scripts/run.py", "approved": false})).await.unwrap();
+    call(&state, COMMAND_SKILL_CATALOG_APP_SCRIPT, json!({"skill_id": id, "path": "scripts/run.py", "approved": false, "sha256": ""})).await.unwrap();
     assert!(!approved(&state));
 
-    let e = call(&state, COMMAND_SKILL_CATALOG_APP_SCRIPT, json!({"skill_id": id, "path": "test.json", "approved": true})).await.unwrap_err();
+    let e = call(&state, COMMAND_SKILL_CATALOG_APP_SCRIPT, json!({"skill_id": id, "path": "test.json", "approved": true, "sha256": ""})).await.unwrap_err();
     assert!(e.contains("not a script"), "{e}");
     let plain = call(&state, COMMAND_SKILL_CATALOG_UPSERT, json!({"name": "plain-app-rpc-t", "skill_type": "agent-skill"})).await.unwrap();
-    let e = call(&state, COMMAND_SKILL_CATALOG_APP_SCRIPT, json!({"skill_id": plain["id"], "path": "x", "approved": true})).await.unwrap_err();
+    let e = call(&state, COMMAND_SKILL_CATALOG_APP_SCRIPT, json!({"skill_id": plain["id"], "path": "x", "approved": true, "sha256": ""})).await.unwrap_err();
     assert!(e.contains("not a computer-use skill"), "{e}");
 }

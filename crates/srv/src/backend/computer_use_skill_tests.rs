@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use super::*;
+use crate::backend::storage::skill_app::{ScriptApproval, ScriptOutcome};
 
 const SKILL_MD: &str = "---\nname: acme-word\ndescription: Use when driving Word (WINWORD.EXE).\n---\n\n# Word\n\nBody.\n";
 const TEST_JSON: &str = "{\"skill\":\"acme.word\",\"task\":\"t\",\"steps\":[],\"verify\":[\"a\"]}\n";
@@ -493,8 +494,12 @@ fn a_signature_is_checked_and_the_publisher_is_pinned_by_the_first_script_a_pers
 
     // Approving a script is what pins the publisher to the key; approving a file that is not a script does nothing.
     assert!(c.skill_publisher_pins().unwrap().is_empty());
-    assert!(!c.skill_script_set_approved("s1", "test.json", true, 5).unwrap());
-    assert!(c.skill_script_set_approved("s1", "scripts/run.py", true, 5).unwrap());
+    let sha = sha256_hex(PY.as_bytes());
+    let approve = |id: &str, path: &str, sha: &str| c.skill_script_set_approved(id, path, ScriptApproval::Approve { reviewed_sha256: sha }, 5).unwrap();
+    assert_eq!(approve("s1", "test.json", &sha), ScriptOutcome::NotAScript);
+    assert_eq!(approve("s1", "scripts/run.py", &"0".repeat(64)), ScriptOutcome::Changed, "only the reviewed text is approved");
+    assert!(c.skill_publisher_pins().unwrap().is_empty());
+    assert_eq!(approve("s1", "scripts/run.py", &sha), ScriptOutcome::Done);
     assert_eq!(c.skill_publisher_pins().unwrap().get("acme"), Some(&test_keys::public_key(1)));
     assert_eq!(c.skill_app_get("s1").unwrap().unwrap().signature.state, SignatureState::Signed);
 
@@ -516,10 +521,27 @@ fn only_an_approved_script_is_written_beside_skill_md_and_revoking_takes_it_back
     let skills = vec![agent_skill("s1", "acme-word")];
     let has_script = |c: &Store| sibling_files(&skills, c).iter().any(|f| f.filename.ends_with("scripts/run.py"));
     assert!(!has_script(&c));
-    c.skill_script_set_approved("s1", "scripts/run.py", true, 2).unwrap();
+    let sha = sha256_hex(PY.as_bytes());
+    c.skill_script_set_approved("s1", "scripts/run.py", ScriptApproval::Approve { reviewed_sha256: &sha }, 2).unwrap();
     assert!(has_script(&c));
-    c.skill_script_set_approved("s1", "scripts/run.py", false, 3).unwrap();
+    c.skill_script_set_approved("s1", "scripts/run.py", ScriptApproval::Revoke, 3).unwrap();
     assert!(!has_script(&c));
+}
+
+#[test]
+fn a_script_of_a_skill_signed_by_another_key_than_the_pin_cannot_be_approved() {
+    // Two skills of one publisher, imported before any approval, so no pin existed to stop either.
+    let (first, second, c) = (signed_with_script(1, "1.0.0"), signed_with_script(2, "1.0.0"), catalog());
+    c.skill_upsert_unique_global(&catalog_skill("s1", "acme-word")).unwrap();
+    c.skill_upsert_unique_global(&catalog_skill("s2", "acme-word-two")).unwrap();
+    install_checked(&c, "s1", &first, 1).unwrap();
+    install_checked(&c, "s2", &second, 1).unwrap();
+    let sha = sha256_hex(PY.as_bytes());
+    let approve = |id: &str| c.skill_script_set_approved(id, "scripts/run.py", ScriptApproval::Approve { reviewed_sha256: &sha }, 2).unwrap();
+    assert_eq!(approve("s1"), ScriptOutcome::Done);
+    assert_eq!(approve("s2"), ScriptOutcome::OtherAuthor);
+    assert!(!c.skill_files("s2").unwrap().iter().any(|f| f.approved));
+    assert_eq!(c.skill_publisher_pins().unwrap().get("acme"), Some(&crate::backend::widget::signature::test_keys::public_key(1)));
 }
 
 /// What the importer does: check the signature, then install with the key it returned.

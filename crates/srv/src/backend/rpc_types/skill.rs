@@ -415,6 +415,9 @@ pub struct CommandSkillCatalogAppScriptData {
     pub skill_id: String,
     pub path: String,
     pub approved: bool,
+    /// The SHA-256 of the script the person read. Approving applies only to that text, so a script replaced
+    /// since is refused; revoking ignores it.
+    pub sha256: String,
 }
 
 /// Result of `skill.catalog.app_script`.

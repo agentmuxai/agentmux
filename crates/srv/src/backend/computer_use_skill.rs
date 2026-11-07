@@ -288,7 +288,7 @@ pub fn script_infos(manifest_json: &str) -> Vec<crate::backend::storage::skill_a
         .unwrap_or_default()
 }
 
-fn sha256_hex(bytes: &[u8]) -> String {
+pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
     Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
 }
 

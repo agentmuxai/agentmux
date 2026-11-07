@@ -159,6 +159,24 @@ pub struct SkillAppInfo {
     pub references: Vec<ReferenceInfo>,
 }
 
+/// What a person asks of a script: revoke it, or approve the text with this hash.
+#[derive(Debug, Clone, Copy)]
+pub enum ScriptApproval<'a> {
+    Revoke,
+    Approve { reviewed_sha256: &'a str },
+}
+
+/// What `skill_script_set_approved` did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScriptOutcome {
+    Done,
+    NotAScript,
+    /// The script is not the text that was reviewed: it was replaced since.
+    Changed,
+    /// The publisher is pinned to another key than this skill's signer.
+    OtherAuthor,
+}
+
 /// What a script's manifest entry says about it, for the prompt that asks for its approval.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
@@ -436,20 +454,46 @@ impl Store {
         pins_of(&conn)
     }
 
-    /// Approve or revoke one script. Approving pins the skill's publisher to the key that signed it, when it
-    /// is signed and not pinned yet. `false` when the file is not a script of this skill.
-    pub fn skill_script_set_approved(&self, skill_id: &str, path: &str, approved: bool, now_ms: i64) -> Result<bool, StoreError> {
+    /// Approve or revoke one script. Approving needs the SHA-256 the person reviewed and applies only if the stored
+    /// script still has it, and not at all when the skill's publisher is pinned to another key than the one that
+    /// signed this skill (or it is unsigned): that is a different author, not an update. A first approval of a
+    /// signed skill pins its publisher to the signer's key.
+    pub fn skill_script_set_approved(&self, skill_id: &str, path: &str, approval: ScriptApproval<'_>, now_ms: i64) -> Result<ScriptOutcome, StoreError> {
         let conn = self.conn.lock().unwrap();
         conn.execute_batch(SCHEMA)?;
-        let n = conn.execute("UPDATE db_skill_file SET approved = ?3 WHERE skill_id = ?1 AND path = ?2 AND script = 1", params![skill_id, path, approved as i64])?;
-        if n > 0 && approved {
-            conn.execute(
-                "INSERT OR IGNORE INTO db_skill_publisher_pin (publisher, public_key, pinned_at)
-                 SELECT a.publisher, s.signer_key, ?2 FROM db_skill_app a JOIN db_skill_signature s ON s.skill_id = a.skill_id WHERE a.skill_id = ?1",
-                params![skill_id, now_ms],
-            )?;
+        let stored: Option<String> = conn
+            .query_row("SELECT sha256 FROM db_skill_file WHERE skill_id = ?1 AND path = ?2 AND script = 1", params![skill_id, path], |r| r.get(0))
+            .optional()?;
+        let Some(stored) = stored else { return Ok(ScriptOutcome::NotAScript) };
+        let ScriptApproval::Approve { reviewed_sha256 } = approval else {
+            conn.execute("UPDATE db_skill_file SET approved = 0 WHERE skill_id = ?1 AND path = ?2", params![skill_id, path])?;
+            return Ok(ScriptOutcome::Done);
+        };
+        if stored != reviewed_sha256 {
+            return Ok(ScriptOutcome::Changed);
         }
-        Ok(n > 0)
+        let (publisher, signer): (Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT a.publisher, (SELECT signer_key FROM db_skill_signature WHERE skill_id = a.skill_id)
+                 FROM db_skill_app a WHERE a.skill_id = ?1",
+                params![skill_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?
+            .unwrap_or((None, None));
+        if let Some(publisher) = &publisher {
+            let pinned: Option<String> = conn.query_row("SELECT public_key FROM db_skill_publisher_pin WHERE publisher = ?1", params![publisher], |r| r.get(0)).optional()?;
+            if pinned.is_some() && pinned != signer {
+                return Ok(ScriptOutcome::OtherAuthor);
+            }
+        }
+        conn.execute("UPDATE db_skill_file SET approved = 1 WHERE skill_id = ?1 AND path = ?2", params![skill_id, path])?;
+        conn.execute(
+            "INSERT OR IGNORE INTO db_skill_publisher_pin (publisher, public_key, pinned_at)
+             SELECT a.publisher, s.signer_key, ?2 FROM db_skill_app a JOIN db_skill_signature s ON s.skill_id = a.skill_id WHERE a.skill_id = ?1",
+            params![skill_id, now_ms],
+        )?;
+        Ok(ScriptOutcome::Done)
     }
 
     /// Drop a deleted skill's manifest, files and records. Call on the catalog store.

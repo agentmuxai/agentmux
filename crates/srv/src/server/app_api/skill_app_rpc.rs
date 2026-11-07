@@ -8,6 +8,7 @@
 //! flips for itself; the `Skills` tool offers `get` of a file but no approval.
 
 use super::*;
+use crate::backend::storage::skill_app::{ScriptApproval, ScriptOutcome};
 use crate::backend::rpc_types::{CommandSkillCatalogAppFileData, CommandSkillCatalogAppScriptData, SkillAppFile, SkillAppScriptResult};
 
 pub(super) fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -52,9 +53,14 @@ fn register_app_script(engine: &Arc<WshRpcEngine>, state: &AppState) {
         async move {
             const E: &str = "skill.catalog.app_script";
             global_app_skill(&identity_store, &req.skill_id, E)?;
-            let changed = identity_store.skill_script_set_approved(&req.skill_id, &req.path, req.approved, now_ms()).map_err(|e| format!("{E}: {e}"))?;
-            if !changed {
-                return Err(format!("{E}: {} is not a script of that skill", req.path));
+            let approval = if req.approved { ScriptApproval::Approve { reviewed_sha256: &req.sha256 } } else { ScriptApproval::Revoke };
+            match identity_store.skill_script_set_approved(&req.skill_id, &req.path, approval, now_ms()).map_err(|e| format!("{E}: {e}"))? {
+                ScriptOutcome::Done => {}
+                ScriptOutcome::NotAScript => return Err(format!("{E}: {} is not a script of that skill", req.path)),
+                ScriptOutcome::Changed => return Err(format!("{E}: {} is not the text you reviewed; it was replaced, so review it again", req.path)),
+                ScriptOutcome::OtherAuthor => {
+                    return Err(format!("{E}: this skill is not signed by the key its publisher is pinned to: a different author, not an update"));
+                }
             }
             tracing::info!(skill = %req.skill_id, path = %req.path, approved = req.approved, "skill: a script was {} in Memory", if req.approved { "approved" } else { "revoked" });
             broker.publish_event::<crate::backend::mps_events::SkillsChanged>(&(), vec![], 0);

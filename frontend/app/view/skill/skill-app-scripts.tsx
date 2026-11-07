@@ -39,7 +39,7 @@ export function ScriptReview(p: {
         setBusy(true);
         setError("");
         try {
-            await RpcApi.SkillCatalogAppScriptCommand(TabRpcClient, { skill_id: p.skillId, path: p.file.path, approved });
+            await RpcApi.SkillCatalogAppScriptCommand(TabRpcClient, { skill_id: p.skillId, path: p.file.path, approved, sha256: p.file.sha256 });
         } catch (e) {
             setError(e instanceof Error ? e.message : String(e));
         } finally {
