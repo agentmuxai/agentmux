@@ -357,7 +357,6 @@
 121 frontend/app/notification/notificationitem.tsx::NotificationItem
 148 frontend/app/notification/sound/sound-service.ts::installSoundService
 111 frontend/app/platform/pane-overlay.ts::flushClip
-158 frontend/app/scroll/follow-scroll.ts::createFollowScroll
 175 frontend/app/selection/selection-effects.ts::createSelectionRunner
 104 frontend/app/selection/selection-machine.ts::transition
 139 frontend/app/statusbar/BackendStatus.tsx::BackendStatus
