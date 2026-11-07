@@ -3,15 +3,23 @@
 
 // SPEC_HELP_PANE_FILTER_2026_10_08.md: the Help pane's filter.
 
-import { cleanup, render, screen } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const openKeyboardSettings = vi.hoisted(() => vi.fn());
+vi.mock("@/app/store/keyboard-focus-request", () => ({ openKeyboardSettings }));
 vi.mock("@/app/keybindings", () => ({
     keyPlatform: () => "other",
     shortcutFor: (command: string) => (command === "pane:close" ? "⌘W" : ""),
     shortcutHelp: () => [
         { category: "Panes", entries: [{ label: "Split pane right", keys: ["⌘D"] }, { label: "Close pane", keys: ["⌘W"] }] },
-        { category: "Tabs & windows", entries: [{ label: "New tab", keys: ["⌘T"] }] },
+        {
+            category: "Tabs & windows",
+            entries: [
+                { label: "New tab", keys: ["⌘T"] },
+                { label: "Close tab", keys: [], command: "tab:close", unbound: true },
+            ],
+        },
     ],
 }));
 
@@ -55,6 +63,21 @@ describe("QuickTips filter", () => {
         render(() => <QuickTips filter="zzzz" />);
         expect(screen.getByText(/Nothing in Help matches/)).toBeTruthy();
         expect(screen.queryByText("Keyboard Shortcuts")).toBeNull();
+    });
+});
+
+describe("Help's links to Settings", () => {
+    it("opens Keyboard shortcuts from Customize", () => {
+        render(() => <QuickTips />);
+        fireEvent.click(screen.getByRole("button", { name: /Customize/ }));
+        expect(openKeyboardSettings).toHaveBeenCalledWith();
+    });
+
+    it("says Not set for a command with no key and links to its line", () => {
+        render(() => <QuickTips filter="close tab" />);
+        expect(screen.getByText("Not set")).toBeTruthy();
+        fireEvent.click(screen.getByRole("button", { name: /Set…/ }));
+        expect(openKeyboardSettings).toHaveBeenCalledWith("tab:close");
     });
 });
 

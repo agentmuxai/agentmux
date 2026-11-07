@@ -447,7 +447,6 @@
 109 frontend/app/view/settings/sections/pinned-senders.tsx::PinnedSenders
 114 frontend/app/view/settings/sections/widget-bar-settings.tsx::WidgetBarSettings
 104 frontend/app/view/settings/sections/widget-catalog.tsx::WidgetCatalog
-105 frontend/app/view/settings/settings-view.tsx::SettingsView
 137 frontend/app/view/shortcuts/shortcuts.tsx::ShortcutsView
 111 frontend/app/view/swarm/swarm-agent-list.tsx::SwarmAgentList
 131 frontend/app/view/swarm/swarm-fleet-toolbar.tsx::SuperviseActions
