@@ -1,0 +1,309 @@
+model.updateDiff j1
+Button "Accept the update" onClick
+model.save {"job_id":"j1","definition":{"template":{"id":"nightly-build","version":"1.1.0","hash":"hash-new"}}}
+-- saving
+<div>
+  <section class="warden-jobs-update" aria-label="Update for Nightly build">
+    <h3 class="warden-jobs-heading">
+      "Update for"
+      "Nightly build"
+    <p>
+      "nightly-build"
+      ":"
+      <strong>
+        "1.0.0"
+      "→"
+      <strong>
+        "1.1.0"
+    <dl class="warden-jobs-facts">
+      <dt>
+        "Brief"
+      <dd class="warden-jobs-brief-diff">
+        <pre class="warden-jobs-brief" data-side="before">
+          "Build it."
+        <pre class="warden-jobs-brief" data-side="after">
+          "Build it and test it."
+      <dt>
+        "Outputs"
+      <dd>
+        <span data-stand="Pill" data-tone="ok">
+          "+"
+          "comment"
+        <span data-stand="Pill" data-tone="error">
+          "−"
+          "pull_request"
+      <dt>
+        "Secrets"
+      <dd>
+        <span data-stand="Pill" data-tone="ok">
+          "+"
+          "REPO_TOKEN"
+      <dt>
+        "max_runs_per_day"
+      <dd>
+        <span class="warden-jobs-before">
+          "4"
+        "→"
+        <span class="warden-jobs-after">
+          "8"
+      <dt>
+        "timeout"
+      <dd>
+        <span class="warden-jobs-before">
+          "10m"
+        "→"
+        <span class="warden-jobs-after">
+          "5m"
+    <div class="warden-jobs-actions">
+      <span data-stand="Button" data-tone="accent" data-icon="check" data-busy="true">
+        "Accept the update"
+      <span data-stand="Button" data-tone="quiet" data-busy="undefined">
+        "Close"
+onClose
+closed 1 time(s)
+-- saved
+<div>
+  <section class="warden-jobs-update" aria-label="Update for Nightly build">
+    <h3 class="warden-jobs-heading">
+      "Update for"
+      "Nightly build"
+    <p>
+      "nightly-build"
+      ":"
+      <strong>
+        "1.0.0"
+      "→"
+      <strong>
+        "1.1.0"
+    <dl class="warden-jobs-facts">
+      <dt>
+        "Brief"
+      <dd class="warden-jobs-brief-diff">
+        <pre class="warden-jobs-brief" data-side="before">
+          "Build it."
+        <pre class="warden-jobs-brief" data-side="after">
+          "Build it and test it."
+      <dt>
+        "Outputs"
+      <dd>
+        <span data-stand="Pill" data-tone="ok">
+          "+"
+          "comment"
+        <span data-stand="Pill" data-tone="error">
+          "−"
+          "pull_request"
+      <dt>
+        "Secrets"
+      <dd>
+        <span data-stand="Pill" data-tone="ok">
+          "+"
+          "REPO_TOKEN"
+      <dt>
+        "max_runs_per_day"
+      <dd>
+        <span class="warden-jobs-before">
+          "4"
+        "→"
+        <span class="warden-jobs-after">
+          "8"
+      <dt>
+        "timeout"
+      <dd>
+        <span class="warden-jobs-before">
+          "10m"
+        "→"
+        <span class="warden-jobs-after">
+          "5m"
+    <div class="warden-jobs-actions">
+      <span data-stand="Button" data-tone="accent" data-icon="check" data-busy="false">
+        "Accept the update"
+      <span data-stand="Button" data-tone="quiet" data-busy="undefined">
+        "Close"
+Button "Accept the update" onClick
+model.save {"job_id":"j1","definition":{"template":{"id":"nightly-build","version":"1.1.0","hash":"hash-new"}}}
+-- not saved, with a reason
+<div>
+  <section class="warden-jobs-update" aria-label="Update for Nightly build">
+    <h3 class="warden-jobs-heading">
+      "Update for"
+      "Nightly build"
+    <p>
+      "nightly-build"
+      ":"
+      <strong>
+        "1.0.0"
+      "→"
+      <strong>
+        "1.1.0"
+    <dl class="warden-jobs-facts">
+      <dt>
+        "Brief"
+      <dd class="warden-jobs-brief-diff">
+        <pre class="warden-jobs-brief" data-side="before">
+          "Build it."
+        <pre class="warden-jobs-brief" data-side="after">
+          "Build it and test it."
+      <dt>
+        "Outputs"
+      <dd>
+        <span data-stand="Pill" data-tone="ok">
+          "+"
+          "comment"
+        <span data-stand="Pill" data-tone="error">
+          "−"
+          "pull_request"
+      <dt>
+        "Secrets"
+      <dd>
+        <span data-stand="Pill" data-tone="ok">
+          "+"
+          "REPO_TOKEN"
+      <dt>
+        "max_runs_per_day"
+      <dd>
+        <span class="warden-jobs-before">
+          "4"
+        "→"
+        <span class="warden-jobs-after">
+          "8"
+      <dt>
+        "timeout"
+      <dd>
+        <span class="warden-jobs-before">
+          "10m"
+        "→"
+        <span class="warden-jobs-after">
+          "5m"
+    <div class="warden-manager-error" role="alert">
+      "The name is taken."
+    <div class="warden-jobs-actions">
+      <span data-stand="Button" data-tone="accent" data-icon="check" data-busy="false">
+        "Accept the update"
+      <span data-stand="Button" data-tone="quiet" data-busy="undefined">
+        "Close"
+Button "Accept the update" onClick
+model.save {"job_id":"j1","definition":{"template":{"id":"nightly-build","version":"1.1.0","hash":"hash-new"}}}
+-- not saved, no reason
+<div>
+  <section class="warden-jobs-update" aria-label="Update for Nightly build">
+    <h3 class="warden-jobs-heading">
+      "Update for"
+      "Nightly build"
+    <p>
+      "nightly-build"
+      ":"
+      <strong>
+        "1.0.0"
+      "→"
+      <strong>
+        "1.1.0"
+    <dl class="warden-jobs-facts">
+      <dt>
+        "Brief"
+      <dd class="warden-jobs-brief-diff">
+        <pre class="warden-jobs-brief" data-side="before">
+          "Build it."
+        <pre class="warden-jobs-brief" data-side="after">
+          "Build it and test it."
+      <dt>
+        "Outputs"
+      <dd>
+        <span data-stand="Pill" data-tone="ok">
+          "+"
+          "comment"
+        <span data-stand="Pill" data-tone="error">
+          "−"
+          "pull_request"
+      <dt>
+        "Secrets"
+      <dd>
+        <span data-stand="Pill" data-tone="ok">
+          "+"
+          "REPO_TOKEN"
+      <dt>
+        "max_runs_per_day"
+      <dd>
+        <span class="warden-jobs-before">
+          "4"
+        "→"
+        <span class="warden-jobs-after">
+          "8"
+      <dt>
+        "timeout"
+      <dd>
+        <span class="warden-jobs-before">
+          "10m"
+        "→"
+        <span class="warden-jobs-after">
+          "5m"
+    <div class="warden-manager-error" role="alert">
+      "It wasn't saved."
+    <div class="warden-jobs-actions">
+      <span data-stand="Button" data-tone="accent" data-icon="check" data-busy="false">
+        "Accept the update"
+      <span data-stand="Button" data-tone="quiet" data-busy="undefined">
+        "Close"
+Button "Accept the update" onClick
+model.save {"job_id":"j1","definition":{"template":{"id":"nightly-build","version":"1.1.0","hash":"hash-new"}}}
+-- save threw
+<div>
+  <section class="warden-jobs-update" aria-label="Update for Nightly build">
+    <h3 class="warden-jobs-heading">
+      "Update for"
+      "Nightly build"
+    <p>
+      "nightly-build"
+      ":"
+      <strong>
+        "1.0.0"
+      "→"
+      <strong>
+        "1.1.0"
+    <dl class="warden-jobs-facts">
+      <dt>
+        "Brief"
+      <dd class="warden-jobs-brief-diff">
+        <pre class="warden-jobs-brief" data-side="before">
+          "Build it."
+        <pre class="warden-jobs-brief" data-side="after">
+          "Build it and test it."
+      <dt>
+        "Outputs"
+      <dd>
+        <span data-stand="Pill" data-tone="ok">
+          "+"
+          "comment"
+        <span data-stand="Pill" data-tone="error">
+          "−"
+          "pull_request"
+      <dt>
+        "Secrets"
+      <dd>
+        <span data-stand="Pill" data-tone="ok">
+          "+"
+          "REPO_TOKEN"
+      <dt>
+        "max_runs_per_day"
+      <dd>
+        <span class="warden-jobs-before">
+          "4"
+        "→"
+        <span class="warden-jobs-after">
+          "8"
+      <dt>
+        "timeout"
+      <dd>
+        <span class="warden-jobs-before">
+          "10m"
+        "→"
+        <span class="warden-jobs-after">
+          "5m"
+    <div class="warden-manager-error" role="alert">
+      "Error: offline"
+    <div class="warden-jobs-actions">
+      <span data-stand="Button" data-tone="accent" data-icon="check" data-busy="false">
+        "Accept the update"
+      <span data-stand="Button" data-tone="quiet" data-busy="undefined">
+        "Close"
+Button "Close" onClick
+onClose
