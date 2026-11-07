@@ -1,0 +1,16 @@
+set notify:sounds:enabled false
+set notify:sounds:suppresswhenfocused false
+set notify:tooltones:flash false
+set notify:sound:agent.turn.complete false
+set notify:sound:agent.turn.error false
+set notify:sound:agent.turn.interrupted false
+set notify:sound:agent.message.accepted false
+set notify:sound:agent.message.rejected false
+set notify:tooltones:enabled false
+set notify:sound:agent.waiting.for.input false
+set notify:waiting:browser false
+set notify:sound:agent.shutdown.pending false
+set notify:sounds:volume 0.7
+set notify:tooltones:volume 0.7
+set notify:sounds:waiting:volume 0.7
+set notify:tooltones:scope "focused"
