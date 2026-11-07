@@ -205,7 +205,7 @@ export function createFollowScroll(
         scrollbarHeld: () => scrollbarHeld,
         observed(kind, geo) {
             if (geo.clientHeight <= 0) {
-                dispatch({ type: "BecameZeroSize" }, false);
+                dispatch({ type: "BecameZeroSize", via: kind, geo }, false);
                 return false;
             }
             last = geo;
@@ -315,7 +315,7 @@ function listenForGestures(scroller: HTMLElement, on: GestureHandlers): () => vo
 
 /** What a ResizeObserver observation means to a pane in `state`: sized again, or the content or viewport changed. */
 function resizeEvent(state: FollowState, kind: "content" | "viewport", geo: ScrollGeometry): FollowEvent {
-    if (state.kind === "SUSPENDED") return { type: "BecameSized" };
+    if (state.kind === "SUSPENDED") return { type: "BecameSized", via: kind, geo };
     return { type: kind === "content" ? "ContentResized" : "ViewportResized", geo };
 }
 

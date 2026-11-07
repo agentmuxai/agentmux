@@ -323,7 +323,7 @@
 147 frontend/app-init.ts::initHostMux
 163 frontend/app-init.ts::initHostNewWindow
 217 frontend/app-init.ts::initMux
-366 frontend/app/block/block.tsx::Block
+364 frontend/app/block/block.tsx::Block
 142 frontend/app/block/block.tsx::BlockFull
 280 frontend/app/block/blockframe.tsx::BlockFrame_Header
 117 frontend/app/block/blockframe.tsx::EndIcons

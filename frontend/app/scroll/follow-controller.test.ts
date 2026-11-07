@@ -335,6 +335,21 @@ describe("followReducer — §5.3, row by row", () => {
     });
 
     describe("BecameZeroSize / BecameSized", () => {
+        it("log which observer saw the size and the geometry it saw", () => {
+            const hidden = followReducer(FOLLOWING, {
+                type: "BecameZeroSize",
+                via: "viewport",
+                geo: { scrollTop: 700, scrollHeight: 1000.4, clientHeight: 0 },
+            });
+            expect(transition(hidden.effects)).toMatchObject({ cause: "zero-size", detail: "via=viewport ch=0 sh=1000 top=700" });
+            const shown = followReducer(hidden.state, {
+                type: "BecameSized",
+                via: "content",
+                geo: { scrollTop: 0, scrollHeight: 1200, clientHeight: 300 },
+            });
+            expect(transition(shown.effects)).toMatchObject({ cause: "sized", detail: "via=content ch=300 sh=1200 top=0" });
+        });
+
         it("hidden suspends with the previous state; shown restores it", () => {
             for (const s of [FOLLOWING, DETACHED]) {
                 const hidden = followReducer(s, { type: "BecameZeroSize" });
