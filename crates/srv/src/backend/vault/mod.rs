@@ -16,6 +16,7 @@ pub mod files;
 pub mod generate;
 pub mod history;
 pub mod import;
+pub mod inspect;
 pub mod kdbx_export;
 pub mod kdbx_names;
 pub mod kinds;
