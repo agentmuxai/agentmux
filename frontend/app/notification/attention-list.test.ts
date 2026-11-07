@@ -6,6 +6,8 @@ import { mergeAttention } from "./attention-list";
 
 vi.mock("@/app/store/agent-runtime-live", () => ({ sharedAgentRuntime: () => ({ rows: () => [] }) }));
 vi.mock("./waiting-for-you", () => ({ waitingPanes: () => [] }));
+vi.mock("@/app/block/pane-color-scheme", () => ({ paneRoleColor: () => undefined }));
+vi.mock("@/app/block/pane-identity", () => ({ isLightThemeActive: () => false }));
 vi.mock("@/app/store/global", () => ({ MOS: {}, workspace: () => null }));
 
 const row = (over: Partial<AgentRuntime>): AgentRuntime =>
@@ -33,6 +35,7 @@ describe("mergeAttention", () => {
             {
                 blockId: "b1",
                 name: "Korp",
+                agentId: "a",
                 color: "#3b82f6",
                 what: "asks to approve a Bash call",
                 since: 100,

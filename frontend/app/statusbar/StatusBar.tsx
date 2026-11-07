@@ -13,6 +13,8 @@ import { GpuStatus } from "./GpuStatus";
 import { HostPopover } from "./HostPopover";
 import { InstancePanel } from "./InstancePanel";
 import { AgentCountsStatus } from "./AgentCountsStatus";
+import { attentionItems } from "@/app/notification/attention-list";
+import { slotDropAt } from "./status-bar-fit";
 import { VaultRequestsStatus } from "./VaultRequestsStatus";
 import { MultiInputStatus } from "./MultiInputStatus";
 import { MuxBusIndicator } from "./MuxBusIndicator";
@@ -151,7 +153,14 @@ const StatusBar = (): JSX.Element => {
     useWidthFit(() => barRef, FIT_TIERS, (el) => [...el.querySelectorAll(".status-bar-left, .status-bar-right")], chromeZoomAtom);
     // The separator goes with its item, so a hidden item leaves none behind.
     const slot = (item: StatusBarItem, separated: boolean) => (
-        <span class="status-bar-slot" data-drop-at={item.dropAt ?? (item.id.startsWith("agentmux:") ? undefined : WIDGET_DROP_AT)}>
+        <span
+            class="status-bar-slot"
+            data-drop-at={slotDropAt(
+                item.id,
+                item.dropAt ?? (item.id.startsWith("agentmux:") ? undefined : WIDGET_DROP_AT),
+                attentionItems().length > 0
+            )}
+        >
             <Show when={separated}>
                 <span class="stat-separator">|</span>
             </Show>
