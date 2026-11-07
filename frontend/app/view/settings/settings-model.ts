@@ -13,6 +13,7 @@ export type SettingsSection =
     | "window"
     | "browser"
     | "terminal"
+    | "keyboard"
     | "sounds"
     | "notifications"
     | "recording"
@@ -52,6 +53,7 @@ export const SETTINGS_SECTION_LABELS: Record<SettingsSection, string> = {
     window: "Window & Panes",
     browser: "Browser",
     terminal: "Terminal",
+    keyboard: "Keyboard shortcuts",
     sounds: "Sounds",
     notifications: "Notifications & Tray",
     recording: "Recording",
@@ -70,6 +72,7 @@ export const SETTINGS_SECTIONS: PaneSections<SettingsSection> = {
         { id: "window", label: SETTINGS_SECTION_LABELS.window, icon: "table-cells" },
         { id: "browser", label: SETTINGS_SECTION_LABELS.browser, icon: "globe" },
         { id: "terminal", label: SETTINGS_SECTION_LABELS.terminal, icon: "terminal" },
+        { id: "keyboard", label: SETTINGS_SECTION_LABELS.keyboard, icon: "keyboard" },
         { id: "sounds", label: SETTINGS_SECTION_LABELS.sounds, icon: "volume-high" },
         { id: "notifications", label: SETTINGS_SECTION_LABELS.notifications, icon: "bell" },
         { id: "recording", label: SETTINGS_SECTION_LABELS.recording, icon: "microphone" },

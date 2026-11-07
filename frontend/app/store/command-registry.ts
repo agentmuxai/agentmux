@@ -22,6 +22,7 @@ import { userInThisWindow } from "@/app/store/input-owner";
 import { openConnectors, openMemory } from "@/app/store/section-panes";
 import { runViewAction } from "@/app/store/view-actions";
 import { openOrFocusPaneByView } from "@/app/store/block-component-registry";
+import { openKeyboardSettings } from "@/app/view/settings/open-settings";
 import { toggleStatusBar } from "@/app/statusbar/status-bar-visibility";
 import { devModeOn, toggleDevMode } from "@/app/store/dev-mode";
 import { paneHistoryBack, paneHistoryForward } from "@/app/store/pane-history";
@@ -672,6 +673,14 @@ function registerAppCommands(): void {
         icon: "cog",
         keywords: "preferences options configure",
         execute: () => fireAndForget(() => openOrFocusPaneByView("settings")),
+    });
+    commandRegistry.register({
+        id: "settings:keyboard",
+        label: "Customize keyboard shortcuts",
+        category: "App",
+        icon: "keyboard",
+        keywords: "keybindings hotkeys rebind shortcuts keys settings",
+        execute: () => fireAndForget(() => openKeyboardSettings()),
     });
     commandRegistry.register({
         id: "open:toolchain",

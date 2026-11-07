@@ -1,7 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { For, Match, Show, Switch, type JSX } from "solid-js";
+import { For, Show, type JSX } from "solid-js";
+import { Dynamic } from "solid-js/web";
 
 import { Button, TabbedPane, type TabItem } from "@/app/element/ui";
 
@@ -14,6 +15,7 @@ import { AnimationsSection } from "./sections/animations-section";
 import { WindowPanesSection } from "./sections/window-panes-section";
 import { BrowserSection } from "./sections/browser-section";
 import { TerminalSection } from "./sections/terminal-section";
+import { KeyboardSection } from "./sections/keyboard-section";
 import { SoundsSection } from "./sections/sounds-section";
 import { NotificationsSection } from "./sections/notifications-section";
 import { RecordingSection } from "./sections/recording-section";
@@ -56,6 +58,23 @@ export function ConfigErrorsBanner(props: { onOpen: (file: ConfigFile) => void }
 
 const RAIL: TabItem<SettingsSection>[] = [...SETTINGS_SECTIONS.items];
 
+// The body each rail entry shows. A section mounts when its tab is chosen and unmounts when another is.
+const SECTION_VIEWS: Record<SettingsSection, () => JSX.Element> = {
+    appearance: AppearanceSection,
+    animations: AnimationsSection,
+    window: WindowPanesSection,
+    browser: BrowserSection,
+    terminal: TerminalSection,
+    keyboard: KeyboardSection,
+    sounds: SoundsSection,
+    notifications: NotificationsSection,
+    recording: RecordingSection,
+    devices: DevicesSection,
+    widgets: WidgetsSection,
+    agents: AgentsSection,
+    advanced: AdvancedSection,
+};
+
 // ── Main view ─────────────────────────────────────────────────────────────────
 
 // Brief on-screen confirmation that a search result actually landed on the
@@ -86,7 +105,7 @@ export function SettingsView(props: { model: SettingsViewModel }): JSX.Element {
             return;
         }
         props.model.setSection(entry.section);
-        // The target section's row only exists in the DOM once its <Match>
+        // The target section's row only exists in the DOM once its section
         // arm has (re-)rendered for the new section — queueMicrotask, not a
         // same-tick lookup, mirrors the same pattern the command palette
         // uses for its own post-mount focus() (command-palette.tsx).
@@ -118,44 +137,7 @@ export function SettingsView(props: { model: SettingsViewModel }): JSX.Element {
                         onSelectResult={handleSelectResult}
                     />
                     <ConfigErrorsBanner onOpen={(f) => void openFile(f)} />
-                    <Switch>
-                        <Match when={section() === "appearance"}>
-                            <AppearanceSection />
-                        </Match>
-                        <Match when={section() === "animations"}>
-                            <AnimationsSection />
-                        </Match>
-                        <Match when={section() === "window"}>
-                            <WindowPanesSection />
-                        </Match>
-                        <Match when={section() === "browser"}>
-                            <BrowserSection />
-                        </Match>
-                        <Match when={section() === "terminal"}>
-                            <TerminalSection />
-                        </Match>
-                        <Match when={section() === "sounds"}>
-                            <SoundsSection />
-                        </Match>
-                        <Match when={section() === "notifications"}>
-                            <NotificationsSection />
-                        </Match>
-                        <Match when={section() === "recording"}>
-                            <RecordingSection />
-                        </Match>
-                        <Match when={section() === "devices"}>
-                            <DevicesSection />
-                        </Match>
-                        <Match when={section() === "widgets"}>
-                            <WidgetsSection />
-                        </Match>
-                        <Match when={section() === "agents"}>
-                            <AgentsSection />
-                        </Match>
-                        <Match when={section() === "advanced"}>
-                            <AdvancedSection />
-                        </Match>
-                    </Switch>
+                    <Dynamic component={SECTION_VIEWS[section()]} />
                     <footer class="settings-footer">
                         <Button icon="file-code" onClick={() => void openRaw()}>
                             Open raw settings.json
