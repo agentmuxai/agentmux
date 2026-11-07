@@ -1,0 +1,19 @@
+onMuxEvent sysinfo local
+sysinfo 65 cores
+65 cores: --cols=14 --sq=22px
+sysinfo 128 cores
+128 cores: --cols=14 --sq=22px
+sysinfo 129 cores
+129 cores: --cols=14 --sq=22px
+sysinfo 200 cores
+200 cores: --cols=16 --sq=19px
+sysinfo 256 cores
+256 cores: --cols=18 --sq=17px
+sysinfo 400 cores
+400 cores: --cols=22 --sq=13px
+sysinfo 600 cores
+600 cores: --cols=28 --sq=10px
+sysinfo 700 cores
+700 cores: --cols=28 --sq=10px
+sysinfo 2000 cores
+2000 cores: --cols=28 --sq=10px
