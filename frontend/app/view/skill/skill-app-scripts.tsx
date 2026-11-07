@@ -6,6 +6,8 @@
  * never written to an agent's folder until a person approves it here; approving pins the publisher's key.
  */
 
+// reactive-coverage: one-shot a script's text is read when the person opens its Review panel and read again when its hash changes; nothing else changes it
+
 import { createResource, createSignal, For, Show, type JSX } from "solid-js";
 import { Button, Pill } from "@/app/element/ui";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -20,8 +22,10 @@ export function ScriptReview(p: { skillId: string; file: SkillFileInfo; info: Sc
     const [open, setOpen] = createSignal(false);
     const [busy, setBusy] = createSignal(false);
     const [error, setError] = createSignal("");
-    const [source] = createResource(open, async (isOpen) =>
-        isOpen ? (await RpcApi.SkillCatalogAppFileCommand(TabRpcClient, { skill_id: p.skillId, path: p.file.path })).text : "",
+    // Keyed on the hash too: a script replaced by an update is read again, never shown stale.
+    const [source] = createResource(
+        () => (open() ? p.file.sha256 : null),
+        async (sha) => (sha ? (await RpcApi.SkillCatalogAppFileCommand(TabRpcClient, { skill_id: p.skillId, path: p.file.path })).text : ""),
     );
 
     async function setApproved(approved: boolean): Promise<void> {

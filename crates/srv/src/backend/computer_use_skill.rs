@@ -457,8 +457,6 @@ pub fn stashed(content_hash: &str) -> Option<Bundle> {
     s.iter().find(|(at, b)| at.elapsed() < STASH_TTL && b.content_hash == content_hash).map(|(_, b)| b.clone())
 }
 
-/// Write an approved bundle's computer-use part for the catalog skill `skill_id`: the manifest, the files, and the pass
-/// records its folder carried. A script lands unapproved. Call after the skill row itself is written.
 /// The key that signed this bundle: `Ok(None)` for an unsigned one, an error for a signature that does not match
 /// its files. A publisher pinned to another key, or pinned and now unsigned, is refused (`SPEC_PACKS` §5): a
 /// different key than the one the person approved a script of is not an update, it is a different author.
@@ -479,9 +477,18 @@ pub fn check_signature(catalog: &Store, b: &Bundle) -> Result<Option<String>, St
     Ok(signer)
 }
 
-pub fn install(catalog: &Store, skill_id: &str, b: &Bundle, now_ms: i64) -> Result<(), crate::backend::storage::error::StoreError> {
+/// Write an approved bundle's computer-use part for the catalog skill `skill_id`: the manifest, the files, and the pass
+/// records its folder carried. A script lands unapproved. Call after the skill row itself is written.
+/// `signer` is what `check_signature` returned for this bundle: the caller checks first and a refusal never gets here.
+pub fn install(
+    catalog: &Store,
+    skill_id: &str,
+    b: &Bundle,
+    signer: Option<&str>,
+    now_ms: i64,
+) -> Result<(), crate::backend::storage::error::StoreError> {
     catalog.skill_app_set(skill_id, &b.info, &b.manifest_json, &b.content_hash, &b.files, now_ms)?;
-    catalog.skill_signer_set(skill_id, check_signature(catalog, b).ok().flatten().as_deref())?;
+    catalog.skill_signer_set(skill_id, signer)?;
     for r in &b.verified {
         catalog.skill_verified_append(skill_id, r, "import", now_ms)?;
     }

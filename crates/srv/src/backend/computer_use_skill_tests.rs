@@ -333,7 +333,7 @@ fn installed() -> (Store, Bundle) {
     let b = read(&files).unwrap();
     let c = catalog();
     c.skill_upsert_unique_global(&catalog_skill("s1", &b.name)).unwrap();
-    install(&c, "s1", &b, 5).unwrap();
+    install_checked(&c, "s1", &b, 5).unwrap();
     (c, b)
 }
 
@@ -346,7 +346,7 @@ fn installing_a_bundle_stores_the_manifest_files_and_the_pass_records_it_carried
     assert_eq!(files, vec![("controls.md", false, false), ("scripts/run.py", true, false), ("test.json", false, false)]);
     assert_eq!(app.verified.len(), 1);
     // Installed again (an update to the same folder): nothing doubles.
-    install(&c, "s1", &b, 6).unwrap();
+    install_checked(&c, "s1", &b, 6).unwrap();
     let again = c.skill_app_get("s1").unwrap().unwrap();
     assert_eq!((again.files.len(), again.verified.len()), (3, 1));
 }
@@ -371,7 +371,7 @@ fn a_launch_writes_the_files_beside_skill_md_but_not_an_unapproved_script_or_a_c
 fn the_files_follow_the_same_folder_name_as_skill_md_when_two_skills_share_a_name() {
     let (c, b) = installed();
     c.skill_upsert_unique_global(&catalog_skill("s2", "another-name")).unwrap();
-    install(&c, "s2", &b, 5).unwrap();
+    install_checked(&c, "s2", &b, 5).unwrap();
     // Two names that make the same folder name: the second is made unique, and its files follow it.
     let skills = vec![agent_skill("s1", "acme-word"), agent_skill("s2", "Acme Word")];
     let written = crate::backend::agent_config::build_config_files(&Default::default(), &skills, "A", "a1", "a", "w", "claude");
@@ -443,7 +443,7 @@ fn a_scan_reads_a_computer_use_folder_whole_and_refuses_a_broken_one_with_the_re
 fn a_pass_on_an_older_version_does_not_say_tested_here() {
     let (c, _) = installed();
     let v2 = read(&base_files(&manifest("1.1.0", ""))).unwrap();
-    install(&c, "s1", &v2, 7).unwrap();
+    install_checked(&c, "s1", &v2, 7).unwrap();
     let p = skill_for_executable(&c, "windows", "WINWORD.EXE").unwrap();
     assert_eq!((p.version.as_str(), p.verified_here), ("1.1.0", false), "the 1.0.0 pass is kept but does not speak for 1.1.0");
 }
@@ -479,7 +479,7 @@ fn a_signature_is_checked_and_the_publisher_is_pinned_by_the_first_script_a_pers
     let (b1, c) = (signed_with_script(1, "1.0.0"), catalog());
     c.skill_upsert_unique_global(&catalog_skill("s1", &b1.name)).unwrap();
     assert_eq!(check_signature(&c, &b1).unwrap(), Some(test_keys::public_key(1)));
-    install(&c, "s1", &b1, 1).unwrap();
+    install_checked(&c, "s1", &b1, 1).unwrap();
     let app = c.skill_app_get("s1").unwrap().unwrap();
     assert_eq!((app.signature.state, app.signature.publisher.as_str()), (SignatureState::SignedNew, "acme"));
     assert!(app.signature.fingerprint.is_some() && app.signature.pinned.is_none());
@@ -512,7 +512,7 @@ fn a_signature_is_checked_and_the_publisher_is_pinned_by_the_first_script_a_pers
 fn only_an_approved_script_is_written_beside_skill_md_and_revoking_takes_it_back() {
     let (b, c) = (signed_with_script(1, "1.0.0"), catalog());
     c.skill_upsert_unique_global(&catalog_skill("s1", &b.name)).unwrap();
-    install(&c, "s1", &b, 1).unwrap();
+    install_checked(&c, "s1", &b, 1).unwrap();
     let skills = vec![agent_skill("s1", "acme-word")];
     let has_script = |c: &Store| sibling_files(&skills, c).iter().any(|f| f.filename.ends_with("scripts/run.py"));
     assert!(!has_script(&c));
@@ -520,4 +520,10 @@ fn only_an_approved_script_is_written_beside_skill_md_and_revoking_takes_it_back
     assert!(has_script(&c));
     c.skill_script_set_approved("s1", "scripts/run.py", false, 3).unwrap();
     assert!(!has_script(&c));
+}
+
+/// What the importer does: check the signature, then install with the key it returned.
+fn install_checked(c: &Store, skill_id: &str, b: &Bundle, now_ms: i64) -> Result<(), crate::backend::storage::error::StoreError> {
+    let signer = check_signature(c, b).expect("the bundle passes the signature check");
+    install(c, skill_id, b, signer.as_deref(), now_ms)
 }
