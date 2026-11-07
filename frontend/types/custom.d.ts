@@ -329,6 +329,9 @@ declare global {
         stop(blockId: string): Promise<void>;
         /** Stop a running download of the pane (the strip's Cancel); an id the host no longer holds does nothing. */
         cancelDownload(blockId: string, downloadId: number): Promise<void>;
+        /** Save a link or an image of the page (the right-click menu): starts a download of `url` through the pane's
+         *  download handler. The host refuses an address that isn't http, https, blob or data. */
+        startDownload(blockId: string, url: string): Promise<void>;
         focus(blockId: string): Promise<void>;
         cut(blockId: string): Promise<void>;
         copy(blockId: string): Promise<void>;
@@ -1032,6 +1035,8 @@ declare global {
             x?: number;
             y?: number;
             linkUrl?: string;
+            /** The picture under the click, when there is one. */
+            imageUrl?: string;
             selectionText?: string;
             isEditable?: boolean;
             canGoBack?: boolean;

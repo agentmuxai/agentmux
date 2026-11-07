@@ -94,14 +94,15 @@
 
 // ── Responsive container queries ─────────────────────────────────────────────
 
-// sm: the cost goes, the kind keeps its column
+// sm: the cost moves under the summary, so a row's cost is still shown
 @container audit (max-width: 767px) {
     .audit-row {
         grid-template-columns: 60px 90px 1fr auto;
     }
 
     .audit-row-cost {
-        display: none;
+        grid-column: 3;
+        grid-row: 2;
     }
 }
 

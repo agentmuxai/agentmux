@@ -1,5 +1,69 @@
 # AgentMux Version History
 
+## 0.60.19 — 2026-11-06
+
+- A sensitive message that needs your confirmation now shows a card in the agent's pane and rings the pane's waiting tone, instead of sitting in the transcript unnoticed
+- The agent pane can show its incoming jekts in a Messages panel beside the conversation, with a count, filters and the messages that need you above the list; off until turned on per pane from the command palette
+- Agent CLI installs through npm now use the public registry and ignore the person's own .npmrc
+- Split the agent pane's bottom panels into a state object and view parts, with what they draw and hand each panel pinned by tests; no change in behaviour
+- Agent panes: one resync of a block at a time (a double start spawned muse serve twice), and a turn on a provider with no sign-in check no longer shows Logged in
+- Add tests for the Vault import dialog ahead of splitting it
+- Split the Vault import dialog into small functions over a state object
+- srv: split the PtyShell create handler into named steps
+- Agent CLIs run only from AgentMux's own copy; a Use the CLI on my PATH switch on each CLI's Toolchain row runs your own copy instead
+- Dragging a pane tab shows a full-size landing rectangle instead of a thin line, the landing zone and the outlines of the other panes are much clearer, and the menu logo's cell is narrower.
+- Memory > Skills: the App skill card no longer overlaps its status dot, the filter row lines up, a skill for another platform says so, and the script pill and route numbers read clearly
+- Split the Jobs section's job history into a state module, view parts and a thin component, with its markup and calls pinned by a characterization test
+- The More menu stays open when a slow pointer crosses toward a submenu, instead of closing on a one-pixel step near where it left the row
+- A test or dev instance started with its own home keeps its secrets, the Vault key included, in files under that home instead of the person's OS keychain
+- Split the Memory pane's Global section into a state module, view parts and a thin component, with its markup and calls pinned by a characterization test
+- Split the object service handler into one function per method, with route tests for them
+- Terminal jobs (capture, background) read a quoted argument with spaces as one argument on Windows, as the drawer does
+- Vault: every entry has a history — each change and use with who, where, which version and why, in a chained record, in the pane and for agents (Vault history)
+- Split Settings > Widgets into a state module, view parts and a thin component, with its markup and calls pinned by a characterization test
+- Toolchain rows get Install and Uninstall for AgentMux's own copy of each agent CLI; the new-agent note no longer lists CLIs you must install yourself
+- Split Settings > Advanced into its setting groups, with its markup and writes pinned by a characterization test
+- In a narrow agent pane the Messages panel opens over the conversation from a header button instead of taking a column
+- feat(agents): model gateway in srv: a harness on a model route reaches its model through srv, which adds the key from the Vault
+- Split Settings > Terminal into its setting groups, with its markup and writes pinned by a characterization test
+- Split the Kanban act handler into one method per move, with tests for the moves that had none
+- Add tests for the Vault export dialog ahead of splitting it
+- The low-disk notice goes only to agents with large build folders and to the host's steward, once per real drop, says which rule tripped, and only a critical level starts a turn
+- Split the Vault export dialog into small functions over a state object
+- Split the agent failure classifier into an ordered list of rules, with tests for their order and fallbacks
+- Add tests for the agent session stats panel ahead of splitting it
+- Split the block-file range read into its steps, with tests for its sources, windows and trims
+- feat(agents): Agents spawn, create and update take harness, route and model; Agents routes lists the model routes; an agent on a route needs no account
+- Split the agent session stats panel into small functions over a state object
+- Split the token usage popover into a state module, view parts and a thin component, with its markup and calls pinned by a characterization test
+- Split the agent picker into a state module, view parts and a thin component, with its markup, wiring and hook order pinned by a characterization test
+- Split the CreateWindow handler into its steps, with tests for its workspace, label and restore paths
+- Split the pinned activity row into a state object and view parts, with no change in behaviour
+- Split the pinned activity dock into a state object and view parts, with no change in behaviour
+- Split the Help pane's content into a filter model and view parts, with no change in behaviour
+- Add tests for the Tower processes table ahead of splitting it
+- Split the Tower processes table into small functions over a state object
+- Split the MuxBus claim-and-deliver step of a pull into named steps (claim, verify, request, files); behaviour unchanged
+- Split the persistent agent controller eager-resume attempt into named steps (stores, launch parts, admission, gate, settle); behaviour unchanged
+- Add tests for the My agents row panel ahead of splitting it
+- Split the My agents row panel into small functions over a state object
+- Split the subagent watcher transcript-change handler into named steps (identify, read, record, announce); behaviour unchanged
+- Add tests for the Kanban board ahead of splitting it
+- Split the Kanban board into small functions over a state object
+- Split the provider auth-login spawn engine into named steps (login state, piped run, PTY run, settle); behaviour unchanged
+- Split the logo menu into a state object and view parts, with no change in behaviour
+- Split the dev-mode reducer dispatch panel into a state object and small view functions, with no change in behaviour
+- Split the Sounds settings section into groups of rows, with no change in behaviour
+- Split the connection picker into a state object and item builders, with no change in behaviour
+- Split the Notifications settings section into groups of rows, with no change in behaviour
+- Split the agents consolidation backfill into named passes (no behaviour change)
+- Add path tests for the agent picker's definition card
+- Split the agent picker's definition card into small functions over a state object
+- Split the diag panel's agent-pane perf section into a polling hook and one view per table (no behaviour change)
+- Removed the vendor-installer button's code: every agent CLI is now installed by AgentMux itself, so the table was empty
+- The Audit's totals count the tool, turn and thought rows (so a turn's cost shows), and a row's cost stays visible at mid widths
+- Right-click a link or an image in a browser pane to save it: Save link as… and Save image as… open the Save As dialog and show the download strip
+
 ## 0.60.18 — 2026-11-06
 
 - Dragging a pane tab out of its window on Windows now shows the pane following the cursor, and the floating window opens where it was dropped
