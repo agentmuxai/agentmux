@@ -122,8 +122,8 @@ describe("SingleLinePlot on uPlot", () => {
         // Only the time is shared between the pane's charts, never a y value.
         expect(opts.cursor.sync.scales).toEqual(["x", null]);
         expect([opts.width, opts.height]).toEqual([600, 200]);
-        // Against the pane's edges: no gutter on the left, only the room its last time label needs on the right.
-        expect(opts.padding).toEqual([7, 0, null, 1]);
+        // Against the pane's edges: no gutter on either side, the y labels sit over the plot.
+        expect(opts.padding).toEqual([7, 0, null, 0]);
         expect(opts.scales.y.range()).toEqual([0, 100]);
         // The x window ends at the newest sample and spans five minutes.
         expect(opts.scales.x.range()).toEqual([(base + 1000) / 1000 - 300, (base + 1000) / 1000]);
@@ -149,22 +149,26 @@ describe("SingleLinePlot on uPlot", () => {
         expect(calls[1][1]).toEqual([40, 55, 60]);
     });
 
-    it("labels the time axis to the second on a short window, and the y axis with its unit", async () => {
+    it("labels the time axis to the second on a short window", async () => {
         mount(() => series(sample(base, 40)));
         await vi.advanceTimersByTimeAsync(200);
         const [x, y] = made.charts[0].opts.axes;
         const t = new Date(2026, 9, 13, 8, 52, 30).getTime() / 1000;
-        expect(x.values(plotArea(600), [t, t + 30], 0, 80, 30)).toEqual(["8:52:30", "8:53:00"]);
-        expect(y.values(null, [0, 50, 100])).toEqual(["0%", "50%", "100%"]);
+        expect(x.values(plotArea(600), [t + 10, t + 40], 0, 80, 30)).toEqual(["8:52:40", "8:53:10"]);
+        // The axis has no labels of its own: they are drawn over the plot (below).
+        expect(y.values(null, [0, 50, 100])).toEqual(["", "", ""]);
     });
 
-    it("leaves a time label blank where it would cross the plot's right edge, keeping the others", async () => {
+    it("leaves a time label blank where it would cross the plot's left or right edge, keeping the others", async () => {
         mount(() => series(sample(base, 40)));
         await vi.advanceTimersByTimeAsync(200);
         const x = made.charts[0].opts.axes[0];
         const t = new Date(2026, 9, 13, 8, 52, 30).getTime() / 1000;
         // 600px wide, 10px per second, labels 40px wide: the tick at 590px would end at 610px.
-        expect(x.values(plotArea(600), [t, t + 30, t + 59], 0, 80, 30)).toEqual(["8:52:30", "8:53:00", ""]);
+        expect(x.values(plotArea(600), [t + 3, t + 30, t + 59], 0, 80, 30)).toEqual(["8:52:33", "8:53:00", ""]);
+        // The same at the left edge, where the plot now begins: a tick at 0 or 20px would be cut off at 20px of half-width.
+        expect(x.values(plotArea(600), [t, t + 2], 0, 80, 30)).toEqual(["", ""]);
+        expect(x.values(plotArea(600), [t + 3], 0, 80, 30)).toEqual(["8:52:33"]);
         // A tick whose label fits (20px half-width + 1px inset) keeps it; one on the edge does not.
         expect(x.values(plotArea(600), [t + 57], 0, 80, 30)).toEqual(["8:53:27"]);
         expect(x.values(plotArea(600), [t + 60], 0, 80, 30)).toEqual([""]);
@@ -217,19 +221,19 @@ describe("SingleLinePlot text zoom and placement", () => {
         expect(opts.axes[1].font).toMatch(/^18px /);
         // Time axis: ceil(18 * 1.25) + tick 3 + gap 3; top padding: half a label + 1.
         expect(opts.axes[0].size).toBe(29);
-        expect(opts.padding).toEqual([10, 0, null, 1]);
+        expect(opts.padding).toEqual([10, 0, null, 0]);
         expect(opts.axes[1].space).toBe(45);
         // The drawing itself doesn't zoom.
         expect(opts.series[1].width).toBe(2);
         expect(opts.axes[0].ticks.size).toBe(3);
     });
 
-    it("draws ticks without labels where a neighbour shows them", async () => {
+    it("has no y labels where a neighbour shows them, and the plot still runs to the edge", async () => {
         mountWith(1, { timeAxis: false, yLabels: false });
         await vi.advanceTimersByTimeAsync(200);
         const [x, y] = made.charts[0].opts.axes;
         expect(x.size).toBe(4);
-        expect(y.size).toBe(4);
+        expect(y.size).toBe(0);
         expect(x.values(null, [1, 2], 0, 80, 1)).toEqual(["", ""]);
         expect(y.values(null, [0, 50])).toEqual(["", ""]);
     });
@@ -244,31 +248,61 @@ describe("SingleLinePlot text zoom and placement", () => {
         expect(container.querySelector(".sysinfo-chart-title")?.textContent).toMatch(/^CPU/);
     });
 
-    it("reports a y-axis width of 0 when it has no y labels, so its column isn't kept wide", async () => {
-        const reported: number[] = [];
-        mountWith(1, { yLabels: false, onAxisWidth: (w) => reported.push(w) });
-        await vi.advanceTimersByTimeAsync(200);
-        expect(reported).toEqual([0]);
-    });
-
     it("marks a top-row chart, so its title keeps clear of the floating buttons", async () => {
         const { container } = mountWith(1, { top: true });
         await vi.advanceTimersByTimeAsync(200);
         expect(container.querySelector(".sysinfo-chart")?.classList.contains("sysinfo-chart--top")).toBe(true);
     });
 
-    it("reports its own y-axis width and takes its column's widest", async () => {
-        const reported: number[] = [];
-        mountWith(1, { axisWidth: 50, onAxisWidth: (w) => reported.push(w) });
-        await vi.advanceTimersByTimeAsync(200);
-        const y = made.charts[0].opts.axes[1];
-        const self = {
-            axes: [{}, { ticks: { size: 3 }, gap: 3, font: ["12px sans-serif"] }],
-            ctx: { font: "", measureText: (t: string) => ({ width: t.length * 7 * devicePixelRatio }) },
+    /** Just enough of a uPlot instance for the y labels and the fade drawn after the plot. */
+    function drawnPlot(erased: string[]) {
+        const ctx = {
+            font: "",
+            globalCompositeOperation: "source-over",
+            fillStyle: "",
+            measureText: (t: string) => ({ width: t.length * 7 }),
+            save() {},
+            restore() {},
+            createLinearGradient: () => ({ addColorStop() {} }),
+            fillRect: (x: number, _y: number, w: number) => erased.push(`${x}+${w} ${ctx.globalCompositeOperation}`),
         };
-        // "100%": 4 × 7 + 6 = 34, under the column's 50.
-        expect(y.size(self, ["0%", "100%"], 1, 0)).toBe(50);
-        await Promise.resolve();
-        expect(reported).toEqual([34]);
+        return {
+            ctx,
+            bbox: { left: 0, top: 0, width: 600, height: 100 },
+            scales: { y: { min: 0, max: 100 } },
+            axes: [{}, { font: ["12px sans-serif"] }],
+            over: { offsetTop: 0 },
+            valToPos: (v: number) => 100 - v,
+        };
+    }
+
+    it("draws its y labels over the plot, and fades the plot's left end out under them", async () => {
+        const { container } = mountWith(1);
+        await vi.advanceTimersByTimeAsync(200);
+        const { opts } = made.charts[0];
+        // The axis only reports the ticks; no width, no tick marks, no labels of its own.
+        expect(opts.axes[1].size).toBe(0);
+        expect(opts.axes[1].ticks.show).toBe(false);
+        opts.axes[1].values(null, [0, 50, 100]);
+        const erased: string[] = [];
+        opts.hooks.draw[0](drawnPlot(erased));
+        const labels = [...container.querySelectorAll(".sysinfo-chart-ylabel")] as HTMLElement[];
+        expect(labels.map((l) => l.textContent)).toEqual(["0%", "50%", "100%"]);
+        expect(labels.map((l) => l.style.top)).toEqual(["100px", "50px", "0px"]);
+        // The lowest hangs above its line; the others are centred on theirs.
+        expect(labels.map((l) => l.style.transform)).toEqual(["translateY(-100%)", "translateY(-50%)", "translateY(-50%)"]);
+        // Widest label "100%" is 28px; plus the 1px inset and the 8px margin: 37px of fade, from the edge.
+        expect(erased).toEqual(["0+37 destination-out"]);
+    });
+
+    it("draws neither labels nor fade where a neighbour has them", async () => {
+        const { container } = mountWith(1, { yLabels: false });
+        await vi.advanceTimersByTimeAsync(200);
+        const { opts } = made.charts[0];
+        opts.axes[1].values(null, [0, 50, 100]);
+        const erased: string[] = [];
+        opts.hooks.draw[0](drawnPlot(erased));
+        expect(container.querySelectorAll(".sysinfo-chart-ylabel")).toHaveLength(0);
+        expect(erased).toEqual([]);
     });
 });

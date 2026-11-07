@@ -6,6 +6,7 @@
 //! via the `telemetry:interval` setting (0.1s–2.0s, default 1.0s).
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -24,6 +25,8 @@ use crate::backend::sampler::{Scheduler, SourceId, SourceSpec};
 const BYTES_PER_GB: f64 = 1_073_741_824.0;
 const BYTES_PER_MB: f64 = 1_048_576.0;
 const PERSIST_COUNT: usize = 1024;
+/// The sample's key for the milliseconds its rates average over (the chart reads it).
+pub const SAMPLE_WINDOW_KEY: &str = "sample:window_ms";
 const DEFAULT_INTERVAL_SECS: f64 = 1.0;
 const MIN_INTERVAL_SECS: f64 = 0.2;
 const MAX_INTERVAL_SECS: f64 = 2.0;
@@ -953,14 +956,14 @@ mod commit_attribution_tests {
 }
 
 /// Network I/O tracking state for rate calculations.
-struct NetState {
+pub(crate) struct NetState {
     prev_sent: u64,
     prev_recv: u64,
     prev_time: Option<Instant>,
 }
 
 impl NetState {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             prev_sent: 0,
             prev_recv: 0,
@@ -969,9 +972,13 @@ impl NetState {
     }
 
     /// Collect network I/O rates (in MB/s).
-    fn get_net_data(&mut self, (total_sent, total_recv): (u64, u64), values: &mut HashMap<String, f64>) {
+    fn get_net_data(&mut self, totals: (u64, u64), values: &mut HashMap<String, f64>) {
+        self.get_net_data_at(Instant::now(), totals, values);
+    }
 
-        let now = Instant::now();
+    /// The rates over the real time since the last read, so a late tick gives the
+    /// average over its longer interval, not a spike or a hole.
+    pub(crate) fn get_net_data_at(&mut self, now: Instant, (total_sent, total_recv): (u64, u64), values: &mut HashMap<String, f64>) {
         if let Some(prev_time) = self.prev_time {
             let elapsed = now.duration_since(prev_time).as_secs_f64();
             if elapsed > 0.0 {
@@ -1113,14 +1120,17 @@ fn get_interval_secs(config_watcher: &ConfigState) -> f64 {
     val.clamp(MIN_INTERVAL_SECS, MAX_INTERVAL_SECS)
 }
 
-/// Run the sysinfo collection loop. Uses `tokio::time::interval` for steady
-/// tick rate regardless of refresh duration. Interval is re-read from config
-/// each tick and the timer is reset if it changes.
+/// Run the sysinfo collection loop until `stop` is set. It must run on a runtime
+/// of its own (`sampler::thread`), not srv's: every read below blocks its thread,
+/// and a sampler that waits for a free worker in the runtime it measures is late
+/// exactly when the machine is busiest. The interval is re-read from config each
+/// tick.
 pub async fn run_sysinfo_loop(
     broker: Arc<Broker>,
     config_watcher: Arc<ConfigState>,
     conn_name: String,
     panes: crate::backend::sampler::panes::PaneSampler,
+    stop: Arc<AtomicBool>,
 ) {
     // CPU and memory only: `new_all()` also kept a full snapshot of every process.
     let kind = sysinfo::RefreshKind::everything().without_processes();
@@ -1174,7 +1184,7 @@ pub async fn run_sysinfo_loop(
 
     tracing::info!("sysinfo loop started for conn:{}", conn_name);
 
-    loop {
+    while !stop.load(Ordering::Relaxed) {
         let now_ms = since_epoch(Instant::now());
         let new_interval = get_interval_secs(&config_watcher);
         if (new_interval - current_interval).abs() > 0.001 {
@@ -1206,40 +1216,30 @@ pub async fn run_sysinfo_loop(
 
         if due.contains(&SourceId::Machine) {
             let run_started = Instant::now();
-            // Refresh all metrics. All sysinfo refresh calls are synchronous
-            // /proc reads; block_in_place signals the Tokio runtime to keep
-            // other tasks (including terminal echo) running on other threads
-            // while this thread is occupied — preventing 1Hz echo starvation.
-            //
-            // `get_pagefile_volume_data`'s `GetDiskFreeSpaceExW` call (reagent
-            // P1, PR #2109) is a synchronous Win32 disk I/O syscall — the exact
-            // hazard this block exists to isolate, unlike `get_commit_data`'s
-            // `GlobalMemoryStatusEx` (pure in-memory, no filesystem driver
-            // involved) — so its result is computed here too, alongside the
-            // other blocking OS reads, not in the async section below.
+            // Refresh all metrics: synchronous reads of the OS's counters, on the sampler's own
+            // thread, so blocking holds nothing else up (`get_pagefile_volume_data` is a disk syscall).
             let mut pagefile_values = HashMap::new();
-            let mut net_totals = (0, 0);
-            tokio::task::block_in_place(|| {
-                sys.refresh_cpu_usage();
-                // RAM only: the swap figures cost a whole-system query and nothing reads them.
-                sys.refresh_memory_specifics(MemoryRefreshKind::nothing().with_ram());
-                net_totals = networks.totals();
-                if last_disk_full_refresh.elapsed() >= DISK_FULL_REFRESH {
-                    disks.refresh(true);
-                    last_disk_full_refresh = Instant::now();
-                } else {
-                    for disk in disks.list_mut() {
-                        disk.refresh_specifics(DiskRefreshKind::nothing().with_io_usage());
-                    }
+            sys.refresh_cpu_usage();
+            // RAM only: the swap figures cost a whole-system query and nothing reads them.
+            sys.refresh_memory_specifics(MemoryRefreshKind::nothing().with_ram());
+            let net_totals = networks.totals();
+            if last_disk_full_refresh.elapsed() >= DISK_FULL_REFRESH {
+                disks.refresh(true);
+                last_disk_full_refresh = Instant::now();
+            } else {
+                for disk in disks.list_mut() {
+                    disk.refresh_specifics(DiskRefreshKind::nothing().with_io_usage());
                 }
-                get_pagefile_volume_data(&mut pagefile_values);
-            });
+            }
+            get_pagefile_volume_data(&mut pagefile_values);
 
             let now_instant = Instant::now();
             let elapsed_secs = now_instant.duration_since(last_tick).as_secs_f64();
             last_tick = now_instant;
 
             let mut values = pagefile_values;
+            // What the rates below average over: a late tick's is long, and the chart draws it as a step.
+            values.insert(SAMPLE_WINDOW_KEY.to_string(), elapsed_secs * 1000.0);
             get_cpu_data(&sys, &mut values);
             get_mem_data(&sys, &mut values);
             get_commit_data(&mut values);
@@ -1274,9 +1274,7 @@ pub async fn run_sysinfo_loop(
                 if due_periodic || due_urgent {
                     let commit_used_gb = *values.get("mem:commit:used").unwrap_or(&0.0);
                     let commit_total_gb = *values.get("mem:commit:total").unwrap_or(&0.0);
-                    tokio::task::block_in_place(|| {
-                        log_memory_attribution(&mut sys, commit_used_gb, commit_total_gb)
-                    });
+                    log_memory_attribution(&mut sys, commit_used_gb, commit_total_gb);
                     last_attribution = now_instant;
                     if due_urgent {
                         last_urgent_attribution = Some(now_instant);
@@ -1302,7 +1300,7 @@ pub async fn run_sysinfo_loop(
             // judged by it.
             let registered = pidregistry::get_all();
             let asked = Instant::now();
-            match tokio::task::block_in_place(|| panes()) {
+            match panes() {
                 Ok(stats) => {
                     peaks.retain(|id| stats.iter().any(|s| s.block_id == id));
                     for s in &stats {

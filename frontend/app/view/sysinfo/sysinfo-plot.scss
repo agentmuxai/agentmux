@@ -54,6 +54,29 @@
     padding-right: calc(var(--sysinfo-actions-w) + var(--sysinfo-text-inset, 1px));
 }
 
+// The y labels, over the plot's left end (sysinfo-plot.tsx draws them after the plot, whose left end fades
+// out under them). A halo in the pane's background, as on the title, keeps them readable where the line runs.
+.sysinfo-chart-yaxis {
+    position: absolute;
+    inset: 0;
+    z-index: var(--z-over-content);
+    pointer-events: none;
+    overflow: hidden;
+}
+
+.sysinfo-chart-ylabel {
+    position: absolute;
+    left: var(--sysinfo-text-inset, 1px);
+    font-size: calc(var(--text-xs) * var(--sysinfo-zoom));
+    line-height: 1;
+    white-space: nowrap;
+    color: var(--secondary-text-color);
+    text-shadow:
+        0 0 2px var(--main-bg-color),
+        0 0 2px var(--main-bg-color),
+        0 0 1px var(--main-bg-color);
+}
+
 .sysinfo-chart-tip {
     position: absolute;
     z-index: var(--z-over-badge);

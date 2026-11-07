@@ -213,9 +213,11 @@ fn spawn_sampling_loops(
     let pane_sampler = backend::sampler::panes::tower_sampler(move |id| {
         backend::tower::sampler::block_label(&label_store, id)
     });
-    tokio::spawn(async move {
-        sysinfo::run_sysinfo_loop(sysinfo_broker, sysinfo_config, "local".to_string(), pane_sampler).await;
-    });
+    // On its own thread, not a task: the tick must not wait for the runtime it measures.
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    if let Err(e) = backend::sampler::thread::spawn(sysinfo_broker, sysinfo_config, "local".to_string(), pane_sampler, stop) {
+        tracing::error!(error = %e, "sysinfo: the sampler thread did not start; no CPU, memory or network samples");
+    }
 
     // Start agent process watchdog (kills panes that exceed max-runtime or idle-output limits)
     let watchdog_config = config_watcher.clone();
