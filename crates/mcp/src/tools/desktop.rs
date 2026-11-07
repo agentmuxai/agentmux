@@ -173,7 +173,7 @@ async fn apps(cx: &ToolCtx<'_>) -> Result<String> {
     let body = DesktopPolicyRequest { auth: sign_ui_automation_auth()?, windows: refs.clone() };
     let policy = post(cx, "/api/v1/agent/desktop/policy", &body, 30).await?;
     if policy["enabled"].as_bool() != Some(true) {
-        return Ok("Desktop driving is off. The user turns it on in Settings (desktop:enabled); until they do, nothing is captured or controlled.".into());
+        return Ok("Desktop driving is off. The user turns it on in Settings > Agents > Desktop driving; until they do, nothing is captured or controlled.".into());
     }
     let state_of = |id: u32| policy["windows"].as_array().and_then(|a| a.iter().find(|w| w["id"].as_u64() == Some(id as u64)));
     let mut lines = Vec::new();
