@@ -1,0 +1,13 @@
+model.setSelectedPath /home/a
+model.setSelectedPath /home/a/src/main.ts
+model.setSelectedPath /home/a/src/main.ts
+m: prevented=true selected=/home/a/src/main.ts focus on /home/a/src/main.ts
+ : prevented=true selected=/home/a/src/main.ts focus on /home/a/src/main.ts
+model.collapseAll
+model.setSelectedPath null
+onFileClick /home/a/src/main.ts
+model.toggleExpand /home/a
+ : prevented=true selected=null focus elsewhere
+model.toggleExpand /home/a
+Enter: prevented=true selected=null focus elsewhere
+F2: prevented=false selected=null focus elsewhere

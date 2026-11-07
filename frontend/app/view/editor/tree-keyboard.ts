@@ -4,7 +4,7 @@
 // The editor file tree's keyboard, as pure functions: the rows the user can
 // see, where each tree key moves the selection (the WAI-ARIA tree pattern),
 // type-ahead, and where a file sits under the tree's roots, for revealing it.
-// file-tree.tsx and file-tree-model.ts apply what these return.
+// file-tree-state.ts, file-tree-node.tsx and file-tree-model.ts apply what these return.
 // docs/specs/SPEC_EDITOR_TREE_KEYBOARD_ICONS_AND_CLICK_ZOOM_2026_10_16.md §4, §5.
 
 import type { DirEntry } from "@/app/store/rpc-api";
