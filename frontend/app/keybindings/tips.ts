@@ -250,7 +250,7 @@ export const TIPS: TipRow[] = [
         gesture: "click / dblclick",
         where: "on a file in the editor's file tree",
         label: "A click opens a preview tab, a double-click a tab that stays; F2 renames",
-        source: { file: "frontend/app/view/editor/file-tree.tsx", anchor: "onDblClick={handleDblClick}" },
+        source: { file: "frontend/app/view/editor/file-tree-node.tsx", anchor: "onDblClick={n.handleDblClick}" },
     },
     {
         // SPEC_EDITOR_TREE_KEYBOARD_ICONS_AND_CLICK_ZOOM_2026_10_16.md §5.2.
@@ -259,7 +259,7 @@ export const TIPS: TipRow[] = [
         gesture: "key:↑ / key:↓ / key:Enter / key:Space / key:Escape",
         where: "in the editor's file tree",
         label: "Previous / next row, previewing a file / open the file in a tab that stays and go to the editor / keep its tab / go to the editor; ← → close and open folders, Home, End and the Page keys jump, typing a name jumps to it",
-        source: { file: "frontend/app/view/editor/file-tree.tsx", anchor: "const move = treeMove(list, current, e.key, pageSize());" },
+        source: { file: "frontend/app/view/editor/file-tree-state.ts", anchor: "const move = treeMove(list, current, e.key, pageSize());" },
     },
 
     // Library defaults (CodeMirror basicSetup), checked by hand on macOS,
