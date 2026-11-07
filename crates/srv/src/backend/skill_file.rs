@@ -27,7 +27,7 @@ const MAX_ENTRIES: usize = 220;
 const MAX_FILE_BYTES: u64 = 1024 * 1024;
 const MAX_TOTAL_BYTES: u64 = 5 * 1024 * 1024;
 /// The zip itself: the files compress, so this is a little over the uncompressed total.
-const MAX_ZIP_BYTES: u64 = 6 * 1024 * 1024;
+pub(crate) const MAX_ZIP_BYTES: u64 = 6 * 1024 * 1024;
 
 /// An exported skill, ready to write.
 pub struct Exported {

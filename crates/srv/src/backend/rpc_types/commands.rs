@@ -815,6 +815,8 @@ pub const COMMAND_SKILL_CATALOG_IMPORT_COMMIT: &str = "skill.catalog.import_comm
 pub const COMMAND_SKILL_CATALOG_APP_FILE: &str = "skill.catalog.app_file";
 pub const COMMAND_SKILL_CATALOG_APP_SCRIPT: &str = "skill.catalog.app_script";
 pub const COMMAND_SKILL_CATALOG_EXPORT: &str = "skill.catalog.export";
+pub const COMMAND_APP_SKILLS_CATALOG: &str = "app_skills.catalog";
+pub const COMMAND_APP_SKILLS_CATALOG_INSTALL: &str = "app_skills.catalog.install";
 
 // Bundle-scoped siblings of the three above (composable model v2,
 // docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md, GH issue #2024 item
