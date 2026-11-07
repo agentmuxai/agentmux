@@ -69,10 +69,12 @@ fn count_recent(times: &mut VecDeque<Instant>, now: Instant) -> usize {
 /// that pane and hasn't handed it to the person.
 pub(super) fn driven(state: &Arc<crate::state::AppState>, browser: &Browser) -> Option<(String, String)> {
     let (pane, target) = super::allowed_origins::pane_and_target(state, browser)?;
-    if !state.owned_panes.lock().contains(&pane) || handoff().lock().contains(&pane) {
-        return None;
-    }
-    Some((pane, target))
+    driven_pane(state, &pane).then_some((pane, target))
+}
+
+/// Whether an agent drives the pane `pane` and hasn't handed it to the person.
+pub(super) fn driven_pane(state: &Arc<crate::state::AppState>, pane: &str) -> bool {
+    state.owned_panes.lock().contains(pane) && !handoff().lock().contains(pane)
 }
 
 /// Answer a parked dialog: `accept` is OK (or Leave), else Cancel (or Stay).

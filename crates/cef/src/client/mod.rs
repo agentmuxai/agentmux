@@ -56,6 +56,7 @@ mod stopped_page;
 mod pane_frontend_guard;
 mod ipc_credentials;
 pub(crate) mod downloads;
+pub(crate) mod agent_permission;
 pub(crate) mod filedialog;
 pub(crate) mod jsdialog;
 mod handlers;
@@ -91,7 +92,7 @@ pub(crate) use wndproc::install_main_window_floater_cascade_hook;
 // pool-window browsers).
 pub(crate) use helpers::{
     backend_browser_attention, backend_browser_bypass, backend_browser_pause, backend_vault, backend_google, backend_widget_approval, backend_upgrade_request, backend_desktop_request, backend_desktop_stop, backend_operator_attest, backend_app_update, backend_browser_navigation, backend_browser_popup, backend_browser_popup_window,
-    backend_browser_dialog,
+    backend_browser_dialog, backend_browser_permission,
 };
 pub(crate) use helpers::backend_close_window;
 // Saving every window before a quit closes them (`commands/window/lifecycle.rs`).

@@ -31,7 +31,7 @@
 112 crates/cef/src/client/crash_recovery.rs::AgentMuxHandler::on_auth_credentials
 417 crates/cef/src/client/crash_recovery.rs::AgentMuxHandler::on_render_process_terminated
 246 crates/cef/src/client/error_catalog.rs::describe
-137 crates/cef/src/client/handlers.rs::AgentMuxPanePermissionHandler::PermissionHandler::on_request_media_access_permission
+139 crates/cef/src/client/handlers.rs::AgentMuxPanePermissionHandler::PermissionHandler::on_request_media_access_permission
 570 crates/cef/src/client/lifecycle.rs::AgentMuxHandler::on_after_created
 104 crates/cef/src/client/lifecycle.rs::AgentMuxHandler::on_before_browse
 600 crates/cef/src/client/lifecycle.rs::AgentMuxHandler::on_before_close

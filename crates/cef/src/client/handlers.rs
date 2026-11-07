@@ -1192,6 +1192,8 @@ wrap_permission_handler! {
                     "allowing media access — covered by an existing grant"
                 );
                 cb.cont(requested_permissions);
+            } else if super::agent_permission::hold(&self.state, cb, &block_id, &origin, requested_permissions) {
+                // An agent's pane: srv decides, not the page and not the agent (agent_permission.rs).
             } else {
                 // No grant covers this — ask the user.
                 //

@@ -72,7 +72,7 @@ pub(super) const ALWAYS: &[&str] = &[
 pub(super) const PLUMBING: &[&str] = &[
     "POST /agentmux/service", "POST /api/v1/attachments/upload", "POST /api/v1/host/app_update",
     "POST /api/v1/host/browser_attention", "POST /api/v1/host/browser_bypass", "POST /api/v1/host/browser_dialog",
-    "POST /api/v1/host/browser_navigation", "POST /api/v1/host/browser_pause", "POST /api/v1/host/browser_popup",
+    "POST /api/v1/host/browser_navigation", "POST /api/v1/host/browser_permission", "POST /api/v1/host/browser_pause", "POST /api/v1/host/browser_popup",
     "POST /api/v1/host/browser_popup_window", "POST /api/v1/host/desktop_request", "POST /api/v1/host/desktop_stop",
     "POST /api/v1/host/google", "POST /api/v1/host/job_templates", "POST /api/v1/host/jobs", "POST /api/v1/host/operator_attest",
     "POST /api/v1/host/upgrade_request", "POST /api/v1/host/vault", "POST /api/v1/host/widget_approval",
