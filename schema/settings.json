@@ -683,6 +683,11 @@
           "description": "Include browser hand-offs and approvals in the waiting tone, tab flash and notification. Default true.",
           "x-section": "Notifications"
         },
+        "notify:waiting:toast": {
+          "type": "boolean",
+          "description": "Show a toast that names the agent waiting on you, with a link to it. Independent of the waiting tone. Default true.",
+          "x-section": "Notifications"
+        },
         "notify:sound:agent.shutdown.pending": {
           "type": "boolean",
           "description": "Play the falling shutdown chime when something other than you asked to shut an agent down and you have 15 seconds to keep it running. Default true.",

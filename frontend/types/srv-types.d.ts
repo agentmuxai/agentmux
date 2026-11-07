@@ -1239,6 +1239,7 @@ declare global {
         "notify:tooltones:scope"?: "all" | "focused";
         "notify:tooltones:flash"?: boolean;
         "notify:waiting:browser"?: boolean;
+        "notify:waiting:toast"?: boolean;
         "dnd:enabled"?: boolean;
         "dnd:concurrency"?: number;
         "dnd:agentinserttoken"?: boolean;

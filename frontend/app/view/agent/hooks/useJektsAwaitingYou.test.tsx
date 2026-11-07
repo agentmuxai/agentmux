@@ -69,7 +69,8 @@ describe("useJektsAwaitingYou", () => {
         expect(started).toHaveBeenCalledWith(
             "p1",
             expect.stringContaining("jekt-needs-you"),
-            "A sensitive message from agent2 needs you"
+            "A sensitive message from agent2 needs you",
+            { what: "has a sensitive message for you" }
         );
         // The pane's `term:awaiting_confirm` (tab badge, Swarm "Waiting for you") is written when the wait starts...
         expect(synced).toHaveBeenCalledTimes(1);

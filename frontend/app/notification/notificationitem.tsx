@@ -44,7 +44,7 @@ const NotificationItem = ({
     onMouseEnter,
     onMouseLeave,
 }: NotificationItemProps): JSX.Element => {
-    const { id, title, message, icon, type, timestamp, persistent, actions } = notification;
+    const { id, title, titleColor, message, icon, type, timestamp, persistent, actions } = notification;
     const color = type === "error" ? "red" : type === "warning" ? "yellow" : "green";
     const nIcon = icon ? icon : "bell";
     // Hovering and keyboard focus each pause the toast's expiry; it resumes only when neither holds.
@@ -120,7 +120,7 @@ const NotificationItem = ({
                 </Show>
                 <div class="notification-text">
                     <Show when={title}>
-                        <div class={clsx("notification-title", color)}>{title}</div>
+                        <div class={clsx("notification-title", color)} style={{ color: titleColor }}>{title}</div>
                     </Show>
                     <Show when={timestamp && !isBubble}>
                         <div class="notification-timestamp">{formatTimestamp(timestamp)}</div>

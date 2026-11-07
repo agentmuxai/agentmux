@@ -69,6 +69,7 @@ export function useJektsAwaitingYou(opts: UseJektsAwaitingYouOptions): void {
             const newest = list[list.length - 1];
             const handle = paneRequests.push(blockId, {
                 source: "jekt-needs-you",
+                what: "has a sensitive message for you",
                 Component: JektNeedsYouCard,
                 props: {
                     jekt: newest,

@@ -553,10 +553,26 @@ describe("sound-service event-sound flash", () => {
         expect(playSpy).toHaveBeenCalledTimes(1); // the sound itself still plays
     });
 
-    it("a sound with no source pane plays but cannot flash anything", () => {
-        notify("agent.turn.complete");
-        expect(playSpy).toHaveBeenCalledTimes(1);
-        expect(flashes).toEqual([]);
+    it("refuses an event sound that names no pane: it would beep with nothing to flash", () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        try {
+            notify("agent.turn.complete");
+            expect(playSpy).not.toHaveBeenCalled();
+            expect(flashes).toEqual([]);
+            expect(warn).toHaveBeenCalledWith(expect.stringContaining("agent.turn.complete refused"));
+        } finally {
+            warn.mockRestore();
+        }
+    });
+
+    it("refuses the waiting tone from the event bus: only the waiting registry starts it", () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        try {
+            notify("agent.waiting.for.input", { sourceBlockId: "blk-1" });
+            expect(playSpy).not.toHaveBeenCalled();
+        } finally {
+            warn.mockRestore();
+        }
     });
 
     it("holds the flash until the sound is audible once the player is primed", () => {

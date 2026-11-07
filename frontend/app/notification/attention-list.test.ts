@@ -1,0 +1,73 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
+import { describe, expect, it, vi } from "vitest";
+import { mergeAttention } from "./attention-list";
+
+vi.mock("@/app/store/agent-runtime-live", () => ({ sharedAgentRuntime: () => ({ rows: () => [] }) }));
+vi.mock("./waiting-for-you", () => ({ waitingPanes: () => [] }));
+
+const row = (over: Partial<AgentRuntime>): AgentRuntime =>
+    ({
+        agent_id: "a",
+        state: "idle",
+        desired: "running",
+        name: "Agent",
+        provider: "claude",
+        icon: "",
+        ...over,
+    }) as AgentRuntime;
+const pane = (blockId: string, what: string, since: number) => ({ blockId, what, since });
+const seen = () => 500;
+
+// SPEC_ATTENTION_TOAST_WITH_LINK_TO_AGENT_2026_11_02.md §3.1.
+describe("mergeAttention", () => {
+    it("names a pane of this window by its agent's row, in its colour, with the registry's words", () => {
+        const items = mergeAttention(
+            [pane("b1", "asks to approve a Bash call", 100)],
+            [row({ name: "Korp", color: "#3b82f6", block_id: "b1" })],
+            seen
+        );
+        expect(items).toEqual([
+            {
+                blockId: "b1",
+                name: "Korp",
+                color: "#3b82f6",
+                what: "asks to approve a Bash call",
+                since: 100,
+                local: true,
+            },
+        ]);
+    });
+
+    it("adds an agent that only srv says waits (another window), once, marked as not local", () => {
+        const rows = [row({ name: "Clare", color: "#aa0000", block_id: "b2", state: "waiting_on_user" })];
+        const items = mergeAttention([pane("b1", "asks you a question", 100)], rows, seen);
+        expect(items.map((i) => [i.blockId, i.local])).toEqual([
+            ["b1", true],
+            ["b2", false],
+        ]);
+        expect(items[1]).toMatchObject({ name: "Clare", what: "needs you", since: 500 });
+    });
+
+    it("counts a pane that both feeds name once, from the registry", () => {
+        const rows = [row({ name: "Korp", block_id: "b1", state: "waiting_on_user" })];
+        expect(mergeAttention([pane("b1", "asks you a question", 100)], rows, seen)).toHaveLength(1);
+    });
+
+    it("skips an agent that waits without a pane, and one that does not wait", () => {
+        const rows = [
+            row({ block_id: undefined, state: "waiting_on_user" }),
+            row({ block_id: "b3", state: "working" }),
+        ];
+        expect(mergeAttention([], rows, seen)).toEqual([]);
+    });
+
+    it("falls back to 'An agent' when srv has no row for the pane, and lists the oldest first", () => {
+        const items = mergeAttention([pane("late", "x", 300), pane("early", "y", 100)], [], seen);
+        expect(items.map((i) => [i.blockId, i.name])).toEqual([
+            ["early", "An agent"],
+            ["late", "An agent"],
+        ]);
+    });
+});

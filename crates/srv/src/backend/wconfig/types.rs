@@ -505,6 +505,11 @@ pub struct SettingsType {
     // REPORT_AGENT_ATTENTION_CTA_CONTRAST_AND_TONE_2026_10_10.md §2.
     #[serde(rename = "notify:waiting:browser", default, skip_serializing_if = "Option::is_none")]
     pub notify_waiting_browser: Option<bool>,
+    // Whether a toast names the agent that waits on you and links to it.
+    // Absence = on. Independent of the waiting tone.
+    // SPEC_ATTENTION_TOAST_WITH_LINK_TO_AGENT_2026_11_02.md §3.9.
+    #[serde(rename = "notify:waiting:toast", default, skip_serializing_if = "Option::is_none")]
+    pub notify_waiting_toast: Option<bool>,
 
     // -- Messaging bridge settings --
 
