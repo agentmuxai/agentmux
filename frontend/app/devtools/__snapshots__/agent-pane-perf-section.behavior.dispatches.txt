@@ -1,0 +1,48 @@
+agentPerfStore.snapshot
+-- dispatch table
+<div>
+  <div style="margin-top:8px;padding-top:8px;border-top:1px solid #333">
+    <div style="font-weight:bold;color:#7af;margin-bottom:4px">
+      "📊 Agent Pane Perf"
+    <div style="margin-bottom:6px">
+      <div style="color:#aaa;font-size:10px;margin-bottom:2px">
+        "Store dispatch duration (last 64 per kind)"
+      <table style="font-size:10px;border-collapse:collapse;width:100%">
+        <thead>
+          <tr style="color:#888">
+            <th style="text-align:left;padding:1px 4px">
+              "kind"
+            <th style="text-align:right;padding:1px 4px">
+              "p50"
+            <th style="text-align:right;padding:1px 4px">
+              "max"
+            <th style="text-align:right;padding:1px 4px">
+              "n"
+        <tbody>
+          <tr>
+            <td style="padding:1px 4px">
+              "document"
+            <td style="padding:1px 4px;text-align:right">
+              "3.2"
+            <td style="padding:1px 4px;text-align:right">
+              "42"
+            <td style="padding:1px 4px;text-align:right;color:#888">
+              "12"
+          <tr>
+            <td style="padding:1px 4px">
+              "layout"
+            <td style="padding:1px 4px;text-align:right">
+              "0.4"
+            <td style="padding:1px 4px;text-align:right">
+              "2.5"
+            <td style="padding:1px 4px;text-align:right;color:#888">
+              "64"
+          <tr>
+            <td style="padding:1px 4px">
+              "other"
+            <td style="padding:1px 4px;text-align:right">
+              "—"
+            <td style="padding:1px 4px;text-align:right">
+              "—"
+            <td style="padding:1px 4px;text-align:right;color:#888">
+              "0"

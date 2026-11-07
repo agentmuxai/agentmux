@@ -16,23 +16,12 @@
  * §"Intelligent perf probing".
  */
 
-import { createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { For, Show, type Accessor, type JSX } from "solid-js";
 import {
-    agentPerfStore,
     ESTIMATOR_MISS_THRESHOLD,
     type AgentPerfSnapshot,
 } from "@/app/agent-model/perf-probe";
-
-const POLL_INTERVAL_MS = 1000;
-
-const EMPTY_SNAPSHOT: AgentPerfSnapshot = {
-    rowMountByKind: new Map(),
-    estimatorMissRateByKind: new Map(),
-    recentEstimatorMisses: [],
-    recentLayoutShifts: [],
-    dispatchByKind: new Map(),
-    transcriptCursors: [],
-};
+import { createPerfSnapshot } from "./agent-pane-perf-section-state";
 
 function formatMs(n: number | undefined): string {
     if (n == null) return "—";
@@ -51,30 +40,197 @@ function ageMs(now: number, at: number): string {
     return `${(dt / 60_000).toFixed(1)}min`;
 }
 
+/** Per-kind row mount durations, slowest p95 first, with each kind's estimator-miss rate. */
+function RowMountTable(props: { snap: Accessor<AgentPerfSnapshot> }): JSX.Element {
+    const snap = props.snap;
+    return (
+        <Show when={snap().rowMountByKind.size > 0}>
+            <div style={{ "margin-bottom": "6px" }}>
+                <div style={{ color: "#aaa", "font-size": "10px", "margin-bottom": "2px" }}>
+                    Row mount duration (last 64 per kind)
+                </div>
+                <table style={{ "font-size": "10px", "border-collapse": "collapse", width: "100%" }}>
+                    <thead>
+                        <tr style={{ color: "#888" }}>
+                            <th style={{ "text-align": "left", padding: "1px 4px" }}>kind</th>
+                            <th style={{ "text-align": "right", padding: "1px 4px" }}>p50</th>
+                            <th style={{ "text-align": "right", padding: "1px 4px" }}>p95</th>
+                            <th style={{ "text-align": "right", padding: "1px 4px" }}>max</th>
+                            <th style={{ "text-align": "right", padding: "1px 4px" }}>n</th>
+                            <th style={{ "text-align": "right", padding: "1px 4px" }}>est-miss</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <For each={[...snap().rowMountByKind.entries()].sort(
+                            ([, a], [, b]) => (b.p95 ?? 0) - (a.p95 ?? 0),
+                        )}>
+                            {([kind, q]) => {
+                                const missRate = snap().estimatorMissRateByKind.get(kind) ?? 0;
+                                const flag = missRate > 0.20 ? " ⚠" : "";
+                                return (
+                                    <tr>
+                                        <td style={{ padding: "1px 4px" }}>{kind}</td>
+                                        <td style={{ padding: "1px 4px", "text-align": "right" }}>
+                                            {formatMs(q.p50)}
+                                        </td>
+                                        <td style={{ padding: "1px 4px", "text-align": "right" }}>
+                                            {formatMs(q.p95)}
+                                        </td>
+                                        <td style={{ padding: "1px 4px", "text-align": "right" }}>
+                                            {formatMs(q.max)}
+                                        </td>
+                                        <td style={{ padding: "1px 4px", "text-align": "right", color: "#888" }}>
+                                            {q.count}
+                                        </td>
+                                        <td style={{
+                                            padding: "1px 4px",
+                                            "text-align": "right",
+                                            color: missRate > 0.20 ? "#fa6" : "#6c8",
+                                        }}>
+                                            {formatPct(missRate)}{flag}
+                                        </td>
+                                    </tr>
+                                );
+                            }}
+                        </For>
+                    </tbody>
+                </table>
+                <div style={{ color: "#666", "font-size": "9px", "margin-top": "2px" }}>
+                    est-miss = pct measured outside ±{formatPct(ESTIMATOR_MISS_THRESHOLD)} of estimate
+                </div>
+            </div>
+        </Show>
+    );
+}
+
+/**
+ * Store dispatch durations (task #40) — the reducer/store cost underneath the DOM, not the row-mount
+ * cost above. "layout" is agent-pane-layout-store.ts (row positions/window), "document" is
+ * agent-document-store.ts (the message list).
+ */
+function DispatchTable(props: { snap: Accessor<AgentPerfSnapshot> }): JSX.Element {
+    const snap = props.snap;
+    return (
+        <Show when={snap().dispatchByKind.size > 0}>
+            <div style={{ "margin-bottom": "6px" }}>
+                <div style={{ color: "#aaa", "font-size": "10px", "margin-bottom": "2px" }}>
+                    Store dispatch duration (last 64 per kind)
+                </div>
+                <table style={{ "font-size": "10px", "border-collapse": "collapse", width: "100%" }}>
+                    <thead>
+                        <tr style={{ color: "#888" }}>
+                            <th style={{ "text-align": "left", padding: "1px 4px" }}>kind</th>
+                            <th style={{ "text-align": "right", padding: "1px 4px" }}>p50</th>
+                            <th style={{ "text-align": "right", padding: "1px 4px" }}>max</th>
+                            <th style={{ "text-align": "right", padding: "1px 4px" }}>n</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <For each={[...snap().dispatchByKind.entries()].sort(
+                            ([, a], [, b]) => (b.max ?? 0) - (a.max ?? 0),
+                        )}>
+                            {([kind, q]) => (
+                                <tr>
+                                    <td style={{ padding: "1px 4px" }}>{kind}</td>
+                                    <td style={{ padding: "1px 4px", "text-align": "right" }}>
+                                        {formatMs(q.p50)}
+                                    </td>
+                                    <td style={{ padding: "1px 4px", "text-align": "right" }}>
+                                        {formatMs(q.max)}
+                                    </td>
+                                    <td style={{ padding: "1px 4px", "text-align": "right", color: "#888" }}>
+                                        {q.count}
+                                    </td>
+                                </tr>
+                            )}
+                        </For>
+                    </tbody>
+                </table>
+            </div>
+        </Show>
+    );
+}
+
+/**
+ * Transcript cursors (Phase 5a-4, transcript-cursor.ts): how each pane's live records were placed.
+ * Anything but delivered/duplicates/echoes is worth a look.
+ */
+function CursorList(props: { snap: Accessor<AgentPerfSnapshot> }): JSX.Element {
+    const snap = props.snap;
+    return (
+        <Show when={snap().transcriptCursors.length > 0}>
+            <div style={{ "margin-bottom": "6px" }}>
+                <div style={{ color: "#aaa", "font-size": "10px", "margin-bottom": "2px" }}>
+                    Transcript cursors
+                </div>
+                <For each={snap().transcriptCursors}>
+                    {({ blockId, stats: c }) => (
+                        <div style={{ "font-size": "10px", color: "#bbb", "padding-left": "8px" }}>
+                            {blockId.slice(0, 8)}: {c.delivered} delivered, {c.duplicates} dup, {c.echoes} echo,
+                            gaps {c.gapsFilled} ({c.gapLinesFilled} lines)
+                            <span style={{ color: c.linesSkipped + c.unpositioned + c.genChanges > 0 ? "#fa6" : "#6c8" }}>
+                                {" "}· skipped {c.linesSkipped}, unpositioned {c.unpositioned}, gen changes {c.genChanges}, own echoes dropped {c.ownEchoesDropped}
+                            </span>
+                        </div>
+                    )}
+                </For>
+            </div>
+        </Show>
+    );
+}
+
+/** The newest layout shifts in the agent pane. */
+function LayoutShifts(props: { snap: Accessor<AgentPerfSnapshot> }): JSX.Element {
+    const snap = props.snap;
+    return (
+        <Show when={snap().recentLayoutShifts.length > 0}>
+            <div style={{ "margin-bottom": "6px" }}>
+                <div style={{ color: "#aaa", "font-size": "10px" }}>
+                    Layout shifts in agent pane (last {snap().recentLayoutShifts.length})
+                </div>
+                <For each={snap().recentLayoutShifts.slice(0, 5)}>
+                    {(s) => {
+                        const now = performance.now();
+                        return (
+                            <div style={{ "font-size": "10px", color: "#bbb", "padding-left": "8px" }}>
+                                {ageMs(now, s.timestamp)} ago: {s.value.toFixed(4)}
+                            </div>
+                        );
+                    }}
+                </For>
+            </div>
+        </Show>
+    );
+}
+
+/** The newest estimator misses. */
+function EstimatorMisses(props: { snap: Accessor<AgentPerfSnapshot> }): JSX.Element {
+    const snap = props.snap;
+    return (
+        <Show when={snap().recentEstimatorMisses.length > 0}>
+            <div>
+                <div style={{ color: "#aaa", "font-size": "10px" }}>
+                    Recent estimator misses (last {snap().recentEstimatorMisses.length})
+                </div>
+                <For each={snap().recentEstimatorMisses.slice(0, 5)}>
+                    {(s) => {
+                        const now = performance.now();
+                        return (
+                            <div style={{ "font-size": "10px", color: "#bbb", "padding-left": "8px" }}>
+                                {ageMs(now, s.timestamp)} ago: {s.kind} —
+                                est {s.estimated.toFixed(0)}px, actual {s.actual.toFixed(0)}px
+                                ({formatPct(s.errorPct)})
+                            </div>
+                        );
+                    }}
+                </For>
+            </div>
+        </Show>
+    );
+}
+
 export function AgentPanePerfSection(): JSX.Element {
-    const [snapshot, setSnapshot] = createSignal<AgentPerfSnapshot>(EMPTY_SNAPSHOT);
-    let pollHandle: number | undefined;
-
-    const poll = (): void => {
-        setSnapshot(agentPerfStore.snapshot());
-    };
-
-    onMount(() => {
-        poll();
-        pollHandle = window.setInterval(poll, POLL_INTERVAL_MS);
-    });
-    onCleanup(() => {
-        if (pollHandle != null) window.clearInterval(pollHandle);
-    });
-
-    const hasData = (): boolean => {
-        const s = snapshot();
-        return s.rowMountByKind.size > 0
-            || s.recentEstimatorMisses.length > 0
-            || s.recentLayoutShifts.length > 0
-            || s.dispatchByKind.size > 0
-            || s.transcriptCursors.length > 0;
-    };
+    const { snapshot, hasData } = createPerfSnapshot();
 
     return (
         <Show when={hasData()}>
@@ -89,167 +245,11 @@ export function AgentPanePerfSection(): JSX.Element {
                     📊 Agent Pane Perf
                 </div>
 
-                {/* Per-kind row mount durations */}
-                <Show when={snapshot().rowMountByKind.size > 0}>
-                    <div style={{ "margin-bottom": "6px" }}>
-                        <div style={{ color: "#aaa", "font-size": "10px", "margin-bottom": "2px" }}>
-                            Row mount duration (last 64 per kind)
-                        </div>
-                        <table style={{ "font-size": "10px", "border-collapse": "collapse", width: "100%" }}>
-                            <thead>
-                                <tr style={{ color: "#888" }}>
-                                    <th style={{ "text-align": "left", padding: "1px 4px" }}>kind</th>
-                                    <th style={{ "text-align": "right", padding: "1px 4px" }}>p50</th>
-                                    <th style={{ "text-align": "right", padding: "1px 4px" }}>p95</th>
-                                    <th style={{ "text-align": "right", padding: "1px 4px" }}>max</th>
-                                    <th style={{ "text-align": "right", padding: "1px 4px" }}>n</th>
-                                    <th style={{ "text-align": "right", padding: "1px 4px" }}>est-miss</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <For each={[...snapshot().rowMountByKind.entries()].sort(
-                                    ([, a], [, b]) => (b.p95 ?? 0) - (a.p95 ?? 0),
-                                )}>
-                                    {([kind, q]) => {
-                                        const missRate = snapshot().estimatorMissRateByKind.get(kind) ?? 0;
-                                        const flag = missRate > 0.20 ? " ⚠" : "";
-                                        return (
-                                            <tr>
-                                                <td style={{ padding: "1px 4px" }}>{kind}</td>
-                                                <td style={{ padding: "1px 4px", "text-align": "right" }}>
-                                                    {formatMs(q.p50)}
-                                                </td>
-                                                <td style={{ padding: "1px 4px", "text-align": "right" }}>
-                                                    {formatMs(q.p95)}
-                                                </td>
-                                                <td style={{ padding: "1px 4px", "text-align": "right" }}>
-                                                    {formatMs(q.max)}
-                                                </td>
-                                                <td style={{ padding: "1px 4px", "text-align": "right", color: "#888" }}>
-                                                    {q.count}
-                                                </td>
-                                                <td style={{
-                                                    padding: "1px 4px",
-                                                    "text-align": "right",
-                                                    color: missRate > 0.20 ? "#fa6" : "#6c8",
-                                                }}>
-                                                    {formatPct(missRate)}{flag}
-                                                </td>
-                                            </tr>
-                                        );
-                                    }}
-                                </For>
-                            </tbody>
-                        </table>
-                        <div style={{ color: "#666", "font-size": "9px", "margin-top": "2px" }}>
-                            est-miss = pct measured outside ±{formatPct(ESTIMATOR_MISS_THRESHOLD)} of estimate
-                        </div>
-                    </div>
-                </Show>
-
-                {/* Store dispatch durations (task #40) — the reducer/store cost
-                    underneath the DOM, not the row-mount cost above. "layout"
-                    is agent-pane-layout-store.ts (row positions/window),
-                    "document" is agent-document-store.ts (the message list). */}
-                <Show when={snapshot().dispatchByKind.size > 0}>
-                    <div style={{ "margin-bottom": "6px" }}>
-                        <div style={{ color: "#aaa", "font-size": "10px", "margin-bottom": "2px" }}>
-                            Store dispatch duration (last 64 per kind)
-                        </div>
-                        <table style={{ "font-size": "10px", "border-collapse": "collapse", width: "100%" }}>
-                            <thead>
-                                <tr style={{ color: "#888" }}>
-                                    <th style={{ "text-align": "left", padding: "1px 4px" }}>kind</th>
-                                    <th style={{ "text-align": "right", padding: "1px 4px" }}>p50</th>
-                                    <th style={{ "text-align": "right", padding: "1px 4px" }}>max</th>
-                                    <th style={{ "text-align": "right", padding: "1px 4px" }}>n</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <For each={[...snapshot().dispatchByKind.entries()].sort(
-                                    ([, a], [, b]) => (b.max ?? 0) - (a.max ?? 0),
-                                )}>
-                                    {([kind, q]) => (
-                                        <tr>
-                                            <td style={{ padding: "1px 4px" }}>{kind}</td>
-                                            <td style={{ padding: "1px 4px", "text-align": "right" }}>
-                                                {formatMs(q.p50)}
-                                            </td>
-                                            <td style={{ padding: "1px 4px", "text-align": "right" }}>
-                                                {formatMs(q.max)}
-                                            </td>
-                                            <td style={{ padding: "1px 4px", "text-align": "right", color: "#888" }}>
-                                                {q.count}
-                                            </td>
-                                        </tr>
-                                    )}
-                                </For>
-                            </tbody>
-                        </table>
-                    </div>
-                </Show>
-
-                {/* Transcript cursors (Phase 5a-4, transcript-cursor.ts): how
-                    each pane's live records were placed. Anything but
-                    delivered/duplicates/echoes is worth a look. */}
-                <Show when={snapshot().transcriptCursors.length > 0}>
-                    <div style={{ "margin-bottom": "6px" }}>
-                        <div style={{ color: "#aaa", "font-size": "10px", "margin-bottom": "2px" }}>
-                            Transcript cursors
-                        </div>
-                        <For each={snapshot().transcriptCursors}>
-                            {({ blockId, stats: c }) => (
-                                <div style={{ "font-size": "10px", color: "#bbb", "padding-left": "8px" }}>
-                                    {blockId.slice(0, 8)}: {c.delivered} delivered, {c.duplicates} dup, {c.echoes} echo,
-                                    gaps {c.gapsFilled} ({c.gapLinesFilled} lines)
-                                    <span style={{ color: c.linesSkipped + c.unpositioned + c.genChanges > 0 ? "#fa6" : "#6c8" }}>
-                                        {" "}· skipped {c.linesSkipped}, unpositioned {c.unpositioned}, gen changes {c.genChanges}, own echoes dropped {c.ownEchoesDropped}
-                                    </span>
-                                </div>
-                            )}
-                        </For>
-                    </div>
-                </Show>
-
-                {/* Recent layout shifts */}
-                <Show when={snapshot().recentLayoutShifts.length > 0}>
-                    <div style={{ "margin-bottom": "6px" }}>
-                        <div style={{ color: "#aaa", "font-size": "10px" }}>
-                            Layout shifts in agent pane (last {snapshot().recentLayoutShifts.length})
-                        </div>
-                        <For each={snapshot().recentLayoutShifts.slice(0, 5)}>
-                            {(s) => {
-                                const now = performance.now();
-                                return (
-                                    <div style={{ "font-size": "10px", color: "#bbb", "padding-left": "8px" }}>
-                                        {ageMs(now, s.timestamp)} ago: {s.value.toFixed(4)}
-                                    </div>
-                                );
-                            }}
-                        </For>
-                    </div>
-                </Show>
-
-                {/* Recent estimator misses */}
-                <Show when={snapshot().recentEstimatorMisses.length > 0}>
-                    <div>
-                        <div style={{ color: "#aaa", "font-size": "10px" }}>
-                            Recent estimator misses (last {snapshot().recentEstimatorMisses.length})
-                        </div>
-                        <For each={snapshot().recentEstimatorMisses.slice(0, 5)}>
-                            {(s) => {
-                                const now = performance.now();
-                                return (
-                                    <div style={{ "font-size": "10px", color: "#bbb", "padding-left": "8px" }}>
-                                        {ageMs(now, s.timestamp)} ago: {s.kind} —
-                                        est {s.estimated.toFixed(0)}px, actual {s.actual.toFixed(0)}px
-                                        ({formatPct(s.errorPct)})
-                                    </div>
-                                );
-                            }}
-                        </For>
-                    </div>
-                </Show>
+                <RowMountTable snap={snapshot} />
+                <DispatchTable snap={snapshot} />
+                <CursorList snap={snapshot} />
+                <LayoutShifts snap={snapshot} />
+                <EstimatorMisses snap={snapshot} />
             </div>
         </Show>
     );

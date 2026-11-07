@@ -332,7 +332,6 @@
 108 frontend/app/block/lazy-pane-tab.tsx::createStandIn
 235 frontend/app/block/sandboxed-widget-host.tsx::createSandboxedInstance
 202 frontend/app/block/widget-bridge.ts::answer
-203 frontend/app/devtools/agent-pane-perf-section.tsx::AgentPanePerfSection
 106 frontend/app/drag/CrossWindowDragMonitor.darwin.tsx::performTearOff
 159 frontend/app/drag/CrossWindowDragMonitor.linux.tsx::performTearOff
 158 frontend/app/drag/CrossWindowDragMonitor.win32.tsx::CrossWindowDragMonitor
