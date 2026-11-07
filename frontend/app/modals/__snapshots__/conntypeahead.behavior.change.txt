@@ -1,0 +1,49 @@
+useMuxObjectValue block:blk-1
+remotesList
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="" conn=ssh:dev
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="" conn=ssh:dev
+refreshRemotes
+ConnListAWSCommand {"timeout":2000}
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="" conn=ssh:dev
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="" conn=ssh:dev
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="" conn=ssh:dev
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="" conn=ssh:dev
+setChangeConnModalOpen false
+globalRefocusWithTimeout 10
+setChangeConnModalOpen false
+globalRefocusWithTimeout 10
+setBlockMeta blk-1 {"connection":null,"file":"~","cmd:cwd":null}
+setChangeConnModalOpen false
+globalRefocusWithTimeout 10
+ConnEnsureCommand {"connname":null,"logblockid":"blk-1"} {"timeout":60000}
+setBlockMeta blk-1 {"connection":"aws:prod","file":"/","cmd:cwd":null}
+setChangeConnModalOpen false
+globalRefocusWithTimeout 10
+ConnEnsureCommand {"connname":"aws:prod","logblockid":"blk-1"} {"timeout":60000}
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="" conn=ssh:dev
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="" conn=ssh:dev
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="" conn=ssh:dev
+setBlockMeta blk-1 {"connection":"ssh:new","file":"","cmd:cwd":null}
+setChangeConnModalOpen false
+globalRefocusWithTimeout 10
+ConnEnsureCommand {"connname":"ssh:new","logblockid":"blk-1"} {"timeout":60000}
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="" conn=ssh:dev
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="" conn=ssh:dev
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="" conn=ssh:dev
+setBlockMeta blk-1 {"connection":"ssh:broken","file":"~","cmd:cwd":null}
+setChangeConnModalOpen false
+globalRefocusWithTimeout 10
+ConnEnsureCommand {"connname":"ssh:broken","logblockid":"blk-1"} {"timeout":60000}
+console.log error connecting blk-1 ssh:broken Error: ensure failed

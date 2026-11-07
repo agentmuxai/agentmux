@@ -1,0 +1,12 @@
+useMuxObjectValue block:blk-1
+remotesList
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="" conn=ssh:dev
+-- closed
+-
+refreshRemotes
+ConnListAWSCommand {"timeout":2000}
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="" conn=ssh:dev
+-- opened later: still nothing drawn, but the lists are loaded
+-

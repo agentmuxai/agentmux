@@ -197,7 +197,6 @@
 129 crates/srv/src/backend/storage/agents/definition.rs::Store::agent_def_find_or_insert
 239 crates/srv/src/backend/storage/agents/instance.rs::Store::instance_create
 136 crates/srv/src/backend/storage/agents/instance.rs::Store::instance_get_active_for_block
-399 crates/srv/src/backend/storage/agents_consolidate.rs::run_consolidate_migration
 208 crates/srv/src/backend/storage/bundles.rs::Store::bundle_reseed_system_if_owned_unobserved
 102 crates/srv/src/backend/storage/bundles.rs::Store::bundle_upsert_with_version_based_unobserved
 183 crates/srv/src/backend/storage/filestore/counter.rs::FileStore::append_in_tx
@@ -361,7 +360,6 @@
 109 frontend/app/hook/useWindowDrag.win32.ts::installJsDragListener
 105 frontend/app/init/error-display.ts::showStartupError
 138 frontend/app/modals/command-palette.tsx::CommandPaletteModal
-209 frontend/app/modals/conntypeahead.tsx::ChangeConnectionBlockModal
 160 frontend/app/modals/typeaheadmodal.tsx::TypeAheadModal
 162 frontend/app/modals/userinputmodal.tsx::UserInputModal
 121 frontend/app/notification/notificationitem.tsx::NotificationItem
@@ -471,9 +469,7 @@
 166 frontend/app/view/settings/sections/appearance-section.tsx::AppearanceSection
 120 frontend/app/view/settings/sections/browser-section.tsx::BrowserSection
 171 frontend/app/view/settings/sections/devices-section.tsx::DevicesSection
-185 frontend/app/view/settings/sections/notifications-section.tsx::NotificationsSection
 109 frontend/app/view/settings/sections/pinned-senders.tsx::PinnedSenders
-201 frontend/app/view/settings/sections/sounds-section.tsx::SoundsSection
 114 frontend/app/view/settings/sections/widget-bar-settings.tsx::WidgetBarSettings
 104 frontend/app/view/settings/sections/widget-catalog.tsx::WidgetCatalog
 105 frontend/app/view/settings/settings-view.tsx::SettingsView
