@@ -81,6 +81,19 @@ describe("opening", () => {
         expect(document.activeElement).toBe(line("tab:new"));
     });
 
+    it("keeps the global keys off until the last recorder is closed", () => {
+        render(() => <KeyboardSection />);
+        const first = open("New tab");
+        open("Close tab");
+        expect(h.off).toHaveBeenCalledTimes(1);
+        press(first, "Escape", "Escape");
+        expect(recorder("New tab")).toBeNull();
+        expect(recorder("Close tab")).toBeTruthy();
+        expect(h.on).not.toHaveBeenCalled();
+        fireEvent.click(button("Cancel"));
+        expect(h.on).toHaveBeenCalledTimes(1);
+    });
+
     it("labels the button Set key for a command with no key", () => {
         useEntries([{ command: "-tab:close", platform: "other" }]);
         render(() => <KeyboardSection />);
