@@ -817,11 +817,6 @@ function useScrollObservers(props: AgentDocumentVirtualListProps, s: ListState):
 }
 
 /**
- * A jump to a row outside the window aims by the estimate, then re-aims as the rows near it are measured
- * (scroll/settle-on-node.ts). The target is read from the layout slice by node id each frame, so rows that arrive
- * or are measured meanwhile move the aim and not the person's place.
- */
-/**
  * The layout has seen where the transcript is (its scroll position is the page's, clamped as the page clamps it)
  * and has a height for every row of its window: a jump that holds its aim now has landed, not just not heard yet.
  */
@@ -837,6 +832,11 @@ function layoutIsReady(props: AgentDocumentVirtualListProps, s: ListState): bool
     return true;
 }
 
+/**
+ * A jump to a row outside the window aims by the estimate, then re-aims as the rows near it are measured
+ * (scroll/settle-on-node.ts). The target is read from the layout slice by node id each frame, so rows that arrive
+ * or are measured meanwhile move the aim and not the person's place.
+ */
 function createJumpSettler(props: AgentDocumentVirtualListProps, s: ListState): { start: (nodeId: string) => void } {
     let target = "";
     const aimAt = (nodeId: string): number | null => {
