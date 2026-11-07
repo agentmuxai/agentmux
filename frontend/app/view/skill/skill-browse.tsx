@@ -36,6 +36,11 @@ function installAction(item: AppSkillCatalogItem): { label: string; note?: strin
     }
 }
 
+/** The refusal as the person reads it: without the name of the command that raised it. */
+function errorText(e: unknown): string {
+    return (e instanceof Error ? e.message : String(e)).replace(/^[a-z_.]+: /, "");
+}
+
 function BadgePill(p: { item: AppSkillCatalogItem }): JSX.Element {
     return p.item.badge === "agentmux" ? (
         <Pill tone="accent" icon="shield-halved" title={`Signed by the AgentMux key ${p.item.fingerprint}`}>
@@ -76,7 +81,7 @@ function BrowseItem(p: {
             });
             p.onChanged();
         } catch (e) {
-            setError(e instanceof Error ? e.message : String(e));
+            setError(errorText(e));
         } finally {
             setBusy(false);
         }
@@ -92,7 +97,7 @@ function BrowseItem(p: {
             </p>
             <p class="skill-app-line">{p.item.entry.description}</p>
             <p class="skill-app-line skill-app-muted">
-                Works on {p.item.entry.platforms.join(", ") || "no platform listed"} · routes: {p.item.entry.routes.join(", ")}
+                Works on {p.item.entry.platforms.join(", ") || "no platform listed"} · routes: {[...new Set(p.item.entry.routes)].join(", ")}
             </p>
             <Show when={p.item.entry.hasScripts}>
                 <p class="skill-app-line skill-app-warn">Carries scripts: you review each one before an agent can use it.</p>
@@ -164,12 +169,14 @@ export function SkillBrowse(p: { catalog: SkillCatalogModel; onOpen: (skillId: s
             </p>
             <Show when={list.error}>
                 <div class="agent-primitive-modal-error" role="alert">
-                    {list.error instanceof Error ? list.error.message : String(list.error)}
+                    {errorText(list.error)}
                 </div>
                 <p class="skill-app-line skill-app-muted">Nothing else depends on the catalog: your installed skills work as they are.</p>
-                <Button density="compact" onClick={() => void refetch()}>
-                    Try again
-                </Button>
+                <div class="skill-browse-actions">
+                    <Button density="compact" onClick={() => void refetch()}>
+                        Try again
+                    </Button>
+                </div>
             </Show>
             <Show when={list.loading && !items()}>
                 <p class="skill-app-line skill-app-muted">Reading the catalog…</p>

@@ -93,7 +93,7 @@ describe("Browse the catalog", () => {
                 item(),
                 item(
                     { badge: "community", fingerprint: "K7Q2-MZ4D-PX3A-9TWE", state: "update", installed_version: "0.9.0", skill_id: "k2" },
-                    { id: "acme.excel", name: "Excel", version: "1.1.0", hasScripts: true, mcp: "excel-mcp", verification: [] },
+                    { id: "acme.excel", name: "Excel", version: "1.1.0", hasScripts: true, mcp: "excel-mcp", verification: [], routes: ["api", "api", "desktop"] },
                 ),
                 item({ state: "current", installed_version: "1.0.0", skill_id: "k3" }, { id: "agentmux.blender", name: "Blender" }),
                 item({ state: "newer_here", installed_version: "2.0.0", skill_id: "k4" }, { id: "agentmux.wavelab", name: "WaveLab" }),
@@ -108,6 +108,7 @@ describe("Browse the catalog", () => {
         const excel = within(list).getByRole("listitem", { name: "Excel" });
         expect(excel.textContent).toContain("Community · K7Q2-MZ4D-PX3A-9TWE");
         expect(excel.textContent).toContain("not tested yet");
+        expect(excel.textContent).toContain("routes: api, desktop");
         expect(excel.textContent).toContain("Carries scripts: you review each one");
         expect(excel.textContent).toContain("Points at the MCP catalog entry excel-mcp. It is installed from the MCP tab, never from here.");
         expect(within(excel).getByRole("button", { name: "Update to 1.1.0" })).toBeTruthy();
@@ -154,11 +155,11 @@ describe("Browse the catalog", () => {
     });
 
     it("says so when the catalog cannot be reached, and tries again on request", async () => {
-        rpc.AppSkillsCatalogCommand.mockRejectedValueOnce(new Error("can't reach the catalog: offline")).mockResolvedValue({ items: [item()] });
+        rpc.AppSkillsCatalogCommand.mockRejectedValueOnce(new Error("app_skills.catalog: can't reach the catalog: offline")).mockResolvedValue({ items: [item()] });
         render(() => <SkillManager />);
         fireEvent.click(await screen.findByRole("button", { name: "Browse the catalog" }));
         const alert = await screen.findByRole("alert");
-        expect(alert.textContent).toContain("can't reach the catalog: offline");
+        expect(alert.textContent).toBe("can't reach the catalog: offline");
         expect(screen.getByText(/Nothing else depends on the catalog/)).toBeTruthy();
         fireEvent.click(screen.getByRole("button", { name: "Try again" }));
         expect(await screen.findByRole("list", { name: "Skills in the catalog" })).toBeTruthy();
