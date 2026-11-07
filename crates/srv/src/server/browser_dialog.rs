@@ -235,6 +235,21 @@ fn chooser_reason(ask: &str) -> String {
     }
 }
 
+/// What the agent reads about a refusal the host reports, and what to do about it. `shown` is only a scheme or a host.
+fn notice_words(notice: &str, shown: &str) -> (String, &'static str) {
+    match notice {
+        "external_protocol" => (
+            format!("a navigation to a {shown}: address was refused"),
+            "AgentMux only loads web pages in a pane, and never hands an address to a program on the computer (mailto:, zoommtg: and the like) or opens a local file by address. If the task needs one, tell the person; don't look for another way in",
+        ),
+        "certificate_error" => (
+            format!("{shown} has a certificate that isn't trusted"),
+            "AgentMux doesn't continue past a certificate warning, and nothing the agent can do clicks through it. Tell the person which site and why you need it",
+        ),
+        _ => (format!("the host refused something: {shown}"), "the host refused it"),
+    }
+}
+
 /// `POST /api/v1/host/browser_dialog` — the host parked a page's dialog in an
 /// agent-driven pane and asks what to do (dialogs spec §4.2). Body
 /// `{id, target, kind, message, origin}`; answers `accept`, `cancel`, or
@@ -268,6 +283,12 @@ pub(crate) async fn handle_host_browser_dialog(
     if let Some(ask) = body.get("chooser").and_then(|v| v.as_str()) {
         // A page's own file chooser, cancelled by the host: the agent is told what to do instead.
         record(&agent, &target, "file_chooser", &chooser_message(ask, &message), "cancelled", &chooser_reason(ask));
+        return answered("cancel");
+    }
+    if let Some(notice) = body.get("notice").and_then(|v| v.as_str()) {
+        // Something the host refused in the pane (a link to a program, an untrusted certificate): the agent is told.
+        let (what, reason) = notice_words(notice, &message);
+        record(&agent, &target, notice, &what, "blocked", reason);
         return answered("cancel");
     }
     if flag("suppressed") {
@@ -409,6 +430,14 @@ mod tests {
         assert!(take_ended("dlg-test-ended-1"));
         assert!(!take_ended("dlg-test-ended-1"));
         assert!(!take_ended("dlg-test-never"));
+    }
+
+    #[test]
+    fn a_refused_link_or_certificate_tells_the_agent_what_to_do_instead() {
+        let (what, why) = notice_words("external_protocol", "mailto");
+        assert!(what.contains("mailto:") && why.contains("tell the person") && !what.contains("program"), "{what} / {why}");
+        let (what, why) = notice_words("certificate_error", "expired.example");
+        assert!(what.contains("expired.example") && why.contains("certificate warning"), "{what} / {why}");
     }
 
     #[test]
