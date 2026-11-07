@@ -1,0 +1,84 @@
+IntersectionObserver rootMargin=600px 0px
+observe figure.am-media am-media-video
+io.disconnect
+fetchMediaRange C:/work/clips/gone.mp4 0-2097151 aborted=false
+-- missing at the probe
+<div>
+  <span class="am-muted">
+    "["
+    "video"
+    "not found:"
+    "clips/gone.mp4"
+    "]"
+io.disconnect
+-- over the cap at the probe
+IntersectionObserver rootMargin=600px 0px
+observe figure.am-media am-media-video
+io.disconnect
+fetchMediaRange C:/work/clips/huge.mp4 0-2097151 aborted=false
+-- too large at the probe
+<div>
+  <span data-stand="Button" class="am-media-card">
+    <i aria-hidden="true" class="fa fa-film">
+    <span class="am-media-card-name">
+      "huge.mp4"
+    <span class="am-muted">
+      "300.0 MB"
+    <span class="am-media-card-action">
+      "Open in the editor"
+Button am-media-card click
+openInEditorPaneOnScreen C:/work/clips/huge.mp4
+createBlock {"meta":{"view":"editor","file":"C:/work/clips/huge.mp4","editor:follow_folder":true}}
+io.disconnect
+-- over the cap at play
+IntersectionObserver rootMargin=600px 0px
+observe figure.am-media am-media-audio
+io.disconnect
+fetchMediaRange C:/work/sound/long.mp3 0-0 aborted=false
+fetchMediaBlob C:/work/sound/long.mp3 max=209715200 type=undefined aborted=false
+-- too large at play
+<div>
+  <span data-stand="Button" class="am-media-card">
+    <i aria-hidden="true" class="fa fa-music">
+    <span class="am-media-card-name">
+      "long.mp3"
+    <span class="am-muted">
+      "250.0 MB"
+    <span class="am-media-card-action">
+      "Open in the editor"
+io.disconnect
+-- the player fails
+IntersectionObserver rootMargin=600px 0px
+observe figure.am-media am-media-video
+io.disconnect
+fetchMediaRange C:/work/clips/odd.mp4 0-2097151 aborted=false
+createObjectURL blob:test/1
+fetchMediaBlob C:/work/clips/odd.mp4 max=209715200 type=undefined aborted=false
+createObjectURL blob:test/2
+revokeObjectURL blob:test/2
+-- playback error, the file freed
+<div>
+  <span class="am-muted">
+    "["
+    "video"
+    "can't play:"
+    "media error on video"
+    "]"
+io.disconnect
+revokeObjectURL blob:test/1
+-- the audio player fails
+IntersectionObserver rootMargin=600px 0px
+observe figure.am-media am-media-audio
+io.disconnect
+fetchMediaRange C:/work/sound/odd.ogg 0-0 aborted=false
+fetchMediaBlob C:/work/sound/odd.ogg max=209715200 type=undefined aborted=false
+createObjectURL blob:test/3
+revokeObjectURL blob:test/3
+-- audio playback error
+<div>
+  <span class="am-muted">
+    "["
+    "audio"
+    "can't play:"
+    "media error on audio"
+    "]"
