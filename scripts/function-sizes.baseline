@@ -476,7 +476,6 @@
 129 frontend/app/view/swarm/swarm-view.tsx::SubagentRow
 161 frontend/app/view/sysinfo/sysinfo-focus.tsx::FocusView
 127 frontend/app/view/sysinfo/sysinfo-model.ts::sampleReducer
-190 frontend/app/view/sysinfo/sysinfo-plot.tsx::TimeChart
 143 frontend/app/view/sysinfo/sysinfo-view.tsx::SysinfoViewInner
 290 frontend/app/view/term/term.tsx::TerminalView
 224 frontend/app/view/term/termViewModel.ts::TermViewModel::constructor
