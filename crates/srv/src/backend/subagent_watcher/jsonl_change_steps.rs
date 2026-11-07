@@ -85,14 +85,14 @@ impl SubagentWatcher {
         meta: Option<JsonlMeta>,
     ) -> Recorded {
         // Now lock and update state
-            let mut sessions = self.sessions.lock().unwrap();
-            let session = sessions
-                .entry(change.session_id.clone())
-                .or_insert_with(|| SessionWatch {
-                    subagents: HashMap::new(),
-                });
+        let mut sessions = self.sessions.lock().unwrap();
+        let session = sessions
+            .entry(change.session_id.clone())
+            .or_insert_with(|| SessionWatch {
+                subagents: HashMap::new(),
+            });
 
-            let is_new = !session.subagents.contains_key(&change.agent_id);
+        let is_new = !session.subagents.contains_key(&change.agent_id);
         note_reparented(session, change);
         let initial_status = initial_status(change);
         let initial_spawned_at = initial_spawned_at(new_events);
