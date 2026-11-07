@@ -10,7 +10,7 @@
  * docs/reports/REPORT_SYSINFO_REWRITE_AND_MODERN_MONITOR_2026_10_13.md section 5.2.
  */
 
-import type { JSX } from "solid-js";
+import type { Accessor, JSX, Setter } from "solid-js";
 import { createEffect, createMemo, createSignal, on, onCleanup, onMount, Show, useContext } from "solid-js";
 import { throttle } from "throttle-debounce";
 import uPlot from "uplot";
@@ -23,7 +23,6 @@ import { SysinfoZoomContext } from "./sysinfo-zoom";
 
 import {
     fadeLeftEnd,
-    formatValue,
     resolveCssColor,
     type SeriesSpec,
     timeAxisLabels,
@@ -34,7 +33,15 @@ import {
     yLabelTexts,
     yRange,
 } from "./sysinfo-chart";
-import { axisFontPx, FADE_EXTRA_PX, minFullChartPx, TICK_GAP_PX, TICK_PX, timeAxisPx, topPaddingPx } from "./sysinfo-layout";
+import {
+    axisFontPx,
+    FADE_EXTRA_PX,
+    minFullChartPx,
+    TICK_GAP_PX,
+    TICK_PX,
+    timeAxisPx,
+    topPaddingPx,
+} from "./sysinfo-layout";
 import { figures, titled, unitFormat } from "./sysinfo-overview-data";
 import type { DataItem } from "./sysinfo-types";
 
@@ -47,7 +54,6 @@ const X_LABEL_SPACE_PX = 80;
 const TEXT_INSET_PX = 1;
 /** Least room between y ticks at 100% zoom (uPlot's default), so a short chart shows fewer labels. */
 const Y_LABEL_SPACE_PX = 30;
-
 
 /**
  * The time labels, with the ones that would cross either of the plot's edges left
@@ -97,7 +103,11 @@ function placeYLabels(u: uPlot, into: HTMLElement, labels: YLabel[]): void {
  * The y axis: it draws the grid and reports its ticks (`onSplits`), and has no width and no labels of its own.
  * The plot runs under the labels, which `placeYLabels` puts over it.
  */
-function yAxisOptions(base: Pick<uPlot.Axis, "stroke" | "font" | "grid">, space: number, onSplits: (splits: number[]) => void): uPlot.Axis {
+function yAxisOptions(
+    base: Pick<uPlot.Axis, "stroke" | "font" | "grid">,
+    space: number,
+    onSplits: (splits: number[]) => void
+): uPlot.Axis {
     return {
         ...base,
         size: 0,
@@ -137,6 +147,253 @@ export type TimeChartProps = {
     class?: string;
 };
 
+/** What a chart's parts share: its props, its size and zoom, and the elements and uPlot it holds. */
+interface ChartState {
+    props: TimeChartProps;
+    size: Accessor<{ width: number; height: number }>;
+    setSize: Setter<{ width: number; height: number }>;
+    zoom: Accessor<number>;
+    /** Too short for axes at this zoom: drawn bare, title and tooltip kept (§5 C.2 rule 8). */
+    bare: Accessor<boolean>;
+    container: HTMLDivElement;
+    tip: HTMLDivElement;
+    yAxis: HTMLDivElement;
+    chart: uPlot | null;
+    /** The y axis' tick values, kept for the labels drawn over the plot. */
+    ySplits: number[];
+    // What the scales read; updated before each setData.
+    xWindow: [number, number];
+    yWindow: [number, number];
+}
+
+function createChartState(props: TimeChartProps): ChartState {
+    const [size, setSize] = createSignal({ width: 0, height: 0 });
+    const zoom = useContext(SysinfoZoomContext);
+    const bare = createMemo(
+        () =>
+            !!props.sparkline || (size().height > 0 && size().height < minFullChartPx(zoom(), props.timeAxis !== false))
+    );
+    return {
+        props,
+        size,
+        setSize,
+        zoom,
+        bare,
+        container: undefined as unknown as HTMLDivElement,
+        tip: undefined as unknown as HTMLDivElement,
+        yAxis: undefined as unknown as HTMLDivElement,
+        chart: null,
+        ySplits: [],
+        xWindow: [0, 1],
+        yWindow: [0, 100],
+    };
+}
+
+function showTip(c: ChartState, u: uPlot) {
+    const { props, tip, container } = c;
+    const idx = u.cursor.idx;
+    if (props.sparkline || idx == null) {
+        tip.style.display = "none";
+        return;
+    }
+    const parts: string[] = [];
+    let anchor: number | null = null;
+    props.series.forEach((s, i) => {
+        const v = u.data[i + 1][idx] as number | null;
+        if (v == null) return;
+        anchor ??= v;
+        parts.push(props.series.length > 1 ? `${s.label} ${props.format(Math.abs(v))}` : props.format(Math.abs(v)));
+    });
+    if (anchor == null) {
+        tip.style.display = "none";
+        return;
+    }
+    const ts = (u.data[0][idx] as number) * 1000;
+    tip.textContent = `${new Date(ts).toLocaleTimeString()}  ${parts.join("  ")}`;
+    tip.style.display = "block";
+    // Centred on the cursor, kept inside the chart so the newest samples (at the edge) stay readable.
+    const half = tip.offsetWidth / 2;
+    const x = u.over.offsetLeft + (u.cursor.left ?? 0);
+    tip.style.left = `${Math.max(half, Math.min(x, container.clientWidth - half))}px`;
+    tip.style.top = `${Math.max(0, u.over.offsetTop + u.valToPos(anchor, "y") - 30)}px`;
+}
+
+/** After uPlot has drawn the plot: the fade at its left end, then the y labels over it. */
+function drawYLabels(c: ChartState, u: uPlot) {
+    const { props, bare } = c;
+    const labels =
+        bare() || props.yLabels === false
+            ? []
+            : yLabelTexts(c.ySplits, u.scales.y.min ?? 0, u.scales.y.max ?? 1, (v) =>
+                  (props.axisFormat ?? props.format)(Math.abs(v))
+              );
+    placeYLabels(u, c.yAxis, labels);
+}
+
+/** What the two axes share: the muted colour, grid and ticks, the gap, the font and the zoom. */
+interface AxisStyle {
+    muted: string;
+    grid: { stroke: string; width: number };
+    ticks: { stroke: string; width: number; size: number };
+    gap: number;
+    font: string;
+    z: number;
+}
+
+function axisStyle(c: ChartState): AxisStyle {
+    const { container } = c;
+    const muted = resolveCssColor(container, "var(--grey-text-color)");
+    const grid = { stroke: withAlpha(muted, 0.25), width: 1 };
+    const ticks = { stroke: withAlpha(muted, 0.4), width: 1, size: TICK_PX };
+    const gap = TICK_GAP_PX;
+    const z = c.zoom();
+    const font = `${axisFontPx(z)}px ${getComputedStyle(container).fontFamily || "sans-serif"}`;
+    return { muted, grid, ticks, gap, font, z };
+}
+
+function timeAxis(c: ChartState, { muted, font, grid, ticks, gap, z }: AxisStyle): uPlot.Axis {
+    const timeLabels = c.props.timeAxis !== false;
+    return {
+        stroke: muted,
+        font,
+        grid,
+        ticks,
+        gap,
+        space: Math.round(X_LABEL_SPACE_PX * z),
+        values: (u, splits, _axisIdx, _space, incr) =>
+            timeLabels ? edgeSafe(u, splits, timeAxisLabels(splits, incr)) : splits.map(() => ""),
+        size: timeAxisPx(z, timeLabels),
+    };
+}
+
+function seriesOptions(c: ChartState): uPlot.Series[] {
+    const { props, container } = c;
+    const single = props.series.length === 1;
+    return [
+        {},
+        ...props.series.map((s) => {
+            const color = resolveCssColor(container, s.color);
+            return {
+                label: s.label,
+                stroke: color,
+                width: props.sparkline ? 1.5 : 2,
+                // A missing sample is a break in the line and the area.
+                spanGaps: false,
+                points: { show: false },
+                fillTo: 0,
+                fill: single
+                    ? (u: uPlot) => {
+                          const g = u.ctx.createLinearGradient(0, u.bbox.top, 0, u.bbox.top + u.bbox.height);
+                          g.addColorStop(0, withAlpha(color, 0.7));
+                          g.addColorStop(1, withAlpha(color, 0));
+                          return g;
+                      }
+                    : withAlpha(color, 0.25),
+            } as uPlot.Series;
+        }),
+    ];
+}
+
+function chartOptions(c: ChartState, width: number, height: number): uPlot.Options {
+    const { props, bare } = c;
+    const style = axisStyle(c);
+    const { muted, font, grid, z } = style;
+    return {
+        width,
+        height,
+        legend: { show: false },
+        // Nothing on either side: the plot runs to both edges (a time label that would
+        // cross the right one is dropped, see `edgeSafe`). The top keeps room for the top y label.
+        ...(bare() ? {} : { padding: [topPaddingPx(z), 0, null, 0] as uPlot.Padding }),
+        cursor: {
+            // Only the time is shared: each chart has its own y scale, and by
+            // default uPlot would also draw the hovered chart's y value on the others.
+            sync: props.syncKey ? { key: props.syncKey, scales: ["x", null] } : undefined,
+            drag: { x: false, y: false },
+            points: { size: 6 },
+        },
+        scales: {
+            x: { time: true, range: () => c.xWindow },
+            y: { range: () => c.yWindow },
+        },
+        axes: bare()
+            ? [{ show: false }, { show: false }]
+            : [
+                  timeAxis(c, style),
+                  yAxisOptions(
+                      { stroke: muted, font, grid },
+                      Math.round(Y_LABEL_SPACE_PX * z),
+                      (splits) => (c.ySplits = splits)
+                  ),
+              ],
+        series: seriesOptions(c),
+        hooks: { setCursor: [(u) => showTip(c, u)], draw: [(u) => drawYLabels(c, u)] },
+    };
+}
+
+function windows(c: ChartState) {
+    const { props } = c;
+    const rows = props.plotData ?? [];
+    const win = xWindowSecs(rows, props.targetLen, props.intervalSecs);
+    if (win) c.xWindow = win;
+    c.yWindow = props.yRange(rows);
+    return toSeriesData(rows, props.series);
+}
+
+function build(c: ChartState) {
+    c.chart?.destroy();
+    c.chart = null;
+    const { width, height } = c.size();
+    if (width <= 0 || height <= 0) return;
+    c.chart = new uPlot(chartOptions(c, width, height), windows(c), c.container);
+}
+
+function watchSize(c: ChartState) {
+    onMount(() => {
+        const resize = throttle(CHART_RESIZE_MS, (width: number, height: number) => c.setSize({ width, height }));
+        const observer = new ResizeObserver((entries) => {
+            const rect = entries[entries.length - 1].contentRect;
+            resize(Math.floor(rect.width), Math.floor(rect.height));
+        });
+        observer.observe(c.container);
+        onCleanup(() => {
+            observer.disconnect();
+            resize.cancel();
+            c.chart?.destroy();
+            c.chart = null;
+        });
+    });
+}
+
+function drawOnChange(c: ChartState) {
+    const { props, bare, zoom } = c;
+    // A new chart when what it draws changes (series, colors, axes, or the
+    // theme, whose colors the canvas resolved when it was built), or when it
+    // has none yet; otherwise only a new size, or new data.
+    createEffect(
+        on(
+            [() => props.series, bare, () => props.timeAxis, () => props.yLabels, zoom, appliedWindowTheme],
+            () => build(c),
+            { defer: true }
+        )
+    );
+    createEffect(
+        on(c.size, (s) => {
+            if (!c.chart) build(c);
+            else c.chart.setSize(s);
+        })
+    );
+    createEffect(
+        on(
+            [() => props.plotData, () => props.targetLen, () => props.intervalSecs],
+            () => c.chart?.setData(windows(c)),
+            {
+                defer: true,
+            }
+        )
+    );
+}
+
 /**
  * A time chart of one or more series, the ones marked `below` drawn under the
  * axis. It runs flush to the edges of its box (so to the pane's): the plot and
@@ -145,192 +402,17 @@ export type TimeChartProps = {
  * (`fadeLeftEnd`), so the series runs to the edge and the labels stay readable.
  */
 export function TimeChart(props: TimeChartProps): JSX.Element {
-    let container!: HTMLDivElement;
-    let tip!: HTMLDivElement;
-    let yAxis!: HTMLDivElement;
-    let chart: uPlot | null = null;
-    const [size, setSize] = createSignal({ width: 0, height: 0 });
-    const zoom = useContext(SysinfoZoomContext);
-    // Too short for axes at this zoom: drawn bare, title and tooltip kept (§5 C.2 rule 8).
-    const bare = createMemo(
-        () => !!props.sparkline || (size().height > 0 && size().height < minFullChartPx(zoom(), props.timeAxis !== false))
-    );
-    // The y axis' tick values, kept for the labels drawn over the plot.
-    let ySplits: number[] = [];
-    // What the scales read; updated before each setData.
-    let xWindow: [number, number] = [0, 1];
-    let yWindow: [number, number] = [0, 100];
-
-    const showTip = (u: uPlot) => {
-        const idx = u.cursor.idx;
-        if (props.sparkline || idx == null) {
-            tip.style.display = "none";
-            return;
-        }
-        const parts: string[] = [];
-        let anchor: number | null = null;
-        props.series.forEach((s, i) => {
-            const v = u.data[i + 1][idx] as number | null;
-            if (v == null) return;
-            anchor ??= v;
-            parts.push(props.series.length > 1 ? `${s.label} ${props.format(Math.abs(v))}` : props.format(Math.abs(v)));
-        });
-        if (anchor == null) {
-            tip.style.display = "none";
-            return;
-        }
-        const ts = (u.data[0][idx] as number) * 1000;
-        tip.textContent = `${new Date(ts).toLocaleTimeString()}  ${parts.join("  ")}`;
-        tip.style.display = "block";
-        // Centred on the cursor, kept inside the chart so the newest samples (at the edge) stay readable.
-        const half = tip.offsetWidth / 2;
-        const x = u.over.offsetLeft + (u.cursor.left ?? 0);
-        tip.style.left = `${Math.max(half, Math.min(x, container.clientWidth - half))}px`;
-        tip.style.top = `${Math.max(0, u.over.offsetTop + u.valToPos(anchor, "y") - 30)}px`;
-    };
-
-    /** After uPlot has drawn the plot: the fade at its left end, then the y labels over it. */
-    const drawYLabels = (u: uPlot) => {
-        const labels =
-            bare() || props.yLabels === false
-                ? []
-                : yLabelTexts(ySplits, u.scales.y.min ?? 0, u.scales.y.max ?? 1, (v) =>
-                      (props.axisFormat ?? props.format)(Math.abs(v))
-                  );
-        placeYLabels(u, yAxis, labels);
-    };
-
-    const options = (width: number, height: number): uPlot.Options => {
-        const muted = resolveCssColor(container, "var(--grey-text-color)");
-        const grid = { stroke: withAlpha(muted, 0.25), width: 1 };
-        const ticks = { stroke: withAlpha(muted, 0.4), width: 1, size: TICK_PX };
-        const gap = TICK_GAP_PX;
-        const single = props.series.length === 1;
-        const z = zoom();
-        const font = `${axisFontPx(z)}px ${getComputedStyle(container).fontFamily || "sans-serif"}`;
-        const timeLabels = props.timeAxis !== false;
-        return {
-            width,
-            height,
-            legend: { show: false },
-            // Nothing on either side: the plot runs to both edges (a time label that would
-            // cross the right one is dropped, see `edgeSafe`). The top keeps room for the top y label.
-            ...(bare() ? {} : { padding: [topPaddingPx(z), 0, null, 0] as uPlot.Padding }),
-            cursor: {
-                // Only the time is shared: each chart has its own y scale, and by
-                // default uPlot would also draw the hovered chart's y value on the others.
-                sync: props.syncKey ? { key: props.syncKey, scales: ["x", null] } : undefined,
-                drag: { x: false, y: false },
-                points: { size: 6 },
-            },
-            scales: {
-                x: { time: true, range: () => xWindow },
-                y: { range: () => yWindow },
-            },
-            axes: bare()
-                ? [{ show: false }, { show: false }]
-                : [
-                      {
-                          stroke: muted,
-                          font,
-                          grid,
-                          ticks,
-                          gap,
-                          space: Math.round(X_LABEL_SPACE_PX * z),
-                          values: (u, splits, _axisIdx, _space, incr) =>
-                              timeLabels ? edgeSafe(u, splits, timeAxisLabels(splits, incr)) : splits.map(() => ""),
-                          size: timeAxisPx(z, timeLabels),
-                      },
-                      yAxisOptions({ stroke: muted, font, grid }, Math.round(Y_LABEL_SPACE_PX * z), (splits) => (ySplits = splits)),
-                  ],
-            series: [
-                {},
-                ...props.series.map((s) => {
-                    const color = resolveCssColor(container, s.color);
-                    return {
-                        label: s.label,
-                        stroke: color,
-                        width: props.sparkline ? 1.5 : 2,
-                        // A missing sample is a break in the line and the area.
-                        spanGaps: false,
-                        points: { show: false },
-                        fillTo: 0,
-                        fill: single
-                            ? (u: uPlot) => {
-                                  const g = u.ctx.createLinearGradient(0, u.bbox.top, 0, u.bbox.top + u.bbox.height);
-                                  g.addColorStop(0, withAlpha(color, 0.7));
-                                  g.addColorStop(1, withAlpha(color, 0));
-                                  return g;
-                              }
-                            : withAlpha(color, 0.25),
-                    } as uPlot.Series;
-                }),
-            ],
-            hooks: { setCursor: [(u) => showTip(u)], draw: [(u) => drawYLabels(u)] },
-        };
-    };
-
-    const windows = () => {
-        const rows = props.plotData ?? [];
-        const win = xWindowSecs(rows, props.targetLen, props.intervalSecs);
-        if (win) xWindow = win;
-        yWindow = props.yRange(rows);
-        return toSeriesData(rows, props.series);
-    };
-
-    const build = () => {
-        chart?.destroy();
-        chart = null;
-        const { width, height } = size();
-        if (width <= 0 || height <= 0) return;
-        chart = new uPlot(options(width, height), windows(), container);
-    };
-
-    onMount(() => {
-        const resize = throttle(CHART_RESIZE_MS, (width: number, height: number) => setSize({ width, height }));
-        const observer = new ResizeObserver((entries) => {
-            const rect = entries[entries.length - 1].contentRect;
-            resize(Math.floor(rect.width), Math.floor(rect.height));
-        });
-        observer.observe(container);
-        onCleanup(() => {
-            observer.disconnect();
-            resize.cancel();
-            chart?.destroy();
-            chart = null;
-        });
-    });
-
-    // A new chart when what it draws changes (series, colors, axes, or the
-    // theme, whose colors the canvas resolved when it was built), or when it
-    // has none yet; otherwise only a new size, or new data.
-    createEffect(
-        on(
-            [() => props.series, bare, () => props.timeAxis, () => props.yLabels, zoom, appliedWindowTheme],
-            () => build(),
-            { defer: true }
-        )
-    );
-    createEffect(
-        on(size, (s) => {
-            if (!chart) build();
-            else chart.setSize(s);
-        })
-    );
-    createEffect(
-        on([() => props.plotData, () => props.targetLen, () => props.intervalSecs], () => chart?.setData(windows()), {
-            defer: true,
-        })
-    );
-
+    const c = createChartState(props);
+    watchSize(c);
+    drawOnChange(c);
     return (
         <div class={`sysinfo-chart ${props.top ? "sysinfo-chart--top" : ""} ${props.class ?? ""}`}>
             <Show when={props.title}>
                 <div class="sysinfo-chart-title">{props.title}</div>
             </Show>
-            <div ref={container} class="sysinfo-chart-canvas" />
-            <div ref={yAxis} class="sysinfo-chart-yaxis" />
-            <div ref={tip} class="sysinfo-chart-tip" style={{ display: "none" }} />
+            <div ref={(el) => (c.container = el)} class="sysinfo-chart-canvas" />
+            <div ref={(el) => (c.yAxis = el)} class="sysinfo-chart-yaxis" />
+            <div ref={(el) => (c.tip = el)} class="sysinfo-chart-tip" style={{ display: "none" }} />
         </div>
     );
 }
