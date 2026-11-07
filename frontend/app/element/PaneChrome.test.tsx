@@ -1624,8 +1624,10 @@ describe("renderPaneChromeShell — paths the other groups leave open", () => {
             headerCalls.at(-1).onTabDoubleClick(id);
             return screen.getByTestId(`tab-${id}`).querySelector("input") as HTMLInputElement;
         }
+        const renamer = vi.fn().mockResolvedValue(undefined);
+        beforeEach(() => renamer.mockClear());
         const renamable = () => {
-            registerPaneTabDescriptor("test-renamable", { label: () => "Old", renamer: () => vi.fn().mockResolvedValue(undefined) });
+            registerPaneTabDescriptor("test-renamable", { label: () => "Old", renamer: () => renamer });
             setObjectValue("block:b1", { meta: { view: "test-renamable" } });
             mockLayoutModel = fakeLayoutModel(["b1"]);
             render(() => renderPaneChromeShell(fakeNodeModel(), <div />));
@@ -1642,6 +1644,7 @@ describe("renderPaneChromeShell — paths the other groups leave open", () => {
             fireEvent.keyDown(input, { key: "Escape" });
             expect(screen.getByTestId("tab-b1").querySelector("input")).toBeNull();
             expect(screen.getByText("Old")).toBeInTheDocument();
+            expect(renamer).not.toHaveBeenCalled();
         });
     });
 
