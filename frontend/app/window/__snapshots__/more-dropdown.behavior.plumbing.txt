@@ -1,0 +1,11 @@
+ref ""
+setSubmenuEl region
+onSubmenuEnter
+onSubmenuLeave 5,6
+item menu open
+onSubmenuLeave 9,10
+setSubmenuEl null
+-- without plumbing
+ref ""
+setSubmenuEl region
+(nothing to tell)

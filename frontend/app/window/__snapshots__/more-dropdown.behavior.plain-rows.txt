@@ -1,0 +1,22 @@
+ref ""
+setSubmenuEl region
+peers.closeOthers a
+openWidget Terminal {"forceNew":false}
+onClose
+openWidget Notes {"forceNew":true}
+onClose
+onItemContextMenu {"x":31,"y":47} b
+context menu: prevented=true reachedParent=true
+-- plain rows
+<div data-stand="AnchoredPopover" data-placement="bottom-end" data-gutter="4" data-hide-until-placed="true" data-shell="anchored-popover--menu" class="action-widget-more-dropdown">
+  <div class="action-widget-more-item" data-row-key="row-0">
+    <span class="action-widget-more-item-icon widget-icon" style="--widget-icon-color: c-Terminal;">
+      <i class="fa fa-solid fa-window-maximize fa-fw">
+    <span class="action-widget-more-item-label">
+      "Terminal"
+  <div class="action-widget-more-item" data-row-key="row-1">
+    <span class="action-widget-more-item-icon widget-icon" style="--widget-icon-color: c-Notes;">
+      <i class="fa fa-solid fa-note-sticky fa-fw">
+    <span class="action-widget-more-item-label">
+      "Notes"
+flyouts open: none
