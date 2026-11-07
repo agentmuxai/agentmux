@@ -1,0 +1,16 @@
+useComposerPaste undefined undefined undefined
+historyAgentId undefined
+useComposerPlaceholder undefined Claude
+useComposerRestore undefined undefined
+setComposerValue "restored text" {"agent":null,"sent":[],"hist":{"pos":0,"draft":""},"esc":null,"composing":false,"scroll":false,"prefix":null,"index":0,"completions":[]}
+useComposerVoiceHandle undefined undefined
+useComposerFocusHandle undefined undefined
+isComposerEmptyRef
+restoreDraftOnMount {"agent":null,"sent":[],"hist":{"pos":0,"draft":""},"esc":null,"composing":false,"scroll":false,"prefix":null,"index":0,"completions":[],"textarea":"TEXTAREA"}
+-- no view model
+<div>
+  <div class="agent-footer">
+    <div class="agent-input-container">
+      <textarea data-raw-text-field="the prompt composer: a surface of its own that grows with its text and takes IME composition, paste and the history keys itself, not a form field" aria-label="Message the agent" rows="1" spellcheck="false" class="agent-input" placeholder="Send message to Claude">
+empty: true
+empty after typing: false
