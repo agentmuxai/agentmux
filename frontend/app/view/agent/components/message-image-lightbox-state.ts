@@ -57,10 +57,11 @@ function createImageStore(abort: AbortController) {
                 type: extOf(path) === "svg" ? "image/svg+xml" : undefined,
                 signal: abort.signal,
             });
-            if (abort.signal.aborted) return;
+            // Let go of a result nobody is waiting for: the entry was dropped while it loaded.
+            if (abort.signal.aborted || entries()[path]?.kind !== "loading") return;
             put(path, { kind: "ready", url: URL.createObjectURL(blob), bytes: blob.size });
         } catch (e) {
-            if (abort.signal.aborted) return;
+            if (abort.signal.aborted || entries()[path]?.kind !== "loading") return;
             put(path, { kind: e instanceof MediaTooLargeError ? "too-large" : "missing" });
         }
     };

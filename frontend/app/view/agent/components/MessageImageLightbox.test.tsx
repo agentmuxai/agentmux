@@ -93,6 +93,23 @@ describe("MessageImageLightbox", () => {
         expect(label(container)).toBe("Image 4 of 6: a.png");
     });
 
+    it("makes no blob URL for a file that finished loading after the preview let it go", async () => {
+        const five = ["a", "b", "c", "d", "e"].map((n) => ({ path: `D:/p/${n}.png`, name: `${n}.png`, alt: "" }));
+        const finish: Record<string, () => void> = {};
+        h.fetch.mockImplementation(
+            (path: string) => new Promise((done) => (finish[path] = () => done(new Blob([path], { type: "image/png" })))),
+        );
+        const create = vi.spyOn(URL, "createObjectURL");
+        const { container } = mount(0, five);
+        await waitFor(() => expect(finish["D:/p/a.png"]).toBeDefined());
+        // Two steps on, "a" is let go while its fetch is still in flight.
+        key(container, "ArrowRight");
+        key(container, "ArrowRight");
+        finish["D:/p/a.png"]();
+        await new Promise((r) => setTimeout(r, 0));
+        expect(create).not.toHaveBeenCalled();
+    });
+
     it("closes on Escape, and opens the shown image in the Editor on E", () => {
         const { container, onClose, onOpenEditor } = mount(2);
         key(container, "e");

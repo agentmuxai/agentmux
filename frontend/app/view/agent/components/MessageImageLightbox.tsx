@@ -77,13 +77,13 @@ export function MessageImageLightbox(props: MessageImageLightboxProps): JSX.Elem
             open={true}
             scope="pane"
             size="fit"
-            panelClass={`${BLOCK}__panel`}
+            panelClass={`${BLOCK}__panel ${BLOCK}__panel--message`}
             onClose={props.onClose}
             ariaLabel={s.label()}
             initialFocus={() => s.dialog() ?? null}
         >
-            <div ref={s.setDialog} class={`${BLOCK}__dialog`} tabIndex={-1} onKeyDown={s.onKeyDown}>
-                <div class={`${BLOCK}__image`}>
+            <div ref={s.setDialog} class={`${BLOCK}__dialog ${BLOCK}__dialog--message`} tabIndex={-1} onKeyDown={s.onKeyDown}>
+                <div class={`${BLOCK}__image ${BLOCK}__image--message`}>
                     <Picture s={s} />
                 </div>
                 <div class={`${BLOCK}__bar`}>
