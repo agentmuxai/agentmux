@@ -386,6 +386,11 @@ describe("TypeAheadModal frame", () => {
         ]);
     });
 
+    it("puts the input group before the suggestions area in the modal", () => {
+        mount({ suggestions: flat("a") });
+        expect(Array.from(modalEl().children).map((c) => c.className)).toEqual(["input-group", "suggestions-wrapper"]);
+    });
+
     it("calls the backdrop handler on a backdrop click, and copes with none", () => {
         const onClickBackdrop = vi.fn();
         mount({ onClickBackdrop });
