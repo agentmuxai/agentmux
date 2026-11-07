@@ -469,9 +469,10 @@ describe("createStripReveal — a smooth reveal in flight", () => {
         expect(frames.size).toBe(1);
     });
 
-    it("keeps a stale held-back layout change from reaching a later tween that began during a width transition", () => {
+    it("holds nothing back for a tween that begins after a layout change met a width transition", () => {
         reveals.mockReturnValue(true);
         const { reveal, setActive } = setup();
+        // No tween is travelling, so the layout change is only remembered for when the transition ends.
         reveal.setWidthAnimating(true);
         reveal.request("layout");
         setActive("c");
