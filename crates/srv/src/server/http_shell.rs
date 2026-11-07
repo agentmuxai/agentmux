@@ -6,11 +6,6 @@
 
 use super::*;
 
-/// `POST /api/v1/shell/create` — start a persistent background shell.
-///
-/// Called by `agentmux-mcp`'s `Shell` tool. Returns immediately with a
-/// `shell_id`; the `ShellNodeRunner` streams stdout/stderr to the frontend
-/// as `shell_chunk` MPS events without blocking the agent.
 /// What a command's Vault entries come to once checked and asked for: the values it is given, and what its
 /// output is stored as (with the labels of the entries nobody answered for).
 type Prepared = (Option<super::shell_secrets::Injected>, (Option<crate::backend::vault::capture::Job>, Vec<String>));
@@ -35,6 +30,11 @@ async fn prepare_secrets(state: &AppState, req: &ShellCreateRequest, remote: boo
     tokio::try_join!(injecting, capturing).map_err(|(code, why)| (code, Json(json!({ "error": why }))).into_response())
 }
 
+/// `POST /api/v1/shell/create` — start a persistent background shell.
+///
+/// Called by `agentmux-mcp`'s `Shell` tool. Returns immediately with a
+/// `shell_id`; the `ShellNodeRunner` streams stdout/stderr to the frontend
+/// as `shell_chunk` MPS events without blocking the agent.
 pub(super) async fn handle_shell_create(
     State(state): State<AppState>,
     Json(req): Json<ShellCreateRequest>,

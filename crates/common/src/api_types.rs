@@ -1381,6 +1381,7 @@ mod app_api_manifest_contract_tests {
             stdin_secret: Some("api-key-x".to_string()),
             secret_files: Some(Default::default()),
             capture: Some(Vec::new()),
+            reason: Some("why".to_string()),
         };
         let value = serde_json::to_value(&instance).expect("must serialize");
         let struct_fields: HashSet<String> =

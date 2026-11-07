@@ -249,8 +249,8 @@ fn rows_made_before_the_chain_are_counted_and_not_checked() {
     assert_eq!(rows[2].seq, 3);
     assert_eq!(rows[2].version, 1, "old rows' versions were never kept, but their actions count: the old entry's `created` is its first version");
 
-    // A row written after the chain began by an older build sharing the store has no hash: counted, not a change,
-    // and the next row of this build still follows the last chained one.
+    // A row written after the chain began by an older build sharing the store has no hash and none of the chain's
+    // columns: counted, not a change, and the next row of this build still follows the last chained one.
     s.vault_run_sql_for_tests("INSERT INTO db_vault_activity (seq, at, entry_id, action, outcome) VALUES (9, 3, 'x', 'revealed', 'done')");
     let mixed = chain_of(&s);
     assert!(mixed.intact, "{mixed:?}");
@@ -314,4 +314,21 @@ fn generate_keeps_the_reason_in_the_history_and_why_still_works_as_the_older_nam
     assert_eq!((ra.reason.as_str(), ra.actor.as_str(), ra.actor_kind.as_str(), ra.version), ("a webhook secret for task 27968", "builder", "agent", 1));
     assert_eq!(rb.reason, "the older name still counts");
     assert!(!ra.target.contains("task 27968"), "the reason is its own column, not the target");
+}
+
+#[test]
+fn a_row_blanked_out_of_the_chain_by_hand_is_not_mistaken_for_an_older_builds() {
+    let (s, _) = busy_store();
+    // Taking a middle row's place in the chain away leaves its other chain columns: that is found at the row.
+    s.vault_run_sql_for_tests("UPDATE db_vault_activity SET hash = '', prev_hash = '' WHERE seq = 3");
+    let chain = chain_of(&s);
+    assert!(!chain.intact, "{chain:?}");
+    assert_eq!(chain.broken_at, Some(3));
+    assert!(chain.problem.contains("taken out of the chain"), "{}", chain.problem);
+    // Blanking every column the chain added as well makes it look like an older build's row, but the row after
+    // it was chained to it, so it no longer follows the one before: found there.
+    let (s, _) = busy_store();
+    s.vault_run_sql_for_tests("UPDATE db_vault_activity SET hash = '', prev_hash = '', actor_kind = '', host = '', version = 0 WHERE seq = 3");
+    let chain = chain_of(&s);
+    assert!(!chain.intact && chain.broken_at == Some(4), "{chain:?}");
 }

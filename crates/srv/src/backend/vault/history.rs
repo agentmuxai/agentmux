@@ -151,8 +151,8 @@ pub struct VaultChain {
     pub checked: usize,
     /// How many older lines were made before the chain began, and so can't be checked.
     pub before_chain: usize,
-    /// How many lines after the chain began have no place in it: written by an older AgentMux sharing this computer's
-    /// store, which doesn't know the chain. Not checked, and not counted as a change.
+    /// How many lines after the chain began have no place in it and look like what an older AgentMux sharing this
+    /// computer's store writes (it doesn't know the chain). They are not checked, and are shown as a count.
     pub unchained_after: usize,
     /// The first line found wrong, when not intact.
     #[ts(type = "number | null")]
@@ -171,6 +171,12 @@ pub struct Head {
     pub hash: String,
 }
 
+/// Whether a row with no hash is what a build that doesn't know the chain writes: none of the columns the chain
+/// added. (Someone blanking them all by hand looks the same, which is why such rows are counted and shown.)
+fn looks_unchained(r: &VaultActivityRow) -> bool {
+    r.version == 0 && r.actor_kind.is_empty() && r.host.is_empty() && r.reason.is_empty() && r.refs.is_empty() && r.prev_hash.is_empty()
+}
+
 /// Walks `rows` (oldest first) and says whether the chain holds, and whether `head` is a row in it.
 pub fn verify_chain(rows: &[VaultActivityRow], head: Option<&Head>) -> VaultChain {
     let mut out = VaultChain { intact: true, checked: 0, before_chain: 0, unchained_after: 0, broken_at: None, head_checked: head.is_some(), problem: String::new() };
@@ -182,7 +188,12 @@ pub fn verify_chain(rows: &[VaultActivityRow], head: Option<&Head>) -> VaultChai
     };
     for row in rows {
         if row.hash.is_empty() {
-            // Before the chain began, or after it by an older build still running on the same store.
+            // Before the chain began, or after it by an older build still running on the same store. Such a row
+            // has none of the chain's columns; one that has some but no place in the chain was taken out of it.
+            if !looks_unchained(row) {
+                broke(&mut out, row.seq, "this line was taken out of the chain");
+                return out;
+            }
             if out.checked > 0 {
                 out.unchained_after += 1;
             } else {
