@@ -1,15 +1,24 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { recycleBlockers } from "@/app/store/recycle-blockers";
 import { createRoot, createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { recycleBlockers } from "@/app/store/recycle-blockers";
 import type { DocumentNode } from "../../../agent-model/types";
-import { SEARCH_DEBOUNCE_MS, SEARCH_REFRESH_MS, SEARCH_SLOW_MS, useInSessionSearch, type UseInSessionSearchOptions } from "./useInSessionSearch";
+import {
+    SEARCH_DEBOUNCE_MS,
+    SEARCH_REFRESH_MS,
+    SEARCH_SLOW_MS,
+    useInSessionSearch,
+    type UseInSessionSearchOptions,
+} from "./useInSessionSearch";
 
 describe("useInSessionSearch", () => {
     it("an open search blocks a renderer recycle until it is closed", () => {
-        const { search, dispose } = createRoot((d) => ({ search: useInSessionSearch({ document: () => [] }), dispose: d }));
+        const { search, dispose } = createRoot((d) => ({
+            search: useInSessionSearch({ document: () => [] }),
+            dispose: d,
+        }));
         search.setVisible(true);
         expect(recycleBlockers()).toContain("a transcript search is open");
         search.close();
@@ -19,7 +28,10 @@ describe("useInSessionSearch", () => {
 
     it("tells the caller when the search ends", () => {
         const onClose = vi.fn();
-        const { search, dispose } = createRoot((d) => ({ search: useInSessionSearch({ document: () => [], onClose }), dispose: d }));
+        const { search, dispose } = createRoot((d) => ({
+            search: useInSessionSearch({ document: () => [], onClose }),
+            dispose: d,
+        }));
         search.setVisible(true);
         expect(onClose).not.toHaveBeenCalled();
         search.close();
@@ -102,6 +114,39 @@ describe("useInSessionSearch: the pass", () => {
         expect(search.highlightId()).toBe("b");
         expect(search.currentIndex()).toBe(2);
         expect(jumpTo).not.toHaveBeenCalled();
+        dispose();
+    });
+
+    it("rows that first match after a search with none are counted, not marked: the first step picks one and jumps", async () => {
+        const base = [md("a", "alpha")];
+        const { search, setDoc, jumpTo, dispose } = open(base);
+        search.performSearch("zeta");
+        await vi.advanceTimersByTimeAsync(SEARCH_DEBOUNCE_MS);
+        expect(search.matchCount()).toBe(0);
+        setDoc([...base, md("z", "zeta arrives")]);
+        await vi.advanceTimersByTimeAsync(SEARCH_REFRESH_MS);
+        expect(search.matches()).toEqual(["z"]);
+        expect(search.currentIndex()).toBe(-1);
+        expect(search.highlightId()).toBeNull();
+        expect(jumpTo).not.toHaveBeenCalled();
+        search.next();
+        expect(search.highlightId()).toBe("z");
+        expect(jumpTo).toHaveBeenCalledExactlyOnceWith("z");
+        dispose();
+    });
+
+    it("a refresh during the typing pause cannot cost the typed query its jump", async () => {
+        const base = [md("a", "alpha")];
+        const { search, setDoc, jumpTo, dispose } = open(base);
+        search.performSearch("zeta");
+        await vi.advanceTimersByTimeAsync(SEARCH_DEBOUNCE_MS);
+        setDoc([...base, md("z", "zeta arrives")]);
+        await vi.advanceTimersByTimeAsync(SEARCH_REFRESH_MS - 1);
+        search.performSearch("zeta a");
+        await vi.advanceTimersByTimeAsync(1);
+        await vi.advanceTimersByTimeAsync(SEARCH_DEBOUNCE_MS);
+        expect(search.highlightId()).toBe("z");
+        expect(jumpTo).toHaveBeenCalledExactlyOnceWith("z");
         dispose();
     });
 

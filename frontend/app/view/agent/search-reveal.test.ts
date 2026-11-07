@@ -119,7 +119,10 @@ describe("createSearchReveal (a search match inside a hidden run, #10718)", () =
     });
 
     it("a run the person opened stays open while the search steps elsewhere", () => {
-        const { reveal, pins } = setup([run("hidden-run:a", ["a"], true), run("hidden-run:c", ["c"])], ["hidden-run:a"]);
+        const { reveal, pins } = setup(
+            [run("hidden-run:a", ["a"], true), run("hidden-run:c", ["c"])],
+            ["hidden-run:a"]
+        );
         reveal.jumpTo("c");
         expect(pins()).toEqual(["hidden-run:a", "hidden-run:c"]);
         reveal.jumpTo("on-screen");

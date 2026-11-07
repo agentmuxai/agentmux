@@ -108,6 +108,12 @@ function applyFound(
         view.setCurrentIndex(keep);
         return;
     }
+    // A refresh of a growing transcript never moves the view, and never marks a row it did not move to: with no
+    // current match, the new matches are counted and the first step picks one.
+    if (!typed) {
+        view.setCurrentIndex(-1);
+        return;
+    }
     const top = opts.topNodeId?.() ?? null;
     const start =
         top === null
@@ -118,8 +124,7 @@ function applyFound(
                   top
               );
     view.setCurrentIndex(start);
-    // A refresh of a growing transcript never moves the view; a query the person typed does.
-    if (typed) opts.jumpTo?.(found[start]);
+    opts.jumpTo?.(found[start]);
 }
 
 /** The debounced, sliced, cancellable passes over the transcript, and the refresh while it grows. */

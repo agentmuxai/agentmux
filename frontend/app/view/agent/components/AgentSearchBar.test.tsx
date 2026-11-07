@@ -33,6 +33,11 @@ describe("AgentSearchBar", () => {
         expect(bar(0, -1).counter()).toBe("No matches");
     });
 
+    it("counts the matches when none is current yet", () => {
+        expect(bar(5, -1).counter()).toBe("5 matches");
+        expect(bar(1, -1).counter()).toBe("1 match");
+    });
+
     it("says Searching… while a long pass runs, then the count", () => {
         const { counter, setS } = bar(3, 0, true);
         expect(counter()).toBe("Searching…");

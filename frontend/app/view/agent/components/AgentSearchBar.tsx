@@ -48,6 +48,8 @@ export const AgentSearchBar = (props: AgentSearchBarProps): JSX.Element => {
         if (props.searching?.()) return "Searching…";
         const count = props.matchCount();
         if (count === 0) return "No matches";
+        // Matches were found while none is current (rows arrived after a search that had none): count them.
+        if (props.matchIndex() < 0) return count === 1 ? "1 match" : `${count} matches`;
         return `${props.matchIndex() + 1} of ${count}`;
     };
 

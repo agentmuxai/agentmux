@@ -129,7 +129,11 @@ export function firstMatchFrom(matches: readonly string[], order: readonly strin
  * the document does not hold under their own ids, so a run stands for its first hidden row and a divider for the
  * next row that is in the document. Null when `topId` is not shown or nothing at or after it is in the document.
  */
-export function rawIdAtOrAfter(shown: readonly DocumentNode[], topId: string | null, raw: ReadonlySet<string>): string | null {
+export function rawIdAtOrAfter(
+    shown: readonly DocumentNode[],
+    topId: string | null,
+    raw: ReadonlySet<string>
+): string | null {
     const start = topId === null ? -1 : shown.findIndex((n) => n.id === topId);
     if (start < 0) return null;
     for (let i = start; i < shown.length; i++) {
