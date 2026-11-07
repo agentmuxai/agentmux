@@ -54,6 +54,9 @@ pub(crate) struct SigninRequest {
     /// The saved sign-in to use; needed only when the page could take more than one.
     #[serde(default)]
     entry: Option<String>,
+    /// Why the agent signs in: one line of 8 to 300 characters, required.
+    #[serde(default)]
+    reason: Option<String>,
 }
 
 /// The key "Always for <agent> on this site" is kept under, in the grants table
@@ -210,12 +213,12 @@ async fn chosen(state: &AppState, block_id: &str, agent: &str, profile: &str, en
 /// The person's yes: under an "Always" the notice shows and nobody pressed
 /// Stop; otherwise they answered the Vault's prompt, in `agent_pane`. True when
 /// nobody answered it and it went ahead.
-async fn approve(state: &AppState, block_id: &str, agent: &str, agent_pane: String, c: &Chosen, incognito: bool) -> Result<bool, Refusal> {
+async fn approve(state: &AppState, block_id: &str, agent: &str, agent_pane: String, c: &Chosen, incognito: bool, reason: &str) -> Result<bool, Refusal> {
     let key = grant_key(agent, &c.profile, &c.origin);
     let (store, e, k) = (state.identity_store.clone(), c.entry.clone(), key.clone());
     let granted = !incognito && tokio::task::spawn_blocking(move || store.vault_grant_check(&e, &k).unwrap_or(false)).await.unwrap_or(false);
     if !granted {
-        return ask(state, block_id, agent, agent_pane, c, incognito, key).await;
+        return ask(state, block_id, agent, agent_pane, c, incognito, key, reason).await;
     }
     match notice(state, block_id, agent, &c.origin, &c.user).await {
         Some(true) => Ok(false),
@@ -235,8 +238,9 @@ fn still_allowed(state: &AppState, req: &SigninRequest, block_id: &str) -> Resul
     }
 }
 
-fn use_request(agent: &str, agent_pane: String, c: &Chosen, incognito: bool) -> UseRequest {
+fn use_request(agent: &str, agent_pane: String, c: &Chosen, incognito: bool, agent_reason: &str) -> UseRequest {
     UseRequest {
+        agent_reason: agent_reason.to_string(),
         id: uuid::Uuid::new_v4().to_string(),
         agent: agent.to_string(),
         block_id: agent_pane,
@@ -260,9 +264,9 @@ fn use_request(agent: &str, agent_pane: String, c: &Chosen, incognito: bool) -> 
 
 /// Ask the person in the Vault's prompt; an "Always" is kept under `key`. True
 /// when nobody answered and it went ahead.
-async fn ask(state: &AppState, block_id: &str, agent: &str, agent_pane: String, c: &Chosen, incognito: bool, key: String) -> Result<bool, Refusal> {
+async fn ask(state: &AppState, block_id: &str, agent: &str, agent_pane: String, c: &Chosen, incognito: bool, key: String, reason: &str) -> Result<bool, Refusal> {
     let headline = format!("{agent} wants to sign in to {}", c.origin);
-    let (ended, _) = super::vault_ask::ask(state, block_id, use_request(agent, agent_pane, c, incognito), ANSWER_WAIT, &headline).await;
+    let (ended, _) = super::vault_ask::ask(state, block_id, use_request(agent, agent_pane, c, incognito, reason), ANSWER_WAIT, &headline).await;
     match ended {
         Ended::Once => Ok(false),
         Ended::WentAhead => Ok(true),
@@ -285,6 +289,10 @@ pub(crate) async fn handle_signin(
     caller: Option<axum::Extension<crate::server::caller::Caller>>,
     Json(req): Json<SigninRequest>,
 ) -> Response {
+    let reason = match crate::backend::vault::history::require_reason(req.reason.as_deref()) {
+        Ok(r) => r,
+        Err(e) => return err_response(StatusCode::BAD_REQUEST, e),
+    };
     let block_id = match target_block_id(&state, caller.as_deref(), &req.auth, req.pane.as_deref()) {
         Ok(b) => b,
         Err((code, e)) => return err_response(code, e),
@@ -300,10 +308,13 @@ pub(crate) async fn handle_signin(
     };
     tracing::info!(agent = %agent, block_id = %block_id, entry = %c.entry, "[signin] an agent asked to sign in");
     let agent_pane = super::vault_ask::agent_pane(&state, caller.as_deref(), &req.auth);
-    let went_ahead = match approve(&state, &block_id, &agent, agent_pane, &c, incognito).await {
+    let went_ahead = match approve(&state, &block_id, &agent, agent_pane, &c, incognito, &reason).await {
         Ok(w) => w,
         Err(r) => {
-            crate::backend::vault::record(&state.identity_store, &c.entry, &c.label, &agent, signins::SIGNED_IN, &c.origin, r.outcome);
+            crate::backend::vault::record_line(
+                &state.identity_store,
+                crate::backend::vault::Line { entry_id: &c.entry, label: &c.label, actor: &agent, action: signins::SIGNED_IN, target: &c.origin, outcome: r.outcome, reason: &reason },
+            );
             super::vault_handlers::publish(&state);
             noted(&state, &block_id, &agent, r.how);
             return err_response(r.code, r.why);
@@ -314,7 +325,7 @@ pub(crate) async fn handle_signin(
         return err_response(code, e);
     }
 
-    match super::browser_signin_fill::fill_as(&state, &block_id, &c.entry, &profile, &agent, Some((c.created, c.origin.clone()))).await {
+    match super::browser_signin_fill::fill_as(&state, &block_id, &c.entry, &profile, &agent, Some((c.created, c.origin.clone())), &reason).await {
         Ok((site, username_filled)) => {
             noted(&state, &block_id, &agent, How::Allowed);
             let mut out = json!({ "filled": true, "entry": c.entry, "site": site, "username_filled": username_filled, "password": "[secret: hidden]" });

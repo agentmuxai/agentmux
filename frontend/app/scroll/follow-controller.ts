@@ -56,6 +56,9 @@ export interface ScrollGeometry {
     clientHeight: number;
 }
 
+/** Which ResizeObserver reported a size. */
+export type SizeSource = "content" | "viewport";
+
 /** What a gesture that escapes at once was (§5.4). */
 export type EscapeCause = "wheel-up" | "key" | "selection";
 
@@ -101,8 +104,9 @@ export type FollowEvent =
     | { type: "JumpToBottom"; reason: string }
     /** Search or a deep link. */
     | { type: "JumpToNode"; nodeId: string }
-    | { type: "BecameZeroSize" }
-    | { type: "BecameSized" }
+    /** `via` and `geo` (what was observed) only feed the transition log; the reducer never reads them. */
+    | { type: "BecameZeroSize"; via?: SizeSource; geo?: ScrollGeometry }
+    | { type: "BecameSized"; via?: SizeSource; geo?: ScrollGeometry }
     /** `/clear`, or a new session in the same pane. */
     | { type: "Reset" };
 
@@ -133,6 +137,11 @@ export function followStateLabel(state: FollowState): "following" | "detached" |
 
 const gapOf = (g: ScrollGeometry): number => g.scrollHeight - g.clientHeight - g.scrollTop;
 const gapDetail = (g: ScrollGeometry): string => `gap=${Math.round(gapOf(g))}px`;
+/** What a size change observed, for the transition log: which observer saw it and the geometry it saw. */
+const sizeDetail = (via?: SizeSource, geo?: ScrollGeometry): string | undefined =>
+    geo
+        ? `${via ? `via=${via} ` : ""}ch=${Math.round(geo.clientHeight)} sh=${Math.round(geo.scrollHeight)} top=${Math.round(geo.scrollTop)}`
+        : undefined;
 
 function same(a: FollowState, b: FollowState): boolean {
     return a.kind === b.kind && (a.kind !== "SUSPENDED" || a.prev === (b as { prev: FollowMode }).prev);
@@ -233,13 +242,13 @@ export function followReducer(state: FollowState, event: FollowEvent): FollowRes
 
         case "BecameZeroSize":
             if (state.kind === "SUSPENDED") return stay(state);
-            return go(state, suspended(state.kind), "zero-size");
+            return go(state, suspended(state.kind), "zero-size", sizeDetail(event.via, event.geo));
 
         case "BecameSized": {
             if (state.kind !== "SUSPENDED") return stay(state);
             const to = state.prev === "FOLLOWING" ? FOLLOWING : DETACHED;
             // DETACHED: the reader's scrollTop is left alone.
-            return go(state, to, "sized", undefined, to.kind === "FOLLOWING" ? [{ type: "Pin", cause: "sized" }] : []);
+            return go(state, to, "sized", sizeDetail(event.via, event.geo), to.kind === "FOLLOWING" ? [{ type: "Pin", cause: "sized" }] : []);
         }
 
         case "Reset":

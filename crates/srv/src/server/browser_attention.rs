@@ -48,6 +48,9 @@ pub(crate) enum Kind {
     /// The agent typed a line in a web terminal and the person's grant says to
     /// ask before Enter (SPEC_BROWSER_WEB_TERMINAL_TYPING_2026_10_23.md §4.4).
     Line,
+    /// An agent that did not open the pane asks to drive it
+    /// (SPEC_BROWSER_RETAKE_AND_COMMANDEER_2026_11_04.md §2.3).
+    Take,
     /// Why a navigation the pane stopped didn't load. Nothing waits on it:
     /// it doesn't pause the agent's tools or time out.
     Notice,
@@ -62,6 +65,7 @@ impl Kind {
             Kind::Bypass => "bypass",
             Kind::Dialog => "dialog",
             Kind::Line => "line",
+            Kind::Take => "take",
             Kind::Notice => "notice",
         }
     }
@@ -86,6 +90,7 @@ impl Kind {
                 "the page in pane {pane:?} is showing its own question (a confirm or \"Leave site?\" box) and the user is being asked to answer it"
             ),
             Kind::Line => format!("pane {pane:?} is showing the user the terminal line you typed and waiting for Run it or Don't run"),
+            Kind::Take => format!("pane {pane:?} is asking the user whether another agent may drive it"),
             // Never pauses anything (`waiting_on_user`); named for completeness.
             Kind::Notice => format!("pane {pane:?} is showing the user why a navigation stopped"),
         };

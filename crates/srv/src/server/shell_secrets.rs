@@ -60,6 +60,8 @@ pub(super) struct Wanted<'a> {
     pub env: Option<&'a std::collections::HashMap<String, String>>,
     pub stdin: Option<&'a str>,
     pub files: Option<&'a std::collections::HashMap<String, String>>,
+    /// The agent's reason for the command's secrets, already checked.
+    pub reason: &'a str,
 }
 
 /// Where one value goes.
@@ -164,16 +166,18 @@ pub(super) async fn plan_capture(
     rules: Option<&[agentmux_common::api_types::CaptureRule]>,
     cmd: &str,
     cwd: &str,
+    reason: &str,
 ) -> Result<(Option<capture::Job>, Vec<String>), Refusal> {
     let Some(rules) = rules.filter(|r| !r.is_empty()) else {
         return Ok((None, Vec::new()));
     };
     let agent = agent_of(state, agent_block_id, auth, "capture")?;
     let (store, rules, a, c) = (state.identity_store.clone(), rules.to_vec(), agent.clone(), cmd.to_string());
-    let plan = tokio::task::spawn_blocking(move || capture::plan(&store, &rules, &a, &c))
+    let mut plan = tokio::task::spawn_blocking(move || capture::plan(&store, &rules, &a, &c))
         .await
         .map_err(|e| refuse(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .map_err(|e| refuse(StatusCode::BAD_REQUEST, e))?;
+    plan.reason = reason.to_string();
     let replaced: Vec<(String, String, &'static str, String)> = plan
         .replaces()
         .filter_map(|t| match t {
@@ -202,6 +206,7 @@ pub(super) async fn plan_capture(
             field: String::new(),
             offer_always: false,
             reason: "what the command prints replaces the value".into(),
+            agent_reason: reason.to_string(),
             kind: kind.clone(),
             command: cmd.to_string(),
             cwd: cwd.to_string(),
@@ -213,7 +218,7 @@ pub(super) async fn plan_capture(
     }).collect();
     while let Some((id, label, ended)) = asking.next().await {
         if !ended.allowed() {
-            vault::record(&state.identity_store, id, label, &agent, capture::CAPTURED, &clip(cmd, 160), ended.outcome());
+            vault::record_line(&state.identity_store, vault::Line { entry_id: id, label, actor: &agent, action: capture::CAPTURED, target: &clip(cmd, 160), outcome: ended.outcome(), reason });
             super::vault_handlers::publish(state);
             return Err(refused(ended));
         }
@@ -261,6 +266,30 @@ pub(super) struct Preapproved {
     pub env: std::collections::HashMap<String, String>,
 }
 
+/// The question for the person about running `command` (cmd, cwd) with the parts of `first`'s entry that
+/// `waiting_on` names, and what the agent says it is for.
+fn command_request(agent: &str, first: &FillTarget, waiting_on: &[(&Delivery, &FillTarget)], command: (&str, &str), agent_reason: &str) -> UseRequest {
+    let mut whats: Vec<&str> = waiting_on.iter().map(|(_, t)| t.what.as_str()).collect();
+    whats.dedup();
+    UseRequest {
+        id: uuid::Uuid::new_v4().to_string(),
+        agent: agent.to_string(),
+        entry_id: first.id.clone(),
+        entry_label: first.label.clone(),
+        what: whats.join(" and "),
+        origin: String::new(),
+        field: waiting_on.iter().map(|(d, t)| d.shown(t.part)).collect::<Vec<_>>().join(", "),
+        offer_always: true,
+        reason: format!("it is the first time {agent} runs a command with this entry"),
+        agent_reason: agent_reason.to_string(),
+        kind: first.kind.to_string(),
+        command: command.0.to_string(),
+        cwd: command.1.to_string(),
+        requested_ms: agentmux_common::time::now_ms_u64(),
+        ..Default::default()
+    }
+}
+
 /// Resolves, asks for and reads the entries a command was given. `None` when it
 /// was given none.
 pub(super) async fn inject(
@@ -273,6 +302,7 @@ pub(super) async fn inject(
     cwd: &str,
     preapproved: Option<&Preapproved>,
 ) -> Result<Option<Injected>, Refusal> {
+    let reason = wanted.reason.to_string();
     // A rotation's approval covers exactly the secrets it approved, nothing more.
     let preapproved = preapproved.is_some_and(|p| {
         wanted.stdin.is_none_or(|s| s.trim().is_empty()) && wanted.files.is_none_or(|f| f.is_empty()) && wanted.env == Some(&p.env)
@@ -308,7 +338,10 @@ pub(super) async fn inject(
         return Err(refuse(StatusCode::BAD_REQUEST, "@pending is a rotation's new value: only that rotation's own commands get it"));
     }
     let record = |t: &FillTarget, outcome: &str| {
-        vault::record(&state.identity_store, &t.id, &t.label, &agent, "ran a command", &clip(cmd, 160), outcome);
+        vault::record_line(
+            &state.identity_store,
+            vault::Line { entry_id: &t.id, label: &t.label, actor: &agent, action: "ran a command", target: &clip(cmd, 160), outcome, reason: &reason },
+        );
         // Every window's Vault pane shows the new line of the record.
         super::vault_handlers::publish(state);
     };
@@ -341,22 +374,7 @@ pub(super) async fn inject(
         let mut whats: Vec<&str> = waiting_on.iter().map(|(_, t)| t.what.as_str()).collect();
         whats.dedup();
         let what = whats.join(" and ");
-        let request = UseRequest {
-            id: uuid::Uuid::new_v4().to_string(),
-            agent: agent.clone(),
-            entry_id: first.id.clone(),
-            entry_label: first.label.clone(),
-            what: what.clone(),
-            origin: String::new(),
-            field: waiting_on.iter().map(|(d, t)| d.shown(t.part)).collect::<Vec<_>>().join(", "),
-            offer_always: true,
-            reason: format!("it is the first time {agent} runs a command with this entry"),
-            kind: first.kind.to_string(),
-            command: cmd.to_string(),
-            cwd: cwd.to_string(),
-            requested_ms: agentmux_common::time::now_ms_u64(),
-            ..Default::default()
-        };
+        let request = command_request(&agent, first, &waiting_on, (cmd, cwd), &reason);
         questions.push((first, waiting_on, request, format!("{agent} wants to run a command with your {what}")));
     }
     let went_ahead = match ask_all(state, agent_block_id, &agent, questions).await {

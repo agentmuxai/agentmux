@@ -1,0 +1,76 @@
+useTick 1000
+Markdown text="Some text that is long enough to count" streaming=false scrollable=false media=undefined
+PeekOverlay show=false rowEl=agent-markdown-peek-anchor
+-- before hover
+-- not hovered
+<div>
+  <div class="agent-markdown-peek-anchor">
+    <div class="agent-markdown-block">
+      <div data-stand="Markdown">
+        "Some text that is long enough to count"
+    <div data-stand="PeekOverlay">
+      <div data-stand="PeekMetaRow" data-time="null" data-tokens="~10 tok (est.)">
+mouse entered; waiting out the enter delay
+(not yet)
+tick read
+PeekOverlay show=true rowEl=agent-markdown-peek-anchor
+-- hovered
+<div>
+  <div class="agent-markdown-peek-anchor">
+    <div class="agent-markdown-block">
+      <div data-stand="Markdown">
+        "Some text that is long enough to count"
+    <div data-stand="PeekOverlay">
+      <div data-stand="PeekMetaRow" data-time="exact(5000) · ago(5000)" data-tokens="~10 tok (est.)">
+tick read
+ticker fired once
+PeekOverlay show=false rowEl=agent-markdown-peek-anchor
+-- left
+<div>
+  <div class="agent-markdown-peek-anchor">
+    <div class="agent-markdown-block">
+      <div data-stand="Markdown">
+        "Some text that is long enough to count"
+    <div data-stand="PeekOverlay">
+      <div data-stand="PeekMetaRow" data-time="null" data-tokens="~10 tok (est.)">
+ticker fired while no panel
+-- no timestamp
+useTick 1000
+Markdown text="Some text that is long enough to count" streaming=false scrollable=false media=undefined
+PeekOverlay show=false rowEl=agent-markdown-peek-anchor
+tick read
+PeekOverlay show=true rowEl=agent-markdown-peek-anchor
+-- hovered, no timestamp
+<div>
+  <div class="agent-markdown-peek-anchor">
+    <div class="agent-markdown-block">
+      <div data-stand="Markdown">
+        "Some text that is long enough to count"
+    <div data-stand="PeekOverlay">
+      <div data-stand="PeekMetaRow" data-time="null" data-tokens="~10 tok (est.)">
+-- empty text, with a timestamp
+useTick 1000
+Markdown text="" streaming=false scrollable=false media=undefined
+PeekOverlay show=false rowEl=agent-markdown-peek-anchor
+tick read
+PeekOverlay show=true rowEl=agent-markdown-peek-anchor
+-- hovered, empty text
+<div>
+  <div class="agent-markdown-peek-anchor">
+    <div class="agent-markdown-block">
+      <div data-stand="Markdown">
+    <div data-stand="PeekOverlay">
+      <div data-stand="PeekMetaRow" data-time="exact(7000) · ago(7000)" data-tokens="null">
+-- empty text, no timestamp
+useTick 1000
+Markdown text="" streaming=false scrollable=false media=undefined
+PeekOverlay show=false rowEl=agent-markdown-peek-anchor
+tick read
+PeekOverlay show=false rowEl=agent-markdown-peek-anchor
+-- hovered, nothing to show
+<div>
+  <div class="agent-markdown-peek-anchor">
+    <div class="agent-markdown-block">
+      <div data-stand="Markdown">
+    <div data-stand="PeekOverlay">
+      <div data-stand="PeekMetaRow" data-time="null" data-tokens="null">

@@ -102,6 +102,17 @@ wrap_client! {
             Some(super::downloads::AgentMuxDownloadHandler::new(state))
         }
 
+        fn dialog_handler(&self) -> Option<DialogHandler> {
+            // Real web panes only, like the page's own dialogs below: it answers only for panes an
+            // agent drives and leaves the person's panes to CEF's own file dialog
+            // (docs/reports/REPORT_AGENTS_AND_OS_PROMPTS_2026_11_07.md, tier 1).
+            if !self.is_browser_pane || self.drag_capture {
+                return None;
+            }
+            let state = self.inner.lock().state.clone();
+            Some(super::filedialog::AgentMuxDialogHandler::new(state))
+        }
+
         fn jsdialog_handler(&self) -> Option<JsdialogHandler> {
             // Real web panes only, like downloads: the app's own confirm()
             // boxes stay CEF's. It answers only for panes an agent drives and
@@ -962,6 +973,22 @@ wrap_request_handler! {
             self.inner.lock().on_render_process_responsive(browser);
         }
 
+        // A site whose certificate is not trusted: refused as before (0), and an agent driving the pane is told.
+        fn on_certificate_error(
+            &self,
+            browser: Option<&mut Browser>,
+            _cert_error: Errorcode,
+            request_url: Option<&CefString>,
+            _ssl_info: Option<&mut Sslinfo>,
+            _callback: Option<&mut Callback>,
+        ) -> ::std::os::raw::c_int {
+            let state = self.inner.lock().state.clone();
+            if let Some(b) = browser.as_deref() {
+                super::agent_notice::tell(&state, b, "certificate_error", &request_url.map(|u| u.to_string()).unwrap_or_default());
+            }
+            0
+        }
+
         // HTTP Basic / Digest auth challenge. Phase α of
         // SPEC_BROWSER_PANE_HTTP_BASIC_AUTH_2026_05_18.md. Returns 1
         // (async) so CEF holds the request open while we surface the
@@ -1181,6 +1208,8 @@ wrap_permission_handler! {
                     "allowing media access — covered by an existing grant"
                 );
                 cb.cont(requested_permissions);
+            } else if super::agent_permission::hold(&self.state, cb, &block_id, &origin, requested_permissions) {
+                // An agent's pane: srv decides, not the page and not the agent (agent_permission.rs).
             } else {
                 // No grant covers this — ask the user.
                 //
@@ -1247,6 +1276,33 @@ wrap_permission_handler! {
                 crate::browser_panes::media_prompt::arm_timeout(request_id);
             }
             1 // handled
+        }
+
+        // Chromium asks "allow this page to download more files?" for a page's second and later
+        // downloads that no click started, and under Alloy no one answers, so the answer is "ignore": that
+        // download is dropped before it reaches the download handler and the pane's later downloads stay
+        // blocked until it restarts (macOS and Linux D0, 2026-11-06). Answering yes is safe here: every
+        // download still asks where to save, one at a time, and the pane's limit of waiting downloads
+        // applies (`client::downloads`, spec §7.2).
+        fn on_show_permission_prompt(
+            &self,
+            browser: Option<&mut Browser>,
+            _prompt_id: u64,
+            requesting_origin: Option<&CefString>,
+            requested_permissions: u32,
+            callback: Option<&mut PermissionPromptCallback>,
+        ) -> ::std::os::raw::c_int {
+            let (Some(cb), Some(block_id)) = (callback, browser.and_then(|b| self.state.block_id_for_browser(b))) else {
+                return 0;
+            };
+            if super::downloads::is_multiple_downloads_prompt(requested_permissions) {
+                tracing::info!(target: "pane-download", %block_id, "allowing the page's further downloads: each still asks where to save");
+                cb.cont(PermissionRequestResult::ACCEPT);
+                return 1;
+            }
+            // A location or notification prompt in a pane an agent drives goes through the countdown.
+            let origin = requesting_origin.map(|s| s.to_string()).unwrap_or_default();
+            ::std::os::raw::c_int::from(super::agent_permission::hold_prompt(&self.state, cb, &block_id, &origin, requested_permissions))
         }
     }
 }

@@ -757,6 +757,8 @@ jobs:
         run: node scripts/check-comment-hygiene.mjs
       - name: Agent workdir writes go through workdir_fs
         run: node scripts/check-workdir-writes.mjs
+      - name: Sounds are made only through the sound service
+        run: node scripts/check-audio-creators.mjs
       - name: No CEF/Chromium version in the README or overview diagrams
         run: bash scripts/check-no-cef-version-in-overview.sh
       # Seed agents, operator-config entries and built-in skills go to every install:

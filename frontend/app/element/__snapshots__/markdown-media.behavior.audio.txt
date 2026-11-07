@@ -1,0 +1,28 @@
+IntersectionObserver rootMargin=600px 0px
+observe figure.am-media am-media-audio
+-- waiting
+<div>
+  <figure class="am-media am-media-audio">
+    <div class="am-media-audio-card">
+      <span class="am-media-av-label">
+        <span class="am-media-card-name">
+          "take.wav"
+io.disconnect
+fetchMediaRange C:/work/sound/take.wav 0-0 aborted=false
+-- audio ready
+<div>
+  <figure class="am-media am-media-audio">
+    <div class="am-media-audio-card">
+      <button type="button" class="am-media-play" aria-label="Play take.wav">
+        <i aria-hidden="true" class="fa fa-play">
+      <span class="am-media-av-label">
+        <span class="am-media-card-name">
+          "take.wav"
+        <span class="am-muted">
+          "4.8 MB"
+fetchMediaBlob C:/work/sound/take.wav max=209715200 type=undefined aborted=false
+createObjectURL blob:test/1
+-- audio playing
+<div>
+  <figure class="am-media am-media-audio">
+    <audio class="am-media-player" controls="" autoplay="" src="blob:test/1" muted.prop=false>

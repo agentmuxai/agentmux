@@ -1261,6 +1261,44 @@
     }
   },
   {
+    "command": "app_skills.catalog",
+    "request": "agentmux_srv::backend::rpc_types::skill::CommandAppSkillsCatalogData",
+    "requestName": "CommandAppSkillsCatalogData",
+    "requestTs": {
+      "imports": [
+        "CommandAppSkillsCatalogData"
+      ],
+      "name": "CommandAppSkillsCatalogData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::skill::AppSkillsCatalog",
+    "responseName": "AppSkillsCatalog",
+    "responseTs": {
+      "imports": [
+        "AppSkillsCatalog"
+      ],
+      "name": "AppSkillsCatalog"
+    }
+  },
+  {
+    "command": "app_skills.catalog.install",
+    "request": "agentmux_srv::backend::rpc_types::skill::CommandAppSkillsCatalogInstallData",
+    "requestName": "CommandAppSkillsCatalogInstallData",
+    "requestTs": {
+      "imports": [
+        "CommandAppSkillsCatalogInstallData"
+      ],
+      "name": "CommandAppSkillsCatalogInstallData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::skill::AppSkillInstallResult",
+    "responseName": "AppSkillInstallResult",
+    "responseTs": {
+      "imports": [
+        "AppSkillInstallResult"
+      ],
+      "name": "AppSkillInstallResult"
+    }
+  },
+  {
     "command": "appendagenthistory",
     "request": "agentmux_srv::backend::rpc_types::agent::CommandAppendAgentHistoryData",
     "requestName": "CommandAppendAgentHistoryData",
@@ -6735,6 +6773,44 @@
     }
   },
   {
+    "command": "skill.catalog.app_file",
+    "request": "agentmux_srv::backend::rpc_types::skill::CommandSkillCatalogAppFileData",
+    "requestName": "CommandSkillCatalogAppFileData",
+    "requestTs": {
+      "imports": [
+        "CommandSkillCatalogAppFileData"
+      ],
+      "name": "CommandSkillCatalogAppFileData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::skill::SkillAppFile",
+    "responseName": "SkillAppFile",
+    "responseTs": {
+      "imports": [
+        "SkillAppFile"
+      ],
+      "name": "SkillAppFile"
+    }
+  },
+  {
+    "command": "skill.catalog.app_script",
+    "request": "agentmux_srv::backend::rpc_types::skill::CommandSkillCatalogAppScriptData",
+    "requestName": "CommandSkillCatalogAppScriptData",
+    "requestTs": {
+      "imports": [
+        "CommandSkillCatalogAppScriptData"
+      ],
+      "name": "CommandSkillCatalogAppScriptData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::skill::SkillAppScriptResult",
+    "responseName": "SkillAppScriptResult",
+    "responseTs": {
+      "imports": [
+        "SkillAppScriptResult"
+      ],
+      "name": "SkillAppScriptResult"
+    }
+  },
+  {
     "command": "skill.catalog.bind",
     "request": "agentmux_srv::backend::rpc_types::skill::SkillAgentBindingData",
     "requestName": "SkillAgentBindingData",
@@ -6808,6 +6884,25 @@
         "SkillDeleteResult"
       ],
       "name": "SkillDeleteResult"
+    }
+  },
+  {
+    "command": "skill.catalog.export",
+    "request": "agentmux_srv::backend::rpc_types::skill::CommandSkillCatalogExportData",
+    "requestName": "CommandSkillCatalogExportData",
+    "requestTs": {
+      "imports": [
+        "CommandSkillCatalogExportData"
+      ],
+      "name": "CommandSkillCatalogExportData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::skill::SkillExportResult",
+    "responseName": "SkillExportResult",
+    "responseTs": {
+      "imports": [
+        "SkillExportResult"
+      ],
+      "name": "SkillExportResult"
     }
   },
   {

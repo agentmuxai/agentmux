@@ -107,7 +107,7 @@ fn save(s: &Setup, user: &str) -> String {
 }
 
 async fn signin(s: &Setup, entry: Option<&str>) -> (StatusCode, Value) {
-    let req = SigninRequest { auth: s.auth.clone(), pane: None, entry: entry.map(String::from) };
+    let req = SigninRequest { auth: s.auth.clone(), pane: None, entry: entry.map(String::from), reason: Some("sign in to the intranet for the test".into()) };
     let resp = handle_signin(State(s.state.clone()), None, Json(req)).await;
     let status = resp.status();
     let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
@@ -147,6 +147,20 @@ async fn a_first_sign_in_asks_the_person_and_the_agent_gets_no_value() {
     assert!(!body.to_string().contains("correct horse") && !body.to_string().contains("alex@example.com"), "{body}");
     let activity = serde_json::to_string(&crate::backend::vault::activity(&s.state.identity_store, 50).unwrap()).unwrap();
     assert!(activity.contains(&s.auth.agent_id) && activity.contains(signins::SIGNED_IN), "{activity}");
+    assert_eq!(asked.agent_reason, "sign in to the intranet for the test", "the card says what the agent said");
+    assert!(activity.contains("sign in to the intranet for the test"), "and so does the history: {activity}");
+}
+
+#[tokio::test]
+async fn a_sign_in_without_a_reason_is_refused_before_anyone_is_asked() {
+    let s = setup(None).await;
+    save(&s, "alex@example.com");
+    let req = SigninRequest { auth: s.auth.clone(), pane: None, entry: None, reason: None };
+    let resp = handle_signin(State(s.state.clone()), None, Json(req)).await;
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    assert!(String::from_utf8_lossy(&body).contains("a reason is required"), "{body:?}");
+    assert!(typed(&s).is_none(), "nothing was typed");
 }
 
 #[tokio::test]

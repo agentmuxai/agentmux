@@ -396,11 +396,19 @@ describe("agent-pane-layout reducer", () => {
             expect(windowRange(s)).toEqual({ startIndex: 0, endIndex: -1 });
         });
 
-        it("scrolled past the end → empty range", () => {
-            let s = build();
+        it("scrolled past the end → the last rows, never an empty window over rows that exist", () => {
+            let s = build(); // 20 rows
             s = apply(s, { type: "Scrolled", scrollTop: 9000, viewportPx: 300 });
             const w = windowRange(s);
-            expect(w.endIndex).toBeLessThan(w.startIndex);
+            expect(w.endIndex).toBe(19);
+            expect(w.startIndex).toBeLessThanOrEqual(w.endIndex);
+            expect(w.startIndex).toBeGreaterThan(10); // the last screenful, not the whole transcript
+        });
+
+        it("a viewport of no height past the end still has the last row", () => {
+            let s = build();
+            s = apply(s, { type: "Scrolled", scrollTop: 9000, viewportPx: 0 });
+            expect(windowRange(s).endIndex).toBe(19);
         });
     });
 

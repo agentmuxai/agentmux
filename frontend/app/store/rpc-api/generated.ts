@@ -50,6 +50,8 @@ import type { AgentTakeoverResult } from "@/types/rpc/AgentTakeoverResult";
 import type { AgentTrackedBlocksResult } from "@/types/rpc/AgentTrackedBlocksResult";
 import type { ApiRetryEvent } from "@/types/rpc/ApiRetryEvent";
 import type { AppInfoResult } from "@/types/rpc/AppInfoResult";
+import type { AppSkillInstallResult } from "@/types/rpc/AppSkillInstallResult";
+import type { AppSkillsCatalog } from "@/types/rpc/AppSkillsCatalog";
 import type { AppUpdateStatus } from "@/types/rpc/AppUpdateStatus";
 import type { AskSideQuestionResult } from "@/types/rpc/AskSideQuestionResult";
 import type { AttachmentsCopyToWorkdirResult } from "@/types/rpc/AttachmentsCopyToWorkdirResult";
@@ -103,6 +105,8 @@ import type { CommandAgentStartData } from "@/types/rpc/CommandAgentStartData";
 import type { CommandAgentStopData } from "@/types/rpc/CommandAgentStopData";
 import type { CommandAgentTakeoverData } from "@/types/rpc/CommandAgentTakeoverData";
 import type { CommandAmbientNarrateData } from "@/types/rpc/CommandAmbientNarrateData";
+import type { CommandAppSkillsCatalogData } from "@/types/rpc/CommandAppSkillsCatalogData";
+import type { CommandAppSkillsCatalogInstallData } from "@/types/rpc/CommandAppSkillsCatalogInstallData";
 import type { CommandAppendAgentHistoryData } from "@/types/rpc/CommandAppendAgentHistoryData";
 import type { CommandAskSideQuestionData } from "@/types/rpc/CommandAskSideQuestionData";
 import type { CommandAttachmentsCancelData } from "@/types/rpc/CommandAttachmentsCancelData";
@@ -246,7 +250,10 @@ import type { CommandSetContainerLimitsData } from "@/types/rpc/CommandSetContai
 import type { CommandShellExecData } from "@/types/rpc/CommandShellExecData";
 import type { CommandShellStatusData } from "@/types/rpc/CommandShellStatusData";
 import type { CommandShellStopData } from "@/types/rpc/CommandShellStopData";
+import type { CommandSkillCatalogAppFileData } from "@/types/rpc/CommandSkillCatalogAppFileData";
+import type { CommandSkillCatalogAppScriptData } from "@/types/rpc/CommandSkillCatalogAppScriptData";
 import type { CommandSkillCatalogBindAllData } from "@/types/rpc/CommandSkillCatalogBindAllData";
+import type { CommandSkillCatalogExportData } from "@/types/rpc/CommandSkillCatalogExportData";
 import type { CommandSkillCatalogImportCommitData } from "@/types/rpc/CommandSkillCatalogImportCommitData";
 import type { CommandSkillCatalogImportPreviewData } from "@/types/rpc/CommandSkillCatalogImportPreviewData";
 import type { CommandSkillCatalogSetOptOutData } from "@/types/rpc/CommandSkillCatalogSetOptOutData";
@@ -503,6 +510,8 @@ import type { Skill } from "@/types/rpc/Skill";
 import type { SkillAgentBindingData } from "@/types/rpc/SkillAgentBindingData";
 import type { SkillAgentItemData } from "@/types/rpc/SkillAgentItemData";
 import type { SkillAgentScopeData } from "@/types/rpc/SkillAgentScopeData";
+import type { SkillAppFile } from "@/types/rpc/SkillAppFile";
+import type { SkillAppScriptResult } from "@/types/rpc/SkillAppScriptResult";
 import type { SkillBindAllResult } from "@/types/rpc/SkillBindAllResult";
 import type { SkillBindResult } from "@/types/rpc/SkillBindResult";
 import type { SkillBundleBindingData } from "@/types/rpc/SkillBundleBindingData";
@@ -512,6 +521,7 @@ import type { SkillCatalogItem } from "@/types/rpc/SkillCatalogItem";
 import type { SkillCatalogItemData } from "@/types/rpc/SkillCatalogItemData";
 import type { SkillCatalogListData } from "@/types/rpc/SkillCatalogListData";
 import type { SkillDeleteResult } from "@/types/rpc/SkillDeleteResult";
+import type { SkillExportResult } from "@/types/rpc/SkillExportResult";
 import type { SkillImportCommitResult } from "@/types/rpc/SkillImportCommitResult";
 import type { SkillImportPreview } from "@/types/rpc/SkillImportPreview";
 import type { SkillListItem } from "@/types/rpc/SkillListItem";
@@ -2463,6 +2473,46 @@ export const GeneratedApi = {
   // command "skill.bind"
   SkillBindCommand(client: RpcClient, data: SkillAgentBindingData, opts?: RpcOpts): Promise<SkillBindResult> {
     return client.rpcCall("skill.bind", data, opts);
+  },
+  // command "app_skills.catalog"
+  AppSkillsCatalogCommand(
+    client: RpcClient,
+    data?: CommandAppSkillsCatalogData,
+    opts?: RpcOpts
+  ): Promise<AppSkillsCatalog> {
+    return client.rpcCall("app_skills.catalog", data ?? {}, opts);
+  },
+  // command "app_skills.catalog.install"
+  AppSkillsCatalogInstallCommand(
+    client: RpcClient,
+    data: CommandAppSkillsCatalogInstallData,
+    opts?: RpcOpts
+  ): Promise<AppSkillInstallResult> {
+    return client.rpcCall("app_skills.catalog.install", data, opts);
+  },
+  // command "skill.catalog.app_file"
+  SkillCatalogAppFileCommand(
+    client: RpcClient,
+    data: CommandSkillCatalogAppFileData,
+    opts?: RpcOpts
+  ): Promise<SkillAppFile> {
+    return client.rpcCall("skill.catalog.app_file", data, opts);
+  },
+  // command "skill.catalog.app_script"
+  SkillCatalogAppScriptCommand(
+    client: RpcClient,
+    data: CommandSkillCatalogAppScriptData,
+    opts?: RpcOpts
+  ): Promise<SkillAppScriptResult> {
+    return client.rpcCall("skill.catalog.app_script", data, opts);
+  },
+  // command "skill.catalog.export"
+  SkillCatalogExportCommand(
+    client: RpcClient,
+    data: CommandSkillCatalogExportData,
+    opts?: RpcOpts
+  ): Promise<SkillExportResult> {
+    return client.rpcCall("skill.catalog.export", data, opts);
   },
   // command "skill.catalog.bind"
   SkillCatalogBindCommand(client: RpcClient, data: SkillAgentBindingData, opts?: RpcOpts): Promise<SkillBindResult> {

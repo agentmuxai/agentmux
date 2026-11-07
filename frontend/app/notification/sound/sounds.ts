@@ -38,6 +38,16 @@ export interface SoundDef {
     category: SoundCategory;
     /** Path under `public/`. Optional — synth fallback covers absence. */
     asset?: string;
+    /**
+     * What the sound means to the person (SPEC_ATTENTION_TOAST_WITH_LINK_TO_AGENT_2026_11_02 §3.8):
+     * - `ask`: something waits on them. It plays only for a request in the waiting registry
+     *   (`startWaitingForYou`), which also gives it a toast and a list row, so it never beeps without a
+     *   visible source. The service refuses it from the event bus.
+     * - `event`: something happened in a pane (a turn ended, a message was taken). It must name that
+     *   pane (`sourceBlockId`), which flashes its tab; the service refuses one that does not.
+     * A new sound does not compile without one of the two.
+     */
+    source: "ask" | "event";
     /** Per-event enable key. Conventionally `notify:sound:<id>`. */
     settingKey: keyof SettingsType;
     /**
@@ -53,6 +63,7 @@ export interface SoundDef {
 export const SOUNDS: Record<SoundId, SoundDef> = {
     "agent.turn.complete": {
         id: "agent.turn.complete",
+        source: "event",
         label: "Agent turn completed",
         category: "success",
         settingKey: "notify:sound:agent.turn.complete",
@@ -60,6 +71,7 @@ export const SOUNDS: Record<SoundId, SoundDef> = {
     },
     "agent.turn.error": {
         id: "agent.turn.error",
+        source: "event",
         label: "Agent turn errored",
         category: "error",
         settingKey: "notify:sound:agent.turn.error",
@@ -67,6 +79,7 @@ export const SOUNDS: Record<SoundId, SoundDef> = {
     },
     "agent.turn.interrupted": {
         id: "agent.turn.interrupted",
+        source: "event",
         label: "Agent turn interrupted",
         category: "warning",
         settingKey: "notify:sound:agent.turn.interrupted",
@@ -74,6 +87,7 @@ export const SOUNDS: Record<SoundId, SoundDef> = {
     },
     "agent.message.accepted": {
         id: "agent.message.accepted",
+        source: "event",
         label: "Pending message accepted",
         category: "info",
         settingKey: "notify:sound:agent.message.accepted",
@@ -81,6 +95,7 @@ export const SOUNDS: Record<SoundId, SoundDef> = {
     },
     "agent.message.rejected": {
         id: "agent.message.rejected",
+        source: "event",
         label: "Pending message rejected",
         category: "warning",
         settingKey: "notify:sound:agent.message.rejected",
@@ -88,6 +103,7 @@ export const SOUNDS: Record<SoundId, SoundDef> = {
     },
     "agent.waiting.for.input": {
         id: "agent.waiting.for.input",
+        source: "ask",
         label: "An agent is waiting for you",
         category: "info",
         settingKey: "notify:sound:agent.waiting.for.input",
@@ -95,3 +111,9 @@ export const SOUNDS: Record<SoundId, SoundDef> = {
         // the service manages start/stop directly, not via the bus.
     },
 };
+
+/** Whether a sound sent over the event bus may play: an `event` sound names the pane it flashes, and an
+ *  `ask` sound never comes this way (the waiting registry starts it). */
+export function mayPlayFromBus(def: SoundDef, ev: { sourceBlockId?: string }): boolean {
+    return def.source === "event" && !!ev.sourceBlockId;
+}

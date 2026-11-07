@@ -19,6 +19,7 @@ import { SkillImportModel } from "./skill-import-model";
 import { SkillImportPanel, SkillImportResult } from "./skill-import";
 import { SkillMatrix } from "./skill-matrix";
 import { AppFilterRow, SkillAppDetail } from "./skill-app";
+import { SkillBrowse } from "./skill-browse";
 import { appPlatform, appStatus, filterSkills, firstRoute, type AppFilter } from "./skill-app-model";
 import "./skill-import.scss";
 import "../agent/components/AgentPrimitiveModal.scss";
@@ -89,6 +90,8 @@ interface ManagerState {
     setImporting: Setter<Importing | null>;
     showMatrix: Accessor<boolean>;
     setShowMatrix: Setter<boolean>;
+    showBrowse: Accessor<boolean>;
+    setShowBrowse: Setter<boolean>;
     filter: Accessor<AppFilter>;
     setFilter: Setter<AppFilter>;
 }
@@ -101,12 +104,13 @@ function createManagerState(): ManagerState {
     // The import panel, or an imported skill's "check for changes" (`updateOf` set).
     const [importing, setImporting] = createSignal<Importing | null>(null);
     const [showMatrix, setShowMatrix] = createSignal(false);
+    const [showBrowse, setShowBrowse] = createSignal(false);
     const [filter, setFilter] = createSignal<AppFilter>("all");
-    return { model, importing, setImporting, showMatrix, setShowMatrix, filter, setFilter };
+    return { model, importing, setImporting, showMatrix, setShowMatrix, showBrowse, setShowBrowse, filter, setFilter };
 }
 
 const inDetail = (m: ManagerState) =>
-    m.model.selectedIdAtom() !== null || m.model.draftAtom() !== null || m.importing() !== null || m.showMatrix();
+    m.model.selectedIdAtom() !== null || m.model.draftAtom() !== null || m.importing() !== null || m.showMatrix() || m.showBrowse();
 
 function importedSkills(m: ManagerState, ids: string[]): void {
     m.setImporting(null);
@@ -116,12 +120,14 @@ function importedSkills(m: ManagerState, ids: string[]): void {
 
 function startImport(m: ManagerState): void {
     m.setShowMatrix(false);
+    m.setShowBrowse(false);
     m.model.setSelectedId(null);
     m.model.setDraft(null);
     m.setImporting({ model: new SkillImportModel((ids) => importedSkills(m, ids)) });
 }
 
 function startCheck(m: ManagerState, skill: SkillCatalogItem): void {
+    m.setShowBrowse(false);
     const check = new SkillImportModel((ids) => importedSkills(m, ids));
     m.setImporting({ model: check, updateOf: skill });
     void check.check(skill.id);
@@ -129,6 +135,7 @@ function startCheck(m: ManagerState, skill: SkillCatalogItem): void {
 
 function goBack(m: ManagerState): void {
     m.setShowMatrix(false);
+    m.setShowBrowse(false);
     m.setImporting(null);
     m.model.setError(null);
     m.model.setSelectedId(null);
@@ -173,6 +180,7 @@ function SkillCard(p: { m: ManagerState; skill: SkillCatalogItem }): JSX.Element
             onSelect={() => {
                 p.m.setImporting(null);
                 p.m.setShowMatrix(false);
+                p.m.setShowBrowse(false);
                 p.m.model.handleSelect(p.skill);
             }}
         />
@@ -197,6 +205,19 @@ function SkillList(p: { m: ManagerState }): JSX.Element {
                         model.setSelectedId(null);
                         model.setDraft(null);
                         p.m.setImporting(null);
+                        p.m.setShowMatrix(false);
+                        p.m.setShowBrowse(true);
+                    }}
+                >
+                    Browse the catalog
+                </Button>
+                <Button
+                    density="compact"
+                    onClick={() => {
+                        model.setSelectedId(null);
+                        model.setDraft(null);
+                        p.m.setImporting(null);
+                        p.m.setShowBrowse(false);
                         p.m.setShowMatrix(true);
                     }}
                 >
@@ -262,7 +283,7 @@ function SkillReadOnly(p: { m: ManagerState; skill: Accessor<SkillCatalogItem> }
                     ? "Used by every agent"
                     : `Used by ${skill().bound_count} ${skill().bound_count === 1 ? "agent" : "agents"}`}
             </p>
-            <Show when={skill().app}>{(app) => <SkillAppDetail app={app()} />}</Show>
+            <Show when={skill().app}>{(app) => <SkillAppDetail skillId={skill().id} app={app()} />}</Show>
             <SkillReach model={model} skill={skill()} />
             <SkillBoundAgents model={model} skill={skill()} />
             <Show when={skill().source}>
@@ -428,7 +449,16 @@ function SkillDetail(p: { m: ManagerState }): JSX.Element {
             <Show when={p.m.showMatrix() && !p.m.importing()}>
                 <SkillMatrix catalog={model} />
             </Show>
-            <Show when={!p.m.importing() && !p.m.showMatrix()}>
+            <Show when={p.m.showBrowse() && !p.m.importing()}>
+                <SkillBrowse
+                    catalog={model}
+                    onOpen={(skillId) => {
+                        p.m.setShowBrowse(false);
+                        model.setSelectedId(skillId);
+                    }}
+                />
+            </Show>
+            <Show when={!p.m.importing() && !p.m.showMatrix() && !p.m.showBrowse()}>
                 <Show when={model.errorAtom()}>
                     <div class="agent-primitive-modal-error">{model.errorAtom()}</div>
                 </Show>

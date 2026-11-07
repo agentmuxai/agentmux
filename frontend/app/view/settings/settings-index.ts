@@ -14,6 +14,7 @@ import { ANIMATIONS_SETTINGS } from "./sections/animations-section";
 import { WINDOW_SETTINGS } from "./sections/window-panes-section";
 import { BROWSER_SETTINGS } from "./sections/browser-section";
 import { TERMINAL_SETTINGS } from "./sections/terminal-section";
+import { KEYBOARD_SETTINGS } from "./sections/keyboard-section";
 import { SOUNDS_SETTINGS } from "./sections/sounds-section";
 import { NOTIFICATIONS_SETTINGS } from "./sections/notifications-section";
 import { RECORDING_SETTINGS } from "./sections/recording-section";
@@ -30,6 +31,7 @@ export const SETTINGS_INDEX: SettingsIndexEntry[] = [
     ...Object.values(WINDOW_SETTINGS),
     ...Object.values(BROWSER_SETTINGS),
     ...Object.values(TERMINAL_SETTINGS),
+    ...Object.values(KEYBOARD_SETTINGS),
     ...Object.values(SOUNDS_SETTINGS),
     ...Object.values(NOTIFICATIONS_SETTINGS),
     ...Object.values(RECORDING_SETTINGS),

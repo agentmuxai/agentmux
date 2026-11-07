@@ -27,6 +27,8 @@ pub(crate) use template_image::chosen_container_image;
 pub(crate) use core::delete_agent_definition;
 mod build_slot;
 mod identity;
+#[cfg(test)]
+mod identity_register_tests;
 mod identity_delete;
 pub(crate) use identity_delete::delete_identity_account;
 mod instance;

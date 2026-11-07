@@ -1,0 +1,21 @@
+useTick 1000
+Markdown text="one" streaming=false scrollable=false media=undefined
+PeekOverlay show=false rowEl=agent-markdown-peek-anchor
+chunk at 1100: "one two"
+pane backgrounded (the settle timer was pending)
+(a dormant pane never paints the pending settle)
+chunk at 1310: "one two three"
+chunk at 1330: "one two three four"
+Markdown text="one two three four" streaming=false scrollable=false media=undefined
+pane shown again
+-- settled once
+<div>
+  <div class="agent-markdown-peek-anchor">
+    <div class="agent-markdown-block">
+      <div data-stand="Markdown">
+        "one two three four"
+    <div data-stand="PeekOverlay">
+      <div data-stand="PeekMetaRow" data-time="null" data-tokens="~5 tok (est.)">
+(hidden and shown with nothing new)
+chunk at 1800: "one two three four five"
+Markdown text="one two three four five" streaming=false scrollable=false media=undefined

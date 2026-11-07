@@ -29,6 +29,72 @@ async fn history(arguments: &Value, cx: &ToolCtx<'_>, base: &str) -> Result<Stri
     Ok(serde_json::to_string_pretty(&result).unwrap_or_default())
 }
 
+/// `show`, `verify` and `health` read the Vault; `update` changes an entry's details. None returns a value.
+async fn inspect(action: &str, arguments: &Value, cx: &ToolCtx<'_>, base: &str) -> Result<String> {
+    let text = |k: &str| arguments.get(k).and_then(Value::as_str);
+    let auth = crate::identity::sign_ui_automation_auth();
+    let body = match action {
+        "show" | "verify" => {
+            if action == "show" && text("id").is_none_or(|i| i.trim().is_empty()) {
+                anyhow::bail!("Vault show needs an id: the entry to look at (list shows them)");
+            }
+            json!({ "id": text("id"), "auth": auth.ok() })
+        }
+        "update" => json!({
+            "id": text("id").filter(|i| !i.trim().is_empty()).ok_or_else(|| anyhow::anyhow!("Vault update needs an id: the entry to change (list shows them)"))?,
+            "label": text("label"),
+            "fields": arguments.get("fields").filter(|f| f.is_object()).cloned().unwrap_or_else(|| json!({})),
+            "tags": arguments.get("tags").cloned(),
+            "reason": text("reason"),
+            "auth": auth.map_err(|e| anyhow::anyhow!("Vault update needs this agent's signed identity: {e}"))?,
+        }),
+        _ => json!({ "auth": auth.ok() }),
+    };
+    let what = format!("Vault {action}");
+    let result = crate::srv_http::srv_post_json(cx.client, &format!("{base}/api/v1/vault/{action}"), cx.auth_key, &body, &what).await?;
+    Ok(serde_json::to_string_pretty(&result).unwrap_or_default())
+}
+
+/// `import`: copy a secret from AWS Secrets Manager into the Vault. The person is asked once; the agent gets ids and names.
+async fn import(arguments: &Value, cx: &ToolCtx<'_>, base: &str) -> Result<String> {
+    let source = arguments.get("source").cloned().unwrap_or(Value::Null);
+    if !source.get("aws_secret_id").is_some_and(Value::is_string) {
+        anyhow::bail!("Vault import needs source.aws_secret_id: the AWS secret to copy (its name or ARN)");
+    }
+    let s = |k: &str| arguments.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+    let wait = arguments.get("wait_secs").and_then(Value::as_u64).unwrap_or(REQUEST_WAIT_SECS).min(REQUEST_WAIT_MAX_SECS);
+    let body = json!({
+        "source": source,
+        "kind": s("kind"),
+        "label": s("label"),
+        "id": arguments.get("id").and_then(Value::as_str),
+        "fields": arguments.get("fields").cloned().unwrap_or_else(|| json!({})),
+        "vault": arguments.get("vault").and_then(Value::as_str),
+        "reason": arguments.get("reason").and_then(Value::as_str),
+        "refs": arguments.get("refs").cloned().unwrap_or_else(|| json!([])),
+        "wait_secs": wait,
+        "auth": crate::identity::sign_ui_automation_auth().map_err(|e| anyhow::anyhow!("Vault import needs this agent's signed identity: {e}"))?,
+    });
+    // The person's answer, then AWS: the wait plus the CLI's 25 s and some room.
+    let url = format!("{base}/api/v1/vault/import");
+    let resp = cx
+        .client
+        .post(&url)
+        .header(AUTH_KEY_HEADER, cx.auth_key)
+        .timeout(std::time::Duration::from_secs(wait + 90))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!(crate::srv_http::describe_transport_error("Vault import", &url, &e)))?;
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    if !status.is_success() {
+        anyhow::bail!(crate::srv_http::describe_http_error("Vault import", status, &text));
+    }
+    let result: Value = serde_json::from_str(&text).unwrap_or_default();
+    Ok(serde_json::to_string_pretty(&result).unwrap_or_default())
+}
+
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     match name {
         "Vault" => {
@@ -50,6 +116,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                         "kind": s("kind"),
                         "label": s("label"),
                         "why": s("why"),
+                        "reason": arguments.get("reason").and_then(Value::as_str),
                         "vault": arguments.get("vault").and_then(Value::as_str),
                         "auth": crate::identity::sign_ui_automation_auth().ok(),
                         "wait_secs": wait,
@@ -78,6 +145,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                         "kind": s("kind"),
                         "label": s("label"),
                         "why": s("why"),
+                        "reason": arguments.get("reason").and_then(Value::as_str),
                         "fields": arguments.get("fields").cloned().unwrap_or_else(|| json!({})),
                         "rules": arguments.get("rules").cloned().unwrap_or_else(|| json!({})),
                         "expires": arguments.get("expires").and_then(Value::as_str),
@@ -93,6 +161,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                         "id": s("id"),
                         "set": s("set"),
                         "verify": arguments.get("verify").and_then(Value::as_str),
+                        "reason": arguments.get("reason").and_then(Value::as_str),
                         "cwd": arguments.get("cwd").and_then(Value::as_str),
                         "rules": arguments.get("rules").cloned().unwrap_or_else(|| json!({})),
                         "auth": crate::identity::sign_ui_automation_auth().map_err(|e| anyhow::anyhow!("Vault rotate needs this agent's signed identity: {e}"))?,
@@ -117,7 +186,9 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                     Ok(serde_json::to_string_pretty(&result).unwrap_or_default())
                 }
                 "history" => history(arguments, cx, base).await,
-                other => anyhow::bail!("Vault: unknown action {other:?}; use list, request, generate, rotate or history"),
+                "import" => import(arguments, cx, base).await,
+                action @ ("show" | "update" | "verify" | "health") => inspect(action, arguments, cx, base).await,
+                other => anyhow::bail!("Vault: unknown action {other:?}; use list, request, generate, rotate, history, import, show, update, verify or health"),
             }
         }
         _ => Err(not_in_family()),
@@ -132,7 +203,7 @@ mod tests {
     fn the_schema_lists_every_action_and_every_kind_srv_knows() {
         let schema: Value = serde_json::from_str(crate::tool_schemas::VAULT_TOOL).unwrap();
         let actions = &schema["inputSchema"]["properties"]["action"]["enum"];
-        assert_eq!(actions, &json!(["list", "request", "generate", "rotate", "history"]));
+        assert_eq!(actions, &json!(["list", "request", "generate", "rotate", "history", "import", "show", "update", "verify", "health"]));
         // srv's catalog (backend/vault/kinds.rs) is the source; this list
         // must name the same kinds.
         let srv = include_str!("../../../srv/src/backend/vault/kinds.rs");

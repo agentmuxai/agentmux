@@ -9,12 +9,14 @@
 //! the Vault makes itself (`generate`), which no one has seen. Everything here
 //! is blocking (the store, the keychain): call it off the async runtime.
 
+pub mod aws_import;
 pub mod capture;
 pub mod expiry;
 pub mod files;
 pub mod generate;
 pub mod history;
 pub mod import;
+pub mod inspect;
 pub mod kdbx_export;
 pub mod kdbx_names;
 pub mod kinds;
@@ -267,6 +269,34 @@ pub fn record(store: &Store, entry_id: &str, entry_label: &str, actor: &str, act
     record_row(store, row);
 }
 
+/// A line of the record for something an agent did with an entry, with the reason it gave.
+pub struct Line<'a> {
+    pub entry_id: &'a str,
+    pub label: &'a str,
+    pub actor: &'a str,
+    pub action: &'a str,
+    pub target: &'a str,
+    pub outcome: &'a str,
+    pub reason: &'a str,
+}
+
+/// [`record`] for an agent's use or change, with its reason.
+pub fn record_line(store: &Store, l: Line<'_>) {
+    record_row(
+        store,
+        VaultActivityRow {
+            entry_id: l.entry_id.into(),
+            entry_label: l.label.into(),
+            actor: l.actor.into(),
+            action: l.action.into(),
+            target: l.target.into(),
+            outcome: l.outcome.into(),
+            reason: l.reason.into(),
+            ..Default::default()
+        },
+    );
+}
+
 /// [`record`] with the line's other parts given too: the agent's reason and references.
 pub fn record_row(store: &Store, mut row: VaultActivityRow) {
     if USES.contains(&row.action.as_str()) && !row.entry_id.is_empty() {
@@ -296,7 +326,19 @@ fn insert(store: &Store, entry: NewEntry, actor: &str, action: &str, target: &st
 }
 
 /// [`insert`] in the Vault `vault_id`.
-fn insert_in(store: &Store, mut entry: NewEntry, actor: &str, action: &str, target: &str, vault_id: &str) -> Result<String, String> {
+fn insert_in(store: &Store, entry: NewEntry, actor: &str, action: &str, target: &str, vault_id: &str) -> Result<String, String> {
+    insert_in_why(store, entry, actor, action, target, vault_id, "")
+}
+
+/// [`insert_in`], recording the agent's `reason` for making the entry.
+fn insert_in_why(store: &Store, entry: NewEntry, actor: &str, action: &str, target: &str, vault_id: &str, reason: &str) -> Result<String, String> {
+    let (id, label) = insert_unrecorded(store, entry, vault_id)?;
+    record_line(store, Line { entry_id: &id, label: &label, actor, action, target, outcome: "done", reason });
+    Ok(id)
+}
+
+/// Saves a new entry in the Vault `vault_id` and leaves the record of it to the caller: its id and label.
+fn insert_unrecorded(store: &Store, mut entry: NewEntry, vault_id: &str) -> Result<(String, String), String> {
     store.vault_info(vault_id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no Vault {vault_id}"))?;
     let kind = kinds::kind(&entry.kind).ok_or_else(|| format!("unknown kind {:?}", entry.kind))?;
     drop_empty(&mut entry.parts);
@@ -323,8 +365,7 @@ fn insert_in(store: &Store, mut entry: NewEntry, actor: &str, action: &str, targ
         vault_id: vault_id.to_string(),
     };
     store.vault_insert(&row).map_err(|e| e.to_string())?;
-    record(store, &id, &label, actor, action, target, "done");
-    Ok(id)
+    Ok((id, label))
 }
 
 /// The kinds `generate` makes, and the part it fills: a value no person needs to
@@ -338,6 +379,9 @@ pub struct GenerateRequest {
     pub label: String,
     #[serde(default)]
     pub why: String,
+    /// Why the agent needs it: one line of 8 to 300 characters, required (`why` is the same thing, as it was called).
+    #[serde(default)]
+    pub reason: Option<String>,
     /// Plain fields of the kind (a login's site and username, an API key's service).
     #[serde(default)]
     pub fields: BTreeMap<String, String>,
@@ -365,6 +409,7 @@ pub struct Generated {
 /// Creates an entry whose main value the Vault makes, for `actor` (the agent that
 /// asked). The value goes from the generator into the sealed row and nowhere else.
 pub fn generate_entry(store: &Store, req: GenerateRequest, actor: &str) -> Result<Generated, String> {
+    let reason = history::require_reason(req.reason.as_deref().filter(|r| !r.trim().is_empty()).or(Some(req.why.as_str())))?;
     let Some((kind, part)) = GENERATED_KINDS.iter().find(|(k, _)| *k == req.kind) else {
         let names: Vec<&str> = GENERATED_KINDS.iter().map(|(k, _)| *k).collect();
         return Err(format!("generate makes {} entries, not {:?}: an ID number or a card is the person's, so ask for it with request", names.join(", "), req.kind));
@@ -373,8 +418,7 @@ pub fn generate_entry(store: &Store, req: GenerateRequest, actor: &str) -> Resul
     let value = generate::generate(&rules)?;
     let mut parts = Parts::default();
     parts.0.insert(part.to_string(), value.to_string());
-    let why: String = req.why.trim().chars().take(160).collect();
-    let target = if why.is_empty() { generate::describe(&rules) } else { why };
+    let target = generate::describe(&rules);
     let mut fields = req.fields;
     if let Some(date) = req.expires.filter(|d| !d.trim().is_empty()) {
         fields.insert(expiry::FIELD.to_string(), date);
@@ -385,7 +429,7 @@ pub fn generate_entry(store: &Store, req: GenerateRequest, actor: &str) -> Resul
         Some(which) => vaults::resolve(store, which, Some(Some(actor)))?.id,
         None => vaults::default_for(store, Some(actor))?,
     };
-    let id = insert_in(store, entry, actor, "generated", &target, &vault_id)?;
+    let id = insert_in_why(store, entry, actor, "generated", &target, &vault_id, &reason)?;
     Ok(Generated { id, label, kind: kind.to_string(), made: generate::describe(&rules) })
 }
 

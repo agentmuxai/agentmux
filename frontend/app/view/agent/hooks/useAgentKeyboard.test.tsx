@@ -150,3 +150,50 @@ describe("useAgentKeyboard — Alt+V, the pane's view", () => {
         expect(cycleA).not.toHaveBeenCalled();
     });
 });
+
+describe("useAgentKeyboard: F3", () => {
+    function SearchPane(props: { open: () => boolean; step: (backward: boolean) => void; blockId?: string }) {
+        useAgentKeyboard({ blockId: props.blockId ?? "S", onToggleSearch: () => {}, searchOpen: props.open, onStepSearch: props.step });
+        return (
+            <div data-blockid={props.blockId ?? "S"} class="block-focused">
+                <input data-testid="field" />
+            </div>
+        );
+    }
+    const f3 = (target: EventTarget, shiftKey = false) => {
+        const e = new KeyboardEvent("keydown", { key: "F3", shiftKey, bubbles: true, cancelable: true });
+        target.dispatchEvent(e);
+        return e;
+    };
+
+    it("steps forward, and backward with Shift, while the bar is open, from the field or the pane", () => {
+        const step = vi.fn();
+        const { getByTestId } = render(() => <SearchPane open={() => true} step={step} />);
+        const field = getByTestId("field");
+        expect(f3(field).defaultPrevented).toBe(true);
+        f3(field, true);
+        f3(document.body);
+        expect(step.mock.calls).toEqual([[false], [true], [false]]);
+    });
+
+    it("leaves F3 alone when the bar is closed", () => {
+        const step = vi.fn();
+        const { getByTestId } = render(() => <SearchPane open={() => false} step={step} />);
+        expect(f3(getByTestId("field")).defaultPrevented).toBe(false);
+        expect(step).not.toHaveBeenCalled();
+    });
+
+    it("steps only in the pane the key was typed in", () => {
+        const stepA = vi.fn();
+        const stepB = vi.fn();
+        const { container } = render(() => (
+            <>
+                <SearchPane blockId="A" open={() => true} step={stepA} />
+                <SearchPane blockId="B" open={() => true} step={stepB} />
+            </>
+        ));
+        f3(container.querySelector("[data-blockid=B] input") as Element);
+        expect(stepB).toHaveBeenCalledOnce();
+        expect(stepA).not.toHaveBeenCalled();
+    });
+});

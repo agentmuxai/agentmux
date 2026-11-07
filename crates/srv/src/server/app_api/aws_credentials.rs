@@ -47,6 +47,14 @@ fn audit(state: &AppState, slug: &str, uid: &str, profile: &str, ok: bool, error
     state.reactive_handler.log_fleet_action_audit(Some(slug), slug, &block_id, AUDIT_ACTION, ok, error, &uuid::Uuid::new_v4().to_string(), Some(&reason));
 }
 
+/// The Audit row of a session a container agent was granted, when it is a fresh one (a cache hit is not recorded).
+pub(crate) fn audit_granted(state: &AppState, slug: &str, uid: &str, granted: &Granted) {
+    if granted.source == Source::Fresh {
+        tracing::info!(target: "identity", agent = %slug, grant = %granted.grant.name, seconds = granted.seconds, "identity.aws: credentials minted for a container agent");
+        audit(state, slug, uid, &granted.grant.name, true, None, &granted_note(granted));
+    }
+}
+
 fn granted_note(g: &Granted) -> String {
     let renewed = if g.source == Source::Fresh { "minted" } else { "reused" };
     let reason = if g.reason.is_empty() { "no reason given".to_string() } else { format!("reason: {}", g.reason) };
@@ -93,10 +101,7 @@ pub(crate) async fn serve<R: Runner>(
     };
     match credentials_for(policy, sessions, runner, &ask, chrono::Utc::now()).await {
         Ok(granted) => {
-            if granted.source == Source::Fresh {
-                tracing::info!(target: "identity", agent = %def.slug, grant = %granted.grant.name, seconds = granted.seconds, "identity.aws: credentials minted for a container agent");
-                audit(state, &def.slug, uid, &granted.grant.name, true, None, &granted_note(&granted));
-            }
+            audit_granted(state, &def.slug, uid, &granted);
             Json(granted.creds.to_json()).into_response()
         }
         Err(refusal) => refused(state, &def.slug, uid, ask.profile, refusal),
@@ -109,9 +114,15 @@ fn shown_profile(profile: &str) -> &str {
     if policy::is_grant_name(profile) { profile } else { "<not a grant name>" }
 }
 
-fn refused(state: &AppState, slug: &str, uid: &str, profile: &str, refusal: Refusal) -> Response {
+/// The Audit row of a refusal.
+pub(crate) fn audit_refused(state: &AppState, slug: &str, uid: &str, profile: &str, refusal: &Refusal) {
+    let profile = shown_profile(profile);
     tracing::info!(target: "identity", agent = %slug, grant = %profile, code = refusal.code, "identity.aws: credentials refused");
     audit(state, slug, uid, profile, false, Some(refusal.code), &format!("refused: {}", refusal.code));
+}
+
+fn refused(state: &AppState, slug: &str, uid: &str, profile: &str, refusal: Refusal) -> Response {
+    audit_refused(state, slug, uid, profile, &refusal);
     refuse(refusal.status, &refusal.text())
 }
 

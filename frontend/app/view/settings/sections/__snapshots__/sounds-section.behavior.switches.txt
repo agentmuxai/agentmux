@@ -38,6 +38,17 @@
           <div data-stand="ToggleControl" data-checked="false">
             <span data-cb="onChange">
               "toggle"
+    <div class="setting-row" id="setting-sounds.waiting_toast">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Toast when an agent waits"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Show a toast that names the agent waiting on you, with a link that takes you to it. Stays on when sounds are muted"
+        <div class="ui-field-control">
+          <div data-stand="ToggleControl" data-checked="true">
+            <span data-cb="onChange">
+              "toggle"
     <div class="settings-subheader">
       "Shutdown warning"
     <div class="setting-row" id="setting-sounds.shutdown_tone_enabled">
@@ -177,6 +188,17 @@
           <div data-stand="ToggleControl" data-checked="false">
             <span data-cb="onChange">
               "toggle"
+    <div class="setting-row" id="setting-sounds.waiting_toast">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Toast when an agent waits"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Show a toast that names the agent waiting on you, with a link that takes you to it. Stays on when sounds are muted"
+        <div class="ui-field-control">
+          <div data-stand="ToggleControl" data-checked="true">
+            <span data-cb="onChange">
+              "toggle"
     <div class="settings-subheader">
       "Shutdown warning"
     <div class="setting-row" id="setting-sounds.shutdown_tone_enabled">
@@ -270,6 +292,17 @@
             "Browser hand-offs and approvals"
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Also when an agent hands you a browser pane or asks to approve something in it"
+        <div class="ui-field-control">
+          <div data-stand="ToggleControl" data-checked="true">
+            <span data-cb="onChange">
+              "toggle"
+    <div class="setting-row" id="setting-sounds.waiting_toast">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Toast when an agent waits"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Show a toast that names the agent waiting on you, with a link that takes you to it. Stays on when sounds are muted"
         <div class="ui-field-control">
           <div data-stand="ToggleControl" data-checked="true">
             <span data-cb="onChange">
@@ -453,6 +486,17 @@
             "Browser hand-offs and approvals"
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Also when an agent hands you a browser pane or asks to approve something in it"
+        <div class="ui-field-control">
+          <div data-stand="ToggleControl" data-checked="true">
+            <span data-cb="onChange">
+              "toggle"
+    <div class="setting-row" id="setting-sounds.waiting_toast">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Toast when an agent waits"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Show a toast that names the agent waiting on you, with a link that takes you to it. Stays on when sounds are muted"
         <div class="ui-field-control">
           <div data-stand="ToggleControl" data-checked="true">
             <span data-cb="onChange">

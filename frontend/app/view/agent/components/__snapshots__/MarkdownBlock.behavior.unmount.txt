@@ -1,0 +1,6 @@
+useTick 1000
+Markdown text="x" streaming=false scrollable=false media=undefined
+PeekOverlay show=false rowEl=agent-markdown-peek-anchor
+chunk at 1100: "xy"
+unmounted with a settle pending
+(nothing rendered after unmount)

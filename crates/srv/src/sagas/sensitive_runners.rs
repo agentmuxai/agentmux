@@ -19,6 +19,10 @@ pub fn register_all() {
         "desktop_control_grant",
         Arc::new(|state, request| Box::pin(async move { crate::server::app_api::desktop::grant_after_countdown(&state, &request.id, request.decided_by.as_deref()) })),
     );
+    window::register_default_runner(
+        "os_prompt_answer",
+        Arc::new(|state, request| Box::pin(async move { crate::server::browser_permission::grant_after_countdown(&state, &request.id) })),
+    );
     window::register_default_runner("widget_install", Arc::new(|state, request| Box::pin(widget_install(state, request))));
     window::register_default_runner(
         "resume_agent_browsing",

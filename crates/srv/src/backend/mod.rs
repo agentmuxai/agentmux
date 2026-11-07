@@ -135,6 +135,8 @@ pub mod continuity_state;
 pub mod builtin_skills;
 /// Reading a skill from a folder, a git repository or a URL, for import.
 pub mod computer_use_skill;
+pub mod skill_catalog;
+pub mod skill_file;
 pub mod skill_import;
 pub mod skill_slugs;
 /// What of Personal Memory fits in a delivery, and what the agent is told about the rest.
@@ -163,6 +165,7 @@ pub mod tool_calls;
 pub mod update;
 pub mod agent_image_digest;
 pub mod upgrade_notice;
+pub mod background_set;
 pub mod background_work;
 pub mod upgrade_request;
 pub mod storage;

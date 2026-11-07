@@ -44,6 +44,8 @@ import {
 import { DocumentRow } from "./DocumentRow";
 import { attachOneWayRecorder, noteOneWay, sampleOneWayFrame } from "../scroll/one-way-recorder";
 import { OneWayFlow, scrollTranscriptTo } from "../scroll/one-way-flow";
+import { createJumpSettler } from "./jump-settler";
+import type { NodeSettler } from "../scroll/settle-on-node";
 import { createFollowScroll, type FollowScroll } from "../../../scroll/follow-scroll";
 import { createFollowLog, NO_SCROLL_INPUT, type ScrollInput } from "../../../scroll/follow-wiring";
 import { estimateNode, estimateNodeForState, previewCapPx } from "./renderers";
@@ -244,6 +246,8 @@ interface ListState {
     setFillStalled: Setter<boolean>;
     jumpToBottom: (reason?: string) => void;
     scrollToNode: (nodeId: string, offsetPx?: number) => void;
+    /** Lands a jump to a row the list has not measured yet (scroll/settle-on-node.ts); one at a time. */
+    settleNode: NodeSettler | null;
 }
 
 /** What the render needs from the rows hook. */
@@ -269,6 +273,7 @@ function createListState(props: AgentDocumentVirtualListProps): ListState {
         pendingProgrammaticScroll: false,
         pinnedGeometry: null,
         input: NO_SCROLL_INPUT,
+        settleNode: null,
         follow: null,
         stickyFrontierId: null,
         frontierIndexHint: -1,
@@ -813,11 +818,13 @@ function useScrollObservers(props: AgentDocumentVirtualListProps, s: ListState):
 }
 
 function useScrollCommands(props: AgentDocumentVirtualListProps, s: ListState): void {
+    const settler = createJumpSettler(props, s);
     // jumpToBottom: forced scroll-to-bottom that re-engages stick.
     // Exposed to parent so AgentFooter can call it on keystroke. `reason`
     // (typing / sent / queued-turn) only feeds the transition log.
     s.jumpToBottom = (reason?: string): void => {
         if (!s.scrollRef) return;
+        s.settleNode?.cancel();
         // "accepted" (a queued message the backend picked up, even mid-turn)
         // is not a jump: it only marks a commit point for the one-way path, and
         // only while following, so a reader scrolled up is never pulled down.
@@ -838,6 +845,7 @@ function useScrollCommands(props: AgentDocumentVirtualListProps, s: ListState): 
         if (!s.scrollRef) return;
         const idx = props.viewState.indexOf(nodeId);
         if (idx < 0) return;
+        s.settleNode?.cancel(); // a newer jump replaces the one still landing
         // Detach first, so no pin can pull the pane back while it scrolls there.
         s.follow?.jumpToNode(nodeId);
         const p = s.partition();
@@ -851,8 +859,11 @@ function useScrollCommands(props: AgentDocumentVirtualListProps, s: ListState): 
             if (row) {
                 const viewportPx = s.scrollRef.clientHeight; // perf:allow-layout-read — user-initiated scrollToNode
                 const center = row.start - viewportPx / 2 + row.height / 2;
-                if (offsetPx == null) scrollTranscriptTo(s.scrollRef, Math.max(0, center), "smooth");
-                else scrollTranscriptTo(s.scrollRef, Math.max(0, row.start + offsetPx));
+                const top = s.scrollRef.scrollTop; // perf:allow-layout-read — user-initiated scrollToNode
+                const onScreen = row.start >= top && row.start + row.height <= top + viewportPx;
+                if (offsetPx != null) scrollTranscriptTo(s.scrollRef, Math.max(0, row.start + offsetPx));
+                else if (onScreen) scrollTranscriptTo(s.scrollRef, Math.max(0, center), "smooth");
+                else settler.start(nodeId);
             }
         } else {
             // Streaming buffer — node is mounted; query DOM and scroll directly.
@@ -860,8 +871,13 @@ function useScrollCommands(props: AgentDocumentVirtualListProps, s: ListState): 
             if (!el) return;
             const elTop = el.offsetTop; // perf:allow-layout-read — user-initiated scrollToNode
             const center = elTop - s.scrollRef.clientHeight / 2 + el.clientHeight / 2; // perf:allow-layout-read — user-initiated scrollToNode
-            if (offsetPx == null) scrollTranscriptTo(s.scrollRef, Math.max(0, center), "smooth");
-            else scrollTranscriptTo(s.scrollRef, Math.max(0, elTop + offsetPx));
+            const top = s.scrollRef.scrollTop; // perf:allow-layout-read — user-initiated scrollToNode
+            const onScreen = elTop >= top && elTop + el.clientHeight <= top + s.scrollRef.clientHeight; // perf:allow-layout-read — user-initiated scrollToNode
+            if (offsetPx != null) scrollTranscriptTo(s.scrollRef, Math.max(0, elTop + offsetPx));
+            else if (onScreen) scrollTranscriptTo(s.scrollRef, Math.max(0, center), "smooth");
+            // Off screen: the rows above are estimates until drawn, so where the tail sits moves as they are
+            // measured; one aim from now would land short (clamped at the bottom), so it settles instead.
+            else settler.start(nodeId);
         }
     };
 

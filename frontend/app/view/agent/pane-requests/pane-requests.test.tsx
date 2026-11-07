@@ -59,8 +59,10 @@ describe("paneRequests", () => {
     });
 
     it("is one waiting source per request, ended when it is answered, once", () => {
-        const h = paneRequests.push("a", { source: "vault-use", Component: Card, props: { label: "x" }, text: "Builder wants GitHub token" });
-        expect(started).toHaveBeenCalledWith("a", expect.stringContaining("vault-use"), "Builder wants GitHub token");
+        const h = paneRequests.push("a", { source: "vault-use", Component: Card, props: { label: "x" }, text: "Builder wants GitHub token", what: "asks to use a secret" });
+        expect(started).toHaveBeenCalledWith("a", expect.stringContaining("vault-use"), "Builder wants GitHub token", {
+            what: "asks to use a secret",
+        });
         const key = started.mock.calls[0][1];
         h.close();
         h.close();

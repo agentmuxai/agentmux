@@ -553,7 +553,7 @@ declare global {
     // waveobj.MetaTSType
     type BrowserAttention = {
         id: string;
-        kind: "handoff" | "approval" | "navigation" | "bypass" | "dialog" | "line" | "notice";
+        kind: "handoff" | "approval" | "navigation" | "bypass" | "dialog" | "line" | "take" | "notice";
         agent?: string;
         /** Hand-off: what the user should do. */
         reason?: string;
@@ -631,7 +631,8 @@ declare global {
         ts: number;
         agent: string;
         /** navigate, back, forward, reload, click, fill, select, check, key,
-         *  upload, capture, terminal, eval, handoff, auto-approve-on, auto-approve-off, pause, resume. */
+         *  upload, capture, terminal, eval, handoff, auto-approve-on, auto-approve-off, pause, resume,
+         *  took-control, released. */
         kind: string;
         url?: string;
         /** The element's label or ref, or a field's ref for a fill. */
@@ -672,6 +673,9 @@ declare global {
         /** The agent the person gave the pane back to (their Give back, relayed by the host): it may retake the pane.
          *  Written by srv; cleared when an agent drives the pane again. */
         "browser:given_back"?: string | null;
+        /** True while the agent driving this pane did not open it (`take_control`), so the header says it took control.
+         *  Written by srv only (SPEC_BROWSER_RETAKE_AND_COMMANDEER_2026_11_04.md §2.5). */
+        "browser:took_control"?: boolean | null;
         /** A request from the agent driving this pane, shown as a banner: a
          *  hand-off or an approval. Written by srv; the user's answer goes back
          *  through the host (SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §5.2, §5.4). */
@@ -1235,6 +1239,7 @@ declare global {
         "notify:tooltones:scope"?: "all" | "focused";
         "notify:tooltones:flash"?: boolean;
         "notify:waiting:browser"?: boolean;
+        "notify:waiting:toast"?: boolean;
         "dnd:enabled"?: boolean;
         "dnd:concurrency"?: number;
         "dnd:agentinserttoken"?: boolean;

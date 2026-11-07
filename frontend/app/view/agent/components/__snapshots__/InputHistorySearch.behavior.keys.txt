@@ -1,0 +1,190 @@
+scrollIntoView Nothing type {"block":"nearest"}
+AgentInputHistoryCommand {"agent_id":"agent-1","limit":50}
+scrollIntoView two lines3×  {"block":"nearest"}
+scrollIntoView third2× · at {"block":"nearest"}
+-- down twice (focus: TextInput)
+<div>
+  <div class="input-history-search" role="dialog" aria-label="Search what you typed to this agent">
+    <div class="input-history-search__query">
+      <span>
+        "Search history"
+      <input data-stand="TextInput" data-variant="plain" data-value="" placeholder="Type to filter" spellcheck="false" aria-controls="input-history-search-list">
+    <div class="input-history-search__list" id="input-history-search-list" role="listbox">
+      <div class="input-history-search__row" role="option" aria-selected="false" data-tip="first message">
+        <span class="input-history-search__text">
+          "first message"
+        <span class="input-history-search__meta">
+          "at 1000 (now, xx-XX)"
+      <div class="input-history-search__row" role="option" aria-selected="false" data-tip="two lines\nsecond line">
+        <span class="input-history-search__text">
+          "two lines"
+        <span class="input-history-search__meta">
+          "3× ·"
+          "at 2000 (now, xx-XX)"
+      <div class="input-history-search__row input-history-search__row--selected" role="option" aria-selected="true" data-tip="third">
+        <span class="input-history-search__text">
+          "third"
+        <span class="input-history-search__meta">
+          "2× ·"
+          "at 3000 (now, xx-XX)"
+    <div class="input-history-search__hint">
+      <span>
+        "Enter to use"
+      <span>
+        "Shift+Del to forget"
+      <span>
+        "Esc to close"
+      <span class="input-history-search__clear">
+        <span data-stand="Button" data-density="compact" data-disabled="false">
+          "Clear history"
+scrollIntoView first messag {"block":"nearest"}
+-- wrapped to the first (focus: TextInput)
+<div>
+  <div class="input-history-search" role="dialog" aria-label="Search what you typed to this agent">
+    <div class="input-history-search__query">
+      <span>
+        "Search history"
+      <input data-stand="TextInput" data-variant="plain" data-value="" placeholder="Type to filter" spellcheck="false" aria-controls="input-history-search-list">
+    <div class="input-history-search__list" id="input-history-search-list" role="listbox">
+      <div class="input-history-search__row input-history-search__row--selected" role="option" aria-selected="true" data-tip="first message">
+        <span class="input-history-search__text">
+          "first message"
+        <span class="input-history-search__meta">
+          "at 1000 (now, xx-XX)"
+      <div class="input-history-search__row" role="option" aria-selected="false" data-tip="two lines\nsecond line">
+        <span class="input-history-search__text">
+          "two lines"
+        <span class="input-history-search__meta">
+          "3× ·"
+          "at 2000 (now, xx-XX)"
+      <div class="input-history-search__row" role="option" aria-selected="false" data-tip="third">
+        <span class="input-history-search__text">
+          "third"
+        <span class="input-history-search__meta">
+          "2× ·"
+          "at 3000 (now, xx-XX)"
+    <div class="input-history-search__hint">
+      <span>
+        "Enter to use"
+      <span>
+        "Shift+Del to forget"
+      <span>
+        "Esc to close"
+      <span class="input-history-search__clear">
+        <span data-stand="Button" data-density="compact" data-disabled="false">
+          "Clear history"
+scrollIntoView third2× · at {"block":"nearest"}
+-- up wrapped to the last (focus: TextInput)
+<div>
+  <div class="input-history-search" role="dialog" aria-label="Search what you typed to this agent">
+    <div class="input-history-search__query">
+      <span>
+        "Search history"
+      <input data-stand="TextInput" data-variant="plain" data-value="" placeholder="Type to filter" spellcheck="false" aria-controls="input-history-search-list">
+    <div class="input-history-search__list" id="input-history-search-list" role="listbox">
+      <div class="input-history-search__row" role="option" aria-selected="false" data-tip="first message">
+        <span class="input-history-search__text">
+          "first message"
+        <span class="input-history-search__meta">
+          "at 1000 (now, xx-XX)"
+      <div class="input-history-search__row" role="option" aria-selected="false" data-tip="two lines\nsecond line">
+        <span class="input-history-search__text">
+          "two lines"
+        <span class="input-history-search__meta">
+          "3× ·"
+          "at 2000 (now, xx-XX)"
+      <div class="input-history-search__row input-history-search__row--selected" role="option" aria-selected="true" data-tip="third">
+        <span class="input-history-search__text">
+          "third"
+        <span class="input-history-search__meta">
+          "2× ·"
+          "at 3000 (now, xx-XX)"
+    <div class="input-history-search__hint">
+      <span>
+        "Enter to use"
+      <span>
+        "Shift+Del to forget"
+      <span>
+        "Esc to close"
+      <span class="input-history-search__clear">
+        <span data-stand="Button" data-density="compact" data-disabled="false">
+          "Clear history"
+scrollIntoView first messag {"block":"nearest"}
+-- Ctrl+R wrapped down (focus: TextInput)
+<div>
+  <div class="input-history-search" role="dialog" aria-label="Search what you typed to this agent">
+    <div class="input-history-search__query">
+      <span>
+        "Search history"
+      <input data-stand="TextInput" data-variant="plain" data-value="" placeholder="Type to filter" spellcheck="false" aria-controls="input-history-search-list">
+    <div class="input-history-search__list" id="input-history-search-list" role="listbox">
+      <div class="input-history-search__row input-history-search__row--selected" role="option" aria-selected="true" data-tip="first message">
+        <span class="input-history-search__text">
+          "first message"
+        <span class="input-history-search__meta">
+          "at 1000 (now, xx-XX)"
+      <div class="input-history-search__row" role="option" aria-selected="false" data-tip="two lines\nsecond line">
+        <span class="input-history-search__text">
+          "two lines"
+        <span class="input-history-search__meta">
+          "3× ·"
+          "at 2000 (now, xx-XX)"
+      <div class="input-history-search__row" role="option" aria-selected="false" data-tip="third">
+        <span class="input-history-search__text">
+          "third"
+        <span class="input-history-search__meta">
+          "2× ·"
+          "at 3000 (now, xx-XX)"
+    <div class="input-history-search__hint">
+      <span>
+        "Enter to use"
+      <span>
+        "Shift+Del to forget"
+      <span>
+        "Esc to close"
+      <span class="input-history-search__clear">
+        <span data-stand="Button" data-density="compact" data-disabled="false">
+          "Clear history"
+scrollIntoView two lines3×  {"block":"nearest"}
+-- hovered the second (focus: TextInput)
+<div>
+  <div class="input-history-search" role="dialog" aria-label="Search what you typed to this agent">
+    <div class="input-history-search__query">
+      <span>
+        "Search history"
+      <input data-stand="TextInput" data-variant="plain" data-value="" placeholder="Type to filter" spellcheck="false" aria-controls="input-history-search-list">
+    <div class="input-history-search__list" id="input-history-search-list" role="listbox">
+      <div class="input-history-search__row" role="option" aria-selected="false" data-tip="first message">
+        <span class="input-history-search__text">
+          "first message"
+        <span class="input-history-search__meta">
+          "at 1000 (now, xx-XX)"
+      <div class="input-history-search__row input-history-search__row--selected" role="option" aria-selected="true" data-tip="two lines\nsecond line">
+        <span class="input-history-search__text">
+          "two lines"
+        <span class="input-history-search__meta">
+          "3× ·"
+          "at 2000 (now, xx-XX)"
+      <div class="input-history-search__row" role="option" aria-selected="false" data-tip="third">
+        <span class="input-history-search__text">
+          "third"
+        <span class="input-history-search__meta">
+          "2× ·"
+          "at 3000 (now, xx-XX)"
+    <div class="input-history-search__hint">
+      <span>
+        "Enter to use"
+      <span>
+        "Shift+Del to forget"
+      <span>
+        "Esc to close"
+      <span class="input-history-search__clear">
+        <span data-stand="Button" data-density="compact" data-disabled="false">
+          "Clear history"
+onDone "two lines\nsecond line"
+onDone undefined
+onDone "third"
+mouse down on the third, default allowed: false
+scrollIntoView Nothing type {"block":"nearest"}
+AgentInputHistoryCommand {"agent_id":"agent-1","limit":50}
+onDone undefined

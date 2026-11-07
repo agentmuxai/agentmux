@@ -1,0 +1,31 @@
+requestAnimationFrame
+createFollowScroll pin,loadOlder,hasOlderHistory,loadingOlder,transition
+ResizeObserver observe
+frames 1
+observed content {"scrollTop":0,"scrollHeight":800,"clientHeight":160}
+noteGeometry {"scrollTop":800,"scrollHeight":800,"clientHeight":160}
+requestAnimationFrame
+frames 1
+observed content {"scrollTop":800,"scrollHeight":960,"clientHeight":160}
+noteGeometry {"scrollTop":960,"scrollHeight":960,"clientHeight":160}
+requestAnimationFrame
+frames 1
+observed content {"scrollTop":960,"scrollHeight":960,"clientHeight":160}
+requestAnimationFrame
+frames 1
+observed content {"scrollTop":960,"scrollHeight":1100,"clientHeight":160}
+noteGeometry {"scrollTop":1100,"scrollHeight":1100,"clientHeight":160}
+reset
+requestAnimationFrame
+frames 1
+observed content {"scrollTop":1100,"scrollHeight":1100,"clientHeight":160}
+noteGeometry {"scrollTop":1100,"scrollHeight":1100,"clientHeight":160}
+requestAnimationFrame
+-- same count, no frame
+frames pending 1
+-- after the shrink: 0 rows, first undefined, last undefined, window translateY(768px), spacer 176px, scrollTop 1100
+requestAnimationFrame
+ResizeObserver disconnect
+dispose
+frames 2
+-- frame after unmount

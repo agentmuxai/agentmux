@@ -3,11 +3,8 @@
 
 import {
     basenameOf,
-    describeMediaError,
     extOf,
     fetchMediaBlob,
-    fetchMediaRange,
-    INLINE_AV_MAX_BYTES,
     INLINE_IMAGE_MAX_BYTES,
     inlineMediaKind,
     isNetworkPath,
@@ -24,6 +21,7 @@ import { Button } from "@/element/ui";
 import { fireAndForget } from "@/util/util";
 import { createSignal, Match, onCleanup, onMount, Show, Switch, type JSX } from "solid-js";
 import { tip } from "@/app/element/tip";
+import { createLocalAv, whenNearViewport, type LocalAvState } from "./markdown-media-av-state";
 
 /**
  * Turns on inline media for one `<Markdown>`: the agent's own messages only
@@ -34,7 +32,28 @@ import { tip } from "@/app/element/tip";
 export type MarkdownMediaOpts = {
     /** Relative paths resolve against this: the agent's working directory. */
     baseDir: string;
+    /**
+     * Set by the agent pane: a click on an image of a message with two or more local images opens them
+     * in a preview that steps through them. Without it (or with one image) a click opens the Editor.
+     */
+    openGallery?: (gallery: MediaGallery) => void;
 };
+
+/** One image of a message, for the preview that steps through them. */
+export type MediaGalleryItem = { path: string; name: string; alt: string };
+export type MediaGallery = { items: MediaGalleryItem[]; index: number };
+
+/** The block's text is one message: its images, in reading order, and the position of `figure` among them. */
+function messageGallery(figure: HTMLElement): MediaGallery {
+    const figures = [...(figure.closest(".agent-markdown-block")?.querySelectorAll<HTMLElement>("figure[data-am-media-path]") ?? [])];
+    return {
+        items: figures.map((f) => {
+            const path = f.dataset.amMediaPath ?? "";
+            return { path, name: basenameOf(path), alt: f.dataset.amMediaAlt ?? "" };
+        }),
+        index: figures.indexOf(figure),
+    };
+}
 
 interface MuxBlockProps {
     blockkey: string;
@@ -74,6 +93,35 @@ export function openMediaInEditor(path: string): void {
     });
 }
 
+type LocalImageProps = { path: string; src: string; alt: string; openGallery?: MarkdownMediaOpts["openGallery"] };
+
+/** A message with two or more images steps through them; one image, or no pane to show it, goes to the Editor. */
+function openImage(props: LocalImageProps, figure: HTMLElement | undefined): void {
+    const gallery = props.openGallery && figure ? messageGallery(figure) : undefined;
+    if (gallery && gallery.items.length > 1 && gallery.index >= 0) props.openGallery!(gallery);
+    else openMediaInEditor(props.path);
+}
+
+/** An image of an agent's message is a button for the keyboard too, named with its place among the message's images once focused. */
+function galleryKeys(open: () => void, name: string) {
+    return {
+        tabIndex: 0,
+        role: "button" as const,
+        "aria-label": `Open image: ${name}`,
+        onKeyDown: (e: KeyboardEvent) => {
+            if (e.key !== "Enter" && e.key !== " ") return;
+            e.preventDefault();
+            open();
+        },
+        onFocus: (e: FocusEvent) => {
+            const img = e.currentTarget as HTMLElement;
+            const figure = img.closest<HTMLElement>("figure[data-am-media-path]");
+            const { items, index } = figure ? messageGallery(figure) : { items: [], index: -1 };
+            if (items.length > 1) img.setAttribute("aria-label", `Open image: ${name}, ${index + 1} of ${items.length}`);
+        },
+    };
+}
+
 /**
  * Aspect ratios of images already shown, by path. A row the virtual list
  * unmounts and remounts reserves the right height straight away instead of
@@ -105,30 +153,6 @@ async function naturalRatio(url: string): Promise<string | undefined> {
     return img.naturalWidth && img.naturalHeight ? `${img.naturalWidth} / ${img.naturalHeight}` : undefined;
 }
 
-/** Start loading once within this distance of the viewport. */
-const LAZY_MARGIN = "600px 0px";
-
-/**
- * Calls `start` once `el` nears the viewport, or right away where there's no
- * IntersectionObserver. Returns a disposer.
- */
-function whenNearViewport(el: Element, start: () => void): () => void {
-    if (typeof IntersectionObserver === "undefined") {
-        start();
-        return () => {};
-    }
-    const io = new IntersectionObserver(
-        (entries) => {
-            if (!entries.some((e) => e.isIntersecting)) return;
-            io.disconnect();
-            start();
-        },
-        { rootMargin: LAZY_MARGIN },
-    );
-    io.observe(el);
-    return () => io.disconnect();
-}
-
 type LocalImageState =
     | { kind: "waiting" }
     | { kind: "ready"; url: string }
@@ -141,7 +165,7 @@ type LocalImageState =
  * unmount). The natural aspect ratio is set before the image swaps in, and the
  * swap goes through the resize contract, so the row settles once.
  */
-function LocalImage(props: { path: string; src: string; alt: string }): JSX.Element {
+function LocalImage(props: LocalImageProps): JSX.Element {
     const [state, setState] = createSignal<LocalImageState>({ kind: "waiting" });
     const [ratio, setRatio] = createSignal(knownRatio.get(props.path));
     let box: HTMLElement | undefined;
@@ -187,6 +211,8 @@ function LocalImage(props: { path: string; src: string; alt: string }): JSX.Elem
         if (url) URL.revokeObjectURL(url);
     });
 
+    const open = () => openImage(props, box);
+
     const readyUrl = () => {
         const s = state();
         return s.kind === "ready" ? s.url : undefined;
@@ -199,7 +225,7 @@ function LocalImage(props: { path: string; src: string; alt: string }): JSX.Elem
     return (
         <Switch
             fallback={
-                <figure class="am-media" ref={box}>
+                <figure class="am-media" ref={box} data-am-media-path={props.path} data-am-media-alt={props.alt}>
                     <Show
                         when={readyUrl()}
                         fallback={<div class="am-media-placeholder" style={{ "aspect-ratio": ratio() ?? "16 / 9" }} />}
@@ -209,9 +235,10 @@ function LocalImage(props: { path: string; src: string; alt: string }): JSX.Elem
                                 class="am-media-img"
                                 src={src()}
                                 alt={props.alt}
-                                {...tip("Open in the editor")}
+                                {...tip(props.openGallery ? "Open image" : "Open in the editor")}
                                 style={ratio() ? { "aspect-ratio": ratio() } : undefined}
-                                onClick={() => openMediaInEditor(props.path)}
+                                {...(props.openGallery ? galleryKeys(open, props.alt || basenameOf(props.path)) : {})}
+                                onClick={open}
                                 onError={() => {
                                     // Undecodable: free the blob now, not at unmount.
                                     if (url) URL.revokeObjectURL(url);
@@ -249,17 +276,108 @@ function MediaCard(props: { path: string; size: number; icon: string }): JSX.Ele
     );
 }
 
-/** What a video reads before play, for a poster frame (§5). */
-const POSTER_BYTES = 2 * 1024 * 1024;
+function AvLabel(props: { s: LocalAvState; path: string }): JSX.Element {
+    return (
+        <span class="am-media-av-label">
+            <span class="am-media-card-name">{basenameOf(props.path)}</span>
+            <Show when={props.s.total()}>
+                <span class="am-muted">{formatBytes(props.s.total())}</span>
+            </Show>
+        </span>
+    );
+}
 
-type AvState =
-    | { kind: "waiting" }
-    | { kind: "ready"; total: number }
-    | { kind: "loading"; total: number }
-    | { kind: "playing"; url: string }
-    | { kind: "too-large"; size: number }
-    | { kind: "missing" }
-    | { kind: "error"; message: string };
+// Appears once the size is known (and under the cap): nothing to press before.
+function PlayButton(props: { s: LocalAvState; path: string }): JSX.Element {
+    const s = props.s;
+    return (
+        <Show when={s.state().kind === "ready" || s.state().kind === "loading"}>
+            <button
+                type="button"
+                class="am-media-play"
+                disabled={s.state().kind !== "ready"}
+                onClick={() => void s.play()}
+                aria-label={`Play ${basenameOf(props.path)}`}
+            >
+                <i class={s.state().kind === "loading" ? "fa fa-spinner fa-spin" : "fa fa-play"} aria-hidden="true" />
+            </button>
+        </Show>
+    );
+}
+
+function AudioCard(props: { s: LocalAvState; path: string }): JSX.Element {
+    const s = props.s;
+    return (
+        <Show
+            when={s.playingUrl()}
+            fallback={
+                <div class="am-media-audio-card">
+                    <PlayButton s={s} path={props.path} />
+                    <AvLabel s={s} path={props.path} />
+                </div>
+            }
+        >
+            {(url) => <audio class="am-media-player" src={url()} controls autoplay onError={s.onMediaError} />}
+        </Show>
+    );
+}
+
+function VideoStage(props: { s: LocalAvState; path: string }): JSX.Element {
+    const s = props.s;
+    return (
+        <div class="am-media-stage">
+            <Show
+                when={s.playingUrl()}
+                fallback={
+                    <>
+                        <Show when={s.poster() && !s.posterFailed()}>
+                            <video
+                                class="am-media-poster"
+                                // `#t=0.1`: seek past a black first frame; `auto`:
+                                // the bytes are already in memory, so decode one.
+                                src={`${s.poster()}#t=0.1`}
+                                preload="auto"
+                                muted
+                                playsinline
+                                onError={() => s.setPosterFailed(true)}
+                            />
+                        </Show>
+                        <div class="am-media-stage-overlay">
+                            <PlayButton s={s} path={props.path} />
+                            <AvLabel s={s} path={props.path} />
+                        </div>
+                    </>
+                }
+            >
+                {(url) => (
+                    <video
+                        // Starts muted (§5); the property, not just
+                        // the attribute, so it holds whatever loads.
+                        ref={(el) => (el.muted = true)}
+                        class="am-media-player"
+                        src={url()}
+                        controls
+                        autoplay
+                        muted
+                        playsinline
+                        onError={s.onMediaError}
+                    />
+                )}
+            </Show>
+        </div>
+    );
+}
+
+/** The player itself: a video's reserved stage, or an audio file's card. */
+export function AvFigure(props: { s: LocalAvState; path: string; kind: "video" | "audio" }): JSX.Element {
+    return (
+        <figure class={`am-media am-media-${props.kind}`} ref={props.s.setBox}>
+            <Show when={props.kind === "video"} fallback={<AudioCard s={props.s} path={props.path} />}>
+                <VideoStage s={props.s} path={props.path} />
+            </Show>
+        </figure>
+    );
+}
 
 /**
  * A local video or audio file (§5). Nothing autoplays on its own. Before play
@@ -270,177 +388,21 @@ type AvState =
  * reserved 16:9 stage throughout, so its row never changes height.
  */
 function LocalAV(props: { path: string; src: string; kind: "video" | "audio" }): JSX.Element {
-    const [state, setState] = createSignal<AvState>({ kind: "waiting" });
-    const [poster, setPoster] = createSignal<string>();
-    const [posterFailed, setPosterFailed] = createSignal(false);
-    let box: HTMLElement | undefined;
-    let disposed = false;
-    const urls: string[] = [];
-    const abort = new AbortController();
-    let stopWatching = () => {};
-    const own = (blob: Blob) => {
-        const url = URL.createObjectURL(blob);
-        urls.push(url);
-        return url;
-    };
-    const fail = (e: unknown) => {
-        if (disposed) return;
-        setState(e instanceof MediaTooLargeError ? { kind: "too-large", size: e.size } : { kind: "missing" });
-    };
-
-    const probe = async () => {
-        try {
-            const end = props.kind === "video" ? POSTER_BYTES - 1 : 0;
-            const { blob, total } = await fetchMediaRange(props.path, 0, end, { signal: abort.signal });
-            if (disposed) return;
-            if (total > INLINE_AV_MAX_BYTES) return setState({ kind: "too-large", size: total });
-            if (props.kind === "video" && blob) setPoster(own(blob));
-            setState({ kind: "ready", total });
-        } catch (e) {
-            fail(e);
-        }
-    };
-
-    const play = async () => {
-        const s = state();
-        if (s.kind !== "ready") return;
-        setState({ kind: "loading", total: s.total });
-        try {
-            const blob = await fetchMediaBlob(props.path, { maxBytes: INLINE_AV_MAX_BYTES, signal: abort.signal });
-            if (disposed) return;
-            setState({ kind: "playing", url: own(blob) });
-        } catch (e) {
-            fail(e);
-        }
-    };
-
-    onMount(() => {
-        if (box) stopWatching = whenNearViewport(box, () => void probe());
-    });
-    onCleanup(() => {
-        disposed = true;
-        stopWatching();
-        abort.abort();
-        for (const url of urls) URL.revokeObjectURL(url);
-    });
-
-    const onMediaError = (e: Event & { currentTarget: HTMLMediaElement }) => {
-        const message = describeMediaError(e.currentTarget);
-        // Free the played file (up to 200 MB) now, not when the row unmounts.
-        const s = state();
-        if (s.kind === "playing") {
-            URL.revokeObjectURL(s.url);
-            urls.splice(urls.indexOf(s.url), 1);
-        }
-        setState({ kind: "error", message });
-    };
-    const total = () => {
-        const s = state();
-        return s.kind === "ready" || s.kind === "loading" ? s.total : 0;
-    };
-    const playingUrl = () => {
-        const s = state();
-        return s.kind === "playing" ? s.url : undefined;
-    };
-    const label = () => (
-        <span class="am-media-av-label">
-            <span class="am-media-card-name">{basenameOf(props.path)}</span>
-            <Show when={total()}>
-                <span class="am-muted">{formatBytes(total())}</span>
-            </Show>
-        </span>
-    );
-    // Appears once the size is known (and under the cap): nothing to press before.
-    const playButton = () => (
-        <Show when={state().kind === "ready" || state().kind === "loading"}>
-            <button
-                type="button"
-                class="am-media-play"
-                disabled={state().kind !== "ready"}
-                onClick={() => void play()}
-                aria-label={`Play ${basenameOf(props.path)}`}
-            >
-                <i class={state().kind === "loading" ? "fa fa-spinner fa-spin" : "fa fa-play"} aria-hidden="true" />
-            </button>
-        </Show>
-    );
-    const errorState = () => {
-        const s = state();
-        return s.kind === "error" ? s.message : "";
-    };
-    const tooLargeSize = () => {
-        const s = state();
-        return s.kind === "too-large" ? s.size : 0;
-    };
-
+    const s = createLocalAv(props);
     return (
-        <Switch
-            fallback={
-                <figure class={`am-media am-media-${props.kind}`} ref={box}>
-                    <Show
-                        when={props.kind === "video"}
-                        fallback={
-                            <Show when={playingUrl()} fallback={<div class="am-media-audio-card">{playButton()}{label()}</div>}>
-                                {(url) => <audio class="am-media-player" src={url()} controls autoplay onError={onMediaError} />}
-                            </Show>
-                        }
-                    >
-                        <div class="am-media-stage">
-                            <Show
-                                when={playingUrl()}
-                                fallback={
-                                    <>
-                                        <Show when={poster() && !posterFailed()}>
-                                            <video
-                                                class="am-media-poster"
-                                                // `#t=0.1`: seek past a black first frame; `auto`:
-                                                // the bytes are already in memory, so decode one.
-                                                src={`${poster()}#t=0.1`}
-                                                preload="auto"
-                                                muted
-                                                playsinline
-                                                onError={() => setPosterFailed(true)}
-                                            />
-                                        </Show>
-                                        <div class="am-media-stage-overlay">
-                                            {playButton()}
-                                            {label()}
-                                        </div>
-                                    </>
-                                }
-                            >
-                                {(url) => (
-                                    <video
-                                        // Starts muted (§5); the property, not just
-                                        // the attribute, so it holds whatever loads.
-                                        ref={(el) => (el.muted = true)}
-                                        class="am-media-player"
-                                        src={url()}
-                                        controls
-                                        autoplay
-                                        muted
-                                        playsinline
-                                        onError={onMediaError}
-                                    />
-                                )}
-                            </Show>
-                        </div>
-                    </Show>
-                </figure>
-            }
-        >
-            <Match when={state().kind === "missing"}>
+        <Switch fallback={<AvFigure s={s} path={props.path} kind={props.kind} />}>
+            <Match when={s.state().kind === "missing"}>
                 <span class="am-muted">
                     [{props.kind} not found: {props.src}]
                 </span>
             </Match>
-            <Match when={state().kind === "error"}>
+            <Match when={s.state().kind === "error"}>
                 <span class="am-muted">
-                    [{props.kind} can't play: {errorState()}]
+                    [{props.kind} can't play: {s.errorState()}]
                 </span>
             </Match>
-            <Match when={state().kind === "too-large"}>
-                <MediaCard path={props.path} size={tooLargeSize()} icon={props.kind === "video" ? "fa-film" : "fa-music"} />
+            <Match when={s.state().kind === "too-large"}>
+                <MediaCard path={props.path} size={s.tooLargeSize()} icon={props.kind === "video" ? "fa-film" : "fa-music"} />
             </Match>
         </Switch>
     );
@@ -521,7 +483,7 @@ const MarkdownImg = (p: { props: JSX.ImgHTMLAttributes<HTMLImageElement>; media?
     const shown = /^file:/i.test(src) ? path : src;
     if (isNetworkPath(path)) return <span class="am-muted">[image: {shown} — network paths aren't loaded]</span>;
     const kind = inlineMediaKind(path);
-    if (kind === "image") return <LocalImage path={path} src={shown} alt={alt} />;
+    if (kind === "image") return <LocalImage path={path} src={shown} alt={alt} openGallery={p.media.openGallery} />;
     if (kind === "video" || kind === "audio") return <LocalAV path={path} src={shown} kind={kind} />;
     return <span class="am-muted">[image: {shown} — unsupported type]</span>;
 };

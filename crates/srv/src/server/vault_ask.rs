@@ -29,9 +29,10 @@ const ASKED: &str = "asked to use it";
 pub(super) async fn ask(state: &AppState, attention_block: &str, mut request: UseRequest, wait: Duration, headline: &str) -> (Ended, Option<UseAnswer>) {
     request.block_id = shown_pane(state, &request.block_id);
     let (id, entry, label, agent) = (request.id.clone(), request.entry_id.clone(), request.entry_label.clone(), request.agent.clone());
+    let agent_reason = request.agent_reason.clone();
     let target = target_of(&request);
     let attention_block = if request.block_id.is_empty() { attention_block.to_string() } else { request.block_id.clone() };
-    let headline = notice(headline, uses::goes_ahead_on_silence(&request.kind, request.needs_value));
+    let headline = notice(headline, uses::goes_ahead(&request));
     let answer = uses::uses().ask(request, wait);
     let _waiting = Waiting::new(id, state.clone());
     super::vault_handlers::publish(state);
@@ -44,7 +45,8 @@ pub(super) async fn ask(state: &AppState, attention_block: &str, mut request: Us
     };
     let ended = Ended::of(answer.as_ref());
     if ended == Ended::WentAhead {
-        crate::backend::vault::record(&state.identity_store, &entry, &label, &agent, ASKED, &target, uses::WENT_AHEAD_OUTCOME);
+        let line = crate::backend::vault::Line { entry_id: &entry, label: &label, actor: &agent, action: ASKED, target: &target, outcome: uses::WENT_AHEAD_OUTCOME, reason: &agent_reason };
+        crate::backend::vault::record_line(&state.identity_store, line);
     }
     (ended, answer)
 }

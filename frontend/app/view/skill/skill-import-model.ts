@@ -17,10 +17,11 @@ import type { SkillImportItem } from "@/types/rpc/SkillImportItem";
 import type { SkillImportPreview } from "@/types/rpc/SkillImportPreview";
 import type { SkillSource } from "@/types/rpc/SkillSource";
 
-export type SkillSourceKind = "folder" | "git" | "url";
+export type SkillSourceKind = "folder" | "file" | "git" | "url";
 
 export const SOURCE_KIND_LABELS: Record<SkillSourceKind, string> = {
     folder: "A folder on this computer",
+    file: "A .skill file on this computer",
     git: "A git repository (https)",
     url: "A SKILL.md at an https address",
 };

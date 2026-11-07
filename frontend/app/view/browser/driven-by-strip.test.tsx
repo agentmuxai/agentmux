@@ -41,6 +41,7 @@ function fakeModel(over: Partial<Record<string, unknown>> = {}) {
         pausedAtom: paused,
         setPaused,
         allowedOriginsAtom: () => [] as string[],
+        tookControlAtom: () => false,
         bypassAtom: bypass,
         bypassEndedAtom: ended,
         bypassPaused: () => false,
@@ -54,6 +55,19 @@ function fakeModel(over: Partial<Record<string, unknown>> = {}) {
 }
 
 describe("DrivenByStrip", () => {
+    it("says when the agent driving the pane took control of it rather than opened it", () => {
+        const { model } = fakeModel();
+        const { container } = render(() => <DrivenByStrip model={model} agent="Naki" />);
+        expect(container.textContent).toContain("Driven by Naki");
+        expect(container.textContent).not.toContain("took control");
+        cleanup();
+        const taken = fakeModel({ tookControlAtom: () => true });
+        const again = render(() => <DrivenByStrip model={taken.model} agent="Naki" />);
+        expect(again.container.textContent).toContain("Driven by Naki (took control)");
+        // One nowrap span, so a narrow pane never breaks "(took control)" across two lines.
+        expect(again.container.querySelector(".browser-took-control")?.textContent).toBe("(took control)");
+    });
+
     it("shows the host's worded failure to stop auto-approve once, with no lead-in in front of it", async () => {
         const text = "Couldn't reach AgentMux to stop auto-approve. Nothing was changed. Try again in a moment.";
         const { model, setBypass, setBypassMeta } = fakeModel();

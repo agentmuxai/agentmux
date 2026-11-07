@@ -20,7 +20,7 @@
  * tone only while this window isn't in front, and send no OS notification.
  */
 
-import { createEffect, createRoot } from "solid-js";
+import { createEffect, createRoot, createSignal } from "solid-js";
 import { fireEvent as firePaneEvent } from "@/app/store/agent-pane-state-store";
 import { getSettingsKeyAtom, MOS } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -33,7 +33,19 @@ import type { UserAttentionEvent } from "@/types/rpc/UserAttentionEvent";
 import { APP_KEY_PREFIX } from "./waiting-keys";
 
 
-const waiting = new Map<string, Map<string, string | undefined>>();
+interface WaitEntry {
+    /** What it wants, for the notification and the tab. */
+    text?: string;
+    /** What it wants in a few words, led by a verb ("asks to approve a Bash call"), for the toast and the list. */
+    what: string;
+}
+
+const waiting = new Map<string, Map<string, WaitEntry>>();
+/** `blockId` → when its first source began waiting (unix ms). */
+const since = new Map<string, number>();
+// Bumped on every change, so the list of waiting panes can be read reactively.
+const [version, setVersion] = createSignal(0);
+const bump = () => setVersion((v) => v + 1);
 /** `blockId\0source` → disposes the watch that ends that wait on its own. */
 const watches = new Map<string, () => void>();
 
@@ -46,6 +58,20 @@ export interface WaitingOptions {
      * is mounted, so a wait outlives a tab switch but not its pane.
      */
     stillWaiting?: () => boolean;
+    /** What it wants in a few words, led by a verb. Absent, a default from the source's name. */
+    what?: string;
+}
+
+/** The default `what` of a source that gives none. */
+export function defaultWhat(source: string, text?: string): string {
+    if (source === "question") return "asks you a question";
+    if (source === "permission") {
+        // A permission's text is "Allow <tool>?".
+        const tool = /^Allow (.+)\?$/.exec(text ?? "")?.[1];
+        return tool ? `asks to approve a ${tool} call` : "asks you to approve a tool call";
+    }
+    if (source === "shutdown") return "will stop unless you keep it running";
+    return "needs you";
 }
 
 /** `source` (e.g. "question", "permission", "srv:<key>") now waits on the
@@ -58,7 +84,9 @@ export function startWaitingForYou(blockId: string, source: string, text?: strin
         waiting.set(blockId, sources);
     }
     const first = sources.size === 0;
-    sources.set(source, text);
+    sources.set(source, { text, what: opts.what ?? defaultWhat(source, text) });
+    if (first) since.set(blockId, Date.now());
+    bump();
     if (opts.stillWaiting) watch(blockId, source, opts.stillWaiting);
     if (first) firePaneEvent(blockId, { type: "waiting-for-input", question: text, questionCount: opts.questionCount });
 }
@@ -88,7 +116,31 @@ export function endWaitingForYou(blockId: string, source: string, reason: "submi
     if (!sources?.delete(source)) return;
     if (sources.size > 0) return;
     waiting.delete(blockId);
+    since.delete(blockId);
+    bump();
     firePaneEvent(blockId, { type: "waiting-ended", reason });
+}
+
+/** A pane that waits on the user in this window. */
+export interface WaitingPane {
+    blockId: string;
+    /** What it wants, in a few words, led by a verb. */
+    what: string;
+    /** When it began to wait (unix ms). */
+    since: number;
+}
+
+/** The panes of this window that wait on the user, oldest first; reactive. A pane that belongs to no
+ *  agent (an `app:` request) is not one of them. */
+export function waitingPanes(): WaitingPane[] {
+    version();
+    const out: WaitingPane[] = [];
+    for (const [blockId, sources] of waiting) {
+        if (blockId.startsWith(APP_KEY_PREFIX)) continue;
+        const first = sources.values().next().value;
+        if (first) out.push({ blockId, what: first.what, since: since.get(blockId) ?? 0 });
+    }
+    return out.sort((a, b) => a.since - b.since);
 }
 
 export function isWaitingForYou(blockId: string): boolean {
@@ -115,6 +167,21 @@ export function isAgentWaitingForYou(blockId: string): boolean {
 const AGENT_WAITS = new Set(["vault"]);
 const AGENT_SOURCE = "srv:agent:";
 
+function whatForKind(kind: string): string {
+    switch (kind) {
+        case "browser":
+            return "needs you in the browser";
+        case "consent":
+            return "asks for your consent";
+        case "widget":
+            return "asks to install a widget";
+        case "vault":
+            return "needs a secret from you";
+        default:
+            return "needs you";
+    }
+}
+
 /** srv's announcement of a call to action it holds open (`userattention`,
  *  crates/srv/src/backend/user_attention.rs), as its Rust type. */
 export type UserAttention = UserAttentionEvent;
@@ -130,7 +197,7 @@ export function applyUserAttention(a: UserAttention, thisWindow: string): void {
     if (a.active && a.kind === "browser" && getSettingsKeyAtom("notify:waiting:browser")() === false) return;
     const agentWaits = AGENT_WAITS.has(a.kind);
     const source = agentWaits ? `${AGENT_SOURCE}${a.key}` : `srv:${a.key}`;
-    if (a.active) startWaitingForYou(blockId, source, a.text);
+    if (a.active) startWaitingForYou(blockId, source, a.text, { what: whatForKind(a.kind) });
     else endWaitingForYou(blockId, source, "submitted");
     if (agentWaits && a.block_id) {
         // Loaded when used: the pane hooks that keep the meta import this registry.
@@ -153,6 +220,8 @@ export function installWaitingForYou(): void {
         .catch(() => {
             /* older srv without notify.attention */
         });
+    // The toast that names who waits and links to it, over the same list.
+    void import("./attention-toast").then((m) => m.installAttentionToast());
 }
 
 /** Test helper. */
@@ -160,4 +229,6 @@ export function __resetWaitingForYou(): void {
     for (const d of watches.values()) d();
     watches.clear();
     waiting.clear();
+    since.clear();
+    bump();
 }

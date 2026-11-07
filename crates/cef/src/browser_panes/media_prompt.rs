@@ -134,12 +134,18 @@ struct PendingRequest {
 /// grant covers the request) and must emit the prompt event *after* this
 /// returns, so an implausibly fast answer still finds the entry.
 pub fn park(callback: MediaAccessCallback, block_id: &str, origin: &str, requested: u32) -> u64 {
+    park_boxed(Box::new(callback), block_id, origin, requested)
+}
+
+/// [`park`] for any callback that can be continued with the bits allowed (a page's location or
+/// notification prompt in an agent's pane, `client::agent_permission`).
+pub fn park_boxed(callback: Box<dyn MediaContinuation>, block_id: &str, origin: &str, requested: u32) -> u64 {
     debug_assert_ne!(
         cef::currently_on(cef::ThreadId::UI),
         0,
         "media prompts must be parked on the CEF UI thread"
     );
-    REGISTRY.with(|r| r.borrow_mut().park(Box::new(callback), block_id, origin, requested))
+    REGISTRY.with(|r| r.borrow_mut().park(callback, block_id, origin, requested))
 }
 
 /// Resolve a parked request. `None` if it is already gone — an unknown id, a
@@ -258,6 +264,26 @@ fn is_pending(id: u64) -> bool {
 pub fn arm_timeout(id: u64) {
     let mut task = TimeoutTask::new(id);
     cef::post_delayed_task(cef::ThreadId::UI, Some(&mut task), PROMPT_TIMEOUT_MS);
+}
+
+/// Answer a parked request from any thread: the answer moves to the UI thread, where the callback
+/// belongs. A request that was answered meanwhile (the timeout, the pane closing) is left alone.
+pub fn resolve_on_ui(id: u64, allow: bool) {
+    let mut task = ResolveTask::new(id, allow);
+    cef::post_task(cef::ThreadId::UI, Some(&mut task));
+}
+
+wrap_task! {
+    pub(crate) struct ResolveTask {
+        id: u64,
+        allow: bool,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            resolve(self.id, self.allow);
+        }
+    }
 }
 
 wrap_task! {

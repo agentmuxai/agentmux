@@ -44,6 +44,9 @@ pub struct UseRequest {
     /// Why the person is being asked: it is a new site, or the field doesn't look
     /// like what the entry is.
     pub reason: String,
+    /// The agent's own reason for asking, one line of at most 300 characters; shown as "<agent> says: ...",
+    /// never used to decide anything. Empty for a use no agent asked for.
+    pub agent_reason: String,
     /// There is no entry yet: the person types the value in the prompt, and may
     /// keep it in the Vault (spec section 6.5).
     pub needs_value: bool,
@@ -71,6 +74,31 @@ pub struct UseRequest {
     pub expires_ms: u64,
     /// Nobody answering lets it go ahead, once.
     pub goes_ahead: bool,
+    /// A secret an agent wants copied into the Vault from another service (`Vault` `import`); never goes ahead on silence.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub import: Option<UseImport>,
+}
+
+/// What an import copies, as the person reads it: where from, and where to. Nothing of the value.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct UseImport {
+    /// The service the secret is read from, e.g. "AWS Secrets Manager".
+    pub service: String,
+    pub secret: String,
+    /// The field of a JSON secret, when one is picked; empty for the whole secret.
+    pub key: String,
+    pub region: String,
+    /// What the read runs under: an AWS grant (a container agent) or a profile on this computer (a native one); empty
+    /// for this computer's default login.
+    pub profile: String,
+    /// `profile` is a grant AgentMux mints a session for, not a profile on this computer.
+    pub grant: bool,
+    /// The Vault it goes into.
+    pub vault: String,
+    /// It replaces the value of the entry (`entry_id`), the old one kept as a version.
+    pub replaces: bool,
 }
 
 /// How long a use that may go ahead on silence waits for a Deny.
@@ -83,6 +111,11 @@ pub const HOLD: Duration = Duration::from_secs(15);
 /// nor does a value only the person can type.
 pub fn goes_ahead_on_silence(kind: &str, needs_value: bool) -> bool {
     !needs_value && matches!(kind, "api-key" | "login" | "note")
+}
+
+/// Whether `req` goes ahead when nobody answers: [`goes_ahead_on_silence`], and never a copy of a secret from elsewhere.
+pub fn goes_ahead(req: &UseRequest) -> bool {
+    req.import.is_none() && goes_ahead_on_silence(&req.kind, req.needs_value)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -238,7 +271,7 @@ impl Uses {
     /// Adds `req`, made at `now`, within the limits; the id to watch, if it waits.
     fn enqueue(&self, mut req: UseRequest, wait: Duration, now: u64) -> (oneshot::Receiver<UseAnswer>, Option<String>) {
         let (tx, rx) = oneshot::channel();
-        req.goes_ahead = goes_ahead_on_silence(&req.kind, req.needs_value);
+        req.goes_ahead = goes_ahead(&req);
         req.expires_ms = now.saturating_add(ms(wait));
         req.deadline_ms = if req.goes_ahead { now.saturating_add(ms(VETO)).min(req.expires_ms) } else { req.expires_ms };
         let mut pending = self.pending.lock().unwrap_or_else(|p| p.into_inner());

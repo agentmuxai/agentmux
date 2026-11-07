@@ -19,12 +19,31 @@ import "./vault-view.scss";
 /** Longest an agent's own words are shown in a question (its name, an entry's
  *  label, its reason), so they can't push the answers out of view or pass for
  *  AgentMux's own wording. The whole text is in the tooltip. */
-export const CLIP = { name: 40, label: 60, reason: 240 } as const;
+export const CLIP = { name: 40, label: 60, reason: 240, agent_reason: 140, secret: 90 } as const;
 
 /** `text` cut to `max` characters, with an ellipsis when it was longer. */
 export function clip(text: string, max: number): string {
     const chars = Array.from(text);
     return chars.length <= max ? text : `${chars.slice(0, max - 1).join("").trimEnd()}…`;
+}
+
+/** `text` cut to `max` characters in the middle, keeping its start and its end, with an ellipsis. */
+export function clipMiddle(text: string, max: number): string {
+    const chars = Array.from(text);
+    if (chars.length <= max) return text;
+    const head = Math.ceil((max - 1) / 3);
+    const tail = max - 1 - head;
+    return `${chars.slice(0, head).join("")}…${chars.slice(chars.length - tail).join("")}`;
+}
+
+/** A secret's id cut in the middle (its name is at the end), the whole of it in the tooltip when cut. */
+export function ClippedId(props: { text: string; max: number }): JSX.Element {
+    const shown = () => clipMiddle(props.text, props.max);
+    return (
+        <span class="vault-clipped" {...tip(shown() === props.text ? undefined : props.text)}>
+            {shown()}
+        </span>
+    );
 }
 
 /** An agent's words cut to `max`, the whole of them in the tooltip when cut. */
@@ -51,6 +70,10 @@ export function siteOf(origin: string): string {
 export function promptTitle(u: UseRequest, short = false): string {
     const agent = short ? clip(u.agent, CLIP.name) : u.agent;
     const label = short ? clip(u.entry_label, CLIP.label) : u.entry_label;
+    if (u.import) {
+        const from = u.import.service;
+        return u.import.replaces ? `${agent} wants to replace the value of ${label} with a secret from ${from}` : `${agent} wants to copy a secret from ${from} into your Vault as ${label}`;
+    }
     if (u.signin) return `${agent} wants to sign in to ${siteOf(u.origin)} as ${short ? clip(u.field, CLIP.label) : u.field}`;
     if (u.replaces) return `${agent} wants to replace ${label} with what a command prints`;
     if (u.command) return `${agent} wants to run a command with your ${u.what}`;
@@ -59,6 +82,7 @@ export function promptTitle(u: UseRequest, short = false): string {
 
 /** The line under the question: what the agent never sees. */
 function promptNote(u: UseRequest): string {
+    if (u.import) return "The agent never sees the value: AgentMux reads it.";
     if (u.replaces) return "The agent never sees the new value: the command's output is cleaned of it.";
     if (u.command) return "The agent never sees the value, and the command's output is cleaned of it.";
     if (u.signin) return "The agent never sees the user name or the password. Check the site is the one you expect.";
@@ -95,6 +119,49 @@ function UseTarget(props: { use: UseRequest }): JSX.Element {
                 's tab.
             </p>
         </Show>
+    );
+}
+
+/** The secret an import copies, and where it goes: the secret, its key and region, the Vault, and what happens to a value it replaces. */
+function UseImportSubject(props: { use: UseRequest; import: NonNullable<UseRequest["import"]> }): JSX.Element {
+    const i = props.import;
+    return (
+        <>
+            <p>
+                The secret <strong class="warden-manager-mono vault-import-id"><ClippedId text={i.secret} max={CLIP.secret} /></strong>
+                <Show when={i.key}>
+                    {" "}
+                    (key <strong class="warden-manager-mono vault-import-id"><ClippedId text={i.key} max={CLIP.label} /></strong>)
+                </Show>
+                <Show when={i.region}>
+                    {" "}
+                    in <strong class="warden-manager-mono vault-import-region">{i.region}</strong>
+                </Show>{" "}
+                from {i.service}.
+            </p>
+            <p>
+                <Show
+                    when={i.profile}
+                    fallback="It is read with this computer's default AWS login."
+                >
+                    {i.grant ? "It is read under the AWS grant " : "It is read with the AWS profile "}
+                    <strong class="warden-manager-mono vault-import-id"><Clipped text={i.profile} max={CLIP.label} /></strong>
+                    {i.grant ? "." : " on this computer."}
+                </Show>
+            </p>
+            <Show
+                when={i.replaces}
+                fallback={
+                    <p>
+                        It is saved to the Vault <strong><Clipped text={i.vault} max={CLIP.label} /></strong> as a new {props.use.kind} entry, <strong><Clipped text={props.use.entry_label} max={CLIP.label} /></strong>.
+                    </p>
+                }
+            >
+                <p>
+                    It replaces the value of <strong><Clipped text={props.use.entry_label} max={CLIP.label} /></strong> in <strong><Clipped text={i.vault} max={CLIP.label} /></strong>. The old value is kept for 7 days, and you can put it back from the Vault pane.
+                </p>
+            </Show>
+        </>
     );
 }
 
@@ -155,7 +222,7 @@ function UseDeadline(props: { use: UseRequest }): JSX.Element {
             fallback={
                 <Show when={!props.use.needs_value}>
                     <p class="vault-use-deadline">
-                        <strong>Waiting for you</strong>: ID and card details are never used without a yes.
+                        <strong>Waiting for you</strong>: {props.use.import ? "nothing is copied without a yes." : "ID and card details are never used without a yes."}
                     </p>
                 </Show>
             }
@@ -238,6 +305,54 @@ function TypedValue(props: { use: UseRequest; answer: UseAnswerState; focus: boo
     );
 }
 
+/** What the agent says it wants this for: quoted and attributed, never as the person's words, and it decides nothing.
+ *  Cut to `CLIP.agent_reason` (the whole in the tooltip) so the command the person must read stays in view; the
+ *  entry's History has all of it. */
+function UseSays(props: { use: UseRequest }): JSX.Element {
+    return (
+        <Show when={props.use.agent_reason}>
+            <p class="vault-use-says">
+                <strong>{clip(props.use.agent, CLIP.name)}</strong> says: <q><Clipped text={props.use.agent_reason} max={CLIP.agent_reason} /></q>
+            </p>
+        </Show>
+    );
+}
+
+/** What a fill, sign-in, command or capture is about: where it goes, and whose value. */
+function UseSubject(props: { use: UseRequest; answer: UseAnswerState; focus: boolean }): JSX.Element {
+    const u = props.use;
+    return (
+        <>
+            <Show when={u.command} fallback={<UseTarget use={u} />}>
+                <UseCommand use={u} />
+            </Show>
+            <Show
+                when={u.needs_value}
+                fallback={
+                    <p>
+                        <Show
+                            when={u.replaces}
+                            fallback={
+                                <>
+                                    From your Vault entry{" "}
+                                    <strong>
+                                        <Clipped text={u.entry_label} max={CLIP.label} />
+                                    </strong>
+                                    . You're asked because: <Clipped text={u.reason} max={CLIP.reason} />.
+                                </>
+                            }
+                        >
+                            The current value is kept for 7 days, and you can put it back from the Vault pane.
+                        </Show>
+                    </p>
+                }
+            >
+                <TypedValue use={u} answer={props.answer} focus={props.focus} />
+            </Show>
+        </>
+    );
+}
+
 /** The question and its answers, laid out by `Body` and `Actions` (the modal's
  *  parts, or the card's). `focus` lets a typed value's field take the focus: the
  *  window's prompt may, a card in the agent's pane never does (spec §4.4). */
@@ -248,32 +363,23 @@ export function UseQuestion(props: { use: UseRequest; answer: UseAnswerState; Bo
     return (
         <div class="vault-use-activity" onPointerMove={held} onKeyDown={held} onFocusIn={held}>
             <props.Body>
-                <UseDeadline use={u} />
-                <Show when={u.command} fallback={<UseTarget use={u} />}>
-                    <UseCommand use={u} />
-                </Show>
                 <Show
-                    when={u.needs_value}
+                    when={u.import}
                     fallback={
-                        <p>
-                            <Show
-                                when={u.replaces}
-                                fallback={
-                                    <>
-                                        From your Vault entry{" "}
-                                        <strong>
-                                            <Clipped text={u.entry_label} max={CLIP.label} />
-                                        </strong>
-                                        . You're asked because: <Clipped text={u.reason} max={CLIP.reason} />.
-                                    </>
-                                }
-                            >
-                                The current value is kept for 7 days, and you can put it back from the Vault pane.
-                            </Show>
-                        </p>
+                        <>
+                            <UseDeadline use={u} />
+                            <UseSays use={u} />
+                            <UseSubject use={u} answer={a} focus={props.focus} />
+                        </>
                     }
                 >
-                    <TypedValue use={u} answer={a} focus={props.focus} />
+                    {(i) => (
+                        <>
+                            <UseImportSubject use={u} import={i()} />
+                            <UseSays use={u} />
+                            <UseDeadline use={u} />
+                        </>
+                    )}
                 </Show>
                 <p class="warden-manager-dim">{promptNote(u)}</p>
                 <Show when={a.error()}>

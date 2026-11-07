@@ -1,0 +1,17 @@
+requestAnimationFrame
+createFollowScroll pin,loadOlder,hasOlderHistory,loadingOlder,transition
+ResizeObserver observe
+openMenuAt [["Copy","icon-copy",true],["Copy All","icon-copy",true]] prevented=true
+writeText "redacted(picked text)"
+writeText "redacted(ALL TEXT)"
+openMenuAt [["Copy","icon-copy",false],["Copy All","icon-copy",true]] prevented=true
+openMenuAt [["Copy","icon-copy",false],["Copy All","icon-copy",true]] prevented=true
+reset
+requestAnimationFrame
+openMenuAt [["Copy","icon-copy",false],["Copy All","icon-copy",false]] prevented=true
+openMenuAt [["Copy","icon-copy",true],["Copy All","icon-copy",false]] prevented=true
+writeText "redacted(again)"
+writeText "redacted(ALL TEXT)"
+console.log clipboard write failed Error: no clipboard
+console.log clipboard write failed Error: no clipboard
+row height 16

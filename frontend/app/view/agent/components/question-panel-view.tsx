@@ -150,6 +150,7 @@ export function QuestionPanelBody(props: QuestionViewProps & { r: AskUserQuestio
             <div
                 ref={(el) => (s.rootEl = el)}
                 class="agent-question-panel"
+                data-toast-avoid
                 role="group"
                 aria-label="Agent question"
                 tabindex={-1}

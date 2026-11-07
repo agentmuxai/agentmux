@@ -29,6 +29,7 @@ import {
     isWaitingForYou,
     startWaitingForYou,
     type UserAttention,
+    waitingPanes,
 } from "./waiting-for-you";
 
 let events: [string, AgentPaneEvent][] = [];
@@ -110,5 +111,35 @@ describe("waiting for you", () => {
         applyUserAttention({ ...a, active: false }, "w1");
         expect(isAgentWaitingForYou("b7")).toBe(false);
         await vi.waitFor(() => expect(syncAwaitingUser).toHaveBeenCalledTimes(2));
+    });
+
+    it("lists the panes that wait, oldest first, with what each wants in a few words", () => {
+        const now = vi.spyOn(Date, "now");
+        try {
+            now.mockReturnValue(1000);
+            startWaitingForYou("b1", "question", "Which branch?");
+            now.mockReturnValue(2000);
+            startWaitingForYou("b2", "permission", "Allow Bash?", { what: "asks to approve a Bash call" });
+            startWaitingForYou("b2", "srv:k", "x");
+            expect(waitingPanes()).toEqual([
+                { blockId: "b1", what: "asks you a question", since: 1000 },
+                { blockId: "b2", what: "asks to approve a Bash call", since: 2000 },
+            ]);
+            endWaitingForYou("b1", "question");
+            expect(waitingPanes().map((p) => p.blockId)).toEqual(["b2"]);
+        } finally {
+            now.mockRestore();
+        }
+    });
+
+    it("words srv's announcements by their kind, and leaves a request that belongs to no pane off the list", () => {
+        const a: UserAttention = { key: "k1", block_id: "b2", kind: "consent", text: "SSH?", window_ids: [], since_ms: 0, active: true };
+        applyUserAttention(a, "w1");
+        applyUserAttention({ ...a, key: "k2", block_id: "b3", kind: "widget" }, "w1");
+        applyUserAttention({ ...a, key: "k3", block_id: "" }, "w1");
+        expect(waitingPanes().map((p) => [p.blockId, p.what])).toEqual([
+            ["b2", "asks for your consent"],
+            ["b3", "asks to install a widget"],
+        ]);
     });
 });

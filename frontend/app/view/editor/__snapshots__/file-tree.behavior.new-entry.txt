@@ -1,0 +1,468 @@
+model.setSelectedPath /home/a/src
+-- new file in src
+<div>
+  <div class="file-tree">
+    <div class="file-tree-toolbar">
+      <span data-stand="IconButton" data-icon="angles-left" data-label="Hide file tree" data-density="compact" data-pressed="undefined">
+      <span data-stand="IconButton" data-icon="eye-slash" data-label="Show hidden files" data-density="compact" data-pressed="false">
+      <span data-stand="IconButton" data-icon="square-minus" data-label="Collapse all folders" data-density="compact" data-pressed="undefined">
+      <span data-stand="IconButton" data-icon="arrows-rotate" data-label="Refresh tree" data-density="compact" data-pressed="undefined">
+    <div class="file-tree-body" role="tree" aria-label="Files">
+      <div class="file-tree-item" role="treeitem" data-path="/home/a" tabindex="-1" aria-label="a" aria-level="1" aria-posinset="1" aria-setsize="2" aria-expanded="true">
+        <div class="file-tree-row file-tree-row--dir" style="padding-left: 4px;" data-hover-tip="/home/a" aria-description="/home/a">
+          <i class="fa fa-chevron-down file-tree-chevron">
+          <i aria-hidden="true" class="fa-solid fa-folder-open file-tree-icon file-tree-icon--steel">
+          <span class="file-tree-label">
+            "a"
+        <div role="group">
+          <div class="file-tree-item" role="treeitem" data-path="/home/a/docs" tabindex="-1" aria-label="docs" aria-level="2" aria-posinset="1" aria-setsize="6" aria-expanded="false">
+            <div class="file-tree-row file-tree-row--dir" style="padding-left: 20px;" data-hover-tip="/home/a/docs" aria-description="/home/a/docs">
+              <i class="fa fa-chevron-right file-tree-chevron">
+              <i aria-hidden="true" class="fa-solid fa-folder file-tree-icon file-tree-icon--steel">
+              <span class="file-tree-label">
+                "docs"
+          <div class="file-tree-item" role="treeitem" data-path="/home/a/src" tabindex="0" aria-label="src" aria-level="2" aria-posinset="2" aria-setsize="6" aria-expanded="true" aria-selected="true">
+            <div class="file-tree-row file-tree-row--dir file-tree-row--selected" style="padding-left: 20px;" data-hover-tip="/home/a/src" aria-description="/home/a/src">
+              <i class="fa fa-chevron-down file-tree-chevron">
+              <i aria-hidden="true" class="fa-solid fa-folder-open file-tree-icon file-tree-icon--steel">
+              <span class="file-tree-label">
+                "src"
+            <div role="group">
+              <div class="file-tree-row file-tree-row--new-entry" style="padding-left: 36px;">
+                <span class="file-tree-chevron-spacer">
+                <i aria-hidden="true" class="fa-solid fa-file file-tree-icon file-tree-icon--grey">
+                <input class="file-tree-inline-input" data-raw-text-field="the file tree's inline name editor: it sits in the row of the entry being named and ends on Enter, Escape or blur, not a form field" type="text" aria-label="file name" placeholder="file name">
+              <div class="file-tree-item" role="treeitem" data-path="/home/a/src/main.ts" tabindex="-1" aria-label="main.ts" aria-level="3" aria-posinset="1" aria-setsize="4">
+                <div class="file-tree-row" style="padding-left: 36px;" data-hover-tip="/home/a/src/main.ts" aria-description="/home/a/src/main.ts">
+                  <span class="file-tree-chevron-spacer">
+                  <i aria-hidden="true" class="fa-solid fa-file-code file-tree-icon file-tree-icon--blue">
+                  <span class="file-tree-label">
+                    "main.ts"
+              <div class="file-tree-item" role="treeitem" data-path="/home/a/src/util.ts" tabindex="-1" aria-label="util.ts" aria-level="3" aria-posinset="2" aria-setsize="4">
+                <div class="file-tree-row" style="padding-left: 36px;" data-hover-tip="/home/a/src/util.ts" aria-description="/home/a/src/util.ts">
+                  <span class="file-tree-chevron-spacer">
+                  <i aria-hidden="true" class="fa-solid fa-file-code file-tree-icon file-tree-icon--blue">
+                  <span class="file-tree-label">
+                    "util.ts"
+              <div class="file-tree-item" role="treeitem" data-path="/home/a/src/zeta.ts" tabindex="-1" aria-label="zeta.ts" aria-level="3" aria-posinset="3" aria-setsize="4">
+                <div class="file-tree-row" style="padding-left: 36px;" data-hover-tip="/home/a/src/zeta.ts" aria-description="/home/a/src/zeta.ts">
+                  <span class="file-tree-chevron-spacer">
+                  <i aria-hidden="true" class="fa-solid fa-file-code file-tree-icon file-tree-icon--blue">
+                  <span class="file-tree-label">
+                    "zeta.ts"
+              <div class="file-tree-item" role="treeitem" data-path="/home/a/src/deep" tabindex="-1" aria-label="deep" aria-level="3" aria-posinset="4" aria-setsize="4" aria-expanded="false">
+                <div class="file-tree-row file-tree-row--dir" style="padding-left: 36px;" data-hover-tip="/home/a/src/deep" aria-description="/home/a/src/deep">
+                  <i class="fa fa-chevron-right file-tree-chevron">
+                  <i aria-hidden="true" class="fa-solid fa-folder file-tree-icon file-tree-icon--steel">
+                  <span class="file-tree-label">
+                    "deep"
+          <div class="file-tree-item" role="treeitem" data-path="/home/a/slow" tabindex="-1" aria-label="slow" aria-level="2" aria-posinset="3" aria-setsize="6" aria-expanded="false">
+            <div class="file-tree-row file-tree-row--dir" style="padding-left: 20px;" data-hover-tip="/home/a/slow" aria-description="/home/a/slow">
+              <i class="fa fa-chevron-right file-tree-chevron">
+              <i aria-hidden="true" class="fa-solid fa-folder file-tree-icon file-tree-icon--steel">
+              <span class="file-tree-label">
+                "slow"
+          <div class="file-tree-item" role="treeitem" data-path="/home/a/broken" tabindex="-1" aria-label="broken" aria-level="2" aria-posinset="4" aria-setsize="6" aria-expanded="false">
+            <div class="file-tree-row file-tree-row--dir" style="padding-left: 20px;" data-hover-tip="/home/a/broken" aria-description="/home/a/broken">
+              <i class="fa fa-chevron-right file-tree-chevron">
+              <i aria-hidden="true" class="fa-solid fa-folder file-tree-icon file-tree-icon--steel">
+              <span class="file-tree-label">
+                "broken"
+          <div class="file-tree-item" role="treeitem" data-path="/home/a/link" tabindex="-1" aria-label="link" aria-level="2" aria-posinset="5" aria-setsize="6">
+            <div class="file-tree-row" style="padding-left: 20px;" data-hover-tip="/home/a/link" aria-description="/home/a/link">
+              <span class="file-tree-chevron-spacer">
+              <i aria-hidden="true" class="fa-solid fa-file file-tree-icon file-tree-icon--grey">
+              <span class="file-tree-label">
+                "link"
+              <span class="file-tree-symlink" aria-label="symlink">
+                "↗"
+          <div class="file-tree-item" role="treeitem" data-path="/home/a/README.md" tabindex="-1" aria-label="README.md" aria-level="2" aria-posinset="6" aria-setsize="6">
+            <div class="file-tree-row" style="padding-left: 20px;" data-hover-tip="/home/a/README.md" aria-description="/home/a/README.md">
+              <span class="file-tree-chevron-spacer">
+              <i aria-hidden="true" class="fa-solid fa-circle-info file-tree-icon file-tree-icon--blue">
+              <span class="file-tree-label">
+                "README.md"
+      <div class="file-tree-item" role="treeitem" data-path="/" tabindex="-1" aria-label="/" aria-level="1" aria-posinset="2" aria-setsize="2" aria-expanded="false">
+        <div class="file-tree-row file-tree-row--dir" style="padding-left: 4px;" data-hover-tip="/" aria-description="/">
+          <i class="fa fa-chevron-right file-tree-chevron">
+          <i aria-hidden="true" class="fa-solid fa-folder file-tree-icon file-tree-icon--steel">
+          <span class="file-tree-label">
+            "/"
+onNewEntryConfirm /home/a/src "fresh.ts" file
+-- new folder in src
+<div>
+  <div class="file-tree">
+    <div class="file-tree-toolbar">
+      <span data-stand="IconButton" data-icon="angles-left" data-label="Hide file tree" data-density="compact" data-pressed="undefined">
+      <span data-stand="IconButton" data-icon="eye-slash" data-label="Show hidden files" data-density="compact" data-pressed="false">
+      <span data-stand="IconButton" data-icon="square-minus" data-label="Collapse all folders" data-density="compact" data-pressed="undefined">
+      <span data-stand="IconButton" data-icon="arrows-rotate" data-label="Refresh tree" data-density="compact" data-pressed="undefined">
+    <div class="file-tree-body" role="tree" aria-label="Files">
+      <div class="file-tree-item" role="treeitem" data-path="/home/a" tabindex="-1" aria-label="a" aria-level="1" aria-posinset="1" aria-setsize="2" aria-expanded="true">
+        <div class="file-tree-row file-tree-row--dir" style="padding-left: 4px;" data-hover-tip="/home/a" aria-description="/home/a">
+          <i class="fa fa-chevron-down file-tree-chevron">
+          <i aria-hidden="true" class="fa-solid fa-folder-open file-tree-icon file-tree-icon--steel">
+          <span class="file-tree-label">
+            "a"
+        <div role="group">
+          <div class="file-tree-item" role="treeitem" data-path="/home/a/docs" tabindex="-1" aria-label="docs" aria-level="2" aria-posinset="1" aria-setsize="6" aria-expanded="false">
+            <div class="file-tree-row file-tree-row--dir" style="padding-left: 20px;" data-hover-tip="/home/a/docs" aria-description="/home/a/docs">
+              <i class="fa fa-chevron-right file-tree-chevron">
+              <i aria-hidden="true" class="fa-solid fa-folder file-tree-icon file-tree-icon--steel">
+              <span class="file-tree-label">
+                "docs"
+          <div class="file-tree-item" role="treeitem" data-path="/home/a/src" tabindex="0" aria-label="src" aria-level="2" aria-posinset="2" aria-setsize="6" aria-expanded="true" aria-selected="true">
+            <div class="file-tree-row file-tree-row--dir file-tree-row--selected" style="padding-left: 20px;" data-hover-tip="/home/a/src" aria-description="/home/a/src">
+              <i class="fa fa-chevron-down file-tree-chevron">
+              <i aria-hidden="true" class="fa-solid fa-folder-open file-tree-icon file-tree-icon--steel">
+              <span class="file-tree-label">
+                "src"
+            <div role="group">
+              <div class="file-tree-row file-tree-row--new-entry" style="padding-left: 36px;">
+                <span class="file-tree-chevron-spacer">
+                <i aria-hidden="true" class="fa-solid fa-folder file-tree-icon file-tree-icon--steel">
+                <input class="file-tree-inline-input" data-raw-text-field="the file tree's inline name editor: it sits in the row of the entry being named and ends on Enter, Escape or blur, not a form field" type="text" aria-label="folder name" placeholder="folder name">
+              <div class="file-tree-item" role="treeitem" data-path="/home/a/src/main.ts" tabindex="-1" aria-label="main.ts" aria-level="3" aria-posinset="1" aria-setsize="4">
+                <div class="file-tree-row" style="padding-left: 36px;" data-hover-tip="/home/a/src/main.ts" aria-description="/home/a/src/main.ts">
+                  <span class="file-tree-chevron-spacer">
+                  <i aria-hidden="true" class="fa-solid fa-file-code file-tree-icon file-tree-icon--blue">
+                  <span class="file-tree-label">
+                    "main.ts"
+              <div class="file-tree-item" role="treeitem" data-path="/home/a/src/util.ts" tabindex="-1" aria-label="util.ts" aria-level="3" aria-posinset="2" aria-setsize="4">
+                <div class="file-tree-row" style="padding-left: 36px;" data-hover-tip="/home/a/src/util.ts" aria-description="/home/a/src/util.ts">
+                  <span class="file-tree-chevron-spacer">
+                  <i aria-hidden="true" class="fa-solid fa-file-code file-tree-icon file-tree-icon--blue">
+                  <span class="file-tree-label">
+                    "util.ts"
+              <div class="file-tree-item" role="treeitem" data-path="/home/a/src/zeta.ts" tabindex="-1" aria-label="zeta.ts" aria-level="3" aria-posinset="3" aria-setsize="4">
+                <div class="file-tree-row" style="padding-left: 36px;" data-hover-tip="/home/a/src/zeta.ts" aria-description="/home/a/src/zeta.ts">
+                  <span class="file-tree-chevron-spacer">
+                  <i aria-hidden="true" class="fa-solid fa-file-code file-tree-icon file-tree-icon--blue">
+                  <span class="file-tree-label">
+                    "zeta.ts"
+              <div class="file-tree-item" role="treeitem" data-path="/home/a/src/deep" tabindex="-1" aria-label="deep" aria-level="3" aria-posinset="4" aria-setsize="4" aria-expanded="false">
+                <div class="file-tree-row file-tree-row--dir" style="padding-left: 36px;" data-hover-tip="/home/a/src/deep" aria-description="/home/a/src/deep">
+                  <i class="fa fa-chevron-right file-tree-chevron">
+                  <i aria-hidden="true" class="fa-solid fa-folder file-tree-icon file-tree-icon--steel">
+                  <span class="file-tree-label">
+                    "deep"
+          <div class="file-tree-item" role="treeitem" data-path="/home/a/slow" tabindex="-1" aria-label="slow" aria-level="2" aria-posinset="3" aria-setsize="6" aria-expanded="false">
+            <div class="file-tree-row file-tree-row--dir" style="padding-left: 20px;" data-hover-tip="/home/a/slow" aria-description="/home/a/slow">
+              <i class="fa fa-chevron-right file-tree-chevron">
+              <i aria-hidden="true" class="fa-solid fa-folder file-tree-icon file-tree-icon--steel">
+              <span class="file-tree-label">
+                "slow"
+          <div class="file-tree-item" role="treeitem" data-path="/home/a/broken" tabindex="-1" aria-label="broken" aria-level="2" aria-posinset="4" aria-setsize="6" aria-expanded="false">
+            <div class="file-tree-row file-tree-row--dir" style="padding-left: 20px;" data-hover-tip="/home/a/broken" aria-description="/home/a/broken">
+              <i class="fa fa-chevron-right file-tree-chevron">
+              <i aria-hidden="true" class="fa-solid fa-folder file-tree-icon file-tree-icon--steel">
+              <span class="file-tree-label">
+                "broken"
+          <div class="file-tree-item" role="treeitem" data-path="/home/a/link" tabindex="-1" aria-label="link" aria-level="2" aria-posinset="5" aria-setsize="6">
+            <div class="file-tree-row" style="padding-left: 20px;" data-hover-tip="/home/a/link" aria-description="/home/a/link">
+              <span class="file-tree-chevron-spacer">
+              <i aria-hidden="true" class="fa-solid fa-file file-tree-icon file-tree-icon--grey">
+              <span class="file-tree-label">
+                "link"
+              <span class="file-tree-symlink" aria-label="symlink">
+                "↗"
+          <div class="file-tree-item" role="treeitem" data-path="/home/a/README.md" tabindex="-1" aria-label="README.md" aria-level="2" aria-posinset="6" aria-setsize="6">
+            <div class="file-tree-row" style="padding-left: 20px;" data-hover-tip="/home/a/README.md" aria-description="/home/a/README.md">
+              <span class="file-tree-chevron-spacer">
+              <i aria-hidden="true" class="fa-solid fa-circle-info file-tree-icon file-tree-icon--blue">
+              <span class="file-tree-label">
+                "README.md"
+      <div class="file-tree-item" role="treeitem" data-path="/" tabindex="-1" aria-label="/" aria-level="1" aria-posinset="2" aria-setsize="2" aria-expanded="false">
+        <div class="file-tree-row file-tree-row--dir" style="padding-left: 4px;" data-hover-tip="/" aria-description="/">
+          <i class="fa fa-chevron-right file-tree-chevron">
+          <i aria-hidden="true" class="fa-solid fa-folder file-tree-icon file-tree-icon--steel">
+          <span class="file-tree-label">
+            "/"
+-- parent closed: nothing shown
+<div>
+  <div class="file-tree">
+    <div class="file-tree-toolbar">
+      <span data-stand="IconButton" data-icon="angles-left" data-label="Hide file tree" data-density="compact" data-pressed="undefined">
+      <span data-stand="IconButton" data-icon="eye-slash" data-label="Show hidden files" data-density="compact" data-pressed="false">
+      <span data-stand="IconButton" data-icon="square-minus" data-label="Collapse all folders" data-density="compact" data-pressed="undefined">
+      <span data-stand="IconButton" data-icon="arrows-rotate" data-label="Refresh tree" data-density="compact" data-pressed="undefined">
+    <div class="file-tree-body" role="tree" aria-label="Files">
+      <div class="file-tree-item" role="treeitem" data-path="/home/a" tabindex="-1" aria-label="a" aria-level="1" aria-posinset="1" aria-setsize="2" aria-expanded="true">
+        <div class="file-tree-row file-tree-row--dir" style="padding-left: 4px;" data-hover-tip="/home/a" aria-description="/home/a">
+          <i class="fa fa-chevron-down file-tree-chevron">
+          <i aria-hidden="true" class="fa-solid fa-folder-open file-tree-icon file-tree-icon--steel">
+          <span class="file-tree-label">
+            "a"
+        <div role="group">
+          <div class="file-tree-item" role="treeitem" data-path="/home/a/docs" tabindex="-1" aria-label="docs" aria-level="2" aria-posinset="1" aria-setsize="6" aria-expanded="false">
+            <div class="file-tree-row file-tree-row--dir" style="padding-left: 20px;" data-hover-tip="/home/a/docs" aria-description="/home/a/docs">
+              <i class="fa fa-chevron-right file-tree-chevron">
+              <i aria-hidden="true" class="fa-solid fa-folder file-tree-icon file-tree-icon--steel">
+              <span class="file-tree-label">
+                "docs"
+          <div class="file-tree-item" role="treeitem" data-path="/home/a/src" tabindex="0" aria-label="src" aria-level="2" aria-posinset="2" aria-setsize="6" aria-expanded="true" aria-selected="true">
+            <div class="file-tree-row file-tree-row--dir file-tree-row--selected" style="padding-left: 20px;" data-hover-tip="/home/a/src" aria-description="/home/a/src">
+              <i class="fa fa-chevron-down file-tree-chevron">
+              <i aria-hidden="true" class="fa-solid fa-folder-open file-tree-icon file-tree-icon--steel">
+              <span class="file-tree-label">
+                "src"
+            <div role="group">
+              <div class="file-tree-item" role="treeitem" data-path="/home/a/src/main.ts" tabindex="-1" aria-label="main.ts" aria-level="3" aria-posinset="1" aria-setsize="4">
+                <div class="file-tree-row" style="padding-left: 36px;" data-hover-tip="/home/a/src/main.ts" aria-description="/home/a/src/main.ts">
+                  <span class="file-tree-chevron-spacer">
+                  <i aria-hidden="true" class="fa-solid fa-file-code file-tree-icon file-tree-icon--blue">
+                  <span class="file-tree-label">
+                    "main.ts"
+              <div class="file-tree-item" role="treeitem" data-path="/home/a/src/util.ts" tabindex="-1" aria-label="util.ts" aria-level="3" aria-posinset="2" aria-setsize="4">
+                <div class="file-tree-row" style="padding-left: 36px;" data-hover-tip="/home/a/src/util.ts" aria-description="/home/a/src/util.ts">
+                  <span class="file-tree-chevron-spacer">
+                  <i aria-hidden="true" class="fa-solid fa-file-code file-tree-icon file-tree-icon--blue">
+                  <span class="file-tree-label">
+                    "util.ts"
+              <div class="file-tree-item" role="treeitem" data-path="/home/a/src/zeta.ts" tabindex="-1" aria-label="zeta.ts" aria-level="3" aria-posinset="3" aria-setsize="4">
+                <div class="file-tree-row" style="padding-left: 36px;" data-hover-tip="/home/a/src/zeta.ts" aria-description="/home/a/src/zeta.ts">
+                  <span class="file-tree-chevron-spacer">
+                  <i aria-hidden="true" class="fa-solid fa-file-code file-tree-icon file-tree-icon--blue">
+                  <span class="file-tree-label">
+                    "zeta.ts"
+              <div class="file-tree-item" role="treeitem" data-path="/home/a/src/deep" tabindex="-1" aria-label="deep" aria-level="3" aria-posinset="4" aria-setsize="4" aria-expanded="false">
+                <div class="file-tree-row file-tree-row--dir" style="padding-left: 36px;" data-hover-tip="/home/a/src/deep" aria-description="/home/a/src/deep">
+                  <i class="fa fa-chevron-right file-tree-chevron">
+                  <i aria-hidden="true" class="fa-solid fa-folder file-tree-icon file-tree-icon--steel">
+                  <span class="file-tree-label">
+                    "deep"
+          <div class="file-tree-item" role="treeitem" data-path="/home/a/slow" tabindex="-1" aria-label="slow" aria-level="2" aria-posinset="3" aria-setsize="6" aria-expanded="false">
+            <div class="file-tree-row file-tree-row--dir" style="padding-left: 20px;" data-hover-tip="/home/a/slow" aria-description="/home/a/slow">
+              <i class="fa fa-chevron-right file-tree-chevron">
+              <i aria-hidden="true" class="fa-solid fa-folder file-tree-icon file-tree-icon--steel">
+              <span class="file-tree-label">
+                "slow"
+          <div class="file-tree-item" role="treeitem" data-path="/home/a/broken" tabindex="-1" aria-label="broken" aria-level="2" aria-posinset="4" aria-setsize="6" aria-expanded="false">
+            <div class="file-tree-row file-tree-row--dir" style="padding-left: 20px;" data-hover-tip="/home/a/broken" aria-description="/home/a/broken">
+              <i class="fa fa-chevron-right file-tree-chevron">
+              <i aria-hidden="true" class="fa-solid fa-folder file-tree-icon file-tree-icon--steel">
+              <span class="file-tree-label">
+                "broken"
+          <div class="file-tree-item" role="treeitem" data-path="/home/a/link" tabindex="-1" aria-label="link" aria-level="2" aria-posinset="5" aria-setsize="6">
+            <div class="file-tree-row" style="padding-left: 20px;" data-hover-tip="/home/a/link" aria-description="/home/a/link">
+              <span class="file-tree-chevron-spacer">
+              <i aria-hidden="true" class="fa-solid fa-file file-tree-icon file-tree-icon--grey">
+              <span class="file-tree-label">
+                "link"
+              <span class="file-tree-symlink" aria-label="symlink">
+                "↗"
+          <div class="file-tree-item" role="treeitem" data-path="/home/a/README.md" tabindex="-1" aria-label="README.md" aria-level="2" aria-posinset="6" aria-setsize="6">
+            <div class="file-tree-row" style="padding-left: 20px;" data-hover-tip="/home/a/README.md" aria-description="/home/a/README.md">
+              <span class="file-tree-chevron-spacer">
+              <i aria-hidden="true" class="fa-solid fa-circle-info file-tree-icon file-tree-icon--blue">
+              <span class="file-tree-label">
+                "README.md"
+      <div class="file-tree-item" role="treeitem" data-path="/" tabindex="-1" aria-label="/" aria-level="1" aria-posinset="2" aria-setsize="2" aria-expanded="false">
+        <div class="file-tree-row file-tree-row--dir" style="padding-left: 4px;" data-hover-tip="/" aria-description="/">
+          <i class="fa fa-chevron-right file-tree-chevron">
+          <i aria-hidden="true" class="fa-solid fa-folder file-tree-icon file-tree-icon--steel">
+          <span class="file-tree-label">
+            "/"
+model.toggleExpand /home/a/docs
+model.setSelectedPath /home/a/docs
+ListEditorDirCommand /home/a/docs
+-- docs opened: its input appears
+<div>
+  <div class="file-tree">
+    <div class="file-tree-toolbar">
+      <span data-stand="IconButton" data-icon="angles-left" data-label="Hide file tree" data-density="compact" data-pressed="undefined">
+      <span data-stand="IconButton" data-icon="eye-slash" data-label="Show hidden files" data-density="compact" data-pressed="false">
+      <span data-stand="IconButton" data-icon="square-minus" data-label="Collapse all folders" data-density="compact" data-pressed="undefined">
+      <span data-stand="IconButton" data-icon="arrows-rotate" data-label="Refresh tree" data-density="compact" data-pressed="undefined">
+    <div class="file-tree-body" role="tree" aria-label="Files">
+      <div class="file-tree-item" role="treeitem" data-path="/home/a" tabindex="-1" aria-label="a" aria-level="1" aria-posinset="1" aria-setsize="2" aria-expanded="true">
+        <div class="file-tree-row file-tree-row--dir" style="padding-left: 4px;" data-hover-tip="/home/a" aria-description="/home/a">
+          <i class="fa fa-chevron-down file-tree-chevron">
+          <i aria-hidden="true" class="fa-solid fa-folder-open file-tree-icon file-tree-icon--steel">
+          <span class="file-tree-label">
+            "a"
+        <div role="group">
+          <div class="file-tree-item" role="treeitem" data-path="/home/a/docs" tabindex="0" aria-label="docs" aria-level="2" aria-posinset="1" aria-setsize="6" aria-expanded="true" aria-selected="true">
+            <div class="file-tree-row file-tree-row--dir file-tree-row--selected" style="padding-left: 20px;" data-hover-tip="/home/a/docs" aria-description="/home/a/docs">
+              <i class="fa fa-chevron-down file-tree-chevron">
+              <i aria-hidden="true" class="fa-solid fa-folder-open file-tree-icon file-tree-icon--steel">
+              <span class="file-tree-label">
+                "docs"
+            <div role="group">
+              <div class="file-tree-row file-tree-row--new-entry" style="padding-left: 36px;">
+                <span class="file-tree-chevron-spacer">
+                <i aria-hidden="true" class="fa-solid fa-file file-tree-icon file-tree-icon--grey">
+                <input class="file-tree-inline-input" data-raw-text-field="the file tree's inline name editor: it sits in the row of the entry being named and ends on Enter, Escape or blur, not a form field" type="text" aria-label="file name" placeholder="file name">
+              <div class="file-tree-item" role="treeitem" data-path="/home/a/docs/guide.md" tabindex="-1" aria-label="guide.md" aria-level="3" aria-posinset="1" aria-setsize="2">
+                <div class="file-tree-row" style="padding-left: 36px;" data-hover-tip="/home/a/docs/guide.md" aria-description="/home/a/docs/guide.md">
+                  <span class="file-tree-chevron-spacer">
+                  <i aria-hidden="true" class="fa-brands fa-markdown file-tree-icon file-tree-icon--blue">
+                  <span class="file-tree-label">
+                    "guide.md"
+              <div class="file-tree-item" role="treeitem" data-path="/home/a/docs/notes.txt" tabindex="-1" aria-label="notes.txt" aria-level="3" aria-posinset="2" aria-setsize="2">
+                <div class="file-tree-row" style="padding-left: 36px;" data-hover-tip="/home/a/docs/notes.txt" aria-description="/home/a/docs/notes.txt">
+                  <span class="file-tree-chevron-spacer">
+                  <i aria-hidden="true" class="fa-solid fa-file-lines file-tree-icon file-tree-icon--steel">
+                  <span class="file-tree-label">
+                    "notes.txt"
+          <div class="file-tree-item" role="treeitem" data-path="/home/a/src" tabindex="-1" aria-label="src" aria-level="2" aria-posinset="2" aria-setsize="6" aria-expanded="true">
+            <div class="file-tree-row file-tree-row--dir" style="padding-left: 20px;" data-hover-tip="/home/a/src" aria-description="/home/a/src">
+              <i class="fa fa-chevron-down file-tree-chevron">
+              <i aria-hidden="true" class="fa-solid fa-folder-open file-tree-icon file-tree-icon--steel">
+              <span class="file-tree-label">
+                "src"
+            <div role="group">
+              <div class="file-tree-item" role="treeitem" data-path="/home/a/src/main.ts" tabindex="-1" aria-label="main.ts" aria-level="3" aria-posinset="1" aria-setsize="4">
+                <div class="file-tree-row" style="padding-left: 36px;" data-hover-tip="/home/a/src/main.ts" aria-description="/home/a/src/main.ts">
+                  <span class="file-tree-chevron-spacer">
+                  <i aria-hidden="true" class="fa-solid fa-file-code file-tree-icon file-tree-icon--blue">
+                  <span class="file-tree-label">
+                    "main.ts"
+              <div class="file-tree-item" role="treeitem" data-path="/home/a/src/util.ts" tabindex="-1" aria-label="util.ts" aria-level="3" aria-posinset="2" aria-setsize="4">
+                <div class="file-tree-row" style="padding-left: 36px;" data-hover-tip="/home/a/src/util.ts" aria-description="/home/a/src/util.ts">
+                  <span class="file-tree-chevron-spacer">
+                  <i aria-hidden="true" class="fa-solid fa-file-code file-tree-icon file-tree-icon--blue">
+                  <span class="file-tree-label">
+                    "util.ts"
+              <div class="file-tree-item" role="treeitem" data-path="/home/a/src/zeta.ts" tabindex="-1" aria-label="zeta.ts" aria-level="3" aria-posinset="3" aria-setsize="4">
+                <div class="file-tree-row" style="padding-left: 36px;" data-hover-tip="/home/a/src/zeta.ts" aria-description="/home/a/src/zeta.ts">
+                  <span class="file-tree-chevron-spacer">
+                  <i aria-hidden="true" class="fa-solid fa-file-code file-tree-icon file-tree-icon--blue">
+                  <span class="file-tree-label">
+                    "zeta.ts"
+              <div class="file-tree-item" role="treeitem" data-path="/home/a/src/deep" tabindex="-1" aria-label="deep" aria-level="3" aria-posinset="4" aria-setsize="4" aria-expanded="false">
+                <div class="file-tree-row file-tree-row--dir" style="padding-left: 36px;" data-hover-tip="/home/a/src/deep" aria-description="/home/a/src/deep">
+                  <i class="fa fa-chevron-right file-tree-chevron">
+                  <i aria-hidden="true" class="fa-solid fa-folder file-tree-icon file-tree-icon--steel">
+                  <span class="file-tree-label">
+                    "deep"
+          <div class="file-tree-item" role="treeitem" data-path="/home/a/slow" tabindex="-1" aria-label="slow" aria-level="2" aria-posinset="3" aria-setsize="6" aria-expanded="false">
+            <div class="file-tree-row file-tree-row--dir" style="padding-left: 20px;" data-hover-tip="/home/a/slow" aria-description="/home/a/slow">
+              <i class="fa fa-chevron-right file-tree-chevron">
+              <i aria-hidden="true" class="fa-solid fa-folder file-tree-icon file-tree-icon--steel">
+              <span class="file-tree-label">
+                "slow"
+          <div class="file-tree-item" role="treeitem" data-path="/home/a/broken" tabindex="-1" aria-label="broken" aria-level="2" aria-posinset="4" aria-setsize="6" aria-expanded="false">
+            <div class="file-tree-row file-tree-row--dir" style="padding-left: 20px;" data-hover-tip="/home/a/broken" aria-description="/home/a/broken">
+              <i class="fa fa-chevron-right file-tree-chevron">
+              <i aria-hidden="true" class="fa-solid fa-folder file-tree-icon file-tree-icon--steel">
+              <span class="file-tree-label">
+                "broken"
+          <div class="file-tree-item" role="treeitem" data-path="/home/a/link" tabindex="-1" aria-label="link" aria-level="2" aria-posinset="5" aria-setsize="6">
+            <div class="file-tree-row" style="padding-left: 20px;" data-hover-tip="/home/a/link" aria-description="/home/a/link">
+              <span class="file-tree-chevron-spacer">
+              <i aria-hidden="true" class="fa-solid fa-file file-tree-icon file-tree-icon--grey">
+              <span class="file-tree-label">
+                "link"
+              <span class="file-tree-symlink" aria-label="symlink">
+                "↗"
+          <div class="file-tree-item" role="treeitem" data-path="/home/a/README.md" tabindex="-1" aria-label="README.md" aria-level="2" aria-posinset="6" aria-setsize="6">
+            <div class="file-tree-row" style="padding-left: 20px;" data-hover-tip="/home/a/README.md" aria-description="/home/a/README.md">
+              <span class="file-tree-chevron-spacer">
+              <i aria-hidden="true" class="fa-solid fa-circle-info file-tree-icon file-tree-icon--blue">
+              <span class="file-tree-label">
+                "README.md"
+      <div class="file-tree-item" role="treeitem" data-path="/" tabindex="-1" aria-label="/" aria-level="1" aria-posinset="2" aria-setsize="2" aria-expanded="false">
+        <div class="file-tree-row file-tree-row--dir" style="padding-left: 4px;" data-hover-tip="/" aria-description="/">
+          <i class="fa fa-chevron-right file-tree-chevron">
+          <i aria-hidden="true" class="fa-solid fa-folder file-tree-icon file-tree-icon--steel">
+          <span class="file-tree-label">
+            "/"
+-- cleared
+<div>
+  <div class="file-tree">
+    <div class="file-tree-toolbar">
+      <span data-stand="IconButton" data-icon="angles-left" data-label="Hide file tree" data-density="compact" data-pressed="undefined">
+      <span data-stand="IconButton" data-icon="eye-slash" data-label="Show hidden files" data-density="compact" data-pressed="false">
+      <span data-stand="IconButton" data-icon="square-minus" data-label="Collapse all folders" data-density="compact" data-pressed="undefined">
+      <span data-stand="IconButton" data-icon="arrows-rotate" data-label="Refresh tree" data-density="compact" data-pressed="undefined">
+    <div class="file-tree-body" role="tree" aria-label="Files">
+      <div class="file-tree-item" role="treeitem" data-path="/home/a" tabindex="-1" aria-label="a" aria-level="1" aria-posinset="1" aria-setsize="2" aria-expanded="true">
+        <div class="file-tree-row file-tree-row--dir" style="padding-left: 4px;" data-hover-tip="/home/a" aria-description="/home/a">
+          <i class="fa fa-chevron-down file-tree-chevron">
+          <i aria-hidden="true" class="fa-solid fa-folder-open file-tree-icon file-tree-icon--steel">
+          <span class="file-tree-label">
+            "a"
+        <div role="group">
+          <div class="file-tree-item" role="treeitem" data-path="/home/a/docs" tabindex="0" aria-label="docs" aria-level="2" aria-posinset="1" aria-setsize="6" aria-expanded="true" aria-selected="true">
+            <div class="file-tree-row file-tree-row--dir file-tree-row--selected" style="padding-left: 20px;" data-hover-tip="/home/a/docs" aria-description="/home/a/docs">
+              <i class="fa fa-chevron-down file-tree-chevron">
+              <i aria-hidden="true" class="fa-solid fa-folder-open file-tree-icon file-tree-icon--steel">
+              <span class="file-tree-label">
+                "docs"
+            <div role="group">
+              <div class="file-tree-item" role="treeitem" data-path="/home/a/docs/guide.md" tabindex="-1" aria-label="guide.md" aria-level="3" aria-posinset="1" aria-setsize="2">
+                <div class="file-tree-row" style="padding-left: 36px;" data-hover-tip="/home/a/docs/guide.md" aria-description="/home/a/docs/guide.md">
+                  <span class="file-tree-chevron-spacer">
+                  <i aria-hidden="true" class="fa-brands fa-markdown file-tree-icon file-tree-icon--blue">
+                  <span class="file-tree-label">
+                    "guide.md"
+              <div class="file-tree-item" role="treeitem" data-path="/home/a/docs/notes.txt" tabindex="-1" aria-label="notes.txt" aria-level="3" aria-posinset="2" aria-setsize="2">
+                <div class="file-tree-row" style="padding-left: 36px;" data-hover-tip="/home/a/docs/notes.txt" aria-description="/home/a/docs/notes.txt">
+                  <span class="file-tree-chevron-spacer">
+                  <i aria-hidden="true" class="fa-solid fa-file-lines file-tree-icon file-tree-icon--steel">
+                  <span class="file-tree-label">
+                    "notes.txt"
+          <div class="file-tree-item" role="treeitem" data-path="/home/a/src" tabindex="-1" aria-label="src" aria-level="2" aria-posinset="2" aria-setsize="6" aria-expanded="true">
+            <div class="file-tree-row file-tree-row--dir" style="padding-left: 20px;" data-hover-tip="/home/a/src" aria-description="/home/a/src">
+              <i class="fa fa-chevron-down file-tree-chevron">
+              <i aria-hidden="true" class="fa-solid fa-folder-open file-tree-icon file-tree-icon--steel">
+              <span class="file-tree-label">
+                "src"
+            <div role="group">
+              <div class="file-tree-item" role="treeitem" data-path="/home/a/src/main.ts" tabindex="-1" aria-label="main.ts" aria-level="3" aria-posinset="1" aria-setsize="4">
+                <div class="file-tree-row" style="padding-left: 36px;" data-hover-tip="/home/a/src/main.ts" aria-description="/home/a/src/main.ts">
+                  <span class="file-tree-chevron-spacer">
+                  <i aria-hidden="true" class="fa-solid fa-file-code file-tree-icon file-tree-icon--blue">
+                  <span class="file-tree-label">
+                    "main.ts"
+              <div class="file-tree-item" role="treeitem" data-path="/home/a/src/util.ts" tabindex="-1" aria-label="util.ts" aria-level="3" aria-posinset="2" aria-setsize="4">
+                <div class="file-tree-row" style="padding-left: 36px;" data-hover-tip="/home/a/src/util.ts" aria-description="/home/a/src/util.ts">
+                  <span class="file-tree-chevron-spacer">
+                  <i aria-hidden="true" class="fa-solid fa-file-code file-tree-icon file-tree-icon--blue">
+                  <span class="file-tree-label">
+                    "util.ts"
+              <div class="file-tree-item" role="treeitem" data-path="/home/a/src/zeta.ts" tabindex="-1" aria-label="zeta.ts" aria-level="3" aria-posinset="3" aria-setsize="4">
+                <div class="file-tree-row" style="padding-left: 36px;" data-hover-tip="/home/a/src/zeta.ts" aria-description="/home/a/src/zeta.ts">
+                  <span class="file-tree-chevron-spacer">
+                  <i aria-hidden="true" class="fa-solid fa-file-code file-tree-icon file-tree-icon--blue">
+                  <span class="file-tree-label">
+                    "zeta.ts"
+              <div class="file-tree-item" role="treeitem" data-path="/home/a/src/deep" tabindex="-1" aria-label="deep" aria-level="3" aria-posinset="4" aria-setsize="4" aria-expanded="false">
+                <div class="file-tree-row file-tree-row--dir" style="padding-left: 36px;" data-hover-tip="/home/a/src/deep" aria-description="/home/a/src/deep">
+                  <i class="fa fa-chevron-right file-tree-chevron">
+                  <i aria-hidden="true" class="fa-solid fa-folder file-tree-icon file-tree-icon--steel">
+                  <span class="file-tree-label">
+                    "deep"
+          <div class="file-tree-item" role="treeitem" data-path="/home/a/slow" tabindex="-1" aria-label="slow" aria-level="2" aria-posinset="3" aria-setsize="6" aria-expanded="false">
+            <div class="file-tree-row file-tree-row--dir" style="padding-left: 20px;" data-hover-tip="/home/a/slow" aria-description="/home/a/slow">
+              <i class="fa fa-chevron-right file-tree-chevron">
+              <i aria-hidden="true" class="fa-solid fa-folder file-tree-icon file-tree-icon--steel">
+              <span class="file-tree-label">
+                "slow"
+          <div class="file-tree-item" role="treeitem" data-path="/home/a/broken" tabindex="-1" aria-label="broken" aria-level="2" aria-posinset="4" aria-setsize="6" aria-expanded="false">
+            <div class="file-tree-row file-tree-row--dir" style="padding-left: 20px;" data-hover-tip="/home/a/broken" aria-description="/home/a/broken">
+              <i class="fa fa-chevron-right file-tree-chevron">
+              <i aria-hidden="true" class="fa-solid fa-folder file-tree-icon file-tree-icon--steel">
+              <span class="file-tree-label">
+                "broken"
+          <div class="file-tree-item" role="treeitem" data-path="/home/a/link" tabindex="-1" aria-label="link" aria-level="2" aria-posinset="5" aria-setsize="6">
+            <div class="file-tree-row" style="padding-left: 20px;" data-hover-tip="/home/a/link" aria-description="/home/a/link">
+              <span class="file-tree-chevron-spacer">
+              <i aria-hidden="true" class="fa-solid fa-file file-tree-icon file-tree-icon--grey">
+              <span class="file-tree-label">
+                "link"
+              <span class="file-tree-symlink" aria-label="symlink">
+                "↗"
+          <div class="file-tree-item" role="treeitem" data-path="/home/a/README.md" tabindex="-1" aria-label="README.md" aria-level="2" aria-posinset="6" aria-setsize="6">
+            <div class="file-tree-row" style="padding-left: 20px;" data-hover-tip="/home/a/README.md" aria-description="/home/a/README.md">
+              <span class="file-tree-chevron-spacer">
+              <i aria-hidden="true" class="fa-solid fa-circle-info file-tree-icon file-tree-icon--blue">
+              <span class="file-tree-label">
+                "README.md"
+      <div class="file-tree-item" role="treeitem" data-path="/" tabindex="-1" aria-label="/" aria-level="1" aria-posinset="2" aria-setsize="2" aria-expanded="false">
+        <div class="file-tree-row file-tree-row--dir" style="padding-left: 4px;" data-hover-tip="/" aria-description="/">
+          <i class="fa fa-chevron-right file-tree-chevron">
+          <i aria-hidden="true" class="fa-solid fa-folder file-tree-icon file-tree-icon--steel">
+          <span class="file-tree-label">
+            "/"

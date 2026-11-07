@@ -487,6 +487,9 @@ pub(crate) struct RequestBody {
     label: String,
     #[serde(default)]
     why: String,
+    /// Why the agent needs it (`why` is the same thing, as it was called): required.
+    #[serde(default)]
+    reason: Option<String>,
     /// The asking agent's signed identity: a name in the body proves nothing.
     #[serde(default)]
     auth: Option<agentmux_common::api_types::UiAutomationAuth>,
@@ -510,7 +513,7 @@ fn hold_use(body: &Value) -> Result<(Value, bool), String> {
 
 /// Who the request says is asking, and its pane: the agent whose signature
 /// verified, else a plain "not a verified agent".
-fn asking_agent(state: &AppState, auth: Option<&agentmux_common::api_types::UiAutomationAuth>) -> (String, Option<String>) {
+pub(super) fn asking_agent(state: &AppState, auth: Option<&agentmux_common::api_types::UiAutomationAuth>) -> (String, Option<String>) {
     const UNVERIFIED: &str = "Something on this computer (not a verified agent)";
     match auth.map(|a| (a, super::ui_handlers::verified_block_id(state, None, a))) {
         Some((a, Ok(pane))) => (a.agent_id.chars().take(64).collect(), Some(pane)),
@@ -538,6 +541,11 @@ pub(crate) async fn handle_vault_request(State(state): State<AppState>, Json(bod
     if label.is_empty() {
         return error(StatusCode::BAD_REQUEST, "a request needs a label: what the entry is, e.g. \"Stripe test key\"");
     }
+    // The agent says why, before anything is opened for the person.
+    let reason = match vault::history::require_reason(body.reason.as_deref().filter(|r| !r.trim().is_empty()).or(Some(body.why.as_str()))) {
+        Ok(r) => r,
+        Err(e) => return error(StatusCode::BAD_REQUEST, e),
+    };
     let (agent, pane) = asking_agent(&state, body.auth.as_ref());
     let vault_id = match body.vault.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
         None => String::new(),
@@ -558,7 +566,7 @@ pub(crate) async fn handle_vault_request(State(state): State<AppState>, Json(bod
         agent: agent.clone(),
         kind: body.kind.clone(),
         label: label.clone(),
-        why: body.why.trim().chars().take(500).collect(),
+        why: reason.clone(),
         requested_ms: agentmux_common::time::now_ms_u64(),
         block_id: super::vault_ask::shown_pane(&state, pane.as_deref().unwrap_or("")),
     };
@@ -568,8 +576,9 @@ pub(crate) async fn handle_vault_request(State(state): State<AppState>, Json(bod
         requests::Asked::Waiting { request_id, new, answer } => {
             if new {
                 let store = state.identity_store.clone();
-                let (label, agent, kind) = (label.clone(), agent.clone(), body.kind.clone());
-                let _ = tokio::task::spawn_blocking(move || vault::record(&store, "", &label, &agent, "requested an entry", &kind, "asked")).await;
+                let (label, agent, kind, reason) = (label.clone(), agent.clone(), body.kind.clone(), reason.clone());
+                let line = move || vault::record_line(&store, vault::Line { entry_id: "", label: &label, actor: &agent, action: "requested an entry", target: &kind, outcome: "asked", reason: &reason });
+                let _ = tokio::task::spawn_blocking(line).await;
                 publish(&state);
             }
             (request_id, answer)

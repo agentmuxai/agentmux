@@ -201,7 +201,7 @@ fn policy(state: &AppState) -> Policy {
     }
 }
 
-const OFF: &str = "Desktop driving is off. The user turns it on in Settings (desktop:enabled); until they do, nothing is captured or controlled.";
+const OFF: &str = "Desktop driving is off. The user turns it on in Settings > Agents > Desktop driving; until they do, nothing is captured or controlled.";
 
 fn caller_block(
     state: &AppState,
@@ -541,7 +541,7 @@ mod tests {
         let id = crate::backend::sensitive_requests::registry().request("u-d", "d", "desktop_control_grant", &scope, "", agentmux_common::time::now_ms()).unwrap().id;
         super::remember_target(&id, super::GrantTarget { uid: "u-d".into(), agent: "a".into(), block_id: "b".into(), app: "notepad".into(), minutes: 30 });
         let err = super::grant_after_countdown(&state, &id, Some("boss")).unwrap_err();
-        assert!(err.contains("Desktop driving is off"), "{err}");
+        assert!(err.contains("Desktop driving is off") && err.contains("Settings > Agents > Desktop driving"), "{err}");
         assert!(!crate::backend::desktop_gate::with_gate(|g| g.has_grant("a", "b", "notepad", agentmux_common::time::now_ms_u64())));
         let gone = super::grant_after_countdown(&state, &id, None).unwrap_err();
         assert!(gone.contains("no longer known"), "the targets were taken: {gone}");

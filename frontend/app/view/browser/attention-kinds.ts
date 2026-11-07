@@ -73,6 +73,9 @@ export function attentionLook(a: BrowserAttention): AttentionLook {
         // (SPEC_BROWSER_WEB_TERMINAL_TYPING_2026_10_23.md §4.4).
         case "line":
             return { agent: true, tone: "danger", density: "comfortable", icon: "fa-terminal", yes: "Run it", answer: "approve", no: "Don't run" };
+        // Another agent asks to drive the pane (SPEC_BROWSER_RETAKE_AND_COMMANDEER_2026_11_04.md §2.3): Not now is the safe answer.
+        case "take":
+            return { agent: true, tone: "attention", density: "comfortable", icon: "fa-robot", yes: "Allow", answer: "approve", no: "Not now" };
         // The page's own question (SPEC_BROWSER_PANE_NATIVE_DIALOGS_2026_10_17.md §4.4):
         // the browser's own words for it.
         case "dialog":

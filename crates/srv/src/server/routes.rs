@@ -449,6 +449,11 @@ fn service_shell_and_vault_routes() -> Router<AppState> {
         .route("/api/v1/vault/list", post(super::vault_handlers::handle_vault_list_for))
         .route("/api/v1/vault/generate", post(super::vault_handlers::handle_vault_generate))
         .route("/api/v1/vault/history", post(super::vault_handlers::handle_vault_history))
+        .route("/api/v1/vault/import", post(super::vault_import::handle_vault_import))
+        .route("/api/v1/vault/show", post(super::vault_inspect::handle_vault_show))
+        .route("/api/v1/vault/update", post(super::vault_inspect::handle_vault_update))
+        .route("/api/v1/vault/verify", post(super::vault_inspect::handle_vault_verify))
+        .route("/api/v1/vault/health", post(super::vault_inspect::handle_vault_health))
         .route("/api/v1/vault/rotate", post(super::vault_rotate::handle_vault_rotate))
         .route("/api/v1/vault/request", post(super::vault_handlers::handle_vault_request))
         .route("/api/v1/vault/on_screen", get(super::vault_handlers::handle_vault_on_screen))
@@ -726,6 +731,7 @@ fn ui_and_host_routes() -> Router<AppState> {
         .route("/api/v1/host/operator_attest", post(super::operator_proof::handle_host_attest))
         .route("/api/v1/host/browser_navigation", post(crate::server::browser_allowlist::handle_host_browser_navigation))
         .route("/api/v1/host/browser_dialog", post(crate::server::browser_dialog::handle_host_browser_dialog))
+        .route("/api/v1/host/browser_permission", post(crate::server::browser_permission::handle_host_browser_permission))
         .route("/api/v1/ui/browser/dialogs", post(crate::server::browser_dialog::handle_ui_browser_dialogs))
         .route("/api/v1/host/browser_popup", post(ui_handlers::handle_host_browser_popup))
         .route("/api/v1/host/browser_popup_window", post(ui_handlers::handle_host_browser_popup_window))
@@ -882,6 +888,8 @@ fn browser_control_routes() -> Router<AppState> {
         .route("/api/v1/ui/browser/handoff", post(ui_handlers::handle_ui_browser_handoff))
         .route("/api/v1/ui/browser/handoff_status", post(crate::server::browser_retake::handle_ui_browser_handoff_status))
         .route("/api/v1/ui/browser/retake", post(crate::server::browser_retake::handle_ui_browser_retake))
+        .route("/api/v1/ui/browser/take_control", post(crate::server::browser_control::handle_ui_browser_take_control))
+        .route("/api/v1/ui/browser/release", post(crate::server::browser_control::handle_ui_browser_release))
 }
 
 /// What an agent changes about the agents themselves: their seats and names. Each acts as the agent its token

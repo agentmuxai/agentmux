@@ -23,6 +23,7 @@ const use = (over: Partial<UseRequest> = {}): UseRequest => ({
     field: "Social Security Number",
     offer_always: true,
     reason: "the first time this entry is used on this site",
+    agent_reason: "",
     needs_value: false,
     kind: "ssn",
     command: "",
@@ -46,7 +47,7 @@ const vault = vi.fn(async (op: string, _args?: Record<string, unknown>): Promise
 vi.mock("@/util/app-api", () => ({ getApi: () => ({ approvals: { vault } }) }));
 
 import { VaultUseItem as UsePrompt } from "./vault-requests-list";
-import { clock, siteOf } from "./vault-use-question";
+import { clipMiddle, clock, siteOf } from "./vault-use-question";
 import { VaultEntries } from "./vault-entries";
 import { refreshVault } from "./vault-store";
 
@@ -104,6 +105,78 @@ describe("the prompt for an agent's use of an entry", () => {
         expect(dialog.textContent).not.toContain("Into");
         fireEvent.click(within(dialog).getByRole("button", { name: "Always for Agent1" }));
         await waitFor(() => expect(calls("answer_use")).toEqual([{ id: "use-1", decision: "always" }]));
+    });
+
+    it("quotes what the agent says it wants the entry for, attributed to it, and says nothing when it gave none", async () => {
+        uses = [use({ command: "stripe balance retrieve", cwd: "C:/work", origin: "", field: "STRIPE_API_KEY", agent_reason: "check the balance before the payout, task 27968" })];
+        await refreshVault();
+        const first = render(() => <UsePrompt use={uses[0]} close={() => {}} />);
+        const says = (await screen.findByRole("group")).querySelector(".vault-use-says")!;
+        expect(says.textContent).toBe("Agent1 says: check the balance before the payout, task 27968");
+        first.unmount();
+
+        uses = [use({ command: "stripe balance retrieve", cwd: "C:/work", origin: "", field: "STRIPE_API_KEY" })];
+        await refreshVault();
+        const second = render(() => <UsePrompt use={uses[0]} close={() => {}} />);
+        expect((await screen.findByRole("group")).querySelector(".vault-use-says")).toBeNull();
+        second.unmount();
+
+        // A long reason is cut, so the command stays in view next to the buttons.
+        const long = `check the nightly build output for task 27968 ${"and compare the bundle sizes ".repeat(10)}`.trim().slice(0, 300);
+        uses = [use({ command: "stripe balance retrieve", cwd: "C:/work", origin: "", field: "STRIPE_API_KEY", agent_reason: long })];
+        await refreshVault();
+        render(() => <UsePrompt use={uses[0]} close={() => {}} />);
+        const shown = (await screen.findByRole("group")).querySelector(".vault-use-says q")!.textContent!;
+        expect(Array.from(shown).length).toBe(140);
+        expect(shown.endsWith("…")).toBe(true);
+    });
+
+    it("asks to copy a secret in from AWS: names the secret, key, region and Vault, offers no Always, and never goes ahead on silence", async () => {
+        const importing = { service: "AWS Secrets Manager", secret: "staging/db-creds", key: "db.password", region: "eu-west-1", profile: "work-read", grant: false, vault: "Staging", replaces: false };
+        uses = [use({ entry_id: "", entry_label: "Staging database", kind: "api-key", origin: "", field: "", what: "secret", offer_always: false, agent_reason: "copy the staging password, task 28071", import: importing })];
+        await refreshVault();
+        const first = render(() => <UsePrompt use={uses[0]} close={vi.fn()} />);
+        const dialog = await screen.findByRole("group");
+        expect(dialog.textContent).toContain("Agent1 wants to copy a secret from AWS Secrets Manager into your Vault as Staging database");
+        expect(dialog.textContent).toContain("staging/db-creds");
+        expect(dialog.textContent).toContain("db.password");
+        expect(dialog.textContent).toContain("eu-west-1");
+        expect(dialog.textContent).toContain("Staging");
+        expect(dialog.textContent).toContain("It is read with the AWS profile work-read on this computer.");
+        expect(dialog.textContent).toContain("Agent1 says: copy the staging password, task 28071");
+        expect(dialog.textContent).toContain("The agent never sees the value: AgentMux reads it.");
+        expect(dialog.textContent).toContain("nothing is copied without a yes");
+        expect(within(dialog).queryByRole("button", { name: /Always/ })).toBeNull();
+        expect(within(dialog).queryByRole("timer")).toBeNull();
+        fireEvent.click(within(dialog).getByRole("button", { name: "Allow once" }));
+        await waitFor(() => expect(calls("answer_use")).toEqual([{ id: "use-1", decision: "once" }]));
+        first.unmount();
+
+        uses = [use({ entry_id: "api-key-stripe", entry_label: "Stripe", kind: "api-key", origin: "", field: "", what: "secret", offer_always: false, import: { ...importing, key: "", region: "", profile: "", replaces: true } })];
+        await refreshVault();
+        render(() => <UsePrompt use={uses[0]} close={vi.fn()} />);
+        const replacing = (await screen.findByRole("group")).textContent!;
+        expect(replacing).toContain("Agent1 wants to replace the value of Stripe with a secret from AWS Secrets Manager");
+        expect(replacing).toContain("The old value is kept for 7 days");
+        expect(replacing).not.toContain("(key");
+        expect(replacing).toContain("It is read with this computer's default AWS login.");
+    });
+
+    it("cuts a long secret id in the middle, so the name at its end stays readable, with the whole in the tooltip's place", async () => {
+        const long = `team-a/secrets/${"team/".repeat(20)}staging-db-creds-AbCdEf`;
+        const shown = clipMiddle(long, 90);
+        expect(Array.from(shown).length).toBe(90);
+        expect(shown.startsWith("team-a/")).toBe(true);
+        expect(shown.endsWith("staging-db-creds-AbCdEf")).toBe(true);
+        expect(clipMiddle("staging/db-creds", 90)).toBe("staging/db-creds");
+
+        uses = [use({ entry_id: "", entry_label: "Staging database", kind: "api-key", origin: "", field: "", offer_always: false, import: { service: "AWS Secrets Manager", secret: long, key: "", region: "eu-west-1", profile: "", grant: false, vault: "Personal", replaces: false } })];
+        await refreshVault();
+        render(() => <UsePrompt use={uses[0]} close={vi.fn()} />);
+        const text = (await screen.findByRole("group")).textContent!;
+        expect(text).toContain("staging-db-creds-AbCdEf");
+        // The secret leads the card: it is read before the countdown line and the agent's words.
+        expect(text.indexOf("The secret")).toBeLessThan(text.indexOf("Waiting for you"));
     });
 
     it("asks for an agent's sign-in by site and masked user, and offers Always for that agent on that site", async () => {

@@ -137,7 +137,7 @@ export function startVaultRequestCards(): void {
     followVault();
     createRoot(() => {
         follow(vaultUses, (u) =>
-            paneRequests.push(u.block_id, { source: "vault-use", Component: VaultUseCard, props: { use: u }, summary: clip(u.entry_label, CLIP.label), deadlineMs: u.goes_ahead ? u.deadline_ms : undefined, waits: false })
+            paneRequests.push(u.block_id, { source: "vault-use", what: "asks to use a secret", Component: VaultUseCard, props: { use: u }, summary: clip(u.entry_label, CLIP.label), deadlineMs: u.goes_ahead ? u.deadline_ms : undefined, waits: false })
         );
         follow(vaultRequests, (r) => paneRequests.push(r.block_id, { source: "vault-request", Component: VaultRequestCard, props: { request: r }, summary: clip(r.label, CLIP.label), waits: false }));
     });

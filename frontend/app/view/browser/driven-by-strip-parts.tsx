@@ -82,6 +82,10 @@ export function PlainStrip(props: Part): JSX.Element {
                 >
                     <span>
                         Driven by <b>{p.agent}</b>
+                        <Show when={model.tookControlAtom()}>
+                            {" "}
+                            <span class="browser-took-control">(took control)</span>
+                        </Show>
                     </span>
                 </Show>
                 <Show when={model.allowedOriginsAtom().length > 0}>

@@ -3,7 +3,11 @@
 /**
  * A file beside `SKILL.md`, as the card lists it (its text is read with `Skills get`).
  */
-export type SkillFileInfo = { path: string, bytes: number, 
+export type SkillFileInfo = { path: string, 
+/**
+ * SHA-256 of the file as stored: what an approval is for.
+ */
+sha256: string, bytes: number, 
 /**
  * A script the agent's shell would run: not written to an agent's folder until a person approves it.
  */

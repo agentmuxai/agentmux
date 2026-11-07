@@ -42,6 +42,7 @@ import { createEffect, createMemo, createRoot, createSignal, onCleanup, onMount,
 import "./block.scss";
 import "./pane-size-badge.scss";
 import { BlockErrorBoundary } from "./BlockErrorBoundary";
+import { logCoverPhases } from "./pane-cover-log";
 import { MissingWidget } from "./missing-widget";
 import { BlockFrame } from "./blockframe";
 import { blockViewToIcon, blockViewToName } from "./blockutil";
@@ -682,10 +683,8 @@ function Block(props: BlockProps): JSX.Element {
 
     // One cover, two sources: the controller until it goes live, this block's
     // own re-cover cycle afterwards.
-    const coverPhase = (): PaneReadinessPhase => {
-        const phase = readiness.phase();
-        return phase === "live" ? reCoverPhase() : phase;
-    };
+    const coverPhase = (): PaneReadinessPhase => (readiness.phase() === "live" ? reCoverPhase() : readiness.phase());
+    logCoverPhases(props.nodeModel.blockId, { controller: readiness.phase, reCover: reCoverPhase });
 
     // Cross-fade the cover out on top of the real content instead of an instant
     // hard cut (SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md §2.3/§4

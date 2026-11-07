@@ -159,8 +159,13 @@ pub struct VaultInfoRow {
 /// The Vault every entry made before Vaults existed belongs to.
 pub const PERSONAL_VAULT: &str = "personal";
 
+/// How many additive changes the Vault's tables have had since they were first made: the revision `Vault health` names.
+pub fn schema_revision() -> usize {
+    VAULT_ALTERS.len()
+}
+
 /// The actions that give an entry a new value: each one is the next version of it.
-pub const VALUE_SETTING: [&str; 6] = ["generated", "captured", "rotated", "replaced", "restored", "created"];
+pub const VALUE_SETTING: [&str; 7] = ["generated", "captured", "rotated", "replaced", "restored", "created", "imported"];
 
 /// The actions that hand an entry's value to a process, a form or a sign-in: each is made under the version then current.
 pub const VALUE_USES: [&str; 7] = ["filled a web form", "signed in", "ran a command", "revealed", "copied", "sent on sign-up", "filled on sign-up"];

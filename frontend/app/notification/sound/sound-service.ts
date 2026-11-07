@@ -29,7 +29,7 @@ import {
 } from "@/app/store/agent-pane-state-store";
 import { createEffect, createRoot } from "solid-js";
 import { notify, subscribeSoundEvents, type SoundEvent } from "./sound-events";
-import { SOUNDS, type SoundId } from "./sounds";
+import { mayPlayFromBus, SOUNDS, type SoundDef, type SoundId } from "./sounds";
 import { SoundPlayer } from "./sound-player";
 import { audibleFlashDelayMs, flashPatternForCategory, flashPatternForSyllable } from "./flash-patterns";
 import { paramsForTool } from "./tool-tones";
@@ -73,6 +73,15 @@ const WAITING_AUTO_STOP_MS = 5 * 60 * 1000;
  */
 export function setReplayMode(value: boolean): void {
     replayMode = value;
+}
+
+/** The sound `ev` asks for, unless the bus may not play it (see `mayPlayFromBus`). */
+function busSound(ev: SoundEvent): SoundDef | null {
+    const def = SOUNDS[ev.id];
+    if (!def) return null;
+    if (mayPlayFromBus(def, ev)) return def;
+    console.warn(`[sound] ${ev.id} refused: an event sound names its pane, and an ask sound comes from the registry`);
+    return null;
 }
 
 /**
@@ -185,7 +194,7 @@ export function installSoundService(): () => void {
     const busUnsub = subscribeSoundEvents((ev) => {
         if (replayMode) return;
         if (!shouldPlay(ev, windowFocused)) return;
-        const def = SOUNDS[ev.id];
+        const def = busSound(ev);
         if (!def) return;
         const now =
             typeof performance !== "undefined" && performance.now

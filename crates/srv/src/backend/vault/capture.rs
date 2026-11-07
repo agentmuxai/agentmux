@@ -20,7 +20,7 @@ use serde_json::value::RawValue;
 use zeroize::Zeroizing;
 
 use super::scrub::{Scrubber, MIN_LINE};
-use super::{insert, kinds, new_id_besides, record, seal, validate, versions, NewEntry, Parts};
+use super::{insert, kinds, new_id_besides, record_line, seal, validate, versions, Line, NewEntry, Parts};
 use crate::backend::storage::store::Store;
 use crate::backend::storage::vault::VaultRow;
 use crate::backend::storage::vault_versions::CaptureWrite;
@@ -77,6 +77,8 @@ pub struct Capture {
     pub agent: String,
     /// The command line, for the activity log and the kept output's label.
     pub cmd: String,
+    /// The agent's reason for the capture, for the activity log.
+    pub reason: String,
 }
 
 /// A capture as the command's runner holds it: the rules, the store they write
@@ -257,7 +259,7 @@ pub fn plan(store: &Store, rules: &[CaptureRule], agent: &str, cmd: &str) -> Res
         }
         out.push(Rule { into, from });
     }
-    Ok(Capture { rules: out, agent: agent.to_string(), cmd: cmd.to_string() })
+    Ok(Capture { rules: out, agent: agent.to_string(), cmd: cmd.to_string(), reason: String::new() })
 }
 
 fn part_of(kind: &kinds::Kind, part: Option<&str>) -> Result<&'static str, String> {
@@ -423,7 +425,7 @@ impl Capture {
         }
         let target = clip(&self.cmd, 160);
         for (id, label) in &made {
-            record(store, id, label, &self.agent, CAPTURED, &target, "done");
+            record_line(store, Line { entry_id: id, label, actor: &self.agent, action: CAPTURED, target: &target, outcome: "done", reason: &self.reason });
         }
         Ok(made.into_iter().map(|(id, _)| id).collect())
     }
@@ -453,7 +455,7 @@ impl Capture {
         };
         for rule in &self.rules {
             if let Target::Existing { id, label, .. } = &rule.into {
-                record(store, id, label, &self.agent, CAPTURED, &clip(&why, 160), "failed");
+                record_line(store, Line { entry_id: id, label, actor: &self.agent, action: CAPTURED, target: &clip(&why, 160), outcome: "failed", reason: &self.reason });
             }
         }
         Outcome::Withheld { why, kept_as }

@@ -224,6 +224,17 @@ export function WaitingToneGroup(): JSX.Element {
                     }
                 />
             </Show>
+            <SettingRow
+                id={SOUNDS_SETTINGS.waitingToast.id}
+                label={SOUNDS_SETTINGS.waitingToast.label}
+                description={SOUNDS_SETTINGS.waitingToast.description}
+                control={
+                    <ToggleControl
+                        checked={s()["notify:waiting:toast"] !== false}
+                        onChange={(v) => set("notify:waiting:toast", v)}
+                    />
+                }
+            />
         </>
     );
 }

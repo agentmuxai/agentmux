@@ -80,7 +80,7 @@ pub(crate) async fn handle_ui_browser_retake(
 
 /// How long ago the host last saw the person use `pane`'s page (`Duration::MAX` if it never has), or None when the host
 /// cannot say, which keeps the pane the person's until they give it back.
-async fn since_person_input(state: &AppState, pane: &str) -> Option<std::time::Duration> {
+pub(crate) async fn since_person_input(state: &AppState, pane: &str) -> Option<std::time::Duration> {
     let host = crate::server::ui_handlers::get_host_ipc(state).await.ok()?;
     // Not `post_to_host_awake`: a sleeping pane has no page to use, and asking must not wake it.
     let answer = crate::server::host_http::post_to_host(

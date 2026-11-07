@@ -21,7 +21,8 @@ use crate::backend::storage::store::Store;
 use crate::backend::storage::vault::{activity_hash, VaultActivityRow};
 use crate::identity::secret_store;
 
-/// A reason is at most this many characters, on one line.
+/// A reason has at least this many characters, and at most [`MAX_REASON`], on one line.
+pub const MIN_REASON: usize = 8;
 pub const MAX_REASON: usize = 300;
 /// An event has at most this many references, each at most [`MAX_REF`] characters.
 pub const MAX_REFS: usize = 3;
@@ -39,6 +40,22 @@ const HEAD_EVERY: Duration = Duration::from_secs(30);
 pub struct Why {
     pub reason: String,
     pub refs: Vec<String>,
+}
+
+/// The reason an agent gives for using or changing an entry, checked before anything is asked or written:
+/// one line of [`MIN_REASON`] to [`MAX_REASON`] characters. The error is what to tell the agent.
+pub fn require_reason(raw: Option<&str>) -> Result<String, String> {
+    let line = one_line(raw.unwrap_or(""), usize::MAX);
+    let n = line.chars().count();
+    if n < MIN_REASON {
+        return Err(format!(
+            "a reason is required: say in one line what you need this for and why, for which task ({MIN_REASON} to {MAX_REASON} characters). The person sees it in the approval, and it is kept in the entry's history"
+        ));
+    }
+    if n > MAX_REASON {
+        return Err(format!("a reason is at most {MAX_REASON} characters, one line: yours is {n}"));
+    }
+    Ok(line)
 }
 
 /// `agent`, `person` (the pane) or `srv` (a sweep, an expiry reminder).
@@ -134,6 +151,9 @@ pub struct VaultChain {
     pub checked: usize,
     /// How many older lines were made before the chain began, and so can't be checked.
     pub before_chain: usize,
+    /// How many lines after the chain began have no place in it and look like what an older AgentMux sharing this
+    /// computer's store writes (it doesn't know the chain). They are not checked, and are shown as a count.
+    pub unchained_after: usize,
     /// The first line found wrong, when not intact.
     #[ts(type = "number | null")]
     pub broken_at: Option<i64>,
@@ -151,9 +171,15 @@ pub struct Head {
     pub hash: String,
 }
 
+/// Whether a row with no hash is what a build that doesn't know the chain writes: none of the columns the chain
+/// added. (Someone blanking them all by hand looks the same, which is why such rows are counted and shown.)
+fn looks_unchained(r: &VaultActivityRow) -> bool {
+    r.version == 0 && r.actor_kind.is_empty() && r.host.is_empty() && r.reason.is_empty() && r.refs.is_empty() && r.prev_hash.is_empty()
+}
+
 /// Walks `rows` (oldest first) and says whether the chain holds, and whether `head` is a row in it.
 pub fn verify_chain(rows: &[VaultActivityRow], head: Option<&Head>) -> VaultChain {
-    let mut out = VaultChain { intact: true, checked: 0, before_chain: 0, broken_at: None, head_checked: head.is_some(), problem: String::new() };
+    let mut out = VaultChain { intact: true, checked: 0, before_chain: 0, unchained_after: 0, broken_at: None, head_checked: head.is_some(), problem: String::new() };
     let mut prev = String::new();
     let mut broke = |out: &mut VaultChain, seq: i64, problem: &str| {
         out.intact = false;
@@ -162,11 +188,17 @@ pub fn verify_chain(rows: &[VaultActivityRow], head: Option<&Head>) -> VaultChai
     };
     for row in rows {
         if row.hash.is_empty() {
-            if out.checked > 0 {
-                broke(&mut out, row.seq, "a line has no place in the chain");
+            // Before the chain began, or after it by an older build still running on the same store. Such a row
+            // has none of the chain's columns; one that has some but no place in the chain was taken out of it.
+            if !looks_unchained(row) {
+                broke(&mut out, row.seq, "this line was taken out of the chain");
                 return out;
             }
-            out.before_chain += 1;
+            if out.checked > 0 {
+                out.unchained_after += 1;
+            } else {
+                out.before_chain += 1;
+            }
             continue;
         }
         if row.prev_hash != prev {

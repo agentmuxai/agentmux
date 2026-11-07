@@ -53,6 +53,8 @@ pub struct Bundle {
     /// The `SKILL.md` name, which is also the folder name.
     pub name: String,
     pub description: String,
+    /// `SKILL.md` as written, frontmatter included: the content hash covers it.
+    pub skill_md: String,
     /// The `SKILL.md` body without its frontmatter: what `db_skills.content` holds.
     pub content: String,
     pub info: SkillAppInfo,
@@ -72,10 +74,15 @@ fn is_name(s: &str) -> bool {
         && s.split('-').all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit()))
 }
 
+/// `1.2.3`, with an optional `-prerelease` and `+build`, each of letters, digits, dots and hyphens: the version ends up in
+/// file names and a pass record's key, so nothing else may ride along after the numbers.
 fn is_semver(s: &str) -> bool {
     let core = s.split(['-', '+']).next().unwrap_or("");
     let parts: Vec<&str> = core.split('.').collect();
-    parts.len() == 3 && parts.iter().all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+    let tail = &s[core.len()..];
+    parts.len() == 3
+        && parts.iter().all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+        && tail.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'+'))
 }
 
 fn ext_of(path: &str) -> String {
@@ -269,7 +276,26 @@ fn listed_scripts(manifest: &Value) -> BTreeMap<String, String> {
         .unwrap_or_default()
 }
 
-fn sha256_hex(bytes: &[u8]) -> String {
+/// What each listed script is for and needs, for the approval prompt.
+pub fn script_infos(manifest_json: &str) -> Vec<crate::backend::storage::skill_app::ScriptInfo> {
+    let Ok(m) = serde_json::from_str::<Value>(manifest_json) else { return Vec::new() };
+    m.get("scripts")
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(|s| {
+                    Some(crate::backend::storage::skill_app::ScriptInfo {
+                        path: s.get("path")?.as_str()?.to_string(),
+                        purpose: s.get("purpose").and_then(Value::as_str).unwrap_or("").to_string(),
+                        needs: str_list(s.get("needs")),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
     Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
 }
 
@@ -401,7 +427,7 @@ pub fn read_folder(dir: &Path) -> Result<Bundle, String> {
         None => Vec::new(),
         Some(t) => serde_json::from_str::<Vec<VerifiedRecord>>(&t).map_err(|e| format!("{VERIFIED_FILE}: {e}"))?,
     };
-    Ok(Bundle { name, description, content, info, manifest_json, content_hash: content_hash(&all), files, signature, verified })
+    Ok(Bundle { name, description, skill_md, content, info, manifest_json, content_hash: content_hash(&all), files, signature, verified })
 }
 
 /// Whether `exe` (an executable name as `Desktop apps` lists it) is one this skill's app runs as on `platform`.
@@ -438,10 +464,39 @@ pub fn stashed(content_hash: &str) -> Option<Bundle> {
     s.iter().find(|(at, b)| at.elapsed() < STASH_TTL && b.content_hash == content_hash).map(|(_, b)| b.clone())
 }
 
+/// The key that signed this bundle: `Ok(None)` for an unsigned one, an error for a signature that does not match
+/// its files. A publisher pinned to another key, or pinned and now unsigned, is refused (`SPEC_PACKS` §5): a
+/// different key than the one the person approved a script of is not an update, it is a different author.
+pub fn check_signature(catalog: &Store, b: &Bundle) -> Result<Option<String>, String> {
+    use crate::backend::widget::signature as sig;
+    let id = format!("{}.{}", b.info.publisher, b.info.id);
+    let signer = match &b.signature {
+        Some(text) => Some(sig::verify_text(&sig::COMPUTER_USE_SKILL, text, &id, &b.info.version, &b.content_hash).map_err(|e| format!("{id}: {e}"))?),
+        None => None,
+    };
+    let pins = catalog.skill_publisher_pins().map_err(|e| e.to_string())?;
+    if let Some(pinned) = pins.get(&b.info.publisher) {
+        if signer.as_deref() != Some(pinned.as_str()) {
+            let said = signer.as_deref().map_or("not signed".to_string(), |k| format!("signed by {}", sig::fingerprint(k)));
+            return Err(format!("{id} is {said}, but {} is pinned to {}: that is a different author, not an update", b.info.publisher, sig::fingerprint(pinned)));
+        }
+    }
+    Ok(signer)
+}
+
 /// Write an approved bundle's computer-use part for the catalog skill `skill_id`: the manifest, the files, and the pass
 /// records its folder carried. A script lands unapproved. Call after the skill row itself is written.
-pub fn install(catalog: &Store, skill_id: &str, b: &Bundle, now_ms: i64) -> Result<(), crate::backend::storage::error::StoreError> {
+/// `signer` is what `check_signature` returned for this bundle: the caller checks first and a refusal never gets here.
+pub fn install(
+    catalog: &Store,
+    skill_id: &str,
+    b: &Bundle,
+    signer: Option<&str>,
+    now_ms: i64,
+) -> Result<(), crate::backend::storage::error::StoreError> {
     catalog.skill_app_set(skill_id, &b.info, &b.manifest_json, &b.content_hash, &b.files, now_ms)?;
+    catalog.skill_signer_set(skill_id, signer)?;
+    catalog.skill_origin_set(skill_id, &b.skill_md, b.signature.as_deref())?;
     for r in &b.verified {
         catalog.skill_verified_append(skill_id, r, "import", now_ms)?;
     }
@@ -489,4 +544,4 @@ pub fn sibling_files(skills: &[AgentSkill], catalog: &Store) -> Vec<AgentConfigF
 
 #[cfg(test)]
 #[path = "computer_use_skill_tests.rs"]
-mod tests;
+pub(crate) mod tests;

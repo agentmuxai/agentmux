@@ -1142,7 +1142,7 @@ impl AgentMuxHandler {
                 url = %url,
                 "on_before_browse: blocked browser-pane navigation to a non-web external scheme (OS-handoff / UAC guard)",
             );
-            return 1; // cancel — do not let CEF hand this to the OS shell
+            return super::agent_notice::refused(&self.state, browser.as_deref(), "external_protocol", &url);
         }
 
         // Track the pane-load watchdog HERE, not from `on_loading_state_change`

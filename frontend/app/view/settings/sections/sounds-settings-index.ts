@@ -108,6 +108,14 @@ export const SOUNDS_SETTINGS = {
         group: "Waiting for input",
         keywords: ["browser", "hand-off", "handoff", "approval", "notify:waiting:browser"],
     },
+    waitingToast: {
+        id: "sounds.waiting_toast",
+        label: "Toast when an agent waits",
+        description: "Show a toast that names the agent waiting on you, with a link that takes you to it. Stays on when sounds are muted",
+        section: "sounds",
+        group: "Waiting for input",
+        keywords: ["toast", "notification", "link", "go to agent", "attention", "notify:waiting:toast"],
+    },
     shutdownToneEnabled: {
         id: "sounds.shutdown_tone_enabled",
         label: "Shutdown warning chime",

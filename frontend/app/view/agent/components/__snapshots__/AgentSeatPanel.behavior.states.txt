@@ -1,0 +1,34 @@
+-- before the list
+<div>
+  <div class="agent-primitive-modal-detail agent-seat-panel" data-testid="agent-seat-panel">
+    <div class="agent-primitive-modal-readonly">
+      <p class="agent-primitive-modal-global-note">
+        "AgentX"
+        "'s seat: its role, whom it reports to and what it owns. Only you set it; agents read it."
+      <div class="agent-seat-panel-roster">
+        <span data-stand="Button" data-icon="file-import" data-busy="undefined" data-disabled="undefined">
+          "Import roster…"
+-- the list failed
+<div>
+  <div class="agent-primitive-modal-detail agent-seat-panel" data-testid="agent-seat-panel">
+    <div class="agent-primitive-modal-readonly">
+      <p class="agent-primitive-modal-global-note">
+        "AgentX"
+        "'s seat: its role, whom it reports to and what it owns. Only you set it; agents read it."
+      <div class="agent-primitive-modal-error">
+        "srv is down"
+      <div class="agent-seat-panel-roster">
+        <span data-stand="Button" data-icon="file-import" data-busy="undefined" data-disabled="undefined">
+          "Import roster…"
+-- no saved agent
+<div>
+  <div class="agent-primitive-modal-detail agent-seat-panel" data-testid="agent-seat-panel">
+    <div class="agent-primitive-modal-readonly">
+      <p class="agent-primitive-modal-global-note">
+        "AgentX"
+        "'s seat: its role, whom it reports to and what it owns. Only you set it; agents read it."
+      <p class="agent-primitive-modal-global-note">
+        "This pane has no saved agent, so it has no seat."
+      <div class="agent-seat-panel-roster">
+        <span data-stand="Button" data-icon="file-import" data-busy="undefined" data-disabled="undefined">
+          "Import roster…"

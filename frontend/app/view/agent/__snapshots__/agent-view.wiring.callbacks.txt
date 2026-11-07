@@ -111,7 +111,6 @@ commands.flushPendingControllerRefresh()
 jumpTo: DIFFERENT
 document: same
 search.setVisible(true)
-search.close()
 onCycleView: same
 onFollowDefaultView: same
 > the root element, snapshot persistence and the shell
@@ -165,6 +164,7 @@ search onPrev: same
 search onClose: same
 search matchIndex: same
 search matchCount: same
+search searching: same
 > the panels, the preparing row and the shell drawer
 pendingDecisions: same
 pendingQuestions: same

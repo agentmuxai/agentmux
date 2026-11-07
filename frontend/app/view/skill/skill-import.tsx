@@ -10,6 +10,7 @@ import { For, Show, type JSX } from "solid-js";
 import type { SkillImportItem } from "@/types/rpc/SkillImportItem";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { Button, TextInput } from "@/app/element/ui";
+import { ImportAppFacts } from "./skill-app-scripts";
 import { diffLineClass, diffLines, lineDiff } from "@/app/view/memory-editor/line-diff";
 import { SOURCE_KIND_LABELS, type SkillImportModel, type SkillSourceKind } from "./skill-import-model";
 
@@ -21,6 +22,7 @@ const STATUS_TEXT: Record<string, string> = {
 
 const LOCATION_HINT: Record<SkillSourceKind, string> = {
     folder: "A folder with a SKILL.md, or a folder of skills",
+    file: "The path of a .skill file",
     git: "https://github.com/owner/skills.git",
     url: "https://example.com/my-skill/SKILL.md",
 };
@@ -48,6 +50,7 @@ function SkillImportRow(props: { model: SkillImportModel; item: SkillImportItem 
             <Show when={item().description}>
                 <div class="skill-import-item-desc">{item().description}</div>
             </Show>
+            <Show when={item().app}>{(app) => <ImportAppFacts app={app()} />}</Show>
             <Show when={item().status !== "same"}>
                 <Show
                     when={item().status === "changed"}

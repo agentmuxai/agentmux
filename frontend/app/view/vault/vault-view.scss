@@ -403,3 +403,18 @@
         margin: 0 0 var(--space-1);
     }
 }
+
+/* An import's secret id and key break anywhere (they have no spaces); a region stays whole ("eu-west-1"). */
+.vault-import-id {
+    overflow-wrap: anywhere;
+}
+
+.vault-import-region {
+    white-space: nowrap;
+}
+
+// What the agent says it wants an entry for, on the approval: quoted and attributed.
+.vault-use-says {
+    margin: 0 0 var(--space-2);
+    overflow-wrap: anywhere;
+}

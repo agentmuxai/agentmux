@@ -133,10 +133,30 @@ export function sameKey(a: KeySpec, b: KeySpec): boolean {
     );
 }
 
+/** A key (or chord) as one comparable string, whatever the spelling: "Ctrl+T", "mod+t" and "ctrl+t" agree on
+ *  Windows. Compare keys by this, never by text. */
+export function keyId(spec: string, platform: KeyPlatform): string {
+    return spec
+        .trim()
+        .split(/\s+/)
+        .map((step) => {
+            const k = parseKey(step, platform);
+            return [k.ctrl && "c", k.alt && "a", k.shift && "s", k.meta && "m", "|", k.letter, k.code, k.named].filter(Boolean).join("");
+        })
+        .join(" ");
+}
+
 function keyLabel(k: KeySpec): string {
     if (k.letter) return k.letter.toUpperCase();
     if (k.code) return CODE_LABEL[k.code] ?? k.code.replace(/^(Digit|Numpad)/, (m) => (m === "Numpad" ? "Num" : ""));
     return NAMED_LABEL[k.named ?? ""] ?? k.named ?? "";
+}
+
+/** The token `parseKey` reads back as physical key `code`: a digit or a punctuation character, else null. */
+export function tokenForCode(code: string): string | null {
+    const digit = code.match(/^Digit([0-9])$/);
+    if (digit) return digit[1];
+    return Object.keys(PUNCT_CODE).find((ch) => PUNCT_CODE[ch] === code) ?? null;
 }
 
 /** "Ctrl+Shift+T" elsewhere, "⇧⌘T" on macOS (Apple's modifier order). */

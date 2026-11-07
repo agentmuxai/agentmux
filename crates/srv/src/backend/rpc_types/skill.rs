@@ -390,3 +390,88 @@ mod req_shape_tests {
         );
     }
 }
+
+/// `skill.catalog.app_file` — window-scoped. One text file beside a computer-use skill's `SKILL.md`, to read before approving it.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandSkillCatalogAppFileData {
+    pub skill_id: String,
+    pub path: String,
+}
+
+/// A file of a computer-use skill, as text.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct SkillAppFile {
+    pub path: String,
+    pub text: String,
+}
+
+/// `skill.catalog.app_script` — window-scoped. Approve or revoke one script of a computer-use skill. A script is
+/// written to an agent's folder only while it is approved.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandSkillCatalogAppScriptData {
+    pub skill_id: String,
+    pub path: String,
+    pub approved: bool,
+    /// The SHA-256 of the script the person read. Approving applies only to that text, so a script replaced
+    /// since is refused; revoking ignores it.
+    pub sha256: String,
+}
+
+/// Result of `skill.catalog.app_script`.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct SkillAppScriptResult {
+    pub approved: bool,
+}
+
+/// `skill.catalog.export` — window-scoped. Write a computer-use skill as a `.skill` file into the person's
+/// Downloads folder (never over a file that is there).
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandSkillCatalogExportData {
+    pub skill_id: String,
+}
+
+/// Result of `skill.catalog.export`.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct SkillExportResult {
+    /// Where the file was written.
+    pub path: String,
+    /// Whether it carries the publisher's signature (it does only while the skill is exactly what was signed).
+    pub signed: bool,
+}
+
+/// `app_skills.catalog` — window-scoped. Fetch the public catalog of computer-use skills and say what is installed here.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandAppSkillsCatalogData {}
+
+/// The catalog as Browse lists it. An unreachable or unverifiable catalog is an error, not an empty list.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct AppSkillsCatalog {
+    pub items: Vec<crate::backend::skill_catalog::AppSkillCatalogItem>,
+}
+
+/// `app_skills.catalog.install` — window-scoped. Install or update one skill from the catalog, by its id
+/// (`<publisher>.<id>`). The catalog is fetched again and checked first; the skill arrives with its scripts unapproved.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandAppSkillsCatalogInstallData {
+    pub id: String,
+}
+
+/// Result of `app_skills.catalog.install`.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct AppSkillInstallResult {
+    pub skill_id: String,
+    pub name: String,
+    pub version: String,
+    /// An earlier version was replaced.
+    pub updated: bool,
+}

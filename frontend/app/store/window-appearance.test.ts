@@ -43,6 +43,7 @@ describe("window:theme", () => {
     const ALLOWED = [
         join("app", "store", "window-appearance.ts"),
         join("app", "view", "settings", "sections", "appearance-section.tsx"),
+        join("app", "view", "settings", "sections", "appearance-section-parts.tsx"),
     ];
 
     function sources(dir: string, out: string[] = []): string[] {
