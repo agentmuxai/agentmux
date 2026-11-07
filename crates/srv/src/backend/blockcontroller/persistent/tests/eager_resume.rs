@@ -1385,3 +1385,91 @@ async fn closing_the_pane_mid_restart_spawn_cancels_the_replacement() {
         "and no restart token remains for it to consume"
     );
 }
+
+// `try_eager_resume_as`'s own preconditions: each declines with its reason before anything is claimed.
+
+fn declined_with(outcome: EagerResumeOutcome) -> &'static str {
+    match outcome {
+        EagerResumeOutcome::DeclinedTo(why) => why,
+        EagerResumeOutcome::Spawned => panic!("expected a decline"),
+    }
+}
+
+#[tokio::test]
+async fn a_controller_without_an_auth_key_declines_before_claiming() {
+    let store = make_store();
+    let c = controller("blk-no-key").with_identity_stores(Some(store.clone()), Some(store), String::new());
+    let meta = meta_with_session("sid-1", &["x"]);
+    assert_eq!(declined_with(c.try_eager_resume(&meta, "sid-1")), "no auth key configured for this controller");
+    assert!(!c.inner.lock().unwrap().spawning_in_progress);
+}
+
+#[tokio::test]
+async fn a_controller_without_an_mstore_declines_before_claiming() {
+    let store = make_store();
+    let c = controller("blk-no-mstore").with_identity_stores(Some(store.clone()), Some(store), "key".to_string());
+    let meta = meta_with_session("sid-1", &["x"]);
+    assert_eq!(declined_with(c.try_eager_resume(&meta, "sid-1")), "no mstore configured for this controller");
+    assert!(!c.inner.lock().unwrap().spawning_in_progress);
+}
+
+#[tokio::test]
+async fn a_pane_stored_without_cli_args_is_not_guessed_at_and_claims_nothing() {
+    let store = make_store();
+    let c = controller("blk-no-args").with_identity_stores(Some(store.clone()), Some(store.clone()), "key".to_string());
+    let c = PersistentSubprocessController { mstore: Some(store), ..c };
+    let mut meta = meta_with_session("sid-1", &["x"]);
+    meta.remove("cmd:args");
+    assert_eq!(declined_with(c.try_eager_resume(&meta, "sid-1")), "cmd:args meta missing — refusing to guess CLI flags");
+    assert!(!c.inner.lock().unwrap().spawning_in_progress);
+    assert!(c.inner.lock().unwrap().current_pid.is_none());
+}
+
+#[tokio::test]
+async fn a_restart_replacement_for_another_generation_declines_and_leaves_the_token() {
+    let store = make_store();
+    let c = controller("blk-other-generation").with_identity_stores(Some(store.clone()), Some(store.clone()), "key".to_string());
+    let c = PersistentSubprocessController { mstore: Some(store), ..c };
+    c.inner.lock().unwrap().config_restart_generation = Some(5);
+    let meta = meta_with_session("sid-1", &["x"]);
+
+    let outcome = c.try_eager_resume_as(&meta, "sid-1", Some(4));
+
+    assert!(declined_with(outcome).contains("a stop overrode the restart"));
+    let inner = c.inner.lock().unwrap();
+    assert!(!inner.spawning_in_progress, "no claim for a replacement that is no longer wanted");
+    assert_eq!(inner.config_restart_generation, Some(5), "the current restart's token is not consumed");
+    assert_eq!(inner.restart_spawn_for, None);
+}
+
+/// A prompt accepted while the gate ran is delivered by the spawn that follows, and the turn is reported
+/// active before the drain starts: a spawn with nothing queued reports nothing (the empty-queue test above).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_prompt_queued_during_the_gate_is_drained_by_the_resume_and_the_turn_reported_active() {
+    if !has_node() {
+        eprintln!("eager_resume_tests: `node` not on PATH — skipping");
+        return;
+    }
+    let store = make_store();
+    let stub = write_stub();
+    let c = controller("blk-queued-resume").with_identity_stores(Some(store.clone()), Some(store.clone()), "key".to_string());
+    let c = PersistentSubprocessController { mstore: Some(store), ..c };
+    let _kill_on_drop = KillOnDrop(&c);
+    {
+        let mut inner = c.inner.lock().unwrap();
+        let seq = inner.take_next_message_seq();
+        inner
+            .pending_send_messages
+            .push_back(QueuedMessage::fresh(seq, "{\"accepted\":\"prompt\"}".to_string(), RecordOrigin::new(MessageOrigin::user())));
+    }
+
+    let meta = meta_with_session("resumed-session", &[stub.to_string_lossy().as_ref()]);
+    assert!(matches!(c.try_eager_resume(&meta, "resumed-session"), EagerResumeOutcome::Spawned));
+
+    assert!(c.health_monitor.is_active_turn(), "something is about to be delivered: the turn is active");
+    wait_until("the queue to drain and the claim to be released", || {
+        let inner = c.inner.lock().unwrap();
+        inner.pending_send_messages.is_empty() && !inner.spawning_in_progress
+    })
+    .await;
+}
