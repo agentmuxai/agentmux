@@ -4,8 +4,8 @@ import { describe, expect, it } from "vitest";
 import { AGENT_COUNTS_ID, slotDropAt } from "./status-bar-fit";
 
 describe("slotDropAt", () => {
-    it("keeps the agent entry to the last tier while anything waits, and at its own tier otherwise", () => {
-        expect(slotDropAt(AGENT_COUNTS_ID, 3, true)).toBe(4);
+    it("never drops the agent entry while anything waits, and drops it at its own tier otherwise", () => {
+        expect(slotDropAt(AGENT_COUNTS_ID, 3, true)).toBeUndefined();
         expect(slotDropAt(AGENT_COUNTS_ID, 3, false)).toBe(3);
     });
     it("leaves every other slot at its tier", () => {
