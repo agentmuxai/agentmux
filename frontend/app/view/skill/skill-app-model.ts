@@ -28,6 +28,18 @@ export function appPlatform(): "windows" | "macos" | "linux" {
     return p === "win32" ? "windows" : p === "darwin" ? "macos" : "linux";
 }
 
+const OS_NAMES: Record<string, string> = { windows: "Windows", macos: "macOS", linux: "Linux" };
+
+/** The platforms as a person names them ("Windows or macOS"). */
+export function osNames(platforms: string[]): string {
+    return platforms.map((p) => OS_NAMES[p] ?? p).join(" or ");
+}
+
+/** A catalog entry that lists platforms and not this one: it is for another OS, so there is nothing to install here. */
+export function forAnotherOs(entry: AppSkillCatalogEntry, platform: string): boolean {
+    return entry.platforms.length > 0 && !entry.platforms.includes(platform);
+}
+
 export const isAppSkill = (item: SkillCatalogItem): boolean => item.app != null;
 
 export function filterSkills(items: SkillCatalogItem[], filter: AppFilter): SkillCatalogItem[] {
@@ -129,7 +141,7 @@ export function describeSignature(sig: WidgetSignatureInfo): { text: string; ton
  * the skill: the newest decides, the same as for an installed skill. "Not tested yet" is a normal state.
  */
 export function catalogStatus(entry: AppSkillCatalogEntry, platform: string): AppStatus {
-    if (entry.platforms.length > 0 && !entry.platforms.includes(platform)) {
+    if (forAnotherOs(entry, platform)) {
         return { tone: "idle", label: `for ${entry.platforms.join(", ")} only` };
     }
     const mine = entry.verification.filter((r) => r.skillVersion === entry.version);

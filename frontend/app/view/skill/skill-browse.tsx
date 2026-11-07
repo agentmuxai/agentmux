@@ -15,7 +15,7 @@ import { Button, Pill } from "@/app/element/ui";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { AppSkillCatalogItem } from "@/types/rpc/AppSkillCatalogItem";
-import { appPlatform, catalogStatus, pillTone } from "./skill-app-model";
+import { appPlatform, catalogStatus, forAnotherOs, osNames, pillTone } from "./skill-app-model";
 import type { SkillCatalogModel } from "./skill-model";
 import "./skill-app.scss";
 import "./skill-browse.scss";
@@ -67,7 +67,8 @@ function BrowseItem(p: {
     const [error, setError] = createSignal("");
     const platform = appPlatform();
     const status = () => catalogStatus(p.item.entry, platform);
-    const action = () => installAction(p.item);
+    const otherOs = () => forAnotherOs(p.item.entry, platform);
+    const action = () => (otherOs() ? null : installAction(p.item));
 
     async function install(): Promise<void> {
         setBusy(true);
@@ -111,9 +112,11 @@ function BrowseItem(p: {
                 when={action()}
                 fallback={
                     <p class="skill-app-line skill-app-muted">
-                        {p.item.state === "current"
-                            ? `Installed here at version ${p.item.installed_version}.`
-                            : `Installed here: ${p.item.installed_version}, newer than the catalog's ${p.item.entry.version}.`}
+                        {otherOs()
+                            ? `Needs ${osNames(p.item.entry.platforms)}; this computer runs ${osNames([platform])}, so it is not offered here.`
+                            : p.item.state === "current"
+                              ? `Installed here at version ${p.item.installed_version}.`
+                              : `Installed here: ${p.item.installed_version}, newer than the catalog's ${p.item.entry.version}.`}
                     </p>
                 }
             >

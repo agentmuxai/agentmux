@@ -122,6 +122,24 @@ describe("Browse the catalog", () => {
         expect(within(wavelab).queryByRole("button")).toBeNull();
     });
 
+    it("offers no Install for a skill that is for another OS, and says which OS it needs", async () => {
+        rpc.AppSkillsCatalogCommand.mockResolvedValue({
+            items: [
+                item({}, { id: "acme.logic", name: "Logic", platforms: ["macos"] }),
+                item({ state: "update", installed_version: "0.9.0", skill_id: "k9" }, { id: "acme.reaper", name: "Reaper", platforms: ["macos", "linux"] }),
+                item({}, { id: "acme.any", name: "Anything", platforms: [] }),
+            ],
+        });
+        const list = await openBrowse();
+        const logic = within(list).getByRole("listitem", { name: "Logic" });
+        expect(within(logic).queryByRole("button")).toBeNull();
+        expect(logic.textContent).toContain("Needs macOS; this computer runs Windows, so it is not offered here.");
+        const reaper = within(list).getByRole("listitem", { name: "Reaper" });
+        expect(within(reaper).queryByRole("button")).toBeNull();
+        expect(reaper.textContent).toContain("Needs macOS or Linux");
+        expect(within(within(list).getByRole("listitem", { name: "Anything" })).getByRole("button", { name: "Install" })).toBeTruthy();
+    });
+
     it("Install sends the id, says the scripts are not approved yet, and opens the skill", async () => {
         // Every read returns new objects, as the real catalog does, and once installed the skill shows as current.
         let installed = false;
