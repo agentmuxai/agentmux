@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Settings › Notifications & tray, pinned as a whole ahead of splitting it into parts: each scenario mounts the real section over a
- * settings object and a config of terminal themes held in signals, with stand-ins for the number, slider, toggle, select
- * and text controls and the default-shell setting, and logs the section as an indented tree (every control with the
- * props it was given) and, in order, every setting it writes. The logs are snapshots recorded on the unsplit component;
- * the split must leave them byte for byte. (This pins the markup and the writes; the controls' own behaviour is tested
- * with the controls.)
+ * Settings › Notifications & tray, pinned as a whole ahead of splitting it into parts: each scenario mounts the real
+ * section over a settings object held in a signal, with stand-ins for the toggle, select, text and button controls,
+ * the host's capabilities (a tray, login entries), the launcher's autostart status and the test-notification RPC, and
+ * logs the section as an indented tree (every control with the props it was given) and, in order, every setting it
+ * writes and every read of the login registration. The logs are snapshots recorded on the unsplit component; the
+ * split must leave them byte for byte. (This pins the markup and the writes; the controls' own behaviour is tested
+ * with the controls, and notifications-section.test.tsx asserts what the person finds.)
  */
 
 import { cleanup, fireEvent, render } from "@solidjs/testing-library";
