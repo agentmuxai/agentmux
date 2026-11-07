@@ -1,0 +1,24 @@
+getAutostartStatus
+set notify:os:enabled false
+set notify:os:inputwaiting false
+set notify:os:turncompleted false
+set notify:os:turncompleted:external true
+set notify:os:turnerrored false
+set notify:os:agentcrashed false
+set notify:os:messageneedsreview false
+set notify:os:cloudsignedout false
+set notify:os:accountunavailable false
+set notify:os:jobfailed false
+set notify:os:vaultexpiring false
+set notify:os:summary false
+set notify:taskbar:attention false
+set notify:pause:allowattention true
+set app:showtray false
+set app:runinbackground true
+set app:startatlogin true
+set notify:os:when "never"
+set notify:os:preview "none"
+set notify:quiethours "23:00-07:00"
+set notify:quiethours null
+NotifyTestCommand
+NotifyTestCommand
