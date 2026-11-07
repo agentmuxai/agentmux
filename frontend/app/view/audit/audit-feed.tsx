@@ -7,6 +7,7 @@
 import { createMemo, For, Show, type JSX } from "solid-js";
 
 import type { AuditEntry } from "@/types/rpc/AuditEntry";
+import type { createAuditSounds } from "./audit-sound";
 import { AuditRow } from "./audit-row";
 import { sectionsOf } from "./audit-shared";
 
@@ -20,10 +21,14 @@ export const AuditFeed = (props: {
     channel?: string;
     now: number;
     paneBlockId: string;
+    /** Which rows show a speaker and which one is lit. */
+    sounds: ReturnType<typeof createAuditSounds>;
 }): JSX.Element => {
     const rows = (entries: () => AuditEntry[]) => (
         <ul class="audit-feed">
-            <For each={entries()}>{(entry) => <AuditRow entry={entry} now={props.now} paneBlockId={props.paneBlockId} />}</For>
+            <For each={entries()}>
+                {(entry) => <AuditRow entry={entry} now={props.now} paneBlockId={props.paneBlockId} sound={props.sounds.badge(entry)} lit={props.sounds.lit() === entry.id} />}
+            </For>
         </ul>
     );
     const sections = createMemo(() => sectionsOf(props.entries, props.channel));
