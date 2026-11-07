@@ -43,12 +43,15 @@ pub(crate) async fn push(state: &AppState) {
     let Some(host) = state.host_ipc.lock().await.clone() else {
         return;
     };
+    let owned = crate::server::browser_owner::owned_panes();
+    let handed = crate::server::browser_attention::asking(crate::server::browser_attention::Kind::Handoff);
     let mut body = serde_json::json!({
-        "panes": crate::server::browser_owner::owned_panes(),
+        "download_workdirs": crate::server::browser_agent_downloads::workdirs(state, &owned, &handed),
+        "panes": owned,
         "allowed": crate::server::browser_allowlist::snapshot(),
         "asking": crate::server::browser_attention::asking(crate::server::browser_attention::Kind::Navigation),
         "unlimited": crate::server::browser_allowlist::confirmed_unlimited(),
-        "handoff": crate::server::browser_attention::asking(crate::server::browser_attention::Kind::Handoff),
+        "handoff": handed,
     });
     // Left out when the store can't be read: the host then keeps its jars.
     if let Some(jars) = crate::server::browser_identity::live_jars(state) {

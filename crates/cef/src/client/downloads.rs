@@ -584,6 +584,7 @@ wrap_task! {
         fn execute(&self) {
             RUNNING.with(|m| m.borrow_mut().retain(|(p, _), _| p != &self.block_id));
             SAVE_DIALOGS.with(|d| d.borrow_mut().clear_pane(&self.block_id));
+            super::agent_downloads::forget_pane(&self.block_id);
             ASKING.with(|m| m.borrow_mut().retain(|(p, _), _| p != &self.block_id));
         }
     }
@@ -692,10 +693,20 @@ wrap_download_handler! {
             let id = item.id();
             let suggested = suggested_name.map(|s| s.to_string()).unwrap_or_default();
 
-            let Some(block_id) = browser.and_then(|b| self.state.block_id_for_browser(b)) else {
+            let mut browser = browser;
+            let Some(block_id) = browser.as_deref_mut().and_then(|b| self.state.block_id_for_browser(b)) else {
                 tracing::info!(target: "pane-download", id, "dropping download — pane is gone");
                 return 0;
             };
+            // A pane an agent owns saves into the agent's workspace with no dialog (D3b); a person's keeps asking.
+            match super::agent_downloads::before(&self.state, browser.as_deref(), &block_id, id, &suggested, item.total_bytes()) {
+                super::agent_downloads::Before::Ask => {}
+                super::agent_downloads::Before::Save(path) => {
+                    cb.cont(Some(&CefString::from(path.to_string_lossy().as_ref())), 0);
+                    return 1;
+                }
+                super::agent_downloads::Before::Refuse => return 0,
+            }
             // `can_download` already checked, but another download may have
             // slipped in between; the add is the check that counts.
             if !with_waiting(|w| w.add(&block_id, id)) {
@@ -746,7 +757,8 @@ wrap_download_handler! {
             // Ids repeat across panes that use different request contexts, so
             // the pane comes from the browser, not from the id. A pane that is
             // already gone had its entries cleared when it closed.
-            let block_id = browser.and_then(|b| self.state.block_id_for_browser(b));
+            let mut browser = browser;
+            let block_id = browser.as_deref_mut().and_then(|b| self.state.block_id_for_browser(b));
             if let Some(block_id) = &block_id {
                 with_waiting(|w| w.release(block_id, id));
                 // This dialog is over: the pane's next parked download asks now.
@@ -768,6 +780,7 @@ wrap_download_handler! {
                 );
             }
             let Some(block_id) = block_id else { return };
+            super::agent_downloads::updated(&self.state, browser.as_deref(), &block_id, item, callback.as_deref());
 
             // Keep the callback while it runs so Cancel can reach it; drop it
             // at the end. (This handler runs on the UI thread, where `RUNNING` lives.)
