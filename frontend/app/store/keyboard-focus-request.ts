@@ -7,19 +7,26 @@
 
 import { createSignal } from "solid-js";
 
-import { openOrFocusPaneByView } from "./block-component-registry";
+import { openOrFocusPaneIdByView } from "./block-component-registry";
 
-const [request, setRequest] = createSignal<{ command: string | null } | null>(null);
+/** `blockId`: the Settings pane that was opened or focused for it; only that pane's section takes the request
+ *  (several Settings panes can be open). Absent, whichever section sees it first. */
+interface KeyboardRowRequest {
+    command: string | null;
+    blockId?: string;
+}
+
+const [request, setRequest] = createSignal<KeyboardRowRequest | null>(null);
 
 export const keyboardRowRequest = request;
 
 /** Ask the Keyboard shortcuts section to show `command`, or just open when none is given. */
-export const requestKeyboardRow = (command: string | null): void => void setRequest(() => ({ command }));
+export const requestKeyboardRow = (command: string | null, blockId?: string): void => void setRequest(() => ({ command, blockId }));
 
 export const clearKeyboardRowRequest = (): void => void setRequest(() => null);
 
 /** Open Settings at Keyboard shortcuts, scrolled to `command`'s line when one is given. */
-export function openKeyboardSettings(command?: string): Promise<void> {
-    requestKeyboardRow(command ?? null);
-    return openOrFocusPaneByView("settings", { meta: { view: "settings", "settings:section": "keyboard" } }, { "settings:section": "keyboard" });
+export async function openKeyboardSettings(command?: string): Promise<void> {
+    const blockId = await openOrFocusPaneIdByView("settings", { meta: { view: "settings", "settings:section": "keyboard" } }, { "settings:section": "keyboard" });
+    requestKeyboardRow(command ?? null, blockId);
 }

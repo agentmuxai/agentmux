@@ -791,6 +791,35 @@ pub struct UiPressKeysRequest {
     pub target: Option<String>,
 }
 
+/// `POST /api/v1/ui/shortcuts/set` — gives one command exactly these keys (docs/specs/SPEC_KEYBOARD_SHORTCUTS_SETTINGS_2026_11_06.md §10).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiSetShortcutRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    /// A command id from `ListShortcuts`.
+    pub command: String,
+    /// The keys the command ends with, in the table's syntax (`ctrl+shift+d`; a chord is two keys separated by a
+    /// space). Empty unbinds the command.
+    #[serde(default)]
+    pub bindings: Vec<String>,
+    /// Where they work (`!textInputFocus`, `viewType == editor`); absent = where the command works today.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub when: Option<String>,
+}
+
+/// `POST /api/v1/ui/shortcuts/reset` — puts one command, or every command, back on its defaults.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiResetShortcutsRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    /// A command id from `ListShortcuts`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    /// Every command, instead of one.
+    #[serde(default)]
+    pub all: bool,
+}
+
 // ── Browser-pane deep control (Navigate/Back/Forward/Reload/Eval/
 //    DispatchKey/FocusElement/FocusInfo) ─────────────────────────────────
 //

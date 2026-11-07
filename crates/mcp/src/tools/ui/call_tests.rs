@@ -87,6 +87,30 @@ fn cases() -> Vec<Case> {
             json!({ "keys": "Ctrl+T" }),
             &["\"pressed\": true"],
         ),
+        c(
+            "SetShortcut",
+            json!({ "command": "tab:new", "bindings": ["ctrl+shift+y"] }),
+            json!({ "ok": true, "data": { "changed": true, "summary": "New tab: Ctrl+Shift+Y", "keys": ["ctrl+shift+y"], "note": "The person was told and can undo it from the notice." } }),
+            "/api/v1/ui/shortcuts/set",
+            json!({ "command": "tab:new", "bindings": ["ctrl+shift+y"] }),
+            &["Changed: New tab: Ctrl+Shift+Y.", "can undo it"],
+        ),
+        c(
+            "SetShortcut",
+            json!({ "command": "tab:new", "bindings": [] }),
+            json!({ "ok": true, "data": { "changed": false, "reason": "Ctrl+Shift+W is Close pane; an agent does not take a key from another command" } }),
+            "/api/v1/ui/shortcuts/set",
+            json!({ "command": "tab:new", "bindings": [] }),
+            &["Not changed: Ctrl+Shift+W is Close pane"],
+        ),
+        c(
+            "ResetShortcuts",
+            json!({ "all": true }),
+            json!({ "ok": true, "data": { "changed": true, "summary": "all shortcuts back on their defaults (2 commands)", "keys": [], "note": "The person was told." } }),
+            "/api/v1/ui/shortcuts/reset",
+            json!({ "all": true }),
+            &["Changed: all shortcuts back on their defaults"],
+        ),
     ]
 }
 

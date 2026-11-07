@@ -316,6 +316,8 @@ pub const ROUTES: &[(Match, Audience)] = &[
     (Match::Route("/api/v1/ui/shortcuts/list"), Audience::Everyone),
     (Match::Route("/api/v1/ui/shortcuts/press"), Audience::Everyone),
     (Match::Route("/api/v1/ui/shortcuts/run"), Audience::Everyone),
+    (Match::Route("/api/v1/ui/shortcuts/set"), Audience::Everyone),
+    (Match::Route("/api/v1/ui/shortcuts/reset"), Audience::Everyone),
     (Match::Route("/api/v1/vault"), Audience::Everyone),
     (Match::Route("/api/v1/vault/generate"), Audience::Everyone),
     (Match::Route("/api/v1/vault/history"), Audience::Everyone),
