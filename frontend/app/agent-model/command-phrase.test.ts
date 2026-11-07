@@ -91,6 +91,21 @@ describe("phraseCommand", () => {
         expect(phraseCommand("sudo -u bob ls")).toBe("List files");
     });
 
+    it("reads bun as a package manager, and as an interpreter only for a script file", () => {
+        expect(phraseCommand("bun run dev")).toBe("Start with bun");
+        expect(phraseCommand("bun install")).toBe("Install packages with bun");
+        expect(phraseCommand("bun test")).toBe("Run tests with bun");
+        expect(phraseCommand("bun scripts/seed.ts")).toBe("Run seed");
+        expect(phraseCommand("bun run scripts/seed.ts")).toBe("Run seed");
+    });
+
+    it("resolves .. in a cd target instead of dropping it", () => {
+        expect(phraseCommand("cd ~/work/rr/.. && ls")).toBe("List files in work");
+        expect(phraseCommand("cd /a/b/./c && ls")).toBe("List files in c");
+        expect(phraseCommand("cd ../foo && ls")).toBe("List files");
+        expect(phraseCommand("cd ~/.. && ls")).toBe("List files");
+    });
+
     it("falls back to a plain phrase when nothing can be named", () => {
         expect(phraseCommand("")).toBe("Run a shell command");
         expect(phraseCommand(undefined)).toBe("Run a shell command");

@@ -25,7 +25,6 @@ const INTERPRETERS = new Set([
     "powershell",
     "ruby",
     "deno",
-    "bun",
     "tsx",
     "ts-node",
 ]);
@@ -196,7 +195,14 @@ function programOf(w: string): string {
 
 /** A folder's last name, unless it is the home folder or an agent's workspace (nothing worth naming). */
 function folderName(dir: string): string | null {
-    const parts = dir.split(/[\\/]/).filter((p) => p && p !== "." && p !== "..");
+    // `..` goes up one folder; one that climbs past what the path names says nothing about where it ends up.
+    const parts: string[] = [];
+    for (const p of dir.split(/[\\/]/)) {
+        if (!p || p === ".") continue;
+        if (p !== "..") parts.push(p);
+        else if (parts.length > 0 && parts.at(-1) !== "~") parts.pop();
+        else return null;
+    }
     const last = parts.at(-1);
     if (!last || last === "~" || last === "$HOME" || /^[A-Za-z]:$/.test(last)) return null;
     if (parts.at(-2) === "agents") return null;
@@ -279,6 +285,9 @@ function phraseSegment(ws: string[], dir: string | null, depth: number): string 
     }
     if (PACKAGE_MANAGERS.has(program)) {
         const verb = plain[0] === "run" || plain[0] === "run-script" ? plain[1] : plain[0];
+        // `bun app.ts` runs a file, as an interpreter does.
+        if (program === "bun" && verb && /\.(mjs|cjs|js|ts|tsx|jsx)$/i.test(verb))
+            return `Run ${baseName(verb).replace(/\.\w+$/, "")}${where}`;
         const said = verb ? PACKAGE_VERBS[verb] : undefined;
         if (said) return `${said} ${program}${where}`;
         return verb
