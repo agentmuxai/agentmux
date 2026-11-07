@@ -1,19 +1,21 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! What every entry a filter matches cost, not only a page's. The audit file is only ever appended to, so a sum
-//! is kept per file and filter and carried on from where the last scan of the file ended: the first asks reads
-//! the file, the next ones only what was written since.
+//! What every entry a filter matches cost, not only a page's. The audit file and the activity day files are only
+//! ever appended to, so a sum is kept per file and filter and carried on from where the last scan of the file ended:
+//! the first asks reads the file, the next ones only what was written since.
 
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Mutex;
 
-use super::{from_audit, jekt_file, Ctx, Filter, Sources, KIND_ACTION, KIND_JEKT, KIND_REGISTRY};
+use super::activity::{day_end_ms, entry_of};
+use super::{from_audit, jekt_file, Ctx, Filter, Sources, KIND_ACTION, KIND_JEKT, KIND_REGISTRY, KIND_THOUGHT, KIND_TOOL, KIND_TURN};
+use crate::backend::audit_activity::{day_files, ActivityRow};
 use crate::backend::rpc_types::AuditTotals;
 
-/// Sums kept: the filters a view asks totals of are few.
-const KEPT: usize = 16;
+/// Sums kept: a file and a filter each, and a month of day files is thirty files for each filter a view asks totals of.
+const KEPT: usize = 128;
 
 struct Kept {
     /// The file's bytes read, and the sum of the entries in them.
@@ -59,13 +61,31 @@ pub(super) fn of(src: &Sources, filter: &Filter) -> AuditTotals {
     let wants_file = [KIND_JEKT, KIND_ACTION, KIND_REGISTRY].iter().any(|k| filter.kinds.contains(*k));
     // The two files hold different lines (a line goes to one), so their sums add.
     for path in [src.jekt_file, src.own_file].into_iter().flatten().filter(|_| wants_file) {
-        add_file(&mut sum, path, filter);
+        add_file(&mut sum, path, filter, |from, s| scan_into(path, from, filter, s));
     }
+    add_activity(&mut sum, src, filter);
     sum
 }
 
-/// Adds to `sum` what `filter` matches in the audit file at `path`.
-fn add_file(sum: &mut AuditTotals, path: &Path, filter: &Filter) {
+/// Adds the tool, turn and thought rows of the activity day files `filter` matches. A turn's row carries what the
+/// turn cost, so leaving these out left the totals short of every turn.
+fn add_activity(sum: &mut AuditTotals, src: &Sources, filter: &Filter) {
+    if ![KIND_TOOL, KIND_TURN, KIND_THOUGHT].iter().any(|k| filter.kinds.contains(*k)) {
+        return;
+    }
+    // A row names its agent by UID: the filter names it by slug. Nothing else of the links is read.
+    let ctx = Ctx { slug_of_uid: src.ctx.slug_of_uid, uid_of_slug: &|_| None, pane_of_agent: &|_| None, block_exists: &|_| false };
+    for dir in [src.activity_dir, src.own_activity_dir].into_iter().flatten() {
+        // A day that ended before the window began holds none of it.
+        for file in day_files(dir).into_iter().filter(|f| day_end_ms(&f.day) >= filter.since) {
+            add_file(sum, &file.path, filter, |from, s| scan_activity(&file.path, &file.day, from, filter, &ctx, s));
+        }
+    }
+}
+
+/// Adds to `sum` what `scan` finds in the file at `path` for `filter`: `scan(from, sum)` reads from byte `from` and
+/// returns where it ended.
+fn add_file(sum: &mut AuditTotals, path: &Path, filter: &Filter, scan: impl Fn(u64, &mut AuditTotals) -> Option<u64>) {
     let key = format!("{}|{}", path.display(), filter.key());
     let (mut read, mut from_file) = (0u64, AuditTotals::default());
     let mut guard = KEPT_SUMS.lock().unwrap_or_else(|e| e.into_inner());
@@ -79,7 +99,7 @@ fn add_file(sum: &mut AuditTotals, path: &Path, filter: &Filter) {
     // The scan's sum is kept with where it ended only if it ended cleanly: one that failed partway would
     // otherwise be counted again from the old position next time.
     let mut scanned = from_file.clone();
-    match scan_into(path, read, filter, &mut scanned) {
+    match scan(read, &mut scanned) {
         Some(end) => {
             let (read, from_file_now) = (end, scanned);
             let mut guard = KEPT_SUMS.lock().unwrap_or_else(|e| e.into_inner());
@@ -108,8 +128,18 @@ fn add_file(sum: &mut AuditTotals, path: &Path, filter: &Filter) {
 
 fn scan_into(path: &Path, from: u64, filter: &Filter, sum: &mut AuditTotals) -> Option<u64> {
     let ctx = no_links();
-    jekt_file::scan(path, from, |raw| {
+    jekt_file::scan(path, from, |raw: crate::backend::reactive::types::AuditLogEntry| {
         let e = from_audit(0, &raw, &ctx);
+        if filter.keep(&e) {
+            add(sum, &e);
+        }
+    })
+    .ok()
+}
+
+fn scan_activity(path: &Path, day: &str, from: u64, filter: &Filter, ctx: &Ctx, sum: &mut AuditTotals) -> Option<u64> {
+    jekt_file::scan(path, from, |row: ActivityRow| {
+        let e = entry_of('t', day, 0, &row, ctx);
         if filter.keep(&e) {
             add(sum, &e);
         }
