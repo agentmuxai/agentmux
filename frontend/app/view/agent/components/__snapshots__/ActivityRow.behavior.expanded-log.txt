@@ -1,0 +1,110 @@
+useTick 1000
+usePulseWhen
+pulse when=true on=agent-activity-row shell running expanded
+-- shell, streaming
+<div>
+  <div class="agent-activity-row shell running expanded">
+    <div class="agent-activity-summary">
+      <span class="agent-activity-sigil">
+        <span data-stand="ActivitySigil" data-activity="a1" data-glyph="⟩" data-tick="0">
+      <div data-stand="Tooltip" data-content="undefined" data-disable="true" data-class="agent-activity-title">
+        "dev server"
+      <span class="agent-activity-stats">
+        <span class="agent-activity-elapsed">
+          "1m 5s"
+      <span data-cb="onClick" data-stand="IconButton:Stop" data-props="{\"icon\":\"stop\",\"tone\":\"danger\",\"density\":\"compact\",\"class\":\"agent-activity-stop\",\"tooltip\":false}">
+        "Stop"
+    <div class="agent-activity-log agent-tool-overlay-log">
+      <div class="agent-activity-command">
+        "npm run dev -- --host 0.0.0.0"
+      <div data-stand="ChunkPreview" data-chunks="[{\"kind\":\"stdout\",\"content\":\"ready\"}]">
+      <div class="agent-shell-streaming-indicator">
+-- shell, closed log, no chunks
+<div>
+  <div class="agent-activity-row shell running expanded">
+    <div class="agent-activity-summary">
+      <span class="agent-activity-sigil">
+        <span data-stand="ActivitySigil" data-activity="a1" data-glyph="⟩" data-tick="0">
+      <div data-stand="Tooltip" data-content="undefined" data-disable="true" data-class="agent-activity-title">
+        "build"
+      <span class="agent-activity-stats">
+        <span class="agent-activity-elapsed">
+          "1m 5s"
+      <span data-cb="onClick" data-stand="IconButton:Stop" data-props="{\"icon\":\"stop\",\"tone\":\"danger\",\"density\":\"compact\",\"class\":\"agent-activity-stop\",\"tooltip\":false}">
+        "Stop"
+    <div class="agent-activity-log agent-tool-overlay-log">
+      <div class="agent-activity-command">
+        "make"
+      <div data-stand="ChunkPreview" data-chunks="[]">
+toolOutputChunks
+-- tool with a command and chunks
+<div>
+  <div class="agent-activity-row tool running expanded">
+    <div class="agent-activity-summary">
+      <span class="agent-activity-sigil">
+        <span data-stand="ActivitySigil" data-activity="a1" data-glyph="$" data-tick="0">
+      <div data-stand="Tooltip" data-content="Run the tests in full" data-disable="false" data-class="agent-activity-title">
+        "Run the tests"
+      <span class="agent-activity-stats">
+        <span class="agent-activity-elapsed">
+          "1m 5s"
+      <span data-cb="onClick" data-stand="IconButton:Stop" data-props="{\"icon\":\"stop\",\"tone\":\"danger\",\"density\":\"compact\",\"class\":\"agent-activity-stop\",\"tooltip\":false}">
+        "Stop"
+    <div class="agent-activity-log agent-tool-overlay-log">
+      <div class="agent-activity-command">
+        "npx vitest run"
+      <div data-stand="ChunkPreview" data-chunks="[{\"kind\":\"stdout\",\"content\":\"ok\"}]">
+      <div class="agent-shell-streaming-indicator">
+toolOutputChunks
+-- tool without a command: full title, no output
+<div>
+  <div class="agent-activity-row tool running expanded">
+    <div class="agent-activity-summary">
+      <span class="agent-activity-sigil">
+        <span data-stand="ActivitySigil" data-activity="a1" data-glyph="$" data-tick="0">
+      <div data-stand="Tooltip" data-content="Run the tests in full" data-disable="false" data-class="agent-activity-title">
+        "Run the tests"
+      <span class="agent-activity-stats">
+        <span class="agent-activity-elapsed">
+          "1m 5s"
+      <span data-cb="onClick" data-stand="IconButton:Stop" data-props="{\"icon\":\"stop\",\"tone\":\"danger\",\"density\":\"compact\",\"class\":\"agent-activity-stop\",\"tooltip\":false}">
+        "Stop"
+    <div class="agent-activity-log agent-tool-overlay-log">
+      <div class="agent-activity-command">
+        "Run the tests in full"
+      <div data-stand="ChunkPreview" data-chunks="[]">
+      <pre class="agent-tool-log-line">
+        "No output yet"
+toolOutputChunks
+-- tool without params or full title: title
+<div>
+  <div class="agent-activity-row tool running expanded">
+    <div class="agent-activity-summary">
+      <span class="agent-activity-sigil">
+        <span data-stand="ActivitySigil" data-activity="a1" data-glyph="$" data-tick="0">
+      <div data-stand="Tooltip" data-content="undefined" data-disable="true" data-class="agent-activity-title">
+        "Run the tests"
+      <span class="agent-activity-stats">
+        <span class="agent-activity-elapsed">
+          "1m 5s"
+      <span data-cb="onClick" data-stand="IconButton:Stop" data-props="{\"icon\":\"stop\",\"tone\":\"danger\",\"density\":\"compact\",\"class\":\"agent-activity-stop\",\"tooltip\":false}">
+        "Stop"
+    <div class="agent-activity-log agent-tool-overlay-log">
+      <div class="agent-activity-command">
+        "Run the tests"
+      <div data-stand="ChunkPreview" data-chunks="[]">
+      <pre class="agent-tool-log-line">
+        "No output yet"
+-- collapsed
+<div>
+  <div class="agent-activity-row tool running">
+    <div class="agent-activity-summary">
+      <span class="agent-activity-sigil">
+        <span data-stand="ActivitySigil" data-activity="a1" data-glyph="$" data-tick="0">
+      <div data-stand="Tooltip" data-content="undefined" data-disable="true" data-class="agent-activity-title">
+        "Run the tests"
+      <span class="agent-activity-stats">
+        <span class="agent-activity-elapsed">
+          "1m 5s"
+      <span data-cb="onClick" data-stand="IconButton:Stop" data-props="{\"icon\":\"stop\",\"tone\":\"danger\",\"density\":\"compact\",\"class\":\"agent-activity-stop\",\"tooltip\":false}">
+        "Stop"
