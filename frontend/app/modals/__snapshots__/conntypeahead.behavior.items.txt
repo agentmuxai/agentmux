@@ -1,0 +1,32 @@
+useMuxObjectValue block:blk-1
+remotesList
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="" conn=ssh:dev
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="" conn=ssh:dev
+refreshRemotes
+ConnListAWSCommand {"timeout":2000}
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="" conn=ssh:dev
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="" conn=ssh:dev
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="" conn=ssh:dev
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="" conn=ssh:dev
+items: ["me@box","ssh:dev","ssh:old","Disconnect ssh:dev","Manage remotes…"]
+item Disconnect ssh:dev
+ConnDisconnectCommand ssh:dev {"timeout":60000}
+item Manage remotes…
+setChangeConnModalOpen false
+openRemotesInPane blk-1 ssh:dev
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="fresh-host" conn=ssh:dev
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="fresh-host" conn=ssh:dev
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="fresh-host" conn=ssh:dev
+item fresh-host (New Connection)
+setBlockMeta blk-1 {"connection":"fresh-host","file":"~","cmd:cwd":null}
+setChangeConnModalOpen false
+ConnEnsureCommand {"connname":"fresh-host","logblockid":"blk-1"} {"timeout":60000}

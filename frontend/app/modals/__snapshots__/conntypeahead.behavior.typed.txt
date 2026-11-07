@@ -1,0 +1,51 @@
+useMuxObjectValue block:blk-1
+remotesList
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="" conn=ssh:dev
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="" conn=ssh:dev
+refreshRemotes
+ConnListAWSCommand {"timeout":2000}
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="" conn=ssh:dev
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="" conn=ssh:dev
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="" conn=ssh:dev
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="" conn=ssh:dev
+-- pane in error: reconnect offered
+<div data-stand=TypeAheadModal data-suggestions=[{"label":"Reconnect to ssh:dev","value":"","icon":"arrow-right-arrow-left","iconColor":"var(--grey-text-color)","status":"connected","hasOnSelect":true},{"headerText":"Local","items":[{"label":"me@box","value":"","icon":"laptop","iconColor":"var(--grey-text-color)","status":"connected","current":false,"hasOnSelect":false}]},{"headerText":"SSH hosts","items":[{"label":"ssh:dev","value":"ssh:dev","icon":"server","iconColor":"var(--grey-text-color)","status":"connected","current":true,"hasOnSelect":false},{"label":"ssh:old","value":"ssh:old","icon":"server","iconColor":"var(--grey-text-color)","status":"connected","current":false,"hasOnSelect":false}]},{"label":"Disconnect ssh:dev","value":"","icon":"xmark","iconColor":"var(--grey-text-color)","status":"connected","hasOnSelect":true},{"label":"Manage remotes…","value":"Manage remotes…","icon":"server","iconColor":"var(--grey-text-color)","status":"disconnected","hasOnSelect":true}] data-select-index=0 data-auto-focus=true data-value= data-label=Connect to (username@host)...>
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="old" conn=ssh:dev
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="old" conn=ssh:dev
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="old" conn=ssh:dev
+-- typed old
+<div data-stand=TypeAheadModal data-suggestions=[{"headerText":"SSH hosts","items":[{"label":"ssh:old","value":"ssh:old","icon":"server","iconColor":"var(--grey-text-color)","status":"connected","current":false,"hasOnSelect":false}]},{"label":"Disconnect ssh:dev","value":"","icon":"xmark","iconColor":"var(--grey-text-color)","status":"connected","hasOnSelect":true},{"label":"old (New Connection)","value":"","icon":"plus","iconColor":"var(--grey-text-color)","status":"connected","hasOnSelect":true}] data-select-index=0 data-auto-focus=true data-value=old data-label=Connect to (username@host)...>
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="brand-new" conn=ssh:dev
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="brand-new" conn=ssh:dev
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="brand-new" conn=ssh:dev
+-- typed an unknown name
+<div data-stand=TypeAheadModal data-suggestions=[{"label":"Disconnect ssh:dev","value":"","icon":"xmark","iconColor":"var(--grey-text-color)","status":"connected","hasOnSelect":true},{"label":"brand-new (New Connection)","value":"","icon":"plus","iconColor":"var(--grey-text-color)","status":"connected","hasOnSelect":true}] data-select-index=0 data-auto-focus=true data-value=brand-new data-label=Connect to (username@host)...>
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="me@box" conn=ssh:dev
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="me@box" conn=ssh:dev
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="me@box" conn=ssh:dev
+-- typed the local name
+<div data-stand=TypeAheadModal data-suggestions=[{"headerText":"Local","items":[{"label":"me@box","value":"","icon":"laptop","iconColor":"var(--grey-text-color)","status":"connected","current":false,"hasOnSelect":false}]},{"label":"Disconnect ssh:dev","value":"","icon":"xmark","iconColor":"var(--grey-text-color)","status":"connected","hasOnSelect":true}] data-select-index=0 data-auto-focus=true data-value=me@box data-label=Connect to (username@host)...>
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="" conn=ssh:dev
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="" conn=ssh:dev
+getConnStatusAtom ssh:dev
+remoteSuggestionScopes ["ssh:dev","ssh:old"] typed="" conn=ssh:dev
+item Reconnect to ssh:dev
+ConnConnectCommand {"host":"ssh:dev","logblockid":"blk-1"} {"timeout":60000}
+item me@box

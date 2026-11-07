@@ -361,7 +361,6 @@
 109 frontend/app/hook/useWindowDrag.win32.ts::installJsDragListener
 105 frontend/app/init/error-display.ts::showStartupError
 138 frontend/app/modals/command-palette.tsx::CommandPaletteModal
-209 frontend/app/modals/conntypeahead.tsx::ChangeConnectionBlockModal
 160 frontend/app/modals/typeaheadmodal.tsx::TypeAheadModal
 162 frontend/app/modals/userinputmodal.tsx::UserInputModal
 121 frontend/app/notification/notificationitem.tsx::NotificationItem
