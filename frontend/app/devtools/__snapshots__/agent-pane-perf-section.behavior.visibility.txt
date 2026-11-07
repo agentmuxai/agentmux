@@ -1,0 +1,27 @@
+agentPerfStore.snapshot
+-- no data at mount
+<div>
+-- data set, no poll yet
+<div>
+poll x1
+agentPerfStore.snapshot
+-- a poll later: the block appears
+<div>
+  <div style="margin-top:8px;padding-top:8px;border-top:1px solid #333">
+    <div style="font-weight:bold;color:#7af;margin-bottom:4px">
+      "📊 Agent Pane Perf"
+    <div style="margin-bottom:6px">
+      <div style="color:#aaa;font-size:10px">
+        "Layout shifts in agent pane (last"
+        "1"
+        ")"
+      <div style="font-size:10px;color:#bbb;padding-left:8px">
+        "500ms"
+        "ago:"
+        "0.0123"
+poll x1
+agentPerfStore.snapshot
+-- data gone, next poll: hidden again
+<div>
+unmounted
+poll x3
