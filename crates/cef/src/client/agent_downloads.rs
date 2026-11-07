@@ -42,10 +42,30 @@ pub(crate) fn set_workdirs(workdirs: HashMap<String, String>) {
 /// A download being saved into a workspace.
 struct Saving {
     name: String,
+    /// The file it is writing: reserved from the moment it is decided, so a second download of the same
+    /// name takes the next number even though CEF has not made the file yet.
+    path: PathBuf,
     /// The `downloads` folder it goes into.
     dir: PathBuf,
     /// What the folder held when it started, so the folder's cap holds for a download of unknown size.
     used: i64,
+    /// The size the server said, or 0.
+    expected: i64,
+    /// Bytes received so far.
+    received: i64,
+}
+
+/// The files and bytes the downloads in flight into `dir` hold or are about to: what the folder's own walk
+/// can't see yet.
+fn in_flight(dir: &Path) -> (Vec<PathBuf>, i64) {
+    SAVING.with(|m| {
+        let m = m.borrow();
+        let mine = m.values().filter(|s| s.dir == dir);
+        let paths = mine.clone().map(|s| s.path.clone()).collect();
+        // A file already written counts in the folder's walk; its bytes still to come are `expected - received`.
+        let coming = mine.map(|s| (s.expected - s.received).max(0)).sum();
+        (paths, coming)
+    })
 }
 
 thread_local! {
@@ -98,9 +118,13 @@ fn downloads_dir(workdir: &Path) -> Result<PathBuf, String> {
     }
 }
 
-/// How many bytes the files under `dir` hold, links not followed. Stops counting past `FOLDER_MAX_BYTES` or
-/// after a great many entries (a folder that big is full either way).
-fn folder_bytes(dir: &Path) -> i64 {
+/// The most entries counted in the `downloads` folder. The count runs on the UI thread, inside the download
+/// handler, so it is bounded: a folder with more is full for this purpose, and the agent is told to clear it.
+const MAX_ENTRIES: usize = 5_000;
+
+/// How many bytes the files under `dir` hold, links not followed (a directory entry's own metadata, which is
+/// cheap), or `None` when it holds more than `FOLDER_MAX_BYTES` or `MAX_ENTRIES` entries.
+fn folder_bytes(dir: &Path) -> Option<i64> {
     let mut total: i64 = 0;
     let mut seen = 0usize;
     let mut stack = vec![dir.to_path_buf()];
@@ -108,10 +132,10 @@ fn folder_bytes(dir: &Path) -> i64 {
         let Ok(rd) = std::fs::read_dir(&d) else { continue };
         for entry in rd.flatten() {
             seen += 1;
-            if seen > 50_000 || total > FOLDER_MAX_BYTES {
-                return FOLDER_MAX_BYTES + 1;
+            if seen > MAX_ENTRIES || total > FOLDER_MAX_BYTES {
+                return None;
             }
-            let Ok(m) = std::fs::symlink_metadata(entry.path()) else { continue };
+            let Ok(m) = entry.metadata() else { continue };
             if m.is_dir() {
                 stack.push(entry.path());
             } else if m.is_file() {
@@ -119,16 +143,20 @@ fn folder_bytes(dir: &Path) -> i64 {
             }
         }
     }
-    total
+    Some(total)
 }
 
 /// The refusal for a folder that has no room: what to do about it.
 fn full_words(dir: &Path) -> String {
-    format!("the downloads folder is full ({} is the most it holds): delete files in {}", size_words(FOLDER_MAX_BYTES), shown(dir))
+    format!(
+        "the downloads folder is full ({} or {MAX_ENTRIES} files is the most it holds): delete files in {}",
+        size_words(FOLDER_MAX_BYTES),
+        shown(dir)
+    )
 }
 
 /// The first of `name`, `name (1)`, `name (2)`… that doesn't exist in `dir`: a download never replaces a file.
-fn free_path(dir: &Path, name: &str) -> Option<PathBuf> {
+fn free_path(dir: &Path, name: &str, taken: &[PathBuf]) -> Option<PathBuf> {
     let (stem, ext) = match name.rfind('.') {
         Some(i) if i > 0 => (&name[..i], &name[i..]),
         _ => (name, ""),
@@ -136,7 +164,7 @@ fn free_path(dir: &Path, name: &str) -> Option<PathBuf> {
     (0..1000).find_map(|n| {
         let candidate = if n == 0 { name.to_string() } else { format!("{stem} ({n}){ext}") };
         let path = dir.join(candidate);
-        std::fs::symlink_metadata(&path).is_err().then_some(path)
+        (std::fs::symlink_metadata(&path).is_err() && !taken.contains(&path)).then_some(path)
     })
 }
 
@@ -148,11 +176,12 @@ pub(crate) fn target(workdir: &Path, suggested: &str, total: i64) -> Result<(Pat
         return Err(format!("{name} is {}, over the {} limit for a download into the workspace", size_words(total), size_words(MAX_BYTES)));
     }
     let dir = downloads_dir(workdir)?;
-    let used = folder_bytes(&dir);
-    if used.saturating_add(total.max(0)) > FOLDER_MAX_BYTES {
+    let (taken, coming) = in_flight(&dir);
+    let used = folder_bytes(&dir).ok_or_else(|| format!("{name} was not saved: {}", full_words(&dir)))?;
+    if used.saturating_add(coming).saturating_add(total.max(0)) > FOLDER_MAX_BYTES {
         return Err(format!("{name} was not saved: {}", full_words(&dir)));
     }
-    let path = free_path(&dir, &name).ok_or_else(|| format!("{name}: the downloads folder already has too many files with that name"))?;
+    let path = free_path(&dir, &name, &taken).ok_or_else(|| format!("{name}: the downloads folder already has too many files with that name"))?;
     Ok((path, used))
 }
 
@@ -200,7 +229,8 @@ pub(crate) fn before(
         Ok((path, used)) => {
             tracing::info!(target: "pane-download", %pane, id, "saving into the agent's workspace, no dialog");
             let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
-            SAVING.with(|m| m.borrow_mut().insert((pane.to_string(), id), Saving { name: safe_download_name(suggested), dir, used }));
+            let saving = Saving { name: safe_download_name(suggested), path: path.clone(), dir, used, expected: total.max(0), received: 0 };
+            SAVING.with(|m| m.borrow_mut().insert((pane.to_string(), id), saving));
             Before::Save(path)
         }
         Err(why) => {
@@ -221,7 +251,18 @@ pub(crate) fn updated(
     callback: Option<&DownloadItemCallback>,
 ) -> bool {
     let key = (pane.to_string(), item.id());
-    let Some((name, dir, used)) = SAVING.with(|m| m.borrow().get(&key).map(|s| (s.name.clone(), s.dir.clone(), s.used))) else { return false };
+    let received = item.received_bytes();
+    let Some((name, dir, used, others)) = SAVING.with(|m| {
+        let mut m = m.borrow_mut();
+        let this = m.get_mut(&key)?;
+        this.received = received;
+        let (name, dir, used) = (this.name.clone(), this.dir.clone(), this.used);
+        // What the other downloads into this folder have received: with this one's own, what the folder holds now.
+        let others = m.iter().filter(|(k, s)| **k != key && s.dir == dir).map(|(_, s)| s.received).sum::<i64>();
+        Some((name, dir, used, others))
+    }) else {
+        return false;
+    };
     if item.is_complete() != 0 {
         SAVING.with(|m| m.borrow_mut().remove(&key));
         let path = CefString::from(&item.full_path()).to_string();
@@ -234,12 +275,12 @@ pub(crate) fn updated(
     } else if item.is_canceled() != 0 {
         // The person pressed Cancel in the strip, or the limit below cancelled it.
         SAVING.with(|m| m.borrow_mut().remove(&key));
-    } else if item.received_bytes() > MAX_BYTES || used.saturating_add(item.received_bytes()) > FOLDER_MAX_BYTES {
+    } else if received > MAX_BYTES || used.saturating_add(others).saturating_add(received) > FOLDER_MAX_BYTES {
         SAVING.with(|m| m.borrow_mut().remove(&key));
         if let Some(cb) = callback {
             cb.cancel();
         }
-        let why = if item.received_bytes() > MAX_BYTES {
+        let why = if received > MAX_BYTES {
             format!("{name} grew past the {} limit for a download into the workspace and was stopped", size_words(MAX_BYTES))
         } else {
             format!("{name} was stopped: {}", full_words(&dir))
@@ -309,14 +350,46 @@ mod tests {
         std::fs::create_dir(dir.join("sub")).unwrap();
         std::fs::write(dir.join("sub").join("old.bin"), vec![0u8; 1000]).unwrap();
         std::fs::write(dir.join("top.bin"), vec![0u8; 24]).unwrap();
-        assert_eq!(folder_bytes(&dir), 1024);
+        assert_eq!(folder_bytes(&dir), Some(1024));
         assert_eq!(target(ws.path(), "b.bin", 10).unwrap().1, 1024);
+    }
+
+    #[test]
+    fn a_folder_with_too_many_entries_counts_as_full() {
+        let ws = tempfile::tempdir().unwrap();
+        let (first, _) = target(ws.path(), "a.bin", 1).unwrap();
+        let dir = first.parent().unwrap().to_path_buf();
+        for i in 0..=MAX_ENTRIES {
+            std::fs::write(dir.join(format!("f{i}")), b"").unwrap();
+        }
+        assert_eq!(folder_bytes(&dir), None);
+        assert!(target(ws.path(), "b.bin", 1).unwrap_err().contains("is full"));
+    }
+
+    #[test]
+    fn a_download_in_flight_holds_its_name_and_its_bytes_before_the_file_exists() {
+        let ws = tempfile::tempdir().unwrap();
+        let (first, used) = target(ws.path(), "a.bin", 100).unwrap();
+        let dir = first.parent().unwrap().to_path_buf();
+        SAVING.with(|m| {
+            m.borrow_mut().insert(
+                ("pane".into(), 1),
+                Saving { name: "a.bin".into(), path: first.clone(), dir: dir.clone(), used, expected: FOLDER_MAX_BYTES - 50, received: 0 },
+            )
+        });
+        // Same name while the first has not written a byte: the next number, not the same path.
+        let (second, _) = target(ws.path(), "a.bin", 10).unwrap();
+        assert_eq!(second.file_name().unwrap(), "a (1).bin");
+        // What the first still has to receive counts toward the folder: 10 more bytes fit, 100 do not.
+        assert!(target(ws.path(), "b.bin", 10).is_ok());
+        assert!(target(ws.path(), "b.bin", 100).unwrap_err().contains("is full"));
+        SAVING.with(|m| m.borrow_mut().clear());
     }
 
     #[test]
     fn a_full_folder_refuses_with_words_naming_the_folder() {
         let why = full_words(Path::new("/w/downloads"));
-        assert!(why.contains("full") && why.contains("2.0 GB") && why.contains("delete files in /w/downloads"), "{why}");
+        assert!(why.contains("full") && why.contains("2.0 GB") && why.contains("5000 files") && why.contains("delete files in /w/downloads"), "{why}");
     }
 
     #[test]
