@@ -163,6 +163,7 @@ function AgentViewOverlays({ v }: { v: AgentViewParts }): JSX.Element {
                 onClose={input.search.close}
                 matchIndex={input.search.currentIndex}
                 matchCount={input.search.matchCount}
+                searching={input.search.searching}
             />
         </>
     );

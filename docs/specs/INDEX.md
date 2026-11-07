@@ -625,6 +625,7 @@ partial list.
 | [`SPEC_AGENT_PANE_PREVIEW_CLEANUPS_2026_09_26`](SPEC_AGENT_PANE_PREVIEW_CLEANUPS_2026_09_26.md) | Spec: Agent-pane preview cleanups (message shell, scroll hand-off, cap estimates, file preview) |
 | [`SPEC_AGENT_PANE_ROW_DISCLOSURE_2026_09_26`](SPEC_AGENT_PANE_ROW_DISCLOSURE_2026_09_26.md) | Spec: One open/closed model for agent-pane rows |
 | [`SPEC_AGENT_PANE_SCROLL_FOLLOW_STATE_MACHINE_2026_09_24`](SPEC_AGENT_PANE_SCROLL_FOLLOW_STATE_MACHINE_2026_09_24.md) | Agent pane scroll-follow: one owner, one intent-based state machine |
+| [`SPEC_AGENT_PANE_SEARCH_AND_DIM_MODE_2026_11_06`](SPEC_AGENT_PANE_SEARCH_AND_DIM_MODE_2026_11_06.md) | Spec: search the agent pane, with a magnifier in the header, a dim mode and stepping through matches |
 | [`SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09`](SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09.md) | SPEC: Session-scoped pane scrollback + a full "Agent History" view |
 | [`SPEC_AGENT_PANE_STREAM_FRAME_BUDGET_2026_10_13`](SPEC_AGENT_PANE_STREAM_FRAME_BUDGET_2026_10_13.md) | Spec: streaming must not stall while the user types, then flood |
 | [`SPEC_AGENT_PANE_TAB_SWITCH_PERF_2026_05_27`](SPEC_AGENT_PANE_TAB_SWITCH_PERF_2026_05_27.md) | SPEC: Agent pane tab-switch perf |

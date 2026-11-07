@@ -310,6 +310,7 @@ function freshFns() {
         close: spy("search.close"),
         currentIndex: () => 0,
         matchCount: () => 0,
+        searching: () => false,
         highlightId: () => null,
     };
     h.fns.scroll = { jumpTo: () => {}, command: () => null };
@@ -697,6 +698,7 @@ describe("AgentPresentationView callbacks", () => {
         same("search onClose", SB.onClose, F.search.close);
         same("search matchIndex", SB.matchIndex, F.search.currentIndex);
         same("search matchCount", SB.matchCount, F.search.matchCount);
+        same("search searching", SB.searching, F.search.searching);
 
         step("the panels, the preparing row and the shell drawer");
         const BP = seen.AgentBottomPanels;

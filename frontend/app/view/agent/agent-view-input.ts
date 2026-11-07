@@ -8,6 +8,7 @@
  * order they were there.
  */
 
+import { snapshot as layoutSnapshot } from "@/app/store/agent-pane-layout-store";
 import { paneZoom } from "@/app/store/pane-zoom-local";
 import { createMemo } from "solid-js";
 import type { AgentViewModel } from "./agent-model";
@@ -21,6 +22,8 @@ import { useJektsAwaitingYou } from "./hooks/useJektsAwaitingYou";
 import { usePtyWidth } from "./hooks/usePtyWidth";
 import { useScrollToNode } from "./hooks/useScrollToNode";
 import { createSearchReveal } from "./search-reveal";
+import { topVisibleNodeId } from "./search/top-row";
+import { rawIdAtOrAfter, topRowId } from "./search/transcript-index";
 
 export function usePaneInput(p: { found: PaneFoundation; model: AgentViewModel; shown: ReturnType<typeof useShownDocument>; late: PaneLate }) {
     const { found, model, late } = p;
@@ -40,11 +43,20 @@ export function usePaneInput(p: { found: PaneFoundation; model: AgentViewModel; 
     // A sensitive jekt that waits on the person: a card above the composer and a wait for the pane (jekts-awaiting-you.ts).
     useJektsAwaitingYou({ blockId: model.blockId, getDocument: p.shown.getDocument, jumpTo: scroll.jumpTo });
 
-    // In-session search over the loaded document slice: matches, navigation, highlight.
+    // In-session search over the loaded document slice: matches, navigation, highlight. A new query starts at the
+    // first match from the row at the top of the screen; a query with no match closes what a jump opened.
     const search = useInSessionSearch({
         document: paneModel.document,
         jumpTo: reveal.jumpTo,
         onClose: reveal.release,
+        onNoMatch: reveal.release,
+        topNodeId: () => {
+            // The drawn rows answer for the streaming tail too, which the layout slice has no rows for.
+            const at = layoutSnapshot(model.blockId);
+            const top = topVisibleNodeId(late.root) ?? (at ? topRowId(found.layoutView()?.rows ?? [], at.scrollTop) : null);
+            // The rows on screen include hidden-run lines and dividers that the document holds under no id of their own.
+            return rawIdAtOrAfter(p.shown.shownDocument(), top, new Set(paneModel.document().map((n) => n.id)));
+        },
     });
 
     // Pane-scoped Ctrl+F: a second press closes the bar and clears the state (hooks/useAgentKeyboard.ts).
