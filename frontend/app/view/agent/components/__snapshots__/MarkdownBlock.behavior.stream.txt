@@ -1,0 +1,23 @@
+useTick 1000
+Markdown text="a" streaming=false scrollable=false media=undefined
+PeekOverlay show=false rowEl=agent-markdown-peek-anchor
+chunk at 1200: "ab"
+Markdown text="ab" streaming=false scrollable=false media=undefined
+chunk at 1210: "abc"
+chunk at 1250: "abcd"
+chunk at 1295: "abcde"
+Markdown text="abcde" streaming=true scrollable=false media=undefined
+-- a quiet window: settle
+Markdown text="abcde" streaming=false scrollable=false media=undefined
+chunk at 1500: "abcdef"
+Markdown text="abcdef" streaming=false scrollable=false media=undefined
+(settled)
+chunk at 1610: "abcdef"
+-- end of stream
+<div>
+  <div class="agent-markdown-peek-anchor">
+    <div class="agent-markdown-block">
+      <div data-stand="Markdown">
+        "abcdef"
+    <div data-stand="PeekOverlay">
+      <div data-stand="PeekMetaRow" data-time="null" data-tokens="~2 tok (est.)">
