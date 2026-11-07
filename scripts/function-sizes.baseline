@@ -454,7 +454,6 @@
 128 frontend/app/view/settings/sections/animations-section.tsx::AnimationsSection
 166 frontend/app/view/settings/sections/appearance-section.tsx::AppearanceSection
 120 frontend/app/view/settings/sections/browser-section.tsx::BrowserSection
-171 frontend/app/view/settings/sections/devices-section.tsx::DevicesSection
 109 frontend/app/view/settings/sections/pinned-senders.tsx::PinnedSenders
 114 frontend/app/view/settings/sections/widget-bar-settings.tsx::WidgetBarSettings
 104 frontend/app/view/settings/sections/widget-catalog.tsx::WidgetCatalog

@@ -9,20 +9,19 @@
 // MuxBus sign-in (muxbus-sign-in.tsx) and Cloud presence (cloud-presence.tsx).
 // agentmux-mobile's SPEC_AGENT_STATUS_AND_LIVE_PANE_FEED_2026_10_07 §4.1.
 
-import { Button, Switch } from "@/app/element/ui";
-import { createSignal, For, Show, type JSX } from "solid-js";
+import type { JSX } from "solid-js";
 
-import { createDomainStore } from "@/app/store/domain-store";
 import { settingsAtom } from "@/app/store/global";
-import { RpcApi, type ViewerDeviceInfo } from "@/app/store/rpc-api";
-import { TabRpcClient } from "@/app/store/rpc-util";
 import type { SettingsIndexEntry } from "../settings-model";
 import { SectionHeader, set, SettingRow, ToggleControl } from "../settings-controls";
 import { CLOUD_PRESENCE_SETTING, CloudPresence } from "./cloud-presence";
+import { createDevices } from "./devices-section-state";
+import { PairedDevices } from "./devices-section-parts";
 import { HIDDEN_AGENTS_SETTING, HiddenAgents } from "./hidden-agents";
 import { MUXBUS_SIGN_IN_SETTING, MuxBusSignIn } from "./muxbus-sign-in";
 import { PINNED_SENDERS_SETTING, PinnedSenders } from "./pinned-senders";
-import { tip } from "@/app/element/tip";
+
+export { ago } from "./devices-section-state";
 
 // ── Search index — see appearance-section.tsx's header comment for the pattern. ──
 
@@ -74,140 +73,17 @@ export const DEVICES_SETTINGS = {
     },
 } satisfies Record<string, SettingsIndexEntry>;
 
-/** "just now", "5 min ago", "3 h ago", or a date. */
-export function ago(ms: number, nowMs: number): string {
-    const s = Math.max(0, Math.floor((nowMs - ms) / 1000));
-    if (s < 60) return "just now";
-    if (s < 3600) return `${Math.floor(s / 60)} min ago`;
-    if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
-    return new Date(ms).toLocaleDateString();
-}
-
-// ── Section: Paired devices ──────────────────────────────────────────────────
-
-// A device pairing (`viewer:paired`), a revoke or a change of its send grant (`viewerdevices:changed`),
-// from this window, a paired device's own request or another window.
-const store = createDomainStore<ViewerDeviceInfo[] | null>({
-    initial: null,
-    events: ["ViewerPaired", "ViewerDevicesChanged"],
-    load: async () => (await RpcApi.ViewerDevicesCommand(TabRpcClient)).devices,
-});
-
 export function DevicesSection(): JSX.Element {
-    store.follow();
-    const devices = store.data;
-    const setDevices = (change: (list: ViewerDeviceInfo[] | null) => ViewerDeviceInfo[]) => store.set(change(store.data()));
-    const [changeError, setError] = createSignal<string | null>(null);
-    const error = () => changeError() ?? (store.error() && `Couldn't list paired devices: ${store.error()}`);
-    const [revoking, setRevoking] = createSignal<string | null>(null);
-    const [granting, setGranting] = createSignal<string | null>(null);
-
-
-    const revoke = async (device: ViewerDeviceInfo) => {
-        setRevoking(device.device_id);
-        try {
-            await RpcApi.ViewerRevokeCommand(TabRpcClient, { device_id: device.device_id });
-            setDevices((list) => (list ?? []).filter((d) => d.device_id !== device.device_id));
-            setError(null);
-        } catch (e) {
-            setError(`Couldn't revoke ${device.device_name}: ${e instanceof Error ? e.message : e}`);
-        } finally {
-            setRevoking(null);
-        }
-    };
-
-    const setCanSend = async (device: ViewerDeviceInfo, canSend: boolean) => {
-        setGranting(device.device_id);
-        try {
-            const r = await RpcApi.ViewerCanSendCommand(TabRpcClient, { device_id: device.device_id, can_send: canSend });
-            setDevices((list) =>
-                (list ?? []).map((d) => (d.device_id === device.device_id ? { ...d, can_send: r.can_send } : d))
-            );
-            setError(null);
-        } catch (e) {
-            setError(`Couldn't change ${device.device_name}: ${e instanceof Error ? e.message : e}`);
-        } finally {
-            setGranting(null);
-        }
-    };
-
-    const now = () => Date.now();
+    const s = createDevices();
 
     return (
         <div class="settings-section-body">
             <SectionHeader label={DEVICES_SETTINGS.pairedDevices.label} />
-            <div id={`setting-${DEVICES_SETTINGS.pairedDevices.id}`} class="setting-row">
-                <div class="setting-devices-description">{DEVICES_SETTINGS.pairedDevices.description}</div>
-                <Show when={error()}>
-                    <div class="settings-config-error" role="alert">
-                        {error()}
-                    </div>
-                </Show>
-                <Show when={devices()} fallback={<div class="setting-devices-empty">Loading…</div>}>
-                    {(list) => (
-                        <Show
-                            when={list().length > 0}
-                            fallback={
-                                <div class="setting-devices-empty">
-                                    No devices paired. Pair one from the host menu in the status bar (Pair a device).
-                                </div>
-                            }
-                        >
-                            <table class="setting-devices">
-                                <thead>
-                                    <tr>
-                                        <th>Name</th>
-                                        <th>Paired</th>
-                                        <th>Last seen</th>
-                                        <th>Can send</th>
-                                        <th />
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <For each={list()}>
-                                        {(device) => (
-                                            <tr>
-                                                <td class="setting-devices-name">{device.device_name}</td>
-                                                <td>{ago(device.created_ms, now())}</td>
-                                                <td>{device.last_seen_ms > 0 ? ago(device.last_seen_ms, now()) : "never"}</td>
-                                                <td>
-                                                    <Show
-                                                        when={device.has_key}
-                                                        fallback={
-                                                            <span
-                                                                class="setting-devices-muted"
-                                                                {...tip("This device paired before devices had keys. Pair it again to let it send.")}
-                                                            >
-                                                                Pair again
-                                                            </span>
-                                                        }
-                                                    >
-                                                        <Switch
-                                                            checked={device.can_send}
-                                                            disabled={granting() === device.device_id}
-                                                            ariaLabel={`${device.device_name} can send messages`}
-                                                            onChange={(v) => void setCanSend(device, v)}
-                                                        />
-                                                    </Show>
-                                                </td>
-                                                <td>
-                                                    <Button
-                                                        tone="danger"
-                                                        disabled={revoking() === device.device_id}
-                                                        onClick={() => void revoke(device)}
-                                                    >
-                                                        {revoking() === device.device_id ? "Revoking…" : "Revoke"}
-                                                    </Button>
-                                                </td>
-                                            </tr>
-                                        )}
-                                    </For>
-                                </tbody>
-                            </table>
-                        </Show>
-                    )}
-                </Show>
-            </div>
+            <PairedDevices
+                s={s}
+                id={DEVICES_SETTINGS.pairedDevices.id}
+                description={DEVICES_SETTINGS.pairedDevices.description}
+            />
             <SettingRow
                 id={DEVICES_SETTINGS.shareTerminals.id}
                 label={DEVICES_SETTINGS.shareTerminals.label}
