@@ -1,7 +1,7 @@
 # Spec: when something waits on you, you can see what, where, and one click takes you to it
 
 **Date:** 2026-11-05 (task #18210, build #18211). Revised the same day after the operator widened it (section 1).
-**Status:** active — approved; PR 1 (the toast, the one list from the registry and srv's rows, the setting, the sound rule) in #6771. Remaining: the status-bar list and its count (3.6), the shutdown chime and `app:` asks as registry sources (3.8, 3.1), parked agents, Kanban and LAN groups, the 10 s close, Do Not Disturb, the optional recent rows (D7).
+**Status:** active — approved; PR 1 (the toast, the one list from the registry and srv's rows, the setting, the sound rule) in #6773. Remaining: the status-bar list and its count (3.6), the shutdown chime and `app:` asks as registry sources (3.8, 3.1), parked agents, Kanban and LAN groups, the 10 s close, Do Not Disturb, the optional recent rows (D7).
 **Author:** Agent5@narko, for AgentX's lane
 **Scope:** `frontend/app/notification/` (the waiting registry, the sound service, the toast stack), `frontend/app/statusbar/AgentCountsStatus.tsx`, `frontend/app/util/reveal-block.ts`. No new srv route; the build may add a field to an existing event (3.3).
 **Related:** `SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27.md`, `SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md`, `SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md`, `REPORT_AGENT_ATTENTION_CTA_CONTRAST_AND_TONE_2026_10_10.md`, `SPEC_AGENT_COLOR_2026_08_08.md`
@@ -125,7 +125,7 @@ One PR, or two if the status-bar list is large (the toast and the rule first, th
 
 ## 6. What the first PR built, and where it differs
 
-PR 1 (#6771) builds the toast, the merged list (this window's registry plus srv's `waiting_on_user` rows), the setting (3.9) and the sound rule (3.8) except the shutdown chime. Where it differs from the text above, until the list ships:
+PR 1 (#6773) builds the toast, the merged list (this window's registry plus srv's `waiting_on_user` rows), the setting (3.9) and the sound rule (3.8) except the shutdown chime. Where it differs from the text above, until the list ships:
 
 - **The toast stays while the request is open** (a persistent toast with a pin, closed by its X or when the list empties). The 10 s close of 3.6 needs the status-bar entry to keep the row, which is PR 2; closing it earlier now would lose the request.
 - **The pane the person is looking at gets no toast** (their own request is in front of them), and for a pane in another window the toast says "in another window" (srv's rows carry no window name).
