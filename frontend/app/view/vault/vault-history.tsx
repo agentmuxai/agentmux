@@ -44,8 +44,9 @@ export function chainNote(c: VaultChain | undefined): string {
     if (!c) return "";
     if (!c.intact) return `The record has been changed: line ${c.broken_at} — ${c.problem}.`;
     const before = c.before_chain > 0 ? `; ${c.before_chain} older ${c.before_chain === 1 ? "line was" : "lines were"} made before checking began` : "";
+    const older = c.unchained_after > 0 ? ` ${c.unchained_after} ${c.unchained_after === 1 ? "line was" : "lines were"} written without a place in the chain, as an older AgentMux on this computer does; they are not checked.` : "";
     const head = c.head_checked ? "" : " The copy of the newest line kept in the keychain could not be checked, so lines removed from the end would not show.";
-    return `Each line follows the one before it (${c.checked} checked${before}).${head} This is evidence for you, not proof against someone who holds both this computer's database and its keychain.`;
+    return `Each line follows the one before it (${c.checked} checked${before}).${older}${head} This is evidence for you, not proof against someone who holds both this computer's database and its keychain.`;
 }
 
 function HistoryRow(props: { row: VaultActivity; showHost: boolean }): JSX.Element {

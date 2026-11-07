@@ -80,6 +80,7 @@ pub(super) async fn create(arguments: &Value, cx: &ToolCtx<'_>) -> Result<ShellC
             Some(v) => Some(serde_json::from_value(v.clone()).map_err(|_| anyhow::anyhow!("secret_files must be an object of environment variable names to Vault entry ids, e.g. {{\"GOOGLE_APPLICATION_CREDENTIALS\": \"api-key-gcp\"}}"))?),
             None => None,
         },
+        reason: arguments.get("reason").and_then(|v| v.as_str()).map(str::to_string),
         capture: match arguments.get("capture").filter(|v| !v.is_null()) {
             Some(v) => Some(serde_json::from_value(v.clone()).map_err(|e| anyhow::anyhow!("capture is a list of {{\"as\": {{\"kind\", \"label\"}} or {{\"id\"}}, \"from\": {{\"stdout\": \"all\"}} or {{\"json\": \"$.path\"}} or {{\"regex\": \"...(group)...\"}} or {{\"line\": n}}}}: {e}"))?),
             None => None,

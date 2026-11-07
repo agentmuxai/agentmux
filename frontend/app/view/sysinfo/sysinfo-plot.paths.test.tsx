@@ -1,8 +1,6 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-/* eslint-disable @typescript-eslint/no-explicit-any -- the uPlot stand-in and its fake chart hold untyped options */
-
 // The Sysinfo time chart (TimeChart and SingleLinePlot in sysinfo-plot.tsx), path by path, beside
 // sysinfo-plot.render.test.tsx: what it hands uPlot (colours, grid, ticks, fonts, series, cursor), when it
 // draws bare, the time labels at the plot's edges, the y labels drawn over the plot and the fade under them, the tooltip's text and place,
