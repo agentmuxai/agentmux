@@ -152,6 +152,13 @@ function keyLabel(k: KeySpec): string {
     return NAMED_LABEL[k.named ?? ""] ?? k.named ?? "";
 }
 
+/** The token `parseKey` reads back as physical key `code`: a digit or a punctuation character, else null. */
+export function tokenForCode(code: string): string | null {
+    const digit = code.match(/^Digit([0-9])$/);
+    if (digit) return digit[1];
+    return Object.keys(PUNCT_CODE).find((ch) => PUNCT_CODE[ch] === code) ?? null;
+}
+
 /** "Ctrl+Shift+T" elsewhere, "⇧⌘T" on macOS (Apple's modifier order). */
 export function formatKey(spec: string, platform: KeyPlatform): string {
     return spec
