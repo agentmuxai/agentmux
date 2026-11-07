@@ -189,8 +189,13 @@ pub(crate) async fn handle_host_browser_permission(
 /// What the countdown ending unvetoed does: the site may use the camera or microphone for a while,
 /// for each agent that still asks.
 pub(crate) fn grant_after_countdown(_state: &AppState, request_id: &str) -> Result<(), String> {
-    let (mine, rest): (Vec<Ask>, Vec<Ask>) = std::mem::take(&mut *asks()).into_iter().partition(|a| a.request_id == request_id);
-    *asks() = rest;
+    // One lock for the take and the store-back, so an ask filed meanwhile is not overwritten.
+    let mine: Vec<Ask> = {
+        let mut a = asks();
+        let (mine, rest): (Vec<Ask>, Vec<Ask>) = std::mem::take(&mut *a).into_iter().partition(|x| x.request_id == request_id);
+        *a = rest;
+        mine
+    };
     if mine.is_empty() {
         return Err("the permission this request was for is no longer known; ask the page again".to_string());
     }
