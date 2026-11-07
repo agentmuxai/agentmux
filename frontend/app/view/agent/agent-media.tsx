@@ -14,8 +14,9 @@
  * the pane fetch anything.
  */
 
-import type { MarkdownMediaOpts } from "@/app/element/markdown-media";
-import { createContext, useContext, type Accessor, type JSX } from "solid-js";
+import { openMediaInEditor, type MarkdownMediaOpts, type MediaGallery } from "@/app/element/markdown-media";
+import { createContext, createSignal, Show, useContext, type Accessor, type JSX } from "solid-js";
+import { MessageImageLightbox } from "./components/MessageImageLightbox";
 import { AgentDormancyProvider } from "./agent-dormancy";
 import { AgentPaneFilesProvider, type AgentPaneFiles } from "./agent-open-in-editor";
 import { ToolResultLoaderProvider, type ToolResultLoader } from "./tool-result-loader";
@@ -25,8 +26,27 @@ import { isContainerAgentType, isContainerRuntime, parseRuntimeKind } from "@/ut
 const AgentMediaContext = createContext<Accessor<MarkdownMediaOpts | undefined>>(() => undefined);
 
 export function AgentMediaProvider(props: { baseDir: Accessor<string>; children: JSX.Element }): JSX.Element {
-    const media = () => ({ baseDir: props.baseDir() });
-    return <AgentMediaContext.Provider value={media}>{props.children}</AgentMediaContext.Provider>;
+    // The preview that steps through one message's images: one per pane, opened by an image's click.
+    const [gallery, setGallery] = createSignal<MediaGallery>();
+    const media = (): MarkdownMediaOpts => ({ baseDir: props.baseDir(), openGallery: setGallery });
+    return (
+        <AgentMediaContext.Provider value={media}>
+            {props.children}
+            <Show when={gallery()}>
+                {(g) => (
+                    <MessageImageLightbox
+                        items={g().items}
+                        index={g().index}
+                        onClose={() => setGallery(undefined)}
+                        onOpenEditor={(path) => {
+                            setGallery(undefined);
+                            openMediaInEditor(path);
+                        }}
+                    />
+                )}
+            </Show>
+        </AgentMediaContext.Provider>
+    );
 }
 
 export function useAgentMedia(): Accessor<MarkdownMediaOpts | undefined> {

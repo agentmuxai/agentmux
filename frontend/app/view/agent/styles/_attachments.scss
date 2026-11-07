@@ -445,6 +445,11 @@ $gap: 6px;
         }
     }
 
+    // The message image preview's step announcement (MessageImageLightbox.tsx): read, never seen.
+    &__live {
+        @include mixins.sr-only;
+    }
+
     &__missing {
         padding: 40px;
         color: var(--secondary-text-color);
