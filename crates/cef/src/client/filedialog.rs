@@ -12,18 +12,18 @@ use std::sync::Arc;
 
 use cef::*;
 
-/// What the page asked for, in the words the agent is told.
-fn ask_of(mode: FileDialogMode) -> &'static str {
+/// What the page asked for, in the words the agent is told. `None` for a Save As: that is the dialog
+/// a download opens (`downloads.rs` answers `on_before_download` with `show_dialog = true`, and CEF
+/// routes it through this same chooser), which the person answers, so it is never cancelled here.
+fn ask_of(mode: FileDialogMode) -> Option<&'static str> {
     if mode == FileDialogMode::OPEN {
-        "choose a file"
+        Some("choose a file")
     } else if mode == FileDialogMode::OPEN_MULTIPLE {
-        "choose several files"
+        Some("choose several files")
     } else if mode == FileDialogMode::OPEN_FOLDER {
-        "choose a folder"
-    } else if mode == FileDialogMode::SAVE {
-        "pick where to save a file"
+        Some("choose a folder")
     } else {
-        "open a file dialog"
+        None
     }
 }
 
@@ -45,10 +45,10 @@ wrap_dialog_handler! {
             callback: Option<&mut FileDialogCallback>,
         ) -> ::std::os::raw::c_int {
             let (Some(browser), Some(callback)) = (browser, callback) else { return 0 };
+            let Some(ask) = ask_of(mode) else { return 0 };
             let Some((_pane, target)) = super::jsdialog::driven(&self.state, browser) else { return 0 };
             // Cancelled in this call, so the page and the pane never wait on it.
             callback.cancel();
-            let ask = ask_of(mode);
             let title = title.map(|t| t.to_string()).unwrap_or_default();
             let origin = crate::browser_pane::callbacks::main_frame_url(browser);
             tracing::info!(target = %target, ask, "browser pane: a page's file chooser in an agent-driven pane was cancelled");
@@ -67,9 +67,13 @@ mod tests {
 
     #[test]
     fn each_kind_of_chooser_is_named_for_the_agent() {
-        assert_eq!(ask_of(FileDialogMode::OPEN), "choose a file");
-        assert_eq!(ask_of(FileDialogMode::OPEN_MULTIPLE), "choose several files");
-        assert_eq!(ask_of(FileDialogMode::OPEN_FOLDER), "choose a folder");
-        assert_eq!(ask_of(FileDialogMode::SAVE), "pick where to save a file");
+        assert_eq!(ask_of(FileDialogMode::OPEN), Some("choose a file"));
+        assert_eq!(ask_of(FileDialogMode::OPEN_MULTIPLE), Some("choose several files"));
+        assert_eq!(ask_of(FileDialogMode::OPEN_FOLDER), Some("choose a folder"));
+    }
+
+    #[test]
+    fn a_save_as_is_left_to_the_person_because_a_download_opens_one() {
+        assert_eq!(ask_of(FileDialogMode::SAVE), None);
     }
 }

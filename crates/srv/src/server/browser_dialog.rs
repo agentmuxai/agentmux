@@ -226,7 +226,7 @@ fn chooser_message(ask: &str, title: &str) -> String {
 }
 
 /// Why the chooser was cancelled, and what to do. Only a file the agent puts in an input with `set_files`
-/// goes up; a folder or a save has no such door from a pane the agent drives.
+/// goes up; a folder has no such door from a pane the agent drives. (A Save As is never cancelled: a download opens it.)
 fn chooser_reason(ask: &str) -> String {
     if ask == "choose a file" || ask == "choose several files" {
         "AgentMux doesn't open the system file chooser in a pane you drive. Use Browser set_files with the page's file input to attach files from your workspace".to_string()
@@ -417,8 +417,8 @@ mod tests {
         assert_eq!(chooser_message("choose several files", "Upload photos"), "the page asked to choose several files: Upload photos");
         assert!(chooser_reason("choose a file").contains("Browser set_files"));
         assert!(chooser_reason("choose several files").contains("Browser set_files"));
-        let save = chooser_reason("pick where to save a file");
-        assert!(!save.contains("set_files") && save.contains("can't pick where to save a file"), "{save}");
+        let folder = chooser_reason("choose a folder");
+        assert!(!folder.contains("set_files") && folder.contains("can't choose a folder"), "{folder}");
     }
 
     #[test]
