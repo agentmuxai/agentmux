@@ -165,6 +165,7 @@ search onPrev: same
 search onClose: same
 search matchIndex: same
 search matchCount: same
+search searching: same
 > the panels, the preparing row and the shell drawer
 pendingDecisions: same
 pendingQuestions: same

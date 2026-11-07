@@ -91,16 +91,39 @@ describe("createSearchReveal (a search match inside a hidden run, #10718)", () =
         expect(pins()).toEqual(["hidden-run:a"]);
     });
 
-    it("closes again the runs the search opened when it ends, and no others", () => {
+    it("keeps open only the run that holds the current match: stepping on closes the one before", () => {
         const { reveal, pins } = setup(
             [run("hidden-run:a", ["a"]), run("hidden-run:c", ["c"]), run("hidden-run:e", ["e"])],
             ["hidden-run:e", "some-tool"]
         );
         reveal.jumpTo("a");
+        expect(pins()).toEqual(["hidden-run:a", "hidden-run:e", "some-tool"]);
         reveal.jumpTo("c");
-        expect(pins()).toEqual(["hidden-run:a", "hidden-run:c", "hidden-run:e", "some-tool"]);
+        expect(pins()).toEqual(["hidden-run:c", "hidden-run:e", "some-tool"]);
         reveal.release();
         expect(pins()).toEqual(["hidden-run:e", "some-tool"]);
+    });
+
+    it("stepping to another row of the same open run leaves the run open", () => {
+        const { reveal, pins } = setup([run("hidden-run:a", ["a", "b"]), run("hidden-run:c", ["c"])]);
+        reveal.jumpTo("a");
+        reveal.jumpTo("b");
+        expect(pins()).toEqual(["hidden-run:a"]);
+    });
+
+    it("stepping to a row on screen closes the run the search opened for the match before", () => {
+        const { reveal, pins } = setup([run("hidden-run:a", ["a"])]);
+        reveal.jumpTo("a");
+        reveal.jumpTo("on-screen");
+        expect(pins()).toEqual([]);
+    });
+
+    it("a run the person opened stays open while the search steps elsewhere", () => {
+        const { reveal, pins } = setup([run("hidden-run:a", ["a"], true), run("hidden-run:c", ["c"])], ["hidden-run:a"]);
+        reveal.jumpTo("c");
+        expect(pins()).toEqual(["hidden-run:a", "hidden-run:c"]);
+        reveal.jumpTo("on-screen");
+        expect(pins()).toEqual(["hidden-run:a"]);
     });
 
     it("release with nothing opened changes nothing", () => {

@@ -44,6 +44,7 @@ import {
 import { DocumentRow } from "./DocumentRow";
 import { attachOneWayRecorder, noteOneWay, sampleOneWayFrame } from "../scroll/one-way-recorder";
 import { OneWayFlow, scrollTranscriptTo } from "../scroll/one-way-flow";
+import { createNodeSettler, type NodeSettler } from "../scroll/settle-on-node";
 import { createFollowScroll, type FollowScroll } from "../../../scroll/follow-scroll";
 import { createFollowLog, NO_SCROLL_INPUT, type ScrollInput } from "../../../scroll/follow-wiring";
 import { estimateNode, estimateNodeForState, previewCapPx } from "./renderers";
@@ -244,6 +245,8 @@ interface ListState {
     setFillStalled: Setter<boolean>;
     jumpToBottom: (reason?: string) => void;
     scrollToNode: (nodeId: string, offsetPx?: number) => void;
+    /** Lands a jump to a row the list has not measured yet (scroll/settle-on-node.ts); one at a time. */
+    settleNode: NodeSettler | null;
 }
 
 /** What the render needs from the rows hook. */
@@ -269,6 +272,7 @@ function createListState(props: AgentDocumentVirtualListProps): ListState {
         pendingProgrammaticScroll: false,
         pinnedGeometry: null,
         input: NO_SCROLL_INPUT,
+        settleNode: null,
         follow: null,
         stickyFrontierId: null,
         frontierIndexHint: -1,
@@ -812,12 +816,44 @@ function useScrollObservers(props: AgentDocumentVirtualListProps, s: ListState):
     });
 }
 
+/**
+ * A jump to a row outside the window aims by the estimate, then re-aims as the rows near it are measured
+ * (scroll/settle-on-node.ts). The target is read from the layout slice by node id each frame, so rows that arrive
+ * or are measured meanwhile move the aim and not the person's place.
+ */
+function createJumpSettler(props: AgentDocumentVirtualListProps, s: ListState): { start: (nodeId: string) => void } {
+    let target = "";
+    const aimAt = (nodeId: string): number | null => {
+        const row = props.layoutView?.()?.rows[props.viewState.indexOf(nodeId)];
+        if (!row || !s.scrollRef) return null;
+        return Math.max(0, row.start - s.scrollRef.clientHeight / 2 + row.height / 2); // perf:allow-layout-read — a jump the person asked for, at most a few frames
+    };
+    s.settleNode = createNodeSettler({
+        aim: () => aimAt(target),
+        write: (top) => s.scrollRef && scrollTranscriptTo(s.scrollRef, top),
+        userActive: () => s.input.windowOpen() || s.input.pointerHeld(),
+        viewKey: () => `${props.zoomFactor?.() ?? 1}:${s.scrollRef?.clientHeight ?? 0}`, // perf:allow-layout-read — same
+        frame: (cb) => requestAnimationFrame(cb),
+        cancelFrame: (id) => cancelAnimationFrame(id),
+        now: () => performance.now(),
+    });
+    onCleanup(() => s.settleNode?.cancel());
+    return {
+        start: (nodeId) => {
+            target = nodeId;
+            s.settleNode?.start();
+        },
+    };
+}
+
 function useScrollCommands(props: AgentDocumentVirtualListProps, s: ListState): void {
+    const settler = createJumpSettler(props, s);
     // jumpToBottom: forced scroll-to-bottom that re-engages stick.
     // Exposed to parent so AgentFooter can call it on keystroke. `reason`
     // (typing / sent / queued-turn) only feeds the transition log.
     s.jumpToBottom = (reason?: string): void => {
         if (!s.scrollRef) return;
+        s.settleNode?.cancel();
         // "accepted" (a queued message the backend picked up, even mid-turn)
         // is not a jump: it only marks a commit point for the one-way path, and
         // only while following, so a reader scrolled up is never pulled down.
@@ -838,6 +874,7 @@ function useScrollCommands(props: AgentDocumentVirtualListProps, s: ListState): 
         if (!s.scrollRef) return;
         const idx = props.viewState.indexOf(nodeId);
         if (idx < 0) return;
+        s.settleNode?.cancel(); // a newer jump replaces the one still landing
         // Detach first, so no pin can pull the pane back while it scrolls there.
         s.follow?.jumpToNode(nodeId);
         const p = s.partition();
@@ -851,8 +888,11 @@ function useScrollCommands(props: AgentDocumentVirtualListProps, s: ListState): 
             if (row) {
                 const viewportPx = s.scrollRef.clientHeight; // perf:allow-layout-read — user-initiated scrollToNode
                 const center = row.start - viewportPx / 2 + row.height / 2;
-                if (offsetPx == null) scrollTranscriptTo(s.scrollRef, Math.max(0, center), "smooth");
-                else scrollTranscriptTo(s.scrollRef, Math.max(0, row.start + offsetPx));
+                const top = s.scrollRef.scrollTop; // perf:allow-layout-read — user-initiated scrollToNode
+                const onScreen = row.start >= top && row.start + row.height <= top + viewportPx;
+                if (offsetPx != null) scrollTranscriptTo(s.scrollRef, Math.max(0, row.start + offsetPx));
+                else if (onScreen) scrollTranscriptTo(s.scrollRef, Math.max(0, center), "smooth");
+                else settler.start(nodeId);
             }
         } else {
             // Streaming buffer — node is mounted; query DOM and scroll directly.

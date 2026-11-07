@@ -28,6 +28,8 @@ export interface AgentSearchBarProps {
     /** 0-based index of the current match. -1 if no matches. */
     matchIndex: Accessor<number>;
     matchCount: Accessor<number>;
+    /** A pass is taking long enough to say so. */
+    searching?: Accessor<boolean>;
 }
 
 export const AgentSearchBar = (props: AgentSearchBarProps): JSX.Element => {
@@ -43,8 +45,9 @@ export const AgentSearchBar = (props: AgentSearchBarProps): JSX.Element => {
     };
 
     const counterText = () => {
+        if (props.searching?.()) return "Searching…";
         const count = props.matchCount();
-        if (count === 0) return "0 matches";
+        if (count === 0) return "No matches";
         return `${props.matchIndex() + 1} of ${count}`;
     };
 
