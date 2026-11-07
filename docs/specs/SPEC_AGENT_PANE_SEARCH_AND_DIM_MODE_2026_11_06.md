@@ -3,7 +3,7 @@
 **Task:** #27381 (spec); the build is a follow-on task that starts when the operator approves this.
 **Asked by the operator (2026-11-06), in their words:** "lets also add a search for the agent pane, it can be a magnifying glass between the grip and minimize button in the pane header. have it enter a dim mode where only the focused items are undimmed, and as you type into the input box, the search results are undimmed and it lets the user scroll through. since this is virtualized oin the UI, we'd need some sophistiacted workings, lets research latest best practices".
 **Author:** Agent1@narko. **Read on:** `origin/main` (2026-11-06), AgentMux 0.60.x. Builds on #6579 (Ctrl+F opens the hidden run that holds a match), `AgentSearchBar`, `useInSessionSearch` and `search-reveal.ts`.
-**Status:** proposed. Not approved; nothing is built.
+**Status:** active. Approved by the operator 2026-11-07 (all nine decisions as recommended). Build PR 1 (the index, the sliced pass, the settled jump) is in review; PRs 2 to 4 are not started.
 
 ## 1. In one paragraph
 
