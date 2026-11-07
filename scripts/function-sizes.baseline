@@ -454,7 +454,6 @@
 131 frontend/app/view/swarm/swarm-fleet-toolbar.tsx::SuperviseActions
 104 frontend/app/view/swarm/swarm-model.ts::SwarmViewModel::buildTree
 153 frontend/app/view/swarm/swarm-model.ts::SwarmViewModel::constructor
-165 frontend/app/view/swarm/swarm-view.tsx::AgentRow
 129 frontend/app/view/swarm/swarm-view.tsx::SubagentRow
 161 frontend/app/view/sysinfo/sysinfo-focus.tsx::FocusView
 127 frontend/app/view/sysinfo/sysinfo-model.ts::sampleReducer
