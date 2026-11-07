@@ -108,6 +108,12 @@ function entryProblem(e: UserKeybinding, isKnownCommand: (id: string) => boolean
 /** Whether a command outside the table exists (the palette's ids), as the app last told `setUserKeybindings`. */
 let knownCommand: (id: string) => boolean = () => false;
 
+/** Why `entry` would be skipped as an entry of the `keybindings` setting, or null when it would be applied: the
+ *  same check as `setUserKeybindings`, for a list that is not saved yet (an import). */
+export function entryIssue(entry: unknown): string | null {
+    return entryProblem(entry as UserKeybinding, knownCommand);
+}
+
 /**
  * The entries of `entries` the registry would apply: the same check as `setUserKeybindings`, so a list that is
  * not saved yet (Settings, an agent's request) is read exactly as the saved one will be.
