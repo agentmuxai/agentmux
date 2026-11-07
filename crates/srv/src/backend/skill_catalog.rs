@@ -171,10 +171,28 @@ pub async fn download(entry: &CatalogEntry) -> Result<Vec<u8>, String> {
     get(&entry.zip, MAX_ZIP_BYTES).await
 }
 
-/// `1.2.3[-pre][+build]` compared by its numbers; what follows the numbers breaks a tie only by being present.
+/// `1.2.3[-pre][+build]` ordered as semver does: the numbers (a missing one is 0), then a pre-release sorts before
+/// the same release and pre-releases compare part by part (numbers before words); `+build` is ignored.
 fn version_cmp(a: &str, b: &str) -> std::cmp::Ordering {
-    let nums = |v: &str| -> Vec<u64> { v.split(['-', '+']).next().unwrap_or("").split('.').map(|p| p.parse().unwrap_or(0)).collect() };
-    nums(a).cmp(&nums(b))
+    use std::cmp::Ordering;
+    fn split(v: &str) -> (Vec<u64>, Option<&str>) {
+        let core = v.split('+').next().unwrap_or("");
+        let (nums, pre) = core.split_once('-').map_or((core, None), |(n, p)| (n, Some(p)));
+        (nums.split('.').map(|p| p.parse().unwrap_or(0)).collect(), pre)
+    }
+    let ((mut an, ap), (mut bn, bp)) = (split(a), split(b));
+    let len = an.len().max(bn.len());
+    an.resize(len, 0);
+    bn.resize(len, 0);
+    an.cmp(&bn).then_with(|| match (ap, bp) {
+        (None, None) => Ordering::Equal,
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (Some(x), Some(y)) => {
+            let part = |p: &str| p.parse::<u64>().map_or((1, 0, p.to_string()), |n| (0, n, String::new()));
+            x.split('.').map(part).cmp(y.split('.').map(part))
+        }
+    })
 }
 
 /// What Browse lists: each entry with what is installed here (`installed` is `Store::skill_app_map`).

@@ -122,6 +122,22 @@ fn browse_says_what_is_installed_and_whether_the_catalog_is_ahead() {
     assert_eq!(items(vec![changed], &here)[0].state, "changed");
     // "1.10.0" is ahead of "1.9.0": versions compare by number, not as text.
     assert_eq!(version_cmp("1.10.0", "1.9.0"), std::cmp::Ordering::Greater);
+    // A missing number is 0, a pre-release is before its release, and a build tag changes nothing.
+    use std::cmp::Ordering::{Equal, Greater, Less};
+    assert_eq!(version_cmp("1.0", "1.0.0"), Equal);
+    assert_eq!(version_cmp("1.0.0-rc1", "1.0.0"), Less);
+    assert_eq!(version_cmp("1.0.0", "1.0.0-rc1"), Greater);
+    assert_eq!(version_cmp("1.0.0-rc.2", "1.0.0-rc.10"), Less);
+    assert_eq!(version_cmp("1.0.0-1", "1.0.0-alpha"), Less);
+    assert_eq!(version_cmp("1.0.0-rc", "1.0.0-rc.1"), Less);
+    assert_eq!(version_cmp("1.0.0+a", "1.0.0+b"), Equal);
+    // So a catalog 1.0.0 is an update over an installed 1.0.0-rc1 that has other files.
+    let rc = signed_with_script(1, "1.0.0-rc1");
+    let c2 = catalog();
+    c2.skill_upsert_unique_global(&skill_row(&rc)).unwrap();
+    install_checked(&c2, "x", &rc, 1).unwrap();
+    let release = CatalogEntry { version: "1.0.0".into(), hash: "f".repeat(64), ..entry_for(&rc, &zip, 1) };
+    assert_eq!(items(vec![release], &c2.skill_app_map().unwrap())[0].state, "update");
 
     let agentmux = CatalogEntry { publisher_key: PACK_CATALOG_KEYS[0].to_string(), ..entry };
     assert_eq!(items(vec![agentmux], &none)[0].badge, "agentmux");
