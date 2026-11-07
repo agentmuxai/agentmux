@@ -5,7 +5,7 @@
 
 // The Sysinfo time chart (TimeChart and SingleLinePlot in sysinfo-plot.tsx), path by path, beside
 // sysinfo-plot.render.test.tsx: what it hands uPlot (colours, grid, ticks, fonts, series, cursor), when it
-// draws bare, the y axis' width and the time labels at the plot's edge, the tooltip's text and place,
+// draws bare, the time labels at the plot's edges, the y labels drawn over the plot and the fade under them, the tooltip's text and place,
 // when a change is a new chart and when it is only a new size or new data, and what SingleLinePlot passes
 // down. uPlot is a recording stand-in (jsdom has no canvas); colours are tagged so they can be read back.
 
@@ -14,6 +14,7 @@ import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const made = vi.hoisted(() => ({ charts: [] as any[] }));
+const fadeLeftEnd = vi.hoisted(() => vi.fn());
 
 vi.mock("uplot", () => {
     class FakeUPlot {
@@ -51,6 +52,7 @@ vi.mock("./sysinfo-chart", async (orig) => {
     const real = await orig<typeof import("./sysinfo-chart")>();
     return {
         ...real,
+        fadeLeftEnd: fadeLeftEnd,
         resolveCssColor: (_el: Element, c: string) => `R(${c})`,
         withAlpha: (c: string, a: number) => `A(${c},${a})`,
     };
@@ -80,6 +82,7 @@ class RecordingObserver {
 }
 
 beforeEach(() => {
+    fadeLeftEnd.mockClear();
     made.charts.length = 0;
     observers.length = 0;
     vi.useFakeTimers();
@@ -125,7 +128,6 @@ function mountChart(init: Extra = {}, size: [number, number] | null = [600, 200]
     const [intervalSecs, setIntervalSecs] = createSignal(init.intervalSecs ?? 1);
     const [timeAxis, setTimeAxis] = createSignal(init.timeAxis);
     const [yLabels, setYLabels] = createSignal(init.yLabels);
-    const [axisWidth, setAxisWidth] = createSignal(init.axisWidth);
     const [zoom, setZoom] = createSignal(zoomStart);
     const yRangeFn = init.yRange ?? vi.fn(() => [3, 9] as [number, number]);
     const result = render(() => (
@@ -142,8 +144,6 @@ function mountChart(init: Extra = {}, size: [number, number] | null = [600, 200]
                 sparkline={init.sparkline}
                 timeAxis={timeAxis()}
                 yLabels={yLabels()}
-                axisWidth={axisWidth()}
-                onAxisWidth={init.onAxisWidth}
                 top={init.top}
                 title={init.title}
                 class={init.class}
@@ -155,120 +155,9 @@ function mountChart(init: Extra = {}, size: [number, number] | null = [600, 200]
         ...result,
         yRangeFn,
         root: result.container.querySelector(".sysinfo-chart") as HTMLElement,
-        set: { setSeries, setPlotData, setTargetLen, setIntervalSecs, setTimeAxis, setYLabels, setAxisWidth, setZoom },
+        set: { setSeries, setPlotData, setTargetLen, setIntervalSecs, setTimeAxis, setYLabels, setZoom },
     };
 }
-
-describe("TimeChart: the y axis' width", () => {
-    const axis = (extra: object = {}) => ({
-        ticks: { size: 3 },
-        gap: 5,
-        font: ["12px a", "13px b"],
-        _size: 77,
-        ...extra,
-    });
-    const selfWith = (a: object, measure: (t: string) => number) => ({
-        axes: [{}, a],
-        ctx: { font: "", measureText: vi.fn((t: string) => ({ width: measure(t) })) },
-    });
-
-    function ySize(min = 0, onWidth: (w: number) => void = () => {}) {
-        mountChart({ axisWidth: min, onAxisWidth: onWidth });
-        return last().opts.axes[1].size as (...a: any[]) => number;
-    }
-
-    it("is the tick, the gap and the widest label at the device's pixel ratio, rounded up", () => {
-        vi.stubGlobal("devicePixelRatio", 2);
-        const size = ySize();
-        const self = selfWith(axis(), () => 12.6);
-        // 3 + 5 + 12.6 / 2 = 14.3
-        expect(size(self, ["0%", "100%"], 1, 0)).toBe(15);
-        expect(self.ctx.font).toBe("12px a");
-    });
-
-    it("measures the first of the longest labels", () => {
-        vi.stubGlobal("devicePixelRatio", 1);
-        const size = ySize();
-        const self = selfWith(axis({ ticks: { size: 0 }, gap: 0 }), (t) => (t === "ab" ? 10 : 20));
-        expect(size(self, ["a", "ab", "cd"], 1, 0)).toBe(10);
-        expect(self.ctx.measureText).toHaveBeenCalledTimes(1);
-    });
-
-    it("measures nothing when there are no labels, and takes a missing tick or gap as 0", () => {
-        vi.stubGlobal("devicePixelRatio", 1);
-        const size = ySize();
-        const self = selfWith({ font: ["12px a"] }, () => 99);
-        expect(size(self, null, 1, 0)).toBe(0);
-        expect(size(self, [], 1, 0)).toBe(0);
-        expect(size(self, [""], 1, 0)).toBe(0);
-        expect(self.ctx.measureText).not.toHaveBeenCalled();
-        expect(self.ctx.font).toBe("");
-    });
-
-    it("adds the tick and the gap to what the labels need", () => {
-        vi.stubGlobal("devicePixelRatio", 1);
-        const size = ySize();
-        expect(
-            size(
-                selfWith(axis({ ticks: { size: 3 }, gap: 5 }), () => 10),
-                ["x"],
-                1,
-                0
-            )
-        ).toBe(18);
-        expect(
-            size(
-                selfWith({ font: ["f"], ticks: { size: 3 } }, () => 10),
-                ["x"],
-                1,
-                0
-            )
-        ).toBe(13);
-        expect(
-            size(
-                selfWith({ font: ["f"], gap: 5 }, () => 10),
-                ["x"],
-                1,
-                0
-            )
-        ).toBe(15);
-    });
-
-    it("takes its column's width when that is wider, and reports its own", async () => {
-        vi.stubGlobal("devicePixelRatio", 1);
-        const reported: number[] = [];
-        const wide = ySize(50, (w) => reported.push(w));
-        const self = selfWith(axis({ ticks: { size: 0 }, gap: 0 }), () => 12.6);
-        expect(wide(self, ["x"], 1, 0)).toBe(50);
-        expect(reported).toEqual([]);
-        await Promise.resolve();
-        // Reported rounded up, not as measured.
-        expect(reported).toEqual([13]);
-    });
-
-    it("keeps its own width when that is wider than its column's", () => {
-        vi.stubGlobal("devicePixelRatio", 1);
-        const size = ySize(5);
-        expect(
-            size(
-                selfWith(axis({ ticks: { size: 0 }, gap: 0 }), () => 12.6),
-                ["x"],
-                1,
-                0
-            )
-        ).toBe(13);
-    });
-
-    it("reuses the size it found once uPlot has passed the first cycles", () => {
-        vi.stubGlobal("devicePixelRatio", 1);
-        const size = ySize();
-        const self = selfWith(axis(), () => 10);
-        expect(size(self, ["x"], 1, 1)).toBe(18);
-        expect(size(self, ["x"], 1, 2)).toBe(77);
-        expect(size(self, ["x"], 1, 3)).toBe(77);
-        expect(self.ctx.measureText).toHaveBeenCalledTimes(1);
-    });
-});
 
 describe("TimeChart: the time labels at the plot's edge", () => {
     const T = new Date(2026, 9, 13, 8, 52, 30).getTime() / 1000;
@@ -295,10 +184,22 @@ describe("TimeChart: the time labels at the plot's edge", () => {
         expect(at(90)[0]).toBe("");
     });
 
+    it("keeps a label that starts exactly at the left edge, less the 1px inset, and blanks the next pixel", () => {
+        const at = (px: number) =>
+            labels(
+                area(200, (_v, s) => (s === "x" ? px : -1000)),
+                [T]
+            );
+        // 11 - 10 - 1 = 0.
+        expect(at(11)[0]).not.toBe("");
+        cleanup();
+        expect(at(10)[0]).toBe("");
+    });
+
     it("measures where a tick is, along x, for each tick", () => {
         const out = labels(
             area(200, (v, s) => (s === "x" ? (v - T) * 10 : -1000)),
-            [T, T + 9.5]
+            [T + 3, T + 9.5]
         );
         expect(out[0]).not.toBe("");
         expect(out[1]).toBe("");
@@ -326,11 +227,9 @@ describe("TimeChart: what it hands uPlot", () => {
         const muted = "R(var(--grey-text-color))";
         expect(x.stroke).toBe(muted);
         expect(y.stroke).toBe(muted);
-        for (const a of [x, y]) {
-            expect(a.grid).toEqual({ stroke: `A(${muted},0.25)`, width: 1 });
-            expect(a.ticks).toEqual({ stroke: `A(${muted},0.4)`, width: 1, size: 3 });
-            expect(a.gap).toBe(3);
-        }
+        for (const a of [x, y]) expect(a.grid).toEqual({ stroke: `A(${muted},0.25)`, width: 1 });
+        expect(x.ticks).toEqual({ stroke: `A(${muted},0.4)`, width: 1, size: 3 });
+        expect(x.gap).toBe(3);
     });
 
     it("sets the axis font from the zoom and the pane's font family, or sans-serif without one", () => {
@@ -438,17 +337,9 @@ describe("TimeChart: what it hands uPlot", () => {
         expect(opts.padding).toBeUndefined();
     });
 
-    it("pads the top for the top label and the left by the text inset, and nothing on the right", () => {
+    it("pads the top for the top label, and nothing on the left or the right", () => {
         mountChart();
-        expect(last().opts.padding).toEqual([7, 0, null, 1]);
-    });
-
-    it("draws the y labels with the axis format if there is one, else the tooltip's, and never a minus sign", () => {
-        mountChart({ axisFormat: (v) => `${v}a` });
-        expect(last().opts.axes[1].values(null, [-2, 0, 3])).toEqual(["2a", "0a", "3a"]);
-        cleanup();
-        mountChart();
-        expect(last().opts.axes[1].values(null, [-2, 3])).toEqual(["2u", "3u"]);
+        expect(last().opts.padding).toEqual([7, 0, null, 0]);
     });
 
     it("sizes the time axis for labels only if it has them", () => {
@@ -461,27 +352,161 @@ describe("TimeChart: what it hands uPlot", () => {
         expect(last().opts.axes[0].values({ bbox: { width: 0 } }, [1, 2], 0, 80, 1)).toEqual(["", ""]);
     });
 
-    it("has a y axis as wide as its labels, and only ticks when it has no labels", () => {
+    it("has a y axis with no width, no gap and no ticks, that only draws the grid and writes no labels", () => {
         mountChart();
-        expect(typeof last().opts.axes[1].size).toBe("function");
+        const y = last().opts.axes[1];
+        expect(y).toMatchObject({ size: 0, gap: 0, ticks: { show: false }, stroke: "R(var(--grey-text-color))" });
+        expect(y.grid).toEqual({ stroke: "A(R(var(--grey-text-color)),0.25)", width: 1 });
+        expect(y.values(null, [0, 50])).toEqual(["", ""]);
+    });
+});
+
+/** Just enough of a uPlot instance for the labels drawn over the plot. */
+function fakeU(over: { min?: number; max?: number } = {}) {
+    return {
+        ctx: { font: "", measureText: vi.fn((t: string) => ({ width: t.length * 10 + 1 })) },
+        axes: [{ font: ["12px x"] }, { font: ["13px y"] }],
+        scales: { y: { min: over.min, max: over.max } },
+        over: { offsetTop: 4 },
+        bbox: { left: 0, top: 0, width: 100, height: 100 },
+        valToPos: vi.fn((v: number, s: string) => (s === "y" ? 100 - v : 999)),
+    };
+}
+
+describe("TimeChart: the y labels over the plot", () => {
+    const WIDTH_VAR = "--sysinfo-ylabel-w";
+
+    function labelled(init: Extra = {}, size: [number, number] | null = [600, 200]) {
+        const mounted = mountChart(init, size);
+        const chart = last();
+        const yaxis = mounted.root.querySelector(".sysinfo-chart-yaxis") as HTMLElement;
+        const draw = (u = fakeU({ min: 0, max: 100 })) => chart.opts.hooks.draw[0](u);
+        const ticks = (splits: number[]) => chart.opts.axes[1].values(null, splits);
+        const shown = () => [...yaxis.children] as HTMLElement[];
+        return { ...mounted, chart, yaxis, draw, ticks, shown };
+    }
+
+    it("draws a label for each tick the axis reported, in the format, over the plot", () => {
+        const { ticks, draw, shown, yaxis } = labelled();
+        ticks([0, 50, 100]);
+        draw();
+        expect(shown().map((e) => e.textContent)).toEqual(["0u", "50u", "100u"]);
+        expect(shown().every((e) => e.className === "sysinfo-chart-ylabel")).toBe(true);
+        expect(yaxis.className).toBe("sysinfo-chart-yaxis");
+    });
+
+    it("puts each at its value, below the chart's top, and the lowest above its line", () => {
+        const { ticks, draw, shown } = labelled();
+        ticks([0, 50, 100]);
+        draw();
+        // 4 (the plot's top) + 100 - value.
+        expect(shown().map((e) => e.style.top)).toEqual(["104px", "54px", "4px"]);
+        expect(shown().map((e) => e.style.transform)).toEqual([
+            "translateY(-100%)",
+            "translateY(-50%)",
+            "translateY(-50%)",
+        ]);
+    });
+
+    it("uses the axis format if there is one, and never writes a minus sign", () => {
+        const { ticks, draw, shown } = labelled({ axisFormat: (v) => `${v}a` });
+        ticks([-20, 0, 20]);
+        draw(fakeU({ min: -20, max: 20 }));
+        expect(shown().map((e) => e.textContent)).toEqual(["20a", "0a", "20a"]);
         cleanup();
-        mountChart({ yLabels: false });
-        expect(last().opts.axes[1].size).toBe(4);
-        expect(last().opts.axes[1].values(null, [1, 2])).toEqual(["", ""]);
+        const plain = labelled();
+        plain.ticks([-20, 0, 20]);
+        plain.draw(fakeU({ min: -20, max: 20 }));
+        expect(plain.shown().map((e) => e.textContent)).toEqual(["20u", "0u", "20u"]);
     });
 
-    it("lets its column set the least width of the y axis", () => {
-        vi.stubGlobal("devicePixelRatio", 1);
-        mountChart({ axisWidth: 50 });
-        const self = { axes: [{}, { font: ["f"] }], ctx: { font: "", measureText: () => ({ width: 5 }) } };
-        expect(last().opts.axes[1].size(self, ["x"], 1, 0)).toBe(50);
+    it("draws only the ticks inside the scale, and reads a scale with no limits as 0 to 1", () => {
+        const { ticks, draw, shown } = labelled();
+        ticks([0, 50, 100]);
+        draw(fakeU({ min: 10, max: 60 }));
+        expect(shown().map((e) => e.textContent)).toEqual(["50u"]);
+        expect(shown()[0].style.transform).toBe("translateY(-100%)");
+        ticks([0, 1, 5]);
+        draw(fakeU());
+        expect(shown().map((e) => e.textContent)).toEqual(["0u", "1u"]);
     });
 
-    it("is as wide as its labels when its column asks for nothing", () => {
-        vi.stubGlobal("devicePixelRatio", 1);
-        mountChart();
-        const self = { axes: [{}, { font: ["f"] }], ctx: { font: "", measureText: () => ({ width: 5 }) } };
-        expect(last().opts.axes[1].size(self, ["x"], 1, 0)).toBe(5);
+    it("measures in the y axis' font, and fades the plot's left end past the widest label", () => {
+        const { ticks, draw } = labelled();
+        ticks([0, 50, 100]);
+        const u = fakeU({ min: 0, max: 100 });
+        draw(u);
+        expect(u.ctx.font).toBe("13px y");
+        // The widest is "100u": 41px at a pixel ratio of 2 is 20.5; plus the 1px inset and 8px of fade, in canvas pixels.
+        expect(fadeLeftEnd).toHaveBeenCalledTimes(1);
+        expect(fadeLeftEnd).toHaveBeenCalledWith(u, (20.5 + 1 + 8) * 2);
+    });
+
+    it("tells the chart how wide its labels are, so the title keeps to their right", () => {
+        const { ticks, draw, root } = labelled();
+        ticks([0, 50, 100]);
+        draw();
+        // ceil(20.5) + the 1px inset.
+        expect(root.style.getPropertyValue(WIDTH_VAR)).toBe("22px");
+    });
+
+    it("draws nothing before the axis has reported its ticks", () => {
+        const { draw, shown, root } = labelled();
+        root.style.setProperty(WIDTH_VAR, "9px");
+        draw();
+        expect(shown()).toHaveLength(0);
+        expect(root.style.getPropertyValue(WIDTH_VAR)).toBe("");
+        expect(fadeLeftEnd).not.toHaveBeenCalled();
+    });
+
+    it("clears its labels and its width when no tick is left inside the scale", () => {
+        const { ticks, draw, shown, root } = labelled();
+        ticks([0, 50, 100]);
+        draw();
+        expect(shown()).toHaveLength(3);
+        draw(fakeU({ min: 200, max: 300 }));
+        expect(shown()).toHaveLength(0);
+        expect(root.style.getPropertyValue(WIDTH_VAR)).toBe("");
+        expect(fadeLeftEnd).toHaveBeenCalledTimes(1);
+    });
+
+    it("replaces its labels each time, not adds to them", () => {
+        const { ticks, draw, shown } = labelled();
+        ticks([0, 50, 100]);
+        draw();
+        draw();
+        expect(shown()).toHaveLength(3);
+    });
+
+    it("draws none when it has no y labels, even with ticks reported", () => {
+        const { ticks, draw, shown, root } = labelled({ yLabels: false });
+        root.style.setProperty(WIDTH_VAR, "9px");
+        ticks([0, 50, 100]);
+        draw();
+        expect(shown()).toHaveLength(0);
+        expect(root.style.getPropertyValue(WIDTH_VAR)).toBe("");
+        expect(fadeLeftEnd).not.toHaveBeenCalled();
+    });
+
+    it("draws none once the chart goes bare, though the ticks it reported are still known", async () => {
+        const { ticks, root, yaxis } = labelled();
+        ticks([0, 50, 100]);
+        await vi.advanceTimersByTimeAsync(150);
+        layout(600, 30);
+        const bare = last();
+        expect(bare.opts.axes).toEqual([{ show: false }, { show: false }]);
+        root.style.setProperty(WIDTH_VAR, "9px");
+        bare.opts.hooks.draw[0](fakeU({ min: 0, max: 100 }));
+        expect(yaxis.children).toHaveLength(0);
+        expect(root.style.getPropertyValue(WIDTH_VAR)).toBe("");
+        expect(fadeLeftEnd).not.toHaveBeenCalled();
+    });
+
+    it("draws none on a sparkline", () => {
+        const { draw, shown } = labelled({ sparkline: true });
+        draw();
+        expect(shown()).toHaveLength(0);
+        expect(fadeLeftEnd).not.toHaveBeenCalled();
     });
 });
 
@@ -528,24 +553,6 @@ describe("TimeChart: when it draws bare", () => {
         layout(600, 200);
         expect(made.charts).toHaveLength(1);
         expect(last().sizes).toEqual([]);
-    });
-
-    it("says it has no y labels when it is bare, or has none, so a column isn't kept wide", async () => {
-        const reported: number[] = [];
-        mountChart({ onAxisWidth: (w) => reported.push(w) }, [600, 30]);
-        expect(reported).toEqual([]);
-        await Promise.resolve();
-        expect(reported).toEqual([0]);
-        cleanup();
-        reported.length = 0;
-        mountChart({ onAxisWidth: (w) => reported.push(w), yLabels: false });
-        await Promise.resolve();
-        expect(reported).toEqual([0]);
-        cleanup();
-        reported.length = 0;
-        mountChart({ onAxisWidth: (w) => reported.push(w) });
-        await Promise.resolve();
-        expect(reported).toEqual([]);
     });
 });
 
@@ -726,7 +733,6 @@ describe("TimeChart: a new chart or new data", () => {
         expect(last().opts.axes[0].size).toBe(4);
         set.setYLabels(false);
         expect(made.charts).toHaveLength(3);
-        expect(last().opts.axes[1].size).toBe(4);
         set.setZoom(1.5);
         expect(made.charts).toHaveLength(4);
         expect(last().opts.axes[0].font).toMatch(/^18px /);
@@ -763,14 +769,6 @@ describe("TimeChart: a new chart or new data", () => {
         set.setIntervalSecs(2);
         expect(last().setDataCalls).toHaveLength(2);
         expect(last().opts.scales.x.range()).toEqual([(BASE + 1000) / 1000 - 200, (BASE + 1000) / 1000]);
-        expect(made.charts).toHaveLength(1);
-    });
-
-    it("lays its axes out again when its column's y-axis width changes, keeping the paths", () => {
-        const { set } = mountChart({ axisWidth: 10 });
-        expect(last().redraws).toEqual([]);
-        set.setAxisWidth(40);
-        expect(last().redraws).toEqual([[false, true]]);
         expect(made.charts).toHaveLength(1);
     });
 });
@@ -851,8 +849,7 @@ describe("SingleLinePlot", () => {
         expect(last().opts.series[1].width).toBe(1.5);
     });
 
-    it("passes down its window, its crosshair key, its layout and its class", async () => {
-        const reported: number[] = [];
+    it("passes down its window, its crosshair key, its layout and its class", () => {
         const { root } = plot({
             targetLen: 100,
             intervalSecs: 2,
@@ -860,23 +857,21 @@ describe("SingleLinePlot", () => {
             timeAxis: false,
             yLabels: false,
             top: true,
-            axisWidth: 33,
-            onAxisWidth: (w) => reported.push(w),
         });
         const { opts } = last();
         expect(opts.scales.x.range()).toEqual([(BASE + 1000) / 1000 - 200, (BASE + 1000) / 1000]);
         expect(opts.cursor.sync.key).toBe("sk");
         expect(opts.axes[0].size).toBe(4);
-        expect(opts.axes[1].size).toBe(4);
+        opts.axes[1].values(null, [0, 50]);
+        opts.hooks.draw[0](fakeU({ min: 0, max: 100 }));
+        expect(root.querySelectorAll(".sysinfo-chart-ylabel")).toHaveLength(0);
         expect(root).toHaveClass("sysinfo-chart--top", "sysinfo-grid-chart");
-        await Promise.resolve();
-        expect(reported).toEqual([0]);
     });
 
-    it("passes down its column's y-axis width", () => {
-        vi.stubGlobal("devicePixelRatio", 1);
-        plot({ axisWidth: 90 });
-        const self = { axes: [{}, { font: ["f"] }], ctx: { font: "", measureText: () => ({ width: 5 }) } };
-        expect(last().opts.axes[1].size(self, ["x"], 1, 0)).toBe(90);
+    it("draws its y labels unless told not to", () => {
+        const { root } = plot();
+        last().opts.axes[1].values(null, [0, 50]);
+        last().opts.hooks.draw[0](fakeU({ min: 0, max: 100 }));
+        expect(root.querySelectorAll(".sysinfo-chart-ylabel")).toHaveLength(2);
     });
 });
