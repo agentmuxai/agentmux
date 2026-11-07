@@ -185,7 +185,7 @@ async fn run_request_value(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String
     if r.is_empty() || kind.is_empty() || label.is_empty() {
         anyhow::bail!("request_value needs ref, kind (e.g. ssn) and label (what the value is, e.g. \"Alex's SSN\")");
     }
-    vault_fill(cx, auth, pane_arg(arguments), &r, VaultSource::Typed { kind: &kind, label: &label }).await
+    vault_fill(cx, auth, pane_arg(arguments), &r, VaultSource::Typed { kind: &kind, label: &label }, None).await
 }
 
 /// `signin`: a saved sign-in typed into the page's sign-in form, once the person says yes.
@@ -193,7 +193,7 @@ async fn run_signin(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     let ToolCtx { local_url, auth_key, block_id, .. } = *cx;
     require_agent_env(local_url, auth_key, block_id)?;
     let auth = sign_ui_automation_auth()?;
-    browser_signin(cx, auth, pane_arg(arguments), arguments.get("entry").and_then(Value::as_str)).await
+    browser_signin(cx, auth, pane_arg(arguments), arguments.get("entry").and_then(Value::as_str), arguments.get("reason").and_then(Value::as_str)).await
 }
 
 /// `capture`: a secret the page shows once goes into the Vault, read by the host.
@@ -225,7 +225,7 @@ async fn run_act(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<Stri
         if action != "fill" || text.is_some() {
             anyhow::bail!("vault is for fill, and instead of text: give one or the other");
         }
-        return vault_fill(cx, auth, pane_arg(arguments), &r, VaultSource::Entry(&vault)).await;
+        return vault_fill(cx, auth, pane_arg(arguments), &r, VaultSource::Entry(&vault), arguments.get("reason").and_then(Value::as_str)).await;
     }
     let option = arguments.get("option").and_then(|v| v.as_str()).map(str::to_string);
     let checked = arguments.get("checked").and_then(|v| v.as_bool());
@@ -1030,13 +1030,14 @@ async fn vault_fill(
     pane: Option<String>,
     r: &str,
     source: VaultSource<'_>,
+    reason: Option<&str>,
 ) -> Result<String> {
     let what = match &source {
         VaultSource::Entry(_) => "from the Vault",
         VaultSource::Typed { .. } => "with a value the person types",
     };
     let body = match source {
-        VaultSource::Entry(v) => json!({ "auth": auth, "pane": pane, "ref": r, "vault": v }),
+        VaultSource::Entry(v) => json!({ "auth": auth, "pane": pane, "ref": r, "vault": v, "reason": reason }),
         VaultSource::Typed { kind, label } => json!({ "auth": auth, "pane": pane, "ref": r, "request_kind": kind, "request_label": label }),
     };
     let url = format!("{}/api/v1/ui/browser/vault_fill", cx.local_url.trim_end_matches('/'));
@@ -1061,7 +1062,7 @@ async fn vault_fill(
 
 async fn browser_capture(cx: &ToolCtx<'_>, auth: agentmux_common::api_types::UiAutomationAuth, pane: Option<String>, arguments: &Value) -> Result<String> {
     let mut body = json!({ "auth": auth, "pane": pane });
-    for k in ["ref", "as", "entry", "download"] {
+    for k in ["ref", "as", "entry", "download", "reason"] {
         if let Some(v) = arguments.get(k).filter(|v| !v.is_null()) {
             body[k] = v.clone();
         }
@@ -1090,8 +1091,8 @@ async fn browser_capture(cx: &ToolCtx<'_>, auth: agentmux_common::api_types::UiA
     Ok(capture_text(&body))
 }
 
-async fn browser_signin(cx: &ToolCtx<'_>, auth: agentmux_common::api_types::UiAutomationAuth, pane: Option<String>, entry: Option<&str>) -> Result<String> {
-    let body = json!({ "auth": auth, "pane": pane, "entry": entry });
+async fn browser_signin(cx: &ToolCtx<'_>, auth: agentmux_common::api_types::UiAutomationAuth, pane: Option<String>, entry: Option<&str>, reason: Option<&str>) -> Result<String> {
+    let body = json!({ "auth": auth, "pane": pane, "entry": entry, "reason": reason });
     let url = format!("{}/api/v1/ui/browser/signin", cx.local_url.trim_end_matches('/'));
     // The first sign-in with an entry waits for the person.
     let resp = cx

@@ -82,6 +82,7 @@ export function PlainStrip(props: Part): JSX.Element {
                 >
                     <span>
                         Driven by <b>{p.agent}</b>
+                        {model.tookControlAtom() ? " (took control)" : ""}
                     </span>
                 </Show>
                 <Show when={model.allowedOriginsAtom().length > 0}>

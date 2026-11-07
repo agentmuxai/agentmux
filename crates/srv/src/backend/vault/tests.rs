@@ -176,7 +176,7 @@ fn a_reveal_of_a_missing_part_or_an_unknown_use_is_refused() {
 }
 
 fn gen(kind: &str, label: &str) -> GenerateRequest {
-    GenerateRequest { kind: kind.into(), label: label.into(), why: "deploy key for the staging site".into(), fields: BTreeMap::new(), rules: Default::default(), expires: None, vault: None }
+    GenerateRequest { kind: kind.into(), label: label.into(), why: "deploy key for the staging site".into(), reason: None, fields: BTreeMap::new(), rules: Default::default(), expires: None, vault: None }
 }
 
 #[test]
@@ -195,7 +195,8 @@ fn generate_makes_an_entry_whose_value_nobody_was_given() {
     let rows = activity(&s, 10).unwrap();
     let line = rows.iter().find(|r| r.action == "generated").unwrap();
     assert_eq!(line.actor, "Agent2-6");
-    assert_eq!(line.target, "deploy key for the staging site");
+    assert_eq!(line.reason, "deploy key for the staging site");
+    assert!(line.target.contains("20 characters"), "{}", line.target);
     assert!(rows.iter().all(|r| !format!("{r:?}").contains(value.as_str())));
 }
 

@@ -8,7 +8,9 @@
 
 use serde::{Deserialize, Serialize};
 pub use crate::agent_create_types::{ContainerAsk, CreateAgentRequest, RouteAsk, SpawnAgentRequest, SpawnManyRequest, SpawnWorkerSpec};
-pub use crate::browser_control_types::{UiBrowserHandoffStatusRequest, UiBrowserRetakeRequest};
+pub use crate::browser_control_types::{
+    UiBrowserHandoffStatusRequest, UiBrowserReleaseRequest, UiBrowserRetakeRequest, UiBrowserTakeControlRequest,
+};
 use std::collections::HashMap;
 
 fn is_zero(n: &usize) -> bool {
@@ -82,6 +84,11 @@ pub struct ShellCreateRequest {
     /// output is withheld whole. Needs `auth`; works over any `connection`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub capture: Option<Vec<CaptureRule>>,
+    /// Why the command takes, or stores a value in, the Vault: one line of 8 to 300 characters, required with
+    /// `secrets`, `stdin_secret`, `secret_files` or `capture`. The person sees it in the approval ("<agent> says"),
+    /// and it is kept in the entry's history. It is the agent's own claim and decides nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 /// One value `Terminal` `run` takes out of a command's output into the Vault
@@ -1376,6 +1383,7 @@ mod app_api_manifest_contract_tests {
             stdin_secret: Some("api-key-x".to_string()),
             secret_files: Some(Default::default()),
             capture: Some(Vec::new()),
+            reason: Some("why".to_string()),
         };
         let value = serde_json::to_value(&instance).expect("must serialize");
         let struct_fields: HashSet<String> =

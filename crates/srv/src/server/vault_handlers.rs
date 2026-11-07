@@ -487,6 +487,9 @@ pub(crate) struct RequestBody {
     label: String,
     #[serde(default)]
     why: String,
+    /// Why the agent needs it (`why` is the same thing, as it was called): required.
+    #[serde(default)]
+    reason: Option<String>,
     /// The asking agent's signed identity: a name in the body proves nothing.
     #[serde(default)]
     auth: Option<agentmux_common::api_types::UiAutomationAuth>,
@@ -538,6 +541,11 @@ pub(crate) async fn handle_vault_request(State(state): State<AppState>, Json(bod
     if label.is_empty() {
         return error(StatusCode::BAD_REQUEST, "a request needs a label: what the entry is, e.g. \"Stripe test key\"");
     }
+    // The agent says why, before anything is opened for the person.
+    let reason = match vault::history::require_reason(body.reason.as_deref().filter(|r| !r.trim().is_empty()).or(Some(body.why.as_str()))) {
+        Ok(r) => r,
+        Err(e) => return error(StatusCode::BAD_REQUEST, e),
+    };
     let (agent, pane) = asking_agent(&state, body.auth.as_ref());
     let vault_id = match body.vault.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
         None => String::new(),
@@ -558,7 +566,7 @@ pub(crate) async fn handle_vault_request(State(state): State<AppState>, Json(bod
         agent: agent.clone(),
         kind: body.kind.clone(),
         label: label.clone(),
-        why: body.why.trim().chars().take(500).collect(),
+        why: reason.clone(),
         requested_ms: agentmux_common::time::now_ms_u64(),
         block_id: super::vault_ask::shown_pane(&state, pane.as_deref().unwrap_or("")),
     };

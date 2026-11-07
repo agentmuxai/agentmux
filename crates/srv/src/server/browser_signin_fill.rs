@@ -139,7 +139,7 @@ fn set_meta(state: &AppState, block_id: &str, value: Value) {
 /// it into the page, if the page still shows a form for the site it is saved for.
 pub(crate) async fn fill(state: &AppState, block_id: &str, entry: &str) -> Result<(), String> {
     let profile = super::browser_signin_offer::profile_of(state, block_id).ok_or("this tab keeps no sign-ins (Incognito)")?;
-    fill_as(state, block_id, entry, &profile, crate::backend::vault::PERSON, None).await.map(|_| ())
+    fill_as(state, block_id, entry, &profile, crate::backend::vault::PERSON, None, "").await.map(|_| ())
 }
 
 /// Type sign-in `entry` of `profile` into pane `block_id`'s page, if the page
@@ -148,7 +148,7 @@ pub(crate) async fn fill(state: &AppState, block_id: &str, entry: &str) -> Resul
 /// `shown`: for an agent's sign-in, the entry's `created_at` and site the person
 /// approved. Nothing is typed if the entry was made again with its id, or its
 /// site was edited, while they were asked.
-pub(crate) async fn fill_as(state: &AppState, block_id: &str, entry: &str, profile: &str, actor: &str, shown: Option<(i64, String)>) -> Result<(String, bool), String> {
+pub(crate) async fn fill_as(state: &AppState, block_id: &str, entry: &str, profile: &str, actor: &str, shown: Option<(i64, String)>, reason: &str) -> Result<(String, bool), String> {
     let origins = form_origins(block_id);
     let (store, id, profile) = (state.identity_store.clone(), entry.to_string(), profile.to_string());
     let (origin, username, password, label) = tokio::task::spawn_blocking(move || {
@@ -173,7 +173,10 @@ pub(crate) async fn fill_as(state: &AppState, block_id: &str, entry: &str, profi
     let typed = super::ui_handlers::proxy_value(state, "signin_fill", body, HOST_WAIT).await;
     drop(password);
     let outcome = if typed.is_ok() { "done" } else { "failed" };
-    crate::backend::vault::record(&state.identity_store, entry, &label, actor, signins::SIGNED_IN, &origin, outcome);
+    crate::backend::vault::record_line(
+        &state.identity_store,
+        crate::backend::vault::Line { entry_id: entry, label: &label, actor, action: signins::SIGNED_IN, target: &origin, outcome, reason },
+    );
     if typed.is_ok() {
         if let Err(e) = state.identity_store.vault_touch(entry, agentmux_common::time::now_ms()) {
             tracing::warn!(error = %e, "[signin-fill] couldn't note the sign-in's use");

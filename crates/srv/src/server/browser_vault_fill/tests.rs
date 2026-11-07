@@ -97,7 +97,7 @@ async fn setup(field: Value) -> Setup {
 }
 
 async fn fill(s: &Setup, vault: &str) -> (StatusCode, Value) {
-    let req = VaultFillRequest { auth: s.auth.clone(), pane: None, ref_: "e7".into(), vault: Some(vault.into()), request_kind: None, request_label: None };
+    let req = VaultFillRequest { auth: s.auth.clone(), pane: None, ref_: "e7".into(), vault: Some(vault.into()), request_kind: None, request_label: None, reason: Some("fill the form for the test".into()) };
     let resp = handle_vault_fill(State(s.state.clone()), None, Json(req)).await;
     let status = resp.status();
     let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
@@ -155,6 +155,24 @@ async fn a_first_use_asks_the_person_and_the_value_never_reaches_the_agent() {
     assert!(!log.contains("123-45"), "{log}");
     // Once is once: no grant.
     assert!(!s.state.identity_store.vault_grant_check(&s.entry, "https://irs.gov").unwrap());
+    // What the agent said it wants the entry for is on the card and in the entry's history.
+    assert_eq!(asked.agent_reason, "fill the form for the test");
+    let rows = crate::backend::vault::activity(&s.state.identity_store, 20).unwrap();
+    assert_eq!(rows.iter().find(|r| r.action == "filled a web form").unwrap().reason, "fill the form for the test");
+}
+
+#[tokio::test]
+async fn a_fill_from_an_entry_without_a_reason_is_refused_before_the_host_or_the_person_is_asked() {
+    let s = setup(ssn_field("https://irs.gov")).await;
+    for reason in [None, Some("short".to_string())] {
+        let req = VaultFillRequest { auth: s.auth.clone(), pane: None, ref_: "e7".into(), vault: Some(s.entry.clone()), request_kind: None, request_label: None, reason };
+        let resp = handle_vault_fill(State(s.state.clone()), None, Json(req)).await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        assert!(String::from_utf8_lossy(&body).contains("a reason is required"), "{body:?}");
+    }
+    assert!(routes(&s).is_empty(), "the host was never asked");
+    assert!(uses::uses().list().iter().all(|u| u.agent != s.auth.agent_id), "the person was never asked");
 }
 
 // The agent's call can be dropped while the person still has the prompt open: the request goes
@@ -166,7 +184,7 @@ async fn a_dropped_call_takes_its_prompt_down() {
     let asking = {
         let (state, auth, entry) = (s.state.clone(), s.auth.clone(), s.entry.clone());
         tokio::spawn(async move {
-            let req = VaultFillRequest { auth, pane: None, ref_: "e7".into(), vault: Some(entry), request_kind: None, request_label: None };
+            let req = VaultFillRequest { auth, pane: None, ref_: "e7".into(), vault: Some(entry), request_kind: None, request_label: None, reason: Some("fill the form for the test".into()) };
             handle_vault_fill(State(state), None, Json(req)).await
         })
     };
@@ -281,7 +299,7 @@ async fn an_unverified_caller_is_refused_before_anything_is_read() {
     let s = setup(ssn_field("https://irs.gov")).await;
     let mut forged = s.auth.clone();
     forged.sig = "not-a-signature".into();
-    let req = VaultFillRequest { auth: forged, pane: None, ref_: "e7".into(), vault: Some(s.entry.clone()), request_kind: None, request_label: None };
+    let req = VaultFillRequest { auth: forged, pane: None, ref_: "e7".into(), vault: Some(s.entry.clone()), request_kind: None, request_label: None, reason: Some("fill the form for the test".into()) };
     let resp = handle_vault_fill(State(s.state.clone()), None, Json(req)).await;
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
     assert!(routes(&s).is_empty());
@@ -400,7 +418,7 @@ fn vault_get_created(s: &Setup) -> i64 {
 // ── A value nobody has stored yet: the person types it in the prompt (spec §6.5) ──
 
 async fn request_value(s: &Setup, kind: &str, label: &str) -> (StatusCode, Value) {
-    let req = VaultFillRequest { auth: s.auth.clone(), pane: None, ref_: "e7".into(), vault: None, request_kind: Some(kind.into()), request_label: Some(label.into()) };
+    let req = VaultFillRequest { auth: s.auth.clone(), pane: None, ref_: "e7".into(), vault: None, request_kind: Some(kind.into()), request_label: Some(label.into()), reason: None };
     let resp = handle_vault_fill(State(s.state.clone()), None, Json(req)).await;
     let status = resp.status();
     let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
@@ -493,7 +511,7 @@ async fn a_request_for_a_value_is_refused_for_a_password_a_login_a_bad_kind_or_n
     }
     assert!(typed(&s).is_none() && uses::uses().list().iter().all(|u| u.agent != s.auth.agent_id));
     // An entry and a request for a value together is a mistake.
-    let req = VaultFillRequest { auth: s.auth.clone(), pane: None, ref_: "e7".into(), vault: Some(s.entry.clone()), request_kind: Some("ssn".into()), request_label: Some("x".into()) };
+    let req = VaultFillRequest { auth: s.auth.clone(), pane: None, ref_: "e7".into(), vault: Some(s.entry.clone()), request_kind: Some("ssn".into()), request_label: Some("x".into()), reason: Some("fill the form for the test".into()) };
     let resp = handle_vault_fill(State(s.state.clone()), None, Json(req)).await;
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }

@@ -65,6 +65,12 @@ pub(crate) fn agent_layout(store: &Store) -> serde_json::Value {
                 {
                     pane["hibernated"] = json!(true);
                 }
+                // Who drives a browser pane: an agent's id, or `person` (docs/specs/SPEC_BROWSER_RETAKE_AND_COMMANDEER_2026_11_04.md §2.1).
+                if b.meta.get("view").and_then(|v| v.as_str()) == Some("browser") {
+                    if let Some(driver) = crate::server::browser_owner::driver_of(&b.meta) {
+                        pane["driver"] = json!(driver);
+                    }
+                }
                 pane
             })
             .collect()

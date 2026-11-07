@@ -33,6 +33,11 @@ offer_always: boolean,
  */
 reason: string, 
 /**
+ * The agent's own reason for asking, one line of at most 300 characters; shown as "<agent> says: ...",
+ * never used to decide anything. Empty for a use no agent asked for.
+ */
+agent_reason: string, 
+/**
  * There is no entry yet: the person types the value in the prompt, and may
  * keep it in the Vault (spec section 6.5).
  */
