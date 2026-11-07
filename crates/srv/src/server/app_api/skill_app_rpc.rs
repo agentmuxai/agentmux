@@ -72,17 +72,34 @@ fn register_app_script(engine: &Arc<WshRpcEngine>, state: &AppState) {
     });
 }
 
-/// A name in `dir` that does not exist yet: `name`, else `name (2)`, `name (3)` ... before the extension.
-fn unused_name(dir: &std::path::Path, filename: &str) -> std::path::PathBuf {
-    let first = dir.join(filename);
-    if !first.exists() {
-        return first;
-    }
+/// Write `bytes` to `filename` in `dir`, or to `name (2).ext`, `name (3).ext` ... when that name is taken. The file is
+/// created only if nothing is there (`create_new`, which does not follow a link to somewhere else), so a file that
+/// appears between two tries is never overwritten.
+fn write_unused(dir: &std::path::Path, filename: &str, bytes: &[u8]) -> std::io::Result<std::path::PathBuf> {
+    use std::io::{ErrorKind, Write};
     let (stem, ext) = filename.rsplit_once('.').unwrap_or((filename, ""));
-    (2..)
-        .map(|n| dir.join(format!("{stem} ({n}).{ext}")))
-        .find(|p| !p.exists())
-        .expect("an unused name")
+    for n in 1..1000 {
+        let path = if n == 1 { dir.join(filename) } else { dir.join(format!("{stem} ({n}).{ext}")) };
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(mut file) => {
+                file.write_all(bytes)?;
+                return Ok(path);
+            }
+            Err(e) if e.kind() == ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    Err(std::io::Error::new(ErrorKind::AlreadyExists, "there are 999 files with that name already"))
+}
+
+/// The Downloads folder: the desktop's own, else `~/Downloads` when there is one (a Linux home without the desktop's folder
+/// list has none to name), else the home folder.
+fn downloads_dir() -> Option<std::path::PathBuf> {
+    dirs::download_dir().or_else(|| {
+        let home = dirs::home_dir()?;
+        let conventional = home.join("Downloads");
+        Some(if conventional.is_dir() { conventional } else { home })
+    })
 }
 
 fn register_export(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -93,9 +110,8 @@ fn register_export(engine: &Arc<WshRpcEngine>, state: &AppState) {
             const E: &str = "skill.catalog.export";
             global_app_skill(&identity_store, &req.skill_id, E)?;
             let exported = crate::backend::skill_file::export(&identity_store, &req.skill_id).map_err(|e| format!("{E}: {e}"))?;
-            let dir = dirs::download_dir().or_else(dirs::home_dir).ok_or_else(|| format!("{E}: this computer has no Downloads folder"))?;
-            let path = unused_name(&dir, &exported.filename);
-            std::fs::write(&path, &exported.bytes).map_err(|e| format!("{E}: {}: {e}", path.display()))?;
+            let dir = downloads_dir().ok_or_else(|| format!("{E}: this computer has no Downloads or home folder"))?;
+            let path = write_unused(&dir, &exported.filename, &exported.bytes).map_err(|e| format!("{E}: {}: {e}", dir.display()))?;
             tracing::info!(skill = %req.skill_id, path = %path.display(), signed = exported.signed, "skill: exported as a .skill file");
             Ok(SkillExportResult { path: path.to_string_lossy().to_string(), signed: exported.signed })
         }

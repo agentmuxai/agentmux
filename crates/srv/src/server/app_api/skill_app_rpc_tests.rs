@@ -1,7 +1,7 @@
 //! `skill.catalog.app_file` and `skill.catalog.app_script`: read a script, approve it, revoke it.
 
 use super::super::*;
-use super::unused_name;
+use super::write_unused;
 use crate::backend::rpc_types::*;
 use serde_json::{json, Value};
 
@@ -102,9 +102,12 @@ async fn a_skill_file_is_previewed_like_a_folder_with_its_scripts_and_signature(
 #[test]
 fn an_export_never_overwrites_a_file_that_is_there() {
     let dir = tempfile::tempdir().unwrap();
-    assert_eq!(unused_name(dir.path(), "a-b-1.0.0.skill"), dir.path().join("a-b-1.0.0.skill"));
-    std::fs::write(dir.path().join("a-b-1.0.0.skill"), b"x").unwrap();
-    assert_eq!(unused_name(dir.path(), "a-b-1.0.0.skill"), dir.path().join("a-b-1.0.0 (2).skill"));
-    std::fs::write(dir.path().join("a-b-1.0.0 (2).skill"), b"x").unwrap();
-    assert_eq!(unused_name(dir.path(), "a-b-1.0.0.skill"), dir.path().join("a-b-1.0.0 (3).skill"));
+    let first = write_unused(dir.path(), "a-b-1.0.0.skill", b"one").unwrap();
+    let second = write_unused(dir.path(), "a-b-1.0.0.skill", b"two").unwrap();
+    let third = write_unused(dir.path(), "a-b-1.0.0.skill", b"three").unwrap();
+    assert_eq!(first, dir.path().join("a-b-1.0.0.skill"));
+    assert_eq!(second, dir.path().join("a-b-1.0.0 (2).skill"));
+    assert_eq!(third, dir.path().join("a-b-1.0.0 (3).skill"));
+    assert_eq!(std::fs::read(&first).unwrap(), b"one", "the first file is untouched");
+    assert_eq!(std::fs::read(&third).unwrap(), b"three");
 }
