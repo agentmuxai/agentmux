@@ -21,6 +21,9 @@ vi.mock("@/app/store/rpc-api", () => ({
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/view/vault/vault-secrets", () => ({ VaultSecrets: () => null }));
 
+const settings: Record<string, unknown> = {};
+vi.mock("@/app/store/global", () => ({ getSettingsKeyAtom: (key: string) => () => settings[key] }));
+
 const eventHandlers = new Map<string, (data: unknown) => void>();
 vi.mock("@/app/store/mps", () => ({
     onMuxEvent: (name: string, handler: (data: unknown) => void) => {
@@ -37,12 +40,15 @@ vi.mock("@/app/util/reveal-block", () => ({ revealBlock: (...a: unknown[]) => re
 const openOrFocusHistoryTab = vi.fn();
 vi.mock("@/app/view/agent/open-history-tab", () => ({ openOrFocusHistoryTab: (...a: unknown[]) => openOrFocusHistoryTab(...a) }));
 
+import { __resetPlayedSounds, noteSound } from "@/app/notification/sound/sound-history";
 import { AuditManager } from "./audit-manager";
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
 afterEach(() => {
     cleanup();
+    __resetPlayedSounds();
+    for (const key of Object.keys(settings)) delete settings[key];
     vi.clearAllMocks();
 });
 
@@ -297,6 +303,29 @@ describe("AuditManager", () => {
         await waitFor(() => expect(screen.getByText("stable one")).toBeInTheDocument());
         expect(query.mock.calls.at(-1)![0].scope).toBe("machine");
         expect(screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual(["narko · stable", "dev"]);
+    });
+
+    it("shows a speaker on a row that makes a sound, lights the row a sound just came from and names who made it", async () => {
+        const tool = entry({ id: "t", kind: "tool", summary: "Bash ls", agent_id: "korp", links: { pane: { block_id: "blk-korp" } } });
+        query.mockResolvedValue(page([tool, entry({ id: "a", kind: "action", summary: "operator setconfig" })]));
+        render(() => <AuditManager paneBlockId="pane-1" />);
+        await waitFor(() => expect(screen.getByText("Bash ls")).toBeInTheDocument());
+        expect(screen.getAllByRole("img", { name: "Plays a sound" })).toHaveLength(1);
+        expect(document.querySelector('[data-lit="true"]')).toBeNull();
+
+        noteSound({ blockId: "blk-korp", event: "tool", tool: "Bash", at: Date.now() });
+        await waitFor(() => expect(document.querySelector('[data-lit="true"]')?.textContent).toContain("Bash ls"));
+        const last = screen.getByRole("button", { name: /^♪ korp · Bash · / });
+        fireEvent.click(last);
+        expect(revealBlock).toHaveBeenCalledWith("blk-korp", { source: "audit" });
+    });
+
+    it("shows no speaker for a sound the person muted", async () => {
+        settings["notify:tooltones:enabled"] = false;
+        query.mockResolvedValue(page([entry({ id: "t", kind: "tool", summary: "Bash ls", agent_id: "korp", links: { pane: { block_id: "blk-korp" } } })]));
+        render(() => <AuditManager paneBlockId="pane-1" />);
+        await waitFor(() => expect(screen.getByText("Bash ls")).toBeInTheDocument());
+        expect(screen.queryByRole("img", { name: "Plays a sound" })).toBeNull();
     });
 
     it("shows an error from the query", async () => {

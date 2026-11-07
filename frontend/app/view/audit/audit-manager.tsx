@@ -12,14 +12,14 @@ import { Button, FilterInput, Select, SegmentedControl } from "@/app/element/ui"
 import { VaultSecrets } from "@/app/view/vault/vault-secrets";
 import { AuditFeed } from "./audit-feed";
 import { AuditKindChips } from "./audit-kind-chips";
+import { AuditLiveBar } from "./audit-live-bar";
 import { createAuditList } from "./audit-list";
+import { createAuditSounds } from "./audit-sound";
 import {
     emptyFilter,
-    newPillLabel,
     notRecordedNote,
     RANGES,
     SCOPES,
-    totalsLabel,
     type AuditFilter,
     type AuditRange,
     type AuditScope,
@@ -41,6 +41,7 @@ export const AuditManager = (props: { paneBlockId: string; visible?: boolean; ag
     let body: HTMLDivElement | undefined; // the pane's scrolling body: the newest entries are at its top
     const tick = useTick(1000);
     const now = createMemo(() => (tick(), Date.now()));
+    const sounds = createAuditSounds(list.entries, now);
     const jumpToNewest = () => {
         list.showNewest();
         body?.scrollTo?.({ top: 0 });
@@ -113,23 +114,14 @@ export const AuditManager = (props: { paneBlockId: string; visible?: boolean; ag
                 />
             </div>
             <AuditKindChips kinds={filter().kinds} onToggle={toggleKind} />
-            <div class="audit-live-bar">
-                <Button
-                    tone="quiet"
-                    density="compact"
-                    icon={list.paused() ? "play" : "pause"}
-                    pressed={list.paused()}
-                    onClick={() => (list.paused() ? jumpToNewest() : list.setPaused(true))}
-                >
-                    {list.paused() ? "Resume" : "Pause"}
-                </Button>
-                <Show when={list.newCount() > 0}>
-                    <Button tone="accent" density="compact" icon="arrow-up" onClick={jumpToNewest}>
-                        {newPillLabel(list.newCount())}
-                    </Button>
-                </Show>
-                <Show when={list.totals()}>{(t) => <span class="audit-totals">{totalsLabel(t())}</span>}</Show>
-            </div>
+            <AuditLiveBar
+                paused={list.paused()}
+                onTogglePause={() => (list.paused() ? jumpToNewest() : list.setPaused(true))}
+                newCount={list.newCount()}
+                onJumpToNewest={jumpToNewest}
+                totals={list.totals()}
+                lastSound={sounds.last()}
+            />
             <Show when={unrecorded().length > 0}>
                 <div class="warden-manager-summary">{notRecordedNote(unrecorded())}</div>
             </Show>
@@ -140,7 +132,14 @@ export const AuditManager = (props: { paneBlockId: string; visible?: boolean; ag
                 when={!empty()}
                 fallback={<div class="warden-section-stub">{list.loading() ? "Loading…" : "No entries match."}</div>}
             >
-                <AuditFeed entries={list.entries()} sectioned={filter().scope === "machine"} channel={list.channel()} now={now()} paneBlockId={props.paneBlockId} />
+                <AuditFeed
+                    entries={list.entries()}
+                    sectioned={filter().scope === "machine"}
+                    channel={list.channel()}
+                    now={now()}
+                    paneBlockId={props.paneBlockId}
+                    sounds={sounds}
+                />
                 <Show when={list.cursor()}>
                     <div class="audit-more">
                         <Button tone="quiet" density="compact" icon="arrow-down" busy={list.loadingMore()} onClick={() => void list.loadMore()}>

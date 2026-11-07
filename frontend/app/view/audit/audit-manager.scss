@@ -78,6 +78,17 @@
     @include mixins.truncate;
 }
 
+// The tooltip's wrapper is a div, in the middle of the summary's text.
+.audit-row-sound {
+    display: inline-block;
+    margin-left: var(--space-1);
+    opacity: 0.55;
+}
+
+.audit-row[data-lit="true"] {
+    background: var(--accent-bg-strong);
+}
+
 .audit-row-reason {
     opacity: 0.8;
     color: var(--accent-color);

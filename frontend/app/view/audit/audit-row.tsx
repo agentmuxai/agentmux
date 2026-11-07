@@ -8,6 +8,7 @@ import { For, Show, type JSX } from "solid-js";
 
 import { Tooltip } from "@/app/element/tooltip";
 import { Button, Pill } from "@/app/element/ui";
+import { UiIcon } from "@/app/element/ui/shared";
 import { revealBlock } from "@/app/util/reveal-block";
 import { openOrFocusHistoryTab } from "@/app/view/agent/open-history-tab";
 import { makeHistoryAt } from "@/app/view/agent/history/history-start-at";
@@ -18,7 +19,7 @@ import { costLabel, entryLinks, isFailure, KIND_CHIPS, type AuditLinkItem } from
 
 const kindLabel = (kind: string): string => KIND_CHIPS.find((c) => c.kind === kind)?.label.replace(/s$/, "") ?? kind;
 
-export const AuditRow = (props: { entry: AuditEntry; now: number; paneBlockId: string }): JSX.Element => {
+export const AuditRow = (props: { entry: AuditEntry; now: number; paneBlockId: string; sound?: boolean; lit?: boolean }): JSX.Element => {
     const failed = () => isFailure(props.entry);
 
     const open = async (item: AuditLinkItem) => {
@@ -37,7 +38,7 @@ export const AuditRow = (props: { entry: AuditEntry; now: number; paneBlockId: s
     };
 
     return (
-        <li class="audit-row" data-variant={failed() ? "err" : "ok"} data-kind={props.entry.kind}>
+        <li class="audit-row" data-variant={failed() ? "err" : "ok"} data-kind={props.entry.kind} data-lit={props.lit ? "true" : undefined}>
             <Tooltip divClassName="audit-row-time" content={new Date(props.entry.ts_ms).toLocaleString()}>
                 {formatAge(ageMs(props.entry.ts_ms, props.now))} ago
             </Tooltip>
@@ -48,6 +49,13 @@ export const AuditRow = (props: { entry: AuditEntry; now: number; paneBlockId: s
                 {props.entry.summary}
                 <Show when={props.entry.reason}>
                     <span class="audit-row-reason"> · {props.entry.reason}</span>
+                </Show>
+                <Show when={props.sound}>
+                    <Tooltip divClassName="audit-row-sound" content="Plays a sound">
+                        <span role="img" aria-label="Plays a sound">
+                            <UiIcon name="volume-high" />
+                        </span>
+                    </Tooltip>
                 </Show>
             </span>
             <Show when={props.entry.cost}>{(cost) => <span class="audit-row-cost">{costLabel(cost())}</span>}</Show>
