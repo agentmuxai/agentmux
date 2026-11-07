@@ -19,7 +19,7 @@ import "./vault-view.scss";
 /** Longest an agent's own words are shown in a question (its name, an entry's
  *  label, its reason), so they can't push the answers out of view or pass for
  *  AgentMux's own wording. The whole text is in the tooltip. */
-export const CLIP = { name: 40, label: 60, reason: 240, agent_reason: 300 } as const;
+export const CLIP = { name: 40, label: 60, reason: 240, agent_reason: 140 } as const;
 
 /** `text` cut to `max` characters, with an ellipsis when it was longer. */
 export function clip(text: string, max: number): string {
@@ -238,7 +238,9 @@ function TypedValue(props: { use: UseRequest; answer: UseAnswerState; focus: boo
     );
 }
 
-/** What the agent says it wants this for: quoted and attributed, never as the person's words, and it decides nothing. */
+/** What the agent says it wants this for: quoted and attributed, never as the person's words, and it decides nothing.
+ *  Cut to `CLIP.agent_reason` (the whole in the tooltip) so the command the person must read stays in view; the
+ *  entry's History has all of it. */
 function UseSays(props: { use: UseRequest }): JSX.Element {
     return (
         <Show when={props.use.agent_reason}>

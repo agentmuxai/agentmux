@@ -117,8 +117,18 @@ describe("the prompt for an agent's use of an entry", () => {
 
         uses = [use({ command: "stripe balance retrieve", cwd: "C:/work", origin: "", field: "STRIPE_API_KEY" })];
         await refreshVault();
-        render(() => <UsePrompt use={uses[0]} close={() => {}} />);
+        const second = render(() => <UsePrompt use={uses[0]} close={() => {}} />);
         expect((await screen.findByRole("group")).querySelector(".vault-use-says")).toBeNull();
+        second.unmount();
+
+        // A long reason is cut, so the command stays in view next to the buttons.
+        const long = `check the nightly build output for task 27968 ${"and compare the bundle sizes ".repeat(10)}`.trim().slice(0, 300);
+        uses = [use({ command: "stripe balance retrieve", cwd: "C:/work", origin: "", field: "STRIPE_API_KEY", agent_reason: long })];
+        await refreshVault();
+        render(() => <UsePrompt use={uses[0]} close={() => {}} />);
+        const shown = (await screen.findByRole("group")).querySelector(".vault-use-says q")!.textContent!;
+        expect(Array.from(shown).length).toBe(140);
+        expect(shown.endsWith("…")).toBe(true);
     });
 
     it("asks for an agent's sign-in by site and masked user, and offers Always for that agent on that site", async () => {
