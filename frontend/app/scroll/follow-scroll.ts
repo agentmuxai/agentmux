@@ -104,8 +104,7 @@ export function createFollowScroll(
     let lastGestureUp = false;
     let pointerHeld = false;
     let scrollbarHeld = false;
-    /** The last press in the document was on this transcript: scoped scroll keys go to it. */
-    let pointerInside = false;
+    let pointerInside = false; // the last press in the document was on this transcript: scoped scroll keys go to it
     const fill = createFillPass(host);
 
     /** Runs the reducer; returns true if it asked for a pin the caller makes itself. */
@@ -130,16 +129,15 @@ export function createFollowScroll(
     const escape = (cause: EscapeCause): void => {
         dispatch({ type: "UserEscape", cause, geo: lastGeo() }, true);
     };
-    /** `up`: the gesture moves the transcript up (a wheel-up, an up key). Scroll events inside its window
-     *  that do not move up are not the reader going back to the bottom (see `afterUpGesture`). */
+    /** `up`: the gesture moves the transcript up (`afterUpGesture`). */
     const mark = (up = false): void => {
         lastGestureAt = now();
         lastGestureUp = up;
     };
 
     const onWheel = (e: WheelEvent): void => {
-        // Ctrl/⌘+wheel zooms the pane; it never scrolls.
-        if (e.ctrlKey || e.metaKey) return;
+        // Ctrl/⌘+wheel zooms; a sideways-only wheel (a wide table) scrolls nothing the follow depends on.
+        if (e.ctrlKey || e.metaKey || e.deltaY === 0) return;
         mark(e.deltaY < 0);
         const target = e.target instanceof Element ? e.target : null;
         const nested = target?.closest(NESTED_SCROLLER);
@@ -193,6 +191,7 @@ export function createFollowScroll(
         onTouch,
         onPointerDown,
         onPointerUp,
+        held: () => pointerHeld,
         onDocPointerDown,
         onKey,
         onSelectionChange,
@@ -230,6 +229,7 @@ export function createFollowScroll(
                     prev,
                     geo,
                     scrollbar: scrollbarHeld,
+                    input: inputLabel(user, scrollbarHeld, pointerHeld),
                     afterUpGesture: lastGestureUp && now() - lastGestureAt <= INTENT_WINDOW_MS,
                     hasOlderHistory: host.hasOlderHistory(),
                     loadingOlder: host.loadingOlder(),
@@ -256,20 +256,37 @@ interface GestureHandlers {
     onTouch(): void;
     onPointerDown(e: PointerEvent): void;
     onPointerUp(): void;
+    held(): boolean;
     onDocPointerDown(e: Event): void;
     onKey(e: KeyboardEvent): void;
     onSelectionChange(): void;
 }
 
-/** Listens for the gestures that decide whether the reader has left the bottom; returns the removal. */
+/** What made a scroll batch the user's, for the transition log. */
+function inputLabel(user: boolean, scrollbar: boolean, pointer: boolean): string {
+    return user ? (scrollbar ? "scrollbar" : pointer ? "pointer" : "gesture") : "none";
+}
+
+/**
+ * Listens for the gestures that decide whether the reader has left the bottom; returns the removal.
+ * A pointer the page never saw released (the button came up over another window or a webview, or the
+ * window lost focus) must not stay held: while it does, every scroll the browser makes counts as the
+ * user's. A pointer move with no button down, a blur or the page hiding ends it.
+ */
 function listenForGestures(scroller: HTMLElement, on: GestureHandlers): () => void {
     const passive: AddEventListenerOptions = { passive: true, capture: true };
+    const onPointerMove = (e: PointerEvent): void => {
+        if (on.held() && e.buttons === 0) on.onPointerUp();
+    };
     scroller.addEventListener("wheel", on.onWheel, passive);
     scroller.addEventListener("touchstart", on.onTouch, passive);
     scroller.addEventListener("touchmove", on.onTouch, passive);
     scroller.addEventListener("pointerdown", on.onPointerDown, passive);
     window.addEventListener("pointerup", on.onPointerUp, passive);
     window.addEventListener("pointercancel", on.onPointerUp, passive);
+    window.addEventListener("blur", on.onPointerUp, passive);
+    document.addEventListener("pointermove", onPointerMove, passive);
+    document.addEventListener("visibilitychange", on.onPointerUp, passive);
     document.addEventListener("pointerdown", on.onDocPointerDown, passive);
     document.addEventListener("keydown", on.onKey, passive);
     document.addEventListener("selectionchange", on.onSelectionChange);
@@ -280,6 +297,9 @@ function listenForGestures(scroller: HTMLElement, on: GestureHandlers): () => vo
         scroller.removeEventListener("pointerdown", on.onPointerDown, passive);
         window.removeEventListener("pointerup", on.onPointerUp, passive);
         window.removeEventListener("pointercancel", on.onPointerUp, passive);
+        window.removeEventListener("blur", on.onPointerUp, passive);
+        document.removeEventListener("pointermove", onPointerMove, passive);
+        document.removeEventListener("visibilitychange", on.onPointerUp, passive);
         document.removeEventListener("pointerdown", on.onDocPointerDown, passive);
         document.removeEventListener("keydown", on.onKey, passive);
         document.removeEventListener("selectionchange", on.onSelectionChange);

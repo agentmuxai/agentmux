@@ -290,6 +290,32 @@ describe("follow controller (one-way flow)", () => {
         expect(s.g.top).toBe(800);
     });
 
+    it("B3: a pointer whose release was never seen lets go on the next move with no button, so a scroll the browser makes is not the user's", () => {
+        const s = setup({ geo });
+        s.row.dispatchEvent(new Event("pointerdown", { bubbles: true })); // the button came up over another window: no pointerup here
+        s.scrollTo(150);
+        expect(s.following()).toBe(false); // while it is held, a scroll counts as the user's (a selection drag autoscrolling)
+        s.jump("test");
+        document.dispatchEvent(new MouseEvent("pointermove", { buttons: 0 }));
+        s.scrollTo(100);
+        expect(s.following()).toBe(true);
+    });
+
+    it("B4: a blur or the page hiding lets go of a held pointer", () => {
+        const s = setup({ geo });
+        s.row.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+        window.dispatchEvent(new Event("blur"));
+        s.scrollTo(150);
+        expect(s.following()).toBe(true);
+    });
+
+    it("B5: a sideways wheel (a wide table) is not a gesture, so a scroll the browser makes just after it is not the user's", () => {
+        const s = setup({ geo });
+        s.scrollRef.dispatchEvent(new WheelEvent("wheel", { deltaX: 60, deltaY: 0, bubbles: true }));
+        s.scrollTo(150);
+        expect(s.following()).toBe(true);
+    });
+
     it("pages only from a user scroll near the top, once detached", () => {
         const s = setup({ geo, hasOlder: true });
         s.scrollTo(10); // browser-made: nothing
@@ -319,7 +345,7 @@ describe("follow controller (one-way flow)", () => {
         s.scrollTo(400);
         window.dispatchEvent(new Event("pointerup"));
         expect(s.following()).toBe(false);
-        expect(followLines()).toContain("pane=abcdef1 following→detached cause=user-scroll:scrollbar gap=300px");
+        expect(followLines()).toContain("pane=abcdef1 following→detached cause=user-scroll:scrollbar gap=300px input=scrollbar");
     });
 
     it("a text-selection drag in the transcript detaches", () => {
