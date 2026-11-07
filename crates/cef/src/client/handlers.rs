@@ -1248,6 +1248,31 @@ wrap_permission_handler! {
             }
             1 // handled
         }
+
+        // Chromium asks "allow this page to download more files?" for a page's second and later
+        // downloads that no click started, and under Alloy no one answers, so the answer is "ignore": that
+        // download is dropped before it reaches the download handler and the pane's later downloads stay
+        // blocked until it restarts (macOS and Linux D0, 2026-11-06). Answering yes is safe here: every
+        // download still asks where to save, one at a time, and the pane's limit of waiting downloads
+        // applies (`client::downloads`, spec §7.2).
+        fn on_show_permission_prompt(
+            &self,
+            browser: Option<&mut Browser>,
+            _prompt_id: u64,
+            _requesting_origin: Option<&CefString>,
+            requested_permissions: u32,
+            callback: Option<&mut PermissionPromptCallback>,
+        ) -> ::std::os::raw::c_int {
+            if !super::downloads::is_multiple_downloads_prompt(requested_permissions) {
+                return 0;
+            }
+            let (Some(cb), Some(block_id)) = (callback, browser.and_then(|b| self.state.block_id_for_browser(b))) else {
+                return 0;
+            };
+            tracing::info!(target: "pane-download", %block_id, "allowing the page's further downloads: each still asks where to save");
+            cb.cont(PermissionRequestResult::ACCEPT);
+            1
+        }
     }
 }
 
