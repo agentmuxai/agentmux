@@ -62,7 +62,7 @@ export function recordsFor(app: SkillApp, platform: string): VerifiedRecord[] {
 export function appStatus(app: SkillApp, platform: string): AppStatus {
     // A skill for another platform's app is not "untested here": it does not apply here.
     if (app.platforms.length > 0 && !app.platforms.includes(platform)) {
-        return { tone: "idle", label: `for ${app.platforms.join(", ")} only` };
+        return { tone: "idle", label: `for ${osNames(app.platforms)} only` };
     }
     const here = recordsFor(app, platform);
     const last = here[here.length - 1];
@@ -72,7 +72,7 @@ export function appStatus(app: SkillApp, platform: string): AppStatus {
             : { tone: "error", label: `failed on ${last.appVersion}` };
     }
     const elsewhere = app.verified.find((r) => r.skillVersion === app.version && r.result === "pass");
-    return { tone: "idle", label: elsewhere ? `tested on ${elsewhere.platform} only` : "not tested yet" };
+    return { tone: "idle", label: elsewhere ? `tested on ${osNames([elsewhere.platform])} only` : "not tested yet" };
 }
 
 /** The app version the newest pass on this platform was run against, if any. */
@@ -142,7 +142,7 @@ export function describeSignature(sig: WidgetSignatureInfo): { text: string; ton
  */
 export function catalogStatus(entry: AppSkillCatalogEntry, platform: string): AppStatus {
     if (forAnotherOs(entry, platform)) {
-        return { tone: "idle", label: `for ${entry.platforms.join(", ")} only` };
+        return { tone: "idle", label: `for ${osNames(entry.platforms)} only` };
     }
     const mine = entry.verification.filter((r) => r.skillVersion === entry.version);
     const here = mine
@@ -155,5 +155,5 @@ export function catalogStatus(entry: AppSkillCatalogEntry, platform: string): Ap
         return last.result === "pass" ? { tone: "ok", label: `verified ${last.appVersion}` } : { tone: "error", label: `failed on ${last.appVersion}` };
     }
     const elsewhere = mine.find((r) => r.result === "pass");
-    return { tone: "idle", label: elsewhere ? `tested on ${elsewhere.platform} only` : "not tested yet" };
+    return { tone: "idle", label: elsewhere ? `tested on ${osNames([elsewhere.platform])} only` : "not tested yet" };
 }

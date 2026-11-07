@@ -98,7 +98,7 @@ function BrowseItem(p: {
             </p>
             <p class="skill-app-line">{p.item.entry.description}</p>
             <p class="skill-app-line skill-app-muted">
-                Works on {p.item.entry.platforms.join(", ") || "no platform listed"} · routes: {[...new Set(p.item.entry.routes)].join(", ")}
+                Works on {osNames(p.item.entry.platforms) || "no platform listed"} · routes: {[...new Set(p.item.entry.routes)].join(", ")}
             </p>
             <Show when={p.item.entry.hasScripts}>
                 <p class="skill-app-line skill-app-warn">Carries scripts: you review each one before an agent can use it.</p>

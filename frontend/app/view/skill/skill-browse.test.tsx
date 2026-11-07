@@ -79,10 +79,10 @@ describe("catalog status", () => {
             ],
         });
         expect(catalogStatus(e as never, "windows")).toEqual({ tone: "error", label: "failed on 16.1" });
-        expect(catalogStatus(e as never, "macos")).toEqual({ tone: "idle", label: "tested on windows only" });
+        expect(catalogStatus(e as never, "macos")).toEqual({ tone: "idle", label: "tested on Windows only" });
         expect(catalogStatus(entry() as never, "windows")).toEqual({ tone: "ok", label: "verified 16.0" });
-        expect(catalogStatus(entry({ platforms: ["windows"] }) as never, "linux")).toEqual({ tone: "idle", label: "for windows only" });
-        expect(catalogStatus(entry({ platforms: [] }) as never, "macos").label).toBe("tested on windows only");
+        expect(catalogStatus(entry({ platforms: ["windows"] }) as never, "linux")).toEqual({ tone: "idle", label: "for Windows only" });
+        expect(catalogStatus(entry({ platforms: [] }) as never, "macos").label).toBe("tested on Windows only");
     });
 });
 
