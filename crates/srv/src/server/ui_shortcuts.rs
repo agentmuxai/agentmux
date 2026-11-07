@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Agent-facing shortcuts (`ListShortcuts` / `RunCommand` / `PressKeys`),
+//! Agent-facing shortcuts (`ListShortcuts` / `RunCommand` / `PressKeys`, and `UI` `bind` / `reset`),
 //! docs/specs/PLAN_SHORTCUTS_VERIFIED_AND_APP_API_2026_10_10.md §4. Same
 //! identity model as the rest of `ui_handlers`: the caller's own pane is
 //! derived from its verified identity, never taken from the request.
@@ -12,7 +12,7 @@ use axum::response::IntoResponse;
 use axum::Json;
 use serde_json::json;
 
-use agentmux_common::api_types::{UiPressKeysRequest, UiRunCommandRequest, UiShortcutsListRequest};
+use agentmux_common::api_types::{UiPressKeysRequest, UiResetShortcutsRequest, UiRunCommandRequest, UiSetShortcutRequest, UiShortcutsListRequest};
 
 use super::ui_handlers::{err_response, proxy_data, target_block_id};
 use super::AppState;
@@ -117,6 +117,69 @@ pub(crate) async fn handle_ui_press_keys(
         &state,
         "press_keys",
         json!({ "block_id": block_id, "keys": req.keys, "target": target }),
+        std::time::Duration::from_secs(10),
+    )
+    .await
+}
+
+/// The most keys, and the longest key or `when`, a request may carry: a command has a handful of keys.
+const MAX_BINDINGS: usize = 8;
+const MAX_KEY_LEN: usize = 64;
+const MAX_WHEN_LEN: usize = 200;
+
+/// `POST /api/v1/ui/shortcuts/set` — backs `UI` action `bind`. The page applies the same edit the Settings view
+/// makes and refuses what an agent may not do (a key another command has, a key the system takes); the person is
+/// told and can undo it.
+pub(crate) async fn handle_ui_set_shortcut(
+    State(state): State<AppState>,
+    caller: Option<axum::Extension<crate::server::caller::Caller>>,
+    Json(req): Json<UiSetShortcutRequest>,
+) -> impl IntoResponse {
+    let block_id = match target_block_id(&state, caller.as_deref(), &req.auth, None) {
+        Ok(b) => b,
+        Err((code, e)) => return err_response(code, e),
+    };
+    if let Some(why) = refused_command(&req.command) {
+        return err_response(StatusCode::FORBIDDEN, format!("{} is not available to agents: {why}", req.command));
+    }
+    if req.command.trim().is_empty() {
+        return err_response(StatusCode::BAD_REQUEST, "`command` is required: a command id from `shortcuts`".to_string());
+    }
+    if req.bindings.len() > MAX_BINDINGS || req.bindings.iter().any(|k| k.len() > MAX_KEY_LEN) || req.when.as_deref().is_some_and(|w| w.len() > MAX_WHEN_LEN) {
+        return err_response(StatusCode::BAD_REQUEST, format!("at most {MAX_BINDINGS} keys of {MAX_KEY_LEN} characters, and a `when` of {MAX_WHEN_LEN}"));
+    }
+    tracing::info!(agent_id = %req.auth.agent_id, block_id = %block_id, command = %req.command, keys = ?req.bindings, "[ui-automation] set shortcut");
+    proxy_data(
+        &state,
+        "set_shortcut",
+        json!({ "block_id": block_id, "command": req.command, "bindings": req.bindings, "when": req.when, "agent": req.auth.agent_id }),
+        std::time::Duration::from_secs(10),
+    )
+    .await
+}
+
+/// `POST /api/v1/ui/shortcuts/reset` — backs `UI` action `reset`.
+pub(crate) async fn handle_ui_reset_shortcuts(
+    State(state): State<AppState>,
+    caller: Option<axum::Extension<crate::server::caller::Caller>>,
+    Json(req): Json<UiResetShortcutsRequest>,
+) -> impl IntoResponse {
+    let block_id = match target_block_id(&state, caller.as_deref(), &req.auth, None) {
+        Ok(b) => b,
+        Err((code, e)) => return err_response(code, e),
+    };
+    let command = req.command.as_deref().map(str::trim).filter(|c| !c.is_empty());
+    if command.is_none() && !req.all {
+        return err_response(StatusCode::BAD_REQUEST, "give `command`, or `all: true` to put every shortcut back on its default".to_string());
+    }
+    if let Some((command, why)) = command.and_then(|c| refused_command(c).map(|why| (c, why))) {
+        return err_response(StatusCode::FORBIDDEN, format!("{command} is not available to agents: {why}"));
+    }
+    tracing::info!(agent_id = %req.auth.agent_id, block_id = %block_id, command = ?command, all = req.all, "[ui-automation] reset shortcuts");
+    proxy_data(
+        &state,
+        "reset_shortcuts",
+        json!({ "block_id": block_id, "command": command, "all": req.all, "agent": req.auth.agent_id }),
         std::time::Duration::from_secs(10),
     )
     .await

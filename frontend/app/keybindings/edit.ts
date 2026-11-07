@@ -50,6 +50,10 @@ export interface PlanOptions {
     replace?: boolean;
 }
 
+/** Where the command works today (its row's `when`): a key given to it works there unless said otherwise, since
+ *  an entry with no `when` fires everywhere. */
+export const ownWhen = (command: string): string | undefined => DEFAULT_KEYBINDINGS.find((r) => r.command === command)?.when;
+
 /** The platform an entry the view writes is pinned to: Windows and Linux share "other". */
 function pinned(platform: KeyPlatform): "mac" | "other" {
     return platform === "mac" ? "mac" : "other";

@@ -17,6 +17,8 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "shortcuts", tool: "ListShortcuts", rename: &[] },
     Act { action: "command", tool: "RunCommand", rename: &[] },
     Act { action: "keys", tool: "PressKeys", rename: &[] },
+    Act { action: "bind", tool: "SetShortcut", rename: &[] },
+    Act { action: "reset", tool: "ResetShortcuts", rename: &[] },
     Act { action: "windows", tool: "DiscoverWindows", rename: &[] },
     Act { action: "window", tool: "CaptureWindow", rename: &[] },
     Act { action: "record", tool: "UIRecord", rename: &[] },
