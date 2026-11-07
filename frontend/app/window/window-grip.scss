@@ -19,6 +19,7 @@
     align-self: stretch;
     margin-top: calc(-1 * var(--space-1-5));
     margin-bottom: calc(-1 * var(--snap-chrome));
+
     @include mixins.flex-center;
     font-size: var(--text-sm);
     color: var(--secondary-text-color);
