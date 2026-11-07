@@ -44,7 +44,8 @@ import {
 import { DocumentRow } from "./DocumentRow";
 import { attachOneWayRecorder, noteOneWay, sampleOneWayFrame } from "../scroll/one-way-recorder";
 import { OneWayFlow, scrollTranscriptTo } from "../scroll/one-way-flow";
-import { createNodeSettler, type NodeSettler } from "../scroll/settle-on-node";
+import { createJumpSettler } from "./jump-settler";
+import type { NodeSettler } from "../scroll/settle-on-node";
 import { createFollowScroll, type FollowScroll } from "../../../scroll/follow-scroll";
 import { createFollowLog, NO_SCROLL_INPUT, type ScrollInput } from "../../../scroll/follow-wiring";
 import { estimateNode, estimateNodeForState, previewCapPx } from "./renderers";
@@ -814,62 +815,6 @@ function useScrollObservers(props: AgentDocumentVirtualListProps, s: ListState):
         if (s.streamingBufferRef) ro.observe(s.streamingBufferRef);
         onCleanup(() => ro.disconnect());
     });
-}
-
-/**
- * The layout has seen where the transcript is (its scroll position is the page's, clamped as the page clamps it)
- * and has a height for every row of its window: a jump that holds its aim now has landed, not just not heard yet.
- */
-function layoutIsReady(props: AgentDocumentVirtualListProps, s: ListState): boolean {
-    const state = props.blockId ? snapshotLayout(props.blockId) : null;
-    const view = props.layoutView?.();
-    if (!state || !view || !s.scrollRef) return true;
-    if (Math.abs(state.scrollTop - s.scrollRef.scrollTop) >= 1) return false; // perf:allow-layout-read — a jump the person asked for
-    for (let i = view.window.startIndex; i <= view.window.endIndex; i++) {
-        const row = view.rows[i];
-        if (row && !state.heights.has(row.nodeId)) return false;
-    }
-    return true;
-}
-
-/**
- * A jump to a row outside the window aims by the estimate, then re-aims as the rows near it are measured
- * (scroll/settle-on-node.ts). The target is read from the layout slice by node id each frame, so rows that arrive
- * or are measured meanwhile move the aim and not the person's place.
- */
-function createJumpSettler(props: AgentDocumentVirtualListProps, s: ListState): { start: (nodeId: string) => void } {
-    let target = "";
-    const aimAt = (nodeId: string): number | null => {
-        if (!s.scrollRef) return null;
-        const idx = props.viewState.indexOf(nodeId);
-        if (idx >= s.partition().splitIndex) {
-            // The streaming tail is drawn outside the virtualiser: its rows sit where the page puts them, after the
-            // virtualised region's height, which changes as rows above are measured.
-            const el = s.scrollRef.querySelector<HTMLElement>(`[data-node-id="${nodeId}"]`);
-            if (!el) return null;
-            return Math.max(0, el.offsetTop - s.scrollRef.clientHeight / 2 + el.clientHeight / 2); // perf:allow-layout-read — a jump the person asked for, at most a few frames
-        }
-        const row = props.layoutView?.()?.rows[idx];
-        if (!row) return null;
-        return Math.max(0, row.start - s.scrollRef.clientHeight / 2 + row.height / 2); // perf:allow-layout-read — same
-    };
-    s.settleNode = createNodeSettler({
-        aim: () => aimAt(target),
-        write: (top) => s.scrollRef && scrollTranscriptTo(s.scrollRef, top),
-        userActive: () => s.input.windowOpen() || s.input.pointerHeld(),
-        viewKey: () => `${props.zoomFactor?.() ?? 1}:${s.scrollRef?.clientHeight ?? 0}`, // perf:allow-layout-read — same
-        ready: () => layoutIsReady(props, s),
-        frame: (cb) => requestAnimationFrame(cb),
-        cancelFrame: (id) => cancelAnimationFrame(id),
-        now: () => performance.now(),
-    });
-    onCleanup(() => s.settleNode?.cancel());
-    return {
-        start: (nodeId) => {
-            target = nodeId;
-            s.settleNode?.start();
-        },
-    };
 }
 
 function useScrollCommands(props: AgentDocumentVirtualListProps, s: ListState): void {
