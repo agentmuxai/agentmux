@@ -1,0 +1,144 @@
+scrollIntoView Nothing type {"block":"nearest"}
+AgentInputHistoryCommand {"agent_id":"agent-1","limit":50}
+scrollIntoView third2× · at {"block":"nearest"}
+forgetInputHistoryEntry agent-1 3
+scrollIntoView two lines3×  {"block":"nearest"}
+-- the last forgotten (focus: TextInput)
+<div>
+  <div class="input-history-search" role="dialog" aria-label="Search what you typed to this agent">
+    <div class="input-history-search__query">
+      <span>
+        "Search history"
+      <input data-stand="TextInput" data-variant="plain" data-value="" placeholder="Type to filter" spellcheck="false" aria-controls="input-history-search-list">
+    <div class="input-history-search__list" id="input-history-search-list" role="listbox">
+      <div class="input-history-search__row" role="option" aria-selected="false" data-tip="first message">
+        <span class="input-history-search__text">
+          "first message"
+        <span class="input-history-search__meta">
+          "at 1000 (now, xx-XX)"
+      <div class="input-history-search__row input-history-search__row--selected" role="option" aria-selected="true" data-tip="two lines\nsecond line">
+        <span class="input-history-search__text">
+          "two lines"
+        <span class="input-history-search__meta">
+          "3× ·"
+          "at 2000 (now, xx-XX)"
+    <div class="input-history-search__hint">
+      <span>
+        "Enter to use"
+      <span>
+        "Shift+Del to forget"
+      <span>
+        "Esc to close"
+      <span class="input-history-search__clear">
+        <span data-stand="Button" data-density="compact" data-disabled="false">
+          "Clear history"
+forgetInputHistoryEntry agent-1 2
+-- forget failed (focus: TextInput)
+<div>
+  <div class="input-history-search" role="dialog" aria-label="Search what you typed to this agent">
+    <div class="input-history-search__query">
+      <span>
+        "Search history"
+      <input data-stand="TextInput" data-variant="plain" data-value="" placeholder="Type to filter" spellcheck="false" aria-controls="input-history-search-list">
+    <div class="input-history-search__list" id="input-history-search-list" role="listbox">
+      <div class="input-history-search__row" role="option" aria-selected="false" data-tip="first message">
+        <span class="input-history-search__text">
+          "first message"
+        <span class="input-history-search__meta">
+          "at 1000 (now, xx-XX)"
+      <div class="input-history-search__row input-history-search__row--selected" role="option" aria-selected="true" data-tip="two lines\nsecond line">
+        <span class="input-history-search__text">
+          "two lines"
+        <span class="input-history-search__meta">
+          "3× ·"
+          "at 2000 (now, xx-XX)"
+    <div class="input-history-search__empty" role="alert">
+      "Couldn't forget it: srv refused"
+    <div class="input-history-search__hint">
+      <span>
+        "Enter to use"
+      <span>
+        "Shift+Del to forget"
+      <span>
+        "Esc to close"
+      <span class="input-history-search__clear">
+        <span data-stand="Button" data-density="compact" data-disabled="false">
+          "Clear history"
+forgetInputHistoryEntry agent-1 2
+-- a plain refusal (focus: TextInput)
+<div>
+  <div class="input-history-search" role="dialog" aria-label="Search what you typed to this agent">
+    <div class="input-history-search__query">
+      <span>
+        "Search history"
+      <input data-stand="TextInput" data-variant="plain" data-value="" placeholder="Type to filter" spellcheck="false" aria-controls="input-history-search-list">
+    <div class="input-history-search__list" id="input-history-search-list" role="listbox">
+      <div class="input-history-search__row" role="option" aria-selected="false" data-tip="first message">
+        <span class="input-history-search__text">
+          "first message"
+        <span class="input-history-search__meta">
+          "at 1000 (now, xx-XX)"
+      <div class="input-history-search__row input-history-search__row--selected" role="option" aria-selected="true" data-tip="two lines\nsecond line">
+        <span class="input-history-search__text">
+          "two lines"
+        <span class="input-history-search__meta">
+          "3× ·"
+          "at 2000 (now, xx-XX)"
+    <div class="input-history-search__empty" role="alert">
+      "Couldn't forget it: plain refusal"
+    <div class="input-history-search__hint">
+      <span>
+        "Enter to use"
+      <span>
+        "Shift+Del to forget"
+      <span>
+        "Esc to close"
+      <span class="input-history-search__clear">
+        <span data-stand="Button" data-density="compact" data-disabled="false">
+          "Clear history"
+forgetInputHistoryEntry agent-1 2
+scrollIntoView first messag {"block":"nearest"}
+-- forgot the second, the error gone (focus: TextInput)
+<div>
+  <div class="input-history-search" role="dialog" aria-label="Search what you typed to this agent">
+    <div class="input-history-search__query">
+      <span>
+        "Search history"
+      <input data-stand="TextInput" data-variant="plain" data-value="" placeholder="Type to filter" spellcheck="false" aria-controls="input-history-search-list">
+    <div class="input-history-search__list" id="input-history-search-list" role="listbox">
+      <div class="input-history-search__row input-history-search__row--selected" role="option" aria-selected="true" data-tip="first message">
+        <span class="input-history-search__text">
+          "first message"
+        <span class="input-history-search__meta">
+          "at 1000 (now, xx-XX)"
+    <div class="input-history-search__hint">
+      <span>
+        "Enter to use"
+      <span>
+        "Shift+Del to forget"
+      <span>
+        "Esc to close"
+      <span class="input-history-search__clear">
+        <span data-stand="Button" data-density="compact" data-disabled="false">
+          "Clear history"
+forgetInputHistoryEntry agent-1 1
+-- none left (focus: TextInput)
+<div>
+  <div class="input-history-search" role="dialog" aria-label="Search what you typed to this agent">
+    <div class="input-history-search__query">
+      <span>
+        "Search history"
+      <input data-stand="TextInput" data-variant="plain" data-value="" placeholder="Type to filter" spellcheck="false" aria-controls="input-history-search-list">
+    <div class="input-history-search__list" id="input-history-search-list" role="listbox">
+      <div class="input-history-search__empty">
+        "Nothing typed to this agent yet."
+    <div class="input-history-search__hint">
+      <span>
+        "Enter to use"
+      <span>
+        "Shift+Del to forget"
+      <span>
+        "Esc to close"
+      <span class="input-history-search__clear">
+        <span data-stand="Button" data-density="compact" data-disabled="true">
+          "Clear history"
