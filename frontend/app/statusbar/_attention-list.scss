@@ -1,0 +1,72 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// The list the status bar's agent entry opens: who waits on the person, and a button to go there.
+
+@use "../element/popover-frame" as popoverFrame;
+
+.attention-list {
+    @include popoverFrame.readout-popover;
+
+    .attention-list-header {
+        @include popoverFrame.readout-popover-header;
+    }
+
+    .attention-list-title {
+        @include popoverFrame.readout-popover-title;
+    }
+
+    .attention-list-count {
+        @include popoverFrame.readout-popover-note;
+    }
+
+    .attention-list-empty {
+        @include popoverFrame.readout-popover-empty;
+    }
+
+    .attention-list-rows {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        max-height: 320px;
+        overflow-y: auto;
+    }
+
+    .attention-list-row {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        padding: var(--space-1-5) var(--space-3);
+    }
+
+    .attention-list-text {
+        flex: 1 1 auto;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .attention-list-name {
+        font-weight: 600;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .attention-list-what {
+        @include popoverFrame.readout-popover-note;
+    }
+
+    .attention-list-age {
+        @include popoverFrame.readout-popover-note;
+        flex: 0 0 auto;
+        white-space: nowrap;
+    }
+
+    .attention-list-footer {
+        display: flex;
+        justify-content: flex-end;
+        padding: var(--space-1-5) var(--space-3) 0;
+        border-top: 1px solid var(--border-color);
+    }
+}
