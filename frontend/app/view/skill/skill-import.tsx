@@ -22,6 +22,7 @@ const STATUS_TEXT: Record<string, string> = {
 
 const LOCATION_HINT: Record<SkillSourceKind, string> = {
     folder: "A folder with a SKILL.md, or a folder of skills",
+    file: "The path of a .skill file",
     git: "https://github.com/owner/skills.git",
     url: "https://example.com/my-skill/SKILL.md",
 };

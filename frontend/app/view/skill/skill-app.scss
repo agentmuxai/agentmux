@@ -96,3 +96,16 @@
         @include mixins.focus-ring;
     }
 }
+
+.skill-app-export {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-1);
+    margin-top: var(--space-1);
+}
+
+// A saved path is one long word: let it wrap anywhere rather than run past the pane.
+.skill-app-export .skill-app-line {
+    overflow-wrap: anywhere;
+}

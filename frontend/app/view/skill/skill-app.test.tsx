@@ -14,6 +14,7 @@ const rpc = vi.hoisted(() => ({
     SkillCatalogListForAgentCommand: vi.fn(),
     SkillCatalogAppFileCommand: vi.fn(),
     SkillCatalogAppScriptCommand: vi.fn(),
+    SkillCatalogExportCommand: vi.fn(),
 }));
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: rpc }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
@@ -272,5 +273,20 @@ describe("Signature and script approval", () => {
         setCurrent(approved as never);
         expect(await screen.findByRole("button", { name: "Revoke approval" })).toBeTruthy();
         expect(screen.getByRole("group", { name: "Script scripts/run.py" })).toBeTruthy();
+    });
+
+    it("Export writes a .skill file and says where it went, and shows a refusal", async () => {
+        rpc.SkillCatalogExportCommand.mockResolvedValueOnce({ path: "C:/Users/me/Downloads/acme-word-1.0.0.skill", signed: true });
+        const detail = await openDetail();
+        fireEvent.click(within(detail).getByRole("button", { name: "Export as a .skill file" }));
+        expect((await within(detail).findByRole("status")).textContent).toBe(
+            "Saved to C:/Users/me/Downloads/acme-word-1.0.0.skill, with its publisher's signature.",
+        );
+        expect(rpc.SkillCatalogExportCommand).toHaveBeenCalledWith({}, { skill_id: "k1" });
+
+        rpc.SkillCatalogExportCommand.mockRejectedValueOnce(new Error("too large to share as one file"));
+        fireEvent.click(within(detail).getByRole("button", { name: "Export as a .skill file" }));
+        expect((await within(detail).findByRole("alert")).textContent).toBe("too large to share as one file");
+        expect(within(detail).queryByRole("status")).toBeNull();
     });
 });

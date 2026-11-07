@@ -691,9 +691,19 @@ async fn read_skill_source(src: &SkillSource) -> Result<crate::backend::skill_im
     use crate::backend::skill_import as imp;
     match src.kind.as_str() {
         "folder" => imp::scan_dir(&crate::backend::base::expand_home_dir_safe(src.location.trim())),
+        "file" => {
+            let path = crate::backend::base::expand_home_dir_safe(src.location.trim());
+            tokio::task::spawn_blocking(move || {
+                let scratch = tempfile::tempdir().map_err(|e| e.to_string())?;
+                crate::backend::skill_file::extract(&path, scratch.path())?;
+                imp::scan_dir(scratch.path())
+            })
+            .await
+            .map_err(|e| e.to_string())?
+        }
         "git" => imp::fetch_git(&src.location, &src.git_ref).await,
         "url" => imp::fetch_url(&src.location).await,
-        other => Err(format!("unknown source kind '{other}' (use folder, git or url)")),
+        other => Err(format!("unknown source kind '{other}' (use folder, file, git or url)")),
     }
 }
 

@@ -6849,6 +6849,25 @@
     }
   },
   {
+    "command": "skill.catalog.export",
+    "request": "agentmux_srv::backend::rpc_types::skill::CommandSkillCatalogExportData",
+    "requestName": "CommandSkillCatalogExportData",
+    "requestTs": {
+      "imports": [
+        "CommandSkillCatalogExportData"
+      ],
+      "name": "CommandSkillCatalogExportData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::skill::SkillExportResult",
+    "responseName": "SkillExportResult",
+    "responseTs": {
+      "imports": [
+        "SkillExportResult"
+      ],
+      "name": "SkillExportResult"
+    }
+  },
+  {
     "command": "skill.catalog.import_commit",
     "request": "agentmux_srv::backend::rpc_types::skill::CommandSkillCatalogImportCommitData",
     "requestName": "CommandSkillCatalogImportCommitData",

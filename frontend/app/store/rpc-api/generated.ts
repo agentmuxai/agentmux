@@ -249,6 +249,7 @@ import type { CommandShellStopData } from "@/types/rpc/CommandShellStopData";
 import type { CommandSkillCatalogAppFileData } from "@/types/rpc/CommandSkillCatalogAppFileData";
 import type { CommandSkillCatalogAppScriptData } from "@/types/rpc/CommandSkillCatalogAppScriptData";
 import type { CommandSkillCatalogBindAllData } from "@/types/rpc/CommandSkillCatalogBindAllData";
+import type { CommandSkillCatalogExportData } from "@/types/rpc/CommandSkillCatalogExportData";
 import type { CommandSkillCatalogImportCommitData } from "@/types/rpc/CommandSkillCatalogImportCommitData";
 import type { CommandSkillCatalogImportPreviewData } from "@/types/rpc/CommandSkillCatalogImportPreviewData";
 import type { CommandSkillCatalogSetOptOutData } from "@/types/rpc/CommandSkillCatalogSetOptOutData";
@@ -516,6 +517,7 @@ import type { SkillCatalogItem } from "@/types/rpc/SkillCatalogItem";
 import type { SkillCatalogItemData } from "@/types/rpc/SkillCatalogItemData";
 import type { SkillCatalogListData } from "@/types/rpc/SkillCatalogListData";
 import type { SkillDeleteResult } from "@/types/rpc/SkillDeleteResult";
+import type { SkillExportResult } from "@/types/rpc/SkillExportResult";
 import type { SkillImportCommitResult } from "@/types/rpc/SkillImportCommitResult";
 import type { SkillImportPreview } from "@/types/rpc/SkillImportPreview";
 import type { SkillListItem } from "@/types/rpc/SkillListItem";
@@ -2483,6 +2485,14 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<SkillAppScriptResult> {
     return client.rpcCall("skill.catalog.app_script", data, opts);
+  },
+  // command "skill.catalog.export"
+  SkillCatalogExportCommand(
+    client: RpcClient,
+    data: CommandSkillCatalogExportData,
+    opts?: RpcOpts
+  ): Promise<SkillExportResult> {
+    return client.rpcCall("skill.catalog.export", data, opts);
   },
   // command "skill.catalog.bind"
   SkillCatalogBindCommand(client: RpcClient, data: SkillAgentBindingData, opts?: RpcOpts): Promise<SkillBindResult> {

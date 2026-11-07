@@ -183,4 +183,18 @@ describe("Import a skill", () => {
         expect(within(list).getByRole("list", { name: "Scripts" }).textContent).toContain("Fills the table of contents · needs python 3");
         expect(within(list).getByText(/not run: no agent gets one until you approve it/)).toBeTruthy();
     });
+
+    it("reads a .skill file by its path", async () => {
+        rpc.SkillCatalogImportPreviewCommand.mockResolvedValue({ source: { ...SOURCE, kind: "file" }, warnings: [], items: [item()] });
+        render(() => <SkillManager />);
+        fireEvent.click(await screen.findByText("Import a skill…"));
+        fireEvent.change(await screen.findByDisplayValue("A folder on this computer"), { target: { value: "file" } });
+        fireEvent.input(await screen.findByLabelText("Where the skill is"), { target: { value: "C:/Downloads/acme-word-1.0.0.skill" } });
+        fireEvent.click(screen.getByRole("button", { name: "Read" }));
+        await screen.findByRole("list", { name: "Skills found" });
+        expect(rpc.SkillCatalogImportPreviewCommand).toHaveBeenCalledWith(
+            {},
+            { source: { kind: "file", location: "C:/Downloads/acme-word-1.0.0.skill", git_ref: "", item_key: "" }, skill_id: "" },
+        );
+    });
 });

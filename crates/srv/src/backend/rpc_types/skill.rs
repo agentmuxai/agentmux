@@ -426,3 +426,21 @@ pub struct CommandSkillCatalogAppScriptData {
 pub struct SkillAppScriptResult {
     pub approved: bool,
 }
+
+/// `skill.catalog.export` — window-scoped. Write a computer-use skill as a `.skill` file into the person's
+/// Downloads folder (never over a file that is there).
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandSkillCatalogExportData {
+    pub skill_id: String,
+}
+
+/// Result of `skill.catalog.export`.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct SkillExportResult {
+    /// Where the file was written.
+    pub path: String,
+    /// Whether it carries the publisher's signature (it does only while the skill is exactly what was signed).
+    pub signed: bool,
+}
