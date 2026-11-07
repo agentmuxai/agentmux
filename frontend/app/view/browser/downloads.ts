@@ -39,8 +39,22 @@ export type DownloadRow = {
     reason?: string;
 };
 
-/** How long a finished download's row stays in the strip before it folds away. */
+/** How long a finished or cancelled download's row stays in the strip before it folds away. */
 export const DONE_ROW_MS = 20_000;
+
+/** The most rows the strip keeps: past it the oldest row that is no longer running goes, so a burst of
+ *  downloads can't stack rows until they take the page's room. A running row is never dropped. */
+export const MAX_ROWS = 6;
+
+function capRows(rows: DownloadRow[]): DownloadRow[] {
+    let out = rows;
+    while (out.length > MAX_ROWS) {
+        const oldest = out.findIndex((r) => r.state !== "running");
+        if (oldest < 0) break;
+        out = out.filter((_, i) => i !== oldest);
+    }
+    return out;
+}
 
 const IGNORED_KEY = "ignored";
 
@@ -76,7 +90,7 @@ export function applyDownloadUpdate(rows: DownloadRow[], u: DownloadUpdate): Dow
         path: u.state === "done" ? u.path : undefined,
         reason: u.state === "failed" ? u.reason : undefined,
     };
-    return prev ? rows.map((r) => (r.key === key ? row : r)) : [...rows, row];
+    return prev ? rows.map((r) => (r.key === key ? row : r)) : capRows([...rows, row]);
 }
 
 export function dismissDownload(rows: DownloadRow[], key: string): DownloadRow[] {

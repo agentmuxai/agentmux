@@ -1,0 +1,51 @@
+onMuxEvent sysinfo local
+-- before any reading
+<div>
+  <div data-stand="AnchoredPopover" data-placement="top-end" class="cpu-cores-popover cpu-cores-popover--rows" role="dialog" aria-label="Per-core CPU usage" style="width: 260px;">
+    <div class="cpu-cores-header">
+      <span class="cpu-cores-title">
+        "CPU Usage"
+      <span class="cpu-cores-aggregate" style="color: var(--secondary-text-color);">
+        "avg"
+        "0"
+        "%"
+    <div class="cpu-cores-subtitle">
+      <span>
+        "0 cores"
+    <div class="cpu-cores-empty">
+      "Reading CPU…"
+onDismiss
+onClose
+sysinfo 2 cores
+-- first reading
+<div>
+  <div data-stand="AnchoredPopover" data-placement="top-end" class="cpu-cores-popover cpu-cores-popover--rows" role="dialog" aria-label="Per-core CPU usage" style="width: 260px;">
+    <div class="cpu-cores-header">
+      <span class="cpu-cores-title">
+        "CPU Usage"
+      <span class="cpu-cores-aggregate" style="color: var(--secondary-text-color);">
+        "avg"
+        "43"
+        "%"
+    <div class="cpu-cores-subtitle">
+      <span>
+        "2 cores"
+    <div class="cpu-cores-list">
+      <div class="cpu-core">
+        <span class="cpu-core-label">
+          "Core 0"
+        <span class="cpu-core-bar" aria-hidden="true">
+          <span class="cpu-core-bar-fill" style="width: 10%; background-color: color-mix(in srgb, var(--warning-color) 20%, var(--cpu-idle-color));">
+        <span class="cpu-core-pct" style="color: color-mix(in srgb, var(--warning-color) 20%, var(--cpu-idle-color));">
+          "10"
+          "%"
+      <div class="cpu-core">
+        <span class="cpu-core-label">
+          "Core 1"
+        <span class="cpu-core-bar" aria-hidden="true">
+          <span class="cpu-core-bar-fill" style="width: 20%; background-color: color-mix(in srgb, var(--warning-color) 40%, var(--cpu-idle-color));">
+        <span class="cpu-core-pct" style="color: color-mix(in srgb, var(--warning-color) 40%, var(--cpu-idle-color));">
+          "20"
+          "%"
+unsubscribe
+unmounted

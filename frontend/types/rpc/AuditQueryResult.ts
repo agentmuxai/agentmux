@@ -17,4 +17,8 @@ not_recorded: Array<string>,
 /**
  * When asked for (`totals`): over everything the filter matches.
  */
-totals?: AuditTotals, };
+totals?: AuditTotals, 
+/**
+ * The channel that answered: what an entry with no channel of its own belongs to.
+ */
+channel?: string, };

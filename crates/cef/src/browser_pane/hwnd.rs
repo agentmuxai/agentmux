@@ -196,6 +196,15 @@ pub fn pane_block_for_hwnd(hwnd: *mut std::ffi::c_void) -> Option<String> {
     find_context(hwnd).map(|ctx| ctx.block_id)
 }
 
+/// The wheel or a key reached the pane whose window `hwnd` is: the person is using its page (srv's retake rule reads it,
+/// `browser_api::last_input`). Also the diagnostic line for whether such input reaches the pane's window at all.
+fn note_person_input(hwnd: *mut std::ffi::c_void, msg: u32) {
+    tracing::debug!("[pane-wndproc] wheel or key hwnd={:p} msg=0x{:x}", hwnd, msg);
+    if let Some(block_id) = pane_block_for_hwnd(hwnd) {
+        crate::browser_api::last_input::note(&block_id);
+    }
+}
+
 /// Subclass a browser pane's outer HWND (and every descendant HWND Chromium
 /// has already created) so a click (`WM_LBUTTONDOWN`) and focus arriving
 /// (`WM_SETFOCUS`) reach the input owner. The input owner decides whether focus
@@ -301,10 +310,10 @@ pub unsafe fn install_browser_pane_subclass(
 
         match msg {
             WM_MOUSEWHEEL | WM_MOUSEHWHEEL => {
-                tracing::debug!("[pane-wndproc] mouse-wheel hwnd={:p} msg=0x{:x}", hwnd, msg);
+                note_person_input(hwnd, msg);
             }
             WM_KEYDOWN | WM_CHAR => {
-                tracing::debug!("[pane-wndproc] key msg=0x{:x}", msg);
+                note_person_input(hwnd, msg);
             }
             WM_KILLFOCUS => {
                 tracing::info!("[pane-wndproc] WM_KILLFOCUS hwnd={:p}", hwnd);

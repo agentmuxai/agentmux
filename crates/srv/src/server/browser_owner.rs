@@ -163,12 +163,20 @@ pub(crate) fn lost_message(pane: &str, agent_id: &str) -> Option<String> {
     let how = if e.given_back || e.during_handoff {
         "The user is done with it: take it back with Browser's retake action"
     } else {
-        "When the user presses Give back, take it back with Browser's retake action"
+        "When the user presses Give back, or has left the pane alone for a minute, take it back with Browser's retake action"
     };
     Some(format!(
         "the user took over pane {pane:?} ({}). {how} (same page: snapshot it first), or open a new pane with Browser's open action",
         ago(e.at.elapsed())
     ))
+}
+
+/// Make the person's takeover of `block_id` `by` older, for a test of the idle rule.
+#[cfg(test)]
+pub(crate) fn age_lost(block_id: &str, by: std::time::Duration) {
+    if let Some(e) = lost().lock().unwrap_or_else(|p| p.into_inner()).get_mut(block_id) {
+        e.at = e.at.checked_sub(by).unwrap_or(e.at);
+    }
 }
 
 /// The person pressed Give back on `block_id`: the agent that lost it may retake it.
@@ -178,11 +186,34 @@ pub(crate) fn mark_given_back(block_id: &str) {
     }
 }
 
+/// How long the person must have left a pane they took over alone before the agent that lost it may drive it again.
+pub(crate) const IDLE_BEFORE_RETAKE: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// The person took `block_id` over from `agent_id` and has neither given it back nor taken it over at the agent's own
+/// request: only their idleness can return it. Some(how long ago they took it over) then, so the caller knows to ask the
+/// host when they last used the pane.
+pub(crate) fn takeover_in_use(block: &Block, block_id: &str, agent_id: &str) -> Option<std::time::Duration> {
+    let given_back_to = block.meta.get(GIVEN_BACK_META_KEY).and_then(|v| v.as_str());
+    if given_back_to.is_some_and(|a| a.eq_ignore_ascii_case(agent_id)) {
+        return None;
+    }
+    let map = lost().lock().unwrap_or_else(|p| p.into_inner());
+    let e = map.get(block_id).filter(|e| e.agent.eq_ignore_ascii_case(agent_id) && e.at.elapsed() < LOST_KEPT_FOR)?;
+    (!e.given_back && !e.during_handoff).then(|| e.at.elapsed())
+}
+
 /// May `agent_id` drive `block` (`block_id`) again, the pane it lost to the person's Take over? Yes once the person
 /// gave the pane back (remembered in memory and in the block's meta, which outlives an srv restart), or took it over
-/// during the agent's own hand-off; a pane the person is still using is refused with what to do. The caller then
+/// during the agent's own hand-off, or has not used the pane for [`IDLE_BEFORE_RETAKE`]; a pane the person is still
+/// using is refused with what to do. `since_input` is how long ago the host last saw the person use the pane's page:
+/// `Duration::MAX` when it never has, None when the host could not say (then only Give back counts). The caller then
 /// writes the owner meta (`retaken_meta`) and records the agent (`record`).
-pub(crate) fn may_retake(block: &Block, block_id: &str, agent_id: &str) -> Result<(), String> {
+pub(crate) fn may_retake(
+    block: &Block,
+    block_id: &str,
+    agent_id: &str,
+    since_input: Option<std::time::Duration>,
+) -> Result<(), String> {
     let given_back_to = block.meta.get(GIVEN_BACK_META_KEY).and_then(|v| v.as_str());
     if given_back_to.is_some_and(|a| a.eq_ignore_ascii_case(agent_id)) {
         return Ok(());
@@ -197,10 +228,30 @@ pub(crate) fn may_retake(block: &Block, block_id: &str, agent_id: &str) -> Resul
     if e.given_back || e.during_handoff {
         return Ok(());
     }
+    if person_has_left(since_input, e.at.elapsed()) {
+        return Ok(());
+    }
+    let used = since_input.map(|d| format!(", last touched {}", ago_exact(d.min(e.at.elapsed())))).unwrap_or_default();
     Err(format!(
-        "the user took over pane {block_id:?} ({}) and is using it. Wait until they press Give back, or ask them in chat",
-        ago(e.at.elapsed())
+        "the user took over pane {block_id:?} ({}{used}) and is using it. Wait until they press Give back or leave it alone for {} s, \
+         or ask them in chat",
+        ago(e.at.elapsed()),
+        IDLE_BEFORE_RETAKE.as_secs()
     ))
+}
+
+/// Has the person left a pane they took over alone for [`IDLE_BEFORE_RETAKE`]? Their Take over click is their last touch
+/// if they never used the page itself. Unknown (the host could not say) is not left.
+fn person_has_left(since_input: Option<std::time::Duration>, since_takeover: std::time::Duration) -> bool {
+    since_input.is_some_and(|d| d.min(since_takeover) >= IDLE_BEFORE_RETAKE)
+}
+
+/// How long ago, to the second under a minute.
+fn ago_exact(d: std::time::Duration) -> String {
+    match d.as_secs() {
+        s @ 0..=59 => format!("{s} s ago"),
+        _ => ago(d),
+    }
 }
 
 /// The meta that shows `agent` driving a pane: the owner the header reads, and the last driver Give back names.
@@ -649,18 +700,18 @@ mod tests {
         let pane = uuid::Uuid::new_v4().to_string();
         let oref = format!("block:{pane}");
         let b = block("browser", None);
-        assert!(may_retake(&b, &pane, "lark").is_err(), "a pane never driven");
+        assert!(may_retake(&b, &pane, "lark", None).is_err(), "a pane never driven");
         record(&pane, "lark");
         guard_client_meta_write(&oref, &null_owner()).unwrap();
-        let e = may_retake(&b, &pane, "lark").unwrap_err();
+        let e = may_retake(&b, &pane, "lark", None).unwrap_err();
         assert!(e.contains("is using it") && e.contains("Give back"), "{e}");
-        assert!(may_retake(&b, &pane, "korp").is_err(), "another agent never lost it");
+        assert!(may_retake(&b, &pane, "korp", None).is_err(), "another agent never lost it");
         mark_given_back(&pane);
-        assert!(may_retake(&b, &pane, "lark").is_ok());
-        assert!(may_retake(&b, &pane, "LARK").is_ok(), "agent ids compare without case");
-        assert!(may_retake(&b, &pane, "korp").is_err(), "given back to lark, not to korp");
+        assert!(may_retake(&b, &pane, "lark", None).is_ok());
+        assert!(may_retake(&b, &pane, "LARK", None).is_ok(), "agent ids compare without case");
+        assert!(may_retake(&b, &pane, "korp", None).is_err(), "given back to lark, not to korp");
         record(&pane, "lark");
-        assert!(may_retake(&b, &pane, "lark").is_err(), "retaken: nothing left to retake");
+        assert!(may_retake(&b, &pane, "lark", None).is_err(), "retaken: nothing left to retake");
         forget(&pane);
     }
 
@@ -670,9 +721,37 @@ mod tests {
         let pane = uuid::Uuid::new_v4().to_string();
         let mut b = block("browser", None);
         b.meta.insert(GIVEN_BACK_META_KEY.to_string(), json!("lark"));
-        assert!(may_retake(&b, &pane, "lark").is_ok());
-        assert!(may_retake(&b, &pane, "korp").is_err(), "given back to lark only");
+        assert!(may_retake(&b, &pane, "lark", None).is_ok());
+        assert!(may_retake(&b, &pane, "korp", None).is_err(), "given back to lark only");
         assert!(retaken_meta("lark").get(GIVEN_BACK_META_KEY).is_some_and(|v| v.is_null()), "driving again spends it");
+    }
+
+    #[test]
+    fn the_person_has_left_after_a_minute_of_no_input_and_no_takeover_click() {
+        use std::time::Duration as D;
+        assert!(person_has_left(Some(D::from_secs(61)), D::from_secs(300)), "idle 61 s");
+        assert!(!person_has_left(Some(D::from_secs(5)), D::from_secs(300)), "typed 5 s ago");
+        assert!(!person_has_left(Some(D::from_secs(600)), D::from_secs(10)), "took over 10 s ago");
+        assert!(person_has_left(Some(D::MAX), D::from_secs(61)), "never used the page; took over 61 s ago");
+        assert!(!person_has_left(Some(D::MAX), D::from_secs(59)), "never used the page; took over 59 s ago");
+        assert!(!person_has_left(None, D::from_secs(3600)), "the host could not say");
+    }
+
+    #[test]
+    fn a_takeover_in_use_is_told_from_one_given_back_or_made_at_a_hand_off() {
+        let pane = uuid::Uuid::new_v4().to_string();
+        let b = block("browser", None);
+        assert!(takeover_in_use(&b, &pane, "lark").is_none(), "never lost");
+        record(&pane, "lark");
+        guard_client_meta_write(&format!("block:{pane}"), &null_owner()).unwrap();
+        assert!(takeover_in_use(&b, &pane, "lark").is_some());
+        assert!(takeover_in_use(&b, &pane, "korp").is_none(), "another agent");
+        let err = may_retake(&b, &pane, "lark", Some(std::time::Duration::from_secs(4))).unwrap_err();
+        assert!(err.contains("last touched 0 s ago") && err.contains("60 s"), "{err}");  // took over just now
+        mark_given_back(&pane);
+        assert!(takeover_in_use(&b, &pane, "lark").is_none(), "given back");
+        record(&pane, "lark");
+        forget(&pane);
     }
 
     #[test]

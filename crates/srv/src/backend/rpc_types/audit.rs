@@ -40,6 +40,11 @@ pub struct AuditQueryReq {
     #[serde(default)]
     #[ts(optional)]
     pub totals: Option<bool>,
+    /// `channel`: only what this srv's channel wrote (an entry that says nothing of its channel is this one's);
+    /// `machine` (the default): what every channel on this computer wrote.
+    #[serde(default)]
+    #[ts(optional)]
+    pub scope: Option<String>,
 }
 
 /// Where an entry can be opened in the agent's history: `HistoryNavigator.locate({ at_ms | at_byte })`.
@@ -229,4 +234,8 @@ pub struct AuditQueryResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub totals: Option<AuditTotals>,
+    /// The channel that answered: what an entry with no channel of its own belongs to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub channel: Option<String>,
 }

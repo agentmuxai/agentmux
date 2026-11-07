@@ -21,10 +21,12 @@
 
 // Stays at the top of the pane's scrolling body, so Pause and "N new" are in reach however far down the list is.
 // A sticky top is measured inside the body's padding (--space-3 in warden-manager-chrome.scss), so the bar is
-// pulled up by it, or rows would scroll through the strip above it.
+// pulled up by it, or rows would scroll through the strip above it. A row's dimmed cells (opacity) are stacking
+// contexts that paint after it, so the bar is lifted over them.
 .audit-live-bar {
     position: sticky;
     top: calc(-1 * var(--space-3));
+    z-index: var(--z-over-content);
     padding: var(--space-1) 0;
     display: flex;
     flex-wrap: wrap;
@@ -35,6 +37,13 @@
 
 .audit-totals {
     font-size: 0.85em;
+    color: var(--secondary-text-color);
+}
+
+.audit-section-label {
+    margin: var(--space-2) 0 var(--space-1);
+    font-size: 0.85em;
+    font-weight: 600;
     color: var(--secondary-text-color);
 }
 

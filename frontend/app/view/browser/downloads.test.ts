@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
     applyDownloadUpdate,
     dismissDownload,
+    MAX_ROWS,
     progressText,
     type DownloadRow,
     type DownloadUpdate,
@@ -60,6 +61,22 @@ describe("applyDownloadUpdate", () => {
         expect(rows).toHaveLength(1);
         expect(rows[0]).toMatchObject({ key: "ignored", id: null, state: "ignored" });
         expect(rows[0].reason).toBe("This page tried to start more downloads. Ignored.");
+    });
+
+    it("keeps at most MAX_ROWS rows, dropping the oldest finished one and never a running one", () => {
+        let rows: DownloadRow[] = [];
+        // Row 1 keeps running while ten more start and are cancelled.
+        rows = applyDownloadUpdate(rows, upd({ download_id: 1 }));
+        for (let id = 2; id <= 11; id++) {
+            rows = applyDownloadUpdate(rows, upd({ download_id: id, state: "cancelled" }));
+        }
+        expect(rows).toHaveLength(MAX_ROWS);
+        expect(rows[0].key).toBe("1");
+        expect(rows.map((r) => r.key)).toEqual(["1", "7", "8", "9", "10", "11"]);
+        // Only running rows: none can go, so all stay.
+        let running: DownloadRow[] = [];
+        for (let id = 1; id <= MAX_ROWS + 2; id++) running = applyDownloadUpdate(running, upd({ download_id: id }));
+        expect(running).toHaveLength(MAX_ROWS + 2);
     });
 
     it("ignores an update with no download id that isn't the flood line", () => {

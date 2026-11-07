@@ -1,0 +1,85 @@
+ref ""
+setSubmenuEl region
+createSubmenuHover #1 closeOnLeave=false
+peers.register m
+peers.closeOthers m
+hover#1.onTriggerEnter
+hover#1 opens its submenu
+PinnedWidgetFlyout mounted: Messengers placement=right-start gutter=8 anchor=row-0
+hover#1.setSubmenuEl
+-- rebuild with equal-looking fresh objects
+PinnedWidgetFlyout Messengers cleanup
+hover#1.setSubmenuEl
+PinnedWidgetFlyout mounted: Messengers placement=right-start gutter=8 anchor=[object HTMLDivElement]
+hover#1.setSubmenuEl
+-- after rebuild: flyout state kept
+<div data-stand="AnchoredPopover" data-placement="bottom-end" data-gutter="4" data-hide-until-placed="true" data-shell="anchored-popover--menu" class="action-widget-more-dropdown">
+  <div class="action-widget-more-item">
+    <span class="action-widget-more-item-icon widget-icon" style="--widget-icon-color: c-Messengers;">
+      <i class="fa fa-solid fa-window-maximize fa-fw">
+    <span class="action-widget-more-item-label">
+      "Messengers"
+    <i class="fa-solid fa-chevron-right action-widget-more-item-chevron">
+  <div data-stand="PinnedWidgetFlyout" data-label="Messengers">
+  <div class="action-widget-more-item">
+    <span class="action-widget-more-item-icon widget-icon" style="--widget-icon-color: c-Terminal;">
+      <i class="fa fa-solid fa-window-maximize fa-fw">
+    <span class="action-widget-more-item-label">
+      "Terminal"
+flyouts open: Messengers
+-- a new parent row appears
+PinnedWidgetFlyout Messengers cleanup
+hover#1.setSubmenuEl
+PinnedWidgetFlyout mounted: Messengers placement=right-start gutter=8 anchor=[object HTMLDivElement]
+hover#1.setSubmenuEl
+createSubmenuHover #2 closeOnLeave=false
+peers.register t
+-- after a second parent row appears
+<div data-stand="AnchoredPopover" data-placement="bottom-end" data-gutter="4" data-hide-until-placed="true" data-shell="anchored-popover--menu" class="action-widget-more-dropdown">
+  <div class="action-widget-more-item">
+    <span class="action-widget-more-item-icon widget-icon" style="--widget-icon-color: c-Messengers;">
+      <i class="fa fa-solid fa-window-maximize fa-fw">
+    <span class="action-widget-more-item-label">
+      "Messengers"
+    <i class="fa-solid fa-chevron-right action-widget-more-item-chevron">
+  <div data-stand="PinnedWidgetFlyout" data-label="Messengers">
+  <div class="action-widget-more-item">
+    <span class="action-widget-more-item-icon widget-icon" style="--widget-icon-color: c-Tools;">
+      <i class="fa fa-solid fa-window-maximize fa-fw">
+    <span class="action-widget-more-item-label">
+      "Tools"
+    <i class="fa-solid fa-chevron-right action-widget-more-item-chevron">
+  <div class="action-widget-more-item">
+    <span class="action-widget-more-item-icon widget-icon" style="--widget-icon-color: c-Terminal;">
+      <i class="fa fa-solid fa-window-maximize fa-fw">
+    <span class="action-widget-more-item-label">
+      "Terminal"
+flyouts open: Messengers
+-- the first parent row goes away and comes back
+PinnedWidgetFlyout Messengers cleanup
+hover#1.setSubmenuEl
+PinnedWidgetFlyout mounted: Messengers placement=right-start gutter=8 anchor=[object HTMLDivElement]
+hover#1.setSubmenuEl
+-- Messengers back
+<div data-stand="AnchoredPopover" data-placement="bottom-end" data-gutter="4" data-hide-until-placed="true" data-shell="anchored-popover--menu" class="action-widget-more-dropdown">
+  <div class="action-widget-more-item">
+    <span class="action-widget-more-item-icon widget-icon" style="--widget-icon-color: c-Messengers;">
+      <i class="fa fa-solid fa-window-maximize fa-fw">
+    <span class="action-widget-more-item-label">
+      "Messengers"
+    <i class="fa-solid fa-chevron-right action-widget-more-item-chevron">
+  <div data-stand="PinnedWidgetFlyout" data-label="Messengers">
+  <div class="action-widget-more-item">
+    <span class="action-widget-more-item-icon widget-icon" style="--widget-icon-color: c-Tools;">
+      <i class="fa fa-solid fa-window-maximize fa-fw">
+    <span class="action-widget-more-item-label">
+      "Tools"
+    <i class="fa-solid fa-chevron-right action-widget-more-item-chevron">
+flyouts open: Messengers
+PinnedWidgetFlyout Messengers cleanup
+hover#1.setSubmenuEl
+hover#1.dispose
+hover#1 closes its submenu
+hover#2.dispose
+setSubmenuEl null
+unmounted

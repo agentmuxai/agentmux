@@ -1,0 +1,84 @@
+onMuxEvent sysinfo local
+sysinfo (unordered keys)
+-- three cores, average above 95
+<div>
+  <div data-stand="AnchoredPopover" data-placement="top-end" class="cpu-cores-popover cpu-cores-popover--rows" role="dialog" aria-label="Per-core CPU usage" style="width: 260px;">
+    <div class="cpu-cores-header">
+      <span class="cpu-cores-title">
+        "CPU Usage"
+      <span class="cpu-cores-aggregate" style="color: var(--error-text-color);">
+        "avg"
+        "96"
+        "%"
+    <div class="cpu-cores-subtitle">
+      <span>
+        "3 cores"
+    <div class="cpu-cores-list">
+      <div class="cpu-core">
+        <span class="cpu-core-label">
+          "Core 0"
+        <span class="cpu-core-bar" aria-hidden="true">
+          <span class="cpu-core-bar-fill" style="width: 3%; background-color: color-mix(in srgb, var(--warning-color) 6%, var(--cpu-idle-color));">
+        <span class="cpu-core-pct" style="color: color-mix(in srgb, var(--warning-color) 6%, var(--cpu-idle-color));">
+          "3"
+          "%"
+      <div class="cpu-core">
+        <span class="cpu-core-label">
+          "Core 1"
+        <span class="cpu-core-bar" aria-hidden="true">
+          <span class="cpu-core-bar-fill" style="width: 100%; background-color: color-mix(in srgb, var(--error-color) 100%, var(--warning-color));">
+        <span class="cpu-core-pct" style="color: color-mix(in srgb, var(--error-color) 100%, var(--warning-color));">
+          "130"
+          "%"
+      <div class="cpu-core">
+        <span class="cpu-core-label">
+          "Core 2"
+        <span class="cpu-core-bar" aria-hidden="true">
+          <span class="cpu-core-bar-fill" style="width: 57.4%; background-color: color-mix(in srgb, var(--error-color) 15%, var(--warning-color));">
+        <span class="cpu-core-pct" style="color: color-mix(in srgb, var(--error-color) 15%, var(--warning-color));">
+          "57"
+          "%"
+readout: Core 2 — 57%
+sysinfo 3 cores
+readout after a tick: Core 2 — 71%
+-- hovering core 2 after a tick, average above 80
+<div>
+  <div data-stand="AnchoredPopover" data-placement="top-end" class="cpu-cores-popover cpu-cores-popover--rows" role="dialog" aria-label="Per-core CPU usage" style="width: 260px;">
+    <div class="cpu-cores-header">
+      <span class="cpu-cores-title">
+        "CPU Usage"
+      <span class="cpu-cores-aggregate" style="color: var(--warning-text-color);">
+        "avg"
+        "85"
+        "%"
+    <div class="cpu-cores-subtitle">
+      <span>
+        "Core 2 — 71%"
+    <div class="cpu-cores-list">
+      <div class="cpu-core">
+        <span class="cpu-core-label">
+          "Core 0"
+        <span class="cpu-core-bar" aria-hidden="true">
+          <span class="cpu-core-bar-fill" style="width: 5%; background-color: color-mix(in srgb, var(--warning-color) 10%, var(--cpu-idle-color));">
+        <span class="cpu-core-pct" style="color: color-mix(in srgb, var(--warning-color) 10%, var(--cpu-idle-color));">
+          "5"
+          "%"
+      <div class="cpu-core">
+        <span class="cpu-core-label">
+          "Core 1"
+        <span class="cpu-core-bar" aria-hidden="true">
+          <span class="cpu-core-bar-fill" style="width: 6%; background-color: color-mix(in srgb, var(--warning-color) 12%, var(--cpu-idle-color));">
+        <span class="cpu-core-pct" style="color: color-mix(in srgb, var(--warning-color) 12%, var(--cpu-idle-color));">
+          "6"
+          "%"
+      <div class="cpu-core">
+        <span class="cpu-core-label">
+          "Core 2"
+        <span class="cpu-core-bar" aria-hidden="true">
+          <span class="cpu-core-bar-fill" style="width: 70.6%; background-color: color-mix(in srgb, var(--error-color) 41%, var(--warning-color));">
+        <span class="cpu-core-pct" style="color: color-mix(in srgb, var(--error-color) 41%, var(--warning-color));">
+          "71"
+          "%"
+readout after leaving: 3 cores
+sysinfo 3 cores
+readout when the hovered core is gone: 1 cores

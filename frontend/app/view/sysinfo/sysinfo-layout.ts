@@ -4,12 +4,9 @@
 /**
  * Where a Sysinfo chart's text goes, as pure rules the simple grid and the
  * Advanced focus view share: which chart draws the time labels, which draws y
- * labels, how tall a chart must be to show axes at all, and one y-axis width per
- * column so plots line up. All sizes are at 100% and scale with the pane's zoom.
+ * labels, and how tall a chart must be to show axes at all. All sizes are at 100% and scale with the pane's zoom.
  * docs/specs/SPEC_SYSINFO_TEXT_ZOOM_DENSITY_AND_ONE_ZOOM_PATH_2026_10_18.md §5.
  */
-
-import { createEffect, createMemo, createSignal, on, type Accessor } from "solid-js";
 
 /** The axis label font at 100% zoom, in px. */
 export const AXIS_FONT_PX = 12;
@@ -20,6 +17,8 @@ export const TICK_PX = 3;
 export const TICK_GAP_PX = 3;
 /** A time axis without labels: its tick marks only. */
 export const BARE_AXIS_PX = 4;
+/** The fade at the plot's left end reaches this far past the y labels' width, so the series is gone under them. */
+export const FADE_EXTRA_PX = 8;
 
 /** The axis label font size at a zoom. */
 export const axisFontPx = (zoom: number): number => Math.max(6, Math.round(AXIS_FONT_PX * zoom));
@@ -55,28 +54,3 @@ export const inTopRow = (index: number, columns: number): boolean => index < col
 /** Measures every simple-view metric on the same 0–100% scale (the cores, or CPU alone)? */
 export const sharesPercentRange = (keys: readonly string[]): boolean =>
     keys.length > 1 && keys.every((k) => /^cpu(:\d+)?$/.test(k));
-
-/**
- * One y-axis width per column, so the plots in a column start at the same x and
- * time reads straight down (§5 C.2 rule 6). Each chart reports the width its own
- * labels need; each gets back its column's widest. Cleared when `reset`'s value
- * changes (a new set of charts), so a chart that left doesn't keep a column wide.
- * Compared by value: pass a string (the metric keys joined), not a fresh array
- * per sample, or every sample would clear it and relayout every chart (#5133).
- */
-export function createAxisColumns(reset: Accessor<string>) {
-    const [widths, setWidths] = createSignal<Record<string, number>>({});
-    const key = createMemo(reset);
-    createEffect(on(key, () => setWidths({}), { defer: true }));
-    return {
-        report(column: number, key: string, width: number): void {
-            const id = `${column}:${key}`;
-            setWidths((prev) => (prev[id] === width ? prev : { ...prev, [id]: width }));
-        },
-        widthFor(column: number): number {
-            let max = 0;
-            for (const [id, w] of Object.entries(widths())) if (id.startsWith(`${column}:`)) max = Math.max(max, w);
-            return max;
-        },
-    };
-}

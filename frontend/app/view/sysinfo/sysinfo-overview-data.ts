@@ -10,6 +10,7 @@
  */
 
 import { formatValue, niceCeil } from "./sysinfo-chart";
+import { isStepRow } from "./sysinfo-gap";
 import type { DataItem } from "./sysinfo-types";
 
 /** The visible window's view of one metric. */
@@ -20,10 +21,14 @@ export interface WindowStats {
     avg: number;
 }
 
-function reading(row: DataItem, key: string): number | null {
-    if (row.blank === 1) return null;
+function finite(row: DataItem, key: string): number | null {
     const v = row[key];
     return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+/** A sample's reading: none for a gap marker, or for a step row (a late sample's average drawn across its gap, not a sample). */
+function reading(row: DataItem, key: string): number | null {
+    return row.blank === 1 || isStepRow(row) ? null : finite(row, key);
 }
 
 /** `key`'s newest reading and its low, high and average over `rows`; `null` with none. */
@@ -143,7 +148,7 @@ export function withBusiestCore(rows: DataItem[], cores: string[]): DataItem[] {
     return rows.map((row) => {
         if (row.blank === 1) return { ...row, [BUSIEST_CORE]: NaN };
         let busiest = -Infinity;
-        for (const k of cores) busiest = Math.max(busiest, reading(row, k) ?? -Infinity);
+        for (const k of cores) busiest = Math.max(busiest, finite(row, k) ?? -Infinity);
         return { ...row, [BUSIEST_CORE]: Number.isFinite(busiest) ? busiest : NaN };
     });
 }

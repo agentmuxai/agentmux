@@ -5,13 +5,11 @@
  * Where a Sysinfo chart's text goes (sysinfo-layout.ts).
  * docs/specs/SPEC_SYSINFO_TEXT_ZOOM_DENSITY_AND_ONE_ZOOM_PATH_2026_10_18.md §5.
  */
-import { createRoot, createSignal } from "solid-js";
 import { describe, expect, it } from "vitest";
 
 import {
     axisFontPx,
     BARE_AXIS_PX,
-    createAxisColumns,
     inTopRow,
     minFullChartPx,
     sharesPercentRange,
@@ -70,27 +68,5 @@ describe("placement rules", () => {
         expect(sharesPercentRange(["cpu:0", "cpu:1", "cpu:2"])).toBe(true);
         expect(sharesPercentRange(["cpu", "mem:used"])).toBe(false);
         expect(sharesPercentRange(["cpu:0"])).toBe(false);
-    });
-});
-
-describe("createAxisColumns", () => {
-    it("gives each column its widest reported y axis, and forgets them for a new set of charts", () => {
-        // Effects start once the root has returned, so the reset is driven from outside it.
-        const { cols, setSet, dispose } = createRoot((dispose) => {
-            const [set, setSet] = createSignal(["a"]);
-            return { cols: createAxisColumns(() => set().join(",")), setSet, dispose };
-        });
-        cols.report(0, "a", 30);
-        cols.report(0, "b", 44);
-        cols.report(1, "c", 20);
-        expect(cols.widthFor(0)).toBe(44);
-        expect(cols.widthFor(1)).toBe(20);
-        expect(cols.widthFor(2)).toBe(0);
-        // A new array with the same charts (every sample makes one) keeps them.
-        setSet(["a"]);
-        expect(cols.widthFor(0)).toBe(44);
-        setSet(["x"]);
-        expect(cols.widthFor(0)).toBe(0);
-        dispose();
     });
 });

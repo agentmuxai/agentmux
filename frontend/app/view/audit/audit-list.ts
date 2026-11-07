@@ -32,6 +32,8 @@ function createListState() {
     const [olderLoaded, setOlderLoaded] = createSignal(false);
     // The newest page, fetched while the list holds still: what the pill counts and "newest" shows.
     const [pending, setPending] = createSignal<AuditQueryResult | null>(null);
+    // The channel that answered: what an entry with no channel of its own belongs to.
+    const [channel, setChannel] = createSignal<string | undefined>();
     const following = () => !paused() && !olderLoaded();
     const newCount = createMemo(() => countNew(entries(), pending()?.entries ?? []));
 
@@ -40,6 +42,7 @@ function createListState() {
         setCursor(res.next_cursor);
         setTotals(res.totals ?? null);
         setNotRecorded(res.not_recorded);
+        setChannel(res.channel);
         setOlderLoaded(false);
         setPending(null);
         setError(null);
@@ -52,7 +55,7 @@ function createListState() {
     };
 
     return {
-        entries, setEntries, cursor, setCursor, totals, notRecorded, error, setError, loading, setLoading,
+        channel, entries, setEntries, cursor, setCursor, totals, notRecorded, error, setError, loading, setLoading,
         loadingMore, setLoadingMore, paused, setPaused, setOlderLoaded, pending, setPending, following, newCount, showPage, holdPage,
     };
 }
@@ -153,6 +156,6 @@ export function createAuditList(filter: Accessor<AuditFilter>, visible: () => bo
     });
     useAuditLive(visible, () => void refresh());
 
-    const { totals, notRecorded, loading, paused, newCount } = state;
-    return { entries, cursor, totals, notRecorded, error, loading, loadingMore, paused, setPaused, newCount, loadMore, showNewest };
+    const { totals, notRecorded, loading, paused, newCount, channel } = state;
+    return { channel, entries, cursor, totals, notRecorded, error, loading, loadingMore, paused, setPaused, newCount, loadMore, showNewest };
 }
