@@ -10,7 +10,7 @@
 
 import { snapshot as layoutSnapshot } from "@/app/store/agent-pane-layout-store";
 import { paneZoom } from "@/app/store/pane-zoom-local";
-import { createMemo } from "solid-js";
+import { createMemo, onCleanup } from "solid-js";
 import type { AgentViewModel } from "./agent-model";
 import type { PaneFoundation } from "./agent-view-foundation";
 import type { PaneLate } from "./agent-view-late";
@@ -22,6 +22,7 @@ import { useJektsAwaitingYou } from "./hooks/useJektsAwaitingYou";
 import { usePtyWidth } from "./hooks/usePtyWidth";
 import { useScrollToNode } from "./hooks/useScrollToNode";
 import { createSearchReveal } from "./search-reveal";
+import { focusSearchField, registerSearchControls, restoreFocusToMagnifier } from "./search/search-bridge";
 import { topVisibleNodeId } from "./search/top-row";
 import { rawIdAtOrAfter, topRowId } from "./search/transcript-index";
 
@@ -48,7 +49,10 @@ export function usePaneInput(p: { found: PaneFoundation; model: AgentViewModel; 
     const search = useInSessionSearch({
         document: paneModel.document,
         jumpTo: reveal.jumpTo,
-        onClose: reveal.release,
+        onClose: () => {
+            reveal.release();
+            restoreFocusToMagnifier(model.blockId);
+        },
         onNoMatch: reveal.release,
         topNodeId: () => {
             // The drawn rows answer for the streaming tail too, which the layout slice has no rows for.
@@ -59,10 +63,23 @@ export function usePaneInput(p: { found: PaneFoundation; model: AgentViewModel; 
         },
     });
 
-    // Pane-scoped Ctrl+F: a second press closes the bar and clears the state (hooks/useAgentKeyboard.ts).
+    // One way in: Ctrl+F, the header magnifier and the palette open the bar; with it open, they put the caret in its
+    // field with the text selected. Esc, the close button and the magnifier close it (search/search-bridge.ts).
+    const openSearch = () => (search.visible() ? focusSearchField(model.blockId) : search.setVisible(true));
+    onCleanup(
+        registerSearchControls(model.blockId, {
+            visible: search.visible,
+            open: openSearch,
+            toggle: () => (search.visible() ? search.close() : search.setVisible(true)),
+        })
+    );
+
+    // Pane-scoped Ctrl+F and F3 (hooks/useAgentKeyboard.ts).
     useAgentKeyboard({
         blockId: model.blockId,
-        onToggleSearch: () => (search.visible() ? search.close() : search.setVisible(true)),
+        onToggleSearch: openSearch,
+        searchOpen: search.visible,
+        onStepSearch: (backward) => (backward ? search.prev() : search.next()),
         onCycleView: viewControls.cycle,
         onFollowDefaultView: viewControls.followDefault,
     });

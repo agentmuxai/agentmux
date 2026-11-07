@@ -11,11 +11,22 @@ import { commandRegistry } from "@/app/store/command-registry";
 import { getFocusedBlockId } from "@/app/store/block-component-registry";
 import { agentViewControls } from "./agent-view-controls";
 import { messagesControlsFor, messagesEnabled, setMessagesEnabled } from "./messages/messages-state";
+import { searchControlsFor } from "./search/search-bridge";
 import { PRESET_LABEL, PRESET_NAMES } from "./virtualization/verbosity";
 
 export function registerAgentViewCommands(): () => void {
     const focused = () => agentViewControls(getFocusedBlockId());
     const offs = [
+        // The third way into the find bar, with Ctrl+F and the header magnifier: the same open (search/search-bridge.ts).
+        commandRegistry.register({
+            id: "agent:search:open",
+            label: "Find in conversation",
+            category: "Agent",
+            icon: "magnifying-glass",
+            keywords: "find search conversation transcript messages ctrl f",
+            when: () => searchControlsFor(getFocusedBlockId()) !== undefined,
+            execute: () => searchControlsFor(getFocusedBlockId())?.open(),
+        }),
         commandRegistry.register({
             id: "agent:view:open",
             label: "Agent view…",

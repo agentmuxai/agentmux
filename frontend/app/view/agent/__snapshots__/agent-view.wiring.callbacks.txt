@@ -111,7 +111,6 @@ commands.flushPendingControllerRefresh()
 jumpTo: DIFFERENT
 document: same
 search.setVisible(true)
-search.close()
 onCycleView: same
 onFollowDefaultView: same
 > the root element, snapshot persistence and the shell

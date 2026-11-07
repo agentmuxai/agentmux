@@ -12,6 +12,7 @@ vi.mock("./agent-view-controls", () => ({ agentViewControls: (id: string | undef
 
 import { commandRegistry, isCommandAvailable } from "@/app/store/command-registry";
 import { registerAgentViewCommands } from "./agent-view-commands";
+import { registerSearchControls } from "./search/search-bridge";
 
 let off: () => void;
 beforeEach(() => {
@@ -56,5 +57,19 @@ describe("agent view palette commands", () => {
         off();
         expect(commandRegistry.get("agent:view:full")).toBeUndefined();
         off = registerAgentViewCommands();
+    });
+});
+
+describe("Find in conversation (palette)", () => {
+    it("is offered for a pane that has a find bar, and opens it", () => {
+        const open = vi.fn();
+        hub.focused = "agent-1";
+        expect(isCommandAvailable(entry("agent:search:open"))).toBe(false);
+        const unregister = registerSearchControls("agent-1", { visible: () => false, open, toggle: vi.fn() });
+        expect(isCommandAvailable(entry("agent:search:open"))).toBe(true);
+        void entry("agent:search:open").execute();
+        expect(open).toHaveBeenCalledOnce();
+        unregister();
+        expect(isCommandAvailable(entry("agent:search:open"))).toBe(false);
     });
 });
