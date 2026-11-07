@@ -378,7 +378,7 @@ export const TIPS: TipRow[] = [
         gesture: "key:↑",
         where: "in an empty message box",
         label: "Take back the last queued message; ↑ and ↓ step through what you sent",
-        source: { file: "frontend/app/view/agent/components/AgentFooter.tsx", anchor: "ArrowUp when the composer is empty" },
+        source: { file: "frontend/app/view/agent/components/agent-footer-state.ts", anchor: "ArrowUp when the composer is empty" },
     },
     {
         id: "agent:suggestion",
