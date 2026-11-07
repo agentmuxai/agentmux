@@ -59,7 +59,7 @@ export function registerAgentViewCommands(): () => void {
             execute: () => focused()?.followDefault(),
         }),
     );
-    // The Messages panel beside the conversation (messages/): off until a person turns it on for the pane.
+    // The Messages panel over the conversation (messages/): on, collapsed to its bar, until a person hides it for the pane.
     offs.push(
         commandRegistry.register({
             id: "agent:messages:show",
@@ -70,7 +70,7 @@ export function registerAgentViewCommands(): () => void {
             when: () => focused() !== undefined && !messagesEnabled(getFocusedBlockId()),
             execute: () => setMessagesEnabled(getFocusedBlockId(), true),
         }),
-        // A narrow pane's header can shed the Messages button: the palette opens the overlay too.
+        // The collapsed bar opens the panel with a click; the palette opens it too.
         commandRegistry.register({
             id: "agent:messages:open",
             label: "Agent: Open messages panel",
@@ -79,9 +79,9 @@ export function registerAgentViewCommands(): () => void {
             keywords: "messages jekts incoming panel overlay open inbox",
             when: () => {
                 const c = messagesControlsFor(getFocusedBlockId());
-                return focused() !== undefined && !!c && c.state().enabled && c.narrow() && !c.overlayOpen();
+                return focused() !== undefined && !!c && c.state().enabled && !c.state().open;
             },
-            execute: () => messagesControlsFor(getFocusedBlockId())?.setOverlayOpen(true),
+            execute: () => messagesControlsFor(getFocusedBlockId())?.patch({ open: true }),
         }),
         commandRegistry.register({
             id: "agent:messages:hide",

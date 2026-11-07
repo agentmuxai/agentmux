@@ -187,6 +187,9 @@ export function ruleOf(node: StoredNode): RowRule {
     return (RULES[node.type] as (n: StoredNode) => RowRule)(node);
 }
 
+/** Whether `node` keeps its row whatever the view and the Messages panel say: it waits on the person. */
+export const isForcedRow = (node: DocumentNode): boolean => !!ruleOf(node as StoredNode).forced;
+
 // ── The display list ────────────────────────────────────────────────────────
 
 /** A copy of `node` with a view mode, kept per node so an unchanged row keeps its identity. */

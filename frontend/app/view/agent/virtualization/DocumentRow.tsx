@@ -29,7 +29,6 @@ import { ContextDeliveryCard } from "../components/ContextDeliveryCard";
 import { SetupNote } from "../components/SetupNote";
 import { UserMessageBlock } from "../components/UserMessageBlock";
 import { useNodePeek } from "../hooks/useNodePeek";
-import { useMessagesPanel, type MessagesPanelControls } from "../messages/messages-state";
 import type { ContextDeliveryNode, DocumentNode, DocumentState, ShellNode, UserMessageNode } from "../../../agent-model/types";
 import { markRowMount } from "../../../agent-model/perf-probe";
 import { useTick } from "@/app/hook/useTick";
@@ -81,16 +80,7 @@ function flipRow(
     else if (t === "collapse") on.onToggleCollapse(node.id);
 }
 
-/** The row's click and the `e` key: flip the row, or, for an incoming jekt the Messages panel takes, open it there. */
-function expandRow(
-    node: DocumentNode,
-    state: DocumentState,
-    on: { onTogglePin: (id: string) => void; onToggleCollapse: (id: string) => void },
-    panel: MessagesPanelControls | undefined
-): void {
-    if (panel?.stubbed(node)) panel.showInPanel(node.id);
-    else flipRow(node, state, on);
-}
+
 
 /** The last time each distinct row error was logged, so a row that throws on
  *  every store write doesn't flood the log. */
@@ -149,8 +139,7 @@ function DocumentRowBody(props: DocumentRowProps): JSX.Element {
     // shared rule says which (virtualization/disclosure.ts), or that the row
     // isn't toggleable at all (normal user input, fixed rows).
     const canExpand = (): boolean => rowDisclosureIn(props.node(), props.documentState()).toggle !== null;
-    const panel = useMessagesPanel();
-    const onExpand = (): void => expandRow(props.node(), props.documentState(), props, panel);
+    const onExpand = (): void => flipRow(props.node(), props.documentState(), props);
 
     const handleRowKey = (e: KeyboardEvent): void => {
         if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -224,8 +213,7 @@ function createNodeBodyState(props: DocumentNodeBodyProps): NodeBodyState {
     // The message rows (agent message, jekt, context delivery) take their open
     // state and their click from the shared rule, as the `e` key does.
     const disclosure = () => rowDisclosureIn(props.node(), props.documentState());
-    const panel = useMessagesPanel();
-    const onExpand = (): void => expandRow(props.node(), props.documentState(), props, panel);
+    const onExpand = (): void => flipRow(props.node(), props.documentState(), props);
     // Peek tooltip for the node kinds still rendered INLINE below
     // (section/agent_error/context_compacted/compaction_started/
     // day_divider/session_outcome) — SPEC_TRANSCRIPT_NODE_HOVER_PEEK_ALL_KINDS_2026_08_25.
@@ -279,9 +267,6 @@ function createNodeBodyState(props: DocumentNodeBodyProps): NodeBodyState {
 
 function renderMessageRows(s: NodeBodyState): JSX.Element {
     const { props } = s;
-    // With the Messages panel on, an incoming jekt is a one-line stub whose click opens it there (messages-state.ts).
-    const panel = useMessagesPanel();
-    const stub = (): boolean => !!panel?.stubbed(props.node());
     return (
         <>
             <Show when={props.node() && props.node().type === "markdown"}>
@@ -322,7 +307,7 @@ function renderMessageRows(s: NodeBodyState): JSX.Element {
             <Show when={props.node() && props.node().type === "jekt_message"}>
                 <OriginContainer
                     node={props.node() as Extract<DocumentNode, { type: "jekt_message" }>}
-                    collapsed={stub() || !s.disclosure().open}
+                    collapsed={!s.disclosure().open}
                     onToggle={s.onExpand}
                     onHoldOpen={() => props.onHoldNodeOpen?.(props.node().id)}
                 />

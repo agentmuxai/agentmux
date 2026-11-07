@@ -39,22 +39,20 @@ const jekt = (over: Partial<JektMessageNode> = {}): JektMessageNode => ({
 
 /** The pane's controls over plain signals: what the block meta would hold. */
 function controlsFor(initial: Partial<MessagesState> = {}) {
-    const [state, setState] = createSignal<MessagesState>({ ...DEFAULT_MESSAGES_STATE, enabled: true, ...initial });
+    // Open: most of what is tested is the panel's content. The collapsed bar's tests say `open: false`.
+    const [state, setState] = createSignal<MessagesState>({ ...DEFAULT_MESSAGES_STATE, enabled: true, open: true, ...initial });
     const [request, setRequest] = createSignal<{ nodeId: string; seq: number } | null>(null);
-    const [overlayOpen, setOverlayOpen] = createSignal(false);
-    const [narrow, setNarrow] = createSignal(false);
     let seq = 0;
     const controls: MessagesPanelControls = {
         state,
         patch: (c) => setState((s) => ({ ...s, ...c })),
         request,
         clearRequest: () => setRequest(null),
-        showInPanel: (nodeId) => setRequest({ nodeId, seq: ++seq }),
-        stubbed: () => false,
-        overlayOpen,
-        setOverlayOpen,
-        narrow,
-        setNarrow,
+        showInPanel: (nodeId) => {
+            setState((s) => ({ ...s, open: true }));
+            setRequest({ nodeId, seq: ++seq });
+        },
+        hidden: () => false,
     };
     return controls;
 }
@@ -142,22 +140,69 @@ describe("MessagesPanel", () => {
         expect(dismissed).toHaveBeenCalledWith("p1", [m]);
     });
 
-    it("is a rail with the count and a needs-you dot while closed, and opens from it", () => {
+    it("is a bar labelled Jekt Messages with the count and a needs-you dot while collapsed, and opens from it", () => {
         const m = jekt({ tier: "sensitive", escalate: "required" });
         waitingNow.ids = [m.id];
         const { controls, view } = mount([m, jekt()], controlsFor({ open: false }));
         expect(view.container.querySelector(".messages-panel")).toBeNull();
+        expect(view.container.querySelector(".messages-rail__text")?.textContent).toBe("Jekt Messages");
         expect(screen.getByText("2")).toBeTruthy();
         expect(view.container.querySelector(".messages-rail__needs")).toBeTruthy();
-        fireEvent.click(screen.getByLabelText(/Messages, 2 unread, 1 need you/));
+        fireEvent.click(screen.getByLabelText(/Jekt Messages, 2 unread, 1 need you/));
         expect(controls.state().open).toBe(true);
     });
 
-    it("opens the message a stub in the conversation asked for", async () => {
+    it("makes the whole bar one button: the label and the marks are inside it, so a click anywhere on it opens the panel", () => {
+        const { controls, view } = mount([jekt()], controlsFor({ open: false }));
+        const bar = view.container.querySelector(".messages-rail")!;
+        const buttons = bar.querySelectorAll("button");
+        expect(buttons).toHaveLength(1);
+        expect(buttons[0].contains(bar.querySelector(".messages-rail__text"))).toBe(true);
+        expect(buttons[0].contains(bar.querySelector(".messages-rail__marks"))).toBe(true);
+        fireEvent.click(bar.querySelector(".messages-rail__text")!);
+        expect(controls.state().open).toBe(true);
+    });
+
+    it("keeps the bar's column when the panel is open, empty and hidden from assistive technology, so the panel lies over the conversation", () => {
+        const { view } = mount([jekt()]);
+        const bar = view.container.querySelector(".messages-rail")!;
+        expect(bar).toBeTruthy();
+        expect(bar.getAttribute("aria-hidden")).toBe("true");
+        expect(bar.querySelector("button")).toBeNull();
+        const panel = view.container.querySelector(".messages-panel")!;
+        expect(panel.classList.contains("ui-side-panel")).toBe(true);
+        expect(panel.classList.contains("ui-side-panel--docked")).toBe(false);
+    });
+
+    it("closes from its close button, and on Esc, and puts the keyboard back on the bar", async () => {
+        const { controls, view } = mount([jekt()]);
+        fireEvent.click(screen.getByLabelText("Close"));
+        expect(controls.state().open).toBe(false);
+        expect(view.container.querySelector(".messages-panel")).toBeNull();
+        controls.patch({ open: true });
+        const panelButton = view.container.querySelector<HTMLElement>(".ui-side-panel__head button")!;
+        await Promise.resolve();
+        expect(document.activeElement).toBe(panelButton);
+        fireEvent.keyDown(panelButton, { key: "Escape" });
+        expect(controls.state().open).toBe(false);
+        await Promise.resolve();
+        expect(document.activeElement).toBe(view.container.querySelector(".messages-rail__button"));
+    });
+
+    it("does not offer Show in conversation for a message the conversation leaves out", () => {
+        const held = jekt({ message: "held in the panel" });
+        const c = controlsFor();
+        const { view } = mount([held], { ...c, hidden: () => true });
+        fireEvent.click(view.container.querySelector(".messages-row__head")!);
+        expect(screen.getByText(/held in the panel/)).toBeTruthy();
+        expect(screen.queryByText("Show in conversation")).toBeNull();
+    });
+
+    it("opens the message it was asked for (a search match inside it), opening the panel if it was collapsed", async () => {
         const a = jekt({ message: "first body text" });
         const b = jekt({ message: "second body text" });
-        const { controls, view } = mount([a, b]);
-        expect(openRows(view)).toBe(0);
+        const { controls, view } = mount([a, b], controlsFor({ open: false }));
+        expect(view.container.querySelector(".messages-panel")).toBeNull();
         controls.showInPanel(b.id);
         expect(openRows(view)).toBe(1);
         expect(view.container.querySelector(".messages-row__body")?.textContent).toContain("second body text");
@@ -174,7 +219,7 @@ describe("MessagesPanel", () => {
         expect(waitingNow.reads).toBeGreaterThan(0);
     });
 
-    it("does not replay a stub's request when the panel is closed to the rail and opened again", () => {
+    it("does not replay a request when the panel is closed to the bar and opened again", () => {
         const a = jekt();
         const b = jekt();
         const { controls, view } = mount([a, b]);

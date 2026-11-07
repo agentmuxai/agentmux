@@ -37,7 +37,7 @@ import { createMessagesPanelControls, MessagesPanelContext } from "./messages/me
 import { MessagesPanel } from "./messages/MessagesPanel";
 import { openOrFocusHistoryTab } from "./open-history-tab";
 import { ShutdownOverlay } from "./shutdown/ShutdownOverlay";
-import { ruleOf } from "./virtualization/verbosity";
+import { isForcedRow } from "./virtualization/verbosity";
 
 /** The hook groups AgentPresentationView built, handed to the parts that draw them. */
 export interface AgentViewParts {
@@ -59,7 +59,7 @@ export interface AgentViewParts {
 export function AgentViewLayout({ v }: { v: AgentViewParts }): JSX.Element {
     const { model, found, feed, input, late } = v;
     // The Messages panel's state and what the conversation's rows need from it (messages/messages-state.ts).
-    const messages = createMessagesPanelControls(model.blockId, (node) => !!ruleOf(node as Parameters<typeof ruleOf>[0]).forced);
+    const messages = createMessagesPanelControls(model.blockId, isForcedRow);
     // A context-menu region under the click (the Shell drawer) owns its own menu. This handler runs first, being
     // a descendant of blockframe's, so without yielding a transcript selection would show a Copy for the wrong
     // text inside the terminal.
