@@ -930,6 +930,7 @@ partial list.
 | [`SPEC_GPU_PROCESS_MEMORY_2026_10_13`](SPEC_GPU_PROCESS_MEMORY_2026_10_13.md) | Spec: why the GPU process holds 394 MB in the field, and what stops it |
 | [`SPEC_HOST_VS_CONTAINER_AGENTS_2026_06_18`](SPEC_HOST_VS_CONTAINER_AGENTS_2026_06_18.md) | Spec: Host vs Container Agent Differentiation |
 | [`SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06`](SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md) | Spec: Make isolated auth the default for every non-`stable` channel |
+| [`SPEC_KEYBOARD_SHORTCUTS_SETTINGS_2026_11_06`](SPEC_KEYBOARD_SHORTCUTS_SETTINGS_2026_11_06.md) | Spec: Settings > Keyboard shortcuts: rebind every shortcut, with Help and the rest following live (#1861) |
 | [`SPEC_LAN_FIREWALL_SETUP_2026_10_01`](SPEC_LAN_FIREWALL_SETUP_2026_10_01.md) | SPEC: LAN that works on a fresh install, with no manual firewall steps |
 | [`SPEC_LAUNCHER_LINUX_PACKAGED_AND_SPLASH_2026_06_05`](SPEC_LAUNCHER_LINUX_PACKAGED_AND_SPLASH_2026_06_05.md) | SPEC: Launcher + reducer/saga parity on Linux + Linux splash |
 | [`SPEC_LAUNCHER_MACOS_DEV_INTEGRATION_2026_05_30`](SPEC_LAUNCHER_MACOS_DEV_INTEGRATION_2026_05_30.md) | SPEC: Integrating `agentmux-launcher` into macOS / Linux `task dev` |
