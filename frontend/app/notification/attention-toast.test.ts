@@ -159,6 +159,20 @@ describe("the attention toast", () => {
         expect(off.pushed).toEqual([]);
     });
 
+    it("goes when the setting is turned off while it shows, and stays when the window stops being in front", () => {
+        const h = harness();
+        h.wait(START_GRACE_MS);
+        h.set([item("b1")]);
+        h.state.inFront = false;
+        h.set([item("b1")]);
+        expect(h.removed).toEqual([]);
+        h.state.enabled = false;
+        h.set([item("b1")]);
+        expect(h.removed).toEqual([ATTENTION_TOAST_ID]);
+        h.set([item("b1")]);
+        expect(h.removed).toHaveLength(1);
+    });
+
     it("leaves out the pane the person is looking at, which shows its own request", () => {
         const h = harness({ focused: "b1" });
         h.wait(START_GRACE_MS);

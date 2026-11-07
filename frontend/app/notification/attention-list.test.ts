@@ -6,6 +6,7 @@ import { mergeAttention } from "./attention-list";
 
 vi.mock("@/app/store/agent-runtime-live", () => ({ sharedAgentRuntime: () => ({ rows: () => [] }) }));
 vi.mock("./waiting-for-you", () => ({ waitingPanes: () => [] }));
+vi.mock("@/app/store/global", () => ({ MOS: {}, workspace: () => null }));
 
 const row = (over: Partial<AgentRuntime>): AgentRuntime =>
     ({
@@ -40,14 +41,29 @@ describe("mergeAttention", () => {
         ]);
     });
 
-    it("adds an agent that only srv says waits (another window), once, marked as not local", () => {
+    it("adds an agent that only srv says waits that this window knows is elsewhere, once, marked as not local", () => {
         const rows = [row({ name: "Clare", color: "#aa0000", block_id: "b2", state: "waiting_on_user" })];
-        const items = mergeAttention([pane("b1", "asks you a question", 100)], rows, seen);
+        const items = mergeAttention([pane("b1", "asks you a question", 100)], rows, seen, () => false);
         expect(items.map((i) => [i.blockId, i.local])).toEqual([
             ["b1", true],
             ["b2", false],
         ]);
         expect(items[1]).toMatchObject({ name: "Clare", what: "needs you", since: 500 });
+    });
+
+    it("says a pane is in another window only when this window knows it is not here", () => {
+        const rows = [
+            row({ block_id: "b4", state: "waiting_on_user" }),
+            row({ block_id: "b5", state: "waiting_on_user" }),
+        ];
+        const here = (b: string) => (b === "b4" ? true : b === "b5" ? false : undefined);
+        const items = mergeAttention([], rows, seen, here);
+        expect(items.map((i) => [i.blockId, i.local])).toEqual([
+            ["b4", true],
+            ["b5", false],
+        ]);
+        // A tab not loaded yet cannot place it: it is not called elsewhere.
+        expect(mergeAttention([], rows.slice(0, 1), seen, () => undefined)[0].local).toBe(true);
     });
 
     it("counts a pane that both feeds name once, from the registry", () => {

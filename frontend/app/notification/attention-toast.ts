@@ -109,9 +109,16 @@ export function createAttentionToast(deps: AttentionToastDeps): { update: () => 
                 shown = false;
                 return;
             }
-            const eligible = deps.enabled() && deps.inFront();
+            if (!deps.enabled()) {
+                // Turned off while it shows: it goes.
+                if (shown) deps.remove(ATTENTION_TOAST_ID);
+                shown = false;
+                return;
+            }
             const isNew = fresh.length > 0 && !inGrace;
-            if (!eligible || !(isNew || shown)) return;
+            // A window that is not in front starts none (the OS notification is the signal) but leaves the one it has:
+            // the request it names still waits.
+            if (!(isNew && deps.inFront()) && !shown) return;
             const toast = buildToast(items, deps.reveal, deps.setAction);
             toast.onClose = () => {
                 shown = false;

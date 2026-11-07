@@ -9,6 +9,7 @@
  */
 
 import { sharedAgentRuntime } from "@/app/store/agent-runtime-live";
+import { MOS, workspace } from "@/app/store/global";
 import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
 import { waitingPanes, type WaitingPane } from "./waiting-for-you";
 
@@ -23,7 +24,7 @@ export interface AttentionItem {
     what: string;
     /** When it began to wait (unix ms) as this window saw it. */
     since: number;
-    /** Whether this window's own registry holds it; false: it asks in another window (or has no pane here). */
+    /** False only when the pane is known to be in another window; a pane this window cannot place counts as here. */
     local: boolean;
 }
 
@@ -34,7 +35,8 @@ const REMOTE_WHAT = "needs you";
 export function mergeAttention(
     panes: WaitingPane[],
     rows: AgentRuntime[],
-    seen: (blockId: string) => number
+    seen: (blockId: string) => number,
+    here: (blockId: string) => boolean | undefined = () => undefined
 ): AttentionItem[] {
     const byBlock = new Map<string, AgentRuntime>();
     for (const r of rows) if (r.block_id) byBlock.set(r.block_id, r);
@@ -58,10 +60,23 @@ export function mergeAttention(
             color: r.color,
             what: REMOTE_WHAT,
             since: seen(r.block_id),
-            local: false,
+            local: here(r.block_id) !== false,
         });
     }
     return items.sort((a, b) => a.since - b.since);
+}
+
+/** Whether `blockId` is in a tab of this window's workspace: undefined while a tab is not loaded to say. */
+function paneIsHere(blockId: string): boolean | undefined {
+    const ws = workspace();
+    if (!ws) return undefined;
+    let unknown = false;
+    for (const tabId of [...(ws.pinnedtabids ?? []), ...(ws.tabids ?? [])]) {
+        const tab = MOS.getObjectValue<Tab>(MOS.makeORef("tab", tabId));
+        if (!tab) unknown = true;
+        else if (tab.blockids?.includes(blockId)) return true;
+    }
+    return unknown ? undefined : false;
 }
 
 // When this window first saw a pane that srv alone reports waiting, so its row has an age; forgotten once it stops.
@@ -70,14 +85,19 @@ const firstSeen = new Map<string, number>();
 /** The panes that wait on the person, anywhere on this machine; reactive. */
 export function attentionItems(): AttentionItem[] {
     const rows = sharedAgentRuntime().rows();
-    const items = mergeAttention(waitingPanes(), rows, (blockId) => {
-        let t = firstSeen.get(blockId);
-        if (t == null) {
-            t = Date.now();
-            firstSeen.set(blockId, t);
-        }
-        return t;
-    });
+    const items = mergeAttention(
+        waitingPanes(),
+        rows,
+        (blockId) => {
+            let t = firstSeen.get(blockId);
+            if (t == null) {
+                t = Date.now();
+                firstSeen.set(blockId, t);
+            }
+            return t;
+        },
+        paneIsHere
+    );
     const live = new Set(items.map((i) => i.blockId));
     for (const id of firstSeen.keys()) if (!live.has(id)) firstSeen.delete(id);
     return items;
