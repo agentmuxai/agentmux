@@ -25,6 +25,7 @@ import {
     snapshot as snapshotLayout,
     type LayoutView,
 } from "@/app/store/agent-pane-layout-store";
+import { REATTACH_PX } from "@/app/scroll/follow-controller";
 import { scrollTranscriptTo } from "../scroll/one-way-flow";
 
 /** A row on screen, and how far the viewport top is past its start. */
@@ -70,10 +71,21 @@ export function keptScrollTop(rows: readonly OnScreenRow[], view: LayoutView | n
     return null;
 }
 
-/** Before a change to the slice's rows: the rows on screen now. */
+/**
+ * Whether the viewport is at the bottom of the rows: a following pane is, and the follow flow keeps it
+ * there. Restoring "the same offset from a row" would write the scroll position from row positions that
+ * are still estimates (a table or a reply not measured yet), by however far the estimate is off, and the
+ * follow controller then sees a scroll up it did not ask for.
+ */
+export function atBottomOf(view: LayoutView | null | undefined, scrollTop: number, viewportPx: number): boolean {
+    return !!view && scrollTop + viewportPx >= view.totalSize - REATTACH_PX;
+}
+
+/** Before a change to the slice's rows: the rows on screen now (none at the bottom, see `atBottomOf`). */
 export function captureOnScreen(blockId: string, view: LayoutView | null | undefined): OnScreenRow[] {
     const snap = snapshotLayout(blockId);
-    return snap ? onScreenRows(view, snap.scrollTop, snap.viewportPx) : [];
+    if (!snap || atBottomOf(view, snap.scrollTop, snap.viewportPx)) return [];
+    return onScreenRows(view, snap.scrollTop, snap.viewportPx);
 }
 
 /** After it: keep them where they were, in the slice and in `scroller`. */
