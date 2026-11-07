@@ -50,6 +50,8 @@ import type { AgentTakeoverResult } from "@/types/rpc/AgentTakeoverResult";
 import type { AgentTrackedBlocksResult } from "@/types/rpc/AgentTrackedBlocksResult";
 import type { ApiRetryEvent } from "@/types/rpc/ApiRetryEvent";
 import type { AppInfoResult } from "@/types/rpc/AppInfoResult";
+import type { AppSkillInstallResult } from "@/types/rpc/AppSkillInstallResult";
+import type { AppSkillsCatalog } from "@/types/rpc/AppSkillsCatalog";
 import type { AppUpdateStatus } from "@/types/rpc/AppUpdateStatus";
 import type { AskSideQuestionResult } from "@/types/rpc/AskSideQuestionResult";
 import type { AttachmentsCopyToWorkdirResult } from "@/types/rpc/AttachmentsCopyToWorkdirResult";
@@ -103,6 +105,8 @@ import type { CommandAgentStartData } from "@/types/rpc/CommandAgentStartData";
 import type { CommandAgentStopData } from "@/types/rpc/CommandAgentStopData";
 import type { CommandAgentTakeoverData } from "@/types/rpc/CommandAgentTakeoverData";
 import type { CommandAmbientNarrateData } from "@/types/rpc/CommandAmbientNarrateData";
+import type { CommandAppSkillsCatalogData } from "@/types/rpc/CommandAppSkillsCatalogData";
+import type { CommandAppSkillsCatalogInstallData } from "@/types/rpc/CommandAppSkillsCatalogInstallData";
 import type { CommandAppendAgentHistoryData } from "@/types/rpc/CommandAppendAgentHistoryData";
 import type { CommandAskSideQuestionData } from "@/types/rpc/CommandAskSideQuestionData";
 import type { CommandAttachmentsCancelData } from "@/types/rpc/CommandAttachmentsCancelData";
@@ -2469,6 +2473,22 @@ export const GeneratedApi = {
   // command "skill.bind"
   SkillBindCommand(client: RpcClient, data: SkillAgentBindingData, opts?: RpcOpts): Promise<SkillBindResult> {
     return client.rpcCall("skill.bind", data, opts);
+  },
+  // command "app_skills.catalog"
+  AppSkillsCatalogCommand(
+    client: RpcClient,
+    data?: CommandAppSkillsCatalogData,
+    opts?: RpcOpts
+  ): Promise<AppSkillsCatalog> {
+    return client.rpcCall("app_skills.catalog", data ?? {}, opts);
+  },
+  // command "app_skills.catalog.install"
+  AppSkillsCatalogInstallCommand(
+    client: RpcClient,
+    data: CommandAppSkillsCatalogInstallData,
+    opts?: RpcOpts
+  ): Promise<AppSkillInstallResult> {
+    return client.rpcCall("app_skills.catalog.install", data, opts);
   },
   // command "skill.catalog.app_file"
   SkillCatalogAppFileCommand(

@@ -444,3 +444,34 @@ pub struct SkillExportResult {
     /// Whether it carries the publisher's signature (it does only while the skill is exactly what was signed).
     pub signed: bool,
 }
+
+/// `app_skills.catalog` — window-scoped. Fetch the public catalog of computer-use skills and say what is installed here.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandAppSkillsCatalogData {}
+
+/// The catalog as Browse lists it. An unreachable or unverifiable catalog is an error, not an empty list.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct AppSkillsCatalog {
+    pub items: Vec<crate::backend::skill_catalog::AppSkillCatalogItem>,
+}
+
+/// `app_skills.catalog.install` — window-scoped. Install or update one skill from the catalog, by its id
+/// (`<publisher>.<id>`). The catalog is fetched again and checked first; the skill arrives with its scripts unapproved.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandAppSkillsCatalogInstallData {
+    pub id: String,
+}
+
+/// Result of `app_skills.catalog.install`.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct AppSkillInstallResult {
+    pub skill_id: String,
+    pub name: String,
+    pub version: String,
+    /// An earlier version was replaced.
+    pub updated: bool,
+}

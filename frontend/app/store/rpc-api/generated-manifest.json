@@ -1365,6 +1365,15 @@
             "method": "SkillBindCommand"
         },
         {
+            "command": "app_skills.catalog",
+            "method": "AppSkillsCatalogCommand",
+            "send": "data ?? {}"
+        },
+        {
+            "command": "app_skills.catalog.install",
+            "method": "AppSkillsCatalogInstallCommand"
+        },
+        {
             "command": "skill.catalog.app_file",
             "method": "SkillCatalogAppFileCommand"
         },
