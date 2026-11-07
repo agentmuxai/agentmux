@@ -244,6 +244,8 @@ export class BrowserViewModel {
     /** The agent the person took this pane from and has not given it back to: the agent that drove it last
      *  (`browser:last_driver`, written by srv) unless srv recorded a Give back (`browser:given_back`). */
     lastDriverAtom!: Accessor<string | undefined>;
+    /** The agent driving the pane did not open it (`browser:took_control`, written by srv). */
+    tookControlAtom!: Accessor<boolean>;
     /** The site of the page that opened this pane as a popup
      *  (`browser:popup_from`, written by srv; SPEC_BROWSER_PANE_POPUPS_ADOPTED_2026_10_08.md §5). */
     popupFromAtom!: Accessor<string | undefined>;
@@ -527,6 +529,7 @@ export class BrowserViewModel {
             this.pausedAtom = createMemo(() => this.meta()?.["browser:paused"] === true);
             this.driverAgentAtom = createMemo(() => trimmedString(this.meta()?.["browser:owner_agent"]));
             this.lastDriverAtom = createMemo(() => takenFrom(this.meta()));
+            this.tookControlAtom = createMemo(() => this.meta()?.["browser:took_control"] === true);
             this.identityAtom = createMemo(() => {
                 const v = this.meta()?.["browser:identity"];
                 return typeof v === "string" && v ? v : undefined;

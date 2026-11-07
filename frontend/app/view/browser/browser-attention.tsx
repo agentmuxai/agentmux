@@ -58,6 +58,12 @@ function AttentionHead(props: Part): JSX.Element {
                         {a().reason ? <>: {a().reason}</> : null}
                     </span>
                 </Match>
+                <Match when={a().kind === "take"}>
+                    <span>
+                        <b>{a().agent || "An agent"}</b> wants to drive this pane
+                        {a().reason ? <> ({a().reason})</> : null}
+                    </span>
+                </Match>
                 <Match when={a().kind === "navigation"}>
                     <span>
                         This pane is limited to the sites it was opened for. The page wants to{" "}

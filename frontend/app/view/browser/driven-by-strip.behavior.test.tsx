@@ -104,6 +104,7 @@ function fakeModel(initial: Record<string, any> = {}) {
         actionsAtom: actions,
         pausedAtom: paused,
         allowedOriginsAtom: origins,
+        tookControlAtom: () => false,
         bypassAtom: bypass,
         bypassEndedAtom: ended,
         bypassPaused,

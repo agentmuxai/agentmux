@@ -882,6 +882,8 @@ fn browser_control_routes() -> Router<AppState> {
         .route("/api/v1/ui/browser/handoff", post(ui_handlers::handle_ui_browser_handoff))
         .route("/api/v1/ui/browser/handoff_status", post(crate::server::browser_retake::handle_ui_browser_handoff_status))
         .route("/api/v1/ui/browser/retake", post(crate::server::browser_retake::handle_ui_browser_retake))
+        .route("/api/v1/ui/browser/take_control", post(crate::server::browser_control::handle_ui_browser_take_control))
+        .route("/api/v1/ui/browser/release", post(crate::server::browser_control::handle_ui_browser_release))
 }
 
 /// What an agent changes about the agents themselves: their seats and names. Each acts as the agent its token

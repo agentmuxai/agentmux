@@ -39,6 +39,8 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "handoff", tool: "BrowserHandoff", rename: &[] },
     Act { action: "handoff_status", tool: "BrowserHandoffStatus", rename: &[] },
     Act { action: "retake", tool: "BrowserRetake", rename: &[] },
+    Act { action: "take_control", tool: "BrowserTakeControl", rename: &[] },
+    Act { action: "release", tool: "BrowserRelease", rename: &[] },
     Act { action: "request_auto_approve", tool: "BrowserRequestBypass", rename: &[] },
     Act { action: "stop_auto_approve", tool: "BrowserEndBypass", rename: &[] },
     Act { action: "log", tool: "BrowserLog", rename: &[] },
@@ -73,6 +75,8 @@ async fn run(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     match act.action {
         "close" => return close(arguments, cx).await,
         "retake" => return retake(arguments, cx).await,
+        "take_control" => return take_control(arguments, cx).await,
+        "release" => return release(arguments, cx).await,
         "handoff_status" => return handoff_status(arguments, cx).await,
         _ => {}
     }
@@ -179,6 +183,75 @@ async fn retake(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
         Ok(snap) => Ok(format!("{lead}\n\nsnapshot:\n{snap}")),
         Err(e) => Ok(format!("{lead}\n\nsnapshot failed (the retake itself was done): {e}")),
     }
+}
+
+/// How long a take_control waits for srv: the person has 120 s to answer the pane's question, and the shared client's own
+/// limit (10 s) would end the call long before.
+const TAKE_CONTROL_WAIT: std::time::Duration = std::time::Duration::from_secs(150);
+
+/// POST `body` to srv's `/api/v1/ui/browser/{route}` and read its answer, or fail with what srv said. `wait` is the time
+/// limit for a call that waits for the person; none: the client's own.
+async fn control_call<T: serde::Serialize>(route: &str, body: &T, wait: Option<std::time::Duration>, cx: &ToolCtx<'_>) -> Result<Value> {
+    let ToolCtx { local_url, auth_key, client, .. } = *cx;
+    let url = format!("{}/api/v1/ui/browser/{route}", local_url.trim_end_matches('/'));
+    let mut request = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(body);
+    if let Some(wait) = wait {
+        request = request.timeout(wait);
+    }
+    let resp = request.send().await.map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    let status = resp.status();
+    if !status.is_success() {
+        let text = resp.text().await.unwrap_or_default();
+        anyhow::bail!("Browser {route} failed: HTTP {status} — {text}");
+    }
+    Ok(resp.json().await.unwrap_or(Value::Null))
+}
+
+/// The pane a take_control or release names: required, since neither defaults to the caller's own.
+fn named_pane(arguments: &Value, action: &str, what: &str) -> Result<String> {
+    let pane = arguments.get("pane").and_then(|v| v.as_str()).map(str::trim).filter(|p| !p.is_empty());
+    pane.map(str::to_string).ok_or_else(|| anyhow::anyhow!("Browser {action} needs pane: {what}"))
+}
+
+/// `take_control`: drive a browser pane the agent did not open. srv may ask the person in the pane first (their Personal
+/// sign-ins, a pane another agent drives, a pane they used a moment ago) and the call waits for the answer.
+async fn take_control(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let pane = named_pane(arguments, "take_control", "the id of a browser pane (Pane layout lists them)")?;
+    let ToolCtx { local_url, auth_key, block_id, .. } = *cx;
+    require_agent_env(local_url, auth_key, block_id)?;
+    let allowed_origins = arguments.get("allowed_origins").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|o| o.as_str().map(str::to_string)).collect());
+    let req = agentmux_common::api_types::UiBrowserTakeControlRequest { auth: sign_ui_automation_auth()?, pane: Some(pane.clone()), allowed_origins };
+    let body = control_call("take_control", &req, Some(TAKE_CONTROL_WAIT), cx).await?;
+    let data = &body["data"];
+    let lead = if data["already"].as_bool() == Some(true) {
+        format!("You already drive pane {pane:?}.")
+    } else {
+        let limit = data["limited_to"].as_array().map(|l| l.iter().filter_map(|o| o.as_str()).collect::<Vec<_>>().join(", ")).filter(|l| !l.is_empty());
+        let limit = limit.map_or_else(String::new, |l| format!(" It is limited to {l}."));
+        format!(
+            "You drive pane {pane:?}, which you did not open; it browses as {}.{limit} The user sees you driving it and can take it back with Take over. Read the page before you act: it was not yours until now.",
+            data["browsing_as"].as_str().unwrap_or("its own profile")
+        )
+    };
+    match browser::call("BrowserSnapshot", &json!({ "pane": pane }), cx).await {
+        Ok(snap) => Ok(format!("{lead}
+
+snapshot:
+{snap}")),
+        Err(e) => Ok(format!("{lead}
+
+snapshot failed (taking control itself was done): {e}")),
+    }
+}
+
+/// `release`: stop driving a pane, so that it has no driver and another agent can take it without asking the person.
+async fn release(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let pane = named_pane(arguments, "release", "the id of a pane you drive")?;
+    let ToolCtx { local_url, auth_key, block_id, .. } = *cx;
+    require_agent_env(local_url, auth_key, block_id)?;
+    let req = agentmux_common::api_types::UiBrowserReleaseRequest { auth: sign_ui_automation_auth()?, pane: Some(pane.clone()) };
+    control_call("release", &req, None, cx).await?;
+    Ok(format!("You no longer drive pane {pane:?}; it stays open for whoever uses it next."))
 }
 
 /// `handoff_status`: what became of a hand-off, by its id or the newest on a pane.
@@ -325,6 +398,27 @@ mod tests {
         // With a pane it reaches ClosePane (which, with no srv here, fails on the missing environment).
         let e = call("Browser", &json!({ "action": "close", "pane": "p1" }), &cx).await.unwrap_err().to_string();
         assert!(!e.contains("needs pane"), "{e}");
+    }
+
+    /// The person has 120 s to answer a take_control question (srv's `ASK_FOR`): the call must outlast it, and the shared
+    /// client's 10 s limit must not be the one that applies.
+    #[test]
+    fn a_take_control_waits_longer_than_the_person_has_to_answer() {
+        assert!(TAKE_CONTROL_WAIT > std::time::Duration::from_secs(120));
+        assert!(TAKE_CONTROL_WAIT > std::time::Duration::from_secs(10));
+    }
+
+    /// Taking control and releasing name the pane they act on: neither defaults to the caller's own.
+    #[tokio::test]
+    async fn take_control_and_release_need_a_pane() {
+        let (client, loops, counter) = cx_parts();
+        let cx = ToolCtx { local_url: "", auth_key: "", block_id: "my-block", client: &client, loops: &loops, loop_counter: &counter };
+        for action in ["take_control", "release"] {
+            let e = call("Browser", &json!({ "action": action }), &cx).await.unwrap_err().to_string();
+            assert!(e.contains(&format!("{action} needs pane")), "{e}");
+            let e = call("Browser", &json!({ "action": action, "pane": "p1" }), &cx).await.unwrap_err().to_string();
+            assert!(!e.contains("needs pane"), "{e}");
+        }
     }
 
     /// A retake names the pane it takes back and a status names the hand-off or the pane: neither defaults to the caller's own.

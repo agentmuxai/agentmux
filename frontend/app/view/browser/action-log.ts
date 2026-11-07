@@ -13,7 +13,7 @@ export function actionTime(ts: number): string {
 
 /** `auto-approve-on` → `auto-approve on`. */
 export function actionKind(kind: string): string {
-    return kind.replace(/-(on|off)$/, " $1");
+    return kind.replace(/-(on|off)$/, " $1").replace("took-control", "took control");
 }
 
 /** A page address shortened for the list: its host and path, without the
