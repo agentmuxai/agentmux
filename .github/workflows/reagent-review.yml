@@ -93,8 +93,8 @@ jobs:
           persist-credentials: false
 
       # A PR opened by Dependabot or Renovate asks for `reagent-deps`: the broker verifies the account (login, id
-      # and type) and grants no credential of any kind, and the reviewer job reviews it by rule without a model
-      # (muxreview docs/DEPENDENCY_REVIEW.md). Every other PR asks for `reagent-review` as before. The broker
+      # and type) and grants no credential of any kind, and the reviewer job reviews it by rule without a model.
+      # Every other PR asks for `reagent-review` as before. The broker
       # is the gate in both cases; this only chooses which entry to ask.
       - name: Ask the broker
         id: grant
