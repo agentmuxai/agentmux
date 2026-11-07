@@ -403,3 +403,9 @@
         margin: 0 0 var(--space-1);
     }
 }
+
+// What the agent says it wants an entry for, on the approval: quoted and attributed.
+.vault-use-says {
+    margin: 0 0 var(--space-2);
+    overflow-wrap: anywhere;
+}

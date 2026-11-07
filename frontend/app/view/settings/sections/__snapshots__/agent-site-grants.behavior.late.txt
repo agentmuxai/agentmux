@@ -1,0 +1,14 @@
+store.follow
+Button "Revoke Naki-2 on shell.cloud.google.com (and ssh.cloud.google.com)" click
+BrowserGrantsRevokeCommand {"id":"r1"}
+-- grants went away while the change was out
+<div>
+  <div class="setting-row agent-site-grants" id="setting-browser.agent_sites">
+    <div class="setting-devices-description">
+      "What an agent may do on a site without asking each time, until you revoke it. Every row lets the agent make committing clicks there without asking (a payment still asks). Add Terminal to let it type and run commands in a web terminal there, such as Cloud Shell: nobody checks each line, so Stop, Pause and Take over in the pane are how you stop it, and Revoke here ends it at once. Tick "ask me for each line" instead to be shown every line in the pane, with Run it and Don't run, before it goes in."
+    <div data-stand="Notice" data-tone="warning">
+      <b>
+        "One limit of the Terminal power"
+      "A line already on its way can't be stopped."
+    <div class="setting-devices-empty">
+      "Loading…"

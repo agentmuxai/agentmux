@@ -1,0 +1,195 @@
+// Copyright 2025, Command Line Inc.
+// Copyright 2025-2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * The find bar's state: where it floats over its anchor, the resets that follow it closing and the text changing,
+ * the stepping through results, and the icon buttons' declarations.
+ */
+
+import { createSignalAtom, type SignalAtom } from "@/util/util";
+import { autoUpdate, computePosition, offset, type Middleware } from "@floating-ui/dom";
+import { createEffect, onCleanup } from "solid-js";
+
+export type SearchProps = SearchAtoms & {
+    anchorRef?: { current: HTMLElement | null };
+    offsetX?: number;
+    offsetY?: number;
+    onSearch?: (search: string) => void;
+    onNext?: () => void;
+    onPrev?: () => void;
+};
+
+export type SearchState = ReturnType<typeof createSearch>;
+
+/** Where the bar floats: top-end of its anchor, pulled back on screen, and kept there while the anchor moves. */
+function createFloating(props: SearchProps) {
+    const offsetX = props.offsetX ?? 10;
+    const offsetY = props.offsetY ?? 10;
+
+    const floatingStyleAtom = createSignalAtom("position:absolute;left:0px;top:0px");
+    let floatingEl: HTMLElement | null = null;
+    let cleanupAutoUpdate: (() => void) | null = null;
+
+    const offsetCallback = ({ rects }: { rects: any }) => {
+        const docRect = document.documentElement.getBoundingClientRect();
+        let yOffsetCalc = -rects.floating.height - offsetY;
+        let xOffsetCalc = -offsetX;
+        const floatingBottom = rects.reference.y + rects.floating.height + offsetY;
+        const floatingLeft = rects.reference.x + rects.reference.width - (rects.floating.width + offsetX);
+        if (floatingBottom > docRect.bottom) {
+            yOffsetCalc -= docRect.bottom - floatingBottom;
+        }
+        if (floatingLeft < 5) {
+            xOffsetCalc += 5 - floatingLeft;
+        }
+        return {
+            mainAxis: yOffsetCalc,
+            crossAxis: xOffsetCalc,
+        };
+    };
+
+    const middleware: Middleware[] = [offset(offsetCallback as any)];
+
+    const updatePosition = async () => {
+        const referenceEl = props.anchorRef?.current;
+        if (!referenceEl || !floatingEl) return;
+        const pos = await computePosition(referenceEl, floatingEl, {
+            placement: "top-end",
+            middleware,
+        });
+        floatingStyleAtom._set(`position:absolute;left:${pos.x}px;top:${pos.y}px`);
+    };
+
+    const registerFloating = (el: HTMLElement) => {
+        floatingEl = el;
+        requestAnimationFrame(() => {
+            const referenceEl = props.anchorRef?.current;
+            if (referenceEl instanceof Element && floatingEl instanceof Element) {
+                cleanupAutoUpdate?.();
+                cleanupAutoUpdate = autoUpdate(referenceEl, floatingEl, updatePosition);
+            }
+        });
+    };
+
+    onCleanup(() => {
+        cleanupAutoUpdate?.();
+    });
+
+    return { style: floatingStyleAtom, register: registerFloating };
+}
+
+const createToggleButtonDecl = (
+    atom: SignalAtom<boolean> | undefined,
+    icon: string,
+    title: string
+): ToggleIconButtonDecl | null =>
+    atom
+        ? {
+              elemtype: "toggleiconbutton",
+              icon,
+              title,
+              active: atom,
+          }
+        : null;
+
+export function createSearch(props: SearchProps) {
+    const searchAtom = props.searchValue;
+    const indexAtom = props.resultsIndex;
+    const numResultsAtom = props.resultsCount;
+    const isOpenAtom = props.isOpen;
+
+    const floating = createFloating(props);
+
+    // When closed, reset search state
+    createEffect(() => {
+        if (!isOpenAtom()) {
+            searchAtom._set("");
+            indexAtom._set(0);
+            numResultsAtom._set(0);
+        }
+    });
+
+    // When search changes, reset index/count and call onSearch
+    createEffect(() => {
+        const search = searchAtom();
+        indexAtom._set(0);
+        numResultsAtom._set(0);
+        props.onSearch?.(search);
+    });
+
+    const onPrevWrapper = () => {
+        if (props.onPrev) {
+            props.onPrev();
+        } else {
+            const idx = indexAtom();
+            const num = numResultsAtom();
+            indexAtom._set((idx - 1 + num) % num);
+        }
+    };
+
+    const onNextWrapper = () => {
+        if (props.onNext) {
+            props.onNext();
+        } else {
+            const idx = indexAtom();
+            const num = numResultsAtom();
+            indexAtom._set((idx + 1) % num);
+        }
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+        if (e.key === "Enter") {
+            if (e.shiftKey) {
+                onPrevWrapper();
+            } else {
+                onNextWrapper();
+            }
+            e.preventDefault();
+        }
+    };
+
+    const prevDecl: IconButtonDecl = {
+        elemtype: "iconbutton",
+        icon: "chevron-up",
+        title: "Previous Result (Shift+Enter)",
+        get disabled() { return numResultsAtom() === 0; },
+        click: onPrevWrapper,
+    };
+
+    const nextDecl: IconButtonDecl = {
+        elemtype: "iconbutton",
+        icon: "chevron-down",
+        title: "Next Result (Enter)",
+        get disabled() { return numResultsAtom() === 0; },
+        click: onNextWrapper,
+    };
+
+    const closeDecl: IconButtonDecl = {
+        elemtype: "iconbutton",
+        icon: "xmark",
+        title: "Close (Esc)",
+        click: () => isOpenAtom._set(false),
+    };
+
+    const regexDecl = createToggleButtonDecl(props.regex, "custom@regex", "Regular Expression");
+    const wholeWordDecl = createToggleButtonDecl(props.wholeWord, "custom@whole-word", "Whole Word");
+    const caseSensitiveDecl = createToggleButtonDecl(props.caseSensitive, "custom@case-sensitive", "Case Sensitive");
+
+    return {
+        isOpen: isOpenAtom,
+        style: floating.style,
+        register: floating.register,
+        searchValue: searchAtom,
+        setSearch: (v: string) => searchAtom._set(v),
+        resultsIndex: indexAtom,
+        resultsCount: numResultsAtom,
+        onKeyDown,
+        prevDecl,
+        nextDecl,
+        closeDecl,
+        regexDecl,
+        wholeWordDecl,
+        caseSensitiveDecl,
+    };
+}

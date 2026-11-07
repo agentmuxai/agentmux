@@ -1,15 +1,14 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Select, TextInput } from "@/app/element/ui";
-import { For, Show, type JSX } from "solid-js";
+import { TextInput } from "@/app/element/ui";
+import type { JSX } from "solid-js";
 
-import { hostHas } from "@/util/host-caps";
 import { settingsAtom } from "@/app/store/global";
-import { THEME_OPTIONS } from "@/app/menu/base-menus";
 import type { SettingsIndexEntry } from "../settings-model";
-import { NumberControl, SectionHeader, set, SettingRow, SliderControl, ToggleControl } from "../settings-controls";
-import { LANGUAGE_SETTINGS, LanguageRow } from "./language-row";
+import { SectionHeader, set, SettingRow } from "../settings-controls";
+import { MagnifyRows, PaneGapRow, ThemeRows, TransparencyRows } from "./appearance-section-parts";
+import { LANGUAGE_SETTINGS } from "./language-row";
 import { WidgetColorsSettings } from "./widget-colors";
 
 // ── Search index — one entry per row below, named-key so re-ordering rows
@@ -114,99 +113,17 @@ export const APPEARANCE_SETTINGS = {
 
 export function AppearanceSection(): JSX.Element {
     const s = () => settingsAtom() ?? ({} as any);
-    const transparent = () => !!(s()["window:transparent"] as boolean);
+    const rows = APPEARANCE_SETTINGS;
 
     return (
         <div class="settings-section-body">
+            <ThemeRows s={s} rows={rows} />
+            <TransparencyRows s={s} rows={rows} />
+            <PaneGapRow s={s} rows={rows} />
             <SettingRow
-                id={APPEARANCE_SETTINGS.theme.id}
-                label={APPEARANCE_SETTINGS.theme.label}
-                description={APPEARANCE_SETTINGS.theme.description}
-                control={
-                    <Select
-                        class="setting-select"
-                        value={(s()["window:theme"] as string) ?? "default"}
-                        onChange={(v) => set("window:theme", v)}
-                    >
-                        <For each={THEME_OPTIONS}>
-                            {(t) => <option value={t.id}>{t.label}</option>}
-                        </For>
-                    </Select>
-                }
-            />
-            <LanguageRow />
-            <SettingRow
-                id={APPEARANCE_SETTINGS.splash.id}
-                label={APPEARANCE_SETTINGS.splash.label}
-                description={APPEARANCE_SETTINGS.splash.description}
-                control={
-                    <ToggleControl
-                        // Stored inverted (`splash:disabled`, false by default) because
-                        // the launcher reads the raw file before any of this code runs;
-                        // the label stays positive so the toggle reads the way the
-                        // splash behaves.
-                        checked={!(s()["splash:disabled"] as boolean)}
-                        onChange={(v) => set("splash:disabled", !v)}
-                    />
-                }
-            />
-            <Show when={hostHas("windowTransparency")}>
-                <SettingRow
-                    id={APPEARANCE_SETTINGS.transparency.id}
-                    label={APPEARANCE_SETTINGS.transparency.label}
-                    description={APPEARANCE_SETTINGS.transparency.description}
-                    control={
-                        <ToggleControl
-                            checked={transparent()}
-                            onChange={(v) => set("window:transparent", v)}
-                        />
-                    }
-                />
-                <Show when={transparent()}>
-                    <SettingRow
-                        id={APPEARANCE_SETTINGS.opacity.id}
-                        indent
-                        label={APPEARANCE_SETTINGS.opacity.label}
-                        description={APPEARANCE_SETTINGS.opacity.description}
-                        control={
-                            <SliderControl
-                                min={0.35} max={1} step={0.05}
-                                value={(s()["window:opacity"] as number) ?? 0.8}
-                                onChange={(v) => set("window:opacity", v)}
-                            />
-                        }
-                    />
-                    <SettingRow
-                        id={APPEARANCE_SETTINGS.blur.id}
-                        indent
-                        label={APPEARANCE_SETTINGS.blur.label}
-                        description={APPEARANCE_SETTINGS.blur.description}
-                        control={
-                            <ToggleControl
-                                checked={!!(s()["window:blur"] as boolean)}
-                                onChange={(v) => set("window:blur", v)}
-                            />
-                        }
-                    />
-                </Show>
-            </Show>
-            <SettingRow
-                id={APPEARANCE_SETTINGS.paneGap.id}
-                label={APPEARANCE_SETTINGS.paneGap.label}
-                description={APPEARANCE_SETTINGS.paneGap.description}
-                control={
-                    <NumberControl
-                        class="setting-number"
-                        min={0} max={20} step={1} parse="int"
-                        value={(s()["window:tilegapsize"] as number) ?? 3}
-                        onChange={(v) => set("window:tilegapsize", v)}
-                    />
-                }
-            />
-            <SettingRow
-                id={APPEARANCE_SETTINGS.bgColor.id}
-                label={APPEARANCE_SETTINGS.bgColor.label}
-                description={APPEARANCE_SETTINGS.bgColor.description}
+                id={rows.bgColor.id}
+                label={rows.bgColor.label}
+                description={rows.bgColor.description}
                 control={
                     <TextInput
                         class="setting-text"
@@ -218,62 +135,12 @@ export function AppearanceSection(): JSX.Element {
                 }
             />
             <SectionHeader label="Pane hover-magnify" />
-            <SettingRow
-                id={APPEARANCE_SETTINGS.magnifiedOpacity.id}
-                label={APPEARANCE_SETTINGS.magnifiedOpacity.label}
-                description={APPEARANCE_SETTINGS.magnifiedOpacity.description}
-                control={
-                    <SliderControl
-                        min={0} max={1} step={0.05}
-                        value={(s()["window:magnifiedblockopacity"] as number) ?? 1}
-                        onChange={(v) => set("window:magnifiedblockopacity", v)}
-                    />
-                }
-            />
-            <SettingRow
-                id={APPEARANCE_SETTINGS.magnifiedSize.id}
-                label={APPEARANCE_SETTINGS.magnifiedSize.label}
-                description={APPEARANCE_SETTINGS.magnifiedSize.description}
-                control={
-                    <NumberControl
-                        class="setting-number setting-number--wide"
-                        min={1} step={0.1}
-                        value={(s()["window:magnifiedblocksize"] as number) ?? 1.5}
-                        onChange={(v) => set("window:magnifiedblocksize", v)}
-                    />
-                }
-            />
-            <SettingRow
-                id={APPEARANCE_SETTINGS.magnifiedBlurPrimary.id}
-                label={APPEARANCE_SETTINGS.magnifiedBlurPrimary.label}
-                description={APPEARANCE_SETTINGS.magnifiedBlurPrimary.description}
-                control={
-                    <NumberControl
-                        class="setting-number"
-                        min={0} step={1} parse="int"
-                        value={(s()["window:magnifiedblockblurprimarypx"] as number) ?? 0}
-                        onChange={(v) => set("window:magnifiedblockblurprimarypx", v)}
-                    />
-                }
-            />
-            <SettingRow
-                id={APPEARANCE_SETTINGS.magnifiedBlurSecondary.id}
-                label={APPEARANCE_SETTINGS.magnifiedBlurSecondary.label}
-                description={APPEARANCE_SETTINGS.magnifiedBlurSecondary.description}
-                control={
-                    <NumberControl
-                        class="setting-number"
-                        min={0} step={1} parse="int"
-                        value={(s()["window:magnifiedblockblursecondarypx"] as number) ?? 0}
-                        onChange={(v) => set("window:magnifiedblockblursecondarypx", v)}
-                    />
-                }
-            />
+            <MagnifyRows s={s} rows={rows} />
             <SectionHeader label="Widget colors" />
             <WidgetColorsSettings
-                id={APPEARANCE_SETTINGS.widgetColors.id}
-                label={APPEARANCE_SETTINGS.widgetColors.label}
-                description={APPEARANCE_SETTINGS.widgetColors.description}
+                id={rows.widgetColors.id}
+                label={rows.widgetColors.label}
+                description={rows.widgetColors.description}
             />
         </div>
     );

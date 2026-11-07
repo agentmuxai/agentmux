@@ -131,6 +131,34 @@ pub(crate) fn drop_pane(pane: &str) -> bool {
     true
 }
 
+/// `pane` leaves its chain for good, and any popup panes still in it keep the list it had: they stay one agent's, and a
+/// new list for `pane` (another agent took it over, `take_control`) must not change what they may reach. [`drop_pane`]
+/// leaves the list under the root's own name, which a new [`set`] on that pane would overwrite.
+pub(crate) fn leave_chain(pane: &str) {
+    let mut l = lock();
+    l.unlimited.remove(pane);
+    let old_root = l.members.remove(pane);
+    let rest: Vec<String> = match &old_root {
+        Some(root) => l.members.iter().filter(|(_, r)| *r == root).map(|(m, _)| m.clone()).collect(),
+        None => l.members.iter().filter(|(_, r)| *r == pane).map(|(m, _)| m.clone()).collect(),
+    };
+    let root = old_root.unwrap_or_else(|| pane.to_string());
+    if rest.is_empty() {
+        l.lists.remove(&root);
+    } else if root == pane {
+        // The chain is named after the pane: rename it, so the pane can start a list of its own.
+        if let Some(list) = l.lists.remove(&root) {
+            let renamed = format!("{pane}:{}", uuid::Uuid::new_v4());
+            for m in rest {
+                l.members.insert(m, renamed.clone());
+            }
+            l.lists.insert(renamed, list);
+        }
+    }
+    drop(l);
+    crate::server::browser_owner::changed().notify_one();
+}
+
 /// Record that `pane` has no list although the host holds one for it.
 fn confirm_unlimited(pane: &str) {
     lock().unlimited.insert(pane.to_string());
@@ -462,6 +490,34 @@ async fn replay_navigation(state: &AppState, target: &str, url: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A pane that leaves its chain takes nothing with it, and a new list for it changes no popup of the old chain.
+    #[test]
+    fn a_pane_that_leaves_its_chain_can_start_a_list_without_changing_the_popups() {
+        let (a, b) = (vec!["https://a.example".to_string()], vec!["https://b.example".to_string(), "https://c.example".to_string()]);
+        set("chain-root-1", a.clone());
+        join("chain-popup-1", "chain-root-1").unwrap();
+        leave_chain("chain-root-1");
+        assert_eq!(list_for("chain-root-1"), None, "the pane itself is out");
+        assert_eq!(list_for("chain-popup-1"), Some(a.clone()), "the popup keeps the list");
+        set("chain-root-1", b.clone());
+        assert_eq!(list_for("chain-root-1"), Some(b), "the pane has its new list");
+        assert_eq!(list_for("chain-popup-1"), Some(a.clone()), "the popup's is not widened");
+
+        // A popup leaves: the chain stays; the last one out takes the list with it.
+        set("chain-root-2", a.clone());
+        join("chain-popup-2", "chain-root-2").unwrap();
+        leave_chain("chain-popup-2");
+        assert_eq!(list_for("chain-popup-2"), None);
+        assert_eq!(list_for("chain-root-2"), Some(a));
+        leave_chain("chain-root-2");
+        assert_eq!(list_for("chain-root-2"), None);
+        assert!(!lock().lists.contains_key("chain-root-2"), "no list left behind");
+        leave_chain("chain-never-seen");
+        for p in ["chain-root-1", "chain-popup-1"] {
+            drop_pane(p);
+        }
+    }
 
     #[test]
     fn a_pane_found_unlimited_is_pushed_until_it_is_limited_again_or_gone() {

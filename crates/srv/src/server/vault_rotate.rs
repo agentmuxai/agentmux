@@ -50,6 +50,9 @@ pub(crate) struct RotateBody {
     verify: Option<String>,
     #[serde(default)]
     cwd: Option<String>,
+    /// Why the agent rotates it: one line of 8 to 300 characters, required.
+    #[serde(default)]
+    reason: Option<String>,
     /// How the new value is made, as for `generate` (20 characters by default).
     #[serde(default)]
     rules: generate::RulesRequest,
@@ -86,6 +89,28 @@ fn rotatable_entry(state: &AppState, id: &str, agent: &str) -> Result<crate::bac
     }
 }
 
+/// The person's question about rotating `row`: both commands, that its value changes, and what the agent says it is for.
+fn rotation_request(agent: &str, row: &crate::backend::storage::vault::VaultRow, command: String, cwd: String, agent_reason: &str) -> UseRequest {
+    UseRequest {
+        id: uuid::Uuid::new_v4().to_string(),
+        agent: agent.to_string(),
+        entry_id: row.id.clone(),
+        entry_label: row.label.clone(),
+        what: "value".to_string(),
+        origin: String::new(),
+        field: "NEW_SECRET, OLD_SECRET".to_string(),
+        offer_always: true,
+        reason: "rotating changes this entry's value at the service: the commands give it a new value AgentMux makes".to_string(),
+        agent_reason: agent_reason.to_string(),
+        kind: row.kind.clone(),
+        command,
+        cwd,
+        replaces: true,
+        requested_ms: agentmux_common::time::now_ms_u64(),
+        ..Default::default()
+    }
+}
+
 /// `POST /api/v1/vault/rotate`.
 pub(crate) async fn handle_vault_rotate(State(state): State<AppState>, Json(body): Json<RotateBody>) -> Response {
     let Some(auth) = body.auth.clone() else {
@@ -96,6 +121,10 @@ pub(crate) async fn handle_vault_rotate(State(state): State<AppState>, Json(body
         Err(e) => return error(StatusCode::FORBIDDEN, format!("rotate needs the agent's signed identity: {e}")),
     };
     let agent: String = auth.agent_id.chars().take(64).collect();
+    let reason = match vault::history::require_reason(body.reason.as_deref()) {
+        Ok(r) => r,
+        Err(e) => return error(StatusCode::BAD_REQUEST, e),
+    };
     let (set, verify) = (body.set.trim().to_string(), body.verify.as_deref().unwrap_or("").trim().to_string());
     if set.is_empty() {
         return error(StatusCode::BAD_REQUEST, "rotate needs set: the command that gives the service the new value (NEW_SECRET)");
@@ -119,23 +148,7 @@ pub(crate) async fn handle_vault_rotate(State(state): State<AppState>, Json(body
     let granted = tokio::task::spawn_blocking(move || store.vault_grant_check(&id, &k).unwrap_or(false)).await.unwrap_or(false);
     let mut went_ahead = false;
     if !granted {
-        let request = UseRequest {
-            id: uuid::Uuid::new_v4().to_string(),
-            agent: agent.clone(),
-            entry_id: row.id.clone(),
-            entry_label: row.label.clone(),
-            what: "value".to_string(),
-            origin: String::new(),
-            field: "NEW_SECRET, OLD_SECRET".to_string(),
-            offer_always: true,
-            reason: "rotating changes this entry's value at the service: the commands give it a new value AgentMux makes".to_string(),
-            kind: row.kind.clone(),
-            command: shown_commands(&set, &verify),
-            cwd: body.cwd.clone().unwrap_or_default(),
-            replaces: true,
-            requested_ms: agentmux_common::time::now_ms_u64(),
-            ..Default::default()
-        };
+        let request = rotation_request(&agent, &row, shown_commands(&set, &verify), body.cwd.clone().unwrap_or_default(), &reason);
         match super::shell_secrets::ask(&state, &block_id, request, &format!("{agent} wants to rotate {}", row.label)).await {
             Ended::Once => {}
             Ended::WentAhead => went_ahead = true,
@@ -145,7 +158,7 @@ pub(crate) async fn handle_vault_rotate(State(state): State<AppState>, Json(body
             }
             ended => {
                 let outcome = ended.outcome();
-                vault::record(&state.identity_store, &row.id, &row.label, &agent, ROTATED, &clip(&set), outcome);
+                vault::record_line(&state.identity_store, vault::Line { entry_id: &row.id, label: &row.label, actor: &agent, action: ROTATED, target: &clip(&set), outcome, reason: &reason });
                 super::vault_handlers::publish(&state);
                 return error(StatusCode::FORBIDDEN, format!("the person didn't allow it ({outcome}): nothing was changed"));
             }
@@ -169,10 +182,10 @@ pub(crate) async fn handle_vault_rotate(State(state): State<AppState>, Json(body
     let cwd = body.cwd.as_deref();
     let pending = format!("{}@pending", row.id);
     let set_env = HashMap::from([("NEW_SECRET".to_string(), pending.clone()), ("OLD_SECRET".to_string(), row.id.clone())]);
-    let set_ran = run(&state, &block_id, &auth, &agent, &set, cwd, set_env).await;
+    let set_ran = run(&state, &block_id, &auth, &agent, &set, cwd, set_env, &reason).await;
     // 3. verify, with the pending value.
     let verify_ran = match (&set_ran, verify.is_empty()) {
-        (Ok(r), false) if r.ok() => Some(run(&state, &block_id, &auth, &agent, &verify, cwd, HashMap::from([("NEW_SECRET".to_string(), pending)])).await),
+        (Ok(r), false) if r.ok() => Some(run(&state, &block_id, &auth, &agent, &verify, cwd, HashMap::from([("NEW_SECRET".to_string(), pending)]), &reason).await),
         _ => None,
     };
     // A set that never started gave no service the value: it is dropped, not kept.
@@ -180,7 +193,7 @@ pub(crate) async fn handle_vault_rotate(State(state): State<AppState>, Json(body
     if let Err(RunError { started: false, why }) = &set_ran {
         let (store, r) = (state.identity_store.clone(), rotation);
         let _ = tokio::task::spawn_blocking(move || versions::abandon_rotation(&store, &r)).await;
-        vault::record(&state.identity_store, &row.id, &row.label, &agent, ROTATED, &clip(&set), "failed: set couldn't start");
+        vault::record_line(&state.identity_store, vault::Line { entry_id: &row.id, label: &row.label, actor: &agent, action: ROTATED, target: &clip(&set), outcome: "failed: set couldn't start", reason: &reason });
         super::vault_handlers::publish(&state);
         return Json(json!({
             "id": row.id,
@@ -205,7 +218,7 @@ pub(crate) async fn handle_vault_rotate(State(state): State<AppState>, Json(body
         (Some(step), _) => format!("failed at step {step}"),
         (None, Err(_)) => "failed: the entry changed meanwhile".to_string(),
     };
-    vault::record(&state.identity_store, &row.id, &row.label, &agent, ROTATED, &clip(&set), &outcome);
+    vault::record_line(&state.identity_store, vault::Line { entry_id: &row.id, label: &row.label, actor: &agent, action: ROTATED, target: &clip(&set), outcome: &outcome, reason: &reason });
     super::vault_handlers::publish(&state);
 
     let rotated = failed.is_none() && finished.is_ok();
@@ -280,6 +293,7 @@ async fn run(
     cmd: &str,
     cwd: Option<&str>,
     secrets: HashMap<String, String>,
+    reason: &str,
 ) -> Result<Ran, RunError> {
     let not_started = |why: String| RunError { started: false, why };
     let req: ShellCreateRequest = serde_json::from_value(json!({
@@ -289,6 +303,7 @@ async fn run(
         "title": format!("rotate: {}", clip(cmd)),
         "auth": auth,
         "secrets": &secrets,
+        "reason": reason,
     }))
     .map_err(|e| not_started(e.to_string()))?;
     let approved = super::shell_secrets::Preapproved { env: secrets };

@@ -1,0 +1,23 @@
+useTick 1000
+Markdown text="Hello **world**" streaming=false scrollable=false media={"baseDir":"/work"}
+PeekOverlay show=false rowEl=agent-markdown-peek-anchor
+-- plain text
+<div>
+  <div class="agent-markdown-peek-anchor">
+    <div class="agent-markdown-block">
+      <div data-stand="Markdown">
+        "Hello **world**"
+    <div data-stand="PeekOverlay">
+      <div data-stand="PeekMetaRow" data-time="null" data-tokens="~4 tok (est.)">
+-- thinking clump
+useTick 1000
+Markdown text="Let me think" streaming=false scrollable=false media={"baseDir":"/work"}
+PeekOverlay show=false rowEl=agent-markdown-peek-anchor
+-- a thinking clump (no view mode: always open, no header)
+<div>
+  <div class="agent-markdown-peek-anchor">
+    <div class="agent-markdown-block thinking-block">
+      <div data-stand="Markdown">
+        "Let me think"
+    <div data-stand="PeekOverlay">
+      <div data-stand="PeekMetaRow" data-time="null" data-tokens="~3 tok (est.)">

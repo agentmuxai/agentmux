@@ -1,0 +1,346 @@
+store.follow
+Button "Revoke" click
+ViewerRevokeCommand {"device_id":"d2"}
+-- revoking Tablet
+<div>
+  <div class="settings-section-body">
+    <h3 data-stand="SectionHeader">
+      "Paired devices"
+    <div class="setting-row" id="setting-devices.paired">
+      <div class="setting-devices-description">
+        "Devices paired with this computer can watch its agents over your local network. Turn on Can send to let one send messages to your agents as you. Revoke one to stop it."
+      <table class="setting-devices">
+        <thead>
+          <tr>
+            <th>
+              "Name"
+            <th>
+              "Paired"
+            <th>
+              "Last seen"
+            <th>
+              "Can send"
+            <th>
+        <tbody>
+          <tr>
+            <td class="setting-devices-name">
+              "Pixel 9"
+            <td>
+              "2 h ago"
+            <td>
+              "10 min ago"
+            <td>
+              <span data-stand="Switch" data-checked="true" data-disabled="false" data-aria-label="Pixel 9 can send messages">
+            <td>
+              <span data-stand="Button" data-tone="danger" data-disabled="false">
+                "Revoke"
+          <tr>
+            <td class="setting-devices-name">
+              "Tablet"
+            <td>
+              "just now"
+            <td>
+              "never"
+            <td>
+              <span data-stand="Switch" data-checked="false" data-disabled="false" data-aria-label="Tablet can send messages">
+            <td>
+              <span data-stand="Button" data-tone="danger" data-disabled="true">
+                "Revoking…"
+          <tr>
+            <td class="setting-devices-name">
+              "Old phone"
+            <td>
+              "5 min ago"
+            <td>
+              "just now"
+            <td>
+              <span class="setting-devices-muted" data-tip="This device paired before devices had keys. Pair it again to let it send.">
+                "Pair again"
+            <td>
+              <span data-stand="Button" data-tone="danger" data-disabled="false">
+                "Revoke"
+    <div data-stand="SettingRow" data-id="devices.share_terminals" data-label="Share terminals with paired devices" data-description="Paired devices can watch this computer's terminals, read-only: what they show, as it happens. Terminals often show passwords and keys, so this is off unless you turn it on. An agent hidden from paired devices keeps its shell hidden too.">
+      <span data-stand="ToggleControl" data-checked="false">
+    <h3 data-stand="SectionHeader">
+      "Hidden agents"
+    <div data-stand="HiddenAgents">
+    <h3 data-stand="SectionHeader">
+      "MuxBus sign-in"
+    <div data-stand="MuxBusSignIn">
+    <h3 data-stand="SectionHeader">
+      "Cloud presence"
+    <div data-stand="CloudPresence">
+    <h3 data-stand="SectionHeader">
+      "Pinned senders"
+    <div data-stand="PinnedSenders">
+    <div data-stand="SettingRow" data-id="devices.publish_presence" data-label="Publish this computer to my devices" data-description="While you are signed in, your devices can list this computer from anywhere. Turn it off to stop; your devices then show it as offline. Dev builds don't publish.">
+      <span data-stand="ToggleControl" data-checked="true">
+    <div data-stand="SettingRow" data-id="devices.share_summaries" data-label="Share what my agents are working on" data-description="Other AgentMux windows on this computer and on your local network show each agent's one-line summary in their Swarm, next to its status. Anyone on your network who can reach AgentMux can read them. Turn it off to share status only.">
+      <span data-stand="ToggleControl" data-checked="true">
+    <div data-stand="SettingRow" data-id="devices.statusbar_muxbus_cloud" data-label="Show MuxBus Cloud in the status bar" data-description="The cloud dot next to the host name, and the sign-in block in the host menu. Turn it off if you don't use MuxBus Cloud; LAN is not affected. You can still sign in from Accounts, and a dead cloud sign-in is no longer flagged in the status bar.">
+      <span data-stand="ToggleControl" data-checked="true">
+Button "Revoking…" click
+store.set [{"device_id":"d1","device_name":"Pixel 9","created_ms":1799992800000,"last_seen_ms":1799999400000,"has_key":true,"can_send":true},{"device_id":"d3","device_name":"Old phone","created_ms":1799999700000,"last_seen_ms":1799999980000,"has_key":false,"can_send":false}]
+-- Tablet revoked
+<div>
+  <div class="settings-section-body">
+    <h3 data-stand="SectionHeader">
+      "Paired devices"
+    <div class="setting-row" id="setting-devices.paired">
+      <div class="setting-devices-description">
+        "Devices paired with this computer can watch its agents over your local network. Turn on Can send to let one send messages to your agents as you. Revoke one to stop it."
+      <table class="setting-devices">
+        <thead>
+          <tr>
+            <th>
+              "Name"
+            <th>
+              "Paired"
+            <th>
+              "Last seen"
+            <th>
+              "Can send"
+            <th>
+        <tbody>
+          <tr>
+            <td class="setting-devices-name">
+              "Pixel 9"
+            <td>
+              "2 h ago"
+            <td>
+              "10 min ago"
+            <td>
+              <span data-stand="Switch" data-checked="true" data-disabled="false" data-aria-label="Pixel 9 can send messages">
+            <td>
+              <span data-stand="Button" data-tone="danger" data-disabled="false">
+                "Revoke"
+          <tr>
+            <td class="setting-devices-name">
+              "Old phone"
+            <td>
+              "5 min ago"
+            <td>
+              "just now"
+            <td>
+              <span class="setting-devices-muted" data-tip="This device paired before devices had keys. Pair it again to let it send.">
+                "Pair again"
+            <td>
+              <span data-stand="Button" data-tone="danger" data-disabled="false">
+                "Revoke"
+    <div data-stand="SettingRow" data-id="devices.share_terminals" data-label="Share terminals with paired devices" data-description="Paired devices can watch this computer's terminals, read-only: what they show, as it happens. Terminals often show passwords and keys, so this is off unless you turn it on. An agent hidden from paired devices keeps its shell hidden too.">
+      <span data-stand="ToggleControl" data-checked="false">
+    <h3 data-stand="SectionHeader">
+      "Hidden agents"
+    <div data-stand="HiddenAgents">
+    <h3 data-stand="SectionHeader">
+      "MuxBus sign-in"
+    <div data-stand="MuxBusSignIn">
+    <h3 data-stand="SectionHeader">
+      "Cloud presence"
+    <div data-stand="CloudPresence">
+    <h3 data-stand="SectionHeader">
+      "Pinned senders"
+    <div data-stand="PinnedSenders">
+    <div data-stand="SettingRow" data-id="devices.publish_presence" data-label="Publish this computer to my devices" data-description="While you are signed in, your devices can list this computer from anywhere. Turn it off to stop; your devices then show it as offline. Dev builds don't publish.">
+      <span data-stand="ToggleControl" data-checked="true">
+    <div data-stand="SettingRow" data-id="devices.share_summaries" data-label="Share what my agents are working on" data-description="Other AgentMux windows on this computer and on your local network show each agent's one-line summary in their Swarm, next to its status. Anyone on your network who can reach AgentMux can read them. Turn it off to share status only.">
+      <span data-stand="ToggleControl" data-checked="true">
+    <div data-stand="SettingRow" data-id="devices.statusbar_muxbus_cloud" data-label="Show MuxBus Cloud in the status bar" data-description="The cloud dot next to the host name, and the sign-in block in the host menu. Turn it off if you don't use MuxBus Cloud; LAN is not affected. You can still sign in from Accounts, and a dead cloud sign-in is no longer flagged in the status bar.">
+      <span data-stand="ToggleControl" data-checked="true">
+Button "Revoke" click
+ViewerRevokeCommand {"device_id":"d1"}
+-- the revoke failed
+<div>
+  <div class="settings-section-body">
+    <h3 data-stand="SectionHeader">
+      "Paired devices"
+    <div class="setting-row" id="setting-devices.paired">
+      <div class="setting-devices-description">
+        "Devices paired with this computer can watch its agents over your local network. Turn on Can send to let one send messages to your agents as you. Revoke one to stop it."
+      <div class="settings-config-error" role="alert">
+        "Couldn't revoke Pixel 9: srv refused"
+      <table class="setting-devices">
+        <thead>
+          <tr>
+            <th>
+              "Name"
+            <th>
+              "Paired"
+            <th>
+              "Last seen"
+            <th>
+              "Can send"
+            <th>
+        <tbody>
+          <tr>
+            <td class="setting-devices-name">
+              "Pixel 9"
+            <td>
+              "2 h ago"
+            <td>
+              "10 min ago"
+            <td>
+              <span data-stand="Switch" data-checked="true" data-disabled="false" data-aria-label="Pixel 9 can send messages">
+            <td>
+              <span data-stand="Button" data-tone="danger" data-disabled="false">
+                "Revoke"
+          <tr>
+            <td class="setting-devices-name">
+              "Old phone"
+            <td>
+              "5 min ago"
+            <td>
+              "just now"
+            <td>
+              <span class="setting-devices-muted" data-tip="This device paired before devices had keys. Pair it again to let it send.">
+                "Pair again"
+            <td>
+              <span data-stand="Button" data-tone="danger" data-disabled="false">
+                "Revoke"
+    <div data-stand="SettingRow" data-id="devices.share_terminals" data-label="Share terminals with paired devices" data-description="Paired devices can watch this computer's terminals, read-only: what they show, as it happens. Terminals often show passwords and keys, so this is off unless you turn it on. An agent hidden from paired devices keeps its shell hidden too.">
+      <span data-stand="ToggleControl" data-checked="false">
+    <h3 data-stand="SectionHeader">
+      "Hidden agents"
+    <div data-stand="HiddenAgents">
+    <h3 data-stand="SectionHeader">
+      "MuxBus sign-in"
+    <div data-stand="MuxBusSignIn">
+    <h3 data-stand="SectionHeader">
+      "Cloud presence"
+    <div data-stand="CloudPresence">
+    <h3 data-stand="SectionHeader">
+      "Pinned senders"
+    <div data-stand="PinnedSenders">
+    <div data-stand="SettingRow" data-id="devices.publish_presence" data-label="Publish this computer to my devices" data-description="While you are signed in, your devices can list this computer from anywhere. Turn it off to stop; your devices then show it as offline. Dev builds don't publish.">
+      <span data-stand="ToggleControl" data-checked="true">
+    <div data-stand="SettingRow" data-id="devices.share_summaries" data-label="Share what my agents are working on" data-description="Other AgentMux windows on this computer and on your local network show each agent's one-line summary in their Swarm, next to its status. Anyone on your network who can reach AgentMux can read them. Turn it off to share status only.">
+      <span data-stand="ToggleControl" data-checked="true">
+    <div data-stand="SettingRow" data-id="devices.statusbar_muxbus_cloud" data-label="Show MuxBus Cloud in the status bar" data-description="The cloud dot next to the host name, and the sign-in block in the host menu. Turn it off if you don't use MuxBus Cloud; LAN is not affected. You can still sign in from Accounts, and a dead cloud sign-in is no longer flagged in the status bar.">
+      <span data-stand="ToggleControl" data-checked="true">
+Button "Revoke" click
+ViewerRevokeCommand {"device_id":"d1"}
+-- a plain refusal
+<div>
+  <div class="settings-section-body">
+    <h3 data-stand="SectionHeader">
+      "Paired devices"
+    <div class="setting-row" id="setting-devices.paired">
+      <div class="setting-devices-description">
+        "Devices paired with this computer can watch its agents over your local network. Turn on Can send to let one send messages to your agents as you. Revoke one to stop it."
+      <div class="settings-config-error" role="alert">
+        "Couldn't revoke Pixel 9: plain refusal"
+      <table class="setting-devices">
+        <thead>
+          <tr>
+            <th>
+              "Name"
+            <th>
+              "Paired"
+            <th>
+              "Last seen"
+            <th>
+              "Can send"
+            <th>
+        <tbody>
+          <tr>
+            <td class="setting-devices-name">
+              "Pixel 9"
+            <td>
+              "2 h ago"
+            <td>
+              "10 min ago"
+            <td>
+              <span data-stand="Switch" data-checked="true" data-disabled="false" data-aria-label="Pixel 9 can send messages">
+            <td>
+              <span data-stand="Button" data-tone="danger" data-disabled="false">
+                "Revoke"
+          <tr>
+            <td class="setting-devices-name">
+              "Old phone"
+            <td>
+              "5 min ago"
+            <td>
+              "just now"
+            <td>
+              <span class="setting-devices-muted" data-tip="This device paired before devices had keys. Pair it again to let it send.">
+                "Pair again"
+            <td>
+              <span data-stand="Button" data-tone="danger" data-disabled="false">
+                "Revoke"
+    <div data-stand="SettingRow" data-id="devices.share_terminals" data-label="Share terminals with paired devices" data-description="Paired devices can watch this computer's terminals, read-only: what they show, as it happens. Terminals often show passwords and keys, so this is off unless you turn it on. An agent hidden from paired devices keeps its shell hidden too.">
+      <span data-stand="ToggleControl" data-checked="false">
+    <h3 data-stand="SectionHeader">
+      "Hidden agents"
+    <div data-stand="HiddenAgents">
+    <h3 data-stand="SectionHeader">
+      "MuxBus sign-in"
+    <div data-stand="MuxBusSignIn">
+    <h3 data-stand="SectionHeader">
+      "Cloud presence"
+    <div data-stand="CloudPresence">
+    <h3 data-stand="SectionHeader">
+      "Pinned senders"
+    <div data-stand="PinnedSenders">
+    <div data-stand="SettingRow" data-id="devices.publish_presence" data-label="Publish this computer to my devices" data-description="While you are signed in, your devices can list this computer from anywhere. Turn it off to stop; your devices then show it as offline. Dev builds don't publish.">
+      <span data-stand="ToggleControl" data-checked="true">
+    <div data-stand="SettingRow" data-id="devices.share_summaries" data-label="Share what my agents are working on" data-description="Other AgentMux windows on this computer and on your local network show each agent's one-line summary in their Swarm, next to its status. Anyone on your network who can reach AgentMux can read them. Turn it off to share status only.">
+      <span data-stand="ToggleControl" data-checked="true">
+    <div data-stand="SettingRow" data-id="devices.statusbar_muxbus_cloud" data-label="Show MuxBus Cloud in the status bar" data-description="The cloud dot next to the host name, and the sign-in block in the host menu. Turn it off if you don't use MuxBus Cloud; LAN is not affected. You can still sign in from Accounts, and a dead cloud sign-in is no longer flagged in the status bar.">
+      <span data-stand="ToggleControl" data-checked="true">
+Button "Revoke" click
+ViewerRevokeCommand {"device_id":"d1"}
+store.set [{"device_id":"d3","device_name":"Old phone","created_ms":1799999700000,"last_seen_ms":1799999980000,"has_key":false,"can_send":false}]
+-- revoked, the error gone
+<div>
+  <div class="settings-section-body">
+    <h3 data-stand="SectionHeader">
+      "Paired devices"
+    <div class="setting-row" id="setting-devices.paired">
+      <div class="setting-devices-description">
+        "Devices paired with this computer can watch its agents over your local network. Turn on Can send to let one send messages to your agents as you. Revoke one to stop it."
+      <table class="setting-devices">
+        <thead>
+          <tr>
+            <th>
+              "Name"
+            <th>
+              "Paired"
+            <th>
+              "Last seen"
+            <th>
+              "Can send"
+            <th>
+        <tbody>
+          <tr>
+            <td class="setting-devices-name">
+              "Old phone"
+            <td>
+              "5 min ago"
+            <td>
+              "just now"
+            <td>
+              <span class="setting-devices-muted" data-tip="This device paired before devices had keys. Pair it again to let it send.">
+                "Pair again"
+            <td>
+              <span data-stand="Button" data-tone="danger" data-disabled="false">
+                "Revoke"
+    <div data-stand="SettingRow" data-id="devices.share_terminals" data-label="Share terminals with paired devices" data-description="Paired devices can watch this computer's terminals, read-only: what they show, as it happens. Terminals often show passwords and keys, so this is off unless you turn it on. An agent hidden from paired devices keeps its shell hidden too.">
+      <span data-stand="ToggleControl" data-checked="false">
+    <h3 data-stand="SectionHeader">
+      "Hidden agents"
+    <div data-stand="HiddenAgents">
+    <h3 data-stand="SectionHeader">
+      "MuxBus sign-in"
+    <div data-stand="MuxBusSignIn">
+    <h3 data-stand="SectionHeader">
+      "Cloud presence"
+    <div data-stand="CloudPresence">
+    <h3 data-stand="SectionHeader">
+      "Pinned senders"
+    <div data-stand="PinnedSenders">
+    <div data-stand="SettingRow" data-id="devices.publish_presence" data-label="Publish this computer to my devices" data-description="While you are signed in, your devices can list this computer from anywhere. Turn it off to stop; your devices then show it as offline. Dev builds don't publish.">
+      <span data-stand="ToggleControl" data-checked="true">
+    <div data-stand="SettingRow" data-id="devices.share_summaries" data-label="Share what my agents are working on" data-description="Other AgentMux windows on this computer and on your local network show each agent's one-line summary in their Swarm, next to its status. Anyone on your network who can reach AgentMux can read them. Turn it off to share status only.">
+      <span data-stand="ToggleControl" data-checked="true">
+    <div data-stand="SettingRow" data-id="devices.statusbar_muxbus_cloud" data-label="Show MuxBus Cloud in the status bar" data-description="The cloud dot next to the host name, and the sign-in block in the host menu. Turn it off if you don't use MuxBus Cloud; LAN is not affected. You can still sign in from Accounts, and a dead cloud sign-in is no longer flagged in the status bar.">
+      <span data-stand="ToggleControl" data-checked="true">

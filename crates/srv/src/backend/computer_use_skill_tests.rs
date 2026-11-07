@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use super::*;
+use crate::backend::storage::skill_app::{ScriptApproval, ScriptOutcome};
 
 const SKILL_MD: &str = "---\nname: acme-word\ndescription: Use when driving Word (WINWORD.EXE).\n---\n\n# Word\n\nBody.\n";
 const TEST_JSON: &str = "{\"skill\":\"acme.word\",\"task\":\"t\",\"steps\":[],\"verify\":[\"a\"]}\n";
 const PY: &str = "print('hi')\n";
 
-fn manifest(version: &str, extra: &str) -> String {
+pub(crate) fn manifest(version: &str, extra: &str) -> String {
     format!(
         r#"{{"schema":"computer-use-skill/v1","publisher":"acme","id":"word","name":"Word","version":"{version}",
 "changelog":[{{"version":"{version}","date":"2026-11-05","by":"x","change":"first"}}],
@@ -28,11 +29,11 @@ fn folder(files: &[(&str, &str)]) -> (tempfile::TempDir, std::path::PathBuf) {
     (tmp, dir)
 }
 
-fn base_files(m: &str) -> Vec<(&'static str, String)> {
+pub(crate) fn base_files(m: &str) -> Vec<(&'static str, String)> {
     vec![("SKILL.md", SKILL_MD.to_string()), (MANIFEST, m.to_string()), ("test.json", TEST_JSON.to_string())]
 }
 
-fn read(files: &[(&str, String)]) -> Result<Bundle, String> {
+pub(crate) fn read(files: &[(&str, String)]) -> Result<Bundle, String> {
     let refs: Vec<(&str, &str)> = files.iter().map(|(p, t)| (*p, t.as_str())).collect();
     let (_tmp, dir) = folder(&refs);
     read_folder(&dir)
@@ -290,7 +291,7 @@ fn a_crop_without_tags_a_wrong_hash_or_outside_references_is_refused() {
 
 // ── install, import, launch files and the Desktop pointer ───────────────────────────────────
 
-fn catalog() -> Store {
+pub(crate) fn catalog() -> Store {
     let s = Store::open_in_memory().unwrap();
     s.apply_identity_schema_for_tests().unwrap();
     s
@@ -333,7 +334,7 @@ fn installed() -> (Store, Bundle) {
     let b = read(&files).unwrap();
     let c = catalog();
     c.skill_upsert_unique_global(&catalog_skill("s1", &b.name)).unwrap();
-    install(&c, "s1", &b, 5).unwrap();
+    install_checked(&c, "s1", &b, 5).unwrap();
     (c, b)
 }
 
@@ -346,7 +347,7 @@ fn installing_a_bundle_stores_the_manifest_files_and_the_pass_records_it_carried
     assert_eq!(files, vec![("controls.md", false, false), ("scripts/run.py", true, false), ("test.json", false, false)]);
     assert_eq!(app.verified.len(), 1);
     // Installed again (an update to the same folder): nothing doubles.
-    install(&c, "s1", &b, 6).unwrap();
+    install_checked(&c, "s1", &b, 6).unwrap();
     let again = c.skill_app_get("s1").unwrap().unwrap();
     assert_eq!((again.files.len(), again.verified.len()), (3, 1));
 }
@@ -371,7 +372,7 @@ fn a_launch_writes_the_files_beside_skill_md_but_not_an_unapproved_script_or_a_c
 fn the_files_follow_the_same_folder_name_as_skill_md_when_two_skills_share_a_name() {
     let (c, b) = installed();
     c.skill_upsert_unique_global(&catalog_skill("s2", "another-name")).unwrap();
-    install(&c, "s2", &b, 5).unwrap();
+    install_checked(&c, "s2", &b, 5).unwrap();
     // Two names that make the same folder name: the second is made unique, and its files follow it.
     let skills = vec![agent_skill("s1", "acme-word"), agent_skill("s2", "Acme Word")];
     let written = crate::backend::agent_config::build_config_files(&Default::default(), &skills, "A", "a1", "a", "w", "claude");
@@ -443,7 +444,7 @@ fn a_scan_reads_a_computer_use_folder_whole_and_refuses_a_broken_one_with_the_re
 fn a_pass_on_an_older_version_does_not_say_tested_here() {
     let (c, _) = installed();
     let v2 = read(&base_files(&manifest("1.1.0", ""))).unwrap();
-    install(&c, "s1", &v2, 7).unwrap();
+    install_checked(&c, "s1", &v2, 7).unwrap();
     let p = skill_for_executable(&c, "windows", "WINWORD.EXE").unwrap();
     assert_eq!((p.version.as_str(), p.verified_here), ("1.1.0", false), "the 1.0.0 pass is kept but does not speak for 1.1.0");
 }
@@ -461,4 +462,90 @@ fn a_name_the_folder_uses_is_reserved_in_any_letters_and_never_written_beside_sk
     let skills = vec![agent_skill("s1", "acme-word")];
     let paths: Vec<String> = sibling_files(&skills, &c).into_iter().map(|f| f.filename).collect();
     assert_eq!(paths, vec![".claude/skills/acme-word/test.json"]);
+}
+
+pub(crate) fn signed_with_script(seed: u8, version: &str) -> Bundle {
+    use crate::backend::widget::signature::{test_keys, COMPUTER_USE_SKILL};
+    let listed = manifest(version, &format!(r#","scripts":[{{"path":"scripts/run.py","sha256":"{}","purpose":"test","needs":["python"]}}]"#, sha256_hex(PY.as_bytes())));
+    let mut files = base_files(&listed);
+    files.push(("scripts/run.py", PY.to_string()));
+    let unsigned = read(&files).unwrap();
+    files.push(("skill.sig", test_keys::sig_file_in(&COMPUTER_USE_SKILL, seed, "acme.word", version, &unsigned.content_hash)));
+    read(&files).unwrap()
+}
+
+#[test]
+fn a_signature_is_checked_and_the_publisher_is_pinned_by_the_first_script_a_person_approves() {
+    use crate::backend::widget::signature::{test_keys, SignatureState};
+    let (b1, c) = (signed_with_script(1, "1.0.0"), catalog());
+    c.skill_upsert_unique_global(&catalog_skill("s1", &b1.name)).unwrap();
+    assert_eq!(check_signature(&c, &b1).unwrap(), Some(test_keys::public_key(1)));
+    install_checked(&c, "s1", &b1, 1).unwrap();
+    let app = c.skill_app_get("s1").unwrap().unwrap();
+    assert_eq!((app.signature.state, app.signature.publisher.as_str()), (SignatureState::SignedNew, "acme"));
+    assert!(app.signature.fingerprint.is_some() && app.signature.pinned.is_none());
+    assert_eq!((app.scripts[0].purpose.as_str(), app.scripts[0].needs.clone()), ("test", vec!["python".to_string()]));
+    let script = app.files.iter().find(|f| f.script).unwrap();
+    assert_eq!(script.sha256, sha256_hex(PY.as_bytes()));
+
+    // A signature that does not match its files is refused.
+    let tampered = Bundle { content_hash: "0".repeat(64), ..b1.clone() };
+    assert!(check_signature(&c, &tampered).unwrap_err().contains("doesn't match"));
+
+    // Approving a script is what pins the publisher to the key; approving a file that is not a script does nothing.
+    assert!(c.skill_publisher_pins().unwrap().is_empty());
+    let sha = sha256_hex(PY.as_bytes());
+    let approve = |id: &str, path: &str, sha: &str| c.skill_script_set_approved(id, path, ScriptApproval::Approve { reviewed_sha256: sha }, 5).unwrap();
+    assert_eq!(approve("s1", "test.json", &sha), ScriptOutcome::NotAScript);
+    assert_eq!(approve("s1", "scripts/run.py", &"0".repeat(64)), ScriptOutcome::Changed, "only the reviewed text is approved");
+    assert!(c.skill_publisher_pins().unwrap().is_empty());
+    assert_eq!(approve("s1", "scripts/run.py", &sha), ScriptOutcome::Done);
+    assert_eq!(c.skill_publisher_pins().unwrap().get("acme"), Some(&test_keys::public_key(1)));
+    assert_eq!(c.skill_app_get("s1").unwrap().unwrap().signature.state, SignatureState::Signed);
+
+    // After that: another key, or none, is a different author, not an update.
+    let other = signed_with_script(2, "1.1.0");
+    assert!(check_signature(&c, &other).unwrap_err().contains("different author"));
+    let unsigned = read(&base_files(&manifest("1.1.0", ""))).unwrap();
+    let e = check_signature(&c, &unsigned).unwrap_err();
+    assert!(e.contains("not signed") && e.contains("pinned"), "{e}");
+    // The same key updating is fine, and its script starts unapproved again because the text changed.
+    assert!(check_signature(&c, &signed_with_script(1, "1.1.0")).is_ok());
+}
+
+#[test]
+fn only_an_approved_script_is_written_beside_skill_md_and_revoking_takes_it_back() {
+    let (b, c) = (signed_with_script(1, "1.0.0"), catalog());
+    c.skill_upsert_unique_global(&catalog_skill("s1", &b.name)).unwrap();
+    install_checked(&c, "s1", &b, 1).unwrap();
+    let skills = vec![agent_skill("s1", "acme-word")];
+    let has_script = |c: &Store| sibling_files(&skills, c).iter().any(|f| f.filename.ends_with("scripts/run.py"));
+    assert!(!has_script(&c));
+    let sha = sha256_hex(PY.as_bytes());
+    c.skill_script_set_approved("s1", "scripts/run.py", ScriptApproval::Approve { reviewed_sha256: &sha }, 2).unwrap();
+    assert!(has_script(&c));
+    c.skill_script_set_approved("s1", "scripts/run.py", ScriptApproval::Revoke, 3).unwrap();
+    assert!(!has_script(&c));
+}
+
+#[test]
+fn a_script_of_a_skill_signed_by_another_key_than_the_pin_cannot_be_approved() {
+    // Two skills of one publisher, imported before any approval, so no pin existed to stop either.
+    let (first, second, c) = (signed_with_script(1, "1.0.0"), signed_with_script(2, "1.0.0"), catalog());
+    c.skill_upsert_unique_global(&catalog_skill("s1", "acme-word")).unwrap();
+    c.skill_upsert_unique_global(&catalog_skill("s2", "acme-word-two")).unwrap();
+    install_checked(&c, "s1", &first, 1).unwrap();
+    install_checked(&c, "s2", &second, 1).unwrap();
+    let sha = sha256_hex(PY.as_bytes());
+    let approve = |id: &str| c.skill_script_set_approved(id, "scripts/run.py", ScriptApproval::Approve { reviewed_sha256: &sha }, 2).unwrap();
+    assert_eq!(approve("s1"), ScriptOutcome::Done);
+    assert_eq!(approve("s2"), ScriptOutcome::OtherAuthor);
+    assert!(!c.skill_files("s2").unwrap().iter().any(|f| f.approved));
+    assert_eq!(c.skill_publisher_pins().unwrap().get("acme"), Some(&crate::backend::widget::signature::test_keys::public_key(1)));
+}
+
+/// What the importer does: check the signature, then install with the key it returned.
+pub(crate) fn install_checked(c: &Store, skill_id: &str, b: &Bundle, now_ms: i64) -> Result<(), crate::backend::storage::error::StoreError> {
+    let signer = check_signature(c, b).expect("the bundle passes the signature check");
+    install(c, skill_id, b, signer.as_deref(), now_ms)
 }

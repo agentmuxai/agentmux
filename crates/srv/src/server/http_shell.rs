@@ -6,6 +6,30 @@
 
 use super::*;
 
+/// What a command's Vault entries come to once checked and asked for: the values it is given, and what its
+/// output is stored as (with the labels of the entries nobody answered for).
+type Prepared = (Option<super::shell_secrets::Injected>, (Option<crate::backend::vault::capture::Job>, Vec<String>));
+
+/// Asks for the Vault secrets a command is given and checks the values its output goes into the Vault as, together,
+/// so the whole asking fits the Terminal tool's wait. The agent says why first (a rotation's own commands carry the
+/// rotation's): a missing reason is refused before anything is asked or run.
+async fn prepare_secrets(state: &AppState, req: &ShellCreateRequest, remote: bool, preapproved: Option<&super::shell_secrets::Preapproved>) -> Result<Prepared, Response> {
+    let gives = req.secrets.as_ref().is_some_and(|m| !m.is_empty())
+        || req.stdin_secret.as_deref().is_some_and(|s| !s.trim().is_empty())
+        || req.secret_files.as_ref().is_some_and(|m| !m.is_empty())
+        || req.capture.as_ref().is_some_and(|c| !c.is_empty());
+    let reason = if gives && preapproved.is_none() {
+        crate::backend::vault::history::require_reason(req.reason.as_deref()).map_err(|e| (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response())?
+    } else {
+        req.reason.clone().unwrap_or_default()
+    };
+    let wanted = super::shell_secrets::Wanted { env: req.secrets.as_ref(), stdin: req.stdin_secret.as_deref(), files: req.secret_files.as_ref(), reason: &reason };
+    let cwd = req.cwd.as_deref().unwrap_or("");
+    let injecting = super::shell_secrets::inject(state, &req.agent_block_id, req.auth.as_ref(), wanted, remote, &req.cmd, cwd, preapproved);
+    let capturing = super::shell_secrets::plan_capture(state, &req.agent_block_id, req.auth.as_ref(), req.capture.as_deref(), &req.cmd, cwd, &reason);
+    tokio::try_join!(injecting, capturing).map_err(|(code, why)| (code, Json(json!({ "error": why }))).into_response())
+}
+
 /// `POST /api/v1/shell/create` — start a persistent background shell.
 ///
 /// Called by `agentmux-mcp`'s `Shell` tool. Returns immediately with a
@@ -66,21 +90,12 @@ pub(super) async fn create_shell(
         let e = "stdin_secret and capture_stdin can't be used together: stdin is closed once the value is written";
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response();
     }
-    // Vault secrets for this command: the person is asked first, and the values go
-    // into this one process (its environment, stdin or private files, further down)
-    // and out of its output.
-    let wanted = super::shell_secrets::Wanted { env: req.secrets.as_ref(), stdin: req.stdin_secret.as_deref(), files: req.secret_files.as_ref() };
-    // Values its output goes into the Vault as: checked, and asked for when one
-    // replaces an entry's value, before it runs. Asked at the same time as its
-    // secrets, so the whole asking fits the Terminal tool's wait.
-    let cwd = req.cwd.as_deref().unwrap_or("");
-    let injecting = super::shell_secrets::inject(&state, &req.agent_block_id, req.auth.as_ref(), wanted, remote, &req.cmd, cwd, preapproved);
-    let capturing = super::shell_secrets::plan_capture(&state, &req.agent_block_id, req.auth.as_ref(), req.capture.as_deref(), &req.cmd, cwd);
-    let (injected, (capture, mut went_ahead)) = match tokio::try_join!(injecting, capturing) {
+    // Vault secrets for this command: the person is asked first, and the values go into this one process (its
+    // environment, stdin or private files, further down) and out of its output.
+    let (injected, (capture, mut went_ahead)) = match prepare_secrets(&state, &req, remote, preapproved).await {
         Ok(both) => both,
-        Err((code, why)) => return (code, Json(json!({ "error": why }))).into_response(),
+        Err(refused) => return refused,
     };
-
     let shell_id = uuid::Uuid::new_v4().to_string();
     let title = req.title.as_deref().unwrap_or(&req.cmd).to_string();
     let now_ms = agentmux_common::time::now_ms_u64();

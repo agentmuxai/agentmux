@@ -1365,6 +1365,18 @@
             "method": "SkillBindCommand"
         },
         {
+            "command": "skill.catalog.app_file",
+            "method": "SkillCatalogAppFileCommand"
+        },
+        {
+            "command": "skill.catalog.app_script",
+            "method": "SkillCatalogAppScriptCommand"
+        },
+        {
+            "command": "skill.catalog.export",
+            "method": "SkillCatalogExportCommand"
+        },
+        {
             "command": "skill.catalog.bind",
             "method": "SkillCatalogBindCommand"
         },

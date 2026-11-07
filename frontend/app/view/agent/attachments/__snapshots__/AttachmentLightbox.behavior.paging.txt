@@ -1,0 +1,212 @@
+Modal open=true scope=pane size=fit panelClass=agent-attachment-lightbox__panel
+useAttachmentUrl send id=a1
+useAttachmentText thumb id=undefined
+initialFocus -> agent-attachment-lightbox__dialog
+-- first of three, with remove
+<div>
+  <div data-stand="Modal" data-aria-label="Image 1: shot.png">
+    <div class="agent-attachment-lightbox__dialog" tabindex="-1">
+      <div class="agent-attachment-lightbox__image">
+        <span class="agent-attachment-lightbox__missing">
+          "Loading…"
+      <div class="agent-attachment-lightbox__bar">
+        <span class="agent-attachment-lightbox__title" data-tip="shot.png">
+          <span class="num">
+            "1"
+          "shot.png"
+        <span class="agent-attachment-lightbox__meta">
+          "4000"
+          "×"
+          "3000"
+          "·"
+          "2.4 MB"
+          <span class="sent">
+            "· sent as"
+            "2000"
+            "×"
+            "1500"
+            ","
+            "391 KB"
+        <span class="agent-attachment-lightbox__actions">
+          <span data-stand="IconButton" data-icon="chevron-left" data-label="Previous image" data-tooltip="false" data-title="Previous (←)">
+          <span class="pos">
+            "1"
+            "/"
+            "3"
+          <span data-stand="IconButton" data-icon="chevron-right" data-label="Next image" data-tooltip="false" data-title="Next (→)">
+          <span data-stand="Button" data-tone="danger">
+            "Remove"
+          <span data-stand="IconButton" data-icon="xmark" data-label="Close preview" data-tooltip="false" data-title="Close (Esc)">
+preventDefault ArrowRight
+onIndex 1
+useAttachmentUrl send id=a2
+useAttachmentText thumb id=undefined
+preventDefault ArrowRight
+onIndex 2
+useAttachmentUrl send id=a3
+useAttachmentText thumb id=undefined
+preventDefault ArrowRight
+onIndex 0
+useAttachmentUrl send id=a1
+useAttachmentText thumb id=undefined
+-- wrapped back to the first
+<div>
+  <div data-stand="Modal" data-aria-label="Image 1: shot.png">
+    <div class="agent-attachment-lightbox__dialog" tabindex="-1">
+      <div class="agent-attachment-lightbox__image">
+        <span class="agent-attachment-lightbox__missing">
+          "Loading…"
+      <div class="agent-attachment-lightbox__bar">
+        <span class="agent-attachment-lightbox__title" data-tip="shot.png">
+          <span class="num">
+            "1"
+          "shot.png"
+        <span class="agent-attachment-lightbox__meta">
+          "4000"
+          "×"
+          "3000"
+          "·"
+          "2.4 MB"
+          <span class="sent">
+            "· sent as"
+            "2000"
+            "×"
+            "1500"
+            ","
+            "391 KB"
+        <span class="agent-attachment-lightbox__actions">
+          <span data-stand="IconButton" data-icon="chevron-left" data-label="Previous image" data-tooltip="false" data-title="Previous (←)">
+          <span class="pos">
+            "1"
+            "/"
+            "3"
+          <span data-stand="IconButton" data-icon="chevron-right" data-label="Next image" data-tooltip="false" data-title="Next (→)">
+          <span data-stand="Button" data-tone="danger">
+            "Remove"
+          <span data-stand="IconButton" data-icon="xmark" data-label="Close preview" data-tooltip="false" data-title="Close (Esc)">
+preventDefault ArrowLeft
+onIndex 2
+useAttachmentUrl send id=a3
+useAttachmentText thumb id=undefined
+-- wrapped to the last
+<div>
+  <div data-stand="Modal" data-aria-label="Image 3: three.png">
+    <div class="agent-attachment-lightbox__dialog" tabindex="-1">
+      <div class="agent-attachment-lightbox__image">
+        <span class="agent-attachment-lightbox__missing">
+          "Loading…"
+      <div class="agent-attachment-lightbox__bar">
+        <span class="agent-attachment-lightbox__title" data-tip="three.png">
+          <span class="num">
+            "3"
+          "three.png"
+        <span class="agent-attachment-lightbox__meta">
+          "4000"
+          "×"
+          "3000"
+          "·"
+          "2.4 MB"
+          <span class="sent">
+            "· sent as"
+            "2000"
+            "×"
+            "1500"
+            ","
+            "391 KB"
+        <span class="agent-attachment-lightbox__actions">
+          <span data-stand="IconButton" data-icon="chevron-left" data-label="Previous image" data-tooltip="false" data-title="Previous (←)">
+          <span class="pos">
+            "3"
+            "/"
+            "3"
+          <span data-stand="IconButton" data-icon="chevron-right" data-label="Next image" data-tooltip="false" data-title="Next (→)">
+          <span data-stand="Button" data-tone="danger">
+            "Remove"
+          <span data-stand="IconButton" data-icon="xmark" data-label="Close preview" data-tooltip="false" data-title="Close (Esc)">
+IconButton Previous image click
+onIndex 1
+useAttachmentUrl send id=a2
+useAttachmentText thumb id=undefined
+IconButton Next image click
+onIndex 2
+useAttachmentUrl send id=a3
+useAttachmentText thumb id=undefined
+Button Remove click
+onRemove k3
+preventDefault Escape
+stopPropagation Escape
+onClose
+IconButton Close preview click
+onClose
+-- one item: no paging, no remove
+Modal open=true scope=pane size=fit panelClass=agent-attachment-lightbox__panel
+useAttachmentUrl send id=a1
+useAttachmentText thumb id=undefined
+initialFocus -> agent-attachment-lightbox__dialog
+-- a single item
+<div>
+  <div data-stand="Modal" data-aria-label="Image 1: shot.png">
+    <div class="agent-attachment-lightbox__dialog" tabindex="-1">
+      <div class="agent-attachment-lightbox__image">
+        <span class="agent-attachment-lightbox__missing">
+          "Loading…"
+      <div class="agent-attachment-lightbox__bar">
+        <span class="agent-attachment-lightbox__title" data-tip="shot.png">
+          <span class="num">
+            "1"
+          "shot.png"
+        <span class="agent-attachment-lightbox__meta">
+          "4000"
+          "×"
+          "3000"
+          "·"
+          "2.4 MB"
+          <span class="sent">
+            "· sent as"
+            "2000"
+            "×"
+            "1500"
+            ","
+            "391 KB"
+        <span class="agent-attachment-lightbox__actions">
+          <span data-stand="IconButton" data-icon="xmark" data-label="Close preview" data-tooltip="false" data-title="Close (Esc)">
+preventDefault ArrowRight
+onIndex 0
+-- the index past the end shows the last
+Modal open=true scope=pane size=fit panelClass=agent-attachment-lightbox__panel
+useAttachmentUrl send id=a3
+useAttachmentText thumb id=undefined
+initialFocus -> agent-attachment-lightbox__dialog
+-- index clamped
+<div>
+  <div data-stand="Modal" data-aria-label="Image 3: three.png">
+    <div class="agent-attachment-lightbox__dialog" tabindex="-1">
+      <div class="agent-attachment-lightbox__image">
+        <span class="agent-attachment-lightbox__missing">
+          "Loading…"
+      <div class="agent-attachment-lightbox__bar">
+        <span class="agent-attachment-lightbox__title" data-tip="three.png">
+          <span class="num">
+            "3"
+          "three.png"
+        <span class="agent-attachment-lightbox__meta">
+          "4000"
+          "×"
+          "3000"
+          "·"
+          "2.4 MB"
+          <span class="sent">
+            "· sent as"
+            "2000"
+            "×"
+            "1500"
+            ","
+            "391 KB"
+        <span class="agent-attachment-lightbox__actions">
+          <span data-stand="IconButton" data-icon="chevron-left" data-label="Previous image" data-tooltip="false" data-title="Previous (←)">
+          <span class="pos">
+            "3"
+            "/"
+            "3"
+          <span data-stand="IconButton" data-icon="chevron-right" data-label="Next image" data-tooltip="false" data-title="Next (→)">
+          <span data-stand="IconButton" data-icon="xmark" data-label="Close preview" data-tooltip="false" data-title="Close (Esc)">

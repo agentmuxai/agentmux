@@ -27,6 +27,7 @@
 #   - frontend/app/view/term/termViewModel.ts              — terminal keyDownHandler
 #   - frontend/app/view/launcher/launcher.tsx              — launcher keyDownHandler
 #   - frontend/app/view/agent/components/AgentFooter.tsx   — agent composer
+#     (and agent-footer-parts.tsx, agent-footer-state.ts, where its wiring lives)
 # Plus a repo-wide ban on synchronous XHR.
 #
 # Escape hatch: any line containing `perf:allow-input-ipc` is skipped, with a
@@ -49,6 +50,8 @@ SCOPE=(
   frontend/app/view/term/termViewModel.ts
   frontend/app/view/launcher/launcher.tsx
   frontend/app/view/agent/components/AgentFooter.tsx
+  frontend/app/view/agent/components/agent-footer-parts.tsx
+  frontend/app/view/agent/components/agent-footer-state.ts
 )
 
 EXISTING_SCOPE=()

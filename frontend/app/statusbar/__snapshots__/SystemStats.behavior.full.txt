@@ -1,0 +1,54 @@
+onMuxEvent sysinfo local
+sysinfo busy
+parseDiskVolumes 4
+-- a busy machine
+<div>
+  <div class="status-bar-item system-stats">
+    <button type="button" class="stat-mono stat-cpu stat-cpu-button" data-tip="Per-core CPU usage" aria-label="CPU usage, click for per-core breakdown" aria-haspopup="dialog" style="color: var(--cpu-38);" aria-expanded="false">
+      "CPU"
+      "38"
+      "%"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-gpu" data-tip="GPU usage" aria-label="GPU usage" style="color: var(--cpu-12);">
+      "GPU"
+      "12"
+      "%"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-mem" data-tip="Memory used and total" aria-label="Memory usage" style="color: var(--secondary-text-color);">
+      "Mem"
+      "6.3G"
+      "/"
+      "16.0G"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-commit" data-tip="Commit charge used and total (RAM + page file budget)." aria-label="Commit charge" style="color: var(--secondary-text-color);">
+      "PF"
+      "9.0G"
+      "/"
+      "24.0G"
+    <span class="stat-separator">
+      "|"
+    <button type="button" class="stat-mono stat-watch-disk stat-disk-button" aria-label="Free disk space, click for per-drive breakdown" aria-haspopup="dialog" style="color: var(--watch-61.4-true);" data-tip="4 volumes" aria-expanded="false">
+      "Disk"
+      "61"
+      "%"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-net" data-tip="Network upload and download" aria-label="Network traffic">
+      <span class="stat-disk-arrow">
+        "↑"
+      "256K"
+      <span class="stat-disk-arrow">
+        "↓"
+      "1.5G"
+    <span class="stat-separator">
+      "|"
+    <span class="stat-mono stat-disk" data-tip="Disk read and write" aria-label="Disk I/O">
+      <span class="stat-disk-arrow">
+        "R"
+      "2.5M"
+      <span class="stat-disk-arrow">
+        "W"
+      "512K"

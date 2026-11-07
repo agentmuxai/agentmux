@@ -1,0 +1,121 @@
+Modal open=true scope=pane size=fit panelClass=agent-attachment-lightbox__panel
+useAttachmentUrl send id=a1
+useAttachmentText thumb id=undefined
+initialFocus -> agent-attachment-lightbox__dialog
+-- loading
+<div>
+  <div data-stand="Modal" data-aria-label="Image 1: shot.png">
+    <div class="agent-attachment-lightbox__dialog" tabindex="-1">
+      <div class="agent-attachment-lightbox__image">
+        <span class="agent-attachment-lightbox__missing">
+          "Loading…"
+      <div class="agent-attachment-lightbox__bar">
+        <span class="agent-attachment-lightbox__title" data-tip="shot.png">
+          <span class="num">
+            "1"
+          "shot.png"
+        <span class="agent-attachment-lightbox__meta">
+          "4000"
+          "×"
+          "3000"
+          "·"
+          "2.4 MB"
+          <span class="sent">
+            "· sent as"
+            "2000"
+            "×"
+            "1500"
+            ","
+            "391 KB"
+        <span class="agent-attachment-lightbox__actions">
+          <span data-stand="IconButton" data-icon="xmark" data-label="Close preview" data-tooltip="false" data-title="Close (Esc)">
+-- the image
+<div>
+  <div data-stand="Modal" data-aria-label="Image 1: shot.png">
+    <div class="agent-attachment-lightbox__dialog" tabindex="-1">
+      <div class="agent-attachment-lightbox__image">
+        <img src="blob:send/1" alt="shot.png">
+      <div class="agent-attachment-lightbox__bar">
+        <span class="agent-attachment-lightbox__title" data-tip="shot.png">
+          <span class="num">
+            "1"
+          "shot.png"
+        <span class="agent-attachment-lightbox__meta">
+          "4000"
+          "×"
+          "3000"
+          "·"
+          "2.4 MB"
+          <span class="sent">
+            "· sent as"
+            "2000"
+            "×"
+            "1500"
+            ","
+            "391 KB"
+        <span class="agent-attachment-lightbox__actions">
+          <span data-stand="IconButton" data-icon="xmark" data-label="Close preview" data-tooltip="false" data-title="Close (Esc)">
+-- gone from the store
+Modal open=true scope=pane size=fit panelClass=agent-attachment-lightbox__panel
+useAttachmentUrl send id=a1
+useAttachmentText thumb id=undefined
+initialFocus -> agent-attachment-lightbox__dialog
+-- missing
+<div>
+  <div data-stand="Modal" data-aria-label="Image 1: shot.png">
+    <div class="agent-attachment-lightbox__dialog" tabindex="-1">
+      <div class="agent-attachment-lightbox__image">
+        <span class="agent-attachment-lightbox__missing">
+          "This image is no longer available."
+      <div class="agent-attachment-lightbox__bar">
+        <span class="agent-attachment-lightbox__title" data-tip="shot.png">
+          <span class="num">
+            "1"
+          "shot.png"
+        <span class="agent-attachment-lightbox__meta">
+          "4000"
+          "×"
+          "3000"
+          "·"
+          "2.4 MB"
+          <span class="sent">
+            "· sent as"
+            "2000"
+            "×"
+            "1500"
+            ","
+            "391 KB"
+        <span class="agent-attachment-lightbox__actions">
+          <span data-stand="IconButton" data-icon="xmark" data-label="Close preview" data-tooltip="false" data-title="Close (Esc)">
+-- a first frame, and a title hover
+Modal open=true scope=pane size=fit panelClass=agent-attachment-lightbox__panel
+useAttachmentUrl send id=a1
+useAttachmentText thumb id=undefined
+initialFocus -> agent-attachment-lightbox__dialog
+-- first frame only
+<div>
+  <div data-stand="Modal" data-aria-label="Image 1: shot.png">
+    <div class="agent-attachment-lightbox__dialog" tabindex="-1">
+      <div class="agent-attachment-lightbox__image">
+        <img src="blob:send/2" alt="shot.png">
+      <div class="agent-attachment-lightbox__bar">
+        <span class="agent-attachment-lightbox__title" data-tip="shot.png">
+          <span class="num">
+            "1"
+          "shot.png"
+        <span class="agent-attachment-lightbox__meta">
+          "4000"
+          "×"
+          "3000"
+          "·"
+          "2.4 MB"
+          <span class="sent">
+            "· sent as"
+            "2000"
+            "×"
+            "1500"
+            ","
+            "391 KB"
+            "(first frame)"
+        <span class="agent-attachment-lightbox__actions">
+          <span data-stand="IconButton" data-icon="xmark" data-label="Close preview" data-tooltip="false" data-title="Close (Esc)">

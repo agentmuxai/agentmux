@@ -198,6 +198,11 @@ impl WaitingDownloads {
     }
 }
 
+/// Whether a permission prompt is exactly Chromium's "this page wants to download more files".
+pub(crate) fn is_multiple_downloads_prompt(requested: u32) -> bool {
+    requested == cef::sys::cef_permission_request_types_t::CEF_PERMISSION_TYPE_MULTIPLE_DOWNLOADS as u32
+}
+
 /// One Save As dialog at a time per pane. CEF routes a download's dialog through the pane's single file
 /// chooser, so a second `cont(.., show_dialog = true)` while one is open cancels the new download at
 /// once and dismisses the open dialog without its download ever ending (macOS, 2026-11-06: ids 5 and 6;
@@ -744,6 +749,15 @@ wrap_download_handler! {
 #[cfg(test)]
 mod save_dialog_tests {
     use super::*;
+
+    #[test]
+    fn only_the_multiple_downloads_prompt_is_answered_for_downloads() {
+        assert!(is_multiple_downloads_prompt(1 << 14));
+        assert!(!is_multiple_downloads_prompt(0));
+        // Mixed with another permission it is not the downloads prompt alone.
+        assert!(!is_multiple_downloads_prompt((1 << 14) | 1));
+        assert!(!is_multiple_downloads_prompt(1));
+    }
 
     #[test]
     fn only_the_first_download_of_a_pane_asks_and_the_rest_wait_their_turn() {

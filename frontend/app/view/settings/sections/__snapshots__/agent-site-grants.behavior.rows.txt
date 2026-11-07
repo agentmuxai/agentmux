@@ -1,0 +1,176 @@
+store.follow
+-- four grants
+<div>
+  <div class="setting-row agent-site-grants" id="setting-browser.agent_sites">
+    <div class="setting-devices-description">
+      "What an agent may do on a site without asking each time, until you revoke it. Every row lets the agent make committing clicks there without asking (a payment still asks). Add Terminal to let it type and run commands in a web terminal there, such as Cloud Shell: nobody checks each line, so Stop, Pause and Take over in the pane are how you stop it, and Revoke here ends it at once. Tick "ask me for each line" instead to be shown every line in the pane, with Run it and Don't run, before it goes in."
+    <div data-stand="Notice" data-tone="warning">
+      <b>
+        "One limit of the Terminal power"
+      "A line already on its way can't be stopped."
+    <ul class="agent-site-grants-list" aria-label="Agents on sites">
+      <li class="agent-site-grant">
+        <div class="agent-site-grant-who">
+          <span class="agent-site-grant-agent">
+            "Naki-2"
+          <span class="agent-site-grant-site">
+            "shell.cloud.google.com (and ssh.cloud.google.com)"
+          <span class="agent-site-grant-when">
+            "granted"
+            "just now"
+        <div class="agent-site-grant-powers" role="group" aria-label="What Naki-2 may do on shell.cloud.google.com (and ssh.cloud.google.com)">
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Terminal: type and run commands for Naki-2 on shell.cloud.google.com (and ssh.cloud.google.com)" checked=true>
+            <span>
+              "Terminal: type and run commands"
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Terminal: ask me for each line for Naki-2 on shell.cloud.google.com (and ssh.cloud.google.com)" checked=false>
+            <span>
+              "Terminal: ask me for each line"
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="mystery for Naki-2 on shell.cloud.google.com (and ssh.cloud.google.com)" checked=false>
+            <span>
+              "mystery"
+          <span class="agent-site-grant-power agent-site-grant-power-fixed">
+            "Committing clicks"
+        <span data-stand="Button" data-disabled="false" data-aria-label="Revoke Naki-2 on shell.cloud.google.com (and ssh.cloud.google.com)">
+          "Revoke"
+      <li class="agent-site-grant">
+        <div class="agent-site-grant-who">
+          <span class="agent-site-grant-agent">
+            "Agent1"
+          <span class="agent-site-grant-site">
+            "example.com"
+          <span class="agent-site-grant-when">
+            "granted"
+            "5 min ago"
+        <div class="agent-site-grant-powers" role="group" aria-label="What Agent1 may do on example.com">
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Terminal: type and run commands for Agent1 on example.com" checked=false>
+            <span>
+              "Terminal: type and run commands"
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Terminal: ask me for each line for Agent1 on example.com" checked=false>
+            <span>
+              "Terminal: ask me for each line"
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="mystery for Agent1 on example.com" checked=false>
+            <span>
+              "mystery"
+          <span class="agent-site-grant-power agent-site-grant-power-fixed">
+            "Committing clicks"
+        <span data-stand="Button" data-disabled="false" data-aria-label="Revoke Agent1 on example.com">
+          "Revoke"
+      <li class="agent-site-grant">
+        <div class="agent-site-grant-who">
+          <span class="agent-site-grant-agent">
+            "gone"
+          <span class="agent-site-grant-site">
+          <span class="agent-site-grant-when">
+            "granted"
+            "2 days ago"
+        <div class="agent-site-grant-powers" role="group" aria-label="What gone may do on ">
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Terminal: type and run commands for gone on " checked=true>
+            <span>
+              "Terminal: type and run commands"
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Terminal: ask me for each line for gone on " checked=true>
+            <span>
+              "Terminal: ask me for each line"
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="mystery for gone on " checked=false>
+            <span>
+              "mystery"
+          <span class="agent-site-grant-power agent-site-grant-power-fixed">
+            "Committing clicks"
+        <span data-stand="Button" data-disabled="false" data-aria-label="Revoke gone on ">
+          "Revoke"
+      <li class="agent-site-grant">
+        <div class="agent-site-grant-who">
+          <span class="agent-site-grant-agent">
+            "nameless"
+          <span class="agent-site-grant-site">
+            "a.dev"
+          <span class="agent-site-grant-when">
+            "granted"
+            "1 h ago"
+        <div class="agent-site-grant-powers" role="group" aria-label="What nameless may do on a.dev">
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Terminal: type and run commands for nameless on a.dev" checked=false>
+            <span>
+              "Terminal: type and run commands"
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Terminal: ask me for each line for nameless on a.dev" checked=false>
+            <span>
+              "Terminal: ask me for each line"
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="mystery for nameless on a.dev" checked=true>
+            <span>
+              "mystery"
+          <span class="agent-site-grant-power agent-site-grant-power-fixed">
+            "Committing clicks"
+        <span data-stand="Button" data-disabled="false" data-aria-label="Revoke nameless on a.dev">
+          "Revoke"
+    <div class="agent-site-grants-add">
+      <div data-stand="Select" data-aria-label="Agent to give a standing grant" data-value="">
+        <span data-option="">
+          "Choose an agent…"
+        <span data-option="agent1">
+          "Agent1"
+        <span data-option="naki-2">
+          "Naki-2"
+        <span data-option="nameless">
+          "nameless"
+      <input data-stand="TextInput" data-detached="true" aria-label="Site" placeholder="shell.example.com" data-value="">
+      <label class="agent-site-grant-power">
+        <input type="checkbox" checked=false>
+        <span>
+          "Terminal: type and run commands"
+      <label class="agent-site-grant-power">
+        <input type="checkbox" disabled="" checked=false>
+        <span>
+          "and show me each line first"
+      <span data-stand="Button" data-disabled="true">
+        "Allow"
+    <div class="agent-site-grants-presets" role="group" aria-label="Consoles">
+      <span class="agent-site-grants-presets-label">
+        "Consoles, with the terminal:"
+      <span data-stand="Button" data-disabled="true" data-title="https://shell.cloud.google.com. Not yet checked.">
+        "Google Cloud Shell"
+      <span class="setting-devices-empty">
+        "Choose an agent first."
+-- no grants, no consoles
+store.follow
+-- no grants
+<div>
+  <div class="setting-row agent-site-grants" id="setting-browser.agent_sites">
+    <div class="setting-devices-description">
+      "What an agent may do on a site without asking each time, until you revoke it. Every row lets the agent make committing clicks there without asking (a payment still asks). Add Terminal to let it type and run commands in a web terminal there, such as Cloud Shell: nobody checks each line, so Stop, Pause and Take over in the pane are how you stop it, and Revoke here ends it at once. Tick "ask me for each line" instead to be shown every line in the pane, with Run it and Don't run, before it goes in."
+    <div data-stand="Notice" data-tone="warning">
+      <b>
+        "One limit of the Terminal power"
+      "A line already on its way can't be stopped."
+    <div class="setting-devices-empty">
+      "No agent has a standing grant. Each one asks in the pane, and you answer there."
+    <div class="agent-site-grants-add">
+      <div data-stand="Select" data-aria-label="Agent to give a standing grant" data-value="">
+        <span data-option="">
+          "Choose an agent…"
+        <span data-option="agent1">
+          "Agent1"
+        <span data-option="naki-2">
+          "Naki-2"
+        <span data-option="nameless">
+          "nameless"
+      <input data-stand="TextInput" data-detached="true" aria-label="Site" placeholder="shell.example.com" data-value="">
+      <label class="agent-site-grant-power">
+        <input type="checkbox" checked=false>
+        <span>
+          "Terminal: type and run commands"
+      <label class="agent-site-grant-power">
+        <input type="checkbox" disabled="" checked=false>
+        <span>
+          "and show me each line first"
+      <span data-stand="Button" data-disabled="true">
+        "Allow"

@@ -9,6 +9,7 @@
 import type { SkillApp } from "@/types/rpc/SkillApp";
 import type { SkillCatalogItem } from "@/types/rpc/SkillCatalogItem";
 import type { VerifiedRecord } from "@/types/rpc/VerifiedRecord";
+import type { WidgetSignatureInfo } from "@/types/rpc/WidgetSignatureInfo";
 import { getPlatform } from "@/util/platformutil";
 
 export type AppFilter = "all" | "app";
@@ -91,10 +92,33 @@ export function fileSize(bytes: number): string {
     return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`;
 }
 
-/** A script's state in the detail: stage 4 adds approval, so until then it is stored and not given to an agent (the pill's tooltip says so). */
+/** A script's state in the detail: a script is never given to an agent until a person approves it. */
 export function scriptState(f: { script: boolean; approved: boolean }): string | null {
     return f.script ? (f.approved ? "approved" : "not approved") : null;
 }
 
 /** The tone a pill takes for a status (a status dot says "idle" where a pill says "neutral"). */
 export const pillTone = (tone: AppTone): "ok" | "neutral" | "error" => (tone === "idle" ? "neutral" : tone);
+
+/**
+ * Who signed the skill, in the words the detail and the import preview use. A key that is not the one this
+ * publisher's scripts were approved under is a different author, not an update.
+ */
+export function describeSignature(sig: WidgetSignatureInfo): { text: string; tone: "ok" | "neutral" | "warn" } {
+    const who = sig.publisher;
+    switch (sig.state) {
+        case "signed":
+            return { tone: "ok", text: `Signed by ${who} · ${sig.fingerprint} (the key you approved ${who}'s scripts under)` };
+        case "signed_new":
+            return { tone: "neutral", text: `Signed by ${who} · ${sig.fingerprint}. Nothing from ${who} is approved here yet: check the key with its author if it matters.` };
+        case "key_changed":
+            return {
+                tone: "warn",
+                text: sig.fingerprint
+                    ? `Signed by ${sig.fingerprint}, not the key ${who} is pinned to (${sig.pinned}). It may not be from the same author.`
+                    : `Not signed, though ${who}'s other skills are (${sig.pinned}). It may not be from the same author.`,
+            };
+        default:
+            return { tone: "neutral", text: "Not signed: AgentMux can't tell who made it." };
+    }
+}

@@ -47,6 +47,9 @@ pub(crate) struct VaultFillRequest {
     request_kind: Option<String>,
     #[serde(default)]
     request_label: Option<String>,
+    /// Why the agent fills the form from an entry: one line of 8 to 300 characters, required with `vault`.
+    #[serde(default)]
+    reason: Option<String>,
 }
 
 /// What the host says about the field.
@@ -110,8 +113,11 @@ fn how_of(outcome: &str) -> How {
     }
 }
 
-fn record(state: &AppState, block_id: &str, target: &FillTarget, agent: &str, where_: &str, outcome: &str) {
-    crate::backend::vault::record(&state.identity_store, &target.id, &target.label, agent, "filled a web form", where_, outcome);
+fn record(state: &AppState, block_id: &str, target: &FillTarget, agent: &str, where_: &str, outcome: &str, reason: &str) {
+    crate::backend::vault::record_line(
+        &state.identity_store,
+        crate::backend::vault::Line { entry_id: &target.id, label: &target.label, actor: agent, action: "filled a web form", target: where_, outcome, reason },
+    );
     // The pane's own Log shows it too, with what was filled and never its value.
     note(block_id, agent, Kind::Fill).detail(&format!("{} from the Vault", target.what)).how(how_of(outcome)).record(state);
     // Every window's Vault pane shows the new line of the record.
@@ -139,6 +145,28 @@ impl Drop for Waiting {
     }
 }
 
+/// The question for the person about filling `field` from `target`: why they are asked (`ask`: whether "Always" is
+/// offered, and the reason) and what the agent says it is for.
+fn fill_request(agent: &str, block_id: String, target: &FillTarget, field: &Field, ask: (bool, &str), agent_reason: &str) -> UseRequest {
+    UseRequest {
+        id: uuid::Uuid::new_v4().to_string(),
+        agent: agent.to_string(),
+        block_id,
+        entry_id: target.id.clone(),
+        entry_label: target.label.clone(),
+        what: target.what.clone(),
+        origin: field.origin.clone(),
+        field: field.label.clone(),
+        offer_always: ask.0,
+        reason: ask.1.to_string(),
+        agent_reason: agent_reason.to_string(),
+        needs_value: target.typed,
+        kind: target.kind.to_string(),
+        requested_ms: agentmux_common::time::now_ms_u64(),
+        ..Default::default()
+    }
+}
+
 /// `POST /api/v1/ui/browser/vault_fill`.
 pub(crate) async fn handle_vault_fill(
     State(state): State<AppState>,
@@ -150,6 +178,15 @@ pub(crate) async fn handle_vault_fill(
         Err((code, e)) => return err_response(code, e),
     };
     let agent = req.auth.agent_id.chars().take(64).collect::<String>();
+    // From an entry, the agent says why, before anything is read or asked.
+    let reason_given = if req.vault.is_some() {
+        match vault::history::require_reason(req.reason.as_deref()) {
+            Ok(r) => r,
+            Err(e) => return err_response(StatusCode::BAD_REQUEST, e),
+        }
+    } else {
+        String::new()
+    };
     // The entry and part, by name only: nothing here reads the value yet.
     let store = state.identity_store.clone();
     let (wanted, kind, label, who) = (req.vault.clone(), req.request_kind.clone(), req.request_label.clone(), agent.clone());
@@ -189,31 +226,16 @@ pub(crate) async fn handle_vault_fill(
     }
     match decided {
         Plan::Refuse(why) => {
-            record(&state, &block_id, &target, &agent, &site, "refused");
+            record(&state, &block_id, &target, &agent, &site, "refused", &reason_given);
             return err_response(StatusCode::BAD_REQUEST, why.to_string());
         }
         Plan::Go => {}
         Plan::Ask { offer_always, reason } => {
-            let request = UseRequest {
-                id: uuid::Uuid::new_v4().to_string(),
-                agent: agent.clone(),
-                block_id: super::vault_ask::agent_pane(&state, caller.as_deref(), &req.auth),
-                entry_id: target.id.clone(),
-                entry_label: target.label.clone(),
-                what: target.what.clone(),
-                origin: field.origin.clone(),
-                field: field.label.clone(),
-                offer_always,
-                reason: reason.to_string(),
-                needs_value: target.typed,
-                kind: target.kind.to_string(),
-                requested_ms: agentmux_common::time::now_ms_u64(),
-                ..Default::default()
-            };
+            let request = fill_request(&agent, super::vault_ask::agent_pane(&state, caller.as_deref(), &req.auth), &target, &field, (offer_always, reason), &reason_given);
             let headline = format!("{agent} wants to fill your {} on {}", target.what, field.origin);
             let (ended, answer) = super::vault_ask::ask(&state, &block_id, request, ANSWER_WAIT, &headline).await;
             if !ended.allowed() {
-                record(&state, &block_id, &target, &agent, &site, ended.outcome());
+                record(&state, &block_id, &target, &agent, &site, ended.outcome(), &reason_given);
                 let code = if ended == Ended::NoAnswer { StatusCode::REQUEST_TIMEOUT } else { StatusCode::FORBIDDEN };
                 return err_response(code, ended.refusal("nothing was typed"));
             }
@@ -240,11 +262,11 @@ pub(crate) async fn handle_vault_fill(
         match tokio::task::spawn_blocking(move || vault::value_for_fill(&store, &entry, created, part)).await {
             Ok(Ok(v)) => v,
             Ok(Err(e)) => {
-                record(&state, &block_id, &target, &agent, &site, "failed");
+                record(&state, &block_id, &target, &agent, &site, "failed", &reason_given);
                 return err_response(StatusCode::BAD_REQUEST, e);
             }
             Err(e) => {
-                record(&state, &block_id, &target, &agent, &site, "failed");
+                record(&state, &block_id, &target, &agent, &site, "failed", &reason_given);
                 return err_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
             }
         }
@@ -269,7 +291,7 @@ pub(crate) async fn handle_vault_fill(
     drop(value);
     match filled {
         Ok(data) => {
-            record(&state, &block_id, &target, &agent, &site, if target.typed { "done (typed by the person)" } else { "done" });
+            record(&state, &block_id, &target, &agent, &site, if target.typed { "done (typed by the person)" } else { "done" }, &reason_given);
             let mut entry_id = target.id.clone();
             let mut saved_note = None;
             if let Some(kept) = to_keep {
@@ -325,7 +347,7 @@ pub(crate) async fn handle_vault_fill(
             (StatusCode::OK, Json(json!({ "ok": true, "data": out }))).into_response()
         }
         Err((code, e)) => {
-            record(&state, &block_id, &target, &agent, &site, "failed");
+            record(&state, &block_id, &target, &agent, &site, "failed", &reason_given);
             err_response(code, e)
         }
     }

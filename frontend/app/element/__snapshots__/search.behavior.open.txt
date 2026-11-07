@@ -1,0 +1,64 @@
+onSearch ""
+-- closed
+-
+state: open=false search="" index=0 count=0
+requestAnimationFrame
+-- open, no toggles
+<div class="search-container" style="position: absolute; left: 0px; top: 0px;">
+  <input data-stand="Input" placeholder="Search" data-autofocus="true" data-autoselect="true">
+  <div aria-live="polite" aria-label="Search Results" class="search-results hidden">
+    "1"
+    "/"
+    "0"
+  <div class="right-buttons">
+    <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="chevron-up" title="Previous Result (Shift+Enter)" disabled="">
+    <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="chevron-down" title="Next Result (Enter)" disabled="">
+    <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="xmark" title="Close (Esc)">
+state: open=true search="" index=0 count=0
+-- open, 3 of 5
+<div class="search-container" style="position: absolute; left: 0px; top: 0px;">
+  <input data-stand="Input" placeholder="Search" data-autofocus="true" data-autoselect="true">
+  <div aria-live="polite" aria-label="Search Results" class="search-results">
+    "3"
+    "/"
+    "5"
+  <div class="right-buttons">
+    <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="chevron-up" title="Previous Result (Shift+Enter)">
+    <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="chevron-down" title="Next Result (Enter)">
+    <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="xmark" title="Close (Esc)">
+state: open=true search="" index=2 count=5
+-- with all three toggles
+onSearch ""
+requestAnimationFrame
+-- open, three toggles
+<div class="search-container" style="position: absolute; left: 0px; top: 0px;">
+  <input data-stand="Input" placeholder="Search" data-autofocus="true" data-autoselect="true">
+  <div aria-live="polite" aria-label="Search Results" class="search-results hidden">
+    "1"
+    "/"
+    "0"
+  <div class="additional-buttons">
+    <button data-stand="DeclIconButton" data-elemtype="toggleiconbutton" data-icon="custom@case-sensitive" title="Case Sensitive" data-active="false">
+    <button data-stand="DeclIconButton" data-elemtype="toggleiconbutton" data-icon="custom@whole-word" title="Whole Word" data-active="true">
+    <button data-stand="DeclIconButton" data-elemtype="toggleiconbutton" data-icon="custom@regex" title="Regular Expression" data-active="true">
+  <div class="right-buttons">
+    <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="chevron-up" title="Previous Result (Shift+Enter)" disabled="">
+    <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="chevron-down" title="Next Result (Enter)" disabled="">
+    <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="xmark" title="Close (Esc)">
+state: open=true search="" index=0 count=0
+-- only one toggle
+requestAnimationFrame
+-- open, case only
+<div class="search-container" style="position: absolute; left: 0px; top: 0px;">
+  <input data-stand="Input" placeholder="Search" data-autofocus="true" data-autoselect="true">
+  <div aria-live="polite" aria-label="Search Results" class="search-results hidden">
+    "1"
+    "/"
+    "0"
+  <div class="additional-buttons">
+    <button data-stand="DeclIconButton" data-elemtype="toggleiconbutton" data-icon="custom@case-sensitive" title="Case Sensitive" data-active="true">
+  <div class="right-buttons">
+    <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="chevron-up" title="Previous Result (Shift+Enter)" disabled="">
+    <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="chevron-down" title="Next Result (Enter)" disabled="">
+    <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="xmark" title="Close (Esc)">
+state: open=true search="" index=0 count=0

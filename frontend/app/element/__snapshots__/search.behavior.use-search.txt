@@ -1,0 +1,4 @@
+defaults: open=false search="" index=0 count=0 regex=undefined caseSensitive=undefined wholeWord=undefined anchor={"current":null}
+options: regex=false caseSensitive=true wholeWord=false anchorIsGiven=true
+view model got the atoms: true
+only regex: regex=true caseSensitive=undefined wholeWord=undefined

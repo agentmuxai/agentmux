@@ -250,7 +250,7 @@ export const TIPS: TipRow[] = [
         gesture: "click / dblclick",
         where: "on a file in the editor's file tree",
         label: "A click opens a preview tab, a double-click a tab that stays; F2 renames",
-        source: { file: "frontend/app/view/editor/file-tree.tsx", anchor: "onDblClick={handleDblClick}" },
+        source: { file: "frontend/app/view/editor/file-tree-node.tsx", anchor: "onDblClick={n.handleDblClick}" },
     },
     {
         // SPEC_EDITOR_TREE_KEYBOARD_ICONS_AND_CLICK_ZOOM_2026_10_16.md §5.2.
@@ -259,7 +259,7 @@ export const TIPS: TipRow[] = [
         gesture: "key:↑ / key:↓ / key:Enter / key:Space / key:Escape",
         where: "in the editor's file tree",
         label: "Previous / next row, previewing a file / open the file in a tab that stays and go to the editor / keep its tab / go to the editor; ← → close and open folders, Home, End and the Page keys jump, typing a name jumps to it",
-        source: { file: "frontend/app/view/editor/file-tree.tsx", anchor: "const move = treeMove(list, current, e.key, pageSize());" },
+        source: { file: "frontend/app/view/editor/file-tree-state.ts", anchor: "const move = treeMove(list, current, e.key, pageSize());" },
     },
 
     // Library defaults (CodeMirror basicSetup), checked by hand on macOS,
@@ -378,7 +378,7 @@ export const TIPS: TipRow[] = [
         gesture: "key:↑",
         where: "in an empty message box",
         label: "Take back the last queued message; ↑ and ↓ step through what you sent",
-        source: { file: "frontend/app/view/agent/components/AgentFooter.tsx", anchor: "ArrowUp when the composer is empty" },
+        source: { file: "frontend/app/view/agent/components/agent-footer-state.ts", anchor: "ArrowUp when the composer is empty" },
     },
     {
         id: "agent:suggestion",
@@ -436,7 +436,7 @@ export const TIPS: TipRow[] = [
         gesture: "key:Enter / shift+key:Enter",
         where: "in a find bar",
         label: "Next / previous match",
-        source: { file: "frontend/app/element/search.tsx", anchor: "shiftKey" },
+        source: { file: "frontend/app/element/search-state.ts", anchor: "shiftKey" },
     },
 
     // ── Browser ──

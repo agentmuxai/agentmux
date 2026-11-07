@@ -6735,6 +6735,44 @@
     }
   },
   {
+    "command": "skill.catalog.app_file",
+    "request": "agentmux_srv::backend::rpc_types::skill::CommandSkillCatalogAppFileData",
+    "requestName": "CommandSkillCatalogAppFileData",
+    "requestTs": {
+      "imports": [
+        "CommandSkillCatalogAppFileData"
+      ],
+      "name": "CommandSkillCatalogAppFileData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::skill::SkillAppFile",
+    "responseName": "SkillAppFile",
+    "responseTs": {
+      "imports": [
+        "SkillAppFile"
+      ],
+      "name": "SkillAppFile"
+    }
+  },
+  {
+    "command": "skill.catalog.app_script",
+    "request": "agentmux_srv::backend::rpc_types::skill::CommandSkillCatalogAppScriptData",
+    "requestName": "CommandSkillCatalogAppScriptData",
+    "requestTs": {
+      "imports": [
+        "CommandSkillCatalogAppScriptData"
+      ],
+      "name": "CommandSkillCatalogAppScriptData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::skill::SkillAppScriptResult",
+    "responseName": "SkillAppScriptResult",
+    "responseTs": {
+      "imports": [
+        "SkillAppScriptResult"
+      ],
+      "name": "SkillAppScriptResult"
+    }
+  },
+  {
     "command": "skill.catalog.bind",
     "request": "agentmux_srv::backend::rpc_types::skill::SkillAgentBindingData",
     "requestName": "SkillAgentBindingData",
@@ -6808,6 +6846,25 @@
         "SkillDeleteResult"
       ],
       "name": "SkillDeleteResult"
+    }
+  },
+  {
+    "command": "skill.catalog.export",
+    "request": "agentmux_srv::backend::rpc_types::skill::CommandSkillCatalogExportData",
+    "requestName": "CommandSkillCatalogExportData",
+    "requestTs": {
+      "imports": [
+        "CommandSkillCatalogExportData"
+      ],
+      "name": "CommandSkillCatalogExportData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::skill::SkillExportResult",
+    "responseName": "SkillExportResult",
+    "responseTs": {
+      "imports": [
+        "SkillExportResult"
+      ],
+      "name": "SkillExportResult"
     }
   },
   {

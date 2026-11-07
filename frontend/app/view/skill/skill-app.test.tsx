@@ -5,12 +5,16 @@
 // (docs/specs/SPEC_PACKS_2026_11_05.md §8).
 
 import { cleanup, fireEvent, render, screen, within } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const rpc = vi.hoisted(() => ({
     SkillCatalogListCommand: vi.fn(),
     ListAgentDefinitionsCommand: vi.fn(),
     SkillCatalogListForAgentCommand: vi.fn(),
+    SkillCatalogAppFileCommand: vi.fn(),
+    SkillCatalogAppScriptCommand: vi.fn(),
+    SkillCatalogExportCommand: vi.fn(),
 }));
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: rpc }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
@@ -20,7 +24,8 @@ vi.mock("@/app/element/markdown", () => ({ Markdown: () => null }));
 vi.mock("@/util/platformutil", () => ({ getPlatform: () => "win32" }));
 
 import { SkillManager } from "./skill-manager";
-import { appStatus, filterSkills, recordsFor, referenceDrift } from "./skill-app-model";
+import { SkillAppDetail } from "./skill-app";
+import { appStatus, describeSignature, filterSkills, recordsFor, referenceDrift } from "./skill-app-model";
 
 function record(over: Record<string, unknown> = {}) {
     return {
@@ -56,9 +61,9 @@ function reference(over: Record<string, unknown> = {}) {
 function app(over: Record<string, unknown> = {}) {
     return {
         files: [
-            { path: "controls.md", bytes: 2048, script: false, approved: false, image: false },
-            { path: "scripts/run.py", bytes: 100, script: true, approved: false, image: false },
-            { path: "references/ribbon.png", bytes: 5000, script: false, approved: false, image: true },
+            { path: "controls.md", bytes: 2048, script: false, approved: false, image: false, sha256: "d".repeat(64) },
+            { path: "scripts/run.py", bytes: 100, script: true, approved: false, image: false, sha256: "e".repeat(64) },
+            { path: "references/ribbon.png", bytes: 5000, script: false, approved: false, image: true, sha256: "f".repeat(64) },
         ],
         verified: [record()],
         content_hash: "c".repeat(64),
@@ -75,6 +80,8 @@ function app(over: Record<string, unknown> = {}) {
         supported: ">=16",
         tested: ["16.0"],
         references: [reference()],
+        scripts: [{ path: "scripts/run.py", purpose: "Fills the table of contents", needs: ["python 3"] }],
+        signature: { state: "signed_new", publisher: "acme", fingerprint: "AAAA-BBBB", pinned: null },
         ...over,
     };
 }
@@ -200,5 +207,86 @@ describe("Memory > Skills with an App skill", () => {
         const card = (await screen.findByRole("group", { name: "Skills" })).querySelector(".ui-card");
         expect(card?.className).toContain("is-attention");
         expect(card?.textContent).toContain("failed on 16.0");
+    });
+});
+
+describe("Signature and script approval", () => {
+    const sig = (state: string, over: Record<string, unknown> = {}) => ({ state, publisher: "acme", fingerprint: "AAAA-BBBB", pinned: null, ...over });
+
+    it("says who signed it, and warns when the key is not the one the publisher is pinned to", () => {
+        expect(describeSignature(sig("signed_new") as never).text).toContain("Signed by acme · AAAA-BBBB");
+        expect(describeSignature(sig("signed", { pinned: "AAAA-BBBB" }) as never).tone).toBe("ok");
+        expect(describeSignature(sig("unsigned", { fingerprint: null }) as never).text).toBe("Not signed: AgentMux can't tell who made it.");
+        const changed = describeSignature(sig("key_changed", { fingerprint: "CCCC-DDDD", pinned: "AAAA-BBBB" }) as never);
+        expect(changed.tone).toBe("warn");
+        expect(changed.text).toContain("not the key acme is pinned to (AAAA-BBBB)");
+        expect(describeSignature(sig("key_changed", { fingerprint: null, pinned: "AAAA-BBBB" }) as never).text).toContain("Not signed, though");
+    });
+
+    async function openDetail() {
+        render(() => <SkillManager />);
+        fireEvent.click(await screen.findByText("acme-word"));
+        return screen.findByRole("region", { name: "App skill" });
+    }
+
+    it("shows the signature line in the detail", async () => {
+        const detail = await openDetail();
+        expect(within(detail).getByText(/Signed by acme · AAAA-BBBB/)).toBeTruthy();
+    });
+
+    it("reviewing a script shows its purpose, needs, hash and text, and Approve sends the approval", async () => {
+        rpc.SkillCatalogAppFileCommand.mockResolvedValue({ path: "scripts/run.py", text: "print('toc')" });
+        rpc.SkillCatalogAppScriptCommand.mockResolvedValue({ approved: true });
+        const detail = await openDetail();
+        fireEvent.click(within(detail).getByRole("button", { name: "Review" }));
+        const panel = await within(detail).findByRole("group", { name: "Script scripts/run.py" });
+        expect(panel.textContent).toContain("Fills the table of contents");
+        expect(panel.textContent).toContain("Needs: python 3");
+        expect(panel.textContent).toContain("e".repeat(64));
+        expect(await within(panel).findByText(/print\('toc'\)/)).toBeTruthy();
+        expect(rpc.SkillCatalogAppFileCommand).toHaveBeenCalledWith({}, { skill_id: "k1", path: "scripts/run.py" });
+        fireEvent.click(within(panel).getByRole("button", { name: "Approve script" }));
+        await vi.waitFor(() =>
+            expect(rpc.SkillCatalogAppScriptCommand).toHaveBeenCalledWith({}, { skill_id: "k1", path: "scripts/run.py", approved: true, sha256: "e".repeat(64) }),
+        );
+    });
+
+    it("an approved script offers Revoke and a failed approval is shown", async () => {
+        rpc.SkillCatalogListCommand.mockResolvedValue([skill({ app: app({ files: [{ path: "scripts/run.py", bytes: 100, script: true, approved: true, image: false, sha256: "e".repeat(64) }] }) })]);
+        rpc.SkillCatalogAppFileCommand.mockResolvedValue({ path: "scripts/run.py", text: "x" });
+        rpc.SkillCatalogAppScriptCommand.mockRejectedValue(new Error("script changed"));
+        const detail = await openDetail();
+        expect(within(detail).getByText("approved")).toBeTruthy();
+        fireEvent.click(within(detail).getByRole("button", { name: "Review" }));
+        fireEvent.click(await within(detail).findByRole("button", { name: "Revoke approval" }));
+        expect((await within(detail).findByRole("alert")).textContent).toBe("script changed");
+        expect(rpc.SkillCatalogAppScriptCommand).toHaveBeenCalledWith({}, { skill_id: "k1", path: "scripts/run.py", approved: false, sha256: "e".repeat(64) });
+    });
+
+    it("the Review panel stays open when an approval makes the detail rebuild its rows", async () => {
+        rpc.SkillCatalogAppFileCommand.mockResolvedValue({ path: "scripts/run.py", text: "x" });
+        const [current, setCurrent] = createSignal(app() as never);
+        render(() => <SkillAppDetail skillId="k1" app={current()} />);
+        fireEvent.click(screen.getByRole("button", { name: "Review" }));
+        await screen.findByRole("group", { name: "Script scripts/run.py" });
+        const approved = app({ files: [{ path: "scripts/run.py", bytes: 100, script: true, approved: true, image: false, sha256: "e".repeat(64) }] });
+        setCurrent(approved as never);
+        expect(await screen.findByRole("button", { name: "Revoke approval" })).toBeTruthy();
+        expect(screen.getByRole("group", { name: "Script scripts/run.py" })).toBeTruthy();
+    });
+
+    it("Export writes a .skill file and says where it went, and shows a refusal", async () => {
+        rpc.SkillCatalogExportCommand.mockResolvedValueOnce({ path: "C:/Users/me/Downloads/acme-word-1.0.0.skill", signed: true });
+        const detail = await openDetail();
+        fireEvent.click(within(detail).getByRole("button", { name: "Export as a .skill file" }));
+        expect((await within(detail).findByRole("status")).textContent).toBe(
+            "Saved to C:/Users/me/Downloads/acme-word-1.0.0.skill, with its publisher's signature.",
+        );
+        expect(rpc.SkillCatalogExportCommand).toHaveBeenCalledWith({}, { skill_id: "k1" });
+
+        rpc.SkillCatalogExportCommand.mockRejectedValueOnce(new Error("too large to share as one file"));
+        fireEvent.click(within(detail).getByRole("button", { name: "Export as a .skill file" }));
+        expect((await within(detail).findByRole("alert")).textContent).toBe("too large to share as one file");
+        expect(within(detail).queryByRole("status")).toBeNull();
     });
 });

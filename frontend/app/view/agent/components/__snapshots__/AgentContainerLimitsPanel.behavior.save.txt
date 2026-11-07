@@ -1,0 +1,322 @@
+GetContainerLimitsCommand {"agent_id":"agent-1"}
+Button "Save" click
+SetContainerLimitsCommand {"agent_id":"agent-1","memory_mb":"6144","cpus":"0"}
+-- saving
+<div>
+  <div class="agent-primitive-modal-detail agent-container-limits-panel" data-testid="agent-container-limits-panel">
+    <div class="agent-primitive-modal-readonly">
+      <p class="agent-primitive-modal-global-note">
+        "How much of Docker's memory and CPU"
+        "Claude"
+        "'s container may use. A change reaches the running container at once; nothing restarts."
+      <div data-stand="Field" data-label="Memory" data-layout="stacked">
+        <div class="agent-container-limits-row">
+          <select data-stand="Select" data-value="custom" data-testid="container-limits-memory-mode" disabled="">
+            <option>
+              "Automatic"
+            <option>
+              "Set a limit"
+            <option>
+              "No limit"
+          <input data-stand="TextInput" class="setting-number" inputmode="decimal" data-value="6" data-testid="container-limits-memory-amount" disabled="">
+          <span>
+            "GB"
+        <p class="agent-primitive-modal-global-note" data-testid="container-limits-memory-note">
+          "In force now: 4 GB of the 8 GB Docker has."
+      <div data-stand="Field" data-label="CPUs" data-layout="stacked">
+        <div class="agent-container-limits-row">
+          <select data-stand="Select" data-value="none" data-testid="container-limits-cpus-mode" disabled="">
+            <option>
+              "Automatic"
+            <option>
+              "Set a limit"
+            <option>
+              "No limit"
+        <p class="agent-primitive-modal-global-note" data-testid="container-limits-cpus-note">
+          "No limit: a build can use every CPU Docker has."
+      <div data-stand="AgentContainerCaches" data-agent-id="agent-1" data-agent-name="Claude">
+      <div class="agent-primitive-modal-actions">
+        <span data-stand="Button" data-tone="accent" data-busy="true" data-disabled="true">
+          "Save"
+Button "Save" click
+-- applied
+<div>
+  <div class="agent-primitive-modal-detail agent-container-limits-panel" data-testid="agent-container-limits-panel">
+    <div class="agent-primitive-modal-readonly">
+      <p class="agent-primitive-modal-global-note">
+        "How much of Docker's memory and CPU"
+        "Claude"
+        "'s container may use. A change reaches the running container at once; nothing restarts."
+      <div data-stand="Field" data-label="Memory" data-layout="stacked">
+        <div class="agent-container-limits-row">
+          <select data-stand="Select" data-value="custom" data-testid="container-limits-memory-mode">
+            <option>
+              "Automatic"
+            <option>
+              "Set a limit"
+            <option>
+              "No limit"
+          <input data-stand="TextInput" class="setting-number" inputmode="decimal" data-value="6" data-testid="container-limits-memory-amount">
+          <span>
+            "GB"
+        <p class="agent-primitive-modal-global-note" data-testid="container-limits-memory-note">
+          "In force now: 4 GB of the 8 GB Docker has."
+      <div data-stand="Field" data-label="CPUs" data-layout="stacked">
+        <div class="agent-container-limits-row">
+          <select data-stand="Select" data-value="none" data-testid="container-limits-cpus-mode">
+            <option>
+              "Automatic"
+            <option>
+              "Set a limit"
+            <option>
+              "No limit"
+        <p class="agent-primitive-modal-global-note" data-testid="container-limits-cpus-note">
+          "No limit: a build can use every CPU Docker has."
+      <div data-stand="AgentContainerCaches" data-agent-id="agent-1" data-agent-name="Claude">
+      <p class="agent-primitive-modal-global-note" role="status" data-testid="container-limits-saved">
+        "Saved. The running container has the new limits now."
+      <div class="agent-primitive-modal-actions">
+        <span data-stand="Button" data-tone="accent" data-busy="false" data-disabled="true">
+          "Save"
+-- edited after saving
+<div>
+  <div class="agent-primitive-modal-detail agent-container-limits-panel" data-testid="agent-container-limits-panel">
+    <div class="agent-primitive-modal-readonly">
+      <p class="agent-primitive-modal-global-note">
+        "How much of Docker's memory and CPU"
+        "Claude"
+        "'s container may use. A change reaches the running container at once; nothing restarts."
+      <div data-stand="Field" data-label="Memory" data-layout="stacked">
+        <div class="agent-container-limits-row">
+          <select data-stand="Select" data-value="custom" data-testid="container-limits-memory-mode">
+            <option>
+              "Automatic"
+            <option>
+              "Set a limit"
+            <option>
+              "No limit"
+          <input data-stand="TextInput" class="setting-number" inputmode="decimal" data-value="5" data-testid="container-limits-memory-amount">
+          <span>
+            "GB"
+        <p class="agent-primitive-modal-global-note" data-testid="container-limits-memory-note">
+          "In force now: 4 GB of the 8 GB Docker has."
+      <div data-stand="Field" data-label="CPUs" data-layout="stacked">
+        <div class="agent-container-limits-row">
+          <select data-stand="Select" data-value="none" data-testid="container-limits-cpus-mode">
+            <option>
+              "Automatic"
+            <option>
+              "Set a limit"
+            <option>
+              "No limit"
+        <p class="agent-primitive-modal-global-note" data-testid="container-limits-cpus-note">
+          "No limit: a build can use every CPU Docker has."
+      <div data-stand="AgentContainerCaches" data-agent-id="agent-1" data-agent-name="Claude">
+      <div class="agent-primitive-modal-actions">
+        <span data-stand="Button" data-tone="accent" data-busy="false" data-disabled="false">
+          "Save"
+Button "Save" click
+SetContainerLimitsCommand {"agent_id":"agent-1","memory_mb":"5120","cpus":"0"}
+-- not applied
+<div>
+  <div class="agent-primitive-modal-detail agent-container-limits-panel" data-testid="agent-container-limits-panel">
+    <div class="agent-primitive-modal-readonly">
+      <p class="agent-primitive-modal-global-note">
+        "How much of Docker's memory and CPU"
+        "Claude"
+        "'s container may use. A change reaches the running container at once; nothing restarts."
+      <div data-stand="Field" data-label="Memory" data-layout="stacked">
+        <div class="agent-container-limits-row">
+          <select data-stand="Select" data-value="custom" data-testid="container-limits-memory-mode">
+            <option>
+              "Automatic"
+            <option>
+              "Set a limit"
+            <option>
+              "No limit"
+          <input data-stand="TextInput" class="setting-number" inputmode="decimal" data-value="5" data-testid="container-limits-memory-amount">
+          <span>
+            "GB"
+        <p class="agent-primitive-modal-global-note" data-testid="container-limits-memory-note">
+          "In force now: 4 GB of the 8 GB Docker has."
+      <div data-stand="Field" data-label="CPUs" data-layout="stacked">
+        <div class="agent-container-limits-row">
+          <select data-stand="Select" data-value="none" data-testid="container-limits-cpus-mode">
+            <option>
+              "Automatic"
+            <option>
+              "Set a limit"
+            <option>
+              "No limit"
+        <p class="agent-primitive-modal-global-note" data-testid="container-limits-cpus-note">
+          "No limit: a build can use every CPU Docker has."
+      <div data-stand="AgentContainerCaches" data-agent-id="agent-1" data-agent-name="Claude">
+      <p class="agent-primitive-modal-global-note" role="status" data-testid="container-limits-saved">
+        "Saved, but Docker did not take the new limits. The container keeps the ones it has."
+      <div class="agent-primitive-modal-actions">
+        <span data-stand="Button" data-tone="accent" data-busy="false" data-disabled="true">
+          "Save"
+Button "Save" click
+SetContainerLimitsCommand {"agent_id":"agent-1","memory_mb":"3072","cpus":"0"}
+-- no container yet
+<div>
+  <div class="agent-primitive-modal-detail agent-container-limits-panel" data-testid="agent-container-limits-panel">
+    <div class="agent-primitive-modal-readonly">
+      <p class="agent-primitive-modal-global-note">
+        "How much of Docker's memory and CPU"
+        "Claude"
+        "'s container may use. A change reaches the running container at once; nothing restarts."
+      <div data-stand="Field" data-label="Memory" data-layout="stacked">
+        <div class="agent-container-limits-row">
+          <select data-stand="Select" data-value="custom" data-testid="container-limits-memory-mode">
+            <option>
+              "Automatic"
+            <option>
+              "Set a limit"
+            <option>
+              "No limit"
+          <input data-stand="TextInput" class="setting-number" inputmode="decimal" data-value="3" data-testid="container-limits-memory-amount">
+          <span>
+            "GB"
+        <p class="agent-primitive-modal-global-note" data-testid="container-limits-memory-note">
+          "In force now: 4 GB of the 8 GB Docker has."
+      <div data-stand="Field" data-label="CPUs" data-layout="stacked">
+        <div class="agent-container-limits-row">
+          <select data-stand="Select" data-value="none" data-testid="container-limits-cpus-mode">
+            <option>
+              "Automatic"
+            <option>
+              "Set a limit"
+            <option>
+              "No limit"
+        <p class="agent-primitive-modal-global-note" data-testid="container-limits-cpus-note">
+          "No limit: a build can use every CPU Docker has."
+      <div data-stand="AgentContainerCaches" data-agent-id="agent-1" data-agent-name="Claude">
+      <p class="agent-primitive-modal-global-note" role="status" data-testid="container-limits-saved">
+        "Saved. The container takes them when it starts."
+      <div class="agent-primitive-modal-actions">
+        <span data-stand="Button" data-tone="accent" data-busy="false" data-disabled="true">
+          "Save"
+Button "Save" click
+SetContainerLimitsCommand {"agent_id":"agent-1","memory_mb":"2048","cpus":"0"}
+-- save failed
+<div>
+  <div class="agent-primitive-modal-detail agent-container-limits-panel" data-testid="agent-container-limits-panel">
+    <div class="agent-primitive-modal-readonly">
+      <p class="agent-primitive-modal-global-note">
+        "How much of Docker's memory and CPU"
+        "Claude"
+        "'s container may use. A change reaches the running container at once; nothing restarts."
+      <div data-stand="Field" data-label="Memory" data-layout="stacked">
+        <div class="agent-container-limits-row">
+          <select data-stand="Select" data-value="custom" data-testid="container-limits-memory-mode">
+            <option>
+              "Automatic"
+            <option>
+              "Set a limit"
+            <option>
+              "No limit"
+          <input data-stand="TextInput" class="setting-number" inputmode="decimal" data-value="2" data-testid="container-limits-memory-amount">
+          <span>
+            "GB"
+        <p class="agent-primitive-modal-global-note" data-testid="container-limits-memory-note">
+          "In force now: 4 GB of the 8 GB Docker has."
+      <div data-stand="Field" data-label="CPUs" data-layout="stacked">
+        <div class="agent-container-limits-row">
+          <select data-stand="Select" data-value="none" data-testid="container-limits-cpus-mode">
+            <option>
+              "Automatic"
+            <option>
+              "Set a limit"
+            <option>
+              "No limit"
+        <p class="agent-primitive-modal-global-note" data-testid="container-limits-cpus-note">
+          "No limit: a build can use every CPU Docker has."
+      <div data-stand="AgentContainerCaches" data-agent-id="agent-1" data-agent-name="Claude">
+      <div class="agent-primitive-modal-error" role="alert">
+        "docker refused"
+      <div class="agent-primitive-modal-actions">
+        <span data-stand="Button" data-tone="accent" data-busy="false" data-disabled="false">
+          "Save"
+Button "Save" click
+SetContainerLimitsCommand {"agent_id":"agent-1","memory_mb":"1024","cpus":"0"}
+-- a plain refusal
+<div>
+  <div class="agent-primitive-modal-detail agent-container-limits-panel" data-testid="agent-container-limits-panel">
+    <div class="agent-primitive-modal-readonly">
+      <p class="agent-primitive-modal-global-note">
+        "How much of Docker's memory and CPU"
+        "Claude"
+        "'s container may use. A change reaches the running container at once; nothing restarts."
+      <div data-stand="Field" data-label="Memory" data-layout="stacked">
+        <div class="agent-container-limits-row">
+          <select data-stand="Select" data-value="custom" data-testid="container-limits-memory-mode">
+            <option>
+              "Automatic"
+            <option>
+              "Set a limit"
+            <option>
+              "No limit"
+          <input data-stand="TextInput" class="setting-number" inputmode="decimal" data-value="1" data-testid="container-limits-memory-amount">
+          <span>
+            "GB"
+        <p class="agent-primitive-modal-global-note" data-testid="container-limits-memory-note">
+          "In force now: 4 GB of the 8 GB Docker has."
+      <div data-stand="Field" data-label="CPUs" data-layout="stacked">
+        <div class="agent-container-limits-row">
+          <select data-stand="Select" data-value="none" data-testid="container-limits-cpus-mode">
+            <option>
+              "Automatic"
+            <option>
+              "Set a limit"
+            <option>
+              "No limit"
+        <p class="agent-primitive-modal-global-note" data-testid="container-limits-cpus-note">
+          "No limit: a build can use every CPU Docker has."
+      <div data-stand="AgentContainerCaches" data-agent-id="agent-1" data-agent-name="Claude">
+      <div class="agent-primitive-modal-error" role="alert">
+        "plain refusal"
+      <div class="agent-primitive-modal-actions">
+        <span data-stand="Button" data-tone="accent" data-busy="false" data-disabled="false">
+          "Save"
+Button "Save" click
+SetContainerLimitsCommand {"agent_id":"agent-1","memory_mb":"1024","cpus":"0"}
+-- saved again, the error gone
+<div>
+  <div class="agent-primitive-modal-detail agent-container-limits-panel" data-testid="agent-container-limits-panel">
+    <div class="agent-primitive-modal-readonly">
+      <p class="agent-primitive-modal-global-note">
+        "How much of Docker's memory and CPU"
+        "Claude"
+        "'s container may use. A change reaches the running container at once; nothing restarts."
+      <div data-stand="Field" data-label="Memory" data-layout="stacked">
+        <div class="agent-container-limits-row">
+          <select data-stand="Select" data-value="custom" data-testid="container-limits-memory-mode">
+            <option>
+              "Automatic"
+            <option>
+              "Set a limit"
+            <option>
+              "No limit"
+          <input data-stand="TextInput" class="setting-number" inputmode="decimal" data-value="1" data-testid="container-limits-memory-amount">
+          <span>
+            "GB"
+        <p class="agent-primitive-modal-global-note" data-testid="container-limits-memory-note">
+          "In force now: 4 GB of the 8 GB Docker has."
+      <div data-stand="Field" data-label="CPUs" data-layout="stacked">
+        <div class="agent-container-limits-row">
+          <select data-stand="Select" data-value="none" data-testid="container-limits-cpus-mode">
+            <option>
+              "Automatic"
+            <option>
+              "Set a limit"
+            <option>
+              "No limit"
+        <p class="agent-primitive-modal-global-note" data-testid="container-limits-cpus-note">
+          "No limit: a build can use every CPU Docker has."
+      <div data-stand="AgentContainerCaches" data-agent-id="agent-1" data-agent-name="Claude">
+      <p class="agent-primitive-modal-global-note" role="status" data-testid="container-limits-saved">
+        "Saved. The running container has the new limits now."
+      <div class="agent-primitive-modal-actions">
+        <span data-stand="Button" data-tone="accent" data-busy="false" data-disabled="true">
+          "Save"
