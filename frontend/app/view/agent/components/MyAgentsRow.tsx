@@ -11,16 +11,16 @@ import { hasProcess } from "@/app/store/agent-runtime";
 import { DualProviderLogo } from "@/element/DualProviderLogo";
 import type { RecentSessionRow } from "@/types/rpc/RecentSessionRow";
 import { formatTimeAgo } from "@/util/format-time";
+import { parseRuntimeKind } from "@/util/runtime-kind";
 import clsx from "clsx";
 import { Show, type Accessor, type JSX } from "solid-js";
-import { resolveEffectiveVendor } from "../providers/catalog";
 import { seatBadgeText, seatReportsLine, seatTooltipLine } from "../../../agent-model/seat-format";
+import { resolveEffectiveVendor } from "../providers/catalog";
 import { AgentRuntimeChip } from "./AgentRuntimeChip";
 import { noPreviewText } from "./my-agents-list-text";
 import type { MyAgentsListProps } from "./MyAgentsList";
 import { RuntimeBadge } from "./RuntimeBadge";
 import { VaultRowAsks } from "./vault-request-card/vault-row-asks";
-import { parseRuntimeKind } from "@/util/runtime-kind";
 
 export interface MyAgentsRowProps {
     row: RecentSessionRow;
@@ -31,7 +31,16 @@ export interface MyAgentsRowProps {
     tileRef: (el: HTMLLIElement) => void;
 }
 
-export const MyAgentsRow = (props: MyAgentsRowProps): JSX.Element => {
+interface RowState {
+    props: MyAgentsRowProps;
+    row: RecentSessionRow;
+    list: MyAgentsListProps;
+    isActive: () => boolean;
+    noPane: () => boolean;
+    openWhere: () => string;
+}
+
+function createRowState(props: MyAgentsRowProps): RowState {
     const row = props.row;
     const list = props.list;
     const isActive = () => (list.openDefinitions?.() ?? new Map()).has(row.definition_id);
@@ -45,6 +54,12 @@ export const MyAgentsRow = (props: MyAgentsRowProps): JSX.Element => {
     // against the box the user sees. See
     // docs/reports/REPORT_MY_AGENTS_TILE_ACTIONS_ALIGNMENT_2026_10_05.md.
     const openWhere = () => list.openLocations?.().get(row.definition_id)?.label ?? "open in another pane";
+    return { props, row, list, isActive, noPane, openWhere };
+}
+
+export const MyAgentsRow = (props: MyAgentsRowProps): JSX.Element => {
+    const s = createRowState(props);
+    const { row } = s;
 
     return (
         <li
@@ -52,8 +67,8 @@ export const MyAgentsRow = (props: MyAgentsRowProps): JSX.Element => {
             class="agent-recent-sessions-row"
             classList={{
                 "is-expanded": props.isExpanded(),
-                "agent-recent-sessions-row--active": isActive(),
-                "agent-recent-sessions-row--no-pane": noPane(),
+                "agent-recent-sessions-row--active": s.isActive(),
+                "agent-recent-sessions-row--no-pane": s.noPane(),
             }}
             data-definition-id={row.definition_id}
         >
@@ -65,140 +80,183 @@ export const MyAgentsRow = (props: MyAgentsRowProps): JSX.Element => {
             />
             <span class="agent-recent-sessions-body">
                 <span class="agent-recent-sessions-line1">
-                    {/* The one control that opens the agent. Its ::after
+                    <RowEntry s={s} />
+                    <RowBadges s={s} />
+                </span>
+                <RowDetails s={s} />
+            </span>
+            <RowTimestamps s={s} />
+            <RowChevron s={s} />
+        </li>
+    );
+};
+
+/** The one control that opens the agent. */
+function RowEntry({ s }: { s: RowState }) {
+    const { row, props } = s;
+    return (
+        <>
+            {/* The one control that opens the agent. Its ::after
                                                 covers the whole tile (the "stretched button"
                                                 pattern), so a click anywhere on the tile opens it
                                                 while the text stays plain text and the chevron
                                                 stays a separate control: nested buttons are not
                                                 valid HTML. */}
-                    <Button
-                        variant="row"
-                        density="compact"
-                        class="agent-recent-sessions-entry"
-                        onClick={() => props.onToggle()}
-                        aria-expanded={props.isExpanded()}
-                        aria-label={row.instance_name || row.definition_name}
-                        data-testid="agent-my-agents-entry"
-                    >
-                        <span class="agent-recent-sessions-name">{row.instance_name || row.definition_name}</span>
-                    </Button>
-                    <Show when={list.runtimeOf?.(row.definition_id)}>
-                        {(runtime) => <AgentRuntimeChip state={runtime().state} detail={runtime().detail} blocked={runtime().blocked} />}
-                    </Show>
-                    <Show when={noPane()}>
-                        <Tag class="agent-no-pane-tag">no pane</Tag>
-                    </Show>
-                    <Show when={isActive()}>
-                        <Tooltip
-                            content={openWhere().charAt(0).toUpperCase() + openWhere().slice(1)}
-                            divClassName="agent-active-badge-anchor"
-                        >
-                            <span class="agent-active-badge" aria-label="Active" />
-                        </Tooltip>
-                    </Show>
-                    <Show when={parseRuntimeKind(row.agent_type) !== undefined}>
-                        {/* size="tag" — same NATIVE/CONTAINER wording + white/
+            <Button
+                variant="row"
+                density="compact"
+                class="agent-recent-sessions-entry"
+                onClick={() => props.onToggle()}
+                aria-expanded={props.isExpanded()}
+                aria-label={row.instance_name || row.definition_name}
+                data-testid="agent-my-agents-entry"
+            >
+                <span class="agent-recent-sessions-name">{row.instance_name || row.definition_name}</span>
+            </Button>
+        </>
+    );
+}
+
+/** What sits after the name on the first line: the runtime chip, no-pane tag, active badge, runtime and seat badges. */
+function RowBadges({ s }: { s: RowState }) {
+    const { row, list } = s;
+    return (
+        <>
+            <Show when={list.runtimeOf?.(row.definition_id)}>
+                {(runtime) => (
+                    <AgentRuntimeChip state={runtime().state} detail={runtime().detail} blocked={runtime().blocked} />
+                )}
+            </Show>
+            <Show when={s.noPane()}>
+                <Tag class="agent-no-pane-tag">no pane</Tag>
+            </Show>
+            <Show when={s.isActive()}>
+                <Tooltip
+                    content={s.openWhere().charAt(0).toUpperCase() + s.openWhere().slice(1)}
+                    divClassName="agent-active-badge-anchor"
+                >
+                    <span class="agent-active-badge" aria-label="Active" />
+                </Tooltip>
+            </Show>
+            <Show when={parseRuntimeKind(row.agent_type) !== undefined}>
+                {/* size="tag" — same NATIVE/CONTAINER wording + white/
                                                     yellow styling as AgentComposerStrip's runtime
                                                     tag, so the badge reads as one consistent
                                                     vocabulary instead of two ("Container" here vs.
                                                     "CONTAINER" in the pane the row launches into). */}
-                        <RuntimeBadge runtime={row.agent_type} size="tag" />
-                    </Show>
-                    <Show when={row.seat}>
-                        {(seat) => (
-                            <Pill class="agent-seat-badge" title={seatTooltipLine(seat())}>
-                                {seatBadgeText(seat())}
-                            </Pill>
-                        )}
-                    </Show>
-                </span>
-                {/* Own line, not squeezed onto line1 via flex:1 next to
+                <RuntimeBadge runtime={row.agent_type} size="tag" />
+            </Show>
+            <Show when={row.seat}>
+                {(seat) => (
+                    <Pill class="agent-seat-badge" title={seatTooltipLine(seat())}>
+                        {seatBadgeText(seat())}
+                    </Pill>
+                )}
+            </Show>
+        </>
+    );
+}
+
+/** The lines under the first: the account, the seat, the preview, the Vault asks and the message count. */
+function RowDetails({ s }: { s: RowState }) {
+    const { row, list } = s;
+    return (
+        <>
+            {/* Own line, not squeezed onto line1 via flex:1 next to
                                             the name — the account is as important as the name
                                             itself for a user managing multiple accounts, and
                                             needs reliable space rather than competing ellipsis
                                             with it. See
                                             docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_SORT_AND_DATA_GAPS_AUDIT_2026_08_24.md §2. */}
-                {/* "No auth", or the bound account; empty (so no line) when
+            {/* "No auth", or the bound account; empty (so no line) when
                                             the backend could not tell
                                             (SPEC_MY_AGENTS_TILES_AUTH_AND_HISTORY_2026_10_03.md §5.2). */}
-                <Show when={row.identity_name}>
-                    <span class="agent-recent-sessions-account">{row.identity_name}</span>
-                </Show>
-                <Show when={row.seat}>
-                    {(seat) => (
-                        <span class="agent-recent-sessions-seat" data-testid="agent-my-agents-seat-line">
-                            {seatReportsLine(seat())}
-                        </span>
-                    )}
-                </Show>
-                <Show
-                    when={row.preview}
-                    fallback={
-                        <span class="agent-recent-sessions-preview agent-recent-sessions-preview--empty">
-                            {noPreviewText(row)}
-                        </span>
-                    }
-                >
-                    <span class="agent-recent-sessions-preview">{row.preview}</span>
-                </Show>
-                <VaultRowAsks agent={noPane() ? list.runtimeOf?.(row.definition_id)?.agent_id : undefined} />
-                <Show when={row.node_count > 0}>
-                    <span class="agent-recent-sessions-line3">
-                        <span class="agent-recent-sessions-nodes">
-                            {row.node_count} message
-                            {row.node_count === 1 ? "" : "s"}
-                        </span>
+            <Show when={row.identity_name}>
+                <span class="agent-recent-sessions-account">{row.identity_name}</span>
+            </Show>
+            <Show when={row.seat}>
+                {(seat) => (
+                    <span class="agent-recent-sessions-seat" data-testid="agent-my-agents-seat-line">
+                        {seatReportsLine(seat())}
                     </span>
-                </Show>
-            </span>
-            {/* Footer row: the timestamps and the chevron share one row at
-                                        the bottom of the tile. Most-relevant-first, not
-                                        chronological (Created → Launch → Active): a picker exists to
-                                        answer "what did I last touch," which is Last Active (or Last
-                                        Launch if never active) — not when the agent was originally
-                                        created, which is the least actionable fact on the row. See
-                                        docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_SORT_AND_DATA_GAPS_AUDIT_2026_08_24.md §2. */}
-            <span class="agent-recent-sessions-timestamps">
-                <Show when={row.has_snapshot && row.started_at > 0 && row.last_active_at > row.started_at}>
-                    <span class="agent-recent-sessions-ts">
-                        <span class="agent-recent-sessions-ts-label">Last Active</span>
-                        <span class="agent-recent-sessions-ts-value">
-                            {formatTimeAgo(row.last_active_at, props.now())}
-                        </span>
+                )}
+            </Show>
+            <Show
+                when={row.preview}
+                fallback={
+                    <span class="agent-recent-sessions-preview agent-recent-sessions-preview--empty">
+                        {noPreviewText(row)}
                     </span>
-                </Show>
-                <Show when={row.started_at > 0}>
-                    <span class="agent-recent-sessions-ts">
-                        <span class="agent-recent-sessions-ts-label">Last Launch</span>
-                        <span class="agent-recent-sessions-ts-value">{formatTimeAgo(row.started_at, props.now())}</span>
+                }
+            >
+                <span class="agent-recent-sessions-preview">{row.preview}</span>
+            </Show>
+            <VaultRowAsks agent={s.noPane() ? list.runtimeOf?.(row.definition_id)?.agent_id : undefined} />
+            <Show when={row.node_count > 0}>
+                <span class="agent-recent-sessions-line3">
+                    <span class="agent-recent-sessions-nodes">
+                        {row.node_count} message
+                        {row.node_count === 1 ? "" : "s"}
                     </span>
-                </Show>
-                <Show when={row.agent_created_at > 0}>
-                    <span class="agent-recent-sessions-ts">
-                        <span class="agent-recent-sessions-ts-label">Created</span>
-                        <span class="agent-recent-sessions-ts-value">
-                            {formatTimeAgo(row.agent_created_at, props.now())}
-                        </span>
-                    </span>
-                </Show>
-            </span>
-
-            {/* Row actions menu toggle. A sibling of the entry button, not
-                                        nested inside it (nested buttons are invalid HTML). See
-                                        docs/specs/SPEC_AGENT_DELETE_2026_09_16.md §4.1. */}
-            <IconButton
-                icon="chevron-down"
-                label={`Actions for ${row.instance_name || row.definition_name}`}
-                tooltip={false}
-                density="compact"
-                class={clsx("agent-recent-sessions-menu-toggle", props.isExpanded() && "is-open")}
-                aria-expanded={props.isExpanded()}
-                onClick={(e) => {
-                    e.stopPropagation();
-                    props.onToggle();
-                }}
-                data-testid="agent-my-agents-menu-toggle"
-            />
-        </li>
+                </span>
+            </Show>
+        </>
     );
-};
+}
+
+/** Footer row: the timestamps and the chevron share one row at
+ *  the bottom of the tile. Most-relevant-first, not
+ *  chronological (Created → Launch → Active): a picker exists to
+ *  answer "what did I last touch," which is Last Active (or Last
+ *  Launch if never active) — not when the agent was originally
+ *  created, which is the least actionable fact on the row. See
+ *  docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_SORT_AND_DATA_GAPS_AUDIT_2026_08_24.md §2. */
+function RowTimestamps({ s }: { s: RowState }) {
+    const { row, props } = s;
+    return (
+        <span class="agent-recent-sessions-timestamps">
+            <Show when={row.has_snapshot && row.started_at > 0 && row.last_active_at > row.started_at}>
+                <span class="agent-recent-sessions-ts">
+                    <span class="agent-recent-sessions-ts-label">Last Active</span>
+                    <span class="agent-recent-sessions-ts-value">{formatTimeAgo(row.last_active_at, props.now())}</span>
+                </span>
+            </Show>
+            <Show when={row.started_at > 0}>
+                <span class="agent-recent-sessions-ts">
+                    <span class="agent-recent-sessions-ts-label">Last Launch</span>
+                    <span class="agent-recent-sessions-ts-value">{formatTimeAgo(row.started_at, props.now())}</span>
+                </span>
+            </Show>
+            <Show when={row.agent_created_at > 0}>
+                <span class="agent-recent-sessions-ts">
+                    <span class="agent-recent-sessions-ts-label">Created</span>
+                    <span class="agent-recent-sessions-ts-value">
+                        {formatTimeAgo(row.agent_created_at, props.now())}
+                    </span>
+                </span>
+            </Show>
+        </span>
+    );
+}
+
+/** Row actions menu toggle. A sibling of the entry button, not
+ *  nested inside it (nested buttons are invalid HTML). See
+ *  docs/specs/SPEC_AGENT_DELETE_2026_09_16.md §4.1. */
+function RowChevron({ s }: { s: RowState }) {
+    const { row, props } = s;
+    return (
+        <IconButton
+            icon="chevron-down"
+            label={`Actions for ${row.instance_name || row.definition_name}`}
+            tooltip={false}
+            density="compact"
+            class={clsx("agent-recent-sessions-menu-toggle", props.isExpanded() && "is-open")}
+            aria-expanded={props.isExpanded()}
+            onClick={(e) => {
+                e.stopPropagation();
+                props.onToggle();
+            }}
+            data-testid="agent-my-agents-menu-toggle"
+        />
+    );
+}
