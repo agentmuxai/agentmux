@@ -80,10 +80,20 @@ const parkedDeps = (open: (tabId: string) => Promise<unknown>): ParkedReopenDeps
     attach: async (tabId) => {
         await open(tabId);
     },
-    // Quiet: a failure is reported once, by openAgentInActiveTab (WORKSPACE_NOT_SHOWN), not also by the reveal.
-    reveal: async (blockId) => {
-        const { revealBlock } = await import("@/app/util/reveal-block");
-        return (await revealBlock(blockId, { source: "open", quiet: true })).ok;
+    // Quiet: only the one failure that Open cannot recover from is reported, by openAgentInActiveTab
+    // (WORKSPACE_NOT_SHOWN), not also by the reveal.
+    reveal: async (blockId, tabId) => {
+        const { revealBlock, isWorkspaceClosedFailure } = await import("@/app/util/reveal-block");
+        // The attach added the block to the tab, and the check above put this window's copy of that tab in
+        // the cache without it. Read the tab again, or the reveal misses it here, hands the request to srv
+        // and back to this window, and the second request ends the first as superseded while the pane shows.
+        try {
+            await MOS.reloadMuxObject<Tab>(MOS.makeORef("tab", tabId));
+        } catch {
+            // srv still has the answer: the reveal reloads what it reads
+        }
+        const result = await revealBlock(blockId, { tabId, source: "open", quiet: true });
+        return { ok: result.ok === true, workspaceClosed: isWorkspaceClosedFailure(result) };
     },
 });
 

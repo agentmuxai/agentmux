@@ -128,6 +128,13 @@ export async function showBlockWithoutFocus(blockId: string, opts: { tabId?: str
 /** `remote-failed`'s detail when the pane's workspace is open in no window and a window could not be opened on it. */
 const WORKSPACE_CLOSED = "workspace-closed";
 
+/** Whether a reveal failed for that one reason: the pane's workspace is open in no window and a window could
+ *  not be opened on it. Every other failure (a slow layout, a newer request taking over) leaves the pane in a
+ *  tab, and is not the same answer. */
+export function isWorkspaceClosedFailure(result: SelectionResult): boolean {
+    return isFailure(result) && result.reason === "remote-failed" && result.detail === WORKSPACE_CLOSED;
+}
+
 /** What the notice says for each reason a pane could not be shown. */
 const FAIL_TEXT: Record<string, string> = {
     "not-found": "it is no longer open",

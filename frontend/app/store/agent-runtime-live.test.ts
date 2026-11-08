@@ -7,13 +7,16 @@ const order: string[] = [];
 let blockMeta: Record<string, unknown> | undefined;
 // Whether this window has the block yet: when not, only a reload gives it.
 let blockCached = true;
-const reload = vi.fn(async () => ({ meta: blockMeta }));
+const reload = vi.fn(async (id: string) => {
+    order.push(`reload:${id}`);
+    return { meta: blockMeta };
+});
 vi.mock("@/app/store/global", () => ({
     atoms: { activeTabId: () => "active" },
     MOS: {
         makeORef: (_t: string, id: string) => id,
         getObjectValue: () => (blockCached ? { meta: blockMeta } : undefined),
-        reloadMuxObject: () => reload(),
+        reloadMuxObject: (id: string) => reload(id),
     },
 }));
 vi.mock("@/app/store/mps", () => ({ onMuxEvent: vi.fn() }));
@@ -41,7 +44,7 @@ vi.mock("@/app/store/rpc-api", () => ({
 vi.mock("@/app/store/agent-open-note", () => ({
     noteOpenedByPerson: (id: string) => order.push(`note:${id}`),
 }));
-let revealResult: { ok: boolean } = { ok: true };
+let revealResult: { ok: boolean; reason?: string; detail?: string } = { ok: true };
 const reveal = vi.fn(async (blockId: string, _opts: unknown) => {
     order.push(`reveal:${blockId}`);
     return revealResult;
@@ -50,6 +53,9 @@ let tabs = new Set<string>();
 vi.mock("@/app/util/reveal-block", () => ({
     revealBlock: (...a: [string, unknown]) => reveal(...a),
     loadObject: async (_t: string, id: string) => (tabs.has(id) ? { oid: id } : null),
+    // The real predicate, on the field shape the real reveal result has.
+    isWorkspaceClosedFailure: (r: { ok: boolean; reason?: string; detail?: string }) =>
+        r.ok === false && r.reason === "remote-failed" && r.detail === "workspace-closed",
 }));
 
 import { openAgentInActiveTab, sharedAgentRuntime } from "./agent-runtime-live";
@@ -102,15 +108,16 @@ describe("openAgentInActiveTab", () => {
         it("whose tab still exists is put back in it and shown there, in a window with its pane focused", async () => {
             const why = await openAgentInActiveTab({ agent_id: "a1", name: "Ada" });
             expect(why).toBeUndefined();
-            expect(reveal).toHaveBeenCalledWith("blk-1", { source: "open", quiet: true });
-            expect(order).toEqual(["note:a1", "rpc:tab-old", "reveal:blk-1"]);
+            // The tab is read again after the attach, so the reveal sees the block the attach put in it.
+            expect(order).toEqual(["note:a1", "rpc:tab-old", "reload:tab-old", "reveal:blk-1"]);
+            expect(reveal).toHaveBeenCalledWith("blk-1", { tabId: "tab-old", source: "open", quiet: true });
         });
 
         it("is found even when this window has not loaded its block yet", async () => {
             blockCached = false;
             await openAgentInActiveTab({ agent_id: "a1", name: "Ada" });
-            expect(reload).toHaveBeenCalledOnce();
-            expect(order).toEqual(["note:a1", "rpc:tab-old", "reveal:blk-1"]);
+            expect(reload).toHaveBeenCalledWith("blk-1");
+            expect(order).toEqual(["note:a1", "reload:blk-1", "rpc:tab-old", "reload:tab-old", "reveal:blk-1"]);
         });
 
         it("whose tab is gone with its workspace opens in the active tab, with no failure notice", async () => {
@@ -128,10 +135,21 @@ describe("openAgentInActiveTab", () => {
         });
 
         it("whose workspace cannot be shown says so, since the pane is back in it and the active tab can't take it", async () => {
-            revealResult = { ok: false };
+            revealResult = { ok: false, reason: "remote-failed", detail: "workspace-closed" };
             const why = await openAgentInActiveTab({ agent_id: "a1", name: "Ada" });
             expect(why).toMatch(/could not be opened/);
-            expect(order).toEqual(["note:a1", "rpc:tab-old", "reveal:blk-1"]);
+            expect(order).toEqual(["note:a1", "rpc:tab-old", "reload:tab-old", "reveal:blk-1"]);
+        });
+
+        // The bug this guards: the pane came back (the attach worked) but the reveal lost its way, and the
+        // person was told the workspace could not be opened in a window. A reveal that timed out or was
+        // taken over by a newer request is not that failure.
+        it("whose reveal merely timed out or was superseded reports no error, because the pane is back", async () => {
+            for (const reason of ["remote-timeout", "superseded", "layout-timeout", "mismatch"]) {
+                order.length = 0;
+                revealResult = { ok: false, reason };
+                expect(await openAgentInActiveTab({ agent_id: "a1", name: "Ada" })).toBeUndefined();
+            }
         });
 
         it("still says why when srv refuses to put it back", async () => {
