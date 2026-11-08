@@ -643,7 +643,7 @@ pub(crate) async fn run_windows(
     // never reuses a Win32 event/class name a still-alive prior splash
     // thread might still be holding open. See that function's doc comment.
     let mut restart_splash_seq: u32 = 0;
-    let mut last_abnormal_code: Option<i32> = None;
+    let mut last_abnormal_exit: Option<(i32, std::time::Instant)> = None;
     let mut host_degraded = false;
     // SPEC_SRV_SUPERVISION_RECYCLE_2026_07_11 (#942 Phase 2) — srv crash
     // budget + the recycle-kill flag. When srv dies unexpectedly, the srv
@@ -1045,11 +1045,11 @@ pub(crate) async fn run_windows(
                             break code;
                         }
                         host_restarts.push(now);
-                        // Crash classification + retry ladder (spec §7): a crash that
-                        // reproduces the previous abnormal exit code is deterministic —
-                        // step down to a degraded (--disable-gpu) relaunch so the retry
-                        // isn't "the same thing again". Degraded is sticky; the ladder
-                        // only steps down.
+                        // Crash classification + retry ladder (spec §7): the same code
+                        // soon after a relaunch is the same deterministic crash — step
+                        // down to a degraded (--disable-gpu) relaunch so the retry isn't
+                        // "the same thing again". A kill after a long run is not that
+                        // (issue #3666). Degraded is sticky; the ladder only steps down.
                         //
                         // SPEC_SRV_SUPERVISION_RECYCLE — a launcher-inflicted
                         // recycle kill is NOT a host fault: skip the ladder
@@ -1060,10 +1060,10 @@ pub(crate) async fn run_windows(
                         // was consumed before classification — reagent P1.)
                         if !recycle_kill {
                             let was_degraded = host_degraded;
-                            if last_abnormal_code == Some(code) {
+                            if super::repeats_crash(last_abnormal_exit, code, now) {
                                 host_degraded = true;
                             }
-                            last_abnormal_code = Some(code);
+                            last_abnormal_exit = Some((code, now));
                             // A recycle is srv's restart, told about there.
                             crate::incidents::record(&crate::incidents::host_restarted(code, host_degraded && !was_degraded));
                         }
