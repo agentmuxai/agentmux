@@ -49,7 +49,8 @@ pub(crate) const CREATED_BY_CONTENT: &str = "agent:created_by";
 
 /// Content only srv writes, and that a fork of the agent does not take along.
 pub(crate) fn written_only_by_srv(content_type: &str) -> bool {
-    content_type == WORKER_OF_CONTENT || content_type == CREATED_BY_CONTENT || content_type == crate::backend::model_gateway::launch::CONTENT_TYPE
+    content_type == WORKER_OF_CONTENT || content_type == CREATED_BY_CONTENT || content_type == crate::backend::model_gateway::launch::CONTENT_TYPE || content_type == crate::backend::model_gateway::switch::PREVIOUS_TYPE
+        || content_type == crate::backend::model_gateway::launch::LEAVING_TYPE
 }
 
 /// The agent that made `def_id`: the one that created it, or the leader it is a worker of.

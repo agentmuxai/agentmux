@@ -54,6 +54,7 @@ pub(crate) mod agent_migrate_ids;
 pub(crate) mod agent_seats;
 pub(crate) mod agent_rename;
 pub(crate) mod agent_definition;
+pub(crate) mod agent_model;
 pub(crate) mod agent_routes;
 pub(crate) mod agent_history_reclaim;
 pub(crate) mod agent_spawn;
@@ -195,6 +196,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     jobs::register(engine, state);
     jobs_edit::register(engine, state);
     crate::server::account_episodes::register(engine, state);
+    agent_model::register(engine, state);
     connectivity::register(engine);
 }
 
