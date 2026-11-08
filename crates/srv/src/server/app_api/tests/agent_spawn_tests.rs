@@ -231,7 +231,7 @@ async fn a_fork_needs_a_brief_and_a_known_model() {
 }
 
 #[tokio::test]
-async fn a_leader_with_three_workers_open_is_refused_a_fourth() {
+async fn a_leader_with_the_most_workers_open_is_refused_one_more() {
     let state = test_state();
     let (def, tab, _) = seed_leader(&state, "claude", "host", json!({})).await;
     for _ in 0..MAX_LIVE_WORKERS {
@@ -678,19 +678,19 @@ async fn a_batch_with_one_bad_worker_is_refused_whole_and_names_it() {
     assert_eq!(definitions(&state), before, "nothing was made");
 }
 
-/// The leader's limit counts the whole batch: two asked with two open is refused, with the room said.
+/// The leader's limit counts the whole batch: two asked with one place left is refused, with the room said.
 #[tokio::test]
 async fn a_batch_over_the_leaders_limit_is_refused_whole() {
     let state = test_state();
     let (def, tab, _) = seed_leader(&state, "claude", "host", json!({})).await;
-    for _ in 0..2 {
+    for _ in 1..MAX_LIVE_WORKERS {
         new_block(&state, &tab, json!({ "view": "agent", COACHED_BY_META_KEY: { "agent": def.name, "id": def.id, "block_id": "x" } })).await;
     }
     let before = definitions(&state);
     let (status, body) = spawn_many_via_http(&state, sign_auth(&state, &def.slug), vec![spec("Batch A", "do a"), spec("Batch B", "do b")]).await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
     let error = body["error"].as_str().unwrap();
-    assert!(error.starts_with("TOO_MANY_WORKERS") && error.contains("you have 2 workers open and asked for 2") && error.contains("room for 1"), "{error}");
+    assert!(error.starts_with("TOO_MANY_WORKERS") && error.contains(&format!("you have {} workers open and asked for 2", MAX_LIVE_WORKERS - 1)) && error.contains("room for 1"), "{error}");
     assert_eq!(definitions(&state), before);
 }
 

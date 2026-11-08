@@ -57,6 +57,7 @@ mod pane_frontend_guard;
 mod ipc_credentials;
 pub(crate) mod downloads;
 pub(crate) mod agent_notice;
+pub(crate) mod agent_downloads;
 pub(crate) mod agent_permission;
 pub(crate) mod filedialog;
 pub(crate) mod jsdialog;

@@ -123,11 +123,19 @@ fn on_route(state: &AppState, who: &AgentDefinition) {
     crate::backend::model_gateway::launch::set_choice(&state.mstore, &who.id, "claude", "openrouter", "").unwrap();
 }
 
+/// The route's key, in the Vault.
+fn with_route_key(state: &AppState) {
+    crate::backend::vault::seal::use_test_key();
+    let entry: crate::backend::vault::NewEntry = serde_json::from_value(json!({ "kind": "api-key", "label": "OpenRouter API key", "parts": { "value": "sk-or-test" } })).unwrap();
+    crate::backend::vault::create(&state.identity_store, entry).unwrap();
+}
+
 #[tokio::test]
 async fn the_model_changes_on_the_route_the_agent_is_on_and_the_agent_can_leave_the_route() {
     let state = test_state();
     let (me, target) = (agent(&state, "Editor"), agent(&state, "Routed"));
     on_route(&state, &target);
+    with_route_key(&state);
     let token = crate::backend::model_gateway::token::token_for(&target.slug, &target.id, "openrouter");
 
     let (status, body) = update_call(&state, Some(&me), json!({ "agent": target.slug, "model": "deepseek/deepseek-v4-pro-0813" })).await;
@@ -135,6 +143,8 @@ async fn the_model_changes_on_the_route_the_agent_is_on_and_the_agent_can_leave_
     assert_eq!(body["changed"], json!(["model"]));
     let saved = crate::backend::model_gateway::launch::choice_of(&state.mstore, &target.id).unwrap();
     assert_eq!((saved.route.as_str(), saved.model.as_str()), ("openrouter", "deepseek/deepseek-v4-pro-0813"));
+    let back = crate::backend::model_gateway::switch::previous_of(&state.mstore, &target.id).unwrap();
+    assert_eq!((back.route.as_str(), back.model.as_str()), ("openrouter", "deepseek/deepseek-v4.1-flash-1017"), "the panel's Back row");
 
     let (status, body) = update_call(&state, Some(&me), json!({ "agent": target.slug, "model": "gpt-5" })).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
@@ -159,4 +169,24 @@ async fn an_update_does_not_put_an_agent_on_a_route_because_that_spends_the_pers
     assert!(crate::backend::model_gateway::launch::choice_of(&state.mstore, &target.id).is_none());
     let (status, body) = update_call(&state, Some(&me), json!({ "agent": target.slug, "route": "" })).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+}
+
+#[tokio::test]
+async fn an_agent_changing_its_model_is_limited_to_six_an_hour() {
+    let state = test_state();
+    let (me, target) = (agent(&state, "Editor"), agent(&state, "Thrasher"));
+    on_route(&state, &target);
+    with_route_key(&state);
+    let models = ["deepseek/deepseek-v4-pro-0813", "deepseek/deepseek-v4.1-flash-1017"];
+    for _ in 0..8 {
+        let (status, _) = update_call(&state, Some(&me), json!({ "agent": target.slug, "model": "gpt-5" })).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "a refused change is not one of the six");
+    }
+    for i in 0..crate::backend::model_gateway::switch::AGENT_SWITCHES_PER_HOUR {
+        let (status, body) = update_call(&state, Some(&me), json!({ "agent": target.slug, "model": models[i % 2] })).await;
+        assert_eq!(status, StatusCode::OK, "{i}: {body}");
+    }
+    let (status, body) = update_call(&state, Some(&me), json!({ "agent": target.slug, "model": models[0] })).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body["error"].as_str().unwrap().contains("times an hour"), "{body}");
 }

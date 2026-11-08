@@ -21,6 +21,7 @@ import { useInSessionSearch } from "./hooks/useInSessionSearch";
 import { useJektsAwaitingYou } from "./hooks/useJektsAwaitingYou";
 import { usePtyWidth } from "./hooks/usePtyWidth";
 import { useScrollToNode } from "./hooks/useScrollToNode";
+import { showInPanelIfHeld } from "./messages/messages-state";
 import { createSearchReveal } from "./search-reveal";
 import { focusSearchField, registerSearchControls, restoreFocusToMagnifier } from "./search/search-bridge";
 import { topVisibleNodeId } from "./search/top-row";
@@ -48,7 +49,8 @@ export function usePaneInput(p: { found: PaneFoundation; model: AgentViewModel; 
     // first match from the row at the top of the screen; a query with no match closes what a jump opened.
     const search = useInSessionSearch({
         document: paneModel.document,
-        jumpTo: reveal.jumpTo,
+        // A match inside a message only the Messages panel holds opens it there: the conversation has no row for it.
+        jumpTo: (id) => void (showInPanelIfHeld(model.blockId, paneModel.document(), id) || reveal.jumpTo(id)),
         onClose: () => {
             reveal.release();
             restoreFocusToMagnifier(model.blockId);

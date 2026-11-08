@@ -185,6 +185,187 @@ export interface ComposerRow {
     right: string[];
 }
 
+type Slot = { key: string; width: number };
+type Pair = [string | undefined, string | undefined];
+
+/** The slots that are anchored this render: the model selector, the Shell, and the pinned pairs that have both members. */
+interface Anchors {
+    anchorLeft: Slot | undefined;
+    hostShell: Slot | undefined;
+    pinned: { left: Slot; right: Slot }[];
+    pinnedKeys: Set<string>;
+}
+
+function resolveAnchors(
+    slots: Slot[],
+    hostShellKey: string,
+    anchorLeftKey: string | undefined,
+    pinnedPairs: { leftKey: string; rightKey: string }[]
+): Anchors {
+    const anchorLeft = anchorLeftKey ? slots.find((s) => s.key === anchorLeftKey) : undefined;
+    const hostShell = slots.find((s) => s.key === hostShellKey);
+
+    // Only pairs where BOTH members are present in this render activate —
+    // see the "SECOND ANCHORED PAIR" doc comment on `computeComposerRows`.
+    const pinned = pinnedPairs
+        .map((p) => ({ left: slots.find((s) => s.key === p.leftKey), right: slots.find((s) => s.key === p.rightKey) }))
+        .filter((p): p is { left: Slot; right: Slot } => Boolean(p.left && p.right));
+    const pinnedKeys = new Set(pinned.flatMap((p) => [p.left.key, p.right.key]));
+    return { anchorLeft, hostShell, pinned, pinnedKeys };
+}
+
+function singleRow(slots: Slot[], hostShellKey: string, { anchorLeft, hostShell, pinned, pinnedKeys }: Anchors): ComposerRow[] {
+    // Single row: the anchors are the OUTERMOST occupant of their own
+    // side rather than a whole reserved row (there is only one row —
+    // "forget the top, it's just left and right respectively").
+    // Pinned-pair members fold into the fixed bases alongside the
+    // primary anchor, exactly like it already does — see the
+    // "SECOND ANCHORED PAIR" doc comment.
+    const pinnedLeftWidth = pinned.reduce((sum, p) => sum + p.left.width, 0);
+    const pinnedRightWidth = pinned.reduce((sum, p) => sum + p.right.width, 0);
+    const movable = slots.filter((s) => s.key !== hostShellKey && s.key !== anchorLeft?.key && !pinnedKeys.has(s.key));
+    const leftKeys = computeBalancedLeftKeys(
+        movable,
+        (hostShell?.width ?? 0) + pinnedRightWidth,
+        (anchorLeft?.width ?? 0) + pinnedLeftWidth,
+    );
+    return [
+        {
+            left: [
+                ...(anchorLeft ? [anchorLeft.key] : []),
+                ...pinned.map((p) => p.left.key),
+                ...movable.filter((s) => leftKeys.has(s.key)).map((s) => s.key),
+            ],
+            right: [
+                ...movable.filter((s) => !leftKeys.has(s.key)).map((s) => s.key),
+                ...pinned.map((p) => p.right.key),
+                ...(hostShell ? [hostShell.key] : []),
+            ],
+        },
+    ];
+}
+
+/** The generic two-pointer walk over the pool, widest slot first; see "Per-pair capacity" in `computeComposerRows`'s doc comment. */
+function pairPool(pool: Slot[], availableWidth: number, gapPx: number): Pair[] {
+    const sorted = [...pool].sort((a, b) => b.width - a.width);
+    const pairs: Pair[] = [];
+    let i = 0;
+    let j = sorted.length - 1;
+    while (i < j) {
+        if (sorted[i].width + sorted[j].width + gapPx <= availableWidth) {
+            pairs.push([sorted[i].key, sorted[j].key]);
+            i++;
+            j--;
+        } else {
+            pairs.push([sorted[i].key, undefined]);
+            i++;
+        }
+    }
+    if (i === j) {
+        pairs.push([sorted[i].key, undefined]);
+    }
+    return pairs;
+}
+
+// Pinned pairs' rows go after the generic two-pointer pairing,
+// BEFORE the primary anchor row, so `hostShell` stays the
+// outermost/last occupant regardless of how many pinned pairs exist.
+// Never subject to the two-pointer sort (§ SECOND ANCHORED PAIR) — but
+// STILL subject to the same per-pair capacity check the generic walk
+// already applies (codex P1, PR #3282): an unconditional pair here
+// would bypass that check, and since a real row is `flex-wrap`, an
+// over-width pair renders as two one-sided PHYSICAL lines anyway —
+// reproducing spec §1's one-sided-lines bug through a different
+// mechanism, exactly what the generic check already exists to avoid.
+// When it doesn't fit, split into two one-sided rows, preserving each
+// member's own pinned side (left stays in the row's `left` array,
+// right stays in `right`) rather than collapsing both to the generic
+// walk's singleton convention (always `left`) — so ctx still reads as
+// right-aligned even alone on its own line. A further instance of the
+// already-named physical-capacity exception, not a new one.
+function pinnedRows(pinned: Anchors["pinned"], availableWidth: number, gapPx: number): Pair[] {
+    const pairs: Pair[] = [];
+    for (const p of pinned) {
+        if (p.left.width + p.right.width + gapPx <= availableWidth) {
+            pairs.push([p.left.key, p.right.key]);
+        } else {
+            pairs.push([p.left.key, undefined]);
+            pairs.push([undefined, p.right.key]);
+        }
+    }
+    return pairs;
+}
+
+function multiRow(
+    slots: Slot[],
+    hostShellKey: string,
+    availableWidth: number,
+    gapPx: number,
+    { anchorLeft, hostShell, pinned, pinnedKeys }: Anchors
+): ComposerRow[] {
+    // Multi-row. When BOTH anchors exist they are reserved out of the
+    // pairing pool entirely and emitted as the final row, so neither one
+    // travels between rows as the pane resizes (the whole point of the
+    // constraint). Reserving exactly TWO slots preserves the parity of
+    // what's left, so spec §1's "at most one singleton row" still holds
+    // unchanged — pairing 2 fewer slots can't turn an even remainder odd.
+    // Pinned pairs (§ SECOND ANCHORED PAIR) are reserved out the same way,
+    // independent of whether the primary anchor pair is — each pinned
+    // pair also reserves exactly two slots, so parity still holds.
+    const anchorsReserved = Boolean(anchorLeft && hostShell);
+    const pool = (
+        anchorsReserved
+            ? slots.filter((s) => s.key !== anchorLeft!.key && s.key !== hostShellKey)
+            : slots
+    ).filter((s) => !pinnedKeys.has(s.key));
+
+    const pairs = pairPool(pool, availableWidth, gapPx);
+    pairs.push(...pinnedRows(pinned, availableWidth, gapPx));
+
+    if (anchorsReserved) {
+        // The constraint row — ALWAYS exactly one row, never split, even
+        // when the two anchors can't fit side by side at this width
+        // (reagent P1, PR #2839). An earlier revision emitted them as two
+        // adjacent one-sided rows in that case, borrowing the generic
+        // physical-capacity exception (spec §1). That was wrong here for a
+        // reason specific to the anchors: only the LAST row is hoisted out
+        // of the render's `<For>` (see `precedingRowIndices`), so a split
+        // put `runtime` in the second-to-last row — back inside the `<For>`
+        // — and resizing across the split boundary destroyed and rebuilt
+        // `AgentRuntimeDropup`, reintroducing the very open-state loss the
+        // hoist exists to prevent, just at a different width.
+        //
+        // Keeping them one row is safe precisely because this pair is
+        // degenerate: two items, one per side, nothing else competing. The
+        // row's own `flex-wrap` (SCSS, the long-standing reagent-P1 #2393
+        // safety net) then breaks them onto two VISUAL lines at narrow
+        // widths — the identical rendering the split produced, reached
+        // without ever moving either anchor between DOM subtrees. The
+        // generic exception still applies to every other pair above, where
+        // the wrap outcome genuinely is unpredictable.
+        pairs.push([anchorLeft!.key, hostShell!.key]);
+    } else {
+        // No anchor pair to reserve (e.g. the runtime slot is absent
+        // because controls are hidden) — fall back to the pre-anchor
+        // behavior: reorient whichever pair `hostShell` landed in so it's
+        // the RIGHT occupant, then move that pair to the end.
+        const hostPairIdx = pairs.findIndex(([a, b]) => a === hostShellKey || b === hostShellKey);
+        if (hostPairIdx !== -1) {
+            let [a, b] = pairs[hostPairIdx];
+            if (a === hostShellKey) {
+                [a, b] = [b, a];
+            }
+            pairs.splice(hostPairIdx, 1);
+            pairs.push([a, b]);
+        }
+    }
+
+    return pairs.map(([left, right]) => ({
+        left: left ? [left] : [],
+        right: right ? [right] : [],
+    }));
+}
+
 /**
  * Rev 7 — see docs/specs/SPEC_COMPOSER_STRIP_ROW_BASED_LAYOUT_2026_08_26.md
  * and docs/retro/retro-composer-strip-one-sided-lines-misdiagnosis-2026-08-26.md
@@ -310,149 +491,12 @@ export function computeComposerRows(
 ): ComposerRow[] {
     if (slots.length === 0) return [];
 
-    const anchorLeft = anchorLeftKey ? slots.find((s) => s.key === anchorLeftKey) : undefined;
-    const hostShell = slots.find((s) => s.key === hostShellKey);
-
-    // Only pairs where BOTH members are present in this render activate —
-    // see the "SECOND ANCHORED PAIR" doc comment above.
-    const pinned = pinnedPairs
-        .map((p) => ({ left: slots.find((s) => s.key === p.leftKey), right: slots.find((s) => s.key === p.rightKey) }))
-        .filter((p): p is { left: { key: string; width: number }; right: { key: string; width: number } } => Boolean(p.left && p.right));
-    const pinnedKeys = new Set(pinned.flatMap((p) => [p.left.key, p.right.key]));
+    const anchors = resolveAnchors(slots, hostShellKey, anchorLeftKey, pinnedPairs);
 
     const totalWidth = slots.reduce((sum, s) => sum + s.width, 0) + Math.max(0, slots.length - 1) * gapPx;
-    if (totalWidth <= availableWidth) {
-        // Single row: the anchors are the OUTERMOST occupant of their own
-        // side rather than a whole reserved row (there is only one row —
-        // "forget the top, it's just left and right respectively").
-        // Pinned-pair members fold into the fixed bases alongside the
-        // primary anchor, exactly like it already does — see the
-        // "SECOND ANCHORED PAIR" doc comment.
-        const pinnedLeftWidth = pinned.reduce((sum, p) => sum + p.left.width, 0);
-        const pinnedRightWidth = pinned.reduce((sum, p) => sum + p.right.width, 0);
-        const movable = slots.filter((s) => s.key !== hostShellKey && s.key !== anchorLeft?.key && !pinnedKeys.has(s.key));
-        const leftKeys = computeBalancedLeftKeys(
-            movable,
-            (hostShell?.width ?? 0) + pinnedRightWidth,
-            (anchorLeft?.width ?? 0) + pinnedLeftWidth,
-        );
-        return [
-            {
-                left: [
-                    ...(anchorLeft ? [anchorLeft.key] : []),
-                    ...pinned.map((p) => p.left.key),
-                    ...movable.filter((s) => leftKeys.has(s.key)).map((s) => s.key),
-                ],
-                right: [
-                    ...movable.filter((s) => !leftKeys.has(s.key)).map((s) => s.key),
-                    ...pinned.map((p) => p.right.key),
-                    ...(hostShell ? [hostShell.key] : []),
-                ],
-            },
-        ];
-    }
-
-    // Multi-row. When BOTH anchors exist they are reserved out of the
-    // pairing pool entirely and emitted as the final row, so neither one
-    // travels between rows as the pane resizes (the whole point of the
-    // constraint). Reserving exactly TWO slots preserves the parity of
-    // what's left, so spec §1's "at most one singleton row" still holds
-    // unchanged — pairing 2 fewer slots can't turn an even remainder odd.
-    // Pinned pairs (§ SECOND ANCHORED PAIR) are reserved out the same way,
-    // independent of whether the primary anchor pair is — each pinned
-    // pair also reserves exactly two slots, so parity still holds.
-    const anchorsReserved = Boolean(anchorLeft && hostShell);
-    const pool = (
-        anchorsReserved
-            ? slots.filter((s) => s.key !== anchorLeft!.key && s.key !== hostShellKey)
-            : slots
-    ).filter((s) => !pinnedKeys.has(s.key));
-
-    const sorted = [...pool].sort((a, b) => b.width - a.width);
-    const pairs: [string | undefined, string | undefined][] = [];
-    let i = 0;
-    let j = sorted.length - 1;
-    while (i < j) {
-        if (sorted[i].width + sorted[j].width + gapPx <= availableWidth) {
-            pairs.push([sorted[i].key, sorted[j].key]);
-            i++;
-            j--;
-        } else {
-            pairs.push([sorted[i].key, undefined]);
-            i++;
-        }
-    }
-    if (i === j) {
-        pairs.push([sorted[i].key, undefined]);
-    }
-
-    // Pinned pairs' rows go here — after the generic two-pointer pairing,
-    // BEFORE the primary anchor row below, so `hostShell` stays the
-    // outermost/last occupant regardless of how many pinned pairs exist.
-    // Never subject to the two-pointer sort (§ SECOND ANCHORED PAIR) — but
-    // STILL subject to the same per-pair capacity check the generic walk
-    // already applies (codex P1, PR #3282): an unconditional pair here
-    // would bypass that check, and since a real row is `flex-wrap`, an
-    // over-width pair renders as two one-sided PHYSICAL lines anyway —
-    // reproducing spec §1's one-sided-lines bug through a different
-    // mechanism, exactly what the generic check already exists to avoid.
-    // When it doesn't fit, split into two one-sided rows, preserving each
-    // member's own pinned side (left stays in the row's `left` array,
-    // right stays in `right`) rather than collapsing both to the generic
-    // walk's singleton convention (always `left`) — so ctx still reads as
-    // right-aligned even alone on its own line. A further instance of the
-    // already-named physical-capacity exception, not a new one.
-    for (const p of pinned) {
-        if (p.left.width + p.right.width + gapPx <= availableWidth) {
-            pairs.push([p.left.key, p.right.key]);
-        } else {
-            pairs.push([p.left.key, undefined]);
-            pairs.push([undefined, p.right.key]);
-        }
-    }
-
-    if (anchorsReserved) {
-        // The constraint row — ALWAYS exactly one row, never split, even
-        // when the two anchors can't fit side by side at this width
-        // (reagent P1, PR #2839). An earlier revision emitted them as two
-        // adjacent one-sided rows in that case, borrowing the generic
-        // physical-capacity exception (spec §1). That was wrong here for a
-        // reason specific to the anchors: only the LAST row is hoisted out
-        // of the render's `<For>` (see `precedingRowIndices`), so a split
-        // put `runtime` in the second-to-last row — back inside the `<For>`
-        // — and resizing across the split boundary destroyed and rebuilt
-        // `AgentRuntimeDropup`, reintroducing the very open-state loss the
-        // hoist exists to prevent, just at a different width.
-        //
-        // Keeping them one row is safe precisely because this pair is
-        // degenerate: two items, one per side, nothing else competing. The
-        // row's own `flex-wrap` (SCSS, the long-standing reagent-P1 #2393
-        // safety net) then breaks them onto two VISUAL lines at narrow
-        // widths — the identical rendering the split produced, reached
-        // without ever moving either anchor between DOM subtrees. The
-        // generic exception still applies to every other pair above, where
-        // the wrap outcome genuinely is unpredictable.
-        pairs.push([anchorLeft!.key, hostShell!.key]);
-    } else {
-        // No anchor pair to reserve (e.g. the runtime slot is absent
-        // because controls are hidden) — fall back to the pre-anchor
-        // behavior: reorient whichever pair `hostShell` landed in so it's
-        // the RIGHT occupant, then move that pair to the end.
-        const hostPairIdx = pairs.findIndex(([a, b]) => a === hostShellKey || b === hostShellKey);
-        if (hostPairIdx !== -1) {
-            let [a, b] = pairs[hostPairIdx];
-            if (a === hostShellKey) {
-                [a, b] = [b, a];
-            }
-            pairs.splice(hostPairIdx, 1);
-            pairs.push([a, b]);
-        }
-    }
-
-    return pairs.map(([left, right]) => ({
-        left: left ? [left] : [],
-        right: right ? [right] : [],
-    }));
+    return totalWidth <= availableWidth
+        ? singleRow(slots, hostShellKey, anchors)
+        : multiRow(slots, hostShellKey, availableWidth, gapPx, anchors);
 }
 
 /**

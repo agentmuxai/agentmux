@@ -48,6 +48,18 @@ pub(super) fn tell(state: &Arc<crate::state::AppState>, browser: &Browser, kind:
     super::jsdialog::notify(state, serde_json::json!({ "target": target, "notice": kind, "message": shown(kind, url) }));
 }
 
+/// What to run when a sign-in prompt for `host` in the pane `block_id` times out unanswered: if an agent drives the
+/// pane, it is told, since it would otherwise see only a page that failed to load. Only the host goes up.
+pub(super) fn on_auth_expired(state: &Arc<crate::state::AppState>, block_id: &str, host: &str) -> Box<dyn FnOnce() + Send> {
+    let (state, block_id, host) = (state.clone(), block_id.to_string(), host.to_string());
+    Box::new(move || {
+        if super::jsdialog::driven_pane(&state, &block_id) {
+            tracing::info!(target = %block_id, "browser pane: a sign-in prompt timed out in an agent-driven pane and the agent was told");
+            super::jsdialog::notify(&state, serde_json::json!({ "target": block_id, "notice": "auth_expired", "message": host }));
+        }
+    })
+}
+
 /// [`tell`] for a navigation the handler cancels: returns 1, `on_before_browse`'s "cancel".
 pub(super) fn refused(
     state: &Arc<crate::state::AppState>,

@@ -691,6 +691,8 @@ fn ui_and_host_routes() -> Router<AppState> {
         .route("/api/v1/ui/shortcuts/list", post(ui_shortcuts::handle_ui_shortcuts_list))
         .route("/api/v1/ui/shortcuts/run", post(ui_shortcuts::handle_ui_run_command))
         .route("/api/v1/ui/shortcuts/press", post(ui_shortcuts::handle_ui_press_keys))
+        .route("/api/v1/ui/shortcuts/set", post(ui_shortcuts::handle_ui_set_shortcut))
+        .route("/api/v1/ui/shortcuts/reset", post(ui_shortcuts::handle_ui_reset_shortcuts))
         // Browser-pane deep control (SPEC_AGENT_BROWSER_PANE_DEEP_CONTROL_2026_09_20.md)
         // — own-pane-only, same identity model as the ui/* routes above.
         // navigate/back/forward/reload/eval additionally require the

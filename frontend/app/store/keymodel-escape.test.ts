@@ -63,7 +63,7 @@ vi.mock("./keymodel-nav", () => ({
     globalRefocus: vi.fn(),
     globalRefocusWithTimeout: vi.fn(),
 }));
-vi.mock("@/app/keybindings/registry", () => ({ setUserKeybindings: () => [] }));
+vi.mock("@/app/keybindings/registry", () => ({ setUserKeybindings: () => [], validEntries: () => [] }));
 vi.mock("./command-registry", () => ({ commandRegistry: { run: vi.fn(() => false), get: () => null } }));
 vi.mock("./window-appearance", () => ({ openNewWindowFromHere: vi.fn() }));
 

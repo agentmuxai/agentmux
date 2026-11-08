@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * An incoming jekt's row while the Messages panel is on: a closed one-line row whose click opens the message in the
- * panel, not a row that opens in place. The row, its disclosure rule and the context are the real ones; the
- * container is a probe that records what it receives.
+ * A jekt's row that the conversation still draws (the Messages panel leaves out only incoming ones it holds, before
+ * the rows are drawn): it opens in place, as every message row does. The row, its disclosure rule are the real
+ * ones; the container is a probe that records what it receives.
  */
 
 import { cleanup, fireEvent, render } from "@solidjs/testing-library";
@@ -21,7 +21,6 @@ vi.mock("../components/OriginContainer", () => ({
 
 import type { DocumentNode, DocumentState } from "../../../agent-model/types";
 import type { AgentDispatch } from "../../swarm/swarm-model";
-import { MessagesPanelContext, type MessagesPanelControls } from "../messages/messages-state";
 import { DocumentRow } from "./DocumentRow";
 
 const state = (over: Partial<DocumentState> = {}): DocumentState =>
@@ -32,58 +31,29 @@ const state = (over: Partial<DocumentState> = {}): DocumentState =>
         ...over,
     }) as unknown as DocumentState;
 
-function mount(node: object, panel: MessagesPanelControls | undefined, docState: DocumentState = state()) {
+function mount(node: object, docState: DocumentState = state()) {
     const fns = { onToggleCollapse: vi.fn(), onTogglePin: vi.fn(), onHoldNodeOpen: vi.fn() };
     const [n] = createSignal(node as unknown as DocumentNode);
     const [s] = createSignal(docState);
     const [m] = createSignal(new Map<string, AgentDispatch>());
-    render(() => (
-        <MessagesPanelContext.Provider value={panel}>
-            <DocumentRow node={n} documentState={s} dispatchMatches={m} {...fns} />
-        </MessagesPanelContext.Provider>
-    ));
+    render(() => <DocumentRow node={n} documentState={s} dispatchMatches={m} {...fns} />);
     return fns;
 }
 
 const jekt = { type: "jekt_message", id: "n1", direction: "incoming", timestamp: 1 };
-
-const panel = (stubbed: boolean, showInPanel = vi.fn()): MessagesPanelControls =>
-    ({ stubbed: () => stubbed, showInPanel }) as unknown as MessagesPanelControls;
 
 afterEach(() => {
     cleanup();
     seen.props = undefined;
 });
 
-describe("an incoming jekt's row with the Messages panel", () => {
-    it("is closed even when the row would be open, and its click opens the message in the panel", () => {
-        const showInPanel = vi.fn();
-        const fns = mount(jekt, panel(true, showInPanel), state({ pinnedNodes: new Set(["n1"]) }));
-        expect(seen.props?.collapsed).toBe(true);
+describe("a jekt's row in the conversation", () => {
+    it("opens in place: its click and the e key flip the row", () => {
+        const fns = mount(jekt, state({ pinnedNodes: new Set(["n1"]) }));
+        expect(seen.props?.collapsed).toBe(false);
         seen.props?.onToggle();
-        expect(showInPanel).toHaveBeenCalledWith("n1");
-        expect(fns.onTogglePin).not.toHaveBeenCalled();
-    });
-
-    it("answers the e key the same way: it opens the message in the panel, and flips nothing", () => {
-        const showInPanel = vi.fn();
-        const fns = mount(jekt, panel(true, showInPanel));
+        expect(fns.onTogglePin).toHaveBeenCalledWith("n1");
         fireEvent.keyDown(document.querySelector(".agent-document-row")!, { key: "e" });
-        expect(showInPanel).toHaveBeenCalledWith("n1");
-        expect(fns.onTogglePin).not.toHaveBeenCalled();
-    });
-
-    it("opens in place as before when the panel does not take it (off, outgoing or forced)", () => {
-        const fns = mount(jekt, panel(false), state({ pinnedNodes: new Set(["n1"]) }));
-        expect(seen.props?.collapsed).toBe(false);
-        seen.props?.onToggle();
-        expect(fns.onTogglePin).toHaveBeenCalledWith("n1");
-    });
-
-    it("opens in place with no panel in the pane's layout at all", () => {
-        const fns = mount(jekt, undefined, state({ pinnedNodes: new Set(["n1"]) }));
-        expect(seen.props?.collapsed).toBe(false);
-        seen.props?.onToggle();
-        expect(fns.onTogglePin).toHaveBeenCalledWith("n1");
+        expect(fns.onTogglePin).toHaveBeenCalledTimes(2);
     });
 });

@@ -24,7 +24,8 @@ import { useSnapshotPersistence } from "./hooks/useSnapshotPersistence";
 import { injectGapRows, injectHistoryLink } from "./inject-history-link";
 import { buildResumePreflightNode, injectResumePreflight } from "./inject-resume-preflight";
 import { createTranscriptSettleLatch } from "./transcript-cursor";
-import { deriveDisplayNodes } from "./virtualization/verbosity";
+import { withoutPanelJekts } from "./messages/messages-state";
+import { deriveDisplayNodes, isForcedRow } from "./virtualization/verbosity";
 
 export type HistoryAndFeed = ReturnType<typeof useHistoryAndFeed>;
 
@@ -135,7 +136,15 @@ export function useShownDocument(found: PaneFoundation, model: AgentViewModel, a
         setDocumentState: (update) => agentAtoms().documentStateAtom[1](update),
     });
     onCleanup(registerAgentViewControls(model.blockId, viewControls));
-    const shownDocument = createMemo(() => deriveDisplayNodes(markResolvedAuthErrors(displayDocument()), viewControls.resolved().view, agentAtoms().documentStateAtom[0]()));
+    // The Messages panel holds the incoming jekts: the conversation leaves them out (messages/messages-state.ts),
+    // before the view folds rows into runs, so a hidden run never counts or holds a jekt that the panel has.
+    const shownDocument = createMemo(() =>
+        deriveDisplayNodes(
+            withoutPanelJekts(markResolvedAuthErrors(displayDocument()), model.blockId, isForcedRow),
+            viewControls.resolved().view,
+            agentAtoms().documentStateAtom[0]()
+        )
+    );
 
     // Read-only; writes dispatch through the document store so its slot state stays in sync.
     const getDocument = paneModel.document;
