@@ -21,6 +21,7 @@ vi.mock("@atlaskit/pragmatic-drag-and-drop/element/adapter", () => ({
 vi.mock("@/app/drag/file-drop-actions", () => ({ notifyDrop: { cantMove: hub.cantMove } }));
 
 import { docTabItemType } from "@/app/drag/drag-types";
+import { onPaneLocate } from "@/app/util/pane-locate";
 import { DocTabsController, type DocTabsSpec } from "./doc-tabs-controller";
 import {
     ALREADY_OPEN_THERE,
@@ -85,6 +86,31 @@ describe("moving a document tab between panes", () => {
         expect(moveDocTab("a", a.tabs()[0].id, "b")).toEqual({ moved: false, reason: ALREADY_OPEN_THERE });
         expect(keys(a)).toEqual(["/1"]);
         expect(keys(b)).toEqual(["/1", "/x"]);
+    });
+
+    it("a drop on a pane that has the document brings its tab to the front and flashes that pane, focus untouched", () => {
+        const asked: [string, unknown][] = [];
+        const off = onPaneLocate((blockId, opts) => asked.push([blockId, opts]));
+        const a = pane("a", ["/1"]);
+        const b = pane("b", ["/1", "/x"]);
+        b.activate(b.tabs()[1].id);
+        expect(dropDocTab("a", a.tabs()[0].id, "b")).toBe(false);
+        expect(hub.cantMove).toHaveBeenCalledWith("1", ALREADY_OPEN_THERE);
+        expect(b.activeId()).toBe(b.tabs()[0].id);
+        expect(keys(a)).toEqual(["/1"]);
+        expect(asked).toEqual([["b", { focus: false }]]);
+        off();
+    });
+
+    it("another refusal, or a drop that moves, flashes nothing", () => {
+        const asked: string[] = [];
+        const off = onPaneLocate((blockId) => asked.push(blockId));
+        const a = pane("a", ["/1", "/2"], { refuseGive: (t) => (t.key === "/1" ? "Stays." : null) });
+        pane("b", ["/x"]);
+        dropDocTab("a", a.tabs()[0].id, "b");
+        dropDocTab("a", a.tabs()[1].id, "b");
+        expect(asked).toEqual([]);
+        off();
     });
 
     it("nothing changes when either side refuses, and the reason comes back", () => {

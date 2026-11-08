@@ -69,7 +69,7 @@
 119 crates/cef/src/floating_pane.rs::CreatePanePoolWindowWin32Task::Task::execute
 152 crates/cef/src/floating_pane.rs::create_popup
 142 crates/cef/src/floating_pane.rs::floating_pane_wndproc
-1141 crates/cef/src/ipc.rs::route_command
+1140 crates/cef/src/ipc.rs::route_command
 130 crates/cef/src/launcher_ipc/mod.rs::apply_event_to_shadow
 259 crates/cef/src/launcher_ipc/mod.rs::connect_to_launcher
 209 crates/cef/src/launcher_ipc/mod.rs::connect_to_launcher#2
@@ -354,7 +354,6 @@
 139 frontend/app/statusbar/BackendStatus.tsx::BackendStatus
 128 frontend/app/statusbar/BackendStatus.tsx::BackendStatusPanel
 140 frontend/app/statusbar/HostPopover.tsx::HostPopover
-145 frontend/app/store/agent-document/reducer.ts::scrubOrphanedInProgress
 258 frontend/app/store/agent-pane-state-store.ts::dispatch
 118 frontend/app/store/agent-pane-state/reducer-failure.ts::onCompactionBoundary
 103 frontend/app/store/agent-pane-state/reducer-failure.ts::onCompactionStarted

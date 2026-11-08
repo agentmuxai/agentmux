@@ -222,4 +222,17 @@ describe("getProviderList", () => {
             expect.arrayContaining([...OAUTH_CLI_IDS, ...ACP_IDS]),
         );
     });
+
+    // Grok Build and Muse Code sign in with `<cli> login` and have no status command: they
+    // are OAuth-class (an account each, under their config dir) and srv reads their login
+    // file for the check, so the check command is empty (identity/resolver/cli_sign_in_files.rs).
+    test("grok and muse are OAuth-class with a login file, not a status command", () => {
+        const expected = { grok: "GROK_HOME", muse: "XDG_CONFIG_HOME" } as const;
+        for (const id of ["grok", "muse"] as const) {
+            expect(PROVIDERS[id].authType).toBe("oauth");
+            expect(PROVIDERS[id].authCheckCommand).toEqual([]);
+            expect(PROVIDERS[id].authLoginCommand).toEqual(["login"]);
+            expect(PROVIDERS[id].authConfigDirEnvVar).toBe(expected[id]);
+        }
+    });
 });

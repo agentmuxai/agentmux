@@ -157,6 +157,9 @@ new activity before the list reports = false
 new activity after = true
 scrollToBottom("new-activity-pill")
 scrollToBottom("typing")
+top band zoom = 1
+top band pane = "blk-12345678"
+find band pane = "blk-12345678"
 search visible: same
 search onSearch: same
 search onNext: same

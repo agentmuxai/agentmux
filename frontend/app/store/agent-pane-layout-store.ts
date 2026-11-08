@@ -130,7 +130,8 @@ function windowInputsChanged(
     return (
         a.scrollTop !== b.scrollTop ||
         a.viewportPx !== b.viewportPx ||
-        a.overscan !== b.overscan
+        a.overscan !== b.overscan ||
+        a.overscanPx !== b.overscanPx
     );
 }
 
@@ -207,6 +208,7 @@ export function dispatch(
                 slot.state.scrollTop,
                 slot.state.viewportPx,
                 slot.state.overscan,
+                slot.state.overscanPx,
             );
             // scrollMarginPx is a position input, so it is unchanged on this path.
             view = { rows: slot.cachedRows, totalSize: slot.cachedTotalSize, window, scrollMarginPx: slot.state.scrollMarginPx };

@@ -35,6 +35,7 @@ import {
     moveActiveTab,
 } from "./keymodel-nav";
 import { setUserKeybindings } from "@/app/keybindings/registry";
+import { registerHostKeysPush } from "./host-keys-push";
 import { createEffect, createRoot } from "solid-js";
 import { commandRegistry } from "./command-registry";
 import { openNewWindowFromHere } from "./window-appearance";
@@ -244,8 +245,10 @@ function deactivateSearch(): boolean {
 }
 
 /** Applies the `keybindings` setting now and whenever it changes; an entry
- *  that can't be used is skipped with a console warning (report §6.6). */
+ *  that can't be used is skipped with a console warning (report §6.6). A focused
+ *  browser pane follows it too: the host is sent the keys to forward. */
 function registerUserKeybindings(): void {
+    registerHostKeysPush();
     createRoot(() =>
         createEffect(() => {
             const known = (id: string) => keyCommands.has(id) || commandRegistry.get(id) != null;
