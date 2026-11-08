@@ -97,7 +97,8 @@ pub fn signed_in(cli_path: &str, auth_env: &std::collections::HashMap<String, St
         Some(dir) => dir.clone(),
         None => crate::backend::providers::default_auth_dir(config).ok()?,
     };
-    Some(probe(provider, Path::new(&dir), agentmux_common::time::now_ms()) == Some(OAuthProbeStatus::Valid))
+    // A lapsed token that holds a refresh token is signed in: the CLI refreshes it as it starts.
+    Some(matches!(probe(provider, Path::new(&dir), agentmux_common::time::now_ms()), Some(OAuthProbeStatus::Valid | OAuthProbeStatus::Expired)))
 }
 
 #[cfg(test)]
@@ -176,6 +177,10 @@ mod tests {
         let signed = grok_dir(serde_json::json!({ "s": { "key": "k", "expires_at": rfc3339(32_503_680_000_000) } }));
         let env = |d: &Path| std::collections::HashMap::from([("GROK_HOME".to_string(), d.to_string_lossy().into_owned())]);
         assert_eq!(signed_in("grok", &env(signed.path())), Some(true));
+        let refreshable = grok_dir(serde_json::json!({ "s": { "key": "k", "expires_at": rfc3339(1_000_000_000_000), "refresh_token": "r" } }));
+        assert_eq!(signed_in("grok", &env(refreshable.path())), Some(true), "the CLI refreshes it as it starts");
+        let lapsed = grok_dir(serde_json::json!({ "s": { "key": "k", "expires_at": rfc3339(1_000_000_000_000) } }));
+        assert_eq!(signed_in("grok", &env(lapsed.path())), Some(false));
         let bare = tempfile::tempdir().unwrap();
         assert_eq!(signed_in("grok", &env(bare.path())), Some(false));
         assert_eq!(signed_in("claude", &env(bare.path())), None);
