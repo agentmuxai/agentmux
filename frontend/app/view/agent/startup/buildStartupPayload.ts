@@ -14,6 +14,7 @@
 import type { AccountProvider } from "@/app/view/identity/identity-model";
 import type { AgentDefinition } from "@/app/store/rpc-api";
 import { jsAsciiSlug } from "../agent-slug";
+import { getCliCatalogEntry } from "../defaults/cli-catalog";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -33,11 +34,26 @@ export interface StartupPayloadOpts {
     version: string;
     accounts: ResolvedAccount[];
     peerAgents: AgentDefinition[];
+    /** By agent id, from srv (`agent.peer-labels`): what an agent on a model route really runs. Absent for the rest. */
+    peerLabels?: Record<string, string>;
     startupContent: string | null;
 }
 
 /** Sentinel value in AgentContent("startup") that disables the startup message. */
 const SKIP_SENTINEL = "__SKIP__";
+
+/**
+ * One peer in the list. An agent on a model route runs its harness (`claude`) against another vendor's model, so
+ * the harness alone, and the harness's own blurb ("Anthropic's coding agent") a spawn copies into the description,
+ * would say the wrong thing: the route's label is added, and the blurb is dropped. A description someone wrote stays.
+ */
+function peerLine(peer: AgentDefinition, routeLabel: string | undefined): string {
+    const what = routeLabel ? `${peer.provider}, ${routeLabel}` : peer.provider;
+    const text = peer.description?.trim() ?? "";
+    const isHarnessBlurb = !!routeLabel && text === getCliCatalogEntry(peer.provider)?.blurb;
+    const desc = text && !isHarnessBlurb ? ` — ${text}` : "";
+    return `- **${peer.name}** (${what})${desc}`;
+}
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
@@ -101,8 +117,7 @@ export function buildStartupPayload(opts: StartupPayloadOpts): string | null {
         // Cap at 10 to keep payload reasonable
         const shown = peers.slice(0, 10);
         for (const peer of shown) {
-            const desc = peer.description?.trim() ? ` — ${peer.description.trim()}` : "";
-            parts.push(`- **${peer.name}** (${peer.provider})${desc}\n`);
+            parts.push(`${peerLine(peer, opts.peerLabels?.[peer.id])}\n`);
         }
         if (peers.length > 10) {
             parts.push(`- ...and ${peers.length - 10} more\n`);

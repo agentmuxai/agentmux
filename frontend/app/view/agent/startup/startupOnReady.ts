@@ -34,6 +34,7 @@ export function startupOnReady(opts: {
             workDir: () => (opts.block()?.meta?.["cmd:cwd"] as string | undefined) ?? "",
             version: () => getApi().getAboutModalDetails().version,
             peerAgents: opts.peerAgents,
+            peerLabels: () => RpcApi.AgentPeerLabelsCommand(TabRpcClient),
             getAgentContent: (contentType) => RpcApi.GetAgentContentCommand(TabRpcClient, { agent_id: opts.agentId, content_type: contentType }),
             listIdentities: () => RpcApi.ListAgentIdentitiesCommand(TabRpcClient, { agent_id: opts.agentId }),
             loadAccounts,

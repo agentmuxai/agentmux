@@ -85,6 +85,22 @@ describe("sendStartupSequence", () => {
         expect(d.sent).toHaveLength(1);
     });
 
+    it("labels route agents in the peer list from srv, and sends the list without labels when srv fails", async () => {
+        const peer = { id: "p1", name: "Deephar", slug: "deephar", provider: "claude", description: "" } as unknown as AgentDefinition;
+        const labelled = deps({ peerAgents: () => [peer], peerLabels: async () => ({ labels: { p1: "DeepSeek V4.1 Flash via OpenRouter" } }) });
+        await sendStartupSequence(labelled);
+        expect(labelled.sent[0]).toContain("**Deephar** (claude, DeepSeek V4.1 Flash via OpenRouter)");
+        const failing = deps({
+            peerAgents: () => [peer],
+            peerLabels: async () => {
+                throw new Error("down");
+            },
+        });
+        await sendStartupSequence(failing);
+        expect(failing.sent).toHaveLength(1);
+        expect(failing.sent[0]).toContain("**Deephar** (claude)");
+    });
+
     it("logs a warning, not a throw, when sending fails", async () => {
         const d = deps({
             send: async () => {
