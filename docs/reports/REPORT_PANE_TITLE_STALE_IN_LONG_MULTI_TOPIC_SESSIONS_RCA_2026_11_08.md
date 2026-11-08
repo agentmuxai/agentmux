@@ -2,6 +2,7 @@
 
 **Date:** 2026-11-08. **Build:** 0.60.21; code read at origin/main `51458817`.
 **Fix:** this change (task #30049).
+**Status:** implemented — the fix described below shipped with this report (task #30049).
 
 ## What happened
 
