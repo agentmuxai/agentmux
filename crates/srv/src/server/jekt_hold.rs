@@ -362,6 +362,11 @@ pub(super) fn held_row(req: &InjectionRequest, request_id: String, now: i64) -> 
             .unwrap_or_default(),
         sent_at_ms: now,
         expires_at_ms: now + HELD_TTL_MS,
+        // The sender's own deadline rides the row (issue #3894): the replay
+        // drops it instead of delivering it stale once it has passed, and the
+        // expiry sweep drops it whatever the hold reason. None keeps today's
+        // 24 h behaviour exactly.
+        sender_expires_at_ms: req.expires_at_ms,
         attempts: 0,
         last_error: String::new(),
         hold_reason: String::new(),

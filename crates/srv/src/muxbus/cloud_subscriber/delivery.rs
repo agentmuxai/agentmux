@@ -28,6 +28,12 @@ pub(super) struct PendingInj {
     // When the relay received it (RFC 3339), for marking a late delivery.
     #[serde(default)]
     created_at: Option<String>,
+    // The sender's delivery deadline (RFC 3339), when the relay carries one
+    // (issue #3894): a review notice that matters for ten minutes is
+    // dropped, not delivered stale, if srv only gets to it after this.
+    // Absent today and from an older relay; an absent value changes nothing.
+    #[serde(default)]
+    expires_at: Option<String>,
     // Present only for messages signed by an AgentMux-operated WAN
     // sender (currently just the GitHub review-notification consumer,
     // "reagent") — see agentmux_common::jekt_sign::verify_reagent_jekt.
@@ -98,6 +104,9 @@ fn wan_request(inj: &PendingInj, target: &str) -> InjectionRequest {
         priority: inj.priority.clone(),
         // Keyword scanning in the handler still applies on top.
         jekt_tier: declared_tier(inj.jekt_tier.as_deref()),
+        // The sender's deadline, when the relay passed it on: what the hold
+        // and the deferred queue then respect (issue #3894).
+        expires_at_ms: inj.expires_at.as_deref().and_then(delivery_status::notes::parse_created_at),
         delivery_tier: Some("wan".to_string()),
         forward_hops: 0,
         reagent_key_id: inj.reagent_key_id.clone(),

@@ -146,7 +146,7 @@ impl PersistentSubprocessController {
         origin: Option<crate::backend::blockcontroller::health::TurnInput>,
     ) -> Result<SendOutcome, String> {
         let record = RecordOrigin::new(MessageOrigin::user());
-        self.send_user_message_with_images_from(message, origin, Vec::new(), record)
+        self.send_user_message_with_images_from(message, origin, Vec::new(), record, None)
     }
 
     /// [`Self::send_user_message_outcome_from`] with Claude content blocks
@@ -157,12 +157,18 @@ impl PersistentSubprocessController {
     /// `record` says where the message came from and which `[AgentMux]` notes
     /// went with it; the record written for it carries both
     /// ([`Self::append_delivered_message`]), also when it waits in the queue.
+    ///
+    /// `expires_at_ms` is the sender's expiry (issue #3894): only a jekt has
+    /// one. It rides the queued entry, so a message that waits out its
+    /// expiry behind a starting, restarting or stopping process is dropped
+    /// at write time instead of written stale.
     pub fn send_user_message_with_images_from(
         &self,
         message: String,
         origin: Option<crate::backend::blockcontroller::health::TurnInput>,
         images: Vec<serde_json::Value>,
         record: RecordOrigin,
+        expires_at_ms: Option<i64>,
     ) -> Result<SendOutcome, String> {
         // Pre-turn fence — see `send_message`.
         self.fence_check()?;
@@ -194,7 +200,7 @@ impl PersistentSubprocessController {
             // Always enqueue first, then write the whole backlog in order.
             // Writing this message directly while older ones are queued would
             // reorder it ahead of them.
-            inner.deferred_deliveries.push_back(Deferred { line: json_str, record });
+            inner.deferred_deliveries.push_back(Deferred { line: json_str, record, expires_at_ms });
 
             // A spawn in flight counts as "wait" rather than as an error. This
             // is the startup race that used to drop jekts outright
@@ -367,6 +373,12 @@ impl PersistentSubprocessController {
     /// it early, if any: the entry that failed stays at the head of the queue
     /// with everything behind it, so a failed write never drops a message.
     ///
+    /// A message whose sender's expiry has passed (issue #3894 — only a jekt
+    /// carries one) is dropped here instead, with one log line: the wait for
+    /// the process to take a write outlived the time the message was worth
+    /// anything, and writing it now would deliver it exactly as stale as the
+    /// durable hold's replay used to.
+    ///
     /// The whole backlog at once, not one at a time: nothing is held for what
     /// the agent is doing any more (`SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28.md`
     /// §2.1), only for whether the process can take a write.
@@ -378,8 +390,17 @@ impl PersistentSubprocessController {
         inner: &mut PersistentInner,
         block_id: &str,
     ) -> (Vec<Deferred>, Option<String>) {
+        let now_ms = agentmux_common::time::now_ms();
         let mut written = Vec::new();
         while let Some(head) = inner.deferred_deliveries.front().cloned() {
+            if head.expires_at_ms.is_some_and(|expires| expires <= now_ms) {
+                inner.deferred_deliveries.pop_front();
+                tracing::info!(
+                    block_id = %block_id,
+                    "deferred jekt expired while waiting for the process — dropped instead of delivered"
+                );
+                continue;
+            }
             if let Err(e) = Self::try_write_stdin_locked(inner, &head.line) {
                 tracing::warn!(
                     block_id = %block_id,

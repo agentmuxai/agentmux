@@ -69,6 +69,12 @@ impl PartialEq<String> for QueuedMessage {
 pub(super) struct Deferred {
     pub(super) line: String,
     pub(super) record: RecordOrigin,
+    /// The sender's expiry, epoch ms (issue #3894): past it, the message is
+    /// dropped at write time with one log line instead of written to the
+    /// process — the wait for the process to take a write outlived the time
+    /// the message was worth anything. `None` keeps today's behaviour: a
+    /// queued message is always written.
+    pub(super) expires_at_ms: Option<i64>,
 }
 
 impl std::ops::Deref for Deferred {
@@ -87,6 +93,7 @@ impl From<String> for Deferred {
             record: RecordOrigin::new(
                 crate::backend::message_origin::MessageOrigin::user(),
             ),
+            expires_at_ms: None,
         }
     }
 }

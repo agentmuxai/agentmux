@@ -295,8 +295,8 @@ fn set_up_reactive_handler(mstore: &Arc<Store>) -> (&'static reactive::ReactiveH
     // silently misses them. Route those through their structured channel (live stdin /
     // session/prompt) — which also steers the agent mid-turn — and fall back to PTY
     // keystrokes only for terminal-based agents.
-    reactive_handler.set_message_sender(Arc::new(|block_id: &str, message: &str, inline: &[serde_json::Value], from: &backend::message_origin::MessageOrigin| {
-        match backend::blockcontroller::deliver_agent_message_from(block_id, message, None, from.clone(), inline) {
+    reactive_handler.set_message_sender(Arc::new(|block_id: &str, message: &str, inline: &[serde_json::Value], from: &backend::message_origin::MessageOrigin, expires_at_ms: Option<i64>| {
+        match backend::blockcontroller::deliver_agent_message_from(block_id, message, None, from.clone(), inline, expires_at_ms) {
             Ok(backend::blockcontroller::AgentDelivery::Structured) => Ok(reactive::SenderDelivery::Delivered),
             Ok(backend::blockcontroller::AgentDelivery::StructuredDeferred) => Ok(reactive::SenderDelivery::Deferred),
             Ok(backend::blockcontroller::AgentDelivery::Pty) => Ok(reactive::SenderDelivery::Pty),
