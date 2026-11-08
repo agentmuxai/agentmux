@@ -1,6 +1,9 @@
 # Spec: the pane locate flash, one framework for every path that surfaces an existing pane
 
 Task #29426 (spec), build #29427. Camper@narko, 2026-11-08. Written against `origin/main` f2569c2ec.
+
+**Status:** active — built in PR #6844. Direction approved by the operator 2026-11-08 (relayed by AgentY), with the steer that a plain tab click in a pane already in front stays quiet.
+
 Builds on `SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27.md` (§4.1 this window, §4.3 another window) and the locate flash of #6396-era work in `pane-locate.ts`.
 
 Direction approved by the operator (relayed by AgentY, 2026-11-08): the flash fires for anything that surfaces an already-existing pane, "consolidate into a framework, since there are many consumers"; build follows this spec without a second approval round.
