@@ -19,10 +19,12 @@ import type { AgentRuntimeDropupProps, OptionRow } from "./runtime-dropup-option
 /** The pane meta key srv writes at every launch with the model that really answers; absent off a route. */
 export const ROUTE_MODEL_META_KEY = "agent:route_model";
 
-/** How many images the user attached across the conversation's messages. A text-only model reads none; other files reach it as text. */
+const ATTACHMENT_NODES: ReadonlySet<string> = new Set(["user_message", "jekt_message", "system_note"]);
+
+/** How many images the conversation holds: those the user attached, a jekt carried, or an "Earlier message" note lists. A text-only model reads none; other files reach it as text. */
 export function countImages(nodes: ReadonlyArray<{ type: string; attachments?: ReadonlyArray<{ image?: boolean }> }>): number {
     return nodes.reduce(
-        (n, node) => n + (node.type === "user_message" ? (node.attachments?.filter((a) => a.image).length ?? 0) : 0),
+        (n, node) => n + (ATTACHMENT_NODES.has(node.type) ? (node.attachments?.filter((a) => a.image).length ?? 0) : 0),
         0
     );
 }

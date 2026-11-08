@@ -208,14 +208,16 @@ describe("the model panel's routes", () => {
 });
 
 describe("the route rows' words", () => {
-    it("counts the images attached across the user's messages, not other files", () => {
+    it("counts the images in user messages, jekts and earlier-message notes, not other files", () => {
         const nodes = [
             { type: "user_message", attachments: [{ image: true }, { image: true }] },
             { type: "assistant_message", attachments: [{ image: true }] },
             { type: "user_message" },
             { type: "user_message", attachments: [{ image: true }, { name: "notes.txt" }] },
+            { type: "jekt_message", attachments: [{ image: true }] },
+            { type: "system_note", attachments: [{ image: true }, { image: true }] },
         ];
-        expect(countImages(nodes)).toBe(3);
+        expect(countImages(nodes)).toBe(6);
         expect(countImages([])).toBe(0);
     });
 
