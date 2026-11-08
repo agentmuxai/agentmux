@@ -40,7 +40,7 @@ pub(crate) use many::handle_agent_spawn_many;
 pub(crate) const COACHED_BY_META_KEY: &str = "agent:coached_by";
 
 /// Live workers a leader may have at once (§3.5).
-pub(crate) const MAX_LIVE_WORKERS: usize = 3;
+pub(crate) const MAX_LIVE_WORKERS: usize = 12;
 
 /// The agent that made this one with `Agents create`, `{agent, id}`, kept on the new agent's definition (agent
 /// content) so that agent can delete it again (`Agents delete`). srv writes it; a client may not, and a fork does
@@ -179,7 +179,7 @@ async fn spawn_with(
         return Err(refuse(
             StatusCode::CONFLICT,
             format!(
-                "TOO_MANY_WORKERS: you have {live} workers open, the most at once; close one \
+                "TOO_MANY_WORKERS: you have {live} workers open, the most at once is {MAX_LIVE_WORKERS}; close one \
                  (Stop pane) when its work is done, then spawn again"
             ),
         ));
