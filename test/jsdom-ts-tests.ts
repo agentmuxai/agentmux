@@ -40,6 +40,7 @@ export const JSDOM_TS_TESTS = [
     "frontend/app/init/startup-splash.test.ts",
     "frontend/app/notification/__tests__/activity-flash.test.ts",
     "frontend/app/notification/os/os-notify-bridge.test.ts",
+    "frontend/app/notification/sound/__tests__/sound-service.install.test.ts",
     "frontend/app/notification/sound/__tests__/sound-service.test.ts",
     "frontend/app/notification/sound/__tests__/waiting-sound-service.test.ts",
     "frontend/app/platform/pane-overlay-auto.test.ts",
