@@ -12,11 +12,17 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { AgentModelPanel } from "@/types/rpc/AgentModelPanel";
 import type { AgentModelPanelModel } from "@/types/rpc/AgentModelPanelModel";
+import type { AgentModelSwitchResult } from "@/types/rpc/AgentModelSwitchResult";
 import { createSignal } from "solid-js";
 import type { AgentRuntimeDropupProps, OptionRow } from "./runtime-dropup-options";
 
 /** The pane meta key srv writes at every launch with the model that really answers; absent off a route. */
 export const ROUTE_MODEL_META_KEY = "agent:route_model";
+
+/** How many files the user attached across the conversation's messages. Images are most of them, and a text-only model reads none. */
+export function countAttachments(nodes: ReadonlyArray<{ type: string; attachments?: readonly unknown[] }>): number {
+    return nodes.reduce((n, node) => n + (node.type === "user_message" ? (node.attachments?.length ?? 0) : 0), 0);
+}
 
 /** The row value of "go back to where the agent was". */
 export const BACK_VALUE = "back";
@@ -104,7 +110,7 @@ export function createRoutePanel(props: AgentRuntimeDropupProps) {
                 await RpcApi.AgentModelPanelCommand(TabRpcClient, {
                     blockid: props.blockId,
                     conversation_tokens: props.contextTokens ?? null,
-                    images: null,
+                    images: props.conversationImages?.() ?? null,
                 })
             );
         } catch {
@@ -114,10 +120,14 @@ export function createRoutePanel(props: AgentRuntimeDropupProps) {
     };
 
     /** Moves the agent to `route`/`model` (an empty route is the harness's own sign-in). The agent restarts after its turn. */
-    const moveTo = async (route: string, model: string, restart: boolean) => {
-        await RpcApi.AgentModelSwitchCommand(TabRpcClient, { blockid: props.blockId, route, model, restart });
+    const moveTo = async (route: string, model: string, restart: boolean): Promise<AgentModelSwitchResult> => {
+        const result = await RpcApi.AgentModelSwitchCommand(TabRpcClient, { blockid: props.blockId, route, model, restart });
         await refresh();
+        return result;
     };
 
-    return { panel, refresh, moveTo };
+    /** Whether srv has the agent on a route: the saved choice, which a running pane only adopts at its next launch. */
+    const onSavedRoute = () => panel()?.routes.some((r) => r.models.some((m) => m.current)) ?? false;
+
+    return { panel, refresh, moveTo, onSavedRoute };
 }

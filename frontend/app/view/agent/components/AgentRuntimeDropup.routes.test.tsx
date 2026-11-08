@@ -7,7 +7,7 @@ import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentModelPanel } from "@/types/rpc/AgentModelPanel";
 import { AgentRuntimeDropup } from "./AgentRuntimeDropup";
-import { backRow, parseRouteValue, routeModelNote, routeModelOf, routeValue } from "./runtime-dropup-routes";
+import { backRow, countAttachments, parseRouteValue, routeModelNote, routeModelOf, routeValue } from "./runtime-dropup-routes";
 
 const panelCommand = vi.fn();
 const switchCommand = vi.fn();
@@ -58,8 +58,16 @@ const onRoute = {
 };
 const plain = { "agent:runtime": { model: "sonnet", permissionMode: "default", effort: "high" } };
 
-function mount(meta: Record<string, unknown>, contextTokens?: number) {
-    render(() => <AgentRuntimeDropup blockId="block-1" blockAtom={() => ({ meta }) as any} providerId="claude" contextTokens={contextTokens} />);
+function mount(meta: Record<string, unknown>, contextTokens?: number, conversationImages?: () => number) {
+    render(() => (
+        <AgentRuntimeDropup
+            blockId="block-1"
+            blockAtom={() => ({ meta }) as any}
+            providerId="claude"
+            contextTokens={contextTokens}
+            conversationImages={conversationImages}
+        />
+    ));
 }
 const trigger = () => screen.getByRole("button", { name: /Runtime settings/i }) as HTMLButtonElement;
 const openPanel = async () => {
@@ -161,6 +169,35 @@ describe("the model panel's routes", () => {
         expect(trigger().title).toContain("KEY_MISSING");
     });
 
+    it("leaves the route a first pick saved even while the running pane has not adopted it yet", async () => {
+        // srv has the choice (current), but the pane's meta is still the old launch's: no route model on it.
+        panelCommand.mockResolvedValue(panelOf({}, [model(FLASH, "DeepSeek V4.1 Flash"), model(PRO, "DeepSeek V4 Pro", { current: true })]));
+        mount(plain);
+        await openPanel();
+        fireEvent.click(option(/Opus/));
+        await flush();
+        expect(switchCommand).toHaveBeenCalledWith({}, { blockid: "block-1", route: "", model: "", restart: false });
+        expect(patchRuntime.mock.calls[0][2]).toEqual({ model: "opus" });
+    });
+
+    it("tells srv how many images the conversation holds, so a text-only model is greyed", async () => {
+        panelCommand.mockResolvedValue(panelOf());
+        mount(plain, undefined, () => 3);
+        await openPanel();
+        expect(panelCommand).toHaveBeenCalledWith({}, { blockid: "block-1", conversation_tokens: null, images: 3 });
+    });
+
+    it("says so when a pane could not restart, so the saved pick is not taken for an applied one", async () => {
+        panelCommand.mockResolvedValue(panelOf());
+        switchCommand.mockResolvedValue({ changed: true, restarted: 0, failed: ["block-1: the pane is gone"] });
+        mount(plain);
+        await openPanel();
+        fireEvent.click(option(/DeepSeek V4 Pro/));
+        await flush();
+        expect(trigger().title).toContain("did not switch");
+        expect(trigger().title).toContain("the pane is gone");
+    });
+
     it("is the harness's own panel when srv offers no routes", async () => {
         panelCommand.mockRejectedValue(new Error("unknown command"));
         mount(plain);
@@ -171,6 +208,17 @@ describe("the model panel's routes", () => {
 });
 
 describe("the route rows' words", () => {
+    it("counts the files attached across the user's messages", () => {
+        const nodes = [
+            { type: "user_message", attachments: [{}, {}] },
+            { type: "assistant_message", attachments: [{}] },
+            { type: "user_message" },
+            { type: "user_message", attachments: [{}] },
+        ];
+        expect(countAttachments(nodes)).toBe(3);
+        expect(countAttachments([])).toBe(0);
+    });
+
     it("round-trips a route model id that has slashes and dots", () => {
         expect(parseRouteValue(routeValue("openrouter", FLASH))).toEqual({ route: "openrouter", model: FLASH });
         expect(parseRouteValue("sonnet")).toBeNull();

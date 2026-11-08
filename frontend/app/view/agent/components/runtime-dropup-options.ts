@@ -81,4 +81,6 @@ export interface AgentRuntimeDropupProps {
     lastReplyModel?: string | null;
     /** How much the conversation holds now (the harness's last usage report), for the cost of re-reading it on another model. */
     contextTokens?: number | null;
+    /** How many images the conversation holds now, asked when the panel opens (a text-only model cannot read them). */
+    conversationImages?: () => number;
 }

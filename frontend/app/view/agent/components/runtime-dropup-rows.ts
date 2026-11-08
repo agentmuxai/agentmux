@@ -71,7 +71,7 @@ function runningModelRow(s: DropupState, a: DropupAgreement): Row {
  */
 function addModelSection(s: DropupState, rows: Row[], options: OptionRow[], selected: string) {
     const panel = s.routes.panel();
-    const onRoute = s.routeModel() !== null;
+    const onRoute = s.routeModel() !== null || s.routes.onSavedRoute();
     rows.push({ kind: "header", section: "model" });
     const add = (row: OptionRow) => {
         rows.push({ kind: "option", ...row });
@@ -151,8 +151,9 @@ export function createDropupActions(s: DropupState, a: DropupAgreement) {
         const panel = s.routes.panel();
         const move = async (route: string, model: string, restart: boolean) => {
             try {
-                await s.routes.moveTo(route, model, restart);
-                s.setApplyError(null);
+                const { failed } = await s.routes.moveTo(route, model, restart);
+                // Saved, but a pane that could not restart still runs the old model: say so, as the pick cannot be retried.
+                s.setApplyError(failed.length > 0 ? `Saved, but the running pane did not switch: ${failed.join("; ")}` : null);
                 return true;
             } catch (err: any) {
                 s.setApplyError(err?.message ?? String(err));
@@ -163,7 +164,7 @@ export function createDropupActions(s: DropupState, a: DropupAgreement) {
         if (value === BACK_VALUE && panel?.previous) await move(panel.previous.route, panel.previous.model, true);
         else if (target) await move(target.route, target.model, true);
         // A harness model: the runtime setting it always was (which shows its own failure), from a route after leaving it.
-        else if (!s.routeModel() || (await move("", "", false))) await s.updateRuntime({ model: value });
+        else if (!(s.routeModel() || s.routes.onSavedRoute()) || (await move("", "", false))) await s.updateRuntime({ model: value });
     };
 
     // Enter applies and keeps the panel open — deliberate departure from
