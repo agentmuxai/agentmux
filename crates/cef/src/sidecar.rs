@@ -4,9 +4,9 @@
 // Sidecar spawning and management for the CEF host.
 // Ported from src-tauri/src/sidecar/ using std::process instead of tauri-plugin-shell.
 
-#[cfg(windows)]
 use agentmux_common::srv_binary;
 use agentmux_common::srv_estart_wait::{wait_for_estart, EstartChannels, EstartWait};
+#[cfg(windows)]
 use agentmux_common::win32::NoWindow;
 use std::io::BufRead;
 use std::sync::Arc;
