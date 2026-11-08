@@ -104,8 +104,10 @@ const FUNCTION_KEYS = new Set(Array.from({ length: 24 }, (_, i) => 0x70 + i));
 /** A key of the person's own that the page can't be typing: with Ctrl, Alt or Meta, or a function key. A bare letter
  *  or Shift+letter, forwarded, would take every such key from every page. Ctrl+Alt is AltGr on a Windows or Linux
  *  layout that types a character with it, and Option on its own types one on macOS: the host can't tell either from
- *  the key alone, so they are not forwarded. */
+ *  the key alone, so they are not forwarded. The host reads no Meta (Windows or Super) key outside macOS, so a key
+ *  with it could never match there and is not forwarded either. */
 function notTyping(k: KeySpec, vk: number, platform: KeyPlatform): boolean {
+    if (k.meta && platform !== "mac") return false;
     if (k.ctrl && k.alt && platform !== "mac") return false;
     if (platform === "mac" && k.alt && !k.ctrl && !k.meta && (k.letter != null || k.code != null)) return false;
     return k.ctrl || k.alt || k.meta || FUNCTION_KEYS.has(vk);

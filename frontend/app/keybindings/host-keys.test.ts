@@ -60,6 +60,12 @@ describe("host-keys.json", () => {
             expect(mac).toContain("ctrl+alt+q");
         });
 
+        it("does not forward a Meta key outside macOS, where the host reads no Meta modifier", () => {
+            expect(keysOf([{ command: "tab:new", key: "meta+shift+y" }]).join()).not.toContain("meta+shift+y");
+            const mac = hostKeysOf(compileRows("mac", [{ command: "tab:new", key: "meta+shift+y" }]), "mac").map((k) => k.source);
+            expect(mac).toContain("meta+shift+y");
+        });
+
         it("does not forward Option on its own with a letter or digit on macOS, where it types characters", () => {
             const mac = (entries: unknown[]) => hostKeysOf(compileRows("mac", entries as never), "mac").map((k) => k.source);
             const kept = mac([{ command: "tab:new", key: "alt+q" }, { command: "tab:new", key: "alt+shift+q" }, { command: "tab:new", key: "alt+5" }, { command: "tab:new", key: "alt+ArrowUp" }, { command: "tab:new", key: "meta+alt+q" }]);
