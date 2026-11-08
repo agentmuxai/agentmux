@@ -237,14 +237,14 @@ describe("SwarmViewModel constructor wiring", () => {
             fire(WpsEvent.AgentProgress, {
                 blockId: "b1",
                 todos: [{ text: "write tests" }, { text: "" }, { text: "split it" }],
-                todosTruncated: true,
+                todosTruncated: 3,
                 todosPartial: false,
                 currentTool: "Bash",
             });
 
             expect(vm.progressAtom().get("b1")).toEqual({
                 todos: [{ text: "write tests" }, { text: "split it" }],
-                todosTruncated: true,
+                todosTruncated: 3,
                 todosPartial: false,
                 currentTool: "Bash",
             });
@@ -254,22 +254,22 @@ describe("SwarmViewModel constructor wiring", () => {
             fire(WpsEvent.AgentProgress, {
                 blockId: "b1",
                 todos: [],
-                todosTruncated: false,
+                todosTruncated: 0,
                 todosPartial: true,
                 currentTool: null,
             });
 
             const stored = vm.progressAtom().get("b1");
-            expect(stored?.todosTruncated).toBe(false);
+            expect(stored?.todosTruncated).toBe(0);
             expect(stored?.todosPartial).toBe(true);
         });
 
         it("without a block id are ignored", () => {
-            fire(WpsEvent.AgentProgress, { todos: [{ text: "x" }], todosTruncated: false, todosPartial: false });
+            fire(WpsEvent.AgentProgress, { todos: [{ text: "x" }], todosTruncated: 0, todosPartial: false });
             fire(WpsEvent.AgentProgress, {
                 blockId: "",
                 todos: [{ text: "x" }],
-                todosTruncated: false,
+                todosTruncated: 0,
                 todosPartial: false,
             });
 
