@@ -1270,6 +1270,7 @@ mod browser_pane_shortcut_tests {
 
     #[test]
     fn host_keys_json_parses_and_resolves_a_known_shortcut() {
+        let _g = super::super::host_keys::TEST_LOCK.lock();
         // Ctrl+Shift+T = new tab on Windows/Linux; ⌘T on macOS.
         assert_eq!(app_shortcut_for(true, true, false, false, 0x54, false).as_deref(), Some("tab:new"));
         assert_eq!(app_shortcut_for(false, false, false, true, 0x54, true).as_deref(), Some("tab:new"));
@@ -1282,6 +1283,7 @@ mod browser_pane_shortcut_tests {
     /// Ctrl+Shift+N opened a new window instead of an Incognito tab.
     #[test]
     fn pane_shortcuts_are_reachable() {
+        let _g = super::super::host_keys::TEST_LOCK.lock();
         let chords = [
             (true, false, false, VK_L),
             (true, false, false, VK_R),
@@ -1304,6 +1306,7 @@ mod browser_pane_shortcut_tests {
 
     #[test]
     fn a_panes_new_incognito_wins_over_new_window() {
+        let _g = super::super::host_keys::TEST_LOCK.lock();
         // The app's "new window" is on the same keys, on both platforms...
         assert_eq!(app_shortcut_for(true, true, false, false, VK_N, false).as_deref(), Some("window:new"));
         assert_eq!(app_shortcut_for(false, true, false, true, VK_N, true).as_deref(), Some("window:new"));

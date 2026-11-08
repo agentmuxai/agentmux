@@ -79,6 +79,10 @@ pub(crate) fn set_host_keys(args: &serde_json::Value) -> Result<serde_json::Valu
     Ok(serde_json::json!({ "count": PUSHED.read().as_ref().map_or(0, |k| k.len()) }))
 }
 
+/// The pushed list is process-wide: a test that replaces it, or reads keys through it, holds this.
+#[cfg(test)]
+pub(crate) static TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
 /// The generated list for this platform, for a test.
 #[cfg(test)]
 pub(crate) fn default_keys(mac: bool) -> &'static [HostKey] {
@@ -95,16 +99,13 @@ pub(crate) fn default_keys(mac: bool) -> &'static [HostKey] {
 mod tests {
     use super::*;
 
-    /// The pushed list is process-wide: one test at a time touches it.
-    static LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
-
     fn clear() {
         *PUSHED.write() = None;
     }
 
     #[test]
     fn a_push_replaces_the_generated_list_until_the_next_push() {
-        let _g = LOCK.lock();
+        let _g = TEST_LOCK.lock();
         clear();
         // Ctrl+Shift+T is new tab in the generated list (⌘T on macOS).
         let (ctrl, meta, mac) = if cfg!(target_os = "macos") { (false, true, true) } else { (true, false, false) };
@@ -127,7 +128,7 @@ mod tests {
 
     #[test]
     fn a_list_it_cannot_use_changes_nothing() {
-        let _g = LOCK.lock();
+        let _g = TEST_LOCK.lock();
         clear();
         let key = |vk: i64, command: &str| serde_json::json!({ "command": command, "source": "x", "ctrl": true, "shift": false, "alt": false, "meta": false, "vk": vk });
         for keys in [
