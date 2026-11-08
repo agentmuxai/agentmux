@@ -463,19 +463,148 @@ interface PaneTabStripItemProps<T> {
     docDrag?: DocTabDrag;
 }
 
+/**
+ * The pill that just landed plays the landing bounce (`.pane-tab--landing` marks it while it
+ * does, for the strip's reveal to wait out). On the pill, not its `.pane-tab-tip` wrapper: the
+ * wrapper owns the flex sizing, so a transform here never moves its neighbours.
+ */
+function usePillLanding<T>(props: PaneTabStripItemProps<T>, id: () => string, pill: () => Element | undefined) {
+    // The pane a landing bounce is for: the block, for document tabs.
+    const landingKey = () => props.docDrag?.blockId ?? props.paneKey;
+    const landed = () => !!landedTab()?.ids.has(id()) && landedTab()?.paneKey === landingKey();
+    usePulseWhen(pill, landed);
+    return { landingKey, landed };
+}
+
+// Applies to every pill, active included: `--pane-tab-bg` is what both
+// the resting rule and `&--active` resolve, so a selected tab paints
+// its own color too and only falls back to the plain
+// `--block-bg-color` when it has none
+// (SPEC_PANE_HEADER_TAIL_COLOR_2026_09_21.md §2.2). Read via a CSS
+// custom property rather than a direct inline `background-color` so the
+// stylesheet keeps control of precedence across the resting / hover /
+// active rules, same pattern as tab.tsx's `--tab-bg` / `--tab-bg-active` / `--tab-underline`.
+function pillColorStyle(c: PaneTabColors | undefined): JSX.CSSProperties {
+    if (!c) return {};
+    return {
+        ...(c.background ? { "--pane-tab-bg": c.background } : {}),
+        ...(c.activeBackground ? { "--pane-tab-bg-active": c.activeBackground } : {}),
+        ...(c.underline ? { "--pane-tab-underline": c.underline } : {}),
+        ...(c.neutralBackground ? { "--pane-tab-neutral-bg": c.neutralBackground } : {}),
+    } as JSX.CSSProperties;
+}
+
+/** What the pill's class list reads besides its props. */
+interface PillClassState {
+    id: () => string;
+    attention: () => boolean;
+    closing: () => boolean;
+    dragging: () => boolean;
+    dropSide: () => "before" | "after" | null;
+    landed: () => boolean;
+}
+
+function pillClassList<T>(props: PaneTabStripItemProps<T>, s: PillClassState): Record<string, boolean> {
+    return {
+        "pane-tab--active": props.active,
+        "pane-tab--attention": s.attention(),
+        "pane-tab--closing": s.closing(),
+        "pane-tab--dragging": s.dragging(),
+        "pane-tab--drop-before": s.dropSide() === "before",
+        "pane-tab--drop-after": s.dropSide() === "after",
+        "pane-tab--landing": s.landed(),
+        "pane-tab--selected": !!props.selection?.isSelected(s.id()),
+        // Gates PaneTabStrip.scss's lighter-on-hover treatment —
+        // only a tab with its own color gets it; every other
+        // consumer's plain hover tint is untouched.
+        "pane-tab--colored": !!props.getColor?.(props.tab)?.background,
+        ...(props.getTabClass?.(props.tab) ?? {}),
+    };
+}
+
+/** What the pill's content reads of the pill: its props, its state and its handlers. */
+interface PillContentProps<T> {
+    item: PaneTabStripItemProps<T>;
+    id: () => string;
+    attention: () => boolean;
+    closing: () => boolean;
+    progress: ReturnType<typeof usePillProgress>;
+    windowDisplayed: Accessor<boolean>;
+    onCloseClick: (e: MouseEvent) => void;
+}
+
+/** The progress line and its words, the selected mark, the icon, the label and the close button, in that order. */
+function PillContent<T>(p: PillContentProps<T>): JSX.Element {
+    const item = p.item;
+    const { lineState, lineLook, progressInfo, descriptionId } = p.progress;
+    return (
+        <>
+            <Show when={item.useProgress}>
+                <span
+                    class="pane-tab-progress"
+                    classList={{
+                        "pane-tab-progress--on": lineState() != null,
+                        "pane-tab-progress--sweeping": lineState() === "working" && p.windowDisplayed(),
+                    }}
+                    data-state={lineLook() ?? undefined}
+                    aria-hidden="true"
+                >
+                    <span class="pane-tab-progress-bar" />
+                </span>
+                <Show when={progressInfo()}>
+                    {(info) => (
+                        <span id={descriptionId()} class="pane-tab-state-text">
+                            {info().text}
+                        </span>
+                    )}
+                </Show>
+            </Show>
+            <Show when={item.selection?.isSelected(p.id())}>
+                {/* The non-colour cue for "selected"; the label is what a screen reader reads. */}
+                <span class="pane-tab-selected-mark" role="img" aria-label="Selected">
+                    <i class="fa-solid fa-circle-check" aria-hidden="true" />
+                </span>
+            </Show>
+            {item.getIcon && <span class="pane-tab-icon">{item.getIcon(item.tab)}</span>}
+            {item.renderLabel ? (
+                item.renderLabel(item.tab)
+            ) : (
+                <span class="pane-tab-label">{item.getLabel(item.tab)}</span>
+            )}
+            <Show when={item.onClose}>
+                <button
+                    class="pane-tab-close"
+                    onClick={p.onCloseClick}
+                    title={p.closing() ? "Closing…" : p.attention() ? "Close (unsaved changes)" : "Close"}
+                    aria-label={p.closing() ? "Closing tab" : "Close tab"}
+                    disabled={p.closing()}
+                >
+                    {/* Always in the DOM for attention tabs (closing
+                        those may need confirmation); hover-shown
+                        otherwise, purely via CSS opacity. */}
+                    <i class={p.closing() ? "fa-solid fa-spinner fa-spin" : "fa-solid fa-xmark"} aria-hidden="true" />
+                </button>
+            </Show>
+        </>
+    );
+}
+
+/** Whether the pill is closing, and its close button's click. */
+function usePillClose<T>(props: PaneTabStripItemProps<T>, id: () => string) {
+    const closing = () => props.isClosing?.(props.tab) ?? false;
+    const onCloseClick = (e: MouseEvent) => {
+        e.stopPropagation();
+        if (closing()) return;
+        props.onClose?.(id());
+    };
+    return { closing, onCloseClick };
+}
+
 function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
     const id = () => props.getId(props.tab);
     const attention = () => props.getAttention?.(props.tab) ?? false;
     let pillRef: HTMLDivElement | undefined;
-    // The pill that just landed plays the landing bounce (`.pane-tab--landing` marks it while it
-    // does, for the strip's reveal to wait out). On the pill, not its `.pane-tab-tip` wrapper: the
-    // wrapper owns the flex sizing, so a transform here never moves its neighbours.
-    usePulseWhen(
-        () => pillRef,
-        () => !!landedTab()?.ids.has(id()) && landedTab()?.paneKey === landingKey()
-    );
-    // The pane a landing bounce is for: the block, for document tabs.
-    const landingKey = () => props.docDrag?.blockId ?? props.paneKey;
+    const { landingKey, landed } = usePillLanding(props, id, () => pillRef);
     const isDragging = () =>
         props.docDrag ? isDraggedDocTab(props.docDrag.blockId, id()) : isDraggedPaneTab(id(), props.paneKey);
 
@@ -485,7 +614,8 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
     // pill's own `--pane-tab-underline` in the stylesheet, so no base
     // color is passed here.
     const windowDisplayed = useWindowTabDisplayed();
-    const { progressInfo, lineState, lineLook, descriptionId } = usePillProgress(props, id);
+    const progress = usePillProgress(props, id);
+    const { progressInfo, descriptionId } = progress;
     usePillFlash({
         enabled: () => props.flashOnActivity,
         id,
@@ -497,31 +627,8 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
     const dropSide = usePillDrag({ props, id, landingKey, pill: () => pillRef, onDragStarted: gestures.noteDragStarted });
     const { onMouseDown, onClick, onDblClick } = gestures;
 
-    const closing = () => props.isClosing?.(props.tab) ?? false;
-    const onCloseClick = (e: MouseEvent) => {
-        e.stopPropagation();
-        if (closing()) return;
-        props.onClose?.(id());
-    };
-
-    // Applies to every pill, active included: `--pane-tab-bg` is what both
-    // the resting rule and `&--active` resolve, so a selected tab paints
-    // its own color too and only falls back to the plain
-    // `--block-bg-color` when it has none
-    // (SPEC_PANE_HEADER_TAIL_COLOR_2026_09_21.md §2.2). Read via a CSS
-    // custom property rather than a direct inline `background-color` so the
-    // stylesheet keeps control of precedence across the resting / hover /
-    // active rules, same pattern as tab.tsx's `--tab-bg` / `--tab-bg-active` / `--tab-underline`.
-    const colorStyle = (): JSX.CSSProperties => {
-        const c = props.getColor?.(props.tab);
-        if (!c) return {};
-        return {
-            ...(c.background ? { "--pane-tab-bg": c.background } : {}),
-            ...(c.activeBackground ? { "--pane-tab-bg-active": c.activeBackground } : {}),
-            ...(c.underline ? { "--pane-tab-underline": c.underline } : {}),
-            ...(c.neutralBackground ? { "--pane-tab-neutral-bg": c.neutralBackground } : {}),
-        } as JSX.CSSProperties;
-    };
+    const { closing, onCloseClick } = usePillClose(props, id);
+    const colorStyle = () => pillColorStyle(props.getColor?.(props.tab));
 
     // Tooltip (Portal-based) rather than native `title` — the strip has
     // overflow:hidden, which would clip a CSS tooltip, and native `title`
@@ -537,21 +644,7 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
         >
             <div
                 class="pane-tab"
-                classList={{
-                    "pane-tab--active": props.active,
-                    "pane-tab--attention": attention(),
-                    "pane-tab--closing": closing(),
-                    "pane-tab--dragging": isDragging(),
-                    "pane-tab--drop-before": dropSide() === "before",
-                    "pane-tab--drop-after": dropSide() === "after",
-                    "pane-tab--landing": !!landedTab()?.ids.has(id()) && landedTab()?.paneKey === landingKey(),
-                    "pane-tab--selected": !!props.selection?.isSelected(id()),
-                    // Gates PaneTabStrip.scss's lighter-on-hover treatment —
-                    // only a tab with its own color gets it; every other
-                    // consumer's plain hover tint is untouched.
-                    "pane-tab--colored": !!props.getColor?.(props.tab)?.background,
-                    ...(props.getTabClass?.(props.tab) ?? {}),
-                }}
+                classList={pillClassList(props, { id, attention, closing, dragging: isDragging, dropSide, landed })}
                 style={colorStyle()}
                 data-tab-id={id()}
                 aria-busy={progressInfo()?.state === "working" ? "true" : undefined}
@@ -562,52 +655,15 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
                 onDblClick={onDblClick}
                 onContextMenu={(e) => props.onContextMenu?.(props.tab, e)}
             >
-                <Show when={props.useProgress}>
-                    <span
-                        class="pane-tab-progress"
-                        classList={{
-                            "pane-tab-progress--on": lineState() != null,
-                            "pane-tab-progress--sweeping": lineState() === "working" && windowDisplayed(),
-                        }}
-                        data-state={lineLook() ?? undefined}
-                        aria-hidden="true"
-                    >
-                        <span class="pane-tab-progress-bar" />
-                    </span>
-                    <Show when={progressInfo()}>
-                        {(info) => (
-                            <span id={descriptionId()} class="pane-tab-state-text">
-                                {info().text}
-                            </span>
-                        )}
-                    </Show>
-                </Show>
-                <Show when={props.selection?.isSelected(id())}>
-                    {/* The non-colour cue for "selected"; the label is what a screen reader reads. */}
-                    <span class="pane-tab-selected-mark" role="img" aria-label="Selected">
-                        <i class="fa-solid fa-circle-check" aria-hidden="true" />
-                    </span>
-                </Show>
-                {props.getIcon && <span class="pane-tab-icon">{props.getIcon(props.tab)}</span>}
-                {props.renderLabel ? (
-                    props.renderLabel(props.tab)
-                ) : (
-                    <span class="pane-tab-label">{props.getLabel(props.tab)}</span>
-                )}
-                <Show when={props.onClose}>
-                    <button
-                        class="pane-tab-close"
-                        onClick={onCloseClick}
-                        title={closing() ? "Closing…" : attention() ? "Close (unsaved changes)" : "Close"}
-                        aria-label={closing() ? "Closing tab" : "Close tab"}
-                        disabled={closing()}
-                    >
-                        {/* Always in the DOM for attention tabs (closing
-                            those may need confirmation); hover-shown
-                            otherwise, purely via CSS opacity. */}
-                        <i class={closing() ? "fa-solid fa-spinner fa-spin" : "fa-solid fa-xmark"} aria-hidden="true" />
-                    </button>
-                </Show>
+                <PillContent
+                    item={props}
+                    id={id}
+                    attention={attention}
+                    closing={closing}
+                    progress={progress}
+                    windowDisplayed={windowDisplayed}
+                    onCloseClick={onCloseClick}
+                />
             </div>
         </Tooltip>
     );
