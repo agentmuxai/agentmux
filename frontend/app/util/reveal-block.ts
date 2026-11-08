@@ -19,6 +19,7 @@
 import { giveBlockFocus } from "@/app/store/focusManager";
 import { createEffect, createRoot } from "solid-js";
 import { createRequestedTabs, createSelectionRunner, type SelectionDeps } from "@/app/selection/selection-effects";
+import { failText, WORKSPACE_CLOSED } from "@/app/selection/reveal-failure";
 import { isFailure, type Intent, type RemoteOutcome, type SelectionResult } from "@/app/selection/selection-machine";
 import { createSelectionTrace } from "@/app/selection/selection-trace";
 import { atoms, getApi, MOS, pushNotification, workspace } from "@/app/store/global";
@@ -123,30 +124,6 @@ export async function showBlockWithoutFocus(blockId: string, opts: { tabId?: str
     if (!model || node?.id == null) return false;
     showBlockInPane(model, node, blockId);
     return true;
-}
-
-/** `remote-failed`'s detail when the pane's workspace is open in no window and a window could not be opened on it. */
-const WORKSPACE_CLOSED = "workspace-closed";
-
-/** What the notice says for each reason a pane could not be shown. */
-const FAIL_TEXT: Record<string, string> = {
-    "not-found": "it is no longer open",
-    "resolve-timeout": "it took too long to find",
-    "tab-timeout": "its tab did not open in time",
-    "layout-timeout": "its tab is still loading",
-    mismatch: "it did not come to the front",
-    stuck: "it did not respond in time",
-    "remote-timeout": "the other window did not answer",
-    "remote-failed": "the other window could not show it",
-    gone: "it was just closed",
-    error: "something went wrong",
-};
-
-function failText(reason: string, detail?: string): string {
-    if (reason === "remote-failed" && detail === WORKSPACE_CLOSED) {
-        return "it is in a workspace no window has open, and a window could not be opened on it";
-    }
-    return FAIL_TEXT[reason] ?? reason;
 }
 
 /** One text value of a pane's meta, trimmed, or nothing. */

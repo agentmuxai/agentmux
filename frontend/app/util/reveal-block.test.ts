@@ -97,6 +97,7 @@ vi.mock("@/app/store/services", () => ({
     },
 }));
 
+import { isWorkspaceClosedFailure } from "@/app/selection/reveal-failure";
 import { findOpenBlockByView, revealBlock, showBlockInPane, showBlockWithoutFocus } from "./reveal-block";
 
 /** A layout model whose one pane holds `members` as tabs. */
@@ -422,5 +423,38 @@ describe("revealBlock — a block in another window (spec §4.3)", () => {
         await revealBlock("remote");
         warn.mockRestore();
         expect(calls).toEqual(["block.reveal:remote", "SetActiveTab:ws2:t9", "focusWindow:second"]);
+    });
+
+    // The shape of a parked agent's Open when this window's copy of the tab was read before the attach
+    // reached it: the request goes to srv, which names this same window, whose `block:reveal` handler asks
+    // again here. The second request ends the first as superseded — and the second is the one that shows
+    // the pane, so the first caller must not call that a failure to open the workspace.
+    it("a newer request from this window ends an older handed-over one as superseded, while it shows the pane", async () => {
+        let answer!: (v: { found: boolean }) => void;
+        blockReveal = () => new Promise((resolve) => (answer = resolve));
+        const first = revealBlock("remote", { source: "open", quiet: true });
+        await vi.waitFor(() => expect(calls).toContain("block.reveal:remote"));
+        // srv told this window to reveal it (it holds the block now): the receiving side asks here, local only.
+        tabs.t1 = { blockids: ["remote"] };
+        models.t1 = modelWithPane("n1", ["remote"]);
+        expect(await revealBlock("remote", { tabId: "t1", localOnly: true, quiet: true })).toEqual({ ok: true });
+        expect(await first).toEqual({ ok: false, reason: "superseded" });
+        answer({ found: false }); // the late answer finds no one waiting
+    });
+});
+
+describe("isWorkspaceClosedFailure", () => {
+    it("is true only for the reveal whose answer is that no window could be opened on the workspace", () => {
+        expect(isWorkspaceClosedFailure({ ok: false, reason: "remote-failed", detail: "workspace-closed" })).toBe(true);
+        for (const other of [
+            { ok: true },
+            { ok: false, reason: "remote-failed", detail: "layout-timeout" },
+            { ok: false, reason: "remote-timeout" },
+            { ok: false, reason: "superseded" },
+            { ok: false, reason: "layout-timeout" },
+            { ok: false, reason: "mismatch" },
+        ] as const) {
+            expect(isWorkspaceClosedFailure(other as any)).toBe(false);
+        }
     });
 });
