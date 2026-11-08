@@ -61,6 +61,9 @@
     &.band {
         position: static;
         z-index: auto;
+        // Fainter than the pane's corner needs (it sat over terminal text there); on the band's own surface a
+        // reading at half strength is hard to read in the light theme (Maricon, #6847).
+        opacity: 0.75;
         background: none;
         padding: 0 var(--space-1-5);
 
