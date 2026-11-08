@@ -318,7 +318,6 @@
 120 crates/srv/src/server/work_queue.rs::handle_work_claim
 198 crates/srv/src/srv_ipc/server.rs::handle_connection
 213 frontend/app-init.ts::initAppInner
-147 frontend/app-init.ts::initHostMux
 163 frontend/app-init.ts::initHostNewWindow
 217 frontend/app-init.ts::initMux
 364 frontend/app/block/block.tsx::Block
