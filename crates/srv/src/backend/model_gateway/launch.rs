@@ -58,14 +58,38 @@ pub fn env_for(route: &Route, model: &Model, token: &str, local_url: &str) -> Ve
     ]
 }
 
-/// Adds the gateway environment to the spawn of the agent on `block_id` when its definition has a route.
-/// Over whatever a persisted `cmd:env` carried: these are reserved names, set by srv at every spawn.
+/// The block meta key the pane, its footer and its header read for the model the agent really runs: the route's
+/// and the model's names, or absent on the harness's own sign-in. Without it they show the harness's nominal model
+/// (the alias the pane was configured with), which on a route is not what answers.
+pub const BLOCK_META_KEY: &str = "agent:route_model";
+
+/// What the pane shows for a route and model.
+pub fn pane_meta(route: &Route, model: &Model) -> serde_json::Value {
+    serde_json::json!({ "route": route.id, "route_label": route.label, "model": model.id, "label": model.label })
+}
+
+/// Keeps the pane's `agent:route_model` as the launch has it. The next block update the start sends carries it.
+fn publish_to_block(mstore: &Store, block_id: &str, shown: Option<(&Route, &Model)>) {
+    let mut update = crate::backend::obj::MetaMapType::new();
+    update.insert(BLOCK_META_KEY.to_string(), shown.map_or(serde_json::Value::Null, |(r, m)| pane_meta(r, m)));
+    if let Err(e) = crate::backend::wcore::object_meta::update_object_meta(mstore, &format!("block:{block_id}"), &update) {
+        tracing::warn!(block_id, error = %e, "model route: the pane's model name was not stored");
+    }
+}
+
+/// Adds the gateway environment to the spawn of the agent on `block_id` when its definition has a route, and
+/// records the real model on the pane. Over whatever a persisted `cmd:env` carried: these are reserved names, set by
+/// srv at every spawn.
 pub fn carry_for_block(mstore: &Store, block_id: &str, env_vars: &mut HashMap<String, String>) {
     let Ok(Some(instance)) = mstore.instance_get_active_for_block(block_id) else { return };
     let Ok(Some(def)) = mstore.agent_def_get(&instance.definition_id) else { return };
-    let Some(choice) = choice_of(mstore, &def.id) else { return };
-    let Ok((route, model)) = catalog::validate(&def.provider, &choice.route, &choice.model) else {
-        tracing::warn!(agent = %def.slug, route = %choice.route, "model route: the agent's saved route no longer validates; launching without it");
+    let choice = choice_of(mstore, &def.id);
+    let validated = choice.as_ref().and_then(|c| catalog::validate(&def.provider, &c.route, &c.model).ok());
+    publish_to_block(mstore, block_id, validated);
+    let Some((route, model)) = validated else {
+        if let Some(c) = choice {
+            tracing::warn!(agent = %def.slug, route = %c.route, "model route: the agent's saved route no longer validates; launching without it");
+        }
         return;
     };
     let Ok(local_url) = std::env::var("AGENTMUX_LOCAL_URL") else {
@@ -91,5 +115,33 @@ mod tests {
         assert_eq!(env["ANTHROPIC_DEFAULT_SONNET_MODEL"], "deepseek/deepseek-v4.1-flash-1017[1m]");
         assert_eq!(env["CLAUDE_CODE_SUBAGENT_MODEL"], "deepseek/deepseek-v4.1-flash-1017");
         assert!(!env.values().any(|v| v.contains("openrouter.ai")), "the upstream address stays in srv");
+    }
+
+    #[test]
+    fn the_pane_is_told_the_model_that_really_answers_and_forgets_it_off_the_route() {
+        use crate::backend::obj::{Block, MetaMapType};
+        const BLOCK: &str = "5b1a3c52-7d0e-4d43-9a43-2f6a0f4f3c11";
+        let store = Store::open_in_memory().unwrap();
+        let mut def = crate::backend::storage::agents::test_agent_def("def-pane", "Paned", "claude", "host", 1, "");
+        store.agent_def_insert(&mut def).unwrap();
+        let mut meta = MetaMapType::new();
+        meta.insert("view".to_string(), serde_json::json!("agent"));
+        let mut block = Block { oid: BLOCK.to_string(), parentoref: String::new(), version: 0, runtimeopts: None, stickers: None, meta, subblockids: None };
+        store.insert(&mut block).unwrap();
+        let instance = crate::backend::storage::agents::AgentInstance {
+            id: "inst-pane".into(), definition_id: "def-pane".into(), parent_instance_id: String::new(), block_id: BLOCK.into(), session_id: String::new(),
+            status: crate::backend::storage::store::InstanceStatus::Running.as_str().to_string(), github_context: String::new(), started_at: 0, ended_at: 0, created_at: 0,
+            identity_id: String::new(), memory_id: String::new(), instance_name: String::new(), working_directory: String::new(), display_hidden: false,
+        };
+        store.instance_create(&instance).unwrap();
+        let shown = |store: &Store| store.get::<Block>(BLOCK).unwrap().unwrap().meta.get(BLOCK_META_KEY).cloned().unwrap_or(serde_json::Value::Null);
+
+        set_choice(&store, "def-pane", "claude", "openrouter", "deepseek/deepseek-v4-pro-0813").unwrap();
+        carry_for_block(&store, BLOCK, &mut HashMap::new());
+        assert_eq!(shown(&store), serde_json::json!({ "route": "openrouter", "route_label": "OpenRouter", "model": "deepseek/deepseek-v4-pro-0813", "label": "DeepSeek V4 Pro" }));
+
+        store.agent_content_delete("def-pane", CONTENT_TYPE).unwrap();
+        carry_for_block(&store, BLOCK, &mut HashMap::new());
+        assert_eq!(shown(&store), serde_json::Value::Null, "back on the harness's own sign-in the pane shows its own model again");
     }
 }

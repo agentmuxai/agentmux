@@ -587,6 +587,19 @@ pub(crate) fn clear_signed_out(mstore: &Arc<Store>, identity: &Store, event_bus:
     cleared
 }
 
+/// Restarts every open pane of the agent with its conversation resumed. A pane in a turn is restarted when the turn
+/// ends. Returns how many were restarted and why the others were not.
+pub(crate) fn restart_panes_of(state: &AppState, def_id: &str) -> (u32, Vec<String>) {
+    let (mut restarted, mut failed) = (0, Vec::new());
+    for block in switch::open_panes(state, def_id) {
+        match moves::restart(state, &block) {
+            Ok(()) => restarted += 1,
+            Err(e) => failed.push(e),
+        }
+    }
+    (restarted, failed)
+}
+
 /// These RPCs are the operator's, except `agent.account.switch` and
 /// `identity.account.availability`: an agent connection (`bus:register`) is refused for the
 /// others, since the move relinks and restarts other agents and a sign-in clears other agents'

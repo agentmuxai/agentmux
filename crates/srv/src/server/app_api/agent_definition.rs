@@ -85,7 +85,7 @@ fn publish_changed(state: &AppState) {
 /// is already on. Putting an agent onto a route spends the person's key, so that is asked of them when the agent is
 /// made or in the composer's model panel, not done by a call that names no one to ask.
 fn route_change(state: &AppState, agent: &AgentDefinition, req: &UpdateRequest) -> Result<Vec<&'static str>, Refusal> {
-    use crate::backend::model_gateway::{launch, token};
+    use crate::backend::model_gateway::{launch, switch::{self, Target}};
     let current = launch::choice_of(&state.mstore, &agent.id);
     let route = req.route.as_deref().map(str::trim);
     let model = req.model.as_deref().map(str::trim).filter(|m| !m.is_empty());
@@ -93,9 +93,13 @@ fn route_change(state: &AppState, agent: &AgentDefinition, req: &UpdateRequest) 
         if model.is_some() {
             return Err(bad("route \"\" leaves the model route; it takes no model"));
         }
-        let Some(current) = current else { return Err(bad("the agent is not on a model route")) };
-        state.mstore.agent_content_delete(&agent.id, launch::CONTENT_TYPE).map_err(|e| refuse(StatusCode::INTERNAL_SERVER_ERROR, format!("Agents update: {e}")))?;
-        token::revoke(&agent.id, &current.route);
+        if current.is_none() {
+            return Err(bad("the agent is not on a model route"));
+        }
+        let harness = state.id_store.resolve_effective_provider_id(agent);
+        switch::allow_agent_switch(&agent.id).map_err(bad)?;
+        switch::move_to(&state.mstore, &agent.id, &harness, Target::OwnLogin, |_| true).map_err(bad)?;
+        restart_on_new_model(state, agent);
         return Ok(vec!["route"]);
     }
     let Some(current) = current else {
@@ -106,8 +110,24 @@ fn route_change(state: &AppState, agent: &AgentDefinition, req: &UpdateRequest) 
         return Err(bad(format!("the agent is on the {} route; moving it to {target} spends another key, which the person approves in the model panel", current.route)));
     }
     let harness = state.id_store.resolve_effective_provider_id(agent);
-    launch::set_choice(&state.mstore, &agent.id, &harness, target, model.unwrap_or(&current.model)).map_err(bad)?;
+    let wanted = model.unwrap_or(&current.model);
+    if wanted == current.model {
+        return Ok(Vec::new());
+    }
+    switch::allow_agent_switch(&agent.id).map_err(bad)?;
+    let key_present = |r: &crate::backend::model_gateway::catalog::Route| crate::backend::vault::route_key::present(&state.identity_store, r.key_label);
+    switch::move_to(&state.mstore, &agent.id, &harness, Target::Route { route: target, model: wanted }, key_present).map_err(bad)?;
+    restart_on_new_model(state, agent);
     Ok(vec!["model"])
+}
+
+/// The choice is read at every launch, so the agent's panes are restarted, with their conversation, at the end of
+/// the turn they are in. A pane that cannot be restarted starts on it the next time it opens.
+fn restart_on_new_model(state: &AppState, agent: &AgentDefinition) {
+    let (_, failed) = crate::server::account_episodes::restart_panes_of(state, &agent.id);
+    for why in failed {
+        tracing::warn!(agent = %agent.slug, why, "Agents update: a pane was not restarted on the new model");
+    }
 }
 
 /// Apply the fields `req` gives to the agent's stored definition. Returns the names of the fields changed.

@@ -13,6 +13,7 @@ pub mod catalog;
 pub mod launch;
 pub mod request;
 pub mod spend;
+pub mod switch;
 pub mod token;
 pub mod usage;
 
