@@ -16,6 +16,8 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
         "ListShortcuts" => run_list_shortcuts(arguments, cx).await,
         "RunCommand" => run_run_command(arguments, cx).await,
         "PressKeys" => run_press_keys(arguments, cx).await,
+        "SetShortcut" => run_set_shortcut(arguments, cx).await,
+        "ResetShortcuts" => run_reset_shortcuts(arguments, cx).await,
         _ => Err(not_in_family()),
     }
 }
@@ -279,6 +281,48 @@ async fn run_press_keys(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     let req = UiPressKeysRequest { auth, keys: keys.to_string(), target: str_arg(arguments, "target") };
     let data = post_shortcuts(cx, "press", &req).await?;
     Ok(serde_json::to_string_pretty(&data).unwrap_or_else(|_| data.to_string()))
+}
+
+/// `bind`: give a command exactly these keys. The page refuses what an agent may not do and says what is in the way.
+async fn run_set_shortcut(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let ToolCtx { local_url, auth_key, block_id, .. } = *cx;
+    require_agent_env(local_url, auth_key, block_id)?;
+    let auth = sign_ui_automation_auth()?;
+    let command = str_arg(arguments, "command").ok_or_else(|| anyhow::anyhow!("missing required parameter: command"))?;
+    let bindings = match arguments.get("bindings") {
+        Some(v) => v
+            .as_array()
+            .ok_or_else(|| anyhow::anyhow!("`bindings` must be a list of keys (an empty list unbinds the command)"))?
+            .iter()
+            .map(|k| k.as_str().map(str::to_string).ok_or_else(|| anyhow::anyhow!("`bindings` must be a list of strings")))
+            .collect::<Result<Vec<_>>>()?,
+        None => return Err(anyhow::anyhow!("missing required parameter: bindings (a list of keys; empty to unbind the command)")),
+    };
+    let req = UiSetShortcutRequest { auth, command, bindings, when: str_arg(arguments, "when") };
+    let data = post_shortcuts(cx, "set", &req).await?;
+    Ok(shortcut_edit_said(&data))
+}
+
+/// `reset`: one command, or every command, back on its defaults.
+async fn run_reset_shortcuts(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let ToolCtx { local_url, auth_key, block_id, .. } = *cx;
+    require_agent_env(local_url, auth_key, block_id)?;
+    let auth = sign_ui_automation_auth()?;
+    let all = arguments.get("all").and_then(|v| v.as_bool()).unwrap_or(false);
+    let req = UiResetShortcutsRequest { auth, command: str_arg(arguments, "command"), all };
+    let data = post_shortcuts(cx, "reset", &req).await?;
+    Ok(shortcut_edit_said(&data))
+}
+
+/// What a change to the person's shortcuts says: what changed, or why not and what is in the way.
+fn shortcut_edit_said(data: &Value) -> String {
+    if data.get("changed").and_then(|v| v.as_bool()) == Some(true) {
+        let summary = data.get("summary").and_then(|v| v.as_str()).unwrap_or("changed");
+        let note = data.get("note").and_then(|v| v.as_str()).unwrap_or("");
+        return format!("Changed: {summary}. {note}").trim_end().to_string();
+    }
+    let why = data.get("reason").and_then(|v| v.as_str()).unwrap_or("no reason given");
+    format!("Not changed: {why}")
 }
 
 fn str_arg(arguments: &Value, name: &str) -> Option<String> {

@@ -111,6 +111,7 @@ mod notify_handlers;
 pub(crate) mod browser_actions;
 pub(crate) mod browser_agent_calls;
 pub(crate) mod browser_allowlist;
+pub(crate) mod browser_agent_downloads;
 pub(crate) mod browser_attention;
 pub(crate) mod browser_bypass;
 pub(crate) mod browser_bypass_routes;

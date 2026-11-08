@@ -1259,6 +1259,83 @@ async fn ui_run_command_refuses_a_permanent_delete_before_the_host() {
 }
 
 #[tokio::test]
+async fn ui_set_and_reset_shortcut_return_the_host_result() {
+    let state = test_state();
+    let port = spawn_fake_browser_api(r#"{"ok":true,"data":{"changed":true,"summary":"New tab: Ctrl+Shift+Y"}}"#, "tok-abc").await;
+    *state.host_ipc.lock().await = Some(HostIpc { port, token: "tok-abc".to_string() });
+    let (_agent_id, mut body) = signed_ui_auth(&state, "b1");
+    body["command"] = serde_json::json!("tab:new");
+    body["bindings"] = serde_json::json!(["ctrl+shift+y"]);
+    let (status, json) = post_json(&build_router(state.clone()), "/api/v1/ui/shortcuts/set", body).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["data"]["changed"], true);
+
+    // No `bindings` unbinds the command: an empty list is a valid request.
+    let (_agent_id, mut body) = signed_ui_auth(&state, "b1");
+    body["command"] = serde_json::json!("tab:close");
+    let (status, _) = post_json(&build_router(state.clone()), "/api/v1/ui/shortcuts/set", body).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (_agent_id, mut body) = signed_ui_auth(&state, "b1");
+    body["all"] = serde_json::json!(true);
+    let (status, json) = post_json(&build_router(state), "/api/v1/ui/shortcuts/reset", body).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+}
+
+#[tokio::test]
+async fn ui_set_and_reset_shortcut_refuse_what_run_command_refuses_before_the_host() {
+    let state = test_state();
+    // A host that would accept anything: the refusal has to come from srv.
+    let port = spawn_fake_browser_api(r#"{"ok":true,"data":{"changed":true}}"#, "tok-abc").await;
+    *state.host_ipc.lock().await = Some(HostIpc { port, token: "tok-abc".to_string() });
+    for command in ["files:deletePermanently", "browser:pauseAll", "browser:resumeAll"] {
+        for uri in ["/api/v1/ui/shortcuts/set", "/api/v1/ui/shortcuts/reset"] {
+            let (_agent_id, mut body) = signed_ui_auth(&state, "b1");
+            body["command"] = serde_json::json!(command);
+            let (status, json) = post_json(&build_router(state.clone()), uri, body).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{uri} {command}");
+            assert!(json["error"].as_str().unwrap().contains("not available to agents"), "{json}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn ui_reset_shortcuts_needs_a_command_or_all() {
+    let state = test_state();
+    let port = spawn_fake_browser_api(r#"{"ok":true,"data":{"changed":true}}"#, "tok-abc").await;
+    *state.host_ipc.lock().await = Some(HostIpc { port, token: "tok-abc".to_string() });
+    let (_agent_id, body) = signed_ui_auth(&state, "b1");
+    let (status, json) = post_json(&build_router(state.clone()), "/api/v1/ui/shortcuts/reset", body).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{json}");
+    assert!(json["error"].as_str().unwrap().contains("`command`, or `all: true`"), "{json}");
+    // A blank command is no command.
+    let (_agent_id, mut body) = signed_ui_auth(&state, "b1");
+    body["command"] = serde_json::json!("  ");
+    let (status, _) = post_json(&build_router(state), "/api/v1/ui/shortcuts/reset", body).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn ui_set_shortcut_limits_what_a_request_carries() {
+    let state = test_state();
+    let port = spawn_fake_browser_api(r#"{"ok":true,"data":{"changed":true}}"#, "tok-abc").await;
+    *state.host_ipc.lock().await = Some(HostIpc { port, token: "tok-abc".to_string() });
+    let too_many = serde_json::json!(["a", "b", "c", "d", "e", "f", "g", "h", "i"]);
+    let too_long = serde_json::json!(["x".repeat(65)]);
+    for bindings in [too_many, too_long] {
+        let (_agent_id, mut body) = signed_ui_auth(&state, "b1");
+        body["command"] = serde_json::json!("tab:new");
+        body["bindings"] = bindings;
+        let (status, json) = post_json(&build_router(state.clone()), "/api/v1/ui/shortcuts/set", body).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{json}");
+    }
+    let (_agent_id, mut body) = signed_ui_auth(&state, "b1");
+    body["command"] = serde_json::json!(" ");
+    let (status, _) = post_json(&build_router(state), "/api/v1/ui/shortcuts/set", body).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn ui_run_command_pane_close_goes_through_close_pane() {
     let state = test_state();
     // A host that would accept anything: pane:close must not reach it.
@@ -1290,6 +1367,8 @@ async fn shortcut_routes_reject_a_forged_agent_identity() {
         ("/api/v1/ui/shortcuts/list", "", ""),
         ("/api/v1/ui/shortcuts/run", "command", "split:right"),
         ("/api/v1/ui/shortcuts/press", "keys", "ctrl+shift+d"),
+        ("/api/v1/ui/shortcuts/set", "command", "tab:new"),
+        ("/api/v1/ui/shortcuts/reset", "command", "tab:new"),
     ] {
         let (victim_agent_id, _) = signed_ui_auth(&state, "victim-block");
         let (_, mut forged) = signed_ui_auth(&state, "attacker-block");

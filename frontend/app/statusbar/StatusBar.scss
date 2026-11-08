@@ -5,6 +5,7 @@
 @use "./token-usage";
 @use "./history-usage";
 @use "./update-popover";
+@use "./attention-list";
 @use "./instance-panel";
 @use "./cpu-cores-popover";
 @use "./disk-volumes-popover";
@@ -261,6 +262,8 @@
     }
 
     .status-version {
+        // One line at any width: in a bar too narrow for it the window's edge cuts it, and the bar keeps its height.
+        white-space: nowrap;
         opacity: 0.4;
         font-size: var(--text-2xs);
         padding: 0 5px;
