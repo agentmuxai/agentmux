@@ -77,6 +77,8 @@ const badgeIcon = (name: string, color: string) => (
     </span>
 );
 
+// Follows the live profile list: an agent's own profile is made when it first opens a browser, after this
+// button is drawn, and the button must show it at once, not after the menu's first open reloads the list.
 export function BrowserProfileButton(props: {
     model: BrowserViewModel;
     home: () => string;
@@ -84,8 +86,6 @@ export function BrowserProfileButton(props: {
     containWithin?: () => HTMLElement | null | undefined;
 }): JSX.Element {
     const model = props.model;
-    // Live: an agent's own profile is made when it first opens a browser, after this button is drawn, and
-    // the button must show it at once, not after the menu's first open reloads the list.
     followBrowserProfiles();
     const identity = createMemo(() => parseIdentity(model.meta()?.[IDENTITY_META_KEY]));
     const profile = () => {
