@@ -509,8 +509,6 @@ pub fn inject_identity_env_with_broker(
     };
 
     let on_route = steps::on_model_route(&mstore, &instance);
-    // Step 2: identity_id check (an empty or blank one is logged, not a bypass).
-    steps::warn_on_blank_identity(&instance, block_id);
 
     // Layer-3 gate input: the agent definition's own CLI provider.
     let (def_provider, parent_template_id) = steps::definition_provider(&mstore, &id_store, &instance);
@@ -527,6 +525,11 @@ pub fn inject_identity_env_with_broker(
     // definition-provider gate (step 5; spec §2.2 edge case: an agent whose
     // oauth-class CLI provider has no binding at all is blocked).
     let bindings = resolve_bindings_for_instance(&identity_store, &instance, &parent_template_id, broker.as_ref());
+
+    // Diagnostic only (#30077): an empty legacy identity_id is the normal launch state, and what
+    // resolves credentials is the binding set just computed (or the model route). Said at debug,
+    // with the real reason, so it is not read as a credential failure.
+    steps::note_blank_identity(&instance, block_id, &bindings, on_route);
 
     // Step 4: per-binding resolution + env injection.
     let mut injector = steps::BindingInjector {
@@ -1875,6 +1878,41 @@ mod tests {
             Err(SpawnGateError::MissingCredentials { provider: "claude".to_string(), linked: false }),
         );
         assert!(env.is_empty());
+    }
+
+    #[test]
+    fn inject_empty_identity_with_a_linked_account_injects_that_account() {
+        // #30077: an empty identity_id is the normal state of a modern launch (the legacy column
+        // records a single account only when there is one; credentials resolve through the
+        // per-provider bindings). This must inject the linked account, not fall back to ambient
+        // creds and not refuse — the live 0.60.21 warnings were this exact case.
+        let store = make_store();
+        let mut def = gate_def(0);
+        store.agent_def_insert(&mut def).unwrap();
+
+        let claude = make_account(
+            "acct-linked",
+            "claude",
+            SecretRef::OAuthConfigDir {
+                dir: test_config_dir("empty-identity-linked"),
+            },
+        );
+        store.identity_upsert(&claude).unwrap();
+        store.agent_identity_link("def-1", "acct-linked", "claude").unwrap();
+
+        insert_block_for_agent(&store, "block-empty-linked", "def-1");
+        let inst = make_instance("block-empty-linked", "");
+        store.instance_create(&inst).unwrap();
+
+        let mut env: HashMap<String, String> = HashMap::new();
+        inject_identity_env(store.clone(), store.clone(), store, "block-empty-linked", &mut env)
+            .expect("an empty identity_id with a bound account must spawn on that account");
+
+        assert_eq!(
+            env.get("CLAUDE_CONFIG_DIR").cloned(),
+            Some(test_config_dir("empty-identity-linked")),
+            "the bound account's dir is what the spawn gets, whatever identity_id holds",
+        );
     }
 
     #[cfg(debug_assertions)]

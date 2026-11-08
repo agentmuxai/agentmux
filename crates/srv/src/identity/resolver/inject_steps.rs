@@ -30,30 +30,50 @@ pub(super) fn check_row_less_block(mstore: &Store, block_id: &str) -> Result<(),
     Ok(())
 }
 
-/// An empty or "blank" identity_id is no longer a bypass: it is logged and gated like any other.
-pub(super) fn warn_on_blank_identity(instance: &AgentInstance, block_id: &str) {
-    //
-    // #2463 Finding 2: this used to `return Ok(())` here (silent ambient-
-    // creds fallback), which bypassed the layer-3 "must have a bound
-    // account" gate (steps 4 and 5) entirely — a genuinely brand-new agent launched
-    // with no account selected got identity_id="" and spawned on whatever
-    // ambient credential happened to be sitting on disk, with nothing
-    // bound in Connectors. Observed behavior therefore depended on whether the
-    // test machine happened to have a stray credential file, not on any
-    // actual policy decision. The UI no longer produces empty/"blank"
-    // identity_id for new launches (identity is required at submit-time —
-    // SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19.md), so seeing one here
-    // means a legacy continuation row or a UI regression; either way it
-    // must be gated the same as any other unresolvable identity_id rather
-    // than silently bypassed. `resolve_bindings_for_instance` (step 3) keys
-    // strictly off `instance.definition_id`, not `identity_id`, so falling
-    // through here is safe regardless of what identity_id contains.
-    if instance.identity_id.is_empty() || instance.identity_id == "blank" {
-        tracing::warn!(
+/// An empty or "blank" identity_id is expected on a modern launch, not a bypass: note it at debug
+/// with what actually resolves the credentials.
+///
+/// `identity_id` is a legacy column. A launch records a single account there only when it has
+/// one (reattach/fork/create); a plain launch has no single account pick, and credentials never
+/// resolve through this column — the layer-3 gate resolves the agent's per-provider account
+/// bindings (or, on a model route, the route) whether it is empty or not (#2463's bypass is
+/// closed by the binding/provider gate, steps 4-5, not by this line). A genuinely missing
+/// account is told by `gate_oauth_failure`'s own `identity.spawn.blocked` warning; this note
+/// explains the empty column without claiming a failure (live 0.60.21: 49 such warnings today,
+/// 45 with the bound account injected right after, 0 spawn blocks).
+///
+/// `resolve_bindings_for_instance` (step 3) keys strictly off `instance.definition_id`, so the
+/// outcome is the same whatever `identity_id` contains.
+pub(super) fn note_blank_identity(
+    instance: &AgentInstance,
+    block_id: &str,
+    bindings: &[IdentityBinding],
+    on_route: bool,
+) {
+    if !(instance.identity_id.is_empty() || instance.identity_id == "blank") {
+        return;
+    }
+    if on_route {
+        tracing::debug!(
             target: "identity",
-            "instance {} has empty/blank identity_id — falling through to the \
-             layer-3 gate instead of ambient creds. Legacy row or UI regression?",
+            "instance {} has no launch account recorded (identity_id empty); it runs on a model \
+             route, so credentials come from the route",
             block_id
+        );
+    } else if bindings.is_empty() {
+        tracing::debug!(
+            target: "identity",
+            "instance {} has no launch account recorded (identity_id empty) and no direct account \
+             links; the layer-3 gate decides",
+            block_id
+        );
+    } else {
+        tracing::debug!(
+            target: "identity",
+            "instance {} has no launch account recorded (identity_id empty); {} account binding(s) \
+             resolve credentials",
+            block_id,
+            bindings.len()
         );
     }
 }
