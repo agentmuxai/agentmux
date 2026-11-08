@@ -49,6 +49,19 @@ fn a_row_without_a_tier_declares_none() {
     assert_eq!(req.jekt_tier, None);
 }
 
+/// Issue #3894: the sender's deadline the relay carries rides into the
+/// delivery request, where the hold and the deferred queue then honour it.
+/// A row without one, or with an unreadable one, behaves exactly as today.
+#[test]
+fn the_senders_deadline_from_the_relay_rides_into_the_request() {
+    let req = wan_request(&pulled(serde_json::json!({ "expires_at": "2026-10-08T14:30:00Z" })), "agent2");
+    assert_eq!(req.expires_at_ms, Some(1_791_469_800_000));
+    for raw in [serde_json::json!(null), serde_json::json!("not a time"), serde_json::json!("")] {
+        let req = wan_request(&pulled(serde_json::json!({ "expires_at": raw })), "agent2");
+        assert_eq!(req.expires_at_ms, None, "{raw}");
+    }
+}
+
 #[test]
 fn a_pull_with_fields_this_build_does_not_know_still_parses() {
     let body: PendingResp = serde_json::from_value(serde_json::json!({

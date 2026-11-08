@@ -3111,6 +3111,45 @@ async fn a_backlog_is_written_first_and_in_order() {
     assert!(c.inner.lock().unwrap().deferred_deliveries.is_empty());
 }
 
+/// Issue #3894: a jekt queued while the process could not take a write is
+/// dropped at write time once the sender's expiry has passed — one log line,
+/// not a message injected stale after the wait — and the queue after it keeps
+/// moving. A message with no expiry is written exactly as before.
+#[tokio::test]
+async fn a_deferred_message_past_its_senders_expiry_is_dropped_not_written() {
+    let (c, mut rx) = starting_controller();
+    let past = agentmux_common::time::now_ms() - 1;
+    // The message goes with a held `[AgentMux]` note, as any delivery does.
+    crate::backend::reactive::held_notes::hold(&c.block_id, "upgrade", "[AgentMux] AgentMux was upgraded");
+    let (message, attached) = crate::backend::reactive::held_notes::attach(&c.block_id, "too late");
+    let record = RecordOrigin { origin: MessageOrigin::user(), notes: attached.note_texts() };
+    let record_notes = attached.keyed_notes();
+    let outcome = c
+        .send_user_message_with_images_from(message, None, Vec::new(), record, Some(past), record_notes)
+        .unwrap();
+    assert_eq!(outcome, SendOutcome::Deferred);
+    // What `deliver_agent_message_from` does as soon as the controller takes it.
+    attached.delivered();
+    c.inner.lock().unwrap().spawning_in_progress = false;
+
+    assert_eq!(c.send_user_message_outcome("on time".to_string()).unwrap(), SendOutcome::Sent);
+
+    let lines = drain(&mut rx);
+    assert_eq!(lines.len(), 1, "the expired message never reached the process: {lines:?}");
+    assert!(lines[0].contains("on time"), "{lines:?}");
+    assert!(c.inner.lock().unwrap().deferred_deliveries.is_empty());
+    // The dropped message was not the note's to take with it.
+    let (_, reheld) = crate::backend::reactive::held_notes::attach(&c.block_id, "next");
+    let notes = reheld.note_texts();
+    assert!(notes.iter().any(|n| n.contains("AgentMux was upgraded")), "the note survives the drop: {notes:?}");
+    reheld.delivered();
+    // Restored under its own key, so the note's usual invalidation still finds it.
+    crate::backend::reactive::held_notes::forget_key(&c.block_id, "upgrade");
+    let (_, gone) = crate::backend::reactive::held_notes::attach(&c.block_id, "after");
+    assert!(!gone.note_texts().iter().any(|n| n.contains("AgentMux was upgraded")), "forget_key clears the restored note");
+    gone.delivered();
+}
+
 /// Teardown must not silently discard accepted messages.
 #[tokio::test]
 async fn teardown_drains_the_queue_rather_than_discarding_it_silently() {
@@ -3873,12 +3912,12 @@ async fn a_labelled_delivery_sets_the_turn_provenance_the_controller_reports() {
 async fn a_delivery_with_images_writes_content_blocks_before_the_text() {
     let (c, mut rx) = idle_controller();
     let image = serde_json::json!({ "type": "image", "source": { "type": "base64", "media_type": "image/png", "data": "AAAA" } });
-    c.send_user_message_with_images_from("look at this".to_string(), None, vec![image.clone()], RecordOrigin::new(MessageOrigin::user())).unwrap();
+    c.send_user_message_with_images_from("look at this".to_string(), None, vec![image.clone()], RecordOrigin::new(MessageOrigin::user()), None, Vec::new()).unwrap();
     let line: serde_json::Value = serde_json::from_str(&rx.try_recv().unwrap()).unwrap();
     let content = line["message"]["content"].as_array().expect("blocks, not a string");
     assert_eq!(content[0], image);
     assert_eq!(content[1]["text"], "look at this");
-    c.send_user_message_with_images_from("plain".to_string(), None, Vec::new(), RecordOrigin::new(MessageOrigin::user())).unwrap();
+    c.send_user_message_with_images_from("plain".to_string(), None, Vec::new(), RecordOrigin::new(MessageOrigin::user()), None, Vec::new()).unwrap();
     let line: serde_json::Value = serde_json::from_str(&rx.try_recv().unwrap()).unwrap();
     assert_eq!(line["message"]["content"], "plain");
 }

@@ -957,7 +957,7 @@ impl Handler {
     /// controller takes it, else typed and submitted.
     fn send_to_block(&self, block_id: &str, text: &str) -> Result<(), String> {
         if let Some(deliver) = &self.message_sender {
-            match deliver(block_id, text, &[], &crate::backend::message_origin::MessageOrigin::system())? {
+            match deliver(block_id, text, &[], &crate::backend::message_origin::MessageOrigin::system(), None)? {
                 SenderDelivery::Delivered | SenderDelivery::Deferred => return Ok(()),
                 SenderDelivery::Pty => {}
             }

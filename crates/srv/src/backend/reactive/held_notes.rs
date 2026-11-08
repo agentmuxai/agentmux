@@ -129,6 +129,16 @@ pub fn hold(block_id: &str, key: &str, text: &str) {
     held().hold(block_id, key, text);
 }
 
+/// Notes that went on a message srv then dropped (a deferred jekt that
+/// expired before the process could take it): hold them again for the agent's
+/// next message, under their original keys. They are not the jekt's to lose —
+/// a `[AgentMux]` note about the app's own state outlives the sender's
+/// deadline (#3894) — and the keys are what a later `replace` or `forget_key`
+/// for the same note acts on, so a restored note can still be superseded.
+pub fn put_back(block_id: &str, notes: Vec<(String, String)>) {
+    held().put_back(block_id, notes);
+}
+
 /// Drop the note held for `block_id` under `key`, if any (it went stale).
 pub fn forget_key(block_id: &str, key: &str) {
     held().forget_key(block_id, key);
@@ -250,6 +260,13 @@ impl Attached {
     /// The texts of the notes taken for the message, oldest first.
     pub fn note_texts(&self) -> Vec<String> {
         self.notes.iter().map(|(_, text)| text.clone()).collect()
+    }
+
+    /// The notes taken for the message with their original keys, so a message
+    /// that is dropped can put them back exactly as they were (the keys are
+    /// what [`HeldNotes::replace`] and [`HeldNotes::forget_key`] act on).
+    pub fn keyed_notes(&self) -> Vec<(String, String)> {
+        self.notes.clone()
     }
 
     /// The message carrying the notes went to the agent.
@@ -530,7 +547,7 @@ never attached
         let sent = Arc::new(Mutex::new(0usize));
         let handler = ReactiveHandler::new();
         let (s1, s2) = (sent.clone(), sent.clone());
-        handler.set_message_sender(Arc::new(move |_: &str, _: &str, _: &[serde_json::Value], _origin: &crate::backend::message_origin::MessageOrigin| {
+        handler.set_message_sender(Arc::new(move |_: &str, _: &str, _: &[serde_json::Value], _origin: &crate::backend::message_origin::MessageOrigin, _expires_at_ms: Option<i64>| {
             *s1.lock().unwrap() += 1;
             Ok(SenderDelivery::Delivered)
         }));

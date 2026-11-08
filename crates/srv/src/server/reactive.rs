@@ -937,7 +937,7 @@ pub(super) async fn try_cloud_relay(state: &AppState, req: &InjectionRequest, ca
         &req.target_agent,
         &req.message,
         priority,
-        carried.as_ref(), req.cloud_files.as_deref(), req.jekt_tier.as_ref(),
+        carried.as_ref(), req.cloud_files.as_deref(), req.jekt_tier.as_ref(), req.expires_at_ms,
     )
     .await;
 
