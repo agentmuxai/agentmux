@@ -13,13 +13,29 @@ fn initialize_states_protocol_version_1_and_offers_no_fs_or_terminal() {
 
 #[test]
 fn a_session_is_loaded_only_when_the_agent_can_and_there_is_one() {
-    let (m, p) = super::session_request(Some("s1"), true, "C:/w", &[]);
+    use super::SessionRestore::{Load, No, Resume};
+    let (m, p) = super::session_request(Some("s1"), Load, "C:/w", &[]);
     assert_eq!(m, "session/load");
     assert_eq!(p, serde_json::json!({ "sessionId": "s1", "cwd": "C:/w", "mcpServers": [] }));
-    assert_eq!(super::session_request(Some("s1"), false, "C:/w", &[]).0, "session/new");
-    let (m, p) = super::session_request(None, true, "C:/w", &[]);
+    assert_eq!(super::session_request(Some("s1"), No, "C:/w", &[]).0, "session/new");
+    let (m, p) = super::session_request(None, Load, "C:/w", &[]);
     assert_eq!(m, "session/new");
     assert_eq!(p, serde_json::json!({ "cwd": "C:/w", "mcpServers": [] }));
+    // dsh offers `session/resume` and no load: the same request, the other method.
+    let (m, p) = super::session_request(Some("s1"), Resume, "C:/w", &[]);
+    assert_eq!(m, "session/resume");
+    assert_eq!(p, serde_json::json!({ "sessionId": "s1", "cwd": "C:/w", "mcpServers": [] }));
+    assert_eq!(super::session_request(None, Resume, "C:/w", &[]).0, "session/new");
+}
+
+#[test]
+fn the_way_an_agent_takes_a_session_back_comes_from_what_it_offers() {
+    use super::SessionRestore::{Load, No, Resume};
+    assert_eq!(super::SessionRestore::of(false, false), No);
+    assert_eq!(super::SessionRestore::of(true, false), Load);
+    assert_eq!(super::SessionRestore::of(false, true), Resume);
+    // Both offered: the replaying load, as before.
+    assert_eq!(super::SessionRestore::of(true, true), Load);
 }
 
 #[test]
@@ -563,7 +579,8 @@ async fn send_input_does_not_roll_back_an_already_active_turn_on_a_failed_steeri
 #[test]
 fn a_session_request_carries_the_agents_mcp_servers() {
     let servers = [serde_json::json!({ "name": "agentmux", "command": "C:/AgentMux/agentmux-mcp.exe", "args": [], "env": [] })];
-    for (resume, load) in [(None, false), (Some("s1"), true)] {
+    use super::SessionRestore::{Load, No, Resume};
+    for (resume, load) in [(None, No), (Some("s1"), Load), (Some("s1"), Resume)] {
         let (_, p) = super::session_request(resume, load, "C:/w", &servers);
         assert_eq!(p["mcpServers"], serde_json::json!(servers));
     }

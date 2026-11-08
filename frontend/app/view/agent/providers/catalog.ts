@@ -788,7 +788,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         requiresLoginTty: true,
         headlessLoginUrlUnsupported: true,
         npmPackage: "@deepseek-ai/dsh",
-        pinnedVersion: "0.2.0-rc.2",
+        pinnedVersion: "0.2.2-rc.1",
         docsUrl: "https://github.com/deepseek-ai/deepseek-harness",
         windowsInstallCommand: "npm install -g @deepseek-ai/dsh",
         unixInstallCommand: "npm install -g @deepseek-ai/dsh",
@@ -802,7 +802,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         resumeFlag: null,
         sessionIdField: "sessionId",
         controllerType: "acp",
-        systemPrereqs: [{ ...NODE_PREREQ, minVersion: "22.19.0" }, NPM_PREREQ],
+        systemPrereqs: [{ ...NODE_PREREQ, minVersion: "24.9.0" }, NPM_PREREQ],
     },
     aider: {
         id: "aider",
