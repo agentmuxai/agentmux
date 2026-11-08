@@ -426,13 +426,35 @@ describe("HistoryAgents", () => {
         it("keeps an open row through a reload that drops another agent", async () => {
             const { container } = mountAgents();
             await screen.findByText("Parent");
+            fireEvent.click(rowOf(container, "parent-1").querySelector(".warden-history-agent button")!);
+            await screen.findByText("s1234567");
+            expect(HistoryAgentSessionsCommand).toHaveBeenCalledTimes(1);
+            HistoryAgentsCommand.mockResolvedValue({
+                agents: [
+                    agent("parent-1", { name: "Parent", archives: 2, archive_bytes: 1024 }),
+                    agent("other-1", { name: "Other" }),
+                ],
+            });
+            fireMux("agents:changed");
+            await vi.advanceTimersByTimeAsync(600);
+            await waitFor(() => expect(container.querySelectorAll("tr[data-agent]")).toHaveLength(2));
+            expect(rowOf(container, "fork-1")).toBeNull();
+            expect(
+                rowOf(container, "parent-1").nextElementSibling!.classList.contains("warden-history-sessions-row")
+            ).toBe(true);
+            expect(screen.getByText("s1234567")).toBeInTheDocument();
+            expect(HistoryAgentSessionsCommand).toHaveBeenCalledTimes(1);
+        });
+
+        it("drops the sessions of a row that leaves the list", async () => {
+            const { container } = mountAgents();
+            await screen.findByText("Parent");
             fireEvent.click(rowOf(container, "fork-1").querySelector(".warden-history-agent button")!);
             await screen.findByText("s1234567");
             HistoryAgentsCommand.mockResolvedValue({ agents: [agent("parent-1", { name: "Parent" })] });
             fireMux("agents:changed");
             await vi.advanceTimersByTimeAsync(600);
             await waitFor(() => expect(container.querySelectorAll("tr[data-agent]")).toHaveLength(1));
-            expect(rowOf(container, "parent-1")).not.toBeNull();
             expect(container.querySelector(".warden-history-sessions-row")).toBeNull();
         });
     });
