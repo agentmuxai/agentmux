@@ -115,6 +115,20 @@ fn remember_previous(mstore: &Store, def_id: &str, from: Option<&Choice>) -> Res
         .map_err(|e| e.to_string())
 }
 
+/// `finish_leaving` for a relaunch of the pane `this_block`, unless another pane of the same agent is still in a turn: its
+/// harness holds the old route's token until its own (deferred) relaunch, which is then the one that ends the access.
+pub fn finish_leaving_after_relaunch(mstore: &Store, def_id: &str, this_block: &str, in_a_turn: impl Fn(&str) -> bool) {
+    use crate::backend::obj::{meta_get_string, Block};
+    let busy = mstore
+        .get_all::<Block>()
+        .unwrap_or_default()
+        .iter()
+        .any(|b| b.oid != this_block && meta_get_string(&b.meta, "agentId", "") == def_id && in_a_turn(&b.oid));
+    if !busy {
+        finish_leaving(mstore, def_id);
+    }
+}
+
 fn switches() -> &'static Mutex<HashMap<String, VecDeque<Instant>>> {
     static SWITCHES: OnceLock<Mutex<HashMap<String, VecDeque<Instant>>>> = OnceLock::new();
     SWITCHES.get_or_init(Default::default)
@@ -201,6 +215,25 @@ mod tests {
         assert!(e.starts_with("KEY_MISSING") && e.contains("OpenRouter API key"), "{e}");
         assert!(move_to(&s, "a1", "codex", Target::Route { route: "openrouter", model: "" }, |_| true).is_err());
         assert!(launch::choice_of(&s, "a1").is_none() && previous_of(&s, "a1").is_none(), "a refused move leaves no trace");
+    }
+
+    #[test]
+    fn the_left_route_ends_only_when_no_other_pane_of_the_agent_is_still_in_a_turn() {
+        use crate::backend::obj::{Block, MetaMapType};
+        let s = store();
+        for oid in ["5b1a3c52-7d0e-4d43-9a43-2f6a0f4f3c21", "5b1a3c52-7d0e-4d43-9a43-2f6a0f4f3c22"] {
+            let mut meta = MetaMapType::new();
+            meta.insert("agentId".to_string(), serde_json::json!("a1"));
+            let mut block = Block { oid: oid.to_string(), parentoref: String::new(), version: 0, runtimeopts: None, stickers: None, meta, subblockids: None };
+            s.insert(&mut block).unwrap();
+        }
+        let (idle, busy) = ("5b1a3c52-7d0e-4d43-9a43-2f6a0f4f3c21", "5b1a3c52-7d0e-4d43-9a43-2f6a0f4f3c22");
+        move_to(&s, "a1", "claude", Target::Route { route: "openrouter", model: FLASH }, |_| true).unwrap();
+        move_to(&s, "a1", "claude", Target::OwnLogin, |_| true).unwrap();
+        finish_leaving_after_relaunch(&s, "a1", idle, |b| b == busy);
+        assert!(launch::leaving_route(&s, "a1").is_some(), "the idle pane's relaunch leaves the busy pane its token");
+        finish_leaving_after_relaunch(&s, "a1", busy, |b| b == busy);
+        assert!(launch::leaving_route(&s, "a1").is_none(), "the busy pane's own relaunch ends it");
     }
 
     #[test]
