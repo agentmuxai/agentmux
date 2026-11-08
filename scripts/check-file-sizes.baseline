@@ -29,4 +29,4 @@
 1521 crates/srv/src/server/editor_handlers.rs
 2107 crates/srv/src/server/muxspect_handlers.rs
 2050 crates/srv/src/server/reactive.rs
-2050 frontend/app/view/swarm/swarm-model.ts
+2071 frontend/app/view/swarm/swarm-model.ts
