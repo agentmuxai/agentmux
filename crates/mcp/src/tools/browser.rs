@@ -898,6 +898,13 @@ fn key_result_text(data: Option<&serde_json::Value>) -> String {
     let Some(d) = data else {
         return "Dispatched".to_string();
     };
+    // Enter or Space taken as a click (the grant's Enter and Space power): what it was taken to mean, and the result.
+    if let Some(resolved) = d.get("resolved").and_then(|r| r.as_str()) {
+        let page = d.get("page").filter(|p| !p.is_null()).map(|p| format!(" The page now: {p}")).unwrap_or_default();
+        let after = d.get("after").filter(|a| !a.is_null()).map(|a| format!(" The control now: {a}")).unwrap_or_default();
+        let clicked = if d.get("bypassed").and_then(|b| b.as_bool()) == Some(true) { " It was made without asking, under the user's auto-approve." } else { "" };
+        return format!("Pressed: {resolved}.{clicked}{after}{page}");
+    }
     let Some(after) = d.get("after").filter(|a| !a.is_null()) else {
         return "Dispatched".to_string();
     };
@@ -941,11 +948,17 @@ fn granted_text(d: &Value) -> String {
     } else {
         format!("for {} more min", d["minutes_left"].as_u64().unwrap_or(0))
     };
+    // With the power, Enter and Space are taken as the click they are; a key whose click can't be named is refused.
+    let keys = if has("enter_space") {
+        "eval stays refused, and Enter and Space (action key) are taken as the click they are: a form's default button, \
+         a button, a link or a checkbox, checked like any click; on anything else they are refused, so click by ref"
+    } else {
+        "eval and Enter/Space stay refused"
+    };
     format!(
         "Auto-approve on {how_long} on {}: committing clicks (action click) run without asking. Nobody \
-         checks them now, so check each one yourself. A payment still asks, eval and Enter/Space stay \
-         refused, and on any other site clicks ask as before.{} Stop it with action stop_auto_approve when the job \
-         is done.",
+         checks them now, so check each one yourself. A payment still asks, {keys}, and on any other site clicks ask as \
+         before.{} Stop it with action stop_auto_approve when the job is done.",
         sites.join(", "),
         if terminal {
             " You may also type and run commands in a web terminal on these sites with action terminal: \
