@@ -243,13 +243,31 @@ async function settle() {
     }
 }
 
-async function advance(ms: number) {
+/** Wait, in real time, until a condition holds (a test whose condition never holds fails on what it asserts next). */
+async function until(condition: () => boolean) {
+    for (let i = 0; i < 5000 && !condition(); i++) await new Promise<void>((r) => realTimeout(r, 2));
+}
+
+/** Move the fake clock, then wait for what that should make happen. */
+async function advance(ms: number, then: () => boolean = () => true) {
     await vi.advanceTimersByTimeAsync(ms);
+    await until(then);
     await settle();
 }
 
-/** Boot the module fresh and run initApp() for a main window until it waits on the clock or finishes. */
-async function run(): Promise<Outcome> {
+/** initHostMux got as far as starting its notices; they load their modules, so they take a moment. */
+const noticesStarted = () =>
+    h.surfaceBackgroundAudit.mock.calls.length > 0 &&
+    h.surfaceIncidents.mock.calls.length > 0 &&
+    h.offerLayoutFromOtherBuild.mock.calls.length > 0 &&
+    h.offerForkSlugUpdate.mock.calls.length > 0 &&
+    h.GetClientData.mock.calls.length >= 2;
+
+/**
+ * Boot the module fresh and run initApp() for a main window until `blocked` holds (the call it
+ * is meant to wait on has been made) or, without one, until it finishes.
+ */
+async function run(blocked?: () => boolean): Promise<Outcome> {
     // The page has been up a while: initHostMux's own start is not the clock's zero.
     vi.advanceTimersByTime(777);
     // A fresh copy of app-init (its once-per-page state starts empty); what it imports stays loaded.
@@ -265,6 +283,8 @@ async function run(): Promise<Outcome> {
             out.error = e;
         }
     );
+    await until(blocked ?? (() => out.done));
+    if (!blocked && h.benchDump.mock.calls.length > 0) await until(noticesStarted);
     await settle();
     return out;
 }
@@ -682,9 +702,9 @@ describe("initHostMux — reads are retried, writes are not", () => {
     it("retries GetClientData after a request that never got a response", async () => {
         h.GetClientData.mockRejectedValueOnce(flaky());
 
-        const out = await run();
+        const out = await run(() => h.GetClientData.mock.calls.length >= 1);
         expect(out.done).toBe(false);
-        await advance(100);
+        await advance(100, () => out.done);
 
         expect(out).toEqual({ done: true });
         expect(h.GetClientData).toHaveBeenCalledTimes(3); // 2 reads + the restore-notice read
@@ -693,8 +713,8 @@ describe("initHostMux — reads are retried, writes are not", () => {
     it("retries GetWindow", async () => {
         h.GetWindow.mockRejectedValueOnce(flaky());
 
-        const out = await run();
-        await advance(100);
+        const out = await run(() => h.GetWindow.mock.calls.length >= 1);
+        await advance(100, () => out.done);
 
         expect(out).toEqual({ done: true });
         expect(h.GetWindow).toHaveBeenCalledTimes(2);
@@ -703,8 +723,8 @@ describe("initHostMux — reads are retried, writes are not", () => {
     it("retries the first GetWorkspace", async () => {
         h.GetWorkspace.mockRejectedValueOnce(flaky());
 
-        const out = await run();
-        await advance(100);
+        const out = await run(() => h.GetWorkspace.mock.calls.length >= 1);
+        await advance(100, () => out.done);
 
         expect(out).toEqual({ done: true });
         expect(h.GetWorkspace).toHaveBeenCalledTimes(2);
@@ -785,11 +805,11 @@ describe("initHostMux — reads are retried, writes are not", () => {
 describe("initHostMux — every srv call has five seconds", () => {
     const timeoutMsg = (label: string) => `Timeout: ${label} did not respond within 5s`;
 
-    async function expectTimeout(label: string) {
-        const out = await run();
+    async function expectTimeout(label: string, blocked: () => boolean) {
+        const out = await run(blocked);
         await advance(4999);
         expect(out.done).toBe(false);
-        await advance(1);
+        await advance(1, () => out.done);
 
         expect(out.done).toBe(true);
         expect(out.error).toBeInstanceOf(h.StartupFailureHandled);
@@ -801,7 +821,7 @@ describe("initHostMux — every srv call has five seconds", () => {
         h.GetClientData.mockReset();
         h.GetClientData.mockReturnValue(never());
 
-        await expectTimeout("GetClientData");
+        await expectTimeout("GetClientData", () => h.GetClientData.mock.calls.length >= 1);
     });
 
     it("CreateWindow, on a cold start", async () => {
@@ -809,14 +829,14 @@ describe("initHostMux — every srv call has five seconds", () => {
         h.CreateWindow.mockReset();
         h.CreateWindow.mockReturnValue(never());
 
-        await expectTimeout("CreateWindow");
+        await expectTimeout("CreateWindow", () => h.CreateWindow.mock.calls.length >= 1);
     });
 
     it("GetWindow", async () => {
         h.GetWindow.mockReset();
         h.GetWindow.mockReturnValue(never());
 
-        await expectTimeout("GetWindow");
+        await expectTimeout("GetWindow", () => h.GetWindow.mock.calls.length >= 1);
     });
 
     it("the replacement CreateWindow", async () => {
@@ -824,14 +844,14 @@ describe("initHostMux — every srv call has five seconds", () => {
         h.CreateWindow.mockReset();
         h.CreateWindow.mockReturnValue(never());
 
-        await expectTimeout("CreateWindow");
+        await expectTimeout("CreateWindow", () => h.CreateWindow.mock.calls.length >= 1);
     });
 
     it("GetWorkspace", async () => {
         h.GetWorkspace.mockReset();
         h.GetWorkspace.mockReturnValue(never());
 
-        await expectTimeout("GetWorkspace");
+        await expectTimeout("GetWorkspace", () => h.GetWorkspace.mock.calls.length >= 1);
     });
 
     it("CloseWindow", async () => {
@@ -839,7 +859,7 @@ describe("initHostMux — every srv call has five seconds", () => {
         h.CloseWindow.mockReset();
         h.CloseWindow.mockReturnValue(never());
 
-        await expectTimeout("CloseWindow");
+        await expectTimeout("CloseWindow", () => h.CloseWindow.mock.calls.length >= 1);
     });
 
     it("the replacement CreateWindow, after the close", async () => {
@@ -847,7 +867,7 @@ describe("initHostMux — every srv call has five seconds", () => {
         h.CreateWindow.mockReset();
         h.CreateWindow.mockReturnValue(never());
 
-        await expectTimeout("CreateWindow");
+        await expectTimeout("CreateWindow", () => h.CreateWindow.mock.calls.length >= 1);
     });
 
     it("the GetWorkspace after the window is recreated", async () => {
@@ -855,7 +875,7 @@ describe("initHostMux — every srv call has five seconds", () => {
         h.GetWorkspace.mockResolvedValueOnce(null);
         h.GetWorkspace.mockReturnValue(never());
 
-        await expectTimeout("GetWorkspace");
+        await expectTimeout("GetWorkspace", () => h.GetWorkspace.mock.calls.length >= 2);
     });
 });
 
@@ -1078,7 +1098,7 @@ describe("initHostMux — instance tracking", () => {
         h.api.getInstanceNumber.mockReset();
         h.api.getInstanceNumber.mockReturnValue(new Promise<number>((r) => (release = () => r(2))));
 
-        const out = await run();
+        const out = await run(() => h.api.getInstanceNumber.mock.calls.length >= 1);
 
         expect(out.done).toBe(false);
         expect(h.benchDump).not.toHaveBeenCalled();
@@ -1089,6 +1109,7 @@ describe("initHostMux — instance tracking", () => {
         expect(h.GetClientData).toHaveBeenCalledTimes(1);
 
         release();
+        await until(() => out.done && noticesStarted());
         await settle();
 
         expect(out.done).toBe(true);
@@ -1178,11 +1199,11 @@ describe("initHostMux — the startup-perf lines", () => {
         h.GetWorkspace.mockImplementation(() => after(25, workspace()));
         h.loadConnStatus.mockImplementation(() => after(300, undefined));
 
-        const out = await run();
-        await advance(120);
-        await advance(40);
-        await advance(25);
-        await advance(300);
+        const out = await run(() => h.GetClientData.mock.calls.length >= 1);
+        await advance(120, () => h.GetWindow.mock.calls.length >= 1);
+        await advance(40, () => h.GetWorkspace.mock.calls.length >= 1);
+        await advance(25, () => h.loadConnStatus.mock.calls.length >= 1);
+        await advance(300, () => out.done && noticesStarted());
 
         expect(out).toEqual({ done: true });
         expect(perfLines()).toEqual([
@@ -1204,10 +1225,10 @@ describe("initHostMux — the startup-perf lines", () => {
         h.GetWindow.mockReset();
         h.GetWindow.mockImplementation(() => after(10, win()));
 
-        await run();
-        await advance(20);
-        await advance(70);
-        await advance(10);
+        const out = await run(() => h.GetClientData.mock.calls.length >= 1);
+        await advance(20, () => h.CreateWindow.mock.calls.length >= 1);
+        await advance(70, () => h.GetWindow.mock.calls.length >= 1);
+        await advance(10, () => out.done && noticesStarted());
 
         expect(perfLines().slice(0, 3)).toEqual([
             "[startup-perf] GetClientData: 20.0ms (total: 20.0ms)",
@@ -1227,11 +1248,11 @@ describe("initHostMux — the startup-perf lines", () => {
         h.GetWorkspace.mockReset();
         h.GetWorkspace.mockImplementation(() => after(5, workspace()));
 
-        await run();
-        await advance(20);
-        await advance(35);
-        await advance(55);
-        await advance(5);
+        const out = await run(() => h.GetClientData.mock.calls.length >= 1);
+        await advance(20, () => h.GetWindow.mock.calls.length >= 1);
+        await advance(35, () => h.CreateWindow.mock.calls.length >= 1);
+        await advance(55, () => h.GetWorkspace.mock.calls.length >= 1);
+        await advance(5, () => out.done && noticesStarted());
 
         expect(perfLines().slice(0, 4)).toEqual([
             "[startup-perf] GetClientData: 20.0ms (total: 20.0ms)",
@@ -1255,13 +1276,13 @@ describe("initHostMux — the startup-perf lines", () => {
         h.CreateWindow.mockReset();
         h.CreateWindow.mockImplementation(() => after(45, win({ oid: "win-new", workspaceid: "ws-new" })));
 
-        await run();
-        await advance(20);
-        await advance(35);
-        await advance(12);
-        await advance(30);
-        await advance(45);
-        await advance(15);
+        const out = await run(() => h.GetClientData.mock.calls.length >= 1);
+        await advance(20, () => h.GetWindow.mock.calls.length >= 1);
+        await advance(35, () => h.GetWorkspace.mock.calls.length >= 1);
+        await advance(12, () => h.CloseWindow.mock.calls.length >= 1);
+        await advance(30, () => h.CreateWindow.mock.calls.length >= 1);
+        await advance(45, () => h.GetWorkspace.mock.calls.length >= 2);
+        await advance(15, () => out.done && noticesStarted());
 
         expect(perfLines().slice(0, 5)).toEqual([
             "[startup-perf] GetClientData: 20.0ms (total: 20.0ms)",
