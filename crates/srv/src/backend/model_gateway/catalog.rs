@@ -3,7 +3,8 @@
 
 //! The routes AgentMux ships. A route's address is fixed here and never read from an agent's request.
 //!
-//! The model list and prices were read from OpenRouter's public models API on 2026-11-06. They are
+//! The model list and prices were read from OpenRouter's public models API on 2026-11-06, and the GLM, Qwen
+//! and Kimi models on 2026-11-08 (a model with no cache-read price is counted at its input price). They are
 //! the values the gateway counts spend with, so a price that moves upstream is a change here.
 
 /// One model a route serves. Prices are US dollars per million tokens.
@@ -57,6 +58,50 @@ const OPENROUTER_MODELS: &[Model] = &[
         price_in: 0.1165,
         price_out: 4.66,
         price_cache_read: 0.111,
+    },
+    Model {
+        id: "z-ai/glm-4.6",
+        label: "GLM 4.6",
+        context: 204_800,
+        tools: true,
+        thinking: true,
+        images: false,
+        price_in: 0.5,
+        price_out: 2.0,
+        price_cache_read: 0.1,
+    },
+    Model {
+        id: "qwen/qwen3-coder",
+        label: "Qwen3 Coder",
+        context: 262_144,
+        tools: true,
+        thinking: false,
+        images: false,
+        price_in: 0.3,
+        price_out: 1.0,
+        price_cache_read: 0.1,
+    },
+    Model {
+        id: "moonshotai/kimi-k2-0905",
+        label: "Kimi K2 0905",
+        context: 262_144,
+        tools: true,
+        thinking: false,
+        images: false,
+        price_in: 0.6,
+        price_out: 2.5,
+        price_cache_read: 0.6,
+    },
+    Model {
+        id: "moonshotai/kimi-k2.7-code",
+        label: "Kimi K2.7 Code",
+        context: 262_144,
+        tools: true,
+        thinking: true,
+        images: true,
+        price_in: 0.6,
+        price_out: 3.5,
+        price_cache_read: 0.16,
     },
 ];
 
@@ -131,5 +176,24 @@ mod tests {
         assert!(validate("claude", "nowhere", "").unwrap_err().contains("openrouter"));
         assert!(validate("codex", "openrouter", "").unwrap_err().contains("serves claude"));
         assert!(validate("claude", "openrouter", "gpt-5").unwrap_err().contains("deepseek/deepseek-v4.1-flash-1017"));
+    }
+
+    #[test]
+    fn every_model_is_listed_once_and_counted_at_a_real_price() {
+        for r in ROUTES {
+            for (i, m) in r.models.iter().enumerate() {
+                assert!(r.models[i + 1..].iter().all(|o| o.id != m.id), "{} is listed twice", m.id);
+                assert!(m.tools, "{} cannot call tools, so no harness can use it", m.id);
+                assert!(m.price_in > 0.0 && m.price_out > 0.0 && m.price_cache_read > 0.0, "{}", m.id);
+                assert!(m.price_cache_read <= m.price_in, "{} reads its cache above its input price", m.id);
+            }
+        }
+    }
+
+    #[test]
+    fn the_bake_off_models_are_served() {
+        for id in ["z-ai/glm-4.6", "qwen/qwen3-coder", "moonshotai/kimi-k2-0905", "moonshotai/kimi-k2.7-code"] {
+            assert!(validate("claude", "openrouter", id).is_ok(), "{id}");
+        }
     }
 }
