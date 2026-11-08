@@ -22,12 +22,9 @@ const GROK_DEFAULT_LIFETIME_MS: i64 = 30 * 24 * 60 * 60 * 1000;
 
 /// The providers whose sign-in is read from a file, by the CLI's file stem.
 pub fn provider_of_cli(cli_path: &str) -> Option<&'static str> {
+    // `muse-bin-<version>`: Muse Code's native binary on Windows, which is what the launcher installs.
     let stem = Path::new(cli_path).file_stem()?.to_str()?.to_ascii_lowercase();
-    match stem.as_str() {
-        "grok" => Some("grok"),
-        "muse" => Some("muse"),
-        _ => None,
-    }
+    ["grok", "muse"].into_iter().find(|name| stem == *name || stem.starts_with(&format!("{name}-")))
 }
 
 /// The credential file of `provider` under its config dir `dir`.
@@ -100,8 +97,7 @@ pub fn signed_in(cli_path: &str, auth_env: &std::collections::HashMap<String, St
         Some(dir) => dir.clone(),
         None => crate::backend::providers::default_auth_dir(config).ok()?,
     };
-    let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok()?.as_millis() as i64;
-    Some(probe(provider, Path::new(&dir), now_ms) == Some(OAuthProbeStatus::Valid))
+    Some(probe(provider, Path::new(&dir), agentmux_common::time::now_ms()) == Some(OAuthProbeStatus::Valid))
 }
 
 #[cfg(test)]
@@ -171,6 +167,7 @@ mod tests {
         assert_eq!(provider_of_cli("C:/tools/grok.exe"), Some("grok"));
         assert_eq!(provider_of_cli("/home/u/.grok/bin/grok"), Some("grok"));
         assert_eq!(provider_of_cli("/usr/bin/muse"), Some("muse"));
+        assert_eq!(provider_of_cli("C:/Users/u/AppData/Local/muse/muse-bin-1.4.7-R6101.1.exe"), Some("muse"));
         assert_eq!(provider_of_cli("pi-acp"), None);
     }
 
