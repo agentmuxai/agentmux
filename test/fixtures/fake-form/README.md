@@ -15,7 +15,8 @@ Every form's submit is caught and recorded, not sent: `window.__submits` holds
 | `#holder` (pay form) | clicks "Pay now": a payment always asks | types a space |
 | `#user`, `#pw` (login form) | clicks "Sign in"; the password is not typed into | types a space; refused in `#pw` |
 | `#lonely` | refused: the form has no submit button | types a space |
-| `#own` | refused: the field listens for keys itself | types a space |
+| `#own` | refused: the field listens for keys itself | refused |
+| `#deleg` (a form that listens for keys) | refused: the form listens for keys | refused |
 | `#note` (textarea) | refused | types a space |
 | `#loose` | refused: not in a form | types a space |
 | `#plain` | clicks it | clicks it |

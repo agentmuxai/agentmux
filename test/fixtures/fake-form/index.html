@@ -9,6 +9,7 @@
 <form id="login"><label>User <input id="user" name="user"></label> <label>Password <input id="pw" name="pw" type="password"></label> <button>Sign in</button></form>
 <form id="nobutton"><label>Lonely <input id="lonely" name="lonely"></label></form>
 <form id="listening"><label>Own keys <input id="own" name="own"></label> <button>Send it</button></form>
+<form id="delegating"><label>Delegated <input id="deleg" name="deleg"></label> <button>Send delegated</button></form>
 <form id="notes"><label>Notes <textarea id="note" name="note"></textarea></label> <button>Save notes</button></form>
 
 <p><label>Outside a form <input id="loose"></label></p>
@@ -27,5 +28,7 @@
   document.getElementById("plain").addEventListener("click", () => window.__clicks.push("plain"));
   document.getElementById("widget").addEventListener("keydown", (e) => window.__clicks.push("widget:" + e.key));
   // A field that reads its own keys: what Enter means here is the page's, not the form's.
+  // A handler on the form, as an autocomplete or a delegated library has: the field itself has none.
+  document.getElementById("delegating").addEventListener("keydown", (e) => window.__clicks.push("deleg:" + e.key));
   document.getElementById("own").addEventListener("keydown", (e) => window.__clicks.push("own:" + e.key));
 </script>

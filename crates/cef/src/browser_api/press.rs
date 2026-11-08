@@ -69,10 +69,29 @@ async fn resolve(cdp: &mut super::cdp::CdpSession, key: &str) -> Result<Resolved
     Ok(Resolved { effect: text("effect"), why: text("why"), target: object("el"), focused: object("focused") })
 }
 
-/// Does the element listen for keys itself? Then the key's effect is the page's
-/// own, and not one to name. Asked of the node in the page's own world: the
-/// isolated world's view of it holds only the listeners AgentMux added.
-async fn handles_keys(cdp: &mut super::cdp::CdpSession, object_id: &str) -> bool {
+/// The focused element and the elements above it that a key reaches before the form does (through a
+/// shadow root's host too), up to and including its form; just the element when it is in no form.
+/// Document- and window-level handlers are not read: nearly every framework page has them, and the
+/// click is still classified and checked before it is made.
+const KEY_PATH: &str = "function () { const out = []; for (let n = this; n; n = n.parentElement || (n.getRootNode && n.getRootNode().host) || null) { out.push(n); if (n.localName === 'form') return out; } return [this]; }";
+
+async fn key_path(cdp: &mut super::cdp::CdpSession, focused: &str) -> Option<Vec<String>> {
+    let path = call(cdp, "Runtime.callFunctionOn", json!({ "objectId": focused, "functionDeclaration": KEY_PATH, "returnByValue": false })).await.ok()?;
+    let array = path.pointer("/result/objectId")?.as_str()?;
+    let items = call(cdp, "Runtime.getProperties", json!({ "objectId": array, "ownProperties": true })).await.ok()?;
+    let ids: Vec<String> = items
+        .get("result")?
+        .as_array()?
+        .iter()
+        .filter(|p| p.get("name").and_then(|n| n.as_str()).is_some_and(|n| n.parse::<usize>().is_ok()))
+        .filter_map(|p| p.pointer("/value/objectId")?.as_str().map(str::to_string))
+        .collect();
+    (!ids.is_empty()).then_some(ids)
+}
+
+/// Does the node listen for keys itself? Asked of the node in the page's own world: the isolated
+/// world's view of it holds only the listeners AgentMux added.
+async fn listens_for_keys(cdp: &mut super::cdp::CdpSession, object_id: &str) -> bool {
     let Some(backend) = backend_of(cdp, object_id).await else { return true };
     let Ok(node) = cdp.call("DOM.resolveNode", json!({ "backendNodeId": backend })).await else { return true };
     let Some(page_object) = node.pointer("/object/objectId").and_then(|o| o.as_str()) else { return true };
@@ -80,6 +99,18 @@ async fn handles_keys(cdp: &mut super::cdp::CdpSession, object_id: &str) -> bool
     v.get("listeners")
         .and_then(|l| l.as_array())
         .is_none_or(|l| l.iter().any(|x| matches!(x.get("type").and_then(|t| t.as_str()), Some("keydown" | "keypress" | "keyup"))))
+}
+
+/// Does the page handle keys on the way to the form from the focused element? Then the key's effect
+/// is the page's own, and not one to name. Fails closed when the path can't be read.
+async fn handles_keys(cdp: &mut super::cdp::CdpSession, focused: &str) -> bool {
+    let Some(path) = key_path(cdp, focused).await else { return true };
+    for node in &path {
+        if listens_for_keys(cdp, node).await {
+            return true;
+        }
+    }
+    false
 }
 
 /// The element's facts, for hiding what a field holds.
@@ -132,6 +163,11 @@ async fn press(root: &mut super::cdp::CdpSession, req: &PressReq) -> Result<Valu
         return Err(format!("{} was not pressed: the page is off the sites the person granted", req.key));
     }
     let found = resolve(root, &req.key).await?;
+    let (Some(focused), "click" | "type") = (found.focused.as_deref(), found.effect.as_str()) else { return Err(refused(&req.key, &found.why)) };
+    // A page that handles keys on the way to the form owns the key's effect: for a space typed as for a click.
+    if handles_keys(root, focused).await {
+        return Err(refused(&req.key, "the page listens for keys on this element or above it in its form, so the key's effect is the page's own"));
+    }
     if found.effect == "type" {
         // An approved retry presents a click: if the focus has moved to a text field since, that click is not
         // the one the person saw, and a space typed there is not what they approved.
@@ -141,24 +177,16 @@ async fn press(root: &mut super::cdp::CdpSession, req: &PressReq) -> Result<Valu
         // A space in a text field, typed here and not by a second call: text goes where the focus is and
         // cannot press a button the page moved focus to, which a key event would.
         refuse_typing_into_secret_field(root).await?;
-        let before = match found.focused.as_deref() {
-            Some(focused) => facts_of(root, focused).await,
-            None => None,
-        };
+        let before = facts_of(root, focused).await;
         insert_text(root, " ").await?;
         // Without the field's facts nothing is shown of it: it could hold a secret.
-        let after = match (found.focused.as_deref(), before) {
-            (Some(focused), Some(before)) => read_back(root, focused, &before).await,
-            _ => Value::Null,
+        let after = match before {
+            Some(before) => read_back(root, focused, &before).await,
+            None => Value::Null,
         };
         return Ok(json!({ "after": after, "resolved": found.why }));
     }
-    let (Some(target), "click") = (found.target.as_deref(), found.effect.as_str()) else { return Err(refused(&req.key, &found.why)) };
-    if let Some(focused) = found.focused.as_deref() {
-        if handles_keys(root, focused).await {
-            return Err(refused(&req.key, "the page listens for keys on this element, so the key's effect is the page's own"));
-        }
-    }
+    let Some(target) = found.target.as_deref() else { return Err(refused(&req.key, &found.why)) };
     let backend = backend_of(root, target).await.ok_or("the control is gone from the page")?;
     let facts = describe(root, backend).await.ok_or("the control is gone from the page")?;
     match check_click(root, target, &facts, "", &now, req.approved_as.as_ref(), req.approved).await? {
