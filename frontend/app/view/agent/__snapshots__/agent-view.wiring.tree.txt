@@ -17,8 +17,4 @@
         <div.agent-composer-region data-toast-avoid="">
           <AgentFooter {"agentName":"\"Korp\"","getCompletions":"<fn>","isComposerEmptyRef":"<fn>","onRecallLatestQueued":"<fn>","onSendMessage":"<fn>","onStopAgent":"<fn>","onTyping":"<fn>","viewModel":"<object>"}>
       <div.messages-dock style="zoom: 1;">
-        <aside.messages-rail aria-label="Jekt Messages">
-          <button.ui-button--chrome.messages-rail__button aria-label="Jekt Messages" title="Jekt Messages" type="button">
-            <span.messages-rail__marks>
-            <span.messages-rail__text>
     <AgentShellDrawer {"blockId":"\"blk-12345678\"","cwd":"\"/work\"","onShellExited":"<fn>","onTermDispose":"<fn>","onTermReady":"<fn>","open":"false","persistedHeight":"undefined","shellSubBlockId":"undefined"}>
