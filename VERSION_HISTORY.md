@@ -1,5 +1,61 @@
 # AgentMux Version History
 
+## 0.60.21 — 2026-11-08
+
+- Settings > Keyboard shortcuts: record a new shortcut by pressing it, with conflicts shown and a choice to replace the other command's key or limit where it works
+- Agents can look at a Vault entry (Vault show), change its label, plain fields and tags (update), and check an entry or the whole Vault (verify, health), none of which returns a value
+- The download strip in a narrow browser pane keeps each file name readable and moves its buttons to a second line instead of pushing the name out of the row
+- Settings > Keyboard shortcuts: find a shortcut by pressing its keys, and export or import the keybindings
+- The Audit marks the rows that make a sound with a speaker, lights the row a sound just came from, and names the last sound with a button to its agent's pane
+- A status-bar list of who waits on you with a button to go there or open the agent, a toast that goes after ten seconds, and Do Not Disturb hiding it
+- A browser pane an agent opened saves a download into the agent's workspace downloads folder without asking, and tells the agent what was saved or why not; a person's own pane still asks, and the browser:downloadagentsave setting turns it off
+- Add tests for the type-ahead picker ahead of splitting it
+- Split the type-ahead picker into small functions over a state object
+- A page's location or notification request in a browser pane an agent drives now goes through the same countdown as the camera and microphone, instead of being left to the pane's default
+- Agents can give a shortcut new keys or put it back on its default (UI bind and reset); the person is told and can undo it
+- Add tests for the scroll follow binding ahead of splitting it
+- Split the scroll follow binding into small functions over a state object
+- Split the container turn function into small steps (no behaviour change)
+- The agent pane's Messages panel is on by default, collapsed to a Jekt Messages bar, opens over the conversation at 95% opacity, and incoming jekts no longer show in the conversation
+- An agent driving a browser pane is told when a sign-in prompt times out after 5 minutes, instead of just seeing a page that stopped responding
+- A browser pane's profile button shows an agent's own profile as soon as the agent opens the pane, without clicking it
+- Closing a pane with busy agents, or a browser page that asks Leave site, now asks inside that pane only; the rest of the tab and window stay live
+- Add tests for the pane tab strip's remaining paths ahead of splitting it
+- Split the pane tab strip into small functions over a state object
+- Add tests for the pane chrome shell's remaining paths ahead of splitting it
+- Split the pane chrome shell into small functions over state objects
+- Add tests for the strip reveal controller ahead of splitting it
+- Split the strip reveal controller into small functions over a state object
+- Add tests for the composer row layout's remaining paths ahead of splitting it
+- Split computeComposerRows into small functions over an anchors object
+- Add tests for what the Swarm view model's constructor wires up ahead of splitting it
+- Split the SwarmViewModel constructor into small listener methods
+- Add tests for the pane tab pill's tooltip, drop side, landing bounce and drag start ahead of splitting it
+- Split PaneTabStripItem into small pill components and hooks
+- Add tests for the title tooltip's placement, hand-over, grace, warm start and listeners ahead of splitting it
+- Split initTitleTooltips into small functions over a tooltip state object
+- On Linux, the sandbox fix covers the real AppImage mount name, and the sandbox-blocked dialog no longer offers Fix it now for a build the fix cannot cover
+- Add tests for the browser pane's freeze-frame ahead of splitting it
+- Split useFreezeFrame into small functions over a freeze state object
+- Add tests for the /btw overlay's streaming, reset, subscription and dismiss behavior
+- Split BtwOverlay into a stream hook, a dismiss hook and a body component
+- Agents: a leader may have 12 workers open at once (was 3), and the refusal names the limit
+- Add tests for the sound service's install wiring: priming, volume, waiting-tone focus and the bus listener
+- Models: an agent can be moved to another route or model in place, and the pane records the model that really answers
+- Split installSoundService into priming, effect-binding and bus-handler functions
+- fix(agents): Open on a parked agent no longer reports a workspace error when its pane comes back
+- Add tests for the History pane's agents list: loading, rows, filter, sessions, refresh and live updates
+- Split HistoryAgents into a list hook and small row, name-cell, bar and table components
+- Add tests for the persistent shell row: elapsed clock, live tail, status, pin panel, Stop button and peek inputs
+- Split PersistentShellBlock into view, peek and stop hooks plus summary and panel components, with no behaviour change
+- Add tests for initHostMux ahead of its function split
+- Split initHostMux into window, workspace and tab lookups plus dev-title and notice helpers, with no behaviour change
+- Add tests for TemplateApproval ahead of its function split
+- Split TemplateApproval into cloud, job, outputs and secrets fact rows plus an approval body, with no behaviour change
+- Make the initHostMux test wait for the calls it depends on instead of a quiet period
+- OpenRouter route: GLM 5.3, Qwen3.8 Max, Kimi K3 and Kimi K3.1 Pro join the DeepSeek models, with their price, context and flags
+- Add tests for scrubOrphanedInProgress ahead of its function split
+
 ## 0.60.20 — 2026-11-07
 
 - A Microsoft Store install asks the Microsoft Store whether there is an update and offers the version the Store lists; GitHub is only the release-notes link
