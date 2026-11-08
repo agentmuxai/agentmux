@@ -5,7 +5,7 @@
 // forks under the agent they were forked from, deleted agents included. A row
 // opens the agent's sessions from its record, and its Agent History tab.
 
-import { createEffect, createMemo, createSignal, For, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, Show, type Accessor, type JSX } from "solid-js";
 
 import { Button, FilterInput, IconButton } from "@/app/element/ui";
 import { createDomainStore } from "@/app/store/domain-store";
@@ -25,7 +25,28 @@ import { tip } from "@/app/element/tip";
 /** srv announces a change at most every two seconds while a transcript grows; a write by another AgentMux sharing the store is not announced, so the list also reads again this often. */
 const SAFETY_POLL_MS = 30_000;
 
-export const HistoryAgents = (props: { paneBlockId: string; visible: boolean }): JSX.Element => {
+type HistoryAgentsProps = { paneBlockId: string; visible: boolean };
+
+/** What the list reads and does: the live store, the filter, the open sessions and the derived rows. */
+interface AgentsList {
+    agents: Accessor<HistoryAgent[] | null>;
+    error: Accessor<string | null>;
+    refreshing: Accessor<boolean>;
+    refresh: () => Promise<void>;
+    filter: Accessor<string>;
+    setFilter: (query: string) => void;
+    open: Accessor<Record<string, Sessions>>;
+    toggleSessions: (id: string) => Promise<void>;
+    openHistory: (a: HistoryAgent) => void;
+    rows: Accessor<AgentRow[]>;
+    rowIds: Accessor<string[]>;
+    rowsById: Accessor<Map<string, AgentRow>>;
+    totals: Accessor<{ agents: number; bytes: number; archives: number }>;
+}
+
+const now = () => Date.now();
+
+function useAgentsList(props: HistoryAgentsProps): AgentsList {
     // Live while the section is shown: a new session, a growing transcript or a renamed agent updates it.
     const store = createDomainStore<HistoryAgent[] | null>({
         initial: null,
@@ -70,101 +91,124 @@ export const HistoryAgents = (props: { paneBlockId: string; visible: boolean }):
     const rowIds = createMemo(() => rows().map((r) => r.agent.definition_id));
     const rowsById = createMemo(() => new Map(rows().map((r) => [r.agent.definition_id, r])));
     const totals = createMemo(() => historyTotals(agents() ?? []));
-    const now = () => Date.now();
+    return { agents, error, refreshing, refresh, filter, setFilter, open, toggleSessions, openHistory, rows, rowIds, rowsById, totals };
+}
+
+const AgentsBar = (props: { list: AgentsList }): JSX.Element => (
+    <div class="warden-history-bar">
+        <FilterInput value={props.list.filter()} onInput={props.list.setFilter} placeholder="Filter agents" />
+        <Button tone="quiet" density="compact" icon="rotate" busy={props.list.refreshing()} onClick={() => void props.list.refresh()}>
+            Refresh
+        </Button>
+    </div>
+);
+
+/** The agent's name cell: the sessions toggle, the name (or that it was deleted), its short id and what it was forked from. */
+const AgentNameCell = (props: { id: string; row: Accessor<AgentRow>; sessions: Accessor<Sessions | undefined>; list: AgentsList }): JSX.Element => {
+    const a = () => props.row().agent;
+    return (
+        <td>
+            <span class="warden-history-agent" style={{ "padding-left": `${props.row().depth * 1.25}em` }}>
+                <IconButton
+                    icon={props.sessions() ? "chevron-down" : "chevron-right"}
+                    label={props.sessions() ? "Hide sessions" : "Show sessions"}
+                    tone="quiet"
+                    density="compact"
+                    onClick={() => void props.list.toggleSessions(props.id)}
+                />
+                <Show when={!a().deleted} fallback={<span class="warden-manager-dim">Deleted agent</span>}>
+                    <span>{a().name}</span>
+                </Show>
+                <span class="warden-manager-mono warden-manager-dim warden-history-id">{props.id.slice(0, 8)}</span>
+                <Show when={a().fork_of}>
+                    <span class="warden-manager-dim warden-history-fork">
+                        fork of {a().fork_of_name || a().fork_of.slice(0, 8)}
+                    </span>
+                </Show>
+            </span>
+        </td>
+    );
+};
+
+/** One agent's row, and its sessions row under it while they are open. */
+const AgentRowItem = (props: { id: string; list: AgentsList }): JSX.Element => {
+    // The last row stands while the id is on its way out of the list.
+    const row = createMemo<AgentRow>((last) => props.list.rowsById().get(props.id) ?? last!);
+    const a = () => row().agent;
+    const sessions = () => props.list.open()[props.id];
+    return (
+        <>
+            <tr data-agent={props.id} data-deleted={a().deleted ? "" : undefined}>
+                <AgentNameCell id={props.id} row={row} sessions={sessions} list={props.list} />
+                <td>{a().provider || <span class="warden-manager-dim">—</span>}</td>
+                <td class="warden-history-num">{formatBytes(a().current_bytes + a().archive_bytes)}</td>
+                <td class="warden-history-num">{a().archives || <span class="warden-manager-dim">—</span>}</td>
+                <td>{a().last_active_ms ? `${formatAge(ageMs(a().last_active_ms, now()))} ago` : "—"}</td>
+                <td class="warden-history-actions">
+                    <Button tone="quiet" density="compact" onClick={() => props.list.openHistory(a())}>
+                        Open history
+                    </Button>
+                </td>
+            </tr>
+            <Show when={sessions()}>
+                {(s) => (
+                    <tr class="warden-history-sessions-row">
+                        <td colSpan={6}>
+                            <SessionList sessions={s()} />
+                        </td>
+                    </tr>
+                )}
+            </Show>
+        </>
+    );
+};
+
+const AgentsTable = (props: { list: AgentsList }): JSX.Element => (
+    <table class="warden-manager-table warden-history-table">
+        <thead>
+            <tr>
+                <th>Agent</th>
+                <th>Provider</th>
+                <th class="warden-history-num">History</th>
+                <th class="warden-history-num">Archived</th>
+                <th>Last active</th>
+                <th />
+            </tr>
+        </thead>
+        <tbody>
+            <For each={props.list.rowIds()}>{(id) => <AgentRowItem id={id} list={props.list} />}</For>
+        </tbody>
+    </table>
+);
+
+export const HistoryAgents = (props: HistoryAgentsProps): JSX.Element => {
+    const list = useAgentsList(props);
+    const totals = list.totals;
 
     return (
         <div class="warden-history-agents">
-            <div class="warden-history-bar">
-                <FilterInput value={filter()} onInput={setFilter} placeholder="Filter agents" />
-                <Button tone="quiet" density="compact" icon="rotate" busy={refreshing()} onClick={() => void refresh()}>
-                    Refresh
-                </Button>
-            </div>
-            <Show when={agents()}>
+            <AgentsBar list={list} />
+            <Show when={list.agents()}>
                 <p class="warden-manager-summary">
                     {totals().agents} agents · {formatBytes(totals().bytes)} kept · {totals().archives} archived conversations
                 </p>
             </Show>
-            <Show when={error()}>
-                <div class="warden-manager-error">⚠ {error()}</div>
+            <Show when={list.error()}>
+                <div class="warden-manager-error">⚠ {list.error()}</div>
             </Show>
             <Show
-                when={rows().length > 0}
+                when={list.rows().length > 0}
                 fallback={
                     <div class="warden-section-stub">
-                        {agents() === null && !error() ? "Loading…" : filter() ? "No agent matches." : "No agent history yet."}
+                        {list.agents() === null && !list.error()
+                            ? "Loading…"
+                            : list.filter()
+                              ? "No agent matches."
+                              : "No agent history yet."}
                     </div>
                 }
             >
-                <table class="warden-manager-table warden-history-table">
-                    <thead>
-                        <tr>
-                            <th>Agent</th>
-                            <th>Provider</th>
-                            <th class="warden-history-num">History</th>
-                            <th class="warden-history-num">Archived</th>
-                            <th>Last active</th>
-                            <th />
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <For each={rowIds()}>
-                            {(id) => {
-                                // The last row stands while the id is on its way out of the list.
-                                const row = createMemo<AgentRow>((last) => rowsById().get(id) ?? last!);
-                                const a = () => row().agent;
-                                const sessions = () => open()[id];
-                                return (
-                                    <>
-                                        <tr data-agent={id} data-deleted={a().deleted ? "" : undefined}>
-                                            <td>
-                                                <span class="warden-history-agent" style={{ "padding-left": `${row().depth * 1.25}em` }}>
-                                                    <IconButton
-                                                        icon={sessions() ? "chevron-down" : "chevron-right"}
-                                                        label={sessions() ? "Hide sessions" : "Show sessions"}
-                                                        tone="quiet"
-                                                        density="compact"
-                                                        onClick={() => void toggleSessions(id)}
-                                                    />
-                                                    <Show
-                                                        when={!a().deleted}
-                                                        fallback={<span class="warden-manager-dim">Deleted agent</span>}
-                                                    >
-                                                        <span>{a().name}</span>
-                                                    </Show>
-                                                    <span class="warden-manager-mono warden-manager-dim warden-history-id">{id.slice(0, 8)}</span>
-                                                    <Show when={a().fork_of}>
-                                                        <span class="warden-manager-dim warden-history-fork">
-                                                            fork of {a().fork_of_name || a().fork_of.slice(0, 8)}
-                                                        </span>
-                                                    </Show>
-                                                </span>
-                                            </td>
-                                            <td>{a().provider || <span class="warden-manager-dim">—</span>}</td>
-                                            <td class="warden-history-num">{formatBytes(a().current_bytes + a().archive_bytes)}</td>
-                                            <td class="warden-history-num">{a().archives || <span class="warden-manager-dim">—</span>}</td>
-                                            <td>{a().last_active_ms ? `${formatAge(ageMs(a().last_active_ms, now()))} ago` : "—"}</td>
-                                            <td class="warden-history-actions">
-                                                <Button tone="quiet" density="compact" onClick={() => openHistory(a())}>
-                                                    Open history
-                                                </Button>
-                                            </td>
-                                        </tr>
-                                        <Show when={sessions()}>
-                                            {(s) => (
-                                                <tr class="warden-history-sessions-row">
-                                                    <td colSpan={6}>
-                                                        <SessionList sessions={s()} />
-                                                    </td>
-                                                </tr>
-                                            )}
-                                        </Show>
-                                    </>
-                                );
-                            }}
-                        </For>
-                    </tbody>
-                </table>
+                <AgentsTable list={list} />
             </Show>
             <div class="warden-manager-footnote">
                 Kept forever. "Open history" shows an agent's whole recorded conversation in this pane.
