@@ -3119,10 +3119,16 @@ async fn a_backlog_is_written_first_and_in_order() {
 async fn a_deferred_message_past_its_senders_expiry_is_dropped_not_written() {
     let (c, mut rx) = starting_controller();
     let past = agentmux_common::time::now_ms() - 1;
+    // The message goes with a held `[AgentMux]` note, as any delivery does.
+    crate::backend::reactive::held_notes::hold(&c.block_id, "upgrade", "[AgentMux] AgentMux was upgraded");
+    let (message, attached) = crate::backend::reactive::held_notes::attach(&c.block_id, "too late");
+    let record = RecordOrigin { origin: MessageOrigin::user(), notes: attached.note_texts() };
     let outcome = c
-        .send_user_message_with_images_from("too late".to_string(), None, Vec::new(), RecordOrigin::new(MessageOrigin::user()), Some(past))
+        .send_user_message_with_images_from(message, None, Vec::new(), record, Some(past))
         .unwrap();
     assert_eq!(outcome, SendOutcome::Deferred);
+    // What `deliver_agent_message_from` does as soon as the controller takes it.
+    attached.delivered();
     c.inner.lock().unwrap().spawning_in_progress = false;
 
     assert_eq!(c.send_user_message_outcome("on time".to_string()).unwrap(), SendOutcome::Sent);
@@ -3131,6 +3137,11 @@ async fn a_deferred_message_past_its_senders_expiry_is_dropped_not_written() {
     assert_eq!(lines.len(), 1, "the expired message never reached the process: {lines:?}");
     assert!(lines[0].contains("on time"), "{lines:?}");
     assert!(c.inner.lock().unwrap().deferred_deliveries.is_empty());
+    // The dropped message was not the note's to take with it.
+    let (_, reheld) = crate::backend::reactive::held_notes::attach(&c.block_id, "next");
+    let notes = reheld.note_texts();
+    assert!(notes.iter().any(|n| n.contains("AgentMux was upgraded")), "the note survives the drop: {notes:?}");
+    reheld.delivered();
 }
 
 /// Teardown must not silently discard accepted messages.

@@ -394,6 +394,9 @@ impl PersistentSubprocessController {
         while let Some(head) = inner.deferred_deliveries.front().cloned() {
             if head.expires_at_ms.is_some_and(|expires| expires <= now_ms) {
                 inner.deferred_deliveries.pop_front();
+                // The message is gone, but the `[AgentMux]` notes it carried
+                // are held again for the next one (#3894).
+                crate::backend::reactive::held_notes::rehold_dropped(block_id, &head.record.notes);
                 tracing::info!(
                     block_id = %block_id,
                     "deferred jekt expired while waiting for the process — dropped instead of delivered"
