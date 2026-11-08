@@ -127,7 +127,7 @@ describe("createPaneReadiness", () => {
     });
 
     it("force-reveals only when a caller explicitly opts in via revealTimeoutMs", () => {
-        const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
         const { value: r, dispose } = inRoot(() =>
             createPaneReadiness({ revealTimeoutMs: 5000, label: "block:bounded" })
         );
@@ -135,7 +135,38 @@ describe("createPaneReadiness", () => {
 
         vi.advanceTimersByTime(5001);
         expect(r.phase()).toBe("revealing");
-        expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("Forcing reveal"));
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Forcing reveal"));
+        warnSpy.mockRestore();
+        dispose();
+    });
+
+    /**
+     * A forced reveal is the caller's configured bound doing its job, so it
+     * must not surface as a host-log error. On every restart each restored
+     * agent pane re-runs its cold launch flow (CLI resolve + auth check)
+     * alongside all the others; the CLI resolve alone outlives the 1.5 s
+     * agent bound, so the auth gate is routinely still pending when the
+     * bound fires — and reports a moment later, once the pane is already
+     * revealed and the release is a no-op. Logged at error level, this
+     * surfaced every routine restart as ~8 host-log ERRORs (2026-11-08;
+     * identical after the 0.60.18 and 0.60.21 upgrades).
+     */
+    it("logs a forced reveal at warn level, not error", () => {
+        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+        const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        const { value: r, dispose } = inRoot(() =>
+            createPaneReadiness({ revealTimeoutMs: 1500, label: "block:restore" })
+        );
+        r.gate("auth");
+
+        vi.advanceTimersByTime(1501);
+        expect(r.phase()).toBe("revealing");
+        // The wording states what is true at reveal time — the gate is
+        // still pending — not that it "never reported": it usually does,
+        // just too late to matter.
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("gate(s) still pending: auth"));
+        expect(errSpy).not.toHaveBeenCalled();
+        warnSpy.mockRestore();
         errSpy.mockRestore();
         dispose();
     });
@@ -151,6 +182,7 @@ describe("createPaneReadiness", () => {
     it("honours a revealTimeoutMs LONGER than warnAfterMs", () => {
         const onTimeout = vi.fn();
         const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
         const { value: r, dispose } = inRoot(() =>
             createPaneReadiness({ warnAfterMs: 8000, revealTimeoutMs: 20000, label: "block:slow", onTimeout })
         );
@@ -159,14 +191,17 @@ describe("createPaneReadiness", () => {
         vi.advanceTimersByTime(8001); // warn deadline only
         expect(onTimeout).toHaveBeenCalledTimes(1);
         expect(r.phase()).toBe("assembling"); // warned, NOT revealed at 8s
+        // The genuinely-stuck warn deadline stays at error level.
+        expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("cover stays up"));
 
         vi.advanceTimersByTime(11000); // still short of 20s
         expect(r.phase()).toBe("assembling");
 
         vi.advanceTimersByTime(1001); // now past the caller's bound
         expect(r.phase()).toBe("revealing");
-        expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("Forcing reveal"));
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Forcing reveal"));
         errSpy.mockRestore();
+        warnSpy.mockRestore();
         dispose();
     });
 
