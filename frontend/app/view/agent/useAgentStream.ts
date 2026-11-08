@@ -165,6 +165,12 @@ interface UseAgentStreamOpts {
 /**
  * Subscribe to subprocess output and parse it into styled DocumentNodes.
  */
+/** A resumed conversation is a new stretch of work: the session title is judged afresh at the next message. */
+function retitleThen<T>(blockId: string, run: () => T): T {
+    markTitleStale(blockId);
+    return run();
+}
+
 export function useAgentStream({
     blockId,
     model,
@@ -223,11 +229,7 @@ export function useAgentStream({
         if (!enabled || !blockId || stored === undefined || stored === null) return;
         const reason = parseCatchUpRequest(stored, Date.now());
         void clearCatchUpRequest(blockId).catch(() => {});
-        if (reason) {
-            // A resumed conversation is a new stretch of work: the session title is judged afresh at the next message.
-            markTitleStale(blockId);
-            void memoryReinjectionController.catchUp(null, reason);
-        }
+        if (reason) void retitleThen(blockId, () => memoryReinjectionController.catchUp(null, reason));
     });
 
     // Tool-chunk and persistent-shell streaming subscriptions, installed at body scope (not inside

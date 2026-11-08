@@ -54,13 +54,7 @@ pub fn store_title(
     turn: Option<u32>,
     still_current: impl Fn() -> bool,
 ) -> Result<bool, String> {
-    store_title_at(store, block_id, title, replace, turn, now_ms(), still_current)
-}
-
-fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
+    store_title_at(store, block_id, title, replace, turn, agentmux_common::time::now_ms(), still_current)
 }
 
 /// Stamp the title as judged `now` at `turn` (the caller's, else the session's
@@ -123,7 +117,7 @@ pub fn confirm_title(
     turn: Option<u32>,
     still_current: impl Fn() -> bool,
 ) -> Result<bool, String> {
-    confirm_title_at(store, block_id, candidate, turn, now_ms(), still_current)
+    confirm_title_at(store, block_id, candidate, turn, agentmux_common::time::now_ms(), still_current)
 }
 
 fn confirm_title_at(

@@ -419,9 +419,12 @@ fn store_summary_title(
         }
         // A refresh judged the session afresh and found the same goal: the title
         // is confirmed as still right, so it stops being asked about at every message.
+        // The pane reads the renewed stamp from its block meta, which only a broadcast updates.
         Ok(false) if refresh => {
-            if let Err(e) = ambient::title::confirm_title(&state.mstore, block_id, title, turn, still_current) {
-                tracing::warn!(block_id = %block_id, error = %e, "session:activity_summary: could not confirm the title");
+            match ambient::title::confirm_title(&state.mstore, block_id, title, turn, still_current) {
+                Ok(true) => crate::backend::blockcontroller::core::broadcast_block_update(&state.mstore, &state.event_bus, block_id),
+                Ok(false) => {}
+                Err(e) => tracing::warn!(block_id = %block_id, error = %e, "session:activity_summary: could not confirm the title"),
             }
             false
         }
