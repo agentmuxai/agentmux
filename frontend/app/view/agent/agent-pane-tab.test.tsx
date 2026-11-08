@@ -70,6 +70,7 @@ describe("agent pane tab", () => {
         expect(setBlockMeta).toHaveBeenCalledWith("b1", { agentName: "BrowserLeader", "frame:title": null });
     });
 
+    const asMeta = (m: Record<string, unknown>) => m as MetaType;
     const ROUTED = {
         route: "openrouter",
         route_label: "OpenRouter",
@@ -82,7 +83,7 @@ describe("agent pane tab", () => {
         expect(agentTabIcon(meta)).toEqual({ kind: "provider", provider: "claude", vendor: "deepseek" });
         const switched = { ...meta, "agent:route_model": { ...ROUTED, model: "moonshotai/kimi-k3", label: "Kimi K3" } };
         expect(agentTabIcon(switched)).toEqual({ kind: "provider", provider: "claude", vendor: "moonshot" });
-        expect(agentTabIcon({ ...meta, "agent:route_model": null })).toEqual({
+        expect(agentTabIcon(asMeta({ ...meta, "agent:route_model": null }))).toEqual({
             kind: "provider",
             provider: "claude",
             vendor: "anthropic",
@@ -98,7 +99,7 @@ describe("agent pane tab", () => {
     });
 
     it("draws the badge on the pill's 14 px icon, and none when the harness answers itself", () => {
-        const badged = render(() => <PaneTabIconView icon={() => agentTabIcon({ agentProvider: "claude", "agent:route_model": ROUTED })} />);
+        const badged = render(() => <PaneTabIconView icon={() => agentTabIcon(asMeta({ agentProvider: "claude", "agent:route_model": ROUTED }))} />);
         expect(badged.container.querySelector(".dual-provider-logo-badge")).not.toBeNull();
         cleanup();
         const bare = render(() => <PaneTabIconView icon={() => ({ kind: "provider", provider: "codex" })} />);
