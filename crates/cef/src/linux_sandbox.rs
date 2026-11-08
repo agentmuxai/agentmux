@@ -310,77 +310,38 @@ mod imp {
             .unwrap_or(false)
     }
 
-    fn try_zenity() -> Option<SandboxDialogChoice> {
+    /// `fixable`: the dialog offers "Fix it now"; otherwise only "Continue without sandbox" and Cancel.
+    fn try_zenity(body: &str, fixable: bool) -> Option<SandboxDialogChoice> {
         if !have_on_path("zenity") {
             return None;
         }
-        let output = Command::new("zenity")
-            .args([
-                "--question",
-                "--title",
-                DIALOG_TITLE,
-                "--text",
-                DIALOG_BODY,
-                "--ok-label",
-                FIX_NOW_LABEL,
-                "--cancel-label",
-                "Cancel",
-                "--extra-button",
-                CONTINUE_WITHOUT_SANDBOX_LABEL,
-            ])
-            .output()
-            .ok()?;
+        let ok_label = if fixable { FIX_NOW_LABEL } else { CONTINUE_WITHOUT_SANDBOX_LABEL };
+        let mut args = vec!["--question", "--title", DIALOG_TITLE, "--text", body, "--ok-label", ok_label, "--cancel-label", "Cancel"];
+        if fixable {
+            args.extend(["--extra-button", CONTINUE_WITHOUT_SANDBOX_LABEL]);
+        }
+        let output = Command::new("zenity").args(args).output().ok()?;
         let stdout = String::from_utf8_lossy(&output.stdout);
-        Some(parse_zenity_result(output.status.success(), &stdout))
+        Some(if fixable {
+            parse_zenity_result(output.status.success(), &stdout)
+        } else {
+            parse_continue_only_zenity(output.status.success())
+        })
     }
 
-    fn try_kdialog() -> Option<SandboxDialogChoice> {
+    fn try_kdialog(body: &str, fixable: bool) -> Option<SandboxDialogChoice> {
         if !have_on_path("kdialog") {
             return None;
         }
-        let status = Command::new("kdialog")
-            .args([
-                "--title",
-                DIALOG_TITLE,
-                "--yesnocancel",
-                DIALOG_BODY,
-                "--yes-label",
-                FIX_NOW_LABEL,
-                "--no-label",
-                CONTINUE_WITHOUT_SANDBOX_LABEL,
-                "--cancel-label",
-                "Cancel",
-            ])
-            .status()
-            .ok()?;
-        Some(parse_kdialog_result(status.code()))
-    }
-
-    /// The same dialog for a binary the fix cannot cover: no "Fix it now".
-    fn show_uncoverable_dialog(exe: &std::path::Path) -> SandboxDialogChoice {
-        let body = uncoverable_dialog_body(&exe.to_string_lossy());
-        let zenity = have_on_path("zenity").then(|| {
-            Command::new("zenity")
-                .args(["--question", "--title", DIALOG_TITLE, "--text", body.as_str()])
-                .args(["--ok-label", CONTINUE_WITHOUT_SANDBOX_LABEL, "--cancel-label", "Cancel"])
-                .status()
-                .ok()
-                .map(|s| parse_continue_only_zenity(s.success()))
-        });
-        if let Some(Some(choice)) = zenity {
-            return choice;
+        let mut args = vec!["--title", DIALOG_TITLE];
+        if fixable {
+            args.extend(["--yesnocancel", body, "--yes-label", FIX_NOW_LABEL, "--no-label", CONTINUE_WITHOUT_SANDBOX_LABEL]);
+            args.extend(["--cancel-label", "Cancel"]);
+        } else {
+            args.extend(["--yesno", body, "--yes-label", CONTINUE_WITHOUT_SANDBOX_LABEL, "--no-label", "Cancel"]);
         }
-        have_on_path("kdialog")
-            .then(|| {
-                Command::new("kdialog")
-                    .args(["--title", DIALOG_TITLE, "--yesno", body.as_str()])
-                    .args(["--yes-label", CONTINUE_WITHOUT_SANDBOX_LABEL, "--no-label", "Cancel"])
-                    .status()
-                    .ok()
-                    .map(|s| parse_continue_only_kdialog(s.code()))
-            })
-            .flatten()
-            .unwrap_or(SandboxDialogChoice::NoDialogToolAvailable)
+        let status = Command::new("kdialog").args(args).status().ok()?;
+        Some(if fixable { parse_kdialog_result(status.code()) } else { parse_continue_only_kdialog(status.code()) })
     }
 
     /// Show the "sandbox blocked" dialog and return the user's choice.
@@ -392,13 +353,11 @@ mod imp {
     /// running from a terminal still sees it.
     pub fn show_userns_blocked_dialog() -> SandboxDialogChoice {
         // A binary no stanza names (a dev build, the portable tarball): offering the fix would loop forever.
-        if let Ok(exe) = std::env::current_exe() {
-            if !exe_covered_by_profile(&exe) {
-                return show_uncoverable_dialog(&exe);
-            }
-        }
-        try_zenity()
-            .or_else(try_kdialog)
+        let uncovered = std::env::current_exe().ok().filter(|exe| !exe_covered_by_profile(exe));
+        let body = uncovered.as_ref().map_or_else(|| DIALOG_BODY.to_string(), |exe| uncoverable_dialog_body(&exe.to_string_lossy()));
+        let fixable = uncovered.is_none();
+        try_zenity(&body, fixable)
+            .or_else(|| try_kdialog(&body, fixable))
             .unwrap_or(SandboxDialogChoice::NoDialogToolAvailable)
     }
 
