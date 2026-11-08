@@ -116,6 +116,12 @@ fn remember_previous(mstore: &Store, def_id: &str, from: Option<&Choice>) -> Res
         .map_err(|e| e.to_string())
 }
 
+/// Whether the pane is in a turn: its harness holds the old route's token until the turn ends.
+pub fn pane_in_a_turn(mstore: &Store, block_id: &str) -> bool {
+    use crate::backend::agent_state::{current_state, AgentState};
+    matches!(current_state(mstore, block_id), Some(AgentState::Working | AgentState::Waiting))
+}
+
 /// `finish_leaving` for a relaunch of the pane `this_block`, unless another pane of the same agent is still in a turn: its
 /// harness holds the old route's token until its own (deferred) relaunch, which is then the one that ends the access.
 pub fn finish_leaving_after_relaunch(mstore: &Store, def_id: &str, this_block: &str, in_a_turn: impl Fn(&str) -> bool) {

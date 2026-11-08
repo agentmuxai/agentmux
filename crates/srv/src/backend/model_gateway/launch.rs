@@ -100,9 +100,7 @@ pub fn carry_for_block(mstore: &Store, block_id: &str, env_vars: &mut HashMap<St
     let Ok(Some(instance)) = mstore.instance_get_active_for_block(block_id) else { return };
     let Ok(Some(def)) = mstore.agent_def_get(&instance.definition_id) else { return };
     // A relaunch is the end of a turn on a route the agent has left: its token stops working now.
-    super::switch::finish_leaving_after_relaunch(mstore, &def.id, block_id, |b| {
-        matches!(crate::backend::agent_state::current_state(mstore, b), Some(crate::backend::agent_state::AgentState::Working | crate::backend::agent_state::AgentState::Waiting))
-    });
+    super::switch::finish_leaving_after_relaunch(mstore, &def.id, block_id, |b| super::switch::pane_in_a_turn(mstore, b));
     let choice = choice_of(mstore, &def.id);
     let validated = choice.as_ref().and_then(|c| catalog::validate(&def.provider, &c.route, &c.model).ok());
     publish_to_block(mstore, block_id, validated);
