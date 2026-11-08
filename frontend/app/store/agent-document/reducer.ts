@@ -76,6 +76,130 @@ function endOldSession(
 }
 
 /**
+ * A tool node a scrub pass changed the status of — the local
+ * resolution `muxspect dock`'s server-side snapshot cache never
+ * otherwise learns about (reagentx P1 on PR #2432: the scrub paths
+ * resolve stuck nodes purely client-side, so the cache could keep
+ * reporting an already-resolved node as STUCK? forever). Consumed
+ * by `agent-document-store.ts`'s `dispatch()` — the pure reducer
+ * itself does no I/O — to push a final status delta for each.
+ *
+ * Carries `run_in_background` too (reagent P1 on PR #2520): the cache's
+ * `push_delta` fully overwrites a node's snapshot per push, so if this
+ * omitted it, a background Bash node resolved via this exact scrub path
+ * would silently blank an earlier `run_in_background: true` push back
+ * to `undefined` — erasing the diagnostic signal for precisely the
+ * orphaned/stuck-launch class `muxspect dock`'s `bg` column exists to
+ * flag.
+ */
+type ResolvedToolNode = { id: string; status: ToolNode["status"]; toolName: string; run_in_background?: boolean };
+
+interface ScrubOptions {
+    /**
+     * True when `nodes` is a prepended sub-range of the merged
+     * document (older history page or restored snapshot, with
+     * other content already in `state.nodes` following it).
+     * In that case `nodes[last]` is NOT the merged tail, so the
+     * last-node thinking heuristic must not fire. Tools are
+     * still scrubbed by their explicit status field. Codex P2
+     * on PR #1104 (HistoryLoaded.loadOlder pagination case).
+     */
+    hasContentAfter?: boolean;
+    /**
+     * Restrict the sweep to running `tool` nodes — the turn-end
+     * scrub scope. Thinking markdown, shells, and awaiting_answer
+     * questions have session-bounded (not turn-bounded) lifecycles
+     * and must survive a mid-session pass. See the
+     * `ScrubOrphanedInProgress` command's doc comment.
+     */
+    toolsOnly?: boolean;
+}
+
+interface ScrubResult {
+    nodes: DocumentNode[];
+    markdownCanceled: number;
+    toolsCanceled: number;
+    /** Every tool node this pass changed the status of. */
+    resolvedToolNodes: ResolvedToolNode[];
+}
+
+/** What one scrub pass has done so far; `next` is a copy of `nodes`, made when the first one changes. */
+interface ScrubPass {
+    nodes: DocumentNode[];
+    at: number;
+    next: DocumentNode[] | null;
+    markdownCanceled: number;
+    toolsCanceled: number;
+    resolvedToolNodes: ResolvedToolNode[];
+}
+
+/** Put `node` at `i` in the pass's copy of the document, making the copy the first time. */
+function replaceScrubbed(pass: ScrubPass, i: number, node: DocumentNode): void {
+    if (!pass.next) pass.next = pass.nodes.slice();
+    pass.next[i] = node;
+}
+
+/** The thinking block the document ends on: flip `thinking` off and mark it canceled. */
+function cancelOrphanedThinking(pass: ScrubPass, i: number, n: Extract<DocumentNode, { type: "markdown" }>): void {
+    replaceScrubbed(pass, i, {
+        ...n,
+        metadata: {
+            ...n.metadata,
+            thinking: false,
+            canceled: true,
+            canceledAt: pass.at,
+        },
+    });
+    pass.markdownCanceled++;
+}
+
+/** A tool still `running` after its turn: cancel it and close its streaming log. */
+function cancelRunningTool(pass: ScrubPass, i: number, n: ToolNode): void {
+    // Close the streaming log alongside the status flip.
+    // `log.open === true` makes ToolBlock / ToolOverlayLog
+    // render the live-tail "↳ latest stream output" branch,
+    // which keeps a canceled orphan looking like an actively-
+    // streaming tool — defeats the spec's "never with a
+    // spinner" goal. Codex + reagent P2 on PR #1104.
+    const closedLog = n.log != null ? { ...n.log, open: false } : n.log;
+    replaceScrubbed(pass, i, { ...n, status: "canceled", log: closedLog });
+    pass.toolsCanceled++;
+    // isAcceptedBackgroundLaunch (not the raw params flag — codex P2 /
+    // reagent P1 on PR #2520) requires status === "success", which
+    // this branch's own guard (n.status === "running") makes
+    // impossible here by construction: a node that WAS confirmed
+    // accepted is already "success" and never reaches this branch
+    // again. That's correct, not dead code — a node orphaned before
+    // any response ever arrived genuinely can't be confirmed as an
+    // accepted background launch, so reporting undefined here (never
+    // a false "bg") is the accurate answer, not a gap.
+    pass.resolvedToolNodes.push({
+        id: n.id,
+        status: "canceled",
+        toolName: n.toolName ?? n.tool,
+        run_in_background: isAcceptedBackgroundLaunch(n) || undefined,
+    });
+}
+
+/** An AskUserQuestion with content after it was answered: resolve it and clear `question`. */
+function resolveAnsweredQuestion(pass: ScrubPass, i: number, n: ToolNode): void {
+    replaceScrubbed(pass, i, {
+        ...n,
+        status: "success",
+        question: undefined,
+        summary: "❓ Question answered",
+    });
+    pass.toolsCanceled++;
+    pass.resolvedToolNodes.push({ id: n.id, status: "success", toolName: n.toolName ?? n.tool });
+}
+
+/** An in-pane shell still `running`: it is stopped, with its log closed. */
+function stopRunningShell(pass: ScrubPass, i: number, n: ShellNode): void {
+    replaceScrubbed(pass, i, { ...n, status: "stopped", exitedAt: pass.at, log: { ...n.log, open: false } });
+    pass.toolsCanceled++;
+}
+
+/**
  * Walk the document and mark orphaned in-progress nodes as canceled.
  *
  * Returns `null` if nothing changed (so the caller can skip the
@@ -103,56 +227,8 @@ function endOldSession(
  *
  * Spec: docs/specs/SPEC_ORPHAN_THINKING_NODES_2026_05_27.md.
  */
-function scrubOrphanedInProgress(
-    nodes: DocumentNode[],
-    at: number,
-    opts?: {
-        /**
-         * True when `nodes` is a prepended sub-range of the merged
-         * document (older history page or restored snapshot, with
-         * other content already in `state.nodes` following it).
-         * In that case `nodes[last]` is NOT the merged tail, so the
-         * last-node thinking heuristic must not fire. Tools are
-         * still scrubbed by their explicit status field. Codex P2
-         * on PR #1104 (HistoryLoaded.loadOlder pagination case).
-         */
-        hasContentAfter?: boolean;
-        /**
-         * Restrict the sweep to running `tool` nodes — the turn-end
-         * scrub scope. Thinking markdown, shells, and awaiting_answer
-         * questions have session-bounded (not turn-bounded) lifecycles
-         * and must survive a mid-session pass. See the
-         * `ScrubOrphanedInProgress` command's doc comment.
-         */
-        toolsOnly?: boolean;
-    },
-): {
-    nodes: DocumentNode[];
-    markdownCanceled: number;
-    toolsCanceled: number;
-    /**
-     * Every tool node this pass changed the status of — the local
-     * resolution `muxspect dock`'s server-side snapshot cache never
-     * otherwise learns about (reagentx P1 on PR #2432: the scrub paths
-     * resolve stuck nodes purely client-side, so the cache could keep
-     * reporting an already-resolved node as STUCK? forever). Consumed
-     * by `agent-document-store.ts`'s `dispatch()` — the pure reducer
-     * itself does no I/O — to push a final status delta for each.
-     *
-     * Carries `run_in_background` too (reagent P1 on PR #2520): the cache's
-     * `push_delta` fully overwrites a node's snapshot per push, so if this
-     * omitted it, a background Bash node resolved via this exact scrub path
-     * would silently blank an earlier `run_in_background: true` push back
-     * to `undefined` — erasing the diagnostic signal for precisely the
-     * orphaned/stuck-launch class `muxspect dock`'s `bg` column exists to
-     * flag.
-     */
-    resolvedToolNodes: Array<{ id: string; status: ToolNode["status"]; toolName: string; run_in_background?: boolean }>;
-} | null {
-    let next: DocumentNode[] | null = null;
-    let markdownCanceled = 0;
-    let toolsCanceled = 0;
-    const resolvedToolNodes: Array<{ id: string; status: ToolNode["status"]; toolName: string; run_in_background?: boolean }> = [];
+function scrubOrphanedInProgress(nodes: DocumentNode[], at: number, opts?: ScrubOptions): ScrubResult | null {
+    const pass: ScrubPass = { nodes, at, next: null, markdownCanceled: 0, toolsCanceled: 0, resolvedToolNodes: [] };
 
     // Spec's "simple heuristic" (SPEC_ORPHAN_THINKING_NODES §Design):
     // a thinking markdown is orphaned only when it's the document's
@@ -177,45 +253,11 @@ function scrubOrphanedInProgress(
             n.metadata?.thinking === true &&
             i === lastIdx
         ) {
-            if (!next) next = nodes.slice();
-            next[i] = {
-                ...n,
-                metadata: {
-                    ...n.metadata,
-                    thinking: false,
-                    canceled: true,
-                    canceledAt: at,
-                },
-            };
-            markdownCanceled++;
+            cancelOrphanedThinking(pass, i, n);
             continue;
         }
         if (n.type === "tool" && n.status === "running") {
-            if (!next) next = nodes.slice();
-            // Close the streaming log alongside the status flip.
-            // `log.open === true` makes ToolBlock / ToolOverlayLog
-            // render the live-tail "↳ latest stream output" branch,
-            // which keeps a canceled orphan looking like an actively-
-            // streaming tool — defeats the spec's "never with a
-            // spinner" goal. Codex + reagent P2 on PR #1104.
-            const closedLog = n.log != null ? { ...n.log, open: false } : n.log;
-            next[i] = { ...n, status: "canceled", log: closedLog };
-            toolsCanceled++;
-            // isAcceptedBackgroundLaunch (not the raw params flag — codex P2 /
-            // reagent P1 on PR #2520) requires status === "success", which
-            // this branch's own guard (n.status === "running") makes
-            // impossible here by construction: a node that WAS confirmed
-            // accepted is already "success" and never reaches this branch
-            // again. That's correct, not dead code — a node orphaned before
-            // any response ever arrived genuinely can't be confirmed as an
-            // accepted background launch, so reporting undefined here (never
-            // a false "bg") is the accurate answer, not a gap.
-            resolvedToolNodes.push({
-                id: n.id,
-                status: "canceled",
-                toolName: n.toolName ?? n.tool,
-                run_in_background: isAcceptedBackgroundLaunch(n) || undefined,
-            });
+            cancelRunningTool(pass, i, n);
             continue;
         }
         // AskUserQuestion that has content AFTER it was answered (the
@@ -226,27 +268,22 @@ function scrubOrphanedInProgress(
         // fires while the question is the tail) or a resumable reopened
         // session. Using the same last-node heuristic as the thinking scrub.
         if (!toolsOnly && n.type === "tool" && n.status === "awaiting_answer" && i !== lastIdx) {
-            if (!next) next = nodes.slice();
-            next[i] = {
-                ...n,
-                status: "success",
-                question: undefined,
-                summary: "❓ Question answered",
-            };
-            toolsCanceled++;
-            resolvedToolNodes.push({ id: n.id, status: "success", toolName: n.toolName ?? n.tool });
+            resolveAnsweredQuestion(pass, i, n);
             continue;
         }
         if (!toolsOnly && n.type === "shell" && n.status === "running") {
-            if (!next) next = nodes.slice();
-            next[i] = { ...n, status: "stopped", exitedAt: at, log: { ...n.log, open: false } };
-            toolsCanceled++;
+            stopRunningShell(pass, i, n);
             continue;
         }
     }
 
-    if (!next) return null;
-    return { nodes: next, markdownCanceled, toolsCanceled, resolvedToolNodes };
+    if (!pass.next) return null;
+    return {
+        nodes: pass.next,
+        markdownCanceled: pass.markdownCanceled,
+        toolsCanceled: pass.toolsCanceled,
+        resolvedToolNodes: pass.resolvedToolNodes,
+    };
 }
 
 /**
