@@ -53,6 +53,7 @@ import { createStreamFlushQueue } from "./stream-flush-queue";
 import { createHidingStreamFlushQueue } from "./hiding-stream-flush-queue";
 import { getBlockMetaKeyAtom } from "@/app/store/global";
 import { CATCH_UP_META_KEY, clearCatchUpRequest, parseCatchUpRequest } from "./catch-up-request";
+import { markTitleStale } from "@/app/store/title-stale";
 import { createStreamMemoryReinjection } from "./stream-memory-reinjection";
 import { createToolOutputNoter, startSharedZonePoll } from "./stream-side-channels";
 import { FALLBACK_CONTEXT_WINDOW } from "./memory-reinjection";
@@ -222,7 +223,11 @@ export function useAgentStream({
         if (!enabled || !blockId || stored === undefined || stored === null) return;
         const reason = parseCatchUpRequest(stored, Date.now());
         void clearCatchUpRequest(blockId).catch(() => {});
-        if (reason) void memoryReinjectionController.catchUp(null, reason);
+        if (reason) {
+            // A resumed conversation is a new stretch of work: the session title is judged afresh at the next message.
+            markTitleStale(blockId);
+            void memoryReinjectionController.catchUp(null, reason);
+        }
     });
 
     // Tool-chunk and persistent-shell streaming subscriptions, installed at body scope (not inside

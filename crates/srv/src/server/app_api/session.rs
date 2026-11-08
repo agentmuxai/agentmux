@@ -351,10 +351,7 @@ pub(crate) async fn activity_summary(state: &AppState, cmd: CommandActivitySumma
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(str::to_string);
-    let activity = match user_message {
-        Some(_) => None,
-        None => ambient::digest::read_recent_activity_digest(&filestore, &mstore, &cmd.block_id),
-    };
+    let activity = summary_activity(&filestore, &mstore, &cmd.block_id, cmd.activity);
 
     // A stored value that is not a real title (a placeholder an older build
     // accepted, such as `(none yet)`) counts as NO title: it is never fed
@@ -379,8 +376,9 @@ pub(crate) async fn activity_summary(state: &AppState, cmd: CommandActivitySumma
         return Ok(empty_summary_result());
     };
 
+    let refresh = cmd.refresh.unwrap_or(false);
     let prompt = ambient::prompt::build_session_title_prompt(
-        &current_title,
+        prompt_anchor(&current_title, refresh),
         user_message.as_deref(),
         activity.as_deref(),
         word_target,
@@ -392,7 +390,7 @@ pub(crate) async fn activity_summary(state: &AppState, cmd: CommandActivitySumma
         })
         .await;
 
-    let stored = store_summary_title(state, &slot, &cmd.block_id, &reply.text);
+    let stored = store_summary_title(state, &slot, &cmd.block_id, &reply.text, cmd.turn, refresh);
     Ok(ActivitySummaryResult { summary: if stored { reply.text } else { String::new() }, tokens: reply.tokens })
 }
 
@@ -402,21 +400,65 @@ pub(crate) async fn activity_summary(state: &AppState, cmd: CommandActivitySumma
 /// (`ambient::title`). The slot is held until the write, so a newer
 /// message's request, admitted while this one ran, supersedes it and
 /// this older title is not stored after the newer one.
-fn store_summary_title(state: &AppState, slot: &ambient::call::Slot, block_id: &str, title: &str) -> bool {
+fn store_summary_title(
+    state: &AppState,
+    slot: &ambient::call::Slot,
+    block_id: &str,
+    title: &str,
+    turn: Option<u32>,
+    refresh: bool,
+) -> bool {
     if title.is_empty() {
         return false;
     }
     let still_current = || !slot.is_superseded();
-    match ambient::title::store_title(&state.mstore, block_id, title, ambient::title::Replace::IfNews, still_current) {
+    match ambient::title::store_title(&state.mstore, block_id, title, ambient::title::Replace::IfNews, turn, still_current) {
         Ok(true) => {
             crate::backend::blockcontroller::core::broadcast_block_update(&state.mstore, &state.event_bus, block_id);
             true
+        }
+        // A refresh judged the session afresh and found the same goal: the title
+        // is confirmed as still right, so it stops being asked about at every message.
+        Ok(false) if refresh => {
+            if let Err(e) = ambient::title::confirm_title(&state.mstore, block_id, title, turn, still_current) {
+                tracing::warn!(block_id = %block_id, error = %e, "session:activity_summary: could not confirm the title");
+            }
+            false
         }
         Ok(false) => false,
         Err(e) => {
             tracing::warn!(block_id = %block_id, error = %e, "session:activity_summary: could not store the title");
             false
         }
+    }
+}
+
+/// The session's recent activity for a title call: what the pane sent from its
+/// document (any provider), else the output file's tail (Claude-shaped streams
+/// only). Read with the user's message too, not only when there is none: a short
+/// status question in the middle of new work says nothing about that work, and a
+/// title built on the message alone stays on the old topic.
+fn summary_activity(
+    filestore: &crate::backend::storage::filestore::FileStore,
+    mstore: &crate::backend::storage::store::Store,
+    block_id: &str,
+    pane_entries: Option<Vec<String>>,
+) -> Option<String> {
+    pane_entries
+        .filter(|entries| !entries.is_empty())
+        .and_then(|entries| ambient::digest::activity_from_entries(block_id, entries))
+        .map(|activity| activity.text)
+        .or_else(|| ambient::digest::read_recent_activity_digest(filestore, mstore, block_id))
+}
+
+/// The title the model is shown as current. None on a refresh: with nothing to
+/// anchor on, "the current title still fits, SKIP" is not the easy answer
+/// (`build_session_title_prompt` writes the create form for an empty one).
+fn prompt_anchor(current_title: &str, refresh: bool) -> &str {
+    if refresh {
+        ""
+    } else {
+        current_title
     }
 }
 

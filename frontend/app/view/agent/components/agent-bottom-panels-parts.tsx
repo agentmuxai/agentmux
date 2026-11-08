@@ -10,7 +10,7 @@
 
 import { isStopping } from "@/app/store/agent-pane-state/types";
 import { plausibleReading } from "@/app/store/agent-pane-state/context-reading";
-import { readSwarmSummary } from "@/app/store/activitySummary";
+import { readPaneSummary } from "@/app/store/swarm-line";
 import { clockTime } from "@/store/muxbus-delivery";
 import { Show, type JSX } from "solid-js";
 import { SensitiveBanner } from "../sensitive/SensitiveBanner";
@@ -225,7 +225,7 @@ export function WorkingRowAnchor(part: Part): JSX.Element {
                     <AgentWorkingRow
                         loading={p.workingRowLoading()}
                         stopping={isStopping(p.paneModel.state.turnPhase)}
-                        activitySummary={readSwarmSummary(p.block()?.meta)}
+                        activitySummary={readPaneSummary(p.block()?.meta)}
                         turnTokens={p.paneModel.state.turnTokens}
                         turnLedger={p.paneModel.state.turnLedger}
                         turnCarry={p.paneModel.state.turnCarry}
