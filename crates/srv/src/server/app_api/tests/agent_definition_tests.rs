@@ -178,6 +178,10 @@ async fn an_agent_changing_its_model_is_limited_to_six_an_hour() {
     on_route(&state, &target);
     with_route_key(&state);
     let models = ["deepseek/deepseek-v4-pro-0813", "deepseek/deepseek-v4.1-flash-1017"];
+    for _ in 0..8 {
+        let (status, _) = update_call(&state, Some(&me), json!({ "agent": target.slug, "model": "gpt-5" })).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "a refused change is not one of the six");
+    }
     for i in 0..crate::backend::model_gateway::switch::AGENT_SWITCHES_PER_HOUR {
         let (status, body) = update_call(&state, Some(&me), json!({ "agent": target.slug, "model": models[i % 2] })).await;
         assert_eq!(status, StatusCode::OK, "{i}: {body}");

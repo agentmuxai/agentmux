@@ -86,7 +86,7 @@ pub const LIVE_INPUT: &[&str] = &[
 /// Returns data and changes nothing.
 pub const READ_ONLY: &[&str] = &[
     "account.oauth.client.get", "account.oauth.poll", "app_skills.catalog", "agent.input-history",
-    "agent.input-history-search", "agent.list", "agent.open-panes", "agent.output", "agent.process-list",
+    "agent.input-history-search", "agent.list", "agent.model.panel", "agent.open-panes", "agent.output", "agent.process-list",
     "agent.project_instructions", "agent.status", "agent.tracked-blocks", "agent:memory:adoption_list",
     "agent:memory:claims", "agent:memory:diff", "agent:memory:history", "agent:memory:list", "agent:memory:read_file",
     "agent:session:list_archives", "agent:session:read", "agentapiretry", "agentdeflisthiddentemplates", "agentruntime.list",

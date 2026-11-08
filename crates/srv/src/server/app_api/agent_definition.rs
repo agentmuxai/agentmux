@@ -97,8 +97,9 @@ fn route_change(state: &AppState, agent: &AgentDefinition, req: &UpdateRequest) 
             return Err(bad("the agent is not on a model route"));
         }
         let harness = state.id_store.resolve_effective_provider_id(agent);
-        switch::allow_agent_switch(&agent.id).map_err(bad)?;
+        switch::agent_switch_allowed(&agent.id).map_err(bad)?;
         switch::move_to(&state.mstore, &agent.id, &harness, Target::OwnLogin, |_| true).map_err(bad)?;
+        switch::count_agent_switch(&agent.id);
         restart_on_new_model(state, agent);
         return Ok(vec!["route"]);
     }
@@ -114,9 +115,10 @@ fn route_change(state: &AppState, agent: &AgentDefinition, req: &UpdateRequest) 
     if wanted == current.model {
         return Ok(Vec::new());
     }
-    switch::allow_agent_switch(&agent.id).map_err(bad)?;
+    switch::agent_switch_allowed(&agent.id).map_err(bad)?;
     let key_present = |r: &crate::backend::model_gateway::catalog::Route| crate::backend::vault::route_key::present(&state.identity_store, r.key_label);
     switch::move_to(&state.mstore, &agent.id, &harness, Target::Route { route: target, model: wanted }, key_present).map_err(bad)?;
+    switch::count_agent_switch(&agent.id);
     restart_on_new_model(state, agent);
     Ok(vec!["model"])
 }

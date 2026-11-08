@@ -104,13 +104,19 @@ fn switches() -> &'static Mutex<HashMap<String, VecDeque<Instant>>> {
     SWITCHES.get_or_init(Default::default)
 }
 
-/// Counts one change an agent makes to its own model, or refuses it when it has made [`AGENT_SWITCHES_PER_HOUR`]
-/// in the last hour. A person's change in the panel is not counted.
-pub fn allow_agent_switch(agent: &str) -> Result<(), String> {
-    allow_at(&mut switches().lock().unwrap(), agent, Instant::now())
+/// Whether an agent may change its own model now: it has made fewer than [`AGENT_SWITCHES_PER_HOUR`] changes in the last
+/// hour. Counts nothing; [`count_agent_switch`] is called once the change has been made, so a refused one costs none.
+/// A person's change in the panel is not counted at all.
+pub fn agent_switch_allowed(agent: &str) -> Result<(), String> {
+    check_at(&mut switches().lock().unwrap(), agent, Instant::now())
 }
 
-fn allow_at(all: &mut HashMap<String, VecDeque<Instant>>, agent: &str, now: Instant) -> Result<(), String> {
+/// Counts one change the agent made to its own model.
+pub fn count_agent_switch(agent: &str) {
+    switches().lock().unwrap().entry(agent.to_string()).or_default().push_back(Instant::now());
+}
+
+fn check_at(all: &mut HashMap<String, VecDeque<Instant>>, agent: &str, now: Instant) -> Result<(), String> {
     let recent = all.entry(agent.to_string()).or_default();
     while recent.front().is_some_and(|t| now.duration_since(*t) >= HOUR) {
         recent.pop_front();
@@ -120,7 +126,6 @@ fn allow_at(all: &mut HashMap<String, VecDeque<Instant>>, agent: &str, now: Inst
             "an agent may change its model {AGENT_SWITCHES_PER_HOUR} times an hour, because each change makes the new model read the whole conversation again at full price; try again later"
         ));
     }
-    recent.push_back(now);
     Ok(())
 }
 
@@ -180,15 +185,18 @@ mod tests {
     }
 
     #[test]
-    fn an_agent_may_switch_six_times_an_hour_and_then_waits() {
+    fn an_agent_may_switch_six_times_an_hour_and_then_waits_and_a_refused_change_costs_nothing() {
         let mut all = HashMap::new();
         let start = Instant::now();
         for i in 0..AGENT_SWITCHES_PER_HOUR {
-            allow_at(&mut all, "x", start + Duration::from_secs(i as u64)).unwrap();
+            let at = start + Duration::from_secs(i as u64);
+            check_at(&mut all, "x", at).unwrap();
+            all.get_mut("x").unwrap().push_back(at);
         }
-        let refused = allow_at(&mut all, "x", start + Duration::from_secs(60)).unwrap_err();
+        let refused = check_at(&mut all, "x", start + Duration::from_secs(60)).unwrap_err();
         assert!(refused.contains("6 times an hour"), "{refused}");
-        allow_at(&mut all, "y", start + Duration::from_secs(60)).unwrap();
-        allow_at(&mut all, "x", start + HOUR + Duration::from_secs(1)).unwrap();
+        assert_eq!(all["x"].len(), AGENT_SWITCHES_PER_HOUR, "checking counts nothing");
+        check_at(&mut all, "y", start + Duration::from_secs(60)).unwrap();
+        check_at(&mut all, "x", start + HOUR + Duration::from_secs(1)).unwrap();
     }
 }
