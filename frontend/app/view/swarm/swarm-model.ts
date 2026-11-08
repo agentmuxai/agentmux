@@ -1124,6 +1124,20 @@ export class SwarmViewModel {
         // handlers below — no response to await here.
         void callBackendService("subagent", "ResolveUnnamedBacklog", []);
 
+        this.listenSubagentEvents();
+        this.listenShellCronAndTaskEvents();
+        this.listenProgressEvents();
+        this.listenTrackedBlockEvents();
+        this.startTrackedBlocksPoll();
+
+        // term:osc_title / term:ambient_summary meta changes — force re-read
+        // of block meta. The block atom in MOS updates reactively, so the
+        // memo in the view already reacts; no explicit handler needed here
+        // beyond the MOS atom.
+    }
+
+    // Subagent and dispatch events: each one reloads the subagent list.
+    private listenSubagentEvents(): void {
         const unsubSpawned = onMuxEvent(WpsEvent.SubagentSpawned, () => this.scheduleLoadSubagents());
         if (unsubSpawned) this.unsubs.push(unsubSpawned);
 
@@ -1162,7 +1176,10 @@ export class SwarmViewModel {
         // to leave behind (visible until srv restart) disappears promptly.
         const unsubBlockPruned = onMuxEvent(WpsEvent.SubagentBlockPruned, () => this.scheduleLoadSubagents());
         if (unsubBlockPruned) this.unsubs.push(unsubBlockPruned);
+    }
 
+    // Shell, cron and background-task events: each reloads its own list.
+    private listenShellCronAndTaskEvents(): void {
         // Shell bucket (SPEC_SWARM_LONG_RUNNING_PROCESS_ROWS_2026_07_20 Phase 1).
         // shell_node_create — a new shell appeared, reload the active list.
         const unsubShellCreate = onMuxEvent(WpsEvent.ShellNodeCreate, () => this.scheduleLoadShells());
@@ -1187,7 +1204,10 @@ export class SwarmViewModel {
         // and reloads the fleet list.
         const unsubBackgroundTask = onMuxEvent(WpsEvent.BackgroundTaskUpdated, () => this.scheduleLoadBackgroundTasks());
         if (unsubBackgroundTask) this.unsubs.push(unsubBackgroundTask);
+    }
 
+    // Events that carry their whole payload: progress, and a subagent's name.
+    private listenProgressEvents(): void {
         // Todo checklist + in-flight tool. Unlike the buckets above this
         // carries its whole payload on the event, so there's nothing to
         // reload — store it keyed by block and let buildTree read it.
@@ -1213,7 +1233,10 @@ export class SwarmViewModel {
             this.setSubagents((prev) => withSubagentName(prev, agentId, displayName))
         );
         if (unsubNamed) this.unsubs.push(unsubNamed);
+    }
 
+    // Events that change which blocks are tracked: each re-reads the list.
+    private listenTrackedBlockEvents(): void {
         // When process trackers change, refresh the block list
         const unsubProcAdded = onMuxEvent(WpsEvent.AgentProcessAdded, () => void this.loadTrackedBlocks());
         if (unsubProcAdded) this.unsubs.push(unsubProcAdded);
@@ -1244,7 +1267,10 @@ export class SwarmViewModel {
         // docs/reports/REPORT_SWARM_MOUNT_DEPENDENT_TRACKING_GAP_2026_09_15.md.
         const unsubTrackedBlocksChanged = onMuxEvent(WpsEvent.ProcessBrokerTrackedBlocksChanged, () => void this.loadTrackedBlocks());
         if (unsubTrackedBlocksChanged) this.unsubs.push(unsubTrackedBlocksChanged);
+    }
 
+    // The safety-net poll behind those events.
+    private startTrackedBlocksPoll(): void {
         // Bounded self-healing safety net: re-poll regardless of whether any
         // of the five event-based triggers above actually fired. Deliberately
         // redundant with them — its only job is to guarantee this list can't
@@ -1255,11 +1281,6 @@ export class SwarmViewModel {
             void this.loadTrackedBlocks();
             void this.loadOtherInstances();
         }, SwarmViewModel.TRACKED_BLOCKS_POLL_MS);
-
-        // term:osc_title / term:ambient_summary meta changes — force re-read
-        // of block meta. The block atom in MOS updates reactively, so the
-        // memo in the view already reacts; no explicit handler needed here
-        // beyond the MOS atom.
     }
 
     loadAll = async (): Promise<void> => {
