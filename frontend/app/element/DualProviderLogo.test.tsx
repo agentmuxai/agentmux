@@ -3,7 +3,7 @@
 
 import { cleanup, render } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it } from "vitest";
-import { DualProviderLogo } from "./DualProviderLogo";
+import { DualProviderLogo, dualLogoTitle } from "./DualProviderLogo";
 
 afterEach(() => cleanup());
 
@@ -45,5 +45,40 @@ describe("DualProviderLogo", () => {
         expect(harnessIcon).not.toBeNull();
         expect(vendorIcon).not.toBeNull();
         expect(vendorIcon.innerHTML).not.toBe(harnessIcon.innerHTML);
+    });
+
+    it("names a route model in the tooltip when given a vendor label", () => {
+        const { container } = render(() => (
+            <DualProviderLogo harness="claude" vendor="deepseek" vendorLabel="DeepSeek V4.1 Flash via OpenRouter" />
+        ));
+        const el = container.querySelector(".dual-provider-logo") as HTMLElement;
+        expect(el.dataset.hoverTip).toBe("Claude Code harness running on DeepSeek V4.1 Flash via OpenRouter");
+    });
+
+    it("draws no tooltip or name of its own when bare, so a button around it can name it", () => {
+        const { container } = render(() => <DualProviderLogo harness="claude" vendor="deepseek" bare />);
+        const el = container.querySelector(".dual-provider-logo") as HTMLElement;
+        expect(el.dataset.hoverTip).toBeUndefined();
+        expect(el.getAttribute("aria-label")).toBeNull();
+        expect(container.querySelector(".dual-provider-logo-badge")).not.toBeNull();
+    });
+
+    it("dualLogoTitle gives the words the logo carries", () => {
+        expect(dualLogoTitle("claude", "claude")).toBe("Claude Code harness");
+        expect(dualLogoTitle("claude", "anthropic")).toBe("Claude Code harness running on Anthropic");
+        expect(dualLogoTitle("claude", "deepseek", "DeepSeek V4 Pro via OpenRouter")).toBe(
+            "Claude Code harness running on DeepSeek V4 Pro via OpenRouter"
+        );
+    });
+
+    it("draws the makers of a route model with marks of their own", () => {
+        for (const maker of ["deepseek", "qwen", "zhipu", "moonshot"]) {
+            const { container } = render(() => <DualProviderLogo harness="claude" vendor={maker} />);
+            const mark = container.querySelector(".dual-provider-logo-badge .provider-logo") as HTMLElement;
+            expect(mark.querySelector("svg"), maker).not.toBeNull();
+            // The letter mark every unknown provider gets is a <text> in the svg.
+            expect(mark.querySelector("text"), maker).toBeNull();
+            cleanup();
+        }
     });
 });

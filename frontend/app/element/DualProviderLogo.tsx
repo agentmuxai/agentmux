@@ -29,6 +29,10 @@ export interface DualProviderLogoProps {
     vendor?: string;
     /** Base pixel size of the primary harness logo (default: 24). */
     size?: number;
+    /** What to call the vendor in the tooltip when the id alone says too little (a route's model: "DeepSeek V4.1 Flash via OpenRouter"). */
+    vendorLabel?: string;
+    /** No tooltip or accessible name of its own: the parent (a header button) names it with `dualLogoTitle`. */
+    bare?: boolean;
     /** Additional CSS class names. */
     class?: string;
 }
@@ -67,20 +71,22 @@ const VENDOR_NAMES: Record<string, string> = {
     custom: "a custom endpoint",
 };
 
+const hasBadge = (harness: string, vendor: string | undefined): boolean =>
+    !!vendor && vendor.toLowerCase() !== (harness ?? "").toLowerCase();
+
+/** What the logo says in words: the harness, and what it runs on when the badge shows. */
+export function dualLogoTitle(harness: string, vendor?: string, vendorLabel?: string): string {
+    const h = HARNESS_NAMES[(harness ?? "").toLowerCase()] ?? harness;
+    if (!hasBadge(harness, vendor)) return `${h} harness`;
+    return `${h} harness running on ${vendorLabel ?? VENDOR_NAMES[vendor!.toLowerCase()] ?? vendor}`;
+}
+
 export const DualProviderLogo = (props: DualProviderLogoProps): JSX.Element => {
     const size = () => props.size ?? 24;
     const vendorSize = () => Math.max(10, Math.round(size() * 0.45));
 
-    const harnessName = () => HARNESS_NAMES[(props.harness ?? "").toLowerCase()] ?? props.harness;
-    const vendorName = () => (props.vendor ? VENDOR_NAMES[props.vendor.toLowerCase()] ?? props.vendor : "");
-
-    const showBadge = () =>
-        !!props.vendor && props.vendor.toLowerCase() !== (props.harness ?? "").toLowerCase();
-
-    const tooltip = () => {
-        const h = harnessName();
-        return showBadge() ? `${h} harness running on ${vendorName()}` : `${h} harness`;
-    };
+    const showBadge = () => hasBadge(props.harness, props.vendor);
+    const tooltip = () => dualLogoTitle(props.harness, props.vendor, props.vendorLabel);
 
     return (
         <span
@@ -93,8 +99,8 @@ export const DualProviderLogo = (props: DualProviderLogoProps): JSX.Element => {
                 width: `${size()}px`,
                 height: `${size()}px`,
             }}
-            {...tip(tooltip())}
-            aria-label={tooltip()}
+            {...(props.bare ? {} : tip(tooltip()))}
+            aria-label={props.bare ? undefined : tooltip()}
         >
             <ProviderLogo provider={props.harness} size={size()} />
             {showBadge() && (
