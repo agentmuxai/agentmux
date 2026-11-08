@@ -470,6 +470,15 @@ describe("the overlay's clip", () => {
             expect(await hits({ x: 320, y: 100, w: 50, h: 50 })).toBe(false);
         });
 
+        it("is judged at a ratio of 1 when the window has none", async () => {
+            Object.defineProperty(window, "devicePixelRatio", { value: 0, configurable: true });
+            // The pane is then at (30, 50) and 600 x 400: a menu over its middle lands on it.
+            expect(await hits({ x: 100, y: 100, w: 50, h: 50 })).toBe(true);
+            cleanup();
+            // And one to the right of 630 does not.
+            expect(await hits({ x: 640, y: 100, w: 50, h: 50 })).toBe(false);
+        });
+
         it("is never a menu over a pane with no width or no height", async () => {
             // A rectangle that straddles the pane's line.
             s.rect = { x: 30, y: 50, width: 0, height: 400 };
