@@ -28,10 +28,10 @@ pub(super) struct PendingInj {
     // When the relay received it (RFC 3339), for marking a late delivery.
     #[serde(default)]
     created_at: Option<String>,
-    // The sender's delivery deadline (RFC 3339), when the relay carries one
-    // (issue #3894): a review notice that matters for ten minutes is
-    // dropped, not delivered stale, if srv only gets to it after this.
-    // Absent today and from an older relay; an absent value changes nothing.
+    // The sender's delivery deadline (RFC 3339), when one is carried
+    // (issue #3894): a short-lived notice is dropped, not delivered stale,
+    // if srv only gets to it after this. Optional: a sender that doesn't set
+    // it, or an older peer that doesn't send it, behaves exactly as before.
     #[serde(default)]
     expires_at: Option<String>,
     // Present only for messages signed by an AgentMux-operated WAN
