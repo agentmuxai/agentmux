@@ -16,12 +16,15 @@ export function isParkedMeta(meta: Record<string, unknown> | undefined): boolean
 
 /** What showing the restored pane did. The pane is back in its tab either way (`attach` did that): this is
  *  about getting it on screen. */
-export interface ParkedReveal {
+export type ParkedReveal =
     /** The block was shown (or another window was told to show it, and did). */
-    ok: boolean;
-    /** It was not shown because its workspace is open in no window and a window could not be opened on it. */
-    workspaceClosed?: boolean;
-}
+    | { ok: true }
+    /** A newer request took over the reveal; that one shows the pane, and says why itself if it cannot. */
+    | { ok: false; superseded: true }
+    /** Its workspace is open in no window and a window could not be opened on it. */
+    | { ok: false; workspaceClosed: true }
+    /** Anything else, in the reveal's own words: the pane could not be brought on screen. */
+    | { ok: false; failure: string };
 
 export interface ParkedReopenDeps {
     /** The block meta of `blockId`; loads the block when this window has not got it yet. */
@@ -49,9 +52,9 @@ export const PARKED_FROM_TAB_META = "agent:parkedFromTab";
  * but its workspace is open in no window and a window could not be opened on it: the pane is no longer parked, so
  * the active tab can't take it, and the person is told why instead of Open appearing to do nothing.
  *
- * Attaching is what makes the agent a pane again; showing it is best effort on top of that. A reveal that loses its
- * way (a tab whose layout is slow, a newer request from the same click taking over) is not that failure: the pane
- * is back, and reporting "its workspace could not be opened in a window" for it is a false error.
+ * Attaching is what makes the agent a pane again; showing it is best effort on top of that. A newer reveal taking
+ * over is not a failure — it is the one showing the pane — so it says nothing; every other failure is said in the
+ * reveal's own words, never as the workspace error unless that is what happened.
  */
 export async function reopenParkedWhereItWas(blockId: string | undefined, deps: ParkedReopenDeps): Promise<boolean> {
     if (!blockId) return false;
@@ -61,6 +64,8 @@ export async function reopenParkedWhereItWas(blockId: string | undefined, deps: 
         return false;
     await deps.attach(tabId);
     const revealed = await deps.reveal(blockId, tabId);
-    if (!revealed.ok && revealed.workspaceClosed) throw new Error(WORKSPACE_NOT_SHOWN);
+    if ("failure" in revealed) throw new Error(revealed.failure);
+    if ("workspaceClosed" in revealed) throw new Error(WORKSPACE_NOT_SHOWN);
+    // Shown, or a newer reveal took it over: the pane is back and on its way.
     return true;
 }

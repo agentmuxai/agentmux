@@ -97,7 +97,8 @@ vi.mock("@/app/store/services", () => ({
     },
 }));
 
-import { findOpenBlockByView, isWorkspaceClosedFailure, revealBlock, showBlockInPane, showBlockWithoutFocus } from "./reveal-block";
+import { isWorkspaceClosedFailure } from "@/app/selection/reveal-failure";
+import { findOpenBlockByView, revealBlock, showBlockInPane, showBlockWithoutFocus } from "./reveal-block";
 
 /** A layout model whose one pane holds `members` as tabs. */
 function modelWithPane(nodeId: string, members: string[], magnified?: string, minimized = false) {

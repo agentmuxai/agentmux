@@ -53,9 +53,6 @@ let tabs = new Set<string>();
 vi.mock("@/app/util/reveal-block", () => ({
     revealBlock: (...a: [string, unknown]) => reveal(...a),
     loadObject: async (_t: string, id: string) => (tabs.has(id) ? { oid: id } : null),
-    // The real predicate, on the field shape the real reveal result has.
-    isWorkspaceClosedFailure: (r: { ok: boolean; reason?: string; detail?: string }) =>
-        r.ok === false && r.reason === "remote-failed" && r.detail === "workspace-closed",
 }));
 
 import { openAgentInActiveTab, sharedAgentRuntime } from "./agent-runtime-live";
@@ -141,14 +138,24 @@ describe("openAgentInActiveTab", () => {
             expect(order).toEqual(["note:a1", "rpc:tab-old", "reload:tab-old", "reveal:blk-1"]);
         });
 
-        // The bug this guards: the pane came back (the attach worked) but the reveal lost its way, and the
-        // person was told the workspace could not be opened in a window. A reveal that timed out or was
-        // taken over by a newer request is not that failure.
-        it("whose reveal merely timed out or was superseded reports no error, because the pane is back", async () => {
-            for (const reason of ["remote-timeout", "superseded", "layout-timeout", "mismatch"]) {
-                order.length = 0;
+        // The bug this guards: the pane came back (the attach worked) but the reveal was taken over by a
+        // newer request, and the person was told the workspace could not be opened in a window. The newer
+        // request is the one showing the pane, so the older one saying nothing is right.
+        it("whose reveal a newer request took over reports no error: that request shows the pane", async () => {
+            revealResult = { ok: false, reason: "superseded" };
+            expect(await openAgentInActiveTab({ agent_id: "a1", name: "Ada" })).toBeUndefined();
+        });
+
+        // Every other failure is still said, but in the reveal's own words: never "the workspace could not
+        // be opened in a window" unless that is what happened. Silent would leave Open doing nothing.
+        it("whose reveal fails another way says why in the reveal's words, not the workspace's", async () => {
+            for (const [reason, text] of [
+                ["layout-timeout", "its tab is still loading"],
+                ["mismatch", "it did not come to the front"],
+                ["not-found", "it is no longer open"],
+            ] as const) {
                 revealResult = { ok: false, reason };
-                expect(await openAgentInActiveTab({ agent_id: "a1", name: "Ada" })).toBeUndefined();
+                expect(await openAgentInActiveTab({ agent_id: "a1", name: "Ada" })).toBe(text);
             }
         });
 

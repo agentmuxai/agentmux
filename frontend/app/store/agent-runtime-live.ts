@@ -5,6 +5,8 @@
 // and a timer. One store serves the window (the status bar, My Agents and the Swarm read it), so
 // srv is asked once and each agent's event is followed once.
 
+import { isWorkspaceClosedFailure, revealFailureText } from "@/app/selection/reveal-failure";
+import { isFailure } from "@/app/selection/selection-machine";
 import { noteOpenedByPerson } from "@/app/store/agent-open-note";
 import { reopenParkedWhereItWas, type ParkedReopenDeps } from "@/app/store/agent-parked";
 import { atoms, MOS } from "@/app/store/global";
@@ -80,10 +82,10 @@ const parkedDeps = (open: (tabId: string) => Promise<unknown>): ParkedReopenDeps
     attach: async (tabId) => {
         await open(tabId);
     },
-    // Quiet: only the one failure that Open cannot recover from is reported, by openAgentInActiveTab
-    // (WORKSPACE_NOT_SHOWN), not also by the reveal.
+    // Quiet: the outcome is classified here and reported once by openAgentInActiveTab, in the reveal's own
+    // words, never also by the reveal's notice.
     reveal: async (blockId, tabId) => {
-        const { revealBlock, isWorkspaceClosedFailure } = await import("@/app/util/reveal-block");
+        const { revealBlock } = await import("@/app/util/reveal-block");
         // The attach added the block to the tab, and the check above put this window's copy of that tab in
         // the cache without it. Read the tab again, or the reveal misses it here, hands the request to srv
         // and back to this window, and the second request ends the first as superseded while the pane shows.
@@ -93,7 +95,11 @@ const parkedDeps = (open: (tabId: string) => Promise<unknown>): ParkedReopenDeps
             // srv still has the answer: the reveal reloads what it reads
         }
         const result = await revealBlock(blockId, { tabId, source: "open", quiet: true });
-        return { ok: result.ok === true, workspaceClosed: isWorkspaceClosedFailure(result) };
+        if (!isFailure(result)) return { ok: true };
+        // A newer reveal took over: it shows the pane, and says why itself when it cannot.
+        if (result.reason === "superseded") return { ok: false, superseded: true };
+        if (isWorkspaceClosedFailure(result)) return { ok: false, workspaceClosed: true };
+        return { ok: false, failure: revealFailureText(result) };
     },
 });
 
