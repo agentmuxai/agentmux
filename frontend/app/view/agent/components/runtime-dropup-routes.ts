@@ -95,12 +95,17 @@ export function backRow(panel: AgentModelPanel): OptionRow | null {
     const prev = panel.previous;
     if (!prev) return null;
     const name = prev.route === "" ? "the harness's own model" : prev.label;
+    // Back is a switch like any other, so it is held to the same checks as that model's own row (a key
+    // gone, images the model cannot read): srv's reason for the model it goes back to.
+    const reason = panel.routes.find((r) => r.id === prev.route)?.models.find((m) => m.id === prev.model)?.unavailable ?? null;
     return {
         section: "model",
         value: BACK_VALUE,
         label: `Back to ${name}`,
-        description: prev.route === "" ? "your plan's model, as before the last change" : `${prev.route} route`,
+        description: reason ?? (prev.route === "" ? "your plan's model, as before the last change" : `${prev.route} route`),
+        detail: reason ?? undefined,
         current: false,
+        disabled: reason != null,
     };
 }
 

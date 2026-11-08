@@ -149,6 +149,42 @@ describe("the model panel's routes", () => {
         expect(patchRuntime.mock.calls[0][2]).toEqual({ model: "opus" });
     });
 
+    it("holds Back to the same checks as the model it goes back to", async () => {
+        panelCommand.mockResolvedValue(
+            panelOf({ previous: { route: "openrouter", model: PRO, label: "DeepSeek V4 Pro" } }, [
+                model(FLASH, "DeepSeek V4.1 Flash"),
+                model(PRO, "DeepSeek V4 Pro", { unavailable: "can't read images (2 in this conversation)" }),
+            ])
+        );
+        mount(onRoute);
+        await openPanel();
+        const back = option(/Back to DeepSeek V4 Pro/);
+        expect(back.getAttribute("aria-disabled")).toBe("true");
+        expect(back.textContent).toContain("can't read images (2 in this conversation)");
+        fireEvent.click(back);
+        await flush();
+        expect(switchCommand).not.toHaveBeenCalled();
+    });
+
+    it("scrolls the row the keys are on into view", async () => {
+        const scrolled: string[] = [];
+        (Element.prototype as any).scrollIntoView = function (this: HTMLElement) {
+            scrolled.push(this.textContent ?? "");
+        };
+        try {
+            panelCommand.mockResolvedValue(panelOf());
+            mount(plain);
+            await openPanel();
+            (document.querySelector(".agent-runtime-dropup-trigger") as HTMLElement).focus();
+            scrolled.length = 0;
+            fireEvent.keyDown(document, { key: "ArrowDown" });
+            await flush();
+            expect(scrolled.length).toBe(1);
+        } finally {
+            delete (Element.prototype as any).scrollIntoView;
+        }
+    });
+
     it("offers Back to where the agent was, first in the Model section", async () => {
         panelCommand.mockResolvedValue(panelOf({ previous: { route: "openrouter", model: FLASH, label: "DeepSeek V4.1 Flash" } }));
         mount(plain);

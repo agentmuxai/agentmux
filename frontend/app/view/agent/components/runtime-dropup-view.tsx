@@ -7,7 +7,7 @@ import { AnchoredPopover } from "@/app/element/anchored-popover";
 import { tip } from "@/app/element/tip";
 import { Button, IconButton } from "@/app/element/ui";
 import clsx from "clsx";
-import { For, Show, type JSX } from "solid-js";
+import { createEffect, For, Show, type JSX } from "solid-js";
 import type { DropupAgreement } from "./runtime-dropup-agreement";
 import { PERMISSION_COLORS, type Row } from "./runtime-dropup-options";
 import type { DropupActions } from "./runtime-dropup-rows";
@@ -111,8 +111,14 @@ function OptionRowView(props: DropupViewProps & { row: Extract<Row, { kind: "opt
     const { s, act, row } = props;
     const optIndex = () =>
         act.build().options.findIndex((o) => o.section === row.section && o.value === row.value);
+    let el: HTMLDivElement | undefined;
+    // The panel scrolls when its rows outnumber the room: keep the row the keys are on in view.
+    createEffect(() => {
+        if (!row.disabled && optIndex() === s.selectedOptIndex()) el?.scrollIntoView?.({ block: "nearest" });
+    });
     return (
         <div
+            ref={el}
             class="menu-item agent-runtime-dropup-row"
             classList={{
                 active: !row.disabled && optIndex() === s.selectedOptIndex(),
