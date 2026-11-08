@@ -303,9 +303,10 @@ export function usePillFlash(opts: {
         const unsubscribeLocate = onPaneLocatePlay((blockId, paneKey) => {
             if (blockId === id() && paneKey === opts.paneKey() && pill()) flashElement(pill()!, LOCATE_PILL_FLASH);
         });
-        // A newer reveal replaces the earlier one's pill, so two never show at once.
-        const unsubscribeRequest = onPaneLocate(() => {
-            if (pill()) cancelFlashPattern(pill()!, LOCATE_PILL_FLASH.pattern);
+        // A reveal of another block replaces the earlier one's pill, so two never show at once. A repeat
+        // request for this block is the same flash (the pane ignores it while it plays): its pill stays lit.
+        const unsubscribeRequest = onPaneLocate((blockId) => {
+            if (blockId !== id() && pill()) cancelFlashPattern(pill()!, LOCATE_PILL_FLASH.pattern);
         });
         onCleanup(() => {
             unsubscribe();

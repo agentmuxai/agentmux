@@ -799,6 +799,16 @@ describe("PaneTabStrip activity flash", () => {
         expect(cancel).toHaveBeenCalledTimes(1);
     });
 
+    it("a repeat request for the block that is flashing leaves its pill lit", () => {
+        const cancel = vi.fn();
+        animate.mockImplementation(() => ({ cancel }) as unknown as Animation);
+        renderStrip(true, "pane-1");
+        emitPaneLocatePlay("b", "pane-1");
+        emitPaneLocate("b");
+        emitPaneLocate("b", { focus: false });
+        expect(cancel).not.toHaveBeenCalled();
+    });
+
     it("a strip without flashOnActivity ignores a locate flash too", () => {
         renderStrip(false, "pane-1");
         emitPaneLocatePlay("b", "pane-1");
