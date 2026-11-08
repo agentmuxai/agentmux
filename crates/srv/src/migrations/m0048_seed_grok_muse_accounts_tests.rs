@@ -14,6 +14,14 @@ impl Fixture {
         let f = Fixture { dir: tempfile::tempdir().unwrap() };
         drop(f.shared());
         drop(f.channel());
+        drop(f.identity());
+        f
+    }
+    /// A host whose identity store has not been made: the shared store holds the links.
+    fn without_identity_store() -> Self {
+        let f = Fixture { dir: tempfile::tempdir().unwrap() };
+        drop(f.shared());
+        drop(f.channel());
         f
     }
     fn ctx(&self) -> MigrationContext {
@@ -26,6 +34,10 @@ impl Fixture {
     }
     fn shared(&self) -> Store {
         Store::open_shared(&self.dir.path().join("store.db")).unwrap()
+    }
+    /// The store the spawn gate reads links from, beside the shared one.
+    fn identity(&self) -> Store {
+        Store::open_identity_store(&self.dir.path().join("identity-store.db")).unwrap()
     }
     fn channel(&self) -> Store {
         Store::open(&self.dir.path().join("objects.db")).unwrap()
@@ -61,7 +73,7 @@ fn account_of(shared: &Store, agent_id: &str, provider: &str) -> Option<String> 
 #[test]
 fn agents_on_a_shared_login_get_one_account_with_its_own_copy_of_it() {
     let f = Fixture::new();
-    let (channel, shared) = (f.channel(), f.shared());
+    let (channel, shared) = (f.channel(), f.identity());
     agent(&channel, "a", "grok");
     agent(&channel, "b", "grok");
     agent(&channel, "c", "claude");
@@ -85,7 +97,7 @@ fn agents_on_a_shared_login_get_one_account_with_its_own_copy_of_it() {
 #[test]
 fn a_provider_with_no_login_in_the_shared_folder_is_left_alone() {
     let f = Fixture::new();
-    let (channel, shared) = (f.channel(), f.shared());
+    let (channel, shared) = (f.channel(), f.identity());
     agent(&channel, "a", "grok");
     agent(&channel, "m", "muse");
     sign_grok_in(&f.providers("grok"), serde_json::json!({}));
@@ -100,7 +112,7 @@ fn a_provider_with_no_login_in_the_shared_folder_is_left_alone() {
 #[test]
 fn a_login_the_cli_can_refresh_is_carried_over_marked_expired() {
     let f = Fixture::new();
-    let (channel, shared) = (f.channel(), f.shared());
+    let (channel, shared) = (f.channel(), f.identity());
     agent(&channel, "a", "grok");
     let long_ago = (chrono::Utc::now() - chrono::Duration::days(90)).to_rfc3339();
     sign_grok_in(&f.providers("grok"), serde_json::json!({ "s": { "key": "k", "create_time": long_ago, "refresh_token": "r" } }));
@@ -114,7 +126,7 @@ fn a_login_the_cli_can_refresh_is_carried_over_marked_expired() {
 #[test]
 fn muse_is_carried_over_from_its_own_folder_under_the_shared_one() {
     let f = Fixture::new();
-    let (channel, shared) = (f.channel(), f.shared());
+    let (channel, shared) = (f.channel(), f.identity());
     agent(&channel, "m", "muse");
     std::fs::create_dir_all(f.providers("muse").join("muse")).unwrap();
     std::fs::write(f.providers("muse").join("muse").join("auth.json"), r#"{"token":"t"}"#).unwrap();
@@ -129,7 +141,7 @@ fn muse_is_carried_over_from_its_own_folder_under_the_shared_one() {
 #[test]
 fn an_agent_with_an_account_keeps_it_and_a_second_run_changes_nothing() {
     let f = Fixture::new();
-    let (channel, shared) = (f.channel(), f.shared());
+    let (channel, shared) = (f.channel(), f.identity());
     agent(&channel, "linked", "grok");
     agent(&channel, "new", "grok");
     let mine = IdentityAccount {
@@ -185,7 +197,7 @@ fn account_row(shared: &Store, id: &str) {
 #[test]
 fn the_accounts_an_agent_resolves_through_decide_who_is_seeded() {
     let f = Fixture::new();
-    let (channel, shared) = (f.channel(), f.shared());
+    let (channel, shared) = (f.channel(), f.identity());
     account_row(&shared, "template-account");
     account_row(&shared, "fork-source-account");
     // A seeded template with an account: the child inherits it, so it is left alone.
@@ -207,4 +219,24 @@ fn the_accounts_an_agent_resolves_through_decide_who_is_seeded() {
     let seeded = account_of(&shared, "from-source", "grok").expect("a fork source's account does not carry over");
     assert_eq!(account_of(&shared, "other-links", "grok"), Some(seeded.clone()));
     assert_ne!(seeded, "fork-source-account");
+}
+
+#[test]
+fn the_links_follow_the_store_the_spawn_gate_reads() {
+    // With an identity store, the agents are linked there and the shared store is kept in step.
+    let f = Fixture::new();
+    agent(&f.channel(), "a", "grok");
+    sign_grok_in(&f.providers("grok"), fresh_login());
+    f.run();
+    let account_id = account_of(&f.identity(), "a", "grok").expect("linked in the identity store");
+    assert_eq!(account_of(&f.shared(), "a", "grok"), Some(account_id.clone()));
+    assert!(f.identity().identity_get(&account_id).unwrap().is_some(), "the account is there too");
+
+    // Without one, the shared store is where they are linked.
+    let f = Fixture::without_identity_store();
+    agent(&f.channel(), "a", "grok");
+    sign_grok_in(&f.providers("grok"), fresh_login());
+    f.run();
+    assert!(account_of(&f.shared(), "a", "grok").is_some());
+    assert!(!f.dir.path().join("identity-store.db").exists(), "the migration does not make one");
 }

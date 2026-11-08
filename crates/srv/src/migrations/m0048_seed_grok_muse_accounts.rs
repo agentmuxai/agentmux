@@ -48,6 +48,15 @@ impl Migration for M0048SeedGrokMuseAccounts {
             .map_err(|e| MigrationError(format!("seed_grok_muse_accounts: open mstore: {e}")))?;
         let shared = Store::open_shared(&ctx.shared_store_path)
             .map_err(|e| MigrationError(format!("seed_grok_muse_accounts: open shared store: {e}")))?;
+        // The links the spawn gate reads live in the identity store (`identity-store.db`, beside the shared
+        // store); the shared store holds the older copy, kept in step.
+        let identity_path = ctx.shared_store_path.with_file_name("identity-store.db");
+        let identity = identity_path
+            .exists()
+            .then(|| Store::open_identity_store(&identity_path))
+            .transpose()
+            .map_err(|e| MigrationError(format!("seed_grok_muse_accounts: open identity store: {e}")))?;
+        let links = identity.as_ref().unwrap_or(&shared);
         let defs = mstore
             .agent_def_list()
             .map_err(|e| MigrationError(format!("seed_grok_muse_accounts: list agents: {e}")))?;
@@ -55,17 +64,19 @@ impl Migration for M0048SeedGrokMuseAccounts {
             let agents: Vec<String> = defs
                 .iter()
                 .filter(|d| resolve_provider_alias(&d.provider) == provider)
-                .filter(|d| !has_account(&mstore, &shared, d, provider))
+                .filter(|d| !has_account(&mstore, links, d, provider))
                 .map(|d| d.id.clone())
                 .collect();
             if agents.is_empty() {
                 continue;
             }
-            match seed_account(ctx, &mstore, &shared, provider) {
+            match seed_account(ctx, &mstore, &shared, identity.as_ref(), provider) {
                 Ok(Some(account_id)) => {
                     for agent in &agents {
-                        if let Err(e) = shared.agent_identity_link(agent, &account_id, provider) {
-                            tracing::warn!(agent_id = %agent, provider, error = %e, "seed_grok_muse_accounts: could not link the agent");
+                        for store in std::iter::once(&shared).chain(identity.as_ref()) {
+                            if let Err(e) = store.agent_identity_link(agent, &account_id, provider) {
+                                tracing::warn!(agent_id = %agent, provider, error = %e, "seed_grok_muse_accounts: could not link the agent");
+                            }
                         }
                     }
                     tracing::info!(provider, account_id = %account_id, agents = agents.len(), "seed_grok_muse_accounts: carried the shared login over");
@@ -105,7 +116,7 @@ fn usable(status: Option<OAuthProbeStatus>) -> Option<&'static str> {
 
 /// Copies the provider's shared folder into a new account folder and records the account.
 /// `None` when the shared folder holds no login worth carrying over.
-fn seed_account(ctx: &MigrationContext, mstore: &Store, shared: &Store, provider: &str) -> Result<Option<String>, String> {
+fn seed_account(ctx: &MigrationContext, mstore: &Store, shared: &Store, identity: Option<&Store>, provider: &str) -> Result<Option<String>, String> {
     let config = get_provider(provider).ok_or_else(|| format!("{provider} is not in the registry"))?;
     let (providers_root, identities_root) = roots(ctx);
     let source = providers_root.join(config.auth_dir_name);
@@ -132,6 +143,9 @@ fn seed_account(ctx: &MigrationContext, mstore: &Store, shared: &Store, provider
         updated_at: now_ms,
     };
     mstore.identity_upsert_with_mirror(shared, &account).map_err(|e| format!("record the account: {e}"))?;
+    if let Some(identity) = identity {
+        identity.identity_upsert(&account).map_err(|e| format!("record the account in the identity store: {e}"))?;
+    }
     Ok(Some(account_id))
 }
 
