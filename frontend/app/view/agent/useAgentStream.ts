@@ -162,15 +162,15 @@ interface UseAgentStreamOpts {
     transcriptSettle?: TranscriptSettleLatch;
 }
 
-/**
- * Subscribe to subprocess output and parse it into styled DocumentNodes.
- */
 /** A resumed conversation is a new stretch of work: the session title is judged afresh at the next message. */
 function retitleThen<T>(blockId: string, run: () => T): T {
     markTitleStale(blockId);
     return run();
 }
 
+/**
+ * Subscribe to subprocess output and parse it into styled DocumentNodes.
+ */
 export function useAgentStream({
     blockId,
     model,
