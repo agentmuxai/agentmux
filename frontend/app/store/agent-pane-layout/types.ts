@@ -78,6 +78,10 @@ export interface AgentPaneLayoutState {
     readonly scrollMarginPx: number;
     /** Extra rows rendered beyond the viewport, each side. */
     readonly overscan: number;
+    /** Extra height rendered beyond the viewport, each side, whatever the rows' heights: the window covers at
+     *  least this much past each edge, so a viewport that grows before the window catches up (the composer
+     *  emptying on send) still lands on rendered rows. */
+    readonly overscanPx: number;
 }
 
 /** Height used when a row has neither a measurement nor an estimate for its
@@ -96,6 +100,8 @@ export const DEFAULT_ROW_PX = 32;
  */
 export const ROW_GAP_PX = 4;
 const DEFAULT_OVERSCAN = 5;
+/** Taller than the composer at its largest with a row of attachments and the panels that go with a send. */
+const DEFAULT_OVERSCAN_PX = 600;
 
 export const initialState = (): AgentPaneLayoutState => ({
     zoom: 1,
@@ -108,6 +114,7 @@ export const initialState = (): AgentPaneLayoutState => ({
     viewportPx: 0,
     scrollMarginPx: 0,
     overscan: DEFAULT_OVERSCAN,
+    overscanPx: DEFAULT_OVERSCAN_PX,
 });
 
 export type AgentPaneLayoutCommand =
