@@ -232,7 +232,6 @@ impl PersistentSubprocessController {
             let was_active = (!written.is_empty()).then(|| self.mark_turn_active_locked_from(label));
             (written, was_active, !inner.deferred_deliveries.is_empty(), failure)
         };
-
         // Anything still queued needs a guaranteed way out. Called after EVERY
         // enqueue that leaves the queue non-empty, so it cannot miss a watchdog
         // that exited just before.
