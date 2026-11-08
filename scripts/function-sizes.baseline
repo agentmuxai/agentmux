@@ -435,7 +435,6 @@
 104 frontend/app/view/swarm/swarm-model.ts::SwarmViewModel::buildTree
 129 frontend/app/view/swarm/swarm-view.tsx::SubagentRow
 127 frontend/app/view/sysinfo/sysinfo-model.ts::sampleReducer
-143 frontend/app/view/sysinfo/sysinfo-view.tsx::SysinfoViewInner
 290 frontend/app/view/term/term.tsx::TerminalView
 224 frontend/app/view/term/termViewModel.ts::TermViewModel::constructor
 127 frontend/app/view/term/termwrap.ts::TermWrap::constructor
