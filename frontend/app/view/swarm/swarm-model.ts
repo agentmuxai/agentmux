@@ -1103,7 +1103,7 @@ export class SwarmViewModel {
     private static readonly LOAD_BACKGROUND_TASKS_DEBOUNCE_MS = 150;
 
     // Bounded self-healing safety net for trackedBlockIdsAtom — see the
-    // comment at this timer's setInterval call site (in the constructor)
+    // comment at this timer's setInterval call site (in startTrackedBlocksPoll)
     // for why it exists alongside the five event-based refresh triggers.
     private trackedBlocksPollTimer: ReturnType<typeof setInterval> | undefined;
     private static readonly TRACKED_BLOCKS_POLL_MS = 12_000;
