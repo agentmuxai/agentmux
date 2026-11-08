@@ -21,7 +21,7 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::act::{backend_of, call, call_on, check_click, click_element, describe, fail, isolated_context, page_now, page_url, unauthorized, ClickCheck, READ_BACK};
+use super::act::{backend_of, call, call_on, check_click, click_element, describe, fail, insert_text, isolated_context, page_now, page_url, refuse_typing_into_secret_field, unauthorized, ClickCheck, READ_BACK};
 use super::types::ApiResponse;
 use crate::state::AppState;
 
@@ -88,8 +88,8 @@ fn refused(key: &str, why: &str) -> String {
 /// `POST /agentmux/browser/press` — what `Enter` or `Space` would do where the
 /// focus is, made as a click. `after` is the clicked element, or a
 /// `needs_approval` when the click commits something; `resolved` says what the
-/// key was taken to mean. `{"resolved": "type"}` means a space in a text field,
-/// which srv types through `dispatch_key` and its secret-field guard.
+/// key was taken to mean. A space in a text field is typed here, after the
+/// secret-field guard.
 pub async fn press_route(State(state): State<Arc<AppState>>, headers: HeaderMap, Json(req): Json<PressReq>) -> (axum::http::StatusCode, Json<ApiResponse<Value>>) {
     if !super::routes::authorized_pub(&headers, &state.ipc_token) {
         return unauthorized();
@@ -116,7 +116,15 @@ async fn press(root: &mut super::cdp::CdpSession, req: &PressReq) -> Result<Valu
     }
     let found = resolve(root, &req.key).await?;
     if found.effect == "type" {
-        return Ok(json!({ "resolved": "type" }));
+        // A space in a text field, typed here and not by a second call: text goes where the focus is and
+        // cannot press a button the page moved focus to, which a key event would.
+        refuse_typing_into_secret_field(root).await?;
+        insert_text(root, " ").await?;
+        let after = match found.focused.as_deref() {
+            Some(focused) => call_on(root, focused, READ_BACK, vec![]).await.unwrap_or(Value::Null),
+            None => Value::Null,
+        };
+        return Ok(json!({ "after": after, "resolved": found.why }));
     }
     let (Some(target), "click") = (found.target.as_deref(), found.effect.as_str()) else { return Err(refused(&req.key, &found.why)) };
     if let Some(focused) = found.focused.as_deref() {

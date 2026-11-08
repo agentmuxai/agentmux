@@ -9,7 +9,7 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use agentmux_common::secret_eq::secret_eq;
 use axum::Json;
-use serde_json::{json, Value};
+use serde_json::json;
 
 use super::cdp::CdpSession;
 use super::types::{
@@ -686,19 +686,6 @@ pub async fn focus_element(
     ok_body(ApiResponse::ok(AckData::new()))
 }
 
-/// One `Input.dispatchKeyEvent` for a named key. Space types a space only when its
-/// keyDown carries the character, as a real keyboard's does.
-fn key_event(event_type: &str, key_name: &str, code: &str, vk: i32) -> Value {
-    let mut event = json!({
-        "type": event_type, "key": key_name, "code": code, "windowsVirtualKeyCode": vk, "nativeVirtualKeyCode": vk,
-    });
-    if key_name == " " && event_type == "keyDown" {
-        event["text"] = json!(" ");
-        event["unmodifiedText"] = json!(" ");
-    }
-    event
-}
-
 /// `POST /agentmux/browser/dispatch_key` — send text or a named key
 /// to whatever has focus in the pane. Optionally focuses a selector
 /// first.
@@ -850,9 +837,17 @@ pub async fn dispatch_key(
         };
 
         for event_type in ["keyDown", "keyUp"] {
-            let event = key_event(event_type, key_name, code, windows_virtual_key_code);
             if let Err(e) = cdp
-                .call("Input.dispatchKeyEvent", event)
+                .call(
+                    "Input.dispatchKeyEvent",
+                    json!({
+                        "type": event_type,
+                        "key": key_name,
+                        "code": code,
+                        "windowsVirtualKeyCode": windows_virtual_key_code,
+                        "nativeVirtualKeyCode": windows_virtual_key_code,
+                    }),
+                )
                 .await
             {
                 let _ = cdp.close().await;

@@ -3,7 +3,7 @@ function (doc, key) {
   // click on a control (spec §5): the host makes that click through act's
   // checks and never presses the key. An effect it cannot name is refused.
   //   { effect: "click", el, focused, why }  click `el`
-  //   { effect: "type", why }                Space in a text field: a space, typed
+  //   { effect: "type", focused, why }       Space in a text field: a space, typed (by the host, in the same call)
   //   { effect: "refuse", why }
   // Properties are read through the prototypes' getters, which the page cannot
   // shadow on an element (a control named "type" or "form").
@@ -30,7 +30,7 @@ function (doc, key) {
     const click = (target, why) => ({ effect: "click", el: target, focused: el, why });
     if (key === "Space") {
       if (button || choice || summary) return click(el, "Space on " + (choice ? "a " + type : button ? "a button" : "a summary") + " presses it");
-      if (textual) return el.readOnly ? refuse("it is read-only") : { effect: "type", why: "Space in a text field types a space" };
+      if (textual) return el.readOnly ? refuse("it is read-only") : { effect: "type", focused: el, why: "Space in a text field types a space" };
       return refuse("Space on this element scrolls the page or is the page's own, and is not a click");
     }
     // Enter.

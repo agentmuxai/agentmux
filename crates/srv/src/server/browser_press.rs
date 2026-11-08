@@ -26,8 +26,6 @@ use super::AppState;
 pub(crate) enum Pressed {
     /// No grant gives this agent the power on this page: refuse as before.
     NotGranted,
-    /// Space in a text field: a space, typed by the ordinary `key` path and its secret-field guard.
-    Type,
     /// Answered: the click was made, or refused.
     Done(Response),
 }
@@ -66,9 +64,6 @@ pub(crate) async fn press(state: &AppState, block_id: &str, agent: &str, selecto
         Ok(d) => d,
         Err((code, e)) => return Pressed::Done(log().fail(state, code, e)),
     };
-    if first.get("resolved").and_then(|r| r.as_str()) == Some("type") {
-        return Pressed::Type;
-    }
     let Some(ask) = first.pointer("/after/needs_approval").cloned() else {
         return Pressed::Done(log().outcome(state, Ok(first)));
     };
@@ -80,7 +75,7 @@ pub(crate) async fn press(state: &AppState, block_id: &str, agent: &str, selecto
 
 /// `key` with Enter or Space (or `text` with a line break) on a pane an agent drives: taken as the
 /// click it is when a grant gives the power, otherwise refused with the reason and the way
-/// forward. `None`: carry on with the key (not a driven pane, or Space typed in a text field).
+/// forward. `None`: carry on with the key (not a driven pane).
 pub(crate) async fn press_or_refuse(
     state: &AppState,
     block_id: &str,
@@ -90,7 +85,6 @@ pub(crate) async fn press_or_refuse(
     if let (None, Some(key)) = (req.text.as_deref(), req.key.as_deref()) {
         match press(state, block_id, &req.auth.agent_id, req.selector.as_deref(), key, &log).await {
             Pressed::Done(resp) => return Some(resp),
-            Pressed::Type => return None,
             Pressed::NotGranted => {}
         }
     }
