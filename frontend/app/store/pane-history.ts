@@ -12,6 +12,7 @@ import { setActiveTab } from "@/app/store/tab-actions";
 import { getObjectValue, makeORef } from "@/app/store/mos";
 import { focusManager } from "@/app/store/focusManager";
 import { whenTabContentSettled } from "@/app/tab/tab-content-settled";
+import { emitPaneLocate } from "@/app/util/pane-locate";
 import { getLayoutModelForTabById, setActiveBlockInStack } from "@/layout/index";
 import { findNodeByBlockId } from "@/layout/lib/layoutNode";
 import {
@@ -80,6 +81,7 @@ async function selectPane(ref: PaneRef): Promise<boolean> {
     // The pane may hold the block as a dormant pane tab.
     if (node.data?.blockId !== ref.blockId) setActiveBlockInStack(model, node.id, ref.blockId);
     model.focusNode(node.id);
+    emitPaneLocate(ref.blockId);
     // A frame later, once the view is mounted, as the layout's own caret hand-off does.
     await nextFrame();
     focusManager.refocusNode();

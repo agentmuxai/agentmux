@@ -123,6 +123,9 @@ export async function showBlockWithoutFocus(blockId: string, opts: { tabId?: str
     const node = model?.getNodeByBlockId(blockId);
     if (!model || node?.id == null) return false;
     showBlockInPane(model, node, blockId);
+    // The pane may be on screen already, or not mounted yet: it flashes where it is once it can be seen,
+    // without taking the focus the caller chose not to move.
+    emitPaneLocate(blockId, { focus: false });
     return true;
 }
 
