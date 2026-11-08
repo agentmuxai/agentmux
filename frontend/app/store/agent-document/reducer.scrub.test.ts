@@ -222,6 +222,17 @@ describe("several nodes scrubbed in one pass", () => {
         expect(r.state.nodes[0]).toBe(keep);
         expect(r.state.nodes[2]).toBe(done);
     });
+
+    it("leaves the document it was given as it was", () => {
+        const before = seed([tool("t1"), shell("dev"), thinking("th")]);
+        const nodes = before.nodes.slice();
+
+        const r = update(before, { type: "ScrubOrphanedInProgress", at: 9999 });
+
+        expect(r.state.nodes).not.toBe(before.nodes);
+        expect(before.nodes).toEqual(nodes);
+        expect(before.nodes.every((n, i) => n === nodes[i])).toBe(true);
+    });
 });
 
 describe("what a scrubbed node keeps", () => {
