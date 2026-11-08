@@ -83,7 +83,9 @@ export function dualLogoTitle(harness: string, vendor?: string, vendorLabel?: st
 
 export const DualProviderLogo = (props: DualProviderLogoProps): JSX.Element => {
     const size = () => props.size ?? 24;
-    const vendorSize = () => Math.max(10, Math.round(size() * 0.45));
+    // A list row's 40 px logo carries a ringed badge; a header's 14-16 px one a smaller, thinly ringed one.
+    const small = () => size() < 20;
+    const vendorSize = () => (small() ? Math.round(size() * 0.6) : Math.max(10, Math.round(size() * 0.45)));
 
     const showBadge = () => hasBadge(props.harness, props.vendor);
     const tooltip = () => dualLogoTitle(props.harness, props.vendor, props.vendorLabel);
@@ -115,9 +117,9 @@ export const DualProviderLogo = (props: DualProviderLogoProps): JSX.Element => {
                         "justify-content": "center",
                         "background-color": "var(--main-bg-color)",
                         "border-radius": "50%",
-                        padding: "1px",
-                        border: "1px solid var(--border-color)",
-                        "box-shadow": "0 1px 3px rgba(0, 0, 0, 0.3)",
+                        padding: small() ? "0" : "1px",
+                        border: small() ? "none" : "1px solid var(--border-color)",
+                        "box-shadow": small() ? "0 0 0 1px var(--main-bg-color)" : "0 1px 3px rgba(0, 0, 0, 0.3)",
                     }}
                 >
                     <ProviderLogo provider={props.vendor!} size={vendorSize()} />
