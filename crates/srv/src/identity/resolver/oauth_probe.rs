@@ -77,6 +77,15 @@ fn probe_codex_auth(dir: &Path) -> OAuthProbeStatus {
     }
 }
 
+/// The providers whose sign-in is a plain file in the config dir: codex's, and the CLIs with no status
+/// command (grok, muse; see `cli_sign_in_files`).
+fn probe_login_file(provider: &str, dir: &Path, now_ms: i64) -> Option<OAuthProbeStatus> {
+    match provider {
+        "codex" => Some(probe_codex_auth(dir)),
+        _ => super::cli_sign_in_files::probe(provider, dir, now_ms),
+    }
+}
+
 /// Cheap on-disk probe of the per-bundle OAuth token file for a
 /// provider. No network calls — just reads + parses the token JSON,
 /// then compares `expiresAt` against `now_ms`.
@@ -121,7 +130,7 @@ pub fn probe_oauth_status(
         // Codex keeps its sign-in in `$CODEX_HOME/auth.json`, not
         // `.credentials.json`; reading the latter marked every working
         // Codex account needs_reauth at its first spawn.
-        "codex" => return Some(probe_codex_auth(Path::new(dir))),
+        "codex" | "grok" | "muse" => return probe_login_file(provider, Path::new(dir), now_ms),
         // Claude Code + openclaw write to `<config_dir>/.credentials.json`
         // per `docs/specs/provider-auth-isolation.md` (the agentmux-managed
         // dir is what CLAUDE_CONFIG_DIR / OPENCLAW_HOME point at).

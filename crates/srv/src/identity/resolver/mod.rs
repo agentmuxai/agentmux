@@ -42,6 +42,7 @@
 //!     test exercising that function moved WITH it into `inject.rs` as
 //!     one atomic unit.
 
+mod cli_sign_in_files;
 mod effective_links;
 mod errors;
 mod inject;
@@ -56,5 +57,6 @@ pub use inject::{
     agent_has_identity_binding, resolve_bound_claude_config_dir_for_agent, resolve_bound_oauth_config_dir,
 };
 pub use effective_links::effective_identity_links;
+pub use cli_sign_in_files::signed_in as cli_file_signed_in;
 pub use oauth_probe::{oauth_status, probe_oauth_status, OAuthProbeStatus};
 pub use provider::{provider_class, ProviderClass};
