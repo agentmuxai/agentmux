@@ -119,7 +119,7 @@ pub struct ActData {
 /// Where the page is after an action, so the agent needs no snapshot to learn
 /// that a click navigated. `before` is the address its last snapshot was of.
 /// `None` when the page doesn't answer in two seconds (a dialog it opened).
-async fn page_now(cdp: &mut CdpSession, before: &str) -> Option<Value> {
+pub(super) async fn page_now(cdp: &mut CdpSession, before: &str) -> Option<Value> {
     let (url, title) = tokio::time::timeout(std::time::Duration::from_secs(2), async {
         let url = page_url(cdp).await;
         let title = cdp
