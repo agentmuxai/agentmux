@@ -33,6 +33,7 @@ import { recallRuntime } from "./remembered-runtime";
 import { buildPaneArgs } from "./buildRuntimeArgs";
 import type { AgentDefinition } from "@/app/store/rpc-api";
 import { markAgentOpen } from "./open-trace";
+import { messagesHeaderButtons } from "./messages/messages-state";
 import { searchHeaderButtons } from "./search/search-bridge";
 import { launchResumesConversation, requestCatchUp } from "./catch-up-request";
 import { isContainerAgentMode, isContainerAgentType } from "@/util/runtime-kind";
@@ -192,7 +193,7 @@ export class AgentViewModel {
         // (agent-body-menu.ts), and the account, MCP and skill bindings in
         // Connectors and Memory (SPEC_DROP_THE_AGENT_STASH_2026_10_24.md, D6).
         // The one exception is the find magnifier (search/search-bridge.ts).
-        this.endIconButtons = () => searchHeaderButtons(blockId);
+        this.endIconButtons = () => [...searchHeaderButtons(blockId), ...messagesHeaderButtons(blockId)];
 
         // Last, once every field exists: registering notifies readers of
         // this block (the pane chrome's fork tabs), which then read those

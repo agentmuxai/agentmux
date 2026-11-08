@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The Messages panel: the incoming jekts of one agent pane, in a panel over the conversation, or a bar on the pane's
- * right edge, labelled "Jekt Messages", when it is collapsed
- * (docs/specs/SPEC_JEKT_SIDE_PANEL_RESEARCH_AND_DESIGN_2026_11_04.md §5, refined in #28993). Each
+ * The Messages panel: the incoming jekts of one agent pane, in a panel over the conversation, opened and closed by
+ * the Messages button in the pane's header
+ * (docs/specs/SPEC_JEKT_SIDE_PANEL_RESEARCH_AND_DESIGN_2026_11_04.md §5, refined in #28993 and #30050). Each
  * message is read from the pane's own document nodes and drawn with the same tags and metadata as its row in the
  * conversation. Messages that wait on the person sit above the list and never clear by being scrolled past.
  */
@@ -33,6 +33,7 @@ import { PreviewLines } from "../components/PreviewLines";
 import { awaitingYou, dismissAwaiting } from "../hooks/useJektsAwaitingYou";
 import { proseDoc, rawDoc } from "../preview-text/docs";
 import { scrollMessagesTo } from "../scroll/one-way-flow";
+import { MESSAGES_TOGGLE_CLASS, publishHeaderButton } from "./messages-header";
 import "./messages-panel.scss";
 import {
     applyFilter,
@@ -65,7 +66,7 @@ export interface MessagesPanelProps {
     zoom: number;
 }
 
-/** The unread count, the waiting set and the list the panel and its rail both draw from. */
+/** The unread count, the waiting set and the list the panel and its header button both draw from. */
 function createMessagesModel(props: MessagesPanelProps) {
     const messages = createMemo(() => panelMessages(props.nodes()));
     const waiting = createMemo(() => awaitingYou(props.blockId, props.nodes()));
@@ -89,9 +90,15 @@ function MessagesDock(props: MessagesPanelProps): JSX.Element {
     let dock: HTMLDivElement | undefined;
     const close = () => {
         controls.patch({ open: false });
-        // Back to the bar it came from, so the keyboard is not left on a panel that is gone.
-        queueMicrotask(() => dock?.querySelector<HTMLElement>(".messages-rail__button")?.focus());
+        // Back to the header button it came from, so the keyboard is not left on a panel that is gone.
+        queueMicrotask(() =>
+            document
+                .querySelector(`[data-blockid="${CSS.escape(props.blockId)}"]:not(.block-preview)`)
+                ?.querySelector<HTMLElement>(`.${MESSAGES_TOGGLE_CLASS}`)
+                ?.focus()
+        );
     };
+    publishHeaderButton(props.blockId, controls, model.unread, () => model.waiting().length > 0);
     // Opened, the panel takes the keyboard: Esc then shuts it instead of reaching the pane. Not from under a text
     // field: a search that finds its match in a held message opens the panel while the person is still typing.
     // Keyed on the boolean: `state()` is a new object whenever the stored meta changes (`seen` moves while it is open).
@@ -99,12 +106,16 @@ function MessagesDock(props: MessagesPanelProps): JSX.Element {
     createEffect(() => {
         if (!isOpen()) return;
         const typing = document.activeElement;
-        if (typing instanceof HTMLElement && !dock?.contains(typing) && typing.matches("input, textarea, [contenteditable]"))
+        if (
+            typing instanceof HTMLElement &&
+            !dock?.contains(typing) &&
+            typing.matches("input, textarea, [contenteditable]")
+        )
             return;
         queueMicrotask(() => dock?.querySelector<HTMLElement>(".ui-side-panel__head button")?.focus());
     });
-    // The bar is a column of its own beside the conversation; the opened panel lies over the conversation along the
-    // pane's right edge, like the Kanban's task drawer, so opening it never moves the conversation.
+    // The opened panel lies over the conversation along the pane's right edge, like the Kanban's task drawer, so
+    // opening it never moves the conversation. Closed, the dock holds nothing: the header button is the way in.
     return (
         <div
             ref={dock}
@@ -118,7 +129,6 @@ function MessagesDock(props: MessagesPanelProps): JSX.Element {
             }}
             style={{ zoom: props.zoom }}
         >
-            <MessagesBar model={model} covered={controls.state().open} onOpen={() => controls.patch({ open: true })} />
             <Show when={controls.state().open}>
                 <MessagesColumn {...props} model={model} onClose={close} />
             </Show>
@@ -127,43 +137,6 @@ function MessagesDock(props: MessagesPanelProps): JSX.Element {
 }
 
 type Model = ReturnType<typeof createMessagesModel>;
-
-/**
- * The collapsed panel: a bar on the right edge, tinted as the jekt rail, labelled "Jekt Messages" at its vertical
- * centre. The whole bar is the button that opens the panel; the count and the dot while something needs the person
- * sit at its top. While the panel is open it lies over the bar: the bar keeps its column, so the conversation does
- * not move, and holds nothing, so the count is not read twice.
- */
-function MessagesBar(props: { model: Model; covered: boolean; onOpen: () => void }): JSX.Element {
-    const label = () => {
-        const n = props.model.unread();
-        const needs = props.model.waiting().length;
-        return `Jekt Messages${n ? `, ${n} unread` : ""}${needs ? `, ${needs} need you` : ""}`;
-    };
-    return (
-        <aside class="messages-rail" aria-label="Jekt Messages" aria-hidden={props.covered || undefined}>
-            <Show when={!props.covered}>
-                <Button
-                    variant="chrome"
-                    class="messages-rail__button"
-                    onClick={props.onOpen}
-                    aria-label={label()}
-                    title={label()}
-                >
-                    <span class="messages-rail__marks">
-                        <Show when={props.model.unread() > 0}>
-                            <Pill tone="accent">{badgeText(props.model.unread())}</Pill>
-                        </Show>
-                        <Show when={props.model.waiting().length > 0}>
-                            <span class="messages-rail__needs" role="img" aria-label="Needs you" />
-                        </Show>
-                    </span>
-                    <span class="messages-rail__text">Jekt Messages</span>
-                </Button>
-            </Show>
-        </aside>
-    );
-}
 
 /**
  * The panel counts as read once it has been open on a focused window for a moment. Messages that need the person
