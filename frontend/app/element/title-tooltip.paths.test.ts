@@ -38,7 +38,7 @@ vi.mock("@floating-ui/dom", () => ({
 
 import { autoUpdate, computePosition } from "@floating-ui/dom";
 import { initTitleTooltips } from "./title-tooltip";
-import { HIDE_DELAY_MS, resetTooltipTiming, SHOW_DELAY_MS, WARM_MS } from "./tooltip-timing";
+import { claimOpen, HIDE_DELAY_MS, resetTooltipTiming, SHOW_DELAY_MS, WARM_MS } from "./tooltip-timing";
 
 let stop: () => void;
 beforeEach(() => {
@@ -271,6 +271,17 @@ describe("the next tooltip after one closed", () => {
 });
 
 describe("what makes it let go", () => {
+    it("another tooltip opening closes it and gives the title back", async () => {
+        const a = add('<button title="Alpha">a</button>');
+        await open(a);
+        expect(a.getAttribute("title")).toBe("");
+
+        claimOpen({ close: vi.fn() });
+
+        expect(panel()).toBeNull();
+        expect(a.getAttribute("title")).toBe("Alpha");
+    });
+
     it("a key press closes it and the title stays taken until the pointer leaves", async () => {
         const a = add('<button title="Alpha">a</button>');
         await open(a);
