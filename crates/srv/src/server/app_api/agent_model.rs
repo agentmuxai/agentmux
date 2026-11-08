@@ -196,8 +196,18 @@ fn switch_model(state: &AppState, req: &AgentModelSwitchReq) -> Result<AgentMode
     if !moved.changed() || !req.restart {
         return Ok(AgentModelSwitchResult { changed: moved.changed(), restarted: 0, failed: Vec::new() });
     }
-    let (restarted, failed) = crate::server::account_episodes::restart_panes_of(state, &def.id);
+    let (restarted, failed) = restart_panes(state, &def.id);
     Ok(AgentModelSwitchResult { changed: true, restarted, failed })
+}
+
+/// Restarts the agent's panes on its new place, and ends the access of a route it left when no relaunch is coming to do it:
+/// the pane restarts at the end of its turn, and its relaunch is what takes the old route's token away.
+pub(crate) fn restart_panes(state: &AppState, def_id: &str) -> (u32, Vec<String>) {
+    let (restarted, failed) = crate::server::account_episodes::restart_panes_of(state, def_id);
+    if restarted == 0 || !failed.is_empty() {
+        switch::finish_leaving(&state.mstore, def_id);
+    }
+    (restarted, failed)
 }
 
 /// Both commands are the window's: an agent may change its own model through `Agents update`, which stays on its

@@ -126,7 +126,7 @@ fn route_change(state: &AppState, agent: &AgentDefinition, req: &UpdateRequest) 
 /// The choice is read at every launch, so the agent's panes are restarted, with their conversation, at the end of
 /// the turn they are in. A pane that cannot be restarted starts on it the next time it opens.
 fn restart_on_new_model(state: &AppState, agent: &AgentDefinition) {
-    let (_, failed) = crate::server::account_episodes::restart_panes_of(state, &agent.id);
+    let (_, failed) = super::agent_model::restart_panes(state, &agent.id);
     for why in failed {
         tracing::warn!(agent = %agent.slug, why, "Agents update: a pane was not restarted on the new model");
     }

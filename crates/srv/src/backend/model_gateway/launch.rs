@@ -16,6 +16,9 @@ use std::collections::HashMap;
 
 /// The definition content type that holds the [`Choice`].
 pub const CONTENT_TYPE: &str = "agent:model_route";
+/// The definition content type that marks a route the agent has left but whose harness may still be running a turn on it:
+/// the gateway keeps answering that route's token until the harness is relaunched ([`super::switch::finish_leaving`]).
+pub const LEAVING_TYPE: &str = "agent:model_route_leaving";
 /// A model with a context of this many tokens or more gets Claude Code's `[1m]` mark, so it does not compact early.
 const LONG_CONTEXT: u32 = 1_000_000;
 
@@ -29,6 +32,18 @@ pub struct Choice {
 pub fn choice_of(mstore: &Store, def_id: &str) -> Option<Choice> {
     let content = mstore.agent_content_get(def_id, CONTENT_TYPE).ok()??;
     serde_json::from_str(&content.content).ok()
+}
+
+/// The route the agent has left but may still be running a turn on, if any.
+pub fn leaving_route(mstore: &Store, def_id: &str) -> Option<String> {
+    mstore.agent_content_get(def_id, LEAVING_TYPE).ok()?.map(|c| c.content).filter(|r| !r.is_empty())
+}
+
+/// The model the gateway sends the agent's requests for `route` to: its chosen one, or, on a route it has just left, the
+/// route's default, so a turn in flight finishes (see [`super::switch::finish_leaving`]). None: the agent is not set to it.
+pub fn model_on_route(mstore: &Store, def_id: &str, route: &'static Route) -> Option<&'static Model> {
+    let chosen = choice_of(mstore, def_id).filter(|c| c.route == route.id).and_then(|c| route.model(&c.model));
+    chosen.or_else(|| (leaving_route(mstore, def_id).as_deref() == Some(route.id)).then(|| route.model(route.default_model)).flatten())
 }
 
 /// Saves the agent's route and model after the shared validation, with the model made explicit.
@@ -83,6 +98,8 @@ fn publish_to_block(mstore: &Store, block_id: &str, shown: Option<(&Route, &Mode
 pub fn carry_for_block(mstore: &Store, block_id: &str, env_vars: &mut HashMap<String, String>) {
     let Ok(Some(instance)) = mstore.instance_get_active_for_block(block_id) else { return };
     let Ok(Some(def)) = mstore.agent_def_get(&instance.definition_id) else { return };
+    // A relaunch is the end of a turn on a route the agent has left: its token stops working now.
+    super::switch::finish_leaving(mstore, &def.id);
     let choice = choice_of(mstore, &def.id);
     let validated = choice.as_ref().and_then(|c| catalog::validate(&def.provider, &c.route, &c.model).ok());
     publish_to_block(mstore, block_id, validated);
@@ -115,6 +132,21 @@ mod tests {
         assert_eq!(env["ANTHROPIC_DEFAULT_SONNET_MODEL"], "deepseek/deepseek-v4.1-flash-1017[1m]");
         assert_eq!(env["CLAUDE_CODE_SUBAGENT_MODEL"], "deepseek/deepseek-v4.1-flash-1017");
         assert!(!env.values().any(|v| v.contains("openrouter.ai")), "the upstream address stays in srv");
+    }
+
+    #[test]
+    fn a_route_just_left_keeps_answering_until_the_harness_is_relaunched() {
+        let store = Store::open_in_memory().unwrap();
+        let mut def = crate::backend::storage::agents::test_agent_def("def-leave", "Leaver", "claude", "host", 1, "");
+        store.agent_def_insert(&mut def).unwrap();
+        let route = catalog::route("openrouter").unwrap();
+        assert!(model_on_route(&store, "def-leave", route).is_none(), "never on the route");
+        set_choice(&store, "def-leave", "claude", "openrouter", "deepseek/deepseek-v4-pro-0813").unwrap();
+        assert_eq!(model_on_route(&store, "def-leave", route).unwrap().id, "deepseek/deepseek-v4-pro-0813");
+        super::super::switch::move_to(&store, "def-leave", "claude", super::super::switch::Target::OwnLogin, |_| true).unwrap();
+        assert_eq!(model_on_route(&store, "def-leave", route).unwrap().id, route.default_model, "a turn in flight finishes");
+        super::super::switch::finish_leaving(&store, "def-leave");
+        assert!(model_on_route(&store, "def-leave", route).is_none(), "after the relaunch it is refused");
     }
 
     #[test]

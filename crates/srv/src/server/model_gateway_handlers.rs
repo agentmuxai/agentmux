@@ -56,7 +56,7 @@ pub(crate) async fn handle_model_gateway(State(state): State<AppState>, Path((ro
     if !gw::path_allowed(route.harness, &tail) {
         return refuse(StatusCode::NOT_FOUND, "not_found_error", "the gateway forwards only the harness's own model paths");
     }
-    let Some(model) = launch::choice_of(&state.mstore, &grant.def_id).filter(|c| c.route == route.id).and_then(|c| route.model(&c.model)) else {
+    let Some(model) = launch::model_on_route(&state.mstore, &grant.def_id, route) else {
         return refuse(StatusCode::FORBIDDEN, "permission_error", "this agent is not set to use that route");
     };
     let key = {

@@ -59,7 +59,7 @@ impl Moved {
 
 /// Records the agent's move to `target`, after the shared validation and with its old place kept as `previous`.
 /// `key_present` says whether a route's key is in the Vault: a route without one is not moved to. Leaving a route
-/// takes its gateway token away at once, so the running harness stops reaching the key.
+/// keeps its gateway token until the harness is relaunched ([`finish_leaving`]), so a turn in flight finishes.
 pub fn move_to(mstore: &Store, def_id: &str, harness: &str, target: Target<'_>, key_present: impl Fn(&Route) -> bool) -> Result<Moved, String> {
     let from = launch::choice_of(mstore, def_id);
     let to = match target {
@@ -86,9 +86,25 @@ pub fn move_to(mstore: &Store, def_id: &str, harness: &str, target: Target<'_>, 
         }
     }
     if let Some(left) = moved.from.as_ref().filter(|f| moved.to.as_ref().is_none_or(|t| t.route != f.route)) {
-        token::revoke(def_id, &left.route);
+        mark_leaving(mstore, def_id, &left.route)?;
     }
     Ok(moved)
+}
+
+fn mark_leaving(mstore: &Store, def_id: &str, route: &str) -> Result<(), String> {
+    mstore
+        .agent_content_set(&AgentContent { agent_id: def_id.to_string(), content_type: launch::LEAVING_TYPE.to_string(), content: route.to_string(), updated_at: agentmux_common::time::now_ms() })
+        .map_err(|e| e.to_string())
+}
+
+/// Ends the access of a route the agent has left: the harness has been relaunched without it, or nothing is left to
+/// relaunch. Until then the gateway keeps answering its token, so a turn in flight is not cut off.
+pub fn finish_leaving(mstore: &Store, def_id: &str) {
+    let Some(route) = launch::leaving_route(mstore, def_id) else { return };
+    token::revoke(def_id, &route);
+    if let Err(e) = mstore.agent_content_delete(def_id, launch::LEAVING_TYPE) {
+        tracing::warn!(def_id, error = %e, "model route: the left route's mark was not cleared");
+    }
 }
 
 fn remember_previous(mstore: &Store, def_id: &str, from: Option<&Choice>) -> Result<(), String> {
@@ -159,6 +175,9 @@ mod tests {
         assert_eq!(launch::choice_of(&s, "a1").unwrap().model, PRO);
         let left = move_to(&s, "a1", "claude", Target::OwnLogin, |_| true).unwrap();
         assert_eq!(left.to, None);
+        assert_eq!(launch::leaving_route(&s, "a1").as_deref(), Some("openrouter"), "a turn in flight keeps its token until the relaunch");
+        finish_leaving(&s, "a1");
+        assert!(launch::leaving_route(&s, "a1").is_none());
         assert!(launch::choice_of(&s, "a1").is_none());
         assert_eq!(previous_of(&s, "a1").unwrap().model, PRO);
     }
