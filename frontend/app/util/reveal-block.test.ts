@@ -70,8 +70,13 @@ vi.mock("@/app/store/tab-actions", () => ({
 vi.mock("@/app/store/focusManager", () => ({ giveBlockFocus: (id: string) => calls.push(`caret:${id}`) }));
 /** The locate flash requests, each with the steps already taken when it was asked. */
 const located: { blockId: string; after: string[] }[] = [];
+/** What each of those requests said about focus. */
+const locateOpts: unknown[] = [];
 vi.mock("@/app/util/pane-locate", () => ({
-    emitPaneLocate: (blockId: string) => located.push({ blockId, after: [...calls] }),
+    emitPaneLocate: (blockId: string, opts?: unknown) => {
+        located.push({ blockId, after: [...calls] });
+        locateOpts.push(opts);
+    },
 }));
 vi.mock("@/layout/index", () => ({
     setActiveBlockInStack: (_m: unknown, nodeId: string, blockId: string) => calls.push(`stack:${nodeId}:${blockId}`),
@@ -122,6 +127,7 @@ function modelWithPane(nodeId: string, members: string[], magnified?: string, mi
 beforeEach(() => {
     calls.length = 0;
     located.length = 0;
+    locateOpts.length = 0;
     notices.length = 0;
     win.activeTab = "t1";
     win.commitDelayMs = 0;
@@ -307,6 +313,17 @@ describe("showBlockWithoutFocus — an agent's file-open into an existing pane",
         models.t2 = modelWithPane("pane", ["agentA", "agentB"], "other", true);
         expect(await showBlockWithoutFocus("agentB")).toBe(true);
         expect(calls).toEqual(["restore:pane", "unmagnify:other", "stack:pane:agentB"]);
+    });
+
+    it("flashes the pane it showed, without asking for focus; a block it could not show flashes nothing", async () => {
+        models.t2 = modelWithPane("pane", ["agentA", "agentB"], "other", true);
+        await showBlockWithoutFocus("agentB");
+        expect(located.map((l) => l.blockId)).toEqual(["agentB"]);
+        expect(locateOpts).toEqual([{ focus: false }]);
+        expect(located[0].after).toEqual(["restore:pane", "unmagnify:other", "stack:pane:agentB"]);
+        located.length = 0;
+        expect(await showBlockWithoutFocus("elsewhere")).toBe(false);
+        expect(located).toEqual([]);
     });
 
     it("a block not in a built layout here: false, nothing touched", async () => {

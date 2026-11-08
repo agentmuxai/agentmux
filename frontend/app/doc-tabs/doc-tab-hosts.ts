@@ -18,6 +18,7 @@
 import { dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import { asDocTabDragData } from "@/app/drag/drag-types";
 import { notifyDrop } from "@/app/drag/file-drop-actions";
+import { emitPaneLocate } from "@/app/util/pane-locate";
 import type { DocDropAt, DocTab } from "./doc-tabs";
 import type { DocTabsModel } from "./doc-tabs-controller";
 import "./doc-tabs.scss";
@@ -52,6 +53,8 @@ export interface DocTabHost {
     mergeFrom?(source: DocTabHost): MergeResult | Promise<MergeResult>;
     /** Open a new, empty document tab in this pane (what Ctrl+T does). */
     newDocument?(): void;
+    /** Bring the tab holding document `key` to the front of this pane; false when none holds it. */
+    reveal?(key: string): boolean;
 }
 
 /** What `mergeFrom` did: all of the source's tabs are in (its pane tab has nothing left), or
@@ -129,9 +132,13 @@ export function moveDocTab(sourceBlockId: string, tabId: string, targetBlockId: 
 
 /** `moveDocTab` for a drop the user made: a refusal is shown, not swallowed. */
 export function dropDocTab(sourceBlockId: string, tabId: string, targetBlockId: string, at?: DocDropAt): boolean {
-    const title = hosts.get(sourceBlockId)?.peek(tabId)?.title ?? "the tab";
+    const peeked = hosts.get(sourceBlockId)?.peek(tabId);
+    const title = peeked?.title ?? "the tab";
     const result = moveDocTab(sourceBlockId, tabId, targetBlockId, at);
     if (result.moved === false && result.reason) notifyDrop.cantMove(title, result.reason);
+    // Its document is open there already: the notice says why nothing moved, the flash says where it is.
+    const key = result.moved === false && result.reason === ALREADY_OPEN_THERE ? peeked?.key : undefined;
+    if (key !== undefined && hosts.get(targetBlockId)?.reveal?.(key)) emitPaneLocate(targetBlockId, { focus: false });
     return result.moved;
 }
 
@@ -174,6 +181,12 @@ export function docTabsHost<P>(tabs: DocTabsModel<P>, docType: string, hooks: Do
             const live = hooks.liveOf?.(before);
             const tab = tabs.detach(tabId);
             return tab ? { docType, tab, live } : null;
+        },
+        reveal: (key) => {
+            const open = tabs.tabs().find((t) => t.key === key);
+            if (!open) return false;
+            tabs.activate(open.id);
+            return true;
         },
         take: (transfer, at) => {
             const tab = hooks.arriving?.(transfer.tab as DocTab<P>, transfer.live) ?? (transfer.tab as DocTab<P>);

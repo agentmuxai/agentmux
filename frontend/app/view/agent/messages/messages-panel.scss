@@ -22,8 +22,8 @@
     min-height: 0;
     font-size: var(--text-sm);
 
-    // A close button that is easy to hit, and red under the pointer. It sits at the panel's top right corner, which
-    // assumes the pane's top band is free (the CPU and memory readout moves into the composer strip: #28995).
+    // A close button that is easy to hit, and red under the pointer. It sits at the panel's top right corner, under
+    // the pane's top band (the panel's containing block is `.agent-view-row`, which starts below the band).
     .ui-side-panel__head {
         align-items: center;
     }
