@@ -39,8 +39,7 @@ pub(super) fn check_row_less_block(mstore: &Store, block_id: &str) -> Result<(),
 /// bindings (or, on a model route, the route) whether it is empty or not (#2463's bypass is
 /// closed by the binding/provider gate, steps 4-5, not by this line). A genuinely missing
 /// account is told by `gate_oauth_failure`'s own `identity.spawn.blocked` warning; this note
-/// explains the empty column without claiming a failure (live 0.60.21: 49 such warnings today,
-/// 45 with the bound account injected right after, 0 spawn blocks).
+/// explains the empty column without claiming a failure.
 ///
 /// `resolve_bindings_for_instance` (step 3) keys strictly off `instance.definition_id`, so the
 /// outcome is the same whatever `identity_id` contains.
