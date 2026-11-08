@@ -72,6 +72,12 @@ describe("DualProviderLogo", () => {
         );
     });
 
+    it("keeps the model in the title when no badge is drawn, a harness on a model of its own maker", () => {
+        expect(dualLogoTitle("qwen", "qwen", "Qwen3.8 Max via OpenRouter")).toBe(
+            "Qwen Code harness running on Qwen3.8 Max via OpenRouter"
+        );
+    });
+
     it("draws the makers of a route model with marks of their own", () => {
         for (const maker of ["deepseek", "qwen", "zhipu", "moonshot"]) {
             const { container } = render(() => <DualProviderLogo harness="claude" vendor={maker} />);

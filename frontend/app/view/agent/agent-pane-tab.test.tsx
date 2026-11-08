@@ -94,8 +94,8 @@ describe("agent pane tab", () => {
     it("the pill's tooltip names the harness and the model", () => {
         const routed = describeAgent({ agentProvider: "claude", "agent:route_model": ROUTED });
         expect(routed.modelLine).toBe("Claude Code harness running on DeepSeek V4.1 Flash via OpenRouter");
-        const plain = describeAgent({ agentProvider: "claude" });
-        expect(plain.modelLine).toBe("Claude Code harness running on Anthropic");
+        // Off a route the pill can't tell what the agent runs on (its definition may name a custom endpoint).
+        expect(describeAgent({ agentProvider: "claude" }).modelLine).toBeUndefined();
         expect(describeAgent({}).modelLine).toBeUndefined();
     });
 

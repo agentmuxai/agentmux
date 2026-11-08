@@ -77,7 +77,7 @@ const hasBadge = (harness: string, vendor: string | undefined): boolean =>
 /** What the logo says in words: the harness, and what it runs on when the badge shows. */
 export function dualLogoTitle(harness: string, vendor?: string, vendorLabel?: string): string {
     const h = HARNESS_NAMES[(harness ?? "").toLowerCase()] ?? harness;
-    if (!hasBadge(harness, vendor)) return `${h} harness`;
+    if (!hasBadge(harness, vendor)) return vendorLabel ? `${h} harness running on ${vendorLabel}` : `${h} harness`;
     return `${h} harness running on ${vendorLabel ?? VENDOR_NAMES[vendor!.toLowerCase()] ?? vendor}`;
 }
 

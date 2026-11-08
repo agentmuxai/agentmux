@@ -42,8 +42,9 @@ export const agentPaneTab: PaneTabDescriptor = {
     },
     icon: ({ meta }) => agentTabIcon(meta),
     modelLine: ({ meta }) => {
+        // Only on a route: off one, the pill has no definition to say what the agent runs on (a custom endpoint).
         const shown = paneIconInput(meta, []);
-        return shown ? dualLogoTitle(shown.harness, shown.vendor, shown.modelText) : undefined;
+        return shown?.modelText ? dualLogoTitle(shown.harness, shown.vendor, shown.modelText) : undefined;
     },
     renamer: ({ blockId, meta }) => {
         const definitionId = meta?.["agentId"] as string | undefined;
