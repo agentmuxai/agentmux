@@ -30,6 +30,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
+use agentmux_common::srv_estart_wait::{wait_for_estart, EstartChannels, EstartWait};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
@@ -149,73 +150,6 @@ pub fn migration_failed_dialog_body(reason: &str) -> String {
          Run `muxlog srv` for the full log.",
         reason
     )
-}
-
-/// Outcome of waiting for srv's readiness signal. Module-level (not local to
-/// `spawn_srv`) so `prefer_buffered_failure` can be unit-tested.
-enum EstartWait {
-    Ready(Option<SrvSpawnResult>),
-    Timeout,
-    MigrationFailed(String),
-    NeedsPrepare(String),
-}
-
-/// Second guard for the ESTART-vs-failure race (reagent P1, post-merge on
-/// #3043). The stderr reader task sends the migration-failure reason and then
-/// drops every sender as srv exits, so by the time the waiter's `select!`
-/// runs, BOTH "failure buffered" and "ESTART channel closed" are ready.
-/// `biased;` in the select makes the failure arm win when both are seen in
-/// one poll; this covers the remaining shape, where the closed channel was
-/// observed first and the reason is sitting in `failure_rx` unread. Every
-/// other outcome passes through unchanged.
-fn prefer_buffered_failure(recv: EstartWait, failure_rx: &mut mpsc::Receiver<String>) -> EstartWait {
-    match recv {
-        EstartWait::Ready(None) => match failure_rx.try_recv() {
-            Ok(reason) => EstartWait::MigrationFailed(reason),
-            Err(_) => EstartWait::Ready(None),
-        },
-        other => other,
-    }
-}
-
-#[cfg(test)]
-mod estart_race_tests {
-    use super::*;
-
-    #[test]
-    fn closed_estart_channel_with_buffered_failure_becomes_migration_failed() {
-        let (tx, mut rx) = mpsc::channel::<String>(1);
-        // Reader task's exact sequence: send the reason, then drop the sender.
-        tx.try_send("migration 0007 failed: disk I/O error".into()).unwrap();
-        drop(tx);
-        match prefer_buffered_failure(EstartWait::Ready(None), &mut rx) {
-            EstartWait::MigrationFailed(r) => assert_eq!(r, "migration 0007 failed: disk I/O error"),
-            _ => panic!("buffered failure reason must win over a closed ESTART channel"),
-        }
-    }
-
-    #[test]
-    fn closed_estart_channel_without_failure_stays_channel_closed() {
-        let (tx, mut rx) = mpsc::channel::<String>(1);
-        drop(tx); // srv died before ESTART for some other reason — no failure line
-        assert!(matches!(
-            prefer_buffered_failure(EstartWait::Ready(None), &mut rx),
-            EstartWait::Ready(None)
-        ));
-    }
-
-    #[test]
-    fn other_outcomes_pass_through_untouched() {
-        let (tx, mut rx) = mpsc::channel::<String>(1);
-        tx.try_send("should not be consumed".into()).unwrap();
-        assert!(matches!(prefer_buffered_failure(EstartWait::Timeout, &mut rx), EstartWait::Timeout));
-        assert!(matches!(
-            prefer_buffered_failure(EstartWait::MigrationFailed("x".into()), &mut rx),
-            EstartWait::MigrationFailed(_)
-        ));
-        // Neither pass-through drained the channel.
-        assert_eq!(rx.try_recv().ok().as_deref(), Some("should not be consumed"));
-    }
 }
 
 /// One of srv's progress lines (a data-preparation step or a migration, in
@@ -530,18 +464,18 @@ async fn spawn_srv_once(
         .stderr
         .take()
         .ok_or_else(|| SrvSpawnError::SpawnFailed("no stderr handle".to_string()))?;
-    let (tx, mut rx) = mpsc::channel::<SrvSpawnResult>(1);
+    let (tx, rx) = mpsc::channel::<SrvSpawnResult>(1);
     // Separate channel so the stderr reader can signal that migrations are running.
     // The ESTART waiter extends its deadline when it receives this ping so that a
     // large-dataset migration that takes longer than the normal 30s boot window
     // doesn't cause the launcher to kill srv prematurely.
-    let (migration_tx, mut migration_rx) = mpsc::channel::<()>(4);
+    let (migration_tx, migration_rx) = mpsc::channel::<()>(4);
     // Third channel: srv reports a fatal migration failure on stderr and exits
     // 1 without ESTART. Without this the waiter would only notice via the 30s
     // timeout, and the user would see "timeout" instead of the actual error.
-    let (failure_tx, mut failure_rx) = mpsc::channel::<String>(1);
+    let (failure_tx, failure_rx) = mpsc::channel::<String>(1);
     // srv's data needs `migrate --prepare`; srv exits right after the line.
-    let (prepare_tx, mut prepare_rx) = mpsc::channel::<String>(1);
+    let (prepare_tx, prepare_rx) = mpsc::channel::<String>(1);
     let auth_key_for_estart = auth_key.clone();
     let host_reg_secret_for_estart = host_reg_secret.clone();
     let started_at_for_estart = started_at.clone();
@@ -608,45 +542,11 @@ async fn spawn_srv_once(
     // running srv that keeps the data dir lockfile, blocking the
     // next launch (#571).
     //
-    // If srv emits AGENTMUXSRV-MIGRATING before ESTART, the deadline is
-    // extended to 30 minutes to accommodate large-dataset migrations. A shorter
-    // cap risks killing srv mid-migration: 0011_shared_store_backfill's skip-guards
-    // check for non-empty shared tables, so a partial copy followed by a kill would
-    // cause rows to be permanently stranded on the next retry.
-    let normal_timeout = std::time::Duration::from_secs(30);
-    let migration_timeout = std::time::Duration::from_secs(1800);
-    let mut deadline = tokio::time::Instant::now() + normal_timeout;
-    let sleep = tokio::time::sleep_until(deadline);
-    tokio::pin!(sleep);
-
-    let recv = loop {
-        tokio::select! {
-            // `biased;` — poll arms in declaration order, failure first.
-            // The stderr reader sends the failure reason and then hits EOF
-            // (srv exits 1 right after the line), dropping every sender
-            // before this select! is next polled. Unbiased, `rx.recv()`
-            // resolving to None (closed) could win the coin flip over the
-            // already-buffered reason and degrade this to the generic
-            // EstartChannelClosed — invisible on Windows, exactly what the
-            // MigrationFailed path exists to fix (reagent P1, post-merge on
-            // #3043). `prefer_buffered_failure` below is the second guard.
-            biased;
-            Some(reason) = failure_rx.recv() => break EstartWait::MigrationFailed(reason),
-            Some(reason) = prepare_rx.recv() => break EstartWait::NeedsPrepare(reason),
-            result = rx.recv() => break EstartWait::Ready(result),
-            _ = &mut sleep => break EstartWait::Timeout,
-            Some(()) = migration_rx.recv() => {
-                // Migrations are running — extend the deadline generously.
-                let new_deadline = tokio::time::Instant::now() + migration_timeout;
-                if new_deadline > deadline {
-                    deadline = new_deadline;
-                    sleep.as_mut().reset(deadline);
-                    crate::log("srv: migration in progress — ESTART deadline extended to 30 minutes");
-                }
-            }
-        }
-    };
-    let recv = prefer_buffered_failure(recv, &mut failure_rx);
+    let mut channels = EstartChannels { ready: rx, migrating: migration_rx, failed: failure_rx, needs_prepare: Some(prepare_rx) };
+    let recv = wait_for_estart(&mut channels, || {
+        crate::log("srv: migration in progress — ESTART deadline extended to 30 minutes")
+    })
+    .await;
     match recv {
         EstartWait::Timeout => {
             let _ = child.start_kill();
@@ -724,41 +624,18 @@ async fn spawn_srv_once(
 ///      land in target/release/)
 ///   4. `<launcher_dir>/agentmux-srv.exe` (dev fallback)
 fn resolve_srv_binary(launcher_exe_dir: &Path) -> Result<PathBuf, SrvSpawnError> {
+    use agentmux_common::srv_binary;
     let backend_name = "agentmux-srv";
-    let exe_suffix = if cfg!(target_os = "windows") { ".exe" } else { "" };
-    let version = env!("CARGO_PKG_VERSION");
-    let (os_name, arch) = if cfg!(target_os = "macos") {
-        ("darwin", if cfg!(target_arch = "aarch64") { "arm64" } else { "x64" })
-    } else if cfg!(target_os = "linux") {
-        ("linux", if cfg!(target_arch = "aarch64") { "arm64" } else { "x64" })
-    } else {
-        ("windows", if cfg!(target_arch = "aarch64") { "arm64" } else { "x64" })
-    };
-
-    let candidates = [
-        // Portable: srv lives in launcher_dir/runtime/
-        launcher_exe_dir
-            .join("runtime")
-            .join(format!("{}-{}-{}.{}{}", backend_name, version, os_name, arch, exe_suffix)),
-        launcher_exe_dir
-            .join("runtime")
-            .join(format!("{}{}", backend_name, exe_suffix)),
-        // Dev: launcher and srv side-by-side in target/release/
-        launcher_exe_dir
-            .join(format!("{}-{}-{}.{}{}", backend_name, version, os_name, arch, exe_suffix)),
-        launcher_exe_dir.join(format!("{}{}", backend_name, exe_suffix)),
-    ];
-
-    for p in &candidates {
-        if p.exists() {
-            return Ok(p.clone());
-        }
+    let runtime = launcher_exe_dir.join("runtime");
+    let candidates = srv_binary::candidates(&[&runtime, launcher_exe_dir], backend_name, srv_binary::EXE_SUFFIX);
+    if let Some(found) = candidates.iter().find(|p| p.exists()) {
+        return Ok(found.clone());
     }
 
     Err(SrvSpawnError::BinaryNotFound(format!(
         "{} v{} not found. Searched:\n  {}",
         backend_name,
-        version,
+        srv_binary::VERSION,
         candidates
             .iter()
             .map(|p| p.display().to_string())
