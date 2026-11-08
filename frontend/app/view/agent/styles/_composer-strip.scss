@@ -243,10 +243,20 @@
         // The check icon lines up with the label, the first line.
         align-items: flex-start;
 
-        // Effort on a model that doesn't use it: shown, not selectable.
+        // Not selectable (effort on a model that doesn't use it, a route model that can't take this
+        // conversation). Only the name is dimmed: a greyed route row's description is the reason, and
+        // has to stay readable.
         &.is-disabled {
-            opacity: 0.45;
             cursor: default;
+
+            .label,
+            .menu-item-check {
+                opacity: 0.45;
+            }
+
+            .agent-runtime-dropup-description {
+                opacity: 1;
+            }
 
             &:hover {
                 background: transparent;

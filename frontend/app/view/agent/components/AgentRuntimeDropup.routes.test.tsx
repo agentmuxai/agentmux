@@ -7,7 +7,7 @@ import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentModelPanel } from "@/types/rpc/AgentModelPanel";
 import { AgentRuntimeDropup } from "./AgentRuntimeDropup";
-import { backRow, countAttachments, parseRouteValue, routeModelNote, routeModelOf, routeValue } from "./runtime-dropup-routes";
+import { backRow, countImages, parseRouteValue, routeModelNote, routeModelOf, routeValue } from "./runtime-dropup-routes";
 
 const panelCommand = vi.fn();
 const switchCommand = vi.fn();
@@ -208,15 +208,15 @@ describe("the model panel's routes", () => {
 });
 
 describe("the route rows' words", () => {
-    it("counts the files attached across the user's messages", () => {
+    it("counts the images attached across the user's messages, not other files", () => {
         const nodes = [
-            { type: "user_message", attachments: [{}, {}] },
-            { type: "assistant_message", attachments: [{}] },
+            { type: "user_message", attachments: [{ image: true }, { image: true }] },
+            { type: "assistant_message", attachments: [{ image: true }] },
             { type: "user_message" },
-            { type: "user_message", attachments: [{}] },
+            { type: "user_message", attachments: [{ image: true }, { name: "notes.txt" }] },
         ];
-        expect(countAttachments(nodes)).toBe(3);
-        expect(countAttachments([])).toBe(0);
+        expect(countImages(nodes)).toBe(3);
+        expect(countImages([])).toBe(0);
     });
 
     it("round-trips a route model id that has slashes and dots", () => {

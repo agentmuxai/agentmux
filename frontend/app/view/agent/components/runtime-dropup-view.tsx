@@ -201,6 +201,7 @@ function DropupPanel(props: DropupViewProps): JSX.Element {
         <AnchoredPopover
             anchor={s.referenceEl}
             placement="top-start"
+            fitHeight
             shellClass="anchored-popover--menu"
             class="menu agent-runtime-dropup-panel"
             ref={(el) => {

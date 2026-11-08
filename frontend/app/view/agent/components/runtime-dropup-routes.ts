@@ -19,9 +19,12 @@ import type { AgentRuntimeDropupProps, OptionRow } from "./runtime-dropup-option
 /** The pane meta key srv writes at every launch with the model that really answers; absent off a route. */
 export const ROUTE_MODEL_META_KEY = "agent:route_model";
 
-/** How many files the user attached across the conversation's messages. Images are most of them, and a text-only model reads none. */
-export function countAttachments(nodes: ReadonlyArray<{ type: string; attachments?: readonly unknown[] }>): number {
-    return nodes.reduce((n, node) => n + (node.type === "user_message" ? (node.attachments?.length ?? 0) : 0), 0);
+/** How many images the user attached across the conversation's messages. A text-only model reads none; other files reach it as text. */
+export function countImages(nodes: ReadonlyArray<{ type: string; attachments?: ReadonlyArray<{ image?: boolean }> }>): number {
+    return nodes.reduce(
+        (n, node) => n + (node.type === "user_message" ? (node.attachments?.filter((a) => a.image).length ?? 0) : 0),
+        0
+    );
 }
 
 /** The row value of "go back to where the agent was". */
