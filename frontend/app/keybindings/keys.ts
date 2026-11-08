@@ -78,6 +78,8 @@ export function parseKey(spec: string, platform: KeyPlatform): KeySpec {
         if (m === "mod") {
             if (platform === "mac") out.meta = true;
             else out.ctrl = true;
+        } else if (m === "cmd" || m === "command") {
+            out.meta = true;
         } else if (m === "ctrl" || m === "shift" || m === "alt" || m === "meta") {
             out[m] = true;
         } else {

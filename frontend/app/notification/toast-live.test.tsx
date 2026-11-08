@@ -41,6 +41,10 @@ describe("withToastLifetime", () => {
         const kept = withToastLifetime(toast({ expiration: now + 5000, actions: [{ label: "Show here", actionKey: "a" }] }), now);
         expect(kept.expiration).toBeUndefined();
     });
+    it("lets an action toast expire when it says so", () => {
+        const n = toast({ expiration: now + 10_000, expiresWithActions: true, actions: [{ label: "Go", actionKey: "a" }] });
+        expect(withToastLifetime(n, now).expiration).toBe(now + 10_000);
+    });
     it("shows any other toast for at least six seconds", () => {
         expect(withToastLifetime(toast({ expiration: now + 5000 }), now).expiration).toBe(now + MIN_TOAST_MS);
         expect(withToastLifetime(toast({ expiration: now + 20000 }), now).expiration).toBe(now + 20000);

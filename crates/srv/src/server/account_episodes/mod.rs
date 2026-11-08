@@ -587,6 +587,28 @@ pub(crate) fn clear_signed_out(mstore: &Arc<Store>, identity: &Store, event_bus:
     cleared
 }
 
+/// Restarts every open pane of the agent with its conversation resumed. A persistent pane in a turn is restarted when the
+/// turn ends. A one-shot (subprocess) pane, a container agent's, is not restarted: a restart would end the turn it is in,
+/// and its next turn reads the agent's choice anyway; nor is a stopped agent, which would be started by it. Those are counted apart. Returns how many were restarted, how many
+/// pick the change up at their next turn, and why the others were not restarted.
+pub(crate) fn restart_panes_of(state: &AppState, def_id: &str) -> (u32, u32, Vec<String>) {
+    let (mut restarted, mut next_turn, mut failed) = (0, 0, Vec::new());
+    for block in switch::open_panes(state, def_id) {
+        // No controller: the agent is stopped, and a restart would start it. It reads the choice when it is started.
+        let one_shot = crate::backend::blockcontroller::get_controller(&block.oid)
+            .is_none_or(|c| c.controller_type() == crate::backend::blockcontroller::BLOCK_CONTROLLER_SUBPROCESS);
+        if one_shot {
+            next_turn += 1;
+            continue;
+        }
+        match moves::restart(state, &block) {
+            Ok(()) => restarted += 1,
+            Err(e) => failed.push(e),
+        }
+    }
+    (restarted, next_turn, failed)
+}
+
 /// These RPCs are the operator's, except `agent.account.switch` and
 /// `identity.account.availability`: an agent connection (`bus:register`) is refused for the
 /// others, since the move relinks and restarts other agents and a sign-in clears other agents'

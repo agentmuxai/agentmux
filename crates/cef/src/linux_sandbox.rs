@@ -28,6 +28,14 @@
 /// Where the one-time fix installs the AppArmor profile.
 pub const APPARMOR_PROFILE_INSTALL_PATH: &str = "/etc/apparmor.d/agentmux-userns";
 
+/// The binary paths the profile names, as AppArmor globs (`*` is any run of characters except `/`, `?` one
+/// character except `/`). One list, so the profile text and [`exe_covered_by_profile`] cannot drift apart.
+const EXTRACTED_GLOB: &str = "/home/*/.local/share/agentmux/extracted/*/usr/bin/agentmux-cef";
+/// The AppImage runtime mounts at `/tmp/.mount_` + the first 6 characters of the AppImage's file name
+/// (`AgentM` for `AgentMux_<version>_amd64.AppImage`) + 6 random characters, e.g. `/tmp/.mount_AgentMDCbFgh`.
+const FUSE_GLOB: &str = "/tmp/.mount_AgentM??????/usr/bin/agentmux-cef";
+const INSTALLED_GLOB: &str = "/opt/agentmux/bin/agentmux-cef";
+
 /// Build the AppArmor profile text granting the `userns` rule to AgentMux's
 /// CEF host binary, covering the common case (AppRun's extract-once
 /// cache), the FUSE-mount fallback (extraction failed / not yet run), and
@@ -55,16 +63,15 @@ pub fn build_apparmor_profile() -> String {
          abi <abi/4.0>,\n\
          include <tunables/global>\n\
          \n\
-         profile agentmux-userns-extracted /home/*/.local/share/agentmux/extracted/*/usr/bin/agentmux-cef flags=(unconfined) {{\n\
+         profile agentmux-userns-extracted {extracted} flags=(unconfined) {{\n\
          \x20 userns,\n\
          }}\n\
          \n\
          # FUSE-mount fallback (extract-once cache unavailable — disk full,\n\
          # $HOME unwritable, or first launch before extraction completes).\n\
-         # appimagetool's default FUSE mountpoint naming; see spec OQ3 —\n\
-         # verify this matches the pinned appimagetool version's actual\n\
-         # naming before relying on this stanza alone.\n\
-         profile agentmux-userns-fuse /tmp/.mount_AgentMu*/usr/bin/agentmux-cef flags=(unconfined) {{\n\
+         # The AppImage runtime names the mount after the first 6 characters\n\
+         # of the AppImage's file name, then 6 random ones.\n\
+         profile agentmux-userns-fuse {fuse} flags=(unconfined) {{\n\
          \x20 userns,\n\
          }}\n\
          \n\
@@ -74,10 +81,36 @@ pub fn build_apparmor_profile() -> String {
          # the files at this same fixed path rather than adding a new\n\
          # version-suffixed directory the way the AppImage's extract cache\n\
          # does.\n\
-         profile agentmux-userns-installed /opt/agentmux/bin/agentmux-cef flags=(unconfined) {{\n\
+         profile agentmux-userns-installed {installed} flags=(unconfined) {{\n\
          \x20 userns,\n\
-         }}\n"
+         }}\n",
+        extracted = EXTRACTED_GLOB,
+        fuse = FUSE_GLOB,
+        installed = INSTALLED_GLOB,
     )
+}
+
+/// Whether AppArmor glob `glob` matches `path` (`*`: any run of characters except `/`; `?`: one such character).
+fn glob_matches(glob: &str, path: &str) -> bool {
+    fn go(g: &[u8], p: &[u8]) -> bool {
+        match g.split_first() {
+            None => p.is_empty(),
+            Some((b'*', rest)) => {
+                let run = p.iter().position(|&c| c == b'/').unwrap_or(p.len());
+                (0..=run).any(|n| go(rest, &p[n..]))
+            }
+            Some((b'?', rest)) => matches!(p.split_first(), Some((&c, tail)) if c != b'/' && go(rest, tail)),
+            Some((c, rest)) => matches!(p.split_first(), Some((d, tail)) if d == c && go(rest, tail)),
+        }
+    }
+    go(glob.as_bytes(), path.as_bytes())
+}
+
+/// Whether a stanza of [`build_apparmor_profile`] names the binary at `exe` (`current_exe()`, which is the resolved
+/// path AppArmor matches). A build anywhere else (a dev `dist/cef-dev` build, the portable `.tar.xz`) is not
+/// covered, so installing the profile cannot help it.
+pub fn exe_covered_by_profile(exe: &std::path::Path) -> bool {
+    exe.to_str().is_some_and(|e| [EXTRACTED_GLOB, FUSE_GLOB, INSTALLED_GLOB].iter().any(|g| glob_matches(g, e)))
 }
 
 /// Outcome of the "sandbox blocked" dialog (§5.3 of the spec).
@@ -117,6 +150,35 @@ fn parse_kdialog_result(exit_code: Option<i32>) -> SandboxDialogChoice {
     match exit_code {
         Some(0) => SandboxDialogChoice::FixNow,
         Some(1) => SandboxDialogChoice::ContinueWithoutSandbox,
+        _ => SandboxDialogChoice::Cancel,
+    }
+}
+
+/// The dialog for a binary no stanza covers: only "Continue without sandbox" and Cancel, because installing the
+/// profile cannot help and clicking "Fix it now" would just ask again.
+fn uncoverable_dialog_body(exe: &str) -> String {
+    format!(
+        "Your system's security policy (AppArmor) is blocking the sandbox AgentMux uses to isolate its browser engine.\n\n\
+         The one-time fix only covers AgentMux when it runs from the AppImage or a .deb/.rpm install, but this copy is running from:\n\
+         {exe}\n\n\
+         Install AgentMux that way to get the fix, or continue without the sandbox for this session \
+         (AGENTMUX_UNSAFE_NOSANDBOX=1 does the same without asking) — see docs/linux.md."
+    )
+}
+
+/// zenity's answer to the dialog above: the OK button is "Continue without sandbox this time".
+fn parse_continue_only_zenity(exit_success: bool) -> SandboxDialogChoice {
+    if exit_success {
+        SandboxDialogChoice::ContinueWithoutSandbox
+    } else {
+        SandboxDialogChoice::Cancel
+    }
+}
+
+/// kdialog's `--yesno` answer to the same: 0 is "Continue without sandbox this time", anything else cancels.
+fn parse_continue_only_kdialog(exit_code: Option<i32>) -> SandboxDialogChoice {
+    match exit_code {
+        Some(0) => SandboxDialogChoice::ContinueWithoutSandbox,
         _ => SandboxDialogChoice::Cancel,
     }
 }
@@ -248,50 +310,38 @@ mod imp {
             .unwrap_or(false)
     }
 
-    fn try_zenity() -> Option<SandboxDialogChoice> {
+    /// `fixable`: the dialog offers "Fix it now"; otherwise only "Continue without sandbox" and Cancel.
+    fn try_zenity(body: &str, fixable: bool) -> Option<SandboxDialogChoice> {
         if !have_on_path("zenity") {
             return None;
         }
-        let output = Command::new("zenity")
-            .args([
-                "--question",
-                "--title",
-                DIALOG_TITLE,
-                "--text",
-                DIALOG_BODY,
-                "--ok-label",
-                FIX_NOW_LABEL,
-                "--cancel-label",
-                "Cancel",
-                "--extra-button",
-                CONTINUE_WITHOUT_SANDBOX_LABEL,
-            ])
-            .output()
-            .ok()?;
+        let ok_label = if fixable { FIX_NOW_LABEL } else { CONTINUE_WITHOUT_SANDBOX_LABEL };
+        let mut args = vec!["--question", "--title", DIALOG_TITLE, "--text", body, "--ok-label", ok_label, "--cancel-label", "Cancel"];
+        if fixable {
+            args.extend(["--extra-button", CONTINUE_WITHOUT_SANDBOX_LABEL]);
+        }
+        let output = Command::new("zenity").args(args).output().ok()?;
         let stdout = String::from_utf8_lossy(&output.stdout);
-        Some(parse_zenity_result(output.status.success(), &stdout))
+        Some(if fixable {
+            parse_zenity_result(output.status.success(), &stdout)
+        } else {
+            parse_continue_only_zenity(output.status.success())
+        })
     }
 
-    fn try_kdialog() -> Option<SandboxDialogChoice> {
+    fn try_kdialog(body: &str, fixable: bool) -> Option<SandboxDialogChoice> {
         if !have_on_path("kdialog") {
             return None;
         }
-        let status = Command::new("kdialog")
-            .args([
-                "--title",
-                DIALOG_TITLE,
-                "--yesnocancel",
-                DIALOG_BODY,
-                "--yes-label",
-                FIX_NOW_LABEL,
-                "--no-label",
-                CONTINUE_WITHOUT_SANDBOX_LABEL,
-                "--cancel-label",
-                "Cancel",
-            ])
-            .status()
-            .ok()?;
-        Some(parse_kdialog_result(status.code()))
+        let mut args = vec!["--title", DIALOG_TITLE];
+        if fixable {
+            args.extend(["--yesnocancel", body, "--yes-label", FIX_NOW_LABEL, "--no-label", CONTINUE_WITHOUT_SANDBOX_LABEL]);
+            args.extend(["--cancel-label", "Cancel"]);
+        } else {
+            args.extend(["--yesno", body, "--yes-label", CONTINUE_WITHOUT_SANDBOX_LABEL, "--no-label", "Cancel"]);
+        }
+        let status = Command::new("kdialog").args(args).status().ok()?;
+        Some(if fixable { parse_kdialog_result(status.code()) } else { parse_continue_only_kdialog(status.code()) })
     }
 
     /// Show the "sandbox blocked" dialog and return the user's choice.
@@ -302,8 +352,12 @@ mod imp {
     /// ask), and should log the equivalent text to stderr so a user
     /// running from a terminal still sees it.
     pub fn show_userns_blocked_dialog() -> SandboxDialogChoice {
-        try_zenity()
-            .or_else(try_kdialog)
+        // A binary no stanza names (a dev build, the portable tarball): offering the fix would loop forever.
+        let uncovered = std::env::current_exe().ok().filter(|exe| !exe_covered_by_profile(exe));
+        let body = uncovered.as_ref().map_or_else(|| DIALOG_BODY.to_string(), |exe| uncoverable_dialog_body(&exe.to_string_lossy()));
+        let fixable = uncovered.is_none();
+        try_zenity(&body, fixable)
+            .or_else(|| try_kdialog(&body, fixable))
             .unwrap_or(SandboxDialogChoice::NoDialogToolAvailable)
     }
 
@@ -472,7 +526,61 @@ mod tests {
     #[test]
     fn apparmor_profile_covers_fuse_mount_fallback() {
         let profile = build_apparmor_profile();
-        assert!(profile.contains("/tmp/.mount_AgentMu*/usr/bin/agentmux-cef"));
+        assert!(profile.contains("/tmp/.mount_AgentM??????/usr/bin/agentmux-cef"));
+        assert!(!profile.contains(".mount_AgentMu"), "the mount name is the first 6 characters of the file name: AgentM");
+    }
+
+    #[test]
+    fn profile_covers_the_real_paths() {
+        let covered = |p: &str| exe_covered_by_profile(std::path::Path::new(p));
+        assert!(covered("/tmp/.mount_AgentMDCbFgh/usr/bin/agentmux-cef"));
+        assert!(covered("/home/parlo/.local/share/agentmux/extracted/0.60.20/usr/bin/agentmux-cef"));
+        assert!(covered("/opt/agentmux/bin/agentmux-cef"));
+    }
+
+    #[test]
+    fn profile_does_not_cover_other_builds() {
+        let covered = |p: &str| exe_covered_by_profile(std::path::Path::new(p));
+        // A dev build, which looped the dialog on charlie.
+        assert!(!covered("/home/parlo/.agentmux/agents/parlo/agentmux/dist/cef-dev/agentmux-cef"));
+        // The portable tarball, anywhere.
+        assert!(!covered("/home/parlo/Downloads/AgentMux/usr/bin/agentmux-cef"));
+        // A home that is not /home/<user>.
+        assert!(!covered("/root/.local/share/agentmux/extracted/0.60.20/usr/bin/agentmux-cef"));
+        // The mount name: 6 random characters after AgentM, and no `/` stands in for any of them.
+        assert!(!covered("/tmp/.mount_AgentM/usr/bin/agentmux-cef"));
+        assert!(!covered("/tmp/.mount_AgentMDCbFghX/usr/bin/agentmux-cef"));
+        assert!(!covered("/tmp/.mount_AgentM/DCbFgh/usr/bin/agentmux-cef"));
+        assert!(!covered("/tmp/.mount_Other00DCbFgh/usr/bin/agentmux-cef"));
+        // A `*` does not cross a directory.
+        assert!(!covered("/home/a/b/.local/share/agentmux/extracted/0.60.20/usr/bin/agentmux-cef"));
+        assert!(!covered("/home/a/.local/share/agentmux/extracted/0.60.20/x/usr/bin/agentmux-cef"));
+    }
+
+    #[test]
+    fn glob_star_and_question_mark() {
+        assert!(glob_matches("/a/*/c", "/a/bb/c"));
+        assert!(glob_matches("/a/*/c", "/a//c"));
+        assert!(!glob_matches("/a/*/c", "/a/b/b/c"));
+        assert!(glob_matches("/a/b?d", "/a/bcd"));
+        assert!(!glob_matches("/a/b?d", "/a/b/d"));
+        assert!(!glob_matches("/a/b?d", "/a/bd"));
+    }
+
+    #[test]
+    fn uncoverable_dialog_names_the_binary_and_offers_no_fix() {
+        let body = uncoverable_dialog_body("/home/p/agentmux/dist/cef-dev/agentmux-cef");
+        assert!(body.contains("/home/p/agentmux/dist/cef-dev/agentmux-cef"));
+        assert!(!body.contains(FIX_NOW_LABEL));
+    }
+
+    #[test]
+    fn uncoverable_dialog_answers_are_continue_or_cancel_never_fix() {
+        assert_eq!(parse_continue_only_zenity(true), SandboxDialogChoice::ContinueWithoutSandbox);
+        assert_eq!(parse_continue_only_zenity(false), SandboxDialogChoice::Cancel);
+        assert_eq!(parse_continue_only_kdialog(Some(0)), SandboxDialogChoice::ContinueWithoutSandbox);
+        assert_eq!(parse_continue_only_kdialog(Some(1)), SandboxDialogChoice::Cancel);
+        assert_eq!(parse_continue_only_kdialog(None), SandboxDialogChoice::Cancel);
     }
 
     #[test]

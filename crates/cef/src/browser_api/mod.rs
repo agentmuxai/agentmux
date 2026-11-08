@@ -107,6 +107,8 @@ pub fn register_routes(router: Router<Arc<AppState>>) -> Router<Arc<AppState>> {
         .route("/agentmux/browser/list_shortcuts", post(shortcuts::list_shortcuts))
         .route("/agentmux/browser/run_command", post(shortcuts::run_command))
         .route("/agentmux/browser/press_keys", post(shortcuts::press_keys))
+        .route("/agentmux/browser/set_shortcut", post(shortcuts::set_shortcut))
+        .route("/agentmux/browser/reset_shortcuts", post(shortcuts::reset_shortcuts))
 }
 
 /// Shared state for the browser API — primarily the resolver's

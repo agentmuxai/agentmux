@@ -632,7 +632,7 @@ declare global {
         agent: string;
         /** navigate, back, forward, reload, click, fill, select, check, key,
          *  upload, capture, terminal, eval, handoff, auto-approve-on, auto-approve-off, pause, resume,
-         *  took-control, released. */
+         *  took-control, released, download. */
         kind: string;
         url?: string;
         /** The element's label or ref, or a field's ref for a fill. */

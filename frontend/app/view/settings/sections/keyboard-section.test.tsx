@@ -248,6 +248,21 @@ describe("Help's links", () => {
         expect((screen.getByLabelText("Search shortcuts by action or key") as HTMLInputElement).value).toBe("");
     });
 
+    it("go to the Settings pane that was shown when several are open", async () => {
+        Element.prototype.scrollIntoView = vi.fn();
+        const { container } = render(() => (
+            <>
+                <div data-blockid="first"><KeyboardSection /></div>
+                <div data-blockid="second"><KeyboardSection /></div>
+            </>
+        ));
+        requestKeyboardRow("tab:new", "second");
+        await Promise.resolve();
+        const second = container.querySelector('[data-blockid="second"]')!;
+        expect(second.contains(document.activeElement)).toBe(true);
+        expect(document.activeElement).toBe(second.querySelector('[data-command="tab:new"]'));
+    });
+
     it("open the group of a command that has no line of its own until then", async () => {
         Element.prototype.scrollIntoView = vi.fn();
         render(() => <KeyboardSection />);

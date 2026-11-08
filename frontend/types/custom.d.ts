@@ -1181,6 +1181,9 @@ declare global {
         /** Stays until the user closes it: no expiry, and a pin on the toast
          *  says so. Needs an `id`. */
         persistent?: boolean;
+        /** An action toast that still goes at `expiration` (an action toast otherwise never expires), and waits
+         *  while the pointer is over it. For a notice that a list elsewhere keeps. */
+        expiresWithActions?: boolean;
         type?: "error" | "update" | "info" | "warning";
         /** How a screen reader is told of it: `status` (polite) or `alert` (at once). Absent, an error
          *  is an alert and everything else a status. Never moves focus. */

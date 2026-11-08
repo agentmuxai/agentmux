@@ -61,7 +61,7 @@ pub(super) const ALWAYS: &[&str] = &[
     "POST /api/v1/ui/browser/release", "POST /api/v1/ui/browser/request_bypass", "POST /api/v1/ui/browser/retake", "POST /api/v1/ui/browser/set_files", "POST /api/v1/ui/browser/signin",
     "POST /api/v1/ui/browser/take_control",
     "POST /api/v1/ui/browser/capture", "POST /api/v1/ui/browser/terminal", "POST /api/v1/ui/browser/vault_fill",
-    "POST /api/v1/ui/click", "POST /api/v1/ui/shortcuts/press", "POST /api/v1/ui/shortcuts/run", "POST /api/v1/vault/generate",
+    "POST /api/v1/ui/click", "POST /api/v1/ui/shortcuts/press", "POST /api/v1/ui/shortcuts/reset", "POST /api/v1/ui/shortcuts/run", "POST /api/v1/ui/shortcuts/set", "POST /api/v1/vault/generate",
     "POST /api/v1/vault/import", "POST /api/v1/vault/request",
     "POST /api/v1/vault/update", "POST /api/v1/vault/rotate", "POST /api/v1/widgets/install",
     "POST /api/v1/window/focus", "POST /api/v1/window/name", "POST /api/v1/work-claims",

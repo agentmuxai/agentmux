@@ -7,7 +7,7 @@
  * (docs/specs/SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09.md §3–§4). Loaded
  * on first use and after every change made here; a change made in another
  * window shows the next time a menu opens (it reloads), and at once in a
- * view that calls `followBrowserProfiles` (the Settings section).
+ * view that calls `followBrowserProfiles` (the Settings section and each browser pane's profile button).
  */
 
 import { createSignal } from "solid-js";

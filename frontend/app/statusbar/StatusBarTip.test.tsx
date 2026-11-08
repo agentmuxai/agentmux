@@ -106,6 +106,23 @@ describe("StatusBarTip", () => {
         expect(stop).toHaveBeenCalledTimes(1);
     });
 
+    it("ends the tip on a click on its item, so a popover the click opens is not under it", async () => {
+        const stop = vi.fn();
+        vi.mocked(autoUpdate).mockReturnValueOnce(stop);
+        const anchor = mountTip();
+        fireEvent.mouseOver(anchor);
+        await tick();
+        flushFrames();
+        fireEvent.click(anchor);
+        await tick();
+        expect(stop).toHaveBeenCalledTimes(1);
+        // The pointer is still on the item: moving inside it does not bring the tip back.
+        fireEvent.mouseOver(anchor);
+        await tick();
+        flushFrames();
+        expect(autoUpdate).toHaveBeenCalledTimes(2);
+    });
+
     // The regression. Dismissing inside the same frame the balloon mounted in
     // left `cleanupAutoUpdate` null at disposal, so the pending frame went on
     // to start an observer with no owner left to stop it. Every later

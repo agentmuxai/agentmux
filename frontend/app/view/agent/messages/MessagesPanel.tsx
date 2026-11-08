@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The Messages panel: the incoming jekts of one agent pane, in a column beside the conversation, or a narrow rail
- * with a count when it is closed (docs/specs/SPEC_JEKT_SIDE_PANEL_RESEARCH_AND_DESIGN_2026_11_04.md §5). Each
+ * The Messages panel: the incoming jekts of one agent pane, in a panel over the conversation, or a bar on the pane's
+ * right edge, labelled "Jekt Messages", when it is collapsed
+ * (docs/specs/SPEC_JEKT_SIDE_PANEL_RESEARCH_AND_DESIGN_2026_11_04.md §5, refined in #28993). Each
  * message is read from the pane's own document nodes and drawn with the same tags and metadata as its row in the
  * conversation. Messages that wait on the person sit above the list and never clear by being scrolled past.
  */
@@ -32,7 +33,6 @@ import { PreviewLines } from "../components/PreviewLines";
 import { awaitingYou, dismissAwaiting } from "../hooks/useJektsAwaitingYou";
 import { proseDoc, rawDoc } from "../preview-text/docs";
 import { scrollMessagesTo } from "../scroll/one-way-flow";
-import { createNarrow, publishHeaderButton } from "./messages-overlay";
 import "./messages-panel.scss";
 import {
     applyFilter,
@@ -87,29 +87,24 @@ function MessagesDock(props: MessagesPanelProps): JSX.Element {
     const model = createMessagesModel(props);
     const { controls } = props;
     let dock: HTMLDivElement | undefined;
-    const narrow = createNarrow(
-        () => dock?.parentElement,
-        () => props.zoom
-    );
+    const close = () => {
+        controls.patch({ open: false });
+        // Back to the bar it came from, so the keyboard is not left on a panel that is gone.
+        queueMicrotask(() => dock?.querySelector<HTMLElement>(".messages-rail__button")?.focus());
+    };
+    // Opened, the panel takes the keyboard: Esc then shuts it instead of reaching the pane. Not from under a text
+    // field: a search that finds its match in a held message opens the panel while the person is still typing.
+    // Keyed on the boolean: `state()` is a new object whenever the stored meta changes (`seen` moves while it is open).
+    const isOpen = createMemo(() => controls.state().open);
     createEffect(() => {
-        controls.setNarrow(narrow());
-        if (!narrow()) controls.setOverlayOpen(false);
+        if (!isOpen()) return;
+        const typing = document.activeElement;
+        if (typing instanceof HTMLElement && !dock?.contains(typing) && typing.matches("input, textarea, [contenteditable]"))
+            return;
+        queueMicrotask(() => dock?.querySelector<HTMLElement>(".ui-side-panel__head button")?.focus());
     });
-    // Opened, the overlay takes the keyboard: Esc then shuts it instead of reaching the pane (focus stays on the
-    // header button otherwise).
-    createEffect(() => {
-        if (narrow() && controls.overlayOpen())
-            queueMicrotask(() => dock?.querySelector<HTMLElement>(".ui-side-panel__head button")?.focus());
-    });
-    onCleanup(() => controls.setNarrow(false));
-    publishHeaderButton(
-        props.blockId,
-        narrow,
-        model.unread,
-        () => model.waiting().length > 0,
-        () => controls.setOverlayOpen(!controls.overlayOpen())
-    );
-    // Wide: the column or its rail beside the conversation. Narrow: the column over it, only while it is opened.
+    // The bar is a column of its own beside the conversation; the opened panel lies over the conversation along the
+    // pane's right edge, like the Kanban's task drawer, so opening it never moves the conversation.
     return (
         <div
             ref={dock}
@@ -117,31 +112,15 @@ function MessagesDock(props: MessagesPanelProps): JSX.Element {
             // A listener on the element itself, not Solid's delegated one: a delegated handler cannot stop what
             // listens at the document (the pane's own Esc).
             on:keydown={(e) => {
-                // Esc shuts the open overlay first (focus inside it), as it shuts the Kanban's drawer.
-                if (e.key !== "Escape" || !narrow() || !controls.overlayOpen()) return;
+                if (e.key !== "Escape" || !controls.state().open) return;
                 e.stopPropagation();
-                controls.setOverlayOpen(false);
-            }}
-            classList={{
-                "messages-dock--overlay": narrow(),
-                "messages-dock--idle": narrow() && !controls.overlayOpen(),
+                close();
             }}
             style={{ zoom: props.zoom }}
         >
-            <Show
-                when={narrow()}
-                fallback={
-                    <Show
-                        when={controls.state().open}
-                        fallback={<MessagesRail model={model} onOpen={() => controls.patch({ open: true })} />}
-                    >
-                        <MessagesColumn {...props} model={model} onClose={() => controls.patch({ open: false })} />
-                    </Show>
-                }
-            >
-                <Show when={controls.overlayOpen()}>
-                    <MessagesColumn {...props} model={model} onClose={() => controls.setOverlayOpen(false)} />
-                </Show>
+            <MessagesBar model={model} covered={controls.state().open} onOpen={() => controls.patch({ open: true })} />
+            <Show when={controls.state().open}>
+                <MessagesColumn {...props} model={model} onClose={close} />
             </Show>
         </div>
     );
@@ -149,30 +128,39 @@ function MessagesDock(props: MessagesPanelProps): JSX.Element {
 
 type Model = ReturnType<typeof createMessagesModel>;
 
-/** The closed panel: a thin rail on the right edge with the count and a dot while something needs the person. */
-function MessagesRail(props: { model: Model; onOpen: () => void }): JSX.Element {
+/**
+ * The collapsed panel: a bar on the right edge, tinted as the jekt rail, labelled "Jekt Messages" at its vertical
+ * centre. The whole bar is the button that opens the panel; the count and the dot while something needs the person
+ * sit at its top. While the panel is open it lies over the bar: the bar keeps its column, so the conversation does
+ * not move, and holds nothing, so the count is not read twice.
+ */
+function MessagesBar(props: { model: Model; covered: boolean; onOpen: () => void }): JSX.Element {
     const label = () => {
         const n = props.model.unread();
         const needs = props.model.waiting().length;
-        return `Messages${n ? `, ${n} unread` : ""}${needs ? `, ${needs} need you` : ""}`;
+        return `Jekt Messages${n ? `, ${n} unread` : ""}${needs ? `, ${needs} need you` : ""}`;
     };
     return (
-        <aside class="messages-rail" aria-label="Messages">
-            <Button
-                variant="chrome"
-                class="messages-rail__button"
-                onClick={props.onOpen}
-                aria-label={label()}
-                title={label()}
-            >
-                <span class="messages-rail__text">Messages</span>
-                <Show when={props.model.unread() > 0}>
-                    <Pill tone="accent">{badgeText(props.model.unread())}</Pill>
-                </Show>
-                <Show when={props.model.waiting().length > 0}>
-                    <span class="messages-rail__needs" role="img" aria-label="Needs you" />
-                </Show>
-            </Button>
+        <aside class="messages-rail" aria-label="Jekt Messages" aria-hidden={props.covered || undefined}>
+            <Show when={!props.covered}>
+                <Button
+                    variant="chrome"
+                    class="messages-rail__button"
+                    onClick={props.onOpen}
+                    aria-label={label()}
+                    title={label()}
+                >
+                    <span class="messages-rail__marks">
+                        <Show when={props.model.unread() > 0}>
+                            <Pill tone="accent">{badgeText(props.model.unread())}</Pill>
+                        </Show>
+                        <Show when={props.model.waiting().length > 0}>
+                            <span class="messages-rail__needs" role="img" aria-label="Needs you" />
+                        </Show>
+                    </span>
+                    <span class="messages-rail__text">Jekt Messages</span>
+                </Button>
+            </Show>
         </aside>
     );
 }
@@ -294,7 +282,6 @@ function MessagesColumn(props: MessagesPanelProps & { model: Model; onClose: () 
 
     return (
         <SidePanel
-            docked
             class="messages-panel"
             label="Messages"
             title={
@@ -336,7 +323,8 @@ function MessagesColumn(props: MessagesPanelProps & { model: Model; onClose: () 
                             unread={isUnread(m, controls.state().seen)}
                             needsYou={model.waitingIds().has(m.id)}
                             onToggle={() => toggle(m.id)}
-                            onShow={() => props.jumpTo(m.id)}
+                            // A message the conversation does not show has no row to jump to.
+                            onShow={controls.hidden(m) ? undefined : () => props.jumpTo(m.id)}
                         />
                     )}
                 </For>
@@ -383,7 +371,7 @@ function MessageRow(props: {
     unread: boolean;
     needsYou: boolean;
     onToggle: () => void;
-    onShow: () => void;
+    onShow?: () => void;
 }): JSX.Element {
     const bodyDoc = createMemo(() => proseDoc(props.node.message));
     const rawPayload = createMemo(() => rawDoc(props.node.raw));
@@ -427,11 +415,15 @@ function MessageRow(props: {
                         <PreviewLines doc={rawPayload()} />
                     </div>
                 </details>
-                <div class="messages-row__actions">
-                    <Button variant="link" onClick={props.onShow}>
-                        Show in conversation
-                    </Button>
-                </div>
+                <Show when={props.onShow}>
+                    {(show) => (
+                        <div class="messages-row__actions">
+                            <Button variant="link" onClick={show()}>
+                                Show in conversation
+                            </Button>
+                        </div>
+                    )}
+                </Show>
             </Show>
         </li>
     );

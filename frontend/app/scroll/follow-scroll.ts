@@ -14,7 +14,7 @@
  * scrollTop per path (I3).
  */
 
-import { createFillPass } from "./fill-pass";
+import { createFillPass, type FillPass } from "./fill-pass";
 import {
     FOLLOWING,
     followReducer,
@@ -92,160 +92,193 @@ export interface FollowScroll extends ScrollInput {
     dispose(): void;
 }
 
+/** What one scroller's binding keeps between events (the state machine's state, the gesture clock, what is held). */
+interface FollowCore {
+    scroller: HTMLElement;
+    host: FollowScrollHost;
+    now: () => number;
+    state: FollowState;
+    last: ScrollGeometry | null;
+    lastGestureAt: number;
+    lastGestureUp: boolean;
+    pointerHeld: boolean;
+    scrollbarHeld: boolean;
+    pointerInside: boolean; // the last press in the document was on this transcript: scoped scroll keys go to it
+    fill: FillPass;
+}
+
+function createFollowCore(scroller: HTMLElement, host: FollowScrollHost, initial: FollowState): FollowCore {
+    return {
+        scroller,
+        host,
+        now: host.now ?? (() => performance.now()),
+        state: initial,
+        last: null,
+        lastGestureAt: Number.NEGATIVE_INFINITY,
+        lastGestureUp: false,
+        pointerHeld: false,
+        scrollbarHeld: false,
+        pointerInside: false,
+        fill: createFillPass(host),
+    };
+}
+
+/** Runs the reducer; returns true if it asked for a pin the caller makes itself. */
+function dispatch(c: FollowCore, event: FollowEvent, pinViaHost: boolean): boolean {
+    const result = followReducer(c.state, event);
+    c.state = result.state;
+    let pin = false;
+    for (const effect of result.effects) {
+        if (effect.type === "Transition") c.host.transition(effect.from, effect.to, effect.cause, effect.detail);
+        else if (effect.type === "LoadOlder") c.host.loadOlder(lastGeo(c));
+        else if (effect.type === "FillOlder") c.fill.run(lastGeo(c));
+        else if (pinViaHost) c.host.pin(effect.cause);
+        else pin = true;
+    }
+    return pin;
+}
+
+const lastGeo = (c: FollowCore): ScrollGeometry => c.last ?? { scrollTop: 0, scrollHeight: 0, clientHeight: 0 };
+const checkFill = (c: FollowCore): void => {
+    dispatch(c, fillCheck(lastGeo(c), c.host), true);
+};
+const escape = (c: FollowCore, cause: EscapeCause): void => {
+    dispatch(c, { type: "UserEscape", cause, geo: lastGeo(c) }, true);
+};
+/** `up`: the gesture moves the transcript up (`afterUpGesture`). */
+const mark = (c: FollowCore, up = false): void => {
+    c.lastGestureAt = c.now();
+    c.lastGestureUp = up;
+};
+
+function onWheel(c: FollowCore, e: WheelEvent): void {
+    // Ctrl/⌘+wheel zooms; a sideways-only wheel (a wide table) scrolls nothing the follow depends on.
+    if (e.ctrlKey || e.metaKey || e.deltaY === 0) return;
+    mark(c, e.deltaY < 0);
+    const target = e.target instanceof Element ? e.target : null;
+    const nested = target?.closest(NESTED_SCROLLER);
+    // The scroller may be such a box itself (a tool preview): only one inside it defers.
+    if (e.deltaY < 0 && !(nested && nested !== c.scroller && c.scroller.contains(nested))) escape(c, "wheel-up");
+}
+
+function onPointerDown(c: FollowCore, e: PointerEvent): void {
+    c.pointerHeld = true;
+    // Only a press on the scroller itself (its scrollbar) can scroll it;
+    // a press on content (focus, a tool header, a link) can't (§2.2 B1).
+    if (e.target !== c.scroller) return;
+    c.scrollbarHeld = true;
+    mark(c);
+}
+
+function onPointerUp(c: FollowCore): void {
+    const was = c.pointerHeld;
+    c.pointerHeld = false;
+    if (c.scrollbarHeld) {
+        c.scrollbarHeld = false;
+        mark(c); // the drag's trailing scroll events are still the user's
+    }
+    if (was) c.host.released?.();
+}
+
+function onKey(c: FollowCore, e: KeyboardEvent): void {
+    if (!SCROLL_KEYS.has(e.key)) return;
+    const t = e.target instanceof HTMLElement ? e.target : null;
+    if (t && (t.isContentEditable || t.tagName === "TEXTAREA" || t.tagName === "INPUT" || t.tagName === "SELECT"))
+        return;
+    // Only keys that scroll THIS transcript: focus inside it, or nothing
+    // focused and the last press was on it (Chromium scrolls that one).
+    const unfocused = !t || t === document.body || t === document.documentElement;
+    if (!(t && c.scroller.contains(t)) && !(unfocused && c.pointerInside)) return;
+    const up = UP_KEYS.has(e.key) || (e.key === " " && e.shiftKey);
+    mark(c, up);
+    if (up) escape(c, "key");
+}
+
+function onSelectionChange(c: FollowCore): void {
+    if (!c.pointerHeld || c.state.kind !== "FOLLOWING") return;
+    const sel = document.getSelection();
+    if (!sel || sel.isCollapsed || !sel.anchorNode || !c.scroller.contains(sel.anchorNode)) return;
+    // A selection drag: following would drag the selection away (§5.4).
+    escape(c, "selection");
+}
+
+function gestureHandlers(c: FollowCore): GestureHandlers {
+    return {
+        onWheel: (e) => onWheel(c, e),
+        onTouch: () => mark(c),
+        onPointerDown: (e) => onPointerDown(c, e),
+        onPointerUp: () => onPointerUp(c),
+        held: () => c.pointerHeld,
+        onDocPointerDown: (e) => {
+            c.pointerInside = e.target instanceof Node && c.scroller.contains(e.target);
+        },
+        onKey: (e) => onKey(c, e),
+        onSelectionChange: () => onSelectionChange(c),
+    };
+}
+
+function observe(c: FollowCore, kind: "content" | "viewport", geo: ScrollGeometry): boolean {
+    if (geo.clientHeight <= 0) {
+        dispatch(c, { type: "BecameZeroSize", via: kind, geo }, false);
+        return false;
+    }
+    c.last = geo;
+    c.fill.observed(geo);
+    const pin = dispatch(c, resizeEvent(c.state, kind, geo), false);
+    checkFill(c);
+    return pin;
+}
+
+function scrolledBatch(c: FollowCore, geo: ScrollGeometry, user: boolean): void {
+    const prev = c.last ?? geo;
+    c.last = geo;
+    dispatch(
+        c,
+        {
+            type: "Scroll",
+            user,
+            prev,
+            geo,
+            scrollbar: c.scrollbarHeld,
+            input: inputLabel(user, c.scrollbarHeld, c.pointerHeld),
+            afterUpGesture: c.lastGestureUp && c.now() - c.lastGestureAt <= INTENT_WINDOW_MS,
+            hasOlderHistory: c.host.hasOlderHistory(),
+            loadingOlder: c.host.loadingOlder(),
+        },
+        true
+    );
+}
+
 export function createFollowScroll(
     scroller: HTMLElement,
     host: FollowScrollHost,
     initial: FollowState = FOLLOWING
 ): FollowScroll {
-    const now = host.now ?? (() => performance.now());
-    let state = initial;
-    let last: ScrollGeometry | null = null;
-    let lastGestureAt = Number.NEGATIVE_INFINITY;
-    let lastGestureUp = false;
-    let pointerHeld = false;
-    let scrollbarHeld = false;
-    let pointerInside = false; // the last press in the document was on this transcript: scoped scroll keys go to it
-    const fill = createFillPass(host);
-
-    /** Runs the reducer; returns true if it asked for a pin the caller makes itself. */
-    const dispatch = (event: FollowEvent, pinViaHost: boolean): boolean => {
-        const result = followReducer(state, event);
-        state = result.state;
-        let pin = false;
-        for (const effect of result.effects) {
-            if (effect.type === "Transition") host.transition(effect.from, effect.to, effect.cause, effect.detail);
-            else if (effect.type === "LoadOlder") host.loadOlder(lastGeo());
-            else if (effect.type === "FillOlder") fill.run(lastGeo());
-            else if (pinViaHost) host.pin(effect.cause);
-            else pin = true;
-        }
-        return pin;
-    };
-
-    const checkFill = (): void => {
-        dispatch(fillCheck(lastGeo(), host), true);
-    };
-    const lastGeo = (): ScrollGeometry => last ?? { scrollTop: 0, scrollHeight: 0, clientHeight: 0 };
-    const escape = (cause: EscapeCause): void => {
-        dispatch({ type: "UserEscape", cause, geo: lastGeo() }, true);
-    };
-    /** `up`: the gesture moves the transcript up (`afterUpGesture`). */
-    const mark = (up = false): void => {
-        lastGestureAt = now();
-        lastGestureUp = up;
-    };
-
-    const onWheel = (e: WheelEvent): void => {
-        // Ctrl/⌘+wheel zooms; a sideways-only wheel (a wide table) scrolls nothing the follow depends on.
-        if (e.ctrlKey || e.metaKey || e.deltaY === 0) return;
-        mark(e.deltaY < 0);
-        const target = e.target instanceof Element ? e.target : null;
-        const nested = target?.closest(NESTED_SCROLLER);
-        // The scroller may be such a box itself (a tool preview): only one inside it defers.
-        if (e.deltaY < 0 && !(nested && nested !== scroller && scroller.contains(nested))) escape("wheel-up");
-    };
-    const onTouch = (): void => mark();
-    const onPointerDown = (e: PointerEvent): void => {
-        pointerHeld = true;
-        // Only a press on the scroller itself (its scrollbar) can scroll it;
-        // a press on content (focus, a tool header, a link) can't (§2.2 B1).
-        if (e.target !== scroller) return;
-        scrollbarHeld = true;
-        mark();
-    };
-    const onPointerUp = (): void => {
-        const was = pointerHeld;
-        pointerHeld = false;
-        if (scrollbarHeld) {
-            scrollbarHeld = false;
-            mark(); // the drag's trailing scroll events are still the user's
-        }
-        if (was) host.released?.();
-    };
-    const onDocPointerDown = (e: Event): void => {
-        pointerInside = e.target instanceof Node && scroller.contains(e.target);
-    };
-    const onKey = (e: KeyboardEvent): void => {
-        if (!SCROLL_KEYS.has(e.key)) return;
-        const t = e.target instanceof HTMLElement ? e.target : null;
-        if (t && (t.isContentEditable || t.tagName === "TEXTAREA" || t.tagName === "INPUT" || t.tagName === "SELECT"))
-            return;
-        // Only keys that scroll THIS transcript: focus inside it, or nothing
-        // focused and the last press was on it (Chromium scrolls that one).
-        const unfocused = !t || t === document.body || t === document.documentElement;
-        if (!(t && scroller.contains(t)) && !(unfocused && pointerInside)) return;
-        const up = UP_KEYS.has(e.key) || (e.key === " " && e.shiftKey);
-        mark(up);
-        if (up) escape("key");
-    };
-    const onSelectionChange = (): void => {
-        if (!pointerHeld || state.kind !== "FOLLOWING") return;
-        const sel = document.getSelection();
-        if (!sel || sel.isCollapsed || !sel.anchorNode || !scroller.contains(sel.anchorNode)) return;
-        // A selection drag: following would drag the selection away (§5.4).
-        escape("selection");
-    };
-
-    const removeListeners = listenForGestures(scroller, {
-        onWheel,
-        onTouch,
-        onPointerDown,
-        onPointerUp,
-        held: () => pointerHeld,
-        onDocPointerDown,
-        onKey,
-        onSelectionChange,
-    });
+    const c = createFollowCore(scroller, host, initial);
+    const removeListeners = listenForGestures(scroller, gestureHandlers(c));
 
     return {
-        state: () => state,
-        following: () => intentOf(state) === "FOLLOWING",
-        windowOpen: () => scrollbarHeld || now() - lastGestureAt <= INTENT_WINDOW_MS,
-        pointerHeld: () => pointerHeld,
-        scrollbarHeld: () => scrollbarHeld,
-        observed(kind, geo) {
-            if (geo.clientHeight <= 0) {
-                dispatch({ type: "BecameZeroSize", via: kind, geo }, false);
-                return false;
-            }
-            last = geo;
-            fill.observed(geo);
-            const pin = dispatch(resizeEvent(state, kind, geo), false);
-            checkFill();
-            return pin;
-        },
-        checkFill,
-        restartFill: fill.restart,
+        state: () => c.state,
+        following: () => intentOf(c.state) === "FOLLOWING",
+        windowOpen: () => c.scrollbarHeld || c.now() - c.lastGestureAt <= INTENT_WINDOW_MS,
+        pointerHeld: () => c.pointerHeld,
+        scrollbarHeld: () => c.scrollbarHeld,
+        observed: (kind, geo) => observe(c, kind, geo),
+        checkFill: () => checkFill(c),
+        restartFill: c.fill.restart,
         noteGeometry(geo) {
-            last = geo;
+            c.last = geo;
         },
-        scrolled(geo, user) {
-            const prev = last ?? geo;
-            last = geo;
-            dispatch(
-                {
-                    type: "Scroll",
-                    user,
-                    prev,
-                    geo,
-                    scrollbar: scrollbarHeld,
-                    input: inputLabel(user, scrollbarHeld, pointerHeld),
-                    afterUpGesture: lastGestureUp && now() - lastGestureAt <= INTENT_WINDOW_MS,
-                    hasOlderHistory: host.hasOlderHistory(),
-                    loadingOlder: host.loadingOlder(),
-                },
-                true
-            );
-        },
+        scrolled: (geo, user) => scrolledBatch(c, geo, user),
         jumpToBottom(reason) {
-            dispatch({ type: "JumpToBottom", reason }, true);
+            dispatch(c, { type: "JumpToBottom", reason }, true);
         },
         jumpToNode(nodeId) {
-            dispatch({ type: "JumpToNode", nodeId }, true);
+            dispatch(c, { type: "JumpToNode", nodeId }, true);
         },
         reset() {
-            fill.restart();
-            dispatch({ type: "Reset" }, true);
+            c.fill.restart();
+            dispatch(c, { type: "Reset" }, true);
         },
         dispose: removeListeners,
     };

@@ -43,9 +43,10 @@
 import { IconButton } from "@/app/element/ui";
 import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
-import { type JSX, Show, createEffect, createSignal, on, onCleanup, onMount } from "solid-js";
+import { type Accessor, type JSX, Show, createEffect, createSignal, on, onCleanup, onMount } from "solid-js";
 import { registerRecycleBlocker } from "@/app/store/recycle-blockers";
 import { eventBelongsToPaneOf } from "@/util/focusutil";
+import type { BtwAnswerChunkEvent } from "@/types/rpc/BtwAnswerChunkEvent";
 
 export interface BtwOverlayProps {
     /** Block this overlay belongs to — scopes the MPS subscription. */
@@ -66,10 +67,56 @@ export interface BtwOverlayProps {
     onClose: () => void;
 }
 
-export function BtwOverlay(props: BtwOverlayProps): JSX.Element {
+/** The streamed answer's local state: what the overlay shows, and the setters the event handler drives. */
+interface BtwStream {
+    answer: Accessor<string>;
+    streamError: Accessor<string | null>;
+    done: Accessor<boolean>;
+    setAnswer: (next: string | ((prev: string) => string)) => void;
+    setStreamError: (next: string | null) => void;
+    setDone: (next: boolean) => void;
+}
+
+function handleBtwChunk(s: BtwStream, data: BtwAnswerChunkEvent): void {
+    // Bound to a local so TS narrows on `ev.type` — narrowing
+    // does not reliably survive re-accessing `data.event` a
+    // second time per switch case.
+    const ev = data.event;
+    switch (ev.type) {
+        case "assistant_text":
+            s.setAnswer((prev) => prev + ev.delta);
+            break;
+        case "done":
+            // `response` is the FULL final text, not a delta —
+            // it supersedes whatever was accumulated from
+            // streamed `assistant_text` chunks rather than
+            // appending to it.
+            if (ev.response) s.setAnswer(ev.response);
+            break;
+        case "error":
+            s.setStreamError(ev.message);
+            break;
+        // tool_use/tool_result never appear on this path (the
+        // backend turn runs with every tool disallowed);
+        // cost/compaction_boundary aren't relevant to a
+        // one-shot, no-session-resume answer.
+        default:
+            break;
+    }
+    // The outer `done` flag (not `event.type === "done"`) is the
+    // authoritative completion signal — it also fires on a
+    // terminal `error` event, which `event.type` alone would not
+    // indicate as "done". See mps-events.ts's doc comment.
+    if (data.done) {
+        s.setDone(true);
+    }
+}
+
+function useBtwStream(props: BtwOverlayProps): BtwStream {
     const [answer, setAnswer] = createSignal("");
     const [streamError, setStreamError] = createSignal<string | null>(null);
     const [done, setDone] = createSignal(false);
+    const stream: BtwStream = { answer, streamError, done, setAnswer, setStreamError, setDone };
     // The answer streams into this component only: a reload would cut it off.
     onCleanup(
         registerRecycleBlocker(() =>
@@ -101,40 +148,7 @@ export function BtwOverlay(props: BtwOverlayProps): JSX.Element {
     createEffect(() => {
         const requestId = props.requestId;
         if (!requestId) return;
-        const unsub = onMuxEvent(WpsEvent.BtwAnswerChunk, (data) => {
-            // Bound to a local so TS narrows on `ev.type` — narrowing
-            // does not reliably survive re-accessing `data.event` a
-            // second time per switch case.
-            const ev = data.event;
-            switch (ev.type) {
-                case "assistant_text":
-                    setAnswer((prev) => prev + ev.delta);
-                    break;
-                case "done":
-                    // `response` is the FULL final text, not a delta —
-                    // it supersedes whatever was accumulated from
-                    // streamed `assistant_text` chunks rather than
-                    // appending to it.
-                    if (ev.response) setAnswer(ev.response);
-                    break;
-                case "error":
-                    setStreamError(ev.message);
-                    break;
-                // tool_use/tool_result never appear on this path (the
-                // backend turn runs with every tool disallowed);
-                // cost/compaction_boundary aren't relevant to a
-                // one-shot, no-session-resume answer.
-                default:
-                    break;
-            }
-            // The outer `done` flag (not `event.type === "done"`) is the
-            // authoritative completion signal — it also fires on a
-            // terminal `error` event, which `event.type` alone would not
-            // indicate as "done". See mps-events.ts's doc comment.
-            if (data.done) {
-                setDone(true);
-            }
-        }, `block:${props.blockId}:btw:${requestId}`);
+        const unsub = onMuxEvent(WpsEvent.BtwAnswerChunk, (data) => handleBtwChunk(stream, data), `block:${props.blockId}:btw:${requestId}`);
         onCleanup(() => {
             try {
                 unsub();
@@ -143,11 +157,14 @@ export function BtwOverlay(props: BtwOverlayProps): JSX.Element {
             }
         });
     });
+    return stream;
+}
 
-    let rootRef: HTMLDivElement | undefined;
+/** Esc, or a click elsewhere in the same pane, closes the overlay; `getRoot` is read when the event fires. */
+function useBtwDismiss(props: BtwOverlayProps, getRoot: () => HTMLDivElement | undefined): void {
     const handleKeyDown = (e: KeyboardEvent): void => {
         // Escape in another pane must not close this pane's side question.
-        if (!eventBelongsToPaneOf(e, rootRef)) return;
+        if (!eventBelongsToPaneOf(e, getRoot())) return;
         if (e.key === "Escape") {
             e.preventDefault();
             props.onClose();
@@ -157,6 +174,7 @@ export function BtwOverlay(props: BtwOverlayProps): JSX.Element {
     const handlePointerDown = (e: PointerEvent): void => {
         // "Outside" means elsewhere in THIS pane — clicking into the pane
         // next to it (to read or type there) leaves this overlay open.
+        const rootRef = getRoot();
         if (!eventBelongsToPaneOf(e, rootRef)) return;
         if (rootRef && e.target instanceof Node && !rootRef.contains(e.target)) {
             props.onClose();
@@ -176,6 +194,41 @@ export function BtwOverlay(props: BtwOverlayProps): JSX.Element {
         document.removeEventListener("keydown", handleKeyDown, true);
         document.removeEventListener("pointerdown", handlePointerDown, true);
     });
+}
+
+function BtwBody(props: { overlay: BtwOverlayProps; stream: BtwStream }): JSX.Element {
+    return (
+        <>
+            {/* props.error: the RPC call itself failed (never got a
+             * requestId). streamError: the RPC succeeded but the turn
+             * itself later reported an `error` event. Mutually
+             * exclusive in practice (streamError can't be set before a
+             * requestId exists to subscribe with), checked separately
+             * since they come from different sources. */}
+            <Show when={props.overlay.error} keyed>
+                {(err) => <div class="btw-overlay__error">{err}</div>}
+            </Show>
+            <Show when={!props.overlay.error && props.stream.streamError()} keyed>
+                {(err) => <div class="btw-overlay__error">{err}</div>}
+            </Show>
+            <Show when={!props.overlay.error && !props.stream.streamError()}>
+                <Show when={props.overlay.requestId != null} fallback={<div class="btw-overlay__loading">Asking…</div>}>
+                    <div class="btw-overlay__answer">
+                        {props.stream.answer()}
+                        <Show when={!props.stream.done()}>
+                            <span class="btw-overlay__cursor" aria-hidden="true" />
+                        </Show>
+                    </div>
+                </Show>
+            </Show>
+        </>
+    );
+}
+
+export function BtwOverlay(props: BtwOverlayProps): JSX.Element {
+    const stream = useBtwStream(props);
+    let rootRef: HTMLDivElement | undefined;
+    useBtwDismiss(props, () => rootRef);
 
     return (
         <div class="btw-overlay" role="dialog" aria-label="Side question" ref={rootRef}>
@@ -185,31 +238,10 @@ export function BtwOverlay(props: BtwOverlayProps): JSX.Element {
             </div>
             <div class="btw-overlay__question">{props.question}</div>
             <div class="btw-overlay__body">
-                {/* props.error: the RPC call itself failed (never got a
-                 * requestId). streamError: the RPC succeeded but the turn
-                 * itself later reported an `error` event. Mutually
-                 * exclusive in practice (streamError can't be set before a
-                 * requestId exists to subscribe with), checked separately
-                 * since they come from different sources. */}
-                <Show when={props.error} keyed>
-                    {(err) => <div class="btw-overlay__error">{err}</div>}
-                </Show>
-                <Show when={!props.error && streamError()} keyed>
-                    {(err) => <div class="btw-overlay__error">{err}</div>}
-                </Show>
-                <Show when={!props.error && !streamError()}>
-                    <Show when={props.requestId != null} fallback={<div class="btw-overlay__loading">Asking…</div>}>
-                        <div class="btw-overlay__answer">
-                            {answer()}
-                            <Show when={!done()}>
-                                <span class="btw-overlay__cursor" aria-hidden="true" />
-                            </Show>
-                        </div>
-                    </Show>
-                </Show>
+                <BtwBody overlay={props} stream={stream} />
             </div>
             <div class="btw-overlay__hint">
-                <span>{done() ? "Done · Esc to close" : "Esc to close"}</span>
+                <span>{stream.done() ? "Done · Esc to close" : "Esc to close"}</span>
             </div>
         </div>
     );

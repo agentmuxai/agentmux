@@ -24,7 +24,7 @@ import {
     parseIdentity,
 } from "@/app/util/browser-identity";
 import type { BrowserViewModel } from "./browser-model";
-import { ensureBrowserProfiles, loadBrowserProfiles, profileById, profileInitial, userProfiles } from "./browser-profiles";
+import { followBrowserProfiles, loadBrowserProfiles, profileById, profileInitial, userProfiles } from "./browser-profiles";
 import { NewProfileModal } from "./new-profile-modal";
 import "./browser-profiles.scss";
 
@@ -77,6 +77,8 @@ const badgeIcon = (name: string, color: string) => (
     </span>
 );
 
+// Follows the live profile list: an agent's own profile is made when it first opens a browser, after this
+// button is drawn, and the button must show it at once, not after the menu's first open reloads the list.
 export function BrowserProfileButton(props: {
     model: BrowserViewModel;
     home: () => string;
@@ -84,7 +86,7 @@ export function BrowserProfileButton(props: {
     containWithin?: () => HTMLElement | null | undefined;
 }): JSX.Element {
     const model = props.model;
-    ensureBrowserProfiles();
+    followBrowserProfiles();
     const identity = createMemo(() => parseIdentity(model.meta()?.[IDENTITY_META_KEY]));
     const profile = () => {
         const id = identity();
