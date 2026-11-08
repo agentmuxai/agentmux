@@ -14,6 +14,7 @@ import { For, Show, type JSX } from "solid-js";
 import { Button, Pill, type PillTone } from "@/app/element/ui";
 import type { CloudExpect } from "@/types/rpc/CloudExpect";
 import type { JobTemplateInfo } from "@/types/rpc/JobTemplateInfo";
+import type { JobTemplateManifest } from "@/types/rpc/JobTemplateManifest";
 import type { ReporterNote } from "@/types/rpc/ReporterNote";
 
 import { describeCron } from "./jobs-format";
@@ -104,6 +105,130 @@ function capsWords(policy: Record<string, unknown> | null | undefined): string {
     return parts.length > 0 ? parts.join(", ") : "the defaults";
 }
 
+/** A cloud template's facts: who owns it, the reporter whose key approving pins, what it is expected to do. */
+const CloudFacts = (props: { manifest: JobTemplateManifest; reporter: ReporterNote | undefined }): JSX.Element => (
+    <>
+        <dt>Owner</dt>
+        <dd>{props.manifest.owner}</dd>
+        <dt>Reporter</dt>
+        <dd>
+            <Show when={props.reporter} fallback={<span class="warden-manager-dim">none named</span>}>
+                {(reporter) => (
+                    <>
+                        <Pill tone={reporterNote(reporter()).tone}>{reporter().name}</Pill>{" "}
+                        <span>{reporterNote(reporter()).text}</span>
+                    </>
+                )}
+            </Show>
+        </dd>
+        <dt>Expects</dt>
+        <dd>{expectWords(props.manifest.expect)}</dd>
+        <dt>Run limit</dt>
+        <dd>{props.manifest.maxDurationMinutes} min before a run counts as lost</dd>
+        <Show when={props.manifest.runNow}>
+            {(runNow) => (
+                <>
+                    <dt>Run now</dt>
+                    <dd>
+                        {runNow().link
+                            ? `opens ${runNow().link}`
+                            : `asks ${props.manifest.owner}: ${runNow().askOwner}`}
+                    </dd>
+                </>
+            )}
+        </Show>
+    </>
+);
+
+/** A job template's facts: when it triggers and what it does. */
+const JobFacts = (props: { manifest: JobTemplateManifest }): JSX.Element => (
+    <>
+        <dt>Triggers</dt>
+        <dd>{triggerWords(props.manifest.trigger)}</dd>
+        <dt>Does</dt>
+        <dd>
+            {String((props.manifest.action as Record<string, unknown> | null)?.kind ?? "message")} an agent with the
+            template's brief
+            <Show when={props.manifest.readsUntrusted}>
+                <span class="warden-manager-dim"> · reads text nobody vouches for</span>
+            </Show>
+        </dd>
+    </>
+);
+
+/** Every output the template declares; the ones that write outside AgentMux are marked. */
+const OutputsFact = (props: { outputs: string[] }): JSX.Element => (
+    <>
+        <dt>Outputs</dt>
+        <dd>
+            <Show when={props.outputs.length > 0} fallback={<span class="warden-manager-dim">none</span>}>
+                <For each={props.outputs}>
+                    {(o) => (
+                        <Pill
+                            tone={writesOutside(o) ? "warn" : "neutral"}
+                            title={writesOutside(o) ? "Writes outside AgentMux" : undefined}
+                        >
+                            {o}
+                        </Pill>
+                    )}
+                </For>
+            </Show>
+        </dd>
+    </>
+);
+
+/** Every secret the template declares. */
+const SecretsFact = (props: { secrets: JobTemplateManifest["secrets"] }): JSX.Element => (
+    <>
+        <dt>Secrets</dt>
+        <dd>
+            <Show when={props.secrets.length > 0} fallback={<span class="warden-manager-dim">none</span>}>
+                <For each={props.secrets}>{(s) => <Pill title={s.description ?? undefined}>{s.name}</Pill>}</For>
+            </Show>
+        </dd>
+    </>
+);
+
+/** What the operator is asked to approve: the heading, the facts of this kind of template, and what approving does. */
+const ApprovalFacts = (props: { info: JobTemplateInfo; manifest: JobTemplateManifest }): JSX.Element => {
+    const note = () => publisherNote(props.info);
+    return (
+        <>
+            <h3 class="warden-jobs-heading">
+                Approve {props.manifest.name} {props.manifest.version}?
+            </h3>
+            <p class="warden-manager-dim">{props.manifest.description}</p>
+            <dl class="warden-jobs-facts">
+                <dt>Publisher</dt>
+                <dd>
+                    <Pill tone={note().tone}>{props.info.signature.publisher}</Pill> <span>{note().text}</span>
+                </dd>
+                <Show when={props.manifest.kind === "cloud"}>
+                    <CloudFacts manifest={props.manifest} reporter={props.info.reporter} />
+                </Show>
+                <Show when={props.manifest.kind !== "cloud"}>
+                    <JobFacts manifest={props.manifest} />
+                </Show>
+                <OutputsFact outputs={props.manifest.outputs} />
+                <SecretsFact secrets={props.manifest.secrets} />
+                <Show when={props.manifest.kind !== "cloud"}>
+                    <dt>Default caps</dt>
+                    <dd>{capsWords(props.manifest.policy)}</dd>
+                </Show>
+            </dl>
+            <p class="warden-manager-dim">
+                <Show
+                    when={props.manifest.kind === "cloud"}
+                    fallback="Approving runs nothing. It lets you make jobs from exactly this version; a changed version asks again."
+                >
+                    Approving starts nothing: AgentMux holds no cloud credentials. It pins the reporter's key and lets
+                    this job's signed run reports into the Jobs ledger; a changed version asks again.
+                </Show>
+            </p>
+        </>
+    );
+};
+
 export function TemplateApproval(props: {
     info: JobTemplateInfo;
     busy: boolean;
@@ -112,7 +237,6 @@ export function TemplateApproval(props: {
     onCancel: () => void;
 }): JSX.Element {
     const m = () => props.info.manifest;
-    const note = () => publisherNote(props.info);
     const refused = () => {
         const reporter = props.info.reporter;
         return reporter ? reporterNote(reporter).block : false;
@@ -123,110 +247,7 @@ export function TemplateApproval(props: {
                 when={m()}
                 fallback={<div class="warden-manager-error">{props.info.error ?? "This template can't be read."}</div>}
             >
-                {(manifest) => (
-                    <>
-                        <h3 class="warden-jobs-heading">
-                            Approve {manifest().name} {manifest().version}?
-                        </h3>
-                        <p class="warden-manager-dim">{manifest().description}</p>
-                        <dl class="warden-jobs-facts">
-                            <dt>Publisher</dt>
-                            <dd>
-                                <Pill tone={note().tone}>{props.info.signature.publisher}</Pill>{" "}
-                                <span>{note().text}</span>
-                            </dd>
-                            <Show when={manifest().kind === "cloud"}>
-                                <dt>Owner</dt>
-                                <dd>{manifest().owner}</dd>
-                                <dt>Reporter</dt>
-                                <dd>
-                                    <Show
-                                        when={props.info.reporter}
-                                        fallback={<span class="warden-manager-dim">none named</span>}
-                                    >
-                                        {(reporter) => (
-                                            <>
-                                                <Pill tone={reporterNote(reporter()).tone}>{reporter().name}</Pill>{" "}
-                                                <span>{reporterNote(reporter()).text}</span>
-                                            </>
-                                        )}
-                                    </Show>
-                                </dd>
-                                <dt>Expects</dt>
-                                <dd>{expectWords(manifest().expect)}</dd>
-                                <dt>Run limit</dt>
-                                <dd>{manifest().maxDurationMinutes} min before a run counts as lost</dd>
-                                <Show when={manifest().runNow}>
-                                    {(runNow) => (
-                                        <>
-                                            <dt>Run now</dt>
-                                            <dd>
-                                                {runNow().link
-                                                    ? `opens ${runNow().link}`
-                                                    : `asks ${manifest().owner}: ${runNow().askOwner}`}
-                                            </dd>
-                                        </>
-                                    )}
-                                </Show>
-                            </Show>
-                            <Show when={manifest().kind !== "cloud"}>
-                                <dt>Triggers</dt>
-                                <dd>{triggerWords(manifest().trigger)}</dd>
-                                <dt>Does</dt>
-                                <dd>
-                                    {String((manifest().action as Record<string, unknown> | null)?.kind ?? "message")}{" "}
-                                    an agent with the template's brief
-                                    <Show when={manifest().readsUntrusted}>
-                                        <span class="warden-manager-dim"> · reads text nobody vouches for</span>
-                                    </Show>
-                                </dd>
-                            </Show>
-                            <dt>Outputs</dt>
-                            <dd>
-                                <Show
-                                    when={manifest().outputs.length > 0}
-                                    fallback={<span class="warden-manager-dim">none</span>}
-                                >
-                                    <For each={manifest().outputs}>
-                                        {(o) => (
-                                            <Pill
-                                                tone={writesOutside(o) ? "warn" : "neutral"}
-                                                title={writesOutside(o) ? "Writes outside AgentMux" : undefined}
-                                            >
-                                                {o}
-                                            </Pill>
-                                        )}
-                                    </For>
-                                </Show>
-                            </dd>
-                            <dt>Secrets</dt>
-                            <dd>
-                                <Show
-                                    when={manifest().secrets.length > 0}
-                                    fallback={<span class="warden-manager-dim">none</span>}
-                                >
-                                    <For each={manifest().secrets}>
-                                        {(s) => <Pill title={s.description ?? undefined}>{s.name}</Pill>}
-                                    </For>
-                                </Show>
-                            </dd>
-                            <Show when={manifest().kind !== "cloud"}>
-                                <dt>Default caps</dt>
-                                <dd>{capsWords(manifest().policy)}</dd>
-                            </Show>
-                        </dl>
-                        <p class="warden-manager-dim">
-                            <Show
-                                when={manifest().kind === "cloud"}
-                                fallback="Approving runs nothing. It lets you make jobs from exactly this version; a changed version asks again."
-                            >
-                                Approving starts nothing: AgentMux holds no cloud credentials. It pins the reporter's
-                                key and lets this job's signed run reports into the Jobs ledger; a changed version asks
-                                again.
-                            </Show>
-                        </p>
-                    </>
-                )}
+                {(manifest) => <ApprovalFacts info={props.info} manifest={manifest()} />}
             </Show>
             <Show when={props.error}>
                 <div class="warden-manager-error" role="alert">
