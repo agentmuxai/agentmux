@@ -30,12 +30,13 @@ import { AgentComposerStrip } from "./components/AgentComposerStrip";
 import { AgentComposerRegion, AgentTranscriptRegion, AgentViewPopoverHost } from "./components/AgentPaneRegions";
 import { AgentPreparingRow } from "./components/AgentPreparingRow";
 import { AgentProgressBar } from "./components/AgentProgressBar";
-import { AgentSearchBar } from "./components/AgentSearchBar";
+import { AgentFindBandItem } from "./components/AgentFindBandItem";
 import { AgentShellDrawer } from "./components/AgentShellDrawer";
 import { BtwOverlay } from "./components/BtwOverlay";
 import { createMessagesPanelControls, MessagesPanelContext } from "./messages/messages-state";
 import { MessagesPanel } from "./messages/MessagesPanel";
 import { openOrFocusHistoryTab } from "./open-history-tab";
+import { AgentTopBand } from "./top-band/AgentTopBand";
 import { ShutdownOverlay } from "./shutdown/ShutdownOverlay";
 import { isForcedRow } from "./virtualization/verbosity";
 
@@ -99,6 +100,9 @@ export function AgentViewLayout({ v }: { v: AgentViewParts }): JSX.Element {
             {/* The conversation and, beside it, the Messages panel (a sibling of the zoomed column, so the
                 transcript's bottom panels stay direct children of it). */}
             <MessagesPanelContext.Provider value={messages}>
+                {/* The top band: what the pane puts across its top (the find bar). Above the row, so the Messages
+                    panel, which lies over the conversation, never covers it. */}
+                <AgentTopBand blockId={model.blockId} zoom={input.zoomFactor} />
                 <div class="agent-view-row">
                     <div class="agent-view-zoomed" style={{ zoom: input.zoomFactor() }}>
                         <AgentViewOverlays v={v} />
@@ -130,7 +134,7 @@ export function AgentViewLayout({ v }: { v: AgentViewParts }): JSX.Element {
     );
 }
 
-/** The progress bar, the /btw overlay and the search bar. */
+/** The progress bar, the /btw overlay and the find bar's place in the top band. */
 function AgentViewOverlays({ v }: { v: AgentViewParts }): JSX.Element {
     const { model, input, sending } = v;
     return (
@@ -155,7 +159,8 @@ function AgentViewOverlays({ v }: { v: AgentViewParts }): JSX.Element {
                     />
                 )}
             </Show>
-            <AgentSearchBar
+            <AgentFindBandItem
+                blockId={model.blockId}
                 visible={input.search.visible}
                 onSearch={input.search.performSearch}
                 onNext={input.search.next}

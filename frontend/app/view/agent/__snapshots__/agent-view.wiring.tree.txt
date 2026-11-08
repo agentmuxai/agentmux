@@ -2,10 +2,11 @@
   <div.agent-view.agent-view--presentation tabindex="-1" style="--agent-pane-zoom: 1;">
     <PaneLoadingCover {"phase":"<fn>"}>
     <ShutdownOverlay {"agentName":"\"Korp\"","blockId":"\"blk-12345678\""}>
+    <AgentTopBand {"blockId":"\"blk-12345678\"","zoom":"<fn>"}>
     <div.agent-view-row>
       <div.agent-view-zoomed style="zoom: 1;">
         <AgentProgressBar {"active":"false","mount":"<fn>","stopping":"false"}>
-        <AgentSearchBar {"matchCount":"<fn>","matchIndex":"<fn>","onClose":"<fn>","onNext":"<fn>","onPrev":"<fn>","onSearch":"<fn>","searching":"<fn>","visible":"<fn>"}>
+        <AgentFindBandItem {"blockId":"\"blk-12345678\"","matchCount":"<fn>","matchIndex":"<fn>","onClose":"<fn>","onNext":"<fn>","onPrev":"<fn>","onSearch":"<fn>","searching":"<fn>","visible":"<fn>"}>
         <div.agent-document-scroll-region>
           <HistoryLoadingRow {"readiness":"<object>"}>
           <AgentDocumentView {"blockId":"\"blk-12345678\"","documentNodes":"<fn>","documentStateAtom":"<object>","followingRef":"<fn>","hasOlderHistory":"<fn>","highlightNodeId":"<fn>","layoutView":"<fn>","loadingOlder":"<fn>","newActivityRef":"<fn>","onAgentErrorLogin":"<fn>","onLoadOlder":"<fn>","onOpenHistory":"<fn>","registerHistoryReadyCallback":"<fn>","scrollCommand":"<fn>","scrollToBottomRef":"<fn>","zoomFactor":"<fn>"}>
