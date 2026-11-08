@@ -494,6 +494,25 @@
     }
   },
   {
+    "command": "agent.peer-labels",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "agentmux_srv::server::app_api::agent_model::AgentPeerLabels",
+    "responseName": "AgentPeerLabels",
+    "responseTs": {
+      "imports": [
+        "AgentPeerLabels"
+      ],
+      "name": "AgentPeerLabels"
+    }
+  },
+  {
     "command": "agent.process-list",
     "request": "agentmux_srv::backend::rpc_types::agent::AgentProcessListCommand",
     "requestName": "AgentProcessListCommand",

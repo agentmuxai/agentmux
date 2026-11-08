@@ -38,6 +38,7 @@ import type { AgentOpenPanesResult } from "@/types/rpc/AgentOpenPanesResult";
 import type { AgentOpenResult } from "@/types/rpc/AgentOpenResult";
 import type { AgentOpenTailResult } from "@/types/rpc/AgentOpenTailResult";
 import type { AgentPaneUnregisterResult } from "@/types/rpc/AgentPaneUnregisterResult";
+import type { AgentPeerLabels } from "@/types/rpc/AgentPeerLabels";
 import type { AgentProcessListCommand } from "@/types/rpc/AgentProcessListCommand";
 import type { AgentProcessListResult } from "@/types/rpc/AgentProcessListResult";
 import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
@@ -3051,6 +3052,10 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<AgentModelSwitchResult> {
     return client.rpcCall("agent.model.switch", data, { timeout: 120000, ...opts });
+  },
+  // command "agent.peer-labels"
+  AgentPeerLabelsCommand(client: RpcClient, opts?: RpcOpts): Promise<AgentPeerLabels> {
+    return client.rpcCall("agent.peer-labels", {}, opts);
   },
   // command "identity.account.move_agents"
   IdentityAccountMoveAgentsCommand(
