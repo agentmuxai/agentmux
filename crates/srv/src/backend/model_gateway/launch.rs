@@ -34,16 +34,17 @@ pub fn choice_of(mstore: &Store, def_id: &str) -> Option<Choice> {
     serde_json::from_str(&content.content).ok()
 }
 
-/// The route the agent has left but may still be running a turn on, if any.
-pub fn leaving_route(mstore: &Store, def_id: &str) -> Option<String> {
-    mstore.agent_content_get(def_id, LEAVING_TYPE).ok()?.map(|c| c.content).filter(|r| !r.is_empty())
+/// The route and model the agent has left but may still be running a turn on, if any.
+pub fn leaving(mstore: &Store, def_id: &str) -> Option<Choice> {
+    serde_json::from_str(&mstore.agent_content_get(def_id, LEAVING_TYPE).ok()??.content).ok()
 }
 
 /// The model the gateway sends the agent's requests for `route` to: its chosen one, or, on a route it has just left, the
-/// route's default, so a turn in flight finishes (see [`super::switch::finish_leaving`]). None: the agent is not set to it.
+/// one it was on, so a turn in flight finishes (see [`super::switch::finish_leaving`]). None: the agent is not set to it.
 pub fn model_on_route(mstore: &Store, def_id: &str, route: &'static Route) -> Option<&'static Model> {
     let chosen = choice_of(mstore, def_id).filter(|c| c.route == route.id).and_then(|c| route.model(&c.model));
-    chosen.or_else(|| (leaving_route(mstore, def_id).as_deref() == Some(route.id)).then(|| route.model(route.default_model)).flatten())
+    // The model it was running, so what the rest of the turn costs is counted at that model's prices.
+    chosen.or_else(|| leaving(mstore, def_id).filter(|c| c.route == route.id).and_then(|c| route.model(&c.model)))
 }
 
 /// Saves the agent's route and model after the shared validation, with the model made explicit.
@@ -146,7 +147,7 @@ mod tests {
         set_choice(&store, "def-leave", "claude", "openrouter", "deepseek/deepseek-v4-pro-0813").unwrap();
         assert_eq!(model_on_route(&store, "def-leave", route).unwrap().id, "deepseek/deepseek-v4-pro-0813");
         super::super::switch::move_to(&store, "def-leave", "claude", super::super::switch::Target::OwnLogin, |_| true).unwrap();
-        assert_eq!(model_on_route(&store, "def-leave", route).unwrap().id, route.default_model, "a turn in flight finishes");
+        assert_eq!(model_on_route(&store, "def-leave", route).unwrap().id, "deepseek/deepseek-v4-pro-0813", "a turn in flight finishes, and is counted at the model it runs");
         super::super::switch::finish_leaving(&store, "def-leave");
         assert!(model_on_route(&store, "def-leave", route).is_none(), "after the relaunch it is refused");
     }

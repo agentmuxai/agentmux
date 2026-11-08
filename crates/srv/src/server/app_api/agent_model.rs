@@ -203,8 +203,8 @@ fn switch_model(state: &AppState, req: &AgentModelSwitchReq) -> Result<AgentMode
 /// Restarts the agent's panes on its new place, and ends the access of a route it left when no relaunch is coming to do it:
 /// the pane restarts at the end of its turn, and its relaunch is what takes the old route's token away.
 pub(crate) fn restart_panes(state: &AppState, def_id: &str) -> (u32, Vec<String>) {
-    let (restarted, failed) = crate::server::account_episodes::restart_panes_of(state, def_id);
-    if restarted == 0 || !failed.is_empty() {
+    let (restarted, next_turn, failed) = crate::server::account_episodes::restart_panes_of(state, def_id);
+    if (restarted == 0 && next_turn == 0) || !failed.is_empty() {
         switch::finish_leaving(&state.mstore, def_id);
     }
     (restarted, failed)
