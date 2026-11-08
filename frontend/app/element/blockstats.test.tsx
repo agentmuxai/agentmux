@@ -245,6 +245,21 @@ describe("the badge as an item of a band", () => {
         await waitFor(() => expect(screen.queryByText("Memory")).toBeNull());
     });
 
+    it("closes on Escape even while the pointer is still over the chip, and opens again once the pointer has left", async () => {
+        detailCmd.mockResolvedValue(local());
+        const { container } = render(() => <BlockStatsBadge blockId="b1" placement="band" form="compact" />);
+        const chip = badge(container).querySelector(".stats-reading")!;
+        hover(container);
+        fireEvent.focus(chip);
+        await waitFor(() => expect(screen.getByText("Memory")).toBeTruthy());
+        fireEvent.keyDown(chip, { key: "Escape" });
+        await waitFor(() => expect(screen.queryByText("Memory")).toBeNull());
+        fireEvent.mouseLeave(badge(container));
+        fireEvent.mouseLeave(chip);
+        hover(container);
+        await waitFor(() => expect(screen.getByText("Memory")).toBeTruthy());
+    });
+
     it("is a plain, tooltip-less copy while the band measures it", () => {
         const { container } = render(() => <BlockStatsBadge blockId="b1" placement="band" measuring />);
         expect(badge(container).textContent).toBe("0.3%90M");

@@ -412,7 +412,12 @@ function StatsFigures(props: { stats: BlockStats; form: StatsForm }) {
  * only): Escape closes it. The compact form has no text for a screen reader beyond the figure, so it carries the
  * whole reading as its name.
  */
-function BandChip(props: { stats: BlockStats; form: StatsForm; pinned: boolean; setPinned: (v: boolean) => void }) {
+function BandChip(props: {
+    stats: BlockStats;
+    form: StatsForm;
+    setPinned: (v: boolean) => void;
+    setDismissed: (v: boolean) => void;
+}) {
     const reading = () => `CPU ${props.stats.cpu.toFixed(1)}%, memory ${formatMem(props.stats.mem)}`;
     return (
         <span
@@ -420,9 +425,22 @@ function BandChip(props: { stats: BlockStats; form: StatsForm; pinned: boolean; 
             tabindex="0"
             role={props.form === "compact" ? "img" : undefined}
             aria-label={props.form === "compact" ? reading() : undefined}
-            onFocus={() => props.setPinned(true)}
-            onBlur={() => props.setPinned(false)}
-            onKeyDown={(e) => e.key === "Escape" && props.setPinned(false)}
+            onFocus={() => {
+                props.setDismissed(false);
+                props.setPinned(true);
+            }}
+            onBlur={() => {
+                props.setDismissed(false);
+                props.setPinned(false);
+            }}
+            onMouseLeave={() => props.setDismissed(false)}
+            // Escape closes it even while the pointer is still over the badge (hover alone would keep it open):
+            // the tooltip stays shut until the pointer leaves or the chip is focused again.
+            onKeyDown={(e) => {
+                if (e.key !== "Escape") return;
+                props.setPinned(false);
+                props.setDismissed(true);
+            }}
         >
             <StatsFigures stats={props.stats} form={props.form} />
         </span>
@@ -432,6 +450,7 @@ function BandChip(props: { stats: BlockStats; form: StatsForm; pinned: boolean; 
 function LocalBadge(props: LocalBadgeProps) {
     const stats = useBlockStats(props.blockId);
     const [pinned, setPinned] = createSignal(false);
+    const [dismissed, setDismissed] = createSignal(false);
     const band = () => props.placement === "band";
     const form = () => props.form ?? "full";
 
@@ -450,12 +469,12 @@ function LocalBadge(props: LocalBadgeProps) {
                     placement="bottom"
                     immediate
                     forceOpen={band() && !props.measuring && pinned()}
-                    disable={props.measuring}
+                    disable={props.measuring || dismissed()}
                     divClassName={`block-stats-badge ${band() ? `band ${form()}` : ""} ${cpuClass()} ${props.noHeader ? "no-header" : ""}`}
                     content={<LocalTooltip blockId={props.blockId} stats={s()} />}
                 >
                     <Show when={band() && !props.measuring} fallback={<StatsFigures stats={s()} form={form()} />}>
-                        <BandChip stats={s()} form={form()} pinned={pinned()} setPinned={setPinned} />
+                        <BandChip stats={s()} form={form()} setPinned={setPinned} setDismissed={setDismissed} />
                     </Show>
                 </Tooltip>
             )}
