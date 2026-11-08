@@ -157,3 +157,54 @@ fn an_agent_with_an_account_keeps_it_and_a_second_run_changes_nothing() {
     assert_eq!(account_of(&shared, "new", "grok"), Some(seeded), "no second account");
     assert_eq!(std::fs::read_dir(f.dir.path().join("identities")).unwrap().count(), 1);
 }
+
+fn forked(store: &Store, id: &str, parent: &str, seeded: bool) {
+    let mut def = test_agent_def(id, id, "claude", "host", 1, "");
+    def.provider = "grok".to_string();
+    def.parent_id = parent.to_string();
+    def.is_seeded = seeded as i64;
+    store.agent_def_insert(&mut def).unwrap();
+}
+
+fn account_row(shared: &Store, id: &str) {
+    let row = IdentityAccount {
+        id: id.to_string(),
+        name: id.to_string(),
+        provider: "grok".to_string(),
+        kind: "oauth".to_string(),
+        display_name: String::new(),
+        secret_ref: SecretRef::OAuthConfigDir { dir: format!("/accounts/{id}") },
+        context: serde_json::json!({}),
+        status: "valid".to_string(),
+        created_at: 1,
+        updated_at: 1,
+    };
+    shared.identity_upsert(&row).unwrap();
+}
+
+#[test]
+fn the_accounts_an_agent_resolves_through_decide_who_is_seeded() {
+    let f = Fixture::new();
+    let (channel, shared) = (f.channel(), f.shared());
+    account_row(&shared, "template-account");
+    account_row(&shared, "fork-source-account");
+    // A seeded template with an account: the child inherits it, so it is left alone.
+    forked(&channel, "template", "", true);
+    shared.agent_identity_link("template", "template-account", "grok").unwrap();
+    forked(&channel, "from-template", "template", false);
+    // An ordinary fork source is not a template: its account is not inherited, so the child needs one.
+    forked(&channel, "source", "", false);
+    shared.agent_identity_link("source", "fork-source-account", "grok").unwrap();
+    forked(&channel, "from-source", "source", false);
+    // Links for another provider mean the template's are not used either.
+    forked(&channel, "other-links", "template", false);
+    shared.agent_identity_link("other-links", "template-account", "claude").unwrap();
+    sign_grok_in(&f.providers("grok"), fresh_login());
+
+    f.run();
+
+    assert_eq!(account_of(&shared, "from-template", "grok"), None, "inherits the template's account");
+    let seeded = account_of(&shared, "from-source", "grok").expect("a fork source's account does not carry over");
+    assert_eq!(account_of(&shared, "other-links", "grok"), Some(seeded.clone()));
+    assert_ne!(seeded, "fork-source-account");
+}

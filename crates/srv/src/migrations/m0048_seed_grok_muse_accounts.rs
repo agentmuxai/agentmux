@@ -25,8 +25,8 @@ use std::path::{Path, PathBuf};
 
 use crate::backend::providers::{get_provider, resolve_provider_alias};
 use crate::backend::storage::identities::{IdentityAccount, SecretRef};
-use crate::backend::storage::store::Store;
-use crate::identity::resolver::{oauth_status, probe_oauth_status, OAuthProbeStatus};
+use crate::backend::storage::store::{AgentDefinition, Store};
+use crate::identity::resolver::{effective_identity_links, oauth_status, probe_oauth_status, OAuthProbeStatus};
 use super::{Migration, MigrationContext, MigrationError, MigrationScope};
 
 const PROVIDERS: [&str; 2] = ["grok", "muse"];
@@ -55,7 +55,7 @@ impl Migration for M0048SeedGrokMuseAccounts {
             let agents: Vec<String> = defs
                 .iter()
                 .filter(|d| resolve_provider_alias(&d.provider) == provider)
-                .filter(|d| !has_account(&shared, &d.id, provider) && !has_account(&shared, &d.parent_id, provider))
+                .filter(|d| !has_account(&mstore, &shared, d, provider))
                 .map(|d| d.id.clone())
                 .collect();
             if agents.is_empty() {
@@ -78,12 +78,12 @@ impl Migration for M0048SeedGrokMuseAccounts {
     }
 }
 
-fn has_account(shared: &Store, agent_id: &str, provider: &str) -> bool {
-    !agent_id.is_empty()
-        && shared
-            .agent_identity_list_for_agent(agent_id)
-            .map(|links| links.iter().any(|l| resolve_provider_alias(&l.provider) == provider))
-            .unwrap_or(false)
+/// Whether the spawn gate would find an account for `provider` on this agent: through the links its
+/// spawn resolves (its own, or only when it has none its seeded template parent's).
+fn has_account(mstore: &Store, shared: &Store, def: &AgentDefinition, provider: &str) -> bool {
+    effective_identity_links(mstore, shared, def)
+        .map(|links| links.iter().any(|l| resolve_provider_alias(&l.provider) == provider))
+        .unwrap_or(false)
 }
 
 /// The shared providers folder and the identities root, from the data paths or beside the shared store.
