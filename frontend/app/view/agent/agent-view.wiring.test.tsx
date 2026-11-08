@@ -143,6 +143,7 @@ vi.mock("./shutdown/ShutdownOverlay", h.comp("ShutdownOverlay"));
 vi.mock("./components/AgentProgressBar", h.comp("AgentProgressBar"));
 vi.mock("./components/BtwOverlay", h.comp("BtwOverlay"));
 vi.mock("./components/AgentFindBandItem", h.comp("AgentFindBandItem"));
+vi.mock("./components/AgentStatsBandItem", h.comp("AgentStatsBandItem"));
 vi.mock("./top-band/AgentTopBand", h.comp("AgentTopBand"));
 vi.mock("./components/HistoryLoadingRow", h.comp("HistoryLoadingRow"));
 vi.mock("./components/AgentDocumentView", h.comp("AgentDocumentView"));
@@ -695,6 +696,7 @@ describe("AgentPresentationView callbacks", () => {
         note("top band zoom", seen.AgentTopBand.zoom());
         note("top band pane", seen.AgentTopBand.blockId);
         note("find band pane", SB.blockId);
+        note("stats band pane", seen.AgentStatsBandItem.blockId);
         same("search visible", SB.visible, F.search.visible);
         same("search onSearch", SB.onSearch, F.search.performSearch);
         same("search onNext", SB.onNext, F.search.next);

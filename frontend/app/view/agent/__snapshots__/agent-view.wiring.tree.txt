@@ -6,6 +6,7 @@
     <div.agent-view-row>
       <div.agent-view-zoomed style="zoom: 1;">
         <AgentProgressBar {"active":"false","mount":"<fn>","stopping":"false"}>
+        <AgentStatsBandItem {"blockId":"\"blk-12345678\""}>
         <AgentFindBandItem {"blockId":"\"blk-12345678\"","matchCount":"<fn>","matchIndex":"<fn>","onClose":"<fn>","onNext":"<fn>","onPrev":"<fn>","onSearch":"<fn>","searching":"<fn>","visible":"<fn>"}>
         <div.agent-document-scroll-region>
           <HistoryLoadingRow {"readiness":"<object>"}>

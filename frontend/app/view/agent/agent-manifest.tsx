@@ -27,6 +27,8 @@ export const agentPaneTabManifest: PaneTabManifest = {
         lifecycle: "keepAlive",
         header: "surface",
         paneZoom: {},
+        // The readout is an item of the pane's top band (top-band/), not an overlay the frame draws over it.
+        statsBadgeIn: "band",
         // A split opens a fresh picker, not a copy of this agent's pane.
         splitBlockDef: agentPickerBlockDef,
         noPadding: true,
