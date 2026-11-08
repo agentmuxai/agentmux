@@ -2,6 +2,8 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+@use "../mixins.scss";
+
 // tag: fixed - the terminal's CPU and memory readout, a faint hard-cornered overlay with a hover tooltip, not a label on a card
 .block-stats-badge {
     position: absolute;
@@ -53,6 +55,34 @@
     // element's own top instead.
     &.no-header {
         top: 4px;
+    }
+
+    // An item of an agent pane's top band: in the flow, in the band's own box, not over the pane.
+    &.band {
+        position: static;
+        z-index: auto;
+        background: none;
+        padding: 0 var(--space-1-5);
+
+        .stats-reading {
+            display: inline-flex;
+            align-items: center;
+            gap: var(--space-1-5);
+            cursor: help;
+
+            &:focus-visible {
+                @include mixins.focus-ring;
+            }
+        }
+
+        // The compact chip: a processor icon and the CPU figure.
+        .stats-icon {
+            color: var(--secondary-text-color);
+        }
+    }
+
+    &.band:focus-within {
+        opacity: 0.9;
     }
 }
 

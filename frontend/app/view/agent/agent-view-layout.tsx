@@ -31,6 +31,7 @@ import { AgentComposerRegion, AgentTranscriptRegion, AgentViewPopoverHost } from
 import { AgentPreparingRow } from "./components/AgentPreparingRow";
 import { AgentProgressBar } from "./components/AgentProgressBar";
 import { AgentFindBandItem } from "./components/AgentFindBandItem";
+import { AgentStatsBandItem } from "./components/AgentStatsBandItem";
 import { AgentShellDrawer } from "./components/AgentShellDrawer";
 import { BtwOverlay } from "./components/BtwOverlay";
 import { createMessagesPanelControls, MessagesPanelContext } from "./messages/messages-state";
@@ -159,6 +160,7 @@ function AgentViewOverlays({ v }: { v: AgentViewParts }): JSX.Element {
                     />
                 )}
             </Show>
+            <AgentStatsBandItem blockId={model.blockId} />
             <AgentFindBandItem
                 blockId={model.blockId}
                 visible={input.search.visible}

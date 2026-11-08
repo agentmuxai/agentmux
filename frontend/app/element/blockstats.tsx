@@ -80,10 +80,11 @@ export function describeConnection(c: BlockStatsConnection): string {
  * (`settingOn`; `term:showstatsbadge` for a terminal), and never in a
  * drag-preview frame. Every pane renders one off screen, laid out and visible
  * to the visibility hooks, so its badge would be a second one, and a remote
- * pane's would ask the machine a second time on every poll.
+ * pane's would ask the machine a second time on every poll. Nor where the
+ * pane draws the readout itself (`drawnByPane`: the capability `statsBadgeIn`).
  */
-export function statsBadgeShown(preview: boolean, settingOn: boolean): boolean {
-    return !preview && settingOn;
+export function statsBadgeShown(preview: boolean, settingOn: boolean, drawnByPane = false): boolean {
+    return !preview && settingOn && !drawnByPane;
 }
 
 /** Whether a pane's `connection` is another machine (SSH, WSL). */
@@ -373,8 +374,66 @@ function RemoteBadge(props: { blockId: string; noHeader?: boolean }) {
     );
 }
 
-function LocalBadge(props: { blockId: string; noHeader?: boolean }) {
+/** How the readout is mounted: over the pane's corner (the block frame), or in the flow as an item of a band. */
+export type StatsPlacement = "overlay" | "band";
+
+/** What a badge in a band shows: all of it, or a processor icon and the CPU figure (the full reading is the tooltip). */
+export type StatsForm = "full" | "compact";
+
+type LocalBadgeProps = {
+    blockId: string;
+    noHeader?: boolean;
+    placement?: StatsPlacement;
+    form?: StatsForm;
+    /** A hidden copy the band measures: no tooltip, not focusable. */
+    measuring?: boolean;
+};
+
+/** The figures, or in the compact form the icon and the CPU figure. */
+function StatsFigures(props: { stats: BlockStats; form: StatsForm }) {
+    return (
+        <Show
+            when={props.form === "compact"}
+            fallback={
+                <>
+                    <span class="stats-cpu">{props.stats.cpu.toFixed(1)}%</span>
+                    <span class="stats-mem">{formatMem(props.stats.mem)}</span>
+                </>
+            }
+        >
+            <i class="fa-solid fa-microchip stats-icon" aria-hidden="true" />
+            <span class="stats-cpu">{props.stats.cpu.toFixed(1)}%</span>
+        </Show>
+    );
+}
+
+/**
+ * A badge in a band is focusable, and its tooltip stays open while it has focus (the tooltip opens on hover
+ * only): Escape closes it. The compact form has no text for a screen reader beyond the figure, so it carries the
+ * whole reading as its name.
+ */
+function BandChip(props: { stats: BlockStats; form: StatsForm; pinned: boolean; setPinned: (v: boolean) => void }) {
+    const reading = () => `CPU ${props.stats.cpu.toFixed(1)}%, memory ${formatMem(props.stats.mem)}`;
+    return (
+        <span
+            class="stats-reading"
+            tabindex="0"
+            role={props.form === "compact" ? "img" : undefined}
+            aria-label={props.form === "compact" ? reading() : undefined}
+            onFocus={() => props.setPinned(true)}
+            onBlur={() => props.setPinned(false)}
+            onKeyDown={(e) => e.key === "Escape" && props.setPinned(false)}
+        >
+            <StatsFigures stats={props.stats} form={props.form} />
+        </span>
+    );
+}
+
+function LocalBadge(props: LocalBadgeProps) {
     const stats = useBlockStats(props.blockId);
+    const [pinned, setPinned] = createSignal(false);
+    const band = () => props.placement === "band";
+    const form = () => props.form ?? "full";
 
     const cpuClass = createMemo(() => {
         const s = stats();
@@ -390,11 +449,14 @@ function LocalBadge(props: { blockId: string; noHeader?: boolean }) {
                 <Tooltip
                     placement="bottom"
                     immediate
-                    divClassName={`block-stats-badge ${cpuClass()} ${props.noHeader ? "no-header" : ""}`}
+                    forceOpen={band() && !props.measuring && pinned()}
+                    disable={props.measuring}
+                    divClassName={`block-stats-badge ${band() ? `band ${form()}` : ""} ${cpuClass()} ${props.noHeader ? "no-header" : ""}`}
                     content={<LocalTooltip blockId={props.blockId} stats={s()} />}
                 >
-                    <span class="stats-cpu">{s().cpu.toFixed(1)}%</span>
-                    <span class="stats-mem">{formatMem(s().mem)}</span>
+                    <Show when={band() && !props.measuring} fallback={<StatsFigures stats={s()} form={form()} />}>
+                        <BandChip stats={s()} form={form()} pinned={pinned()} setPinned={setPinned} />
+                    </Show>
                 </Tooltip>
             )}
         </Show>
@@ -406,12 +468,30 @@ function LocalBadge(props: { blockId: string; noHeader?: boolean }) {
  * come from srv every second while a badge is shown, counted as Tower counts
  * them (srv `sampler::panes`); a remote pane's (SSH, WSL) from its machine,
  * asked while the pane is visible (SPEC_TERMINAL_STATS_BADGE_REMOTE_PANES_2026_10_12.md).
+ *
+ * `placement` is `overlay` (the default: the block frame draws it over the pane's corner) or `band` (an item of
+ * an agent pane's top band, in the flow, with a compact `form` for a tight band). The band is for a local pane.
  */
-export function BlockStatsBadge(props: { blockId: string; noHeader?: boolean; connection?: string }) {
+export function BlockStatsBadge(props: {
+    blockId: string;
+    noHeader?: boolean;
+    connection?: string;
+    placement?: StatsPlacement;
+    form?: StatsForm;
+    measuring?: boolean;
+}) {
     return (
         <Show
             when={isRemoteConnection(props.connection)}
-            fallback={<LocalBadge blockId={props.blockId} noHeader={props.noHeader} />}
+            fallback={
+                <LocalBadge
+                    blockId={props.blockId}
+                    noHeader={props.noHeader}
+                    placement={props.placement}
+                    form={props.form}
+                    measuring={props.measuring}
+                />
+            }
         >
             <RemoteBadge blockId={props.blockId} noHeader={props.noHeader} />
         </Show>
