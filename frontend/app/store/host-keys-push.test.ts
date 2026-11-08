@@ -38,19 +38,19 @@ describe("pushHostKeys", () => {
     });
 
     it("sends the same list once", () => {
-        setUserKeybindings([{ command: "tab:new", key: "ctrl+alt+y", platform: "other" }], () => false);
+        setUserKeybindings([{ command: "tab:new", key: "ctrl+shift+y", platform: "other" }], () => false);
         pushHostKeys();
         pushHostKeys();
         expect(h.setHostKeys).toHaveBeenCalledTimes(1);
     });
 
     it("sends the default list again when the person goes back to the defaults", () => {
-        setUserKeybindings([{ command: "tab:new", key: "ctrl+alt+y", platform: "other" }], () => false);
+        setUserKeybindings([{ command: "tab:new", key: "ctrl+shift+y", platform: "other" }], () => false);
         pushHostKeys();
         setUserKeybindings([], () => false);
         pushHostKeys();
         expect(h.setHostKeys).toHaveBeenCalledTimes(2);
         expect(sentKeys(1)).toContain("ctrl+shift+t");
-        expect(sentKeys(1)).not.toContain("ctrl+alt+y");
+        expect(sentKeys(1)).not.toContain("ctrl+shift+y");
     });
 });

@@ -50,8 +50,34 @@ describe("host-keys.json", () => {
         });
 
         it("forwards a function key or a key with Ctrl or Alt", () => {
-            const keys = keysOf(["F9", "ctrl+alt+9", "alt+ArrowUp"].map((key) => ({ command: "tab:new", key })));
-            expect(keys).toEqual(expect.arrayContaining(["tab:new F9", "tab:new ctrl+alt+9", "tab:new alt+ArrowUp"]));
+            const keys = keysOf(["F9", "ctrl+shift+9", "alt+ArrowUp"].map((key) => ({ command: "tab:new", key })));
+            expect(keys).toEqual(expect.arrayContaining(["tab:new F9", "tab:new ctrl+shift+9", "tab:new alt+ArrowUp"]));
+        });
+
+        it("does not forward Ctrl+Alt on Windows or Linux, where AltGr types characters with it", () => {
+            expect(keysOf([{ command: "tab:new", key: "ctrl+alt+q" }]).join()).not.toContain("ctrl+alt+q");
+            const mac = hostKeysOf(compileRows("mac", [{ command: "tab:new", key: "ctrl+alt+q" }]), "mac").map((k) => k.source);
+            expect(mac).toContain("ctrl+alt+q");
+        });
+
+        it("does not forward a key whose place leaves out browser panes", () => {
+            expect(keysOf([{ command: "tab:new", key: "ctrl+shift+9", when: "viewType != browser" }]).join()).not.toContain("shift+9");
+            expect(keysOf([{ command: "tab:new", key: "ctrl+shift+8", when: "viewType != editor" }])).toContain("tab:new ctrl+shift+8");
+        });
+
+        it("forwards the keys the recorder can give that no default uses", () => {
+            const keys = hostKeysOf(
+                compileRows("other", ["ctrl+Home", "ctrl+End", "ctrl+Backspace", "ctrl+Insert", "ctrl+code:Space", "ctrl+code:KeyQ", "F15"].map((key) => ({ command: "tab:new", key })) as never),
+                "other",
+            );
+            const vk = (source: string) => keys.find((k) => k.source === source)?.vk;
+            expect(vk("ctrl+Home")).toBe(0x24);
+            expect(vk("ctrl+End")).toBe(0x23);
+            expect(vk("ctrl+Backspace")).toBe(0x08);
+            expect(vk("ctrl+Insert")).toBe(0x2d);
+            expect(vk("ctrl+code:Space")).toBe(0x20);
+            expect(vk("ctrl+code:KeyQ")).toBe(0x51);
+            expect(vk("F15")).toBe(0x7e);
         });
 
         it("does not forward a key limited to where the person types, or a chord", () => {

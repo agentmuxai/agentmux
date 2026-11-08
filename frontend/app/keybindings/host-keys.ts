@@ -57,10 +57,23 @@ const CODE_VK: Record<string, number> = {
     Quote: 0xde,
 };
 
-function vkOf(k: KeySpec): number | null {
+/** Keys the Settings recorder can give a binding that no default uses: the default list stays as it was. */
+const USER_NAMED_VK: Record<string, number> = {
+    Backspace: 0x08,
+    End: 0x23,
+    Home: 0x24,
+    Insert: 0x2d,
+    ...Object.fromEntries(Array.from({ length: 12 }, (_, i) => [`F${i + 13}`, 0x7c + i])),
+};
+const USER_CODE_VK: Record<string, number> = {
+    Space: 0x20,
+    ...Object.fromEntries(Array.from({ length: 26 }, (_, i) => [`Key${String.fromCharCode(65 + i)}`, 0x41 + i])),
+};
+
+function vkOf(k: KeySpec, user: boolean): number | null {
     if (k.letter) return k.letter.toUpperCase().charCodeAt(0);
-    if (k.code) return CODE_VK[k.code] ?? null;
-    return NAMED_VK[k.named ?? ""] ?? null;
+    if (k.code) return CODE_VK[k.code] ?? (user ? USER_CODE_VK[k.code] : undefined) ?? null;
+    return NAMED_VK[k.named ?? ""] ?? (user ? USER_NAMED_VK[k.named ?? ""] : undefined) ?? null;
 }
 
 /**
@@ -75,15 +88,17 @@ function forwards(row: KeyBindingRow): boolean {
     if (row.pane || !row.skipShell || row.devOnly) return false;
     if (row.category === "Find & zoom" || row.category === "Terminal") return false;
     const terms = (row.when ?? "").split("&&").map((t) => t.trim()).filter(Boolean);
-    // A browser pane is neither a document-tab host nor any excluded view.
-    return terms.every((t) => t === "!docTabsHost" || /^viewType\s*!=/.test(t));
+    // A browser pane is neither a document-tab host nor any excluded view: `viewType != browser` excludes it.
+    return terms.every((t) => t === "!docTabsHost" || /^viewType\s*!=\s*(?!browser$)\S+$/.test(t));
 }
 
-const FUNCTION_KEYS = new Set(Array.from({ length: 12 }, (_, i) => 0x70 + i));
+const FUNCTION_KEYS = new Set(Array.from({ length: 24 }, (_, i) => 0x70 + i));
 
 /** A key of the person's own that the page can't be typing: with Ctrl, Alt or Meta, or a function key. A bare letter
- *  or Shift+letter, forwarded, would take every such key from every page. */
-function notTyping(k: KeySpec, vk: number): boolean {
+ *  or Shift+letter, forwarded, would take every such key from every page. Ctrl+Alt is AltGr on a Windows or Linux
+ *  layout that types a character with it, which the host can't tell from the key alone: it is not forwarded. */
+function notTyping(k: KeySpec, vk: number, platform: KeyPlatform): boolean {
+    if (k.ctrl && k.alt && platform !== "mac") return false;
     return k.ctrl || k.alt || k.meta || FUNCTION_KEYS.has(vk);
 }
 
@@ -94,8 +109,8 @@ export function hostKeysOf(rows: { row: KeyBindingRow; source: string; user?: bo
         if (!forwards(row)) continue;
         if (source.includes(" ")) continue; // chords
         const k = parseKey(source, platform);
-        const vk = vkOf(k);
-        if (vk == null || (user && !notTyping(k, vk))) continue;
+        const vk = vkOf(k, user === true);
+        if (vk == null || (user && !notTyping(k, vk, platform))) continue;
         out.push({ command: row.command, source, ctrl: k.ctrl, shift: k.shift, alt: k.alt, meta: k.meta, vk });
     }
     return out;
