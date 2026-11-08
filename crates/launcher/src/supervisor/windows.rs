@@ -1045,11 +1045,11 @@ pub(crate) async fn run_windows(
                             break code;
                         }
                         host_restarts.push(now);
-                        // Crash classification + retry ladder (spec §7): the same code
-                        // soon after a relaunch is the same deterministic crash — step
-                        // down to a degraded (--disable-gpu) relaunch so the retry isn't
-                        // "the same thing again". A kill after a long run is not that
-                        // (issue #3666). Degraded is sticky; the ladder only steps down.
+                        // Crash classification + retry ladder (spec §7): the same fault
+                        // code repeating, or any code soon after a relaunch, is the same
+                        // deterministic crash — step down to a degraded (--disable-gpu)
+                        // relaunch so the retry isn't "the same thing again". A kill after
+                        // a long run is not that (#3666). Degraded is sticky; only down.
                         //
                         // SPEC_SRV_SUPERVISION_RECYCLE — a launcher-inflicted
                         // recycle kill is NOT a host fault: skip the ladder

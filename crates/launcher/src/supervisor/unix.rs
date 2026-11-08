@@ -463,7 +463,7 @@ pub(crate) async fn run_unix(
     // Separate budget for system-OOM host exits (memory-aware relaunch); see
     // mem_supervisor + SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16.
     let mut oom_restarts: Vec<std::time::Instant> = Vec::new();
-    let mut last_abnormal_code: Option<i32> = None;
+    let mut last_abnormal_exit: Option<(i32, std::time::Instant)> = None;
     let mut host_degraded = false;
     // srv's own restart budgets (SPEC_UNIX_SRV_RESTART_BUDGET_2026_10_24): crashes, and exits while
     // the computer was out of memory, which are waited out like the window process's.
@@ -781,10 +781,10 @@ pub(crate) async fn run_unix(
                         }
                         host_restarts.push(now);
                         let was_degraded = host_degraded;
-                        if last_abnormal_code == Some(code) {
+                        if super::repeats_crash(last_abnormal_exit, code, now) {
                             host_degraded = true;
                         }
-                        last_abnormal_code = Some(code);
+                        last_abnormal_exit = Some((code, now));
                         crate::incidents::record(&crate::incidents::host_restarted(code, host_degraded && !was_degraded));
                         log(&format!(
                             "CEF host exited abnormally (code {}) — relaunching (restart {}/{}{})",
