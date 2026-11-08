@@ -62,6 +62,7 @@ pub(crate) mod agent_permission;
 pub(crate) mod filedialog;
 pub(crate) mod jsdialog;
 mod handlers;
+pub(crate) mod host_keys;
 pub(crate) mod helpers;
 pub(crate) mod srv_failure;
 mod lifecycle;
