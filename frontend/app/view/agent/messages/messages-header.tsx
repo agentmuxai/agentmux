@@ -7,7 +7,7 @@
  * noticeable with the panel closed.
  */
 
-import { createEffect, onCleanup, Show, type Accessor, type JSX } from "solid-js";
+import { onCleanup, Show, type Accessor, type JSX } from "solid-js";
 
 import { Pill } from "@/app/element/ui/Pill";
 import type { SignalAtom } from "@/util/util";
@@ -17,6 +17,9 @@ import { publishMessagesHeaderButton, type MessagesPanelControls } from "./messa
 
 /** The class the header button carries, to put the keyboard back on it when the panel closes. */
 export const MESSAGES_TOGGLE_CLASS = "messages-toggle";
+
+/** Keeps the button in a narrow header: with the bar gone it is the only way in (mixins.scss, `block-frame-end-keep`). */
+const KEEP_CLASS = "block-frame-end-keep";
 
 /** The button's face: the envelope, the unread count and a dot while something waits on the person. */
 function ButtonFace(props: { unread: number; needsYou: boolean }): JSX.Element {
@@ -39,7 +42,9 @@ export const buttonTitle = (unread: number, needsYou: boolean): string =>
 
 /**
  * Put the Messages button in the pane's header, pressed while the panel is open, and take it away when the panel goes
- * (the pane hid it, or the pane closed).
+ * (the pane hid it, or the pane closed). One declaration for the panel's life, its title and face reading the
+ * count themselves: the header draws a new button for a new object, which would drop the keyboard or the tooltip
+ * the moment a message arrived.
  */
 export function publishHeaderButton(
     blockId: string,
@@ -50,19 +55,17 @@ export function publishHeaderButton(
     // A fake SignalAtom, as the find bar's magnifier uses: the read tracks the panel, the write opens or closes it.
     const active = (() => controls.state().open) as SignalAtom<boolean>;
     active._set = (open: boolean) => controls.patch({ open });
-    createEffect(() => {
-        const n = unread();
-        const needs = needsYou();
-        publishMessagesHeaderButton(blockId, {
-            elemtype: "toggleiconbutton",
-            // A function, not a node: the pane's header is drawn in more than one place (the tile preview among
-            // them), and each draws its own face. One node can only sit in one of them.
-            icon: (() => <ButtonFace unread={n} needsYou={needs} />) as unknown as JSX.Element,
-            title: buttonTitle(n, needs),
-            className: MESSAGES_TOGGLE_CLASS,
-            fitContent: true,
-            active,
-        });
+    publishMessagesHeaderButton(blockId, {
+        elemtype: "toggleiconbutton",
+        // A function, not a node: the pane's header is drawn in more than one place (the tile preview among
+        // them), and each draws its own face. One node can only sit in one of them.
+        icon: (() => <ButtonFace unread={unread()} needsYou={needsYou()} />) as unknown as JSX.Element,
+        get title() {
+            return buttonTitle(unread(), needsYou());
+        },
+        className: `${MESSAGES_TOGGLE_CLASS} ${KEEP_CLASS}`,
+        fitContent: true,
+        active,
     });
     onCleanup(() => publishMessagesHeaderButton(blockId, null));
 }

@@ -93,7 +93,7 @@ function MessagesDock(props: MessagesPanelProps): JSX.Element {
         // Back to the header button it came from, so the keyboard is not left on a panel that is gone.
         queueMicrotask(() =>
             document
-                .querySelector(`[data-blockid="${props.blockId}"]`)
+                .querySelector(`[data-blockid="${CSS.escape(props.blockId)}"]:not(.block-preview)`)
                 ?.querySelector<HTMLElement>(`.${MESSAGES_TOGGLE_CLASS}`)
                 ?.focus()
         );

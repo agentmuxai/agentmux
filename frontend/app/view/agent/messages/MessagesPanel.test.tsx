@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -197,6 +199,27 @@ describe("MessagesPanel", () => {
         controls.patch({ enabled: false });
         expect(messagesHeaderButtons("p1")).toEqual([]);
         view.unmount();
+    });
+
+    it("keeps one button as messages arrive: the same element, its title and count following", async () => {
+        const { setDoc } = mount([jekt()], controlsFor({ open: false }));
+        const button = headerButton()!;
+        const el = button.container.querySelector("button")!;
+        expect(el.getAttribute("aria-label")).toBe("Messages, 1 unread");
+        setDoc([jekt(), jekt(), jekt()]);
+        expect(button.container.querySelector("button")).toBe(el);
+        expect(el.getAttribute("aria-label")).toBe("Messages, 3 unread");
+        expect(el.querySelector(".messages-header-button")?.textContent).toBe("3");
+    });
+
+    it("stays in a narrow header: the class the header's fit rules spare", () => {
+        mount([jekt()]);
+        expect(messagesHeaderButtons("p1")[0].className).toContain("block-frame-end-keep");
+        const rules = readFileSync(resolve(__dirname, "../../../mixins.scss"), "utf8");
+        for (const tier of ["trim", "min"]) {
+            expect(rules).toContain(`&[data-fit="${tier}"] .block-frame-end-extra:not(.block-frame-end-keep)`);
+        }
+        expect(rules).toContain(".block-frame-end-icons > :not(.block-frame-default-close):not(.block-frame-end-keep)");
     });
 
     it("takes the button away when the pane goes", () => {
