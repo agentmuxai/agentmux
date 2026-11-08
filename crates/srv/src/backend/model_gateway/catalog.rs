@@ -3,7 +3,10 @@
 
 //! The routes AgentMux ships. A route's address is fixed here and never read from an agent's request.
 //!
-//! The model list and prices were read from OpenRouter's public models API on 2026-11-06. They are
+//! The model list and prices were read from OpenRouter's public models API on 2026-11-06, and the GLM, Qwen
+//! and Kimi models on 2026-11-08. The GLM and Kimi models are served by many providers whose prices differ
+//! several times over, so each is counted at the median price of the providers that take tool calls, not the cheapest one
+//! the API lists first: the daily cap would otherwise run behind the bill. They are
 //! the values the gateway counts spend with, so a price that moves upstream is a change here.
 
 /// One model a route serves. Prices are US dollars per million tokens.
@@ -57,6 +60,50 @@ const OPENROUTER_MODELS: &[Model] = &[
         price_in: 0.1165,
         price_out: 4.66,
         price_cache_read: 0.111,
+    },
+    Model {
+        id: "z-ai/glm-5.3",
+        label: "GLM 5.3",
+        context: 1_048_576,
+        tools: true,
+        thinking: true,
+        images: false,
+        price_in: 1.0,
+        price_out: 4.2,
+        price_cache_read: 0.169,
+    },
+    Model {
+        id: "qwen/qwen3.8-max-0902",
+        label: "Qwen3.8 Max",
+        context: 1_000_000,
+        tools: true,
+        thinking: true,
+        images: true,
+        price_in: 2.0,
+        price_out: 6.0,
+        price_cache_read: 0.25,
+    },
+    Model {
+        id: "moonshotai/kimi-k3",
+        label: "Kimi K3",
+        context: 1_048_576,
+        tools: true,
+        thinking: true,
+        images: true,
+        price_in: 1.95,
+        price_out: 15.0,
+        price_cache_read: 0.285,
+    },
+    Model {
+        id: "moonshotai/kimi-k3.1-pro",
+        label: "Kimi K3.1 Pro",
+        context: 1_048_576,
+        tools: true,
+        thinking: true,
+        images: true,
+        price_in: 2.0,
+        price_out: 10.0,
+        price_cache_read: 0.2,
     },
 ];
 
@@ -131,5 +178,24 @@ mod tests {
         assert!(validate("claude", "nowhere", "").unwrap_err().contains("openrouter"));
         assert!(validate("codex", "openrouter", "").unwrap_err().contains("serves claude"));
         assert!(validate("claude", "openrouter", "gpt-5").unwrap_err().contains("deepseek/deepseek-v4.1-flash-1017"));
+    }
+
+    #[test]
+    fn every_model_is_listed_once_and_counted_at_a_real_price() {
+        for r in ROUTES {
+            for (i, m) in r.models.iter().enumerate() {
+                assert!(r.models[i + 1..].iter().all(|o| o.id != m.id), "{} is listed twice", m.id);
+                assert!(m.tools, "{} cannot call tools, so no harness can use it", m.id);
+                assert!(m.price_in > 0.0 && m.price_out > 0.0 && m.price_cache_read > 0.0, "{}", m.id);
+                assert!(m.price_cache_read <= m.price_in, "{} reads its cache above its input price", m.id);
+            }
+        }
+    }
+
+    #[test]
+    fn the_bake_off_models_are_served() {
+        for id in ["z-ai/glm-5.3", "qwen/qwen3.8-max-0902", "moonshotai/kimi-k3", "moonshotai/kimi-k3.1-pro"] {
+            assert!(validate("claude", "openrouter", id).is_ok(), "{id}");
+        }
     }
 }

@@ -671,6 +671,12 @@ pub const COMMAND_IDENTITY_ACCOUNT_AVAILABILITY: &str = "identity.account.availa
 /// window only.
 pub const COMMAND_IDENTITY_ACCOUNT_MOVE_AGENTS: &str = "identity.account.move_agents";
 pub const COMMAND_AGENT_ACCOUNT_SWITCH: &str = "agent.account.switch";
+/// The model panel's content for a pane: the routes that serve its harness with their models, what cannot be picked and
+/// why, and where the agent is now. The operator's window only.
+pub const COMMAND_AGENT_MODEL_PANEL: &str = "agent.model.panel";
+/// A person's pick in the model panel: moves the agent to a model on a route, or back to the harness's own sign-in.
+/// The operator's window only: the click is the approval of the spend.
+pub const COMMAND_AGENT_MODEL_SWITCH: &str = "agent.model.switch";
 /// A sign-in the window ran for an account completed: its agents' "signed
 /// out" ends (#2237). The operator's window only.
 pub const COMMAND_IDENTITY_ACCOUNT_SIGNED_IN: &str = "identity.account.signed_in";

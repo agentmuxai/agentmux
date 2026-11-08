@@ -86,17 +86,11 @@ function busSound(ev: SoundEvent): SoundDef | null {
 }
 
 /**
- * Install the sound service. Idempotent — subsequent calls no-op.
- * Returns a cleanup function for tests; production code does not
- * uninstall.
+ * The first-gesture handler that primes the AudioContext, then hooks the
+ * tool-tones chain and any waiting players into it. It disarms itself, so it
+ * is built here where it can name itself.
  */
-export function installSoundService(): () => void {
-    if (installed) return () => undefined;
-    installed = true;
-
-    const windowFocused = makeWindowFocusSignal();
-    windowFocusedSignal = windowFocused;
-
+function makePrimeOnce(): (e: Event) => Promise<void> {
     // Prime AudioContext on the first user gesture, exactly once.
     // After priming, hook the tool-tones chain into the same context +
     // master gain so a single OS volume slider controls both subsystems.
@@ -126,103 +120,142 @@ export function installSoundService(): () => void {
             }
         }
     };
+    return primeOnce;
+}
+
+/**
+ * Reactively thread the master-volume + tool-tones-volume settings
+ * into their respective gain nodes. Call inside the install's root.
+ */
+function bindVolumeEffects(): void {
+    createEffect(() => {
+        const vol = getSettingsKeyAtom("notify:sounds:volume")();
+        player.setMasterGain(typeof vol === "number" ? vol : DEFAULT_MASTER_VOLUME);
+    });
+    createEffect(() => {
+        const vol = getSettingsKeyAtom("notify:tooltones:volume")();
+        toolTones.setVolume(typeof vol === "number" ? vol : DEFAULT_TOOLTONES_VOLUME);
+    });
+    createEffect(() => {
+        const vol = getSettingsKeyAtom("notify:sounds:waiting:volume")();
+        const v = typeof vol === "number" ? vol : DEFAULT_WAITING_VOLUME;
+        for (const wp of waitingTones.values()) wp.setVolume(v);
+    });
+}
+
+/**
+ * Spec §8: kill all active waiting tones when the master switch or
+ * the per-event toggle is turned off mid-loop. Created BEFORE the
+ * focus-resume effect so it runs first in the same reactive batch —
+ * this prevents a disabled tone from being re-started by the resume
+ * path when settings change at the same moment focus leaves the pane.
+ */
+function bindWaitingOffEffect(): void {
+    createEffect(() => {
+        const masterEnabled = getSettingsKeyAtom("notify:sounds:enabled")();
+        const perEventEnabled = getSettingsKeyAtom("notify:sound:agent.waiting.for.input")();
+        if (masterEnabled === false || perEventEnabled === false) {
+            for (const blockId of [...waitingTones.keys()]) {
+                stopWaiting(blockId);
+            }
+        }
+    });
+}
+
+/**
+ * Spec §8: reactively suspend the waiting tone when the source pane
+ * gains focus, and resume it when focus moves elsewhere.
+ * "Suspend" = fade out but keep the player in waitingTones so it can
+ * be restarted from the top when focus leaves.
+ */
+function bindWaitingFocusEffect(windowFocused: () => boolean): void {
+    createEffect(() => reconcileWaitingFocus(windowFocused));
+}
+
+function reconcileWaitingFocus(windowFocused: () => boolean): void {
+    const focusedId = focusManager.blockFocusAtom();
+    const winFocused = windowFocused();
+    const suppressRaw = getSettingsKeyAtom("notify:sounds:suppresswhenfocused")();
+    const shouldSuppress = suppressRaw !== false;
+    const vol = (getSettingsKeyAtom("notify:sounds:waiting:volume")() as number | undefined) ?? DEFAULT_WAITING_VOLUME;
+
+    const toSuspend: string[] = [];
+    const toResume: string[] = [];
+    for (const blockId of waitingTones.keys()) {
+        const suppressed = shouldSuppress && winFocused && (focusedId === blockId || blockId.startsWith(APP_KEY_PREFIX));
+        if (suppressed && !suspendedByFocus.has(blockId)) toSuspend.push(blockId);
+        else if (!suppressed && suspendedByFocus.has(blockId)) toResume.push(blockId);
+    }
+    for (const blockId of toSuspend) {
+        void waitingTones.get(blockId)!.stop();
+        suspendedByFocus.add(blockId);
+        stopWaitingFlash(blockId);
+    }
+    for (const blockId of toResume) {
+        suspendedByFocus.delete(blockId);
+        waitingTones.get(blockId)?.start(vol);
+        startWaitingFlash(blockId);
+    }
+}
+
+/** The bus listener: one sound event, through every gate, to the player and its visual twin. */
+function handleBusEvent(ev: SoundEvent, windowFocused: () => boolean): void {
+    if (replayMode) return;
+    if (!shouldPlay(ev, windowFocused)) return;
+    const def = busSound(ev);
+    if (!def) return;
+    const now =
+        typeof performance !== "undefined" && performance.now
+            ? performance.now()
+            : Date.now();
+    const last = lastFiredAt.get(ev.id) ?? 0;
+    if (now - last < (def.coalesceMs ?? 300)) return;
+    lastFiredAt.set(ev.id, now);
+    let startAt: number | null = null;
+    try {
+        startAt = playEventSound(def, ev);
+    } catch (e) {
+        console.warn(`[sound] play threw for ${ev.id}`, e);
+    }
+    // The visual twin, past every gate the sound itself passed (master,
+    // per-event, focus suppression, coalesce) and whether or not the
+    // player is primed. SPEC_AGENT_ACTIVITY_FLASH_SOUND_SYNC_2026_09_24.md
+    // §3.5 (Phase 2).
+    if (ev.sourceBlockId && getSettingsKeyAtom("notify:tooltones:flash")() !== false) {
+        const ctx = player.getAudioContext();
+        emitActivityFlash({
+            blockId: ev.sourceBlockId,
+            pattern: flashPatternForCategory(def.category),
+            delayMs: ctx && typeof startAt === "number" ? audibleFlashDelayMs(ctx, startAt, nowMs()) : 0,
+        });
+    }
+}
+
+/**
+ * Install the sound service. Idempotent — subsequent calls no-op.
+ * Returns a cleanup function for tests; production code does not
+ * uninstall.
+ */
+export function installSoundService(): () => void {
+    if (installed) return () => undefined;
+    installed = true;
+
+    const windowFocused = makeWindowFocusSignal();
+    windowFocusedSignal = windowFocused;
+
+    const primeOnce = makePrimeOnce();
     document.addEventListener("pointerdown", primeOnce, { capture: true });
     document.addEventListener("keydown", primeOnce, { capture: true });
 
-    // Reactively thread the master-volume + tool-tones-volume settings
-    // into their respective gain nodes.
     const volumeDispose = createRoot((dispose) => {
-        createEffect(() => {
-            const vol = getSettingsKeyAtom("notify:sounds:volume")();
-            player.setMasterGain(typeof vol === "number" ? vol : DEFAULT_MASTER_VOLUME);
-        });
-        createEffect(() => {
-            const vol = getSettingsKeyAtom("notify:tooltones:volume")();
-            toolTones.setVolume(typeof vol === "number" ? vol : DEFAULT_TOOLTONES_VOLUME);
-        });
-        createEffect(() => {
-            const vol = getSettingsKeyAtom("notify:sounds:waiting:volume")();
-            const v = typeof vol === "number" ? vol : DEFAULT_WAITING_VOLUME;
-            for (const wp of waitingTones.values()) wp.setVolume(v);
-        });
-        // Spec §8: kill all active waiting tones when the master switch or
-        // the per-event toggle is turned off mid-loop. Created BEFORE the
-        // focus-resume effect so it runs first in the same reactive batch —
-        // this prevents a disabled tone from being re-started by the resume
-        // path when settings change at the same moment focus leaves the pane.
-        createEffect(() => {
-            const masterEnabled = getSettingsKeyAtom("notify:sounds:enabled")();
-            const perEventEnabled = getSettingsKeyAtom("notify:sound:agent.waiting.for.input")();
-            if (masterEnabled === false || perEventEnabled === false) {
-                for (const blockId of [...waitingTones.keys()]) {
-                    stopWaiting(blockId);
-                }
-            }
-        });
-        // Spec §8: reactively suspend the waiting tone when the source pane
-        // gains focus, and resume it when focus moves elsewhere.
-        // "Suspend" = fade out but keep the player in waitingTones so it can
-        // be restarted from the top when focus leaves.
-        createEffect(() => {
-            const focusedId = focusManager.blockFocusAtom();
-            const winFocused = windowFocused();
-            const suppressRaw = getSettingsKeyAtom("notify:sounds:suppresswhenfocused")();
-            const shouldSuppress = suppressRaw !== false;
-            const vol = (getSettingsKeyAtom("notify:sounds:waiting:volume")() as number | undefined) ?? DEFAULT_WAITING_VOLUME;
-
-            const toSuspend: string[] = [];
-            const toResume: string[] = [];
-            for (const blockId of waitingTones.keys()) {
-                const suppressed = shouldSuppress && winFocused && (focusedId === blockId || blockId.startsWith(APP_KEY_PREFIX));
-                if (suppressed && !suspendedByFocus.has(blockId)) toSuspend.push(blockId);
-                else if (!suppressed && suspendedByFocus.has(blockId)) toResume.push(blockId);
-            }
-            for (const blockId of toSuspend) {
-                void waitingTones.get(blockId)!.stop();
-                suspendedByFocus.add(blockId);
-                stopWaitingFlash(blockId);
-            }
-            for (const blockId of toResume) {
-                suspendedByFocus.delete(blockId);
-                waitingTones.get(blockId)?.start(vol);
-                startWaitingFlash(blockId);
-            }
-        });
+        bindVolumeEffects();
+        bindWaitingOffEffect();
+        bindWaitingFocusEffect(windowFocused);
         return dispose;
     });
 
     // Bus → player.
-    const busUnsub = subscribeSoundEvents((ev) => {
-        if (replayMode) return;
-        if (!shouldPlay(ev, windowFocused)) return;
-        const def = busSound(ev);
-        if (!def) return;
-        const now =
-            typeof performance !== "undefined" && performance.now
-                ? performance.now()
-                : Date.now();
-        const last = lastFiredAt.get(ev.id) ?? 0;
-        if (now - last < (def.coalesceMs ?? 300)) return;
-        lastFiredAt.set(ev.id, now);
-        let startAt: number | null = null;
-        try {
-            startAt = playEventSound(def, ev);
-        } catch (e) {
-            console.warn(`[sound] play threw for ${ev.id}`, e);
-        }
-        // The visual twin, past every gate the sound itself passed (master,
-        // per-event, focus suppression, coalesce) and whether or not the
-        // player is primed. SPEC_AGENT_ACTIVITY_FLASH_SOUND_SYNC_2026_09_24.md
-        // §3.5 (Phase 2).
-        if (ev.sourceBlockId && getSettingsKeyAtom("notify:tooltones:flash")() !== false) {
-            const ctx = player.getAudioContext();
-            emitActivityFlash({
-                blockId: ev.sourceBlockId,
-                pattern: flashPatternForCategory(def.category),
-                delayMs: ctx && typeof startAt === "number" ? audibleFlashDelayMs(ctx, startAt, nowMs()) : 0,
-            });
-        }
-    });
+    const busUnsub = subscribeSoundEvents((ev) => handleBusEvent(ev, windowFocused));
 
     // Reducer events → bus.
     const paneUnsub = addPaneListener((blockId, event) => {

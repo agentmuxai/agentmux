@@ -225,8 +225,8 @@ function rowsFor(platform: KeyPlatform): CompiledRow[] {
 }
 
 /** Every row as resolved for `platform`, user keys first (for the help pane). */
-export function effectiveRows(platform: KeyPlatform): { row: KeyBindingRow; source: string }[] {
-    return rowsFor(platform).map(({ row, source }) => ({ row, source }));
+export function effectiveRows(platform: KeyPlatform): { row: KeyBindingRow; source: string; user: boolean }[] {
+    return rowsFor(platform).map(({ row, source, user }) => ({ row, source, user }));
 }
 
 const WHEN_FLAGS = new Set(["textInputFocus", "terminalFocus", "docTabsHost"]);

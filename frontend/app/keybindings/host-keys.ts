@@ -4,10 +4,13 @@
 // The app shortcuts the host forwards out of a focused browser pane
 // (docs/reports/REPORT_KEYBINDINGS_AUDIT_AND_CONSOLIDATION_2026_10_04.md §6.5).
 // A browser pane is a native CEF child window, so its keys never reach the
-// app's DOM listeners; crates/cef reads host-keys.json, which this generates.
+// app's DOM listeners; crates/cef starts from host-keys.json, which this
+// generates from the defaults, and replaces it with the list `hostKeysOf`
+// gives for the person's own keybindings (store/host-keys-push.ts).
 
-import { DEFAULT_KEYBINDINGS, rowKeys, type KeyBindingRow } from "./defaults";
+import type { KeyBindingRow } from "./defaults";
 import { parseKey, type KeyPlatform, type KeySpec } from "./keys";
+import { compileRows } from "./registry";
 
 export interface HostKey {
     command: string;
@@ -54,10 +57,32 @@ const CODE_VK: Record<string, number> = {
     Quote: 0xde,
 };
 
-function vkOf(k: KeySpec): number | null {
+/** Keys the Settings recorder can give a binding that no default uses: the default list stays as it was. */
+const USER_NAMED_VK: Record<string, number> = {
+    Backspace: 0x08,
+    End: 0x23,
+    Home: 0x24,
+    Insert: 0x2d,
+    ...Object.fromEntries(Array.from({ length: 12 }, (_, i) => [`F${i + 13}`, 0x7c + i])),
+};
+const USER_CODE_VK: Record<string, number> = {
+    Space: 0x20,
+    ...Object.fromEntries(Array.from({ length: 26 }, (_, i) => [`Key${String.fromCharCode(65 + i)}`, 0x41 + i])),
+};
+
+function vkOf(k: KeySpec, user: boolean): number | null {
     if (k.letter) return k.letter.toUpperCase().charCodeAt(0);
-    if (k.code) return CODE_VK[k.code] ?? null;
-    return NAMED_VK[k.named ?? ""] ?? null;
+    if (k.code) return CODE_VK[k.code] ?? (user ? USER_CODE_VK[k.code] : undefined) ?? null;
+    return NAMED_VK[k.named ?? ""] ?? (user ? USER_NAMED_VK[k.named ?? ""] : undefined) ?? null;
+}
+
+/** Whether a `when` term holds in a focused browser pane: it is not a terminal and not a document-tab host, and its
+ *  view is `browser`. Whether the page has a text field focused the host can't tell, so a term about typing does not. */
+function holdsInBrowserPane(term: string): boolean {
+    if (term === "!docTabsHost" || term === "!terminalFocus") return true;
+    const view = term.match(/^viewType\s*(==|!=)\s*(\S+)$/);
+    if (!view) return false;
+    return view[1] === "==" ? view[2] === "browser" : view[2] !== "browser";
 }
 
 /**
@@ -71,22 +96,38 @@ function forwards(row: KeyBindingRow): boolean {
     // swallow the key from the page.
     if (row.pane || !row.skipShell || row.devOnly) return false;
     if (row.category === "Find & zoom" || row.category === "Terminal") return false;
-    const terms = (row.when ?? "").split("&&").map((t) => t.trim()).filter(Boolean);
-    // A browser pane is neither a document-tab host nor any excluded view.
-    return terms.every((t) => t === "!docTabsHost" || /^viewType\s*!=/.test(t));
+    return (row.when ?? "").split("&&").map((t) => t.trim()).filter(Boolean).every(holdsInBrowserPane);
 }
 
-export function hostKeys(platform: KeyPlatform): HostKey[] {
+const FUNCTION_KEYS = new Set(Array.from({ length: 24 }, (_, i) => 0x70 + i));
+
+/** A key of the person's own that the page can't be typing: with Ctrl, Alt or Meta, or a function key. A bare letter
+ *  or Shift+letter, forwarded, would take every such key from every page. Ctrl+Alt is AltGr on a Windows or Linux
+ *  layout that types a character with it, and Option on its own types one on macOS: the host can't tell either from
+ *  the key alone, so they are not forwarded. The host reads no Meta (Windows or Super) key outside macOS, so a key
+ *  with it could never match there and is not forwarded either. */
+function notTyping(k: KeySpec, vk: number, platform: KeyPlatform): boolean {
+    if (k.meta && platform !== "mac") return false;
+    if (k.ctrl && k.alt && platform !== "mac") return false;
+    if (platform === "mac" && k.alt && !k.ctrl && !k.meta && (k.letter != null || k.code != null)) return false;
+    return k.ctrl || k.alt || k.meta || FUNCTION_KEYS.has(vk);
+}
+
+/** The keys to forward for `rows`: each row as the keybindings resolve it (`user`: from the person's setting). */
+export function hostKeysOf(rows: { row: KeyBindingRow; source: string; user?: boolean }[], platform: KeyPlatform): HostKey[] {
     const out: HostKey[] = [];
-    for (const row of DEFAULT_KEYBINDINGS) {
+    for (const { row, source, user } of rows) {
         if (!forwards(row)) continue;
-        for (const source of rowKeys(row, platform)) {
-            if (source.includes(" ")) continue; // chords
-            const k = parseKey(source, platform);
-            const vk = vkOf(k);
-            if (vk == null) continue;
-            out.push({ command: row.command, source, ctrl: k.ctrl, shift: k.shift, alt: k.alt, meta: k.meta, vk });
-        }
+        if (source.includes(" ")) continue; // chords
+        const k = parseKey(source, platform);
+        const vk = vkOf(k, user === true);
+        if (vk == null || (user && !notTyping(k, vk, platform))) continue;
+        out.push({ command: row.command, source, ctrl: k.ctrl, shift: k.shift, alt: k.alt, meta: k.meta, vk });
     }
     return out;
+}
+
+/** The default table's keys: what host-keys.json holds. */
+export function hostKeys(platform: KeyPlatform): HostKey[] {
+    return hostKeysOf(compileRows(platform, []), platform);
 }

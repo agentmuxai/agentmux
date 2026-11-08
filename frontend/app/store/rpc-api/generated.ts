@@ -29,6 +29,10 @@ import type { AgentKillProcessCommand } from "@/types/rpc/AgentKillProcessComman
 import type { AgentKillResult } from "@/types/rpc/AgentKillResult";
 import type { AgentKillTreeCommand } from "@/types/rpc/AgentKillTreeCommand";
 import type { AgentLastRuntime } from "@/types/rpc/AgentLastRuntime";
+import type { AgentModelPanel } from "@/types/rpc/AgentModelPanel";
+import type { AgentModelPanelReq } from "@/types/rpc/AgentModelPanelReq";
+import type { AgentModelSwitchReq } from "@/types/rpc/AgentModelSwitchReq";
+import type { AgentModelSwitchResult } from "@/types/rpc/AgentModelSwitchResult";
 import type { AgentMoveHereResult } from "@/types/rpc/AgentMoveHereResult";
 import type { AgentOpenPanesResult } from "@/types/rpc/AgentOpenPanesResult";
 import type { AgentOpenResult } from "@/types/rpc/AgentOpenResult";
@@ -3035,6 +3039,18 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<AgentAccountSwitchResult> {
     return client.rpcCall("agent.account.switch", data, { timeout: 120000, ...opts });
+  },
+  // command "agent.model.panel"
+  AgentModelPanelCommand(client: RpcClient, data: AgentModelPanelReq, opts?: RpcOpts): Promise<AgentModelPanel> {
+    return client.rpcCall("agent.model.panel", data, opts);
+  },
+  // command "agent.model.switch"
+  AgentModelSwitchCommand(
+    client: RpcClient,
+    data: AgentModelSwitchReq,
+    opts?: RpcOpts
+  ): Promise<AgentModelSwitchResult> {
+    return client.rpcCall("agent.model.switch", data, { timeout: 120000, ...opts });
   },
   // command "identity.account.move_agents"
   IdentityAccountMoveAgentsCommand(

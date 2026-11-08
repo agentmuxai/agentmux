@@ -69,7 +69,7 @@
 119 crates/cef/src/floating_pane.rs::CreatePanePoolWindowWin32Task::Task::execute
 152 crates/cef/src/floating_pane.rs::create_popup
 142 crates/cef/src/floating_pane.rs::floating_pane_wndproc
-1141 crates/cef/src/ipc.rs::route_command
+1140 crates/cef/src/ipc.rs::route_command
 130 crates/cef/src/launcher_ipc/mod.rs::apply_event_to_shadow
 259 crates/cef/src/launcher_ipc/mod.rs::connect_to_launcher
 209 crates/cef/src/launcher_ipc/mod.rs::connect_to_launcher#2
@@ -318,7 +318,6 @@
 120 crates/srv/src/server/work_queue.rs::handle_work_claim
 198 crates/srv/src/srv_ipc/server.rs::handle_connection
 213 frontend/app-init.ts::initAppInner
-147 frontend/app-init.ts::initHostMux
 163 frontend/app-init.ts::initHostNewWindow
 217 frontend/app-init.ts::initMux
 364 frontend/app/block/block.tsx::Block
@@ -335,7 +334,6 @@
 219 frontend/app/drag/CrossWindowDragMonitor.win32.tsx::performTearOff
 119 frontend/app/drag/CrossWindowDropOverlay.tsx::CrossWindowDropOverlay
 132 frontend/app/element/ModalLayer.tsx::ModalLayer
-149 frontend/app/element/PaneTabStrip.tsx::PaneTabStripItem
 122 frontend/app/element/ProviderLogo.tsx::ProviderLogo
 112 frontend/app/element/anchored-popover.tsx::AnchoredPopover
 126 frontend/app/element/flyoutmenu.tsx::FlyoutMenu
@@ -343,7 +341,6 @@
 118 frontend/app/element/markdown-incremental.ts::findSafeSplitPoint
 113 frontend/app/element/markdown-util.ts::transformBlocks
 257 frontend/app/element/modal.tsx::Modal
-148 frontend/app/element/title-tooltip.ts::initTitleTooltips
 159 frontend/app/element/tooltip.tsx::TooltipInner
 113 frontend/app/element/ui/CardGrid.tsx::CardGrid
 116 frontend/app/hook/useVoiceInput.ts::createWebSpeechVoiceSession
@@ -351,14 +348,12 @@
 105 frontend/app/init/error-display.ts::showStartupError
 138 frontend/app/modals/command-palette.tsx::CommandPaletteModal
 121 frontend/app/notification/notificationitem.tsx::NotificationItem
-148 frontend/app/notification/sound/sound-service.ts::installSoundService
 111 frontend/app/platform/pane-overlay.ts::flushClip
 175 frontend/app/selection/selection-effects.ts::createSelectionRunner
 104 frontend/app/selection/selection-machine.ts::transition
 139 frontend/app/statusbar/BackendStatus.tsx::BackendStatus
 128 frontend/app/statusbar/BackendStatus.tsx::BackendStatusPanel
 140 frontend/app/statusbar/HostPopover.tsx::HostPopover
-145 frontend/app/store/agent-document/reducer.ts::scrubOrphanedInProgress
 258 frontend/app/store/agent-pane-state-store.ts::dispatch
 118 frontend/app/store/agent-pane-state/reducer-failure.ts::onCompactionBoundary
 103 frontend/app/store/agent-pane-state/reducer-failure.ts::onCompactionStarted
@@ -382,10 +377,8 @@
 116 frontend/app/view/agent/components/AgentEnvPanel.tsx::AgentEnvPanel
 120 frontend/app/view/agent/components/AgentSessionNotices.tsx::AgentSessionNotices
 126 frontend/app/view/agent/components/AgentShellInfoPanel.tsx::AgentShellInfoPanel
-148 frontend/app/view/agent/components/BtwOverlay.tsx::BtwOverlay
 130 frontend/app/view/agent/components/HiddenTemplatesSection.tsx::HiddenTemplatesSection
 141 frontend/app/view/agent/components/MyAgentsList.tsx::MyAgentsList
-147 frontend/app/view/agent/components/PersistentShellBlock.tsx::PersistentShellBlock
 130 frontend/app/view/agent/components/SeatRosterImport.tsx::SeatRosterImport
 108 frontend/app/view/agent/components/SlashCommandPicker.tsx::SlashCommandPicker
 233 frontend/app/view/agent/components/agent-picker-launch.ts::createPickerLaunch
@@ -419,7 +412,6 @@
 123 frontend/app/view/audit/audit-manager.tsx::AuditManager
 101 frontend/app/view/browser/browser-profile-menu.tsx::BrowserProfileButton
 141 frontend/app/view/browser/use-browser-auth.ts::useBrowserAuth
-148 frontend/app/view/browser/use-freeze-frame.ts::useFreezeFrame
 394 frontend/app/view/browser/use-pane-rect-sync.ts::usePaneRectSync
 155 frontend/app/view/bundle/BundleProviderInstructionsSection.tsx::BundleProviderInstructionsSection
 118 frontend/app/view/bundle/components/BundleImportConfirmModal.tsx::BundleImportConfirmModalPanel
@@ -427,7 +419,6 @@
 101 frontend/app/view/editor/viewers/viewer-host.tsx::ViewerFor
 152 frontend/app/view/files/files-preview.tsx::FilesPreview
 118 frontend/app/view/global-bundle/GlobalMemoryFullView.tsx::EntryView
-147 frontend/app/view/history/history-agents.tsx::HistoryAgents
 143 frontend/app/view/memory-editor/MemoryHistory.tsx::MemoryHistory
 126 frontend/app/view/native-memory/MemoryAdoptionPanel.tsx::MemoryAdoptionPanel
 112 frontend/app/view/native-memory/NativeMemoryCreate.tsx::NativeMemoryCreate
@@ -460,7 +451,6 @@
 105 frontend/app/view/warden-jobs/job-dry-run.tsx::JobDryRun
 101 frontend/app/view/warden-jobs/job-editor-fields.tsx::PolicySection
 102 frontend/app/view/warden-jobs/job-editor-fields.tsx::WhatSection
-146 frontend/app/view/warden-jobs/job-template-approval.tsx::TemplateApproval
 137 frontend/app/view/warden-jobs/warden-jobs-manager.tsx::WardenJobsManager
 107 frontend/app/window/pane-media-capture-indicator.tsx::PaneMediaCaptureIndicator
 117 frontend/app/window/titlebar-context-menu.tsx::TitleBarContextMenu
