@@ -35,6 +35,8 @@ export const LOCATE_HOLD_MS = 80;
 export const LOCATE_TOTAL_MS = 900;
 /** Flashes start at least this far apart: three a second at most. */
 export const LOCATE_MIN_GAP_MS = 340;
+/** A second request for the block whose flash started this recently adds nothing: the wash is still at its strongest. */
+export const LOCATE_COALESCE_MS = 600;
 /** How long a pane gets to become visible before the flash is dropped. */
 export const LOCATE_READY_TIMEOUT_MS = 1500;
 /** The same, when the window is hidden (another window is still being raised). */
@@ -53,7 +55,14 @@ export const LOCATE_PILL_FLASH: { pattern: FlashPattern; delayMs: number } = {
 
 // ── Bus ──────────────────────────────────────────────────────────────────
 
-type BlockListener = (blockId: string) => void;
+/** What a request says about how its pane was surfaced. */
+export interface LocateOptions {
+    /** The reveal moved focus to the pane (default): the flash waits for it and ends when focus leaves.
+     *  False for a pane shown without taking focus: it flashes where it is, focused or not. */
+    focus?: boolean;
+}
+
+type BlockListener = (blockId: string, opts: LocateOptions) => void;
 /** Told which block, and which pane's flash it is: a block can have pills in more than one pane. */
 type PlayListener = (blockId: string, paneKey: string) => void;
 const requests = new Set<BlockListener>();
@@ -69,9 +78,13 @@ function notify<A extends unknown[]>(listeners: Set<(...args: A) => void>, ...ar
     }
 }
 
-/** `blockId` was just revealed: its pane should flash once it is on screen. */
-export function emitPaneLocate(blockId: string): void {
-    notify(requests, blockId);
+/**
+ * `blockId` was just surfaced: its pane should flash once it is on screen. The one call for every path that
+ * shows an existing pane, `revealBlock` and the ones that switch or show a pane without it
+ * (docs/specs/SPEC_PANE_LOCATE_FLASH_ONE_FRAMEWORK_2026_11_08.md).
+ */
+export function emitPaneLocate(blockId: string, opts: LocateOptions = {}): void {
+    notify(requests, blockId, opts);
 }
 
 /** Every pane hears every request: the pane that owns the block starts, the others stop. */
