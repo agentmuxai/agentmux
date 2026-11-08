@@ -21,7 +21,8 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::act::{backend_of, call, call_on, check_click, click_element, describe, fail, insert_text, isolated_context, page_now, page_url, refuse_typing_into_secret_field, unauthorized, ClickCheck, READ_BACK};
+use super::act::{backend_of, call, call_on, check_click, click_element, describe, fail, insert_text, isolated_context, page_now, page_url, redact_secret, refuse_typing_into_secret_field, unauthorized, ClickCheck, READ_BACK};
+use super::snapshot::DomFacts;
 use super::types::ApiResponse;
 use crate::state::AppState;
 
@@ -81,6 +82,22 @@ async fn handles_keys(cdp: &mut super::cdp::CdpSession, object_id: &str) -> bool
         .is_none_or(|l| l.iter().any(|x| matches!(x.get("type").and_then(|t| t.as_str()), Some("keydown" | "keypress" | "keyup"))))
 }
 
+/// The element's facts, for hiding what a field holds.
+async fn facts_of(cdp: &mut super::cdp::CdpSession, object_id: &str) -> Option<DomFacts> {
+    let backend = backend_of(cdp, object_id).await?;
+    describe(cdp, backend).await
+}
+
+/// The element's state after the key, as `act` gives it: a secret field's value and any card, ID or
+/// token number hidden, on the facts from before and after (the page's handlers may have changed the field).
+async fn read_back(cdp: &mut super::cdp::CdpSession, object_id: &str, before: &DomFacts) -> Value {
+    let after = redact_secret(call_on(cdp, object_id, READ_BACK, vec![]).await.unwrap_or(Value::Null), before);
+    match facts_of(cdp, object_id).await {
+        Some(now) => redact_secret(after, &now),
+        None => after,
+    }
+}
+
 fn refused(key: &str, why: &str) -> String {
     format!("{key} was not pressed: {why}. The host only presses a key whose click it can name; use Browser's click action on the control (a snapshot has its reference)")
 }
@@ -119,10 +136,15 @@ async fn press(root: &mut super::cdp::CdpSession, req: &PressReq) -> Result<Valu
         // A space in a text field, typed here and not by a second call: text goes where the focus is and
         // cannot press a button the page moved focus to, which a key event would.
         refuse_typing_into_secret_field(root).await?;
+        let before = match found.focused.as_deref() {
+            Some(focused) => facts_of(root, focused).await,
+            None => None,
+        };
         insert_text(root, " ").await?;
-        let after = match found.focused.as_deref() {
-            Some(focused) => call_on(root, focused, READ_BACK, vec![]).await.unwrap_or(Value::Null),
-            None => Value::Null,
+        // Without the field's facts nothing is shown of it: it could hold a secret.
+        let after = match (found.focused.as_deref(), before) {
+            (Some(focused), Some(before)) => read_back(root, focused, &before).await,
+            _ => Value::Null,
         };
         return Ok(json!({ "after": after, "resolved": found.why }));
     }
@@ -140,7 +162,7 @@ async fn press(root: &mut super::cdp::CdpSession, req: &PressReq) -> Result<Valu
     }
     let mut inner = root.in_session(None);
     click_element(&mut inner, root, None, target).await?;
-    let after = call_on(&mut inner, target, READ_BACK, vec![]).await.unwrap_or(Value::Null);
+    let after = read_back(&mut inner, target, &facts).await;
     let page = page_now(root, &now).await;
     Ok(json!({ "after": after, "page": page, "resolved": found.why }))
 }

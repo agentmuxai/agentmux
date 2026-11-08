@@ -43,6 +43,15 @@ describe("Enter", () => {
         expect(bogus.el.id).toBe("b");
     });
 
+    it("counts an image button as a submit button, which form.elements leaves out", () => {
+        const got = press(`<form><input id="f"><input type="image" id="img" alt="Go"><button id="later">Other</button></form>`, "Enter");
+        expect(got.effect).toBe("click");
+        expect(got.el.id).toBe("img");
+        // Its own form's buttons only: a button of another form earlier on the page is not the default.
+        const other = press(`<form><button id="elsewhere">Elsewhere</button></form><form><input id="f"><button id="mine">Mine</button></form>`, "Enter");
+        expect(other.el.id).toBe("mine");
+    });
+
     it("is refused when the form has no submit button, or its button is disabled", () => {
         expect(press(`<form><input id="f"></form>`, "Enter").effect).toBe("refuse");
         expect(press(`<form><input id="f"><button disabled>Go</button></form>`, "Enter").effect).toBe("refuse");
