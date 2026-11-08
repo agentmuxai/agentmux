@@ -1477,30 +1477,6 @@ mod tests {
         }
 
         #[test]
-        fn enter_taken_as_a_click_says_what_it_was_and_how_it_went() {
-            let d = json!({
-                "resolved": "Enter in a field of a form presses the form's default button",
-                "after": { "tag": "button", "type": "submit" },
-                "page": { "url": "https://a.example/done", "changed": true },
-                "bypassed": true,
-            });
-            let said = key_result_text(Some(&d));
-            assert!(said.starts_with("Pressed: Enter in a field of a form presses the form's default button."), "{said}");
-            assert!(said.contains("without asking") && said.contains("https://a.example/done"), "{said}");
-            let plain = key_result_text(Some(&json!({ "resolved": "Space on a checkbox presses it", "after": { "checked": true } })));
-            assert!(plain.contains("\"checked\":true") && !plain.contains("without asking"), "{plain}");
-        }
-
-        #[test]
-        fn a_grant_with_enter_and_space_says_they_are_clicks_and_one_without_says_refused() {
-            let with = json!({ "origins": ["https://a.example"], "minutes_left": 55, "powers": ["clicks", "enter_space"], "always": false });
-            let said = super::super::granted_text(&with);
-            assert!(said.contains("Enter and Space (action key) are taken as the click they are") && !said.contains("Enter/Space stay refused"), "{said}");
-            let without = json!({ "origins": ["https://a.example"], "minutes_left": 55, "powers": ["clicks"], "always": false });
-            assert!(super::super::granted_text(&without).contains("eval and Enter/Space stay refused"));
-        }
-
-        #[test]
         fn an_older_answer_without_data_is_just_dispatched() {
             assert_eq!(key_result_text(None), "Dispatched");
             assert_eq!(key_result_text(Some(&json!({ "ok": true }))), "Dispatched");

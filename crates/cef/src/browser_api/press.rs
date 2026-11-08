@@ -69,9 +69,13 @@ async fn resolve(cdp: &mut super::cdp::CdpSession, key: &str) -> Result<Resolved
 }
 
 /// Does the element listen for keys itself? Then the key's effect is the page's
-/// own, and not one to name.
+/// own, and not one to name. Asked of the node in the page's own world: the
+/// isolated world's view of it holds only the listeners AgentMux added.
 async fn handles_keys(cdp: &mut super::cdp::CdpSession, object_id: &str) -> bool {
-    let Ok(v) = cdp.call("DOMDebugger.getEventListeners", json!({ "objectId": object_id })).await else { return true };
+    let Some(backend) = backend_of(cdp, object_id).await else { return true };
+    let Ok(node) = cdp.call("DOM.resolveNode", json!({ "backendNodeId": backend })).await else { return true };
+    let Some(page_object) = node.pointer("/object/objectId").and_then(|o| o.as_str()) else { return true };
+    let Ok(v) = cdp.call("DOMDebugger.getEventListeners", json!({ "objectId": page_object })).await else { return true };
     v.get("listeners")
         .and_then(|l| l.as_array())
         .is_none_or(|l| l.iter().any(|x| matches!(x.get("type").and_then(|t| t.as_str()), Some("keydown" | "keypress" | "keyup"))))
