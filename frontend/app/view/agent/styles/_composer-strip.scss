@@ -309,6 +309,26 @@
     }
 }
 
+// A model route's name inside the Model section, with who pays for it on the same line.
+.agent-runtime-dropup-group {
+    display: flex;
+    gap: var(--space-1-5);
+    padding: var(--space-1) var(--space-1-5) 2px;
+    font-size: var(--text-2xs);
+    font-weight: 600;
+    color: var(--secondary-text-color);
+    white-space: nowrap;
+
+    .agent-runtime-dropup-section-note {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        font-weight: normal;
+        font-style: italic;
+        padding-right: 0.25em;
+    }
+}
+
 .agent-runtime-dropup-description {
     color: var(--secondary-text-color);
     font-size: var(--text-3xs);

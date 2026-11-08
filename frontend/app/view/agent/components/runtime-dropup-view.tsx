@@ -171,6 +171,16 @@ function DropupRow(props: DropupViewProps & { row: Row }): JSX.Element {
             </div>
         );
     }
+    if (row.kind === "group") {
+        return (
+            <div class="agent-runtime-dropup-group">
+                {row.text}
+                <Show when={row.note}>
+                    <span class="agent-runtime-dropup-section-note">{row.note}</span>
+                </Show>
+            </div>
+        );
+    }
     if (row.kind === "note") {
         return (
             <div

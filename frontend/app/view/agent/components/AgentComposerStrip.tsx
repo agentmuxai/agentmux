@@ -268,6 +268,7 @@ function runtimeSlot(props: AgentComposerStripProps): Slot {
                 blockAtom={props.blockAtom ?? (() => undefined)}
                 providerId={props.providerId ?? ""}
                 lastReplyModel={props.lastReplyModel}
+                contextTokens={props.contextTokens}
             />
         ),
     };
