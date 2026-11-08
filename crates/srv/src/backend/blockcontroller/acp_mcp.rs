@@ -64,6 +64,33 @@ pub(super) fn acp_mcp_servers(
     out
 }
 
+/// Give AgentMux's own MCP server (`agentmux-mcp`) the `AGENTMUX_*` variables of the agent's environment
+/// that its entry does not set. Claude Code starts an MCP server with the agent's own environment, so
+/// `agentmux-mcp` finds `AGENTMUX_AUTH_KEY` there; an ACP agent that starts it with only the `env` of its
+/// `session/new` (dsh) left it without the key, and every call was refused, `Pane` `whoami` included.
+/// Entries the server already has (the identity and signing keys of `.mcp.json`) win; other servers are
+/// untouched. The agent holds these values itself, so nothing new reaches it.
+pub(super) fn carry_agentmux_env(servers: &mut [Value], agent_env: &std::collections::HashMap<String, String>) {
+    for server in servers.iter_mut() {
+        let is_agentmux_mcp = server
+            .get("command")
+            .and_then(Value::as_str)
+            .and_then(|c| std::path::Path::new(c).file_stem())
+            .is_some_and(|stem| stem == "agentmux-mcp");
+        let Some(env) = server.get_mut("env").and_then(Value::as_array_mut) else { continue };
+        if !is_agentmux_mcp {
+            continue;
+        }
+        let mut extra: Vec<(&String, &String)> = agent_env
+            .iter()
+            .filter(|(k, v)| k.starts_with("AGENTMUX_") && !v.is_empty())
+            .filter(|(k, _)| !env.iter().any(|e| e.get("name").and_then(Value::as_str) == Some(k.as_str())))
+            .collect();
+        extra.sort();
+        env.extend(extra.into_iter().map(|(k, v)| json!({ "name": k, "value": v })));
+    }
+}
+
 /// A `{ "K": "v" }` object as ACP's `[{ "name": "K", "value": "v" }]`, each value
 /// through `x` (placeholder expansion).
 fn name_values(obj: Option<&Value>, x: &impl Fn(&str) -> String) -> Vec<Value> {
@@ -132,6 +159,73 @@ pub(super) fn resolve_command(cmd: &str, path: Option<&str>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn agent_env() -> std::collections::HashMap<String, String> {
+        [
+            ("AGENTMUX_AUTH_KEY", "the-key"),
+            ("AGENTMUX_BLOCKID", "blk-1"),
+            ("AGENTMUX_AGENT_ID", "from-process"),
+            ("AGENTMUX_EMPTY", ""),
+            ("PATH", "/bin"),
+            ("AWS_PROFILE", "p"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect()
+    }
+
+    fn env_of(server: &Value) -> Vec<(String, String)> {
+        server["env"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| (e["name"].as_str().unwrap().to_string(), e["value"].as_str().unwrap().to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn agentmux_mcp_gets_the_agents_agentmux_variables_it_lacks() {
+        let mut servers = vec![json!({
+            "name": "agentmux", "command": "C:/AgentMux/agentmux-mcp.exe", "args": [],
+            "env": [{ "name": "AGENTMUX_AGENT_ID", "value": "deephar" }, { "name": "AGENTMUX_JEKT_KEY", "value": "j" }],
+        })];
+        carry_agentmux_env(&mut servers, &agent_env());
+        let env = env_of(&servers[0]);
+        assert!(env.contains(&("AGENTMUX_AUTH_KEY".into(), "the-key".into())));
+        assert!(env.contains(&("AGENTMUX_BLOCKID".into(), "blk-1".into())));
+        // The entry's own values win, and nothing is listed twice.
+        assert!(env.contains(&("AGENTMUX_AGENT_ID".into(), "deephar".into())));
+        assert_eq!(env.iter().filter(|(k, _)| k == "AGENTMUX_AGENT_ID").count(), 1);
+        assert!(env.contains(&("AGENTMUX_JEKT_KEY".into(), "j".into())));
+    }
+
+    #[test]
+    fn only_agentmux_variables_and_only_non_empty_ones() {
+        let mut servers = vec![json!({ "name": "agentmux", "command": "/t/agentmux-mcp", "args": [], "env": [] })];
+        carry_agentmux_env(&mut servers, &agent_env());
+        let names: Vec<String> = env_of(&servers[0]).into_iter().map(|(k, _)| k).collect();
+        assert_eq!(names, vec!["AGENTMUX_AGENT_ID", "AGENTMUX_AUTH_KEY", "AGENTMUX_BLOCKID"]);
+    }
+
+    #[test]
+    fn another_server_is_left_alone() {
+        let other = json!({ "name": "docs", "command": "/t/docs-mcp", "args": [], "env": [] });
+        let mut servers = vec![other.clone()];
+        carry_agentmux_env(&mut servers, &agent_env());
+        assert_eq!(servers[0], other);
+        // An http server has no env list at all.
+        let mut http = vec![json!({ "type": "http", "name": "x", "url": "https://x", "headers": [] })];
+        let before = http.clone();
+        carry_agentmux_env(&mut http, &agent_env());
+        assert_eq!(http, before);
+    }
+
+    #[test]
+    fn a_bare_command_name_counts_too() {
+        let mut servers = vec![json!({ "name": "agentmux", "command": "agentmux-mcp", "args": [], "env": [] })];
+        carry_agentmux_env(&mut servers, &agent_env());
+        assert!(!env_of(&servers[0]).is_empty());
+    }
 
     fn abs(cmd: &str) -> Option<String> {
         (cmd == "agentmux-mcp").then(|| "C:/AgentMux/agentmux-mcp.exe".to_string())

@@ -6,7 +6,9 @@ use super::{ControllerType, ProviderConfig};
 // DeepSeek Harness (`dsh`): `dsh --profile acp` speaks ACP over stdio. A
 // prerelease upstream (breaking changes promised), shown as a preview. It
 // runs signed out until a prompt needs DEEPSEEK_API_KEY. Checked against
-// 0.2.0-rc.2 on 2026-10-14 (SPEC_NINE_NEW_HARNESSES_2026_10_14.md §7.6).
+// 0.2.0-rc.2 on 2026-10-14 (SPEC_NINE_NEW_HARNESSES_2026_10_14.md §7.6) and read again at 0.2.2-rc.1 on
+// 2026-11-08: the same ACP surface (`initialize` offers `sessionCapabilities.resume`, no `loadSession`,
+// http MCP only), so a session is taken back with `session/resume` (blockcontroller/acp.rs).
 pub(super) static DSH: ProviderConfig = ProviderConfig {
     id: "dsh",
     cli_command: "dsh",
@@ -25,7 +27,7 @@ pub(super) static DSH: ProviderConfig = ProviderConfig {
     auth_extra_env: &[("DSH_TELEMETRY_DISABLED", "1")],
     unset_env: &[],
     npm_package: "@deepseek-ai/dsh",
-    pinned_version: "0.2.0-rc.2",
+    pinned_version: "0.2.2-rc.1",
     base_url_env_var: None,
     supported_vendors: &["deepseek"],
     startup_instructions_filename: Some("AGENTS.md"),
