@@ -130,6 +130,16 @@ impl PersistentSubprocessController {
         self.send_user_message_outcome_from(message, None)
     }
 
+    /// An explicit error when the deferred queue is full, never a false
+    /// success: the caller treats it like any other transient delivery failure
+    /// and retries.
+    fn deferred_queue_full() -> String {
+        format!(
+            "deferred-delivery queue is full ({MAX_DEFERRED_DELIVERIES} messages \
+             waiting for this agent's process to start up, restart or stop) — retry shortly"
+        )
+    }
+
     /// [`Self::send_user_message_outcome`], saying who the input is from (turn
     /// provenance, SPEC_AGENT_SELF_QUIT §6.3) — the Swarm broadcast, which is
     /// the user's own message (SPEC_SWARM_BROADCAST_AS_USER_MESSAGE §6 q2).
@@ -162,15 +172,6 @@ impl PersistentSubprocessController {
     /// one. It rides the queued entry, so a message that waits out its
     /// expiry behind a starting, restarting or stopping process is dropped
     /// at write time instead of written stale.
-    /// An explicit error when the deferred queue is full, never a false
-    /// success: the caller treats it like any other transient delivery failure
-    /// and retries.
-    fn deferred_queue_full() -> String {
-        format!(
-            "deferred-delivery queue is full ({MAX_DEFERRED_DELIVERIES} messages \
-             waiting for this agent's process to start up, restart or stop) — retry shortly"
-        )
-    }
 
     pub fn send_user_message_with_images_from(
         &self,
