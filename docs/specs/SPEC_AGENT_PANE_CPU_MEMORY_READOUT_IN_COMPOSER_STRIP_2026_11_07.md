@@ -1,7 +1,7 @@
 # Spec: the agent pane's top band is a priority layout, and the CPU and memory readout moves from it into the composer strip
 
 **Date:** 2026-11-07 (task #28995; builds: A first, then #28996 for B).
-**Status:** approved by the operator 2026-11-07, all four questions as recommended (Q1 after the context reading, on the left; Q2 compact chip, never hidden; Q3 agent panes only; Q4 A before B, as two builds). A1 is built in PR #6814 (task #29008); A2 (#29009) and B (#28996) follow.
+**Status:** active — approved by the operator 2026-11-07, all four questions as recommended (Q1 after the context reading, on the left; Q2 compact chip, never hidden; Q3 agent panes only; Q4 A before B, as two builds). A1 is built in PR #6814 (task #29008); A2 (#29009) and B (#28996) follow.
 **Author:** Agent1@narko
 **Scope:** `frontend/app/element/blockstats.tsx` and `blockstats.scss` (the readout), `frontend/app/block/blockframe.tsx` (where it is drawn today), the agent pane's layout (`agent-view-layout.tsx`) and find bar (`AgentSearchBar.tsx`), `frontend/app/view/agent/components/AgentComposerStrip.tsx` and `composer-row-layout.ts`, and `AgentSessionStats.tsx` (the popover the strip's context reading opens).
 **Related:** `SPEC_COMPOSER_STRIP_ROW_BASED_LAYOUT_2026_08_26.md`, `SPEC_COMPOSER_STRIP_DROP_CENTER_STATS_2026_08_31.md`, `SPEC_JEKT_SIDE_PANEL_RESEARCH_AND_DESIGN_2026_11_04.md` (section 10, #28993), `SPEC_AGENT_PANE_SEARCH_AND_DIM_MODE_2026_11_06.md`.
