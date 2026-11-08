@@ -58,6 +58,17 @@ export function terminalNote(powers: readonly string[] | undefined): string {
     return hasTerminalPower(powers) ? " and it runs commands in the terminal" : "";
 }
 
+/** Does a grant (or a request for one) carry the Enter and Space power? */
+export function hasEnterSpacePower(powers: readonly string[] | undefined): boolean {
+    return !!powers?.includes("enter_space");
+}
+
+/** What the strip says about the powers beyond clicks, each led by a space: nothing when the grant has none. */
+export function powersNote(powers: readonly string[] | undefined): string {
+    const terminal = terminalNote(powers);
+    return terminal + (hasEnterSpacePower(powers) ? `${terminal ? "," : ""} and it presses Enter and Space, each as the click it is` : "");
+}
+
 /** The longest a line is shown before "Show all": a longer one can't be run until it has been read in full. */
 export const LINE_PREVIEW_CHARS = 300;
 

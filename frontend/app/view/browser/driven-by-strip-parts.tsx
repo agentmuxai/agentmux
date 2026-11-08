@@ -13,7 +13,7 @@ import { tip } from "@/app/element/tip";
 import { For, Show, type JSX } from "solid-js";
 import { actionFailed, actionKind, actionTime, shortUrl } from "./action-log";
 import type { BrowserViewModel } from "./browser-model";
-import { BYPASS_MINUTES, leftLabel, minutesLabel, siteLabel, terminalNote } from "./bypass";
+import { BYPASS_MINUTES, leftLabel, minutesLabel, powersNote, siteLabel } from "./bypass";
 import type { DrivenByProps, DrivenByState } from "./driven-by-strip-state";
 
 type Part = { t: DrivenByState; p: DrivenByProps };
@@ -165,7 +165,7 @@ export function BypassStrip(props: Part & { grant: () => BrowserBypass }): JSX.E
                         <span>
                             <b>Auto-approve on:</b> <b>{b().agent}</b>'s clicks go through without asking on{" "}
                             {b().origins.map(siteLabel).join(", ")}
-                            {terminalNote(b().powers)} ·{" "}
+                            {powersNote(b().powers)} ·{" "}
                             {leftLabel(b().always, model.bypassMinutesLeft())}
                         </span>
                     </Show>

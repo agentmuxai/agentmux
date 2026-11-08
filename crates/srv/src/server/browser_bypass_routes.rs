@@ -48,13 +48,15 @@ pub(crate) async fn page_url(state: &AppState, target: &str) -> Result<String, S
 /// site the page is on (bypass spec §4.1). `approved` is the act request to
 /// send for it. `page` is the address the host read from the page itself. A
 /// payment still asks (§11.2). None: ask as usual. `log` describes the click
-/// for the pane's action log.
+/// for the pane's action log. `route` is the host route that makes the click
+/// (`act`, or `press` for Enter and Space taken as one).
 pub(crate) async fn bypassed_click(
     state: &AppState,
     block_id: &str,
     agent: &str,
     ask: &serde_json::Value,
     approved: serde_json::Value,
+    route: &str,
     log: Note,
 ) -> Option<Response> {
     let pane = bypass_pane(block_id);
@@ -95,7 +97,7 @@ pub(crate) async fn bypassed_click(
     );
     // The page may confirm it while the click is still running.
     crate::server::browser_dialog::note_click(block_id, what, crate::server::browser_dialog::How::Auto);
-    let made = proxy_value(state, "act", approved, std::time::Duration::from_secs(20)).await.map(|mut data| {
+    let made = proxy_value(state, route, approved, std::time::Duration::from_secs(20)).await.map(|mut data| {
         if let Some(o) = data.as_object_mut() {
             o.insert("bypassed".to_string(), json!(true));
             o.insert("bypass_minutes_left".to_string(), json!(g.minutes_left()));
