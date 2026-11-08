@@ -19,7 +19,7 @@
  */
 
 import { ProviderLogo } from "@/element/ProviderLogo";
-import type { JSX } from "solid-js";
+import { Show, type JSX } from "solid-js";
 import { tip } from "@/app/element/tip";
 
 export interface DualProviderLogoProps {
@@ -105,26 +105,29 @@ export const DualProviderLogo = (props: DualProviderLogoProps): JSX.Element => {
             aria-label={props.bare ? undefined : tooltip()}
         >
             <ProviderLogo provider={props.harness} size={size()} />
-            {showBadge() && (
-                <span
-                    class="dual-provider-logo-badge"
-                    style={{
-                        position: "absolute",
-                        bottom: "-2px",
-                        right: "-2px",
-                        display: "inline-flex",
-                        "align-items": "center",
-                        "justify-content": "center",
-                        "background-color": "var(--main-bg-color)",
-                        "border-radius": "50%",
-                        padding: small() ? "0" : "1px",
-                        border: small() ? "none" : "1px solid var(--border-color)",
-                        "box-shadow": small() ? "0 0 0 1px var(--main-bg-color)" : "0 1px 3px rgba(0, 0, 0, 0.3)",
-                    }}
-                >
-                    <ProviderLogo provider={props.vendor!} size={vendorSize()} />
-                </span>
-            )}
+            {/* Keyed on the vendor: ProviderLogo picks its artwork once, so a model switched in place needs a new one. */}
+            <Show when={showBadge() ? props.vendor : undefined} keyed>
+                {(vendor) => (
+                    <span
+                        class="dual-provider-logo-badge"
+                        style={{
+                            position: "absolute",
+                            bottom: "-2px",
+                            right: "-2px",
+                            display: "inline-flex",
+                            "align-items": "center",
+                            "justify-content": "center",
+                            "background-color": "var(--main-bg-color)",
+                            "border-radius": "50%",
+                            padding: small() ? "0" : "1px",
+                            border: small() ? "none" : "1px solid var(--border-color)",
+                            "box-shadow": small() ? "0 0 0 1px var(--main-bg-color)" : "0 1px 3px rgba(0, 0, 0, 0.3)",
+                        }}
+                    >
+                        <ProviderLogo provider={vendor} size={vendorSize()} />
+                    </span>
+                )}
+            </Show>
         </span>
     );
 };

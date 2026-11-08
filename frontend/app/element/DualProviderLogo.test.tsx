@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { cleanup, render } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it } from "vitest";
 import { DualProviderLogo, dualLogoTitle } from "./DualProviderLogo";
 
@@ -80,5 +81,18 @@ describe("DualProviderLogo", () => {
             expect(mark.querySelector("text"), maker).toBeNull();
             cleanup();
         }
+    });
+
+    it("draws a new badge when the model's vendor changes under a mounted logo", async () => {
+        const [vendor, setVendor] = createSignal("deepseek");
+        const { container } = render(() => <DualProviderLogo harness="claude" vendor={vendor()} size={14} bare />);
+        const title = () => container.querySelector(".dual-provider-logo-badge svg title")?.textContent;
+        expect(title()).toBe("DeepSeek");
+        setVendor("moonshot");
+        await Promise.resolve();
+        expect(title()).toBe("MoonshotAI");
+        setVendor("claude");
+        await Promise.resolve();
+        expect(container.querySelector(".dual-provider-logo-badge")).toBeNull();
     });
 });

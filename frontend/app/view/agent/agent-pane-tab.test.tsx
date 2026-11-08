@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { cleanup, render } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/app/store/global", () => ({
@@ -105,5 +106,23 @@ describe("agent pane tab", () => {
         const bare = render(() => <PaneTabIconView icon={() => ({ kind: "provider", provider: "codex" })} />);
         expect(bare.container.querySelector(".dual-provider-logo-badge")).toBeNull();
         expect(bare.container.querySelector(".provider-logo")).not.toBeNull();
+    });
+
+    it("redraws the pill's badge when the model is switched in place, back to none and again", async () => {
+        const [meta, setMeta] = createSignal<Record<string, unknown>>({ agentProvider: "claude" });
+        const { container } = render(() => <PaneTabIconView icon={() => agentTabIcon(asMeta(meta()))} />);
+        const title = () => container.querySelector(".dual-provider-logo-badge svg title")?.textContent;
+        expect(title()).toBe("Anthropic");
+        setMeta({ agentProvider: "claude", "agent:route_model": ROUTED });
+        await Promise.resolve();
+        expect(title()).toBe("DeepSeek");
+        setMeta({ agentProvider: "claude", "agent:route_model": { ...ROUTED, model: "moonshotai/kimi-k3", label: "Kimi K3" } });
+        await Promise.resolve();
+        expect(title()).toBe("MoonshotAI");
+        setMeta({ agentProvider: "claude", "agent:route_model": null });
+        await Promise.resolve();
+        expect(title()).toBe("Anthropic");
+        // The harness mark stays the one mark throughout.
+        expect(container.querySelectorAll(".dual-provider-logo > .provider-logo").length).toBe(1);
     });
 });
