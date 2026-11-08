@@ -128,6 +128,7 @@ export const JSDOM_TS_TESTS = [
     "frontend/app/window/pane-media-permission-prompt.test.ts",
     "frontend/app/workspace/redock-ghost.test.ts",
     "frontend/app/workspace/window-tab-visibility.test.ts",
+    "frontend/app-init.host-mux.test.ts",
     "frontend/bootstrap.startup-failure.test.ts",
     "frontend/layout/lib/drag-preview-size.test.ts",
     "frontend/layout/lib/tile-drag-registrar.test.ts",
