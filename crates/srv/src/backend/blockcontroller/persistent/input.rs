@@ -172,7 +172,10 @@ impl PersistentSubprocessController {
     /// one. It rides the queued entry, so a message that waits out its
     /// expiry behind a starting, restarting or stopping process is dropped
     /// at write time instead of written stale.
-
+    ///
+    /// `notes` are the `[AgentMux]` notes the message carries, with their keys:
+    /// if the queued entry is dropped at that expiry, they are held again for
+    /// the next message instead of going with it.
     pub fn send_user_message_with_images_from(
         &self,
         message: String,
