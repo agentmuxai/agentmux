@@ -73,3 +73,30 @@ pub(crate) async fn approve_click(
         )),
     }
 }
+
+/// The tail of a committing click that wasn't let through: ask the person about
+/// `ask`, then make the click the same way once they approve (`approved_body`,
+/// sent to the host's `route`, carries what they were shown). Used by `act` and
+/// by Enter and Space taken as a click.
+pub(crate) async fn ask_then_click(
+    state: &AppState,
+    block_id: &str,
+    agent: &str,
+    route: &str,
+    ask: &serde_json::Value,
+    approved_body: serde_json::Value,
+    log: impl Fn() -> super::browser_actions::Note,
+) -> axum::response::Response {
+    use super::ui_handlers::{err_response, proxy_value};
+    match approve_click(state, block_id, agent, ask).await {
+        Ok((_waiting, asked_at)) => {
+            let clicked = proxy_value(state, route, approved_body, std::time::Duration::from_secs(20)).await;
+            log().asked(ask).how(How::Approved).outcome(state, super::browser_actions::approved_by_user(clicked, asked_at.elapsed()))
+        }
+        Err(ClickRefused::NotAsked(code, e)) => err_response(code, e),
+        Err(ClickRefused::Asked(how, code, e)) => match how {
+            Some(how) => log().asked(ask).how(how).fail(state, code, e),
+            None => log().asked(ask).fail(state, code, e),
+        },
+    }
+}

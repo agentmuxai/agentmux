@@ -7,7 +7,7 @@ import { createSignal, For, Match, Show, Switch, type Accessor, type JSX } from 
 import { Button } from "@/app/element/ui";
 import { tip } from "@/app/element/tip";
 import { attentionLook, dialogMessage } from "./attention-kinds";
-import { asksEachLine, hasTerminalPower, LATE_PROMPT_LIMIT, LINE_PREVIEW_CHARS, minutesLabel, siteLabel } from "./bypass";
+import { asksEachLine, hasEnterSpacePower, hasTerminalPower, LATE_PROMPT_LIMIT, LINE_PREVIEW_CHARS, minutesLabel, siteLabel } from "./bypass";
 import type { BrowserViewModel } from "./browser-model";
 
 type Part = { attention: Accessor<BrowserAttention> };
@@ -151,6 +151,13 @@ function AttentionDetails(props: Part & LineView): JSX.Element {
                     it types real keys and presses Enter with no question per line. You can read every line in the
                     pane's Log, and Stop or Pause end it at once. Passwords and codes stay yours to type.{" "}
                     One limit: {LATE_PROMPT_LIMIT}
+                </div>
+            </Show>
+            <Show when={a().kind === "bypass" && hasEnterSpacePower(a().powers)}>
+                <div class="browser-attention-target">
+                    It also asks to <b>press Enter and Space</b> on {(a().origins ?? []).map(siteLabel).join(", ")}. Each one is taken as the
+                    click it is (a form's default button, a button, a link, a checkbox) and checked like any click; a payment still asks, and a
+                    key whose click can't be named is refused.
                 </div>
             </Show>
             <Show when={a().window}>
