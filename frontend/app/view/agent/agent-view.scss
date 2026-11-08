@@ -137,9 +137,9 @@
     //
     // `.agent-view` (below) now carries its own `z-index: 0`, containing
     // every absolutely/sticky-positioned descendant inside it — including
-    // `.slash-autocomplete` (_slash.scss, z:50) and `.agent-search-bar`
-    // (_search.scss, z:10), both flagged by reagent P1 on PR #2526's 8th
-    // round as escaping to compete directly with this 4, on top of
+    // `.slash-autocomplete` (_slash.scss, z:50) and the search bar (then a
+    // sticky z:10 row, now an item of the top band), both flagged by reagent P1
+    // on PR #2526's 8th round as escaping to compete directly with this 4, on top of
     // `.agent-pane-loading-overlay` from the 6th/7th rounds. An earlier
     // attempt at exactly this (round 6) was reverted (round 7) because it
     // also trapped `.agent-auth-overlay`, which needed to escape and
@@ -442,8 +442,8 @@
     // Establishes a real stacking context (position + z-index together,
     // per spec — same pattern as .agent-document-scroll-region below).
     // Contains EVERY absolutely/sticky-positioned descendant's z-index —
-    // .agent-pane-loading-overlay (PaneLoadingCover.scss), .agent-search-
-    // bar (_search.scss, z:10), .slash-autocomplete (_slash.scss, z:50),
+    // .agent-pane-loading-overlay (PaneLoadingCover.scss),
+    // .slash-autocomplete (_slash.scss, z:50),
     // and anything
     // else added inside .agent-view later — so none of them can ever
     // escape and compete with .pane-tab-strip (a true sibling of
