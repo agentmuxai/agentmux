@@ -493,13 +493,15 @@
 
 // The conversation and, beside it, the Messages panel. It takes the space the Shell drawer doesn't, so the
 // composer still shifts up to make room for the drawer. min-height:0 so the transcript can scroll rather than
-// forcing the flex parent open.
+// forcing the flex parent open. position:relative makes the row the Messages panel's containing block (the panel is
+// absolute, top:0), so the panel starts under the top band and never covers it.
 .agent-view-row {
     display: flex;
     flex-direction: row;
     flex: 1 1 auto;
     min-height: 0;
     min-width: 0;
+    position: relative;
 }
 
 // ── Agent History view (spec §4 — read-only full-stream reader) ──────────
