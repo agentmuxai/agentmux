@@ -76,6 +76,15 @@ function vkOf(k: KeySpec, user: boolean): number | null {
     return NAMED_VK[k.named ?? ""] ?? (user ? USER_NAMED_VK[k.named ?? ""] : undefined) ?? null;
 }
 
+/** Whether a `when` term holds in a focused browser pane: it is not a terminal and not a document-tab host, and its
+ *  view is `browser`. Whether the page has a text field focused the host can't tell, so a term about typing does not. */
+function holdsInBrowserPane(term: string): boolean {
+    if (term === "!docTabsHost" || term === "!terminalFocus") return true;
+    const view = term.match(/^viewType\s*(==|!=)\s*(\S+)$/);
+    if (!view) return false;
+    return view[1] === "==" ? view[2] === "browser" : view[2] !== "browser";
+}
+
 /**
  * Rows worth forwarding: global (not a pane's), allowed in a terminal too
  * (`skipShell`, so they don't take a key a page commonly needs), single-key,
@@ -87,18 +96,18 @@ function forwards(row: KeyBindingRow): boolean {
     // swallow the key from the page.
     if (row.pane || !row.skipShell || row.devOnly) return false;
     if (row.category === "Find & zoom" || row.category === "Terminal") return false;
-    const terms = (row.when ?? "").split("&&").map((t) => t.trim()).filter(Boolean);
-    // A browser pane is neither a document-tab host nor any excluded view: `viewType != browser` excludes it.
-    return terms.every((t) => t === "!docTabsHost" || /^viewType\s*!=\s*(?!browser$)\S+$/.test(t));
+    return (row.when ?? "").split("&&").map((t) => t.trim()).filter(Boolean).every(holdsInBrowserPane);
 }
 
 const FUNCTION_KEYS = new Set(Array.from({ length: 24 }, (_, i) => 0x70 + i));
 
 /** A key of the person's own that the page can't be typing: with Ctrl, Alt or Meta, or a function key. A bare letter
  *  or Shift+letter, forwarded, would take every such key from every page. Ctrl+Alt is AltGr on a Windows or Linux
- *  layout that types a character with it, which the host can't tell from the key alone: it is not forwarded. */
+ *  layout that types a character with it, and Option on its own types one on macOS: the host can't tell either from
+ *  the key alone, so they are not forwarded. */
 function notTyping(k: KeySpec, vk: number, platform: KeyPlatform): boolean {
     if (k.ctrl && k.alt && platform !== "mac") return false;
+    if (platform === "mac" && k.alt && !k.ctrl && !k.meta && (k.letter != null || k.code != null)) return false;
     return k.ctrl || k.alt || k.meta || FUNCTION_KEYS.has(vk);
 }
 

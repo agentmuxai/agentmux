@@ -60,6 +60,27 @@ describe("host-keys.json", () => {
             expect(mac).toContain("ctrl+alt+q");
         });
 
+        it("does not forward Option on its own with a letter or digit on macOS, where it types characters", () => {
+            const mac = (entries: unknown[]) => hostKeysOf(compileRows("mac", entries as never), "mac").map((k) => k.source);
+            const kept = mac([{ command: "tab:new", key: "alt+q" }, { command: "tab:new", key: "alt+shift+q" }, { command: "tab:new", key: "alt+5" }, { command: "tab:new", key: "alt+ArrowUp" }, { command: "tab:new", key: "meta+alt+q" }]);
+            expect(kept).not.toContain("alt+q");
+            expect(kept).not.toContain("alt+shift+q");
+            expect(kept).not.toContain("alt+5");
+            expect(kept).toContain("alt+ArrowUp");
+            expect(kept).toContain("meta+alt+q");
+        });
+
+        it("forwards a key whose place includes browser panes, and not one that needs typing or another view", () => {
+            const where = (when: string) => keysOf([{ command: "tab:new", key: "ctrl+shift+7", when }]).includes("tab:new ctrl+shift+7");
+            expect(where("viewType == browser")).toBe(true);
+            expect(where("!terminalFocus")).toBe(true);
+            expect(where("!terminalFocus && viewType != editor")).toBe(true);
+            expect(where("viewType == editor")).toBe(false);
+            expect(where("terminalFocus && viewType == term")).toBe(false);
+            expect(where("!textInputFocus")).toBe(false);
+            expect(where("textInputFocus")).toBe(false);
+        });
+
         it("does not forward a key whose place leaves out browser panes", () => {
             expect(keysOf([{ command: "tab:new", key: "ctrl+shift+9", when: "viewType != browser" }]).join()).not.toContain("shift+9");
             expect(keysOf([{ command: "tab:new", key: "ctrl+shift+8", when: "viewType != editor" }])).toContain("tab:new ctrl+shift+8");
