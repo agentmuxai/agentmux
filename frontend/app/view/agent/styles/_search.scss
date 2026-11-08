@@ -8,18 +8,20 @@
 .agent-view {
     // === In-session Search Bar ===
 
+    // The bar is the top band's controls item (top-band/): the band is the row across the pane's top, so the bar
+    // needs no sticky position or ground of its own.
     .agent-search-bar {
-        flex-shrink: 0;
+        flex: 1 1 auto;
+        min-width: 0;
         display: flex;
         align-items: center;
         gap: var(--space-1);
-        padding: var(--space-1) var(--space-2);
-        background: color-mix(in srgb, var(--accent-color) 6%, var(--main-bg-color));
-        border-bottom: 1px solid var(--border-color);
-        // Sticky so it stays visible while the document scrolls beneath it
-        position: sticky;
-        top: 0;
-        z-index: var(--z-pane-search-bar);
+    }
+
+    // The band measures a copy of the bar with the field at its narrowest, so the bar is never asked for more room
+    // than it needs.
+    .agent-search-bar--measuring .agent-search-input {
+        flex: 0 0 96px;
     }
 
     .agent-search-input {
