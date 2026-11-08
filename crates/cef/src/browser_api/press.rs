@@ -133,6 +133,11 @@ async fn press(root: &mut super::cdp::CdpSession, req: &PressReq) -> Result<Valu
     }
     let found = resolve(root, &req.key).await?;
     if found.effect == "type" {
+        // An approved retry presents a click: if the focus has moved to a text field since, that click is not
+        // the one the person saw, and a space typed there is not what they approved.
+        if req.approved {
+            return Err(format!("{} was not pressed: the focus moved while the user was reading the approval; press it again", req.key));
+        }
         // A space in a text field, typed here and not by a second call: text goes where the focus is and
         // cannot press a button the page moved focus to, which a key event would.
         refuse_typing_into_secret_field(root).await?;

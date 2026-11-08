@@ -52,6 +52,16 @@ describe("Enter", () => {
         expect(other.el.id).toBe("mine");
     });
 
+    it("finds the default button of a form inside a shadow root", () => {
+        document.body.innerHTML = `<div id="host"></div>`;
+        const shadow = document.getElementById("host").attachShadow({ mode: "open" });
+        shadow.innerHTML = `<form><input id="f"><button id="inside">Go</button></form>`;
+        shadow.getElementById("f").focus();
+        const got = effect(document, "Enter");
+        expect(got.effect).toBe("click");
+        expect(got.el.id).toBe("inside");
+    });
+
     it("is refused when the form has no submit button, or its button is disabled", () => {
         expect(press(`<form><input id="f"></form>`, "Enter").effect).toBe("refuse");
         expect(press(`<form><input id="f"><button disabled>Go</button></form>`, "Enter").effect).toBe("refuse");

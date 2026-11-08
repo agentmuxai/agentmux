@@ -43,8 +43,8 @@ function (doc, key) {
       if (!form) return refuse("it is not in a form, so Enter has no submit button to press");
       const submitter = (x) => (x.localName === "button" && typeOf(x) === "submit") || (x.localName === "input" && ["submit", "image"].includes(typeOf(x)));
       const formOf = (x) => get(x.localName === "button" ? win.HTMLButtonElement.prototype : win.HTMLInputElement.prototype, "form", x);
-      // The form's own submit buttons in tree order: not form.elements, which leaves image buttons out.
-      const first = Array.from(el.ownerDocument.querySelectorAll("button, input")).find((x) => submitter(x) && formOf(x) === form);
+      // The form's own submit buttons in tree order, in the tree the form is in (a shadow root's, say): not form.elements, which leaves image buttons out.
+      const first = Array.from(form.getRootNode().querySelectorAll("button, input")).find((x) => submitter(x) && formOf(x) === form);
       if (!first) return refuse("its form has no submit button");
       if (first.matches(":disabled")) return refuse("its form's submit button is disabled");
       return click(first, "Enter in a field of a form presses the form's default button");
