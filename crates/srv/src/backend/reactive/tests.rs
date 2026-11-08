@@ -1952,7 +1952,7 @@ fn test_handler_inject_structured_delivery_skips_pty() {
         Ok(())
     }));
     // Structured controller: report delivered (Ok(true)).
-    handler.set_message_sender(Arc::new(move |block_id: &str, message: &str, _inline: &[serde_json::Value], _origin: &crate::backend::message_origin::MessageOrigin| {
+    handler.set_message_sender(Arc::new(move |block_id: &str, message: &str, _inline: &[serde_json::Value], _origin: &crate::backend::message_origin::MessageOrigin, _expires_at_ms: Option<i64>| {
         msg_clone
             .lock()
             .unwrap()
@@ -1996,7 +1996,7 @@ fn test_handler_inject_structured_delivery_skips_pty() {
 #[test]
 fn test_handler_inject_reports_deferred_delivery() {
     let mut handler = Handler::new();
-    handler.set_message_sender(Arc::new(|_block_id: &str, _message: &str, _inline: &[serde_json::Value], _origin: &crate::backend::message_origin::MessageOrigin| Ok(SenderDelivery::Deferred)));
+    handler.set_message_sender(Arc::new(|_block_id: &str, _message: &str, _inline: &[serde_json::Value], _origin: &crate::backend::message_origin::MessageOrigin, _expires_at_ms: Option<i64>| Ok(SenderDelivery::Deferred)));
     handler.register_agent("agent1", "block1", None).unwrap();
     let resp = handler.inject_message(InjectionRequest {
         target_agent: "agent1".to_string(),
@@ -2025,7 +2025,7 @@ async fn test_handler_inject_pty_fallback() {
             .push((block_id.to_string(), data.to_vec()));
         Ok(())
     }));
-    handler.set_message_sender(Arc::new(|_block_id: &str, _message: &str, _inline: &[serde_json::Value], _origin: &crate::backend::message_origin::MessageOrigin| Ok(SenderDelivery::Pty)));
+    handler.set_message_sender(Arc::new(|_block_id: &str, _message: &str, _inline: &[serde_json::Value], _origin: &crate::backend::message_origin::MessageOrigin, _expires_at_ms: Option<i64>| Ok(SenderDelivery::Pty)));
     handler.register_agent("agent1", "block1", None).unwrap();
 
     let resp = handler.inject_message(InjectionRequest {
@@ -2070,7 +2070,7 @@ fn test_handler_inject_structured_failure_no_pty_fallback() {
             .push((block_id.to_string(), data.to_vec()));
         Ok(())
     }));
-    handler.set_message_sender(Arc::new(|_block_id: &str, _message: &str, _inline: &[serde_json::Value], _origin: &crate::backend::message_origin::MessageOrigin| {
+    handler.set_message_sender(Arc::new(|_block_id: &str, _message: &str, _inline: &[serde_json::Value], _origin: &crate::backend::message_origin::MessageOrigin, _expires_at_ms: Option<i64>| {
         Err("persistent process not running".to_string())
     }));
     handler.register_agent("agent1", "block1", None).unwrap();
@@ -4000,7 +4000,7 @@ fn test_inline_files_reach_the_structured_sender() {
     let seen: Arc<Mutex<Vec<usize>>> = Arc::default();
     let sink = seen.clone();
     let mut handler = Handler::new();
-    handler.set_message_sender(Arc::new(move |_block_id: &str, _message: &str, inline: &[serde_json::Value], _origin: &crate::backend::message_origin::MessageOrigin| {
+    handler.set_message_sender(Arc::new(move |_block_id: &str, _message: &str, inline: &[serde_json::Value], _origin: &crate::backend::message_origin::MessageOrigin, _expires_at_ms: Option<i64>| {
         sink.lock().unwrap().push(inline.len());
         Ok(SenderDelivery::Delivered)
     }));
@@ -4308,7 +4308,7 @@ fn test_system_note_is_delivered_verbatim_without_a_jekt_block() {
     let msgs = Arc::new(Mutex::new(Vec::<(String, String)>::new()));
     let msg_clone = msgs.clone();
     let mut handler = Handler::new();
-    handler.set_message_sender(Arc::new(move |block_id: &str, message: &str, _inline: &[serde_json::Value], _origin: &crate::backend::message_origin::MessageOrigin| {
+    handler.set_message_sender(Arc::new(move |block_id: &str, message: &str, _inline: &[serde_json::Value], _origin: &crate::backend::message_origin::MessageOrigin, _expires_at_ms: Option<i64>| {
         msg_clone.lock().unwrap().push((block_id.to_string(), message.to_string()));
         Ok(SenderDelivery::Delivered)
     }));
@@ -4330,7 +4330,7 @@ fn test_system_note_falls_back_to_keystrokes_for_a_terminal_agent() {
         typed_clone.lock().unwrap().push(data.to_vec());
         Ok(())
     }));
-    handler.set_message_sender(Arc::new(|_block_id: &str, _message: &str, _inline: &[serde_json::Value], _origin: &crate::backend::message_origin::MessageOrigin| Ok(SenderDelivery::Pty)));
+    handler.set_message_sender(Arc::new(|_block_id: &str, _message: &str, _inline: &[serde_json::Value], _origin: &crate::backend::message_origin::MessageOrigin, _expires_at_ms: Option<i64>| Ok(SenderDelivery::Pty)));
     handler.register_agent("agent1", "block1", None).unwrap();
     handler.deliver_system_note("agent1", "[AgentMux] hi").unwrap();
     let typed = typed.lock().unwrap();

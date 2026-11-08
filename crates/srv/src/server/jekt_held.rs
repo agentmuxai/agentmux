@@ -154,6 +154,10 @@ pub(crate) enum ReplayOutcome {
     Failed,
     /// Refused `MAX_ATTEMPTS` times; dropped.
     Dropped,
+    /// The sender's expiry passed before the target could take it; dropped
+    /// at delivery time with one log line instead of delivered stale
+    /// (issue #3894).
+    Expired,
 }
 
 /// One pass: drop expired rows, then deliver to every target that is now
@@ -241,7 +245,10 @@ pub(crate) async fn replay_pass(state: &AppState) -> Vec<(String, ReplayOutcome)
                     spent += 1;
                     break;
                 }
-                ReplayOutcome::Delivered => spent += 1,
+                // An expired row is gone — it cannot be retried — but it
+                // took a fetch slot, so it spends like a delivery: a target
+                // with a backlog of expired notices cannot crowd the pass.
+                ReplayOutcome::Expired | ReplayOutcome::Delivered => spent += 1,
             }
         }
     }
@@ -282,6 +289,10 @@ pub(crate) fn request_from_held(row: &HeldJekt) -> InjectionRequest {
     req.transcript_request_escalate_forced = row.transcript_request_escalate_forced;
     req.audit_source_uid = row.audit_source_uid.clone();
     req.held_sent_at_ms = Some(row.sent_at_ms);
+    // The sender's expiry rides again, so a delivery that ends up waiting
+    // once more (the controller's startup queue, a re-hold) still drops the
+    // message at its own deadline rather than delivering it stale.
+    req.expires_at_ms = row.sender_expires_at_ms;
     // The row has no `reply` column; srv remembers an hour of `reply: none` ids, which covers most holds.
     req.reply = crate::backend::ack_policy::asked_for_no_reply(&row.request_id).then(|| "none".to_string());
     req.files = (!row.files_json.is_empty())
@@ -291,6 +302,24 @@ pub(crate) fn request_from_held(row: &HeldJekt) -> InjectionRequest {
 }
 
 async fn replay_one(state: &AppState, row: HeldJekt) -> ReplayOutcome {
+    // The sender's expiry (issue #3894): a notice that mattered for ten
+    // minutes is worse delivered an hour late, in a burst, than dropped.
+    // Delivery time — the moment this row would be injected — is the last
+    // honest check; the 30 s sweep drops most expired rows earlier, this
+    // covers a row whose expiry passed since the sweep or that was ready
+    // before it. No expiry: today's behaviour exactly.
+    if row.sender_expires_at_ms.is_some_and(|expires| expires <= agentmux_common::time::now_ms()) {
+        let mstore = state.mstore.clone();
+        let id = row.request_id.clone();
+        let _ = tokio::task::spawn_blocking(move || mstore.jekt_held_delete(&id)).await;
+        crate::backend::agent_resolve::record_uid_fallback("jekt.held_sender_expired");
+        tracing::info!(
+            target_uid = %row.target_uid,
+            source_agent = %row.source_agent,
+            "durable jekt: the sender's expiry passed — dropping the held message instead of delivering it"
+        );
+        return ReplayOutcome::Expired;
+    }
     // The transcript-request fields are restored as accepted, never
     // recomputed: the replay addresses the target by UID, and the slug-keyed
     // recompute would lose a forced escalation.

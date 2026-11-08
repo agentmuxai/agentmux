@@ -390,6 +390,17 @@ pub struct InjectionRequest {
     /// whose files it doesn't bind.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub files: Option<Vec<agentmux_common::jekt_files::JektFile>>,
+    /// The sender's own expiry for this message, in epoch ms: past it,
+    /// delivering the message is worse than dropping it — a review notice
+    /// matters for ten minutes, not for however long its recipient was
+    /// unavailable (issue #3894). Carried through forwarding and both hold
+    /// paths (a held row keeps it, a controller queue entry rides it), and
+    /// checked at delivery time, where an expired message is dropped with
+    /// one log line instead of delivered stale. `None` — the default — is
+    /// the sender saying nothing, and the message keeps today's behaviour
+    /// exactly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at_ms: Option<i64>,
     /// What the agent gets for `files`, prepared by srv before delivery
     /// (`server::jekt_files::prepare`). Never read from or written to a
     /// body: a sender can't supply its own file list.
@@ -851,8 +862,15 @@ pub type InputSender = Arc<dyn Fn(&str, &[u8]) -> Result<(), String> + Send + Sy
 ///
 /// The fourth is where the message came from (`message_origin`), which the
 /// record of it carries: every sender says, none can leave it out.
+///
+/// The fifth is the sender's expiry (`InjectionRequest::expires_at_ms`,
+/// issue #3894): the controller's deferred queue rides it on each entry, so
+/// a message queued while its process was starting, restarting or stopping is
+/// dropped at write time with one log line once the expiry has passed, not
+/// delivered stale. `None` — every sender but a jekt — keeps today's
+/// behaviour exactly.
 pub type MessageSender = Arc<
-    dyn Fn(&str, &str, &[serde_json::Value], &crate::backend::message_origin::MessageOrigin) -> Result<SenderDelivery, String>
+    dyn Fn(&str, &str, &[serde_json::Value], &crate::backend::message_origin::MessageOrigin, Option<i64>) -> Result<SenderDelivery, String>
         + Send
         + Sync,
 >;

@@ -530,7 +530,7 @@ never attached
         let sent = Arc::new(Mutex::new(0usize));
         let handler = ReactiveHandler::new();
         let (s1, s2) = (sent.clone(), sent.clone());
-        handler.set_message_sender(Arc::new(move |_: &str, _: &str, _: &[serde_json::Value], _origin: &crate::backend::message_origin::MessageOrigin| {
+        handler.set_message_sender(Arc::new(move |_: &str, _: &str, _: &[serde_json::Value], _origin: &crate::backend::message_origin::MessageOrigin, _expires_at_ms: Option<i64>| {
             *s1.lock().unwrap() += 1;
             Ok(SenderDelivery::Delivered)
         }));
