@@ -146,7 +146,7 @@ impl PersistentSubprocessController {
         origin: Option<crate::backend::blockcontroller::health::TurnInput>,
     ) -> Result<SendOutcome, String> {
         let record = RecordOrigin::new(MessageOrigin::user());
-        self.send_user_message_with_images_from(message, origin, Vec::new(), record, None)
+        self.send_user_message_with_images_from(message, origin, Vec::new(), record, None, Vec::new())
     }
 
     /// [`Self::send_user_message_outcome_from`] with Claude content blocks
@@ -162,6 +162,16 @@ impl PersistentSubprocessController {
     /// one. It rides the queued entry, so a message that waits out its
     /// expiry behind a starting, restarting or stopping process is dropped
     /// at write time instead of written stale.
+    /// An explicit error when the deferred queue is full, never a false
+    /// success: the caller treats it like any other transient delivery failure
+    /// and retries.
+    fn deferred_queue_full() -> String {
+        format!(
+            "deferred-delivery queue is full ({MAX_DEFERRED_DELIVERIES} messages \
+             waiting for this agent's process to start up, restart or stop) — retry shortly"
+        )
+    }
+
     pub fn send_user_message_with_images_from(
         &self,
         message: String,
@@ -169,6 +179,7 @@ impl PersistentSubprocessController {
         images: Vec<serde_json::Value>,
         record: RecordOrigin,
         expires_at_ms: Option<i64>,
+        notes: Vec<(String, String)>,
     ) -> Result<SendOutcome, String> {
         // Pre-turn fence — see `send_message`.
         self.fence_check()?;
@@ -190,17 +201,12 @@ impl PersistentSubprocessController {
             let mut inner = self.inner.lock().unwrap();
 
             if inner.deferred_deliveries.len() >= MAX_DEFERRED_DELIVERIES {
-                // An explicit error, never a false success. The caller treats
-                // this like any other transient delivery failure and retries.
-                return Err(format!(
-                    "deferred-delivery queue is full ({MAX_DEFERRED_DELIVERIES} messages \
-                     waiting for this agent's process to start up, restart or stop) — retry shortly"
-                ));
+                return Err(Self::deferred_queue_full());
             }
             // Always enqueue first, then write the whole backlog in order.
             // Writing this message directly while older ones are queued would
             // reorder it ahead of them.
-            inner.deferred_deliveries.push_back(Deferred { line: json_str, record, expires_at_ms });
+            inner.deferred_deliveries.push_back(Deferred { line: json_str, record, expires_at_ms, notes });
 
             // A spawn in flight counts as "wait" rather than as an error. This
             // is the startup race that used to drop jekts outright
@@ -395,8 +401,8 @@ impl PersistentSubprocessController {
             if head.expires_at_ms.is_some_and(|expires| expires <= now_ms) {
                 inner.deferred_deliveries.pop_front();
                 // The message is gone, but the `[AgentMux]` notes it carried
-                // are held again for the next one (#3894).
-                crate::backend::reactive::held_notes::rehold_dropped(block_id, &head.record.notes);
+                // are held again for the next one, under their own keys (#3894).
+                crate::backend::reactive::held_notes::put_back(block_id, head.notes.clone());
                 tracing::info!(
                     block_id = %block_id,
                     "deferred jekt expired while waiting for the process — dropped instead of delivered"

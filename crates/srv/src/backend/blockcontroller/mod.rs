@@ -819,7 +819,7 @@ pub fn deliver_agent_message_from(
         .downcast_ref::<persistent::PersistentSubprocessController>()
     {
         let record = RecordOrigin { origin: from, notes: held.note_texts() };
-        let outcome = persistent_ctrl.send_user_message_with_images_from(message, origin, inline.to_vec(), record, expires_at_ms)?;
+        let outcome = persistent_ctrl.send_user_message_with_images_from(message, origin, inline.to_vec(), record, expires_at_ms, held.keyed_notes())?;
         held.delivered();
         return Ok(match outcome {
             SendOutcome::Sent => AgentDelivery::Structured,

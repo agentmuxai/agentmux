@@ -75,6 +75,10 @@ pub(super) struct Deferred {
     /// the message was worth anything. `None` keeps today's behaviour: a
     /// queued message is always written.
     pub(super) expires_at_ms: Option<i64>,
+    /// The `[AgentMux]` notes the message carries, with their keys: if the
+    /// message is dropped, they are held again for the next one instead of
+    /// going with it (issue #3894).
+    pub(super) notes: Vec<(String, String)>,
 }
 
 impl std::ops::Deref for Deferred {
@@ -94,6 +98,7 @@ impl From<String> for Deferred {
                 crate::backend::message_origin::MessageOrigin::user(),
             ),
             expires_at_ms: None,
+            notes: Vec::new(),
         }
     }
 }

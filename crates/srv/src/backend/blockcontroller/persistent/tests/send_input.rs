@@ -3123,8 +3123,9 @@ async fn a_deferred_message_past_its_senders_expiry_is_dropped_not_written() {
     crate::backend::reactive::held_notes::hold(&c.block_id, "upgrade", "[AgentMux] AgentMux was upgraded");
     let (message, attached) = crate::backend::reactive::held_notes::attach(&c.block_id, "too late");
     let record = RecordOrigin { origin: MessageOrigin::user(), notes: attached.note_texts() };
+    let record_notes = attached.keyed_notes();
     let outcome = c
-        .send_user_message_with_images_from(message, None, Vec::new(), record, Some(past))
+        .send_user_message_with_images_from(message, None, Vec::new(), record, Some(past), record_notes)
         .unwrap();
     assert_eq!(outcome, SendOutcome::Deferred);
     // What `deliver_agent_message_from` does as soon as the controller takes it.
@@ -3142,6 +3143,11 @@ async fn a_deferred_message_past_its_senders_expiry_is_dropped_not_written() {
     let notes = reheld.note_texts();
     assert!(notes.iter().any(|n| n.contains("AgentMux was upgraded")), "the note survives the drop: {notes:?}");
     reheld.delivered();
+    // Restored under its own key, so the note's usual invalidation still finds it.
+    crate::backend::reactive::held_notes::forget_key(&c.block_id, "upgrade");
+    let (_, gone) = crate::backend::reactive::held_notes::attach(&c.block_id, "after");
+    assert!(!gone.note_texts().iter().any(|n| n.contains("AgentMux was upgraded")), "forget_key clears the restored note");
+    gone.delivered();
 }
 
 /// Teardown must not silently discard accepted messages.
@@ -3906,12 +3912,12 @@ async fn a_labelled_delivery_sets_the_turn_provenance_the_controller_reports() {
 async fn a_delivery_with_images_writes_content_blocks_before_the_text() {
     let (c, mut rx) = idle_controller();
     let image = serde_json::json!({ "type": "image", "source": { "type": "base64", "media_type": "image/png", "data": "AAAA" } });
-    c.send_user_message_with_images_from("look at this".to_string(), None, vec![image.clone()], RecordOrigin::new(MessageOrigin::user()), None).unwrap();
+    c.send_user_message_with_images_from("look at this".to_string(), None, vec![image.clone()], RecordOrigin::new(MessageOrigin::user()), None, Vec::new()).unwrap();
     let line: serde_json::Value = serde_json::from_str(&rx.try_recv().unwrap()).unwrap();
     let content = line["message"]["content"].as_array().expect("blocks, not a string");
     assert_eq!(content[0], image);
     assert_eq!(content[1]["text"], "look at this");
-    c.send_user_message_with_images_from("plain".to_string(), None, Vec::new(), RecordOrigin::new(MessageOrigin::user()), None).unwrap();
+    c.send_user_message_with_images_from("plain".to_string(), None, Vec::new(), RecordOrigin::new(MessageOrigin::user()), None, Vec::new()).unwrap();
     let line: serde_json::Value = serde_json::from_str(&rx.try_recv().unwrap()).unwrap();
     assert_eq!(line["message"]["content"], "plain");
 }
