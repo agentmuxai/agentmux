@@ -195,9 +195,9 @@ Also needs a second stanza (or a second profile) covering the **FUSE-mount
 path** for the rarer case where extraction itself failed (disk full, `$HOME`
 unwritable) and `AppRun` falls back to running straight from the mount —
 lower priority since it's already a degraded path, but should be covered for
-completeness (exact mount path pattern is `/tmp/.mount_AgentMu*/usr/bin/
-agentmux-cef` — appimage's default FUSE mountpoint naming scheme, needs
-confirming against the actual runtime AgentMux ships).
+completeness (exact mount path pattern is `/tmp/.mount_AgentM??????/usr/bin/
+agentmux-cef` — the AppImage runtime names the mount after the first 6
+characters of the AppImage's file name, then 6 random characters).
 
 ### 5.2 Helper script + `pkexec`
 
