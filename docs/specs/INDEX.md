@@ -807,6 +807,7 @@ partial list.
 | [`SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13`](SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13.md) | Spec: Restore-on-relaunch + named, reloadable "Layouts" |
 | [`SPEC_SETTINGS_JSON_EVERY_KEY_ONE_TO_ONE_2026_11_01`](SPEC_SETTINGS_JSON_EVERY_KEY_ONE_TO_ONE_2026_11_01.md) | settings.json lists every setting with its default commented out, kept 1-to-1 by a guard, safe to copy and paste |
 | [`SPEC_SHARED_AUTH_ACROSS_CHANNELS_2026_10_03`](SPEC_SHARED_AUTH_ACROSS_CHANNELS_2026_10_03.md) | SPEC: share authentication across channels — no re-login on every build |
+| [`SPEC_SHARED_KANBAN_ACROSS_MACHINES_2026_11_01`](SPEC_SHARED_KANBAN_ACROSS_MACHINES_2026_11_01.md) | SPEC: Shared Kanban: one board across a user's machines, by LAN or AgentMux Cloud |
 | [`SPEC_SHARED_PERCEPTUAL_PALETTE_16_2026_11_01`](SPEC_SHARED_PERCEPTUAL_PALETTE_16_2026_11_01.md) | SPEC: one shared 16-colour palette, evenly spaced by human perception, for panes, agents, tabs, windows and browser profiles |
 | [`SPEC_SHORTCUTS_PANE_FOR_SPLITS_2026_10_28`](SPEC_SHORTCUTS_PANE_FOR_SPLITS_2026_10_28.md) | The Shortcuts pane: a split opens tiles for every pane type and widget, last used first |
 | [`SPEC_SIGNED_UPDATE_CHECKSUMS_2026_10_25`](SPEC_SIGNED_UPDATE_CHECKSUMS_2026_10_25.md) | Signed checksums for update downloads |
@@ -839,6 +840,7 @@ partial list.
 | [`SPEC_UNRESPONSIVE_AGENTS_2026_10_23`](SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md) | SPEC: unresponsive agents — out-of-quota and signed-out states, the reset time, held messages, the per-account notice |
 | [`SPEC_UPDATE_UNPACK_7Z_IN_RUST_2026_10_19`](SPEC_UPDATE_UNPACK_7Z_IN_RUST_2026_10_19.md) | Spec: the Windows upgrade unpacks the release's .7z itself, not with tar.exe |
 | [`SPEC_UPGRADE_FOR_USERS_AND_AGENTS_2026_10_15`](SPEC_UPGRADE_FOR_USERS_AND_AGENTS_2026_10_15.md) | SPEC: upgrading AgentMux, for users and for agents |
+| [`SPEC_USER_DATA_SYNC_LAYER_2026_11_01`](SPEC_USER_DATA_SYNC_LAYER_2026_11_01.md) | SPEC: one sync layer for a user's own data: Kanban boards and Vaults across their machines, by LAN or AgentMux Cloud |
 | [`SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09`](SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md) | User widgets and the widget API |
 | [`SPEC_VAULT_GENERATE_CAPTURE_AND_BROWSER_SIGNINS_2026_10_28`](SPEC_VAULT_GENERATE_CAPTURE_AND_BROWSER_SIGNINS_2026_10_28.md) | SPEC: secrets nobody types. The Vault generates, captures, delivers and rotates them, and the browser saves, generates and fills sign-ins |
 | [`SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19`](SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md) | SPEC: the Vault: one pane for the person's secrets, which agents use without seeing them |
