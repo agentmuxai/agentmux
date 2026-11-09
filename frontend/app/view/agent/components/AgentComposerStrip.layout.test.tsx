@@ -12,6 +12,7 @@
  */
 
 import { cleanup, render } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AgentComposerStrip } from "./AgentComposerStrip";
@@ -554,5 +555,41 @@ describe("AgentComposerStrip — a ~420 px pane (the operator's screenshot, #302
         // Shell is the outermost slot on the right, runtime on the left, whatever else shares the line.
         expect(rows[1].right.at(-1)).toBe("hostShell");
         expect(rows[1].left[0]).toBe("runtime");
+    });
+});
+
+describe("AgentComposerStrip — the view chip", () => {
+    const chipProps = { viewChip: "Replies · this pane", onOpenView: () => {} };
+
+    it("shrinks to an eye, named by its text, after Shell and before the readout gives way", () => {
+        widths.view = 150;
+        Object.assign(probeWidths, PROBES, { "view:full": 150, "view:compact": 24 });
+        const { container } = renderStrip({ authEmail: "alice@example.com", ...chipProps });
+        const chip = () => real(container, ".agent-composer-strip-view");
+        resizeTo(container, 1000);
+        expect(chip().textContent).toBe("Replies · this pane");
+        // 120 + 32 + 112 + 32 + 24 + 4 x 8 = 352 with every compact form; 480 with the chip still in words.
+        resizeTo(container, 400);
+        expect(layout(container).length).toBe(1);
+        expect(chip().textContent).toBe("");
+        expect(chip().getAttribute("aria-label")).toBe("Replies · this pane");
+        expect(chip().getAttribute("title")).toContain("Replies · this pane");
+    });
+
+    it("lays the strip out again when the chip appears or goes while the pane keeps its width", () => {
+        widths.view = 150;
+        const [chip, setChip] = createSignal<string | null>(null);
+        const utils = render(() => <AgentComposerStrip {...baseProps} viewChip={chip()} onOpenView={() => {}} />);
+        const strip = utils.container.querySelector(".agent-composer-strip") as HTMLElement;
+        Object.defineProperty(strip, "clientWidth", { configurable: true, value: 100 });
+        resizeTo(utils.container, 400);
+        const before = layout(utils.container).length;
+        expect(before).toBeGreaterThan(1);
+        setChip("Replies · this pane");
+        expect(layout(utils.container).flatMap((r) => [...r.left, ...r.right])).toContain("view");
+        expect(layout(utils.container).length).toBeGreaterThan(1);
+        setChip(null);
+        expect(layout(utils.container).flatMap((r) => [...r.left, ...r.right])).not.toContain("view");
+        expect(layout(utils.container).length).toBe(before);
     });
 });

@@ -629,19 +629,36 @@ describe("computeComposerRows — rows that fit together share a line (Rev 10)",
     });
 
     it("puts a merged row's right slots before Shell on the anchor line, so Shell stays outermost", () => {
-        // The auth/ctx pair (222) fits beside the anchors (252) in 500 px; the view chip does not.
+        // The auth/ctx pair (222) fits beside the anchors (252) in 500 px; the wide slot fits nowhere with anything.
         const slots = [
             { key: "runtime", width: 172 },
             { key: "auth", width: 24 },
             { key: "ctx", width: 190 },
-            { key: "view", width: 150 },
+            { key: "wide", width: 300 },
             { key: "hostShell", width: 72 },
         ];
         const rows = computeComposerRows(slots, "hostShell", 500, 8, "runtime", [{ leftKey: "auth", rightKey: "ctx" }]);
         const last = rows[rows.length - 1];
         expect(last.left[0]).toBe("runtime");
         expect(last.right).toEqual(["ctx", "hostShell"]);
-        expect(rows.slice(0, -1).flatMap(keysOf)).toEqual(["view"]);
+        expect(rows.slice(0, -1).flatMap(keysOf)).toEqual(["wide"]);
+    });
+
+    it("balances the lines: of the ways to make two, the chip joins the anchors rather than the pair", () => {
+        // 420 px: anchors 158, pair 240, chip 150. Anchors + pair (406) with the chip alone, or the pair + chip (398)
+        // with the anchors alone, are lopsided; anchors + chip (316) with the pair (240) is the most even.
+        const slots = [
+            { key: "runtime", width: 100 },
+            { key: "auth", width: 24 },
+            { key: "ctx", width: 208 },
+            { key: "view", width: 150 },
+            { key: "hostShell", width: 50 },
+        ];
+        const rows = computeComposerRows(slots, "hostShell", 420, 8, "runtime", [{ leftKey: "auth", rightKey: "ctx" }]);
+        expect(rows).toHaveLength(2);
+        expect(keysOf(rows[0])).toEqual(["auth", "ctx"]);
+        expect(keysOf(rows[1])).toEqual(["hostShell", "runtime", "view"]);
+        expect(rows[1].right.at(-1)).toBe("hostShell");
     });
 
     it("never builds a line wider than the strip when each row fits on its own", () => {

@@ -17,10 +17,10 @@
 
 /**
  * Collapse order, first to collapse first: the account (to its dot and initial), the context reading (to
- * "392k/1m", Compact to an icon), then Shell (to an icon). The CPU readout joins in part B, last, because its
- * compact form is almost as wide as its full one.
+ * "392k/1m", Compact to an icon), Shell (to an icon), the view chip (to an eye), then the CPU readout, last,
+ * because its compact form is almost as wide as its full one.
  */
-export const COMPACT_ORDER = ["auth", "ctx", "hostShell", "stats"] as const;
+export const COMPACT_ORDER = ["auth", "ctx", "hostShell", "view", "stats"] as const;
 
 /**
  * The keys that show their compact form. `full` holds every slot's width in its full form and `compact` the width

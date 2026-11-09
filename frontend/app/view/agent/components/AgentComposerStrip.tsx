@@ -483,18 +483,22 @@ function viewSlot(props: AgentComposerStripProps): Slot {
         key: "view",
         side: "right",
         interactive: true,
-        render: () => (
+        compact: true,
+        // Tight: an eye, the chip's text as its tooltip and accessible name.
+        render: (_rowSide, compact) => (
             <Button
                 variant="link"
                 class="agent-composer-strip-view"
                 data-strip-button
                 data-agent-view-chip
+                icon={compact() ? "eye" : undefined}
+                aria-label={compact() ? (props.viewChip ?? undefined) : undefined}
                 aria-haspopup="dialog"
                 aria-expanded={props.viewOpen ? "true" : "false"}
-                title="What this pane shows: click to change"
+                title={compact() ? `${props.viewChip}. What this pane shows: click to change` : "What this pane shows: click to change"}
                 onClick={() => props.onOpenView?.()}
             >
-                {props.viewChip}
+                {compact() ? undefined : props.viewChip}
             </Button>
         ),
     };

@@ -368,13 +368,15 @@ function multiRow(
 }
 
 /**
- * Rev 10 (2026-11-09, #30203): rows that fit together on one line share it. The pairing above puts one slot a
- * side per row, so a narrow pane with seven small slots came out as three or four half-empty lines (the
- * operator's screenshot of a 420 px pane). This packs the rows, best fit, widest first, into as few lines as
- * hold them: a row's slots keep their own sides, so a merged line has the left slots of both on the left and the
- * right slots of both on the right. The LAST row (the anchors, or the one holding Shell) is the seed of its own
- * line and stays last, and no row is ever split, so the invariants of Revs 7 to 9 are untouched: the anchors
- * share the last line, a pinned pair stays together when it fits, nothing becomes one-sided that was not.
+ * Rev 10 (2026-11-09, #30203): rows that fit together share a line. The pairing above puts one slot a side per
+ * row, so a narrow pane with seven small slots came out as three or four half-empty lines (the operator's
+ * screenshot of a 420 px pane). This packs the rows into the fewest lines that hold them and, of those, the most
+ * even (the narrowest widest line), so a pane does not get one chip alone on a line beside a full one. A row's
+ * slots keep their own sides: a merged line has the left slots of its rows on the left and the right slots on
+ * the right. The LAST row (the anchors, or the one holding Shell) seeds its own line and stays last, and no row
+ * is ever split, so the invariants of Revs 7 to 9 are untouched: the anchors share the last line (their slots
+ * outermost; what joins goes between), a pinned pair stays together when it fits, and nothing becomes
+ * one-sided that was not. Searched exhaustively: a strip has a handful of rows, and fit prunes most of it.
  */
 function mergeRows(rows: ComposerRow[], widthOf: Map<string, number>, availableWidth: number, gapPx: number): ComposerRow[] {
     if (rows.length < 2) return rows;
@@ -382,32 +384,55 @@ function mergeRows(rows: ComposerRow[], widthOf: Map<string, number>, availableW
         const keys = [...r.left, ...r.right];
         return keys.reduce((sum, k) => sum + (widthOf.get(k) ?? 0), 0) + Math.max(0, keys.length - 1) * gapPx;
     };
-    type Line = { first: number; left: string[]; right: string[]; width: number };
-    const lineOf = (r: ComposerRow, first: number): Line => ({ first, left: [...r.left], right: [...r.right], width: widthOfRow(r) });
-    const anchor = lineOf(rows[rows.length - 1], rows.length - 1);
-    const lines: Line[] = [];
-    const widest = rows
-        .slice(0, -1)
-        .map((r, i) => ({ r, i, width: widthOfRow(r) }))
-        .sort((a, b) => b.width - a.width || a.i - b.i);
-    for (const item of widest) {
-        // The line with the least room left that still holds it (the anchor line included).
-        let best: Line | undefined;
-        for (const line of [...lines, anchor]) {
-            const room = availableWidth - (line.width + gapPx + item.width);
-            if (room >= 0 && (!best || room < availableWidth - (best.width + gapPx + item.width))) best = line;
+    type Item = { r: ComposerRow; i: number; width: number };
+    const anchorRow = rows[rows.length - 1];
+    const items: Item[] = rows.slice(0, -1).map((r, i) => ({ r, i, width: widthOfRow(r) }));
+    const order = [...items].sort((a, b) => b.width - a.width || a.i - b.i);
+    // members[0] is the anchor line (already holding the anchor row); the others open as items need them.
+    const widths = [widthOfRow(anchorRow)];
+    const members: Item[][] = [[]];
+    let best: Item[][] = [];
+    let bestKey = [Infinity, Infinity];
+    const visit = (k: number): void => {
+        if (members.length > bestKey[0]) return;
+        if (k === order.length) {
+            const key = [members.length, Math.max(...widths)];
+            if (key[0] < bestKey[0] || (key[0] === bestKey[0] && key[1] < bestKey[1])) {
+                bestKey = key;
+                best = members.map((m) => [...m]);
+            }
+            return;
         }
-        const target = best ?? (lines[lines.push(lineOf({ left: [], right: [] }, item.i)) - 1]);
-        const empty = target.left.length + target.right.length === 0;
-        target.left.push(...item.r.left);
-        // On the anchor line the right slots go BEFORE the anchors' own (Shell stays outermost, Rev 8); the
-        // edge ordering keeps the order within the clickable ones.
-        if (target === anchor) target.right.unshift(...item.r.right);
-        else target.right.push(...item.r.right);
-        target.width = empty ? item.width : target.width + gapPx + item.width;
-        target.first = Math.min(target.first, item.i);
-    }
-    return [...lines.sort((a, b) => a.first - b.first), anchor].map(({ left, right }) => ({ left, right }));
+        const item = order[k];
+        for (let j = 0; j < members.length; j++) {
+            const joined = widths[j] + gapPx + item.width;
+            if (joined > availableWidth) continue;
+            const was = widths[j];
+            widths[j] = joined;
+            members[j].push(item);
+            visit(k + 1);
+            members[j].pop();
+            widths[j] = was;
+        }
+        widths.push(item.width);
+        members.push([item]);
+        visit(k + 1);
+        members.pop();
+        widths.pop();
+    };
+    visit(0);
+    const byIndex = (group: Item[]) => [...group].sort((a, b) => a.i - b.i);
+    const joined = (group: Item[], side: "left" | "right") => byIndex(group).flatMap((m) => m.r[side]);
+    const lines = best
+        .slice(1)
+        .map((group) => ({ first: byIndex(group)[0].i, left: joined(group, "left"), right: joined(group, "right") }))
+        .sort((a, b) => a.first - b.first);
+    const anchor = {
+        left: [...anchorRow.left, ...joined(best[0], "left")],
+        // What joins the anchor line goes BEFORE the anchors' own right slots: Shell stays outermost (Rev 8).
+        right: [...joined(best[0], "right"), ...anchorRow.right],
+    };
+    return [...lines.map(({ left, right }) => ({ left, right })), anchor];
 }
 
 /**
