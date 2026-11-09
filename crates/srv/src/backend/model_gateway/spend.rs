@@ -89,8 +89,8 @@ pub fn record(agent: &str, model: &Model, tokens: &TokenCounts, actual: Option<f
 /// `total_cost_usd` becomes the session total, which the turn ledger takes the
 /// rise of; `cost_usd` becomes this turn's rise, because the pane adds each
 /// frame's value to its running total. `None` when the line is not a `result`
-/// frame, reports no total, or the agent is not on a route (no response of its
-/// carried a charge).
+/// frame, reports no total, or the agent is not on a route (none of its
+/// responses carried a charge).
 pub fn rewrite_result_total(line: &str, agent: &str) -> Option<String> {
     let real = session_usd(agent)?;
     let mut frame: serde_json::Value = serde_json::from_str(line).ok()?;
