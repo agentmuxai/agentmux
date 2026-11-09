@@ -57,11 +57,11 @@
         top: 4px;
     }
 
-    // An item of an agent pane's top band: in the flow, in the band's own box, not over the pane.
-    &.band {
+    // A slot of an agent pane's composer strip: in the flow, in the strip's own row, not over the pane.
+    &.inline {
         position: static;
         z-index: auto;
-        // Fainter than the pane's corner needs (it sat over terminal text there); on the band's own surface a
+        // Fainter than the pane's corner needs (it sat over terminal text there); on the strip's own surface a
         // reading at half strength is hard to read in the light theme (Maricon, #6847).
         opacity: 0.75;
         background: none;
@@ -84,7 +84,7 @@
         }
     }
 
-    &.band:focus-within {
+    &.inline:focus-within {
         opacity: 0.9;
     }
 }

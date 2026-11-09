@@ -1,7 +1,7 @@
 # Spec: the agent pane's top band is a priority layout, and the CPU and memory readout moves from it into the composer strip
 
 **Date:** 2026-11-07 (task #28995; builds: A first, then #28996 for B).
-**Status:** active — approved by the operator 2026-11-07, all four questions as recommended (Q1 after the context reading, on the left; Q2 compact chip, never hidden; Q3 agent panes only; Q4 A before B, as two builds). A1 is built in PR #6814 (task #29008) and A2 in task #29009; B (#28996) follows.
+**Status:** active — approved by the operator 2026-11-07, all four questions as recommended (Q1 after the context reading, on the left; Q2 compact chip, never hidden; Q3 agent panes only; Q4 A before B, as two builds). A1 is built in PR #6814 (task #29008), A2 in task #29009 and B (#28996) with the strip's compact forms (task #30203), see 4.3.
 **Author:** Agent1@narko
 **Scope:** `frontend/app/element/blockstats.tsx` and `blockstats.scss` (the readout), `frontend/app/block/blockframe.tsx` (where it is drawn today), the agent pane's layout (`agent-view-layout.tsx`) and find bar (`AgentSearchBar.tsx`), `frontend/app/view/agent/components/AgentComposerStrip.tsx` and `composer-row-layout.ts`, and `AgentSessionStats.tsx` (the popover the strip's context reading opens).
 **Related:** `SPEC_COMPOSER_STRIP_ROW_BASED_LAYOUT_2026_08_26.md`, `SPEC_COMPOSER_STRIP_DROP_CENTER_STATS_2026_08_31.md`, `SPEC_JEKT_SIDE_PANEL_RESEARCH_AND_DESIGN_2026_11_04.md` (section 10, #28993), `SPEC_AGENT_PANE_SEARCH_AND_DIM_MODE_2026_11_06.md`.
@@ -154,6 +154,20 @@ The band is `frontend/app/view/agent/top-band/`: `top-band-layout.ts` (the pure 
 - `BlockStatsBadge` has a `placement` (`overlay`, the default, or `band`) and, in the band, a `form` (`full` or `compact`) and a `measuring` copy. In the band it is in the flow (no absolute position), and the figures are a focusable chip: the tooltip (the readout's existing one, with the processes and every figure) stays open while the chip has focus, and Escape closes it. The compact form is a processor icon and the CPU figure, tinted by the same colour rule, with the whole reading ("CPU 0.3%, memory 90M") as its accessible name. The band is for a local pane: an agent pane never measures a remote shell.
 - `AgentStatsBandItem` registers the `stats` item (slot `stats`, priority `TOP_BAND_PRIORITY.stats`, a full and a compact form). It joins the band once the first figures arrive, so the band is not drawn empty before them. The band's layout rule then does the rest: the readout goes compact before the find bar is asked to give anything, and is never dropped (it has a compact form).
 - The capability is `statsBadgeIn` (`"band"` or `"strip"`) in `pane-tab-registry.ts`, next to `statsBadgeSetting`; the agent pane declares `"band"`, and the block frame (`createStatsBadge`) draws no overlay for a pane that declares it. A terminal or any other pane keeps the overlay.
+
+### 4.3 B as built (tasks #28996 and #30203, one strip layout)
+
+The operator's screenshot of a ~420 px pane showed the strip's footer wrapping to three half-empty rows, so B and the footer packing are one change: the strip gets compact forms, and the readout is one more slot that has them.
+
+- **The readout is the strip's `stats` slot**, drawn by `BlockStatsBadge` with the `inline` placement (the `band` placement of A2 under its new name; the chip, tooltip and focus behaviour are unchanged). The strip adds the slot once the first figures arrive, as the band did. `AgentStatsBandItem` is gone, the capability is `statsBadgeIn: "strip"`, and the band's `stats` slot is simply empty: it takes no width.
+- **Where.** In this build's strip the context reading is on the right (`[runtime] [account] ... [0.0% 66M] [104k / 200k] [Shell]`), not on the left as the diagrams of 3.1 draw it. The readout sits **beside the context reading** on the right (passive slots take the inner side of a row, so it reads before the context reading), which keeps the two "how much is this pane using" readings together, the reason for Q1. When the strip wraps, the row layout moves it with the others.
+- **Compact forms.** The strip measures every slot that has a compact form in both forms, in hidden, inert probes (`composer-forms-probes.tsx`, the same idea as the band's), and `chooseCompactKeys` (`composer-forms.ts`) picks the forms: everything full when the slots fit one row; otherwise the slots collapse one at a time, in a fixed order, until they do. A slot is never measured in the form it is drawn in, so the choice cannot flip. The order:
+  1. the account: a dot and its initial (`!` when signed out), the whole label as its tooltip and accessible name;
+  2. the context reading: "392k/1m", the compaction countdown moves into its tooltip, and Compact becomes an icon button;
+  3. Shell: an icon button named "Shell";
+  4. the CPU and memory readout: the chip of A2 (processor icon and CPU figure).
+  The readout goes last, as its compact form is only about 24 px smaller than its full one. Never hidden, in any form: the runtime trigger, the context reading, the readout and Shell. When even the compact forms don't fit one row, they all stay compact and the row layout wraps what is left. This replaces the "compact below 360 px or with several rows" rule of 3.2, which would have shown the full forms in a row that has room for them only when the pane is wide, and the wrapped three-row footer in between.
+- The unit tests: `composer-forms.test.ts` (the order, the fit, the edge cases), `AgentComposerStrip.layout.test.tsx` (forms and readout in the measured layout, with fake probe widths) and `blockstats.test.tsx` (the `inline` placement).
 
 ## 5. Questions for the operator
 

@@ -52,6 +52,10 @@ import { RuntimeBadge } from "./RuntimeBadge";
 import { shortenEmail } from "@/app/view/identity/identity-model";
 import { compactionCountdownText, contextTitle, ctxBand } from "./context-bandwidth";
 import { computeComposerRows, computeStatsInline, orderKeysForEdgePriority, type ComposerRow } from "./composer-row-layout";
+import { useBlockStats } from "@/app/hook/useBlockStats";
+import { BlockStatsBadge } from "@/element/blockstats";
+import { accountInitial, shortContextText } from "./composer-forms";
+import { useSlotForms } from "./composer-forms-probes";
 import { useStatsZone } from "./composer-stats-zone";
 import { isContainerAgentMode, parseRuntimeKind } from "@/util/runtime-kind";
 import { tip } from "@/app/element/tip";
@@ -161,7 +165,14 @@ interface AgentComposerStripProps {
 }
 
 type Side = "left" | "right";
-type Slot = { key: string; side: Side; interactive: boolean; render: (rowSide: Side) => JSX.Element };
+/** `compact`: the slot has a compact form, which `render` draws while its second argument says so (composer-forms.ts). */
+type Slot = {
+    key: string;
+    side: Side;
+    interactive: boolean;
+    compact?: boolean;
+    render: (rowSide: Side, compact: Accessor<boolean>) => JSX.Element;
+};
 
 /** The pieces of the props the slots and the layout both read. */
 interface StripDerived {
@@ -295,7 +306,8 @@ function authSlot(props: AgentComposerStripProps): Slot {
         // has candidates): the flag feeds edge-priority ordering, and
         // flipping it with every turn would reorder the strip.
         interactive: true,
-        render: () => {
+        compact: true,
+        render: (_rowSide, compact) => {
             const authed = () => props.authStatus === "authenticated";
             const hasOthers = () => !!props.canSwitchAccount && !!props.onSwitchAccount;
             // srv holds a switch asked for in a turn until it ends (agent.account.switch).
@@ -305,6 +317,9 @@ function authSlot(props: AgentComposerStripProps): Slot {
                 const base = accountKnown(props) ? (props.authEmail ? shortenEmail(props.authEmail) : "Account") : !authed() ? "Not logged in" : props.authEmail ? shortenEmail(props.authEmail) : "Logged in";
                 return props.pendingAccountLabel ? `${base} → ${shortenEmail(props.pendingAccountLabel)}` : base;
             };
+            // Tight: the dot and one letter, the whole label in the tooltip and the accessible name. Signed out
+            // keeps a mark of its own, as "N" for "Not logged in" would read as a name.
+            const shown = () => (compact() ? (props.authStatus === "unauthenticated" ? "!" : accountInitial(label())) : label());
             const title = () => {
                 if (!authed() && !accountKnown(props)) return hasOthers() ? "Not signed in — click to log in or switch account" : "Not signed in — click Log in to continue";
                 const base = accountKnown(props)
@@ -328,14 +343,15 @@ function authSlot(props: AgentComposerStripProps): Slot {
                     {...tip(title())}
                 >
                     <span class="agent-composer-strip-auth-dot" aria-hidden="true" />
-                    <Show when={canSwitch()} fallback={label()}>
+                    <Show when={canSwitch()} fallback={<span aria-label={compact() ? label() : undefined}>{shown()}</span>}>
                         <Button
                             variant="link"
                             class="agent-composer-strip-auth-link"
                             aria-haspopup="menu"
+                            aria-label={compact() ? label() : undefined}
                             onClick={(e) => props.onSwitchAccount?.(e)}
                         >
-                            {label()}
+                            {shown()}
                         </Button>
                     </Show>
                 </span>
@@ -372,17 +388,20 @@ function ctxSlot(props: AgentComposerStripProps, d: StripDerived): Slot {
         // button doesn't render. It was gated on Compact back when
         // the reading was inert text.
         interactive: true,
+        compact: true,
         // Compact sits on the OUTER end of whichever side this
         // slot renders on (edge priority): first on the left,
         // last on the right. The text + countdown stay adjacent
         // in reading order either way.
-        render: (rowSide) => {
+        render: (rowSide, compact) => {
             const compactBtn = () => (
                 <Show when={d.offersCompact()}>
                     <Button
                         density="compact"
                         class="agent-composer-strip-compact-btn"
                         data-strip-button
+                        icon={compact() ? "compress" : undefined}
+                        aria-label={compact() ? "Compact" : undefined}
                         disabled={!d.canCompact()}
                         title={
                             d.canCompact()
@@ -393,7 +412,7 @@ function ctxSlot(props: AgentComposerStripProps, d: StripDerived): Slot {
                         }
                         onClick={() => props.onCompact?.()}
                     >
-                        Compact
+                        {compact() ? undefined : "Compact"}
                     </Button>
                 </Show>
             );
@@ -411,12 +430,14 @@ function ctxSlot(props: AgentComposerStripProps, d: StripDerived): Slot {
                         ctxClass={d.ctxClass()}
                         title={
                             props.contextTokens != null
-                                ? contextTitle(props.contextTokens, props.contextWindow, props.contextNote, props.autoCompact)
+                                ? contextTitle(props.contextTokens, props.contextWindow, props.contextNote, props.autoCompact) +
+                                  // The countdown is not drawn when tight: the tooltip has it.
+                                  (compact() && d.ctxCountdownText() ? ` ${d.ctxCountdownText()}` : "")
                                 : undefined
                         }
-                        label={d.ctxText() ?? "session"}
+                        label={compact() ? shortContextText(d.ctxText() ?? "session") : (d.ctxText() ?? "session")}
                     />
-                    <Show when={d.ctxCountdownText()}>
+                    <Show when={!compact() && d.ctxCountdownText()}>
                         <span
                             class={`agent-composer-strip-ctx-countdown ${d.ctxClass()}`}
                             classList={{ "agent-composer-strip-ctx-countdown--critical": d.ctxClass().endsWith("critical") }}
@@ -429,6 +450,23 @@ function ctxSlot(props: AgentComposerStripProps, d: StripDerived): Slot {
                 </>
             );
         },
+    };
+}
+
+/**
+ * The pane's live CPU and memory readout, next to the context reading. A status, not a control: the full
+ * "0.0% 66M" while the row has room, a processor icon and the CPU figure when it is tight (the whole reading is
+ * its tooltip, and the chip takes focus). The strip adds the slot once the first figures arrive.
+ */
+function statsSlot(props: AgentComposerStripProps): Slot {
+    return {
+        key: "stats",
+        side: "right",
+        interactive: false,
+        compact: true,
+        render: (_rowSide, compact) => (
+            <BlockStatsBadge blockId={props.blockId ?? ""} placement="inline" form={compact() ? "compact" : "full"} />
+        ),
     };
 }
 
@@ -459,6 +497,7 @@ function hostShellSlot(props: AgentComposerStripProps): Slot {
         key: "hostShell",
         side: "right",
         interactive: true,
+        compact: true,
         // Shell (the button) on the OUTER end, NATIVE badge (passive)
         // inward — mirrored by side the same way ctx's Compact is.
         // On the right this is the existing "Shell always outermost"
@@ -474,7 +513,7 @@ function hostShellSlot(props: AgentComposerStripProps): Slot {
         // allowed. The user explicitly chose this over the older
         // "NATIVE just left of Shell" pairing when the two directives
         // collided (see _composer-strip.scss's removal note).
-        render: (rowSide) => {
+        render: (rowSide, compact) => {
             const hostBadge = () => (
                 <Show when={parseRuntimeKind(props.agentMode) !== undefined}>
                     <RuntimeBadge runtime={props.agentMode!} size="tag" />
@@ -486,10 +525,12 @@ function hostShellSlot(props: AgentComposerStripProps): Slot {
                     density="compact"
                     class="agent-composer-strip-log-btn"
                     pressed={props.logOpen}
+                    icon={compact() ? "terminal" : undefined}
+                    aria-label={compact() ? "Shell" : undefined}
                     title={props.logOpen ? "Hide the shell" : "Show the shell"}
                     onClick={() => props.onToggleLog()}
                 >
-                    Shell
+                    {compact() ? undefined : "Shell"}
                 </Button>
             );
             return (
@@ -573,6 +614,10 @@ function useStripWidth(refs: StripRefs): Accessor<number> {
 // (here, the always-mounted `stripRef`) is the correct multiplier for
 // a `getComputedStyle` length read anywhere else in that same
 // subtree — multiply by this wherever the two measurement styles mix.
+/** The column-gap between a row's slots, in the same zoomed pixels as the measured widths. */
+const stripGap = (refs: StripRefs): number =>
+    refs.rowsRef ? (parseFloat(getComputedStyle(refs.rowsRef).getPropertyValue("--space-2")) || 8) * zoomRatio(refs) : 8;
+
 const zoomRatio = (refs: StripRefs): number => {
     if (!refs.stripRef || !refs.stripRef.clientWidth) return 1;
     return refs.stripRef.getBoundingClientRect().width / refs.stripRef.clientWidth;
@@ -846,7 +891,11 @@ function createLayout(
     });
 }
 
-function createSlotRenderer(slotByKey: Accessor<Map<string, Slot>>, refs: StripRefs): (key: string, rowSide: Side) => JSX.Element {
+function createSlotRenderer(
+    slotByKey: Accessor<Map<string, Slot>>,
+    refs: StripRefs,
+    compactKeys: Accessor<Set<string>>
+): (key: string, rowSide: Side) => JSX.Element {
     const renderSlot = (key: string, rowSide: Side) => {
         // untrack: see `slotByKey`'s own doc comment above — without
         // this, a bare `{slotByKey().get(key)?.render(...)}` would read
@@ -854,7 +903,7 @@ function createSlotRenderer(slotByKey: Accessor<Map<string, Slot>>, refs: StripR
         // reconstructing e.g. AgentRuntimeDropup, resetting its own
         // open/selectedOptIndex signals) on every `slots()` recompute,
         // defeating the point of keying by string at all.
-        const rendered = untrack(() => slotByKey().get(key)?.render(rowSide));
+        const rendered = untrack(() => slotByKey().get(key)?.render(rowSide, () => compactKeys().has(key)));
         return (
             // `display: contents` (agent-composer-strip-slot-measure,
             // _composer-strip.scss) — invisible to layout, so this
@@ -878,10 +927,11 @@ interface StripViewParts {
     precedingRowIndices: Accessor<number[]>;
     lastRowIndex: Accessor<number>;
     renderSlot: (key: string, rowSide: Side) => JSX.Element;
+    probes: () => JSX.Element;
 }
 
 function StripView(view: StripViewParts): JSX.Element {
-    const { props, refs, rows, statsInline, statsZone, precedingRowIndices, lastRowIndex, renderSlot } = view;
+    const { props, refs, rows, statsInline, statsZone, precedingRowIndices, lastRowIndex, renderSlot, probes } = view;
     return (
         <div
             class="agent-composer-strip"
@@ -939,15 +989,14 @@ function StripView(view: StripViewParts): JSX.Element {
                     </div>
                 </Show>
             </div>
+            {probes()}
         </div>
     );
 }
 
 // ── Component ──────────────────────────────────────────────────────────────
 
-export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element => {
-    const d = createStripDerived(props);
-
+function createSlots(props: AgentComposerStripProps, d: StripDerived): Accessor<Slot[]> {
     // Dynamic left/right pooling — see the file-header comment for why a
     // static per-item zone assignment left the controls zone empty for
     // non-Claude/no-process/unknown-auth panes. Each slot's `render`
@@ -973,6 +1022,9 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
     // (a slot changing sides leaves one <For> and enters the other,
     // re-invoking render with the new side), so it is deliberately a
     // plain parameter, not a reactive read.
+    // Whether the readout has figures yet: the memo changes once, so the slots are not rebuilt by its ticks.
+    const stats = props.blockId ? useBlockStats(props.blockId) : () => null;
+    const hasStats = createMemo(() => stats() != null);
     const slots = createMemo((): Slot[] => {
         const out: Slot[] = [];
 
@@ -984,6 +1036,9 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         // still gets the popover — cost and processed tokens — once a turn
         // has reported totals.
         if (d.ctxText() != null || d.hasSessionToManage() || props.sessionTotals != null) out.push(ctxSlot(props, d));
+
+        // The CPU and memory readout, after the context reading (the last of the forms to give way).
+        if (hasStats()) out.push(statsSlot(props));
 
         // The pane's view (agent-view-controls.ts viewChipLabel), only while it is not the plain Full.
         // The memo reads only whether there is a chip; the text is read in render, so a change of preset does not
@@ -997,14 +1052,23 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
 
         return out;
     });
+    return slots;
+}
+
+export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element => {
+    const d = createStripDerived(props);
+
+    const slots = createSlots(props, d);
 
     const refs: StripRefs = { stripRef: undefined, rowsRef: undefined, measureRefs: {} };
     const stripWidth = useStripWidth(refs);
     const slotWidths = useSlotWidths(slots, stripWidth, refs);
+    // Which slots show their compact form, from hidden probes of both forms (composer-forms-probes.tsx).
+    const forms = useSlotForms(slots, stripWidth, slotWidths, () => stripGap(refs));
     // The stats zone and its measured footprint (composer-stats-zone.tsx).
     const { statsWidth, statsZone } = useStatsZone(stripWidth, slotWidths);
     const slotByKey = createSlotMap(slots);
-    const layout = createLayout(slots, slotWidths, stripWidth, statsWidth, refs);
+    const layout = createLayout(slots, forms.layoutWidths, stripWidth, statsWidth, refs);
 
     const rows = (): ComposerRow[] => layout().rows;
     const statsInline = (): boolean => layout().statsInline;
@@ -1035,10 +1099,10 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
     const precedingRowIndices = createMemo(() => rows().slice(0, -1).map((_, i) => i));
     const lastRowIndex = createMemo(() => rows().length - 1);
 
-    const renderSlot = createSlotRenderer(slotByKey, refs);
+    const renderSlot = createSlotRenderer(slotByKey, refs, forms.compactKeys);
 
     return (
-        <StripView props={props} refs={refs} rows={rows} statsInline={statsInline} statsZone={statsZone} precedingRowIndices={precedingRowIndices} lastRowIndex={lastRowIndex} renderSlot={renderSlot} />
+        <StripView props={props} refs={refs} rows={rows} statsInline={statsInline} statsZone={statsZone} precedingRowIndices={precedingRowIndices} lastRowIndex={lastRowIndex} renderSlot={renderSlot} probes={forms.probes} />
     );
 };
 

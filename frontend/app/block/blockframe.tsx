@@ -1135,7 +1135,7 @@ function createStatsBadge(props: BlockFrameProps, blockData: Accessor<Block | un
         const view = blockData()?.meta?.view;
         const setting = paneTabCapability(view, "statsBadgeSetting");
         const settingOn = setting == null || getSettingsKeyAtom(setting as any)() !== false;
-        // A pane that draws the readout itself (the agent pane's top band) has none of the frame's.
+        // A pane that draws the readout itself (the agent pane's composer strip) has none of the frame's.
         return statsBadgeShown(!!props.preview, settingOn, paneTabCapability(view, "statsBadgeIn") != null);
     });
 }
