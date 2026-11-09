@@ -76,6 +76,9 @@ pub fn apply(env: &mut HashMap<String, String>, endpoint: &Endpoint, config_dir:
     });
     env.insert("CLAUDE_CONFIG_DIR".to_string(), config_dir.to_string());
     env.insert("ANTHROPIC_BASE_URL".to_string(), endpoint.base_url.clone());
+    // Empty, not absent: the child process inherits srv's own environment (`apply_working_dir`), which may hold
+    // the person's token, and only an entry here overrides it.
+    env.insert("CLAUDE_CODE_OAUTH_TOKEN".to_string(), String::new());
     let value_of = |written: &Option<String>| {
         written.as_deref().and_then(|w| match agent_env::vault_ref(w) {
             Some(id) => resolve_vault(id),
@@ -87,8 +90,10 @@ pub fn apply(env: &mut HashMap<String, String>, endpoint: &Endpoint, config_dir:
         (Some(token), _) => {
             env.insert("ANTHROPIC_AUTH_TOKEN".to_string(), token);
         }
-        // A key and no token: the CLI sends the key; a token variable would take its place.
-        (None, Some(_)) => {}
+        // A key and no token: the CLI sends the key; a token would take its place, so it is emptied.
+        (None, Some(_)) => {
+            env.insert("ANTHROPIC_AUTH_TOKEN".to_string(), String::new());
+        }
         (None, None) => {
             env.insert("ANTHROPIC_AUTH_TOKEN".to_string(), NO_KEY_PLACEHOLDER.to_string());
         }
@@ -191,11 +196,19 @@ pub(crate) async fn guard(
         // The step died: the agent starts with no login at all rather than with the person's.
         Err(e) => {
             tracing::error!(block_id = %block_id, error = %e, "endpoint: the step failed; the agent is started without a login");
-            for name in ACCOUNT_VARIABLES.iter().copied().chain(["CLAUDE_CONFIG_DIR"]) {
-                env_vars.remove(name);
-            }
+            no_login(env_vars);
         }
     }
+}
+
+/// No login for the child: the account variables emptied (an absent name would be inherited from srv's
+/// own environment) and the config directory a folder with nothing in it (an absent one is the person's
+/// own `~/.claude`).
+fn no_login(env: &mut HashMap<String, String>) {
+    for name in ACCOUNT_VARIABLES {
+        env.insert((*name).to_string(), String::new());
+    }
+    env.insert("CLAUDE_CONFIG_DIR".to_string(), std::env::temp_dir().join("agentmux-no-login").to_string_lossy().into_owned());
 }
 
 #[cfg(test)]
@@ -246,9 +259,40 @@ mod tests {
         assert_eq!(spawn["ANTHROPIC_BASE_URL"], "http://192.0.2.68:11434");
         assert_eq!(spawn["ANTHROPIC_AUTH_TOKEN"], "ollama");
         assert_eq!(spawn["ANTHROPIC_API_KEY"], "", "the account's key is emptied");
-        assert!(!spawn.contains_key("CLAUDE_CODE_OAUTH_TOKEN"));
+        assert_eq!(spawn["CLAUDE_CODE_OAUTH_TOKEN"], "", "emptied, so a token in srv's own environment does not reach the child");
         assert!(!spawn.values().any(|v| v.contains("PERSONS") || v.contains("persons-bearer")), "{spawn:?}");
         assert_eq!(spawn["TZ"], "UTC", "other variables are left alone");
+    }
+
+    #[test]
+    fn a_failed_step_leaves_no_login_and_nothing_to_inherit() {
+        let mut spawn = account();
+        no_login(&mut spawn);
+        for name in ACCOUNT_VARIABLES {
+            assert_eq!(spawn[*name], "", "{name}");
+        }
+        assert!(!spawn["CLAUDE_CONFIG_DIR"].contains("shared"), "{spawn:?}");
+        assert_eq!(spawn["TZ"], "UTC");
+    }
+
+    #[test]
+    fn every_account_variable_is_in_the_overlay_so_none_is_inherited_from_srv() {
+        // Whatever the account put in (or did not), the child gets an entry for each, because a name left out
+        // is inherited from srv's own environment.
+        for endpoint_env in [
+            env(&[("ANTHROPIC_BASE_URL", "http://localhost:11434")]),
+            env(&[("ANTHROPIC_BASE_URL", "http://localhost:11434"), ("ANTHROPIC_API_KEY", "local")]),
+            env(&[("ANTHROPIC_BASE_URL", "http://localhost:11434"), ("ANTHROPIC_AUTH_TOKEN", "ollama")]),
+        ] {
+            let endpoint = requested(&endpoint_env).unwrap();
+            for mut spawn in [env(&[]), account()] {
+                apply(&mut spawn, &endpoint, "/d", &none);
+                for name in ACCOUNT_VARIABLES {
+                    let value = spawn.get(*name).unwrap_or_else(|| panic!("{name} is left to be inherited: {spawn:?}"));
+                    assert!(!value.contains("PERSONS") && value != "persons-bearer", "{name}={value}");
+                }
+            }
+        }
     }
 
     #[test]
@@ -306,7 +350,7 @@ mod tests {
         let mut spawn = account();
         apply(&mut spawn, &endpoint, "/d", &none);
         assert_eq!(spawn["ANTHROPIC_API_KEY"], "local");
-        assert!(!spawn.contains_key("ANTHROPIC_AUTH_TOKEN"), "{spawn:?}");
+        assert_eq!(spawn["ANTHROPIC_AUTH_TOKEN"], "", "emptied, not absent: an inherited bearer token must not override the key");
     }
 
     #[test]
