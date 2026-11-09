@@ -229,15 +229,20 @@
 // instead of overflowing it — required for the tab's ellipsis (below) to
 // ever engage.
 .pane-tab-tip {
-    // Shrinkable, with a floor, before the strip scrolls: a lone tab whose
-    // label does not fit used to keep its full width and scroll, so a ~318 px
-    // pane showed "u, memory and network" instead of ellipsizing (#30300).
-    // Many tabs still scroll once each is at the floor.
-    flex: 0 1 auto;
-    min-width: 72px;
+    flex: 0 0 auto;
+    min-width: 0;
     max-width: 240px;
     display: flex;
     align-items: stretch;
+}
+
+// A LONE tab may shrink to the strip and ellipsize instead of scrolling: in a
+// ~318 px pane the "CPU, memory and network" tab used to keep its width and
+// the strip scrolled ("u, memory and network", #30300). Several tabs are left
+// exactly as before: each at its own width, the strip scrolling once they no
+// longer fit — no short tab is widened by a floor.
+.pane-tab-strip-inner:not(:has(.pane-tab-tip ~ .pane-tab-tip)) .pane-tab-tip {
+    flex: 0 1 auto;
 }
 
 .pane-tab {
