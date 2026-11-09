@@ -546,6 +546,7 @@ impl Controller for AcpController {
             env_vars.entry("PI_ACP_PI_COMMAND".to_string()).or_insert(pi);
         }
         let provider = super::super::obj::meta_get_string(&block_meta, "agentProvider", "");
+        super::acp_prelaunch::prepare_env(&provider, &mut env_vars);
         super::acp_prelaunch::prepare(&provider, &env_vars, &session_cwd(&cwd));
         {
             let mut inner = self.inner.lock().unwrap();

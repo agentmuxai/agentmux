@@ -10,8 +10,9 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { atoms, getApi, MOS } from "@/app/store/global";
 import { agentModels } from "./agent-models";
 import { buildAgentPaneIcon } from "./components/AgentPaneIcon";
+import { paneIconInput, samePaneIconInput } from "./pane-icon-input";
 import { useAgentDefinitions } from "./components/AgentPicker";
-import { getProvider, isAccountListed, PROVIDERS, resolveProviderAlias } from "./providers";
+import { getProvider, isAccountListed, PROVIDERS } from "./providers";
 import { Logger } from "@/util/logger";
 import { translateError } from "@/app/errors/translate";
 import { buildInstanceSlug } from "./defaults/instance-slug";
@@ -148,20 +149,20 @@ export class AgentViewModel {
         // them up via the blockAtom subscription. Before this, the title
         // was the literal string "Agent" regardless of which agent ran.
         // See SPEC_AGENT_PANE_FOLLOWUPS item #8.
+        // Compared by value: a meta write that leaves the harness and the model alone builds no new icon, and a
+        // model switched in place changes the badge.
+        const iconInput = createMemo(
+            () => paneIconInput(this.blockAtom()?.meta, this.agentDefinitions()),
+            null,
+            { equals: samePaneIconInput }
+        );
         this.viewIcon = (): string | IconButtonDecl => {
+            // The harness (main icon) and the model answering (badge), from the pane's meta. An agent definition
+            // may store an alias (e.g. "kimi-cli") for its provider, and the quick-launch path writes `agentId`
+            // as the provider key: paneIconInput resolves both.
+            const shown = iconInput();
+            if (shown) return buildAgentPaneIcon(shown);
             const meta = this.blockAtom()?.meta;
-            const provider = meta?.["agentProvider"];
-            if (typeof provider === "string" && provider.length > 0) {
-                // Agent definitions may store an alias (e.g. "kimi-cli") rather
-                // than the canonical provider key ProviderLogo matches on.
-                return buildAgentPaneIcon(resolveProviderAlias(provider));
-            }
-            // Quick-launch path (`launchAgent`) writes `agentId` as the
-            // provider key — show the brand logo for that path too.
-            const agentId = meta?.["agentId"];
-            if (typeof agentId === "string" && PROVIDERS[agentId]) {
-                return buildAgentPaneIcon(agentId);
-            }
             const icon = meta?.["agentIcon"];
             if (typeof icon === "string" && icon.length > 0) return icon;
             return "sparkles";

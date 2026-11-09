@@ -36,6 +36,7 @@ import { BtwOverlay } from "./components/BtwOverlay";
 import { createMessagesPanelControls, MessagesPanelContext } from "./messages/messages-state";
 import { MessagesPanel } from "./messages/MessagesPanel";
 import { openOrFocusHistoryTab } from "./open-history-tab";
+import { countImages } from "./components/runtime-dropup-routes";
 import { AgentTopBand } from "./top-band/AgentTopBand";
 import { ShutdownOverlay } from "./shutdown/ShutdownOverlay";
 import { isForcedRow } from "./virtualization/verbosity";
@@ -261,6 +262,7 @@ function AgentViewBottom({ v }: { v: AgentViewParts }): JSX.Element {
                 logOpen={paneModel.state.detailsOpen}
                 onToggleLog={found.shell.withShellFocus(() => paneModel.dispatchPane({ type: "DetailsToggle" }, "user"))}
                 contextTokens={context.reading()?.tokens ?? null}
+                conversationImages={() => countImages(paneModel.document())}
                 contextWindow={context.reading()?.window ?? undefined}
                 contextNote={context.note()}
                 autoCompact={context.autoCompact()}

@@ -79,7 +79,7 @@
 138 crates/cef/src/memory_heartbeat.rs::start
 143 crates/cef/src/reducer/mod.rs::HostCommand::fmt
 120 crates/cef/src/reducer/mod.rs::update
-299 crates/cef/src/sidecar.rs::spawn_backend
+265 crates/cef/src/sidecar.rs::spawn_backend
 134 crates/cef/src/srv_ipc.rs::connect_to_srv
 130 crates/cef/src/state/mod.rs::log_host_event
 467 crates/cef/src/ui_tasks/drag.rs::Win32BeginMoveTask::Task::execute
@@ -119,7 +119,7 @@
 105 crates/launcher/src/splash_mac.rs::Splash::run_until_dismissed
 233 crates/launcher/src/splash_mac.rs::build_window
 108 crates/launcher/src/splash_mac.rs::flatten_rows
-272 crates/launcher/src/srv_spawner.rs::spawn_srv_once
+238 crates/launcher/src/srv_spawner.rs::spawn_srv_once
 858 crates/launcher/src/supervisor/unix.rs::run_unix
 1290 crates/launcher/src/supervisor/windows.rs::run_windows
 161 crates/launcher/src/tray/windows.rs::run
@@ -387,7 +387,7 @@
 326 frontend/app/view/agent/components/shell-highlight/tokenize.ts::Scanner::scanListInner
 189 frontend/app/view/agent/failure/failure-accessory.ts::failureToRow
 168 frontend/app/view/agent/failure/useAccountBinding.ts::useAccountBinding
-238 frontend/app/view/agent/flows/launch-flow.ts::runLaunchFlow
+227 frontend/app/view/agent/flows/launch-flow.ts::runLaunchFlow
 220 frontend/app/view/agent/flows/run-provider-login.ts::runProviderLogin
 136 frontend/app/view/agent/history/HistoryNavigator.tsx::HistoryNavigator
 106 frontend/app/view/agent/hooks/useAgentDecisions.ts::useAgentDecisions

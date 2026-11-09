@@ -4,6 +4,8 @@
 // Sidecar spawning and management for the CEF host.
 // Ported from src-tauri/src/sidecar/ using std::process instead of tauri-plugin-shell.
 
+use agentmux_common::srv_binary;
+use agentmux_common::srv_estart_wait::{wait_for_estart, EstartChannels, EstartWait};
 #[cfg(windows)]
 use agentmux_common::win32::NoWindow;
 use std::io::BufRead;
@@ -398,12 +400,12 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
     // Parse ESTART from stderr. A second channel carries AGENTMUXSRV-MIGRATING
     // pings so the async ESTART waiter can extend its deadline when migrations are
     // running (same pattern as crates/launcher/src/srv_spawner.rs).
-    let (tx, mut rx) = tokio::sync::mpsc::channel::<BackendSpawnResult>(1);
-    let (migration_tx, mut migration_rx) = tokio::sync::mpsc::channel::<()>(4);
+    let (tx, rx) = tokio::sync::mpsc::channel::<BackendSpawnResult>(1);
+    let (migration_tx, migration_rx) = tokio::sync::mpsc::channel::<()>(4);
     // Third channel: a fatal migration failure. srv reports it on stderr and
     // exits 1 without ESTART (SPEC_MIGRATION_SYSTEM_HARDENING Phase 1); the
     // waiter fails immediately with the reason instead of after the timeout.
-    let (failure_tx, mut failure_rx) = tokio::sync::mpsc::channel::<String>(1);
+    let (failure_tx, failure_rx) = tokio::sync::mpsc::channel::<String>(1);
     let state_for_monitor = state.clone();
 
     std::thread::spawn(move || {
@@ -480,52 +482,18 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
         );
     });
 
-    // Wait for ESTART. On receiving AGENTMUXSRV-MIGRATING, extend the deadline
-    // from 30s to 30 minutes to accommodate large-dataset migrations. A shorter
-    // cap risks killing srv mid-migration: 0011_shared_store_backfill's skip-guards
-    // check for non-empty shared tables, so a partial copy followed by a kill would
-    // cause rows to be permanently stranded on the next retry.
-    let normal_timeout = std::time::Duration::from_secs(30);
-    let migration_timeout = std::time::Duration::from_secs(1800);
-    let mut deadline = tokio::time::Instant::now() + normal_timeout;
-    let sleep = tokio::time::sleep_until(deadline);
-    tokio::pin!(sleep);
-
-    let migration_failed = |reason: String| format!("agentmux-srv database migration failed: {}", reason);
-    let recv: Result<Option<BackendSpawnResult>, String> = loop {
-        tokio::select! {
-            // `biased;` — failure arm first. The stderr thread sends the
-            // reason then exits (srv exits 1 right after the line), dropping
-            // all senders before this select! is next polled; unbiased,
-            // `rx.recv()` → None could win over the buffered reason and
-            // degrade to the generic "channel closed" error (reagent P1,
-            // post-merge on #3043). Same fix as srv_spawner.rs, which also
-            // re-checks the failure channel after the loop — mirrored below.
-            biased;
-            Some(reason) = failure_rx.recv() => break Err(migration_failed(reason)),
-            result = rx.recv() => break Ok(result),
-            _ = &mut sleep => break Err("Timeout waiting for agentmux-srv to start (30s)".to_string()),
-            Some(()) = migration_rx.recv() => {
-                let new_deadline = tokio::time::Instant::now() + migration_timeout;
-                if new_deadline > deadline {
-                    deadline = new_deadline;
-                    sleep.as_mut().reset(deadline);
-                    tracing::info!("spawn_backend: migration in progress — ESTART deadline extended to 30 minutes");
-                }
-            }
-        }
+    let mut channels = EstartChannels { ready: rx, migrating: migration_rx, failed: failure_rx, needs_prepare: None };
+    let result = match wait_for_estart(&mut channels, || {
+        tracing::info!("spawn_backend: migration in progress — ESTART deadline extended to 30 minutes")
+    })
+    .await
+    {
+        EstartWait::Ready(Some(result)) => result,
+        EstartWait::Ready(None) => return Err("agentmux-srv channel closed before sending endpoints".to_string()),
+        EstartWait::MigrationFailed(reason) => return Err(format!("agentmux-srv database migration failed: {}", reason)),
+        EstartWait::NeedsPrepare(reason) => return Err(format!("agentmux-srv's data needs preparing: {}", reason)),
+        EstartWait::Timeout => return Err("Timeout waiting for agentmux-srv to start (30s)".to_string()),
     };
-    // Second guard for the same race: if ESTART's channel closed but a
-    // failure reason is already buffered, the reason is the real outcome.
-    let recv = match recv {
-        Ok(None) => match failure_rx.try_recv() {
-            Ok(reason) => Err(migration_failed(reason)),
-            Err(_) => Ok(None),
-        },
-        other => other,
-    };
-    let result = recv?
-        .ok_or_else(|| "agentmux-srv channel closed before sending endpoints".to_string())?;
 
     tracing::info!(
         "Backend successfully started: ws={} web={} version={} instance={}",
@@ -553,55 +521,21 @@ fn resolve_backend_binary(
     let exe_path = std::env::current_exe()
         .map_err(|e| format!("Failed to get current exe: {}", e))?;
     let exe_dir = exe_path.parent().unwrap();
-    let version = env!("CARGO_PKG_VERSION");
+    let version = srv_binary::VERSION;
 
     tracing::info!("resolve_backend_binary: exe_dir={:?}, version={}", exe_dir, version);
 
-    let (os_name, arch) = if cfg!(target_os = "macos") {
-        ("darwin", if cfg!(target_arch = "aarch64") { "arm64" } else { "x64" })
-    } else if cfg!(target_os = "linux") {
-        ("linux", if cfg!(target_arch = "aarch64") { "arm64" } else { "x64" })
-    } else {
-        ("windows", if cfg!(target_arch = "aarch64") { "arm64" } else { "x64" })
-    };
-
-    // 1. Versioned binary in same directory as CEF host (portable layout)
-    //    e.g. runtime/agentmux-srv-0.33.37-windows.x64.exe
-    let versioned = exe_dir.join(format!(
-        "{}-{}-{}.{}{}", backend_name, version, os_name, arch, exe_suffix
-    ));
-    if versioned.exists() {
-        tracing::info!("Using versioned {} at: {:?}", backend_name, versioned);
-        return Ok(versioned);
-    }
-
-    // 2. Plain binary in same directory (dev mode — cargo build output)
-    //    e.g. target/release/agentmux-srv.exe
-    let plain = exe_dir.join(format!("{}{}", backend_name, exe_suffix));
-    if plain.exists() {
-        tracing::info!("Using dev-mode {} at: {:?}", backend_name, plain);
-        return Ok(plain);
-    }
-
-    // 3. Workspace dist/bin/ (for `task dev` / `task cef:run`)
+    // The host's own folder (portable layout, or a cargo build's output), then the workspace dist/bin/
+    // (`task dev` / `task cef:run`).
     let dist_bin = exe_dir.parent()
         .and_then(|p| p.parent())
         .map(|ws| ws.join("dist").join("bin"));
-
-    if let Some(ref dist_bin) = dist_bin {
-        let dist_versioned = dist_bin.join(format!(
-            "{}-{}-{}.{}{}", backend_name, version, os_name, arch, exe_suffix
-        ));
-        if dist_versioned.exists() {
-            tracing::info!("Using dist {} at: {:?}", backend_name, dist_versioned);
-            return Ok(dist_versioned);
-        }
-
-        let dist_plain = dist_bin.join(format!("{}{}", backend_name, exe_suffix));
-        if dist_plain.exists() {
-            tracing::info!("Using dist {} at: {:?}", backend_name, dist_plain);
-            return Ok(dist_plain);
-        }
+    let mut dirs: Vec<&std::path::Path> = vec![exe_dir];
+    dirs.extend(dist_bin.as_deref());
+    let candidates = srv_binary::candidates(&dirs, backend_name, exe_suffix);
+    if let Some(found) = candidates.iter().find(|p| p.exists()) {
+        tracing::info!("Using {} at: {:?}", backend_name, found);
+        return Ok(found.clone());
     }
 
     // Diagnostic: list exe_dir contents
@@ -628,7 +562,7 @@ fn resolve_backend_binary(
          \x20 2. {:?} (plain, dev mode)\n\
          \x20 3. {}\n\
          Relevant files in exe_dir: [{}]",
-        backend_name, version, exe_dir, versioned, plain, dist_info, dir_listing
+        backend_name, version, exe_dir, candidates[0], candidates[1], dist_info, dir_listing
     ))
 }
 

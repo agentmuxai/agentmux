@@ -25,6 +25,8 @@ import opencodeSvg from "@lobehub/icons-static-svg/icons/opencode.svg?raw";
 import gooseSvg from "@lobehub/icons-static-svg/icons/goose.svg?raw";
 import grokSvg from "@lobehub/icons-static-svg/icons/grok.svg?raw";
 import deepseekColorSvg from "@lobehub/icons-static-svg/icons/deepseek-color.svg?raw";
+import qwenColorSvg from "@lobehub/icons-static-svg/icons/qwen-color.svg?raw";
+import zhipuColorSvg from "@lobehub/icons-static-svg/icons/zhipu-color.svg?raw";
 import plandexUrl from "@/app/element/icons/plandex.png?url";
 import piUrl from "@/app/element/icons/pi.svg?url";
 import aiderUrl from "@/app/element/icons/aider.svg?url";
@@ -41,6 +43,15 @@ import { uniquifySvgIds } from "@/util/svg-ids";
 const MUX_CODE_MARK = markSvg
     .replace("viewBox=\"0 0 512 512\"", "viewBox=\"64 64 384 384\"")
     .replace("<svg ", '<svg width="1em" height="1em" ');
+
+// Company marks: DeepSeek's (also the mark of its harness) and the makers of the models a route serves, which the
+// pane header's model badge shows.
+const MAKER_MARKS = new Map<string, string>([
+    ["dsh", deepseekColorSvg],
+    ["deepseek", deepseekColorSvg],
+    ["qwen", qwenColorSvg],
+    ["zhipu", zhipuColorSvg],
+]);
 
 export interface ProviderLogoProps {
     provider: string;
@@ -75,8 +86,8 @@ export const ProviderLogo = (props: ProviderLogoProps): JSX.Element => {
         if (p === "opencode") return { html: opencodeSvg };
         if (p === "goose") return { html: gooseSvg };
         if (p === "grok") return { html: grokSvg };
-        // DeepSeek's company mark: the harness has none of its own in the set.
-        if (p === "dsh") return { html: deepseekColorSvg };
+        const mark = MAKER_MARKS.get(p);
+        if (mark) return { html: mark };
         // Plandex only: Pi (pi-coding-agent) is a different project, and
         // showing Plandex's mark on it named the wrong product.
         if (p === "plandex") return { png: plandexUrl };

@@ -93,7 +93,7 @@ The user attached 1 image.
         }) as any;
         expect(node.type).toBe("user_message");
         expect(node.message).toBe("why is this red?");
-        expect(node.attachments).toEqual([{ id, name: "err.png" }]);
+        expect(node.attachments).toEqual([{ id, name: "err.png", image: true }]);
     });
 
     test("a plain message has no attachments field", () => {
@@ -558,7 +558,7 @@ describe("jekt marker detection", () => {
         const node = parser.parseStreamEvent({ type: "user_message", message: withFiles("1", `look at this\n${list}`) });
         const jekt = node as import("../../agent-model/types").JektMessageNode;
         expect(jekt.message).toBe("look at this");
-        expect(jekt.attachments).toEqual([{ id: sha, name: "shot.png" }]);
+        expect(jekt.attachments).toEqual([{ id: sha, name: "shot.png", image: true }]);
     });
 
     test("a list without FILES= in the marker is just text", () => {
@@ -857,7 +857,7 @@ describe("swarm broadcast header", () => {
             message: `${header()}\nlook\n\n<attached_images>\nThe user attached 1 image.\n1. a.png — /s/${id}.v1-e2000.send.png\n</attached_images>`,
         }) as any;
         expect(node.message).toBe("look");
-        expect(node.attachments).toEqual([{ id, name: "a.png" }]);
+        expect(node.attachments).toEqual([{ id, name: "a.png", image: true }]);
         expect(node.broadcast).toBeDefined();
     });
 
