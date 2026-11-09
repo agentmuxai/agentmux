@@ -33,7 +33,7 @@ pub(super) const ALWAYS: &[&str] = &[
     "POST /agentmux/work/:id/accept", "POST /agentmux/work/:id/ask", "POST /agentmux/work/:id/complete",
     "POST /agentmux/work/:id/heartbeat", "POST /agentmux/work/:id/hold", "POST /agentmux/work/:id/release",
     "POST /agentmux/work/:id/send_back", "POST /agentmux/work/:id/submit", "POST /agentmux/work/:id/unhold",
-    "POST /agentmux/work/:id/update", "POST /agentmux/work/act", "POST /agentmux/work/claim",
+    "POST /agentmux/work/:id/update", "POST /agentmux/work/act", "POST /agentmux/work/boards", "POST /agentmux/work/claim",
     "POST /agentmux/work/media", "POST /api/bus/broadcast", "POST /api/bus/inject", "POST /api/bus/messages/delete",
     "POST /api/bus/register", "POST /api/bus/send", "POST /api/messaging/discord/send",
     "POST /api/messaging/slack/send", "POST /api/messaging/telegram/send", "POST /api/messaging/whatsapp/send",

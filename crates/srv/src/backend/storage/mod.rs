@@ -64,6 +64,7 @@ pub mod viewer_devices;
 pub mod agent_input_history;
 pub mod widget_storage;
 pub mod work_board;
+pub mod work_boards;
 pub mod work_claims;
 pub mod google_grants;
 pub mod work_deps;

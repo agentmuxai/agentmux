@@ -6,7 +6,18 @@
 use super::*;
 
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    // A bare number with a board named is that board's: `work#12`.
+    let scoped_args;
+    let arguments = match scoped(name, arguments) {
+        Some(a) => {
+            scoped_args = a;
+            &scoped_args
+        }
+        None => arguments,
+    };
     match name {
+        "WorkBoards" | "WorkBoardCreate" | "WorkBoardEdit" | "WorkBoardArchive" | "WorkBoardUnarchive" | "WorkBoardDefault"
+        | "WorkBoardDelete" | "WorkBoardCancelDelete" => run_work_boards(name, arguments, cx).await,
         "WorkEnqueue" => run_work_enqueue(arguments, cx).await,
         "WorkClaim" => run_work_claim(arguments, cx).await,
         "WorkUpdate" | "WorkAsk" | "WorkSubmit" => run_work_update(name, arguments, cx).await,
@@ -77,6 +88,7 @@ async fn run_work_enqueue(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String>
         "after": arguments.get("after").filter(|a| a.is_array()).cloned().unwrap_or(Value::Array(vec![])),
         "first": arguments.get("first").and_then(|v| v.as_str()),
         "ui_change": arguments.get("ui_change").and_then(|v| v.as_bool()),
+        "board": arguments.get("board").and_then(|v| v.as_str()),
     });
     let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&body).send().await
         .map_err(|e| anyhow::anyhow!("work enqueue request failed: {e}"))?;
@@ -92,8 +104,9 @@ async fn run_work_enqueue(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String>
     let wait = v.get("note").and_then(|n| n.as_str()).map(|n| format!(" Note: {n}")).unwrap_or_default();
     if let Some(build) = v.get("build_num").and_then(|n| n.as_i64()) {
         let whose = if for_me { "your backlog" } else { "the queue" };
+        let build = v.get("build_ref").and_then(|r| r.as_str()).map(str::to_string).unwrap_or_else(|| format!("#{build}"));
         return Ok(format!(
-            "Filed {name} (the spec) and #{build} (the build, which starts after it) in {whose}: {title}. \
+            "Filed {name} (the spec) and {build} (the build, which starts after it) in {whose}: {title}. \
              Tell the operator both numbers. Hand the spec's path in with Tasks update (links.doc); \
              complete the spec when it is approved, and the build's agent is told it can start.{wait}"
         ));
@@ -132,6 +145,7 @@ async fn run_work_claim(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
         // row on this block rather than deriving one from the name.
         "block_id": block_id,
         "kind": arguments.get("kind").and_then(|v| v.as_str()),
+        "board": arguments.get("board").and_then(|v| v.as_str()),
         "lease_ms": arguments.get("lease_ms").and_then(|v| v.as_i64()).filter(|&n| n > 0),
         // Group membership is resolved server-side-of-this-call by the
         // caller in the general design; the MCP path has no cheap way
@@ -166,8 +180,9 @@ async fn run_work_claim(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     // one straight back rather than start on work nobody asked for.
     if let Some(n) = named {
         let num = v.get("num").and_then(|x| x.as_i64()).map(|x| x.to_string());
-        if id != n && num.as_deref() != Some(n) {
-            let release = format!("{}/agentmux/work/{}/release", local_url.trim_end_matches('/'), id);
+        let task_ref = v.get("ref").and_then(|x| x.as_str());
+        if id != n && num.as_deref() != Some(n) && task_ref != Some(n) && task_ref.map(|r| r.trim_start_matches('#')) != Some(n) {
+            let release = format!("{}/agentmux/work/{}/release", local_url.trim_end_matches('/'), path_seg(id));
             let _ = client
                 .post(&release)
                 .header(AUTH_KEY_HEADER, auth_key)
@@ -208,7 +223,10 @@ fn claimed_text(v: &Value, item: &Value, id: &str, attempt: i64) -> String {
     } else {
         String::new()
     };
-    let short = v.get("num").and_then(|n| n.as_i64()).map(|n| n.to_string()).unwrap_or_else(|| id.to_string());
+    let short = match v.get("ref").and_then(|r| r.as_str()) {
+        Some(r) => r.trim_start_matches('#').to_string(),
+        None => v.get("num").and_then(|n| n.as_i64()).map(|n| n.to_string()).unwrap_or_else(|| id.to_string()),
+    };
     let after = starts_after_text(v.get("after"));
     format!(
         "Claimed {name} (attempt {attempt}): pass id={short} and attempt={attempt} to \
@@ -242,7 +260,7 @@ async fn run_work_update(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
         (_, Some(paths)) => send_files::upload_task_media(&paths, arguments.get("captions"), cx).await?,
         (_, None) => Vec::new(),
     };
-    let url = format!("{}/agentmux/work/{}/{}", local_url.trim_end_matches('/'), id, segment);
+    let url = format!("{}/agentmux/work/{}/{}", local_url.trim_end_matches('/'), path_seg(id), segment);
     let body = serde_json::json!({
         "agent_id": self_id,
         "attempt": attempt,
@@ -324,7 +342,7 @@ async fn run_work_heartbeat(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> 
         ),
     };
 
-    let url = format!("{}/agentmux/work/{}/{}", local_url.trim_end_matches('/'), id, segment);
+    let url = format!("{}/agentmux/work/{}/{}", local_url.trim_end_matches('/'), path_seg(id), segment);
     let body = serde_json::json!({
         "agent_id": self_id,
         "attempt": attempt,
@@ -383,7 +401,7 @@ async fn run_work_hold(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Resul
         .ok_or_else(|| anyhow::anyhow!("AGENTMUX_AGENT_ID is not set"))?;
     let id = task_id(arguments)?;
     let segment = if name == "WorkHold" { "hold" } else { "unhold" };
-    let url = format!("{}/agentmux/work/{}/{}", local_url.trim_end_matches('/'), id, segment);
+    let url = format!("{}/agentmux/work/{}/{}", local_url.trim_end_matches('/'), path_seg(id), segment);
     let body = serde_json::json!({
         "agent_id": self_id,
         "attempt": arguments.get("attempt").and_then(|v| v.as_i64()),
@@ -411,7 +429,7 @@ async fn run_work_accept(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
     let id = task_id(arguments)?;
     let accept = name == "WorkAccept";
     let segment = if accept { "accept" } else { "send_back" };
-    let url = format!("{}/agentmux/work/{}/{}", local_url.trim_end_matches('/'), id, segment);
+    let url = format!("{}/agentmux/work/{}/{}", local_url.trim_end_matches('/'), path_seg(id), segment);
     let key = if accept { "note" } else { "reason" };
     let text = arguments.get(key).and_then(|v| v.as_str()).unwrap_or("");
     if !accept && text.trim().is_empty() {
@@ -460,7 +478,7 @@ async fn run_work_edit(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Resul
     };
     let text = arguments.get("text").or_else(|| arguments.get("reason")).and_then(|v| v.as_str()).unwrap_or("");
     let mut body = serde_json::json!({ "agent_id": self_id, "action": action, "id": id, "text": text });
-    for key in ["title", "payload", "kind", "priority", "repo", "review", "after", "hold", "rank", "confirm", "followers"] {
+    for key in ["title", "payload", "kind", "priority", "repo", "review", "after", "hold", "rank", "confirm", "followers", "board", "drop_deps"] {
         if let Some(v) = arguments.get(key).filter(|v| !v.is_null()) {
             body[key] = v.clone();
         }
@@ -492,9 +510,17 @@ async fn run_work_edit(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Resul
     }
     // A take back or reassign of a task with a branch or PR asks first: say what it asked.
     if let Some(ask) = v.get("confirm").and_then(|c| c.as_str()) {
-        return Ok(format!("Task #{id} not changed. {ask} Call again with confirm: true to go ahead."));
+        return Ok(format!("Task {} not changed. {ask} Call again with confirm: true to go ahead.", shown_id(id)));
     }
-    Ok(format!("Task #{id}: {action} done."))
+    if action == "move" && v.get("ref").is_some() {
+        let to = v.get("ref").and_then(|r| r.as_str()).unwrap_or("");
+        let from = v.get("from").and_then(|r| r.as_str()).unwrap_or("");
+        let dropped = v.get("dropped_dependencies").and_then(|d| d.as_array()).filter(|d| !d.is_empty());
+        let dropped = dropped.map(|d| format!(" Its dependencies on {} were removed.", d.iter().filter_map(|x| x.as_str()).collect::<Vec<_>>().join(", "))).unwrap_or_default();
+        let cleared = if v.get("target_cleared").and_then(|c| c.as_bool()) == Some(true) { " Its target agent is not on that board's agent list, so it is for anyone now." } else { "" };
+        return Ok(format!("Task {from} moved to {to} (the original is closed pointing to it).{dropped}{cleared}"));
+    }
+    Ok(format!("Task {}: {action} done.", shown_id(id)))
 }
 
 async fn run_work_list(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
@@ -503,14 +529,19 @@ async fn run_work_list(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     let url = format!("{}/agentmux/work", local_url.trim_end_matches('/'));
     let state = arguments.get("state").and_then(|v| v.as_str()).unwrap_or("");
     let limit = arguments.get("limit").and_then(|v| v.as_i64()).unwrap_or(50);
+    let board = arguments.get("board").and_then(|v| v.as_str()).map(str::trim).unwrap_or("");
     // Built via reqwest's own query serializer, NOT string
     // concatenation (reagent P2 on PR #2902): `state` is a free-form
     // string in this tool's schema, not a validated enum, so a value
     // containing `&`, `#`, or `%` would otherwise corrupt the query
     // rather than being sent as the literal the caller intended.
+    let mut query = vec![("state", state.to_string()), ("limit", limit.to_string())];
+    if !board.is_empty() {
+        query.push(("board", board.to_string()));
+    }
     let resp = client
         .get(&url)
-        .query(&[("state", state), ("limit", &limit.to_string())])
+        .query(&query)
         .header(AUTH_KEY_HEADER, auth_key)
         .send()
         .await
@@ -522,12 +553,15 @@ async fn run_work_list(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     }
     let v: Value = serde_json::from_str(&text).unwrap_or(serde_json::json!({}));
     let items = v.get("items").and_then(|x| x.as_array()).cloned().unwrap_or_default();
+    let note = v.get("note").and_then(|n| n.as_str()).map(|n| format!("\n{n}")).unwrap_or_default();
     if items.is_empty() {
-        return Ok("Queue is empty.".to_string());
+        let on = v.get("board").and_then(|b| b.as_str()).filter(|b| *b != "all").map(|b| format!(" on board {b}")).unwrap_or_default();
+        return Ok(format!("Queue is empty{on}.{note}"));
     }
-    let mut out = format!("{} work item(s):\n", items.len());
+    let mut out = format!("{} work item(s){}:\n", items.len(), v.get("board").and_then(|b| b.as_str()).map(|b| format!(" on {b}")).unwrap_or_default());
     for it in &items {
-        let id = it.get("num").and_then(|x| x.as_i64()).map(|n| format!("#{n}"))
+        let id = it.get("ref").and_then(|x| x.as_str()).map(str::to_string)
+            .or_else(|| it.get("num").and_then(|x| x.as_i64()).map(|n| format!("#{n}")))
             .unwrap_or_else(|| it.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string());
         let st = it.get("state").and_then(|x| x.as_str()).unwrap_or("");
         let title = it.get("title").and_then(|x| x.as_str()).unwrap_or("");
@@ -544,7 +578,85 @@ async fn run_work_list(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
             out.push_str(&format!("      -> {result}\n"));
         }
     }
+    out.push_str(note.trim_start_matches('\n'));
     Ok(out)
+}
+
+/// The boards, and managing them (`GET` and `POST /agentmux/work/boards`).
+async fn run_work_boards(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
+    require_agent_env(local_url, auth_key, block_id)?;
+    let url = format!("{}/agentmux/work/boards", local_url.trim_end_matches('/'));
+    let action = match name {
+        "WorkBoardCreate" => "create",
+        "WorkBoardEdit" => "edit",
+        "WorkBoardArchive" => "archive",
+        "WorkBoardUnarchive" => "unarchive",
+        "WorkBoardDefault" => "default",
+        "WorkBoardDelete" => "delete",
+        "WorkBoardCancelDelete" => "cancel_delete",
+        _ => "",
+    };
+    let resp = if action.is_empty() {
+        let archived = arguments.get("archived").and_then(|v| v.as_bool()).unwrap_or(false);
+        client.get(&url).query(&[("archived", archived.to_string())]).header(AUTH_KEY_HEADER, auth_key).send().await
+    } else {
+        let mut body = serde_json::json!({ "action": action });
+        for key in ["board", "name", "slug", "readable", "agents"] {
+            if let Some(v) = arguments.get(key).filter(|v| !v.is_null()) {
+                body[key] = v.clone();
+            }
+        }
+        client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&body).send().await
+    }
+    .map_err(|e| anyhow::anyhow!("boards request failed: {e}"))?;
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    let v: Value = serde_json::from_str(&text).unwrap_or(serde_json::json!({}));
+    if !status.is_success() {
+        let why = v.get("error").and_then(|e| e.as_str()).map(str::to_string).unwrap_or(text);
+        anyhow::bail!("Tasks {}: {why}", if action.is_empty() { "boards".to_string() } else { format!("board_{action}") });
+    }
+    Ok(boards_text(action, &v))
+}
+
+/// What the boards answers say: the list, or the board a change left.
+fn boards_text(action: &str, v: &Value) -> String {
+    let line = |b: &Value| {
+        let s = |k: &str| b.get(k).and_then(|x| x.as_str()).unwrap_or("");
+        let n = |k: &str| b.get(k).and_then(|x| x.as_i64()).unwrap_or(0);
+        let flag = |k: &str| b.get(k).and_then(|x| x.as_bool()).unwrap_or(false);
+        let agents = b.get("agents").and_then(|a| a.as_array()).filter(|a| !a.is_empty()).map(|a| {
+            format!(", agents: {}", a.iter().filter_map(|x| x.as_str()).collect::<Vec<_>>().join(", "))
+        });
+        format!(
+            "{} ({}){}{}{}: {} open of {} task(s){}",
+            s("slug"),
+            s("name"),
+            if flag("default") { " [default]" } else { "" },
+            if flag("archived") { " [archived]" } else { "" },
+            if b.get("pending_delete_at").is_some_and(|p| !p.is_null()) { " [being deleted]" } else { "" },
+            n("open"),
+            n("total"),
+            agents.unwrap_or_default(),
+        )
+    };
+    match action {
+        "" => {
+            let boards = v.get("boards").and_then(|b| b.as_array()).cloned().unwrap_or_default();
+            let mut out = format!("{} board(s) you see:\n", boards.len());
+            for b in &boards {
+                out.push_str(&format!("  {}\n", line(b)));
+            }
+            out
+        }
+        "delete" if v.get("deleted").and_then(|d| d.as_bool()) == Some(true) => "Board deleted.".to_string(),
+        "delete" => v.get("note").and_then(|n| n.as_str()).unwrap_or("The board will be deleted shortly.").to_string(),
+        _ => match v.get("board") {
+            Some(b) => format!("Done. {}", line(b)),
+            None => "Done.".to_string(),
+        },
+    }
 }
 
 /// The task an action names, as it goes in a URL path: its id, or its number
@@ -580,14 +692,54 @@ fn task_id(arguments: &Value) -> Result<&str> {
         .map(|s| s.trim().trim_start_matches('#'))
         .filter(|s| !s.is_empty())
         .ok_or_else(|| anyhow::anyhow!("missing required parameter: id"))?;
-    if !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
-        anyhow::bail!("id {id:?} is neither a task number (12) nor a task id");
+    // `work#12`: a task number on a board; the slug is letters, digits and hyphens.
+    let plain = |s: &str| s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    let ok = match id.split_once('#') {
+        Some((slug, num)) => !slug.is_empty() && plain(slug) && !num.is_empty() && num.chars().all(|c| c.is_ascii_digit()),
+        None => plain(id),
+    };
+    if !ok {
+        anyhow::bail!("id {id:?} is neither a task number (12 or work#12) nor a task id");
     }
     Ok(id)
 }
 
+/// A task ref as one URL path segment (a raw `#` would start the URL's fragment).
+fn path_seg(id: &str) -> String {
+    id.replace('#', "%23")
+}
+
+/// How an answer writes the id it was given: `#12`, or `work#12` as it is.
+fn shown_id(id: &str) -> String {
+    if id.contains('#') { id.to_string() } else { format!("#{id}") }
+}
+
+/// The arguments with a bare task number made a ref on the board they name (`board: "work"`, `id: "12"` is
+/// `work#12`), when the board is given as a slug. Not for `move` (its board is where the task goes), nor
+/// where the board is not about the id.
+fn scoped(name: &str, arguments: &Value) -> Option<Value> {
+    if matches!(name, "WorkMove" | "WorkEnqueue" | "WorkList") || name.starts_with("WorkBoard") {
+        return None;
+    }
+    let board = arguments.get("board").and_then(|b| b.as_str()).map(str::trim)?;
+    let id = arguments.get("id").and_then(|i| i.as_str()).map(|i| i.trim().trim_start_matches('#'))?;
+    let slug = !board.is_empty()
+        && board.len() <= 24
+        && !board.starts_with('-')
+        && board.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+    if !slug || id.is_empty() || !id.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    let mut a = arguments.clone();
+    a["id"] = Value::String(format!("{board}#{id}"));
+    Some(a)
+}
+
 /// A task as an answer names it: `#12` when srv gave it a number, else its id.
 fn task_name(v: &Value, id: &str) -> String {
+    if let Some(r) = v.get("ref").and_then(|r| r.as_str()) {
+        return format!("task {r}");
+    }
     match v.get("num").and_then(|n| n.as_i64()) {
         Some(n) => format!("task #{n}"),
         None => format!("work item {id}"),
@@ -619,12 +771,13 @@ fn starts_after_text(after: Option<&Value>) -> String {
 
 /// The answer to `accept` or `send_back`: what was done, and what it set off.
 fn decision_text(id: &str, accept: bool, v: &Value) -> String {
+    let id = shown_id(id);
     if !accept {
-        return format!("Task #{id} was sent back. Its holder has the reason.");
+        return format!("Task {id} was sent back. Its holder has the reason.");
     }
     match v.get("unlocked").and_then(|n| n.as_u64()).unwrap_or(0) {
-        0 => format!("Task #{id} is accepted."),
-        n => format!("Task #{id} is accepted. {n} waiting build{} told it can start.", if n == 1 { " was" } else { "s were" }),
+        0 => format!("Task {id} is accepted."),
+        n => format!("Task {id} is accepted. {n} waiting build{} told it can start.", if n == 1 { " was" } else { "s were" }),
     }
 }
 
@@ -700,6 +853,31 @@ mod tests {
         assert_eq!(task_id(&serde_json::json!({"id": "7f3a-b2"})).unwrap(), "7f3a-b2");
         assert!(task_id(&serde_json::json!({"id": "12/../x"})).is_err());
         assert!(task_id(&serde_json::json!({"id": "#"})).is_err());
+    }
+
+    #[test]
+    fn a_task_ref_names_a_task_on_a_board() {
+        assert_eq!(task_id(&serde_json::json!({"id": "work#12"})).unwrap(), "work#12");
+        assert_eq!(task_id(&serde_json::json!({"id": "client-x#3"})).unwrap(), "client-x#3");
+        assert!(task_id(&serde_json::json!({"id": "work#"})).is_err());
+        assert!(task_id(&serde_json::json!({"id": "work#1#2"})).is_err());
+        assert!(task_id(&serde_json::json!({"id": "#work#1"})).is_ok(), "a leading # is the hash of a number, then a ref");
+        assert_eq!(path_seg("work#12"), "work%2312");
+        assert_eq!(shown_id("12"), "#12");
+        assert_eq!(shown_id("work#12"), "work#12");
+    }
+
+    #[test]
+    fn a_bare_number_with_a_board_slug_becomes_that_boards_ref() {
+        let a = serde_json::json!({ "id": "12", "board": "work", "reason": "r" });
+        assert_eq!(scoped("WorkHold", &a).unwrap()["id"], "work#12");
+        assert_eq!(scoped("WorkHold", &serde_json::json!({ "id": "#12", "board": "work" })).unwrap()["id"], "work#12");
+        // Not where the board is a destination, not for a name that is not a slug, not for a ref or an id.
+        assert!(scoped("WorkMove", &a).is_none());
+        assert!(scoped("WorkHold", &serde_json::json!({ "id": "12", "board": "Client X" })).is_none());
+        assert!(scoped("WorkHold", &serde_json::json!({ "id": "work#12", "board": "work" })).is_none());
+        assert!(scoped("WorkHold", &serde_json::json!({ "id": "12" })).is_none());
+        assert!(scoped("WorkBoardEdit", &serde_json::json!({ "board": "work", "id": "12" })).is_none());
     }
 
     #[test]

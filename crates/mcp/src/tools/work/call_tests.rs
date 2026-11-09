@@ -145,6 +145,86 @@ fn cases() -> Vec<Case> {
             &["1 work item(s):", "#3  claimed [x]  Tt", "-> R"],
         ),
         c("WorkList", json!({}), json!({ "items": [] }), "/agentmux/work?state=&limit=50", json!({}), &["Queue is empty."]),
+        // Several boards.
+        c(
+            "WorkEnqueue",
+            json!({ "title": "T", "payload": "P", "board": "work" }),
+            json!({ "id": "abc", "num": 5, "ref": "work#5", "board": "work" }),
+            "/agentmux/work",
+            json!({ "board": "work" }),
+            &["Enqueued task work#5: T"],
+        ),
+        c(
+            "WorkClaim",
+            json!({ "board": "work" }),
+            json!({ "claimed": true, "attempt": 1, "num": 5, "ref": "work#5", "item": { "id": "abc", "title": "T", "payload": "P" } }),
+            "/agentmux/work/claim",
+            json!({ "board": "work" }),
+            &["Claimed task work#5", "pass id=work#5 and attempt=1"],
+        ),
+        c(
+            "WorkList",
+            json!({ "board": "all" }),
+            json!({ "board": "all", "note": "2 more for you on Work", "items": [{ "num": 3, "ref": "work#3", "state": "open", "title": "Tt" }] }),
+            "/agentmux/work?state=&limit=50&board=all",
+            json!({}),
+            &["1 work item(s) on all:", "work#3  open  Tt", "2 more for you on Work"],
+        ),
+        c(
+            "WorkList",
+            json!({}),
+            json!({ "board": "main", "note": "3 more for you on Work and Client X", "items": [] }),
+            "/agentmux/work?state=&limit=50",
+            json!({}),
+            &["Queue is empty on board main.", "3 more for you on Work and Client X"],
+        ),
+        // A ref goes in the path with its # encoded; a bare number with a board named is that board's.
+        c("WorkHold", json!({ "id": "work#7", "reason": "wait" }), json!({}), "/agentmux/work/work%237/hold", json!({ "reason": "wait" }), &[]),
+        c("WorkHold", json!({ "id": "7", "board": "work", "reason": "wait" }), json!({}), "/agentmux/work/work%237/hold", json!({ "reason": "wait" }), &[]),
+        c(
+            "WorkEdit",
+            json!({ "id": "work#7", "title": "N" }),
+            json!({}),
+            "/agentmux/work/act",
+            json!({ "action": "edit", "id": "work#7", "title": "N" }),
+            &["Task work#7: edit done."],
+        ),
+        // `move` with a board moves the task there; the board is where it goes, not the id's.
+        c(
+            "WorkMove",
+            json!({ "id": "7", "board": "work", "drop_deps": true }),
+            json!({ "ok": true, "ref": "work#2", "from": "#7", "dropped_dependencies": ["#9"] }),
+            "/agentmux/work/act",
+            json!({ "action": "move", "id": "7", "board": "work", "drop_deps": true }),
+            &["Task #7 moved to work#2", "dependencies on #9 were removed"],
+        ),
+        c(
+            "WorkBoards",
+            json!({}),
+            json!({ "default": "main", "boards": [
+                { "slug": "main", "name": "Main", "default": true, "archived": false, "open": 3, "total": 12, "agents": [] },
+                { "slug": "team", "name": "Team", "default": false, "archived": false, "open": 1, "total": 1, "agents": ["agentx"] }
+            ] }),
+            "/agentmux/work/boards?archived=false",
+            json!({}),
+            &["2 board(s) you see:", "main (Main) [default]: 3 open of 12 task(s)", "team (Team): 1 open of 1 task(s), agents: agentx"],
+        ),
+        c(
+            "WorkBoardCreate",
+            json!({ "name": "Work", "agents": ["agentx"] }),
+            json!({ "ok": true, "board": { "slug": "work", "name": "Work", "default": false, "archived": false, "open": 0, "total": 0, "agents": ["agentx"] } }),
+            "/agentmux/work/boards",
+            json!({ "action": "create", "name": "Work", "agents": ["agentx"] }),
+            &["Done. work (Work): 0 open of 0 task(s), agents: agentx"],
+        ),
+        c(
+            "WorkBoardDelete",
+            json!({ "board": "old" }),
+            json!({ "ok": true, "deleted": false, "note": "board old and its 2 task(s) will be deleted in 15 seconds" }),
+            "/agentmux/work/boards",
+            json!({ "action": "delete", "board": "old" }),
+            &["will be deleted in 15 seconds"],
+        ),
     ]
 }
 

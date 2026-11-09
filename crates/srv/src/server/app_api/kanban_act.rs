@@ -25,6 +25,11 @@ pub(super) enum TakeBack {
     Done(Value),
 }
 
+/// How a task is written (`#12`, or `work#12` off the default board).
+fn task_ref(state: &AppState, id: &str) -> Option<String> {
+    crate::server::work_tasks::ref_of(state, id).map(|(r, _)| r)
+}
+
 impl Act<'_> {
     /// The task the request names.
     pub(super) fn task(&self) -> Result<BoardTask, String> {
@@ -58,12 +63,15 @@ impl Act<'_> {
                     std::slice::from_ref(&spec_id),
                     now,
                 )?;
-                json!({ "ok": true, "id": spec_id, "num": spec_num, "build_id": build_id, "build_num": build_num })
+                json!({
+                    "ok": true, "id": spec_id, "num": spec_num, "ref": task_ref(state, &spec_id),
+                    "build_id": build_id, "build_num": build_num, "build_ref": task_ref(state, &build_id),
+                })
             }
             None => {
                 let kind = req.kind.clone().unwrap_or_default();
                 let (id, num) = create_one(state, regs, req, title, payload, &kind, &after, now)?;
-                json!({ "ok": true, "id": id, "num": num })
+                json!({ "ok": true, "id": id, "num": num, "ref": task_ref(state, &id) })
             }
         })
     }
@@ -102,8 +110,33 @@ impl Act<'_> {
         Ok(json!({ "ok": true }))
     }
 
+    /// Move the task to another board (`board`): a new task there with the next number, the original
+    /// closed with a pointer. An agent sees only the boards its agent list has it on.
+    fn move_to_board(&self, to: &str) -> Result<Value, String> {
+        let Act { state, req, actor, now, .. } = *self;
+        let t = self.task()?;
+        let who = (!actor.is_operator).then_some((actor.name.as_str(), ""));
+        crate::server::work_tasks::pick_board(state, Some(to), who, true)?;
+        if let Some((from, _)) = state.work_store.work_task_board(&t.item.id).map_err(|e| e.to_string())? {
+            if who.is_some_and(|(a, u)| !from.visible_to(a, u)) {
+                return Err("no such task".into());
+            }
+        }
+        let moved = state
+            .work_store
+            .work_task_move(&t.item.id, to, &actor.name, req.drop_deps == Some(true), now)
+            .map_err(|e| e.to_string())?;
+        Ok(json!({
+            "ok": true, "id": moved.id, "ref": moved.to_ref, "from": moved.from_ref, "board": moved.board, "num": moved.num,
+            "dropped_dependencies": moved.dropped_deps, "target_cleared": moved.target_cleared,
+        }))
+    }
+
     pub(super) fn move_task(&self) -> Result<Value, String> {
         let Act { state, req, actor, regs, now, .. } = *self;
+        if let Some(to) = req.board.as_deref().map(str::trim).filter(|b| !b.is_empty()) {
+            return self.move_to_board(to);
+        }
         let store = &state.work_store;
         let t = self.task()?;
         let id = &t.item.id;
@@ -320,6 +353,7 @@ impl Act<'_> {
         };
         store.work_queue_enqueue(&item).map_err(|e| e.to_string())?;
         let card = NewCard {
+            board: String::new(),
             repo: facts.as_ref().and_then(|f| f.repo_key()).unwrap_or_default(),
             branch: facts.as_ref().and_then(|f| f.branch.clone()).unwrap_or_default(),
             review_required: true,

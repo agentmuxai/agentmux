@@ -259,7 +259,21 @@ impl Store {
         lease_ms: i64,
         min_priority: Option<i64>,
     ) -> Result<Option<WorkItem>, StoreError> {
+        self.work_queue_claim_in(filter, None, now_ms, lease_ms, min_priority)
+    }
+
+    /// [`Self::work_queue_claim_with`] on one board (by id), or on every board the claimer sees
+    /// when `None`: not an archived one, and not one whose agent list leaves the claimer out.
+    pub fn work_queue_claim_in(
+        &self,
+        filter: &ClaimFilter,
+        board_id: Option<&str>,
+        now_ms: i64,
+        lease_ms: i64,
+        min_priority: Option<i64>,
+    ) -> Result<Option<WorkItem>, StoreError> {
         let conn = self.conn().lock().unwrap();
+        super::work_boards::number_unboarded(&conn)?;
         let quota = min_priority.map(|n| format!("AND {}", floor_exempt(n))).unwrap_or_default();
 
         // Group eligibility is an IN-list built from caller-resolved groups.
@@ -273,6 +287,7 @@ impl Store {
                 .collect();
             format!(" OR target_group IN ({})", marks.join(","))
         };
+        let board_mark = format!("?{}", 6 + filter.groups.len());
 
         let sql = format!(
             "UPDATE db_work_queue
@@ -307,6 +322,11 @@ impl Store {
                        AND (target_group = ''{groups})
                        AND (?4 = '' OR kind = ?4)
                        {quota}
+                       -- Several boards: not an archived board, nor one whose
+                       -- agent list leaves this claimer out; and only the
+                       -- board the claim names, when it names one.
+                       AND {visible}
+                       AND ({board} = '' OR c.board_id = {board})
                        -- Kanban §6.15: not while a task it starts after
                        -- is unfinished.
                        AND NOT {waits}
@@ -316,7 +336,9 @@ impl Store {
                      -- the backlog (a card's rank, in created_at units), else
                      -- the order they were filed.
                      ORDER BY (CASE WHEN target_agent_uid <> '' OR target_agent <> '' THEN 0 ELSE 1 END),
-                              priority DESC, COALESCE(c.rank, created_at) ASC
+                              priority DESC,
+                              (CASE WHEN c.board_id = (SELECT id FROM db_boards WHERE is_default = 1 LIMIT 1) THEN 0 ELSE 1 END),
+                              COALESCE(c.rank, created_at) ASC
                      LIMIT 1
               )
               RETURNING {cols}",
@@ -324,6 +346,8 @@ impl Store {
             open = work_state::OPEN,
             groups = group_placeholders,
             quota = quota,
+            visible = super::work_boards::card_visible_to_agent("?1", "?5"),
+            board = board_mark,
             waits = super::work_deps::WAITS_ON_UNFINISHED,
             cols = COLS,
         );
@@ -345,6 +369,8 @@ impl Store {
         for g in &filter.groups {
             binds.push(g);
         }
+        let board = board_id.unwrap_or("");
+        binds.push(&board);
 
         let item = stmt
             .query_row(binds.as_slice(), row_to_item)

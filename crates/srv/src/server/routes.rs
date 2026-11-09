@@ -309,6 +309,7 @@ fn agent_routes(state: &AppState) -> Router<AppState> {
         .route("/agentmux/cron/runs/:run_id/report", post(cron::handle_cron_report))
         .route("/agentmux/work", post(work_queue::handle_work_enqueue))
         .route("/agentmux/work/claim", post(bulletin_handlers::handle_work_claim_with_bulletins))
+        .route("/agentmux/work/boards", post(work_boards::handle_boards_act))
         .route("/agentmux/work/:id/heartbeat", post(work_queue::handle_work_heartbeat))
         .route("/agentmux/work/:id/complete", post(work_queue::handle_work_complete))
         .route("/agentmux/work/:id/release", post(work_queue::handle_work_release))
@@ -862,6 +863,7 @@ fn forward_messaging_and_work_routes() -> Router<AppState> {
             get(agent_self_keys::handle_agent_self_keys),
         )
         .route("/agentmux/work", get(work_queue::handle_work_list))
+        .route("/agentmux/work/boards", get(work_boards::handle_boards_list))
         // Kanban: an agent's decision on a task in review (signed, not a token).
         .route("/agentmux/work/:id/accept", post(work_delegate::handle_work_accept))
         .route("/agentmux/work/:id/send_back", post(work_delegate::handle_work_send_back))
