@@ -58,6 +58,7 @@ import type { LoginStep } from "@/app/store/launch-phase-state/types";
 
 import type { LogFn } from "../../../agent-model/types";
 import { ensureProviderAuthDir } from "../agent-launch-env";
+import { markAgentOpen } from "../open-trace";
 import type { BlockControllerRuntimeStatus } from "@/types/rpc/BlockControllerRuntimeStatus";
 import { isContainerAgentMode } from "@/util/runtime-kind";
 export type { LogFn };
@@ -354,6 +355,7 @@ async function startLaunchFlow(c: ControllerCtx) {
     const { opts, dispatch } = c;
     const started = dispatch({ type: "MountStarted" }).some((e) => e.type === "mount-started");
     if (!started) return;
+    markAgentOpen(opts.blockId, "launch_start");
     const prov = opts.provider();
     // "success" means the controller registered, not that the login was
     // confirmed: the auth check may have failed transiently and been
@@ -361,7 +363,11 @@ async function startLaunchFlow(c: ControllerCtx) {
     let authConfirmed = false;
     let result: MountResult;
     try {
-        const authEnv = await buildAuthEnv(prov);
+        // Not awaited here: the launch flow runs its other lookups beside it.
+        const authEnv = buildAuthEnv(prov).then((env) => {
+            markAgentOpen(opts.blockId, "auth_env");
+            return env;
+        });
         result = await runLaunchFlow({
             blockId: opts.blockId,
             provider: prov,
