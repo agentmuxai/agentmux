@@ -56,7 +56,7 @@ pub const ALWAYS: &[&str] = &[
     "skill.catalog.unbind",
     "skill.catalog.unbind_from_bundle", "skill.catalog.upsert", "skill.catalog.upsert_for_bundle", "skill.delete",
     "skill.unbind", "skill.upsert", "subprocessspawn", "supervisor.set-mode", "toolchain.install_system_tool",
-    "toolchain.prune", "tooldecision", "tower.forget", "tower.pair", "unlinkagentidentity", "updateagent",
+    "toolchain.prune", "tooldecision", "tower.forget", "tower.pair", "undoagentendpoint", "unlinkagentidentity", "updateagent",
     "updateagentinstance", "updateagentskill", "upsertdrone", "upsertidentityaccount", "upsertmemory",
     "upsertsystemmemory", "viewer.pair-start", "viewer.revoke", "widget.api", "widgets.call",
     "widgets.catalog.install", "widgets.install", "widgets.rescan", "widgets.session", "widgets.setenabled",
