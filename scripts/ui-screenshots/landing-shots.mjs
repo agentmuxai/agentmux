@@ -171,7 +171,10 @@ function landingWorkspace() {
         prep: async (session) => {
             const problem = demoPathProblem(DEMO);
             if (problem) throw new Error(`DEMO_DIR: ${problem}`);
-            await session.setViewport({ width: 1280, height: 800, scale: 1 });
+            // 1440 x 900: five columns at 1280 left the agent picker ~318 px, too narrow to show its agents' names.
+            await session.setViewport({ width: 1440, height: 900, scale: 1 });
+            // The terminal's CPU and memory readout would sit over the end of the typed command in a pane this narrow.
+            await session.evaluate(`RpcApi.SetConfigCommand(TabRpcClient, { "term:showstatsbadge": false })`);
             await session.pressKey("Escape");
             tab.tabId = null;
             await openNewTab(session, tab);
@@ -219,6 +222,7 @@ function landingWorkspace() {
             tab.tabId = null;
             terminal = null;
             files = null;
+            await session.evaluate(`RpcApi.SetConfigCommand(TabRpcClient, { "term:showstatsbadge": true })`);
             await session.clearViewport();
         },
     };
