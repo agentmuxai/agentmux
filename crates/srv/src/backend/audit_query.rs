@@ -275,6 +275,10 @@ fn from_audit_in(prefix: char, at: u64, e: &AuditLogEntry, ctx: &Ctx) -> AuditEn
         cost: None,
         links: AuditLinks::default(),
         provenance: provenance::of(e),
+        prompt: e.prompt.clone(),
+        answer: e.answer.clone(),
+        level: e.level.clone(),
+        standing: e.standing,
     };
     match e.event_kind.as_str() {
         "register" | "unregister" | "swept" => AuditEntry {

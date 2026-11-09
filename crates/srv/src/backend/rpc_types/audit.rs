@@ -195,6 +195,22 @@ pub struct AuditEntry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub provenance: Option<AuditProvenance>,
+    /// The dialog's text as read, for a sensitive-op row (`os_prompt_answer`). Absent otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub prompt: Option<String>,
+    /// The exact value given. Never a password or other secret value (the guard refuses those).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub answer: Option<String>,
+    /// The op's risk level: `low`, `medium` or `high`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub level: Option<String>,
+    /// `true` when a remembered grant allowed it, with no fresh countdown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub standing: Option<bool>,
 }
 
 /// The cost of every entry a filter matches (all of them, not a page).
