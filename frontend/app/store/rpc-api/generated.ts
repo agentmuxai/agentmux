@@ -269,6 +269,7 @@ import type { CommandSkillUpsertData } from "@/types/rpc/CommandSkillUpsertData"
 import type { CommandSubprocessSpawnData } from "@/types/rpc/CommandSubprocessSpawnData";
 import type { CommandSupervisorSetModeData } from "@/types/rpc/CommandSupervisorSetModeData";
 import type { CommandToolDecisionData } from "@/types/rpc/CommandToolDecisionData";
+import type { CommandUndoAgentEndpointData } from "@/types/rpc/CommandUndoAgentEndpointData";
 import type { CommandUnlinkAgentIdentityData } from "@/types/rpc/CommandUnlinkAgentIdentityData";
 import type { CommandUpdateAgentDefinitionData } from "@/types/rpc/CommandUpdateAgentDefinitionData";
 import type { CommandUpdateAgentInstanceData } from "@/types/rpc/CommandUpdateAgentInstanceData";
@@ -549,6 +550,7 @@ import type { TowerPeerInfo } from "@/types/rpc/TowerPeerInfo";
 import type { TowerPeersResult } from "@/types/rpc/TowerPeersResult";
 import type { TowerSampleReq } from "@/types/rpc/TowerSampleReq";
 import type { TowerSnapshot } from "@/types/rpc/TowerSnapshot";
+import type { UndoAgentEndpointResult } from "@/types/rpc/UndoAgentEndpointResult";
 import type { UninstallReq } from "@/types/rpc/UninstallReq";
 import type { UninstallResult } from "@/types/rpc/UninstallResult";
 import type { UnlinkAgentIdentityResult } from "@/types/rpc/UnlinkAgentIdentityResult";
@@ -2779,6 +2781,14 @@ export const GeneratedApi = {
   // command "unwatchmediadir"
   UnwatchMediaDirCommand(client: RpcClient, data: UnwatchMediaDirReq, opts?: RpcOpts): Promise<void> {
     return client.rpcCall("unwatchmediadir", data, opts);
+  },
+  // command "undoagentendpoint"
+  UndoAgentEndpointCommand(
+    client: RpcClient,
+    data: CommandUndoAgentEndpointData,
+    opts?: RpcOpts
+  ): Promise<UndoAgentEndpointResult> {
+    return client.rpcCall("undoagentendpoint", data, opts);
   },
   // command "updateagent"
   UpdateAgentDefinitionCommand(

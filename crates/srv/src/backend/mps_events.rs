@@ -236,6 +236,9 @@ events! {
     BlockReveal: crate::backend::notify::router::EVENT_BLOCK_REVEAL => crate::backend::notify::router::BlockRevealEvent,
     /// An agent opened a pane; the person's active window offers to show it (`http_open`).
     PaneAgentOpened: "pane:agentopened" => PaneAgentOpenedEvent,
+    /// An agent's model server was changed through `Agents env_set`, or the change was undone: the agent's pane and
+    /// My Agents say so, with an Undo for a short while (`backend::endpoint_notice`).
+    AgentEndpointNotice: "agent:endpoint-notice" => crate::backend::endpoint_notice::EndpointNoticeEvent,
 
     // Published by a client through the HTTP relay, which checks the payload (`client_events!`).
     /// A line of a Bash call's output, its exit, its pid or which call it is (`agentmux-bashwrap`).

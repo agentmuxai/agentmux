@@ -13,6 +13,7 @@ pub mod agent_color;
 pub mod palette;
 pub mod account_availability;
 pub mod agent_env;
+pub mod endpoint_notice;
 pub mod agent_runtime_state;
 pub mod install_events;
 pub mod signin_link_event;

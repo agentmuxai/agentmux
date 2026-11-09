@@ -93,9 +93,10 @@ async fn reserved_credential_and_secret_looking_input_is_refused_and_nothing_is_
         json!({ "GH_CONFIG_DIR": "/x" }),
         json!({ "CLAUDE_CONFIG_DIR": "/x" }),
         json!({ "CODEX_HOME": "/x" }),
-        json!({ "ANTHROPIC_API_KEY": "x" }),
         json!({ "OPENAI_API_KEY": "x" }),
-        json!({ "ANTHROPIC_BASE_URL": "http://x" }),
+        json!({ "OPENAI_BASE_URL": "http://x" }),
+        json!({ "ANTHROPIC_API_KEY": "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789" }),
+        json!({ "ANTHROPIC_BASE_URL": "http://user:pw@x" }),
         json!({ "SERVICE_TOKEN": "x" }),
         json!({ "FORCE_COLOR": "ghp_abcdefghijklmnopqrstuvwxyz0123456789" }),
         json!({ "bad name": "x" }),
@@ -272,4 +273,119 @@ async fn a_set_that_says_what_to_set_is_required_and_lines_exclude_the_edits() {
         let (status, out) = call(&state, Some(&me), body).await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{out}");
     }
+}
+
+const SERVER: &str = "http://198.51.100.7:11434";
+
+fn audited_by_name(target: &AgentDefinition, source: &str) -> Vec<crate::backend::reactive::AuditLogEntry> {
+    get_global_handler()
+        .get_audit_log(usize::MAX)
+        .into_iter()
+        .filter(|e| e.source_agent.as_deref() == Some(source) && e.target_agent == target.slug)
+        .collect()
+}
+
+fn point(agent: &AgentDefinition) -> Value {
+    json!({ "action": "set", "agent": agent.id, "set": {
+        "ANTHROPIC_BASE_URL": SERVER,
+        "ANTHROPIC_AUTH_TOKEN": "ollama",
+        "ANTHROPIC_MODEL": "flint:40b-a2b",
+        "API_TIMEOUT_MS": "600000",
+    } })
+}
+
+#[tokio::test]
+async fn an_agent_points_another_at_a_model_server_with_a_notice_and_no_key_in_the_answer() {
+    let state = test_state();
+    let (me, lolly) = (agent(&state, "host", false), agent(&state, "host", false));
+    let (status, body) = call(&state, Some(&me), point(&lolly)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["notice"]["undo_for_ms"], 30_000, "{body}");
+    assert!(body["note"].as_str().unwrap().contains("Undo"), "{body}");
+    assert_eq!(body["changed"]["added"]["ANTHROPIC_BASE_URL"], SERVER, "{body}");
+    // The key is not echoed, in the change or in the text shown back.
+    assert!(!body.to_string().contains("ollama"), "{body}");
+    assert!(body["lines"].as_str().unwrap().contains("ANTHROPIC_AUTH_TOKEN=[hidden]"), "{body}");
+    assert!(stored(&state, &lolly).unwrap().contains("ANTHROPIC_BASE_URL=http://198.51.100.7:11434"));
+}
+
+#[tokio::test]
+async fn the_audit_row_names_the_acting_agent_and_the_endpoint_change_without_a_key() {
+    let state = test_state();
+    let (me, lolly) = (agent(&state, "host", false), agent(&state, "host", false));
+    let (_, body) = call(&state, Some(&me), point(&lolly)).await;
+    let entries = audited(&me, &lolly);
+    let entry = entries.iter().find(|e| e.request_id == body["audit_id"].as_str().unwrap()).expect("an audit entry");
+    assert!(entry.success);
+    let reason = entry.reason.as_deref().unwrap();
+    assert!(reason.contains(&me.id) && reason.contains(&lolly.id) && reason.contains("[model endpoint]"), "{reason}");
+    assert!(reason.contains("ANTHROPIC_AUTH_TOKEN"), "the name is recorded: {reason}");
+    assert!(!reason.contains("ollama"), "the key stays out of the audit log: {reason}");
+}
+
+#[tokio::test]
+async fn a_secret_shaped_key_or_an_unusable_vault_reference_is_refused_and_nothing_is_written() {
+    let state = test_state();
+    let (me, lolly) = (agent(&state, "host", false), agent(&state, "host", false));
+    for token in ["sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789", "vault:no-such-entry"] {
+        let (status, body) = call(
+            &state,
+            Some(&me),
+            json!({ "action": "set", "agent": lolly.id, "set": { "ANTHROPIC_BASE_URL": SERVER, "ANTHROPIC_AUTH_TOKEN": token } }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{token}: {body}");
+        assert!(!body.to_string().contains(token), "a refusal does not repeat the value: {body}");
+    }
+    assert_eq!(stored(&state, &lolly), None);
+    assert!(audited(&me, &lolly).iter().any(|e| !e.success), "the refusals are recorded");
+}
+
+#[tokio::test]
+async fn an_agent_on_a_model_route_or_in_a_container_keeps_its_own_server() {
+    let state = test_state();
+    let (me, routed, container) = (agent(&state, "host", false), agent(&state, "host", false), agent(&state, "container", false));
+    state
+        .mstore
+        .agent_content_set(&AgentContent {
+            agent_id: routed.id.clone(),
+            content_type: crate::backend::model_gateway::launch::CONTENT_TYPE.into(),
+            content: json!({ "route": "openrouter", "model": "any" }).to_string(),
+            updated_at: 1,
+        })
+        .unwrap();
+    for target in [&routed, &container] {
+        let (status, body) = call(&state, Some(&me), point(target)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        assert_eq!(stored(&state, target), None);
+    }
+    // Other variables on the same agents still go through.
+    let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": container.id, "set": { "TZ": "1" } })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+}
+
+#[tokio::test]
+async fn the_change_is_undone_inside_the_window_and_only_once() {
+    let state = test_state();
+    let (me, lolly) = (agent(&state, "host", false), agent(&state, "host", false));
+    call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "set": { "TZ": "1" } })).await;
+    let (_, body) = call(&state, Some(&me), point(&lolly)).await;
+    let notice = body["notice"]["id"].as_str().unwrap().to_string();
+    undo_endpoint(&state, &notice, "you").unwrap();
+    assert_eq!(stored(&state, &lolly).as_deref(), Some("TZ=1\n"));
+    assert!(undo_endpoint(&state, &notice, "you").is_err(), "an undone change cannot be undone again");
+    let entries = audited_by_name(&lolly, "you");
+    assert!(entries.iter().any(|e| e.success && e.reason.as_deref().is_some_and(|r| r.contains("undid"))), "{entries:?}");
+}
+
+#[tokio::test]
+async fn an_undo_after_the_environment_was_edited_again_is_refused() {
+    let state = test_state();
+    let (me, lolly) = (agent(&state, "host", false), agent(&state, "host", false));
+    let (_, body) = call(&state, Some(&me), point(&lolly)).await;
+    let notice = body["notice"]["id"].as_str().unwrap().to_string();
+    call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "set": { "TZ": "1" } })).await;
+    let why = undo_endpoint(&state, &notice, "you").unwrap_err();
+    assert!(why.contains("changed again"), "{why}");
+    assert!(stored(&state, &lolly).unwrap().contains("ANTHROPIC_BASE_URL"), "the later edit and the endpoint both stand");
 }

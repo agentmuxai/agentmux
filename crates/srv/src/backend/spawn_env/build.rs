@@ -48,16 +48,8 @@ pub(crate) async fn build_persistent_spawn_env(
     // Kept for the identity-M0 slug lookup below; `mstore` itself moves into
     // the identity injector.
     let mstore_for_slug = mstore.clone();
-    let mut env_vars = crate::identity::token_warmup::inject_after_warmup(
-        mstore,
-        id_store.clone(),
-        identity_store.clone(),
-        broker,
-        block_id.to_string(),
-        base_env_vars,
-    )
-    .await?;
-    super::run_account::note_run_account(&mstore_for_slug, &identity_store, block_id);
+    let mut env_vars =
+        super::endpoint::inject_identity(mstore, id_store, identity_store, broker, block_meta, block_id, base_env_vars).await?;
 
     // No MuxBus account login here: agents reach the cloud through the srv,
     // which uses its own stored login (see `account_login_guard`).

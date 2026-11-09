@@ -1587,6 +1587,10 @@
             "method": "UnwatchMediaDirCommand"
         },
         {
+            "command": "undoagentendpoint",
+            "method": "UndoAgentEndpointCommand"
+        },
+        {
             "command": "updateagent",
             "method": "UpdateAgentDefinitionCommand",
             "optionalFields": [

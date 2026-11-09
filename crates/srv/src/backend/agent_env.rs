@@ -10,8 +10,11 @@
 //! The operator edits the blob freely in My Agents. An agent edits it through
 //! `Agents env_set` (`server/app_api/agent_env.rs`), and these rules bound
 //! what it may write: no name AgentMux itself sets or that points a provider
-//! at another home, endpoint or credential, no value that looks like a secret,
-//! and a small size. Everything an agent reads back has the values of
+//! at another home or credential, no value that looks like a secret, and a
+//! small size. The one exception is the model endpoint of a Claude Code agent
+//! ([`ENDPOINT_NAMES`]): an agent may point another agent at a server of its own
+//! (a local model), on the terms in [`endpoint_value_problem`] and with the
+//! notice and undo window of `server/app_api/agent_env.rs`. Everything an agent reads back has the values of
 //! names it may not set hidden.
 
 use std::collections::BTreeMap;
@@ -76,6 +79,97 @@ const RESERVED_SHELL_NAMES: &[&str] = &["ENV", "BASH_ENV", "PROMPT_COMMAND", "IF
 /// home of its own.
 const RESERVED_SUFFIXES: &[&str] =
     &["_BASE_URL", "_API_BASE", "_URL", "_ENDPOINT", "_HOST", "_PROXY", "_CA_BUNDLE", "_CA_CERTS", "_CERT_FILE", "_CONFIG_DIR", "_HOME", "_COMMAND", "_HELPER", "_PREFIX", "_EDITOR", "_PAGER"];
+
+/// The Claude Code variables that choose the server and the model an agent talks to. An agent
+/// may set them, which is why they are spelled out here and not left to the reserved patterns
+/// (`_BASE_URL`, a credential ending): the notice, the undo window and the launch rules of
+/// `spawn_env/endpoint.rs` stand where the refusal stood. Other harnesses have no verified endpoint
+/// variable (`providers`: `base_url_env_var` is Claude's alone), so nothing else is in the list.
+pub const ENDPOINT_NAMES: &[&str] = &[
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_API_KEY",
+    "API_TIMEOUT_MS",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    "CLAUDE_CODE_SUBAGENT_MODEL",
+];
+
+/// Whether `name` is one of [`ENDPOINT_NAMES`] (any case).
+pub fn is_endpoint_name(name: &str) -> bool {
+    ENDPOINT_NAMES.iter().any(|n| n.eq_ignore_ascii_case(name))
+}
+
+/// The prefix of a value that names a Vault entry: `vault:<entry id>`.
+pub const VAULT_REF_PREFIX: &str = "vault:";
+
+/// The Vault entry id in `value`, if it is a reference to one.
+pub fn vault_ref(value: &str) -> Option<&str> {
+    value.strip_prefix(VAULT_REF_PREFIX).map(str::trim).filter(|id| !id.is_empty())
+}
+
+/// The longest placeholder an agent may write for a key: "ollama" is six.
+const MAX_PLACEHOLDER: usize = 24;
+
+fn is_placeholder(value: &str) -> bool {
+    !value.is_empty() && value.len() <= MAX_PLACEHOLDER && value.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+}
+
+/// Why `value` is not acceptable for the endpoint variable `name`, if it is not. A server address is
+/// plain `http(s)://host[:port][/path]`: no sign-in in it, no query, no fragment. A key is a reference
+/// to a Vault entry (`vault:<id>`; whether the agent may use that entry is the caller's to check) or
+/// a short placeholder for a server that ignores it (Ollama's "ollama"); a real secret is never
+/// stored in the environment, where every agent that can read it would see it. The rest are
+/// numbers and model names.
+pub fn endpoint_value_problem(name: &str, value: &str) -> Option<String> {
+    let upper = name.to_ascii_uppercase();
+    match upper.as_str() {
+        "ANTHROPIC_BASE_URL" => endpoint_url_problem(value).map(|why| format!("{name}: {why}")),
+        "ANTHROPIC_AUTH_TOKEN" | "ANTHROPIC_API_KEY" => {
+            if vault_ref(value).is_some() || is_placeholder(value) {
+                None
+            } else if value.starts_with(VAULT_REF_PREFIX) {
+                Some(format!("{name}: vault: needs the entry's id after it"))
+            } else {
+                Some(format!(
+                    "{name}: give vault:<entry id> for a key kept in the Vault, or a short placeholder ({MAX_PLACEHOLDER} letters, digits, - _ . at most) for a server that ignores it; a key is never written here"
+                ))
+            }
+        }
+        "API_TIMEOUT_MS" => (!value.chars().all(|c| c.is_ascii_digit()) || value.is_empty() || value.len() > 9)
+            .then(|| format!("{name}: a number of milliseconds")),
+        _ => (value.trim().is_empty() || value.len() > 200 || value.chars().any(char::is_whitespace))
+            .then(|| format!("{name}: a model name, with no spaces")),
+    }
+}
+
+/// Why `value` is not a server address an agent may point another agent at.
+fn endpoint_url_problem(value: &str) -> Option<String> {
+    let rest = value.strip_prefix("https://").or_else(|| value.strip_prefix("http://"));
+    let Some(rest) = rest else {
+        return Some("an address is http:// or https://, then the host".to_string());
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    if authority.is_empty() || authority.contains('@') {
+        return Some("an address has a host and no sign-in in it (no user:password@)".to_string());
+    }
+    if rest.contains('?') || rest.contains('#') {
+        return Some("an address has no query or fragment".to_string());
+    }
+    if !authority.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']')) {
+        return Some("the host is letters, digits, dots and dashes, with an optional :port".to_string());
+    }
+    None
+}
+
+/// Whether `url` (a `ANTHROPIC_BASE_URL` value) is Anthropic's own API: the one place a person's Claude
+/// sign-in may go. Anything else, a LAN server, a proxy or another vendor, is not.
+pub fn is_anthropic_url(url: &str) -> bool {
+    let rest = url.trim().strip_prefix("https://").unwrap_or("");
+    let host = rest.split(['/', ':']).next().unwrap_or("").to_ascii_lowercase();
+    host == "api.anthropic.com"
+}
 
 /// What an agent may set, each name spelled out: the settings that tune a
 /// provider CLI's context, output, timeouts and telemetry, and a few ordinary
@@ -183,6 +277,9 @@ pub fn name_problem(name: &str) -> Option<String> {
     if upper.starts_with("AGENTMUX_") {
         return Some(format!("{name}: names starting AGENTMUX_ are reserved for AgentMux"));
     }
+    if is_endpoint_name(&upper) {
+        return None;
+    }
     let reserved = RESERVED_NAMES.contains(&upper.as_str())
         || RESERVED_SHELL_NAMES.contains(&upper.as_str())
         || RESERVED_PREFIXES.iter().any(|p| upper.starts_with(p))
@@ -212,6 +309,9 @@ pub fn value_problem(name: &str, value: &str) -> Option<String> {
     }
     if value.chars().any(|c| c.is_control() && c != '\t') {
         return Some(format!("{name}: a value is one line of plain text"));
+    }
+    if is_endpoint_name(name) {
+        return endpoint_value_problem(name, value);
     }
     if looks_like_secret(value) {
         return Some(format!("{name}: the value looks like a secret; values here are plain text, so keep secrets in the Vault"));
@@ -364,6 +464,13 @@ pub struct ValueChange {
 }
 
 impl Change {
+    /// Whether the change adds, changes or removes one of [`ENDPOINT_NAMES`], `ANTHROPIC_MODEL` or
+    /// `ANTHROPIC_SMALL_FAST_MODEL`: where the agent's traffic goes, or what it asks for there.
+    pub fn touches_endpoint(&self) -> bool {
+        let named = |n: &String| is_endpoint_name(n) || n.eq_ignore_ascii_case("ANTHROPIC_MODEL") || n.eq_ignore_ascii_case("ANTHROPIC_SMALL_FAST_MODEL");
+        self.added.keys().chain(self.changed.keys()).chain(self.removed.iter()).any(named)
+    }
+
     pub fn is_empty(&self) -> bool {
         self.added.is_empty() && self.changed.is_empty() && self.removed.is_empty()
     }
@@ -385,7 +492,8 @@ impl Change {
 /// and a secret can sit under a name no pattern recognises (`PGPASSWORD`,
 /// `DB_PASS`), so the name decides, not a guess at what the value is.
 fn shown(name: &str, value: &str) -> String {
-    let readable = ALLOWED_NAMES.contains(&name.to_ascii_uppercase().as_str()) && !is_credential_name(name) && !looks_like_secret(value);
+    let upper = name.to_ascii_uppercase();
+    let readable = (ALLOWED_NAMES.contains(&upper.as_str()) || is_endpoint_name(&upper)) && !is_credential_name(name) && !looks_like_secret(value);
     if readable { value.to_string() } else { HIDDEN.to_string() }
 }
 

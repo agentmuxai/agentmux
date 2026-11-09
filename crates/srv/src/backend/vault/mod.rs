@@ -22,6 +22,7 @@ pub mod kdbx_names;
 pub mod kinds;
 pub mod plain_export;
 pub mod requests;
+pub mod endpoint_key;
 pub mod route_key;
 pub mod scrub;
 pub mod seal;
