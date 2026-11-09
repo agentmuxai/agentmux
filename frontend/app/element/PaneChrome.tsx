@@ -146,6 +146,7 @@ function renderShellHeader(
             getLabel={t.labelOf}
             getTooltipDetail={t.summaryOf}
             getTooltipSeat={tabSeatOf}
+            getTooltipModel={(id) => t.tabInfos().get(id)?.modelLine}
             getIcon={(id) => <PaneTabIconView icon={() => t.tabInfos().get(id)?.icon} badge={() => t.tabInfos().get(id)?.badge} />}
             getColor={(id) => t.tabColors().get(id)}
             useProgress={usePaneTabProgress}

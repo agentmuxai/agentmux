@@ -20,6 +20,8 @@ export interface StripAttachment {
     /** Absent when the image was already gone at send time. */
     id?: string;
     name: string;
+    /** An image, which a text-only model cannot read; any other file reaches it as text or a path. */
+    image?: boolean;
 }
 
 export function AttachmentStrip(props: { attachments: StripAttachment[] }) {

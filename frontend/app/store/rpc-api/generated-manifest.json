@@ -1739,6 +1739,11 @@
             "opts": "{ timeout: 120000, ...opts }"
         },
         {
+            "command": "agent.peer-labels",
+            "method": "AgentPeerLabelsCommand",
+            "send": "{}"
+        },
+        {
             "command": "identity.account.move_agents",
             "method": "IdentityAccountMoveAgentsCommand"
         },

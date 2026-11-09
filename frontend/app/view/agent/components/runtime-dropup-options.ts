@@ -67,6 +67,8 @@ export interface OptionRow {
 export type Row =
     // `note`: why the section's options do not apply, on the header's line.
     | { kind: "header"; section: Section; note?: string }
+    // A heading inside a section: a model route's name, with the billing note that goes with it.
+    | { kind: "group"; section: Section; text: string; note?: string }
     // What the process runs, under the Model rows; `placeholder` until it is known.
     | { kind: "note"; section: Section; text: string; placeholder?: boolean }
     | (OptionRow & { kind: "option" });
@@ -77,4 +79,8 @@ export interface AgentRuntimeDropupProps {
     providerId: string;
     /** The resolved model id on the last main-agent reply, if there has been one. */
     lastReplyModel?: string | null;
+    /** How much the conversation holds now (the harness's last usage report), for the cost of re-reading it on another model. */
+    contextTokens?: number | null;
+    /** How many images the conversation holds now, asked when the panel opens (a text-only model cannot read them). */
+    conversationImages?: () => number;
 }

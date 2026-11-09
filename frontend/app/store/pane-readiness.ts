@@ -62,7 +62,9 @@
  * A caller that genuinely wants a bound opts in with `revealTimeoutMs`. Agent
  * panes do since 2026-10-05 (`usePaneReveal`, 1.5 s): the owner chose an open
  * that shows at once, with "Loading conversation…" over the transcript, over a
- * cover that stayed up for a 17 s history read.
+ * cover that stayed up for a 17 s history read. A bound firing is that choice
+ * working as configured, so its log is a warning naming the gates that were
+ * still pending — the error level stays for the genuinely-stuck warn deadline.
  *
  * The two are INDEPENDENT deadlines on independent timers. Collapsing them into
  * one timer at `Math.min(...)` makes a caller's explicit hard bound silently
@@ -205,9 +207,21 @@ function createDeadlineTimers(
                 revealFired = true;
                 if (phase() !== "assembling") return;
                 const stuck = pending();
-                console.error(
+                // WARN, not error: the bound firing is the behaviour the
+                // caller asked for by setting `revealTimeoutMs`, not a pane
+                // failure. The one real caller (agent panes, `usePaneReveal`,
+                // 1.5 s) hits this on every restart: each restored pane
+                // re-runs its cold launch flow (CLI resolve + auth check)
+                // alongside all the others, and the CLI resolve alone
+                // measured 1.6 s — so the auth gate is routinely still
+                // pending here and reports a moment later, once the pane is
+                // already revealed and the release is a no-op. Logged at
+                // error level, that surfaced every routine restart as ~8
+                // host-log ERRORs (2026-11-08; identical after the 0.60.18
+                // and 0.60.21 upgrades).
+                console.warn(
                     `[pane-readiness] ${opts.label ?? "pane"}: Forcing reveal after ` +
-                        `revealTimeoutMs=${revealTimeoutMs}ms; gate(s) never reported: ` +
+                        `revealTimeoutMs=${revealTimeoutMs}ms; gate(s) still pending: ` +
                         `${stuck.join(", ") || "(none)"}.`
                 );
                 opts.onTimeout?.(stuck);

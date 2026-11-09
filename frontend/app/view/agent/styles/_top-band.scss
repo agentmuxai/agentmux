@@ -12,11 +12,15 @@
         border-bottom: 1px solid var(--border-color);
     }
 
+    // As tall as the find bar's field (its line plus its 3px padding and 1px border on both sides), so the band is
+    // the same height with the readout alone as with the find bar: the conversation does not move when the find
+    // bar opens or closes.
     .agent-top-band-row {
         display: flex;
         align-items: center;
         gap: var(--space-2);
         min-width: 0;
+        min-height: calc(var(--text-sm) * 1.2 + 8px);
     }
 
     .agent-top-band-slot {

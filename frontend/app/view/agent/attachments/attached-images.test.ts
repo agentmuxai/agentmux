@@ -26,15 +26,15 @@ describe("splitAttachedImages", () => {
         const r = splitAttachedImages(msg);
         expect(r.text).toBe("look at these");
         expect(r.attachments).toEqual([
-            { id: A, name: "a.png" },
-            { name: "b.png" },
-            { id: C, name: "shot — 2 — final.png" },
+            { id: A, name: "a.png", image: true },
+            { name: "b.png", image: true },
+            { id: C, name: "shot — 2 — final.png", image: true },
         ]);
     });
 
     it("handles a message that is only images", () => {
         const msg = `<attached_images>\nThe user attached 1 image.\n1. x.png — /p/${A}.v1-e2000.send.png\n</attached_images>`;
-        expect(splitAttachedImages(msg)).toEqual({ text: "", attachments: [{ id: A, name: "x.png" }] });
+        expect(splitAttachedImages(msg)).toEqual({ text: "", attachments: [{ id: A, name: "x.png", image: true }] });
     });
 
     it("reads <attached_files>: notes are dropped, named copies give the id", () => {
@@ -51,7 +51,7 @@ describe("splitAttachedImages", () => {
         const r = splitAttachedImages(msg);
         expect(r.text).toBe("compare");
         expect(r.attachments).toEqual([
-            { id: A, name: "a.png" },
+            { id: A, name: "a.png", image: true },
             { id: C, name: "report [final].pdf" },
             // A bare name ending in brackets reads as a note; only the label suffers.
             { id: A, name: "notes" },

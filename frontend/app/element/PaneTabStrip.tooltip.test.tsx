@@ -120,6 +120,27 @@ describe("PaneTabStrip tooltip detail", () => {
         expect(tip.firstElementChild!.getAttribute("style")).toContain("opacity: 1");
     });
 
+    it("shows the harness and model line of an agent tab, at once, with nothing else to show", async () => {
+        const { container } = render(() => (
+            <PaneTabStrip
+                tabs={TABS}
+                activeId="agent"
+                getId={(t: T) => t.id}
+                getLabel={(t: T) => t.label}
+                getTooltipModel={(t: T) => (t.id === "agent" ? "Claude Code harness running on DeepSeek V4.1 Flash via OpenRouter" : undefined)}
+                onActivate={vi.fn()}
+            />
+        ));
+        fireEvent.mouseEnter(container.querySelectorAll(".pane-tab-tip")[0] as HTMLElement);
+        await frame();
+        const tip = overlay()!;
+        expect(tip.querySelector(".pane-tab-tip-label")!.textContent).toBe("AgentX");
+        expect(tip.querySelector(".pane-tab-tip-seat")!.textContent).toBe(
+            "Claude Code harness running on DeepSeek V4.1 Flash via OpenRouter"
+        );
+        expect(tip.firstElementChild!.getAttribute("style")).toContain("opacity: 1");
+    });
+
     it("follows a summary that changes while the tooltip is open", async () => {
         const [summary, setSummary] = createSignal<string | undefined>("Fixing login");
         const { container } = renderStrip((t) => (t.id === "agent" ? summary() : undefined));

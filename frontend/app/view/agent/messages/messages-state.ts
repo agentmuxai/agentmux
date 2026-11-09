@@ -22,7 +22,7 @@ export interface MessagesState {
     seen: number;
 }
 
-/** On, with the panel collapsed to its bar. */
+/** On, with the panel closed: the pane's header button opens it. */
 export const DEFAULT_MESSAGES_STATE: MessagesState = { enabled: true, open: false, seen: 0 };
 
 /** Meta is free-form JSON: take what is well-formed, default the rest. `open` is never stored. */
@@ -112,6 +112,22 @@ export function showInPanelIfHeld(blockId: string, nodes: readonly DocumentNode[
     if (!panel || !node || !panel.hidden(node)) return false;
     panel.showInPanel(nodeId);
     return true;
+}
+
+const [headerButtons, setHeaderButtons] = createSignal<Record<string, ToggleIconButtonDecl>>({});
+
+/** The panel offers its button to the pane's header (with `null`, takes it back). The button is how the panel opens and closes. */
+export function publishMessagesHeaderButton(blockId: string, decl: ToggleIconButtonDecl | null): void {
+    setHeaderButtons((prev) => {
+        const { [blockId]: _gone, ...rest } = prev;
+        return decl ? { ...rest, [blockId]: decl } : rest;
+    });
+}
+
+/** The header buttons the panel has for a pane: none, or the Messages button. Reactive. */
+export function messagesHeaderButtons(blockId: string): ToggleIconButtonDecl[] {
+    const decl = headerButtons()[blockId];
+    return decl ? [decl] : [];
 }
 
 /** What the conversation's rows need from the panel: provided by the pane's layout, absent outside it. */

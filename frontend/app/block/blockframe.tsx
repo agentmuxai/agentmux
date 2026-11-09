@@ -1132,9 +1132,11 @@ function createNoHeader(props: BlockFrameProps): () => boolean {
 // Never in a drag-preview frame (`statsBadgeShown`).
 function createStatsBadge(props: BlockFrameProps, blockData: Accessor<Block | undefined>): Accessor<boolean> {
     return createMemo(() => {
-        const setting = paneTabCapability(blockData()?.meta?.view, "statsBadgeSetting");
+        const view = blockData()?.meta?.view;
+        const setting = paneTabCapability(view, "statsBadgeSetting");
         const settingOn = setting == null || getSettingsKeyAtom(setting as any)() !== false;
-        return statsBadgeShown(!!props.preview, settingOn);
+        // A pane that draws the readout itself (the agent pane's top band) has none of the frame's.
+        return statsBadgeShown(!!props.preview, settingOn, paneTabCapability(view, "statsBadgeIn") != null);
     });
 }
 

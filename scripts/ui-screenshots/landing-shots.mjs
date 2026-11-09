@@ -141,10 +141,11 @@ function landingTerminals() {
     };
 }
 
-/** A block opened with `pane.open` (the RPC the app's own panes use), waited for until it mounts. */
-async function openPane(session, args) {
+/** A block opened with `pane.open` (the RPC the app's own panes use), waited for until it mounts.
+ *  From a window the RPC needs to know which tab the person acted in: `tabId`. */
+async function openPane(session, tabId, args) {
     const before = new Set(await session.evaluate(BLOCK_IDS));
-    await session.evaluate(`TabRpcClient.rpcCall("pane.open", ${JSON.stringify(args)}, {})`);
+    await session.evaluate(`TabRpcClient.rpcCall("pane.open", ${JSON.stringify({ origin_tab_id: tabId, ...args })}, {})`);
     for (let t = 0; t < 40; t++) {
         const id = (await session.evaluate(BLOCK_IDS)).find((b) => !before.has(b));
         if (id) return id;
@@ -175,8 +176,8 @@ function landingWorkspace() {
             tab.tabId = null;
             await openNewTab(session, tab);
             // The new tab has the default layout; the Files pane and the terminal open as columns beside it.
-            files = await openPane(session, { view: "files", cwd: DEMO });
-            terminal = await openPane(session, { view: "term", cwd: DEMO });
+            files = await openPane(session, tab.tabId, { view: "files", cwd: DEMO });
+            terminal = await openPane(session, tab.tabId, { view: "term", cwd: DEMO });
             let stashed = false;
             for (let t = 0; t < 40 && !stashed; t++) {
                 stashed = await session.evaluate(stashTerminal(terminal));

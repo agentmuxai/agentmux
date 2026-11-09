@@ -4,7 +4,7 @@ BrowserGrantsPowersCommand {"id":"r1","powers":["terminal","terminal_ask"]}
 <div>
   <div class="setting-row agent-site-grants" id="setting-browser.agent_sites">
     <div class="setting-devices-description">
-      "What an agent may do on a site without asking each time, until you revoke it. Every row lets the agent make committing clicks there without asking (a payment still asks). Add Terminal to let it type and run commands in a web terminal there, such as Cloud Shell: nobody checks each line, so Stop, Pause and Take over in the pane are how you stop it, and Revoke here ends it at once. Tick "ask me for each line" instead to be shown every line in the pane, with Run it and Don't run, before it goes in."
+      "What an agent may do on a site without asking each time, until you revoke it. Every row lets the agent make committing clicks there without asking (a payment still asks). Add Terminal to let it type and run commands in a web terminal there, such as Cloud Shell: nobody checks each line, so Stop, Pause and Take over in the pane are how you stop it, and Revoke here ends it at once. Tick "ask me for each line" instead to be shown every line in the pane, with Run it and Don't run, before it goes in. Enter and Space lets it press those keys, each taken as the click it is (a form's default button, a button, a link, a checkbox) and checked like any click."
     <div data-stand="Notice" data-tone="warning">
       <b>
         "One limit of the Terminal power"
@@ -88,7 +88,7 @@ store.set {"grants":{"rows":[{"id":"r9","agent":"naki-2","origins":["https://she
 <div>
   <div class="setting-row agent-site-grants" id="setting-browser.agent_sites">
     <div class="setting-devices-description">
-      "What an agent may do on a site without asking each time, until you revoke it. Every row lets the agent make committing clicks there without asking (a payment still asks). Add Terminal to let it type and run commands in a web terminal there, such as Cloud Shell: nobody checks each line, so Stop, Pause and Take over in the pane are how you stop it, and Revoke here ends it at once. Tick "ask me for each line" instead to be shown every line in the pane, with Run it and Don't run, before it goes in."
+      "What an agent may do on a site without asking each time, until you revoke it. Every row lets the agent make committing clicks there without asking (a payment still asks). Add Terminal to let it type and run commands in a web terminal there, such as Cloud Shell: nobody checks each line, so Stop, Pause and Take over in the pane are how you stop it, and Revoke here ends it at once. Tick "ask me for each line" instead to be shown every line in the pane, with Run it and Don't run, before it goes in. Enter and Space lets it press those keys, each taken as the click it is (a form's default button, a button, a link, a checkbox) and checked like any click."
     <div data-stand="Notice" data-tone="warning">
       <b>
         "One limit of the Terminal power"
@@ -149,7 +149,7 @@ BrowserGrantsPowersCommand {"id":"r9","powers":[]}
 <div>
   <div class="setting-row agent-site-grants" id="setting-browser.agent_sites">
     <div class="setting-devices-description">
-      "What an agent may do on a site without asking each time, until you revoke it. Every row lets the agent make committing clicks there without asking (a payment still asks). Add Terminal to let it type and run commands in a web terminal there, such as Cloud Shell: nobody checks each line, so Stop, Pause and Take over in the pane are how you stop it, and Revoke here ends it at once. Tick "ask me for each line" instead to be shown every line in the pane, with Run it and Don't run, before it goes in."
+      "What an agent may do on a site without asking each time, until you revoke it. Every row lets the agent make committing clicks there without asking (a payment still asks). Add Terminal to let it type and run commands in a web terminal there, such as Cloud Shell: nobody checks each line, so Stop, Pause and Take over in the pane are how you stop it, and Revoke here ends it at once. Tick "ask me for each line" instead to be shown every line in the pane, with Run it and Don't run, before it goes in. Enter and Space lets it press those keys, each taken as the click it is (a form's default button, a button, a link, a checkbox) and checked like any click."
     <div data-stand="Notice" data-tone="warning">
       <b>
         "One limit of the Terminal power"
@@ -213,7 +213,7 @@ BrowserGrantsRevokeCommand {"id":"r9"}
 <div>
   <div class="setting-row agent-site-grants" id="setting-browser.agent_sites">
     <div class="setting-devices-description">
-      "What an agent may do on a site without asking each time, until you revoke it. Every row lets the agent make committing clicks there without asking (a payment still asks). Add Terminal to let it type and run commands in a web terminal there, such as Cloud Shell: nobody checks each line, so Stop, Pause and Take over in the pane are how you stop it, and Revoke here ends it at once. Tick "ask me for each line" instead to be shown every line in the pane, with Run it and Don't run, before it goes in."
+      "What an agent may do on a site without asking each time, until you revoke it. Every row lets the agent make committing clicks there without asking (a payment still asks). Add Terminal to let it type and run commands in a web terminal there, such as Cloud Shell: nobody checks each line, so Stop, Pause and Take over in the pane are how you stop it, and Revoke here ends it at once. Tick "ask me for each line" instead to be shown every line in the pane, with Run it and Don't run, before it goes in. Enter and Space lets it press those keys, each taken as the click it is (a form's default button, a button, a link, a checkbox) and checked like any click."
     <div data-stand="Notice" data-tone="warning">
       <b>
         "One limit of the Terminal power"
@@ -278,7 +278,7 @@ store.set {"grants":{"rows":[],"presets":[{"id":"google-cloud-shell","label":"Go
 <div>
   <div class="setting-row agent-site-grants" id="setting-browser.agent_sites">
     <div class="setting-devices-description">
-      "What an agent may do on a site without asking each time, until you revoke it. Every row lets the agent make committing clicks there without asking (a payment still asks). Add Terminal to let it type and run commands in a web terminal there, such as Cloud Shell: nobody checks each line, so Stop, Pause and Take over in the pane are how you stop it, and Revoke here ends it at once. Tick "ask me for each line" instead to be shown every line in the pane, with Run it and Don't run, before it goes in."
+      "What an agent may do on a site without asking each time, until you revoke it. Every row lets the agent make committing clicks there without asking (a payment still asks). Add Terminal to let it type and run commands in a web terminal there, such as Cloud Shell: nobody checks each line, so Stop, Pause and Take over in the pane are how you stop it, and Revoke here ends it at once. Tick "ask me for each line" instead to be shown every line in the pane, with Run it and Don't run, before it goes in. Enter and Space lets it press those keys, each taken as the click it is (a form's default button, a button, a link, a checkbox) and checked like any click."
     <div data-stand="Notice" data-tone="warning">
       <b>
         "One limit of the Terminal power"

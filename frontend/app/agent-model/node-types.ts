@@ -151,7 +151,7 @@ export interface JektMessageNode {
     /** Files the sender sent with it, read back from srv's `<attached_files>`
      *  list (marker `FILES=`; SPEC_JEKT_FILE_TRANSFER_2026_10_05.md §6.2).
      *  Absent when none came. */
-    attachments?: { id?: string; name: string }[];
+    attachments?: { id?: string; name: string; image?: boolean }[];
 }
 
 /**
@@ -187,7 +187,7 @@ export interface SystemNoteNode {
     /** Shown beside the label: a supervisor turn's "steady 2 of 5". */
     detail?: string;
     /** Files or images sent with an "Earlier message", read back from the record's attachment list. */
-    attachments?: { id?: string; name: string }[];
+    attachments?: { id?: string; name: string; image?: boolean }[];
 }
 
 /**
@@ -227,7 +227,7 @@ export interface UserMessageNode {
     /** Images sent with the message, in the order the agent numbered them.
      *  An entry without `id` was no longer available when it was sent.
      *  SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §5.8. */
-    attachments?: { id?: string; name: string }[];
+    attachments?: { id?: string; name: string; image?: boolean }[];
     /** Set when this turn was one copy of a Swarm broadcast: the user typed it
      *  once and sent it to several agents. `message` is then the body, with the
      *  `[BROADCAST:...]` header srv prepended already removed.

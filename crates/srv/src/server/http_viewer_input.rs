@@ -72,7 +72,7 @@ fn delivery_refusal(error: &str) -> Response {
 /// broadcast is (`app_api::fleet::deliver_broadcast_turn`).
 async fn deliver(state: &AppState, block_id: &str, text: &str) -> Result<Sent, Response> {
     let input = TurnInput { from: MessageOrigin::user(), text: text.to_string(), joins_turn: None };
-    match crate::bootstrap::route_agent_message_from(block_id, text, Some(input), MessageOrigin::user(), &[]) {
+    match crate::bootstrap::route_agent_message_from(block_id, text, Some(input), MessageOrigin::user(), &[], None) {
         Ok(AgentRoute::Sent(SenderDelivery::Delivered)) => Ok(Sent::Delivered),
         Ok(AgentRoute::Sent(SenderDelivery::Deferred)) => Ok(Sent::Queued),
         Ok(AgentRoute::Sent(SenderDelivery::Pty)) => Err(refuse(

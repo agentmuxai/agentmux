@@ -145,6 +145,6 @@ mod tests {
     fn the_snapshot_offers_every_preset_and_the_powers_beyond_clicks() {
         let s = snapshot();
         assert_eq!(s.presets.len(), standing::PRESETS.len());
-        assert_eq!(s.powers, vec!["terminal", "terminal_ask"]);
+        assert_eq!(s.powers, vec!["terminal", "terminal_ask", "enter_space"]);
     }
 }

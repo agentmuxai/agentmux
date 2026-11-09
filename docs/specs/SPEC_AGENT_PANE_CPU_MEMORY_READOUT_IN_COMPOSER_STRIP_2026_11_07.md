@@ -1,7 +1,7 @@
 # Spec: the agent pane's top band is a priority layout, and the CPU and memory readout moves from it into the composer strip
 
 **Date:** 2026-11-07 (task #28995; builds: A first, then #28996 for B).
-**Status:** active — approved by the operator 2026-11-07, all four questions as recommended (Q1 after the context reading, on the left; Q2 compact chip, never hidden; Q3 agent panes only; Q4 A before B, as two builds). A1 is built in PR #6814 (task #29008); A2 (#29009) and B (#28996) follow.
+**Status:** active — approved by the operator 2026-11-07, all four questions as recommended (Q1 after the context reading, on the left; Q2 compact chip, never hidden; Q3 agent panes only; Q4 A before B, as two builds). A1 is built in PR #6814 (task #29008) and A2 in task #29009; B (#28996) follows.
 **Author:** Agent1@narko
 **Scope:** `frontend/app/element/blockstats.tsx` and `blockstats.scss` (the readout), `frontend/app/block/blockframe.tsx` (where it is drawn today), the agent pane's layout (`agent-view-layout.tsx`) and find bar (`AgentSearchBar.tsx`), `frontend/app/view/agent/components/AgentComposerStrip.tsx` and `composer-row-layout.ts`, and `AgentSessionStats.tsx` (the popover the strip's context reading opens).
 **Related:** `SPEC_COMPOSER_STRIP_ROW_BASED_LAYOUT_2026_08_26.md`, `SPEC_COMPOSER_STRIP_DROP_CENTER_STATS_2026_08_31.md`, `SPEC_JEKT_SIDE_PANEL_RESEARCH_AND_DESIGN_2026_11_04.md` (section 10, #28993), `SPEC_AGENT_PANE_SEARCH_AND_DIM_MODE_2026_11_06.md`.
@@ -148,6 +148,12 @@ The band is `frontend/app/view/agent/top-band/`: `top-band-layout.ts` (the pure 
 - The find bar is the `find` item of the `controls` slot (`AgentFindBandItem`), registered while the search is open. It left its sticky place in the conversation's column; the band is its ground. Its measuring copy has the field at its narrowest (96 px), so the bar is not asked for more room than it needs.
 - A tie in priority keeps the earlier registered item in its full form longer.
 - The z-index token `--z-pane-search-bar` is gone with the sticky bar.
+
+### 4.2 A2 as built (task #29009)
+
+- `BlockStatsBadge` has a `placement` (`overlay`, the default, or `band`) and, in the band, a `form` (`full` or `compact`) and a `measuring` copy. In the band it is in the flow (no absolute position), and the figures are a focusable chip: the tooltip (the readout's existing one, with the processes and every figure) stays open while the chip has focus, and Escape closes it. The compact form is a processor icon and the CPU figure, tinted by the same colour rule, with the whole reading ("CPU 0.3%, memory 90M") as its accessible name. The band is for a local pane: an agent pane never measures a remote shell.
+- `AgentStatsBandItem` registers the `stats` item (slot `stats`, priority `TOP_BAND_PRIORITY.stats`, a full and a compact form). It joins the band once the first figures arrive, so the band is not drawn empty before them. The band's layout rule then does the rest: the readout goes compact before the find bar is asked to give anything, and is never dropped (it has a compact form).
+- The capability is `statsBadgeIn` (`"band"` or `"strip"`) in `pane-tab-registry.ts`, next to `statsBadgeSetting`; the agent pane declares `"band"`, and the block frame (`createStatsBadge`) draws no overlay for a pane that declares it. A terminal or any other pane keeps the overlay.
 
 ## 5. Questions for the operator
 

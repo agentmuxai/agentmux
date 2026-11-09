@@ -36,6 +36,11 @@ use crate::backend::storage::store::Store;
 /// useful error instead of a bare 400 after a round trip.
 const MAX_RELAY_MESSAGE_BYTES: usize = 10240;
 
+/// The longest delivery lifetime the cloud route accepts, in seconds (24 h).
+/// A sender's later deadline is clamped to it: the route cannot hold a message
+/// longer, and asking for longer is a 400 that would fail the send outright.
+const MAX_RELAY_TTL_SECONDS: i64 = 86_400;
+
 /// Bounds how long a failed local delivery can block on the cloud before the
 /// caller gets its answer. Tier 4 runs only after tiers 1–3 have already
 /// failed, so this is additive to a request that is already slow.
@@ -249,6 +254,7 @@ pub(crate) async fn relay_inject(
     wan: Option<&WanCarried>,
     files: Option<&[agentmux_common::jekt_files::CloudFile]>,
     jekt_tier: Option<&crate::backend::reactive::types::JektTier>,
+    expires_at_ms: Option<i64>,
 ) -> RelayOutcome {
     if message.len() > MAX_RELAY_MESSAGE_BYTES {
         return RelayOutcome::Failed(format!(
@@ -281,6 +287,18 @@ pub(crate) async fn relay_inject(
     // `sensitive`, never lower what those rules decide.
     if let (Some(tier), Some(obj)) = (jekt_tier, body.as_object_mut()) {
         obj.insert("jekt_tier".to_string(), serde_json::Value::String(tier.to_string()));
+    }
+    // The sender's own deadline, when it has one (issue #3894): sent as the
+    // remaining lifetime, the unit the route takes, so the message cannot
+    // outlive its sender's window on the way and arrive stale. Clamped into
+    // the route's accepted range; an already-past deadline becomes the
+    // minimum, so it is queued and dropped there rather than delivered late.
+    if let Some(expires_at_ms) = expires_at_ms {
+        let remaining = (expires_at_ms - agentmux_common::time::now_ms()).div_euclid(1000);
+        let ttl = remaining.clamp(1, MAX_RELAY_TTL_SECONDS);
+        if let Some(obj) = body.as_object_mut() {
+            obj.insert("ttl_seconds".to_string(), serde_json::json!(ttl));
+        }
     }
     let resp = http
         .post(&url)
@@ -475,7 +493,7 @@ mod tests {
             "clare",
             "hello",
             "normal",
-            None, None, None,
+            None, None, None, None,
         )
         .await;
         match out {
@@ -503,7 +521,7 @@ mod tests {
             "clare",
             "hello",
             "urgent",
-            None, None, None,
+            None, None, None, None,
         )
         .await;
 
@@ -521,6 +539,36 @@ mod tests {
         assert_eq!(c.body.get("target_agent").and_then(|v| v.as_str()), Some("clare"));
         assert_eq!(c.body.get("message").and_then(|v| v.as_str()), Some("hello"));
         assert_eq!(c.body.get("priority").and_then(|v| v.as_str()), Some("urgent"));
+        assert!(c.body.get("ttl_seconds").is_none(), "no sender deadline: the route's own default applies");
+    }
+
+    /// Issue #3894: a jekt with a sender deadline tells the route how long it
+    /// may hold the message, in the route's own unit.
+    #[tokio::test]
+    async fn a_sender_deadline_travels_as_the_remaining_lifetime() {
+        let (url, seen, _g) = stub_relay(axum::http::StatusCode::OK, r#"{"success":true}"#).await;
+        let expires = agentmux_common::time::now_ms() + 600_000;
+        let _ = relay_inject(
+            &url,
+            &reqwest::Client::new(),
+            "tok",
+            "agent2",
+            "clare",
+            "hello",
+            "normal",
+            None, None, None,
+            Some(expires),
+        )
+        .await;
+        let c = seen.lock().unwrap();
+        let ttl = c
+            .as_ref()
+            .expect("stub relay saw no request")
+            .body
+            .get("ttl_seconds")
+            .and_then(|v| v.as_i64())
+            .expect("ttl_seconds reaches the route");
+        assert!((590..=600).contains(&ttl), "about ten minutes, got {ttl}");
     }
 
     #[tokio::test]
@@ -538,7 +586,7 @@ mod tests {
             "clare",
             "hello",
             "normal",
-            None, None, None,
+            None, None, None, None,
         )
         .await;
         match out {
@@ -560,7 +608,7 @@ mod tests {
             (r#"{"success":true,"injection_id":"inj-8","target_in_account":true}"#, Some(true)),
         ] {
             let (url, _seen, _g) = stub_relay(axum::http::StatusCode::OK, body).await;
-            let out = relay_inject(&url, &reqwest::Client::new(), "tok", "agent2", "agnetx", "hello", "normal", None, None, None).await;
+            let out = relay_inject(&url, &reqwest::Client::new(), "tok", "agent2", "agnetx", "hello", "normal", None, None, None, None).await;
             match out {
                 RelayOutcome::Queued { target_in_account, .. } => assert_eq!(target_in_account, want, "{body}"),
                 other => panic!("expected Queued, got {other:?}"),
@@ -583,7 +631,7 @@ mod tests {
             "clare",
             "hello",
             "normal",
-            None, None, None,
+            None, None, None, None,
         )
         .await;
         assert!(matches!(out, RelayOutcome::Failed(_)), "got {out:?}");
@@ -602,7 +650,7 @@ mod tests {
             "clare",
             &big,
             "normal",
-            None, None, None,
+            None, None, None, None,
         )
         .await;
         match out {
@@ -625,7 +673,7 @@ mod tests {
             "clare",
             "hello",
             "normal",
-            None, None, None,
+            None, None, None, None,
         )
         .await;
         assert!(matches!(out, RelayOutcome::Failed(_)), "got {out:?}");
@@ -770,7 +818,7 @@ mod tests {
         let (url, seen, _g) = stub_relay(axum::http::StatusCode::OK, r#"{"success":true}"#).await;
         let (_dir, wan, req) = origin_request();
         let carried = wan_sign_at_origin(&req, Some("camper"), Some(&wan), Some(TEST_DIR), "stable", NOW).unwrap();
-        let _ = relay_inject(&url, &reqwest::Client::new(), "tok", "camper", "agent2", "hello", "normal", Some(&carried), None, None)
+        let _ = relay_inject(&url, &reqwest::Client::new(), "tok", "camper", "agent2", "hello", "normal", Some(&carried), None, None, None)
             .await;
         {
             let c = seen.lock().unwrap();
@@ -784,7 +832,7 @@ mod tests {
             assert_eq!(body["wan_ts_secs"], serde_json::json!(NOW));
         }
 
-        let _ = relay_inject(&url, &reqwest::Client::new(), "tok", "camper", "agent2", "hello", "normal", None, None, None).await;
+        let _ = relay_inject(&url, &reqwest::Client::new(), "tok", "camper", "agent2", "hello", "normal", None, None, None, None).await;
         let c = seen.lock().unwrap();
         let keys: std::collections::BTreeSet<_> =
             c.as_ref().unwrap().body.as_object().unwrap().keys().cloned().collect();
@@ -805,7 +853,7 @@ mod tests {
             key: "A".repeat(43) + "=",
             blob_id: "blob-0123abcd-0000-4000-8000-0123456789ab".into(),
         }];
-        let _ = relay_inject(&url, &reqwest::Client::new(), "tok", "camper", "agent2", "hello", "normal", None, Some(&files), None).await;
+        let _ = relay_inject(&url, &reqwest::Client::new(), "tok", "camper", "agent2", "hello", "normal", None, Some(&files), None, None).await;
         let c = seen.lock().unwrap();
         let body = &c.as_ref().unwrap().body;
         assert_eq!(body["files"][0]["blob_id"], "blob-0123abcd-0000-4000-8000-0123456789ab");
@@ -821,7 +869,7 @@ mod tests {
         use crate::backend::reactive::types::JektTier;
         let (url, seen, _g) = stub_relay(axum::http::StatusCode::OK, r#"{"success":true}"#).await;
         for (tier, want) in [(JektTier::Sensitive, "sensitive"), (JektTier::Info, "info"), (JektTier::Coord, "coord")] {
-            let _ = relay_inject(&url, &reqwest::Client::new(), "tok", "camper", "agent2", "hello", "normal", None, None, Some(&tier)).await;
+            let _ = relay_inject(&url, &reqwest::Client::new(), "tok", "camper", "agent2", "hello", "normal", None, None, Some(&tier), None).await;
             let c = seen.lock().unwrap();
             assert_eq!(c.as_ref().unwrap().body["jekt_tier"], want);
         }

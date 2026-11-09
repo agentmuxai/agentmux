@@ -21,6 +21,16 @@ pub(super) fn prepare(provider: &str, env: &HashMap<String, String>, cwd: &str) 
     }
 }
 
+/// Run on an ACP agent's spawn env before it spawns. DeepSeek Harness drops every variable whose name
+/// holds `KEY`, `TOKEN`, `SECRET` or `PASSWORD` from the shells it starts, which would split git's
+/// `GIT_CONFIG_*` list, so its git config is handed over as `GIT_CONFIG_PARAMETERS`
+/// (`publish_guard::git_config_as_parameters`).
+pub(super) fn prepare_env(provider: &str, env: &mut HashMap<String, String>) {
+    if provider == "dsh" {
+        crate::backend::publish_guard::git_config_as_parameters(env, |k| std::env::var(k).ok());
+    }
+}
+
 /// Grok reads project rules (the agent's AGENTS.md) only in a trusted folder,
 /// and its stdio agent takes no `--trust`. So the agent's own working folder
 /// is trusted in `$GROK_HOME/trusted_folders.toml`, the file `grok --trust`

@@ -33,6 +33,8 @@
         border-radius: 0;
         padding: 3px var(--space-1-5);
         font-size: var(--text-sm);
+        // A set line height, so the band can be as tall without the bar as with it (_top-band.scss).
+        line-height: 1.2;
         font-family: inherit;
         outline: none;
         transition: border-color var(--duration-decorative-base);
