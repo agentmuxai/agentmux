@@ -23,17 +23,25 @@ On `Agents env_set` (and `lines`), for a Claude Code agent:
 | Name | Value rule |
 |---|---|
 | `ANTHROPIC_BASE_URL` | `http(s)` URL with no user info, query or fragment |
-| `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY` | `vault:<entry id>` or a short non-secret placeholder (for example `ollama`); a secret-shaped value is refused |
+| `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY` | `vault:<entry id>`, or for a server that ignores the key one of a fixed list of words (`ollama`, `lm-studio`, `lmstudio`, `llamacpp`, `vllm`, `local`, `none`, `dummy`, `placeholder`, `unused`, `not-needed`, `no-key`); anything else is refused, because any shape that fits a placeholder also fits a short real key |
 | `API_TIMEOUT_MS` | digits |
 | `ANTHROPIC_MODEL`, `ANTHROPIC_SMALL_FAST_MODEL`, `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL`, `CLAUDE_CODE_SUBAGENT_MODEL` | a model name, no spaces |
 
-Other harnesses declare no base-URL variable today, so no other names are opened.
-A `vault:` key must be an entry the person opened to the target agent; srv reads it at launch,
-records the use in the Vault's audit, and the value never appears in an answer, the Audit row, a log
-or the UI (a credential-named value is shown as `[hidden]`).
+The endpoint names are written in capitals (a second spelling would be a second way to write the
+same setting), and the launch reads them without regard to case all the same, so an environment saved
+from My Agents in another case cannot send the sign-in to a custom server.
 
-Refused with a reason: an agent on a model route (the route sets server, key and models), and a
-container agent (its image is given the person's account; follow-up).
+Other harnesses declare no base-URL variable today, so no other names are opened.
+A `vault:` key must be an entry the person opened to the target agent **and** to the agent that writes
+it (srv does not hand a key to a server for an agent that could not have read it); an agent on another
+machine names none. srv reads it at launch, records the use in the Vault's audit, and the value never
+appears in an answer, the Audit row, a log or the UI (a credential-named value is shown as `[hidden]`).
+A refused key gets one answer, whether the entry is missing, of another kind or in a closed Vault, so
+a refusal never says which entries exist; the reason is in srv's log.
+
+Refused with a reason when a call sets one of these names: an agent on a model route (the route sets
+server, key and models), and a container agent (its image is given the person's account; follow-up).
+Removing the settings, or setting `ANTHROPIC_MODEL` alone, stays allowed for both.
 
 ## 3. Launch
 

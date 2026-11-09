@@ -13,9 +13,22 @@ use super::{kinds, record, seal, vaults, Store};
 /// The activity line for a use, listed with the other uses of a value.
 pub const USED: &str = "put in an agent's launch environment";
 
-/// Why `entry_id` is not an entry `agent_id` may have put in its environment, if it is not. Reads no
-/// value. Used when the reference is written and again at every launch.
+/// What a caller is told when an entry is not one an agent may have: one answer for a missing entry, a
+/// wrong kind and a closed Vault, so a refusal never says which entries exist or what they are called
+/// (`vaults::resolve` keeps the same rule). The reason is in srv's log.
+pub const NOT_AVAILABLE: &str = "that Vault key is not available to this agent";
+
+/// Why `entry_id` is not an entry `agent_id` may have put in its environment, if it is not: the one
+/// answer [`NOT_AVAILABLE`]. Reads no value. Used when the reference is written (for the agent that
+/// writes it and the agent it is written for) and again at every launch.
 pub fn problem(store: &Store, entry_id: &str, agent_id: &str) -> Option<String> {
+    reason(store, entry_id, agent_id).map(|why| {
+        tracing::info!(entry = %entry_id, agent = %agent_id, "a Vault key was refused for an agent's environment: {why}");
+        NOT_AVAILABLE.to_string()
+    })
+}
+
+fn reason(store: &Store, entry_id: &str, agent_id: &str) -> Option<String> {
     let row = match store.vault_get(entry_id) {
         Ok(Some(row)) => row,
         Ok(None) => return Some(format!("the Vault has no entry {entry_id}")),
@@ -63,8 +76,11 @@ mod tests {
     #[test]
     fn a_missing_entry_and_a_note_are_refused() {
         let (store, note) = store_with("note", "A note", "text");
-        assert!(problem(&store, "nope", "a1").unwrap().contains("no entry"));
-        assert!(problem(&store, &note, "a1").unwrap().contains("not an api-key"));
+        assert!(reason(&store, "nope", "a1").unwrap().contains("no entry"));
+        assert!(reason(&store, &note, "a1").unwrap().contains("not an api-key"));
+        // The caller hears the same thing for both, and for a closed Vault.
+        assert_eq!(problem(&store, "nope", "a1").as_deref(), Some(NOT_AVAILABLE));
+        assert_eq!(problem(&store, &note, "a1").as_deref(), Some(NOT_AVAILABLE));
         assert!(for_launch(&store, &note, "a1", "lolly").is_err());
     }
 
@@ -78,7 +94,8 @@ mod tests {
     fn a_vault_the_person_opened_to_other_agents_is_not_usable_by_this_one() {
         let (store, id) = store_with("api-key", "Local LLM key", "value");
         assert!(store.vault_set("personal", "Personal", "named", "[\"a2\"]").unwrap());
-        assert!(problem(&store, &id, "a1").unwrap().contains("not opened to this agent"));
+        assert!(reason(&store, &id, "a1").unwrap().contains("not opened to this agent"));
+        assert_eq!(problem(&store, &id, "a1").as_deref(), Some(NOT_AVAILABLE));
         assert_eq!(problem(&store, &id, "a2"), None);
         assert!(for_launch(&store, &id, "a1", "lolly").is_err(), "no value without the person's opening");
     }

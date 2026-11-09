@@ -37,17 +37,23 @@ pub struct Endpoint {
     pub api_key: Option<String>,
 }
 
+/// Every non-empty value written for `name`, in any spelling (a launch on Windows reads names without
+/// regard to case, so `anthropic_base_url` is the same setting), ordered by spelling so the choice is stable.
+fn values_of(env: &HashMap<String, String>, name: &str) -> Vec<String> {
+    let mut spellings: Vec<(&String, &String)> = env.iter().filter(|(k, _)| k.eq_ignore_ascii_case(name)).collect();
+    spellings.sort();
+    spellings.into_iter().map(|(_, v)| v.trim()).filter(|v| !v.is_empty()).map(str::to_string).collect()
+}
+
 fn nonempty(env: &HashMap<String, String>, name: &str) -> Option<String> {
-    env.get(name).map(|v| v.trim()).filter(|v| !v.is_empty()).map(str::to_string)
+    values_of(env, name).into_iter().next()
 }
 
 /// The custom endpoint `own` (the agent's own environment) asks for, or `None` where it names
 /// none or names Anthropic's own API.
 pub fn requested(own: &HashMap<String, String>) -> Option<Endpoint> {
-    let base_url = nonempty(own, "ANTHROPIC_BASE_URL")?;
-    if agent_env::is_anthropic_url(&base_url) {
-        return None;
-    }
+    // Two spellings that disagree: the one that is not Anthropic's decides, so the sign-in stays home.
+    let base_url = values_of(own, "ANTHROPIC_BASE_URL").into_iter().find(|u| !agent_env::is_anthropic_url(u))?;
     Some(Endpoint { base_url, auth_token: nonempty(own, "ANTHROPIC_AUTH_TOKEN"), api_key: nonempty(own, "ANTHROPIC_API_KEY") })
 }
 
@@ -64,9 +70,10 @@ pub fn private_config_dir(shared_auth_dir: &str, agent_slug: &str) -> String {
 /// own environment asked for. `resolve_vault` turns an entry id into its value, or `None` when the
 /// agent may not have it (the key is then left out: never a fallback to another key).
 pub fn apply(env: &mut HashMap<String, String>, endpoint: &Endpoint, config_dir: &str, resolve_vault: &dyn Fn(&str) -> Option<String>) {
-    for name in ACCOUNT_VARIABLES {
-        env.remove(*name);
-    }
+    // Every spelling of the names set below goes first, so the child never sees one name twice.
+    env.retain(|k, _| {
+        !ACCOUNT_VARIABLES.iter().chain(&["CLAUDE_CONFIG_DIR", "ANTHROPIC_BASE_URL"]).any(|n| n.eq_ignore_ascii_case(k))
+    });
     env.insert("CLAUDE_CONFIG_DIR".to_string(), config_dir.to_string());
     env.insert("ANTHROPIC_BASE_URL".to_string(), endpoint.base_url.clone());
     let value_of = |written: &Option<String>| {
@@ -242,6 +249,29 @@ mod tests {
         apply(&mut spawn, &endpoint, "/d", &none);
         assert_eq!(spawn["ANTHROPIC_AUTH_TOKEN"], NO_KEY_PLACEHOLDER);
         assert_eq!(spawn["ANTHROPIC_API_KEY"], "");
+    }
+
+    #[test]
+    fn a_name_in_any_case_is_the_same_setting_and_leaves_no_second_copy() {
+        // An environment saved from My Agents keeps the spelling it was typed in, and a Windows
+        // launch reads names without regard to case: the sign-in must stay home either way.
+        let own = env(&[("anthropic_base_url", "http://192.0.2.68:11434"), ("Anthropic_Auth_Token", "ollama")]);
+        let endpoint = requested(&own).unwrap();
+        assert_eq!((endpoint.base_url.as_str(), endpoint.auth_token.as_deref()), ("http://192.0.2.68:11434", Some("ollama")));
+        let mut spawn = account();
+        spawn.extend(own);
+        apply(&mut spawn, &endpoint, "/d", &none);
+        let spellings = |name: &str| spawn.keys().filter(|k| k.eq_ignore_ascii_case(name)).count();
+        assert_eq!((spellings("ANTHROPIC_BASE_URL"), spellings("ANTHROPIC_AUTH_TOKEN")), (1, 1), "{spawn:?}");
+        assert!(!spawn.values().any(|v| v.contains("PERSONS")), "{spawn:?}");
+    }
+
+    #[test]
+    fn two_spellings_that_disagree_never_leave_the_sign_in_going_to_anthropic_by_chance() {
+        let own = env(&[("ANTHROPIC_BASE_URL", "https://api.anthropic.com"), ("anthropic_base_url", "http://192.0.2.68:11434")]);
+        for _ in 0..8 {
+            assert_eq!(requested(&own).unwrap().base_url, "http://192.0.2.68:11434");
+        }
     }
 
     #[test]

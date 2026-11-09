@@ -145,8 +145,12 @@ fn audit(state: &AppState, actor: &Actor, target: &AgentDefinition, ok: bool, er
 /// Why this change to `target`'s model endpoint is refused, if it is. Not for what it does (the notice and its
 /// undo window answer that) but for where it would not work: an agent on a model route keeps the route's
 /// server and keys, a container agent gets the person's account mounted in its image, which a custom
-/// server must not receive, and a key must be a Vault entry the person opened to that agent.
-fn endpoint_refusal(state: &AppState, target: &AgentDefinition, new: &str) -> Option<Refusal> {
+/// server must not receive, and a key must be a Vault entry the person opened to that agent. A key is
+/// also one the acting agent could use itself: srv does not put a key in a server's hands for an agent
+/// that could not have read it. (An agent on another machine names none: it has no agent here.) The
+/// answer is the same for an entry that is missing, of another kind or closed to an agent, so it never
+/// says which entries exist.
+fn endpoint_refusal(state: &AppState, actor: &Actor, target: &AgentDefinition, current: &str, new: &str) -> Option<Refusal> {
     let bad = |m: String| Some(refuse(StatusCode::BAD_REQUEST, m));
     if crate::backend::model_gateway::launch::choice_of(&state.mstore, &target.id).is_some() {
         return bad(format!(
@@ -160,12 +164,18 @@ fn endpoint_refusal(state: &AppState, target: &AgentDefinition, new: &str) -> Op
             target.name
         ));
     }
+    let before = agent_env::effective(current);
     for (name, value) in agent_env::effective(new) {
         let key = name.eq_ignore_ascii_case("ANTHROPIC_AUTH_TOKEN") || name.eq_ignore_ascii_case("ANTHROPIC_API_KEY");
-        if let (true, Some(entry)) = (key, agent_env::vault_ref(&value)) {
-            if let Some(why) = crate::backend::vault::endpoint_key::problem(&state.identity_store, entry, &target.id) {
-                return bad(format!("{name}: {why}; the person opens a Vault to an agent in the Vault's agents setting"));
-            }
+        // A reference already there was checked when it was written, and again at every launch.
+        let (Some(entry), true) = (agent_env::vault_ref(&value), key && before.get(&name) != Some(&value)) else { continue };
+        let usable = |agent_id: &str| crate::backend::vault::endpoint_key::problem(&state.identity_store, entry, agent_id).is_none();
+        let local_actor = !actor.uid.starts_with("remote:");
+        if !(local_actor && usable(&actor.uid) && usable(&target.id)) {
+            return bad(format!(
+                "{name}: {}; the person opens a Vault to an agent in the Vault's agents setting",
+                crate::backend::vault::endpoint_key::NOT_AVAILABLE
+            ));
         }
     }
     None
@@ -216,8 +226,8 @@ fn run_as(state: &AppState, actor: Actor, req: AgentEnvRequest) -> Result<Value,
                 return Ok(json!({ "agent": agent, "changed": change, "note": "nothing changed" }));
             }
             let endpoint = change.touches_endpoint();
-            if endpoint {
-                if let Some(refusal) = endpoint_refusal(state, &target, &new) {
+            if change.sets_endpoint() {
+                if let Some(refusal) = endpoint_refusal(state, &actor, &target, &current, &new) {
                     audit(state, &actor, &target, false, Some(&refusal.message), "refused (model endpoint)");
                     return Err(refusal);
                 }
@@ -285,7 +295,7 @@ pub(crate) fn undo_endpoint(state: &AppState, notice_id: &str, by: &str) -> Resu
     let actor = Actor { uid: format!("ui:{by}"), slug: by.to_string(), name: by.to_string() };
     let _writing = ENV_WRITE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let current = current_text(state, &def.id).map_err(|r| r.message)?;
-    let (previous, event) = endpoint_notice::take_for_undo(notice_id, &current, agentmux_common::time::now_ms()).map_err(|r| r.words().to_string())?;
+    let (previous, event) = endpoint_notice::check_for_undo(notice_id, &current, agentmux_common::time::now_ms()).map_err(|r| r.words().to_string())?;
     let content = AgentContent {
         agent_id: def.id.clone(),
         content_type: agent_env::CONTENT_TYPE.to_string(),
@@ -297,6 +307,7 @@ pub(crate) fn undo_endpoint(state: &AppState, notice_id: &str, by: &str) -> Resu
         audit(state, &actor, &def, false, Some(&message), "undo of a model endpoint change: not saved");
         return Err(message);
     }
+    endpoint_notice::finish_undo(notice_id);
     audit(state, &actor, &def, true, None, &format!("undid the model endpoint change {} made", event.by));
     state.broker.publish_event::<crate::backend::mps_events::AgentContentChanged>(&(), vec![], 0);
     state.broker.publish_event::<crate::backend::mps_events::AgentEndpointNotice>(&event, vec![], 0);

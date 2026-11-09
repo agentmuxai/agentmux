@@ -531,10 +531,14 @@ pub(crate) fn model_takes_effort(model: &str) -> bool {
 /// that tier's `ANTHROPIC_DEFAULT_*_MODEL`. None where the agent is not on a custom server, or names no model.
 pub(crate) fn endpoint_model(meta: &MetaMapType) -> Option<String> {
     let env = meta.get("cmd:env")?.as_object()?;
-    let get = |name: &str| env.get(name).and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty());
-    if crate::backend::agent_env::is_anthropic_url(get("ANTHROPIC_BASE_URL")?) {
-        return None;
-    }
+    // Names are read without regard to case, as the launch does (`spawn_env::endpoint`).
+    let all = |name: &str| {
+        let mut spellings: Vec<_> = env.iter().filter(|(k, _)| k.eq_ignore_ascii_case(name)).collect();
+        spellings.sort_by(|a, b| a.0.cmp(b.0));
+        spellings.into_iter().filter_map(|(_, v)| v.as_str()).map(str::trim).filter(|v| !v.is_empty()).collect::<Vec<_>>()
+    };
+    let get = |name: &str| all(name).into_iter().next();
+    all("ANTHROPIC_BASE_URL").into_iter().find(|u| !crate::backend::agent_env::is_anthropic_url(u))?;
     get("ANTHROPIC_MODEL").map(str::to_string).or_else(|| {
         [("ANTHROPIC_DEFAULT_SONNET_MODEL", "sonnet"), ("ANTHROPIC_DEFAULT_OPUS_MODEL", "opus"), ("ANTHROPIC_DEFAULT_HAIKU_MODEL", "haiku")]
             .into_iter()
@@ -1381,6 +1385,14 @@ mod tests {
         assert_eq!(endpoint_model(&anthropic), None);
         let out = with_runtime_flags_listed(&anthropic, ss(&["--print"]), &[]);
         assert!(out.contains(&"--model".to_string()) && !out.contains(&"claude-opus-5-5".to_string()), "{out:?}");
+    }
+
+    #[test]
+    fn the_endpoint_names_are_read_in_any_case() {
+        let meta = endpoint_meta(json!({"anthropic_base_url": "http://localhost:11434", "Anthropic_Model": "flint:40b-a2b"}));
+        assert_eq!(endpoint_model(&meta).as_deref(), Some("flint:40b-a2b"));
+        let both = endpoint_meta(json!({"ANTHROPIC_BASE_URL": "https://api.anthropic.com", "anthropic_base_url": "http://localhost:11434", "ANTHROPIC_MODEL": "m"}));
+        assert_eq!(endpoint_model(&both).as_deref(), Some("m"), "a spelling that is not Anthropic's decides");
     }
 
     #[test]

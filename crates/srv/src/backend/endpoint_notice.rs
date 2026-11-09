@@ -123,9 +123,10 @@ impl Refusal {
     }
 }
 
-/// Takes the notice `id` for an Undo: the text to put back and the event that says it was undone.
-/// `current` is the environment as stored now.
-pub fn take_for_undo(id: &str, current: &str, now: i64) -> Result<(String, EndpointNoticeEvent), Refusal> {
+/// Checks the notice `id` for an Undo: the text to put back and the event that says it was undone.
+/// `current` is the environment as stored now. The notice stays held until [`finish_undo`], so a write
+/// that fails can be tried again inside the window.
+pub fn check_for_undo(id: &str, current: &str, now: i64) -> Result<(String, EndpointNoticeEvent), Refusal> {
     let mut held = HELD.lock().unwrap_or_else(|p| p.into_inner());
     let at = held.iter().position(|h| h.event.id == id).ok_or(Refusal::Unknown)?;
     if now > held[at].event.expires_at {
@@ -135,10 +136,21 @@ pub fn take_for_undo(id: &str, current: &str, now: i64) -> Result<(String, Endpo
     if held[at].applied != current {
         return Err(Refusal::ChangedSince);
     }
-    let taken = held.remove(at);
-    let mut event = taken.event;
+    let mut event = held[at].event.clone();
     event.state = "undone".to_string();
-    Ok((taken.previous, event))
+    Ok((held[at].previous.clone(), event))
+}
+
+/// The environment was put back: the notice cannot be undone again.
+pub fn finish_undo(id: &str) {
+    HELD.lock().unwrap_or_else(|p| p.into_inner()).retain(|h| h.event.id != id);
+}
+
+#[cfg(test)]
+fn take_for_undo(id: &str, current: &str, now: i64) -> Result<(String, EndpointNoticeEvent), Refusal> {
+    let taken = check_for_undo(id, current, now)?;
+    finish_undo(id);
+    Ok(taken)
 }
 
 #[cfg(test)]
@@ -177,6 +189,15 @@ mod tests {
         assert_eq!(text, BEFORE);
         assert_eq!(undone.state, "undone");
         assert_eq!(take_for_undo(&event.id, BEFORE, 2_000), Err(Refusal::Unknown), "once");
+    }
+
+    #[test]
+    fn a_notice_stays_until_the_undo_was_written() {
+        let event = opened(1_000);
+        assert!(check_for_undo(&event.id, AFTER, 2_000).is_ok());
+        assert!(check_for_undo(&event.id, AFTER, 2_001).is_ok(), "a failed write can be tried again");
+        finish_undo(&event.id);
+        assert_eq!(check_for_undo(&event.id, AFTER, 2_002), Err(Refusal::Unknown));
     }
 
     #[test]

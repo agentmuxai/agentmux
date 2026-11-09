@@ -222,6 +222,7 @@ partial list.
 | [`SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10`](SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md) | SPEC: Agent-Driven Interactive PTY Shell API |
 | [`SPEC_AGENT_LAUNCH_NAME_NO_AUTOFILL_2026_09_08`](SPEC_AGENT_LAUNCH_NAME_NO_AUTOFILL_2026_09_08.md) | SPEC: Agent launch name — no autofill, ghost-text placeholder only |
 | [`SPEC_AGENT_LOGIN_FLOW_TIGHTENING_2026_09_04`](SPEC_AGENT_LOGIN_FLOW_TIGHTENING_2026_09_04.md) | SPEC — Tighten the agent-pane login flow: auto-unblock on external bind, "Bind account" button |
+| [`SPEC_AGENT_MODEL_ENDPOINT_ENV_2026_11_08`](SPEC_AGENT_MODEL_ENDPOINT_ENV_2026_11_08.md) | SPEC: agents can point a Claude Code agent at another model server |
 | [`SPEC_AGENT_OPEN_LATENCY_2026_09_27`](SPEC_AGENT_OPEN_LATENCY_2026_09_27.md) | SPEC: opening an agent from My Agents should be near-instant — where the time goes, and what to change |
 | [`SPEC_AGENT_PANE_ARMORY_HEADER_ICON_2026_07_20`](SPEC_AGENT_PANE_ARMORY_HEADER_ICON_2026_07_20.md) | SPEC: Vault Icon on the Agent-Setup Button + Responsive Tabs in the Per-Agent "Armory" |
 | [`SPEC_AGENT_PANE_AUTH_NOTIFICATIONS_2026_07_26`](SPEC_AGENT_PANE_AUTH_NOTIFICATIONS_2026_07_26.md) | Agent Pane Mount/Auth Notifications & Launch-Auth Reducer |

@@ -239,7 +239,8 @@ fn credential_looking_values_are_never_shown_to_an_agent() {
 fn the_endpoint_names_are_allowed_and_other_harnesses_endpoints_are_not() {
     for name in ENDPOINT_NAMES {
         assert_eq!(name_problem(name), None, "{name}");
-        assert_eq!(name_problem(&name.to_ascii_lowercase()), None, "{name}");
+        // One spelling: a second would be a second way to write the same setting.
+        assert!(name_problem(&name.to_ascii_lowercase()).is_some(), "{name} in lower case");
     }
     for name in ["ANTHROPIC_MODEL", "ANTHROPIC_SMALL_FAST_MODEL"] {
         assert_eq!(name_problem(name), None, "{name}");
@@ -276,7 +277,7 @@ fn a_server_address_is_plain_http_or_https_with_no_sign_in_query_or_fragment() {
 #[test]
 fn a_key_is_a_vault_reference_or_a_short_placeholder_never_a_secret() {
     for name in ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"] {
-        for ok in ["ollama", "none", "local-llm_1", "vault:2f9c1d", "vault: 2f9c1d"] {
+        for ok in ["ollama", "none", "lm-studio", "OLLAMA", "vault:2f9c1d", "vault: 2f9c1d"] {
             assert_eq!(value_problem(name, ok), None, "{name}={ok}");
         }
         for bad in [
@@ -284,6 +285,9 @@ fn a_key_is_a_vault_reference_or_a_short_placeholder_never_a_secret() {
             "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789",
             "ghp_abcdefghijklmnopqrstuvwxyz0123456789",
             "a-long-looking-secret-value-123456",
+            // The shape of a placeholder is the shape of a short real key: only the listed words pass.
+            "local-llm_1",
+            "abcd1234efgh5678",
             "has space",
             "vault:",
             "vault:   ",
@@ -314,7 +318,18 @@ fn only_api_anthropic_com_over_https_is_anthropic() {
     assert!(is_anthropic_url("https://api.anthropic.com"));
     assert!(is_anthropic_url("https://api.anthropic.com/v1"));
     assert!(is_anthropic_url(" https://API.Anthropic.com:443/ "));
-    for not in ["http://api.anthropic.com", "https://api.anthropic.com.evil.example", "https://example.com/api.anthropic.com", "http://192.0.2.68:11434", "https://anthropic.com", ""] {
+    for not in [
+        "http://api.anthropic.com",
+        "https://api.anthropic.com.evil.example",
+        "https://example.com/api.anthropic.com",
+        "http://192.0.2.68:11434",
+        "https://anthropic.com",
+        "https://api.anthropic.com:x@evil.example",
+        "https://api.anthropic.com@evil.example/",
+        "https://api.anthropic.com:8443",
+        "https://api.anthropic.com?@evil.example",
+        "",
+    ] {
         assert!(!is_anthropic_url(not), "{not:?}");
     }
 }
@@ -349,4 +364,10 @@ fn names_in_the_list_are_found_in_a_change() {
     assert!(!diff("", "TZ=UTC\n").touches_endpoint());
     assert!(diff("ANTHROPIC_MODEL=a\n", "ANTHROPIC_MODEL=b\n").touches_endpoint());
     assert!(diff("ANTHROPIC_API_KEY=ollama\n", "").touches_endpoint());
+    // What needs a server to reach is setting an endpoint name: not removing one, not a model name.
+    assert!(diff("", "ANTHROPIC_BASE_URL=http://192.0.2.68:11434\n").sets_endpoint());
+    assert!(diff("API_TIMEOUT_MS=1\n", "API_TIMEOUT_MS=2\n").sets_endpoint());
+    assert!(!diff("ANTHROPIC_BASE_URL=http://192.0.2.68:11434\n", "").sets_endpoint());
+    assert!(!diff("", "ANTHROPIC_MODEL=a\n").sets_endpoint());
+    assert!(!diff("", "TZ=UTC\n").sets_endpoint());
 }

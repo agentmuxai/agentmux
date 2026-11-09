@@ -109,17 +109,19 @@ pub fn vault_ref(value: &str) -> Option<&str> {
     value.strip_prefix(VAULT_REF_PREFIX).map(str::trim).filter(|id| !id.is_empty())
 }
 
-/// The longest placeholder an agent may write for a key: "ollama" is six.
-const MAX_PLACEHOLDER: usize = 24;
+/// What an agent may write for a key a server ignores. A fixed list, not a shape: any shape that fits
+/// a placeholder also fits a short real key.
+const PLACEHOLDERS: &[&str] =
+    &["ollama", "lm-studio", "lmstudio", "llamacpp", "vllm", "local", "none", "dummy", "placeholder", "unused", "not-needed", "no-key"];
 
 fn is_placeholder(value: &str) -> bool {
-    !value.is_empty() && value.len() <= MAX_PLACEHOLDER && value.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+    PLACEHOLDERS.iter().any(|p| p.eq_ignore_ascii_case(value))
 }
 
 /// Why `value` is not acceptable for the endpoint variable `name`, if it is not. A server address is
 /// plain `http(s)://host[:port][/path]`: no sign-in in it, no query, no fragment. A key is a reference
 /// to a Vault entry (`vault:<id>`; whether the agent may use that entry is the caller's to check) or
-/// a short placeholder for a server that ignores it (Ollama's "ollama"); a real secret is never
+/// one of a few placeholder words for a server that ignores it (Ollama's "ollama"); a real secret is never
 /// stored in the environment, where every agent that can read it would see it. The rest are
 /// numbers and model names.
 pub fn endpoint_value_problem(name: &str, value: &str) -> Option<String> {
@@ -133,7 +135,8 @@ pub fn endpoint_value_problem(name: &str, value: &str) -> Option<String> {
                 Some(format!("{name}: vault: needs the entry's id after it"))
             } else {
                 Some(format!(
-                    "{name}: give vault:<entry id> for a key kept in the Vault, or a short placeholder ({MAX_PLACEHOLDER} letters, digits, - _ . at most) for a server that ignores it; a key is never written here"
+                    "{name}: give vault:<entry id> for a key kept in the Vault, or one of {} for a server that ignores it; a key is never written here",
+                    PLACEHOLDERS.join(", ")
                 ))
             }
         }
@@ -166,9 +169,14 @@ fn endpoint_url_problem(value: &str) -> Option<String> {
 /// Whether `url` (a `ANTHROPIC_BASE_URL` value) is Anthropic's own API: the one place a person's Claude
 /// sign-in may go. Anything else, a LAN server, a proxy or another vendor, is not.
 pub fn is_anthropic_url(url: &str) -> bool {
-    let rest = url.trim().strip_prefix("https://").unwrap_or("");
-    let host = rest.split(['/', ':']).next().unwrap_or("").to_ascii_lowercase();
-    host == "api.anthropic.com"
+    let Some(rest) = url.trim().strip_prefix("https://") else { return false };
+    // Sign-in, query or fragment: not the address Anthropic gives, so not trusted with the person's sign-in.
+    if rest.contains(['@', '?', '#']) {
+        return false;
+    }
+    let authority = rest.split('/').next().unwrap_or("");
+    let (host, port) = authority.split_once(':').map_or((authority, None), |(h, p)| (h, Some(p)));
+    host.eq_ignore_ascii_case("api.anthropic.com") && port.is_none_or(|p| p == "443")
 }
 
 /// What an agent may set, each name spelled out: the settings that tune a
@@ -278,7 +286,8 @@ pub fn name_problem(name: &str) -> Option<String> {
         return Some(format!("{name}: names starting AGENTMUX_ are reserved for AgentMux"));
     }
     if is_endpoint_name(&upper) {
-        return None;
+        // One spelling: a launch on Windows reads names without regard to case, and a second spelling would be a second way to write the same setting.
+        return (name != upper).then(|| format!("{name}: write this one as {upper}"));
     }
     let reserved = RESERVED_NAMES.contains(&upper.as_str())
         || RESERVED_SHELL_NAMES.contains(&upper.as_str())
@@ -469,6 +478,12 @@ impl Change {
     pub fn touches_endpoint(&self) -> bool {
         let named = |n: &String| is_endpoint_name(n) || n.eq_ignore_ascii_case("ANTHROPIC_MODEL") || n.eq_ignore_ascii_case("ANTHROPIC_SMALL_FAST_MODEL");
         self.added.keys().chain(self.changed.keys()).chain(self.removed.iter()).any(named)
+    }
+
+    /// Whether the change adds or changes one of [`ENDPOINT_NAMES`]: the settings that need a server
+    /// the agent can reach. Removing one, or any change to `ANTHROPIC_MODEL`, is not.
+    pub fn sets_endpoint(&self) -> bool {
+        self.added.keys().chain(self.changed.keys()).any(|n| is_endpoint_name(n))
     }
 
     pub fn is_empty(&self) -> bool {
