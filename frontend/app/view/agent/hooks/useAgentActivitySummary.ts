@@ -51,7 +51,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { makeORef } from "@/app/store/mos";
 import { ObjectService } from "@/app/store/services";
 import { fireAndForget } from "@/util/util";
-import { AMBIENT_PULL_TIMEOUT_MS } from "./ambient-rpc";
+import { AMBIENT_TITLE_PULL_TIMEOUT_MS } from "./ambient-rpc";
 import { STARTUP_HEADING_RE } from "../stream-parser";
 import { isUsableTitle } from "@/app/store/ambient-title";
 import { lastPromptToStore, META_LAST_PROMPT } from "@/app/store/swarm-line";
@@ -134,7 +134,7 @@ export function useAgentActivitySummary(opts: UseAgentActivitySummaryOptions): v
                 turn,
                 refresh: request === "refresh",
             },
-            { timeout: AMBIENT_PULL_TIMEOUT_MS },
+            { timeout: AMBIENT_TITLE_PULL_TIMEOUT_MS },
         ).catch(() => {
             // Silently ignore — the header just stays on its last title.
         });
