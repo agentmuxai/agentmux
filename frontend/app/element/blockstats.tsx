@@ -374,10 +374,10 @@ function RemoteBadge(props: { blockId: string; noHeader?: boolean }) {
     );
 }
 
-/** How the readout is mounted: over the pane's corner (the block frame), or in the flow as an item of a band. */
-export type StatsPlacement = "overlay" | "band";
+/** How the readout is mounted: over the pane's corner (the block frame), or in the flow, as a slot of the agent pane's composer strip. */
+export type StatsPlacement = "overlay" | "inline";
 
-/** What a badge in a band shows: all of it, or a processor icon and the CPU figure (the full reading is the tooltip). */
+/** What an inline badge shows: all of it, or a processor icon and the CPU figure (the full reading is the tooltip). */
 export type StatsForm = "full" | "compact";
 
 type LocalBadgeProps = {
@@ -385,7 +385,7 @@ type LocalBadgeProps = {
     noHeader?: boolean;
     placement?: StatsPlacement;
     form?: StatsForm;
-    /** A hidden copy the band measures: no tooltip, not focusable. */
+    /** A hidden copy that is only measured: no tooltip, not focusable. */
     measuring?: boolean;
 };
 
@@ -408,11 +408,11 @@ function StatsFigures(props: { stats: BlockStats; form: StatsForm }) {
 }
 
 /**
- * A badge in a band is focusable, and its tooltip stays open while it has focus (the tooltip opens on hover
+ * An inline badge is focusable, and its tooltip stays open while it has focus (the tooltip opens on hover
  * only): Escape closes it. The compact form has no text for a screen reader beyond the figure, so it carries the
  * whole reading as its name.
  */
-function BandChip(props: {
+function InlineChip(props: {
     stats: BlockStats;
     form: StatsForm;
     setPinned: (v: boolean) => void;
@@ -451,7 +451,7 @@ function LocalBadge(props: LocalBadgeProps) {
     const stats = useBlockStats(props.blockId);
     const [pinned, setPinned] = createSignal(false);
     const [dismissed, setDismissed] = createSignal(false);
-    const band = () => props.placement === "band";
+    const inline = () => props.placement === "inline";
     const form = () => props.form ?? "full";
 
     const cpuClass = createMemo(() => {
@@ -468,13 +468,13 @@ function LocalBadge(props: LocalBadgeProps) {
                 <Tooltip
                     placement="bottom"
                     immediate
-                    forceOpen={band() && !props.measuring && pinned()}
+                    forceOpen={inline() && !props.measuring && pinned()}
                     disable={props.measuring || dismissed()}
-                    divClassName={`block-stats-badge ${band() ? `band ${form()}` : ""} ${cpuClass()} ${props.noHeader ? "no-header" : ""}`}
+                    divClassName={`block-stats-badge ${inline() ? `inline ${form()}` : ""} ${cpuClass()} ${props.noHeader ? "no-header" : ""}`}
                     content={<LocalTooltip blockId={props.blockId} stats={s()} />}
                 >
-                    <Show when={band() && !props.measuring} fallback={<StatsFigures stats={s()} form={form()} />}>
-                        <BandChip stats={s()} form={form()} setPinned={setPinned} setDismissed={setDismissed} />
+                    <Show when={inline() && !props.measuring} fallback={<StatsFigures stats={s()} form={form()} />}>
+                        <InlineChip stats={s()} form={form()} setPinned={setPinned} setDismissed={setDismissed} />
                     </Show>
                 </Tooltip>
             )}
@@ -488,8 +488,8 @@ function LocalBadge(props: LocalBadgeProps) {
  * them (srv `sampler::panes`); a remote pane's (SSH, WSL) from its machine,
  * asked while the pane is visible (SPEC_TERMINAL_STATS_BADGE_REMOTE_PANES_2026_10_12.md).
  *
- * `placement` is `overlay` (the default: the block frame draws it over the pane's corner) or `band` (an item of
- * an agent pane's top band, in the flow, with a compact `form` for a tight band). The band is for a local pane.
+ * `placement` is `overlay` (the default: the block frame draws it over the pane's corner) or `inline` (a slot of
+ * an agent pane's composer strip, in the flow, with a compact `form` for a tight strip). Inline is for a local pane.
  */
 export function BlockStatsBadge(props: {
     blockId: string;

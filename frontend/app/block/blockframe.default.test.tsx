@@ -78,7 +78,7 @@ registerPaneTab({
     label: "Banded",
     icon: "b",
     create: () => ({ component: () => null as any }),
-    capabilities: { statsBadgeIn: "band" },
+    capabilities: { statsBadgeIn: "strip" },
 });
 
 let version = 0;
