@@ -26,7 +26,7 @@ export function LastSoundStatus(props: { rows?: Accessor<AgentRuntime[]> }): JSX
     // It comes and goes while a narrow bar may hide its slot, which changes no size the bar watches.
     createEffect(on(() => !!sound(), refitStatusBar, { defer: true }));
     const line = (s: PlayedSound) => soundText(s, who(), now());
-    const who = () => (props.rows ?? sharedAgentRuntime().rows)().find((r) => r.block_id === sound()?.blockId)?.agent_id;
+    const who = () => (props.rows ?? sharedAgentRuntime().rows)().find((r) => r.block_id === sound()?.blockId)?.name;
     return (
         <Show when={sound()}>
             {(s) => (

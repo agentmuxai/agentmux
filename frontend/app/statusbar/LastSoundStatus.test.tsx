@@ -22,12 +22,13 @@ afterEach(() => {
     vi.clearAllMocks();
 });
 
-const agent = (agent_id: string, block_id: string): AgentRuntime => ({
-    agent_id,
+// An agent's id is its UID; the item names it by what the person calls it.
+const agent = (name: string, block_id: string): AgentRuntime => ({
+    agent_id: `6b6e9e6a-125d-47de-9594-${name}`,
     block_id,
     state: "working",
     desired: "running",
-    name: agent_id,
+    name,
     provider: "claude",
     icon: "",
 });
