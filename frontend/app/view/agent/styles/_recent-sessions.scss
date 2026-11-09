@@ -236,7 +236,9 @@
     // positioned itself, so the ::after is sized against the tile (the `<li>`).
     .agent-recent-sessions-entry {
         flex: 1;
-        min-width: 0;
+        // A readable floor for the name; below the sum of name + badges the
+        // badges wrap to the next line instead of squeezing the name (#30300).
+        min-width: 7ch;
         margin: 0;
         // A kit row Button; the tile's own text colour and face stay.
         --ui-fg: inherit;
@@ -277,9 +279,19 @@
 
     .agent-recent-sessions-line1 {
         display: flex;
+        // The badges drop to their own line when the name would be squeezed
+        // under its floor, instead of shrinking the name to one letter at a
+        // ~318 px pane (#30300).
+        flex-wrap: wrap;
         align-items: baseline;
         gap: var(--space-2);
         min-width: 0;
+    }
+
+    // A badge keeps its wording; it is the name that decides where the line
+    // breaks.
+    .agent-recent-sessions-line1 > :not(.agent-recent-sessions-entry) {
+        flex-shrink: 0;
     }
 
     .agent-recent-sessions-name {

@@ -6,11 +6,13 @@ import { describe, expect, it } from "vitest";
 import {
     FALLBACK_TOOLTIP,
     formatLineAge,
+    FRESH_STATUS_MS,
     heuristicTitle,
     isAwaitingUser,
     lastPromptToStore,
     isMutedLine,
     lineAt,
+    readPaneSummary,
     LAST_PROMPT_MAX_CHARS,
     LIVE_PHRASE_STALE_MS,
     META_AWAITING_USER,
@@ -344,5 +346,47 @@ describe("how a Swarm row shows the line", () => {
         expect(swarmLineTooltip({ text: "x", source: "task", ageMs: 1000, stale: false })).toBe("The task it claimed; the agent has not said more yet");
         expect(swarmLineTooltip({ text: "x", source: "task", ageMs: 3 * 3_600_000, stale: true })).toBe("The task it claimed 3h ago");
         expect(swarmLineTooltip({ text: "x", source: "declared", stale: true })).toBe("Set by the agent, a while ago");
+    });
+});
+
+
+describe("readPaneSummary", () => {
+    const now = 1_000_000_000_000;
+    const title = "Compare AWS Bedrock and OpenRouter pricing";
+    const status = "Fixing the Windows resize bug";
+    const meta = (over: Record<string, unknown>) => ({ "term:ambient_summary": title, ...over });
+    const said = (agoMs: number, src = "agent") => ({
+        [META_LIVE_PHRASE]: status,
+        [META_LIVE_PHRASE_AT]: now - agoMs,
+        [META_LIVE_PHRASE_SRC]: src,
+    });
+
+    it("shows the generated title when the agent has said nothing", () => {
+        expect(readPaneSummary(meta({}), now)).toBe(title);
+    });
+
+    it("a fresh status line wins over an older title", () => {
+        expect(readPaneSummary(meta({ ...said(5 * 60_000), "term:ambient_summary_at": now - 4 * 3_600_000 }), now)).toBe(status);
+    });
+
+    it("wins over a title with no stamp, whose age is unknown", () => {
+        expect(readPaneSummary(meta(said(5 * 60_000)), now)).toBe(status);
+    });
+
+    it("a title judged after the status line was set wins again", () => {
+        expect(readPaneSummary(meta({ ...said(30 * 60_000), "term:ambient_summary_at": now - 60_000 }), now)).toBe(title);
+    });
+
+    it("a status line older than an hour does not", () => {
+        expect(readPaneSummary(meta(said(FRESH_STATUS_MS + 1)), now)).toBe(title);
+    });
+
+    it("the task title srv wrote at a claim is not the agent's word", () => {
+        expect(readPaneSummary(meta(said(60_000, "task")), now)).toBe(title);
+    });
+
+    it("with no title at all, a fresh status line is the line", () => {
+        expect(readPaneSummary(said(60_000), now)).toBe(status);
+        expect(readPaneSummary({}, now)).toBeNull();
     });
 });

@@ -35,8 +35,12 @@ const INTERACTIVE_TIMEOUT: Duration = Duration::from_secs(30);
 const BACKGROUND_TIMEOUT: Duration = Duration::from_secs(45);
 
 /// The per-turn session title the pane requests (`session:activity_summary`).
+/// It reads a digest of the session as well as the message now, and nothing waits on
+/// it: the header keeps its last title until the new one is stored. A title call
+/// that times out is an evaluation lost and a stale title left standing (one pane's
+/// calls timed out at 30 s several times in a day), so it has the background limit.
 pub const ACTIVITY_SUMMARY: Purpose =
-    Purpose { tag: "activity_summary", timeout: INTERACTIVE_TIMEOUT, class: Class::Interactive, logs_reply: true };
+    Purpose { tag: "activity_summary", timeout: BACKGROUND_TIMEOUT, class: Class::Interactive, logs_reply: true };
 
 /// A missing session title, recovered by the background sweep
 /// (`backend::reactive::activity_watcher`). Its own purpose so it never cancels,

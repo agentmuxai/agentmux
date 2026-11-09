@@ -9,3 +9,7 @@
  * section 6.4.
  */
 export const AMBIENT_PULL_TIMEOUT_MS = 45_000;
+
+/** The session title's call runs up to 45 s (`ambient::purpose` ACTIVITY_SUMMARY) after up to 10 s for a permit, so its RPC
+ *  outlasts both: a title that took the whole budget is stored, not dropped on arrival. */
+export const AMBIENT_TITLE_PULL_TIMEOUT_MS = 60_000;
