@@ -8,7 +8,8 @@ import { revealBlock } from "@/app/util/reveal-block";
 import { lastSound, soundText, usePlayedSounds } from "@/app/view/audit/audit-sound";
 import { openAuditAtSound } from "@/app/view/audit/open-audit";
 import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
-import { createMemo, Show, type Accessor, type JSX } from "solid-js";
+import { createEffect, createMemo, on, Show, type Accessor, type JSX } from "solid-js";
+import { refitStatusBar } from "./status-bar-fit";
 
 export const LAST_SOUND_TIP = "Click to see this in the Audit. Shift-click goes to the agent's pane";
 
@@ -22,6 +23,8 @@ export function LastSoundStatus(props: { rows?: Accessor<AgentRuntime[]> }): JSX
     const tick = useTick(1000);
     const now = createMemo(() => (tick(), Date.now()));
     const sound = createMemo(() => lastSound(sounds(), now()));
+    // It comes and goes while a narrow bar may hide its slot, which changes no size the bar watches.
+    createEffect(on(() => !!sound(), refitStatusBar, { defer: true }));
     const line = (s: PlayedSound) => soundText(s, who(), now());
     const who = () => (props.rows ?? sharedAgentRuntime().rows)().find((r) => r.block_id === sound()?.blockId)?.agent_id;
     return (

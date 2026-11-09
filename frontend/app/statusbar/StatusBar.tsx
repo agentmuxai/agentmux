@@ -15,7 +15,7 @@ import { InstancePanel } from "./InstancePanel";
 import { AgentCountsStatus } from "./AgentCountsStatus";
 import { LastSoundStatus } from "./LastSoundStatus";
 import { attentionItems } from "@/app/notification/attention-list";
-import { slotDropAt } from "./status-bar-fit";
+import { FIT_TIERS, slotDropAt } from "./status-bar-fit";
 import { VaultRequestsStatus } from "./VaultRequestsStatus";
 import { MultiInputStatus } from "./MultiInputStatus";
 import { MuxBusIndicator } from "./MuxBusIndicator";
@@ -102,7 +102,8 @@ const DROP_AT: Record<string, 1 | 2 | 3 | 4 | undefined> = {
     gpu: 2,
     "history-usage": 2,
     "token-usage": 2,
-    "last-sound": 2,
+    // The first to go: it comes and goes on its own, so it never takes another readout with it.
+    "last-sound": 1,
     "agent-counts": 3,
     "browser-pause-all": 3,
     "multi-input": 3,
@@ -113,8 +114,6 @@ const DROP_AT: Record<string, 1 | 2 | 3 | 4 | undefined> = {
     "system-stats": 4,
 };
 
-/** What a narrow bar sheds, tier by tier, until it fits on one line. */
-const FIT_TIERS = ["1", "2", "3", "4"] as const;
 
 /** A widget's item goes before AgentMux's own readouts do. */
 const WIDGET_DROP_AT = 2;

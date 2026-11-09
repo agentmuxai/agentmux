@@ -51,6 +51,23 @@ describe("LastSoundStatus", () => {
         await waitFor(() => expect(screen.getByRole("button").textContent).toMatch(/^♪ Agent turn completed · \d+s ago$/));
     });
 
+    it("has the bar fit again as it comes, since a hidden slot changes no size the bar watches", async () => {
+        vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => (cb(0), 0));
+        const bar = document.createElement("div");
+        bar.className = "status-bar";
+        bar.setAttribute("data-fit", "2");
+        document.body.append(bar);
+        try {
+            render(() => <LastSoundStatus rows={() => []} />, { container: bar });
+            expect(bar.getAttribute("data-fit")).toBe("2");
+            noteSound({ blockId: "blk-korp", event: "tool", tool: "Bash", at: Date.now() });
+            await waitFor(() => expect(bar.hasAttribute("data-fit")).toBe(false));
+        } finally {
+            bar.remove();
+            vi.unstubAllGlobals();
+        }
+    });
+
     it("goes away a minute after the sound", async () => {
         const { container } = render(() => <LastSoundStatus rows={() => []} />);
         noteSound({ blockId: "blk-korp", event: "tool", tool: "Bash", at: Date.now() - 61_000 });
