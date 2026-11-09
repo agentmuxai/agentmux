@@ -56,6 +56,7 @@ Usage: install.ps1 [options]
   -NoLaunch             do not start AgentMux when done
   -Force                install even if AgentMux is already installed
   -RequireSignature     fail when the release's signature cannot be checked here
+  -Interactive          accepted and ignored: this script never prompts
   -Help                 this text
 
 Environment: AGENTMUX_INSTALL_INSTALLED, AGENTMUX_INSTALL_WINGET, AGENTMUX_INSTALL_TEST_KEYS and
@@ -275,16 +276,24 @@ AGENTMUX_INSTALL_RELEASE_BASE replace what it looks at, and AGENTMUX_INSTALL_NO_
 
     # ---- go ----
     # Everything above only defines functions; nothing is installed until here, so a download cut short (irm | iex) does nothing.
+    # What is installed decides which way in is open: the Store id is the Store's copy, AgentMux.AI and the download are the
+    # installer's, and the two kinds are never mixed.
     $kind = "setup"
     $done = $false
-    if ($Method -ne "download" -and (Test-Winget)) {
-        if (Test-WingetPackage) {
-            if ($installed -and $installed -ne "setup") { Die "the Microsoft Store copy is installed; remove it first (the two kinds do not mix)" }
-            $done = Install-Winget $WingetId $false
-        } else {
-            if ($installed -and $installed -ne "store") { Die "the installer's copy is installed; remove it first (the two kinds do not mix)" }
+    $useWinget = ($Method -ne "download") -and (Test-Winget)
+    $useStore = $false
+    if ($useWinget) {
+        $inCatalogue = Test-WingetPackage
+        if ($installed -eq "store") { $useStore = $true }
+        elseif ($installed -eq "setup") { $useWinget = $inCatalogue }
+        else { $useStore = -not $inCatalogue }
+    }
+    if ($useWinget) {
+        if ($useStore) {
             $kind = "store"
             $done = Install-Winget $StoreId $true
+        } else {
+            $done = Install-Winget $WingetId $false
         }
         if (-not $done) {
             if ($Method -eq "package-manager") { Die "winget could not install AgentMux" }
@@ -292,10 +301,11 @@ AGENTMUX_INSTALL_RELEASE_BASE replace what it looks at, and AGENTMUX_INSTALL_NO_
             $kind = "setup"
         }
     } elseif ($Method -eq "package-manager") {
+        if (Test-Winget) { Die "the installer's copy is installed and winget has no AgentMux.AI package yet: use -Method download" }
         Die "winget was not found"
     }
     if (-not $done) {
-        if ($installed -and $installed -ne "setup") { Die "the Microsoft Store copy is installed; remove it first (the two kinds do not mix)" }
+        if ($installed -eq "store") { Die "the Microsoft Store copy is installed; remove it first (the two kinds do not mix)" }
         Install-Download
     }
     Start-AgentMux $kind

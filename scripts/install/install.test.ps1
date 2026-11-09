@@ -74,9 +74,13 @@ foreach ($sh in $shells) {
     Expect "-Force installs over the same kind" 0 "winget install --id AgentMux.AI" $sh $setupInstalled @("-DryRun", "-NoLaunch", "-Force")
     $storeInstalled = @{ AGENTMUX_INSTALL_INSTALLED = "store"; AGENTMUX_INSTALL_WINGET = "ai" }
     Expect "the store copy is named" 0 "Microsoft Store" $sh $storeInstalled @("-NoLaunch")
-    Expect "-Force does not add a second kind (store copy, installer wanted)" 1 "do not mix" $sh $storeInstalled @("-DryRun", "-NoLaunch", "-Force")
-    $setupWithStoreWinget = @{ AGENTMUX_INSTALL_INSTALLED = "setup"; AGENTMUX_INSTALL_WINGET = "store" }
-    Expect "-Force does not add a second kind (installer copy, store wanted)" 1 "do not mix" $sh $setupWithStoreWinget @("-DryRun", "-NoLaunch", "-Force")
+    Expect "-Force over the store copy stays with the Store" 0 "winget install --id 9P9QCXNNCRK3 --source msstore" $sh $storeInstalled @("-DryRun", "-NoLaunch", "-Force")
+    Expect "-Force does not add a second kind (store copy, no winget)" 1 "do not mix" $sh @{ AGENTMUX_INSTALL_INSTALLED = "store"; AGENTMUX_INSTALL_WINGET = "none" } @("-DryRun", "-NoLaunch", "-Force", "-Version", "0.60.14")
+    $setupNoPackage = @{ AGENTMUX_INSTALL_INSTALLED = "setup"; AGENTMUX_INSTALL_WINGET = "store" }
+    Expect "-Force over the installer copy falls back to the download when winget has only the Store" 0 "AgentMux-0.60.14-x64-setup.exe" $sh $setupNoPackage @("-DryRun", "-NoLaunch", "-Force", "-Version", "0.60.14")
+    Expect-Absent "-Force over the installer copy never uses the Store id" "9P9QCXNNCRK3" $sh $setupNoPackage @("-DryRun", "-NoLaunch", "-Force", "-Version", "0.60.14")
+    Expect "-Method package-manager cannot add the other kind" 1 "use -Method download" $sh $setupNoPackage @("-DryRun", "-NoLaunch", "-Force", "-Method", "package-manager")
+    Expect "-Interactive is accepted" 0 "done" $sh (WithWinget "ai") @("-DryRun", "-NoLaunch", "-Interactive")
 }
 
 # ASCII only, no smart quotes
