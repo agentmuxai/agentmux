@@ -11,8 +11,8 @@
  * context reading, the CPU and memory readout, and Shell (the strip's one action).
  *
  * How far it goes is decided by rows, not by one row: the fewest rows the strip can have is what it gets with every
- * compact form (one row when they fit, else two, ...); the slots then collapse only until the layout reaches that
- * many rows, so a pane that needs two rows keeps whatever full forms fit in them.
+ * compact form (one row when they fit, else two, ...); the fewest slots then collapse that reach that many rows
+ * (of equal counts, the earliest in the order), so a pane keeps whatever full forms it has room for.
  */
 
 /**
@@ -25,8 +25,9 @@ export const COMPACT_ORDER = ["auth", "ctx", "hostShell", "view", "stats"] as co
 /**
  * The keys that show their compact form. `full` holds every slot's width in its full form and `compact` the width
  * of those that have a compact form (a slot the strip hides measures 0 in `full` and takes no part). `rowCount`
- * says how many rows the strip's layout makes of the slots at the widths it is given. Collapses in `COMPACT_ORDER`
- * until the layout is down to the rows it has with every compact form.
+ * says how many rows the strip's layout makes of the slots at the widths it is given. Picks the fewest slots to
+ * collapse that bring the layout down to the rows it has with every compact form, and of the sets of that size
+ * the one that comes first in `order`. Exhaustive: at most a handful of slots have a compact form.
  */
 export function chooseCompactKeys(
     order: readonly string[],
@@ -35,15 +36,19 @@ export function chooseCompactKeys(
     rowCount: (widths: Record<string, number>) => number
 ): Set<string> {
     const candidates = order.filter((k) => (full[k] ?? 0) > 0 && compact[k] !== undefined && compact[k] < full[k]);
-    const widths = { ...full };
     const target = rowCount({ ...full, ...Object.fromEntries(candidates.map((k) => [k, compact[k]])) });
-    const chosen = new Set<string>();
-    for (const key of candidates) {
-        if (rowCount(widths) <= target) break;
-        chosen.add(key);
-        widths[key] = compact[key];
+    let best: string[] = candidates;
+    let bestCost = [candidates.length, Infinity];
+    for (let mask = 0; mask < 1 << candidates.length; mask++) {
+        const picked = candidates.filter((_, i) => mask & (1 << i));
+        // Cost: how many collapse, then how late in the order they are (an earlier slot is the cheaper to give up).
+        const cost = [picked.length, picked.reduce((sum, k) => sum + order.indexOf(k), 0)];
+        if (cost[0] > bestCost[0] || (cost[0] === bestCost[0] && cost[1] >= bestCost[1])) continue;
+        if (rowCount({ ...full, ...Object.fromEntries(picked.map((k) => [k, compact[k]])) }) > target) continue;
+        best = picked;
+        bestCost = cost;
     }
-    return chosen;
+    return new Set(best);
 }
 
 /** The context reading short: "392k / 1.0m" is "392k/1m". Anything else is left as it is. */

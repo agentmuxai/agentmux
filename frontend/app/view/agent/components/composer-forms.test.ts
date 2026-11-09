@@ -41,6 +41,20 @@ describe("chooseCompactKeys", () => {
         expect([...chooseCompactKeys(COMPACT_ORDER, FULL, COMPACT, rowsAt(200))]).toEqual(["auth", "ctx", "hostShell"]);
     });
 
+    it("collapses as few slots as it takes, not the first ones in the order", () => {
+        // 654 + 4 gaps = 686 in 600 px: the view chip alone (126) is enough; the account (72) and context (48) are not.
+        const full = { runtime: 168, auth: 104, ctx: 160, hostShell: 72, view: 150 };
+        const compact = { auth: 32, ctx: 112, hostShell: 32, view: 24 };
+        expect([...chooseCompactKeys(COMPACT_ORDER, full, compact, rowsAt(600))]).toEqual(["view"]);
+    });
+
+    it("of equal numbers of slots takes the earlier in the order", () => {
+        const full = { runtime: 168, auth: 104, ctx: 160, hostShell: 72, view: 150 };
+        const compact = { auth: 32, ctx: 112, hostShell: 32, view: 24 };
+        // 686 in 640: the account (72) or the context reading (48) or the chip (126) alone each do it.
+        expect([...chooseCompactKeys(COMPACT_ORDER, full, compact, rowsAt(640))]).toEqual(["auth"]);
+    });
+
     it("never touches a slot with no compact form", () => {
         const chosen = chooseCompactKeys(["auth", "ctx", "hostShell", "runtime"], FULL, COMPACT, rowsAt(100));
         expect(chosen.has("runtime")).toBe(false);
