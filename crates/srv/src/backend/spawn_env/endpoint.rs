@@ -27,6 +27,12 @@ pub const NO_KEY_PLACEHOLDER: &str = "agentmux-no-key";
 /// The environment variables that carry a Claude login or key that the account puts in.
 const ACCOUNT_VARIABLES: &[&str] = &["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"];
 
+/// Whether `name` is one of the variables that carry the person's Claude login. The endpoint step leaves
+/// these empty, and `apply_working_dir` removes an empty one from the child command.
+pub(crate) fn is_account_variable(name: &str) -> bool {
+    ACCOUNT_VARIABLES.iter().any(|n| n.eq_ignore_ascii_case(name))
+}
+
 /// What the agent's own environment (`cmd:env`, before the account's variables) asks for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Endpoint {
@@ -76,8 +82,8 @@ pub fn apply(env: &mut HashMap<String, String>, endpoint: &Endpoint, config_dir:
     });
     env.insert("CLAUDE_CONFIG_DIR".to_string(), config_dir.to_string());
     env.insert("ANTHROPIC_BASE_URL".to_string(), endpoint.base_url.clone());
-    // Empty, not absent: the child process inherits srv's own environment (`apply_working_dir`), which may hold
-    // the person's token, and only an entry here overrides it.
+    // Left empty, not absent: the child inherits srv's own environment, which may hold the person's token, and
+    // `apply_working_dir` removes an emptied login variable from the child command.
     env.insert("CLAUDE_CODE_OAUTH_TOKEN".to_string(), String::new());
     let value_of = |written: &Option<String>| {
         written.as_deref().and_then(|w| match agent_env::vault_ref(w) {
@@ -262,6 +268,26 @@ mod tests {
         assert_eq!(spawn["CLAUDE_CODE_OAUTH_TOKEN"], "", "emptied, so a token in srv's own environment does not reach the child");
         assert!(!spawn.values().any(|v| v.contains("PERSONS") || v.contains("persons-bearer")), "{spawn:?}");
         assert_eq!(spawn["TZ"], "UTC", "other variables are left alone");
+    }
+
+    #[test]
+    fn the_child_command_loses_an_emptied_login_variable_it_would_inherit() {
+        let endpoint = requested(&env(&[("ANTHROPIC_BASE_URL", "http://localhost:11434"), ("ANTHROPIC_API_KEY", "local")])).unwrap();
+        let mut spawn = account();
+        apply(&mut spawn, &endpoint, "/d", &none);
+        let mut cmd = tokio::process::Command::new("claude");
+        crate::backend::blockcontroller::core::apply_working_dir(&mut cmd, "block-1", "", &spawn);
+        let set: HashMap<String, Option<String>> = cmd
+            .as_std()
+            .get_envs()
+            .map(|(k, v)| (k.to_string_lossy().into_owned(), v.map(|v| v.to_string_lossy().into_owned())))
+            .collect();
+        // Removed from the child (None), not set to an empty string and not left to be inherited.
+        assert_eq!(set.get("CLAUDE_CODE_OAUTH_TOKEN"), Some(&None), "{set:?}");
+        assert_eq!(set.get("ANTHROPIC_AUTH_TOKEN"), Some(&None), "{set:?}");
+        // The key the endpoint gave is set; the address too.
+        assert_eq!(set.get("ANTHROPIC_API_KEY"), Some(&Some("local".to_string())));
+        assert_eq!(set.get("ANTHROPIC_BASE_URL"), Some(&Some("http://localhost:11434".to_string())));
     }
 
     #[test]

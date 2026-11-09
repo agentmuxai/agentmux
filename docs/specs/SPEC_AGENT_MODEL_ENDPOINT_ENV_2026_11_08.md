@@ -55,7 +55,12 @@ own environment still wins:
   strips the account variables rather than leave them in.
 - `agent_runtime.rs` replaces srv's nominal `--model`/`--effort` with the endpoint's model
   (`ANTHROPIC_MODEL`, else the tier alias from `ANTHROPIC_DEFAULT_*_MODEL`).
-- A resumed conversation starts fresh, because the config directory changed.
+- The first switch away from Anthropic starts a fresh conversation, because the config directory changes.
+  Pointing an agent from one custom server to another keeps the directory, so its session is resumed on
+  the new server (follow-up: end the conversation when the address changes).
+- The login variables (`CLAUDE_CODE_OAUTH_TOKEN`, and the token or key the endpoint did not give) are
+  removed from the child command itself: the child inherits srv's own environment, which may hold the
+  person's token.
 - srv's own background calls for the pane (title, summary, next-prompt suggestion) are built from the
   pane's saved environment with the shared sign-in directory, so for an agent on a custom server they
   make no call at all (`ambient/cli.rs`): sending the person's sign-in to that server is what the rule
