@@ -199,6 +199,7 @@ vi.mock("@/app/block/widget-install-requests", () => h.stub("startWidgetInstallR
 vi.mock("@/app/block/upgrade-requests", () => h.stub("startUpgradeRequests"));
 vi.mock("@/app/block/desktop-requests", () => h.stub("startDesktopRequests"));
 vi.mock("@/app/view/agent/components/vault-request-card/vault-request-cards", () => h.stub("startVaultRequestCards"));
+vi.mock("@/app/view/agent/endpoint-notice-cards", () => h.stub("startEndpointNoticeCards"));
 vi.mock("@/app/notification/waiting-for-you", () => h.stub("installWaitingForYou"));
 vi.mock("@/app/platform/pane-overlay-auto", () => h.stub("startPaneOverlayAutoService"));
 vi.mock("@/app/notification/sound", () => h.stub("installSoundService"));

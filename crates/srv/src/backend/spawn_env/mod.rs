@@ -9,6 +9,7 @@
 pub(crate) mod bash_prefix;
 pub(crate) mod block_identity;
 pub(crate) mod build;
+pub(crate) mod endpoint;
 pub(crate) mod former_names;
 pub(crate) mod identity;
 pub(crate) mod run_account;

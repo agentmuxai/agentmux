@@ -36,6 +36,15 @@
     }
   },
   {
+    "event": "agent:endpoint-notice",
+    "payloadTs": {
+      "imports": [
+        "EndpointNoticeEvent"
+      ],
+      "name": "EndpointNoticeEvent"
+    }
+  },
+  {
     "event": "agent:inputhistory",
     "payloadTs": {
       "imports": [

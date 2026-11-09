@@ -7506,6 +7506,25 @@
     }
   },
   {
+    "command": "undoagentendpoint",
+    "request": "agentmux_srv::backend::rpc_types::agent::CommandUndoAgentEndpointData",
+    "requestName": "CommandUndoAgentEndpointData",
+    "requestTs": {
+      "imports": [
+        "CommandUndoAgentEndpointData"
+      ],
+      "name": "CommandUndoAgentEndpointData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::agent::UndoAgentEndpointResult",
+    "responseName": "UndoAgentEndpointResult",
+    "responseTs": {
+      "imports": [
+        "UndoAgentEndpointResult"
+      ],
+      "name": "UndoAgentEndpointResult"
+    }
+  },
+  {
     "command": "unlinkagentidentity",
     "request": "agentmux_srv::backend::rpc_types::identity::CommandUnlinkAgentIdentityData",
     "requestName": "CommandUnlinkAgentIdentityData",

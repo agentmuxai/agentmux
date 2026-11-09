@@ -36,6 +36,7 @@ import type { DesktopEvent } from "@/types/rpc/DesktopEvent";
 import type { DispatchActivityEvent } from "@/types/rpc/DispatchActivityEvent";
 import type { DispatchUpdatedEvent } from "@/types/rpc/DispatchUpdatedEvent";
 import type { DockClearEvent } from "@/types/rpc/DockClearEvent";
+import type { EndpointNoticeEvent } from "@/types/rpc/EndpointNoticeEvent";
 import type { EventsDroppedEvent } from "@/types/rpc/EventsDroppedEvent";
 import type { FilesChangedEvent } from "@/types/rpc/FilesChangedEvent";
 import type { FsOpEvent } from "@/types/rpc/FsOpEvent";
@@ -104,6 +105,7 @@ export type MuxEventPayloads = {
   "agent-api-retry": ApiRetryEvent;
   "agent-message-accepted": MessageAcceptedEvent;
   "agent-resume-retry": ResumeRetryEvent;
+  "agent:endpoint-notice": EndpointNoticeEvent;
   "agent:inputhistory": InputHistoryChangedEvent;
   "agent:process-added": ProcessAddedEvent;
   "agent:process-exited": ProcessExitedEvent;
@@ -228,6 +230,7 @@ export const TYPED_MUX_EVENTS = [
   "agent-api-retry",
   "agent-message-accepted",
   "agent-resume-retry",
+  "agent:endpoint-notice",
   "agent:inputhistory",
   "agent:process-added",
   "agent:process-exited",

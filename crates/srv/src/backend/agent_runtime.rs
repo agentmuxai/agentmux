@@ -526,6 +526,27 @@ pub(crate) fn model_takes_effort(model: &str) -> bool {
     !model.to_ascii_lowercase().contains("haiku")
 }
 
+/// The model a Claude Code agent pointed at a custom server (`ANTHROPIC_BASE_URL` in its `cmd:env` that is
+/// not Anthropic's) asks it for: `ANTHROPIC_MODEL`, else the alias (`sonnet`, `opus`, `haiku`) the CLI maps to
+/// that tier's `ANTHROPIC_DEFAULT_*_MODEL`. None where the agent is not on a custom server, or names no model.
+pub(crate) fn endpoint_model(meta: &MetaMapType) -> Option<String> {
+    let env = meta.get("cmd:env")?.as_object()?;
+    // Names are read without regard to case, as the launch does (`spawn_env::endpoint`).
+    let all = |name: &str| {
+        let mut spellings: Vec<_> = env.iter().filter(|(k, _)| k.eq_ignore_ascii_case(name)).collect();
+        spellings.sort_by(|a, b| a.0.cmp(b.0));
+        spellings.into_iter().filter_map(|(_, v)| v.as_str()).map(str::trim).filter(|v| !v.is_empty()).collect::<Vec<_>>()
+    };
+    let get = |name: &str| all(name).into_iter().next();
+    all("ANTHROPIC_BASE_URL").into_iter().find(|u| !crate::backend::agent_env::is_anthropic_url(u))?;
+    get("ANTHROPIC_MODEL").map(str::to_string).or_else(|| {
+        [("ANTHROPIC_DEFAULT_SONNET_MODEL", "sonnet"), ("ANTHROPIC_DEFAULT_OPUS_MODEL", "opus"), ("ANTHROPIC_DEFAULT_HAIKU_MODEL", "haiku")]
+            .into_iter()
+            .find(|(name, _)| get(name).is_some())
+            .map(|(_, alias)| alias.to_string())
+    })
+}
+
 /// Claude model names: the aliases and concrete ids. A pane carried over from
 /// before per-provider models can have one stored for a Codex agent; it must
 /// never reach Codex, which rejects it (frontend `buildRuntimeArgs.ts` guards the
@@ -558,6 +579,15 @@ fn with_runtime_flags_listed(meta: &MetaMapType, args: Vec<String>, listed: &[St
     // for — would silently get nothing (ReAgent P1 on #4116). Unknown → "".
     let raw_provider = crate::backend::obj::meta_get_string(meta, "agentProvider", "");
     let provider_id = crate::backend::providers::resolve_provider_alias(&raw_provider);
+    // An agent pointed at a server of its own asks that server for the model its environment names, not
+    // for a Claude model the server does not have (a local Ollama answers `claude-sonnet-5-5` with 404).
+    if provider_id == "claude" {
+        if let Some(model) = endpoint_model(meta) {
+            let mut out = without_flags(without_model_flags(args), &["--effort"]);
+            out.extend(["--model".to_string(), model]);
+            return out;
+        }
+    }
     let Some(default_model) = launch_default_model(provider_id, listed) else {
         return args;
     };
@@ -1326,5 +1356,49 @@ mod tests {
             );
         }
         assert!(with_runtime_flags(&meta_with("claude", None), vec![]).is_empty());
+    }
+
+    fn endpoint_meta(env: Value) -> MetaMapType {
+        let mut m = meta_with("claude", Some(json!({"model": "sonnet", "effort": "high", "permissionMode": "bypass"})));
+        m.insert("cmd:env".to_string(), env);
+        m
+    }
+
+    #[test]
+    fn an_agent_on_a_custom_server_asks_it_for_its_own_model_not_a_claude_one() {
+        let meta = endpoint_meta(json!({"ANTHROPIC_BASE_URL": "http://192.0.2.68:11434", "ANTHROPIC_MODEL": "flint:40b-a2b"}));
+        // srv's own default (`--model claude-sonnet-5-5 --effort high`) is already in the stored argv.
+        let args = ss(&["--print", "--model", "claude-sonnet-5-5", "--effort", "high", "--resume", "sid"]);
+        let out = with_runtime_flags_listed(&meta, args, &[]);
+        assert_eq!(out, ss(&["--print", "--resume", "sid", "--model", "flint:40b-a2b"]));
+        // Idempotent: a second pass changes nothing.
+        assert_eq!(with_runtime_flags_listed(&meta, out.clone(), &[]), out);
+    }
+
+    #[test]
+    fn with_no_model_named_the_tiers_alias_is_used_and_anthropic_itself_is_left_alone() {
+        let tier = endpoint_meta(json!({"ANTHROPIC_BASE_URL": "http://localhost:11434", "ANTHROPIC_DEFAULT_SONNET_MODEL": "qwen3-coder:30b"}));
+        assert_eq!(endpoint_model(&tier).as_deref(), Some("sonnet"));
+        let none = endpoint_meta(json!({"ANTHROPIC_BASE_URL": "http://localhost:11434"}));
+        assert_eq!(endpoint_model(&none), None);
+        let anthropic = endpoint_meta(json!({"ANTHROPIC_BASE_URL": "https://api.anthropic.com", "ANTHROPIC_MODEL": "claude-opus-5-5"}));
+        assert_eq!(endpoint_model(&anthropic), None);
+        let out = with_runtime_flags_listed(&anthropic, ss(&["--print"]), &[]);
+        assert!(out.contains(&"--model".to_string()) && !out.contains(&"claude-opus-5-5".to_string()), "{out:?}");
+    }
+
+    #[test]
+    fn the_endpoint_names_are_read_in_any_case() {
+        let meta = endpoint_meta(json!({"anthropic_base_url": "http://localhost:11434", "Anthropic_Model": "flint:40b-a2b"}));
+        assert_eq!(endpoint_model(&meta).as_deref(), Some("flint:40b-a2b"));
+        let both = endpoint_meta(json!({"ANTHROPIC_BASE_URL": "https://api.anthropic.com", "anthropic_base_url": "http://localhost:11434", "ANTHROPIC_MODEL": "m"}));
+        assert_eq!(endpoint_model(&both).as_deref(), Some("m"), "a spelling that is not Anthropic's decides");
+    }
+
+    #[test]
+    fn an_agent_with_no_endpoint_keeps_the_model_flags_it_has() {
+        let meta = meta_with("claude", Some(json!({"model": "sonnet", "effort": "high", "permissionMode": "bypass"})));
+        let args = ss(&["--print", "--model", "opus", "--effort", "max"]);
+        assert_eq!(with_runtime_flags_listed(&meta, args.clone(), &[]), args);
     }
 }

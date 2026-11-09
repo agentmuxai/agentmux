@@ -218,6 +218,8 @@ pub const COMMAND_DELETE_AGENT: &str = "deleteagent";
 pub const COMMAND_GET_AGENT_CONTENT: &str = "getagentcontent";
 pub const COMMAND_SET_AGENT_CONTENT: &str = "setagentcontent";
 pub const COMMAND_GET_ALL_AGENT_CONTENT: &str = "getallagentcontent";
+/// Put an agent's environment back as it was before a model-server change, within its undo window.
+pub const COMMAND_UNDO_AGENT_ENDPOINT: &str = "undoagentendpoint";
 
 // Agent Skills
 pub const COMMAND_LIST_AGENT_SKILLS: &str = "listagentskills";

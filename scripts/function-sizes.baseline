@@ -190,7 +190,7 @@
 270 crates/srv/src/backend/service.rs::get_method_meta
 238 crates/srv/src/backend/shell_node.rs::ShellNodeRunner::run
 111 crates/srv/src/backend/slug_migration/plan.rs::holder_of
-138 crates/srv/src/backend/spawn_env/build.rs::build_persistent_spawn_env
+130 crates/srv/src/backend/spawn_env/build.rs::build_persistent_spawn_env
 129 crates/srv/src/backend/storage/agents/definition.rs::Store::agent_def_find_or_insert
 239 crates/srv/src/backend/storage/agents/instance.rs::Store::instance_create
 136 crates/srv/src/backend/storage/agents/instance.rs::Store::instance_get_active_for_block
@@ -318,7 +318,7 @@
 198 crates/srv/src/srv_ipc/server.rs::handle_connection
 213 frontend/app-init.ts::initAppInner
 163 frontend/app-init.ts::initHostNewWindow
-217 frontend/app-init.ts::initMux
+218 frontend/app-init.ts::initMux
 364 frontend/app/block/block.tsx::Block
 142 frontend/app/block/block.tsx::BlockFull
 280 frontend/app/block/blockframe.tsx::BlockFrame_Header
@@ -373,7 +373,7 @@
 140 frontend/app/view/agent/cli-notice.ts::parseCliNoticeFrame
 111 frontend/app/view/agent/commands/global/login.ts::runLogin
 116 frontend/app/view/agent/components/AgentDocumentView.tsx::AgentDocumentView
-116 frontend/app/view/agent/components/AgentEnvPanel.tsx::AgentEnvPanel
+115 frontend/app/view/agent/components/AgentEnvPanel.tsx::AgentEnvPanel
 120 frontend/app/view/agent/components/AgentSessionNotices.tsx::AgentSessionNotices
 126 frontend/app/view/agent/components/AgentShellInfoPanel.tsx::AgentShellInfoPanel
 130 frontend/app/view/agent/components/HiddenTemplatesSection.tsx::HiddenTemplatesSection
