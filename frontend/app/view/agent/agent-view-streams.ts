@@ -66,6 +66,7 @@ export function useTurnStreams(p: { found: PaneFoundation; model: AgentViewModel
         blockId: model.blockId,
         turnPhase: () => paneModel.state.turnPhase,
         getRootWidth: () => late.root?.offsetWidth,
+        document: paneModel.document,
     });
 
     // Ghost-text next-prompt suggestion. AgentFooter supplies the composer's emptiness once it mounts; until
