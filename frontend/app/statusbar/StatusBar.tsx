@@ -13,6 +13,7 @@ import { GpuStatus } from "./GpuStatus";
 import { HostPopover } from "./HostPopover";
 import { InstancePanel } from "./InstancePanel";
 import { AgentCountsStatus } from "./AgentCountsStatus";
+import { LastSoundStatus } from "./LastSoundStatus";
 import { attentionItems } from "@/app/notification/attention-list";
 import { slotDropAt } from "./status-bar-fit";
 import { VaultRequestsStatus } from "./VaultRequestsStatus";
@@ -101,6 +102,7 @@ const DROP_AT: Record<string, 1 | 2 | 3 | 4 | undefined> = {
     gpu: 2,
     "history-usage": 2,
     "token-usage": 2,
+    "last-sound": 2,
     "agent-counts": 3,
     "browser-pause-all": 3,
     "multi-input": 3,
@@ -126,6 +128,7 @@ function registerBuiltinStatusBarItems(): void {
         ["backend", "left", () => <BackendStatus />],
         ["system-stats", "left", () => <SystemStats />],
         ["gpu", "left", () => <GpuStatus />],
+        ["last-sound", "right", () => <LastSoundStatus />],
         ["agent-counts", "right", () => <AgentCountsStatus />],
         ["vault-requests", "right", () => <VaultRequestsStatus />],
         ["browser-pause-all", "right", () => <BrowserPauseAllStatus />],
