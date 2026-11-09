@@ -12,11 +12,25 @@
  */
 
 import { cleanup, render } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AgentComposerStrip } from "./AgentComposerStrip";
 
 vi.mock("../runtime-apply", () => ({ applyRuntimeChange: vi.fn().mockResolvedValue(undefined) }));
+
+// The pane's readout: figures there or not, and a plain stand-in for the badge, which draws a tooltip.
+const readout = vi.hoisted(() => ({ on: false }));
+vi.mock("@/app/hook/useBlockStats", () => ({
+    useBlockStats: () => () => (readout.on ? { cpu: 1, mem: 1, peak: 1, pids: 1 } : null),
+}));
+vi.mock("@/element/blockstats", () => ({
+    BlockStatsBadge: (p: { form?: string }) => (
+        <span class="block-stats-badge" data-form={p.form}>
+            {p.form}
+        </span>
+    ),
+}));
 
 type ROCallback = (entries: ResizeObserverEntry[]) => void;
 interface FakeRecord {
@@ -49,6 +63,8 @@ let rowsWidth = 0;
 let outerWidth = 0;
 let columnGap = "0px";
 let spaceTwo = "";
+/** The width of each hidden probe, by its `data-probe` ("auth:full", "auth:compact"). None: nothing to choose forms from. */
+const probeWidths: Record<string, number> = {};
 const SELECTORS: [string, string][] = [
     [".agent-runtime-dropup-trigger", "runtime"],
     [".agent-composer-strip-auth", "auth"],
@@ -57,8 +73,11 @@ const SELECTORS: [string, string][] = [
     [".agent-composer-strip-log-btn", "shell"],
     [".runtime-badge", "badge"],
     [".agent-composer-strip-view", "view"],
+    [".block-stats-badge", "stats"],
 ];
 function widthOf(el: Element): number {
+    const probe = el.getAttribute("data-probe");
+    if (probe) return probeWidths[probe] ?? 0;
     if (el.classList.contains("agent-composer-strip-rows")) return rowsWidth;
     if (el.classList.contains("agent-composer-strip")) return outerWidth;
     for (const [selector, name] of SELECTORS) if (el.matches(selector)) return widths[name] ?? 0;
@@ -72,6 +91,8 @@ beforeEach(() => {
     observers = [];
     for (const k of Object.keys(widths)) delete widths[k];
     Object.assign(widths, { runtime: 120, auth: 100, ctxReading: 90, compact: 70, shell: 50, badge: 60 });
+    for (const k of Object.keys(probeWidths)) delete probeWidths[k];
+    readout.on = false;
     rowsWidth = 0;
     outerWidth = 100;
     columnGap = "0px";
@@ -114,6 +135,7 @@ function renderStrip(extra: Partial<Parameters<typeof AgentComposerStrip>[0]> = 
 }
 
 function slotKey(slot: Element): string {
+    if (slot.querySelector(".block-stats-badge")) return "stats";
     if (slot.querySelector(".agent-composer-strip-log-btn")) return "hostShell";
     if (slot.querySelector(".agent-runtime-dropup-trigger")) return "runtime";
     if (slot.querySelector(".agent-composer-strip-auth")) return "auth";
@@ -304,5 +326,270 @@ describe("AgentComposerStrip — the observer", () => {
         expect(observers.some((o) => o.targets.has(rows))).toBe(true);
         unmount();
         expect(observers.every((o) => o.disconnected)).toBe(true);
+    });
+});
+
+// Both forms of a slot, as the hidden probes measure them. The full ones match the slot widths above
+// (104 + 160 + 112 after rounding), so one row takes 120 + 104 + 160 + 112 + 3 x 8 = 520.
+const PROBES = {
+    "auth:full": 100,
+    "auth:compact": 32,
+    "ctx:full": 160,
+    "ctx:compact": 112,
+    "hostShell:full": 110,
+    "hostShell:compact": 32,
+};
+
+/** The first match outside the hidden probes, which draw the same elements. */
+function real(container: HTMLElement, selector: string): HTMLElement {
+    const found = [...container.querySelectorAll<HTMLElement>(selector)].find((el) => !el.closest(".agent-composer-strip-probes"));
+    if (!found) throw new Error(`no ${selector} outside the probes`);
+    return found;
+}
+
+describe("AgentComposerStrip — compact forms", () => {
+    const withProbes = () => Object.assign(probeWidths, PROBES);
+    const authed = { authEmail: "alice@example.com" };
+
+    it("keeps every slot in its full form while they fit one row", () => {
+        withProbes();
+        const { container } = renderStrip(authed);
+        resizeTo(container, 520);
+        expect(layout(container)).toEqual(ONE_ROW);
+        expect(real(container, ".agent-composer-strip-auth").textContent).toContain("alice");
+        expect(real(container, ".agent-composer-strip-compact-btn").textContent).toBe("Compact");
+        expect(real(container, ".agent-composer-strip-log-btn").textContent).toBe("Shell");
+    });
+
+    it("shrinks the account first, then the context reading, then Shell, and stays on one row", () => {
+        withProbes();
+        const { container } = renderStrip(authed);
+        const shell = () => real(container, ".agent-composer-strip-log-btn");
+        const compactBtn = () => real(container, ".agent-composer-strip-compact-btn");
+        const auth = () => real(container, ".agent-composer-strip-auth");
+
+        resizeTo(container, 460);
+        expect(layout(container)).toEqual(ONE_ROW);
+        expect(auth().textContent).toBe("A");
+        expect(compactBtn().textContent).toBe("Compact");
+        expect(shell().textContent).toBe("Shell");
+
+        resizeTo(container, 400);
+        expect(layout(container)).toEqual(ONE_ROW);
+        expect(compactBtn().getAttribute("aria-label")).toBe("Compact");
+        expect(compactBtn().textContent).toBe("");
+        expect(shell().textContent).toBe("Shell");
+
+        resizeTo(container, 320);
+        expect(layout(container)).toEqual(ONE_ROW);
+        expect(shell().getAttribute("aria-label")).toBe("Shell");
+        expect(shell().textContent).toBe("");
+    });
+
+    it("is one row down to 320 px with the compact forms, 520 px without", () => {
+        withProbes();
+        const { container } = renderStrip(authed);
+        expect(narrowestOneRow(container)).toBe(320);
+    });
+
+    it("wraps only when even the compact forms don't fit, and keeps the full forms where they cost no row", () => {
+        withProbes();
+        const { container } = renderStrip(authed);
+        resizeTo(container, 300);
+        expect(layout(container).length).toBeGreaterThan(1);
+        // The compact forms make as many rows as the full ones here, so nothing is shrunk for nothing.
+        expect(real(container, ".agent-composer-strip-auth").textContent).toContain("alice");
+        expect(real(container, ".agent-composer-strip-log-btn").textContent).toBe("Shell");
+    });
+
+    it("uses every compact form that saves a row when one row is out of reach", () => {
+        withProbes();
+        const { container } = renderStrip(authed);
+        resizeTo(container, 280);
+        const rows = layout(container).length;
+        expect(rows).toBeGreaterThan(1);
+        resizeTo(container, 1000);
+        expect(layout(container).length).toBe(1);
+    });
+
+    it("gives the full forms back when the strip widens", () => {
+        withProbes();
+        const { container } = renderStrip(authed);
+        resizeTo(container, 320);
+        resizeTo(container, 1000);
+        expect(real(container, ".agent-composer-strip-auth").textContent).toContain("alice");
+        expect(real(container, ".agent-composer-strip-log-btn").textContent).toBe("Shell");
+    });
+
+    it("marks a signed-out account with ! when it is tight, the full label in its accessible name", () => {
+        withProbes();
+        const { container } = renderStrip({ authStatus: "unauthenticated" });
+        resizeTo(container, 400);
+        const auth = real(container, ".agent-composer-strip-auth");
+        expect(auth.textContent).toBe("!");
+        const named = auth.querySelector("[aria-label]");
+        expect(named?.getAttribute("aria-label")).toBe("Not logged in");
+        expect(named?.getAttribute("role")).toBe("img");
+    });
+
+    it("counts a slot the strip hides (0 px) as taking no room, so the others collapse no earlier than they must", () => {
+        withProbes();
+        widths.auth = 0;
+        const { container } = renderStrip(authed);
+        // Without the account: 120 + 160 + 112 + 2 x 8 = 408 in full forms.
+        resizeTo(container, 408);
+        expect(layout(container).length).toBe(1);
+        expect(real(container, ".agent-composer-strip-compact-btn").textContent).toBe("Compact");
+        expect(real(container, ".agent-composer-strip-log-btn").textContent).toBe("Shell");
+    });
+
+    it("leaves the forms alone until the probes report a width", () => {
+        const { container } = renderStrip(authed);
+        resizeTo(container, 200);
+        expect(real(container, ".agent-composer-strip-auth").textContent).toContain("alice");
+        expect(real(container, ".agent-composer-strip-log-btn").textContent).toBe("Shell");
+    });
+
+    it("measures a probe again when its own width changes at a constant strip width (the readout gaining digits)", () => {
+        readout.on = true;
+        widths.stats = 80;
+        Object.assign(probeWidths, PROBES, { "stats:full": 80, "stats:compact": 56 });
+        const { container } = renderStrip({ authEmail: "alice@example.com" });
+        resizeTo(container, 408);
+        expect(real(container, ".block-stats-badge").dataset.form).toBe("full");
+        // The live figures grow: the probe is 200 px now, the strip is the same width.
+        probeWidths["stats:full"] = 200;
+        for (const o of observers) {
+            if ([...o.targets].some((t) => (t as HTMLElement).dataset?.probe === "stats:full")) o.cb([]);
+        }
+        expect(real(container, ".block-stats-badge").dataset.form).toBe("compact");
+    });
+
+    it("keeps the probes out of the rows, hidden from assistive tech and inert", () => {
+        withProbes();
+        const { container } = renderStrip(authed);
+        resizeTo(container, 400);
+        const probes = container.querySelector(".agent-composer-strip-probes")!;
+        expect(probes.getAttribute("aria-hidden")).toBe("true");
+        expect(probes.hasAttribute("inert")).toBe(true);
+        expect(probes.closest(".agent-composer-strip-rows")).toBeNull();
+        expect(probes.querySelectorAll("[data-probe]").length).toBe(6);
+    });
+});
+
+describe("AgentComposerStrip — the CPU and memory readout", () => {
+    const keysOf = (container: HTMLElement) => layout(container).flatMap((r) => [...r.left, ...r.right]);
+
+    it("is no slot until the pane has its first figures", () => {
+        const { container } = renderStrip();
+        resizeTo(container, 1000);
+        expect(keysOf(container)).not.toContain("stats");
+        expect(container.querySelector(".block-stats-badge")).toBeNull();
+    });
+
+    it("is a slot of the strip beside the context reading, in the full form when the row has room", () => {
+        readout.on = true;
+        widths.stats = 80;
+        const { container } = renderStrip();
+        resizeTo(container, 1000);
+        const keys = keysOf(container);
+        // On the right, passive slots sit on the inner side: the readout, then the context reading, then Shell.
+        expect(keys.slice(keys.indexOf("stats"))).toEqual(["stats", "ctx", "hostShell"]);
+        expect(real(container, ".block-stats-badge").dataset.form).toBe("full");
+    });
+
+    it("counts toward the row: one slot more is 88 px and a gap wider", () => {
+        readout.on = true;
+        widths.stats = 80;
+        const { container } = renderStrip();
+        expect(narrowestOneRow(container)).toBe(520 + 80 + 8);
+    });
+
+    it("gives way last: the account, the context reading and Shell shrink first, then the readout to its chip", () => {
+        readout.on = true;
+        widths.stats = 80;
+        Object.assign(probeWidths, PROBES, { "stats:full": 80, "stats:compact": 56 });
+        const { container } = renderStrip({ authEmail: "alice@example.com" });
+        const chip = () => real(container, ".block-stats-badge");
+
+        // 120 + 32 + 112 + 80 + 32 + 4 x 8 = 408 with the three others compact: the readout is still full.
+        resizeTo(container, 408);
+        expect(layout(container).length).toBe(1);
+        expect(chip().dataset.form).toBe("full");
+        expect(real(container, ".agent-composer-strip-log-btn").getAttribute("aria-label")).toBe("Shell");
+
+        // Its chip is 24 px smaller: one row down to 384, never hidden.
+        resizeTo(container, 384);
+        expect(layout(container).length).toBe(1);
+        expect(chip().dataset.form).toBe("compact");
+
+        resizeTo(container, 200);
+        expect(keysOf(container)).toContain("stats");
+    });
+});
+
+describe("AgentComposerStrip — a ~420 px pane (the operator's screenshot, #30203)", () => {
+    it("is two lines, the readout beside the context reading, the anchors on the last", () => {
+        readout.on = true;
+        // The parts as a 420 px pane measured them: all compact they add up to ~450 px, so one line is out of reach.
+        Object.assign(widths, { runtime: 172, auth: 160, ctxReading: 90, compact: 70, shell: 25, badge: 42, stats: 90 });
+        Object.assign(probeWidths, {
+            "auth:full": 160,
+            "auth:compact": 24,
+            "ctx:full": 168,
+            "ctx:compact": 72,
+            "hostShell:full": 140,
+            "hostShell:compact": 72,
+            "stats:full": 90,
+            "stats:compact": 56,
+        });
+        const { container } = renderStrip({ authEmail: "alice@example.com" });
+        resizeTo(container, 404);
+        const rows = layout(container);
+        expect(rows).toHaveLength(2);
+        const first = [...rows[0].left, ...rows[0].right];
+        expect(first).toEqual(expect.arrayContaining(["stats", "ctx"]));
+        expect(Math.abs(first.indexOf("stats") - first.indexOf("ctx"))).toBe(1);
+        const last = [...rows[1].left, ...rows[1].right];
+        expect(last).toEqual(expect.arrayContaining(["runtime", "hostShell"]));
+        // Shell is the outermost slot on the right, runtime on the left, whatever else shares the line.
+        expect(rows[1].right.at(-1)).toBe("hostShell");
+        expect(rows[1].left[0]).toBe("runtime");
+    });
+});
+
+describe("AgentComposerStrip — the view chip", () => {
+    const chipProps = { viewChip: "Replies · this pane", onOpenView: () => {} };
+
+    it("shrinks to an eye, named by its text, after Shell and before the readout gives way", () => {
+        widths.view = 150;
+        Object.assign(probeWidths, PROBES, { "view:full": 150, "view:compact": 24 });
+        const { container } = renderStrip({ authEmail: "alice@example.com", ...chipProps });
+        const chip = () => real(container, ".agent-composer-strip-view");
+        resizeTo(container, 1000);
+        expect(chip().textContent).toBe("Replies · this pane");
+        // 120 + 32 + 112 + 32 + 24 + 4 x 8 = 352 with every compact form; 480 with the chip still in words.
+        resizeTo(container, 400);
+        expect(layout(container).length).toBe(1);
+        expect(chip().textContent).toBe("");
+        expect(chip().getAttribute("aria-label")).toBe("Replies · this pane");
+        expect(chip().getAttribute("title")).toContain("Replies · this pane");
+    });
+
+    it("lays the strip out again when the chip appears or goes while the pane keeps its width", () => {
+        widths.view = 150;
+        const [chip, setChip] = createSignal<string | null>(null);
+        const utils = render(() => <AgentComposerStrip {...baseProps} viewChip={chip()} onOpenView={() => {}} />);
+        const strip = utils.container.querySelector(".agent-composer-strip") as HTMLElement;
+        Object.defineProperty(strip, "clientWidth", { configurable: true, value: 100 });
+        resizeTo(utils.container, 400);
+        const before = layout(utils.container).length;
+        expect(before).toBeGreaterThan(1);
+        setChip("Replies · this pane");
+        expect(layout(utils.container).flatMap((r) => [...r.left, ...r.right])).toContain("view");
+        expect(layout(utils.container).length).toBeGreaterThan(1);
+        setChip(null);
+        expect(layout(utils.container).flatMap((r) => [...r.left, ...r.right])).not.toContain("view");
+        expect(layout(utils.container).length).toBe(before);
     });
 });
