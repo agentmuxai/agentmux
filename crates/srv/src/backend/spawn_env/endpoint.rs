@@ -110,6 +110,15 @@ fn who_of(mstore: &crate::backend::storage::store::Store, block_id: &str, env: &
     Some(Who { id: def.id, slug })
 }
 
+/// Whether the pane runs the Claude Code CLI. `agentProvider` is written from the definition verbatim, so it can
+/// be a legacy alias (`claude-code`, `claude_code`): it is resolved, as the model rule does, or a Claude agent on
+/// an alias would keep the person's sign-in on a custom server. Nothing written (or only blanks) is Claude, the
+/// default a launch assumes; any other provider is not.
+fn is_claude(block_meta: &crate::backend::obj::MetaMapType) -> bool {
+    let written = crate::backend::obj::meta_get_string(block_meta, "agentProvider", "");
+    written.trim().is_empty() || crate::backend::providers::resolve_provider_alias(written.trim()) == "claude"
+}
+
 /// The identity step of a spawn (the account's variables over the agent's own), then this step, then the
 /// note of which account the run uses. `base_env_vars` is the agent's own environment.
 pub(crate) async fn inject_identity(
@@ -148,7 +157,7 @@ pub(crate) async fn guard(
     mstore: std::sync::Arc<crate::backend::storage::store::Store>,
     identity_store: std::sync::Arc<crate::backend::storage::store::Store>,
 ) {
-    if crate::backend::obj::meta_get_string(block_meta, "agentProvider", "claude") != "claude" {
+    if !is_claude(block_meta) {
         return;
     }
     let Some(endpoint) = requested(own) else { return };
@@ -264,6 +273,23 @@ mod tests {
         let spellings = |name: &str| spawn.keys().filter(|k| k.eq_ignore_ascii_case(name)).count();
         assert_eq!((spellings("ANTHROPIC_BASE_URL"), spellings("ANTHROPIC_AUTH_TOKEN")), (1, 1), "{spawn:?}");
         assert!(!spawn.values().any(|v| v.contains("PERSONS")), "{spawn:?}");
+    }
+
+    #[test]
+    fn a_claude_agent_is_claude_under_any_name_it_was_written_with() {
+        let meta = |provider: Option<&str>| {
+            let mut m = crate::backend::obj::MetaMapType::new();
+            if let Some(p) = provider {
+                m.insert("agentProvider".to_string(), serde_json::json!(p));
+            }
+            m
+        };
+        for claude in [None, Some(""), Some("  "), Some("claude"), Some("claude-code"), Some("claude_code")] {
+            assert!(is_claude(&meta(claude)), "{claude:?} is Claude");
+        }
+        for other in ["codex", "codex-cli", "gemini", "no-such-provider"] {
+            assert!(!is_claude(&meta(Some(other))), "{other} is not Claude");
+        }
     }
 
     #[test]
