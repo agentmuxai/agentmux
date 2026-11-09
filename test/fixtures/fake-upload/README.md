@@ -4,7 +4,7 @@ A page whose buttons open file choosers, for the Browser tool's `set_files` with
 `chooser: true` on a grant that carries the `uploads` power
 (`docs/specs/SPEC_BROWSER_WEB_TERMINAL_TYPING_2026_10_23.md` §6, §13).
 
-    node test/fixtures/fake-upload/server.mjs [port]     # default 8767
+    node test/fixtures/fake-upload/server.mjs [port]     # default 8767; it also answers on the next port
 
 Each button makes an `<input type=file>` and clicks it, so the chooser opens
 during the agent's own click. `window.__got` holds one entry for each pick:
@@ -17,3 +17,8 @@ during the agent's own click. `window.__got` holds one entry for each pick:
 | `#choose-many` | several files, `.txt` and `.pdf` only |
 | `#choose-later` | one file, opened 300 ms after the click |
 | `#choose-folder` | a folder: always cancelled |
+
+`/?frame=1` embeds `/frame.html` from the next port, which is another site: its
+"Choose from frame" button opens a chooser, and what is chosen is posted to the
+page (`window.__frameGot`). A page with that frame gets no chooser filled unless
+the grant covers both ports.

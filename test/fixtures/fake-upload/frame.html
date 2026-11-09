@@ -1,0 +1,17 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Fake uploads, a frame</title>
+<!-- Copyright 2026, AgentMux Corp. SPDX-License-Identifier: Apache-2.0 -->
+<!-- A frame from another site (README.md): its button opens a chooser, and what is chosen goes to the page that embeds it. -->
+<button id="frame-choose">Choose from frame</button>
+<script>
+    document.getElementById("frame-choose").addEventListener("click", () => {
+        const input = document.createElement("input");
+        input.type = "file";
+        input.addEventListener("change", async () => {
+            const files = await Promise.all(Array.from(input.files).map(async (f) => ({ name: f.name, text: await f.text() })));
+            parent.postMessage({ framePick: files }, "*");
+        });
+        input.click();
+    });
+</script>

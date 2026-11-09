@@ -12,12 +12,23 @@
 <button id="choose-later">Choose later</button>
 <!-- A button that asks for a folder. -->
 <button id="choose-folder">Choose a folder</button>
+<!-- With ?frame=1 a frame from the next port, another site: README.md. -->
+<div id="framebox"></div>
 <!-- Shows what was chosen, and whether the browser raised the events itself. -->
 <pre id="shown">nothing chosen</pre>
 
 <script>
     window.__got = [];
     window.__opens = [];
+    window.__frameGot = [];
+    window.addEventListener("message", (e) => { if (e.data && e.data.framePick) window.__frameGot.push(e.data.framePick); });
+    if (new URLSearchParams(location.search).has("frame")) {
+        const f = document.createElement("iframe");
+        f.src = `${location.protocol}//${location.hostname}:${Number(location.port) + 1}/frame.html`;
+        f.width = 420;
+        f.height = 60;
+        document.getElementById("framebox").appendChild(f);
+    }
     const shown = document.getElementById("shown");
     function open(kind, accept, multiple, folder) {
         const input = document.createElement("input");
