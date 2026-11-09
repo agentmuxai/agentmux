@@ -6,7 +6,7 @@
 
 use super::catalog::Model;
 use crate::agents::types::TokenCounts;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -29,6 +29,14 @@ fn sessions() -> &'static Mutex<HashMap<String, f64>> {
     SESSIONS.get_or_init(Default::default)
 }
 
+/// The agents whose responses have carried a provider charge: they are on a
+/// route, so a response of theirs that reports none is priced by the route's
+/// own table and still belongs in their session total.
+fn routed() -> &'static Mutex<HashSet<String>> {
+    static ROUTED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    ROUTED.get_or_init(Default::default)
+}
+
 /// The cumulative provider total last put on a `result` frame, per agent: what
 /// a frame's turn-scoped `cost_usd` is measured from.
 fn last_totals() -> &'static Mutex<HashMap<String, f64>> {
@@ -41,6 +49,7 @@ fn last_totals() -> &'static Mutex<HashMap<String, f64>> {
 pub fn reset_session(agent: &str) {
     sessions().lock().unwrap().remove(agent);
     last_totals().lock().unwrap().remove(agent);
+    routed().lock().unwrap().remove(agent);
 }
 
 /// The provider-reported spend for `agent` since [`reset_session`], or `None`
@@ -66,9 +75,21 @@ pub fn cost(model: &Model, tokens: &TokenCounts) -> f64 {
 /// provider's own charge when the response reported one (`actual`), else the
 /// price table's estimate.
 pub fn record(agent: &str, model: &Model, tokens: &TokenCounts, actual: Option<f64>, now_ms: i64) -> f64 {
-    let cost = actual.filter(|c| c.is_finite() && *c >= 0.0).unwrap_or_else(|| cost(model, tokens));
-    if let Some(actual) = actual.filter(|c| c.is_finite() && *c >= 0.0) {
-        *sessions().lock().unwrap().entry(agent.to_string()).or_insert(0.0) += actual;
+    let actual = actual.filter(|c| c.is_finite() && *c >= 0.0);
+    let cost = actual.unwrap_or_else(|| cost(model, tokens));
+    // A route agent's session total holds every response of its own, priced by
+    // the provider where it said and by the route's table where it did not (an
+    // interrupted stream, say); only a response that never saw a charge at all
+    // leaves an agent off a route with no total.
+    let on_route = match actual {
+        Some(_) => {
+            routed().lock().unwrap().insert(agent.to_string());
+            true
+        }
+        None => routed().lock().unwrap().contains(agent),
+    };
+    if on_route {
+        *sessions().lock().unwrap().entry(agent.to_string()).or_insert(0.0) += actual.unwrap_or(cost);
     }
     let mut table = table().lock().unwrap();
     let day_now = day(now_ms);
@@ -147,8 +168,17 @@ mod tests {
         record("spend-route", model, &used, Some(0.006), 2_000);
         assert!((session_usd("spend-route").unwrap() - 0.010).abs() < 1e-12);
         assert!((today("spend-route", 3_000).cost_usd - 0.010).abs() < 1e-12);
+        // A route response that reported no charge (an interrupted stream) is
+        // priced by the route's table and still counts, rather than vanishing
+        // from the pane's session figure.
+        let estimate = cost(model, &used);
+        record("spend-route", model, &used, None, 3_000);
+        let total = session_usd("spend-route").unwrap();
+        assert!((total - (0.010 + estimate)).abs() < 1e-12, "{total}");
         reset_session("spend-route");
         assert_eq!(session_usd("spend-route"), None, "a new process starts its own total");
+        record("spend-route", model, &used, None, 4_000);
+        assert_eq!(session_usd("spend-route"), None, "and a costless response alone does not make one");
     }
 
     #[test]
