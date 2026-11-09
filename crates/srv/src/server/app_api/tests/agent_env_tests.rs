@@ -426,6 +426,64 @@ async fn a_key_written_by_an_agent_on_another_machine_may_not_name_a_vault_entry
     assert_eq!(stored(&state, &lolly), None);
 }
 
+fn write_env(state: &AppState, agent: &AgentDefinition, text: &str) {
+    state
+        .mstore
+        .agent_content_set(&AgentContent { agent_id: agent.id.clone(), content_type: "env".into(), content: text.into(), updated_at: 1 })
+        .unwrap();
+}
+
+#[tokio::test]
+async fn moving_the_address_checks_the_keys_already_in_the_environment_too() {
+    let state = test_state();
+    let (me, lolly) = (agent(&state, "host", false), agent(&state, "host", false));
+    // A Vault key open to Lolly only, named by the person: an agent that could not read it must not be able
+    // to send it to an address of its own choosing by changing the address alone.
+    let key = vault_key(&state, &[&lolly]);
+    write_env(&state, &lolly, &format!("ANTHROPIC_BASE_URL={SERVER}\nANTHROPIC_AUTH_TOKEN=vault:{key}\n"));
+    let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "set": { "ANTHROPIC_BASE_URL": "http://198.51.100.9:11434" } })).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(stored(&state, &lolly).unwrap().contains(SERVER), "nothing was written");
+    // Changing something else leaves the key where it was, so it is not asked again.
+    let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "set": { "API_TIMEOUT_MS": "1000" } })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    // Taking the address away sends nothing anywhere.
+    let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "unset": ["ANTHROPIC_BASE_URL"] })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+}
+
+#[tokio::test]
+async fn a_key_the_person_wrote_in_the_clear_is_not_handed_to_an_address_an_agent_chose() {
+    let state = test_state();
+    let (me, lolly) = (agent(&state, "host", false), agent(&state, "host", false));
+    write_env(&state, &lolly, "ANTHROPIC_API_KEY=operator-plain-key-123\n");
+    let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "set": { "ANTHROPIC_BASE_URL": SERVER } })).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(!body.to_string().contains("operator-plain-key-123"), "{body}");
+    assert_eq!(stored(&state, &lolly).as_deref(), Some("ANTHROPIC_API_KEY=operator-plain-key-123\n"));
+    // A placeholder is no key.
+    write_env(&state, &lolly, "ANTHROPIC_API_KEY=ollama\n");
+    let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "set": { "ANTHROPIC_BASE_URL": SERVER } })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+}
+
+#[tokio::test]
+async fn only_a_change_of_address_opens_a_notice() {
+    let state = test_state();
+    let (me, lolly) = (agent(&state, "host", false), agent(&state, "host", false));
+    for set in [json!({ "ANTHROPIC_MODEL": "sonnet" }), json!({ "API_TIMEOUT_MS": "1000" })] {
+        let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "set": set })).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(body["notice"].is_null(), "no address moved: {body}");
+        assert!(!body["note"].as_str().unwrap().contains("Undo"), "{body}");
+    }
+    let (_, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "set": { "ANTHROPIC_BASE_URL": SERVER } })).await;
+    assert!(body["notice"]["id"].is_string(), "{body}");
+    // Taking the address away is a change of address too.
+    let (_, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "unset": ["ANTHROPIC_BASE_URL"] })).await;
+    assert!(body["notice"]["id"].is_string(), "{body}");
+}
+
 #[tokio::test]
 async fn an_endpoint_name_is_written_in_capitals_only() {
     let state = test_state();

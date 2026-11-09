@@ -164,14 +164,37 @@ fn endpoint_refusal(state: &AppState, actor: &Actor, target: &AgentDefinition, c
             target.name
         ));
     }
-    let before = agent_env::effective(current);
-    for (name, value) in agent_env::effective(new) {
-        let key = name.eq_ignore_ascii_case("ANTHROPIC_AUTH_TOKEN") || name.eq_ignore_ascii_case("ANTHROPIC_API_KEY");
-        // A reference already there was checked when it was written, and again at every launch.
-        let (Some(entry), true) = (agent_env::vault_ref(&value), key && before.get(&name) != Some(&value)) else { continue };
+    key_refusal(state, actor, target, current, new)
+}
+
+/// Why the keys the new environment holds may not go to its server. When the call moves the address, every
+/// key in the environment goes with it, so every one is checked, the ones already there as well as the
+/// ones the call writes: a `vault:` reference must be usable by the acting agent and by the target, and a
+/// key written in the clear (the operator's, from My Agents) is never handed to an address an agent chose.
+/// When only a key changes, that key is checked.
+fn key_refusal(state: &AppState, actor: &Actor, target: &AgentDefinition, current: &str, new: &str) -> Option<Refusal> {
+    let bad = |m: String| Some(refuse(StatusCode::BAD_REQUEST, m));
+    let (before, after) = (agent_env::effective(current), agent_env::effective(new));
+    let url = |m: &BTreeMap<String, String>| m.iter().find(|(k, _)| k.eq_ignore_ascii_case("ANTHROPIC_BASE_URL")).map(|(_, v)| v.trim().to_string());
+    let moved = url(&before) != url(&after);
+    for (name, value) in &after {
+        if !(name.eq_ignore_ascii_case("ANTHROPIC_AUTH_TOKEN") || name.eq_ignore_ascii_case("ANTHROPIC_API_KEY")) {
+            continue;
+        }
+        if !moved && before.get(name) == Some(value) {
+            continue;
+        }
+        let value = value.trim();
+        let Some(entry) = agent_env::vault_ref(value) else {
+            if !value.is_empty() && !agent_env::is_placeholder(value) {
+                return bad(format!(
+                    "{name}: holds a key written in the environment, which would go to the new address; replace it with vault:<entry id> or have the person set the address in My Agents"
+                ));
+            }
+            continue;
+        };
         let usable = |agent_id: &str| crate::backend::vault::endpoint_key::problem(&state.identity_store, entry, agent_id).is_none();
-        let local_actor = !actor.uid.starts_with("remote:");
-        if !(local_actor && usable(&actor.uid) && usable(&target.id)) {
+        if actor.uid.starts_with("remote:") || !usable(&actor.uid) || !usable(&target.id) {
             return bad(format!(
                 "{name}: {}; the person opens a Vault to an agent in the Vault's agents setting",
                 crate::backend::vault::endpoint_key::NOT_AVAILABLE
@@ -254,11 +277,14 @@ fn run_as(state: &AppState, actor: Actor, req: AgentEnvRequest) -> Result<Value,
                 "agent.env.set: {summary}"
             );
             state.broker.publish_event::<crate::backend::mps_events::AgentContentChanged>(&(), vec![], 0);
-            let notice = endpoint.then(|| {
+            // A card and an Undo are for a change of address; not for a model name, nor for a timeout on an agent with no server of its own.
+            let pointed = endpoint_notice::pointed(&current, &new);
+            let noticed = change.moves_endpoint() && (pointed.base_url.is_some() || pointed.cleared);
+            let notice = noticed.then(|| {
                 let event = endpoint_notice::open(
                     (&target.id, &target.slug, &target.name),
                     &actor.name,
-                    endpoint_notice::pointed(&current, &new),
+                    pointed,
                     &current,
                     &new,
                     agentmux_common::time::now_ms(),
@@ -271,7 +297,7 @@ fn run_as(state: &AppState, actor: Actor, req: AgentEnvRequest) -> Result<Value,
                 "changed": change,
                 "lines": agent_env::redacted(&new),
                 "audit_id": audit_id,
-                "note": if endpoint {
+                "note": if noticed {
                     "applies at the agent's next launch, on a conversation of its own: its pane and My Agents say who pointed it where, with an Undo for 30 seconds"
                 } else {
                     "applies at the agent's next launch"

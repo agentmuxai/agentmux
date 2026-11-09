@@ -114,7 +114,7 @@ pub fn vault_ref(value: &str) -> Option<&str> {
 const PLACEHOLDERS: &[&str] =
     &["ollama", "lm-studio", "lmstudio", "llamacpp", "vllm", "local", "none", "dummy", "placeholder", "unused", "not-needed", "no-key"];
 
-fn is_placeholder(value: &str) -> bool {
+pub fn is_placeholder(value: &str) -> bool {
     PLACEHOLDERS.iter().any(|p| p.eq_ignore_ascii_case(value))
 }
 
@@ -478,6 +478,12 @@ impl Change {
     pub fn touches_endpoint(&self) -> bool {
         let named = |n: &String| is_endpoint_name(n) || n.eq_ignore_ascii_case("ANTHROPIC_MODEL") || n.eq_ignore_ascii_case("ANTHROPIC_SMALL_FAST_MODEL");
         self.added.keys().chain(self.changed.keys()).chain(self.removed.iter()).any(named)
+    }
+
+    /// Whether the change adds, changes or removes one of [`ENDPOINT_NAMES`]: a change to where the agent's
+    /// traffic goes or how it gets there (not to the model it asks for).
+    pub fn moves_endpoint(&self) -> bool {
+        self.added.keys().chain(self.changed.keys()).chain(self.removed.iter()).any(|n| is_endpoint_name(n))
     }
 
     /// Whether the change adds or changes one of [`ENDPOINT_NAMES`]: the settings that need a server
