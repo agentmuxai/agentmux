@@ -22,7 +22,7 @@ import { getPaneTab, paneTabCapability, resolvePaneTabView } from "@/app/store/p
 import { isLightThemeActive } from "@/app/block/pane-identity";
 import { MOS, pushNotification } from "@/app/store/global";
 import { shouldReduceMotion } from "@/app/motion/motion";
-import { readSwarmSummary } from "@/app/store/activitySummary";
+import { readPaneSummary } from "@/app/store/swarm-line";
 import { readSeatMeta, seatTooltipLine } from "@/app/agent-model/seat-format";
 import {
     closeBlockInStack,
@@ -361,7 +361,7 @@ export function tabSummaryOf(id: string, tabInfos: Accessor<Map<string, PaneTabI
     if (badge) return `Browsing as ${badge.label}`;
     const meta = blockMeta(id);
     if (meta?.view !== "agent") return undefined;
-    return readSwarmSummary(meta) ?? undefined;
+    return readPaneSummary(meta) ?? undefined;
 }
 
 /** An agent tab's seat, from the `agent:seat` srv seeds at agent.open (SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §4). */
