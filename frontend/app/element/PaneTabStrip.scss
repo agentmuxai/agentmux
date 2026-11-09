@@ -216,6 +216,10 @@
     display: flex;
     flex-direction: row;
     align-items: stretch;
+    // As a flex item it would otherwise take its content's intrinsic width as
+    // a minimum, leaving a shrinkable lone tab nothing to shrink against and
+    // scrolling the strip instead (#30300, measured on Linux).
+    min-width: 0;
     height: var(--pane-tab-strip-height);
     zoom: var(--pane-tab-strip-zoom, 1);
 }
