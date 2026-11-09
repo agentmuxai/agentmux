@@ -506,6 +506,16 @@ impl PersistentSubprocessController {
         .unwrap_or(crate::connectivity::Service::ModelApi(
             &crate::connectivity::ANTHROPIC,
         ));
+        // A new process starts its own provider-reported spend total, as the
+        // harness's own total starts again with it. Reset it before the
+        // process can answer, not in the reader task (which starts a moment
+        // later, so a response settling first would land in the old total,
+        // #30143).
+        if let Some(mstore) = self.mstore.as_deref() {
+            if let Some(agent) = crate::identity::resolver::block_agent_id(mstore, &self.block_id) {
+                crate::backend::model_gateway::spend::reset_session(&agent);
+            }
+        }
         let stdout_reader_handle: tokio::task::JoinHandle<()> =
             tokio::spawn(Self::run_stdout_reader(StdoutReaderCtx {
                 stdout,

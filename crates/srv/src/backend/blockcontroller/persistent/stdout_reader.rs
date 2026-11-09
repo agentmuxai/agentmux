@@ -107,13 +107,6 @@ impl PersistentSubprocessController {
 
 impl StdoutReader {
     fn from_ctx(ctx: StdoutReaderCtx) -> (tokio::process::ChildStdout, Self) {
-        // A new process starts its own provider-reported session total, as the
-        // harness's own `total_cost_usd` starts again with it (#30143).
-        if let Some(mstore) = &ctx.mstore_read {
-            if let Some(agent) = crate::identity::resolver::block_agent_id(mstore, &ctx.block_id_read) {
-                crate::backend::model_gateway::spend::reset_session(&agent);
-            }
-        }
         let StdoutReaderCtx {
             stdout,
             block_id_read,
@@ -183,7 +176,6 @@ impl StdoutReader {
         (stdout, reader)
     }
 
-    /// One line of the CLI's stdout.
     /// `line` rewritten when it is a `result` frame from an agent on a model
     /// route: the harness prices its tokens with Claude's rates, which on a
     /// route are wrong by orders of magnitude, so the provider's own session
@@ -198,6 +190,7 @@ impl StdoutReader {
         crate::backend::model_gateway::spend::rewrite_result_total(line, &agent)
     }
 
+    /// One line of the CLI's stdout.
     fn handle_line(&mut self, line: String) {
         if line.trim().is_empty() {
             return;
