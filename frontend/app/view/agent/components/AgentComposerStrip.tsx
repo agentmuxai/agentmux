@@ -347,7 +347,11 @@ function authSlot(props: AgentComposerStripProps): Slot {
                     {...tip(title())}
                 >
                     <span class="agent-composer-strip-auth-dot" aria-hidden="true" />
-                    <Show when={canSwitch()} fallback={<span aria-label={compact() ? label() : undefined}>{shown()}</span>}>
+                    <Show when={canSwitch()} fallback={
+                            <span role={compact() ? "img" : undefined} aria-label={compact() ? label() : undefined}>
+                                {shown()}
+                            </span>
+                        }>
                         <Button
                             variant="link"
                             class="agent-composer-strip-auth-link"
@@ -618,14 +622,14 @@ function useStripWidth(refs: StripRefs): Accessor<number> {
 // (here, the always-mounted `stripRef`) is the correct multiplier for
 // a `getComputedStyle` length read anywhere else in that same
 // subtree — multiply by this wherever the two measurement styles mix.
-/** The column-gap between a row's slots, in the same zoomed pixels as the measured widths. */
-const stripGap = (refs: StripRefs): number =>
-    refs.rowsRef ? (parseFloat(getComputedStyle(refs.rowsRef).getPropertyValue("--space-2")) || 8) * zoomRatio(refs) : 8;
-
 const zoomRatio = (refs: StripRefs): number => {
     if (!refs.stripRef || !refs.stripRef.clientWidth) return 1;
     return refs.stripRef.getBoundingClientRect().width / refs.stripRef.clientWidth;
 };
+
+/** The column-gap between a row's slots, in the same zoomed pixels as the measured widths. */
+const stripGap = (refs: StripRefs): number =>
+    refs.rowsRef ? (parseFloat(getComputedStyle(refs.rowsRef).getPropertyValue("--space-2")) || 8) * zoomRatio(refs) : 8;
 
 // Re-measures every current slot whenever the pool changes shape OR
 // any slot's own content changes width (both flow through `slots()`

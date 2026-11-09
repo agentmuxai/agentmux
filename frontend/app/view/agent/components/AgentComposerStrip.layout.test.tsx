@@ -415,7 +415,20 @@ describe("AgentComposerStrip — compact forms", () => {
         resizeTo(container, 400);
         const auth = real(container, ".agent-composer-strip-auth");
         expect(auth.textContent).toBe("!");
-        expect(auth.querySelector("[aria-label]")?.getAttribute("aria-label")).toBe("Not logged in");
+        const named = auth.querySelector("[aria-label]");
+        expect(named?.getAttribute("aria-label")).toBe("Not logged in");
+        expect(named?.getAttribute("role")).toBe("img");
+    });
+
+    it("counts a slot the strip hides (0 px) as taking no room, so the others collapse no earlier than they must", () => {
+        withProbes();
+        widths.auth = 0;
+        const { container } = renderStrip(authed);
+        // Without the account: 120 + 160 + 112 + 2 x 8 = 408 in full forms.
+        resizeTo(container, 408);
+        expect(layout(container).length).toBe(1);
+        expect(real(container, ".agent-composer-strip-compact-btn").textContent).toBe("Compact");
+        expect(real(container, ".agent-composer-strip-log-btn").textContent).toBe("Shell");
     });
 
     it("leaves the forms alone until the probes report a width", () => {
