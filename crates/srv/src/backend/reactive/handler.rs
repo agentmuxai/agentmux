@@ -1490,7 +1490,6 @@ impl ReactiveHandler {
             reason,
         );
     }
-
 }
 
 impl Default for ReactiveHandler {
