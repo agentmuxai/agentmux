@@ -44,6 +44,11 @@ pub struct HeldNotes {
 #[derive(Debug, Default)]
 struct Pane {
     notes: Vec<(String, String)>,
+    /// Keys invalidated since they were last held. A note can be out of the
+    /// set while a message carries it (it is taken on attach); if that message
+    /// is later dropped, [`HeldNotes::put_back`] must not resurrect a note its
+    /// own invalidation (`forget_key`/`replace`) has since removed.
+    forgotten: HashSet<String>,
     touched: u64,
 }
 
@@ -65,6 +70,8 @@ impl HeldNotes {
         let text = super::sanitize::with_system_note_marker(text);
         let pane = self.pane(block_id);
         pane.notes.retain(|(k, _)| k != key);
+        // A fresh note under this key supersedes any earlier invalidation.
+        pane.forgotten.remove(key);
         pane.notes.push((key.to_string(), text.into_owned()));
         if pane.notes.len() > MAX_PER_PANE {
             pane.notes.remove(0);
@@ -74,21 +81,28 @@ impl HeldNotes {
     /// Hold `text` under `key` in place of the note held under `old_key`.
     /// `false`, holding nothing, when no note is held under `old_key`.
     pub fn replace(&mut self, block_id: &str, old_key: &str, key: &str, text: &str) -> bool {
-        let Some(pane) = self.panes.get_mut(block_id) else { return false };
+        let pane = self.pane(block_id);
         let before = pane.notes.len();
         pane.notes.retain(|(k, _)| k != old_key);
-        if pane.notes.len() == before {
-            return false;
+        // Even when the old note is out with a queued message, its key is now
+        // invalidated and must not come back if that message is dropped (#3894
+        // follow-up).
+        pane.forgotten.insert(old_key.to_string());
+        let replaced = pane.notes.len() != before;
+        if replaced {
+            self.hold(block_id, key, text);
         }
-        self.hold(block_id, key, text);
-        true
+        replaced
     }
 
     /// Drop the note held for `block_id` under `key`, if any.
     pub fn forget_key(&mut self, block_id: &str, key: &str) {
-        if let Some(pane) = self.panes.get_mut(block_id) {
-            pane.notes.retain(|(k, _)| k != key);
-        }
+        let pane = self.pane(block_id);
+        pane.notes.retain(|(k, _)| k != key);
+        // Recorded even when nothing is held: the note may be out with a
+        // message that is waiting, and must not return if that message is
+        // dropped (#3894 follow-up).
+        pane.forgotten.insert(key.to_string());
     }
 
     /// Whether a note is held for `block_id` under `key`.
@@ -108,8 +122,12 @@ impl HeldNotes {
             return;
         }
         let pane = self.pane(block_id);
-        let mut all: Vec<(String, String)> =
-            notes.into_iter().filter(|(k, _)| !pane.notes.iter().any(|(newer, _)| newer == k)).collect();
+        // Not a note its own invalidation removed while the message waited
+        // (#3894 follow-up), and not one a newer note has since taken.
+        let mut all: Vec<(String, String)> = notes
+            .into_iter()
+            .filter(|(k, _)| !pane.forgotten.contains(k) && !pane.notes.iter().any(|(newer, _)| newer == k))
+            .collect();
         all.append(&mut pane.notes);
         let excess = all.len().saturating_sub(MAX_PER_PANE);
         pane.notes = all.split_off(excess);
@@ -427,6 +445,41 @@ mod tests {
         assert!(h.replace("b", "paused", "outage", "[AgentMux] were paused"));
         assert!(!h.holds("b", "paused"));
         assert_eq!(texts(&h.take("b")), ["[AgentMux] were paused"]);
+    }
+
+    /// #3894 follow-up: while a message waits (the controller's deferred
+    /// queue), the notes it took are out of the held set; an invalidation in
+    /// that window must still reach them, so a dropped message cannot restore
+    /// a note that has been superseded.
+    #[test]
+    fn a_note_invalidated_while_a_message_waits_is_not_put_back() {
+        let mut h = HeldNotes::default();
+        h.hold("b", "paused", "[AgentMux] cloud delivery paused");
+        let waiting = h.take("b");
+        h.forget_key("b", "paused");
+        h.put_back("b", waiting);
+        assert!(!h.holds("b", "paused"), "the invalidation wins over the dropped message");
+    }
+
+    #[test]
+    fn a_note_replaced_while_a_message_waits_is_not_put_back() {
+        let mut h = HeldNotes::default();
+        h.hold("b", "paused", "[AgentMux] cloud delivery paused");
+        let waiting = h.take("b");
+        assert!(!h.replace("b", "paused", "outage", "[AgentMux] still paused"), "nothing held to replace");
+        h.hold("b", "resumed", "[AgentMux] resumed");
+        h.put_back("b", waiting);
+        assert_eq!(texts(&h.take("b")), ["[AgentMux] resumed"]);
+    }
+
+    /// A dropped message's note still comes back when nothing invalidated it.
+    #[test]
+    fn a_note_untouched_while_the_message_waited_is_put_back() {
+        let mut h = HeldNotes::default();
+        h.hold("b", "other", "[AgentMux] other");
+        let waiting = h.take("b");
+        h.put_back("b", waiting);
+        assert!(h.holds("b", "other"));
     }
 
     #[test]
