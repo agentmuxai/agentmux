@@ -9,33 +9,47 @@ import { COMPACT_ORDER, accountInitial, chooseCompactKeys, shortContextText } fr
 const FULL = { runtime: 168, auth: 152, ctx: 256, hostShell: 72 };
 const COMPACT = { auth: 32, ctx: 112, hostShell: 32 };
 
+/** A stand-in for the strip's row layout: lines of `width` filled in order, `gap` between slots. */
+const rowsAt =
+    (width: number, gap = 8) =>
+    (widths: Record<string, number>): number => {
+        const shown = Object.values(widths).filter((w) => w > 0);
+        const total = shown.reduce((sum, w) => sum + w, 0) + Math.max(0, shown.length - 1) * gap;
+        return Math.max(1, Math.ceil(total / width));
+    };
+
 describe("chooseCompactKeys", () => {
     it("keeps every slot full when they fit one row", () => {
-        expect(chooseCompactKeys(COMPACT_ORDER, FULL, COMPACT, 900, 8).size).toBe(0);
+        expect(chooseCompactKeys(COMPACT_ORDER, FULL, COMPACT, rowsAt(900)).size).toBe(0);
     });
 
-    it("collapses in order, only as far as it takes to fit", () => {
+    it("collapses in order, only as far as it takes to reach the fewest rows", () => {
         // 648 + 3 gaps = 672. Auth alone saves 120.
-        expect([...chooseCompactKeys(COMPACT_ORDER, FULL, COMPACT, 560, 8)]).toEqual(["auth"]);
+        expect([...chooseCompactKeys(COMPACT_ORDER, FULL, COMPACT, rowsAt(560))]).toEqual(["auth"]);
         // Auth and ctx: 672 - 120 - 144 = 408.
-        expect([...chooseCompactKeys(COMPACT_ORDER, FULL, COMPACT, 420, 8)]).toEqual(["auth", "ctx"]);
+        expect([...chooseCompactKeys(COMPACT_ORDER, FULL, COMPACT, rowsAt(420))]).toEqual(["auth", "ctx"]);
         // And Shell: 408 - 40 = 368.
-        expect([...chooseCompactKeys(COMPACT_ORDER, FULL, COMPACT, 370, 8)]).toEqual(["auth", "ctx", "hostShell"]);
+        expect([...chooseCompactKeys(COMPACT_ORDER, FULL, COMPACT, rowsAt(370))]).toEqual(["auth", "ctx", "hostShell"]);
     });
 
-    it("keeps every compact form when even those don't fit, and leaves the rest to the row layout", () => {
-        expect([...chooseCompactKeys(COMPACT_ORDER, FULL, COMPACT, 200, 8)]).toEqual(["auth", "ctx", "hostShell"]);
+    it("when one row is out of reach, stops at the fewest rows the compact forms give and keeps the other full forms", () => {
+        // All compact: 368, two rows of 300. Full: three. The account alone gets it to two.
+        expect([...chooseCompactKeys(COMPACT_ORDER, FULL, COMPACT, rowsAt(300))]).toEqual(["auth"]);
+    });
+
+    it("keeps every compact form when the rows only come down with all of them", () => {
+        expect([...chooseCompactKeys(COMPACT_ORDER, FULL, COMPACT, rowsAt(200))]).toEqual(["auth", "ctx", "hostShell"]);
     });
 
     it("never touches a slot with no compact form", () => {
-        const chosen = chooseCompactKeys(["auth", "ctx", "hostShell", "runtime"], FULL, COMPACT, 100, 8);
+        const chosen = chooseCompactKeys(["auth", "ctx", "hostShell", "runtime"], FULL, COMPACT, rowsAt(100));
         expect(chosen.has("runtime")).toBe(false);
     });
 
     it("leaves out a slot the strip already hides (0 wide), and a form that is no smaller", () => {
-        const hidden = chooseCompactKeys(COMPACT_ORDER, { ...FULL, auth: 0 }, COMPACT, 300, 8);
+        const hidden = chooseCompactKeys(COMPACT_ORDER, { ...FULL, auth: 0 }, COMPACT, rowsAt(300));
         expect(hidden.has("auth")).toBe(false);
-        const same = chooseCompactKeys(COMPACT_ORDER, FULL, { ...COMPACT, ctx: 256 }, 300, 8);
+        const same = chooseCompactKeys(COMPACT_ORDER, FULL, { ...COMPACT, ctx: 256 }, rowsAt(300));
         expect(same.has("ctx")).toBe(false);
     });
 

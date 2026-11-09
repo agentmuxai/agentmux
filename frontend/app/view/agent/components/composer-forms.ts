@@ -9,6 +9,10 @@
  *
  * The order is what collapses first. Never hidden, in any form: the runtime trigger (mode, model, effort), the
  * context reading, the CPU and memory readout, and Shell (the strip's one action).
+ *
+ * How far it goes is decided by rows, not by one row: the fewest rows the strip can have is what it gets with every
+ * compact form (one row when they fit, else two, ...); the slots then collapse only until the layout reaches that
+ * many rows, so a pane that needs two rows keeps whatever full forms fit in them.
  */
 
 /**
@@ -20,26 +24,24 @@ export const COMPACT_ORDER = ["auth", "ctx", "hostShell", "stats"] as const;
 
 /**
  * The keys that show their compact form. `full` holds every slot's width in its full form and `compact` the width
- * of those that have a compact form. A slot that measures 0 is shed by the strip's own rules and takes no part.
- * Collapses in `COMPACT_ORDER` until the slots, with a `gap` between each, fit one row of `width`; when even all
- * compact forms don't fit, they all stay compact and the row layout wraps what is left.
+ * of those that have a compact form (a slot the strip hides measures 0 in `full` and takes no part). `rowCount`
+ * says how many rows the strip's layout makes of the slots at the widths it is given. Collapses in `COMPACT_ORDER`
+ * until the layout is down to the rows it has with every compact form.
  */
 export function chooseCompactKeys(
     order: readonly string[],
     full: Record<string, number>,
     compact: Record<string, number>,
-    width: number,
-    gap: number
+    rowCount: (widths: Record<string, number>) => number
 ): Set<string> {
-    const shown = Object.keys(full).filter((k) => (full[k] ?? 0) > 0);
-    let total = shown.reduce((sum, k) => sum + full[k], 0) + Math.max(0, shown.length - 1) * gap;
+    const candidates = order.filter((k) => (full[k] ?? 0) > 0 && compact[k] !== undefined && compact[k] < full[k]);
+    const widths = { ...full };
+    const target = rowCount({ ...full, ...Object.fromEntries(candidates.map((k) => [k, compact[k]])) });
     const chosen = new Set<string>();
-    for (const key of order) {
-        if (total <= width) break;
-        const smaller = compact[key];
-        if (!shown.includes(key) || smaller === undefined || smaller >= full[key]) continue;
+    for (const key of candidates) {
+        if (rowCount(widths) <= target) break;
         chosen.add(key);
-        total -= full[key] - smaller;
+        widths[key] = compact[key];
     }
     return chosen;
 }

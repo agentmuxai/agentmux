@@ -319,7 +319,9 @@ describe("computeComposerRows — anchored model selector + Shell (Rev 8)", () =
             { key: "hostShell", width: 50 },
         ];
         const rows = computeComposerRows(slots, "hostShell", 200, 5, "runtime");
-        expect(lastRow(rows)).toEqual({ left: ["runtime"], right: ["hostShell"] });
+        // Anchors outermost on the last row; a row that fits beside them may share it (Rev 10).
+        expect(lastRow(rows).left[0]).toBe("runtime");
+        expect(lastRow(rows).right.at(-1)).toBe("hostShell");
     });
 
     it("multi-row: neither anchor ever appears in any row but the last", () => {
@@ -593,6 +595,70 @@ describe("computeComposerRows — pinned auth/ctx pair (Rev 9)", () => {
  * (`orderKeysForEdgePriority`), and side-dependent internal ordering of
  * the composite ctx/hostShell slots (Compact/Shell on the outer end).
  */
+describe("computeComposerRows — rows that fit together share a line (Rev 10)", () => {
+    const keysOf = (r: ComposerRow) => [...r.left, ...r.right].sort();
+
+    it("packs a pane of seven small slots into two lines, not four", () => {
+        // The operator's ~420 px pane: runtime, account, readout, context, view and Shell, all in compact forms.
+        const slots = [
+            { key: "runtime", width: 172 },
+            { key: "auth", width: 24 },
+            { key: "ctx", width: 120 },
+            { key: "view", width: 150 },
+            { key: "hostShell", width: 72 },
+        ];
+        const rows = computeComposerRows(slots, "hostShell", 404, 8, "runtime", [{ leftKey: "auth", rightKey: "ctx" }]);
+        expect(rows).toHaveLength(2);
+        expect(keysOf(rows[1])).toEqual(["hostShell", "runtime"]);
+        expect(keysOf(rows[0])).toEqual(["auth", "ctx", "view"]);
+    });
+
+    it("keeps the anchors on the last line and shares it only with what fits beside them", () => {
+        const slots = [
+            { key: "runtime", width: 100 },
+            { key: "a", width: 40 },
+            { key: "b", width: 150 },
+            { key: "c", width: 150 },
+            { key: "hostShell", width: 50 },
+        ];
+        const rows = computeComposerRows(slots, "hostShell", 320, 10, "runtime");
+        const last = rows[rows.length - 1];
+        expect(last.left[0]).toBe("runtime");
+        expect(last.right.at(-1)).toBe("hostShell");
+        for (const row of rows.slice(0, -1)) expect(keysOf(row)).not.toContain("runtime");
+    });
+
+    it("never builds a line wider than the strip when each row fits on its own", () => {
+        const slots = [
+            { key: "runtime", width: 120 },
+            { key: "a", width: 90 },
+            { key: "b", width: 90 },
+            { key: "c", width: 90 },
+            { key: "d", width: 90 },
+            { key: "hostShell", width: 60 },
+        ];
+        const widths = new Map(slots.map((s) => [s.key, s.width]));
+        const rows = computeComposerRows(slots, "hostShell", 300, 8, "runtime");
+        for (const row of rows) {
+            const keys = [...row.left, ...row.right];
+            const total = keys.reduce((sum, k) => sum + widths.get(k)!, 0) + (keys.length - 1) * 8;
+            expect(total).toBeLessThanOrEqual(300);
+        }
+        expect(rows.flatMap((r) => [...r.left, ...r.right]).sort()).toEqual(slots.map((s) => s.key).sort());
+    });
+
+    it("leaves rows alone when nothing fits beside another", () => {
+        const slots = [
+            { key: "runtime", width: 150 },
+            { key: "a", width: 140 },
+            { key: "b", width: 140 },
+            { key: "hostShell", width: 120 },
+        ];
+        const rows = computeComposerRows(slots, "hostShell", 300, 8, "runtime");
+        expect(rows.map(keysOf)).toEqual([["a", "b"], ["hostShell", "runtime"]]);
+    });
+});
+
 describe("orderKeysForEdgePriority", () => {
     const isInteractive = (interactive: string[]) => (key: string) => interactive.includes(key);
 

@@ -360,10 +360,51 @@ function multiRow(
         }
     }
 
-    return pairs.map(([left, right]) => ({
+    const rows = pairs.map(([left, right]) => ({
         left: left ? [left] : [],
         right: right ? [right] : [],
     }));
+    return mergeRows(rows, new Map(slots.map((s) => [s.key, s.width])), availableWidth, gapPx);
+}
+
+/**
+ * Rev 10 (2026-11-09, #30203): rows that fit together on one line share it. The pairing above puts one slot a
+ * side per row, so a narrow pane with seven small slots came out as three or four half-empty lines (the
+ * operator's screenshot of a 420 px pane). This packs the rows, best fit, widest first, into as few lines as
+ * hold them: a row's slots keep their own sides, so a merged line has the left slots of both on the left and the
+ * right slots of both on the right. The LAST row (the anchors, or the one holding Shell) is the seed of its own
+ * line and stays last, and no row is ever split, so the invariants of Revs 7 to 9 are untouched: the anchors
+ * share the last line, a pinned pair stays together when it fits, nothing becomes one-sided that was not.
+ */
+function mergeRows(rows: ComposerRow[], widthOf: Map<string, number>, availableWidth: number, gapPx: number): ComposerRow[] {
+    if (rows.length < 2) return rows;
+    const widthOfRow = (r: ComposerRow): number => {
+        const keys = [...r.left, ...r.right];
+        return keys.reduce((sum, k) => sum + (widthOf.get(k) ?? 0), 0) + Math.max(0, keys.length - 1) * gapPx;
+    };
+    type Line = { first: number; left: string[]; right: string[]; width: number };
+    const lineOf = (r: ComposerRow, first: number): Line => ({ first, left: [...r.left], right: [...r.right], width: widthOfRow(r) });
+    const anchor = lineOf(rows[rows.length - 1], rows.length - 1);
+    const lines: Line[] = [];
+    const widest = rows
+        .slice(0, -1)
+        .map((r, i) => ({ r, i, width: widthOfRow(r) }))
+        .sort((a, b) => b.width - a.width || a.i - b.i);
+    for (const item of widest) {
+        // The line with the least room left that still holds it (the anchor line included).
+        let best: Line | undefined;
+        for (const line of [...lines, anchor]) {
+            const room = availableWidth - (line.width + gapPx + item.width);
+            if (room >= 0 && (!best || room < availableWidth - (best.width + gapPx + item.width))) best = line;
+        }
+        const target = best ?? (lines[lines.push(lineOf({ left: [], right: [] }, item.i)) - 1]);
+        const empty = target.left.length + target.right.length === 0;
+        target.left.push(...item.r.left);
+        target.right.push(...item.r.right);
+        target.width = empty ? item.width : target.width + gapPx + item.width;
+        target.first = Math.min(target.first, item.i);
+    }
+    return [...lines.sort((a, b) => a.first - b.first), anchor].map(({ left, right }) => ({ left, right }));
 }
 
 /**

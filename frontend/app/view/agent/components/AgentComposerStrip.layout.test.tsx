@@ -391,13 +391,24 @@ describe("AgentComposerStrip — compact forms", () => {
         expect(narrowestOneRow(container)).toBe(320);
     });
 
-    it("wraps only when even the compact forms don't fit, and keeps them compact", () => {
+    it("wraps only when even the compact forms don't fit, and keeps the full forms where they cost no row", () => {
         withProbes();
         const { container } = renderStrip(authed);
         resizeTo(container, 300);
         expect(layout(container).length).toBeGreaterThan(1);
-        expect(real(container, ".agent-composer-strip-auth").textContent).toBe("A");
-        expect(real(container, ".agent-composer-strip-log-btn").getAttribute("aria-label")).toBe("Shell");
+        // The compact forms make as many rows as the full ones here, so nothing is shrunk for nothing.
+        expect(real(container, ".agent-composer-strip-auth").textContent).toContain("alice");
+        expect(real(container, ".agent-composer-strip-log-btn").textContent).toBe("Shell");
+    });
+
+    it("uses every compact form that saves a row when one row is out of reach", () => {
+        withProbes();
+        const { container } = renderStrip(authed);
+        resizeTo(container, 280);
+        const rows = layout(container).length;
+        expect(rows).toBeGreaterThan(1);
+        resizeTo(container, 1000);
+        expect(layout(container).length).toBe(1);
     });
 
     it("gives the full forms back when the strip widens", () => {
@@ -498,6 +509,32 @@ describe("AgentComposerStrip — the CPU and memory readout", () => {
 
         resizeTo(container, 200);
         expect(keysOf(container)).toContain("stats");
-        expect(chip().dataset.form).toBe("compact");
+    });
+});
+
+describe("AgentComposerStrip — a ~420 px pane (the operator's screenshot, #30203)", () => {
+    it("is two lines, the readout beside the context reading, the anchors on the last", () => {
+        readout.on = true;
+        // The parts as a 420 px pane measured them: all compact they add up to ~450 px, so one line is out of reach.
+        Object.assign(widths, { runtime: 172, auth: 160, ctxReading: 90, compact: 70, shell: 25, badge: 42, stats: 90 });
+        Object.assign(probeWidths, {
+            "auth:full": 160,
+            "auth:compact": 24,
+            "ctx:full": 168,
+            "ctx:compact": 72,
+            "hostShell:full": 140,
+            "hostShell:compact": 72,
+            "stats:full": 90,
+            "stats:compact": 56,
+        });
+        const { container } = renderStrip({ authEmail: "alice@example.com" });
+        resizeTo(container, 404);
+        const rows = layout(container);
+        expect(rows).toHaveLength(2);
+        const first = [...rows[0].left, ...rows[0].right];
+        expect(first).toEqual(expect.arrayContaining(["stats", "ctx"]));
+        expect(Math.abs(first.indexOf("stats") - first.indexOf("ctx"))).toBe(1);
+        const last = [...rows[1].left, ...rows[1].right];
+        expect(last).toEqual(expect.arrayContaining(["runtime", "hostShell"]));
     });
 });

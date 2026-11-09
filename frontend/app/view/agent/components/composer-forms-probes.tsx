@@ -52,7 +52,7 @@ export function useSlotForms(
     slots: Accessor<FormSlot[]>,
     stripWidth: Accessor<number>,
     slotWidths: Accessor<Record<string, number>>,
-    gapPx: () => number
+    rowCount: (widths: Record<string, number>) => number
 ): SlotForms {
     let root: HTMLElement | undefined;
     const [measured, setMeasured] = createSignal<Measured>({ full: {}, compact: {} });
@@ -70,10 +70,15 @@ export function useSlotForms(
         const probed = probeKeys().filter((k) => m.full[k] !== undefined && m.compact[k] !== undefined);
         if (width === 0 || probed.length === 0) return new Set();
         const full: Record<string, number> = { ...widths };
+        const compact: Record<string, number> = {};
         // A slot the strip's own rules hide measures 0 and takes no part, as in `layoutWidths`.
-        for (const key of probed) if ((widths[key] ?? 0) > 0) full[key] = m.full[key];
+        for (const key of probed) {
+            if ((widths[key] ?? 0) <= 0) continue;
+            full[key] = m.full[key];
+            compact[key] = m.compact[key];
+        }
         const order = COMPACT_ORDER.filter((k) => probed.includes(k));
-        return chooseCompactKeys(order, full, m.compact, width, gapPx());
+        return chooseCompactKeys(order, full, compact, rowCount);
     }, new Set<string>());
 
     const layoutWidths = createMemo((): Record<string, number> => {

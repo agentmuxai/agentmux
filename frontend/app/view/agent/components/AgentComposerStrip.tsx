@@ -767,6 +767,33 @@ function fallbackLayout(list: Slot[], edgeOrdered: (r: ComposerRow) => ComposerR
     return { rows: [edgeOrdered({ left, right })], statsInline: true };
 }
 
+/** The slots that take room: all but those the strip's own rules hide (0 px; Shell is never one of them). */
+function visibleSlots(list: Slot[], widths: Record<string, number>): Slot[] {
+    return list.filter((s) => s.key === "hostShell" || (widths[s.key] ?? 0) > 0);
+}
+
+/**
+ * The rows for these slots at these widths. The CPU and memory readout rides with the context reading, as one
+ * unit that is never split across lines (the readout, then the reading); the rest is `computeComposerRows`:
+ * runtime/Shell anchored on the last row, account/context pinned left/right (Rev 9, see
+ * docs/specs/SPEC_COMPOSER_STRIP_AUTH_COMPACT_SIDE_STABILITY_2026_09_16.md).
+ */
+function buildRows(visible: Slot[], widths: Record<string, number>, width: number, gapPx: number): ComposerRow[] {
+    const beside = visible.some((s) => s.key === "stats") && visible.some((s) => s.key === "ctx");
+    const units = visible
+        .filter((s) => !(beside && s.key === "stats"))
+        .map((s) => ({ key: s.key, width: (widths[s.key] ?? 0) + (beside && s.key === "ctx" ? (widths.stats ?? 0) + gapPx : 0) }));
+    const rows = computeComposerRows(units, "hostShell", width, gapPx, "runtime", [{ leftKey: "auth", rightKey: "ctx" }]);
+    if (!beside) return rows;
+    const expand = (keys: string[]) => keys.flatMap((k) => (k === "ctx" ? ["stats", "ctx"] : [k]));
+    return rows.map((r) => ({ left: expand(r.left), right: expand(r.right) }));
+}
+
+/** How many rows these slots make at these widths (what the forms are chosen by). */
+function rowCountFor(list: Slot[], widths: Record<string, number>, width: number, gapPx: number): number {
+    return buildRows(visibleSlots(list, widths), widths, width, gapPx).length;
+}
+
 function measuredLayout(
     list: Slot[],
     widths: Record<string, number>,
@@ -794,7 +821,7 @@ function measuredLayout(
     // pairs than necessary as the pane narrowed, reproducing the very
     // one-sided-lines pattern this file exists to prevent. See
     // `zoomRatio`'s own doc comment above.
-    const gapPx = refs.rowsRef ? (parseFloat(getComputedStyle(refs.rowsRef).getPropertyValue("--space-2")) || 8) * zoomRatio(refs) : 8;
+    const gapPx = stripGap(refs);
 
     // Codex P1, PR #2812: a slot hidden via this file's own SCSS
     // shed-content queries (e.g. `.agent-composer-strip-auth`
@@ -812,20 +839,10 @@ function measuredLayout(
     // threshold again — then folded back into the last row afterward
     // via its own fallback `side`, where its zero width can never
     // visually unbalance anything.
-    const visible = list.filter((s) => s.key === "hostShell" || (widths[s.key] ?? 0) > 0);
+    const visible = visibleSlots(list, widths);
     const shed = list.filter((s) => s.key !== "hostShell" && (widths[s.key] ?? 0) === 0);
 
-    const built = computeComposerRows(
-        visible.map((s) => ({ key: s.key, width: widths[s.key] ?? 0 })),
-        "hostShell",
-        width,
-        gapPx,
-        "runtime",
-        // auth ("Logged in") / ctx (Compact) — see Rev 9's "SECOND
-        // ANCHORED PAIR" doc comment on computeComposerRows above and
-        // docs/specs/SPEC_COMPOSER_STRIP_AUTH_COMPACT_SIDE_STABILITY_2026_09_16.md.
-        [{ leftKey: "auth", rightKey: "ctx" }],
-    );
+    const built = buildRows(visible, widths, width, gapPx);
 
     // Stats share the single row's line only when slots PLUS stats
     // (plus the stats' own gap) genuinely fit — the check Codex P1
@@ -1072,7 +1089,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
     const stripWidth = useStripWidth(refs);
     const slotWidths = useSlotWidths(slots, stripWidth, refs);
     // Which slots show their compact form, from hidden probes of both forms (composer-forms-probes.tsx).
-    const forms = useSlotForms(slots, stripWidth, slotWidths, () => stripGap(refs));
+    const forms = useSlotForms(slots, stripWidth, slotWidths, (widths) => rowCountFor(slots(), widths, stripWidth(), stripGap(refs)));
     // The stats zone and its measured footprint (composer-stats-zone.tsx).
     const { statsWidth, statsZone } = useStatsZone(stripWidth, slotWidths);
     const slotByKey = createSlotMap(slots);
