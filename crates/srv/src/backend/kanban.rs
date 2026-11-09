@@ -123,7 +123,7 @@ pub fn reminder_text(waiting: &[BoardTask], now_ms: i64) -> String {
                 "agent" if !t.card.requested_by.is_empty() => format!("requested by {}", q(&t.card.requested_by)),
                 _ => "filed".to_string(),
             };
-            format!("#{} \"{}\" ({who} {})", t.card.num, q(&t.item.title), ago(now_ms, t.item.created_at))
+            format!("{} \"{}\" ({who} {})", t.card.name(), q(&t.item.title), ago(now_ms, t.item.created_at))
         })
         .collect();
     let more = waiting.len().saturating_sub(MAX_NAMED);
@@ -287,14 +287,14 @@ pub fn unlocked_text(spec: &BoardTask, build: &BoardTask) -> String {
     use crate::backend::reactive::sanitize::quote_in_system_note as q;
     let doc = if spec.card.doc.is_empty() { String::new() } else { format!(" ({})", q(&spec.card.doc)) };
     format!(
-        "[AgentMux] Task #{} \"{}\" can start: the {} it waits on, #{} \"{}\"{doc}, is done. \
+        "[AgentMux] Task {} \"{}\" can start: the {} it waits on, {} \"{}\"{doc}, is done. \
          Take it with Tasks claim (id {}) when you've finished your current task.",
-        build.card.num,
+        build.card.name(),
         q(&build.item.title),
         spec.item.kind.trim().to_ascii_lowercase(),
-        spec.card.num,
+        spec.card.name(),
         q(&spec.item.title),
-        build.card.num
+        build.card.id_arg()
     )
 }
 
@@ -337,7 +337,7 @@ pub fn notify_unlocked(identity: &Store, mstore: &Store, finished_id: &str) -> u
         let to = note_address(reg.uid.as_deref(), &reg.agent_id);
         match handler.deliver_system_note(&to, &unlocked_text(&spec, &build)) {
             Ok(()) => {
-                record(identity, &build.item.id, "agentmux", "unlocked", &format!("#{} done", spec.card.num));
+                record(identity, &build.item.id, "agentmux", "unlocked", &format!("{} done", spec.card.name()));
                 told += 1;
             }
             Err(e) => tracing::info!(target = %reg.agent_id, error = %e, "kanban: unlock note not delivered"),

@@ -304,3 +304,31 @@ fn a_dependency_is_shown_by_its_number_on_its_board() {
     s.work_card_create("m3", &NewCard::default(), 1000).unwrap();
     assert_eq!(s.work_board_get("#3").unwrap().unwrap().card.after[0].label(), "#1");
 }
+
+#[test]
+fn a_dependency_cannot_be_set_across_boards() {
+    let (s, _d) = store();
+    let work = s.work_board_create(&edit("Work"), "t", 1).unwrap();
+    file(&s, "m1", "");
+    file(&s, "w1", &work.id);
+    file(&s, "w2", &work.id);
+    let why = s.work_deps_set("w1", &["m1".to_string()]).unwrap().expect("refused");
+    assert!(why.contains("own board"), "{why}");
+    assert_eq!(s.work_deps_of("w1").unwrap().len(), 0, "nothing was written");
+    assert_eq!(s.work_deps_set("w1", &["w2".to_string()]).unwrap(), None, "the same board is fine");
+}
+
+#[test]
+fn deleting_main_does_not_bring_it_back_as_a_second_default() {
+    let (s, d) = store();
+    let work = s.work_board_create(&edit("Work"), "t", 1).unwrap();
+    s.work_board_set_default("work", 2).unwrap();
+    s.work_board_archive("main", true, 3).unwrap();
+    s.work_board_delete("main", 4).unwrap();
+    drop(s);
+    let s = Store::open_identity_store(&d.path().join("identity-store.db")).unwrap();
+    let boards = s.work_boards_list(true, 5).unwrap();
+    assert_eq!(boards.iter().map(|b| b.slug.as_str()).collect::<Vec<_>>(), ["work"]);
+    assert!(boards[0].is_default);
+    assert_eq!(s.work_board_default().unwrap().id, work.id);
+}

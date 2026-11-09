@@ -116,7 +116,7 @@ async fn decide(state: &AppState, caller: Option<&Caller>, id: &str, req: Decisi
     let outcome = check(&task, &req.text, verb);
     // One audit line per call, a refusal too: who, which task and why not.
     let request_id = uuid::Uuid::new_v4().to_string();
-    let note = format!("#{num}{}", if own_work { " (its own work)" } else { "" });
+    let note = format!("{}{}", task.card.name(), if own_work { " (its own work)" } else { "" });
     match &outcome {
         Err(r) => {
             tracing::info!(agent = %reg.agent_id, task = num, why = r.code, "kanban: an agent's decision was refused");
@@ -165,7 +165,7 @@ async fn decide(state: &AppState, caller: Option<&Caller>, id: &str, req: Decisi
 /// The checks, in order; the first that fails answers.
 fn check(task: &BoardTask, text: &str, verb: Verb) -> Result<(), Refusal> {
     if task.item.state != work_state::REVIEW {
-        return Err(delegate::not_in_review(task.card.num, &task.item.state));
+        return Err(delegate::not_in_review(&task.card.name(), &task.item.state));
     }
     if verb == Verb::SendBack && text.trim().is_empty() {
         return Err(Refusal { code: "reason_required", words: "send_back needs a reason: it goes to the task's holder.".to_string() });

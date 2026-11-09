@@ -181,7 +181,10 @@ async fn run_work_claim(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     if let Some(n) = named {
         let num = v.get("num").and_then(|x| x.as_i64()).map(|x| x.to_string());
         let task_ref = v.get("ref").and_then(|x| x.as_str());
-        if id != n && num.as_deref() != Some(n) && task_ref != Some(n) && task_ref.map(|r| r.trim_start_matches('#')) != Some(n) {
+        // A srv that knows boards answers with the task's canonical `ref`, which may be spelled
+        // differently from the request (`main#1` for `#1`, a renamed board's old slug): it
+        // honoured the id. Only an older srv, which sends no ref, can hand out another task.
+        if task_ref.is_none() && id != n && num.as_deref() != Some(n) {
             let release = format!("{}/agentmux/work/{}/release", local_url.trim_end_matches('/'), path_seg(id));
             let _ = client
                 .post(&release)

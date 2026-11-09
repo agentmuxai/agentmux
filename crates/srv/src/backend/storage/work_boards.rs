@@ -77,9 +77,11 @@ pub(crate) fn apply_schema(conn: &Connection) -> Result<(), StoreError> {
     // Seeding Main is what marks the migration done: only then does every existing card keep its
     // number. A card an older build adds later is numbered from Main's counter instead
     // (`number_unboarded`), so it can't collide with a number handed out since.
+    // Only into an empty table: Main may have been deleted since, and must not come back as a
+    // second default beside the board the person chose.
     let seeded = conn.execute(
         "INSERT OR IGNORE INTO db_boards (id, slug, name, is_default, created_at, updated_at)
-         VALUES (?1, 'main', 'Main', 1, 0, 0)",
+         SELECT ?1, 'main', 'Main', 1, 0, 0 WHERE NOT EXISTS (SELECT 1 FROM db_boards)",
         params![MAIN_ID],
     )?;
     if seeded > 0 {
@@ -298,7 +300,7 @@ pub(crate) fn default_board_id(conn: &Connection) -> Result<String, StoreError> 
 
 /// The wall clock in ms, for the lookups that have no `now` of their own (an alias in force).
 pub(crate) fn now_ms_clock() -> i64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
+    agentmux_common::time::now_ms()
 }
 
 /// Give each task its board's slug and the way its ref is written.
@@ -657,34 +659,7 @@ impl Store {
         if target.archived {
             return refused(format!("board {} is archived; unarchive it first", target.slug));
         }
-        let (source_board, source_num, item) = {
-            let key = task.trim();
-            let found = match parse_ref(key) {
-                Some((slug, n)) => {
-                    let b = resolve(&conn, slug.as_deref(), now_ms)?;
-                    conn.query_row(
-                        "SELECT work_id FROM db_work_cards WHERE board_id = ?1 AND board_num = ?2",
-                        params![b.id, n],
-                        |r| r.get::<_, String>(0),
-                    )
-                    .optional()?
-                }
-                None => Some(key.to_string()),
-            };
-            let Some(work_id) = found else { return refused(format!("no task {key}")) };
-            let Some(item) = conn
-                .query_row(&format!("SELECT {COLS} FROM db_work_queue WHERE id = ?1"), params![work_id], row_to_item)
-                .optional()?
-            else {
-                return refused(format!("no task {key}"));
-            };
-            let (board_id, num): (String, i64) = conn.query_row(
-                "SELECT board_id, board_num FROM db_work_cards WHERE work_id = ?1",
-                params![item.id],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )?;
-            (find(&conn, &board_id, 0)?.ok_or(StoreError::NotFound)?, num, item)
-        };
+        let (source_board, source_num, item) = task_to_move(&conn, task, now_ms)?;
         if source_board.id == target.id {
             return refused(format!("it is already on board {}", target.slug));
         }
@@ -751,6 +726,36 @@ impl Store {
         tx.commit()?;
         Ok(TaskMoved { id: new_id, from_ref, to_ref, board: target.slug, num, dropped_deps: edges, target_cleared })
     }
+}
+
+/// The task a move names (an id or a `slug#n` ref), with the board it is on and its number there.
+fn task_to_move(conn: &Connection, task: &str, now_ms: i64) -> Result<(Board, i64, WorkItem), BoardError> {
+    let key = task.trim();
+    let found = match parse_ref(key) {
+        Some((slug, n)) => {
+            let b = resolve(conn, slug.as_deref(), now_ms)?;
+            conn.query_row(
+                "SELECT work_id FROM db_work_cards WHERE board_id = ?1 AND board_num = ?2",
+                params![b.id, n],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()?
+        }
+        None => Some(key.to_string()),
+    };
+    let Some(work_id) = found else { return refused(format!("no task {key}")) };
+    let Some(item) = conn
+        .query_row(&format!("SELECT {COLS} FROM db_work_queue WHERE id = ?1"), params![work_id], row_to_item)
+        .optional()?
+    else {
+        return refused(format!("no task {key}"));
+    };
+    let (board_id, num): (String, i64) = conn.query_row(
+        "SELECT board_id, board_num FROM db_work_cards WHERE work_id = ?1",
+        params![item.id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    Ok((find(conn, &board_id, 0)?.ok_or(StoreError::NotFound)?, num, item))
 }
 
 /// The refs of the tasks a task starts after, and of those that start after it.

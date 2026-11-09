@@ -90,6 +90,18 @@ pub struct ChecklistItem {
     pub status: String,
 }
 
+impl WorkCard {
+    /// How a message names the task: `#12` on the default board, else `work#12`.
+    pub fn name(&self) -> String {
+        if self.task_ref.is_empty() { format!("#{}", self.num) } else { self.task_ref.clone() }
+    }
+
+    /// The `id` an agent passes to `Tasks`: the bare number on the default board, else `work#12`.
+    pub fn id_arg(&self) -> String {
+        self.name().trim_start_matches('#').to_string()
+    }
+}
+
 /// The board's fields of one task.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct WorkCard {

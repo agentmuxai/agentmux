@@ -20,7 +20,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use rusqlite::{params, params_from_iter, Connection, TransactionBehavior};
+use rusqlite::{params, params_from_iter, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 
 use super::store::Store;
@@ -176,6 +176,18 @@ fn refusal(conn: &Connection, work_id: &str, after_ids: &[String]) -> Result<Opt
         let exists: i64 = conn.query_row("SELECT COUNT(*) FROM db_work_queue WHERE id = ?1", params![after], |r| r.get(0))?;
         if exists == 0 {
             return Ok(Some(format!("no task {after}")));
+        }
+        // Dependencies stay inside one board. A task with no card yet (one being filed) is checked
+        // by the caller, which knows the board it is going to.
+        let board_of = |id: &str| -> Result<String, StoreError> {
+            Ok(conn
+                .query_row("SELECT board_id FROM db_work_cards WHERE work_id = ?1", params![id], |r| r.get::<_, String>(0))
+                .optional()?
+                .unwrap_or_default())
+        };
+        let (mine, theirs) = (board_of(work_id)?, board_of(after)?);
+        if !mine.is_empty() && !theirs.is_empty() && mine != theirs {
+            return Ok(Some("a task can only start after a task on its own board".into()));
         }
         // Does `after` already wait on `work_id`, through any chain?
         let mut seen = HashSet::new();

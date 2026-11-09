@@ -204,14 +204,14 @@ fn send_back_text(t: &BoardTask, by: &Decider<'_>, reason: &str) -> String {
 {}", crate::backend::kanban_delegate::RELAYED_REASON_MARK, quoted(reason)),
     };
     format!(
-        "Task #{} \"{}\" was sent back from review by {}{}
+        "Task {} \"{}\" was sent back from review by {}{}
 
 Fix that before anything else, then submit it again (id {}, attempt {}).",
-        t.card.num,
+        t.card.name(),
         quote_in_system_note(&t.item.title),
         by.sender(),
         why,
-        t.card.num,
+        t.card.id_arg(),
         t.item.attempts
     )
 }
@@ -430,7 +430,7 @@ fn after_words(store: &crate::backend::storage::store::Store, ids: &[String]) ->
     }
     let nums: Vec<String> = ids
         .iter()
-        .map(|id| store.work_board_get(id).ok().flatten().map(|t| format!("#{}", t.card.num)).unwrap_or_else(|| id.clone()))
+        .map(|id| store.work_board_get(id).ok().flatten().map(|t| t.card.name()).unwrap_or_else(|| id.clone()))
         .collect();
     format!("starts after {}", nums.join(", "))
 }
@@ -494,7 +494,7 @@ fn quoted(text: &str) -> String {
 
 /// What an agent receives when the operator starts a task on it.
 fn start_text(t: &BoardTask, attempt: i64, by: &Actor) -> String {
-    let n = t.card.num;
+    let (name, n) = (t.card.name(), t.card.id_arg());
     let title = quote_in_system_note(&t.item.title);
     let report = format!(
         "Report on it with Tasks (id {n}, attempt {attempt}): update at milestones, ask if you need {}, submit when it's done.",
@@ -502,7 +502,7 @@ fn start_text(t: &BoardTask, attempt: i64, by: &Actor) -> String {
     );
     let operator_wrote = t.card.filed_by.is_empty() && t.item.created_by == OPERATOR;
     if operator_wrote {
-        format!("Task #{n} from the Kanban: {title}\n\n{}\n\n{report}", neutralize_markers(&sanitize_message(&t.item.payload)))
+        format!("Task {name} from the Kanban: {title}\n\n{}\n\n{report}", neutralize_markers(&sanitize_message(&t.item.payload)))
     } else {
         let by = if t.card.filed_by.is_empty() { t.item.created_by.clone() } else { t.card.filed_by.clone() };
         let asked = match t.card.requested_by_kind.as_str() {
@@ -512,7 +512,7 @@ fn start_text(t: &BoardTask, attempt: i64, by: &Actor) -> String {
             _ => String::new(),
         };
         format!(
-            "Task #{n} from the Kanban: {title}. {} wrote it down; here it is as they wrote it:\n{}{asked}\n\n{report}",
+            "Task {name} from the Kanban: {title}. {} wrote it down; here it is as they wrote it:\n{}{asked}\n\n{report}",
             quote_in_system_note(&by),
             quoted(&t.item.payload)
         )

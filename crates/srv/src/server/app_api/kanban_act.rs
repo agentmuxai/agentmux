@@ -223,11 +223,11 @@ impl Act<'_> {
         }
         let reg = holder_of(regs, &t.item).cloned().filter(alive).ok_or("its agent isn't running")?;
         let msg = format!(
-            "Answer{} on task #{} \"{}\": {text}\n\nCarry on with it (id {}, attempt {}).",
+            "Answer{} on task {} \"{}\": {text}\n\nCarry on with it (id {}, attempt {}).",
             if actor.is_operator { String::new() } else { format!(" from {}", quote_in_system_note(&actor.name)) },
-            t.card.num,
+            t.card.name(),
             quote_in_system_note(&t.item.title),
-            t.card.num,
+            t.card.id_arg(),
             t.item.attempts
         );
         tell(state, &reg, actor, msg).await.map_err(|e| format!("couldn't reach {}: {e}", reg.agent_id))?;
@@ -263,7 +263,7 @@ impl Act<'_> {
         // then the unfinished spec keeps them from being claimed, and no
         // claim can slip in between.
         let research = crate::backend::kanban::is_research_kind(&t.item.kind);
-        let why = format!("its {} #{} was cancelled", t.item.kind.trim().to_ascii_lowercase(), t.card.num);
+        let why = format!("its {} {} was cancelled", t.item.kind.trim().to_ascii_lowercase(), t.card.name());
         let mut held: Vec<String> = Vec::new();
         let mut were_held: Vec<String> = Vec::new();
         if research {
@@ -444,10 +444,10 @@ impl Act<'_> {
         // Cancel tells nobody, so the old holder is told here: it may still be
         // working on the task, or be about to hand it in.
         let note = format!(
-            "[AgentMux] {} took task #{} \"{}\" back from you. Stop working on it and don't hand it in: \
+            "[AgentMux] {} took task {} \"{}\" back from you. Stop working on it and don't hand it in: \
              your claim (attempt {}) is closed.{}",
             actor.who(),
-            t.card.num,
+            t.card.name(),
             quote_in_system_note(&t.item.title),
             t.item.attempts,
             if text.is_empty() { String::new() } else { format!(" Reason given: {}", quote_in_system_note(text)) }

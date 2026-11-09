@@ -160,23 +160,10 @@ pub(super) async fn enqueue_core(state: &AppState, req: EnqueueRequest, filer: F
         crate::backend::agent_resolve::record_uid_fallback("work_enqueue.uid_not_carried");
     }
 
-    // Which board, and whether this filer sees it. An agent of another machine (`slug@machine`) is
-    // matched against the board's agent list by that name.
-    let who: Option<(String, String)> = match (&remote, caller) {
-        (Some(actor), _) => Some((actor.clone(), String::new())),
-        (None, c) => super::work_tasks::viewer(&state, c),
-    };
-    let who_ref = who.as_ref().map(|(a, u)| (a.as_str(), u.as_str()));
-    let board = match super::work_tasks::pick_board(&state, req.board.as_deref(), who_ref, true) {
+    let board = match filing_board(&state, &req, &target_agent_uid, (&remote, caller)) {
         Ok(b) => b,
         Err(why) => return err(StatusCode::BAD_REQUEST, why),
     };
-    if (!req.target_agent.trim().is_empty() || !target_agent_uid.is_empty()) && !board.visible_to(req.target_agent.trim(), &target_agent_uid) {
-        return err(
-            StatusCode::BAD_REQUEST,
-            format!("{} isn't on the agent list of board {}; add it there, or file on another board", req.target_agent.trim(), board.slug),
-        );
-    }
 
     let now = now_ms();
     let ui_change = req.ui_change;
@@ -215,16 +202,8 @@ pub(super) async fn enqueue_core(state: &AppState, req: EnqueueRequest, filer: F
         Ok(a) => a,
         Err(why) => return err(StatusCode::BAD_REQUEST, why),
     };
-    // Dependencies stay inside one board.
-    for a in &after {
-        if let Ok(Some((other, n))) = state.work_store.work_task_board(a) {
-            if other.id != board.id {
-                return err(
-                    StatusCode::BAD_REQUEST,
-                    format!("after: {} is on board {}; a task can only start after tasks on its own board ({})", other.task_ref(n), other.slug, board.slug),
-                );
-            }
-        }
+    if let Err(why) = after_on_board(&state, &after, &board) {
+        return err(StatusCode::BAD_REQUEST, why);
     }
     let first = match req.first.as_deref().map(str::trim).filter(|f| !f.is_empty()) {
         Some(f) if crate::backend::kanban::is_research_kind(f) => Some(f.to_ascii_lowercase()),
@@ -248,8 +227,57 @@ pub(super) async fn enqueue_core(state: &AppState, req: EnqueueRequest, filer: F
             Err(e) => e,
         };
     };
-    // A feature as two tasks: its spec (or research), and a build that
-    // starts after it, for the same agent, filed and numbered together.
+    file_pair(&state, item, first, &after, &card, (&board, ui_change, now), &target).await
+}
+
+/// Which board a filing goes to, if its filer sees it and the target agent is on its list. An agent
+/// of another machine (`slug@machine`) is matched against the board's agent list by that name.
+fn filing_board(
+    state: &AppState,
+    req: &EnqueueRequest,
+    target_agent_uid: &str,
+    (remote, caller): (&Option<String>, Option<&super::caller::Caller>),
+) -> Result<crate::backend::storage::work_boards::Board, String> {
+    let who: Option<(String, String)> = match (remote, caller) {
+        (Some(actor), _) => Some((actor.clone(), String::new())),
+        (None, c) => super::work_tasks::viewer(state, c),
+    };
+    let who_ref = who.as_ref().map(|(a, u)| (a.as_str(), u.as_str()));
+    let board = super::work_tasks::pick_board(state, req.board.as_deref(), who_ref, true)?;
+    if (!req.target_agent.trim().is_empty() || !target_agent_uid.is_empty()) && !board.visible_to(req.target_agent.trim(), target_agent_uid) {
+        return Err(format!("{} isn't on the agent list of board {}; add it there, or file on another board", req.target_agent.trim(), board.slug));
+    }
+    Ok(board)
+}
+
+/// Dependencies stay inside one board.
+fn after_on_board(state: &AppState, after: &[String], board: &crate::backend::storage::work_boards::Board) -> Result<(), String> {
+    for a in after {
+        if let Ok(Some((other, n))) = state.work_store.work_task_board(a) {
+            if other.id != board.id {
+                return Err(format!(
+                    "after: {} is on board {}; a task can only start after tasks on its own board ({})",
+                    other.task_ref(n),
+                    other.slug,
+                    board.slug
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// A feature as two tasks: its spec (or research), and a build that starts after it, for the same
+/// agent, filed and numbered together.
+async fn file_pair(
+    state: &AppState,
+    item: WorkItem,
+    first: String,
+    after: &[String],
+    card: &crate::backend::storage::work_board::NewCard,
+    (board, ui_change, now): (&crate::backend::storage::work_boards::Board, Option<bool>, i64),
+    target: &(String, String),
+) -> (StatusCode, Json<Value>) {
     use crate::backend::kanban::{build_payload, pair_title, spec_payload};
     let spec = WorkItem {
         title: pair_title(&first, &item.title),
@@ -264,23 +292,23 @@ pub(super) async fn enqueue_core(state: &AppState, req: EnqueueRequest, filer: F
         kind: "build".into(),
         ..item
     };
-    let spec_num = match enqueue_one(&state, &spec, &after, &card) {
+    let spec_num = match enqueue_one(state, &spec, after, card) {
         Ok(n) => n,
         Err(e) => return e,
     };
-    let build_num = match enqueue_one(&state, &build, std::slice::from_ref(&spec.id), &card) {
+    let build_num = match enqueue_one(state, &build, std::slice::from_ref(&spec.id), card) {
         Ok(n) => {
             // The flag is the build's: the spec is a document.
             let _ = state.work_store.work_ui_set(&build.id, ui_change, None, 0, now);
             n
         }
         Err(e) => {
-            publish_changed(&state);
+            publish_changed(state);
             return e;
         }
     };
-    publish_changed(&state);
-    let note = super::availability_view::enqueue_note(&state, &target.0, &target.1).await;
+    publish_changed(state);
+    let note = super::availability_view::enqueue_note(state, &target.0, &target.1).await;
     let body = json!({
         "id": spec.id, "num": spec_num, "ref": spec_num.map(|n| board.task_ref(n)),
         "build_id": build.id, "build_num": build_num, "build_ref": build_num.map(|n| board.task_ref(n)),
@@ -466,9 +494,8 @@ pub(super) async fn handle_work_claim(
     };
     let lease = req.lease_ms.filter(|&n| n > 0).unwrap_or(DEFAULT_LEASE_MS);
 
-    let who = Some((req.agent_id.as_str(), filter.agent_uid.as_str()));
     let on_board = match req.board.as_deref().map(str::trim).filter(|b| !b.is_empty() && !b.eq_ignore_ascii_case("all")) {
-        Some(key) => match super::work_tasks::pick_board(&state, Some(key), who, false) {
+        Some(key) => match super::work_tasks::pick_board(&state, Some(key), Some((req.agent_id.as_str(), filter.agent_uid.as_str())), false) {
             Ok(b) => Some(b),
             Err(why) => return err(StatusCode::BAD_REQUEST, why),
         },
@@ -482,14 +509,8 @@ pub(super) async fn handle_work_claim(
             _ => named.to_string(),
         };
         let id = super::work_tasks::resolve_id(&state, &named);
-        // A task on a board the claimer doesn't see is as good as unknown; an archived board's is read-only.
-        if let Ok(Some((b, _))) = state.work_store.work_task_board(&id) {
-            if !b.visible_to(&req.agent_id, &filter.agent_uid) {
-                return (StatusCode::OK, Json(json!({ "claimed": false, "why": format!("there is no task {named}") })));
-            }
-            if b.archived {
-                return (StatusCode::OK, Json(json!({ "claimed": false, "why": format!("board {} is archived: its tasks can't be claimed", b.slug) })));
-            }
+        if let Some(why) = unclaimable_board(&state, &id, &named, &filter) {
+            return (StatusCode::OK, Json(json!({ "claimed": false, "why": why })));
         }
         return match state.work_store.work_claim_one(&id, &filter, now, lease) {
             Ok(Some((item, from))) => {
@@ -523,24 +544,37 @@ pub(super) async fn handle_work_claim(
             // 404-shaped "not the holder" response.
             claimed_reply(&state, &item, num, &req.block_id, (&req.agent_id, holder_uid(caller.as_deref())))
         }
-        Ok(None) => {
-            // Only when the floor is what stood in the way does the answer say so.
-            let held = floor.and_then(|n| state.work_store.work_queue_held_by_floor(&filter, now, n).ok().filter(|&h| h > 0).map(|h| (n, h)));
-            match held {
-                Some((n, held)) => (
-                    StatusCode::OK,
-                    Json(json!({
-                        "claimed": false,
-                        "held_back_by_quota_mode": held,
-                        "reason": format!(
-                            "quota mode: {held} open task(s) held back; an unnamed claim takes only tasks aimed at you and ones with priority {n} or more. Claim a named one with its id if you were told to"
-                        ),
-                    })),
-                ),
-                None => (StatusCode::OK, Json(json!({ "claimed": false }))),
-            }
-        }
+        Ok(None) => nothing_to_claim(&state, &filter, now, floor),
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, format!("claim failed: {e}")),
+    }
+}
+
+/// Why a named task can't be claimed because of its board: one the claimer doesn't see is as good
+/// as unknown, and an archived board's tasks are read-only.
+fn unclaimable_board(state: &AppState, id: &str, named: &str, filter: &ClaimFilter) -> Option<String> {
+    let Ok(Some((b, _))) = state.work_store.work_task_board(id) else { return None };
+    if !b.visible_to(&filter.agent_id, &filter.agent_uid) {
+        return Some(format!("there is no task {named}"));
+    }
+    b.archived.then(|| format!("board {} is archived: its tasks can't be claimed", b.slug))
+}
+
+/// The answer when an unnamed claim finds nothing. Only when the quota floor is what stood in the
+/// way does it say so.
+fn nothing_to_claim(state: &AppState, filter: &ClaimFilter, now: i64, floor: Option<i64>) -> (StatusCode, Json<Value>) {
+    let held = floor.and_then(|n| state.work_store.work_queue_held_by_floor(filter, now, n).ok().filter(|&h| h > 0).map(|h| (n, h)));
+    match held {
+        Some((n, held)) => (
+            StatusCode::OK,
+            Json(json!({
+                "claimed": false,
+                "held_back_by_quota_mode": held,
+                "reason": format!(
+                    "quota mode: {held} open task(s) held back; an unnamed claim takes only tasks aimed at you and ones with priority {n} or more. Claim a named one with its id if you were told to"
+                ),
+            })),
+        ),
+        None => (StatusCode::OK, Json(json!({ "claimed": false }))),
     }
 }
 
