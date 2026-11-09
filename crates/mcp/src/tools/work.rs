@@ -8,7 +8,7 @@ use super::*;
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     // A bare number with a board named is that board's: `work#12`.
     let scoped_args;
-    let arguments = match scoped(name, arguments) {
+    let arguments = match scoped(name, arguments)? {
         Some(a) => {
             scoped_args = a;
             &scoped_args
@@ -720,22 +720,32 @@ fn shown_id(id: &str) -> String {
 /// The arguments with a bare task number made a ref on the board they name (`board: "work"`, `id: "12"` is
 /// `work#12`), when the board is given as a slug. Not for `move` (its board is where the task goes), nor
 /// where the board is not about the id.
-fn scoped(name: &str, arguments: &Value) -> Option<Value> {
+///
+/// A board that is not a slug (a display name) cannot make the ref, and the number must not fall back to
+/// the default board's task of that number: that is an error, naming the way to say it.
+fn scoped(name: &str, arguments: &Value) -> Result<Option<Value>> {
     if matches!(name, "WorkMove" | "WorkEnqueue" | "WorkList") || name.starts_with("WorkBoard") {
-        return None;
+        return Ok(None);
     }
-    let board = arguments.get("board").and_then(|b| b.as_str()).map(str::trim)?;
-    let id = arguments.get("id").and_then(|i| i.as_str()).map(|i| i.trim().trim_start_matches('#'))?;
-    let slug = !board.is_empty()
-        && board.len() <= 24
-        && !board.starts_with('-')
-        && board.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
-    if !slug || id.is_empty() || !id.chars().all(|c| c.is_ascii_digit()) {
-        return None;
+    let Some(board) = arguments.get("board").and_then(|b| b.as_str()).map(str::trim).filter(|b| !b.is_empty()) else {
+        return Ok(None);
+    };
+    let Some(id) = arguments.get("id").and_then(|i| i.as_str()).map(|i| i.trim().trim_start_matches('#')) else {
+        return Ok(None);
+    };
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_digit()) {
+        return Ok(None);
+    }
+    let slug = board.len() <= 24 && !board.starts_with('-') && board.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+    if !slug {
+        anyhow::bail!(
+            "Task {id} on board \"{board}\": give the board by its slug (Tasks boards lists them), or the id as slug#{id}. \
+             A bare number alone would mean the default board's task."
+        );
     }
     let mut a = arguments.clone();
     a["id"] = Value::String(format!("{board}#{id}"));
-    Some(a)
+    Ok(Some(a))
 }
 
 /// A task as an answer names it: `#12` when srv gave it a number, else its id.
@@ -873,14 +883,16 @@ mod tests {
     #[test]
     fn a_bare_number_with_a_board_slug_becomes_that_boards_ref() {
         let a = serde_json::json!({ "id": "12", "board": "work", "reason": "r" });
-        assert_eq!(scoped("WorkHold", &a).unwrap()["id"], "work#12");
-        assert_eq!(scoped("WorkHold", &serde_json::json!({ "id": "#12", "board": "work" })).unwrap()["id"], "work#12");
-        // Not where the board is a destination, not for a name that is not a slug, not for a ref or an id.
-        assert!(scoped("WorkMove", &a).is_none());
-        assert!(scoped("WorkHold", &serde_json::json!({ "id": "12", "board": "Client X" })).is_none());
-        assert!(scoped("WorkHold", &serde_json::json!({ "id": "work#12", "board": "work" })).is_none());
-        assert!(scoped("WorkHold", &serde_json::json!({ "id": "12" })).is_none());
-        assert!(scoped("WorkBoardEdit", &serde_json::json!({ "board": "work", "id": "12" })).is_none());
+        assert_eq!(scoped("WorkHold", &a).unwrap().unwrap()["id"], "work#12");
+        assert_eq!(scoped("WorkHold", &serde_json::json!({ "id": "#12", "board": "work" })).unwrap().unwrap()["id"], "work#12");
+        // Not where the board is a destination, not for a ref or an id.
+        assert!(scoped("WorkMove", &a).unwrap().is_none());
+        assert!(scoped("WorkHold", &serde_json::json!({ "id": "work#12", "board": "work" })).unwrap().is_none());
+        assert!(scoped("WorkHold", &serde_json::json!({ "id": "12" })).unwrap().is_none());
+        assert!(scoped("WorkBoardEdit", &serde_json::json!({ "board": "work", "id": "12" })).unwrap().is_none());
+        // A display name with a bare number is refused, never read as the default board's task.
+        let e = scoped("WorkCancel", &serde_json::json!({ "id": "1", "board": "Client X" })).unwrap_err().to_string();
+        assert!(e.contains("slug") && e.contains("Client X"), "{e}");
     }
 
     #[test]

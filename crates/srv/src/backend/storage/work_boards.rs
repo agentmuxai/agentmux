@@ -691,6 +691,15 @@ impl Store {
         }
 
         let tx = conn.unchecked_transaction()?;
+        // Another AgentMux sharing the store may have claimed it since it was checked: close it only if it
+        // is still as it was read, as the first write, so the whole move rolls back if it is not.
+        let closed = tx.execute(
+            "UPDATE db_work_queue SET state = ?2, updated_at = ?3 WHERE id = ?1 AND state = ?4",
+            params![item.id, work_state::DONE, now_ms, item.state],
+        )?;
+        if closed != 1 {
+            return refused(format!("{from_ref} changed while it was being moved; look at it again"));
+        }
         tx.execute("DELETE FROM db_work_deps WHERE work_id = ?1 OR after_id = ?1", params![item.id])?;
         let target_cleared = (!item.target_agent.is_empty() || !item.target_agent_uid.is_empty())
             && !target.visible_to(&item.target_agent, &item.target_agent_uid);
