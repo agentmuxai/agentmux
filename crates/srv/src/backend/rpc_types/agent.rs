@@ -224,6 +224,13 @@ pub struct AgentListEntry {
     pub provider: String,
     pub status: String,
     pub session_id: Option<String>,
+    /// What the provider itself charged this agent since its current process
+    /// started, when it is on a model route: the real figure, not the harness's
+    /// Claude-priced estimate (#30143). `None` off a route, or before its first
+    /// priced response.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub route_cost_usd: Option<f64>,
 }
 
 /// Response from agent.list.

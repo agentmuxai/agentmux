@@ -118,11 +118,11 @@ struct Metered {
 impl Metered {
     fn settle(&mut self) {
         let Some(tap) = self.tap.take() else { return };
-        let (tokens, answered) = tap.finish();
+        let (tokens, answered, actual) = tap.finish();
         if tokens.input + tokens.output + tokens.cache_read + tokens.cache_creation == 0 {
             return;
         }
-        let cost = spend::record(&self.agent, self.model, &tokens, agentmux_common::time::now_ms());
+        let cost = spend::record(&self.agent, self.model, &tokens, actual, agentmux_common::time::now_ms());
         tracing::info!(
             agent = %self.agent, model = self.model.id, answered = answered.as_deref().unwrap_or(""),
             input = tokens.input, output = tokens.output, cache_read = tokens.cache_read, cost_usd = cost,

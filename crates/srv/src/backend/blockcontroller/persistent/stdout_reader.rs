@@ -107,6 +107,13 @@ impl PersistentSubprocessController {
 
 impl StdoutReader {
     fn from_ctx(ctx: StdoutReaderCtx) -> (tokio::process::ChildStdout, Self) {
+        // A new process starts its own provider-reported session total, as the
+        // harness's own `total_cost_usd` starts again with it (#30143).
+        if let Some(mstore) = &ctx.mstore_read {
+            if let Some(agent) = crate::identity::resolver::block_agent_id(mstore, &ctx.block_id_read) {
+                crate::backend::model_gateway::spend::reset_session(&agent);
+            }
+        }
         let StdoutReaderCtx {
             stdout,
             block_id_read,
@@ -177,6 +184,20 @@ impl StdoutReader {
     }
 
     /// One line of the CLI's stdout.
+    /// `line` rewritten when it is a `result` frame from an agent on a model
+    /// route: the harness prices its tokens with Claude's rates, which on a
+    /// route are wrong by orders of magnitude, so the provider's own session
+    /// total replaces both totals the frame reports (#30143). `None` for any
+    /// other frame, and for an agent whose responses never carried a charge.
+    fn route_cost_frame(&self, line: &str, parsed: &serde_json::Value) -> Option<String> {
+        if parsed.get("type").and_then(serde_json::Value::as_str) != Some("result") {
+            return None;
+        }
+        let mstore = self.mstore_read.as_ref()?;
+        let agent = crate::identity::resolver::block_agent_id(mstore, &self.block_id_read)?;
+        crate::backend::model_gateway::spend::rewrite_result_total(line, &agent)
+    }
+
     fn handle_line(&mut self, line: String) {
         if line.trim().is_empty() {
             return;
@@ -184,7 +205,7 @@ impl StdoutReader {
         // A turn the CLI found cut off with a tool call pending (we
         // interrupted it at a restart or an upgrade) is told plainly, not
         // as the CLI's raw diagnostic; the diagnostic stays in the log.
-        let line = match crate::agents::failure::plain_cut_off(&line) {
+        let mut line = match crate::agents::failure::plain_cut_off(&line) {
             Some((diagnostic, plain)) => {
                 tracing::info!(block_id = %self.block_id_read, diagnostic = %diagnostic, "a turn was cut off mid-tool; shown as an interrupted turn");
                 plain
@@ -221,7 +242,13 @@ impl StdoutReader {
         let mut outcome = FrameOutcome::default();
         // Parse JSON for control-frame handling, turn-active tracking,
         // and session ID capture
-        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&line) {
+        if let Ok(mut parsed) = serde_json::from_str::<serde_json::Value>(&line) {
+            if let Some(rewritten) = self.route_cost_frame(&line, &parsed) {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&rewritten) {
+                    parsed = v;
+                    line = rewritten;
+                }
+            }
             outcome = self.handle_frame(&line, &parsed);
             if outcome.skip {
                 return;
