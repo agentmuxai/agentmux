@@ -15,6 +15,9 @@
     gap: var(--space-2);
     padding: var(--space-3);
     min-height: 0;
+    // The dock caps every card at a share of the pane. When the content does not fit (a narrow pane),
+    // the card scrolls as a whole; no part of it shrinks to nothing or is cut off below the composer.
+    overflow-y: auto;
     container-type: inline-size;
 }
 
@@ -26,8 +29,7 @@
 }
 
 .agent-notice-body {
-    min-height: 0;
-    overflow-y: auto;
+    flex-shrink: 0;
     overflow-wrap: anywhere;
 
     p {
@@ -106,8 +108,24 @@
 }
 
 @container (max-width: 280px) {
+    .agent-notice-card {
+        gap: var(--space-1);
+    }
+
+    .agent-notice-quote {
+        -webkit-line-clamp: 2;
+        line-clamp: 2;
+    }
+
+    // The buttons stay at the card's bottom edge while the rest scrolls behind them, so Stop it and
+    // Start now are always reachable.
     .agent-notice-actions {
         flex-direction: column;
         align-items: stretch;
+        position: sticky;
+        bottom: calc(-1 * var(--space-3));
+        margin-bottom: calc(-1 * var(--space-3));
+        padding: var(--space-2) 0 var(--space-3);
+        background: var(--modal-bg-color);
     }
 }

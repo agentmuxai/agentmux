@@ -111,7 +111,10 @@ export function AgentNoticeCard(props: { notice: NoticeView; decide: (choice: No
 export function AgentNoticeLine(props: { notice: NoticeView } & PaneRequestProps): JSX.Element {
     const n = props.notice;
     // One line, cut with an ellipsis; the whole of it is in the tooltip.
-    const whole = [n.headline, n.body, n.quote && `"${n.quote}"`].filter(Boolean).join(". ");
+    const whole = [n.headline, n.body, n.quote && `"${n.quote}"`]
+        .filter(Boolean)
+        .map((part) => String(part).replace(/[.\s]+$/, ""))
+        .join(". ");
     return (
         <section class="agent-notice-line" aria-label={n.headline}>
             <p class="agent-notice-line-text" {...tip(whole)}>

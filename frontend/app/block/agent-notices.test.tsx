@@ -167,6 +167,18 @@ describe("a one-line notice", () => {
         expect(requestOf("agent-notice-line")).toBeUndefined();
     });
 
+    it("has the whole text on hover, each part ending in one full stop", () => {
+        onEvent!({ ...LINE, body: "Korp-2 on sonnet. It spends tokens until it is stopped." });
+        const r = requestOf("agent-notice-line")!;
+        const Line = r.Component;
+        render(() => <Line {...r.props} close={vi.fn()} />);
+        const text = document.querySelector(".agent-notice-line-text")!.getAttribute("data-hover-tip")!;
+        expect(text).toBe(
+            'Posa is starting a new agent, Korp-2. Korp-2 on sonnet. It spends tokens until it is stopped. "Implement SPEC_X."',
+        );
+        expect(text).not.toContain("..");
+    });
+
     it("can be dismissed", () => {
         onEvent!(LINE);
         const r = requestOf("agent-notice-line")!;
