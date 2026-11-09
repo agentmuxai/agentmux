@@ -405,7 +405,7 @@ fn held_tasks(state: &AppState, block_ids: &[&str]) -> HashMap<String, Vec<(Acco
         } else {
             String::new()
         };
-        let task = AccountEpisodeTask { id: t.item.id.clone(), number: t.card.num, title: t.item.title.clone() };
+        let task = AccountEpisodeTask { id: t.item.id.clone(), number: t.card.num, task_ref: t.card.name(), title: t.item.title.clone() };
         out.entry(holder.block_id.clone()).or_default().push((task, requester));
     }
     out
@@ -444,21 +444,21 @@ fn view(state: &AppState, ep: &Episode) -> AccountAvailability {
 }
 
 /// For each requester of a task the newly blocked `panes` hold: the panes,
-/// and the numbers of that requester's tasks each one holds.
-fn requester_items(state: &AppState, panes: &[BlockedPane]) -> std::collections::BTreeMap<String, Vec<(BlockedPane, Vec<i64>)>> {
+/// and the refs of that requester's tasks each one holds.
+fn requester_items(state: &AppState, panes: &[BlockedPane]) -> std::collections::BTreeMap<String, Vec<(BlockedPane, Vec<String>)>> {
     let ids: Vec<&str> = panes.iter().map(|p| p.block_id.as_str()).collect();
     let held = held_tasks(state, &ids);
-    let mut out: std::collections::BTreeMap<String, Vec<(BlockedPane, Vec<i64>)>> = Default::default();
+    let mut out: std::collections::BTreeMap<String, Vec<(BlockedPane, Vec<String>)>> = Default::default();
     for pane in panes {
-        let mut by_requester: std::collections::BTreeMap<String, Vec<i64>> = Default::default();
+        let mut by_requester: std::collections::BTreeMap<String, Vec<(i64, String)>> = Default::default();
         for (task, requester) in held.get(&pane.block_id).into_iter().flatten() {
             if !requester.is_empty() {
-                by_requester.entry(requester.clone()).or_default().push(task.number);
+                by_requester.entry(requester.clone()).or_default().push((task.number, task.task_ref.clone()));
             }
         }
-        for (requester, mut numbers) in by_requester {
-            numbers.sort_unstable();
-            out.entry(requester).or_default().push((pane.clone(), numbers));
+        for (requester, mut held) in by_requester {
+            held.sort_unstable();
+            out.entry(requester).or_default().push((pane.clone(), held.into_iter().map(|(_, r)| r).collect()));
         }
     }
     out
@@ -475,7 +475,7 @@ fn requester_notes(state: &AppState, episodes: &Mutex<Episodes>, account_id: &st
         .into_iter()
         .filter(|(requester, _)| fresh.contains(requester))
         .map(|(requester, items)| {
-            let refs: Vec<(&BlockedPane, &[i64])> = items.iter().map(|(p, n)| (p, n.as_slice())).collect();
+            let refs: Vec<(&BlockedPane, &[String])> = items.iter().map(|(p, n)| (p, n.as_slice())).collect();
             let text = format!("[AgentMux] {}", crate::backend::reactive::sanitize::quote_in_system_note(&machine::leader_note(&refs)));
             (requester, text)
         })

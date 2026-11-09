@@ -226,7 +226,7 @@ async fn the_strip_lists_the_agents_their_tasks_and_where_they_can_move() {
     assert_eq!((v.state.as_str(), v.resets_at_ms, v.limit_window.as_deref()), ("limited", Some(now + 60_000), Some("seven_day")));
     assert_eq!(v.agents, vec![AccountEpisodeAgent { block_id: block.clone(), agent_id: "a1".into(), agent_name: "Naki-r4test".into() }]);
     assert_eq!((v.agent_ids.clone(), v.block_ids.clone()), (vec!["a1".to_string()], vec![block.clone()]), "who it covers");
-    assert_eq!(v.tasks, vec![AccountEpisodeTask { id: "w-r4".into(), number: num, title: "Write the spec".into() }], "only what it holds");
+    assert_eq!(v.tasks, vec![AccountEpisodeTask { id: "w-r4".into(), number: num, task_ref: format!("#{num}"), title: "Write the spec".into() }], "only what it holds");
     let to: Vec<&str> = v.candidates.iter().map(|c| c.account_id.as_str()).collect();
     assert_eq!(to, ["spare", "spare-unknown"], "same provider, not blocked, not the account itself; signed in first");
     let held = held_tasks(&state, &[block.as_str()]);

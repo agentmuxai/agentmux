@@ -30,6 +30,8 @@ pub struct AccountEpisodeTask {
     pub id: String,
     #[ts(type = "number")]
     pub number: i64,
+    /// How the task is named: `#12` on the default board, else `work#12`.
+    pub task_ref: String,
     pub title: String,
 }
 

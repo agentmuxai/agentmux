@@ -132,32 +132,36 @@ fn the_toast_body_counts_agents_and_never_names_the_account() {
     assert!(!body.contains("acct-secret"));
 }
 
+fn refs(numbers: &[i64]) -> Vec<String> {
+    numbers.iter().map(|n| format!("#{n}")).collect()
+}
+
 #[test]
 fn the_leader_note_names_the_agents_and_their_tasks() {
     let p = pane("b1", "Naki-2", "acct", AgentState::Limited, None, None);
     assert_eq!(
-        leader_note(&[(&p, &[163])]),
+        leader_note(&[(&p, &refs(&[163])[..])]),
         "Naki-2 is out of quota and holds #163. Until then, a message to it starts a turn that fails; move it to another account or wait for the reset."
     );
     let q = pane("b2", "Loap-3", "acct", AgentState::SignedOut, None, None);
     assert_eq!(
-        leader_note(&[(&q, &[1, 2, 3])]),
+        leader_note(&[(&q, &refs(&[1, 2, 3])[..])]),
         "Loap-3 needs the user to sign in again and holds #1, #2 and #3. \
          Until it is signed in again, a message to it starts a turn that fails; sign it in again or move it to another account."
     );
     let r = pane("b3", "QTest", "acct", AgentState::SignedOut, None, None);
-    assert!(leader_note(&[(&q, &[1]), (&r, &[2])]).ends_with(
+    assert!(leader_note(&[(&q, &refs(&[1])[..]), (&r, &refs(&[2])[..])]).ends_with(
         "Until they are signed in again, a message to one of them starts a turn that fails; sign them in again or move them to another account."
     ));
     assert_eq!(
-        leader_note(&[(&p, &[163]), (&q, &[1, 2, 3])]),
+        leader_note(&[(&p, &refs(&[163])[..]), (&q, &refs(&[1, 2, 3])[..])]),
         "Naki-2 is out of quota and holds #163; Loap-3 needs the user to sign in again and holds #1, #2 and #3. \
          Until then, a message to one of them starts a turn that fails; sign them in again, move them to another account or wait for the reset."
     );
-    assert!(leader_note(&[(&p, &[1]), (&weekly("b", "X", "a"), &[4, 5])]).ends_with(
+    assert!(leader_note(&[(&p, &refs(&[1])[..]), (&weekly("b", "X", "a"), &refs(&[4, 5])[..])]).ends_with(
         "Until then, a message to one of them starts a turn that fails; move them to another account or wait for the reset."
     ));
-    assert!(leader_note(&[(&weekly("b", "X", "a"), &[4, 5])]).contains("is out of quota until "));
+    assert!(leader_note(&[(&weekly("b", "X", "a"), &refs(&[4, 5])[..])]).contains("is out of quota until "));
 }
 
 #[test]
