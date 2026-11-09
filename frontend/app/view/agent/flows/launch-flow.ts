@@ -72,7 +72,8 @@ export interface LaunchFlowOptions {
      *  "waiting on X, up to Ys" label) instead of a generic spinner. See
      *  launch-phase.ts. Optional so existing callers/tests are unaffected. */
     setLaunchPhase?: (phase: LaunchPhase | null) => void;
-    authEnv?: Record<string, string>;
+    /** The provider's auth env, or the lookup still in flight: the flow runs its own lookups beside it. */
+    authEnv?: Record<string, string> | Promise<Record<string, string> | undefined>;
     /** Posts a permanent, visible line into the pane's conversation — for
      *  anything that isn't a login *success* (the hook's `onLoginSuccess`) but
      *  still shouldn't be silent: a warning before an automatic relogin
@@ -124,8 +125,48 @@ function plannedInstallLine(provider: Pick<ProviderDefinition, "id" | "npmPackag
         : `if not found locally, will install ${provider.npmPackage}@${provider.pinnedVersion} via npm (this may take 1-2 minutes)...`;
 }
 
+/** The agent's bound account and that account's own auth dir, when it has one. Best-effort: a failed lookup means the generic dir. */
+async function boundAccountDir(agentDefinitionId: string, providerId: string): Promise<{ accountId?: string; dir?: string }> {
+    const accountId = await linkedAccountFor(agentDefinitionId, providerId);
+    if (!accountId) return {};
+    try {
+        const account = await RpcApi.GetIdentityAccountCommand(TabRpcClient, { id: accountId });
+        if (account?.secret_ref?.backend === "oauth_config_dir" && account.secret_ref.dir) {
+            return { accountId, dir: account.secret_ref.dir };
+        }
+    } catch {
+        // Best-effort — fall back to the generic auth dir if this lookup fails.
+    }
+    return { accountId };
+}
+
+/** Phase 1's request: say what is about to happen, listen for install progress, and send ResolveCli. */
+function beginCliResolve(
+    blockId: string,
+    provider: ProviderDefinition,
+    log: LogFn,
+): { done: Promise<ResolveCliResult>; unsubscribe: () => void } {
+    log("cli", `checking for ${provider.cliCommand}...`);
+    if (provider.pinnedVersion) {
+        log("cli", plannedInstallLine(provider));
+    }
+    // Subscribe to install progress events — backend streams npm/installer output line-by-line
+    const unsubscribe = onMuxEvent(
+        WpsEvent.InstallProgress,
+        ({ message }) => {
+            if (message) log("install", message);
+        },
+        MOS.makeORef("block", blockId),
+    );
+    markAgentOpen(blockId, "cli_sent");
+    const done = resolveProviderCli(provider, blockId);
+    // Awaited later; this only keeps a failure that lands first from reading as unhandled.
+    done.catch(() => {});
+    return { done, unsubscribe };
+}
+
 export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlowResult> {
-    const { blockId, provider, log, authEnv } = opts;
+    const { blockId, provider, log } = opts;
     const setPhase = opts.setLaunchPhase ?? (() => {});
     const notify = opts.onNotify ?? (() => {});
 
@@ -181,22 +222,22 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
     // carried forward from a bundle-era migration) — silently disagreeing
     // with `inject_identity_env`'s actual spawn-time read of `secret_ref.dir`,
     // reintroducing the exact false-"Log in" bug this fix targets.
+    //
+    // The lookups that don't depend on each other start together: the caller's auth dir, this agent's bound
+    // account, and, for a host agent, the CLI itself. Run one after the other, a restart's burst of panes made
+    // each of them wait three round trips before its CLI request even left the pane.
+    const boundAccount =
+        agentDefinitionId && provider.authType === "oauth" ? boundAccountDir(agentDefinitionId, provider.id) : undefined;
+    const cliResolve = isContainerAgentMode(agentMode) ? undefined : beginCliResolve(blockId, provider, log);
+    const authEnv = await opts.authEnv;
     let linkedAccountId: string | undefined;
     let linkLookupDone = false;
     let effectiveAuthEnv = authEnv;
-    if (agentDefinitionId && provider.authType === "oauth") {
+    if (boundAccount) {
         linkLookupDone = true;
-        linkedAccountId = await linkedAccountFor(agentDefinitionId, provider.id);
-        if (linkedAccountId) {
-            try {
-                const account = await RpcApi.GetIdentityAccountCommand(TabRpcClient, { id: linkedAccountId });
-                if (account?.secret_ref?.backend === "oauth_config_dir" && account.secret_ref.dir) {
-                    effectiveAuthEnv = { ...authEnv, [provider.authConfigDirEnvVar]: account.secret_ref.dir };
-                }
-            } catch {
-                // Best-effort — fall back to authEnv's generic dir if this lookup fails.
-            }
-        }
+        const bound = await boundAccount;
+        linkedAccountId = bound.accountId;
+        if (bound.dir) effectiveAuthEnv = { ...authEnv, [provider.authConfigDirEnvVar]: bound.dir };
     }
 
     if (isContainerAgentMode(agentMode)) {
@@ -237,21 +278,11 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
         return finishLaunch(opts, log, setPhase, notify, true);
     }
 
-    // Phase 1: CLI Detection / Installation
-    log("cli", `checking for ${provider.cliCommand}...`);
-    if (provider.pinnedVersion) {
-        log("cli", plannedInstallLine(provider));
-    }
-
-    // Subscribe to install progress events — backend streams npm/installer output line-by-line
-    const installScope = MOS.makeORef("block", blockId);
-    const unsubInstall = onMuxEvent(WpsEvent.InstallProgress, ({ message }) => {
-        if (message) log("install", message);
-    }, installScope);
-
+    // Phase 1: CLI Detection / Installation (the request was sent with the other lookups, above)
+    const { done: cliDone, unsubscribe: unsubInstall } = cliResolve ?? beginCliResolve(blockId, provider, log);
     let cliResult: ResolveCliResult;
     try {
-        cliResult = await resolveProviderCli(provider, blockId);
+        cliResult = await cliDone;
     } catch (err: any) {
         unsubInstall();
         // Route through translateError so typed wire-format errors
