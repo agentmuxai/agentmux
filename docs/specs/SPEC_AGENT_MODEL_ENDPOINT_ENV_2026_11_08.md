@@ -2,7 +2,7 @@
 
 **Author:** Agent2-5
 **Date:** 2026-11-08
-**Status:** implemented
+**Status:** implemented — #6874 (`crates/srv/src/backend/spawn_env/endpoint.rs`, `crates/srv/src/server/app_api/agent_env.rs`)
 
 ---
 
