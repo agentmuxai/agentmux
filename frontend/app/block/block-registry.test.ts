@@ -88,7 +88,7 @@ describe("built-in pane tabs (block-registry.ts)", () => {
         expect(paneTabCapability("term", "statsBadgeSetting")).toBe("term:showstatsbadge");
         // The agent pane draws the readout itself, as an item of its top band; the frame leaves it out.
         expect(holders("statsBadgeIn")).toEqual(["agent"]);
-        expect(paneTabCapability("agent", "statsBadgeIn")).toBe("band");
+        expect(paneTabCapability("agent", "statsBadgeIn")).toBe("strip");
         expect(holders("hueBorder")).toEqual(["term"]);
         expect(holders("nativeSurface")).toEqual(["browser"]);
         // 5b: zoom.ts's allowlist and editor's base size, paste, Ctrl+F, cwd.

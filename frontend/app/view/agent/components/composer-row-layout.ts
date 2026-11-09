@@ -360,10 +360,79 @@ function multiRow(
         }
     }
 
-    return pairs.map(([left, right]) => ({
+    const rows = pairs.map(([left, right]) => ({
         left: left ? [left] : [],
         right: right ? [right] : [],
     }));
+    return mergeRows(rows, new Map(slots.map((s) => [s.key, s.width])), availableWidth, gapPx);
+}
+
+/**
+ * Rev 10 (2026-11-09, #30203): rows that fit together share a line. The pairing above puts one slot a side per
+ * row, so a narrow pane with seven small slots came out as three or four half-empty lines (the operator's
+ * screenshot of a 420 px pane). This packs the rows into the fewest lines that hold them and, of those, the most
+ * even (the narrowest widest line), so a pane does not get one chip alone on a line beside a full one. A row's
+ * slots keep their own sides: a merged line has the left slots of its rows on the left and the right slots on
+ * the right. The LAST row (the anchors, or the one holding Shell) seeds its own line and stays last, and no row
+ * is ever split, so the invariants of Revs 7 to 9 are untouched: the anchors share the last line (their slots
+ * outermost; what joins goes between), a pinned pair stays together when it fits, and nothing becomes
+ * one-sided that was not. Searched exhaustively: a strip has a handful of rows, and fit prunes most of it.
+ */
+function mergeRows(rows: ComposerRow[], widthOf: Map<string, number>, availableWidth: number, gapPx: number): ComposerRow[] {
+    if (rows.length < 2) return rows;
+    const widthOfRow = (r: ComposerRow): number => {
+        const keys = [...r.left, ...r.right];
+        return keys.reduce((sum, k) => sum + (widthOf.get(k) ?? 0), 0) + Math.max(0, keys.length - 1) * gapPx;
+    };
+    type Item = { r: ComposerRow; i: number; width: number };
+    const anchorRow = rows[rows.length - 1];
+    const items: Item[] = rows.slice(0, -1).map((r, i) => ({ r, i, width: widthOfRow(r) }));
+    const order = [...items].sort((a, b) => b.width - a.width || a.i - b.i);
+    // members[0] is the anchor line (already holding the anchor row); the others open as items need them.
+    const widths = [widthOfRow(anchorRow)];
+    const members: Item[][] = [[]];
+    let best: Item[][] = [];
+    let bestKey = [Infinity, Infinity];
+    const visit = (k: number): void => {
+        if (members.length > bestKey[0]) return;
+        if (k === order.length) {
+            const key = [members.length, Math.max(...widths)];
+            if (key[0] < bestKey[0] || (key[0] === bestKey[0] && key[1] < bestKey[1])) {
+                bestKey = key;
+                best = members.map((m) => [...m]);
+            }
+            return;
+        }
+        const item = order[k];
+        for (let j = 0; j < members.length; j++) {
+            const joined = widths[j] + gapPx + item.width;
+            if (joined > availableWidth) continue;
+            const was = widths[j];
+            widths[j] = joined;
+            members[j].push(item);
+            visit(k + 1);
+            members[j].pop();
+            widths[j] = was;
+        }
+        widths.push(item.width);
+        members.push([item]);
+        visit(k + 1);
+        members.pop();
+        widths.pop();
+    };
+    visit(0);
+    const byIndex = (group: Item[]) => [...group].sort((a, b) => a.i - b.i);
+    const joined = (group: Item[], side: "left" | "right") => byIndex(group).flatMap((m) => m.r[side]);
+    const lines = best
+        .slice(1)
+        .map((group) => ({ first: byIndex(group)[0].i, left: joined(group, "left"), right: joined(group, "right") }))
+        .sort((a, b) => a.first - b.first);
+    const anchor = {
+        left: [...anchorRow.left, ...joined(best[0], "left")],
+        // What joins the anchor line goes BEFORE the anchors' own right slots: Shell stays outermost (Rev 8).
+        right: [...joined(best[0], "right"), ...anchorRow.right],
+    };
+    return [...lines.map(({ left, right }) => ({ left, right })), anchor];
 }
 
 /**
