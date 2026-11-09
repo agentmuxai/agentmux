@@ -536,5 +536,8 @@ describe("AgentComposerStrip — a ~420 px pane (the operator's screenshot, #302
         expect(Math.abs(first.indexOf("stats") - first.indexOf("ctx"))).toBe(1);
         const last = [...rows[1].left, ...rows[1].right];
         expect(last).toEqual(expect.arrayContaining(["runtime", "hostShell"]));
+        // Shell is the outermost slot on the right, runtime on the left, whatever else shares the line.
+        expect(rows[1].right.at(-1)).toBe("hostShell");
+        expect(rows[1].left[0]).toBe("runtime");
     });
 });

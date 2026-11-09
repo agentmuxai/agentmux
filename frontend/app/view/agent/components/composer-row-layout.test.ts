@@ -628,6 +628,22 @@ describe("computeComposerRows — rows that fit together share a line (Rev 10)",
         for (const row of rows.slice(0, -1)) expect(keysOf(row)).not.toContain("runtime");
     });
 
+    it("puts a merged row's right slots before Shell on the anchor line, so Shell stays outermost", () => {
+        // The auth/ctx pair (222) fits beside the anchors (252) in 500 px; the view chip does not.
+        const slots = [
+            { key: "runtime", width: 172 },
+            { key: "auth", width: 24 },
+            { key: "ctx", width: 190 },
+            { key: "view", width: 150 },
+            { key: "hostShell", width: 72 },
+        ];
+        const rows = computeComposerRows(slots, "hostShell", 500, 8, "runtime", [{ leftKey: "auth", rightKey: "ctx" }]);
+        const last = rows[rows.length - 1];
+        expect(last.left[0]).toBe("runtime");
+        expect(last.right).toEqual(["ctx", "hostShell"]);
+        expect(rows.slice(0, -1).flatMap(keysOf)).toEqual(["view"]);
+    });
+
     it("never builds a line wider than the strip when each row fits on its own", () => {
         const slots = [
             { key: "runtime", width: 120 },

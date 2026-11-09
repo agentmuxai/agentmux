@@ -400,7 +400,10 @@ function mergeRows(rows: ComposerRow[], widthOf: Map<string, number>, availableW
         const target = best ?? (lines[lines.push(lineOf({ left: [], right: [] }, item.i)) - 1]);
         const empty = target.left.length + target.right.length === 0;
         target.left.push(...item.r.left);
-        target.right.push(...item.r.right);
+        // On the anchor line the right slots go BEFORE the anchors' own (Shell stays outermost, Rev 8); the
+        // edge ordering keeps the order within the clickable ones.
+        if (target === anchor) target.right.unshift(...item.r.right);
+        else target.right.push(...item.r.right);
         target.width = empty ? item.width : target.width + gapPx + item.width;
         target.first = Math.min(target.first, item.i);
     }
