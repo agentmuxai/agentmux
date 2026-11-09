@@ -42,6 +42,10 @@ export interface PaneTabCapabilities {
      *  set to `false` (terminal: `term:showstatsbadge`). Without it the badge
      *  always shows. */
     statsBadgeSetting?: string;
+    /** Where this view draws its CPU/memory readout itself, so the block frame leaves its own overlay at the
+     *  pane's corner out: `"band"` is an item of the pane's top band (the agent pane); `"strip"` is a slot of
+     *  its composer strip. Without it the frame draws the readout over the pane's top right corner. */
+    statsBadgeIn?: "band" | "strip";
     /** The pane's color (pane-identity.ts) also paints this tab's inner
      *  active border — a terminal running an agent CLI shows that agent's color. */
     hueBorder?: boolean;

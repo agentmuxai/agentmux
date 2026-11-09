@@ -674,6 +674,9 @@ pub const COMMAND_AGENT_ACCOUNT_SWITCH: &str = "agent.account.switch";
 /// The model panel's content for a pane: the routes that serve its harness with their models, what cannot be picked and
 /// why, and where the agent is now. The operator's window only.
 pub const COMMAND_AGENT_MODEL_PANEL: &str = "agent.model.panel";
+/// What each agent on a model route really runs, by agent id ("DeepSeek V4.1 Flash via OpenRouter"), for the peer list in
+/// an agent's opening message: an agent's `provider` is its harness (`claude`), which on a route is not the model.
+pub const COMMAND_AGENT_PEER_LABELS: &str = "agent.peer-labels";
 /// A person's pick in the model panel: moves the agent to a model on a route, or back to the harness's own sign-in.
 /// The operator's window only: the click is the approval of the spend.
 pub const COMMAND_AGENT_MODEL_SWITCH: &str = "agent.model.switch";

@@ -68,6 +68,8 @@ interface AgentComposerStripProps {
     /** Tokens in context: the main agent's latest call's whole prompt — a
      *  reading that already passed `plausibleReading` (context-reading.ts). */
     contextTokens?: number | null;
+    /** How many images the conversation holds, for the Runtime panel's model list. */
+    conversationImages?: () => number;
     /** The model's context window. undefined = unknown (the strip then shows
      *  the token count alone, with no fill band). */
     contextWindow?: number;
@@ -268,6 +270,8 @@ function runtimeSlot(props: AgentComposerStripProps): Slot {
                 blockAtom={props.blockAtom ?? (() => undefined)}
                 providerId={props.providerId ?? ""}
                 lastReplyModel={props.lastReplyModel}
+                contextTokens={props.contextTokens}
+                conversationImages={props.conversationImages}
             />
         ),
     };

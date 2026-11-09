@@ -494,6 +494,20 @@
     img {
         object-fit: contain;
     }
+
+    // The model badge on a harness logo (DualProviderLogo) keeps the size it was given, not the box's.
+    .dual-provider-logo-badge {
+        .provider-logo {
+            width: auto;
+            height: auto;
+        }
+
+        svg {
+            width: 1em;
+            height: 1em;
+            font-size: inherit;
+        }
+    }
 }
 
 // A mark at the icon's bottom-right (PaneTabBadge): a dot too small for a glyph to read, ringed in the tab's

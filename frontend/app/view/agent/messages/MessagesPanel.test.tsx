@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -16,8 +18,14 @@ vi.mock("../hooks/useJektsAwaitingYou", () => ({
 }));
 
 import type { DocumentNode, JektMessageNode } from "@/app/agent-model/node-types";
+import { DeclIconButton } from "@/app/element/ui/DeclIconButton";
+import {
+    DEFAULT_MESSAGES_STATE,
+    messagesHeaderButtons,
+    type MessagesPanelControls,
+    type MessagesState,
+} from "./messages-state";
 import { MessagesPanel, SEEN_AFTER_MS } from "./MessagesPanel";
-import { DEFAULT_MESSAGES_STATE, type MessagesPanelControls, type MessagesState } from "./messages-state";
 
 let n = 0;
 const jekt = (over: Partial<JektMessageNode> = {}): JektMessageNode => ({
@@ -39,8 +47,13 @@ const jekt = (over: Partial<JektMessageNode> = {}): JektMessageNode => ({
 
 /** The pane's controls over plain signals: what the block meta would hold. */
 function controlsFor(initial: Partial<MessagesState> = {}) {
-    // Open: most of what is tested is the panel's content. The collapsed bar's tests say `open: false`.
-    const [state, setState] = createSignal<MessagesState>({ ...DEFAULT_MESSAGES_STATE, enabled: true, open: true, ...initial });
+    // Open: most of what is tested is the panel's content. The closed panel's tests say `open: false`.
+    const [state, setState] = createSignal<MessagesState>({
+        ...DEFAULT_MESSAGES_STATE,
+        enabled: true,
+        open: true,
+        ...initial,
+    });
     const [request, setRequest] = createSignal<{ nodeId: string; seq: number } | null>(null);
     let seq = 0;
     const controls: MessagesPanelControls = {
@@ -140,42 +153,95 @@ describe("MessagesPanel", () => {
         expect(dismissed).toHaveBeenCalledWith("p1", [m]);
     });
 
-    it("is a bar labelled Jekt Messages with the count and a needs-you dot while collapsed, and opens from it", () => {
+    /** The Messages button as the pane's header draws it. */
+    const headerButton = () => {
+        const [decl] = messagesHeaderButtons("p1");
+        return decl ? render(() => <DeclIconButton decl={decl} />) : undefined;
+    };
+
+    it("draws no bar: closed, the panel leaves nothing in the pane, and the header button is the way in", () => {
+        const { view } = mount([jekt()], controlsFor({ open: false }));
+        expect(view.container.querySelector(".messages-panel")).toBeNull();
+        expect(view.container.querySelector(".messages-rail")).toBeNull();
+        expect(view.container.textContent).toBe("");
+        expect(messagesHeaderButtons("p1")).toHaveLength(1);
+    });
+
+    it("has a header button with the count and a needs-you dot, and a click opens the panel", () => {
         const m = jekt({ tier: "sensitive", escalate: "required" });
         waitingNow.ids = [m.id];
-        const { controls, view } = mount([m, jekt()], controlsFor({ open: false }));
-        expect(view.container.querySelector(".messages-panel")).toBeNull();
-        expect(view.container.querySelector(".messages-rail__text")?.textContent).toBe("Jekt Messages");
-        expect(screen.getByText("2")).toBeTruthy();
-        expect(view.container.querySelector(".messages-rail__needs")).toBeTruthy();
-        fireEvent.click(screen.getByLabelText(/Jekt Messages, 2 unread, 1 need you/));
+        const { controls } = mount([m, jekt()], controlsFor({ open: false }));
+        const button = headerButton()!;
+        expect(button.container.querySelector(".messages-header-button")?.textContent).toBe("2");
+        expect(button.container.querySelector(".messages-header-button__needs")).toBeTruthy();
+        const el = button.container.querySelector("button")!;
+        expect(el.getAttribute("aria-label")).toBe("Messages, 2 unread, needs you");
+        expect(el.getAttribute("aria-pressed")).toBe("false");
+        fireEvent.click(el);
         expect(controls.state().open).toBe(true);
     });
 
-    it("makes the whole bar one button: the label and the marks are inside it, so a click anywhere on it opens the panel", () => {
-        const { controls, view } = mount([jekt()], controlsFor({ open: false }));
-        const bar = view.container.querySelector(".messages-rail")!;
-        const buttons = bar.querySelectorAll("button");
-        expect(buttons).toHaveLength(1);
-        expect(buttons[0].contains(bar.querySelector(".messages-rail__text"))).toBe(true);
-        expect(buttons[0].contains(bar.querySelector(".messages-rail__marks"))).toBe(true);
-        fireEvent.click(bar.querySelector(".messages-rail__text")!);
-        expect(controls.state().open).toBe(true);
+    it("shows the button pressed while the panel is open, and the same click closes it", () => {
+        const { controls } = mount([jekt()]);
+        const el = headerButton()!.container.querySelector("button")!;
+        expect(el.getAttribute("aria-pressed")).toBe("true");
+        fireEvent.click(el);
+        expect(controls.state().open).toBe(false);
+        expect(el.getAttribute("aria-pressed")).toBe("false");
     });
 
-    it("keeps the bar's column when the panel is open, empty and hidden from assistive technology, so the panel lies over the conversation", () => {
+    it("keeps the count current as messages arrive, and takes the button away when the pane hides the panel", () => {
+        const { controls, setDoc, view } = mount([jekt()], controlsFor({ open: false }));
+        const label = () => messagesHeaderButtons("p1")[0]?.title;
+        expect(label()).toBe("Messages, 1 unread");
+        setDoc([jekt(), jekt()]);
+        expect(label()).toBe("Messages, 2 unread");
+        controls.patch({ enabled: false });
+        expect(messagesHeaderButtons("p1")).toEqual([]);
+        view.unmount();
+    });
+
+    it("keeps one button as messages arrive: the same element, its title and count following", async () => {
+        const { setDoc } = mount([jekt()], controlsFor({ open: false }));
+        const button = headerButton()!;
+        const el = button.container.querySelector("button")!;
+        expect(el.getAttribute("aria-label")).toBe("Messages, 1 unread");
+        setDoc([jekt(), jekt(), jekt()]);
+        expect(button.container.querySelector("button")).toBe(el);
+        expect(el.getAttribute("aria-label")).toBe("Messages, 3 unread");
+        expect(el.querySelector(".messages-header-button")?.textContent).toBe("3");
+    });
+
+    it("stays in a narrow header: the class the header's fit rules spare", () => {
+        mount([jekt()]);
+        expect(messagesHeaderButtons("p1")[0].className).toContain("block-frame-end-keep");
+        const rules = readFileSync(resolve(__dirname, "../../../mixins.scss"), "utf8");
+        for (const tier of ["trim", "min"]) {
+            expect(rules).toContain(`&[data-fit="${tier}"] .block-frame-end-extra:not(.block-frame-end-keep)`);
+        }
+        expect(rules).toContain(".block-frame-end-icons > :not(.block-frame-default-close):not(.block-frame-end-keep)");
+    });
+
+    it("takes the button away when the pane goes", () => {
         const { view } = mount([jekt()]);
-        const bar = view.container.querySelector(".messages-rail")!;
-        expect(bar).toBeTruthy();
-        expect(bar.getAttribute("aria-hidden")).toBe("true");
-        expect(bar.querySelector("button")).toBeNull();
+        expect(messagesHeaderButtons("p1")).toHaveLength(1);
+        view.unmount();
+        expect(messagesHeaderButtons("p1")).toEqual([]);
+    });
+
+    it("lies over the conversation when open: the kit's overlay panel, not a docked column", () => {
+        const { view } = mount([jekt()]);
         const panel = view.container.querySelector(".messages-panel")!;
         expect(panel.classList.contains("ui-side-panel")).toBe(true);
         expect(panel.classList.contains("ui-side-panel--docked")).toBe(false);
     });
 
-    it("closes from its close button, and on Esc, and puts the keyboard back on the bar", async () => {
+    it("closes from its close button, and on Esc, and puts the keyboard back on the header button", async () => {
+        const frame = document.createElement("div");
+        frame.setAttribute("data-blockid", "p1");
+        document.body.appendChild(frame);
         const { controls, view } = mount([jekt()]);
+        const button = render(() => <DeclIconButton decl={messagesHeaderButtons("p1")[0]} />, { container: frame });
         fireEvent.click(screen.getByLabelText("Close"));
         expect(controls.state().open).toBe(false);
         expect(view.container.querySelector(".messages-panel")).toBeNull();
@@ -186,7 +252,9 @@ describe("MessagesPanel", () => {
         fireEvent.keyDown(panelButton, { key: "Escape" });
         expect(controls.state().open).toBe(false);
         await Promise.resolve();
-        expect(document.activeElement).toBe(view.container.querySelector(".messages-rail__button"));
+        expect(document.activeElement).toBe(button.container.querySelector(".messages-toggle"));
+        button.unmount();
+        frame.remove();
     });
 
     it("opens without taking the keyboard from a text field (a search match in a held message opens it mid-typing)", async () => {
@@ -242,7 +310,7 @@ describe("MessagesPanel", () => {
         expect(waitingNow.reads).toBeGreaterThan(0);
     });
 
-    it("does not replay a request when the panel is closed to the bar and opened again", () => {
+    it("does not replay a request when the panel is closed and opened again", () => {
         const a = jekt();
         const b = jekt();
         const { controls, view } = mount([a, b]);

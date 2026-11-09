@@ -67,6 +67,7 @@ export function PaneHeaderTabStrip<T>(props: PaneHeaderTabStripProps<T>): JSX.El
             getTooltip={props.getTooltip}
             getTooltipDetail={props.getTooltipDetail}
             getTooltipSeat={props.getTooltipSeat}
+            getTooltipModel={props.getTooltipModel}
             getAttention={props.getAttention}
             getTabClass={props.getTabClass}
             getColor={props.getColor}

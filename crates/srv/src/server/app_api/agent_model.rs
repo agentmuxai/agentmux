@@ -15,7 +15,7 @@ use crate::backend::model_gateway::catalog::{self, Model, Route};
 use crate::backend::model_gateway::launch::{self, Choice};
 use crate::backend::model_gateway::switch::{self, Target};
 use crate::backend::rpc::engine::WshRpcEngine;
-use crate::backend::rpc_types::{COMMAND_AGENT_MODEL_PANEL, COMMAND_AGENT_MODEL_SWITCH};
+use crate::backend::rpc_types::{COMMAND_AGENT_MODEL_PANEL, COMMAND_AGENT_MODEL_SWITCH, COMMAND_AGENT_PEER_LABELS};
 use crate::backend::storage::agents::AgentDefinition;
 use crate::backend::vault::route_key;
 use crate::server::AppState;
@@ -116,6 +116,35 @@ pub struct AgentModelSwitchResult {
     pub changed: bool,
     pub restarted: u32,
     pub failed: Vec<String>,
+}
+
+/// What `agent.peer-labels` answers.
+#[derive(Debug, Clone, PartialEq, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct AgentPeerLabels {
+    /// By agent definition id: the model the agent really runs and the route that serves it, such as
+    /// "DeepSeek V4.1 Flash via OpenRouter". An agent on its harness's own sign-in is not listed.
+    pub labels: std::collections::HashMap<String, String>,
+}
+
+/// The model and route an agent with `choice` runs on `harness`, or None when it has no choice or the saved one no longer
+/// validates (the launch falls back to the harness's own sign-in then, so the label must too).
+fn peer_label(harness: &str, choice: Option<&Choice>) -> Option<String> {
+    let choice = choice?;
+    let (route, model) = catalog::validate(harness, &choice.route, &choice.model).ok()?;
+    Some(format!("{} via {}", model.label, route.label))
+}
+
+fn peer_labels(state: &AppState) -> Result<AgentPeerLabels, String> {
+    let defs = state.mstore.agent_def_list().map_err(|e| e.to_string())?;
+    let labels = defs
+        .iter()
+        .filter_map(|def| {
+            let harness = state.id_store.resolve_effective_provider_id(def);
+            peer_label(&harness, launch::choice_of(&state.mstore, &def.id).as_ref()).map(|l| (def.id.clone(), l))
+        })
+        .collect();
+    Ok(AgentPeerLabels { labels })
 }
 
 fn agent_of_block(state: &AppState, block_id: &str) -> Result<AgentDefinition, String> {
@@ -223,6 +252,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }
     });
     let s = state.clone();
+    // No argument: `Value` takes whatever the caller sends. Any caller may read it: it names no key and no price.
+    engine.register_typed(COMMAND_AGENT_PEER_LABELS, move |_data: serde_json::Value, _ctx| {
+        let s = s.clone();
+        async move { tokio::task::spawn_blocking(move || peer_labels(&s)).await.map_err(|e| e.to_string())? }
+    });
+    let s = state.clone();
     engine.register_typed(COMMAND_AGENT_MODEL_SWITCH, move |req: AgentModelSwitchReq, ctx| {
         let s = s.clone();
         async move {
@@ -238,6 +273,17 @@ mod tests {
 
     fn req(tokens: Option<u32>, images: Option<u32>) -> AgentModelPanelReq {
         AgentModelPanelReq { blockid: "b".into(), conversation_tokens: tokens, images }
+    }
+
+    #[test]
+    fn a_route_agent_is_labelled_with_its_model_and_route() {
+        let on_route = Choice { route: "openrouter".into(), model: "deepseek/deepseek-v4.1-flash-1017".into() };
+        assert_eq!(peer_label("claude", Some(&on_route)).as_deref(), Some("DeepSeek V4.1 Flash via OpenRouter"));
+        // No choice, or a saved one that no longer validates (another harness, an unknown model): the harness's own sign-in.
+        assert_eq!(peer_label("claude", None), None);
+        assert_eq!(peer_label("codex", Some(&on_route)), None);
+        let gone = Choice { route: "openrouter".into(), model: "nobody/retired".into() };
+        assert_eq!(peer_label("claude", Some(&gone)), None);
     }
 
     #[test]

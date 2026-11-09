@@ -418,14 +418,19 @@ export function pillTooltipContent<T>(
         getTooltip?: (tab: T) => string;
         getTooltipDetail?: (tab: T) => string | undefined;
         getTooltipSeat?: (tab: T) => string | undefined;
+        getTooltipModel?: (tab: T) => string | undefined;
     },
     progressInfo: () => PaneTabProgress | null
 ): JSX.Element {
-    return props.getTooltipDetail?.(props.tab) || props.getTooltipSeat?.(props.tab) || progressInfo() ? (
+    return props.getTooltipDetail?.(props.tab) ||
+        props.getTooltipSeat?.(props.tab) ||
+        props.getTooltipModel?.(props.tab) ||
+        progressInfo() ? (
         <div class="pane-tab-tip-body" data-testid="pane-tab-tip-body">
             <div class="pane-tab-tip-label">{props.getTooltip?.(props.tab) ?? props.getLabel(props.tab)}</div>
             <Show when={progressInfo()}>{(info) => <div class="pane-tab-tip-state">{info().text}</div>}</Show>
             <Show when={props.getTooltipSeat?.(props.tab)}>{(seat) => <div class="pane-tab-tip-seat">{seat()}</div>}</Show>
+            <Show when={props.getTooltipModel?.(props.tab)}>{(model) => <div class="pane-tab-tip-seat">{model()}</div>}</Show>
             <Show when={props.getTooltipDetail?.(props.tab)}>{(detail) => <div class="pane-tab-tip-summary">{detail()}</div>}</Show>
         </div>
     ) : (

@@ -429,7 +429,7 @@ impl Handler {
         // PTY-based shell/term agents report back so we fall through to keystrokes.
         if let Some(ref deliver) = self.message_sender {
             let joins_turn = crate::backend::reactive::turn_audit::turn_in_flight(&d.block_id);
-            match deliver(&d.block_id, final_msg, d.req.files_delivery.as_ref().map_or(&[][..], |f| &f.inline), &crate::backend::reactive::sanitize::jekt_origin(d.req, d.effective_tier, d.delivery_tier, &d.request_id, d.now as i64)) {
+            match deliver(&d.block_id, final_msg, d.req.files_delivery.as_ref().map_or(&[][..], |f| &f.inline), &crate::backend::reactive::sanitize::jekt_origin(d.req, d.effective_tier, d.delivery_tier, &d.request_id, d.now as i64), d.req.expires_at_ms) {
                 Ok(outcome @ (SenderDelivery::Delivered | SenderDelivery::Deferred)) => {
                     let deferred = outcome == SenderDelivery::Deferred;
                     self.delivery_turn = Some(if joins_turn && !deferred { "joined" } else { "started" });

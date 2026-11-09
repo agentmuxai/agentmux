@@ -59,7 +59,8 @@ export function registerAgentViewCommands(): () => void {
             execute: () => focused()?.followDefault(),
         }),
     );
-    // The Messages panel over the conversation (messages/): on, collapsed to its bar, until a person hides it for the pane.
+    // The Messages panel over the conversation (messages/): on, closed, until a person hides it for the pane; the
+    // button in the pane's header opens and closes it.
     offs.push(
         commandRegistry.register({
             id: "agent:messages:show",
@@ -70,7 +71,7 @@ export function registerAgentViewCommands(): () => void {
             when: () => focused() !== undefined && !messagesEnabled(getFocusedBlockId()),
             execute: () => setMessagesEnabled(getFocusedBlockId(), true),
         }),
-        // The collapsed bar opens the panel with a click; the palette opens it too.
+        // The header button opens the panel with a click; the palette opens it too.
         commandRegistry.register({
             id: "agent:messages:open",
             label: "Agent: Open messages panel",

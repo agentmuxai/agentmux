@@ -56,6 +56,13 @@
 // when code changed since, and fail when only docs did: nothing will ask
 // Codex again, so the PR needs the fix. This gate only reads.
 //
+// Only P0 and P1 findings block. Codex marks each inline finding with a priority badge
+// (`![P2 Badge](https://img.shields.io/badge/P2-...)`); a findings review whose inline comments are all
+// P2 or P3 passes its head, and the pass carries to a later head while it is Codex's latest word:
+// muxreview does not ask for another round because of them (it lists them in one follow-ups comment
+// for the author to file). A finding with no readable badge, and a review with no inline comments,
+// count as P1 (the safe default).
+//
 // If the status looks stuck (Codex answered but the status didn't move),
 // re-evaluate the PR without asking Codex anything:
 //   gh workflow run codex-review-gate.yml -f pr=<number>
@@ -225,6 +232,34 @@ function filesByReview(reviewComments) {
     return byReview;
 }
 
+// A Codex inline finding's priority from its badge, or null. Prose that mentions "P2" is not a badge.
+const PRIORITY_BADGE = /!\[P([0-3])\s*Badge\]|img\.shields\.io\/badge\/P([0-3])-/i;
+export function findingPriority(body) {
+    const m = PRIORITY_BADGE.exec(body ?? "");
+    return m ? Number(m[1] ?? m[2]) : null;
+}
+
+/**
+ * Review id -> true when the review has inline comments and every one is P2 or P3 (a follow-up, not a
+ * reason to wait). A review with none, or with one that is P0, P1 or has no badge, is not in the map.
+ */
+function nonBlockingReviews(reviewComments) {
+    const byReview = new Map();
+    for (const c of reviewComments) {
+        if (c.pull_request_review_id == null) continue;
+        const priority = findingPriority(c.body);
+        const quiet = priority === 2 || priority === 3;
+        byReview.set(c.pull_request_review_id, (byReview.get(c.pull_request_review_id) ?? true) && quiet);
+    }
+    for (const [id, quiet] of [...byReview]) if (!quiet) byReview.delete(id);
+    return byReview;
+}
+
+/** Findings whose inline comments are all P2 or P3. */
+function isNonBlockingFindings(o) {
+    return o?.kind === "findings" && o.nonBlocking === true;
+}
+
 /** Findings whose flagged files are known and all docs. */
 function isDocsOnlyFindings(o) {
     return o?.kind === "findings" && o.files.size > 0 && [...o.files].every(isDocsOnlyPath);
@@ -252,6 +287,7 @@ function muxreviewSkips(comments = []) {
 function codexOutputs({ comments = [], reviews = [], reviewComments = [] }) {
     const quotaHeads = quotaAttribution({ comments, reviews });
     const flagged = filesByReview(reviewComments);
+    const quiet = nonBlockingReviews(reviewComments);
     return [
         ...comments
             .filter(isCodex)
@@ -273,6 +309,7 @@ function codexOutputs({ comments = [], reviews = [], reviewComments = [] }) {
                 at: r.submitted_at,
                 sha: reviewedCommit(r.body),
                 files: flagged.get(r.id) ?? new Set(),
+                nonBlocking: quiet.get(r.id) === true,
             })),
     ]
         .filter((o) => o.sha !== null)
@@ -442,6 +479,9 @@ export function evaluateCodexGate({
     if (isDocsOnlyFindings(onHead)) {
         return { state: "success", description: `Codex only flagged docs in ${short}; see its comments` };
     }
+    if (isNonBlockingFindings(onHead)) {
+        return { state: "success", description: `Codex found only P2/P3 follow-ups in ${short}; they don't block` };
+    }
     if (onHead?.kind === "findings") {
         return {
             state: "failure",
@@ -461,6 +501,11 @@ export function evaluateCodexGate({
     }
     if (isDocsOnlyFindings(latest) && onlyDocsSince) {
         return { state: "success", description: `Codex only flagged docs in ${latest.sha}; see its comments` };
+    }
+    // P2/P3 follow-ups are not a reason to ask Codex again (muxreview does not), so they carry to a later
+    // head whatever changed since, while they are Codex's latest word.
+    if (isNonBlockingFindings(latest)) {
+        return { state: "success", description: `Codex's P2/P3 follow-ups on ${latest.sha} don't block; ${short} passes` };
     }
     // Only where it would otherwise wait: a verdict Codex did give still counts.
     if (dependencyBot) {

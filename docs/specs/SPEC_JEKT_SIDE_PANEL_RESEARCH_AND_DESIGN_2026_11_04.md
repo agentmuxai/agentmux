@@ -221,3 +221,14 @@ The operator's words (2026-11-07): "1) We want the message panel to come out at 
 - **On, collapsed, by default.** The setting is on until a person hides it (`agent:messages` in the block meta: `enabled`, `seen`). Whether the panel is open is this session only: a restart never covers the conversation.
 - **No inline jekts.** The conversation leaves out every incoming jekt the panel holds. A forced one (a sensitive jekt, or one nothing proved) keeps its row: it is what the person confirms in the conversation, and the panel's "Needs you" strip and the card above the composer point at it. With the panel hidden for the pane, every jekt shows in the conversation as before. A search match inside a message the conversation leaves out opens the message in the panel, since there is no row to jump to.
 - **The open panel's head:** the close button is 36 px and larger, and it turns red on hover (`--error-text-color`, `--error-bg`). It sits at the panel's top right corner and assumes the pane's top band is free: the CPU and memory readout, which is drawn there today and would sit over it, moves into the composer strip (task #28995), so the panel does not design around it.
+
+## 11. The bar is gone; the header button opens the panel (task #30050)
+
+The operator's words (2026-11-08): "we'll need do refine the work regarding the jekt messenger panel. The vertical side bar you click to expand needs to go, remove it. Instead, the message icon in the pane header was the best choice. lets go back to that. otherwise everything remains the same".
+
+What changed from section 10:
+
+- **The collapsed "Jekt Messages" bar is removed.** Closed, the panel leaves nothing in the pane: no column, no label.
+- **The Messages button in the pane's header** (the envelope, `messages/messages-header.tsx`) opens and closes the panel at every pane width, after the find bar's magnifier. It is pressed while the panel is open. It carries what the bar carried, so a new message is still noticeable with the panel closed: the unread count, and the dot while something waits on the person. Its title and accessible name say the same ("Messages, 2 unread, needs you").
+- **The keyboard** goes back to the header button when the panel closes (the close button, or Esc), as it went back to the bar.
+- Everything else in section 10 stands: the panel lies over the conversation at 95%, incoming jekts leave the conversation (a sensitive or unproven one keeps its row), the setting is on until a person hides it, a search match inside a held message opens it, and the command palette's Show, Open and Hide still work.

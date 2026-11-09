@@ -340,6 +340,11 @@ impl AcpStdoutReader {
                     .pointer("/result/agentCapabilities/loadSession")
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
+                // dsh offers `session/resume` (sessionCapabilities.resume, an object or true) and no load.
+                let can_resume = json
+                    .pointer("/result/agentCapabilities/sessionCapabilities/resume")
+                    .is_some_and(|v| !v.is_null() && v.as_bool() != Some(false));
+                let restore = SessionRestore::of(can_load, can_resume);
                 let takes = |t: &str| {
                     json.pointer(&format!("/result/agentCapabilities/mcpCapabilities/{t}"))
                         .and_then(|v| v.as_bool())
@@ -351,17 +356,20 @@ impl AcpStdoutReader {
                     let (http, sse) = (takes("http"), takes("sse"));
                     let path = env.get("PATH").map(String::as_str);
                     let resolve = |c: &str| super::super::acp_mcp::resolve_command(c, path);
-                    super::super::acp_mcp::acp_mcp_servers(raw, http, sse, resolve, lookup)
+                    let mut servers = super::super::acp_mcp::acp_mcp_servers(raw, http, sse, resolve, lookup);
+                    // dsh starts the MCP server with only the env listed here, not the agent's own.
+                    super::super::acp_mcp::carry_agentmux_env(&mut servers, env);
+                    servers
                 });
                 inner.mcp_servers = servers;
                 let resume = inner.resume_session_id.clone();
-                let loading = if can_load { resume.clone() } else { None };
-                let req = session_request(resume.as_deref(), can_load, &inner.session_cwd, &inner.mcp_servers);
+                let loading = if restore != SessionRestore::No { resume.clone() } else { None };
+                let req = session_request(resume.as_deref(), restore, &inner.session_cwd, &inner.mcp_servers);
                 Some((req, loading))
             } else if is(inner.session_request_id) && json.get("error").is_some() && inner.loading_session.is_some() {
                 inner.loading_session = None;
                 state.recovered_error = true;
-                Some((session_request(None, false, &inner.session_cwd, &inner.mcp_servers), None))
+                Some((session_request(None, SessionRestore::No, &inner.session_cwd, &inner.mcp_servers), None))
             } else {
                 None
             };

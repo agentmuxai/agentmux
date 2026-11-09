@@ -895,6 +895,11 @@ pub(super) fn add_agent_columns(conn: &Connection) -> Result<(), StoreError> {
         "ALTER TABLE db_jekt_held ADD COLUMN hold_reason TEXT NOT NULL DEFAULT ''",
         // A held WAN message's verdict, kept for its replay (no bump: an older build ignores it).
         "ALTER TABLE db_jekt_held ADD COLUMN wan_json TEXT NOT NULL DEFAULT ''",
+        // The sender's own expiry for a held message, epoch ms (issue #3894): at delivery time
+        // the replay drops the row instead of delivering it stale, and the expiry sweep drops it
+        // whatever its hold reason. NULL — the sender said nothing — keeps today's behaviour
+        // (no bump: an older build ignores the column).
+        "ALTER TABLE db_jekt_held ADD COLUMN sender_expires_at_ms INTEGER",
         "ALTER TABLE db_agent_native_memory ADD COLUMN last_seen_mtime_ms INTEGER NOT NULL DEFAULT 0", // a table made before this column
     ])?;
     Ok(())

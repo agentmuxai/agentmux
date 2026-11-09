@@ -7091,6 +7091,56 @@ async fn a_jekt_refused_by_the_spawn_gate_is_held_for_sign_in() {
     .is_none());
 }
 
+/// Issue #3894: a held jekt whose sender's expiry has passed is dropped
+/// before the replay can deliver it — the pass's own sweep deletes the row,
+/// so the target never receives it stale when it finally comes back.
+#[tokio::test]
+async fn a_held_jekts_senders_expiry_drops_it_before_the_replay_delivers_it() {
+    use crate::backend::agent_state::test_support::register_stub;
+    use crate::backend::blockcontroller::{BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING};
+    use crate::backend::reactive::types::InjectionRequest;
+    use crate::backend::storage::agents::test_agent_def;
+    let mut state = test_state();
+    state.reactive_handler = Box::leak(Box::new(crate::backend::reactive::handler::ReactiveHandler::new()));
+    let deliveries = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let received = deliveries.clone();
+    state.reactive_handler.set_message_sender(Arc::new(move |_, message, _, _origin, _expires_at_ms| {
+        received.lock().unwrap().push(message.to_string());
+        Ok(crate::backend::reactive::types::SenderDelivery::Delivered)
+    }));
+    let slug = format!("expired-{}", &uuid::Uuid::new_v4().to_string()[..8]);
+    let uid = format!("uid-{slug}");
+    let mut def = test_agent_def(&uid, "Expired Y", "claude", "agent", 1, "");
+    def.slug = slug.clone();
+    state.mstore.agent_def_insert(&mut def).unwrap();
+    let mut block = crate::backend::obj::Block { oid: uuid::Uuid::new_v4().to_string(), ..Default::default() };
+    state.mstore.insert(&mut block).unwrap();
+    register_stub(&block.oid, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING, false);
+    state.reactive_handler.register_agent_full(&slug, &block.oid, None, 0, None, Some(&uid), "test").unwrap();
+
+    let now = agentmux_common::time::now_ms();
+    let req = InjectionRequest {
+        target_agent: slug.clone(),
+        message: "a review notice from an hour ago".to_string(),
+        source_agent: Some("github-consumer".to_string()),
+        request_id: Some("req-sender-expired".to_string()),
+        expires_at_ms: Some(now - 1_000),
+        ..Default::default()
+    };
+    let mut row = crate::server::jekt_hold::held_row(&req, "req-sender-expired".to_string(), now - 60_000);
+    row.target_uid = uid.clone();
+    state.mstore.jekt_held_insert(&row).unwrap();
+
+    let outcomes = crate::server::jekt_held::replay_pass(&state).await;
+    assert!(
+        !outcomes.iter().any(|(id, outcome)| id == "req-sender-expired"
+            && *outcome != crate::server::jekt_held::ReplayOutcome::Expired),
+        "never a delivery for the expired row: {outcomes:?}"
+    );
+    assert!(state.mstore.jekt_held_for_target(&uid, 10).unwrap().is_empty(), "dropped, not kept");
+    assert!(deliveries.lock().unwrap().is_empty(), "never delivered");
+}
+
 /// SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §5 (step 2c): a message to an agent
 /// here whose account is out of quota is held with `held_reason: usage_limit`
 /// and the reset time, never injected into a turn that would fail and lose
@@ -7107,7 +7157,7 @@ async fn a_message_to_an_agent_out_of_quota_is_held_until_it_can_work() {
     state.reactive_handler = Box::leak(Box::new(crate::backend::reactive::handler::ReactiveHandler::new()));
     let deliveries = Arc::new(std::sync::Mutex::new(Vec::new()));
     let received = deliveries.clone();
-    state.reactive_handler.set_message_sender(Arc::new(move |_, message, _, _origin| {
+    state.reactive_handler.set_message_sender(Arc::new(move |_, message, _, _origin, _expires_at_ms| {
         received.lock().unwrap().push(message.to_string());
         Ok(crate::backend::reactive::types::SenderDelivery::Delivered)
     }));

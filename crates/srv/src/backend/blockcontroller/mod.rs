@@ -784,7 +784,7 @@ pub enum AgentDelivery {
 /// input). Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md §6 (Phase 3).
 #[cfg(test)]
 pub fn deliver_agent_message(block_id: &str, message: &str) -> Result<AgentDelivery, String> {
-    deliver_agent_message_from(block_id, message, None, MessageOrigin::system(), &[])
+    deliver_agent_message_from(block_id, message, None, MessageOrigin::system(), &[], None)
 }
 
 /// [`deliver_agent_message`], saying who the input is from (turn provenance,
@@ -794,12 +794,19 @@ pub fn deliver_agent_message(block_id: &str, message: &str) -> Result<AgentDeliv
 ///
 /// `from` says where the message came from, for the record of it
 /// (`message_origin`): a producer that doesn't say doesn't compile.
+///
+/// `expires_at_ms` is the sender's expiry (`InjectionRequest::expires_at_ms`,
+/// issue #3894): only the persistent controller's deferred queue uses it — a
+/// message queued while its process was starting, restarting or stopping is
+/// dropped at write time once the expiry has passed. Every other controller
+/// delivers at once, so it ignores it.
 pub fn deliver_agent_message_from(
     block_id: &str,
     message: &str,
     origin: Option<health::TurnInput>,
     from: MessageOrigin,
     inline: &[serde_json::Value],
+    expires_at_ms: Option<i64>,
 ) -> Result<AgentDelivery, String> {
     let ctrl =
         get_controller(block_id).ok_or_else(|| format!("no controller for block {block_id}"))?;
@@ -812,7 +819,7 @@ pub fn deliver_agent_message_from(
         .downcast_ref::<persistent::PersistentSubprocessController>()
     {
         let record = RecordOrigin { origin: from, notes: held.note_texts() };
-        let outcome = persistent_ctrl.send_user_message_with_images_from(message, origin, inline.to_vec(), record)?;
+        let outcome = persistent_ctrl.send_user_message_with_images_from(message, origin, inline.to_vec(), record, expires_at_ms, held.keyed_notes())?;
         held.delivered();
         return Ok(match outcome {
             SendOutcome::Sent => AgentDelivery::Structured,
