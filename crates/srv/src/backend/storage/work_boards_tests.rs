@@ -332,3 +332,18 @@ fn deleting_main_does_not_bring_it_back_as_a_second_default() {
     assert!(boards[0].is_default);
     assert_eq!(s.work_board_default().unwrap().id, work.id);
 }
+
+#[test]
+fn a_card_an_older_build_adds_after_main_was_deleted_goes_on_the_default_board() {
+    let (s, _d) = store();
+    let work = s.work_board_create(&edit("Work"), "t", 1).unwrap();
+    s.work_board_set_default("work", 2).unwrap();
+    s.work_board_archive("main", true, 3).unwrap();
+    s.work_board_delete("main", 4).unwrap();
+    // A card with no board, as an older build writes it.
+    s.work_queue_enqueue(&item("old", 1000)).unwrap();
+    s.conn().lock().unwrap().execute("INSERT INTO db_work_cards (num, work_id, updated_at) VALUES (900, 'old', 1)", []).unwrap();
+    let t = s.work_board_get("old").unwrap().expect("found, and numbered");
+    assert_eq!((t.card.board.as_str(), t.card.num, t.card.task_ref.as_str()), ("work", 1, "#1"));
+    assert_eq!(t.card.board_id, work.id);
+}

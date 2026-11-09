@@ -287,9 +287,13 @@ fn default_board(conn: &Connection) -> Result<Board, StoreError> {
     match conn.query_row(&sql, [], row_to_board).optional()? {
         Some(b) => Ok(b),
         None => {
-            // The default is only ever moved, never cleared; if a hand edit left none, Main is it.
-            conn.execute("UPDATE db_boards SET is_default = 1 WHERE id = ?1", params![MAIN_ID])?;
-            Ok(conn.query_row(&format!("SELECT {BOARD_COLS} FROM db_boards WHERE id = ?1"), params![MAIN_ID], row_to_board)?)
+            // The default is only ever moved, never cleared; if a hand edit left none, the oldest board is it
+            // (Main, unless it was deleted).
+            conn.execute(
+                "UPDATE db_boards SET is_default = 1 WHERE id = (SELECT id FROM db_boards ORDER BY created_at, id LIMIT 1)",
+                [],
+            )?;
+            Ok(conn.query_row(&sql, [], row_to_board)?)
         }
     }
 }
@@ -312,8 +316,10 @@ pub(crate) fn attach_boards(conn: &Connection, tasks: &mut [super::work_board::B
     let boards: std::collections::HashMap<String, (String, bool)> = stmt
         .query_map([], |r| Ok((r.get::<_, String>(0)?, (r.get::<_, String>(1)?, r.get::<_, i64>(2)? != 0))))?
         .collect::<Result<_, _>>()?;
+    // A card with no board yet is on the default one.
+    let fallback = default_board(conn)?;
     for t in tasks {
-        let (slug, default) = boards.get(&t.card.board_id).cloned().unwrap_or_else(|| (MAIN_ID.into(), true));
+        let (slug, default) = boards.get(&t.card.board_id).cloned().unwrap_or_else(|| (fallback.slug.clone(), true));
         t.card.task_ref = if default { format!("#{}", t.card.num) } else { format!("{slug}#{}", t.card.num) };
         t.card.board = slug;
     }
@@ -333,9 +339,14 @@ pub(crate) fn alloc_num(conn: &Connection, board_id: &str) -> Result<i64, StoreE
 pub(crate) fn number_unboarded(conn: &Connection) -> Result<(), StoreError> {
     let mut stmt = conn.prepare("SELECT num FROM db_work_cards WHERE board_id = '' ORDER BY num")?;
     let nums = stmt.query_map([], |r| r.get::<_, i64>(0))?.collect::<Result<Vec<_>, _>>()?;
+    if nums.is_empty() {
+        return Ok(());
+    }
+    // Main's counter, unless Main was deleted: then the default board's.
+    let board = default_board_id(conn)?;
     for num in nums {
-        let n = alloc_num(conn, MAIN_ID)?;
-        conn.execute("UPDATE db_work_cards SET board_id = ?1, board_num = ?2 WHERE num = ?3", params![MAIN_ID, n, num])?;
+        let n = alloc_num(conn, &board)?;
+        conn.execute("UPDATE db_work_cards SET board_id = ?1, board_num = ?2 WHERE num = ?3", params![board, n, num])?;
     }
     Ok(())
 }
