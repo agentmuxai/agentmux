@@ -212,8 +212,10 @@ function createDeadlineTimers(
                 // failure. The one real caller (agent panes, `usePaneReveal`,
                 // 1.5 s) hits this on every restart: each restored pane
                 // re-runs its cold launch flow (CLI resolve + auth check)
-                // alongside all the others, and the CLI resolve alone
-                // measured 1.6 s — so the auth gate is routinely still
+                // alongside all the others, and the CLI answer arrived 1.6 s
+                // after the mount (srv resolved it in tens of ms; the rest was
+                // the pane's requests queuing behind the restart's burst) —
+                // so the auth gate is routinely still
                 // pending here and reports a moment later, once the pane is
                 // already revealed and the release is a no-op. Logged at
                 // error level, that surfaced every routine restart as ~8
