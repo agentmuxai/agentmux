@@ -29,10 +29,18 @@ fn sessions() -> &'static Mutex<HashMap<String, f64>> {
     SESSIONS.get_or_init(Default::default)
 }
 
+/// The cumulative provider total last put on a `result` frame, per agent: what
+/// a frame's turn-scoped `cost_usd` is measured from.
+fn last_totals() -> &'static Mutex<HashMap<String, f64>> {
+    static LAST: OnceLock<Mutex<HashMap<String, f64>>> = OnceLock::new();
+    LAST.get_or_init(Default::default)
+}
+
 /// Clears `agent`'s provider-reported session total: a new process (spawn,
 /// restart, resume) starts its own, as the harness's own total does.
 pub fn reset_session(agent: &str) {
     sessions().lock().unwrap().remove(agent);
+    last_totals().lock().unwrap().remove(agent);
 }
 
 /// The provider-reported spend for `agent` since [`reset_session`], or `None`
@@ -76,10 +84,13 @@ pub fn record(agent: &str, model: &Model, tokens: &TokenCounts, actual: Option<f
 }
 
 /// `line`, a JSON frame from the harness, with a route agent's `result` totals
-/// replaced by the provider's own session charge: the harness prices its tokens
-/// with Claude's rates, which on a route are wrong by orders of magnitude
-/// (#30143). `None` when the line is not a `result` frame, reports no total, or
-/// the agent is not on a route (no response of its carried a charge).
+/// replaced by the provider's own charge: the harness prices its tokens with
+/// Claude's rates, which on a route are wrong by orders of magnitude (#30143).
+/// `total_cost_usd` becomes the session total, which the turn ledger takes the
+/// rise of; `cost_usd` becomes this turn's rise, because the pane adds each
+/// frame's value to its running total. `None` when the line is not a `result`
+/// frame, reports no total, or the agent is not on a route (no response of its
+/// carried a charge).
 pub fn rewrite_result_total(line: &str, agent: &str) -> Option<String> {
     let real = session_usd(agent)?;
     let mut frame: serde_json::Value = serde_json::from_str(line).ok()?;
@@ -88,8 +99,12 @@ pub fn rewrite_result_total(line: &str, agent: &str) -> Option<String> {
     }
     frame.get("total_cost_usd")?.as_f64()?;
     frame["total_cost_usd"] = serde_json::json!(real);
+    // `total_cost_usd` is the session total (the turn ledger takes its rise);
+    // `cost_usd` is turn-scoped — the pane ADDS each frame's value, so it must
+    // be the rise since the previous frame, never the cumulative total.
+    let previous = last_totals().lock().unwrap().insert(agent.to_string(), real).unwrap_or(0.0);
     if frame.get("cost_usd").is_some() {
-        frame["cost_usd"] = serde_json::json!(real);
+        frame["cost_usd"] = serde_json::json!((real - previous).max(0.0));
     }
     Some(frame.to_string())
 }
@@ -145,7 +160,15 @@ mod tests {
         let out = rewrite_result_total(line, "spend-rewrite").expect("rewritten");
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["total_cost_usd"].as_f64(), Some(0.0042));
-        assert_eq!(v["cost_usd"].as_f64(), Some(0.0042));
+        assert_eq!(v["cost_usd"].as_f64(), Some(0.0042), "the first frame's turn cost is the whole total");
+        // A second turn: the total is cumulative, the turn figure is the rise.
+        record("spend-rewrite", model, &used, Some(0.0058), 2_000);
+        let out = rewrite_result_total(line, "spend-rewrite").expect("rewritten");
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let total = v["total_cost_usd"].as_f64().unwrap();
+        assert!((total - 0.01).abs() < 1e-12, "{total}");
+        let turn = v["cost_usd"].as_f64().unwrap();
+        assert!((turn - 0.0058).abs() < 1e-12, "never the cumulative total: {turn}");
         assert_eq!(v["num_turns"].as_u64(), Some(1), "the rest of the frame is untouched");
         assert!(rewrite_result_total(r#"{"type":"assistant"}"#, "spend-rewrite").is_none(), "not a result frame");
         assert!(rewrite_result_total(line, "spend-estimate-only").is_none(), "no provider charge: unchanged");
