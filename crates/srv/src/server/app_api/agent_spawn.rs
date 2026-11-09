@@ -738,7 +738,7 @@ pub(super) async fn announce_start(
     body: String,
     quote: &str,
 ) -> Result<bool, SpawnError> {
-    use crate::backend::agent_notice::{self, Go, Kind, Notice, Outcome, Waiver};
+    use crate::sagas::agent_notice::{self, Go, Kind, Notice, Outcome, Waiver};
     let provenance = blockcontroller::get_controller(&leader.block_id).and_then(|c| c.turn_provenance());
     let gate = crate::sagas::self_quit::gate(provenance.as_ref(), user_instruction);
     let waived = if gate.is_ok() && !route_asked {
@@ -776,9 +776,10 @@ fn agents_may_start_agents(state: &AppState) -> bool {
     state.config_watcher.get_settings().extra.get(SETTING_MAY_START_AGENTS).and_then(serde_json::Value::as_bool).unwrap_or(false)
 }
 
-/// Whether the pane that asked still exists. A parked agent's pane does, and it still runs.
-fn requester_here(state: &AppState, block_id: &str) -> bool {
-    state.mstore.get::<Block>(block_id).ok().flatten().is_some()
+/// Whether the requester is still there to start things for: its pane exists and its agent was not
+/// stopped since (an explicit stop keeps the pane). A parked agent's pane exists and it still runs.
+pub(crate) fn requester_here(state: &AppState, block_id: &str) -> bool {
+    state.mstore.get::<Block>(block_id).ok().flatten().is_some() && !super::agent_attach::stopped_this_run(block_id)
 }
 
 /// What the person is shown about one worker.

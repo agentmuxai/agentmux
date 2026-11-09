@@ -12,7 +12,7 @@
 
 import type { ModalLayerRequest } from "@/app/element/modal-layer";
 import { MENU_ICON } from "@/app/util/menu-icons";
-import { setStartsAgentsWithoutAsking, startsAgentsWithoutAsking } from "@/app/store/agent-grants";
+import { setStartsAgentsWithoutAsking, setUsesGoogleWithoutAsking, startsAgentsWithoutAsking, usesGoogleWithoutAsking } from "@/app/store/agent-grants";
 import { openMemory } from "@/app/store/section-panes";
 import { HISTORY_TAB_FOR_META_KEY, openOrFocusHistoryTab } from "./open-history-tab";
 import { isContainerAgentMode } from "@/util/runtime-kind";
@@ -76,7 +76,18 @@ export function agentBodyMenuItems(host: AgentBodyMenuHost): ContextMenuItem[] {
                 type: "checkbox",
                 checked: startsAgentsWithoutAsking(agentId),
                 click: () => void setStartsAgentsWithoutAsking(agentId, !startsAgentsWithoutAsking(agentId)).catch(() => {}),
-            }
+            },
+            // A Google "Always" can only be given on its card, so the entry is there to take it back.
+            ...(usesGoogleWithoutAsking(agentId)
+                ? [
+                      {
+                          label: "Uses Google without asking",
+                          type: "checkbox" as const,
+                          checked: true,
+                          click: () => void setUsesGoogleWithoutAsking(agentId, false).catch(() => {}),
+                      },
+                  ]
+                : [])
         );
     }
     items.push({ type: "separator" }, { label: "Shut down", icon: MENU_ICON.shutdown, click: host.shutDown }, { type: "separator" });

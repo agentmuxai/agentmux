@@ -207,7 +207,7 @@ struct HostApprover<'a> {
 
 impl Approver for HostApprover<'_> {
     async fn ask(&self, def: &AgentDefinition, title: String, message: String, _yes: &str, _no: &str) -> Result<Answer, String> {
-        use crate::backend::agent_notice::{self, Kind, Notice, Outcome};
+        use crate::sagas::agent_notice::{self, Kind, Notice, Outcome};
         let block = super::app_api::agent_block::find_agent_block_by_uid(&self.state.mstore, &def.id)?
             .ok_or("you have no pane open to tell the person in, so this can't go ahead")?
             .block
@@ -224,7 +224,7 @@ impl Approver for HostApprover<'_> {
             always_label: format!("Always allow {} to do this", super::app_api::connections::one_line(&def.name, 40)),
             waived: None,
         };
-        let outcome = agent_notice::announce(self.state, notice, || self.state.mstore.get::<crate::backend::obj::Block>(&block).ok().flatten().is_some()).await;
+        let outcome = agent_notice::announce(self.state, notice, || super::app_api::agent_spawn::requester_here(self.state, &block)).await;
         Ok(match outcome {
             Outcome::Go(_) => Answer::Yes,
             Outcome::Stopped => Answer::No,

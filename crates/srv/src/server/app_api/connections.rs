@@ -676,7 +676,7 @@ pub(crate) async fn consent_for_ssh(
     connection: &str,
     what: &str,
 ) -> Result<(), String> {
-    use crate::backend::agent_notice::{self, Kind, Notice, Outcome};
+    use crate::sagas::agent_notice::{self, Kind, Notice, Outcome};
     let agent_id = Some(agent_id.to_string()).filter(|a| !a.trim().is_empty());
     let agent = agent_label(agent_id.as_deref());
     let connection = connection.trim();
@@ -692,7 +692,7 @@ pub(crate) async fn consent_for_ssh(
         always_label: format!("Always allow {} on {}", one_line(&agent, 40), one_line(connection, 80)),
         waived: None,
     };
-    let outcome = agent_notice::announce(state, notice, || state.mstore.get::<Block>(agent_block_id).ok().flatten().is_some()).await;
+    let outcome = agent_notice::announce(state, notice, || super::agent_spawn::requester_here(state, agent_block_id)).await;
     tracing::info!(agent = %agent, connection = %connection, what = %one_line(what, 200), outcome = ?outcome, "agent ssh access");
     match outcome {
         Outcome::Go(_) => Ok(()),

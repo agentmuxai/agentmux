@@ -160,7 +160,7 @@ describe("a one-line notice", () => {
         const r = requestOf("agent-notice-line")!;
         const Line = r.Component;
         render(() => <Line {...r.props} close={vi.fn()} />);
-        expect(screen.getByText(/Posa is starting a new agent, Korp-2\./)).toBeTruthy();
+        expect(screen.getByText(/Posa is starting a new agent, Korp-2/)).toBeTruthy();
         expect(screen.queryByRole("button", { name: "Stop it" })).toBeNull();
         expect(r.waits).toBe(false);
         vi.advanceTimersByTime(LINE_SHOWN_MS + 10);

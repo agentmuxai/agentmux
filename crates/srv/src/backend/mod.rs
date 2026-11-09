@@ -4,7 +4,6 @@
 
 pub mod agent_admission;
 pub mod agent_grants;
-pub mod agent_notice;
 pub mod agent_line;
 pub mod agent_seat;
 pub mod agent_availability;

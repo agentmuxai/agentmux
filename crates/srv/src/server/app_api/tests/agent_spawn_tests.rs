@@ -17,8 +17,8 @@ async fn person_stops_it(state: &AppState, block_id: &str) {
     let (state, block_id) = (state.clone(), block_id.to_string());
     tokio::spawn(async move {
         loop {
-            for card in crate::backend::agent_notice::pending().into_iter().filter(|c| c.block_id == block_id) {
-                let _ = crate::backend::agent_notice::decide(&state, &card.id, "veto");
+            for card in crate::sagas::agent_notice::pending().into_iter().filter(|c| c.block_id == block_id) {
+                let _ = crate::sagas::agent_notice::decide(&state, &card.id, "veto");
             }
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         }
@@ -322,6 +322,31 @@ async fn an_always_leader_is_not_asked_again() {
     crate::backend::agent_grants::revoke(crate::backend::agent_grants::Topic::Spawn, &def.id).unwrap();
 }
 
+/// A leader the person stops while the card counts down (its pane stays open) has nothing to start it for.
+#[tokio::test]
+async fn a_leader_that_is_stopped_while_the_card_counts_starts_nothing() {
+    let state = test_state();
+    let (def, _, block_id) = seed_leader(&state, "claude", "host", json!({})).await;
+    *state.host_ipc.lock().await = Some(crate::server::HostIpc { port: 1, token: "t".into() });
+    let before = definitions(&state);
+    let auth = sign_auth(&state, &def.slug);
+    let task = {
+        let state = state.clone();
+        tokio::spawn(async move { spawn(&state, request(auth, "implement the spec")).await })
+    };
+    for _ in 0..400 {
+        if crate::sagas::agent_notice::pending().iter().any(|c| c.block_id == block_id) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    super::super::agent_attach::set_desired(&state.mstore, &block_id, super::super::agent_attach::DESIRED_STOPPED);
+    let (status, body) = task.await.unwrap();
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert!(body["error"].as_str().unwrap().starts_with("NOT_AN_AGENT_PANE"), "{body}");
+    assert_eq!(definitions(&state), before);
+}
+
 /// A leader whose pane is closed while the card counts down has nothing to start it for.
 #[tokio::test]
 async fn a_leader_that_closes_while_the_card_counts_starts_nothing() {
@@ -335,7 +360,7 @@ async fn a_leader_that_closes_while_the_card_counts_starts_nothing() {
         tokio::spawn(async move { spawn(&state, request(auth, "implement the spec")).await })
     };
     for _ in 0..400 {
-        if crate::backend::agent_notice::pending().iter().any(|c| c.block_id == block_id) {
+        if crate::sagas::agent_notice::pending().iter().any(|c| c.block_id == block_id) {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(5)).await;

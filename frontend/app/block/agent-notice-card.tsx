@@ -17,6 +17,7 @@
 
 import { createSignal, onCleanup, Show, type JSX } from "solid-js";
 
+import { tip } from "@/app/element/tip";
 import { Button } from "@/app/element/ui";
 import type { PaneRequestProps } from "@/app/store/pane-requests";
 import type { NoticeView } from "@/types/rpc/NoticeView";
@@ -72,18 +73,18 @@ export function AgentNoticeCard(props: { notice: NoticeView; decide: (choice: No
     return (
         <section class="agent-notice-card" aria-label={n.headline}>
             <h3 class="agent-notice-title">{n.headline}</h3>
+            <p class="agent-notice-deadline" role="timer">
+                <strong>
+                    {words.ahead} {mmss(Math.ceil(left() / 1000))}
+                </strong>{" "}
+                unless you stop it.
+            </p>
+            <div class="agent-notice-bar" aria-hidden="true">
+                <div class="agent-notice-bar-fill" style={{ width: `${Math.min(100, (left() * 100) / total)}%` }} />
+            </div>
             <div class="agent-notice-body">
                 <p>{n.body}</p>
                 <Quote text={n.quote} />
-                <p class="agent-notice-deadline" role="timer">
-                    <strong>
-                        {words.ahead} {mmss(Math.ceil(left() / 1000))}
-                    </strong>{" "}
-                    unless you stop it.
-                </p>
-                <div class="agent-notice-bar" aria-hidden="true">
-                    <div class="agent-notice-bar-fill" style={{ width: `${Math.min(100, (left() * 100) / total)}%` }} />
-                </div>
                 <Show when={error()}>
                     <div class="settings-config-error" role="alert">
                         {error()}
@@ -109,13 +110,15 @@ export function AgentNoticeCard(props: { notice: NoticeView; decide: (choice: No
 
 export function AgentNoticeLine(props: { notice: NoticeView } & PaneRequestProps): JSX.Element {
     const n = props.notice;
+    // One line, cut with an ellipsis; the whole of it is in the tooltip.
+    const whole = [n.headline, n.body, n.quote && `"${n.quote}"`].filter(Boolean).join(". ");
     return (
         <section class="agent-notice-line" aria-label={n.headline}>
-            <p class="agent-notice-line-text">
-                <strong>{n.headline}.</strong> {n.body}
+            <p class="agent-notice-line-text" {...tip(whole)}>
+                <strong>{n.headline}</strong>
                 <Show when={n.quote}>
-                    {" "}
-                    <q>{n.quote}</q>
+                    {": "}
+                    {n.quote}
                 </Show>
             </p>
             <Button variant="chrome" icon="xmark" aria-label="Dismiss" onClick={() => props.close()} />
