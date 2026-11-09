@@ -225,24 +225,6 @@ pub(crate) enum RelayOutcome {
     Failed(String),
 }
 
-/// POST one injection to the cloud relay.
-///
-/// Deliberately takes `base_url` and `token` rather than resolving them
-/// internally: that keeps this function a pure HTTP operation with no globals,
-/// so the tests can point it at a stub relay without mutating process-wide env
-/// (which would race the rest of the test binary).
-///
-/// ## Contract (verified against the cloud relay)
-///
-/// - `source_agent` travels in the **`X-Agent-ID` header, not the body** — the
-///   route 400s without it and derives the sender from it alone.
-/// - `X-Client-Wrapped: true` is required. Without it the cloud wraps the
-///   message in its own `[JEKT:...]` marker before storing; the receiving srv
-///   then wraps it *again* in `Handler::inject_message`, so the recipient sees
-///   a doubled marker. Sending raw + telling the cloud not to wrap yields
-///   exactly one marker, applied by the receiver — identical to how tiers 2
-///   and 3 already behave.
-#[allow(clippy::too_many_arguments)]
 /// The body the cloud route takes, as this srv sends it: the message plus the
 /// carried signature tuple, files, the declared tier, and the sender's own
 /// deadline as the route's `ttl_seconds` (issue #3894).
@@ -292,6 +274,24 @@ fn relay_body(
     body
 }
 
+/// POST one injection to the cloud relay.
+///
+/// Deliberately takes `base_url` and `token` rather than resolving them
+/// internally: that keeps this function a pure HTTP operation with no globals,
+/// so the tests can point it at a stub relay without mutating process-wide env
+/// (which would race the rest of the test binary).
+///
+/// ## Contract (verified against the cloud relay)
+///
+/// - `source_agent` travels in the **`X-Agent-ID` header, not the body** — the
+///   route 400s without it and derives the sender from it alone.
+/// - `X-Client-Wrapped: true` is required. Without it the cloud wraps the
+///   message in its own `[JEKT:...]` marker before storing; the receiving srv
+///   then wraps it *again* in `Handler::inject_message`, so the recipient sees
+///   a doubled marker. Sending raw + telling the cloud not to wrap yields
+///   exactly one marker, applied by the receiver — identical to how tiers 2
+///   and 3 already behave.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn relay_inject(
     base_url: &str,
     http: &reqwest::Client,

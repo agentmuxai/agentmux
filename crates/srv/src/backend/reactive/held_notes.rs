@@ -110,9 +110,12 @@ impl HeldNotes {
         self.panes.get(block_id).is_some_and(|p| p.notes.iter().any(|(k, _)| k == key))
     }
 
-    /// Every note held for `block_id`, oldest first; none are held after.
+    /// Every note held for `block_id`, oldest first; none are held after. The
+    /// pane stays, with the keys invalidated while a message carries its
+    /// notes, so a later [`Self::put_back`] still sees them (#3894 follow-up).
     pub fn take(&mut self, block_id: &str) -> Vec<(String, String)> {
-        self.panes.remove(block_id).map(|p| p.notes).unwrap_or_default()
+        let Some(pane) = self.panes.get_mut(block_id) else { return Vec::new() };
+        std::mem::take(&mut pane.notes)
     }
 
     /// `notes`, taken for a message that didn't go, are held again ahead of
@@ -470,6 +473,19 @@ mod tests {
         h.hold("b", "resumed", "[AgentMux] resumed");
         h.put_back("b", waiting);
         assert_eq!(texts(&h.take("b")), ["[AgentMux] resumed"]);
+    }
+
+    /// A second message taking the same pane must not clear the invalidation
+    /// the first one's wait recorded.
+    #[test]
+    fn an_invalidation_survives_a_later_take_of_the_same_pane() {
+        let mut h = HeldNotes::default();
+        h.hold("b", "paused", "[AgentMux] paused");
+        let first = h.take("b");
+        h.forget_key("b", "paused");
+        assert!(h.take("b").is_empty(), "the second message takes nothing");
+        h.put_back("b", first);
+        assert!(!h.holds("b", "paused"), "the invalidation still wins");
     }
 
     /// A dropped message's note still comes back when nothing invalidated it.
