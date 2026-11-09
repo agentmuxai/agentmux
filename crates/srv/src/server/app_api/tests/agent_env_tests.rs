@@ -468,6 +468,32 @@ async fn a_key_the_person_wrote_in_the_clear_is_not_handed_to_an_address_an_agen
 }
 
 #[tokio::test]
+async fn a_key_is_written_only_with_the_address_of_a_server_of_its_own() {
+    let state = test_state();
+    let (me, lolly) = (agent(&state, "host", false), agent(&state, "host", false));
+    // A key alone would be sent to Anthropic as its key, next to the person's login.
+    let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "set": { "ANTHROPIC_API_KEY": "ollama" } })).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(stored(&state, &lolly), None);
+    // Nor with Anthropic's own address.
+    let (status, body) = call(
+        &state,
+        Some(&me),
+        json!({ "action": "set", "agent": lolly.id, "set": { "ANTHROPIC_BASE_URL": "https://api.anthropic.com", "ANTHROPIC_AUTH_TOKEN": "ollama" } }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    // With the address, in one call: fine; and then a key on its own address.
+    let (status, body) = call(&state, Some(&me), point(&lolly)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "set": { "ANTHROPIC_API_KEY": "none" } })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    // Taking the address away together with another setting is not a key written.
+    let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "set": { "API_TIMEOUT_MS": "5" }, "unset": ["ANTHROPIC_BASE_URL"] })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+}
+
+#[tokio::test]
 async fn only_a_change_of_address_opens_a_notice() {
     let state = test_state();
     let (me, lolly) = (agent(&state, "host", false), agent(&state, "host", false));

@@ -171,17 +171,25 @@ fn endpoint_refusal(state: &AppState, actor: &Actor, target: &AgentDefinition, c
 /// key in the environment goes with it, so every one is checked, the ones already there as well as the
 /// ones the call writes: a `vault:` reference must be usable by the acting agent and by the target, and a
 /// key written in the clear (the operator's, from My Agents) is never handed to an address an agent chose.
-/// When only a key changes, that key is checked.
+/// When only a key changes, that key is checked. A key is only written for a server of its own: with no
+/// address, or Anthropic's, the launch passes it through next to the person's login and the CLI would send
+/// that string to Anthropic as its key.
 fn key_refusal(state: &AppState, actor: &Actor, target: &AgentDefinition, current: &str, new: &str) -> Option<Refusal> {
     let bad = |m: String| Some(refuse(StatusCode::BAD_REQUEST, m));
     let (before, after) = (agent_env::effective(current), agent_env::effective(new));
     let url = |m: &BTreeMap<String, String>| m.iter().find(|(k, _)| k.eq_ignore_ascii_case("ANTHROPIC_BASE_URL")).map(|(_, v)| v.trim().to_string());
     let moved = url(&before) != url(&after);
+    let custom = url(&after).is_some_and(|u| !agent_env::is_anthropic_url(&u));
     for (name, value) in &after {
         if !(name.eq_ignore_ascii_case("ANTHROPIC_AUTH_TOKEN") || name.eq_ignore_ascii_case("ANTHROPIC_API_KEY")) {
             continue;
         }
-        if !moved && before.get(name) == Some(value) {
+        let written = before.get(name) != Some(value);
+        if written && !custom {
+            return bad(format!("{name}: a key goes with the address of a server of its own; set ANTHROPIC_BASE_URL in the same call"));
+        }
+        // With no server of its own the key goes nowhere; with one, it goes there if it is new or the address is.
+        if !custom || !(written || moved) {
             continue;
         }
         let value = value.trim();
