@@ -16,6 +16,7 @@ import { AuditLiveBar } from "./audit-live-bar";
 import { createAuditList } from "./audit-list";
 import { followAgentProp } from "./audit-agent-prop";
 import { createAuditSoundsAt } from "./audit-focus";
+import { revealSoundRow } from "./audit-reveal";
 import type { SoundRef } from "./audit-sound";
 import {
     emptyFilter,
@@ -51,7 +52,7 @@ export const AuditManager = (props: { paneBlockId: string; visible?: boolean; ag
     followAgentProp(() => props.agent, filter, setFilter, setAgentText);
     const set = (patch: Partial<AuditFilter>) => setFilter({ ...filter(), ...patch });
     const sounds = createAuditSoundsAt(list.entries, now, () => props.sound, {
-        showKind: (kind) => filter().kinds.has(kind) || set({ kinds: new Set([...filter().kinds, kind]) }),
+        showKind: revealSoundRow(filter, setFilter, () => (setAgentText(""), setSearchText("")), list.showNewest),
         body: () => body,
     });
     const typed = () => {

@@ -340,6 +340,23 @@ describe("AuditManager", () => {
         }
     });
 
+    it("drops an agent filter and a search that would leave the sound's row out, and resumes a paused list", async () => {
+        const tool = entry({ id: "t", kind: "tool", summary: "Bash ls", agent_id: "korp", links: { pane: { block_id: "blk-korp" } } });
+        const other = entry({ id: "a", kind: "action", summary: "operator setconfig" });
+        query.mockImplementation((req) => Promise.resolve(page(req.agent_id || req.text ? [other] : req.kinds?.includes("tool") ? [tool, other] : [other])));
+        const [sound, setSound] = createSignal<ReturnType<typeof parseSoundRef>>();
+        render(() => <AuditManager paneBlockId="pane-1" agent="loap" sound={sound()} />);
+        await waitFor(() => expect(screen.getByText("operator setconfig")).toBeInTheDocument());
+        expect(query.mock.calls.at(-1)![0].agent_id).toBe("loap");
+        fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+
+        setSound(parseSoundRef(encodeSoundRef({ blockId: "blk-korp", event: "tool", tool: "Bash", at: Date.now() })));
+        await waitFor(() => expect(document.querySelector('[data-lit="true"]')?.textContent).toContain("Bash ls"));
+        expect(screen.getByRole("textbox", { name: "Only entries of this agent" })).toHaveValue("");
+        expect(query.mock.calls.at(-1)![0].agent_id).toBeUndefined();
+        expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument();
+    });
+
     it("does not look for the row of a sound asked for long ago", async () => {
         query.mockResolvedValue(page([entry({ id: "a", kind: "action", summary: "operator setconfig" })]));
         const sound = parseSoundRef(encodeSoundRef({ blockId: "blk-korp", event: "tool", tool: "Bash", at: Date.now() }, Date.now() - 60_000));
