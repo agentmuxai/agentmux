@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { hasEnterSpacePower, hasTerminalPower, leftLabel, minutesLabel, originCovered, pageOrigin, powersNote, siteLabel } from "./bypass";
+import { hasEnterSpacePower, hasTerminalPower, hasUploadsPower, leftLabel, minutesLabel, originCovered, pageOrigin, powersNote, siteLabel } from "./bypass";
 
 describe("bypass sites", () => {
     it("reads a page's site, and none for pages without one", () => {
@@ -51,6 +51,18 @@ describe("the Enter and Space power", () => {
         expect(powersNote(["clicks", "enter_space"])).toBe(" and it presses Enter and Space, each as the click it is");
         expect(powersNote(["clicks", "terminal_ask", "enter_space"])).toBe(
             " and it types in the terminal, asking you before each line runs, and it presses Enter and Space, each as the click it is"
+        );
+    });
+});
+
+describe("the uploads power", () => {
+    it("is its own power, and the strip says it last", () => {
+        expect(hasUploadsPower(["clicks", "uploads"])).toBe(true);
+        expect(hasUploadsPower(["clicks", "enter_space"])).toBe(false);
+        expect(hasUploadsPower(undefined)).toBe(false);
+        expect(powersNote(["clicks", "uploads"])).toBe(" and it fills a file chooser the page opens, from files in its workspace");
+        expect(powersNote(["clicks", "terminal", "enter_space", "uploads"])).toBe(
+            " and it runs commands in the terminal, and it presses Enter and Space, each as the click it is, and it fills a file chooser the page opens, from files in its workspace"
         );
     });
 });

@@ -7,6 +7,7 @@
         "crates/**/*.js",
         "test/fixtures/fake-xterm/server.mjs",
         "test/fixtures/fake-form/server.mjs",
+        "test/fixtures/fake-upload/server.mjs",
         "frontend/**/*.{darwin,linux}.{ts,tsx}"
     ],
     "ignore": ["docs/examples/**"],

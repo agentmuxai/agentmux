@@ -235,6 +235,18 @@ fn chooser_reason(ask: &str) -> String {
     }
 }
 
+/// A page's own file chooser: kept for the agent when its grant has the uploads power, else cancelled
+/// by the host, and the agent is told what to do instead. Answers the host's `decision`.
+fn chooser_decision(state: &AppState, agent: &str, target: &str, ask: &str, title: &str, origin: &str) -> &'static str {
+    let said = chooser_message(ask, title);
+    if crate::server::browser_chooser::holds(state, target, agent, origin, ask) {
+        record(agent, target, "file_chooser", &said, "held", &crate::server::browser_chooser::held_reason());
+        return "hold";
+    }
+    record(agent, target, "file_chooser", &said, "cancelled", &chooser_reason(ask));
+    "cancel"
+}
+
 /// What the agent reads about a refusal the host reports, and what to do about it. `shown` is only a scheme or a host.
 fn notice_words(notice: &str, shown: &str) -> (String, &'static str) {
     match notice {
@@ -294,9 +306,7 @@ pub(crate) async fn handle_host_browser_dialog(
         return answered("ok");
     }
     if let Some(ask) = body.get("chooser").and_then(|v| v.as_str()) {
-        // A page's own file chooser, cancelled by the host: the agent is told what to do instead.
-        record(&agent, &target, "file_chooser", &chooser_message(ask, &message), "cancelled", &chooser_reason(ask));
-        return answered("cancel");
+        return answered(chooser_decision(&state, &agent, &target, ask, &message, &s("origin")));
     }
     if let Some(notice) = body.get("notice").and_then(|v| v.as_str()) {
         // Something the host refused in the pane (a link to a program, an untrusted certificate): the agent is told.

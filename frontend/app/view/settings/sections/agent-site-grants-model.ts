@@ -13,6 +13,7 @@ export const POWER_LABELS: Record<string, string> = {
     terminal: "Terminal: type and run commands",
     terminal_ask: "Terminal: ask me for each line",
     enter_space: "Enter and Space: press them as the click they are",
+    uploads: "Uploads: fill a page's file chooser from its workspace",
 };
 
 /** A row's sites for display: the one it is named by, and how many frames of other sites belong to it. */

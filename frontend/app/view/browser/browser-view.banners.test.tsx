@@ -90,6 +90,7 @@ describe("the attention banner", () => {
         ["bypass-terminal", att({ kind: "bypass", agent: "Korp", origins: ["https://a.example"], minutes: 60, powers: ["terminal"], local: false })],
         ["bypass-terminal-ask", att({ kind: "bypass", agent: "Korp", origins: ["https://a.example"], minutes: 60, powers: ["terminal_ask"], local: false })],
         ["bypass-enter-space", att({ kind: "bypass", agent: "Korp", origins: ["https://a.example"], minutes: 60, powers: ["enter_space"], local: false })],
+        ["bypass-uploads", att({ kind: "bypass", agent: "Korp", origins: ["https://a.example"], minutes: 60, powers: ["uploads"], local: false })],
         [
             "line",
             att({

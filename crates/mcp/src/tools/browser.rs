@@ -267,11 +267,13 @@ async fn run_set_files(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
     require_agent_env(local_url, auth_key, block_id)?;
     let auth = sign_ui_automation_auth()?;
-    let r = arguments
-        .get("ref")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| anyhow::anyhow!("missing required parameter: ref"))?
-        .to_string();
+    // `chooser: true` fills the file chooser the page last opened (the uploads power), so no control is named.
+    let chooser = arguments.get("chooser").and_then(|v| v.as_bool()) == Some(true);
+    let r = match arguments.get("ref").and_then(|v| v.as_str()) {
+        Some(r) if !chooser => r.to_string(),
+        _ if chooser => String::new(),
+        _ => anyhow::bail!("missing required parameter: ref (or chooser: true for the file chooser the page opened)"),
+    };
     let paths: Vec<String> = arguments
         .get("paths")
         .and_then(|v| v.as_array())
@@ -284,7 +286,7 @@ async fn run_set_files(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     let resp = client
         .post(&req_url)
         .header(AUTH_KEY_HEADER, auth_key)
-        .json(&agentmux_common::api_types::UiBrowserSetFilesRequest { auth, pane: pane_arg(arguments), ref_: r.clone(), paths })
+        .json(&agentmux_common::api_types::UiBrowserSetFilesRequest { auth, pane: pane_arg(arguments), ref_: r.clone(), paths, chooser })
         // srv reads up to 25 MB and gives the host up to 60 s: wait for it.
         .timeout(std::time::Duration::from_secs(90))
         .send()
@@ -293,10 +295,13 @@ async fn run_set_files(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        anyhow::bail!("Browser set_files {r} failed: HTTP {status} — {text}");
+        anyhow::bail!("Browser set_files {} failed: HTTP {status} — {text}", if chooser { "(file chooser)" } else { &r });
     }
     let body: Value = resp.json().await.map_err(|e| anyhow::anyhow!("Browser set_files: bad response: {e}"))?;
     let after = body.pointer("/data/after").cloned().unwrap_or(Value::Null);
+    if chooser {
+        return Ok(format!("Browser set_files: the page's file chooser now holds: {after}. The page was told like a person's pick; click its Upload or Save button if it has one."));
+    }
     Ok(format!("Browser set_files {r}: done. The file input now holds: {after}"))
 }
 
@@ -935,43 +940,6 @@ fn key_result_text(data: Option<&serde_json::Value>) -> String {
     }
 }
 
-/// What `request_auto_approve` tells the agent when it was granted: for how long
-/// (a standing grant has no clock: it stands until the user revokes it) and what
-/// the grant lets it do.
-fn granted_text(d: &Value) -> String {
-    let sites: Vec<&str> = d["origins"].as_array().map(|a| a.iter().filter_map(|v| v.as_str()).collect()).unwrap_or_default();
-    let has = |p: &str| d["powers"].as_array().is_some_and(|a| a.iter().any(|v| v.as_str() == Some(p)));
-    // Asking about each line is the stricter of the two, so it wins when both are there.
-    let (terminal, per_line) = (has("terminal") && !has("terminal_ask"), has("terminal_ask"));
-    let how_long = if d["always"].as_bool() == Some(true) {
-        "until the user revokes it".to_string()
-    } else {
-        format!("for {} more min", d["minutes_left"].as_u64().unwrap_or(0))
-    };
-    // With the power, Enter and Space are taken as the click they are; a key whose click can't be named is refused.
-    let keys = if has("enter_space") {
-        "eval stays refused, and Enter and Space (action key) are taken as the click they are: a form's default button, \
-         a button, a link or a checkbox, checked like any click; on anything else they are refused, so click by ref"
-    } else {
-        "eval and Enter/Space stay refused"
-    };
-    format!(
-        "Auto-approve on {how_long} on {}: committing clicks (action click) run without asking. Nobody \
-         checks them now, so check each one yourself. A payment still asks, {keys}, and on any other site clicks ask as \
-         before.{} Stop it with action stop_auto_approve when the job is done.",
-        sites.join(", "),
-        if terminal {
-            " You may also type and run commands in a web terminal on these sites with action terminal: \
-             nobody checks each line, the user can Stop or Pause you, and a password or code prompt is theirs to type."
-        } else if per_line {
-            " You may also use a web terminal on these sites with action terminal, one line per call: the user is shown \
-             each line (give a `reason`) and presses Run it or Don't run; a password or code prompt is theirs to type."
-        } else {
-            ""
-        }
-    )
-}
-
 /// The request for a `wait`: at most one condition (`until_text`, `until_url`, `until_gone` or
 /// `until_state`), and none means the page settling.
 fn wait_request(arguments: &Value, auth: agentmux_common::api_types::UiAutomationAuth) -> Result<agentmux_common::api_types::UiBrowserWaitForRequest> {
@@ -1210,6 +1178,9 @@ fn wait_result_text(body: &serde_json::Value) -> String {
     };
     format!("Done waiting after {waited} ms{in_frame}; the page is {url}. Take a new snapshot before acting.")
 }
+
+mod granted;
+use granted::granted_text;
 
 #[cfg(test)]
 mod call_tests;

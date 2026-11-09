@@ -899,6 +899,9 @@ pub(crate) async fn handle_ui_browser_set_files(
         Ok(b) => b,
         Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
     };
+    if req.chooser {
+        return crate::server::browser_chooser::fill(&state, &block_id, &own, &req.auth.agent_id, req.paths).await;
+    }
     let files = match crate::server::browser_uploads::files_for_agent(&own, req.paths.clone()).await {
         Ok(f) => f,
         Err((code, e)) => return err_response(code, e),

@@ -134,6 +134,7 @@ pub(crate) mod browser_powers;
 pub(crate) mod browser_pause_all;
 pub(crate) mod browser_standing;
 pub(crate) mod browser_terminal;
+pub(crate) mod browser_chooser;
 pub(crate) mod browser_press;
 pub(crate) mod browser_terminal_line;
 pub(crate) mod browser_uploads;
