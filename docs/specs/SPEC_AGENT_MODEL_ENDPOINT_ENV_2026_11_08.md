@@ -56,10 +56,16 @@ own environment still wins:
 - `agent_runtime.rs` replaces srv's nominal `--model`/`--effort` with the endpoint's model
   (`ANTHROPIC_MODEL`, else the tier alias from `ANTHROPIC_DEFAULT_*_MODEL`).
 - A resumed conversation starts fresh, because the config directory changed.
+- srv's own background calls for the pane (title, summary, next-prompt suggestion) are built from the
+  pane's saved environment with the shared sign-in directory, so for an agent on a custom server they
+  make no call at all (`ambient/cli.rs`): sending the person's sign-in to that server is what the rule
+  forbids, and sending the conversation to Anthropic is what pointing the agent elsewhere avoids. Its
+  pane title keeps the last one it had.
 
 ## 4. Notice and undo
 
-Every change that touches these names opens a notice (`agent:endpoint-notice`): a card in each pane
+Every change that moves the address (`ANTHROPIC_BASE_URL` set, changed or taken away; a new key,
+timeout or model on the same address is not one) opens a notice (`agent:endpoint-notice`): a card in each pane
 of the target agent and a line in My Agents' Environment panel ("AgentY pointed Lolly at …"). For
 30 seconds it carries an Undo (`undoagentendpoint`) that restores the previous text, only while the
 environment is unchanged since. srv holds the previous text in memory; the event carries no key or

@@ -370,9 +370,5 @@ fn names_in_the_list_are_found_in_a_change() {
     assert!(!diff("ANTHROPIC_BASE_URL=http://192.0.2.68:11434\n", "").sets_endpoint());
     assert!(!diff("", "ANTHROPIC_MODEL=a\n").sets_endpoint());
     assert!(!diff("", "TZ=UTC\n").sets_endpoint());
-    // A change of address, or of how it is reached: removing counts, a model name does not.
-    assert!(diff("ANTHROPIC_BASE_URL=http://192.0.2.68:11434\n", "").moves_endpoint());
-    assert!(diff("", "API_TIMEOUT_MS=1\n").moves_endpoint());
-    assert!(!diff("", "ANTHROPIC_MODEL=a\n").moves_endpoint());
-    assert!(!diff("", "TZ=UTC\n").moves_endpoint());
+
 }

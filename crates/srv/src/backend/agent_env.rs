@@ -480,12 +480,6 @@ impl Change {
         self.added.keys().chain(self.changed.keys()).chain(self.removed.iter()).any(named)
     }
 
-    /// Whether the change adds, changes or removes one of [`ENDPOINT_NAMES`]: a change to where the agent's
-    /// traffic goes or how it gets there (not to the model it asks for).
-    pub fn moves_endpoint(&self) -> bool {
-        self.added.keys().chain(self.changed.keys()).chain(self.removed.iter()).any(|n| is_endpoint_name(n))
-    }
-
     /// Whether the change adds or changes one of [`ENDPOINT_NAMES`]: the settings that need a server
     /// the agent can reach. Removing one, or any change to `ANTHROPIC_MODEL`, is not.
     pub fn sets_endpoint(&self) -> bool {

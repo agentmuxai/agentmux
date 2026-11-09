@@ -41,7 +41,7 @@ pub async fn invoke_haiku(
     cancel: tokio_util::sync::CancellationToken,
     timeout: std::time::Duration,
 ) -> Result<(String, Option<crate::agents::TokenCounts>), String> {
-    let auth_env = crate::backend::blockcontroller::cmd_env_of(meta);
+    let auth_env = ambient_env(meta)?;
     // Not on an identity whose first spawn is still refreshing its token (#6081): held until that
     // spawn's first turn has ended, and over this call's own run. Gives up on cancel, or when the
     // wait alone uses up the call's time.
@@ -170,6 +170,44 @@ fn parse_cli_stream(stdout: &str) -> (String, Option<crate::agents::TokenCounts>
         }
     }
     (sanitize_ambient_text(&last_text), tokens)
+}
+
+/// The environment of an ambient call: the pane's saved one. Not for an agent on a model server of its own:
+/// the call would read the person's stored sign-in from the shared config directory and send it, with a digest
+/// of the conversation, to that server (or send the digest to Anthropic, which is what pointing the agent
+/// elsewhere was meant to avoid). It makes no call at all.
+fn ambient_env(meta: &obj::MetaMapType) -> Result<std::collections::HashMap<String, String>, String> {
+    let env = crate::backend::blockcontroller::cmd_env_of(meta);
+    match crate::backend::spawn_env::endpoint::requested(&env) {
+        Some(_) => Err("no ambient call for an agent on a model server of its own".to_string()),
+        None => Ok(env),
+    }
+}
+
+#[cfg(test)]
+mod ambient_endpoint_tests {
+    use super::*;
+
+    /// The person's sign-in and the conversation stay off a server an agent was pointed at: the call is not made.
+    #[tokio::test]
+    async fn an_agent_on_a_server_of_its_own_gets_no_ambient_call() {
+        for env in [
+            serde_json::json!({ "CLAUDE_CONFIG_DIR": "C:/shared/providers/claude", "ANTHROPIC_BASE_URL": "http://192.0.2.68:11434" }),
+            serde_json::json!({ "anthropic_base_url": "http://192.0.2.68:11434" }),
+        ] {
+            let mut meta = obj::MetaMapType::new();
+            meta.insert("cmd:env".to_string(), env);
+            let out = invoke_haiku(
+                "a-cli-that-does-not-exist",
+                "prompt",
+                &meta,
+                tokio_util::sync::CancellationToken::new(),
+                std::time::Duration::from_secs(5),
+            )
+            .await;
+            assert_eq!(out.unwrap_err(), "no ambient call for an agent on a model server of its own");
+        }
+    }
 }
 
 #[cfg(test)]

@@ -61,6 +61,8 @@ pub struct Pointed {
     pub base_url: Option<String>,
     pub model: Option<String>,
     pub cleared: bool,
+    /// The address is not what it was: set, changed or taken away. A new key or timeout on the same address is not.
+    pub moved: bool,
 }
 
 /// Where `new` points the agent, against `old`.
@@ -72,8 +74,8 @@ pub fn pointed(old: &str, new: &str) -> Pointed {
         .or_else(|| new.get("ANTHROPIC_DEFAULT_SONNET_MODEL"))
         .map(|m| m.trim().to_string())
         .filter(|m| !m.is_empty());
-    let had_url = old.get("ANTHROPIC_BASE_URL").is_some_and(|u| !u.trim().is_empty());
-    Pointed { cleared: url.is_none() && had_url, base_url: url, model }
+    let old_url = old.get("ANTHROPIC_BASE_URL").map(|u| u.trim().to_string()).filter(|u| !u.is_empty());
+    Pointed { cleared: url.is_none() && old_url.is_some(), moved: old_url != url, base_url: url, model }
 }
 
 /// Opens the notice for a change and keeps what Undo needs. Returns the event to publish.
@@ -180,6 +182,11 @@ mod tests {
         assert!(p.cleared);
         assert_eq!(p.base_url, None);
         assert!(!pointed(BEFORE, AFTER).cleared);
+        assert!(pointed(AFTER, BEFORE).moved && pointed(BEFORE, AFTER).moved);
+        // The same address with another key or model is no new address.
+        let other_key = AFTER.replace("ollama", "none");
+        assert!(!pointed(AFTER, &other_key).moved);
+        assert!(!pointed(BEFORE, "TZ=UTC\n").moved);
     }
 
     #[test]

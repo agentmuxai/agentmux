@@ -472,12 +472,22 @@ async fn only_a_change_of_address_opens_a_notice() {
     let state = test_state();
     let (me, lolly) = (agent(&state, "host", false), agent(&state, "host", false));
     for set in [json!({ "ANTHROPIC_MODEL": "sonnet" }), json!({ "API_TIMEOUT_MS": "1000" })] {
+        // (An agent with no address of its own: nothing moved.)
         let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "set": set })).await;
         assert_eq!(status, StatusCode::OK, "{body}");
         assert!(body["notice"].is_null(), "no address moved: {body}");
         assert!(!body["note"].as_str().unwrap().contains("Undo"), "{body}");
     }
     let (_, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "set": { "ANTHROPIC_BASE_URL": SERVER } })).await;
+    assert!(body["notice"]["id"].is_string(), "{body}");
+    // On an agent that has an address, a key, a timeout or a model on the same address is no new address.
+    for set in [json!({ "ANTHROPIC_AUTH_TOKEN": "ollama" }), json!({ "API_TIMEOUT_MS": "2000" }), json!({ "ANTHROPIC_DEFAULT_SONNET_MODEL": "flint:40b" })] {
+        let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "set": set })).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(body["notice"].is_null(), "the address did not move: {body}");
+    }
+    // Another address is a change of address.
+    let (_, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "set": { "ANTHROPIC_BASE_URL": "http://198.51.100.9:11434" } })).await;
     assert!(body["notice"]["id"].is_string(), "{body}");
     // Taking the address away is a change of address too.
     let (_, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "unset": ["ANTHROPIC_BASE_URL"] })).await;

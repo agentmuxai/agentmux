@@ -277,9 +277,9 @@ fn run_as(state: &AppState, actor: Actor, req: AgentEnvRequest) -> Result<Value,
                 "agent.env.set: {summary}"
             );
             state.broker.publish_event::<crate::backend::mps_events::AgentContentChanged>(&(), vec![], 0);
-            // A card and an Undo are for a change of address; not for a model name, nor for a timeout on an agent with no server of its own.
+            // A card and an Undo are for a change of address: not for a model name, nor for a key or a timeout on the address it had.
             let pointed = endpoint_notice::pointed(&current, &new);
-            let noticed = change.moves_endpoint() && (pointed.base_url.is_some() || pointed.cleared);
+            let noticed = pointed.moved;
             let notice = noticed.then(|| {
                 let event = endpoint_notice::open(
                     (&target.id, &target.slug, &target.name),
