@@ -77,6 +77,7 @@ vi.mock("@/app/store/global", () => ({
     staticTabId: () => "tab-1",
 }));
 
+import { beginAgentOpen, finishAgentOpen, openTraceEnv, resetAgentOpenTracesForTests } from "../open-trace";
 import { runLaunchFlow } from "./launch-flow";
 
 const claude = {
@@ -703,5 +704,38 @@ describe("runLaunchFlow, the lookups that don't depend on each other", () => {
 
         expect(hub.resolveCli).toHaveBeenCalledTimes(1);
         expect(phases).toEqual([{ kind: "resolving-cli" }]);
+    });
+
+    it("marks the CLI's arrival when ResolveCli answers, not when the flow gets to it after a slow account lookup", async () => {
+        const saved = { ...openTraceEnv };
+        let clock = 0;
+        const lines: string[] = [];
+        openTraceEnv.now = () => clock;
+        openTraceEnv.log = (l) => lines.push(l);
+        try {
+            beginAgentOpen("block-1", "Agent", "mount");
+            let answerLinks!: (links: unknown[]) => void;
+            hub.listAgentIdentities.mockReturnValue(
+                new Promise((r) => {
+                    answerLinks = r;
+                }),
+            );
+            hub.resolveCli.mockImplementation(async () => {
+                clock = 40;
+                return { cli_path: "x", source: "local_install", version: "1.0" };
+            });
+
+            const flow = runLaunchFlow({ blockId: "block-1", provider: claude, log: vi.fn(), authEnv: Promise.resolve({}) });
+            await new Promise((r) => setTimeout(r, 0));
+            clock = 800;
+            answerLinks([]);
+            await flow;
+            finishAgentOpen("block-1", "closed");
+
+            expect(lines[0]).toContain("cli_sent=0 cli=40 cli_source=local_install");
+        } finally {
+            Object.assign(openTraceEnv, saved);
+            resetAgentOpenTracesForTests();
+        }
     });
 });

@@ -387,7 +387,7 @@
 326 frontend/app/view/agent/components/shell-highlight/tokenize.ts::Scanner::scanListInner
 189 frontend/app/view/agent/failure/failure-accessory.ts::failureToRow
 168 frontend/app/view/agent/failure/useAccountBinding.ts::useAccountBinding
-228 frontend/app/view/agent/flows/launch-flow.ts::runLaunchFlow
+227 frontend/app/view/agent/flows/launch-flow.ts::runLaunchFlow
 220 frontend/app/view/agent/flows/run-provider-login.ts::runProviderLogin
 136 frontend/app/view/agent/history/HistoryNavigator.tsx::HistoryNavigator
 106 frontend/app/view/agent/hooks/useAgentDecisions.ts::useAgentDecisions

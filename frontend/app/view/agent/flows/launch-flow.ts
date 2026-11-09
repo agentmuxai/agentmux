@@ -160,8 +160,9 @@ function beginCliResolve(
     );
     markAgentOpen(blockId, "cli_sent");
     const done = resolveProviderCli(provider, blockId);
-    // Awaited later; this only keeps a failure that lands first from reading as unhandled.
-    done.catch(() => {});
+    // The answer's arrival is marked here, not where the flow consumes it after the other lookups, so `cli_sent`
+    // to `cli` is the request's own time. A failure that lands first is handled here so it can't read as unhandled.
+    done.then((result) => markAgentOpen(blockId, "cli", { cli_source: result.source }), () => {});
     return { done, unsubscribe };
 }
 
@@ -299,7 +300,6 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
         return "fatal";
     }
     unsubInstall();
-    markAgentOpen(blockId, "cli", { cli_source: cliResult.source });
 
     if (cliResult.source === "installed") {
         log("cli", `installed ${provider.npmPackage || provider.id} (${cliResult.version})`);
