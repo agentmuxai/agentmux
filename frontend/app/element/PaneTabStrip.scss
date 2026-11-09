@@ -229,8 +229,12 @@
 // instead of overflowing it — required for the tab's ellipsis (below) to
 // ever engage.
 .pane-tab-tip {
-    flex: 0 0 auto;
-    min-width: 0;
+    // Shrinkable, with a floor, before the strip scrolls: a lone tab whose
+    // label does not fit used to keep its full width and scroll, so a ~318 px
+    // pane showed "u, memory and network" instead of ellipsizing (#30300).
+    // Many tabs still scroll once each is at the floor.
+    flex: 0 1 auto;
+    min-width: 72px;
     max-width: 240px;
     display: flex;
     align-items: stretch;
