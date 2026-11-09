@@ -15,7 +15,7 @@ import { InstancePanel } from "./InstancePanel";
 import { AgentCountsStatus } from "./AgentCountsStatus";
 import { LastSoundStatus } from "./LastSoundStatus";
 import { attentionItems } from "@/app/notification/attention-list";
-import { FIT_TIERS, slotDropAt } from "./status-bar-fit";
+import { FIT_TIERS, slotDropAt, type DropAt } from "./status-bar-fit";
 import { VaultRequestsStatus } from "./VaultRequestsStatus";
 import { MultiInputStatus } from "./MultiInputStatus";
 import { MuxBusIndicator } from "./MuxBusIndicator";
@@ -98,12 +98,12 @@ let builtinsRegistered = false;
 /** Which fit tier hides each of AgentMux's items in a narrow bar (the rest stay: the backend dot, vault
  *  requests, update and version notices). Higher tiers hide more; before it goes, system-stats sheds its
  *  readouts in StatusBar.scss. */
-const DROP_AT: Record<string, 1 | 2 | 3 | 4 | undefined> = {
+const DROP_AT: Record<string, DropAt | undefined> = {
     gpu: 2,
     "history-usage": 2,
     "token-usage": 2,
-    // The first to go: it comes and goes on its own, so it never takes another readout with it.
-    "last-sound": 1,
+    // The first to go, at a tier of its own: it comes and goes on its own, so it never takes another readout with it.
+    "last-sound": 0,
     "agent-counts": 3,
     "browser-pause-all": 3,
     "multi-input": 3,
