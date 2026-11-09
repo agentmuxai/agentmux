@@ -77,6 +77,7 @@ vi.mock("@/app/store/global", () => ({
     staticTabId: () => "tab-1",
 }));
 
+import { beginAgentOpen, finishAgentOpen, openTraceEnv, resetAgentOpenTracesForTests } from "../open-trace";
 import { runLaunchFlow } from "./launch-flow";
 
 const claude = {
@@ -652,5 +653,89 @@ describe("runLaunchFlow, a CLI that keeps its own login", () => {
         hub.checkCliAuth.mockReset().mockResolvedValue({ authenticated: false });
         expect(await runLaunchFlow({ blockId: "block-1", provider: claude, log: vi.fn() })).toBe("auth_failed");
         expect(hub.checkCliAuth).toHaveBeenCalledTimes(1);
+    });
+});
+
+
+describe("runLaunchFlow, the lookups that don't depend on each other", () => {
+    // A restart mounts every agent pane at once. Run one after the other, the auth dir, the bound account and
+    // ResolveCli cost each pane three round trips before the CLI answered; they are independent, so they start
+    // together.
+    it("sends ResolveCli before the auth dir or the bound account's lookup has answered", async () => {
+        hub.listAgentIdentities.mockReturnValue(new Promise(() => {}));
+        const authEnv = new Promise<Record<string, string>>(() => {});
+
+        void runLaunchFlow({ blockId: "block-1", provider: claude, log: vi.fn(), authEnv });
+        await new Promise((r) => setTimeout(r, 0));
+
+        expect(hub.listAgentIdentities).toHaveBeenCalledTimes(1);
+        expect(hub.resolveCli).toHaveBeenCalledTimes(1);
+        expect(hub.checkCliAuth).not.toHaveBeenCalled();
+    });
+
+    it("still launches with the auth dir the caller's lookup answers", async () => {
+        hub.checkCliAuth.mockResolvedValue({ authenticated: true });
+        let answer!: (env: Record<string, string>) => void;
+        const authEnv = new Promise<Record<string, string>>((r) => {
+            answer = r;
+        });
+
+        const flow = runLaunchFlow({ blockId: "block-1", provider: claude, log: vi.fn(), authEnv });
+        await new Promise((r) => setTimeout(r, 0));
+        answer({ CLAUDE_CONFIG_DIR: "/generic/shared/dir" });
+
+        expect(await flow).toBe("success");
+        expect(hub.checkCliAuth).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({ auth_env: { CLAUDE_CONFIG_DIR: "/generic/shared/dir" } }),
+            expect.anything(),
+        );
+    });
+
+    it("keeps a ResolveCli failure from going unhandled while the other lookups are still out", async () => {
+        hub.resolveCli.mockRejectedValue(new Error("no cli"));
+        hub.listAgentIdentities.mockReturnValue(new Promise(() => {}));
+        const authEnv = Promise.resolve({ CLAUDE_CONFIG_DIR: "/generic/shared/dir" });
+        const phases: unknown[] = [];
+
+        // The account lookup never answers, so the flow can't finish; the failure must not surface as unhandled.
+        void runLaunchFlow({ blockId: "block-1", provider: claude, log: vi.fn(), authEnv, setLaunchPhase: (p) => phases.push(p) });
+        await new Promise((r) => setTimeout(r, 0));
+
+        expect(hub.resolveCli).toHaveBeenCalledTimes(1);
+        expect(phases).toEqual([{ kind: "resolving-cli" }]);
+    });
+
+    it("marks the CLI's arrival when ResolveCli answers, not when the flow gets to it after a slow account lookup", async () => {
+        const saved = { ...openTraceEnv };
+        let clock = 0;
+        const lines: string[] = [];
+        openTraceEnv.now = () => clock;
+        openTraceEnv.log = (l) => lines.push(l);
+        try {
+            beginAgentOpen("block-1", "Agent", "mount");
+            let answerLinks!: (links: unknown[]) => void;
+            hub.listAgentIdentities.mockReturnValue(
+                new Promise((r) => {
+                    answerLinks = r;
+                }),
+            );
+            hub.resolveCli.mockImplementation(async () => {
+                clock = 40;
+                return { cli_path: "x", source: "local_install", version: "1.0" };
+            });
+
+            const flow = runLaunchFlow({ blockId: "block-1", provider: claude, log: vi.fn(), authEnv: Promise.resolve({}) });
+            await new Promise((r) => setTimeout(r, 0));
+            clock = 800;
+            answerLinks([]);
+            await flow;
+            finishAgentOpen("block-1", "closed");
+
+            expect(lines[0]).toContain("cli_sent=0 cli=40 cli_source=local_install");
+        } finally {
+            Object.assign(openTraceEnv, saved);
+            resetAgentOpenTracesForTests();
+        }
     });
 });

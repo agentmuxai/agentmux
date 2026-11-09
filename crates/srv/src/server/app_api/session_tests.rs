@@ -137,9 +137,55 @@ async fn the_next_prompt_suggestion_of_a_block_that_does_not_exist_is_an_error_o
 #[tokio::test]
 async fn the_activity_summary_of_a_block_that_does_not_exist_is_an_error_or_empty_never_a_panic() {
     let state = test_state();
-    let cmd = CommandActivitySummaryData { block_id: "no-such-block".into(), word_target: None, generation: 1, user_message: Some("hi".into()) };
+    let cmd = CommandActivitySummaryData { block_id: "no-such-block".into(), word_target: None, generation: 1, user_message: Some("hi".into()), activity: None, turn: None, refresh: None };
     match activity_summary(&state, cmd).await {
         Ok(result) => assert!(result.summary.is_empty()),
         Err(err) => assert!(err.contains("BLOCK_NOT_FOUND"), "{err}"),
     }
+}
+
+
+#[tokio::test]
+async fn a_status_question_is_read_with_the_work_the_pane_sent_not_alone() {
+    // The title call used to read the activity only when there was no message, so
+    // "whats the status?" reached the model with nothing about the new topic.
+    let state = test_state();
+    let block_id = add_block(&state, &[]);
+    let entries = vec![
+        "[user] Compare Bedrock and OpenRouter pricing".to_string(),
+        "[assistant] Bedrock is cheaper for Haiku.".to_string(),
+        "[user] now fix the Windows resize bug".to_string(),
+        "[assistant] Found it in the child-window lag.".to_string(),
+    ];
+    let digest = summary_activity(&state.filestore, &state.mstore, &block_id, Some(entries)).unwrap();
+    assert!(digest.contains("Windows resize bug"), "{digest}");
+    let prompt = ambient::prompt::build_session_title_prompt(
+        "Compare Bedrock and OpenRouter pricing",
+        Some("whats the status on that?"),
+        Some(&digest),
+        7,
+    );
+    assert!(prompt.contains("whats the status on that?"), "{prompt}");
+    assert!(prompt.contains("Windows resize bug"), "{prompt}");
+}
+
+#[tokio::test]
+async fn with_no_pane_entries_and_no_output_file_there_is_no_activity() {
+    // The pane sends nothing (an older build) or an empty list: the output file is the source, and
+    // a block with none has no activity. The title call then rests on the user's message alone.
+    let state = test_state();
+    let block_id = add_block(&state, &[]);
+    assert!(summary_activity(&state.filestore, &state.mstore, &block_id, None).is_none());
+    assert!(summary_activity(&state.filestore, &state.mstore, &block_id, Some(Vec::new())).is_none());
+}
+
+#[test]
+fn a_refresh_shows_the_model_no_current_title_so_skip_is_not_the_easy_answer() {
+    let current = "Compare Bedrock and OpenRouter pricing";
+    let kept = ambient::prompt::build_session_title_prompt(prompt_anchor(current, false), Some("status?"), None, 7);
+    assert!(kept.contains("Current title: Compare Bedrock and OpenRouter pricing"), "{kept}");
+    assert!(kept.contains("reply SKIP"), "{kept}");
+    let fresh = ambient::prompt::build_session_title_prompt(prompt_anchor(current, true), Some("status?"), None, 7);
+    assert!(!fresh.contains("Current title"), "{fresh}");
+    assert!(!fresh.contains("Compare Bedrock"), "{fresh}");
 }

@@ -25,7 +25,7 @@ useAgentControllerStatus({blockId,getInitialTermSize,log,onAccountBound,onContro
 useControllerStatusEvents({blockId,log,onActiveTurnConfirmed,onTurnActive})
 useFocusRepoll({blockId,flushPendingControllerRefresh,trackTurnJustEnded,windowFocused})
 useBlockActivity({blockId})
-useAgentActivitySummary({blockId,getRootWidth,turnPhase})
+useAgentActivitySummary({blockId,document,getRootWidth,turnPhase})
 useNextPromptSuggestion({blockId,document,isComposerEmpty,turnJustEndedAtom,turnPhase})
 useAmbientNarration("blk-12345678", fn)
 useBackgroundHandoffNarration(fn, fn)
