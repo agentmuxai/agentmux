@@ -14,6 +14,7 @@ import { patchRuntime } from "../runtime-apply";
 import { PROVIDER_FLAGS_META_KEY } from "../launch-args";
 import { codexEffort, codexModeFor, effectiveRuntime, effortApplies } from "../runtime-capabilities";
 import type { AgentRuntimeConfig, PermissionMode } from "../../../agent-model/types";
+import { createRoutePanel, routeModelOf } from "./runtime-dropup-routes";
 import {
     EFFORT_OPTIONS,
     FALLBACK_MODEL_OPTIONS,
@@ -106,11 +107,15 @@ export function createDropupState(props: AgentRuntimeDropupProps) {
     const runningEffort = (): string =>
         isCodex() ? (codexEffort(runningModel(), shown().effort).effort ?? shown().effort) : shown().effort;
 
+    // The model that really answers when the agent is on a model route (srv writes it on the pane at each launch).
+    const routeModel = () => routeModelOf(props.blockAtom()?.meta);
+    const routes = createRoutePanel(props);
+
     const compactSummary = (): string => {
         const r = shown();
         // Effort is left out when it does nothing for this pane: the label says
         // what the agent runs, and "Haiku · high" would claim an effort it never gets.
-        const parts = [modeLabel(r.permissionMode), modelLabel(r.model)];
+        const parts = [modeLabel(r.permissionMode), routeModel()?.label ?? modelLabel(r.model)];
         if (effortApplies(props.providerId, runningModel())) parts.push(effortLabel(runningEffort()));
         return parts.join(" · ");
     };
@@ -123,6 +128,8 @@ export function createDropupState(props: AgentRuntimeDropupProps) {
         migrateModel,
         isCodex,
         modelOptions,
+        routeModel,
+        routes,
         modelLabel,
         effortLabel,
         modeLabel,
