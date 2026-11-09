@@ -430,7 +430,7 @@ pub(crate) fn backend_browser_navigation(
 
 /// Ask srv what to do with a page's dialog in an agent-driven pane
 /// (SPEC_BROWSER_PANE_NATIVE_DIALOGS_2026_10_17.md §4.1), or tell it one
-/// ended. Returns srv's `decision`: `accept`, `cancel` or `parked`. Blocking:
+/// ended. Returns srv's `decision`: `accept`, `cancel`, `parked` or (for a file chooser) `hold`. Blocking:
 /// run it off the UI thread.
 pub(crate) fn backend_browser_dialog(
     web_endpoint: &str,

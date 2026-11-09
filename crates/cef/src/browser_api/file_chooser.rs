@@ -27,7 +27,7 @@ use std::time::Duration;
 use serde_json::{json, Value};
 
 use super::act::{
-    call_on, check_click, click_element, isolated_context, resolve, ClickCheck, SetFilesReq, FILES_READ_BACK, SET_FILES,
+    call_on, check_click, click_element, isolated_context, resolve, ClickCheck, SetFilesReq, UploadFile, FILES_READ_BACK, SET_FILES,
 };
 use super::cdp::{subscribe, CdpSession};
 use super::frames::FrameRef;
@@ -90,10 +90,15 @@ pub(super) fn accept_allows(accept: &str, name: &str, mime: &str) -> bool {
 
 /// The refusal for files the input doesn't take, or `None`.
 pub(super) fn refuse_files(req: &SetFilesReq, multiple: bool, accept: &str) -> Option<String> {
-    if req.files.len() > 1 && !multiple {
+    files_refusal(&req.files, multiple, accept)
+}
+
+/// [`refuse_files`] for any list of files: the page's file chooser kept for the agent uses it too.
+pub(crate) fn files_refusal(files: &[UploadFile], multiple: bool, accept: &str) -> Option<String> {
+    if files.len() > 1 && !multiple {
         return Some("this file input takes one file".to_string());
     }
-    let bad: Vec<&str> = req.files.iter().filter(|f| !accept_allows(accept, &f.name, &f.mime)).map(|f| f.name.as_str()).collect();
+    let bad: Vec<&str> = files.iter().filter(|f| !accept_allows(accept, &f.name, &f.mime)).map(|f| f.name.as_str()).collect();
     if bad.is_empty() {
         None
     } else {
