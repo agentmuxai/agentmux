@@ -227,3 +227,23 @@ async fn the_operator_files_on_a_board_and_the_list_follows_the_board_it_names()
     let all = crate::server::app_api::kanban::list_for_tests(&state, json!({ "board": "all" })).await;
     assert_eq!(all["tasks"].as_array().unwrap().len(), 1);
 }
+
+#[tokio::test]
+async fn an_agent_left_off_a_boards_list_cannot_act_on_its_tasks() {
+    let state = test_state();
+    create(&state, "Team", &["agentx", ACTOR]);
+    let filed = file(&state, "t", Some("team")).await;
+    let id = filed["id"].as_str().unwrap().to_string();
+    // By ref or by id, an agent not on the list is told there is no such task.
+    for key in ["team#1", id.as_str()] {
+        let e = act_as(&state, json!({ "action": "cancel", "id": key }), &Actor::agent("naki-2")).await.unwrap_err();
+        assert_eq!(e, "no such task", "{key}");
+    }
+    assert_eq!(state.work_store.work_queue_get(&id).unwrap().unwrap().state, "open", "nothing changed");
+    // An agent on the list can, and so can the operator.
+    act_as(&state, json!({ "action": "cancel", "id": "team#1" }), &Actor::agent("agentx")).await.unwrap();
+    assert_eq!(state.work_store.work_queue_get(&id).unwrap().unwrap().state, "cancelled");
+    let again = file(&state, "t2", Some("team")).await;
+    let ok = act_as(&state, json!({ "action": "cancel", "id": again["id"] }), &Actor::operator()).await;
+    assert!(ok.is_ok());
+}

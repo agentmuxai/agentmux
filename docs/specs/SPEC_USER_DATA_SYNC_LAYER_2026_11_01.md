@@ -1,6 +1,6 @@
 # SPEC: one sync layer for a user's own data: Kanban boards and Vaults across their machines, by LAN or AgentMux Cloud
 
-**Status:** draft, 2026-11-01. Written for tasks #17016 (Kanban, Naki-2) and #17014 (Vault, Agent2-6), who agreed that Naki-2 owns this layer spec and Agent2-6 reviews it and writes only the Vault's part. **Approved** (operator, 2026-11-08, relayed by AgentY: "ok, shared kanban is good, but does it consider having multiple kanbans? we need to be able to have multiple kanbans, and select them in the kanban view", then "ok, greenlight kanban work"; the green light covers the shared Kanban and this layer), revised the same day for the one change asked: **several Kanban boards in the first build**, with a board picker (Kanban spec §9).
+**Status:** active, being built (first the Kanban's B1a and B1b, which need no layer; then S0 and S1). Written 2026-11-01 for tasks #17016 (Kanban, Naki-2) and #17014 (Vault, Agent2-6), who agreed that Naki-2 owns this layer spec and Agent2-6 reviews it and writes only the Vault's part. **Approved** (operator, 2026-11-08, relayed by AgentY: "ok, shared kanban is good, but does it consider having multiple kanbans? we need to be able to have multiple kanbans, and select them in the kanban view", then "ok, greenlight kanban work"; the green light covers the shared Kanban and this layer), revised the same day for the one change asked: **several Kanban boards in the first build**, with a board picker (Kanban spec §9).
 **Author:** Naki-2@narko, with Agent2-6's ten constraints for the Vault (§3, each marked "V").
 **Trigger (operator, 2026-11-01):** "I just have 2 ideas: 1) Managed vault 2) Managed Kanban .. in both cases, users of AgentMux Cloud can use kanbans and vaults from their own cloud", then "users should still have this ability to shared via the LAN tier, without cloud.", then "whether users can have multiple vaults/kanbans", and "their own cloud means an agentmux hosted service".
 **Naming (operator):** "Kanban and Vault will simply retain their names." In the app, the console and the cloud tier they are "Kanban" and "Vault", with no Mux- prefix; "AgentMux Vault" only where the brand is needed outside the app.
@@ -33,7 +33,7 @@ A **collection** is `{id, kind (kanban | vault), name, tier (local | lan | cloud
 - **The collection key** is 256 random bits, made on the first machine and handed to each member when it joins. An instance key is an Ed25519 *signing* key, so the key is not sealed to it directly: each instance has an X25519 key derived from its seed with HKDF and signed by the instance key, and the collection key is sealed to that with an ephemeral X25519 key, HKDF-SHA256 and AES-256-GCM. That is exactly `server/jekt_seal.rs` (built for cloud file keys), which the layer reuses. Records leave srv sealed with the collection key (V2): ChaCha20-Poly1305, with the **collection id, record id, version and epoch** as associated data, so an old version can't be replayed under the same id and a record can't be moved into another collection. The clear header holds only: collection id, record id, hybrid-clock version, origin machine and sequence, key epoch, tombstone flag, size. **A Vault's labels, kinds, sites and user names are inside the seal** (V2), so a LAN peer's logs and the relay see nothing readable.
 - **`join_policy`:** `auto_proven` (a machine already proven by the LAN trust and signed in to the same account joins at once: the Kanban's default, as the fleet Global Memory does) or `approve` (a person approves on an existing member, in the host window: the Vault's default, V4). **An approval shows a short code on both screens**, derived from both instance keys and a fresh nonce, which the person compares: LAN pins are first-seen and the cloud's key directory is the service's word, so without the code a rogue LAN install or a swapped key would be handed the collection key. An agent may *start* a join request; only the person approves it.
 - **Removing a machine** moves the collection to epoch n+1: a new key, sealed to the remaining members; every record is re-sealed in a background pass; the layer refuses to send to a removed member (V4). The same runs **automatically when an install retires itself with a signed revocation** (built, LAN key continuity). The cloud keeps the old epoch's records until the re-sealed set is complete, so a crash in the middle of the pass loses nothing.
-- **`readable_by_cloud`:** a collection whose records the hosted service may read (§8.2): off for every Vault, always; a choice for a Kanban board.
+- **`readable_by_cloud`:** a collection whose records the hosted service may read (§11, decision 2): off for every Vault, always; a choice for a Kanban board.
 
 ### 3.2 Records and versions
 
@@ -87,7 +87,7 @@ The same records and the same version vectors, through a store interface (§8): 
 
 ## 6. Security
 
-1. **The relay and LAN peers see opaque records.** Clear header fields: collection id, record id, version, origin and sequence, epoch, tombstone flag, size. For a collection with `readable_by_cloud`, the hosted service holds the key and can read what it stores (§8.2); for a Vault, never.
+1. **The relay and LAN peers see opaque records.** Clear header fields: collection id, record id, version, origin and sequence, epoch, tombstone flag, size. For a collection with `readable_by_cloud`, the hosted service holds the key and can read what it stores (§11, decision 2); for a Vault, never.
 2. **Membership changes are signed** by an existing member and, for `approve` collections, shown in the host window naming the machine; no agent can answer that window (the same rule as every approval window).
 3. **Agents gain nothing.** The layer has no agent route that reads or writes a record. The Kanban's agents use the same `Tasks` tool as today, which writes the local store, and the layer replicates what that wrote; the Vault's agents use today's use and approval routes (V8).
 4. **Every remote write is audited** on both machines (the remote-ops audit rows), naming the machine and the collection, never a value.
@@ -99,21 +99,15 @@ The same records and the same version vectors, through a store interface (§8): 
 - **The conflict inbox**, per collection: what a returning member changed that the merge could not place (after the tombstone horizon), and the Vault's keep-both entries. It is a list in the collection's own view, with "keep this" and "keep that"; nothing is dropped without a choice.
 - **The Kanban** shows an overwritten field in the card's history; it needs no inbox beyond the case above.
 
-## 8. What the layer needs from the hosted service, and from the console
+## 8. The cloud tier, from the client's side
 
 ### 8.1 The store interface (V9)
 
-The client talks to the cloud tier only through: `put` and `get` of sealed records by collection and version vector; `chunk` get and put; a wake notification; membership records stored as ordinary records. The store also refuses `put` and `get` from an install that is not in the signed member list, checking the signature against the account's key directory: a second line, since the first is that a non-member has no key. One store serves both kinds of collection, keyed (account, collection, record). Everything behind it (storage, quotas, the account model) is the managed service's, specified privately. A future backend (including a user's own, which the operator ruled out for now) would implement the same interface; it is not built.
+The client talks to the cloud tier only through a store interface: `put` and `get` of sealed records by collection and version vector; `chunk` get and put; a wake notification; membership records stored as ordinary records. A non-member has no collection key, so it cannot read what it fetches. Everything behind the interface (what the hosted service stores and how it is run, its account model, its console) is specified privately, with AgentMux Cloud's own documents. A future backend would implement the same interface; it is not built.
 
-### 8.2 What each collection kind needs from the console (Clamk's specification)
+### 8.2 The console
 
-- **Collections list:** name, kind (Kanban or Vault), tier, members (machines, with last contact and online state), sync health (lag, queue length, last error), key epoch.
-- **Membership:** add a machine (the approval of §3.1 lands here and in the host window). Removing one **marks it "to be removed"**: the service stops serving it at once, and the next member that is online re-keys (the console holds no collection key and can't) and asks the person; the console then shows the re-seal's progress. Any cloud-side action that needs the key works this way.
-- **Tier:** turn the cloud tier on or off per collection, with what it means said plainly (what the service can and can't read).
-- **For a Kanban board only:** the "readable by AgentMux Cloud" switch (§11 decision 2). Off makes the service store sealed records it can't show, so the console and the mobile app can list the board's existence and sync state but not its cards.
-- **Usage and limits:** blob storage by collection, record counts, the per-collection size cap.
-- **Audit:** the remote-op audit rows for the collection, and the conflict inbox.
-- **Delete and leave:** a machine leaves a collection (it keeps its copy); the last member deleting a cloud collection asks the service to delete what it holds.
+What the console shows and does for each collection is specified privately, with the hosted service. The client's part is the data it supplies: each collection's name, kind, tier, members and sync health.
 
 ## 9. Several collections per user (the operator's question)
 

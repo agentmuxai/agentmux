@@ -53,7 +53,13 @@ const IDS_PER_QUERY: usize = 500;
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AfterTask {
     pub id: String,
+    /// Its number on its board.
     pub num: i64,
+    /// Its board's slug, and how it is written (`#12` on the default board, else `work#12`).
+    #[serde(default)]
+    pub board: String,
+    #[serde(default)]
+    pub task_ref: String,
     pub title: String,
     pub state: String,
     /// Its kind: a follower of an accepted `spec` or `research` task is
@@ -67,6 +73,11 @@ pub struct AfterTask {
 }
 
 impl AfterTask {
+    /// How a message names it: `#12` on the default board, else `work#12`.
+    pub fn label(&self) -> String {
+        if self.task_ref.is_empty() { format!("#{}", self.num) } else { self.task_ref.clone() }
+    }
+
     /// Whether it no longer holds its followers.
     pub fn finished(&self) -> bool {
         self.state == work_state::DONE || self.state == work_state::CANCELLED
@@ -90,21 +101,27 @@ fn linked(conn: &Connection, ids: &[&str], by: &str, other: &str) -> Result<Hash
     for chunk in ids.chunks(IDS_PER_QUERY) {
         let marks = vec!["?"; chunk.len()].join(",");
         let sql = format!(
-            "SELECT {by}, p.id, COALESCE(c.num, 0), p.title, p.state, p.kind, COALESCE(doc.path, '')
+            "SELECT {by}, p.id, COALESCE(c.board_num, 0), p.title, p.state, p.kind, COALESCE(doc.path, ''),
+                    COALESCE(b.slug, 'main'), COALESCE(b.is_default, 1)
                FROM db_work_deps d
                JOIN db_work_queue p ON p.id = {other}
                LEFT JOIN db_work_cards c ON c.work_id = p.id
+               LEFT JOIN db_boards b ON b.id = c.board_id
                LEFT JOIN db_work_docs doc ON doc.work_id = p.id
               WHERE {by} IN ({marks})
-              ORDER BY c.num"
+              ORDER BY c.board_id, c.board_num"
         );
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(params_from_iter(chunk.iter()), |r| {
+            let num: i64 = r.get(2)?;
+            let (slug, default): (String, i64) = (r.get(7)?, r.get(8)?);
             Ok((
                 r.get::<_, String>(0)?,
                 AfterTask {
                     id: r.get(1)?,
-                    num: r.get(2)?,
+                    num,
+                    task_ref: if default != 0 { format!("#{num}") } else { format!("{slug}#{num}") },
+                    board: slug,
                     title: r.get(3)?,
                     state: r.get(4)?,
                     kind: r.get(5)?,

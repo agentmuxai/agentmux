@@ -35,7 +35,16 @@ impl Act<'_> {
     pub(super) fn task(&self) -> Result<BoardTask, String> {
         let id = self.req.id.as_deref().ok_or("id is required")?;
         let id = resolve_id(self.state, id);
-        self.state.work_store.work_board_get(&id).map_err(|e| e.to_string())?.ok_or_else(|| "no such task".to_string())
+        let task = self.state.work_store.work_board_get(&id).map_err(|e| e.to_string())?.ok_or_else(|| "no such task".to_string())?;
+        // An agent sees only the boards whose agent list has it; the operator sees them all.
+        if !self.actor.is_operator {
+            if let Some((board, _)) = self.state.work_store.work_task_board(&task.item.id).map_err(|e| e.to_string())? {
+                if !board.visible_to(&self.actor.name, "") {
+                    return Err("no such task".to_string());
+                }
+            }
+        }
+        Ok(task)
     }
 
     pub(super) fn create(&self) -> Result<Value, String> {

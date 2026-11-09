@@ -283,3 +283,24 @@ fn refs_parse() {
     assert_eq!(parse_ref("a b#1"), None);
     assert_eq!(parse_ref("3f2a9c10-aaaa-bbbb-cccc-000000000000"), None);
 }
+
+#[test]
+fn a_dependency_is_shown_by_its_number_on_its_board() {
+    let (s, _d) = store();
+    let work = s.work_board_create(&edit("Work"), "t", 1).unwrap();
+    // Cards on Main first, so the store's own keys and the boards' numbers no longer agree.
+    file(&s, "m1", "");
+    file(&s, "m2", "");
+    file(&s, "w1", &work.id);
+    s.work_queue_enqueue_after(&item("w2", 1000), &["w1".to_string()]).unwrap();
+    s.work_card_create("w2", &NewCard { board: work.id.clone(), ..Default::default() }, 1000).unwrap();
+    let w2 = s.work_board_get("work#2").unwrap().unwrap();
+    let after = &w2.card.after[0];
+    assert_eq!((after.num, after.board.as_str(), after.task_ref.as_str(), after.label().as_str()), (1, "work", "work#1", "work#1"));
+    let w1 = s.work_board_get("work#1").unwrap().unwrap();
+    assert_eq!(w1.card.followers[0].task_ref, "work#2");
+    // On the default board a dependency is a bare number.
+    s.work_queue_enqueue_after(&item("m3", 1000), &["m1".to_string()]).unwrap();
+    s.work_card_create("m3", &NewCard::default(), 1000).unwrap();
+    assert_eq!(s.work_board_get("#3").unwrap().unwrap().card.after[0].label(), "#1");
+}

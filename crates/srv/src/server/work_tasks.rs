@@ -576,6 +576,16 @@ pub(super) fn viewer(state: &AppState, caller: Option<&Caller>) -> Option<(Strin
     Some((reg.agent_id.clone(), reg.uid.clone().unwrap_or_default()))
 }
 
+/// Whether the caller may see the board a task is on (a call with no token sees every board). A task
+/// on a board whose agent list leaves the caller out is refused like one that doesn't exist.
+pub(super) fn sees_task(state: &AppState, caller: Option<&Caller>, work_id: &str) -> bool {
+    let Some((id, uid)) = viewer(state, caller) else { return true };
+    match state.work_store.work_task_board(work_id) {
+        Ok(Some((board, _))) => board.visible_to(&id, &uid),
+        _ => true,
+    }
+}
+
 /// The board a call names (none: the default board), if the caller sees it. A board it can't see is
 /// refused like one that doesn't exist; `filing` also refuses an archived board, which takes no new
 /// tasks.
@@ -657,6 +667,9 @@ pub(super) async fn handle_work_hold(
     let Ok(Some(item)) = state.work_store.work_queue_get(&id) else {
         return (StatusCode::NOT_FOUND, Json(json!({ "error": format!("no task {id}") })));
     };
+    if !sees_task(&state, caller, &id) {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": format!("no task {id}") })));
+    }
     let reason = clean(&req.reason);
     if let Some(r) = sensitive_reason(&reason) {
         return r;
@@ -706,6 +719,7 @@ pub(super) async fn handle_work_hold(
 pub(super) async fn handle_work_unhold(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    caller: Option<axum::Extension<Caller>>,
     Json(req): Json<HoldRequest>,
 ) -> (StatusCode, Json<Value>) {
     if req.agent_id.trim().is_empty() {
@@ -715,6 +729,9 @@ pub(super) async fn handle_work_unhold(
     let Ok(Some(item)) = state.work_store.work_queue_get(&id) else {
         return (StatusCode::NOT_FOUND, Json(json!({ "error": format!("no task {id}") })));
     };
+    if !sees_task(&state, caller.as_deref(), &id) {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": format!("no task {id}") })));
+    }
     let reason = clean(&req.reason);
     if let Some(r) = sensitive_reason(&reason) {
         return r;
@@ -762,7 +779,7 @@ pub(super) fn why_not_claimed(state: &AppState, id: &str, filter: &ClaimFilter, 
         return format!("{name} is not of kind {kind}");
     }
     if let Some(after) = state.work_store.work_deps_of(id).unwrap_or_default().into_iter().find(|a| !a.finished()) {
-        return format!("{name} starts after #{} \"{}\", which is {}", after.num, after.title, after.state);
+        return format!("{name} starts after {} \"{}\", which is {}", after.label(), after.title, after.state);
     }
     if item.attempts >= item.max_attempts {
         return format!("{name} has used all {} of its attempts", item.max_attempts);

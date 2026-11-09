@@ -103,6 +103,12 @@ async fn decide(state: &AppState, caller: Option<&Caller>, id: &str, req: Decisi
         Ok(None) => return (StatusCode::NOT_FOUND, Json(json!({ "error": "no such task" }))).into_response(),
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
     };
+    // A task on a board whose agent list leaves this agent out looks like one that doesn't exist.
+    if let Ok(Some((board, _))) = state.work_store.work_task_board(&task.item.id) {
+        if !board.visible_to(&reg.agent_id, reg.uid.as_deref().unwrap_or("")) {
+            return (StatusCode::NOT_FOUND, Json(json!({ "error": "no such task" }))).into_response();
+        }
+    }
     let num = task.card.num;
     let events = state.work_store.work_events(&task.item.id, 200).unwrap_or_default();
     let own_work = is_own_work(&task, &reg, &events);
