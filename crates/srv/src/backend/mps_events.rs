@@ -192,6 +192,10 @@ events! {
     /// A sensitive request's countdown, and its end (`sagas::sensitive_window`).
     SensitivePending: crate::sagas::sensitive_window::EVENT_SENSITIVE_PENDING => crate::sagas::sensitive_window::SensitiveView,
     SensitiveCleared: crate::sagas::sensitive_window::EVENT_SENSITIVE_CLEARED => crate::sagas::sensitive_window::SensitiveClearedEvent,
+    /// An agent's start of an agent (or another act the person may stop): a one-line notice or a countdown card, and its end (`backend::agent_notice`).
+    AgentNotice: crate::backend::agent_notice::EVENT_AGENT_NOTICE => crate::backend::agent_notice::NoticeView,
+    /// The agents the person said "Always" to, after a change (`backend::agent_grants`).
+    AgentGrants: crate::backend::agent_notice::EVENT_AGENT_GRANTS => crate::backend::agent_notice::GrantsEvent,
     /// A provider sign-in link to show as a notice with an Open action (`server::signin_notice`).
     SigninLink: "identity:signinlink" => crate::backend::signin_link_event::SigninLinkEvent,
     /// An OS notification to show, retract or act on (`notify::router`).

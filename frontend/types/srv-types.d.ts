@@ -1276,6 +1276,7 @@ declare global {
         "supervisor:notify:done"?: boolean;
         "agent:mcpselfheal"?: boolean;
         "agent:outdatedidsnotice"?: boolean;
+        "agent:maystartagents"?: boolean;
         "agent:transcriptsinglecopy"?: boolean;
         "desktop:enabled"?: boolean;
         "desktop:blocklist"?: string[];

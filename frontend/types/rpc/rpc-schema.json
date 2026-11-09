@@ -418,6 +418,63 @@
     }
   },
   {
+    "command": "agent.notice.decide",
+    "request": "agentmux_srv::backend::agent_notice::CommandAgentNoticeDecideData",
+    "requestName": "CommandAgentNoticeDecideData",
+    "requestTs": {
+      "imports": [
+        "CommandAgentNoticeDecideData"
+      ],
+      "name": "CommandAgentNoticeDecideData"
+    },
+    "response": "agentmux_srv::backend::agent_notice::AgentNoticeDecideResult",
+    "responseName": "AgentNoticeDecideResult",
+    "responseTs": {
+      "imports": [
+        "AgentNoticeDecideResult"
+      ],
+      "name": "AgentNoticeDecideResult"
+    }
+  },
+  {
+    "command": "agent.notice.grants",
+    "request": "agentmux_srv::backend::agent_notice::CommandAgentNoticeGrantsData",
+    "requestName": "CommandAgentNoticeGrantsData",
+    "requestTs": {
+      "imports": [
+        "CommandAgentNoticeGrantsData"
+      ],
+      "name": "CommandAgentNoticeGrantsData"
+    },
+    "response": "agentmux_srv::backend::agent_notice::AgentNoticeGrantsResult",
+    "responseName": "AgentNoticeGrantsResult",
+    "responseTs": {
+      "imports": [
+        "AgentNoticeGrantsResult"
+      ],
+      "name": "AgentNoticeGrantsResult"
+    }
+  },
+  {
+    "command": "agent.notice.setgrant",
+    "request": "agentmux_srv::backend::agent_notice::CommandAgentNoticeSetGrantData",
+    "requestName": "CommandAgentNoticeSetGrantData",
+    "requestTs": {
+      "imports": [
+        "CommandAgentNoticeSetGrantData"
+      ],
+      "name": "CommandAgentNoticeSetGrantData"
+    },
+    "response": "agentmux_srv::backend::agent_notice::AgentNoticeGrantsResult",
+    "responseName": "AgentNoticeGrantsResult",
+    "responseTs": {
+      "imports": [
+        "AgentNoticeGrantsResult"
+      ],
+      "name": "AgentNoticeGrantsResult"
+    }
+  },
+  {
     "command": "agent.open",
     "request": "agentmux_srv::backend::rpc_types::agent::CommandAgentOpenData",
     "requestName": "CommandAgentOpenData",

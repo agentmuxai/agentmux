@@ -10,6 +10,21 @@ use crate::server::tests::test_state;
 use agentmux_common::api_types::{ContainerAsk, CreateAgentRequest, SpawnWorkerSpec, UiAutomationAuth};
 use agentmux_common::ipc::{Command, Event};
 
+/// The person has a window open and presses Stop it on every card for `block_id`: what the
+/// pane's notice becomes when they don't want the start. Without a window nobody can stop it.
+async fn person_stops_it(state: &AppState, block_id: &str) {
+    *state.host_ipc.lock().await = Some(crate::server::HostIpc { port: 1, token: "t".into() });
+    let (state, block_id) = (state.clone(), block_id.to_string());
+    tokio::spawn(async move {
+        loop {
+            for card in crate::backend::agent_notice::pending().into_iter().filter(|c| c.block_id == block_id) {
+                let _ = crate::backend::agent_notice::decide(&state, &card.id, "veto");
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    });
+}
+
 async fn dispatch_apply(state: &AppState, cmd: Command) -> Vec<Event> {
     let evs = crate::server::service::dispatch_to_reducer(state, cmd).await;
     for ev in &evs {
@@ -190,7 +205,7 @@ async fn a_worker_cannot_start_workers_of_its_own() {
     assert_eq!(definitions(&state), before);
 }
 
-/// A container leader spawns as a host leader does: it reaches the user's prompt (here, no go-ahead, so nothing is
+/// A container leader spawns as a host leader does: it reaches the person's notice (here they stop it, so nothing is
 /// created), and the worker it would get is a container agent with the leader's image and its own container and
 /// workspace.
 #[tokio::test]
@@ -200,8 +215,9 @@ async fn a_container_leader_gets_a_container_worker() {
     def.container_image = "agentmux/dev:1".to_string();
     def.container_name = "lead-container".to_string();
     state.mstore.agent_def_update(&mut def).unwrap();
-    assert!(leader_at(&state, block_id).is_ok(), "a container agent may lead");
+    assert!(leader_at(&state, block_id.clone()).is_ok(), "a container agent may lead");
 
+    person_stops_it(&state, &block_id).await;
     let before = definitions(&state);
     let (status, body) = spawn(&state, request(sign_auth(&state, &def.slug), "implement the spec")).await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
@@ -270,16 +286,64 @@ async fn a_fork_waits_for_the_leaders_fork_under_way_and_counts_its_worker() {
     assert!(body["error"].as_str().unwrap().starts_with("TOO_MANY_WORKERS"), "{body}");
 }
 
-/// A turn the user didn't start (here: no controller can say who did) asks
-/// the user; with no window to ask in, nothing is created.
+/// A turn the user didn't start (here: no controller can say who did) shows the person a card; when they
+/// stop it, nothing is created and the agent is told so.
 #[tokio::test]
-async fn without_the_users_go_ahead_nothing_is_created() {
+async fn when_the_person_stops_it_nothing_is_created() {
     let state = test_state();
-    let (def, _, _) = seed_leader(&state, "claude", "host", json!({})).await;
+    let (def, _, block_id) = seed_leader(&state, "claude", "host", json!({})).await;
+    person_stops_it(&state, &block_id).await;
     let before = definitions(&state);
     let (status, body) = spawn(&state, request(sign_auth(&state, &def.slug), "implement the spec")).await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
-    assert!(body["error"].as_str().unwrap().starts_with("NOT_ALLOWED"), "{body}");
+    assert_eq!(body["error"], "NOT_ALLOWED: the user stopped it, so nothing was started");
+    assert_eq!(definitions(&state), before);
+}
+
+/// With no window connected nobody could stop it, so it is not held up: whatever happens next, the
+/// refusal is not a missing go-ahead.
+#[tokio::test]
+async fn with_no_window_to_stop_it_the_start_is_not_held_up() {
+    let state = test_state();
+    let (def, _, _) = seed_leader(&state, "claude", "host", json!({})).await;
+    let (_, body) = spawn(&state, request(sign_auth(&state, &def.slug), "implement the spec")).await;
+    assert!(!body["error"].as_str().unwrap_or_default().starts_with("NOT_ALLOWED"), "{body}");
+}
+
+/// A leader the person has said Always to is not shown a card, even with a window open to stop it.
+#[tokio::test]
+async fn an_always_leader_is_not_asked_again() {
+    let state = test_state();
+    let (def, _, block_id) = seed_leader(&state, "claude", "host", json!({})).await;
+    person_stops_it(&state, &block_id).await;
+    crate::backend::agent_grants::allow(crate::backend::agent_grants::Topic::Spawn, &def.id).unwrap();
+    let (_, body) = spawn(&state, request(sign_auth(&state, &def.slug), "implement the spec")).await;
+    assert!(!body["error"].as_str().unwrap_or_default().starts_with("NOT_ALLOWED"), "{body}");
+    crate::backend::agent_grants::revoke(crate::backend::agent_grants::Topic::Spawn, &def.id).unwrap();
+}
+
+/// A leader whose pane is closed while the card counts down has nothing to start it for.
+#[tokio::test]
+async fn a_leader_that_closes_while_the_card_counts_starts_nothing() {
+    let state = test_state();
+    let (def, tab_id, block_id) = seed_leader(&state, "claude", "host", json!({})).await;
+    *state.host_ipc.lock().await = Some(crate::server::HostIpc { port: 1, token: "t".into() });
+    let before = definitions(&state);
+    let auth = sign_auth(&state, &def.slug);
+    let task = {
+        let state = state.clone();
+        tokio::spawn(async move { spawn(&state, request(auth, "implement the spec")).await })
+    };
+    for _ in 0..400 {
+        if crate::backend::agent_notice::pending().iter().any(|c| c.block_id == block_id) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    crate::sagas::delete_block::run(&state, tab_id, block_id).await.unwrap();
+    let (status, body) = task.await.unwrap();
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert!(body["error"].as_str().unwrap().starts_with("NOT_AN_AGENT_PANE"), "{body}");
     assert_eq!(definitions(&state), before);
 }
 
@@ -488,15 +552,15 @@ fn a_client_cannot_write_who_coaches_a_pane() {
 }
 
 #[test]
-fn the_users_prompt_names_the_leader_the_worker_its_model_and_the_task() {
-    let m = consent_message("Loap-3", Some("Loap-4"), Some("sonnet"), &WorkerRuntime { placement: container::Placement::AsSource, ..Default::default() }, &account_of(&account("a1", "me@example.com", "valid")), "Implement SPEC_X.\nReport to Loap-3.");
-    assert!(m.starts_with("Loap-3 wants to start a new agent, Loap-4 on sonnet, from its own instructions"), "{m}");
-    assert!(m.contains("Implement SPEC_X. Report to Loap-3."), "the task, on one line: {m}");
+fn the_notice_names_the_worker_its_model_and_who_pays() {
+    let m = consent_message(Some("Loap-4"), Some("sonnet"), &WorkerRuntime { placement: container::Placement::AsSource, ..Default::default() }, &account_of(&account("a1", "me@example.com", "valid")));
+    assert!(m.starts_with("Loap-4 on sonnet, from its leader's instructions"), "{m}");
     assert!(m.contains("It runs on the account me@example.com."), "{m}");
+    assert!(m.ends_with("It spends tokens until it is stopped."), "{m}");
     assert_eq!(one_line(&"x".repeat(500), 400).chars().count(), 401);
     let boxed = container::Placement::Container(container::ContainerPlan { image: "ghcr.io/agentmuxai/agent-base:developer".into(), memory_mb: Some("8192".into()), cpus: None });
-    let m = consent_message("Loap-3", Some("Loap-4"), Some("sonnet"), &WorkerRuntime { placement: boxed, ..Default::default() }, &account_of(&account("a1", "me@example.com", "valid")), "Implement SPEC_X.");
-    assert!(m.contains("Loap-4 on sonnet in a container (ghcr.io/agentmuxai/agent-base:developer), memory 8192 MB, from its own instructions"), "the prompt says it runs in a container: {m}");
+    let m = consent_message(Some("Loap-4"), Some("sonnet"), &WorkerRuntime { placement: boxed, ..Default::default() }, &account_of(&account("a1", "me@example.com", "valid")));
+    assert!(m.contains("Loap-4 on sonnet in a container (ghcr.io/agentmuxai/agent-base:developer), memory 8192 MB, from its leader's instructions"), "the notice says it runs in a container: {m}");
 }
 
 /// A worker is a new agent, not a fork: the pane's Fork carries the
@@ -694,11 +758,12 @@ async fn a_batch_over_the_leaders_limit_is_refused_whole() {
     assert_eq!(definitions(&state), before);
 }
 
-/// With no window to ask in, one prompt covers all of them and, unanswered, nothing is created.
+/// One card covers all of them and, stopped, nothing is created.
 #[tokio::test]
-async fn without_the_users_go_ahead_a_batch_creates_nothing() {
+async fn when_the_person_stops_it_a_batch_creates_nothing() {
     let state = test_state();
-    let (def, _, _) = seed_leader(&state, "claude", "host", json!({})).await;
+    let (def, _, block_id) = seed_leader(&state, "claude", "host", json!({})).await;
+    person_stops_it(&state, &block_id).await;
     let before = definitions(&state);
     let (status, body) = spawn_many_via_http(&state, sign_auth(&state, &def.slug), vec![spec("Batch A", "do a"), spec("Batch B", "do b")]).await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
@@ -714,11 +779,10 @@ fn the_one_prompt_lists_every_worker() {
         many::Planned { name: Some("Batch A".into()), brief: "first task\nmore".into(), runtime: WorkerRuntime::default(), account: account.clone() },
         many::Planned { name: None, brief: "second task".into(), runtime: worker_runtime("claude", "", Some("sonnet"), None).unwrap(), account },
     ];
-    let m = many::consent_message_many("Lead", &planned);
-    assert!(m.starts_with("Lead wants to start 2 new agents"), "{m}");
-    assert!(m.contains("• Batch A, account me@example.com: first task more"), "{m}");
+    let m = many::consent_message_many(&planned);
+    assert!(m.starts_with("• Batch A, account me@example.com: first task more"), "{m}");
     assert!(m.contains("• a new agent on sonnet, account me@example.com: second task"), "{m}");
-    assert!(m.contains("Start them?"), "{m}");
+    assert!(m.ends_with("They spend tokens until they are stopped."), "{m}");
 }
 
 /// A name made for an unnamed worker skips the ones the same batch gave to later workers.
@@ -859,11 +923,12 @@ async fn create_refuses_a_forged_caller_a_worker_an_unknown_template_and_a_blank
     assert_eq!(definitions(&state), before);
 }
 
-/// Without the user's go-ahead (no window to ask in) nothing is made; with Docker missing, a container is refused first.
+/// When the person stops it nothing is made; with Docker missing, a container is refused first.
 #[tokio::test]
-async fn create_asks_the_user_and_refuses_a_container_without_docker() {
+async fn create_shows_the_person_a_card_and_refuses_a_container_without_docker() {
     let state = test_state();
-    let (def, _, _) = seed_leader(&state, "claude", "host", json!({})).await;
+    let (def, _, block_id) = seed_leader(&state, "claude", "host", json!({})).await;
+    person_stops_it(&state, &block_id).await;
     seed_template(&state, "Claude Code", "host");
     let before = definitions(&state);
     let (status, body) = create(&state, create_request(sign_auth(&state, &def.slug), "Fresh", "Claude Code")).await;
@@ -954,9 +1019,10 @@ fn on_route(model: Option<&str>) -> agentmux_common::api_types::RouteAsk {
 }
 
 #[tokio::test]
-async fn a_worker_on_a_route_needs_the_key_in_the_vault_and_the_users_go_ahead_and_makes_nothing_before() {
+async fn a_worker_on_a_route_needs_the_key_in_the_vault_and_the_person_is_shown_a_card_before_anything_is_made() {
     let state = test_state();
-    let (def, _, _) = seed_leader(&state, "claude", "host", json!({})).await;
+    let (def, _, block_id) = seed_leader(&state, "claude", "host", json!({})).await;
+    person_stops_it(&state, &block_id).await;
     let before = definitions(&state);
     let mut req = request(sign_auth(&state, &def.slug), "implement the spec");
     req.model = None;
@@ -971,7 +1037,7 @@ async fn a_worker_on_a_route_needs_the_key_in_the_vault_and_the_users_go_ahead_a
     req.route = on_route(None);
     let (status, body) = spawn(&state, req).await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
-    assert!(body["error"].as_str().unwrap().starts_with("NOT_ALLOWED"), "the person is asked: {body}");
+    assert!(body["error"].as_str().unwrap().starts_with("NOT_ALLOWED"), "the person is shown the card: {body}");
     assert_eq!(definitions(&state), before);
 }
 
@@ -1005,7 +1071,7 @@ async fn a_worker_on_a_route_has_no_account_takes_the_routes_model_and_the_appro
     assert!(runtime.model.is_none(), "the model is the route's, not a Claude one");
     let account = route::account(&state, &leader, &provider, &runtime, None).unwrap();
     assert!(account.id.is_empty(), "nothing to link");
-    let m = consent_message("Lead", Some("Helper"), None, &runtime, &account, "do it");
+    let m = consent_message(Some("Helper"), None, &runtime, &account);
     assert!(m.contains("DeepSeek V4 Pro") && m.contains("not to a plan") && !m.contains("account"), "{m}");
     let e = route::account(&state, &leader, &provider, &runtime, Some("me@example.com")).unwrap_err();
     assert!(e.message.contains("no account"), "{}", e.message);
@@ -1059,7 +1125,8 @@ async fn a_worker_is_given_its_harness_and_route_by_srv_and_a_client_cannot_writ
 async fn a_created_agent_on_a_route_is_checked_against_its_templates_harness() {
     let state = test_state();
     with_route_key(&state);
-    let (def, _, _) = seed_leader(&state, "claude", "host", json!({})).await;
+    let (def, _, block_id) = seed_leader(&state, "claude", "host", json!({})).await;
+    person_stops_it(&state, &block_id).await;
     let template = seed_template(&state, "Route Template", "host");
     let mut req = create_request(sign_auth(&state, &def.slug), "Route Box", &template.slug);
     req.route = agentmux_common::api_types::RouteAsk { harness: Some("codex".into()), route: Some("openrouter".into()) };
@@ -1076,7 +1143,7 @@ async fn a_created_agent_on_a_route_is_checked_against_its_templates_harness() {
     req.route.route = Some("openrouter".into());
     let (status, body) = create(&state, req).await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
-    assert!(body["error"].as_str().unwrap().starts_with("NOT_ALLOWED"), "the person is asked before anything is made: {body}");
+    assert!(body["error"].as_str().unwrap().starts_with("NOT_ALLOWED"), "the person is shown the card before anything is made: {body}");
     let mut req = create_request(sign_auth(&state, &def.slug), "Route Box", &template.slug);
     req.model = Some("sonnet".into());
     let (status, body) = create(&state, req).await;

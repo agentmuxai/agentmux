@@ -45,6 +45,15 @@
     }
   },
   {
+    "event": "agent:grants",
+    "payloadTs": {
+      "imports": [
+        "GrantsEvent"
+      ],
+      "name": "GrantsEvent"
+    }
+  },
+  {
     "event": "agent:inputhistory",
     "payloadTs": {
       "imports": [
