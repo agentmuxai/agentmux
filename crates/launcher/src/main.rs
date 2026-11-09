@@ -56,6 +56,7 @@ mod ui_liveness;
 mod host_hang_dump;
 mod upgrade;
 mod upgrade_restart;
+mod version_flag;
 // Windows's "Upgrade & restart": the AgentMux window the dialog sits over (upgrade_restart.rs).
 #[cfg(target_os = "windows")]
 mod upgrade_window;
@@ -131,6 +132,10 @@ fn suppress_os_crash_dialogs() {}
 /// Windows crash modal either. Spec:
 /// docs/specs/SPEC_SERVICE_SUPERVISION_AND_RECOVERY_2026_05_20.md.
 fn main() {
+    // `--version` / `-V`: print the version and exit; nothing else starts.
+    if let Some(code) = version_flag::run_if_requested(&std::env::args().collect::<Vec<_>>()) {
+        std::process::exit(code);
+    }
     // `--verify-update`: the root helper of a .deb/.rpm upgrade asks for a downloaded
     // package to be checked against the release's signed manifest. Nothing else starts.
     if let Some(code) = verify_update::run_if_requested(&std::env::args().collect::<Vec<_>>()) {
