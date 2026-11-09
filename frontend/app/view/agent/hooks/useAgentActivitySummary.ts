@@ -51,11 +51,13 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { makeORef } from "@/app/store/mos";
 import { ObjectService } from "@/app/store/services";
 import { fireAndForget } from "@/util/util";
-import { AMBIENT_PULL_TIMEOUT_MS } from "./ambient-rpc";
+import { AMBIENT_TITLE_PULL_TIMEOUT_MS } from "./ambient-rpc";
 import { STARTUP_HEADING_RE } from "../stream-parser";
 import { isUsableTitle } from "@/app/store/ambient-title";
 import { lastPromptToStore, META_LAST_PROMPT } from "@/app/store/swarm-line";
-import { META_HUMAN_TURNS, nextHumanTurn, shouldRequestTitle } from "@/app/store/title-schedule";
+import { isTitleAged, META_HUMAN_TURNS, nextHumanTurn, titleRequest } from "@/app/store/title-schedule";
+import { recentActivityEntries } from "../ambient-activity";
+import type { DocumentNode } from "../../../agent-model/types";
 import { MOS } from "@/app/store/global";
 import type { TurnPhase } from "@/app/store/agent-pane-state/types";
 import { META_TITLE } from "@/app/store/meta-keys";
@@ -64,6 +66,9 @@ export interface UseAgentActivitySummaryOptions {
     blockId: string;
     turnPhase: Accessor<TurnPhase>;
     getRootWidth: () => number | undefined;
+    /** The pane's document. Its recent conversation is sent with the message (`ambient-activity.ts`),
+     *  so a short status question in the middle of new work still names that work. */
+    document?: Accessor<DocumentNode[]>;
 }
 
 export function useAgentActivitySummary(opts: UseAgentActivitySummaryOptions): void {
@@ -109,7 +114,10 @@ export function useAgentActivitySummary(opts: UseAgentActivitySummaryOptions): v
                 ...(lastPrompt ? { [META_LAST_PROMPT]: lastPrompt } : {}),
             } as any)
         );
-        if (!shouldRequestTitle(hasTitle, turn)) return;
+        // An aged title is judged afresh: the model is not shown it, so "still the same goal" is
+        // not the easy answer (title-schedule.ts `isTitleAged`).
+        const request = titleRequest(hasTitle, turn, isTitleAged(meta, turn, Date.now()));
+        if (request === "none") return;
         const rootWidth = getRootWidth() ?? 400;
         const textWidth = Math.max(0, rootWidth - 280);
         const wordTarget = Math.max(5, Math.min(12, Math.floor(textWidth / 48)));
@@ -122,8 +130,11 @@ export function useAgentActivitySummary(opts: UseAgentActivitySummaryOptions): v
                 word_target: wordTarget,
                 generation: Date.now(),
                 user_message: phase.pendingContent,
+                activity: opts.document && recentActivityEntries(opts.document()),
+                turn,
+                refresh: request === "refresh",
             },
-            { timeout: AMBIENT_PULL_TIMEOUT_MS },
+            { timeout: AMBIENT_TITLE_PULL_TIMEOUT_MS },
         ).catch(() => {
             // Silently ignore — the header just stays on its last title.
         });
