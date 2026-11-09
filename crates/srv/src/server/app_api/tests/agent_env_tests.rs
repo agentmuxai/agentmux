@@ -447,8 +447,10 @@ async fn moving_the_address_checks_the_keys_already_in_the_environment_too() {
     // Changing something else leaves the key where it was, so it is not asked again.
     let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "set": { "API_TIMEOUT_MS": "1000" } })).await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    // Taking the address away sends nothing anywhere.
+    // Taking the address away takes its key with it, or that string would go to Anthropic as the key.
     let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "unset": ["ANTHROPIC_BASE_URL"] })).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "unset": ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"] })).await;
     assert_eq!(status, StatusCode::OK, "{body}");
 }
 
@@ -488,9 +490,20 @@ async fn a_key_is_written_only_with_the_address_of_a_server_of_its_own() {
     assert_eq!(status, StatusCode::OK, "{body}");
     let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "set": { "ANTHROPIC_API_KEY": "none" } })).await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    // Taking the address away together with another setting is not a key written.
+    // Leaving the address behind with its keys is refused, with another setting in the call or without.
     let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "set": { "API_TIMEOUT_MS": "5" }, "unset": ["ANTHROPIC_BASE_URL"] })).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "set": { "ANTHROPIC_BASE_URL": "https://api.anthropic.com" } })).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    // Taking the keys with it is fine.
+    let unset = json!(["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"]);
+    let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "set": { "API_TIMEOUT_MS": "5" }, "unset": unset })).await;
     assert_eq!(status, StatusCode::OK, "{body}");
+    // A key the person wrote in the clear is theirs, and stays.
+    write_env(&state, &lolly, "ANTHROPIC_BASE_URL=http://192.0.2.68:11434\nANTHROPIC_API_KEY=sk-ant-person-owned-key\n");
+    let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "unset": ["ANTHROPIC_BASE_URL"] })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(stored(&state, &lolly).unwrap().contains("ANTHROPIC_API_KEY"));
 }
 
 #[tokio::test]
@@ -515,8 +528,8 @@ async fn only_a_change_of_address_opens_a_notice() {
     // Another address is a change of address.
     let (_, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "set": { "ANTHROPIC_BASE_URL": "http://198.51.100.9:11434" } })).await;
     assert!(body["notice"]["id"].is_string(), "{body}");
-    // Taking the address away is a change of address too.
-    let (_, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "unset": ["ANTHROPIC_BASE_URL"] })).await;
+    // Taking the address away (and its key) is a change of address too.
+    let (_, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "unset": ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"] })).await;
     assert!(body["notice"]["id"].is_string(), "{body}");
 }
 

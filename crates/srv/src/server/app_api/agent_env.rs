@@ -173,7 +173,7 @@ fn endpoint_refusal(state: &AppState, actor: &Actor, target: &AgentDefinition, c
 /// key written in the clear (the operator's, from My Agents) is never handed to an address an agent chose.
 /// When only a key changes, that key is checked. A key is only written for a server of its own: with no
 /// address, or Anthropic's, the launch passes it through next to the person's login and the CLI would send
-/// that string to Anthropic as its key.
+/// that string to Anthropic as its key; so a call that takes the address away takes those keys with it.
 fn key_refusal(state: &AppState, actor: &Actor, target: &AgentDefinition, current: &str, new: &str) -> Option<Refusal> {
     let bad = |m: String| Some(refuse(StatusCode::BAD_REQUEST, m));
     let (before, after) = (agent_env::effective(current), agent_env::effective(new));
@@ -185,14 +185,21 @@ fn key_refusal(state: &AppState, actor: &Actor, target: &AgentDefinition, curren
             continue;
         }
         let written = before.get(name) != Some(value);
-        if written && !custom {
-            return bad(format!("{name}: a key goes with the address of a server of its own; set ANTHROPIC_BASE_URL in the same call"));
-        }
-        // With no server of its own the key goes nowhere; with one, it goes there if it is new or the address is.
-        if !custom || !(written || moved) {
+        let value = value.trim();
+        if !custom {
+            if written {
+                return bad(format!("{name}: a key goes with the address of a server of its own; set ANTHROPIC_BASE_URL in the same call"));
+            }
+            // A placeholder or a Vault reference was for the server being left; a key the person wrote is theirs.
+            if moved && (agent_env::vault_ref(value).is_some() || agent_env::is_placeholder(value)) {
+                return bad(format!("{name}: is for the server this agent was pointed at; unset it in the same call that takes the address away"));
+            }
             continue;
         }
-        let value = value.trim();
+        // With a server of its own the key goes there if it is new or the address is.
+        if !(written || moved) {
+            continue;
+        }
         let Some(entry) = agent_env::vault_ref(value) else {
             if !value.is_empty() && !agent_env::is_placeholder(value) {
                 return bad(format!(
@@ -257,11 +264,17 @@ fn run_as(state: &AppState, actor: Actor, req: AgentEnvRequest) -> Result<Value,
                 return Ok(json!({ "agent": agent, "changed": change, "note": "nothing changed" }));
             }
             let endpoint = change.touches_endpoint();
-            if change.sets_endpoint() {
-                if let Some(refusal) = endpoint_refusal(state, &actor, &target, &current, &new) {
-                    audit(state, &actor, &target, false, Some(&refusal.message), "refused (model endpoint)");
-                    return Err(refusal);
-                }
+            // Setting an endpoint name is checked in full; taking one away only for the keys it leaves behind.
+            let refusal = if change.sets_endpoint() {
+                endpoint_refusal(state, &actor, &target, &current, &new)
+            } else if endpoint {
+                key_refusal(state, &actor, &target, &current, &new)
+            } else {
+                None
+            };
+            if let Some(refusal) = refusal {
+                audit(state, &actor, &target, false, Some(&refusal.message), "refused (model endpoint)");
+                return Err(refusal);
             }
             let content = AgentContent {
                 agent_id: target.id.clone(),
