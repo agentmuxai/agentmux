@@ -45,7 +45,12 @@ pub async fn chooser_files_route(
     if !agentmux_common::allowed_origins::allows(&req.allowed_origins, &now) {
         return fail("no file chooser was filled: the page is off the sites the person granted");
     }
-    match crate::client::chooser_hold::fill(&req.block_id, &now, &req.files) {
+    // The host's data folder is the person's own: nothing another local user can reach.
+    let Some(data) = state.version_data_dir.lock().clone().filter(|d| !d.is_empty()) else {
+        return fail("no file chooser was filled: the host has no data folder to keep the chosen files in");
+    };
+    let base = std::path::Path::new(&data).join("chooser-files");
+    match crate::client::chooser_hold::fill(&req.block_id, &now, &req.files, &base) {
         Ok(after) => (axum::http::StatusCode::OK, Json(ApiResponse::ok(json!({ "after": after })))),
         Err(e) => fail(e),
     }

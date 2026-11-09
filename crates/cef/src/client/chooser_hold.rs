@@ -9,7 +9,8 @@
 //! CEF's callback instead, for [`HOLD`], and `set_files` with `chooser: true`
 //! answers it (`browser_api/chooser_files.rs`). The files are the bytes srv read
 //! from the agent's workspace; they are written into a private folder of their
-//! own and CEF is handed those paths, so the page sees exactly what a person's
+//! own, in the host's data folder (the person's own, never the shared temp
+//! folder), and CEF is handed those paths, so the page sees exactly what a person's
 //! pick would give it (a `change` event the browser raised itself) and never a
 //! path in the workspace. Only the newest chooser per pane is kept.
 
@@ -30,7 +31,7 @@ pub(crate) const HOLD: Duration = Duration::from_secs(30);
 /// Folders of chosen files kept per pane: a page may read a file long after it was chosen
 /// (an upload that starts on a later click), so they stay until the pane closes or this many newer ones exist.
 const KEPT_PER_PANE: usize = 8;
-/// Leftovers of an earlier run are removed once they are this old.
+/// Leftovers of an earlier run or pane are removed once they are this old.
 const STALE: Duration = Duration::from_secs(24 * 60 * 60);
 
 struct Held {
@@ -149,7 +150,7 @@ fn no_chooser() -> String {
 /// Put `files` in the chooser kept for `target`, which the pane's page at `page` must still be on the
 /// site of. Answers what was chosen. A refusal the agent can fix (a file the page doesn't accept)
 /// leaves the chooser kept.
-pub(crate) fn fill(target: &str, page: &str, files: &[UploadFile]) -> Result<Vec<Value>, String> {
+pub(crate) fn fill(target: &str, page: &str, files: &[UploadFile], base: &Path) -> Result<Vec<Value>, String> {
     let now_site = site_of(page).ok_or("couldn't tell which site the page is on")?;
     let kept = {
         let mut h = held().lock();
@@ -164,7 +165,7 @@ pub(crate) fn fill(target: &str, page: &str, files: &[UploadFile]) -> Result<Vec
         }
         h.remove(target).ok_or_else(no_chooser)?
     };
-    let dir = match write_files(&base_dir(), files) {
+    let dir = match write_files(base, files) {
         Ok(d) => d,
         Err(e) => {
             kept.callback.cancel();
@@ -189,11 +190,6 @@ fn keep(target: &str, dir: PathBuf) {
     while list.len() > KEPT_PER_PANE {
         let _ = std::fs::remove_dir_all(list.remove(0));
     }
-}
-
-/// Where chosen files are written: one folder for AgentMux in the system's temp folder.
-fn base_dir() -> PathBuf {
-    std::env::temp_dir().join("agentmux-chooser")
 }
 
 /// The name a file is given on disk: its last path component only, without anything a file
@@ -224,12 +220,13 @@ fn private_dir(path: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(path)
 }
 
-/// Remove folders of an earlier run (or pane) left in `base` for longer than [`STALE`].
-fn sweep(base: &Path, now: std::time::SystemTime) {
+/// Remove folders left in `base` for longer than [`STALE`], those of an earlier run or of a pane that
+/// is gone. Not the ones `live` names: a pane still open may yet read a file it chose long ago.
+fn sweep(base: &Path, now: std::time::SystemTime, live: &[PathBuf]) {
     let Ok(entries) = std::fs::read_dir(base) else { return };
     for e in entries.flatten() {
         let old = e.metadata().and_then(|m| m.modified()).ok().and_then(|m| now.duration_since(m).ok()).is_some_and(|age| age >= STALE);
-        if old {
+        if old && !live.contains(&e.path()) {
             let _ = std::fs::remove_dir_all(e.path());
         }
     }
@@ -239,9 +236,9 @@ fn sweep(base: &Path, now: std::time::SystemTime) {
 /// private folder of `base`.
 fn write_files(base: &Path, files: &[UploadFile]) -> Result<Written, String> {
     use base64::Engine as _;
-    static SWEPT: OnceLock<()> = OnceLock::new();
     private_dir(base).map_err(|e| format!("couldn't make a folder for the chosen files: {e}"))?;
-    SWEPT.get_or_init(|| sweep(base, std::time::SystemTime::now()));
+    let live: Vec<PathBuf> = written().lock().values().flatten().cloned().collect();
+    sweep(base, std::time::SystemTime::now(), &live);
     let root = base.join(uuid::Uuid::new_v4().to_string());
     private_dir(&root).map_err(|e| format!("couldn't make a folder for the chosen files: {e}"))?;
     let mut out = Written { root: root.clone(), files: vec![], sizes: vec![] };
@@ -314,9 +311,12 @@ mod tests {
     fn old_folders_are_swept_and_new_ones_stay() {
         let base = std::env::temp_dir().join(format!("agentmux-chooser-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(base.join("fresh")).unwrap();
-        sweep(&base, std::time::SystemTime::now());
+        sweep(&base, std::time::SystemTime::now(), &[]);
         assert!(base.join("fresh").exists());
-        sweep(&base, std::time::SystemTime::now() + STALE + Duration::from_secs(60));
+        let later = std::time::SystemTime::now() + STALE + Duration::from_secs(60);
+        sweep(&base, later, &[base.join("fresh")]);
+        assert!(base.join("fresh").exists(), "a folder a pane still holds is kept, however old");
+        sweep(&base, later, &[]);
         assert!(!base.join("fresh").exists());
         let _ = std::fs::remove_dir_all(&base);
     }
