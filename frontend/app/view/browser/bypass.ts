@@ -63,10 +63,16 @@ export function hasEnterSpacePower(powers: readonly string[] | undefined): boole
     return !!powers?.includes("enter_space");
 }
 
+/** Does a grant (or a request for one) carry the uploads power? */
+export function hasUploadsPower(powers: readonly string[] | undefined): boolean {
+    return !!powers?.includes("uploads");
+}
+
 /** What the strip says about the powers beyond clicks, each led by a space: nothing when the grant has none. */
 export function powersNote(powers: readonly string[] | undefined): string {
     const terminal = terminalNote(powers);
-    return terminal + (hasEnterSpacePower(powers) ? `${terminal ? "," : ""} and it presses Enter and Space, each as the click it is` : "");
+    const keys = terminal + (hasEnterSpacePower(powers) ? `${terminal ? "," : ""} and it presses Enter and Space, each as the click it is` : "");
+    return keys + (hasUploadsPower(powers) ? `${keys ? "," : ""} and it fills a file chooser the page opens, from files in its workspace` : "");
 }
 
 /** The longest a line is shown before "Show all": a longer one can't be run until it has been read in full. */

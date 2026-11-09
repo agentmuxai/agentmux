@@ -32,6 +32,7 @@ pub mod act;
 pub mod capture;
 pub mod capture_download;
 pub mod cdp;
+pub mod chooser_files;
 pub mod combobox;
 pub mod dates;
 pub mod file_chooser;
@@ -95,6 +96,7 @@ pub fn register_routes(router: Router<Arc<AppState>>) -> Router<Arc<AppState>> {
         .route("/agentmux/browser/focus_element", post(routes::focus_element))
         .route("/agentmux/browser/dispatch_key", post(routes::dispatch_key))
         .route("/agentmux/browser/press", post(press::press_route))
+        .route("/agentmux/browser/chooser_files", post(chooser_files::chooser_files_route).layer(act::set_files_body_limit()))
         .route("/agentmux/browser/terminal_state", post(terminal::terminal_state))
         .route("/agentmux/browser/terminal_keys", post(terminal::terminal_keys))
         .route("/agentmux/browser/navigate", post(routes::navigate))

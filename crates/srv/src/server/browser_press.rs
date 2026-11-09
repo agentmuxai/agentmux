@@ -30,11 +30,11 @@ pub(crate) enum Pressed {
     Done(Response),
 }
 
-/// The grant that lets `agent` press keys on `pane`, which also covers the page.
+/// The grant that gives `agent` the power `power` on `pane`, which also covers the page.
 /// The person's standing grant for the agent on the page's site makes one when
 /// the pane has none.
-fn grant(state: &AppState, pane: &str, agent: &str, page: &str) -> Option<bypass::Grant> {
-    let has = |g: &bypass::Grant| g.allows(Power::EnterSpace) && g.covers(page);
+pub(crate) fn grant(state: &AppState, pane: &str, agent: &str, page: &str, power: Power) -> Option<bypass::Grant> {
+    let has = |g: &bypass::Grant| g.allows(power) && g.covers(page);
     bypass::active_for(pane, agent)
         .filter(has)
         .or_else(|| super::browser_standing::activate_at(state, pane, agent, page).filter(has))
@@ -45,7 +45,7 @@ fn grant(state: &AppState, pane: &str, agent: &str, page: &str) -> Option<bypass
 pub(crate) async fn press(state: &AppState, block_id: &str, agent: &str, selector: Option<&str>, key: &str, log: &impl Fn() -> Note) -> Pressed {
     let pane = banner_for(block_id).0;
     let Ok(page) = super::browser_bypass_routes::page_url(state, block_id).await else { return Pressed::NotGranted };
-    let Some(g) = grant(state, &pane, agent, &page) else { return Pressed::NotGranted };
+    let Some(g) = grant(state, &pane, agent, &page, Power::EnterSpace) else { return Pressed::NotGranted };
     let host_key = if key == "Space" { "Space" } else { "Enter" };
     let timeout = std::time::Duration::from_secs(20);
     if let Err((code, e)) = super::browser_actions::not_paused(block_id) {

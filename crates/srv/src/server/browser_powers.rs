@@ -24,11 +24,15 @@ pub(crate) enum Power {
     /// a form's default button, a button, a link or a checkbox, through the same
     /// check as a click. A key whose click can't be named is refused.
     EnterSpace,
+    /// Fill the file chooser the page opened from a file in the agent's own workspace
+    /// (spec §6): `set_files` with `chooser: true`. Without it the chooser is cancelled
+    /// the moment the page opens it, as in any pane an agent drives.
+    Uploads,
 }
 
 impl Power {
     /// The order a grant lists its powers in.
-    const ALL: [Power; 4] = [Power::Clicks, Power::Terminal, Power::TerminalAsk, Power::EnterSpace];
+    const ALL: [Power; 5] = [Power::Clicks, Power::Terminal, Power::TerminalAsk, Power::EnterSpace, Power::Uploads];
 
     /// The name on the wire, in `powers` lists.
     pub(crate) fn name(self) -> &'static str {
@@ -37,6 +41,7 @@ impl Power {
             Power::Terminal => "terminal",
             Power::TerminalAsk => "terminal_ask",
             Power::EnterSpace => "enter_space",
+            Power::Uploads => "uploads",
         }
     }
 
@@ -116,6 +121,14 @@ mod tests {
         assert_eq!(names(&p), vec!["clicks", "terminal", "enter_space"]);
         assert_eq!(asking_each_line(&p), vec![Power::Clicks, Power::TerminalAsk, Power::EnterSpace]);
         assert!(granted_by_the_person().contains(&"enter_space".to_string()));
+    }
+
+    #[test]
+    fn uploads_is_its_own_power_listed_after_the_keys() {
+        let p = parse(Some(&asked(&["uploads", "enter_space"]))).unwrap();
+        assert_eq!(p, vec![Power::Clicks, Power::EnterSpace, Power::Uploads]);
+        assert_eq!(names(&p), vec!["clicks", "enter_space", "uploads"]);
+        assert!(granted_by_the_person().contains(&"uploads".to_string()));
     }
 
     #[test]

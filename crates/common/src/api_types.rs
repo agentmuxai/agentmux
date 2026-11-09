@@ -1013,11 +1013,15 @@ pub struct UiBrowserSetFilesRequest {
     /// the caller's own pane.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pane: Option<String>,
-    /// The file input's reference from the latest snapshot.
-    #[serde(rename = "ref")]
+    /// The file input's reference from the latest snapshot. Empty with `chooser`.
+    #[serde(rename = "ref", default)]
     pub ref_: String,
     /// Absolute, or relative to the agent's workspace.
     pub paths: Vec<String>,
+    /// Fill the file chooser the page last opened, instead of the input `ref` names (the uploads
+    /// power; SPEC_BROWSER_WEB_TERMINAL_TYPING_2026_10_23.md §6).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub chooser: bool,
 }
 
 /// `POST /api/v1/ui/browser/wait_for` — backs `BrowserWaitFor`.
