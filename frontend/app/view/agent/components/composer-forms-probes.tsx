@@ -8,7 +8,7 @@
  * band's (`top-band/`), here with the slot's own render.
  */
 
-import { For, Show, createEffect, createMemo, createSignal, untrack, type Accessor, type JSX } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, untrack, type Accessor, type JSX } from "solid-js";
 
 import { COMPACT_ORDER, chooseCompactKeys } from "./composer-forms";
 
@@ -48,6 +48,12 @@ function measureProbes(root: HTMLElement | undefined, keys: string[]): Measured 
     return out;
 }
 
+const sameMeasured = (a: Measured, b: Measured): boolean =>
+    (["full", "compact"] as const).every((form) => {
+        const keys = Object.keys(b[form]);
+        return keys.length === Object.keys(a[form]).length && keys.every((k) => a[form][k] === b[form][k]);
+    });
+
 export function useSlotForms(
     slots: Accessor<FormSlot[]>,
     stripWidth: Accessor<number>,
@@ -57,11 +63,23 @@ export function useSlotForms(
     let root: HTMLElement | undefined;
     const [measured, setMeasured] = createSignal<Measured>({ full: {}, compact: {} });
     const probeKeys = createMemo(() => slots().filter((s) => s.compact).map((s) => s.key));
+    const remeasure = () =>
+        setMeasured((prev) => {
+            const next = measureProbes(root, probeKeys());
+            return sameMeasured(prev, next) ? prev : next;
+        });
+    let observer: ResizeObserver | undefined;
     createEffect(() => {
         stripWidth();
         slots();
-        setMeasured(measureProbes(root, probeKeys()));
+        remeasure();
+        // A probe's own width changes with its content (the readout gaining a digit) at a constant strip width.
+        if (typeof ResizeObserver === "undefined" || !root) return;
+        observer ??= new ResizeObserver(remeasure);
+        observer.disconnect();
+        root.querySelectorAll("[data-probe]").forEach((el) => observer!.observe(el));
     });
+    onCleanup(() => observer?.disconnect());
 
     const compactKeys = createMemo((): Set<string> => {
         const width = stripWidth();

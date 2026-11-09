@@ -449,6 +449,21 @@ describe("AgentComposerStrip — compact forms", () => {
         expect(real(container, ".agent-composer-strip-log-btn").textContent).toBe("Shell");
     });
 
+    it("measures a probe again when its own width changes at a constant strip width (the readout gaining digits)", () => {
+        readout.on = true;
+        widths.stats = 80;
+        Object.assign(probeWidths, PROBES, { "stats:full": 80, "stats:compact": 56 });
+        const { container } = renderStrip({ authEmail: "alice@example.com" });
+        resizeTo(container, 408);
+        expect(real(container, ".block-stats-badge").dataset.form).toBe("full");
+        // The live figures grow: the probe is 200 px now, the strip is the same width.
+        probeWidths["stats:full"] = 200;
+        for (const o of observers) {
+            if ([...o.targets].some((t) => (t as HTMLElement).dataset?.probe === "stats:full")) o.cb([]);
+        }
+        expect(real(container, ".block-stats-badge").dataset.form).toBe("compact");
+    });
+
     it("keeps the probes out of the rows, hidden from assistive tech and inert", () => {
         withProbes();
         const { container } = renderStrip(authed);
