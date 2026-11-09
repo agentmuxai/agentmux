@@ -60,8 +60,8 @@ Usage: install.ps1 [options]
   -Help                 this text
 
 Environment: AGENTMUX_INSTALL_INSTALLED, AGENTMUX_INSTALL_WINGET, AGENTMUX_INSTALL_TEST_KEYS and
-AGENTMUX_INSTALL_RELEASE_BASE replace what it looks at, and AGENTMUX_INSTALL_NO_RUN_SETUP stops short of running the installer
-(used by its tests).
+AGENTMUX_INSTALL_RELEASE_BASE and AGENTMUX_INSTALL_WINGET_EXE replace what it looks at or runs, and AGENTMUX_INSTALL_NO_RUN_SETUP stops
+short of running the installer (used by its tests).
 "@
         return
     }
@@ -231,9 +231,12 @@ AGENTMUX_INSTALL_RELEASE_BASE replace what it looks at, and AGENTMUX_INSTALL_NO_
         $wingetArgs += @("--accept-package-agreements", "--accept-source-agreements", "--disable-interactivity")
         Show "winget $($wingetArgs -join ' ')"
         if ($DryRun) { return $true }
+        $wingetExe = "winget"
+        if ($env:AGENTMUX_INSTALL_WINGET_EXE) { $wingetExe = $env:AGENTMUX_INSTALL_WINGET_EXE }
         $old = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
-        try { & winget @wingetArgs } finally { $ErrorActionPreference = $old }
+        # Out-Host: winget's output is for the person (or agent) watching; left in the pipeline it would become part of the return value.
+        try { & $wingetExe @wingetArgs | Out-Host } finally { $ErrorActionPreference = $old }
         return ($LASTEXITCODE -eq 0)
     }
 

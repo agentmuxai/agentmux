@@ -30,7 +30,9 @@ function Invoke-Install([string]$Shell, [hashtable]$EnvVars, [string[]]$ScriptAr
 function Expect([string]$Name, [int]$Code, [string]$Want, [string]$Shell, [hashtable]$EnvVars, [string[]]$ScriptArgs) {
     $r = Invoke-Install $Shell $EnvVars $ScriptArgs
     if ($r.Code -ne $Code) { Fail $Name "exit $($r.Code), wanted $Code`: $($r.Out)"; return }
-    if ($Want -and -not $r.Out.Contains($Want)) { Fail $Name "missing '$Want': $($r.Out)"; return }
+    # An error message is wrapped to the console's width, with a bar in front of each line: read it as one line.
+    $flat = $r.Out -replace '\s*\r?\n\s*(\|\s*)?', ' '
+    if ($Want -and -not $flat.Contains($Want)) { Fail $Name "missing '$Want': $($r.Out)"; return }
     Pass $Name
 }
 
@@ -81,6 +83,21 @@ foreach ($sh in $shells) {
     Expect-Absent "-Force over the installer copy never uses the Store id" "9P9QCXNNCRK3" $sh $setupNoPackage @("-DryRun", "-NoLaunch", "-Force", "-Version", "0.60.14")
     Expect "-Method package-manager cannot add the other kind" 1 "use -Method download" $sh $setupNoPackage @("-DryRun", "-NoLaunch", "-Force", "-Method", "package-manager")
     Expect "-Interactive is accepted" 0 "done" $sh (WithWinget "ai") @("-DryRun", "-NoLaunch", "-Interactive")
+
+    # A real winget run, with a stand-in for winget: its output is shown, and its exit code decides (a failure is not read as success).
+    $fakeOk = Join-Path $work "fake-winget-ok.cmd"
+    [IO.File]::WriteAllText($fakeOk, "@echo off`r`necho fake winget output`r`nexit /b 0`r`n")
+    $fakeFail = Join-Path $work "fake-winget-fail.cmd"
+    [IO.File]::WriteAllText($fakeFail, "@echo off`r`necho fake winget failure`r`nexit /b 1`r`n")
+    $wingetOk = @{ AGENTMUX_INSTALL_INSTALLED = "none"; AGENTMUX_INSTALL_WINGET = "ai"; AGENTMUX_INSTALL_WINGET_EXE = $fakeOk }
+    $wingetFail = @{ AGENTMUX_INSTALL_INSTALLED = "none"; AGENTMUX_INSTALL_WINGET = "ai"; AGENTMUX_INSTALL_WINGET_EXE = $fakeFail }
+    Expect "a winget that succeeds shows its output" 0 "fake winget output" $sh $wingetOk @("-NoLaunch")
+    Expect "a winget that succeeds ends with done and no fallback" 0 "done" $sh $wingetOk @("-NoLaunch")
+    Expect-Absent "a winget that succeeds does not fall back to the installer" "using the installer instead" $sh $wingetOk @("-NoLaunch")
+    Expect "a winget that fails is reported (-Method package-manager)" 1 "winget could not install AgentMux" $sh $wingetFail @("-NoLaunch", "-Method", "package-manager")
+    Expect "a winget that fails shows its output" 1 "fake winget failure" $sh $wingetFail @("-NoLaunch", "-Method", "package-manager")
+    $wingetFailNoRun = @{ AGENTMUX_INSTALL_INSTALLED = "none"; AGENTMUX_INSTALL_WINGET = "ai"; AGENTMUX_INSTALL_WINGET_EXE = $fakeFail; AGENTMUX_INSTALL_NO_RUN_SETUP = "1"; AGENTMUX_INSTALL_RELEASE_BASE = (Join-Path $work "no-such-release") }
+    Expect "a winget that fails falls back to the installer" 1 "using the installer instead" $sh $wingetFailNoRun @("-NoLaunch", "-Version", "9.9.9")
 }
 
 # ASCII only, no smart quotes
