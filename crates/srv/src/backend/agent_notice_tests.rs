@@ -122,6 +122,17 @@ async fn always_starts_it_and_remembers_the_agent_so_it_is_not_asked_again() {
 }
 
 #[tokio::test]
+async fn an_always_that_comes_too_late_saves_nothing() {
+    let state = with_window().await;
+    let n = notice(Kind::Spawn);
+    let task = spawn_announce(&state, n.clone(), Duration::from_millis(40));
+    let card = card_for(&n.block_id).await;
+    assert_eq!(task.await.unwrap(), Outcome::Go(Go::Deadline));
+    assert_eq!(decide(&state, &card.id, "always").unwrap(), "too_late");
+    assert!(!agent_grants::allowed(Topic::Spawn, &n.agent_id), "the person was told too late, so the agent is still shown the card");
+}
+
+#[tokio::test]
 async fn a_notice_that_offers_no_always_refuses_one() {
     let state = with_window().await;
     let n = Notice { always_label: String::new(), ..notice(Kind::Spawn) };

@@ -5,6 +5,7 @@
 // (docs/specs/SPEC_AGENT_SPAWN_NOTICE_IN_THE_PANE_2026_11_08.md): the question card's chrome, so the
 // kinds of request above the composer read as one set.
 
+@use "../mixins.scss";
 @use "../view/agent/styles/attention-card" as *;
 
 .agent-notice-card {
@@ -52,9 +53,9 @@
 .agent-notice-bar-fill {
     height: 100%;
     background: var(--attention-color);
-    transition: width 250ms linear;
+    transition: width var(--duration-base) linear;
 
-    @media (prefers-reduced-motion: reduce) {
+    @include mixins.when-motion-reduced(feedback) {
         transition: none;
     }
 }

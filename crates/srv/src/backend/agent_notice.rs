@@ -422,26 +422,22 @@ pub fn decide(state: &AppState, id: &str, choice: &str) -> Result<&'static str, 
         "always" => Choice::Always,
         other => return Err(format!("INVALID_ARG: choice is 'veto', 'now' or 'always', not '{}'", other.chars().take(20).collect::<String>())),
     };
-    let notice = match entries().get(id) {
-        Some(e) if e.view.status == "pending" && e.choice.is_none() => e.notice.clone(),
-        _ => return Ok("too_late"),
+    // One lock from the check to the grant and the choice: a countdown that ends in between
+    // (`settle` takes the same lock) leaves no grant behind for a person who was told "too late".
+    let mut map = entries();
+    let Some(e) = map.get_mut(id).filter(|e| e.view.status == "pending" && e.choice.is_none()) else {
+        return Ok("too_late");
     };
     if choice == Choice::Always {
-        remember(state, &notice)?;
+        remember(state, &e.notice)?;
     }
-    let mut map = entries();
-    match map.get_mut(id) {
-        Some(e) if e.view.status == "pending" && e.choice.is_none() => {
-            e.choice = Some(choice);
-            e.wake.notify_one();
-            Ok(match choice {
-                Choice::Veto => "stopped",
-                Choice::Now => "started",
-                Choice::Always => "always",
-            })
-        }
-        _ => Ok("too_late"),
-    }
+    e.choice = Some(choice);
+    e.wake.notify_one();
+    Ok(match choice {
+        Choice::Veto => "stopped",
+        Choice::Now => "started",
+        Choice::Always => "always",
+    })
 }
 
 /// Write the "Always" the card offered.
