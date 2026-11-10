@@ -221,6 +221,7 @@ export async function openOrFocusPaneIdByView(
     const { revealOrOpen, outcomeBlockId } = await import("@/app/util/reveal-or-open");
     const { showBlockInPane, findOpenBlockByView, revealBlock } = await import("@/app/util/reveal-block");
     const { paneScope } = await import("./widget-singleton");
+    const { emitPaneLocate } = await import("@/app/util/pane-locate");
     const { appRevealDeps } = await import("@/app/util/reveal-app-scope");
     const { paneIdentity } = await import("@/app/util/pane-identity");
     // Read only to tell an agent's, a document's or a profile's pane from another of the view.
@@ -241,7 +242,11 @@ export async function openOrFocusPaneIdByView(
                     const node = layoutModel.getNodeByBlockId(blockId);
                     if (node?.id != null) {
                         // In the shown tab: show it, then focus it. focusNode alone leaves a minimized pane
-                        // collapsed and a background tab of a pane's stack hidden.
+                        // collapsed and a background tab of a pane's stack hidden. Then the locate flash, as
+                        // for every path that brings an existing pane to the front: a pane already on screen
+                        // would otherwise answer the click with nothing visible
+                        // (SPEC_PANE_LOCATE_FLASH_ONE_FRAMEWORK_2026_11_08.md §3.1; the other paths flash
+                        // from revealBlock).
                         return {
                             here: {
                                 blockId,
@@ -249,6 +254,7 @@ export async function openOrFocusPaneIdByView(
                                     showBlockInPane(layoutModel, node, blockId);
                                     layoutModel.focusNode(node.id);
                                     giveBlockFocus(blockId);
+                                    emitPaneLocate(blockId);
                                 },
                             },
                         };
