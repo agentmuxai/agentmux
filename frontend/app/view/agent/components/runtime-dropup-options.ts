@@ -83,4 +83,6 @@ export interface AgentRuntimeDropupProps {
     contextTokens?: number | null;
     /** How many images the conversation holds now, asked when the panel opens (a text-only model cannot read them). */
     conversationImages?: () => number;
+    /** Compacts the conversation, then moves the agent to this model: the pick of a model the conversation is too large for. */
+    compactThenSwitch?: (route: string, model: string) => Promise<void>;
 }

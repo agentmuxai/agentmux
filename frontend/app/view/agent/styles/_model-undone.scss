@@ -1,0 +1,48 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// The card after a refused model change was undone (components/AgentModelUndoneCard.tsx).
+.agent-view {
+    .agent-model-undone {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-2);
+        padding: var(--space-1) var(--space-1-5);
+        border-top: 1px solid var(--border-color);
+        color: var(--secondary-text-color);
+        font-size: var(--text-sm);
+        flex-shrink: 0;
+        // A narrow pane puts the actions under the text instead of squeezing it to a few letters.
+        flex-wrap: wrap;
+
+        .agent-model-undone-text {
+            display: flex;
+            flex: 1 1 14rem;
+            flex-direction: column;
+            min-width: 0;
+            gap: var(--space-0-5);
+        }
+
+        .agent-model-undone-title {
+            font-weight: 600;
+            color: var(--main-text-color);
+        }
+
+        .agent-model-undone-reason {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .agent-model-undone-error {
+            color: var(--error-text-color);
+        }
+
+        .agent-model-undone-actions {
+            display: flex;
+            flex-shrink: 0;
+            gap: var(--space-1);
+        }
+    }
+}

@@ -7,7 +7,7 @@ import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentModelPanel } from "@/types/rpc/AgentModelPanel";
 import { AgentRuntimeDropup } from "./AgentRuntimeDropup";
-import { backRow, countImages, parseRouteValue, routeModelNote, routeModelOf, routeValue } from "./runtime-dropup-routes";
+import { backRow, compactValue, countImages, parseCompactValue, parseRouteValue, routeModelNote, routeModelOf, routeRows, routeValue } from "./runtime-dropup-routes";
 
 const panelCommand = vi.fn();
 const switchCommand = vi.fn();
@@ -38,6 +38,7 @@ const model = (id: string, label: string, extra: Record<string, unknown> = {}) =
     default: id === FLASH,
     current: false,
     unavailable: null,
+    compact_first: null,
     reread_cost_usd: null,
     ...extra,
 });
@@ -274,6 +275,19 @@ describe("the route rows' words", () => {
         expect(routeModelNote(m, 200_000)).toContain("about $0.030 to re-read 200K on this model");
         expect(routeModelNote(model(PRO, "x", { reread_cost_usd: 0.03, current: true }), 200_000)).not.toContain("re-read");
         expect(routeModelNote(m, null)).not.toContain("re-read");
+    });
+
+    it("offers a model too small for the conversation as Compact, then switch, and keeps one that cannot fit greyed", () => {
+        const why = "the conversation (200K) is larger than this model's context (128K)";
+        const small = model(PRO, "DeepSeek V4 Pro", { compact_first: why });
+        const none = model(FLASH, "Tiny", { unavailable: `${why}, even compacted` });
+        const rows = routeRows(panelOf({}, [small, none]), 200_000)[0].rows;
+        expect(rows[0]).toMatchObject({ value: compactValue("openrouter", PRO), label: "DeepSeek V4 Pro · Compact, then switch", disabled: false });
+        expect(rows[0].description).toContain("compacts it first, then switches");
+        expect(rows[1]).toMatchObject({ value: routeValue("openrouter", FLASH), disabled: true });
+        expect(parseCompactValue(rows[0].value)).toEqual({ route: "openrouter", model: PRO });
+        expect(parseRouteValue(rows[0].value)).toBeNull();
+        expect(parseCompactValue(routeValue("openrouter", PRO))).toBeNull();
     });
 
     it("names the harness's own model when Back goes off a route", () => {

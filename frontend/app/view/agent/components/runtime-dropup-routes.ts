@@ -32,6 +32,7 @@ export function countImages(nodes: ReadonlyArray<{ type: string; attachments?: R
 /** The row value of "go back to where the agent was". */
 export const BACK_VALUE = "back";
 const ROUTE_PREFIX = "route:";
+const COMPACT_PREFIX = "compact:";
 
 export interface PaneRouteModel {
     route: string;
@@ -51,10 +52,22 @@ export function routeModelOf(meta: Record<string, unknown> | undefined): PaneRou
 /** A route model's row value. A route id has no colon, so the model id is whatever follows the second one. */
 export const routeValue = (route: string, model: string) => `${ROUTE_PREFIX}${route}:${model}`;
 
+/** The row value of a model picked by compacting the conversation first. */
+export const compactValue = (route: string, model: string) => `${COMPACT_PREFIX}${route}:${model}`;
+
 /** The route and model a row value names, or null for a harness model or the Back row. */
 export function parseRouteValue(value: string): { route: string; model: string } | null {
-    if (!value.startsWith(ROUTE_PREFIX)) return null;
-    const rest = value.slice(ROUTE_PREFIX.length);
+    return parsePrefixed(value, ROUTE_PREFIX);
+}
+
+/** The route and model a "Compact, then switch" row value names, or null. */
+export function parseCompactValue(value: string): { route: string; model: string } | null {
+    return parsePrefixed(value, COMPACT_PREFIX);
+}
+
+function parsePrefixed(value: string, prefix: string): { route: string; model: string } | null {
+    if (!value.startsWith(prefix)) return null;
+    const rest = value.slice(prefix.length);
     const i = rest.indexOf(":");
     return i > 0 ? { route: rest.slice(0, i), model: rest.slice(i + 1) } : null;
 }
@@ -65,6 +78,7 @@ const tokens = (n: number) => (n >= 1_000_000 ? `${+(n / 1_000_000).toFixed(1)}M
 /** What a route model's row says under its name: the reason it cannot be picked, else its size, price and what it does. */
 export function routeModelNote(m: AgentModelPanelModel, conversationTokens: number | null | undefined): string {
     if (m.unavailable) return m.unavailable;
+    if (m.compact_first) return `${m.compact_first}: compacts it first, then switches`;
     const abilities = [m.tools && "tools", m.thinking && "thinking", m.images && "images"].filter(Boolean).join(", ");
     const line = `${tokens(m.context)} context · ${money(m.price_in)} in / ${money(m.price_out)} out per million${abilities ? ` · ${abilities}` : ""}`;
     return !m.current && m.reread_cost_usd != null && conversationTokens
@@ -79,8 +93,8 @@ export function routeRows(panel: AgentModelPanel, conversationTokens: number | n
         rows: route.models.map(
             (m): OptionRow => ({
                 section: "model",
-                value: routeValue(route.id, m.id),
-                label: m.label,
+                value: m.compact_first ? compactValue(route.id, m.id) : routeValue(route.id, m.id),
+                label: m.compact_first ? `${m.label} · Compact, then switch` : m.label,
                 description: routeModelNote(m, conversationTokens),
                 detail: m.unavailable ?? undefined,
                 current: m.current,
