@@ -1,6 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { t } from "@/app/i18n/i18n";
+
 // The extra environment variables a definition launches with: the `env` content
 // blob, one `KEY=VALUE` per line, `#` for a comment. The launch (agent-model.ts)
 // and the Environment editor read it with this one parser, so the editor shows
@@ -38,9 +40,9 @@ export function parseEnvText(text: string | undefined | null): ParsedEnv {
         if (!line || line.startsWith("#")) return;
         const eq = line.indexOf("=");
         const skip = (reason: string) => parsed.ignored.push({ number: index + 1, text: line, reason });
-        if (eq < 1) return skip("no NAME= before the value");
+        if (eq < 1) return skip(t("agentEnv.reason.noName"));
         const key = line.substring(0, eq);
-        if (!ENV_NAME.test(key)) return skip(`${key} is not a name: use letters, digits and underscores, not starting with a digit`);
+        if (!ENV_NAME.test(key)) return skip(t("agentEnv.reason.badName", { key }));
         parsed.vars[key] = line.substring(eq + 1);
         if (key.toUpperCase().startsWith(RESERVED_PREFIX) && !parsed.reserved.includes(key)) parsed.reserved.push(key);
     });

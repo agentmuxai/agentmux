@@ -27,7 +27,7 @@ vi.mock("@/app/store/mps", () => ({
     },
 }));
 
-import { AgentEnvPanel, ENV_HINT } from "./AgentEnvPanel";
+import { AgentEnvPanel, envHint } from "./AgentEnvPanel";
 
 const stored = (content: string) => ({ agent_id: "uid-x", content_type: "env", content, updated_at: 1 });
 const box = () => screen.getByLabelText("Environment") as HTMLTextAreaElement;
@@ -46,9 +46,9 @@ describe("AgentEnvPanel", () => {
         render(() => <AgentEnvPanel agentId="uid-x" agentName="AgentX" />);
         await waitFor(() => expect(box().value).toBe("# tools\nEDITOR=vim\n"));
         expect(getContent).toHaveBeenCalledWith({}, { agent_id: "uid-x", content_type: "env" });
-        expect(screen.getByText(ENV_HINT)).toBeInTheDocument();
-        expect(ENV_HINT).toContain("next launch");
-        expect(ENV_HINT).toContain("AGENTMUX_");
+        expect(screen.getByText(envHint())).toBeInTheDocument();
+        expect(envHint()).toContain("next launch");
+        expect(envHint()).toContain("AGENTMUX_");
         expect(save().disabled).toBe(true);
     });
 
