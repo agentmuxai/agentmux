@@ -44,20 +44,49 @@ chmod +x "$TMP/broken/ninja" "$TMP/broken/ninja.exe"
 
 mkdir -p "$TMP/empty" "$TMP/home"
 
+# An override and a second search location, for the precedence tests below.
+mkdir -p "$TMP/override" "$TMP/other"
+printf '#!/bin/sh\necho 9.9.9\n' > "$TMP/override/ninja"
+printf '#!/bin/sh\necho 8.8.8\n' > "$TMP/other/ninja"
+chmod +x "$TMP/override/ninja" "$TMP/other/ninja"
+
 # A usable ninja on PATH needs no fix: no output, exit 0.
 out=$(PATH="$TMP/bin:$TMP/real:/usr/bin:/bin" HOME="$TMP/home" \
       AGENTMUX_NINJA_SEARCH="$TMP/empty" AGENTMUX_TARGET_DIR="$TMP/target" \
-      "$SCRIPT" 2>"$TMP/err1"); rc=$?
+      sh "$SCRIPT" 2>"$TMP/err1"); rc=$?
 if [ "$rc" -eq 0 ] && [ -z "$out" ]; then
   ok "a usable ninja on PATH needs no fix"
 else
   bad "a usable ninja on PATH needs no fix" "rc=$rc out='$out' $(cat "$TMP/err1")"
 fi
 
+# AGENTMUX_NINJA is an override: it wins over a working ninja on PATH and over
+# a search location.
+out=$(PATH="$TMP/bin:$TMP/real:/usr/bin:/bin" HOME="$TMP/home" \
+      AGENTMUX_NINJA="$TMP/override/ninja" AGENTMUX_NINJA_SEARCH="$TMP/other" \
+      AGENTMUX_TARGET_DIR="$TMP/target" \
+      sh "$SCRIPT" 2>"$TMP/err1b"); rc=$?
+if [ "$rc" -eq 0 ] && [ "$out" = "$TMP/override" ]; then
+  ok "AGENTMUX_NINJA wins over the ninja on PATH and the search locations"
+else
+  bad "AGENTMUX_NINJA wins over the ninja on PATH and the search locations" "rc=$rc out='$out' $(cat "$TMP/err1b")"
+fi
+
+# A working ninja on PATH that is not an alias is kept as-is: no search runs,
+# so a different ninja is not prepended.
+out=$(PATH="$TMP/bin:$TMP/real:/usr/bin:/bin" HOME="$TMP/home" \
+      AGENTMUX_NINJA_SEARCH="$TMP/other" AGENTMUX_TARGET_DIR="$TMP/target" \
+      sh "$SCRIPT" 2>"$TMP/err1c"); rc=$?
+if [ "$rc" -eq 0 ] && [ -z "$out" ]; then
+  ok "a working ninja on PATH is kept, not replaced by a search location"
+else
+  bad "a working ninja on PATH is kept, not replaced by a search location" "rc=$rc out='$out' $(cat "$TMP/err1c")"
+fi
+
 # A broken ninja on PATH, with a real one in the search path: print its dir.
 out=$(PATH="$TMP/bin:$TMP/broken:/usr/bin:/bin" HOME="$TMP/home" \
       AGENTMUX_NINJA_SEARCH="$TMP/real" AGENTMUX_TARGET_DIR="$TMP/target" \
-      "$SCRIPT" 2>"$TMP/err2"); rc=$?
+      sh "$SCRIPT" 2>"$TMP/err2"); rc=$?
 if [ "$rc" -eq 0 ] && [ "$out" = "$TMP/real" ]; then
   ok "a broken ninja is replaced by a real one from the search path"
 else
@@ -73,7 +102,7 @@ ln -s "$TMP/real/ninja" "$TMP/links/ninja"
 if [ -L "$TMP/links/ninja" ]; then
   out=$(PATH="$TMP/bin:$TMP/links:/usr/bin:/bin" HOME="$TMP/home" \
         AGENTMUX_TARGET_DIR="$TMP/target" \
-        "$SCRIPT" 2>"$TMP/err2b"); rc=$?
+        sh "$SCRIPT" 2>"$TMP/err2b"); rc=$?
   if [ "$rc" -eq 0 ] && [ "$out" = "$TMP/real" ]; then
     ok "a symlink alias resolves to its real target"
   else
@@ -86,7 +115,7 @@ fi
 # No usable ninja anywhere: exit 1, no PATH line, instructions on stderr.
 out=$(PATH="$TMP/bin:$TMP/broken:/usr/bin:/bin" HOME="$TMP/home" \
       AGENTMUX_NINJA_SEARCH="$TMP/empty" AGENTMUX_TARGET_DIR="$TMP/target" \
-      "$SCRIPT" 2>"$TMP/err3"); rc=$?
+      sh "$SCRIPT" 2>"$TMP/err3"); rc=$?
 if [ "$rc" -eq 1 ] && [ -z "$out" ] && grep -q 'needs a ninja that starts' "$TMP/err3"; then
   ok "no usable ninja fails with instructions"
 else
@@ -101,7 +130,7 @@ printf 'CMAKE_MAKE_PROGRAM:FILEPATH=%s\n' "$TMP/broken/ninja" > "$TMP/target/rel
 printf 'CMAKE_MAKE_PROGRAM:FILEPATH=%s\n' "$TMP/real/ninja" > "$TMP/target/debug/build/cef-dll-sys-good/out/build/CMakeCache.txt"
 out=$(PATH="$TMP/bin:$TMP/broken:/usr/bin:/bin" HOME="$TMP/home" \
       AGENTMUX_NINJA_SEARCH="$TMP/real" AGENTMUX_TARGET_DIR="$TMP/target" \
-      "$SCRIPT" 2>"$TMP/err4"); rc=$?
+      sh "$SCRIPT" 2>"$TMP/err4"); rc=$?
 if [ "$rc" -eq 0 ] \
    && [ ! -f "$TMP/target/release/build/cef-dll-sys-bad/out/build/CMakeCache.txt" ] \
    && [ -f "$TMP/target/debug/build/cef-dll-sys-good/out/build/CMakeCache.txt" ] \

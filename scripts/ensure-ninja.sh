@@ -24,7 +24,8 @@
 #   instructions when none is.
 #
 # Env:
-#   AGENTMUX_NINJA          an explicit ninja executable to use
+#   AGENTMUX_NINJA          an explicit ninja executable to use; it wins over
+#                           the ninja on PATH and over every search location
 #   AGENTMUX_NINJA_SEARCH   colon-separated directories to search for
 #                           ninja.exe, replacing the built-in WinGet/Visual
 #                           Studio/Scoop/Chocolatey locations (unusual
@@ -107,9 +108,28 @@ first_usable() {
     return 1
 }
 
+# AGENTMUX_NINJA is an explicit override and the strongest signal: it is
+# honoured on every OS, before following a PATH alias and before the
+# AGENTMUX_NINJA_SEARCH locations.
+if [ -n "${AGENTMUX_NINJA:-}" ] && usable "$AGENTMUX_NINJA"; then
+    REAL="$AGENTMUX_NINJA"
+fi
+
+# A ninja on PATH that starts and is not an alias is exactly what the build
+# wants. Leave it where it is: searching for and prepending a different ninja
+# would contradict "keeps a working PATH ninja as-is".
+if [ -z "$REAL" ] && [ "$PATH_OK" -eq 1 ] && { [ "$IS_WINDOWS" -eq 0 ] || [ "$PATH_ALIAS" -eq 0 ]; }; then
+    if [ "$CHECK" -eq 1 ]; then
+        echo "  OK   ninja — $(version_of "$PATH_NINJA")"
+    else
+        invalidate_stale_cef_caches
+    fi
+    exit 0
+fi
+
 # AGENTMUX_NINJA_SEARCH replaces the built-in locations when set, so a test or
 # an unusual install can say exactly where to look.
-if [ -n "${AGENTMUX_NINJA_SEARCH:-}" ]; then
+if [ -z "$REAL" ] && [ -n "${AGENTMUX_NINJA_SEARCH:-}" ]; then
     OLD_IFS=$IFS
     IFS=:
     set -- $AGENTMUX_NINJA_SEARCH
@@ -118,7 +138,7 @@ if [ -n "${AGENTMUX_NINJA_SEARCH:-}" ]; then
         [ -n "$dir" ] || continue
         first_usable "$dir/ninja.exe" "$dir/ninja" "$dir" && break
     done
-elif [ "$IS_WINDOWS" -eq 1 ]; then
+elif [ -z "$REAL" ] && [ "$IS_WINDOWS" -eq 1 ]; then
     LOCAL_HOME="${HOME:-${USERPROFILE:-}}"
     LOCAL_APPDATA="${LOCALAPPDATA:-}"
     # Git Bash reports Windows-style env vars; only use one that is a POSIX path.
@@ -135,7 +155,6 @@ elif [ "$IS_WINDOWS" -eq 1 ]; then
 
     if [ -z "$REAL" ]; then
         first_usable \
-            "${AGENTMUX_NINJA:-}" \
             "$LOCAL_HOME"/AppData/Local/Microsoft/WinGet/Packages/Ninja-build.Ninja_*/ninja.exe \
             "$LOCAL_APPDATA"/Microsoft/WinGet/Packages/Ninja-build.Ninja_*/ninja.exe \
             "/c/Program Files/Microsoft Visual Studio/"*/*/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe \
@@ -144,9 +163,6 @@ elif [ "$IS_WINDOWS" -eq 1 ]; then
             "$LOCAL_HOME"/scoop/shims/ninja.exe \
             "/c/ProgramData/chocolatey/bin/ninja.exe" || true
     fi
-else
-    # Never skip an explicit AGENTMUX_NINJA outside Windows either.
-    first_usable "${AGENTMUX_NINJA:-}" || true
 fi
 
 if [ -n "$REAL" ]; then
@@ -159,17 +175,6 @@ if [ -n "$REAL" ]; then
         invalidate_stale_cef_caches
         # The directory, for the caller to prepend to PATH.
         echo "${REAL%/*}"
-    fi
-    exit 0
-fi
-
-# A real file on PATH, or an OS where symlinks do not mean a Windows alias:
-# nothing to do. (On Windows an alias that starts is kept only as a fallback.)
-if [ "$PATH_OK" -eq 1 ] && { [ "$IS_WINDOWS" -eq 0 ] || [ "$PATH_ALIAS" -eq 0 ]; }; then
-    if [ "$CHECK" -eq 1 ]; then
-        echo "  OK   ninja — $(version_of "$PATH_NINJA")"
-    else
-        invalidate_stale_cef_caches
     fi
     exit 0
 fi
