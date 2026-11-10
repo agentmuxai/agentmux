@@ -63,7 +63,7 @@ pub fn set_choice(mstore: &Store, def_id: &str, harness: &str, route: &str, mode
 pub fn env_for(route: &Route, model: &Model, token: &str, local_url: &str) -> Vec<(String, String)> {
     let marked = if model.context >= LONG_CONTEXT { format!("{}[1m]", model.id) } else { model.id.to_string() };
     let var = |k: &str, v: String| (k.to_string(), v);
-    vec![
+    let mut env = vec![
         var("ANTHROPIC_BASE_URL", format!("{}{PATH_PREFIX}{}", local_url.trim_end_matches('/'), route.id)),
         var("ANTHROPIC_AUTH_TOKEN", token.to_string()),
         var("ANTHROPIC_API_KEY", String::new()),
@@ -71,7 +71,13 @@ pub fn env_for(route: &Route, model: &Model, token: &str, local_url: &str) -> Ve
         var("ANTHROPIC_DEFAULT_SONNET_MODEL", marked.clone()),
         var("ANTHROPIC_DEFAULT_HAIKU_MODEL", marked),
         var("CLAUDE_CODE_SUBAGENT_MODEL", model.id.to_string()),
-    ]
+    ];
+    // The `[1m]` mark above makes the CLI take a 1M window and compact near its end; on a route that is a
+    // million tokens re-read every turn. The CLI compacts at this budget instead (`autoCompactThreshold`).
+    if let Some(budget) = model.compact_budget() {
+        env.push(var("CLAUDE_CODE_AUTO_COMPACT_WINDOW", budget.to_string()));
+    }
+    env
 }
 
 /// The block meta key the pane, its footer and its header read for the model the agent really runs: the route's
@@ -135,6 +141,20 @@ mod tests {
         assert_eq!(env["ANTHROPIC_DEFAULT_SONNET_MODEL"], "deepseek/deepseek-v4.1-flash-1017[1m]");
         assert_eq!(env["CLAUDE_CODE_SUBAGENT_MODEL"], "deepseek/deepseek-v4.1-flash-1017");
         assert!(!env.values().any(|v| v.contains("openrouter.ai")), "the upstream address stays in srv");
+    }
+
+    #[test]
+    fn a_model_with_a_long_window_compacts_at_the_budget_not_at_the_end_of_its_window() {
+        let route = catalog::route("openrouter").unwrap();
+        let long = route.model("deepseek/deepseek-v4.1-flash-1017").unwrap();
+        assert!(long.context >= LONG_CONTEXT, "the window the CLI is told is 1M");
+        let env: HashMap<_, _> = env_for(route, long, "t", "http://127.0.0.1:4000").into_iter().collect();
+        assert_eq!(env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"], "300000");
+        assert!(env["ANTHROPIC_DEFAULT_SONNET_MODEL"].ends_with("[1m]"), "the mark stays: the model does read 1M");
+        let short = Model { context: 128_000, ..*long };
+        assert_eq!(short.compact_budget(), None);
+        let env: HashMap<_, _> = env_for(route, &short, "t", "http://127.0.0.1:4000").into_iter().collect();
+        assert!(!env.contains_key("CLAUDE_CODE_AUTO_COMPACT_WINDOW"), "a window within the budget needs no override");
     }
 
     #[test]
