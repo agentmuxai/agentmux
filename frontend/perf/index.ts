@@ -56,7 +56,8 @@ export function recordIpcRoundtrip(command: string, durationMs: number): void {
     if (PERF_IPC_BLOCKLIST.has(command)) return;
     perfStore.recordIpc(command, durationMs);
     // A lab's probe (scripts/perf): a script that has put an array on the window gets every roundtrip.
-    window.__agentmuxIpcProbe?.push({ command, durationMs, at: performance.now() });
+    // No window under node (this module's own tests run there).
+    if (typeof window !== "undefined") window.__agentmuxIpcProbe?.push({ command, durationMs, at: performance.now() });
     if (durationMs > 16) {
         console.warn(`[perf] ipc ${command} ${durationMs.toFixed(1)}ms`);
     }
