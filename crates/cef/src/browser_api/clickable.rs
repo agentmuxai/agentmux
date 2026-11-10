@@ -76,12 +76,19 @@ fn child_ids(node: &Value) -> impl Iterator<Item = &str> {
     node.get("childIds").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str)
 }
 
-/// What the page shows inside `root`: the text of its text nodes, one space apart, clipped.
-fn text_under(nodes: &[Value], by_id: &HashMap<String, usize>, root: usize) -> String {
+/// What the page shows inside `root`: the text of its text nodes, one space apart, with a card or ID
+/// number, a code or a token masked before it is clipped (a cut through the middle of one would hide
+/// its shape from the mask the snapshot applies to every name). Left out: what the page hides, and a
+/// place the page shows a secret once (a code block, a Copy button's row), which the snapshot masks by
+/// where it is and a name made from it would carry out of that place.
+fn text_under(nodes: &[Value], by_id: &HashMap<String, usize>, root: usize, zones: &HashSet<&str>, hidden: &HashSet<i64>) -> String {
     let mut words: Vec<String> = Vec::new();
     let mut stack = vec![root];
     while let Some(i) = stack.pop() {
         let node = &nodes[i];
+        if i != root && (backend_of(node).is_some_and(|b| hidden.contains(&b)) || super::shown_once::starts_zone(node, zones)) {
+            continue;
+        }
         if role_of(node) == "StaticText" {
             if let Some(t) = node.pointer("/name/value").and_then(Value::as_str).map(str::trim).filter(|t| !t.is_empty()) {
                 words.push(t.to_string());
@@ -91,11 +98,11 @@ fn text_under(nodes: &[Value], by_id: &HashMap<String, usize>, root: usize) -> S
         let kids: Vec<usize> = child_ids(node).filter_map(|k| by_id.get(k).copied()).collect();
         stack.extend(kids.into_iter().rev());
     }
-    let joined = words.join(" ");
-    if joined.chars().count() <= MAX_NAME {
-        return joined;
+    let masked = agentmux_common::pii_mask::mask_bounded(&words.join(" "), MAX_NAME + 1);
+    if masked.chars().count() <= MAX_NAME {
+        return masked;
     }
-    let mut cut: String = joined.chars().take(MAX_NAME).collect();
+    let mut cut: String = masked.chars().take(MAX_NAME).collect();
     cut.push('…');
     cut
 }
@@ -124,8 +131,11 @@ pub(super) fn mark(nodes: &mut [Value], clickable: &HashSet<i64>, hidden: &HashS
             holds_control[i] |= holds_control[c] || super::snapshot::is_actionable_role(role_of(&nodes[c]));
         }
     }
+    let zones = super::shown_once::copy_zones(nodes);
     // Whether the node, or something above it, is a control or was marked: nothing below is marked.
     let mut covered = vec![false; nodes.len()];
+    // Whether the node is inside a place the page shows a secret once: not marked, and its text not copied out.
+    let mut zoned = vec![false; nodes.len()];
     let mut marked: Vec<(usize, String)> = Vec::new();
     for &i in &order {
         let node = &nodes[i];
@@ -135,18 +145,20 @@ pub(super) fn mark(nodes: &mut [Value], clickable: &HashSet<i64>, hidden: &HashS
             && marked.len() < MAX_MARKED
             && node.get("ignored").and_then(Value::as_bool) != Some(true)
             && !holds_control[i]
+            && !zoned[i]
+            && !super::shown_once::starts_zone(node, &zones)
             && size[i] <= MAX_SUBTREE
             && backend_of(node).is_some_and(|b| clickable.contains(&b) && !hidden.contains(&b));
         if candidate {
             covered[i] = true;
             let own = node.pointer("/name/value").and_then(Value::as_str).map(str::trim).unwrap_or("");
-            let name = if own.is_empty() { text_under(nodes, &by_id, i) } else { own.to_string() };
+            let name = if own.is_empty() { text_under(nodes, &by_id, i, &zones, hidden) } else { own.to_string() };
             marked.push((i, name));
         }
-        if covered[i] {
-            for k in child_ids(&nodes[i]).filter_map(|k| by_id.get(k).copied()).collect::<Vec<_>>() {
-                covered[k] = true;
-            }
+        let zone_here = zoned[i] || super::shown_once::starts_zone(&nodes[i], &zones);
+        for k in child_ids(&nodes[i]).filter_map(|k| by_id.get(k).copied()).collect::<Vec<_>>() {
+            covered[k] |= covered[i];
+            zoned[k] |= zone_here;
         }
     }
     let n = marked.len();
@@ -273,6 +285,72 @@ mod tests {
         }
         let all: HashSet<i64> = (0..(MAX_MARKED + 20) as i64).map(|i| 100 + i).collect();
         assert_eq!(mark(&mut nodes, &all, &HashSet::new()), MAX_MARKED);
+    }
+
+    const SECRET: &str = "Xy8Q~abcDEF1234ghijKLmnoPQRstu.vwxYZ0123";
+
+    #[test]
+    fn a_code_block_the_page_makes_clickable_keeps_its_role_so_its_secret_stays_masked() {
+        let mut nodes = vec![
+            ax("1", None, "RootWebArea", "", 1, &["2"]),
+            ax("2", Some("1"), "code", "", 2, &["3"]),
+            ax("3", Some("2"), "StaticText", SECRET, 3, &[]),
+        ];
+        assert_eq!(mark(&mut nodes, &HashSet::from([2]), &HashSet::new()), 0);
+        assert_eq!(role_of(&nodes[1]), "code");
+    }
+
+    #[test]
+    fn a_clickable_row_with_a_copy_button_or_around_a_code_block_does_not_copy_that_text_into_its_name() {
+        let mut nodes = vec![
+            ax("1", None, "RootWebArea", "", 1, &["2", "5"]),
+            ax("2", Some("1"), "generic", "", 2, &["3", "4"]),
+            ax("3", Some("2"), "code", "", 3, &["6"]),
+            ax("6", Some("3"), "StaticText", SECRET, 6, &[]),
+            ax("4", Some("2"), "StaticText", "Client secret", 4, &[]),
+            ax("5", Some("1"), "generic", "", 5, &["7"]),
+            ax("7", Some("5"), "generic", "", 7, &["8"]),
+            ax("8", Some("7"), "StaticText", "Token row", 8, &[]),
+        ];
+        assert_eq!(mark(&mut nodes, &HashSet::from([2, 5]), &HashSet::new()), 2);
+        assert_eq!(nodes[1]["name"]["value"], "Client secret");
+        assert!(!nodes[1]["name"]["value"].as_str().unwrap().contains("Xy8Q"));
+    }
+
+    #[test]
+    fn a_clickable_inside_a_code_block_is_not_marked() {
+        let mut nodes = vec![
+            ax("1", None, "RootWebArea", "", 1, &["2"]),
+            ax("2", Some("1"), "pre", "", 2, &["3"]),
+            ax("3", Some("2"), "generic", "", 3, &["4"]),
+            ax("4", Some("3"), "StaticText", SECRET, 4, &[]),
+        ];
+        assert_eq!(mark(&mut nodes, &HashSet::from([3]), &HashSet::new()), 0);
+    }
+
+    #[test]
+    fn text_the_page_hides_inside_a_clickable_is_not_in_its_name() {
+        let mut nodes = vec![
+            ax("1", None, "RootWebArea", "", 1, &["2"]),
+            ax("2", Some("1"), "generic", "", 2, &["3", "4"]),
+            ax("3", Some("2"), "StaticText", "Visible", 3, &[]),
+            ax("4", Some("2"), "StaticText", "Opacity zero text", 4, &[]),
+        ];
+        mark(&mut nodes, &HashSet::from([2]), &HashSet::from([4]));
+        assert_eq!(nodes[1]["name"]["value"], "Visible");
+    }
+
+    #[test]
+    fn a_card_number_that_crosses_the_clip_is_masked_whole_not_cut_into_a_prefix() {
+        let text = format!("{}4111111111111111", "a".repeat(72));
+        let mut nodes = vec![
+            ax("1", None, "RootWebArea", "", 1, &["2"]),
+            ax("2", Some("1"), "generic", "", 2, &["3"]),
+            ax("3", Some("2"), "StaticText", &text, 3, &[]),
+        ];
+        mark(&mut nodes, &HashSet::from([2]), &HashSet::new());
+        let name = nodes[1]["name"]["value"].as_str().unwrap();
+        assert!(!name.contains("4111"), "{name}");
     }
 
     /// A `DOMSnapshot.captureSnapshot` result: `(node name, backend id, clickable)` per node.
