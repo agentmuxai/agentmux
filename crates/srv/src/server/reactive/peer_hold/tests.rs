@@ -224,3 +224,33 @@ fn every_agent_gets_to_the_front_of_the_replay_in_turn() {
     assert_eq!(rotated(Vec::new(), 5), Vec::<String>::new(), "nothing held is nothing to rotate");
     assert_eq!(rotated(keys.clone(), 4).len(), keys.len(), "none is lost");
 }
+
+#[test]
+fn a_row_is_spent_at_its_hold_or_its_senders_deadline() {
+    let (req, _) = request("Pspent", "req-spent");
+    let mut row = crate::server::jekt_hold::held_row(&req, "req-spent".into(), 1_000);
+    row.expires_at_ms = 5_000;
+    assert!(!spent(&row, 4_999));
+    assert!(spent(&row, 5_000), "the hold ran out");
+    row.sender_expires_at_ms = Some(3_000);
+    assert!(spent(&row, 3_000), "the sender's deadline came first");
+    assert!(!spent(&row, 2_999));
+}
+
+#[tokio::test]
+async fn a_row_that_ran_out_is_dropped_not_sent_and_a_live_one_waits() {
+    let state = test_state();
+    listed("Pspenttwo", "charlie");
+    let (req, resp) = request("Pspenttwo", "req-spent-2");
+    hold_for_down_peer(&state, ReactiveAuthVia::FullAuthKey, &req, &resp).await.unwrap();
+    let mut row = state.mstore.jekt_held_for_target("peer:pspenttwo", 10).unwrap().remove(0);
+
+    // No peer and no relay login here, so a live row is not sent: it waits.
+    assert_eq!(send_row(&state, &row, &None).await, Sent::Later);
+    // The same row once its 24 h ran out is settled as gone without any send being tried.
+    row.expires_at_ms = agentmux_common::time::now_ms() - 1;
+    let sent = send_row(&state, &row, &None).await;
+    assert_eq!(sent, Sent::Gone);
+    settle(&state, &row, sent).await;
+    assert!(state.mstore.jekt_held_for_target("peer:pspenttwo", 10).unwrap().is_empty());
+}
