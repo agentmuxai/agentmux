@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createEffect, on, onCleanup, untrack, type Accessor } from "solid-js";
+import { createEffect, onCleanup, untrack, type Accessor } from "solid-js";
 import { useAgentDormant } from "../agent-dormancy";
 import type { DocumentState } from "../../../agent-model/types";
 import { SHOW_SETTLE_SAMPLE_MS, ShowSettle } from "./show-settle";
@@ -193,20 +193,6 @@ export function useScrolledOffRelease(opts: {
         stopSettleLoop();
         settleTimer = setTimeout(settleStep, SHOW_SETTLE_SAMPLE_MS);
     };
-    // Rows a snapshot restored as held (a restart or an upgrade brought the pane
-    // back): carried like rows held when the pane was hidden, so they stay open
-    // until seen in this visit and then scrolled off. A pane that restores while
-    // hidden takes them with the rest of its held rows when it is shown.
-    createEffect(
-        on(
-            () => opts.documentState().restoredHeldNodes,
-            (restored) => {
-                if (!restored || restored.size === 0 || untrack(dormant)) return;
-                for (const id of restored) carried.add(id);
-                beginSettle();
-            }
-        )
-    );
     createEffect(() => {
         const d = dormant();
         if (wasDormant && !d) {

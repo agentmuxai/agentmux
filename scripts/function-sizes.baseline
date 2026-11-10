@@ -395,7 +395,7 @@
 172 frontend/app/view/agent/hooks/usePaneReveal.ts::usePaneReveal
 121 frontend/app/view/agent/hooks/usePtyWidth.ts::usePtyWidth
 140 frontend/app/view/agent/hooks/useShellNodeStream.ts::useShellNodeStream
-137 frontend/app/view/agent/hooks/useSnapshotPersistence.ts::useSnapshotPersistence
+124 frontend/app/view/agent/hooks/useSnapshotPersistence.ts::useSnapshotPersistence
 173 frontend/app/view/agent/hooks/useSubagentBackfillGate.ts::useSubagentBackfillGate
 185 frontend/app/view/agent/offline/offline-input.ts::createOfflineInput
 229 frontend/app/view/agent/parseHistoryLines.ts::HistoryParser::feed
@@ -405,7 +405,7 @@
 138 frontend/app/view/agent/stream-flush-queue.ts::createStreamFlushQueue
 116 frontend/app/view/agent/stream-parser.ts::ClaudeCodeStreamParser::eventToNode
 232 frontend/app/view/agent/useAgentStream.ts::useAgentStream
-116 frontend/app/view/agent/virtualization/held-release.ts::useScrolledOffRelease
+102 frontend/app/view/agent/virtualization/held-release.ts::useScrolledOffRelease
 115 frontend/app/view/audit/audit-manager.tsx::AuditManager
 101 frontend/app/view/browser/browser-profile-menu.tsx::BrowserProfileButton
 141 frontend/app/view/browser/use-browser-auth.ts::useBrowserAuth
