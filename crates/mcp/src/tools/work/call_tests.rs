@@ -265,11 +265,9 @@ async fn a_tool_missing_what_it_needs_refuses_before_it_asks_srv() {
         ("WorkEnqueue", json!({}), "missing required parameter: title"),
         ("WorkEnqueue", json!({ "title": "T" }), "missing required parameter: payload"),
         ("WorkUpdate", json!({}), "missing required parameter: id"),
-        ("WorkUpdate", json!({ "id": "7" }), "missing required parameter: attempt"),
         ("WorkUpdate", json!({ "id": "a/b", "attempt": 1 }), "is neither a task number"),
         ("WorkAsk", json!({ "id": "7", "attempt": 1 }), "Tasks ask needs a question"),
         ("WorkSubmit", json!({ "id": "7", "attempt": 1 }), "Tasks submit needs a result"),
-        ("WorkHeartbeat", json!({ "id": "7" }), "missing required parameter: attempt"),
         ("WorkComplete", json!({ "id": "7", "attempt": 1 }), "Tasks complete requires a non-empty 'result'"),
         ("WorkHold", json!({}), "missing required parameter: id"),
         ("WorkAccept", json!({}), "missing required parameter: id"),
@@ -283,6 +281,47 @@ async fn a_tool_missing_what_it_needs_refuses_before_it_asks_srv() {
         assert!(err.contains(wanted), "{tool} {args}: {err:?}, wanted {wanted:?}");
         assert!(srv.seen.lock().unwrap().is_empty(), "{tool} {args} asked srv");
     }
+}
+
+/// What a call without `attempt` is told, given the claimed tasks srv lists: the refusal asks srv which tasks
+/// the agent holds (one GET), and sends nothing else.
+async fn missing_attempt_says(tool: &str, args: Value, listed: Value) -> String {
+    let srv = stub_srv("200 OK", listed);
+    let fx = Fixture::new(&srv);
+    let err = call(tool, &args, &fx.cx()).await.expect_err("a call without an attempt refuses").to_string();
+    let seen = srv.seen.lock().unwrap().clone();
+    assert_eq!(seen.len(), 1, "only the list of claimed tasks: {seen:?}");
+    assert!(seen[0].0.starts_with("/agentmux/work?"), "{seen:?}");
+    err
+}
+
+#[tokio::test]
+async fn a_call_without_an_attempt_is_told_the_attempt_it_holds() {
+    let listed = json!({ "items": [
+        { "ref": "#46807", "state": "claimed", "claimed_by": "tester", "attempts": 2 },
+        { "ref": "#9", "state": "claimed", "claimed_by": "someone-else", "attempts": 5 },
+    ] });
+    for tool in ["WorkUpdate", "WorkHeartbeat"] {
+        let err = missing_attempt_says(tool, json!({ "id": "46807" }), listed.clone()).await;
+        assert!(err.contains("You hold #46807 as attempt 2: pass id=46807 attempt=2"), "{tool}: {err}");
+    }
+}
+
+#[tokio::test]
+async fn a_call_without_an_attempt_for_a_task_it_does_not_hold_lists_what_it_holds() {
+    let listed = json!({ "items": [
+        { "ref": "#1", "state": "claimed", "claimed_by": "tester", "attempts": 1 },
+        { "num": 2, "state": "claimed", "claimed_by": "tester", "attempts": 3 },
+    ] });
+    let err = missing_attempt_says("WorkUpdate", json!({ "id": "7" }), listed).await;
+    assert!(err.contains("You hold: #1 (attempt 1), #2 (attempt 3)"), "{err}");
+    assert!(!err.contains("attempt=") , "it does not pick one for the agent: {err}");
+}
+
+#[tokio::test]
+async fn a_call_without_an_attempt_and_no_claimed_task_is_told_to_claim() {
+    let err = missing_attempt_says("WorkUpdate", json!({ "id": "7" }), json!({ "items": [] })).await;
+    assert!(err.contains("You hold no claimed task: claim one first"), "{err}");
 }
 
 #[tokio::test]

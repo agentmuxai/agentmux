@@ -244,8 +244,9 @@ async fn run_work_update(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
     let self_id = std::env::var("AGENTMUX_AGENT_ID").ok().filter(|s| !s.is_empty())
         .ok_or_else(|| anyhow::anyhow!("AGENTMUX_AGENT_ID is not set"))?;
     let id = task_id(arguments)?;
-    let attempt = arguments.get("attempt").and_then(|v| v.as_i64())
-        .ok_or_else(|| anyhow::anyhow!("missing required parameter: attempt (from the Tasks claim answer)"))?;
+    let Some(attempt) = arguments.get("attempt").and_then(|v| v.as_i64()) else {
+        return Err(missing_attempt(arguments, &self_id, cx).await);
+    };
     let str_arg = |k: &str| arguments.get(k).and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty());
     let (segment, text) = match name {
         "WorkAsk" => ("ask", str_arg("question").ok_or_else(|| anyhow::anyhow!("Tasks ask needs a question"))?),
@@ -311,8 +312,9 @@ async fn run_work_heartbeat(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> 
     let self_id = std::env::var("AGENTMUX_AGENT_ID").ok().filter(|s| !s.is_empty())
         .ok_or_else(|| anyhow::anyhow!("AGENTMUX_AGENT_ID is not set"))?;
     let id = task_id(arguments)?;
-    let attempt = arguments.get("attempt").and_then(|v| v.as_i64())
-        .ok_or_else(|| anyhow::anyhow!("missing required parameter: attempt (from the Tasks claim answer)"))?;
+    let Some(attempt) = arguments.get("attempt").and_then(|v| v.as_i64()) else {
+        return Err(missing_attempt(arguments, &self_id, cx).await);
+    };
 
     let (segment, result_text) = match name {
         "WorkHeartbeat" => ("heartbeat", String::new()),
@@ -686,6 +688,38 @@ fn attached_text(v: &Value) -> String {
         })
         .collect();
     format!(" Attached: {}.", names.join(", "))
+}
+
+/// The refusal for a call without `attempt`: the tasks this agent holds, each with the attempt to pass. A
+/// weak model repeats a bare refusal; this one says what to send. It never fills the attempt in: the
+/// argument is how srv rejects a stale holder, and a default would defeat it.
+async fn missing_attempt(arguments: &Value, self_id: &str, cx: &ToolCtx<'_>) -> anyhow::Error {
+    let ToolCtx { local_url, auth_key, client, .. } = *cx;
+    let asked = arguments.get("id").and_then(|v| v.as_str()).map(|s| s.trim().trim_start_matches('#')).unwrap_or("");
+    let url = format!("{}/agentmux/work", local_url.trim_end_matches('/'));
+    let held: Vec<(String, i64)> = match client.get(&url).query(&[("state", "claimed"), ("limit", "200")]).header(AUTH_KEY_HEADER, auth_key).send().await {
+        Ok(resp) => resp.json::<Value>().await.ok(),
+        Err(_) => None,
+    }
+    .and_then(|v| v.get("items").and_then(Value::as_array).cloned())
+    .unwrap_or_default()
+    .iter()
+    .filter(|it| it.get("claimed_by").and_then(Value::as_str) == Some(self_id))
+    .filter_map(|it| {
+        let task = it.get("ref").and_then(Value::as_str).map(|r| r.trim_start_matches('#').to_string())
+            .or_else(|| it.get("num").and_then(Value::as_i64).map(|n| n.to_string()))?;
+        Some((task, it.get("attempts").and_then(Value::as_i64)?))
+    })
+    .collect();
+    let mine = held.iter().find(|(task, _)| !asked.is_empty() && task == asked);
+    anyhow::anyhow!(match (mine, held.as_slice()) {
+        (Some((task, n)), _) => format!("missing required parameter: attempt. You hold #{task} as attempt {n}: pass id={task} attempt={n}."),
+        (None, []) => "missing required parameter: attempt (from the Tasks claim answer). You hold no claimed task: claim one first, and pass the attempt it answers.".to_string(),
+        (None, held) => format!(
+            "missing required parameter: attempt (from the Tasks claim answer). You hold: {}. Pass the id and attempt of the one you mean.",
+            held.iter().map(|(task, n)| format!("#{task} (attempt {n})")).collect::<Vec<_>>().join(", ")
+        ),
+    })
 }
 
 fn task_id(arguments: &Value) -> Result<&str> {

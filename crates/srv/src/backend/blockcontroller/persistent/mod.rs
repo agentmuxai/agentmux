@@ -1572,6 +1572,7 @@ fn surface_error_line(
 
 mod eager_resume;
 mod input;
+mod loop_stop;
 #[cfg(test)]
 use input::park_tool_permission_request;
 pub(crate) mod lifecycle;
