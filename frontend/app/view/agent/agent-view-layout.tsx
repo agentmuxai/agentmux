@@ -223,16 +223,17 @@ function AgentViewTranscript({ v }: { v: AgentViewParts }): JSX.Element {
     );
 }
 
-/** Below the transcript: the panels, the preparing row, the composer strip and the composer. */
-function AgentViewBottom({ v }: { v: AgentViewParts }): JSX.Element {
-    const { model, agentId, found, shown, turn, streams, sending, failure, late } = v;
-    const { paneModel, block, provider, providerKey, meta, context } = found;
-    const { commands, paneBusy } = sending;
-    const { account } = failure;
-    // Compacts the conversation, then moves the agent: the card after a refused change and the panel's rows share it,
-    // one at a time, and a switch that worked clears the card whichever of them asked.
+/**
+ * Compacts the conversation, then moves the agent: the card after a refused change and the model panel's rows share it,
+ * one at a time, and a switch that worked clears the card whichever of them asked.
+ */
+function compactThenSwitchFor(
+    blockId: string,
+    commands: { sendWithState: (text: string) => Promise<void> },
+    paneModel: { state: { lastCompactionBoundaryAt: number | null } }
+): (route: string, modelId: string) => Promise<void> {
     let compacting = false;
-    const compactThenSwitchTo = async (route: string, modelId: string) => {
+    return async (route, modelId) => {
         if (compacting) throw new Error("A compaction is already running");
         compacting = true;
         try {
@@ -240,14 +241,25 @@ function AgentViewBottom({ v }: { v: AgentViewParts }): JSX.Element {
                 compact: () => commands.sendWithState("/compact"),
                 boundaryAt: () => paneModel.state.lastCompactionBoundaryAt,
                 switchTo: async () => {
-                    await RpcApi.AgentModelSwitchCommand(TabRpcClient, { blockid: model.blockId, route, model: modelId, restart: true });
+                    const { failed } = await RpcApi.AgentModelSwitchCommand(TabRpcClient, { blockid: blockId, route, model: modelId, restart: true });
+                    // Saved, but a pane that could not restart still runs the old model: the card stays and says so.
+                    if (failed.length > 0) throw new Error(`Saved, but the running pane did not switch: ${failed.join("; ")}`);
                 },
             });
-            await dismissModelUndone(model.blockId);
+            await dismissModelUndone(blockId);
         } finally {
             compacting = false;
         }
     };
+}
+
+/** Below the transcript: the panels, the preparing row, the composer strip and the composer. */
+function AgentViewBottom({ v }: { v: AgentViewParts }): JSX.Element {
+    const { model, agentId, found, shown, turn, streams, sending, failure, late } = v;
+    const { paneModel, block, provider, providerKey, meta, context } = found;
+    const { commands, paneBusy } = sending;
+    const { account } = failure;
+    const compactThenSwitchTo = compactThenSwitchFor(model.blockId, commands, paneModel);
     return (
         <>
             {/* Login, decisions, questions, queue, recovery banners, activity dock,
