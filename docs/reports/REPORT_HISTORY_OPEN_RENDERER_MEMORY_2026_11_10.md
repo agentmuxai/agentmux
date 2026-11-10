@@ -1,6 +1,7 @@
 # Report: why opening an agent pane with history costs the main renderer about 1 GB
 
 **Date:** 2026-11-10
+**Status:** implemented in PR #6921 (the two fixes in §4); the before/after run is a lab and has not been run.
 **Author:** Loap-3@narko (task #46547)
 **Build measured:** 0.60.22 `main` (own isolated dev instance; not a lab run, no scripted soak)
 
