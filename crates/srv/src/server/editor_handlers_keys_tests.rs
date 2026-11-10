@@ -26,9 +26,8 @@ impl Drop for DataHome {
 /// Run `writeagentconfig` for an `.mcp.json` naming `slug`, as `ctx`, and return the file as
 /// written (or the refusal).
 async fn write_mcp_json(ctx: RpcContext, slug: &str) -> Result<serde_json::Value, String> {
-    // The data home is process-wide; keep these two tests from overlapping each other.
-    static ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let _held = ENV.lock().unwrap_or_else(|e| e.into_inner());
+    // The data home is process-wide; hold the one shared lock every test that sets it uses.
+    let _held = crate::backend::mcp_config_file::data_home_lock();
     let data = tempfile::tempdir().unwrap();
     let _home = DataHome::set(data.path());
     let state = crate::server::tests::test_state();
