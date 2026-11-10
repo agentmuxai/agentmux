@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! The key a LAN peer's agent signs with, as this machine trusts it: asked of the
-//! peers, pinned on first use, and moved only when the hosting install vouches
-//! (`lan_continuity`). Shared by the LAN jekt check (`verify_lan_signature`) and
+//! peers, pinned only when a trusted install vouches for it, and moved only the same
+//! way (`lan_continuity`). Shared by the LAN jekt check (`verify_lan_signature`) and
 //! the remote-operation check (`remote_ops::receive`), so the two can't judge a
 //! sender's key differently.
 

@@ -66,7 +66,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 }
 
 /// An agent's `adopt` of a refused LAN key: done only if the install that hosts the
-/// agent vouches for it and this machine trusts that install, found by srv now.
+/// agent vouches for it and this machine trusts that install, found by srv now. The
+/// exception is a name with no pin yet: its first key can be accepted without a vouch
+/// (there is no pin to move), and the acceptance is logged as the agent that made it.
 async fn agent_adopt(state: &AppState, ctx: &RpcContext, req: &CommandPinsChangeData) -> Result<(), String> {
     if req.kind != "lan" {
         return Err("pins: an agent adopts a LAN key only; an install pin needs the user's window".to_string());
@@ -181,7 +183,9 @@ fn change(state: &AppState, req: &CommandPinsChangeData, how: Change) -> Result<
         "wan" => change_wan(&agent, req.channel.as_deref().ok_or("pins: a WAN pin needs its channel")?, how, req.expect.as_deref())?,
         other => return Err(format!("pins: unknown kind {other:?} (lan or wan)")),
     };
-    lan_continuity::audit(&json!({ "action": how.as_str(), "kind": req.kind, "agent": agent, "channel": req.channel, "from": done.0, "to": done.1, "by": "operator" }));
+    // Accepting the first key of a name that had no pin is a `first-pin`, as it is when an agent or a vouching install does it.
+    let action = if how == Change::Adopt && req.kind == "lan" && done.0.is_none() { "first-pin" } else { how.as_str() };
+    lan_continuity::audit(&json!({ "action": action, "kind": req.kind, "agent": agent, "channel": req.channel, "from": done.0, "to": done.1, "by": "operator" }));
     state.broker.publish_event::<crate::backend::mps_events::PinsChanged>(&(), vec![], 0);
     Ok(())
 }
@@ -388,6 +392,8 @@ mod tests {
         let (err, _) = call(&state, window(), COMMAND_PINS_ADOPT, adopt).await;
         assert_eq!(err, "");
         assert_eq!(state.mstore.lan_peer_pubkey_pin_load("pinfirst-a").unwrap().as_deref(), Some(key.as_str()));
+        let by_window = lan_continuity::AUDITED.lock().unwrap().iter().filter(|e| e["agent"] == "pinfirst-a" && e["action"] == "first-pin").count();
+        assert_eq!(by_window, 1, "the window's accept of a first key is a first-pin line too");
 
         // An agent may accept a first key too (no vouching install is needed), recorded as the agent.
         let key_b = BASE64.encode([5u8; 32]);
