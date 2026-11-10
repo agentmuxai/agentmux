@@ -473,6 +473,12 @@ impl PersistentSubprocessController {
         Some(apply_deferred_restart)
     }
 
+    /// Asks for the deferred runtime-config restart at the boundary about to end the turn: the replacement is brought up
+    /// at once by the kill arm, which is what `turn_boundary_locked` commits when `restart_when_idle` is set.
+    pub(super) fn restart_at_boundary_locked(inner: &mut PersistentInner) {
+        inner.restart_when_idle = true;
+    }
+
     /// Make sure a watchdog task is looking after a non-empty deferred queue.
     ///
     /// Messages are queued only while the process cannot take a write (see

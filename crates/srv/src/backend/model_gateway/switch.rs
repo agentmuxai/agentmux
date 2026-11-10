@@ -101,13 +101,14 @@ fn place_of(choice: Option<&Choice>) -> Previous {
 /// now becomes `previous`, so the panel can still offer it, and its route is left like any other ([`finish_leaving`]).
 pub(super) fn restore(mstore: &Store, def_id: &str, to: &Previous) -> Result<(), String> {
     let failed = launch::choice_of(mstore, def_id);
-    remember_previous(mstore, def_id, failed.as_ref())?;
+    // `previous` is written once the old place is back: a restore that fails leaves both as they were.
     if to.route.is_empty() {
         mstore.agent_content_delete(def_id, launch::CONTENT_TYPE).map_err(|e| e.to_string())?;
     } else {
         let harness = catalog::route(&to.route).map(|r| r.harness).ok_or_else(|| format!("unknown model route {:?}", to.route))?;
         launch::set_choice(mstore, def_id, harness, &to.route, &to.model)?;
     }
+    remember_previous(mstore, def_id, failed.as_ref())?;
     if let Some(left) = failed.as_ref().filter(|f| f.route != to.route) {
         mark_leaving(mstore, def_id, left)?;
     }
