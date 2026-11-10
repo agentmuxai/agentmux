@@ -316,10 +316,14 @@ const ERR_SEC_INTERACTION_NOT_ALLOWED: i32 = -25308;
 /// `errSecDuplicateItem`: what a write over an item that doesn't trust this
 /// build ends in (it can't be read to be updated, so a new one is added).
 const ERR_SEC_DUPLICATE_ITEM: i32 = -25299;
+/// `errSecInvalidOwnerEdit`: what the Keychain store's delete (`SecItemDelete`)
+/// ends in for an item that doesn't trust this build. keyring 2 deleted by
+/// item reference, which needs no consent, so it never met this.
+const ERR_SEC_INVALID_OWNER_EDIT: i32 = -25244;
 
 /// Delete the keychain item for `account` without reading it, which an item
 /// that doesn't trust this build allows: found by reference, never by its
-/// secret (`keyring-core`'s delete reads the secret first). `Ok(false)` when
+/// secret (`keyring-core`'s delete asks for the item's owner rights). `Ok(false)` when
 /// there is none. macOS only.
 #[cfg(target_os = "macos")]
 fn delete_without_reading(account: &str) -> Result<bool, String> {
@@ -350,9 +354,10 @@ fn delete_without_reading(account: &str) -> Result<bool, String> {
 }
 
 /// Whether a failed keychain call means the item exists but doesn't trust
-/// this build: a read says `errSecAuthFailed`, a write `errSecDuplicateItem`.
+/// this build: a read says `errSecAuthFailed`, a write `errSecDuplicateItem`,
+/// a delete `errSecInvalidOwnerEdit`.
 fn untrusted_item(e: &keyring_core::Error) -> bool {
-    matches!(keychain_status(e), Some(ERR_SEC_AUTH_FAILED | ERR_SEC_DUPLICATE_ITEM))
+    matches!(keychain_status(e), Some(ERR_SEC_AUTH_FAILED | ERR_SEC_DUPLICATE_ITEM | ERR_SEC_INVALID_OWNER_EDIT))
 }
 
 /// [`delete_without_reading`] as a `keyring_core` result, for [`replace_untrusted`].
@@ -687,6 +692,10 @@ mod tests {
         assert_eq!(keychain_error("read", &err(ERR_SEC_AUTH_FAILED)), NEEDS_CONSENT);
         assert!(keychain_error("read", &err(ERR_SEC_INTERACTION_NOT_ALLOWED)).contains("locked"));
         assert!(!is_needs_consent(&keychain_error("read", &err(-25299))));
+        // A delete of an item saved by another build ends in errSecInvalidOwnerEdit
+        // (Keychain store 1.0.2 deletes with SecItemDelete); it is deleted by reference instead.
+        assert!(untrusted_item(&err(ERR_SEC_INVALID_OWNER_EDIT)));
+        assert!(!untrusted_item(&err(ERR_SEC_INTERACTION_NOT_ALLOWED)));
         assert!(!is_needs_consent(&keychain_error("read", &keyring_core::Error::NoEntry)));
     }
 
