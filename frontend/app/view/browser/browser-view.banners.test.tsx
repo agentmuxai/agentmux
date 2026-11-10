@@ -171,6 +171,14 @@ describe("the attention banner", () => {
         expect(back.disabled).toBe(true);
     });
 
+    it("a cancelled file chooser says why and how to answer it, with Dismiss and no Back or Allow", () => {
+        const v = mount({ attention: att({ kind: "notice", chooser: "choose a file" }) });
+        const banner = v.banner() as HTMLElement;
+        expect(banner.textContent).toContain("The page asked to choose a file, but an agent drives this pane, so AgentMux cancelled it. Use Take over");
+        const labels = [...banner.querySelectorAll(".browser-attention-actions button")].map((b) => b.textContent?.trim());
+        expect(labels).toEqual(["Dismiss"]);
+    });
+
     it("is gone when nothing is asked", () => {
         const v = mount({ attention: att({ kind: "handoff", reason: "x" }) });
         expect(v.banner()).not.toBeNull();

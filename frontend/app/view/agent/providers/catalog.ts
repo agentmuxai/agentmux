@@ -118,7 +118,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         npmPackage: "@anthropic-ai/claude-code",
         // Keep in sync with crates/srv/src/backend/providers.rs `pinned_version`,
         // enforced by ./pin-consistency.test.ts.
-        pinnedVersion: "2.1.288",
+        pinnedVersion: "2.1.321",
         docsUrl: "https://docs.anthropic.com/claude-code",
         windowsInstallCommand: "irm https://claude.ai/install.ps1 | iex",
         unixInstallCommand: "curl -fsSL https://claude.ai/install.sh | bash",
@@ -178,7 +178,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         models: [
             { value: "opus", label: "Opus 5.5", description: "Highest quality", aliases: ["claude-opus"] },
             { value: "sonnet", label: "Sonnet 5.5", default: true, description: "Balanced speed and quality", aliases: ["claude-sonnet"] },
-            { value: "haiku", label: "Haiku 4.5", description: "Fastest", aliases: ["claude-haiku"] },
+            { value: "haiku", label: "Haiku 5.5", description: "Fastest", aliases: ["claude-haiku"] },
             // No confirmed generic "fable" alias (unlike opus/sonnet/haiku above) —
             // `claude --help` documents `--model` as taking "an alias for the latest
             // model (e.g. 'sonnet' or 'opus') or a model's full name", and lists no
@@ -186,7 +186,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
             // family already relied on by context-window.ts's 1M band. Unlike the
             // alias rows above, a concrete id does NOT self-resolve, so
             // `setProviderModels` refreshes this row's `value` as well as its label.
-            { value: "claude-fable-5-1", label: "Fable 5.1", description: "Long-horizon work" },
+            { value: "claude-fable-5-2", label: "Fable 5.2", description: "Long-horizon work" },
         ],
     },
     codex: {
@@ -284,7 +284,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         authCheckCommand: ["auth", "status"],
         authLoginCommand: ["auth", "login"],
         npmPackage: "@google/gemini-cli",
-        pinnedVersion: "0.62.0",
+        pinnedVersion: "0.67.0",
         docsUrl: "https://ai.google.dev/gemini-cli",
         windowsInstallCommand: "npm install -g @google/gemini-cli",
         unixInstallCommand: "npm install -g @google/gemini-cli",
@@ -328,7 +328,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         authCheckCommand: ["auth", "status"],
         authLoginCommand: ["auth"],
         npmPackage: "@qwen-code/qwen-code",
-        pinnedVersion: "0.24.7",
+        pinnedVersion: "0.27.1",
         docsUrl: "https://qwenlm.github.io/qwen-code-docs",
         windowsInstallCommand: "npm install -g @qwen-code/qwen-code",
         unixInstallCommand: "npm install -g @qwen-code/qwen-code",
@@ -385,7 +385,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // only the args here. Kimi's `["login"]` is the convention.
         authLoginCommand: ["models", "auth", "login", "--provider", "openai-codex"],
         npmPackage: "openclaw",
-        pinnedVersion: "2026.9.8",
+        pinnedVersion: "2026.11.2",
         docsUrl: "https://docs.openclaw.ai",
         windowsInstallCommand: "npm install -g openclaw",
         unixInstallCommand: "npm install -g openclaw",
@@ -457,7 +457,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         authCheckCommand: ["auth", "status"],
         authLoginCommand: ["auth", "login"],
         npmPackage: "@github/copilot",
-        pinnedVersion: "1.0.91",
+        pinnedVersion: "1.0.108",
         docsUrl: "https://docs.github.com/copilot/concepts/agents/about-copilot-cli",
         windowsInstallCommand: "npm install -g @github/copilot",
         unixInstallCommand: "npm install -g @github/copilot",
@@ -596,7 +596,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         requiresLoginTty: true,
         headlessLoginUrlUnsupported: true,
         npmPackage: "@kilocode/cli",
-        pinnedVersion: "7.8.8",
+        pinnedVersion: "7.8.27",
         docsUrl: "https://kilo.ai/docs/cli",
         windowsInstallCommand: "npm install -g @kilocode/cli",
         unixInstallCommand: "npm install -g @kilocode/cli",
@@ -629,7 +629,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         requiresLoginTty: true,
         headlessLoginUrlUnsupported: true,
         npmPackage: "cline",
-        pinnedVersion: "3.0.71",
+        pinnedVersion: "3.0.74",
         docsUrl: "https://docs.cline.bot/cli/cli-reference",
         windowsInstallCommand: "npm install -g cline",
         unixInstallCommand: "npm install -g cline",
@@ -664,7 +664,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         requiresLoginTty: true,
         headlessLoginUrlUnsupported: true,
         npmPackage: "opencode-ai",
-        pinnedVersion: "1.19.0",
+        pinnedVersion: "1.19.5",
         docsUrl: "https://opencode.ai/docs/",
         windowsInstallCommand: "npm install -g opencode-ai",
         unixInstallCommand: "npm install -g opencode-ai",
@@ -701,7 +701,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         headlessLoginUrlUnsupported: true,
         npmPackage: "",
         managedInstall: true,
-        pinnedVersion: "1.54.0",
+        pinnedVersion: "1.58.0",
         versionSource: { kind: "github-release", repo: "aaif-goose/goose" },
         docsUrl: "https://goose-docs.ai/docs/getting-started/installation",
         windowsInstallCommand: "irm https://raw.githubusercontent.com/aaif-goose/goose/main/download_cli.ps1 | iex",
@@ -739,7 +739,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         headlessLoginUrlUnsupported: true,
         npmPackage: "",
         managedInstall: true,
-        pinnedVersion: "1.0.52",
+        pinnedVersion: "1.0.77",
         versionSource: { kind: "vendor", url: "https://x.ai/cli/stable" },
         docsUrl: "https://github.com/xai-org/grok-build",
         windowsInstallCommand: "irm https://x.ai/cli/install.ps1 | iex",
@@ -802,6 +802,8 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         resumeFlag: null,
         sessionIdField: "sessionId",
         controllerType: "acp",
+        // Keep the minimum in step with DSH_MIN_NODE in crates/srv/src/backend/blockcontroller/acp_prelaunch.rs, which
+        // refuses to restart an already-installed dsh agent on an older Node.
         systemPrereqs: [{ ...NODE_PREREQ, minVersion: "24.9.0" }, NPM_PREREQ],
     },
     aider: {
@@ -895,7 +897,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         headlessLoginUrlUnsupported: true,
         npmPackage: "",
         managedInstall: true,
-        pinnedVersion: "1.4.7-R6101.1",
+        pinnedVersion: "1.4.14-R7309.1",
         versionSource: { kind: "vendor", url: "https://api.meta.ai/muse-code/channels/muse-stable" },
         docsUrl: "https://dev.meta.ai/docs/muse-code",
         windowsInstallCommand: "irm https://dev.meta.ai/install.ps1 | iex",

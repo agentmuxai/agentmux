@@ -11,6 +11,7 @@
  * module, so `createRowPanels` can be split without changing one of them.
  */
 
+import { noteWindowResize, resetWindowResizeForTests, WINDOW_RESIZE_SETTLE_MS } from "@/app/platform/window-resize";
 import type { RecentSessionRow } from "@/types/rpc/RecentSessionRow";
 import { createEffect, createRoot } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -813,11 +814,13 @@ describe("Escape", () => {
 });
 
 describe("the grid", () => {
-    function grid(columnsText: string) {
+    function grid(columnsText: string, style: object = {}) {
         let text = columnsText;
-        vi.spyOn(window, "getComputedStyle").mockImplementation(() => ({ gridTemplateColumns: text }) as never);
+        vi.spyOn(window, "getComputedStyle").mockImplementation(
+            () => ({ ...style, gridTemplateColumns: text }) as never
+        );
         const observers: Array<{
-            cb: () => void;
+            cb: (entries?: unknown[]) => void;
             disconnect: ReturnType<typeof vi.fn>;
             observe: ReturnType<typeof vi.fn>;
         }> = [];
@@ -900,6 +903,47 @@ describe("the grid", () => {
         expect(t.panels.panelAfter("r2")).toBeNull();
         dispose();
         expect(g.observers[0].disconnect).toHaveBeenCalledTimes(1);
+    });
+
+    it("works the count out from the observed width while the window is resized, and reads it again when it settles", () => {
+        vi.useFakeTimers();
+        try {
+            const g = grid("1fr 1fr 1fr", { columnGap: "8px", getPropertyValue: () => "240px" });
+            const t = build({}, six);
+            measure(t);
+            t.panels.setOpenMenuId("r0");
+            expect(t.panels.panelAfter("r2")).toBe(six[0]);
+            const reads = vi.mocked(window.getComputedStyle).mock.calls.length;
+            noteWindowResize();
+            // 500 px holds two 240 px tiles and a gap; the browser is not asked
+            g.observers[0].cb([{ contentRect: { width: 500 } }]);
+            expect(t.panels.panelAfter("r1")).toBe(six[0]);
+            expect(t.panels.panelAfter("r2")).toBeNull();
+            expect(vi.mocked(window.getComputedStyle).mock.calls.length).toBe(reads);
+            // the drag settles on a width the browser lays out as three columns after all
+            vi.advanceTimersByTime(WINDOW_RESIZE_SETTLE_MS);
+            expect(vi.mocked(window.getComputedStyle).mock.calls.length).toBeGreaterThan(reads);
+            expect(t.panels.panelAfter("r2")).toBe(six[0]);
+        } finally {
+            resetWindowResizeForTests();
+            vi.useRealTimers();
+        }
+    });
+
+    it("keeps reading the columns from the browser when the tile minimum or gap is not a plain pixel length", () => {
+        const g = grid("1fr 1fr 1fr", { columnGap: "normal", getPropertyValue: () => "" });
+        const t = build({}, six);
+        measure(t);
+        t.panels.setOpenMenuId("r0");
+        noteWindowResize();
+        try {
+            g.set("1fr 1fr");
+            g.observers[0].cb([{ contentRect: { width: 500 } }]);
+            expect(t.panels.panelAfter("r1")).toBe(six[0]);
+            expect(t.panels.panelAfter("r2")).toBeNull();
+        } finally {
+            resetWindowResizeForTests();
+        }
     });
 
     it("measures once where there is no ResizeObserver", () => {

@@ -190,6 +190,18 @@ impl StdoutReader {
         crate::backend::model_gateway::spend::rewrite_result_total(line, &agent)
     }
 
+    /// Settles a model change waiting on its first turn with the `result` frame that ended it; whether the change was
+    /// undone, which needs the harness restarted on the old place.
+    fn settle_route_trial(&self, parsed: &serde_json::Value) -> bool {
+        // A replaced process's late frame ends nothing the current one is doing.
+        if self.inner_read.lock().unwrap().spawn_generation != self.my_generation_read {
+            return false;
+        }
+        let Some(mstore) = self.mstore_read.as_ref() else { return false };
+        let Some(agent) = crate::identity::resolver::block_agent_id(mstore, &self.block_id_read) else { return false };
+        crate::backend::model_gateway::trial::settle(mstore, &agent, &self.block_id_read, parsed).is_some()
+    }
+
     /// One line of the CLI's stdout.
     fn handle_line(&mut self, line: String) {
         if line.trim().is_empty() {
@@ -563,6 +575,12 @@ impl StdoutReader {
         // between the decision and the kill.
         // Whether the deferred restart may apply: see
         // `turn_boundary_locked`.
+        // The first turn on a changed model route or model decides the change: refused, the agent is put back and
+        // restarted on the place it came from, by the same deferred restart a runtime-config change uses. It is asked
+        // for before the boundary, which commits it in the acquisition that ends the turn.
+        if self.settle_route_trial(parsed) {
+            PersistentSubprocessController::restart_at_boundary_locked(&mut self.inner_read.lock().unwrap());
+        }
         let boundary = PersistentSubprocessController::turn_boundary_locked(
             &mut self.inner_read.lock().unwrap(),
             &self.health_read,

@@ -40,8 +40,8 @@ pub(super) fn hands_over_work(identity: &Store, req: &InjectionRequest, target_u
         .unwrap_or(false)
 }
 
-/// The decision for a routine message to a running agent. Pure of the
-/// controllers: `last_output_ms` is `session_last_output`'s answer.
+/// The decision for a routine message to a running agent, and the words for why it was not held.
+/// Pure of the controllers: `last_output_ms` is `session_last_output`'s answer.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn decide(
     mstore: &Store,
@@ -53,22 +53,80 @@ pub(super) fn decide(
     now_ms: i64,
     after_ms: i64,
 ) -> Decision {
+    decide_why(mstore, identity, req, target_uid, target_slug, last_output_ms, now_ms, after_ms).0
+}
+
+/// [`decide`], with the reason: what the log says for a message delivered rather than held.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn decide_why(
+    mstore: &Store,
+    identity: &Store,
+    req: &InjectionRequest,
+    target_uid: &str,
+    target_slug: &str,
+    last_output_ms: Option<i64>,
+    now_ms: i64,
+    after_ms: i64,
+) -> (Decision, String) {
     if cold_hold::asks_to_wake(req.priority.as_deref()) {
         // A sender who was told "held" and sent it again to wake the agent:
         // the held copy would arrive a second time behind it.
         let source = req.source_agent.clone().unwrap_or_default();
         let message = crate::backend::reactive::sanitize::sanitize_message(&req.message);
         let _ = mstore.jekt_held_delete_idle_copies(target_uid, &source, &message);
-        return Decision::Deliver;
+        return (Decision::Deliver, "the sender asked for it to be delivered now (urgent)".to_string());
     }
+    let Some(last) = last_output_ms else {
+        return (Decision::Deliver, "the session has written no output, is not a Claude session, or has a turn in flight".to_string());
+    };
     use crate::backend::agent_availability::{verdict, Availability};
-    let idle = Availability::Idle { quiet_for_ms: last_output_ms.map(|at| u64::try_from(now_ms.saturating_sub(at)).unwrap_or(0)) };
+    let quiet_ms = now_ms.saturating_sub(last);
+    let idle = Availability::Idle { quiet_for_ms: Some(u64::try_from(quiet_ms).unwrap_or(0)) };
     let rule = verdict(&idle, false, true, u64::try_from(after_ms).ok(), || hands_over_work(identity, req, target_uid, target_slug, now_ms));
     if rule.waits() {
-        Decision::Hold
+        (Decision::Hold, "idle".to_string())
+    } else if after_ms == i64::MAX {
+        // The cold hold is off and only quota mode is on: there is no minutes limit to compare with.
+        (Decision::Deliver, format!("the cold hold is off and quota mode did not hold it; quiet for {} min", quiet_ms / 60_000))
+    } else if quiet_ms > after_ms {
+        (Decision::Deliver, format!("it hands the agent work (a task it names or one its sender just filed); quiet for {} min", quiet_ms / 60_000))
     } else {
-        Decision::Deliver
+        (Decision::Deliver, format!("the session is warm: quiet for {} min of {}", quiet_ms / 60_000, after_ms / 60_000))
     }
+}
+
+/// Why the cold hold does not look at this message at all, or `None` when it may apply: the hold
+/// takes a message with an id, from a named sender that is not cron, that came from a full-key
+/// host-tier caller or a peer on another machine that proved who it is (`verified_peer`).
+fn outside_the_hold(auth_via: super::ReactiveAuthVia, req: &InjectionRequest) -> Option<String> {
+    if req.request_id.as_deref().is_none_or(str::is_empty) {
+        return Some("it has no request id".to_string());
+    }
+    match req.source_agent.as_deref() {
+        None | Some("") => return Some("it has no named sender".to_string()),
+        Some("cron") => return Some("it is a cron fire".to_string()),
+        _ => {}
+    }
+    let host = auth_via == super::ReactiveAuthVia::FullAuthKey && req.delivery_tier.as_deref() == Some("host");
+    if host || super::jekt_hold::verified_peer(req) {
+        return None;
+    }
+    let tier = req.delivery_tier.as_deref().unwrap_or("none");
+    Some(match tier {
+        "lan" | "wan" => format!("it came over the {tier} and its sender is not proven"),
+        _ => format!("it is not from a full-key host-tier caller (tier {tier})"),
+    })
+}
+
+/// One line in the log for a message the cold hold let through, with the reason.
+fn delivered_because(req: &InjectionRequest, why: &str) {
+    tracing::info!(
+        target = %req.target_agent,
+        source = req.source_agent.as_deref().unwrap_or(""),
+        tier = req.delivery_tier.as_deref().unwrap_or(""),
+        why,
+        "reactive inject: the cold hold did not hold this message"
+    );
 }
 
 /// Whether quota mode holds a routine message to a running agent: no turn in flight (a message that
@@ -89,18 +147,54 @@ pub(super) async fn hold_if_cold(
     req: &InjectionRequest,
     replay: &mut replay::Reservation,
 ) -> Option<serde_json::Value> {
-    // The same set the durable hold takes (`hold_applies`): a full-key,
-    // host-tier request with an id, not a periodic `cron` fire. Not a message
-    // an agent sends itself (its own loops and reminders).
-    let request_id = req.request_id.clone().filter(|id| !id.is_empty())?;
-    if auth_via != super::ReactiveAuthVia::FullAuthKey
-        || req.delivery_tier.as_deref() != Some("host")
-        || req.source_agent.as_deref().is_none_or(|s| s.is_empty() || s == "cron")
-    {
+    let held = hold_decision(state, auth_via, req).await?;
+    replay.delivered();
+    let reason = if held.hold_reason == REASON_QUOTA { HoldReason::Quota } else { HoldReason::Idle };
+    Some(held_answer(&req.target_agent, &held.request_id, reason))
+}
+
+/// The `AppState` the relay subscriber's cold hold reads, set once it exists ([`install`]).
+static RELAY_STATE: std::sync::OnceLock<AppState> = std::sync::OnceLock::new();
+
+/// Give the relay subscriber, which has no `AppState` of its own, the cold hold ([`hold_relayed`]).
+pub(crate) fn install(state: &AppState) {
+    let _ = RELAY_STATE.set(state.clone());
+}
+
+/// A message that came by the cloud relay, to an agent here: kept, as a local or LAN one is, when it
+/// is routine, its sender is a proven install of this account and its session has gone cold
+/// (#2263). `true` when it is kept, so the caller does not inject it. Nothing is held before
+/// [`install`] has run.
+pub(crate) async fn hold_relayed(req: &InjectionRequest) -> bool {
+    match RELAY_STATE.get() {
+        Some(state) => hold_decision(state, super::ReactiveAuthVia::LanKey, req).await.is_some(),
+        None => false,
+    }
+}
+
+/// The cold hold's decision for `req`: the row it was kept as, or `None` to deliver it, with the
+/// reason logged either way.
+async fn hold_decision(
+    state: &AppState,
+    auth_via: super::ReactiveAuthVia,
+    req: &InjectionRequest,
+) -> Option<crate::backend::storage::jekt_held::HeldJekt> {
+    // The messages the hold takes (`outside_the_hold`): a full-key host-tier caller, or a peer on
+    // another machine that proved who it is, with an id and a named sender that is not cron. Not a
+    // message an agent sends itself (its own loops and reminders). Every other one is let through
+    // with its reason in the log, since a hold that does not say why it let a message by cannot be
+    // checked (#2257).
+    if let Some(why) = outside_the_hold(auth_via, req) {
+        delivered_because(req, &why);
         return None;
     }
-    let route = crate::backend::reactive::sanitize::route_name(&req.target_agent)?;
+    let request_id = req.request_id.clone().filter(|id| !id.is_empty())?;
+    let Some(route) = crate::backend::reactive::sanitize::route_name(&req.target_agent) else {
+        delivered_because(req, "its target is not an agent name");
+        return None;
+    };
     if req.source_agent.as_deref().map(crate::backend::reactive::sanitize::route_name).flatten().as_deref() == Some(route.as_str()) {
+        delivered_because(req, "the agent sent it to itself");
         return None;
     }
     let extra = state.config_watcher.get_full_config().settings.extra.clone();
@@ -109,47 +203,68 @@ pub(super) async fn hold_if_cold(
     let after_ms = match cold_hold::cold_after_ms(&extra) {
         Some(ms) => ms,
         None if quota_tight => i64::MAX,
-        None => return None,
+        None => {
+            delivered_because(req, "the cold hold is off (jekt:cold_hold_minutes is 0)");
+            return None;
+        }
     };
     let LookupOutcome::One(reg) = state.reactive_handler.lookup_delivery_target(&route) else {
+        delivered_because(req, "its target is not exactly one running agent here");
         return None;
     };
-    let target_uid = reg.uid.clone()?;
+    let Some(target_uid) = reg.uid.clone() else {
+        delivered_because(req, "its target agent has no uid");
+        return None;
+    };
     let (mstore, identity, request) = (state.mstore.clone(), state.work_store.clone(), req.clone());
     let now = agentmux_common::time::now_ms();
+    let proven_peer = super::jekt_hold::verified_peer(req);
     let held = tokio::task::spawn_blocking(move || {
         // Urgent or not routine: the sender's own words decide, so a message
         // that is not routine skips even the wake-up bookkeeping.
-        if !cold_hold::is_routine(&request) && !cold_hold::asks_to_wake(request.priority.as_deref()) {
-            return None;
+        if let Some(why) = cold_hold::why_not_routine(&request, proven_peer) {
+            if !cold_hold::asks_to_wake(request.priority.as_deref()) {
+                return Err(format!("it is not a routine message: {why}"));
+            }
         }
         let last_output = cold_hold::session_last_output(&mstore, &reg.block_id);
-        let reason = match decide(&mstore, &identity, &request, &target_uid, &reg.agent_id, last_output, now, after_ms) {
+        let (decision, why) = decide_why(&mstore, &identity, &request, &target_uid, &reg.agent_id, last_output, now, after_ms);
+        let reason = match decision {
             Decision::Hold => REASON_IDLE,
             Decision::Deliver
                 if quota_tight && quota_holds(&identity, &request, &target_uid, &reg.agent_id, cold_hold::session_activity(&reg.block_id), now) =>
             {
                 REASON_QUOTA
             }
-            Decision::Deliver => return None,
+            Decision::Deliver => return Err(why),
         };
         let mut row = super::jekt_hold::held_row(&request, request_id, now);
         row.target_uid = target_uid;
         row.hold_reason = reason.to_string();
         match mstore.jekt_held_insert(&row) {
-            Ok(HoldOutcome::Held) | Ok(HoldOutcome::AlreadyHeld) => Some(row),
+            Ok(HoldOutcome::Held) | Ok(HoldOutcome::AlreadyHeld) => Ok(row),
             // Full, or a store fault: deliver it rather than lose or refuse it.
-            Ok(HoldOutcome::Full) | Err(_) => None,
+            Ok(HoldOutcome::Full) | Err(_) => Err("the held-message store is full or failed, so it is delivered rather than lost".to_string()),
         }
     })
-    .await
-    .ok()
-    .flatten()?;
-    replay.delivered();
+    .await;
+    let held = match held {
+        Ok(Ok(row)) => row,
+        Ok(Err(why)) => {
+            delivered_because(req, &why);
+            return None;
+        }
+        Err(_) => return None,
+    };
     crate::backend::agent_resolve::record_uid_fallback("jekt.held");
     let reason = if held.hold_reason == REASON_QUOTA { HoldReason::Quota } else { HoldReason::Idle };
-    tracing::info!(target = %req.target_agent, reason = reason.as_str(), "reactive inject: holding a routine message until the agent is next active");
-    Some(held_answer(&req.target_agent, &held.request_id, reason))
+    tracing::info!(
+        target = %req.target_agent,
+        tier = req.delivery_tier.as_deref().unwrap_or(""),
+        reason = reason.as_str(),
+        "reactive inject: holding a routine message until the agent is next active"
+    );
+    Some(held)
 }
 
 /// The answer to a routine message held because the target's session is cold (`Idle`), or because
@@ -296,6 +411,57 @@ mod tests {
         i3.work_queue_enqueue(&task("t1", "uid-z", "uid-l", NOW - 5 * 60_000)).unwrap();
         i3.work_card_create("t1", &Default::default(), 1).unwrap();
         assert_eq!(decision(&m3, &i3, &req("take a look when you can"), COLD), "hold");
+    }
+
+    fn with_id(mut r: InjectionRequest, tier: &str) -> InjectionRequest {
+        r.request_id = Some("r1".into());
+        r.delivery_tier = Some(tier.into());
+        r
+    }
+
+    #[test]
+    fn a_verified_peer_on_the_lan_is_inside_the_hold_and_an_unproven_one_says_why_not() {
+        let host = super::super::ReactiveAuthVia::FullAuthKey;
+        assert_eq!(outside_the_hold(host, &with_id(req("hi"), "host")), None);
+        let mut lan = with_id(req("hi"), "lan");
+        lan.sig_verified = None;
+        let why = outside_the_hold(super::super::ReactiveAuthVia::FullAuthKey, &lan).unwrap();
+        assert!(why.contains("lan") && why.contains("not proven"), "{why}");
+        lan.lan_verified = Some(true);
+        assert_eq!(outside_the_hold(host, &lan), None, "a LAN message whose signature checked out may wait like a local one");
+    }
+
+    #[test]
+    fn a_message_outside_the_hold_names_the_reason() {
+        let host = super::super::ReactiveAuthVia::FullAuthKey;
+        let mut no_id = req("hi");
+        no_id.delivery_tier = Some("host".into());
+        assert!(outside_the_hold(host, &no_id).unwrap().contains("no request id"));
+        let mut cron = with_id(req("hi"), "host");
+        cron.source_agent = Some("cron".into());
+        assert!(outside_the_hold(host, &cron).unwrap().contains("cron"));
+        let mut nobody = with_id(req("hi"), "host");
+        nobody.source_agent = None;
+        assert!(outside_the_hold(host, &nobody).unwrap().contains("no named sender"));
+        assert!(outside_the_hold(host, &with_id(req("hi"), "cross-channel")).unwrap().contains("cross-channel"));
+    }
+
+    #[test]
+    fn a_delivered_message_says_why_it_was_not_held() {
+        let (m, i, _d) = stores();
+        let why = |r: &InjectionRequest, last| decide_why(&m, &i, r, "uid-l", "loap", last, NOW, AFTER).1;
+        assert!(why(&req("thanks"), WARM).contains("warm"));
+        assert!(why(&req("thanks"), None).contains("no output"));
+        let off = decide_why(&m, &i, &req("thanks"), "uid-l", "loap", COLD, NOW, i64::MAX).1;
+        assert!(off.contains("cold hold is off") && !off.contains("warm"), "{off}");
+        let mut urgent = req("thanks");
+        urgent.priority = Some("urgent".into());
+        assert!(why(&urgent, COLD).contains("urgent"));
+        i.work_queue_enqueue(&task("t1", "uid-x", "uid-l", NOW - 5 * 60_000)).unwrap();
+        i.work_card_create("t1", &Default::default(), 1).unwrap();
+        assert!(why(&req("take a look"), COLD).contains("hands the agent work"));
+        let (m2, i2, _d2) = stores();
+        assert_eq!(decide_why(&m2, &i2, &req("thanks"), "uid-l", "loap", COLD, NOW, AFTER).1, "idle");
     }
 
     #[test]

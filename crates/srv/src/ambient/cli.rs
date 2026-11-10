@@ -19,7 +19,7 @@ pub(crate) fn ambient_call_cwd() -> Option<std::path::PathBuf> {
 }
 
 /// The model every ambient call runs on.
-pub const AMBIENT_MODEL: &str = "claude-haiku-4-5-20251001";
+pub const AMBIENT_MODEL: &str = "claude-haiku-5-5";
 
 /// Invoke the Claude CLI on [`AMBIENT_MODEL`] for one ambient call, within
 /// `timeout` (the purpose's own, `purpose::Purpose::timeout`).

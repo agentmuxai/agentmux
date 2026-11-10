@@ -253,8 +253,7 @@ async fn hold_with_reason(
     // than tell the sender it is not. Not for a spawn-gate refusal: that
     // target is registered, and a retry now would only be refused again.
     if reason == HoldReason::NotRunning && state.reactive_handler.has_uid_registration(&outcome.target_uid) {
-        let mut by_uid = req.clone();
-        by_uid.target_agent = outcome.target_uid.clone();
+        let by_uid = req.addressed_by_uid(&outcome.target_uid);
         let resp = state.reactive_handler.inject_message(by_uid);
         if resp.success {
             replay.delivered();
@@ -294,7 +293,7 @@ async fn hold_with_reason(
                     "agent {target}'s account is out of quota — held for delivery on this AgentMux instance for up to 24 h, delivered when it can work again (an account move or the reset)"
                 ),
                 HoldReason::ApiOffline => format!("agent {target}'s model API is offline — held for up to 24 h, delivered when it answers again"),
-                HoldReason::Idle | HoldReason::Quota => format!("agent {target}'s session is idle — held until it is next active"), // `jekt_cold` has its own answer; never through here
+                HoldReason::Idle | HoldReason::Quota | HoldReason::PeerOffline => format!("agent {target}'s session is idle — held until it is next active"), // `jekt_cold` and `reactive::peer_hold` have their own answers; never through here
             };
             let mut answer = json!({
                 "success": false,

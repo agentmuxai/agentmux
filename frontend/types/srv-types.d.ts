@@ -601,6 +601,10 @@ declare global {
         sites?: string[];
         why?: string;
         allow?: boolean;
+        /** Notice: the page opened a file chooser in a pane an agent drives and the host
+         *  cancelled it. This is what it asked for (`choose a file`, `choose several files`,
+         *  `choose a folder`). */
+        chooser?: string;
         /** Never from srv: the host's own notice, for when srv couldn't be told.
          *  The pane takes it down itself. */
         local?: boolean;
@@ -891,6 +895,8 @@ declare global {
          *  such an agent as signed out (agent_state.rs). Cleared (null) once the controller registers. */
         "agent:launch_blocked"?: "sign_in";
         "agent:launch_blocked_at_ms"?: number;
+        /** A model change srv undid because the new place refused the conversation on its first turn (model-undone.ts). Cleared (null) by the pane's Dismiss. */
+        "agent:model_switch_undone"?: { at: number; tried: { route: string; model: string; label: string }; back_on: { route: string; model: string; label: string }; status: number; reason: string } | null;
         /** A switch of the agent's account asked for mid-turn, applied by srv when no pane of the agent is in a
          *  turn (agent.account.switch, `after_turn`): the account id, and who asked. */
         "agent:pending_account"?: string;
@@ -1156,6 +1162,8 @@ declare global {
         "window:bgcolor"?: string;
         /** @deprecated Ignored: motion follows the system (SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15). */
         "window:reducedmotion"?: boolean;
+        /** Live reflow while a pane is dragged: the other panes glide to where the drop leaves them (SPEC_LIVE_REFLOW_PANE_DRAG_2026_11_06). Default off. */
+        "layout:livereflow"?: boolean;
         /** Animations: which choice Settings shows. Absent is "smooth". */
         "animation:preset"?: "system" | "off" | "quick" | "smooth" | "slow" | "custom";
         /** Animation duration, percent of the designed timing, with "custom": 0, or 25 to 300 in steps of 5. */

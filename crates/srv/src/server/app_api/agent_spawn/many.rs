@@ -62,7 +62,7 @@ async fn plan(state: &AppState, leader: &Leader, specs: &[SpawnWorkerSpec]) -> R
             }
         }
         let (provider, mut runtime) = route::choose(state, leader, &spec.route, spec.model.as_deref(), spec.effort.as_deref()).map_err(|e| of_worker(n, e))?;
-        runtime.placement = container::decide_here(state, &spec.container, &leader.def, &leader.def).await.map_err(|e| of_worker(n, e))?;
+        runtime.placement = container::decide_here(state, &spec.container, &leader.def, &leader.def, &provider).await.map_err(|e| of_worker(n, e))?;
         let account = route::account(state, leader, &provider, &runtime, spec.account.as_deref()).map_err(|e| of_worker(n, e))?;
         planned.push(Planned { name: name.map(str::to_string), brief: brief.to_string(), runtime, account });
     }

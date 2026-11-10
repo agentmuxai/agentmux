@@ -13,6 +13,7 @@ import { defineConfig, searchForWorkspaceRoot, type Plugin } from "vite";
 import svgr from "vite-plugin-svgr";
 import tsconfigPaths from "vite-tsconfig-paths";
 import { devInstance } from "./scripts/dev-instance-plugin.mjs";
+import { shikiNoThemes } from "./scripts/shiki-no-themes.mjs";
 import { shikiPrebundleDeps } from "./scripts/shiki-prebundle.mjs";
 import { thirdPartyNotices } from "./scripts/third-party-notices.mjs";
 
@@ -268,6 +269,7 @@ export default defineConfig({
         requireMuxBusClientId(),
         devInstance(),
         platformResolve(),
+        shikiNoThemes(),
         tsconfigPaths(HOST_TSCONFIG ? { projects: [path.resolve(__dirname, "tsconfig.json"), HOST_TSCONFIG] } : {}),
         svgr({
             svgrOptions: { exportType: "default", ref: true, svgo: false, titleProp: true },

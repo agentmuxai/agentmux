@@ -23,6 +23,8 @@ use cef::*;
 use crate::state::AppState;
 
 mod window;
+#[cfg(target_os = "windows")]
+mod main_focus;
 pub(crate) mod focus;
 #[cfg(not(target_os = "windows"))]
 mod window_maximized;

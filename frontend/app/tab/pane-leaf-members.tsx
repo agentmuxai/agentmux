@@ -9,11 +9,12 @@
  */
 
 import { Block } from "@/app/block/block";
+import { layoutBehind, markLayoutBehind, windowResizing } from "@/app/platform/window-resize";
 import { setKeepAliveBlockDormant } from "@/app/store/block-component-registry";
 import { PaneStackMemberActiveProvider, usePaneStackMemberActive } from "@/app/tab/pane-stack-member";
 import type { NodeModel } from "@/layout/index";
 import { Key } from "@/util/keyed";
-import { createEffect, For, onCleanup, Show, type Accessor, type JSX } from "solid-js";
+import { createEffect, For, onCleanup, Show, untrack, type Accessor, type JSX } from "solid-js";
 
 export interface PaneMembersInput {
     keepAlive: Accessor<boolean>;
@@ -47,6 +48,18 @@ function renderKeepAliveSlot(id: string, input: PaneMembersInput): JSX.Element {
     const outerMemberActive = usePaneStackMemberActive();
     const memberActive = () => outerMemberActive() && id === activeBlockId();
 
+    // A dormant member does not lay its content out while the window is resized, nor until it is its turn to catch up
+    // afterwards (window-resize.ts): four or five hidden agent views relaying out their transcripts and composers on
+    // every frame of a drag is most of the lag, and only the active member changes what is on screen. The DOM, the
+    // mount and the slot's box stay, so the observers inside fire once at the final size when it is released.
+    const behindKey = `keepalive:${id}`;
+    createEffect(() => {
+        // Only the resize flag is tracked: a member that goes dormant mid-drag still skips (skipsLayout) and
+        // simply has no catch-up turn of its own, so it lays out when the drag settles.
+        if (windowResizing() && untrack(() => id !== activeBlockId())) markLayoutBehind(behindKey);
+    });
+    const skipsLayout = () => id !== activeBlockId() && (windowResizing() || layoutBehind(behindKey));
+
     return (
         <div
             class="pane-leaf-keepalive-slot"
@@ -67,11 +80,15 @@ function renderKeepAliveSlot(id: string, input: PaneMembersInput): JSX.Element {
                 // which showed the Help tab's content as a ~300ms "ghost"
                 // over the newly selected tab. Nothing escapes a
                 // container's opacity, and it keeps the slot's real size
-                // (unlike display:none / content-visibility:hidden, which
-                // the keep-alive guarantee in `usePaneKinds`, pane-leaf-state.ts, rules out).
+                // (unlike display:none, which the keep-alive guarantee in
+                // `usePaneKinds`, pane-leaf-state.ts, rules out; and a
+                // permanent content-visibility:hidden, ruled out for the same
+                // reason: the fit logic needs a live size — it is used only
+                // while the window is resized, via `skipsLayout`).
                 // SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md §1.
                 opacity: id === activeBlockId() ? "1" : "0",
                 "pointer-events": id === activeBlockId() ? "auto" : "none",
+                "content-visibility": skipsLayout() ? "hidden" : undefined,
             }}
         >
             <PaneStackMemberActiveProvider value={memberActive}>

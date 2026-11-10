@@ -453,3 +453,52 @@
 .swarm-agent-row .block-frame-unseen-turns {
     align-self: center;
 }
+
+// The header's one horizontal range (#29325, SPEC_PANE_HEADER_SCROLL_RANGE_2026_11_10.md):
+// the tab strip and its "+", the pane's inline header elements, the grip and the aux
+// controls scroll together; the window controls after it stay pinned. The content is
+// right-packed by a flexible spacer that collapses when it overflows, so a wide pane looks
+// as it did and a thin one scrolls instead of shedding controls.
+.block-frame-header-scroll {
+    display: flex;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    @include mixins.scroll-edge-fade(20px);
+
+    &::-webkit-scrollbar {
+        display: none;
+    }
+}
+
+.block-frame-header-content {
+    display: flex;
+    // Grows to the range's width so the spacer below can take the free room; never shrinks,
+    // so the range scrolls instead of compressing the tabs.
+    flex: 1 0 auto;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+// The free room between the tabs and the grip while the header fits; 0 once it overflows.
+.block-frame-header-spacer {
+    flex: 1 1 0;
+    min-width: 0;
+}
+
+// Inside the range the strip is a plain flex item: the range is the scroller now.
+.block-frame-header-scroll .block-frame-default-header-tabstrip {
+    flex: 0 0 auto;
+    overflow-x: visible;
+}
+
+.block-frame-header-scroll .pane-tab-strip {
+    max-width: none;
+    overflow-x: visible;
+}
+
+.block-frame-header-scroll .pane-tab-strip-inner {
+    overflow-x: visible;
+}

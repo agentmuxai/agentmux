@@ -194,13 +194,6 @@ const SNAPSHOT_SCHEMA_VERSION_V2 = 2;
 /** Version written by writeSnapshotNow. */
 export const SNAPSHOT_SCHEMA_VERSION = SNAPSHOT_SCHEMA_VERSION_V2;
 /**
- * The most held-open row ids a snapshot keeps (the newest). A row held open
- * keeps its text in memory, so a restore can't open an unbounded set; ids
- * only, so the snapshot stays small. Additive: an older build ignores the field.
- */
-export const MAX_SAVED_HELD = 40;
-
-/**
  * Render viewport: lines loaded on restore. Not a storage cap — see §2 of spec.
  * At most srv's per-read cap (`blockfile:read_range` returns ≤ 10,000 lines
  * from `offset`, so a larger window would drop the NEWEST lines). 10,000
@@ -485,18 +478,13 @@ async function openHistory(opts: UseHistoryPaginationOptions, s: HistoryState): 
 function applySnapshotOverlay(opts: UseHistoryPaginationOptions, snapshot: any): void {
     const ds = snapshot.documentState;
     if (!ds || !opts.onSnapshotOverlay) return;
-    const restoredHeld: string[] = Array.isArray(ds.heldOpenNodeIds)
-        ? ds.heldOpenNodeIds.filter((id: unknown): id is string => typeof id === "string").slice(-MAX_SAVED_HELD)
-        : [];
     opts.onSnapshotOverlay({
         documentState: {
             collapsedNodes: new Set<string>(ds.collapsedNodeIds ?? []),
             pinnedNodes: new Set<string>(ds.pinnedNodeIds ?? []),
-            // What the pane had open when it was last hidden or closed
-            // (a few ids at most, `MAX_SAVED_HELD`); nothing for a
-            // snapshot without them, so restored history renders collapsed.
-            heldOpenNodes: new Set<string>(restoredHeld),
-            restoredHeldNodes: restoredHeld.length > 0 ? new Set<string>(restoredHeld) : undefined,
+            // Restored history renders collapsed: a row held open keeps its whole preview in the page, and
+            // opening a pane with 40 of them cost ~20 000 elements and ~0.5 GB for the few seconds they stayed.
+            heldOpenNodes: new Set<string>(),
             scrollPosition: typeof ds.scrollPosition === "number" ? ds.scrollPosition : 0,
             filter: ds.filter ?? DEFAULT_FILTER_STATE,
         },

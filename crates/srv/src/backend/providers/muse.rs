@@ -9,7 +9,8 @@ use super::{ControllerType, ProviderConfig};
 // with no launcher and so no hourly launcher self-update; a copy from Meta's
 // installer is still found beside its launcher (`known_install_paths`). Checked
 // against 1.4.7-R6101.1 on 2026-10-14
-// (SPEC_NINE_NEW_HARNESSES_2026_10_14.md §7.7).
+// (SPEC_NINE_NEW_HARNESSES_2026_10_14.md §7.7); pin moved to 1.4.14-R7309.1 on 2026-11-09
+// after diffing `muse schema generate-ts` (additive) and an MSP `initialize`.
 pub(super) static MUSE: ProviderConfig = ProviderConfig {
     id: "muse",
     cli_command: "muse",
@@ -29,7 +30,7 @@ pub(super) static MUSE: ProviderConfig = ProviderConfig {
     auth_extra_env: &[("MUSE_NO_AUTO_UPDATE", "1"), ("TBH_DISABLE_TELEMETRY", "1")],
     unset_env: &[],
     npm_package: "",
-    pinned_version: "1.4.7-R6101.1",
+    pinned_version: "1.4.14-R7309.1",
     base_url_env_var: None,
     supported_vendors: &["meta"],
     startup_instructions_filename: Some("AGENTS.md"),

@@ -45,6 +45,8 @@ let held: {
     /** A pane's: where the pointer went down in it, and its size, both CSS px. */
     grab?: { x: number; y: number };
     size?: { width: number; height: number };
+    /** The live follow is showing this picture: it is what the user has been looking at, however long the drag. */
+    following?: boolean;
 } | null = null;
 
 export interface CssRect {
@@ -255,7 +257,9 @@ async function peekHeld(key: string, waitMs: number) {
     });
     const picture = await Promise.race([h.picture, budget]);
     clearTimeout(timer);
-    return picture && picture.length <= MAX_SNAPSHOT_CHARS ? { picture, grab: h.grab, size: h.size } : undefined;
+    if (!picture || picture.length > MAX_SNAPSHOT_CHARS) return undefined;
+    h.following = true;
+    return { picture, grab: h.grab, size: h.size };
 }
 
 /**
@@ -305,7 +309,9 @@ export function prewarmTearOffSnapshot(blockId: string, pointer?: { x: number; y
 export async function takeTearOffSnapshot(blockId: string): Promise<string | undefined> {
     const h = held;
     held = null;
-    if (!h || h.blockId !== blockId || Date.now() - h.at > MAX_AGE_MS) return undefined;
+    // A picture the live follow has shown goes to the floater at any age: the floater opens on exactly
+    // what the user saw, and a drag held for a while must not land on the loading logo instead.
+    if (!h || h.blockId !== blockId || (!h.following && Date.now() - h.at > MAX_AGE_MS)) return undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const budget = new Promise<null>((resolve) => {
         timer = setTimeout(() => resolve(null), TAKE_BUDGET_MS);

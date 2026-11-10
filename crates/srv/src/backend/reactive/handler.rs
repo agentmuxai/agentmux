@@ -883,7 +883,7 @@ impl Handler {
         let wrapped = wrap_jekt_message_with_files(
             &super::sanitize::with_wan_pin_note(&sanitized, delivery_tier, &req),
             req.source_agent.as_deref(),
-            &req.target_agent,
+            req.marker_target.as_deref().unwrap_or(&req.target_agent),
             effective_tier,
             delivery_tier,
             req.sig_verified,

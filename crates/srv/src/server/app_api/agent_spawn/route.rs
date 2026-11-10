@@ -41,6 +41,10 @@ pub(super) fn choose(state: &AppState, leader: &Leader, ask_route: &RouteAsk, mo
     };
     let picked = ask::resolve(&harness, ask_route.route.as_deref(), model, inherited.as_ref(), key_present(state)).map_err(bad)?;
     let leader_runtime = if same { state.mstore.agent_last_runtime_get(&leader.def.id).unwrap_or_default() } else { String::new() };
+    // A worker on a route runs the route's model; the leader's own Claude model is not its to inherit. The harness
+    // sizes its requests by the model it was started with, and a Claude one it takes per-turn effort for sends
+    // `configuration_update` blocks the route's model answers with a 400 on the first turn.
+    let leader_runtime = if picked.is_some() { without_model(&leader_runtime) } else { leader_runtime };
     let mut runtime = worker_runtime(&harness, &leader_runtime, if picked.is_some() { None } else { model }, effort)
         .map_err(|e| refuse(StatusCode::BAD_REQUEST, format!("INVALID_ARG: {e}")))?;
     if let Some(p) = &picked {
@@ -54,6 +58,17 @@ pub(super) fn choose(state: &AppState, leader: &Leader, ask_route: &RouteAsk, mo
         runtime.harness = Some(harness.clone());
     }
     Ok((harness, runtime))
+}
+
+/// A remembered runtime (`agentlastruntime`) without its model; the other fields, and anything unreadable, as they are.
+fn without_model(runtime: &str) -> String {
+    match serde_json::from_str::<serde_json::Value>(runtime) {
+        Ok(serde_json::Value::Object(mut o)) => {
+            o.remove("model");
+            serde_json::Value::Object(o).to_string()
+        }
+        _ => runtime.to_string(),
+    }
 }
 
 /// The account a new worker runs on. A worker on a route is billed to the route's key and signs in nowhere, so it

@@ -36,10 +36,14 @@ export function phaseToDisplayStatus(blockId: string, fallback: "running" | "idl
         case "Interrupting":
             return "stopping";
         case "Done":
-            return phase.outcome === "errored" ? "error" : "idle";
+            if (phase.outcome === "errored") return "error";
+            // A completed round can be followed by more of the same turn (a model that goes on thinking, a
+            // tool continuation): while srv says the turn is still active, it is working.
+            return phase.outcome === "completed" && fallback === "running" ? "working" : "idle";
         case "Disconnected":
             return "disconnected";
         default:
-            return "idle";
+            // Idle: the pane has seen no stream activity it counts, but srv's turn_active is the turn-precise word.
+            return fallback === "running" ? "working" : "idle";
     }
 }

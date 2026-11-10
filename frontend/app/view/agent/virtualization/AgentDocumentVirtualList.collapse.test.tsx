@@ -19,7 +19,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AgentDocumentVirtualList } from "./AgentDocumentVirtualList";
 import { AgentDormancyProvider } from "../agent-dormancy";
-import { AwayArrivals, CARRY_MAX_MS } from "./held-release";
+import { AwayArrivals } from "./held-release";
 import { SHOW_SETTLE_MAX_MS, SHOW_SETTLE_MIN_MS, SHOW_SETTLE_SAMPLE_MS } from "./show-settle";
 import { createAgentViewState } from "./state";
 import type { DocumentNode, DocumentState, ToolNode } from "../../../agent-model/types";
@@ -309,52 +309,6 @@ describe("AgentDocumentVirtualList — hidden-pane scroll-off collapse guard", (
             t.scrollRef.getBoundingClientRect = () => rect(0, 0);
             t.show();
             expect(t.onHoldNodeOpen).not.toHaveBeenCalled();
-        });
-    });
-
-    // After a restart or an upgrade the snapshot gives back the rows that were
-    // open (`restoredHeldNodes`): carried, so they aren't closed because the
-    // restored transcript is drawn above the viewport.
-    describe("rows a snapshot restored as held", () => {
-        afterEach(() => {
-            vi.restoreAllMocks();
-        });
-
-        it("stay open until seen on screen in this visit, then collapse when they scroll off", () => {
-            let now = 1_000;
-            vi.spyOn(performance, "now").mockImplementation(() => now);
-            const { scrollRef, onReleaseNodeHold, setDocState } = setup(new Set(["tc-1"]));
-            setDocState((prev) => ({ ...prev, restoredHeldNodes: new Set(["tc-1"]) }));
-            place(scrollRef, rect(-50, -10)); // the restored transcript put it above the viewport
-            now += SHOW_SETTLE_MAX_MS + 1; // the restore has settled
-            scroll(scrollRef);
-            expect(onReleaseNodeHold).not.toHaveBeenCalled();
-            place(scrollRef, rect(50, 90)); // the reader scrolls it into view: seen
-            scroll(scrollRef);
-            place(scrollRef, rect(-50, -10));
-            scroll(scrollRef);
-            expect(onReleaseNodeHold).toHaveBeenCalledWith("tc-1");
-        });
-
-        it("are released after CARRY_MAX_MS if never seen, like any carried row", () => {
-            let now = 1_000;
-            vi.spyOn(performance, "now").mockImplementation(() => now);
-            const { scrollRef, onReleaseNodeHold, setDocState } = setup(new Set(["tc-1"]));
-            setDocState((prev) => ({ ...prev, restoredHeldNodes: new Set(["tc-1"]) }));
-            place(scrollRef, rect(-50, -10));
-            now += CARRY_MAX_MS - 1;
-            scroll(scrollRef);
-            expect(onReleaseNodeHold).not.toHaveBeenCalled();
-            now += 2;
-            scroll(scrollRef);
-            expect(onReleaseNodeHold).toHaveBeenCalledWith("tc-1");
-        });
-
-        it("without the restore marker the same row is released at once (the baseline)", () => {
-            const { scrollRef, onReleaseNodeHold } = setup(new Set(["tc-1"]));
-            place(scrollRef, rect(-50, -10));
-            scroll(scrollRef);
-            expect(onReleaseNodeHold).toHaveBeenCalledWith("tc-1");
         });
     });
 

@@ -1103,6 +1103,25 @@ async fn a_worker_on_a_route_has_no_account_takes_the_routes_model_and_the_appro
 }
 
 #[tokio::test]
+async fn a_worker_on_a_route_keeps_its_leaders_effort_but_not_its_leaders_claude_model() {
+    // A leader on `claude-fable-5-1`: a worker started with that model sends per-turn effort the route's model answers with a 400.
+    let state = test_state();
+    with_route_key(&state);
+    let (def, _, block_id) = seed_leader(&state, "claude", "host", json!({})).await;
+    state.mstore.agent_last_runtime_set(&def.id, r#"{"permissionMode":"bypass","model":"claude-fable-5-1","effort":"high"}"#).unwrap();
+    let leader = leader_in(&state, &def, &block_id);
+    let (_, runtime) = route::choose(&state, &leader, &on_route(None), None, None).unwrap();
+    assert!(runtime.route.is_some() && runtime.model.is_none());
+    assert_eq!(runtime.effort.as_deref(), Some("high"), "the leader's effort");
+    let stored: serde_json::Value = serde_json::from_str(&runtime.stored).unwrap();
+    assert_eq!(stored, json!({ "permissionMode": "bypass", "effort": "high" }), "no model to start the harness with");
+    // Off the route it is still the leader's model.
+    let own = agentmux_common::api_types::RouteAsk { harness: None, route: Some("anthropic".into()) };
+    let (_, plain) = route::choose(&state, &leader, &own, None, None).unwrap();
+    assert_eq!(plain.model.as_deref(), Some("claude-fable-5-1"));
+}
+
+#[tokio::test]
 async fn a_worker_inherits_its_leaders_route_unless_it_names_another_or_leaves_it() {
     let state = test_state();
     with_route_key(&state);

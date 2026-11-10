@@ -158,6 +158,9 @@ pub fn set_link(link: Link) {
 /// reported `expired`. Holds its resume or expiry note, if it has one; call
 /// after the pull's own messages are delivered, so the note comes last.
 pub fn fetched(agent: &str, delivered: usize, expired: &[ExpiredItem]) {
+    if !expired.is_empty() {
+        tracing::info!(agent, delivered, expired = expired.len(), "muxbus: the relay reports messages that expired undelivered for this agent");
+    }
     crate::connectivity::report(crate::connectivity::Service::Muxbus, crate::connectivity::Outcome::Answered);
     let broker = broker_state();
     let effects = rt().machine.lock().unwrap_or_else(|e| e.into_inner()).relay_answered(agent, broker.as_ref(), now_ms());

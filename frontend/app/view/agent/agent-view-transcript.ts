@@ -110,7 +110,7 @@ export function useHistoryAndFeed(found: PaneFoundation, model: AgentViewModel, 
 
 /** What the pane shows: the document under the pane's view, kept saved. */
 export function useShownDocument(found: PaneFoundation, model: AgentViewModel, agentId: string, feed: HistoryAndFeed) {
-    const { paneModel, agentAtoms, renderDormant } = found;
+    const { paneModel, agentAtoms } = found;
     const { log } = found.shell;
     const { history, resumePreflight } = feed;
     const { gapsBefore, earlierHistoryAvailable, earlierTurnsKnown } = feed.liveFeed;
@@ -157,7 +157,7 @@ export function useShownDocument(found: PaneFoundation, model: AgentViewModel, a
         getDocument,
         getDetailsOpen: () => paneModel.state.detailsOpen,
         snapshotIsForeignBlock: () => history.snapshotIsForeignBlock(),
-        hidden: renderDormant, log,
+        log,
     });
 
     return { displayDocument, viewControls, shownDocument, getDocument };

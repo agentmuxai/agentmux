@@ -131,3 +131,37 @@ async fn nothing_asked_applies_nothing() {
     assert_eq!((stored.agent_type.as_str(), stored.container_image.as_str()), ("container", "tpl/image:2"));
     assert_eq!(state.mstore.container_limits_get(&def.id).unwrap(), None);
 }
+
+
+#[test]
+fn a_new_agent_defaults_to_a_container_unless_the_setting_says_native() {
+    let mut extra = std::collections::HashMap::new();
+    assert!(default_is_container(&extra), "the default");
+    for native in [json!("native"), json!(" Host "), json!("NATIVE")] {
+        extra.insert(SETTING_DEFAULT_RUNTIME.to_string(), native.clone());
+        assert!(!default_is_container(&extra), "{native} is the old default");
+    }
+    for container in [json!("container"), json!("anything else"), json!(true)] {
+        extra.insert(SETTING_DEFAULT_RUNTIME.to_string(), container.clone());
+        assert!(default_is_container(&extra), "{container} leaves the default");
+    }
+}
+
+#[test]
+fn only_claude_code_has_a_container_image_so_every_other_harness_stays_native() {
+    assert!(has_container_image("claude"));
+    for other in ["codex", "gemini", "kimi", "qwen", "pi", "copilot", "antigravity", ""] {
+        assert!(!has_container_image(other), "{other}");
+    }
+}
+
+#[tokio::test]
+async fn a_call_that_says_nothing_stays_as_its_source_when_there_is_no_docker() {
+    // test_state has no container runtime: the default must never refuse a call that asked for no container.
+    let state = test_state();
+    let host = test_agent_def("lead", "Lead", "claude", "host", 1, "");
+    let got = decide_here(&state, &ContainerAsk::default(), &host, &host, "claude").await.unwrap();
+    assert_eq!(got, Placement::AsSource);
+    let asked = decide_here(&state, &ask(Some("container"), None, None, None), &host, &host, "claude").await;
+    assert_eq!(refused(asked).0, StatusCode::SERVICE_UNAVAILABLE, "an explicit container still says why it cannot start");
+}

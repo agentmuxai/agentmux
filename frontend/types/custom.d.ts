@@ -717,7 +717,7 @@ declare global {
             isLastTab?: boolean;
             /** A pane or pane-tab drag: the hook only reports Escape (`tabdrag:escape-pressed`). */
             escapeOnly?: boolean;
-            /** With `escapeOnly`: the hook also moves the live-follow picture while the cursor is outside every window. */
+            /** With `escapeOnly`: the hook also moves the live-follow picture with the cursor, wherever it goes. */
             paneFollow?: boolean;
         }) => Promise<void>;
         /** Belt-and-suspenders hook teardown at dragend — the hook
@@ -736,11 +736,13 @@ declare global {
             /** Cursor to the window's top-left. */
             offsetX: number;
             offsetY: number;
-            /** The viewport y below which the picture shows; none: outside every AgentMux window (a pane). */
+            /** The viewport y below which a window tab's picture shows; none: a pane, shown everywhere from its first move. */
             tearLineY?: number;
         }) => Promise<void>;
         /** Drop the picture now. Idempotent. */
         liveFollowEnd: () => Promise<void>;
+        /** Give the picture another size (DIP): cut or padded from the one first shown, never scaled. A no-op with no picture. */
+        liveFollowResize: (args: { windowWidth: number; windowHeight: number }) => Promise<void>;
         setDragCursor: () => Promise<void>;
         restoreDragCursor: () => Promise<void>;
         releaseDragCapture: () => Promise<void>;
@@ -1317,6 +1319,19 @@ declare global {
         // Bootstrap flags (set before app init)
         __AGENTMUX_IPC_PORT__?: number;
         __AGENTMUX_IPC_TOKEN__?: string;
+        /**
+         * The host's process-message lane for a command, put on an app
+         * window's main frame by the host's renderer (crates/cef/src/ipc_query.rs).
+         * Used through `invokeFastCommand` (app/platform/ipc-query.ts).
+         */
+        agentmuxQuery?: (query: {
+            request: string;
+            persistent?: boolean;
+            onSuccess: (response: string) => void;
+            onFailure: (code: number, message: string) => void;
+        }) => number;
+        /** A lab's probe: every host command roundtrip, when a script has put an array here (perf/index.ts). */
+        __agentmuxIpcProbe?: Array<{ command: string; durationMs: number; at: number }>;
         __WAVE_SERVER_WS_ENDPOINT__?: string;
         __WAVE_SERVER_WEB_ENDPOINT__?: string;
         __startupPerfStart?: number;

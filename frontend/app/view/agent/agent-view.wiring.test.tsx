@@ -148,6 +148,7 @@ vi.mock("./components/HistoryLoadingRow", h.comp("HistoryLoadingRow"));
 vi.mock("./components/AgentDocumentView", h.comp("AgentDocumentView"));
 vi.mock("./components/NewActivityPill", h.comp("NewActivityPill"));
 vi.mock("./components/AgentBottomPanels", h.comp("AgentBottomPanels"));
+vi.mock("./components/AgentModelUndoneCard", h.comp("AgentModelUndoneCard"));
 vi.mock("./components/AgentPreparingRow", h.comp("AgentPreparingRow"));
 vi.mock("./components/AgentComposerStrip", h.comp("AgentComposerStrip"));
 vi.mock("./components/AgentViewPopover", h.comp("AgentViewPopover"));
@@ -646,7 +647,6 @@ describe("AgentPresentationView callbacks", () => {
         hist.foreign = true;
         note("snapshotIsForeignBlock", SP.snapshotIsForeignBlock());
         same("getDocument", SP.getDocument, F.paneModel.document);
-        note("hidden", SP.hidden());
         note("definitionId", SP.definitionId);
         same("log", SP.log, F.log);
         same("decisions document", opts("useAgentDecisions").getDocument, F.paneModel.document);

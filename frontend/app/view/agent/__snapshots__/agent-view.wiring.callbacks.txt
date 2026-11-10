@@ -121,7 +121,6 @@ atoms are stable: same
 detailsOpen = false
 snapshotIsForeignBlock = true
 getDocument: same
-hidden = false
 definitionId = "korp"
 log: same
 decisions document: same

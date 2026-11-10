@@ -12,8 +12,8 @@ trigger "Default · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-dens
   [model]
   - Opus 5.5 / Highest quality {}
   - Sonnet 5.5 / Balanced speed and quality {current}
-  - Haiku 4.5 / Fastest {}
-  - Fable 5.1 / Long-horizon work {}
+  - Haiku 5.5 / Fastest {}
+  - Fable 5.2 / Long-horizon work {}
   note: ⚠ Last reply used claude-opus-5-5, not sonnet. If you changed the model since, the next reply will show it.
   [effort]
   - low {}
@@ -35,8 +35,8 @@ trigger "Default · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-dens
   [model]
   - Opus 5.5 / Highest quality {}
   - Sonnet 5.5 / Balanced speed and quality {current}
-  - Haiku 4.5 / Fastest {}
-  - Fable 5.1 / Long-horizon work {}
+  - Haiku 5.5 / Fastest {}
+  - Fable 5.2 / Long-horizon work {}
   note: ⚠ Running claude-haiku-4-5 · effort low (not sonnet, not effort high)
   [effort]
   - low {}

@@ -68,6 +68,8 @@ const VENDOR_NAMES: Record<string, string> = {
     github: "GitHub",
     ollama: "Ollama (local)",
     pi: "Pi",
+    xai: "xAI",
+    meta: "Meta",
     custom: "a custom endpoint",
 };
 
@@ -121,7 +123,9 @@ export const DualProviderLogo = (props: DualProviderLogoProps): JSX.Element => {
                             "border-radius": "50%",
                             padding: small() ? "0" : "1px",
                             border: small() ? "none" : "1px solid var(--border-color)",
-                            "box-shadow": small() ? "0 0 0 1px var(--main-bg-color)" : "0 1px 3px rgba(0, 0, 0, 0.3)",
+                            // A small badge separates from the harness mark with a light ring, not the
+                            // pane's dark background: at 8 px a dark ring muddies a colourful mark.
+                            "box-shadow": small() ? "0 0 0 1px var(--border-color)" : "0 1px 3px rgba(0, 0, 0, 0.3)",
                         }}
                     >
                         <ProviderLogo provider={vendor} size={vendorSize()} />

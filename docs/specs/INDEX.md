@@ -433,6 +433,7 @@ partial list.
 | [`SPEC_PANE_ENV_ISOLATION_2026_09_17`](SPEC_PANE_ENV_ISOLATION_2026_09_17.md) | SPEC: an instance's identity must not be inheritable by its panes |
 | [`SPEC_PANE_FILE_DROP_2026_05_30`](SPEC_PANE_FILE_DROP_2026_05_30.md) | SPEC: Drag-and-drop files into Terminal and Agent panes |
 | [`SPEC_PANE_HEADER_HEIGHT_TAB_INDICATOR_2026_04_19`](SPEC_PANE_HEADER_HEIGHT_TAB_INDICATOR_2026_04_19.md) | SPEC: Pane Header Height + Tab Active Indicator Edge-to-Edge |
+| [`SPEC_PANE_HEADER_SCROLL_RANGE_2026_11_10`](SPEC_PANE_HEADER_SCROLL_RANGE_2026_11_10.md) | SPEC: The pane header's horizontal scroll covers tabs, +, grip and aux controls (minimize stays pinned) |
 | [`SPEC_PANE_HEADER_TAIL_COLOR_2026_09_21`](SPEC_PANE_HEADER_TAIL_COLOR_2026_09_21.md) | SPEC: the pane header's tail color follows the pane, not the active tab |
 | [`SPEC_PANE_HEADER_TEXT_HOVER_TOOLTIP_2026_09_21`](SPEC_PANE_HEADER_TEXT_HOVER_TOOLTIP_2026_09_21.md) | SPEC: pane header informational text becomes a hover tooltip |
 | [`SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26`](SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md) | SPEC: Pane resize dimension overlay (WxH badge) |
@@ -758,6 +759,7 @@ partial list.
 | [`SPEC_LAYOUT_FILES_2026_09_25`](SPEC_LAYOUT_FILES_2026_09_25.md) | SPEC: Layout files — "Layouts → Save layout…" and the `agentmux.layout` file format |
 | [`SPEC_LINUX_PACKAGES_XZ_2026_10_14`](SPEC_LINUX_PACKAGES_XZ_2026_10_14.md) | Spec: compress the Linux deb, rpm and portable tarball with xz |
 | [`SPEC_LINUX_PACKAGE_UPGRADE_AND_REPOSITORY_2026_10_24`](SPEC_LINUX_PACKAGE_UPGRADE_AND_REPOSITORY_2026_10_24.md) | Spec: upgrading a .deb or .rpm install from the app, and an apt/dnf repository |
+| [`SPEC_LIVE_REFLOW_PANE_DRAG_2026_11_06`](SPEC_LIVE_REFLOW_PANE_DRAG_2026_11_06.md) | SPEC: Live reflow while dragging a pane or pane tab (the end state for pane drag and drop) |
 | [`SPEC_LONG_RUNNING_ACTIVITY_ANIMATIONS_2026_11_02`](SPEC_LONG_RUNNING_ACTIVITY_ANIMATIONS_2026_11_02.md) | Spec: one ASCII animation per kind of long-running work |
 | [`SPEC_LONG_RUNNING_SHELL_PINNED_DOCK_2026_06_15`](SPEC_LONG_RUNNING_SHELL_PINNED_DOCK_2026_06_15.md) | SPEC: Pinned Activity Dock — Unified Long-Running Activities |
 | [`SPEC_MARKDOWN_CODE_ON_SHIKI_AND_REDUNDANT_LIBRARIES_2026_10_21`](SPEC_MARKDOWN_CODE_ON_SHIKI_AND_REDUNDANT_LIBRARIES_2026_10_21.md) | Spec: code in markdown on shiki, and the frontend libraries we can drop |
@@ -805,6 +807,7 @@ partial list.
 | [`SPEC_RESUME_GATE_AND_SAME_IDENTITY_CONTINUATION_2026_09_25`](SPEC_RESUME_GATE_AND_SAME_IDENTITY_CONTINUATION_2026_09_25.md) | SPEC: one resume gate, and native continuation across logins of the same identity |
 | [`SPEC_RESUME_PHASE_CATCH_UP_TURN_2026_10_13`](SPEC_RESUME_PHASE_CATCH_UP_TURN_2026_10_13.md) | SPEC: Resume phases: the "Given to the agent" card in its place, then the agent catches up and tells the user where it is |
 | [`SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27`](SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27.md) | SPEC: one way to reveal a block — including a background tab in a multi-tab pane |
+| [`SPEC_ROUTE_AGENT_BRAKES_2026_11_10`](SPEC_ROUTE_AGENT_BRAKES_2026_11_10.md) | Route agent brakes: a spend cap, budgeted compaction and loop detection |
 | [`SPEC_RPC_BINDINGS_CODEGEN_2026_09_07`](SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md) | SPEC: Generate the Rust ↔ TypeScript RPC bindings from srv |
 | [`SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13`](SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13.md) | Spec: Restore-on-relaunch + named, reloadable "Layouts" |
 | [`SPEC_SETTINGS_JSON_EVERY_KEY_ONE_TO_ONE_2026_11_01`](SPEC_SETTINGS_JSON_EVERY_KEY_ONE_TO_ONE_2026_11_01.md) | settings.json lists every setting with its default commented out, kept 1-to-1 by a guard, safe to copy and paste |

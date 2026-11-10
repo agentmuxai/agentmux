@@ -52,7 +52,7 @@
 212 crates/cef/src/commands/pane_pool.rs::promote_pane_pool_window
 160 crates/cef/src/commands/tear_off_hook/macos.rs::start_tab_drag_tracking
 135 crates/cef/src/commands/tear_off_hook/windows.rs::handle_button_up
-146 crates/cef/src/commands/tear_off_hook/windows.rs::start_hook_session
+134 crates/cef/src/commands/tear_off_hook/windows.rs::start_hook_session
 170 crates/cef/src/commands/window/chrome.rs::toggle_floating_maximize
 103 crates/cef/src/commands/window/creation.rs::open_new_window
 176 crates/cef/src/commands/window/creation.rs::reproject_from_srv
@@ -69,7 +69,7 @@
 119 crates/cef/src/floating_pane.rs::CreatePanePoolWindowWin32Task::Task::execute
 152 crates/cef/src/floating_pane.rs::create_popup
 142 crates/cef/src/floating_pane.rs::floating_pane_wndproc
-1140 crates/cef/src/ipc.rs::route_command
+1139 crates/cef/src/ipc.rs::route_command
 130 crates/cef/src/launcher_ipc/mod.rs::apply_event_to_shadow
 259 crates/cef/src/launcher_ipc/mod.rs::connect_to_launcher
 209 crates/cef/src/launcher_ipc/mod.rs::connect_to_launcher#2
@@ -89,7 +89,7 @@
 293 crates/cef/src/ui_tasks/platform_macos.rs::swizzled_nsapp_send_event
 369 crates/cef/src/ui_tasks/window.rs::CloseWindowTask::Task::execute
 141 crates/cef/src/ui_tasks/window.rs::CreateWindowTask::Task::execute
-120 crates/cef/src/ui_tasks/window.rs::MainFocusReclaimTask::Task::execute
+114 crates/cef/src/ui_tasks/window.rs::MainFocusReclaimTask::Task::execute
 107 crates/cef/src/ui_tasks/window.rs::begin_drain_and_cascade
 162 crates/cef/src/wrr/win_event.rs::QuitWatchdogRecheckTask::Task::execute
 284 crates/cef/src/wrr/win_event.rs::win_event_callback
@@ -276,7 +276,6 @@
 216 crates/srv/src/server/browser_terminal.rs::handle_ui_browser_terminal
 184 crates/srv/src/server/browser_vault_fill.rs::handle_vault_fill
 722 crates/srv/src/server/cli_handlers.rs::register_cli_handlers
-904 crates/srv/src/server/editor_handlers.rs::register_editor_handlers
 107 crates/srv/src/server/files.rs::handle_stream_local_file
 122 crates/srv/src/server/http_health.rs::handle_discovery
 229 crates/srv/src/server/http_shell.rs::create_shell
@@ -286,7 +285,7 @@
 106 crates/srv/src/server/identity_auth_dirs.rs::compute_and_ensure_account_dir
 332 crates/srv/src/server/install_handlers.rs::spawn_install_task
 102 crates/srv/src/server/jekt_files.rs::receive
-105 crates/srv/src/server/jekt_hold.rs::hold_with_reason
+104 crates/srv/src/server/jekt_hold.rs::hold_with_reason
 238 crates/srv/src/server/mux_obj_bridge.rs::dispatch_event
 124 crates/srv/src/server/muxspect_handlers.rs::handle_muxspect_conversations
 118 crates/srv/src/server/muxspect_handlers.rs::handle_muxspect_find
@@ -320,15 +319,15 @@
 218 frontend/app-init.ts::initMux
 364 frontend/app/block/block.tsx::Block
 142 frontend/app/block/block.tsx::BlockFull
-280 frontend/app/block/blockframe.tsx::BlockFrame_Header
-117 frontend/app/block/blockframe.tsx::EndIcons
+293 frontend/app/block/blockframe.tsx::BlockFrame_Header
+102 frontend/app/block/blockframe.tsx::EndIcons
 114 frontend/app/block/blockutil.tsx::ConnectionButton
 108 frontend/app/block/lazy-pane-tab.tsx::createStandIn
 235 frontend/app/block/sandboxed-widget-host.tsx::createSandboxedInstance
 202 frontend/app/block/widget-bridge.ts::answer
 106 frontend/app/drag/CrossWindowDragMonitor.darwin.tsx::performTearOff
 159 frontend/app/drag/CrossWindowDragMonitor.linux.tsx::performTearOff
-158 frontend/app/drag/CrossWindowDragMonitor.win32.tsx::CrossWindowDragMonitor
+151 frontend/app/drag/CrossWindowDragMonitor.win32.tsx::CrossWindowDragMonitor
 219 frontend/app/drag/CrossWindowDragMonitor.win32.tsx::performTearOff
 119 frontend/app/drag/CrossWindowDropOverlay.tsx::CrossWindowDropOverlay
 132 frontend/app/element/ModalLayer.tsx::ModalLayer
@@ -396,7 +395,7 @@
 172 frontend/app/view/agent/hooks/usePaneReveal.ts::usePaneReveal
 121 frontend/app/view/agent/hooks/usePtyWidth.ts::usePtyWidth
 140 frontend/app/view/agent/hooks/useShellNodeStream.ts::useShellNodeStream
-137 frontend/app/view/agent/hooks/useSnapshotPersistence.ts::useSnapshotPersistence
+124 frontend/app/view/agent/hooks/useSnapshotPersistence.ts::useSnapshotPersistence
 173 frontend/app/view/agent/hooks/useSubagentBackfillGate.ts::useSubagentBackfillGate
 185 frontend/app/view/agent/offline/offline-input.ts::createOfflineInput
 229 frontend/app/view/agent/parseHistoryLines.ts::HistoryParser::feed
@@ -406,7 +405,7 @@
 138 frontend/app/view/agent/stream-flush-queue.ts::createStreamFlushQueue
 116 frontend/app/view/agent/stream-parser.ts::ClaudeCodeStreamParser::eventToNode
 232 frontend/app/view/agent/useAgentStream.ts::useAgentStream
-116 frontend/app/view/agent/virtualization/held-release.ts::useScrolledOffRelease
+102 frontend/app/view/agent/virtualization/held-release.ts::useScrolledOffRelease
 115 frontend/app/view/audit/audit-manager.tsx::AuditManager
 101 frontend/app/view/browser/browser-profile-menu.tsx::BrowserProfileButton
 141 frontend/app/view/browser/use-browser-auth.ts::useBrowserAuth
@@ -455,7 +454,7 @@
 170 frontend/app/workspace/redock-ghost.ts::installFloatingRedockHoverListener
 472 frontend/app/workspace/workspace.tsx::WorkspaceElem
 119 frontend/layout/lib/layoutInvariants.ts::validateLayoutInvariants
-173 frontend/layout/lib/layoutModel.ts::LayoutModel::constructor
+170 frontend/layout/lib/layoutModel.ts::LayoutModel::constructor
 175 frontend/layout/lib/layoutNodeModels.ts::getNodeModel
 232 frontend/layout/lib/layoutPersistence.ts::handleBackendAction
 138 frontend/layout/lib/layoutResize.ts::onResizeMove

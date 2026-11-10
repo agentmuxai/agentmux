@@ -540,8 +540,12 @@ export const Placeholder = (props: PlaceholderProps) => {
 
     onCleanup(() => { if (exitTimer) clearTimeout(exitTimer); });
 
+    // The live reflow (liveReflow.ts) moves the panes themselves to where the drop leaves them: they are the
+    // outline, so the wireframe stays away and the landing zone drops its dim (tilelayout.scss).
+    const reflowing = () => props.layoutModel.liveReflowActive();
+
     return (
-        <div class="placeholder-container" style={props.style}>
+        <div class={clsx("placeholder-container", reflowing() && "live-reflow")} style={props.style}>
             <Show when={visible()}>
                 {/* `data-pane-overlay`: a browser page is a native window drawn
                     above the DOM, so without it the ghost vanished behind a
@@ -555,7 +559,7 @@ export const Placeholder = (props: PlaceholderProps) => {
                 </div>
                 {/* Every other pane's rect once the drop has happened. Not tagged `data-pane-overlay`: that
                     cuts the rect out of a browser page, and an outline must not take the page's pane away. */}
-                <For each={props.layoutModel.placementWireframe()}>
+                <For each={reflowing() ? [] : props.layoutModel.placementWireframe()}>
                     {(w) => <div class={clsx("placement-wireframe", exiting() && "exiting")} style={w.style as JSX.CSSProperties} />}
                 </For>
             </Show>

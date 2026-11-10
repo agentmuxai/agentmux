@@ -121,6 +121,17 @@ pub fn decide_check(listed: Result<Vec<Option<(u16, u16, u16)>>, String>) -> Sto
     }
 }
 
+/// The one log line per check: what the Store answered and how long it took, so a report of "the Store
+/// says no newer version" can be checked against the log afterwards.
+pub fn check_log_line(check: &StoreCheck, took: Duration) -> String {
+    let version = if check.version.is_empty() { "-" } else { &check.version };
+    let mut line = format!("[store-check] state={} version={version} took_ms={}", check.state, took.as_millis());
+    if !check.message.is_empty() {
+        line.push_str(&format!(" why={}", check.message));
+    }
+    line
+}
+
 /// Ask the Store whether it has an update for AgentMux, without installing it.
 /// Blocks on the Store's answer, so call it off the async workers.
 #[cfg(target_os = "windows")]
@@ -220,7 +231,12 @@ pub async fn run(state: &std::sync::Arc<crate::state::AppState>, cmd: &str, args
     tracing::info!("[ipc] {cmd}");
     let gone = |e: tokio::task::JoinError| format!("store_update: {e}");
     match cmd {
-        "store_update_check" => json(tokio::task::spawn_blocking(check_update).await.map_err(gone)?),
+        "store_update_check" => {
+            let started = Instant::now();
+            let check = tokio::task::spawn_blocking(check_update).await.map_err(gone)?;
+            tracing::info!("{}", check_log_line(&check, started.elapsed()));
+            json(check)
+        }
         "store_update_came_back" => json(super::store_restart::came_back()),
         _ => {
             let target = args.get("version").and_then(|v| v.as_str()).unwrap_or_default().to_string();
@@ -306,6 +322,19 @@ pub fn install_update(_target: &str, _web_endpoint: &str, _auth_key: &str) -> St
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn each_check_leaves_one_line_with_the_answer_and_the_time() {
+        let took = Duration::from_millis(5400);
+        let none = decide_check(Ok(vec![]));
+        assert_eq!(check_log_line(&none, took), "[store-check] state=none version=- took_ms=5400");
+        let available = decide_check(Ok(vec![Some((0, 60, 22))]));
+        assert_eq!(check_log_line(&available, took), "[store-check] state=available version=0.60.22 took_ms=5400");
+        let unknown = decide_check(Err("the Microsoft Store is Windows only".into()));
+        assert_eq!(check_log_line(&unknown, took), "[store-check] state=unknown version=- took_ms=5400 why=the Microsoft Store is Windows only");
+        let silent = decide_check(Err(NO_ANSWER.into()));
+        assert_eq!(check_log_line(&silent, Duration::from_secs(60)), "[store-check] state=no_answer version=- took_ms=60000");
+    }
 
     #[test]
     fn nothing_listed_means_the_store_has_no_newer_version() {

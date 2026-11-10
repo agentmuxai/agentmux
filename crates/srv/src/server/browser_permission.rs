@@ -349,11 +349,13 @@ mod tests {
     #[tokio::test]
     async fn a_standing_grant_writes_one_audit_row_flagged_standing() {
         let state = crate::server::tests::test_state();
-        let before = state.reactive_handler.get_audit_log(200).len();
-        audit_standing_allow(&state, "bp-agent-2", "https://standing.example", &["camera", "microphone"], "https://standing.example asked to use the camera and the microphone");
-        let log = state.reactive_handler.get_audit_log(200);
-        assert_eq!(log.len(), before + 1, "exactly one row");
-        let row = &log[0];
+        // Counted by this test's own agent, not by the log's length: the log keeps only its newest rows,
+        // so after earlier tests in one process (the nightly's `--test-threads=1`) its length no longer grows.
+        let agent = format!("bp-agent-{}", uuid::Uuid::new_v4().simple());
+        audit_standing_allow(&state, &agent, "https://standing.example", &["camera", "microphone"], "https://standing.example asked to use the camera and the microphone");
+        let mine: Vec<_> = state.reactive_handler.get_audit_log(200).into_iter().filter(|r| r.target_agent == agent).collect();
+        assert_eq!(mine.len(), 1, "exactly one row");
+        let row = &mine[0];
         assert_eq!(row.standing, Some(true));
         assert!(row.prompt.as_deref().unwrap().contains("standing.example"));
         assert!(row.answer.as_deref().unwrap().contains("camera") && row.answer.as_deref().unwrap().contains("microphone"));
