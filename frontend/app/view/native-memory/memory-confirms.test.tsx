@@ -119,6 +119,9 @@ describe("adopting earlier memory", () => {
         expect(modal.textContent).not.toContain("held.md");
         expect(rpc.adopt).not.toHaveBeenCalled();
         expect(screen.getByRole("button", { name: "Waiting for confirmation…" })).toBeTruthy();
+        // The person's own click, like adding a host: the accent button, not the tone for an agent that waits.
+        expect(screen.getByRole("button", { name: "Adopt" }).className).toContain("ui-tone-accent");
+        expect(screen.getByRole("button", { name: "Adopt" }).className).not.toContain("ui-tone-attention");
     });
 
     it("adopts on Adopt, with the list's own ids, then says what it did", async () => {

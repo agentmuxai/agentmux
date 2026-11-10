@@ -10,7 +10,7 @@ export type UserAttentionEvent = { key: string,
  */
 block_id: string, 
 /**
- * `browser`, `consent` or `widget`.
+ * `browser`, `consent`, `widget`, or `confirm` (a pane asks the person about their own click).
  */
 kind: string, text: string, 
 /**
