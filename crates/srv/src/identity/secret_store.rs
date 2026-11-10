@@ -73,6 +73,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::Duration;
 
@@ -235,12 +236,15 @@ fn shared_reads() -> &'static SharedReads {
 /// Linux. Until it has worked, every call tries again: the Secret Service
 /// connects when the store is made, and a session bus or keyring daemon that
 /// wasn't up yet shouldn't leave this process without credentials until restart.
+/// On Linux every call makes a new store, as keyring 2 connected on every call:
+/// the store keeps one Secret Service session and doesn't reconnect, so one
+/// kept for the life of the process would fail for good after the keyring
+/// daemon restarts.
 /// The stores name an entry the way keyring 2 did (service and user; on Windows
 /// the target `user.service`), so what it stored is found.
 fn credential_store() -> Result<(), String> {
-    static INSTALLED: Mutex<bool> = Mutex::new(false);
-    let mut installed = lock(&INSTALLED);
-    if *installed {
+    static INSTALLED: AtomicBool = AtomicBool::new(false);
+    if INSTALLED.load(Ordering::Acquire) && !cfg!(target_os = "linux") {
         return Ok(());
     }
     #[cfg(target_os = "macos")]
@@ -252,7 +256,7 @@ fn credential_store() -> Result<(), String> {
     #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
     {
         keyring_core::set_default_store(store.map_err(|e| format!("keychain unavailable: {e}"))?);
-        *installed = true;
+        INSTALLED.store(true, Ordering::Release);
         Ok(())
     }
     #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
