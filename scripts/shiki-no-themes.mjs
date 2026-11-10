@@ -18,23 +18,23 @@ export function isShikiWebBundle(id) {
     return /[\\/]shiki[\\/]dist[\\/]bundle-web\.mjs$/.test(id.split("?")[0]);
 }
 
-const THEMES_IMPORT = "import { bundledThemes } from './themes.mjs';";
-const THEMES_INFO_EXPORT = "export { bundledThemesInfo } from './themes.mjs';";
+/** Shiki 4's bundle-web.mjs takes both theme tables in one import, and its export list names them. */
+const THEMES_IMPORT = /import \{ bundledThemes, bundledThemesInfo \} from ["']\.\/themes\.mjs["'];/;
 
 /**
  * @param {string} code  the source of shiki's bundle-web.mjs
- * @returns {string} the same module with an empty theme table
- * @throws when Shiki's file no longer has the lines this replaces, so a Shiki update fails the build
+ * @returns {string} the same module with empty theme tables
+ * @throws when Shiki's file no longer has the line this replaces, so a Shiki update fails the build
  *         instead of quietly shipping every theme again
  */
 export function withoutBundledThemes(code) {
-    if (!code.includes(THEMES_IMPORT) || !code.includes(THEMES_INFO_EXPORT)) {
+    if (!THEMES_IMPORT.test(code)) {
         throw new Error(
             "[shiki-no-themes] shiki/dist/bundle-web.mjs no longer imports its themes the way this plugin expects. " +
                 "Check scripts/shiki-no-themes.mjs against the new Shiki."
         );
     }
-    return code.replace(THEMES_IMPORT, "const bundledThemes = {};").replace(THEMES_INFO_EXPORT, "");
+    return code.replace(THEMES_IMPORT, "const bundledThemes = {}; const bundledThemesInfo = [];");
 }
 
 /** @returns {import("vite").Plugin} */
