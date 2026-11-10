@@ -208,7 +208,7 @@ describe("the launch flow it starts", () => {
             expect(a.onNotify).toBe(onNotify);
             expect(a.getInitialTermSize).toBe(getInitialTermSize);
             expect(a.onControllerStatus).toBe(onControllerStatus);
-            expect(a.authEnv).toEqual({ CLAUDE_CONFIG_DIR: "/auth/claude", EXTRA: "1" });
+            expect(await a.authEnv).toEqual({ CLAUDE_CONFIG_DIR: "/auth/claude", EXTRA: "1" });
             expect(hub.ensureProviderAuthDir).toHaveBeenCalledWith("claude");
         });
     });
@@ -221,7 +221,7 @@ describe("the launch flow it starts", () => {
         await inRoot(async () => {
             const { status } = mk();
             await status.startLaunchFlow();
-            expect(hub.runLaunchFlow.mock.calls[0][0].authEnv).toBeUndefined();
+            expect(await hub.runLaunchFlow.mock.calls[0][0].authEnv).toBeUndefined();
             expect(hub.ensureProviderAuthDir).not.toHaveBeenCalled();
         });
     });
@@ -231,14 +231,14 @@ describe("the launch flow it starts", () => {
         await inRoot(async () => {
             const { status } = mk();
             await status.startLaunchFlow();
-            expect(hub.runLaunchFlow.mock.calls[0][0].authEnv).toEqual({ CLAUDE_CONFIG_DIR: "/auth/claude" });
+            expect(await hub.runLaunchFlow.mock.calls[0][0].authEnv).toEqual({ CLAUDE_CONFIG_DIR: "/auth/claude" });
         });
         hub.provider = claude();
         hub.ensureProviderAuthDir.mockRejectedValue(new Error("no disk"));
         await inRoot(async () => {
             const { status } = mk();
             await status.startLaunchFlow();
-            expect(hub.runLaunchFlow.mock.calls.at(-1)![0].authEnv).toBeUndefined();
+            expect(await hub.runLaunchFlow.mock.calls.at(-1)![0].authEnv).toBeUndefined();
         });
     });
 
@@ -341,7 +341,7 @@ describe("the pane's own login", () => {
             const a = loginArgs();
             expect(a.provider).toBe(hub.provider);
             expect(a.cliPath).toBe("/bin/claude");
-            expect(a.authEnv).toEqual({ CLAUDE_CONFIG_DIR: "/acct/dir" });
+            expect(await a.authEnv).toEqual({ CLAUDE_CONFIG_DIR: "/acct/dir" });
             expect(a.linkTarget).toEqual({ blockId: BLOCK, agentDefinitionId: "def-1" });
             expect(a.existingAccountId).toBe("acct-9");
             expect(hub.linkedAccountFor).toHaveBeenCalledWith("def-1", "claude");

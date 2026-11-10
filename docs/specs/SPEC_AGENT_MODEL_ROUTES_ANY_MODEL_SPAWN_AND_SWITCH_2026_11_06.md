@@ -1,7 +1,7 @@
 # Spec: an agent is a harness, a model route and a key: spawn on any model and switch the model in place
 
 **Date:** 2026-11-06 (task #27458; the build follows it)
-**Status:** active — P1 (catalog and gateway) in PR #6662; P2 (spawn, create, update and routes) in the PR after it; P3 to P5 not started. Approved by the operator 2026-11-06 ("greenlight 27458"; the recommendations in section 12 are the decisions). Verified 2026-11-06.
+**Status:** active — P1 (catalog and gateway) in PR #6662; P2 (spawn, create, update and routes) in PR #6673; P3a (the switch in srv, the panel's two commands and the real model on the pane) in PR #6825; P3b (the panel itself) in the PR after it; P4 and P5 not started. Approved by the operator 2026-11-06 ("greenlight 27458"; the recommendations in section 12 are the decisions). Verified 2026-11-06.
 **Author:** Agent5@narko, for AgentX's lane
 **Read from:** `origin/main` at `1a79691b0` (v0.60.18). Web facts read the same day are marked.
 **Builds on:** the AgentSky parity and model switching report of 2026-11-05 (task #24714, kept outside the repo: one agent, one id, one history), PR #6555 (`Agents` create/update/bundles).
@@ -258,3 +258,22 @@ Every PR follows the usual checks (the change gates, a look check on macOS and L
 ## 14. What I did not do
 
 I did not run Claude Code against OpenRouter or DeepSeek (no key is in the Vault yet), so section 6's "to test" rows are expectations, not results. I did not open DeepSeek's own documentation (the direct address came from a search result). I did not read the gateway's streaming behaviour against OpenRouter's, which P1's first session tests. The effort figures are guesses.
+
+## 15. As built: P3a (the switch in srv)
+
+P3 is built in two PRs, because the panel needs srv's half first. P3a is the half with no screen.
+
+- **Where the route lives.** The route and model stay the agent's content blob (`agent:model_route`), and the pane's `agent:runtime.model` stays the harness's own alias. So `Remembered::parse` does not change: a route-qualified id is never stored there, and the gateway maps any model name the route does not serve to the agent's chosen one. This replaces the "stored value is route-qualified" line of 7a.1.
+- **`model_gateway::switch`.** `move_to` validates (route serves the harness, model served, key in the Vault), keeps the old place as `previous` (the panel's Back row; content `agent:model_route_previous`, written only by srv), writes or clears the choice, and takes the left route's gateway token away. `agent_switch_allowed` and `count_agent_switch` are decision D12: an agent changing its own model is held to 6 an hour, counted once the change is made so a refused one costs none; a person's click is not counted.
+- **`Agents update`** now goes through `move_to`, so it records `previous`, counts against the hour and restarts the agent's panes at the end of the turn they are in (the same restart an account switch uses).
+- **Two commands for the window only** (`ctx.operator_only`: the click is the approval of the spend): `agent.model.panel` returns the routes serving the pane's harness with each model's context, prices and capabilities, which one is current, the previous place, and for each row why it cannot be picked ("key missing: add \"OpenRouter API key\" in the Vault", "can't read images (N in this conversation)") and, over 50K tokens of conversation, what re-reading it costs at that model's input price. `agent.model.switch` moves the agent (route `""` is the harness's own sign-in) and restarts its panes unless told not to.
+- **The real model on the pane.** At every launch srv writes `agent:route_model` ({route, route_label, model, label}) on the pane's meta, or clears it off a route. The panel, the composer footer and the pane header's model icon (task #29322) read that one field, so they agree.
+- **Not in P3a:** the panel (P3b); committing a cross-provider switch only after its first turn succeeds, and "Compact, then switch" (P3c); an agent putting itself on a paid route with a "Always" grant (an agent still cannot leave its route for another: a person does it in the panel).
+
+## 16. As built: P3b (the panel)
+
+- **Where.** The composer's runtime panel (`AgentRuntimeDropup`, `runtime-dropup-*`) keeps its Mode and Effort sections. Its Model section is now a Back row (when `agent.model.panel` reports a `previous`), a "Your plan" group with the harness's own models, and one group per route serving the harness ("billed to your key in the Vault", or "key missing"). Only a Claude Code pane asks srv for routes; any other harness, or an srv without the command, shows the harness's own panel as before.
+- **A row** names the model and says under it: context, price in and out per million, and what it does (tools, thinking, images), with the cost of re-reading the conversation on that model when it is over 50K tokens and not the model already running. A model srv says cannot be picked (key missing, cannot read the images in the conversation) is greyed with srv's reason, and kept out of keyboard navigation.
+- **A pick** calls `agent.model.switch` (`restart: true`): srv records `previous`, writes the choice and restarts the pane at the end of its turn, with its conversation. Picking a harness model while on a route first leaves the route (`route: ""`, `restart: false`) and then sets the runtime as it always did, which restarts it once. A failed switch is shown on the trigger and leaves the agent where it was.
+- **The footer.** The trigger's label shows the model that really answers (`agent:route_model` on the pane, written by srv at each launch), not the harness alias Claude Code reports; the line under the Model rows reads "Running: GLM 5.3 on OpenRouter". Off a route nothing changes.
+- **Not in P3b:** committing a cross-provider switch only after its first turn succeeds, and "Compact, then switch" (P3c).

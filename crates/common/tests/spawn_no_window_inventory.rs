@@ -174,6 +174,8 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/srv/src/backend/process_tracker/roots_file.rs", "\"sleep\"", 1,
      "test: the unix-only prune test's stand-in CLI"),
+    ("crates/srv/src/backend/spawn_env/endpoint.rs", "\"claude\"", 1,
+     "test: builds a command only to read the environment it would get; never spawned"),
     ("crates/common/src/runtime_mode.rs", "\"git\"", 1,
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/common/src/toolchain_path.rs", "shell", 1,

@@ -629,11 +629,8 @@ pub(crate) async fn handle_ui_browser_dispatch_key(
     // The key's name, never the text typed: it can be anything the agent was given.
     let log = || note(&block_id, &req.auth.agent_id, Kind::Key).target(req.selector.as_deref().unwrap_or("")).detail(req.key.as_deref().unwrap_or("typed text (not logged)"));
     if presses {
-        if let Err(resp) = refuse_on_driven_pane(
-            &state, log(), &block_id,
-            "Browser's key action with Enter or Space",
-            "Browser's click action on the button (it asks the user when the click submits something)",
-        ) {
+        // A grant with the Enter and Space power takes the key as the click it is (spec §5).
+        if let Some(resp) = crate::server::browser_press::press_or_refuse(&state, &block_id, &req, log).await {
             return resp;
         }
     }
@@ -902,6 +899,9 @@ pub(crate) async fn handle_ui_browser_set_files(
         Ok(b) => b,
         Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
     };
+    if req.chooser {
+        return crate::server::browser_chooser::fill(&state, &block_id, &own, &req.auth.agent_id, req.paths).await;
+    }
     let files = match crate::server::browser_uploads::files_for_agent(&own, req.paths.clone()).await {
         Ok(f) => f,
         Err((code, e)) => return err_response(code, e),
@@ -947,7 +947,7 @@ pub(crate) async fn handle_ui_browser_wait_for(
 /// with the approval check in front of committing clicks.
 /// A refusal goes in the pane's action log as `log`.
 #[allow(clippy::result_large_err)]
-fn refuse_on_driven_pane(state: &AppState, log: Note, block_id: &str, what: &str, instead: &str) -> Result<(), axum::response::Response> {
+pub(crate) fn refuse_on_driven_pane(state: &AppState, log: Note, block_id: &str, what: &str, instead: &str) -> Result<(), axum::response::Response> {
     // A popup window has no owner record of its own (it is driven through the
     // pane that opened it), and it is always driven: the same refusal holds.
     let on = if crate::server::browser_popup::is_window_id(block_id) {
@@ -1474,24 +1474,12 @@ pub(crate) async fn handle_ui_browser_act(
     // Bypass (bypass spec §4.1): the person let this agent click without
     // asking on this page's site.
     if let Some(resp) =
-        crate::server::browser_bypass_routes::bypassed_click(&state, &block_id, &req.auth.agent_id, &ask, body(Some(&ask)), log()).await
+        crate::server::browser_bypass_routes::bypassed_click(&state, &block_id, &req.auth.agent_id, &ask, body(Some(&ask)), "act", log()).await
     {
         return resp;
     }
     tracing::info!(agent_id = %req.auth.agent_id, block_id = %block_id, "[ui-automation] browser act waits for approval");
-    let asked = || log().asked(&ask);
-    use crate::server::browser_click_approval::{approve_click, ClickRefused};
-    match approve_click(&state, &block_id, &req.auth.agent_id, &ask).await {
-        Ok((_waiting, asked_at)) => {
-            let clicked = proxy_value(&state, "act", body(Some(&ask)), std::time::Duration::from_secs(20)).await;
-            asked().how(How::Approved).outcome(&state, crate::server::browser_actions::approved_by_user(clicked, asked_at.elapsed()))
-        }
-        Err(ClickRefused::NotAsked(code, e)) => err_response(code, e),
-        Err(ClickRefused::Asked(how, code, e)) => match how {
-            Some(how) => asked().how(how).fail(&state, code, e),
-            None => asked().fail(&state, code, e),
-        },
-    }
+    crate::server::browser_click_approval::ask_then_click(&state, &block_id, &req.auth.agent_id, "act", &ask, body(Some(&ask)), log).await
 }
 
 #[cfg(test)]

@@ -46,6 +46,8 @@ pub mod settings_jsonc;
 pub mod settings_path;
 pub mod shell_quote;
 pub mod slug;
+pub mod srv_binary;
+pub mod srv_estart_wait;
 pub mod srv_stderr;
 pub mod time;
 pub mod tokens;

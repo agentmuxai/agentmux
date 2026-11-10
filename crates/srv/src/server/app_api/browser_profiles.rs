@@ -120,6 +120,9 @@ fn path() -> Result<std::path::PathBuf, String> {
 pub(crate) async fn ensure_agent_profile(state: &AppState, owner: &str, name: &str) -> Result<store::BrowserProfile, String> {
     let (own, changed) = ensure_agent_profile_at(&path()?, owner, name).await?;
     if changed {
+        // A pane's profile button follows this event: without it the button keeps the default colour until the
+        // person opens its menu.
+        state.broker.publish_event::<crate::backend::mps_events::BrowserProfilesChanged>(&(), vec![], 0);
         crate::server::browser_host_sync::push(state).await;
     }
     Ok(own)

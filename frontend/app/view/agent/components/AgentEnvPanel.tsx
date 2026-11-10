@@ -19,6 +19,7 @@ import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { ENV_CONTENT_TYPE, parseEnvText } from "../agent-env";
+import { EndpointNoticeLine } from "./EndpointNoticeLine";
 import "./AgentEnvPanel.scss";
 import "./AgentPrimitiveModal.scss";
 
@@ -104,9 +105,8 @@ export const AgentEnvPanel = (props: AgentEnvPanelProps): JSX.Element => {
     return (
         <div class="agent-primitive-modal-detail agent-env-panel" data-testid="agent-env-panel">
             <div class="agent-primitive-modal-readonly">
-                <p class="agent-primitive-modal-global-note">
-                    The extra environment variables {props.agentName} starts with.
-                </p>
+                <p class="agent-primitive-modal-global-note">The extra environment variables {props.agentName} starts with.</p>
+                <EndpointNoticeLine agentId={props.agentId} />
                 <Field label="Environment" layout="stacked" hint={ENV_HINT}>
                     <TextArea
                         mono

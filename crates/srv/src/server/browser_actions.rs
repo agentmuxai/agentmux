@@ -72,6 +72,8 @@ pub(crate) enum Kind {
     TookControl,
     /// An agent let a pane go.
     Released,
+    /// A download its pane saved into the agent's workspace without a dialog, or refused to.
+    Download,
 }
 
 /// How it went: who let it through, or why it didn't happen.

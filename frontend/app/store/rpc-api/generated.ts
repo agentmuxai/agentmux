@@ -29,11 +29,16 @@ import type { AgentKillProcessCommand } from "@/types/rpc/AgentKillProcessComman
 import type { AgentKillResult } from "@/types/rpc/AgentKillResult";
 import type { AgentKillTreeCommand } from "@/types/rpc/AgentKillTreeCommand";
 import type { AgentLastRuntime } from "@/types/rpc/AgentLastRuntime";
+import type { AgentModelPanel } from "@/types/rpc/AgentModelPanel";
+import type { AgentModelPanelReq } from "@/types/rpc/AgentModelPanelReq";
+import type { AgentModelSwitchReq } from "@/types/rpc/AgentModelSwitchReq";
+import type { AgentModelSwitchResult } from "@/types/rpc/AgentModelSwitchResult";
 import type { AgentMoveHereResult } from "@/types/rpc/AgentMoveHereResult";
 import type { AgentOpenPanesResult } from "@/types/rpc/AgentOpenPanesResult";
 import type { AgentOpenResult } from "@/types/rpc/AgentOpenResult";
 import type { AgentOpenTailResult } from "@/types/rpc/AgentOpenTailResult";
 import type { AgentPaneUnregisterResult } from "@/types/rpc/AgentPaneUnregisterResult";
+import type { AgentPeerLabels } from "@/types/rpc/AgentPeerLabels";
 import type { AgentProcessListCommand } from "@/types/rpc/AgentProcessListCommand";
 import type { AgentProcessListResult } from "@/types/rpc/AgentProcessListResult";
 import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
@@ -264,6 +269,7 @@ import type { CommandSkillUpsertData } from "@/types/rpc/CommandSkillUpsertData"
 import type { CommandSubprocessSpawnData } from "@/types/rpc/CommandSubprocessSpawnData";
 import type { CommandSupervisorSetModeData } from "@/types/rpc/CommandSupervisorSetModeData";
 import type { CommandToolDecisionData } from "@/types/rpc/CommandToolDecisionData";
+import type { CommandUndoAgentEndpointData } from "@/types/rpc/CommandUndoAgentEndpointData";
 import type { CommandUnlinkAgentIdentityData } from "@/types/rpc/CommandUnlinkAgentIdentityData";
 import type { CommandUpdateAgentDefinitionData } from "@/types/rpc/CommandUpdateAgentDefinitionData";
 import type { CommandUpdateAgentInstanceData } from "@/types/rpc/CommandUpdateAgentInstanceData";
@@ -544,6 +550,7 @@ import type { TowerPeerInfo } from "@/types/rpc/TowerPeerInfo";
 import type { TowerPeersResult } from "@/types/rpc/TowerPeersResult";
 import type { TowerSampleReq } from "@/types/rpc/TowerSampleReq";
 import type { TowerSnapshot } from "@/types/rpc/TowerSnapshot";
+import type { UndoAgentEndpointResult } from "@/types/rpc/UndoAgentEndpointResult";
 import type { UninstallReq } from "@/types/rpc/UninstallReq";
 import type { UninstallResult } from "@/types/rpc/UninstallResult";
 import type { UnlinkAgentIdentityResult } from "@/types/rpc/UnlinkAgentIdentityResult";
@@ -2775,6 +2782,14 @@ export const GeneratedApi = {
   UnwatchMediaDirCommand(client: RpcClient, data: UnwatchMediaDirReq, opts?: RpcOpts): Promise<void> {
     return client.rpcCall("unwatchmediadir", data, opts);
   },
+  // command "undoagentendpoint"
+  UndoAgentEndpointCommand(
+    client: RpcClient,
+    data: CommandUndoAgentEndpointData,
+    opts?: RpcOpts
+  ): Promise<UndoAgentEndpointResult> {
+    return client.rpcCall("undoagentendpoint", data, opts);
+  },
   // command "updateagent"
   UpdateAgentDefinitionCommand(
     client: RpcClient,
@@ -3035,6 +3050,22 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<AgentAccountSwitchResult> {
     return client.rpcCall("agent.account.switch", data, { timeout: 120000, ...opts });
+  },
+  // command "agent.model.panel"
+  AgentModelPanelCommand(client: RpcClient, data: AgentModelPanelReq, opts?: RpcOpts): Promise<AgentModelPanel> {
+    return client.rpcCall("agent.model.panel", data, opts);
+  },
+  // command "agent.model.switch"
+  AgentModelSwitchCommand(
+    client: RpcClient,
+    data: AgentModelSwitchReq,
+    opts?: RpcOpts
+  ): Promise<AgentModelSwitchResult> {
+    return client.rpcCall("agent.model.switch", data, { timeout: 120000, ...opts });
+  },
+  // command "agent.peer-labels"
+  AgentPeerLabelsCommand(client: RpcClient, opts?: RpcOpts): Promise<AgentPeerLabels> {
+    return client.rpcCall("agent.peer-labels", {}, opts);
   },
   // command "identity.account.move_agents"
   IdentityAccountMoveAgentsCommand(

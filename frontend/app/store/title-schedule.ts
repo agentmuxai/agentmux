@@ -16,6 +16,7 @@
  * cannot: ones driven by jekts or tools, with no human message to trigger it.
  * docs/specs/SPEC_AMBIENT_SWARM_SUMMARY_HARDENING_2026_10_02.md section 5.6.
  */
+import { META_TITLE_AT, META_TITLE_TURN } from "@/app/store/meta-keys";
 
 /** Block meta key: human (non-hidden) messages submitted this session. Cleared at
  *  the session boundary with the title (useBlockActivity.ts). */
@@ -41,6 +42,28 @@ export function resetHumanTurns(blockId: string): void {
     localTurns.delete(blockId);
 }
 
+/** A title older than this many human messages is judged afresh (see `titleRequest`). */
+export const TITLE_AGED_AFTER_TURNS = 9;
+/** ...or older than this much time. */
+export const TITLE_AGED_AFTER_MS = 2 * 60 * 60_000;
+
+/**
+ * Has the title outlived its goal? A title is written for the session's overall goal, which is
+ * right for a worker on one task but not for a leader taking a stream of unrelated requests: the
+ * four-hour title "Compare AWS Bedrock and OpenRouter pricing" outlived thirty messages on other
+ * topics. Past about nine human messages, or two hours, since it was last judged (or after a
+ * compaction, `markTitleStale`), it is judged afresh. A title with no stamp (stored by an older
+ * build, or restored from a finished session) has no known age and counts as aged, so it is
+ * judged once and stamped.
+ */
+export function isTitleAged(meta: Record<string, unknown> | undefined, turn: number, now: number): boolean {
+    const at = meta?.[META_TITLE_AT];
+    if (typeof at !== "number" || !Number.isFinite(at)) return true;
+    if (now - at >= TITLE_AGED_AFTER_MS) return true;
+    const judgedAt = meta?.[META_TITLE_TURN];
+    return typeof judgedAt === "number" && turn - judgedAt >= TITLE_AGED_AFTER_TURNS;
+}
+
 /** Is human turn `n` (1-based) one where an existing title is re-evaluated? */
 export function isReevaluationTurn(n: number): boolean {
     if (!Number.isInteger(n) || n < 2) return false;
@@ -53,4 +76,14 @@ export function isReevaluationTurn(n: number): boolean {
  *  only on a re-evaluation turn. */
 export function shouldRequestTitle(hasUsableTitle: boolean, n: number): boolean {
     return !hasUsableTitle || isReevaluationTurn(n);
+}
+
+/** What a human message asks of the title model: nothing, a check that the title still fits
+ *  (`maintain`, the schedule above, which replies SKIP while it does), or a fresh judgement with
+ *  no current title shown (`refresh`, for an aged title). */
+export type TitleRequest = "none" | "maintain" | "refresh";
+
+export function titleRequest(hasUsableTitle: boolean, n: number, aged: boolean): TitleRequest {
+    if (hasUsableTitle && aged) return "refresh";
+    return shouldRequestTitle(hasUsableTitle, n) ? "maintain" : "none";
 }

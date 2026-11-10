@@ -6,6 +6,13 @@
 
 use super::*;
 
+/// Said wherever a tool finds this agent has no AgentMux credential. An agent that went looking for the
+/// key (in AgentMux's config, other agents' folders, the process list) was working around a launch fault
+/// it could not fix, and reading what it was never given.
+pub(crate) const NO_KEY_HUNT: &str = "Don't search AgentMux's config files, other agents' folders or \
+    the process list for a key: an agent is never given one that way. Tell your leader or the operator \
+    that this agent's AgentMux tools have no auth key, so they fix how it was launched.";
+
 /// Guard for the self-scoped agent-API verbs: they need the sidecar URL +
 /// auth key to reach it, and the caller's block id to resolve "my own"
 /// tab/pane/window/workspace.
@@ -13,7 +20,7 @@ pub(crate) fn require_agent_env(local_url: &str, auth_key: &str, block_id: &str)
     if local_url.is_empty() || auth_key.is_empty() {
         anyhow::bail!(
             "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
-             Is this agent pane opened via AgentMux?"
+             Is this agent pane opened via AgentMux? {NO_KEY_HUNT}"
         );
     }
     if block_id.is_empty() {
@@ -139,7 +146,8 @@ pub(crate) fn describe_http_error(what: &str, status: reqwest::StatusCode, body:
     let hint = match status.as_u16() {
         401 => {
             " — AgentMux rejected this process's auth key (AGENTMUX_AUTH_KEY). The agent was \
-             probably started by an AgentMux that has since restarted; reopen it."
+             probably started by an AgentMux that has since restarted; reopen it. \
+             Don't look for another key: ask your leader or the operator."
         }
         503 => " — temporary; retry shortly.",
         _ => "",

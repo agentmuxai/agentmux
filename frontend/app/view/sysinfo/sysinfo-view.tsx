@@ -18,7 +18,7 @@ import { type AreaChoice, FOCUS_CHOICES } from "./sysinfo-overview-data";
 import { inTopRow, sharesPercentRange, showsTimeAxis, showsYLabels } from "./sysinfo-layout";
 import { SingleLinePlot } from "./sysinfo-plot-lazy";
 import { SysinfoZoomContext } from "./sysinfo-zoom";
-import { AreaPlotType, SIMPLE_VIEWS } from "./sysinfo-types";
+import { AreaPlotType, type DataItem, SIMPLE_VIEWS } from "./sysinfo-types";
 import { convertTimeSeriesToDataItem } from "./sysinfo-util";
 
 type SysinfoViewProps = {
@@ -101,15 +101,13 @@ function SysinfoView(props: SysinfoViewProps): JSX.Element {
 // the default 1 Hz sampling.
 const CHART_UPDATE_INTERVAL_MS = 1000;
 
-function SysinfoViewInner(props: SysinfoViewProps): JSX.Element {
-    const { model } = props;
-
-    // The charts take the model's samples on a timer (CHART_UPDATE_INTERVAL_MS)
-    // rather than on every event, so a burst (a backfill, a resumed lane) is one
-    // redraw, not many.
+/**
+ * The samples the charts draw: the model's, taken on a timer (CHART_UPDATE_INTERVAL_MS)
+ * rather than on every event, so a burst (a backfill, a resumed lane) is one redraw, not many.
+ * The setter is for taking them at once.
+ */
+function createChartSamples(model: SysinfoViewModel, paused: () => boolean) {
     const [plotData, setPlotData] = createSignal(model.dataAtom());
-    // Paused: the charts hold what they show while samples keep arriving.
-    const [paused, setPaused] = createSignal(false);
     onMount(() => {
         // Skipped while the window is being resized: rebuilding the chart reads
         // layout, which mid-resize forced the frame's whole layout early
@@ -133,10 +131,12 @@ function SysinfoViewInner(props: SysinfoViewProps): JSX.Element {
             }
         )
     );
+    return [plotData, setPlotData] as const;
+}
+
+/** How the simple views' charts are laid out: their metrics, and the columns they fall into. */
+function createGridLayout(model: SysinfoViewModel) {
     const yvals = createMemo(() => model.metrics());
-    const plotMeta = createMemo(() => model.plotMetaAtom());
-    const targetLen = createMemo(() => model.numPoints() + 1);
-    const intervalSecs = createMemo(() => model.intervalSecsAtom());
 
     // The "CPU + Mem + Net" plot type stacks as a single column of 3
     // full-width rows instead of falling into the 2-column grid below: at 2
@@ -153,6 +153,85 @@ function SysinfoViewInner(props: SysinfoViewProps): JSX.Element {
     // row only, y labels on the left column only when every chart shares 0–100%,
     // and the plots run to both edges, so they line up without a shared axis.
     const sameRange = createMemo(() => sharesPercentRange(yvals()));
+    return { yvals, cols1, cols2, columns, sameRange };
+}
+
+type GridLayout = ReturnType<typeof createGridLayout>;
+
+type SimpleGridProps = {
+    model: SysinfoViewModel;
+    layout: GridLayout;
+    plotData: DataItem[];
+    plotMeta: Map<string, TimeSeriesMeta>;
+    targetLen: number;
+    intervalSecs: number;
+};
+
+/** A simple view: one chart for each metric, in one column or two. */
+function SimpleGrid(props: SimpleGridProps): JSX.Element {
+    const { yvals, cols1, cols2, columns, sameRange } = props.layout;
+    return (
+        <div class="flex flex-col flex-grow mb-0 overflow-y-auto">
+            <div
+                class={clsx("sysinfo-grid", {
+                    "grid-cols-1": cols1(),
+                    "grid-cols-2": cols2(),
+                })}
+            >
+                <For each={yvals()}>
+                    {(yval, i) => (
+                        <SingleLinePlot
+                            plotData={props.plotData}
+                            yval={yval}
+                            yvalMeta={props.plotMeta.get(yval)}
+                            blockId={props.model.blockId}
+                            defaultColor={"var(--accent-color)"}
+                            targetLen={props.targetLen}
+                            intervalSecs={props.intervalSecs}
+                            syncKey={`sysinfo-${props.model.blockId}`}
+                            timeAxis={showsTimeAxis(i(), yvals().length, columns())}
+                            yLabels={showsYLabels(i(), columns(), sameRange())}
+                            top={inTopRow(i(), columns())}
+                        />
+                    )}
+                </For>
+            </div>
+        </div>
+    );
+}
+
+type MeasureTableScrollProps = {
+    overview: boolean;
+    plotData: DataItem[];
+    keys: string[];
+    focus: AreaChoice;
+};
+
+/**
+ * The figures as a table instead of the charts. It lists what the view shows: an
+ * Advanced view's area, or exactly the measures a simple view charts. It scrolls
+ * when it is taller than the pane.
+ */
+function MeasureTableScroll(props: MeasureTableScrollProps): JSX.Element {
+    return (
+        <div class="sysinfo-table-scroll">
+            <Show when={props.overview} fallback={<MeasureTable plotData={props.plotData} keys={props.keys} />}>
+                <MeasureTable plotData={props.plotData} focus={props.focus} />
+            </Show>
+        </div>
+    );
+}
+
+function SysinfoViewInner(props: SysinfoViewProps): JSX.Element {
+    const { model } = props;
+
+    // Paused: the charts hold what they show while samples keep arriving.
+    const [paused, setPaused] = createSignal(false);
+    const [plotData, setPlotData] = createChartSamples(model, paused);
+    const layout = createGridLayout(model);
+    const plotMeta = createMemo(() => model.plotMetaAtom());
+    const targetLen = createMemo(() => model.numPoints() + 1);
+    const intervalSecs = createMemo(() => model.intervalSecsAtom());
 
     // The pane's zoom scales Sysinfo's text, not its charts (SysinfoZoomContext).
     const zoom = createMemo(() => readZoom(model.meta()));
@@ -168,15 +247,6 @@ function SysinfoViewInner(props: SysinfoViewProps): JSX.Element {
     );
     const view = () => (overview() ? model.focus() : model.plotTypeSelectedAtom());
     const onView = (v: string) => (overview() ? model.setFocus(v as AreaChoice) : void model.setSimpleView(v));
-    // The table lists what the view shows: an Advanced view's area, or exactly
-    // the measures a simple view charts. It scrolls when it is taller than the pane.
-    const measureTable = () => (
-        <div class="sysinfo-table-scroll">
-            <Show when={overview()} fallback={<MeasureTable plotData={plotData()} keys={yvals()} />}>
-                <MeasureTable plotData={plotData()} focus={model.focus()} />
-            </Show>
-        </div>
-    );
 
     return (
         <SysinfoZoomContext.Provider value={zoom}>
@@ -199,7 +269,17 @@ function SysinfoViewInner(props: SysinfoViewProps): JSX.Element {
                 onTable={setTable}
                 onActionsWidth={setActionsWidth}
             />
-            <Show when={!table()} fallback={measureTable()}>
+            <Show
+                when={!table()}
+                fallback={
+                    <MeasureTableScroll
+                        overview={overview()}
+                        plotData={plotData()}
+                        keys={layout.yvals()}
+                        focus={model.focus()}
+                    />
+                }
+            >
                 <Show
                     when={!overview()}
                     fallback={
@@ -212,32 +292,14 @@ function SysinfoViewInner(props: SysinfoViewProps): JSX.Element {
                         />
                     }
                 >
-                    <div class="flex flex-col flex-grow mb-0 overflow-y-auto">
-                        <div
-                            class={clsx("sysinfo-grid", {
-                                "grid-cols-1": cols1(),
-                                "grid-cols-2": cols2(),
-                            })}
-                        >
-                            <For each={yvals()}>
-                                {(yval, i) => (
-                                    <SingleLinePlot
-                                        plotData={plotData()}
-                                        yval={yval}
-                                        yvalMeta={plotMeta().get(yval)}
-                                        blockId={model.blockId}
-                                        defaultColor={"var(--accent-color)"}
-                                        targetLen={targetLen()}
-                                        intervalSecs={intervalSecs()}
-                                        syncKey={`sysinfo-${model.blockId}`}
-                                        timeAxis={showsTimeAxis(i(), yvals().length, columns())}
-                                        yLabels={showsYLabels(i(), columns(), sameRange())}
-                                        top={inTopRow(i(), columns())}
-                                    />
-                                )}
-                            </For>
-                        </div>
-                    </div>
+                    <SimpleGrid
+                        model={model}
+                        layout={layout}
+                        plotData={plotData()}
+                        plotMeta={plotMeta()}
+                        targetLen={targetLen()}
+                        intervalSecs={intervalSecs()}
+                    />
                 </Show>
             </Show>
         </div>

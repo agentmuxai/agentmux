@@ -34,6 +34,7 @@
 import { readSwarmSummary } from "./activitySummary";
 import { META_AWAITING_CONFIRM, rankAgentStatus, type AgentStatus } from "./agent-status";
 import { isUsableTitle } from "./ambient-title";
+import { META_TITLE_AT } from "./meta-keys";
 import { supervisorPauseReason } from "./supervisor";
 
 export type SwarmLineSource = "declared" | "task" | "generated" | "restored" | "heuristic" | "status";
@@ -195,6 +196,26 @@ function readLivePhrase(meta: Record<string, unknown> | undefined, now: number):
         ageMs,
         stale: ageMs === undefined || ageMs > LIVE_PHRASE_STALE_MS,
     };
+}
+
+/** An agent's own status line wins over the generated title in the pane while it is this fresh. */
+export const FRESH_STATUS_MS = 60 * 60_000;
+
+/**
+ * The line an agent pane shows for what the agent is doing (the working row, a tab's tooltip):
+ * the agent's own status line (`Presence status`) while it is fresh and newer than the generated
+ * title, else the generated title. The agent knows what it is doing; the title is a guess made
+ * from its messages, and it can lag behind a change of topic. A task title srv wrote at a claim
+ * is not the agent's word, so it does not count here, and neither does an old line.
+ */
+export function readPaneSummary(meta: Record<string, unknown> | undefined, now: number = Date.now()): string | null {
+    const title = readSwarmSummary(meta);
+    const phrase = readLivePhrase(meta, now);
+    if (!phrase || phrase.source !== "declared" || phrase.setAt === undefined) return title;
+    if ((phrase.ageMs ?? Infinity) > FRESH_STATUS_MS) return title;
+    const titleAt = meta?.[META_TITLE_AT];
+    const titleIsNewer = title !== null && typeof titleAt === "number" && titleAt >= phrase.setAt;
+    return titleIsNewer ? title : phrase.text;
 }
 
 /** The ranked status of a Swarm agent, from what its row knows: whether a

@@ -41,7 +41,7 @@ import { MOS } from "@/app/store/global";
 import { isUsableTitle } from "@/app/store/ambient-title";
 import { META_AWAITING_USER, META_LAST_PROMPT, META_RESTORED } from "@/app/store/swarm-line";
 import { META_HUMAN_TURNS, resetHumanTurns } from "@/app/store/title-schedule";
-import { META_OSC_TITLE, META_SUGGESTION, META_TITLE } from "@/app/store/meta-keys";
+import { META_OSC_TITLE, META_SUGGESTION, META_TITLE, META_TITLE_AT, META_TITLE_TURN } from "@/app/store/meta-keys";
 
 export interface UseBlockActivityOptions {
     blockId: string;
@@ -61,6 +61,8 @@ function clearActivity(blockId: string): void {
         ObjectService.UpdateObjectMeta(makeORef("block", blockId), {
             [META_OSC_TITLE]: null,
             [META_TITLE]: null,
+            [META_TITLE_AT]: null,
+            [META_TITLE_TURN]: null,
             [META_SUGGESTION]: null,
             // The session is over: what it was asked and whether it was waiting
             // belong to it. Left in place, a new session in this pane, or one

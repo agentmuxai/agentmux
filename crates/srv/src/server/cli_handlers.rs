@@ -774,7 +774,11 @@ async fn run_auth_check(
     // No check command must never read as signed in: a bare CLI with null
     // stdin often just exits 0 (pi-acp does).
     if auth_check_args.is_empty() {
-        return Err("this CLI has no sign-in check".to_string());
+        // A CLI with no status command (Grok Build, Muse Code) is asked through its login file.
+        return match crate::identity::resolver::cli_file_signed_in(cli_path, auth_env) {
+            Some(signed_in) => Ok((signed_in, None, Some("credential file".to_string()), String::new())),
+            None => Err("this CLI has no sign-in check".to_string()),
+        };
     }
     // pi-acp has no status command of its own; the pi beside it does:
     // `pi --list-models` prints "No models available" until a provider is

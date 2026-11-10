@@ -361,6 +361,44 @@
     }
   },
   {
+    "command": "agent.model.panel",
+    "request": "agentmux_srv::server::app_api::agent_model::AgentModelPanelReq",
+    "requestName": "AgentModelPanelReq",
+    "requestTs": {
+      "imports": [
+        "AgentModelPanelReq"
+      ],
+      "name": "AgentModelPanelReq"
+    },
+    "response": "agentmux_srv::server::app_api::agent_model::AgentModelPanel",
+    "responseName": "AgentModelPanel",
+    "responseTs": {
+      "imports": [
+        "AgentModelPanel"
+      ],
+      "name": "AgentModelPanel"
+    }
+  },
+  {
+    "command": "agent.model.switch",
+    "request": "agentmux_srv::server::app_api::agent_model::AgentModelSwitchReq",
+    "requestName": "AgentModelSwitchReq",
+    "requestTs": {
+      "imports": [
+        "AgentModelSwitchReq"
+      ],
+      "name": "AgentModelSwitchReq"
+    },
+    "response": "agentmux_srv::server::app_api::agent_model::AgentModelSwitchResult",
+    "responseName": "AgentModelSwitchResult",
+    "responseTs": {
+      "imports": [
+        "AgentModelSwitchResult"
+      ],
+      "name": "AgentModelSwitchResult"
+    }
+  },
+  {
     "command": "agent.move-here",
     "request": "agentmux_srv::backend::rpc_types::agent::CommandAgentMoveHereData",
     "requestName": "CommandAgentMoveHereData",
@@ -453,6 +491,25 @@
         "AgentPaneUnregisterResult"
       ],
       "name": "AgentPaneUnregisterResult"
+    }
+  },
+  {
+    "command": "agent.peer-labels",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "agentmux_srv::server::app_api::agent_model::AgentPeerLabels",
+    "responseName": "AgentPeerLabels",
+    "responseTs": {
+      "imports": [
+        "AgentPeerLabels"
+      ],
+      "name": "AgentPeerLabels"
     }
   },
   {
@@ -7446,6 +7503,25 @@
         "TowerSnapshot"
       ],
       "name": "TowerSnapshot"
+    }
+  },
+  {
+    "command": "undoagentendpoint",
+    "request": "agentmux_srv::backend::rpc_types::agent::CommandUndoAgentEndpointData",
+    "requestName": "CommandUndoAgentEndpointData",
+    "requestTs": {
+      "imports": [
+        "CommandUndoAgentEndpointData"
+      ],
+      "name": "CommandUndoAgentEndpointData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::agent::UndoAgentEndpointResult",
+    "responseName": "UndoAgentEndpointResult",
+    "responseTs": {
+      "imports": [
+        "UndoAgentEndpointResult"
+      ],
+      "name": "UndoAgentEndpointResult"
     }
   },
   {

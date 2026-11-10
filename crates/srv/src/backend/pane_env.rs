@@ -387,6 +387,8 @@ mod spawn_site_coverage {
          "sanitized: our own binary re-run as `__file_icons` to ask the system for a file type's icon in isolation; it needs no instance identity, so sanitize_external_std_command"),
         ("src/backend/attachments/extract.rs", "harness", 1,
          "test: re-runs the test harness as a child that sleeps, to prove the extraction deadline kills it"),
+        ("src/backend/spawn_env/endpoint.rs", "\"claude\"", 1,
+         "test: builds a command only to read the environment it would get, to prove an emptied login variable is removed from it; never spawned"),
         ("src/backend/storage/muxbus.rs", "std::env::current_exe(", 1,
          "test: re-runs the test harness as children that save and read one keychain sign-in at once (ignored; real keychain)"),
         ("src/backend/storage/filestore/tests_checkpoint.rs", "std::env::current_exe(", 1,

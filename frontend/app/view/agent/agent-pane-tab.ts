@@ -12,20 +12,17 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { PaneTabDescriptor, PaneTabIcon } from "@/element/pane-tab-model";
 import { HISTORY_TAB_FOR_META_KEY, historyTabLabel } from "./open-history-tab";
-import { PROVIDERS, resolveProviderAlias } from "./providers";
+import { dualLogoTitle } from "@/element/DualProviderLogo";
+import { paneIconInput } from "./pane-icon-input";
 import { setBlockMeta } from "@/app/store/block-meta";
 
 /** Same precedence as AgentViewModel.viewIcon; undefined falls through to
  *  the shared default (frame:icon, then the "agent" view icon). */
 export function agentTabIcon(meta: MetaType | undefined): PaneTabIcon | undefined {
-    const provider = meta?.["agentProvider"];
-    if (typeof provider === "string" && provider.length > 0) {
-        return { kind: "provider", provider: resolveProviderAlias(provider) };
-    }
-    const agentId = meta?.["agentId"];
-    if (typeof agentId === "string" && PROVIDERS[agentId]) {
-        return { kind: "provider", provider: agentId };
-    }
+    // The harness, with the model answering as its badge. The pill has no agent definitions at hand, so a
+    // custom endpoint's own badge ("custom") is the header icon's, not the pill's.
+    const shown = paneIconInput(meta, []);
+    if (shown) return { kind: "provider", provider: shown.harness, vendor: shown.vendor };
     const icon = meta?.["agentIcon"];
     if (typeof icon === "string" && icon.length > 0) return { kind: "fa", name: icon };
     return undefined;
@@ -44,6 +41,11 @@ export const agentPaneTab: PaneTabDescriptor = {
         return typeof name === "string" && name.length > 0 ? name : "Agent";
     },
     icon: ({ meta }) => agentTabIcon(meta),
+    modelLine: ({ meta }) => {
+        // Only on a route: off one, the pill has no definition to say what the agent runs on (a custom endpoint).
+        const shown = paneIconInput(meta, []);
+        return shown?.modelText ? dualLogoTitle(shown.harness, shown.vendor, shown.modelText) : undefined;
+    },
     renamer: ({ blockId, meta }) => {
         const definitionId = meta?.["agentId"] as string | undefined;
         // A blank picker tab has nothing to rename, and a history tab must

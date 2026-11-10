@@ -1587,6 +1587,10 @@
             "method": "UnwatchMediaDirCommand"
         },
         {
+            "command": "undoagentendpoint",
+            "method": "UndoAgentEndpointCommand"
+        },
+        {
             "command": "updateagent",
             "method": "UpdateAgentDefinitionCommand",
             "optionalFields": [
@@ -1728,6 +1732,20 @@
             "command": "agent.account.switch",
             "method": "AgentAccountSwitchCommand",
             "opts": "{ timeout: 120000, ...opts }"
+        },
+        {
+            "command": "agent.model.panel",
+            "method": "AgentModelPanelCommand"
+        },
+        {
+            "command": "agent.model.switch",
+            "method": "AgentModelSwitchCommand",
+            "opts": "{ timeout: 120000, ...opts }"
+        },
+        {
+            "command": "agent.peer-labels",
+            "method": "AgentPeerLabelsCommand",
+            "send": "{}"
         },
         {
             "command": "identity.account.move_agents",

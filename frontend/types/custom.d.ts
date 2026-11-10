@@ -5,6 +5,7 @@
 // SolidJS migration: all Jotai/React types replaced with SolidJS equivalents.
 
 import type { PaneVoiceHandle } from "@/app/hook/useVoiceInput";
+import type { HostKey } from "@/app/keybindings/host-keys";
 import type { HealthPayload } from "@/app/store/health-signals";
 import type { NodeModel } from "@/layout/index";
 import type { SignalAtom } from "@/util/util";
@@ -523,6 +524,8 @@ declare global {
         onFullScreenChange: (callback: (isFullScreen: boolean) => void) => void;
         onZoomFactorChange: (callback: (zoomFactor: number) => void) => void;
         setZoomFactor: (zoomFactor: number) => void;
+        /** The app shortcuts the host forwards out of a focused browser pane; replaces its list. */
+        setHostKeys: (keys: HostKey[]) => void;
         onUpdaterStatusChange: (callback: (status: UpdaterStatus) => void) => void;
         getUpdaterStatus: () => UpdaterStatus;
         getUpdaterVersion: () => string | null;
@@ -1181,6 +1184,9 @@ declare global {
         /** Stays until the user closes it: no expiry, and a pin on the toast
          *  says so. Needs an `id`. */
         persistent?: boolean;
+        /** An action toast that still goes at `expiration` (an action toast otherwise never expires), and waits
+         *  while the pointer is over it. For a notice that a list elsewhere keeps. */
+        expiresWithActions?: boolean;
         type?: "error" | "update" | "info" | "warning";
         /** How a screen reader is told of it: `status` (polite) or `alert` (at once). Absent, an error
          *  is an alert and everything else a status. Never moves focus. */

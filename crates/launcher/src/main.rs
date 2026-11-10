@@ -283,23 +283,7 @@ fn splash_selftest() {
         let (sink, rx) = startup_events::StartupEventSink::new();
         // Fire fake startup events so the stage list is exercised.
         std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(300));
-            sink.stage_begin("prep", "Launcher setup");
-            std::thread::sleep(std::time::Duration::from_millis(120));
-            sink.stage_end("prep", 120, startup_events::StartupStatus::Ok, None);
-            std::thread::sleep(std::time::Duration::from_millis(100));
-            sink.stage_begin("migrations", "Migrations");
-            sink.sub_begin("migrations", "0009", "cron_schema");
-            std::thread::sleep(std::time::Duration::from_millis(80));
-            sink.sub_end("migrations", "0009", 80, startup_events::StartupStatus::Ok, None);
-            sink.sub_begin("migrations", "0010", "identity_dedup");
-            std::thread::sleep(std::time::Duration::from_millis(40));
-            sink.sub_end("migrations", "0010", 40, startup_events::StartupStatus::Ok, None);
-            sink.stage_end("migrations", 220, startup_events::StartupStatus::Ok, None);
-            std::thread::sleep(std::time::Duration::from_millis(200));
-            sink.stage_begin("backend", "Backend startup");
-            std::thread::sleep(std::time::Duration::from_millis(1500));
-            sink.stage_end("backend", 1500, startup_events::StartupStatus::Ok, None);
+            play_selftest_stages(&sink);
         });
         splash_linux::spawn(rx);
         std::thread::sleep(hold);
@@ -307,26 +291,9 @@ fn splash_selftest() {
     #[cfg(target_os = "macos")]
     {
         let (sink, rx) = startup_events::StartupEventSink::new();
-        // Fire fake startup events so the stage panel is exercised — same
-        // fixture shape as the Linux branch above.
+        // Fire fake startup events so the stage panel is exercised: the shared stages, then the host's.
         std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(300));
-            sink.stage_begin("prep", "Launcher setup");
-            std::thread::sleep(std::time::Duration::from_millis(120));
-            sink.stage_end("prep", 120, startup_events::StartupStatus::Ok, None);
-            std::thread::sleep(std::time::Duration::from_millis(100));
-            sink.stage_begin("migrations", "Migrations");
-            sink.sub_begin("migrations", "0009", "cron_schema");
-            std::thread::sleep(std::time::Duration::from_millis(80));
-            sink.sub_end("migrations", "0009", 80, startup_events::StartupStatus::Ok, None);
-            sink.sub_begin("migrations", "0010", "identity_dedup");
-            std::thread::sleep(std::time::Duration::from_millis(40));
-            sink.sub_end("migrations", "0010", 40, startup_events::StartupStatus::Ok, None);
-            sink.stage_end("migrations", 220, startup_events::StartupStatus::Ok, None);
-            std::thread::sleep(std::time::Duration::from_millis(200));
-            sink.stage_begin("backend", "Backend startup");
-            std::thread::sleep(std::time::Duration::from_millis(1500));
-            sink.stage_end("backend", 1500, startup_events::StartupStatus::Ok, None);
+            play_selftest_stages(&sink);
             std::thread::sleep(std::time::Duration::from_millis(100));
             sink.stage_begin("host", "Host startup");
             std::thread::sleep(std::time::Duration::from_millis(90));
@@ -345,6 +312,29 @@ fn splash_selftest() {
         let _ = splash::spawn_splash("selftest", rx, false);
         std::thread::sleep(hold);
     }
+}
+
+/// The fake stages `--splash-selftest` plays into the splash (prep, migrations with two sub-rows, backend), on the
+/// calling thread, with the pauses a real start has. The macOS branch adds the host stage after it.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn play_selftest_stages(sink: &startup_events::StartupEventSink) {
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    sink.stage_begin("prep", "Launcher setup");
+    std::thread::sleep(std::time::Duration::from_millis(120));
+    sink.stage_end("prep", 120, startup_events::StartupStatus::Ok, None);
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    sink.stage_begin("migrations", "Migrations");
+    sink.sub_begin("migrations", "0009", "cron_schema");
+    std::thread::sleep(std::time::Duration::from_millis(80));
+    sink.sub_end("migrations", "0009", 80, startup_events::StartupStatus::Ok, None);
+    sink.sub_begin("migrations", "0010", "identity_dedup");
+    std::thread::sleep(std::time::Duration::from_millis(40));
+    sink.sub_end("migrations", "0010", 40, startup_events::StartupStatus::Ok, None);
+    sink.stage_end("migrations", 220, startup_events::StartupStatus::Ok, None);
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    sink.stage_begin("backend", "Backend startup");
+    std::thread::sleep(std::time::Duration::from_millis(1500));
+    sink.stage_end("backend", 1500, startup_events::StartupStatus::Ok, None);
 }
 
 async fn launcher_main(startup_sink: Option<startup_events::StartupEventSink>) {

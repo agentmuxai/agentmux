@@ -56,7 +56,7 @@ pub(crate) async fn handle_model_gateway(State(state): State<AppState>, Path((ro
     if !gw::path_allowed(route.harness, &tail) {
         return refuse(StatusCode::NOT_FOUND, "not_found_error", "the gateway forwards only the harness's own model paths");
     }
-    let Some(model) = launch::choice_of(&state.mstore, &grant.def_id).filter(|c| c.route == route.id).and_then(|c| route.model(&c.model)) else {
+    let Some(model) = launch::model_on_route(&state.mstore, &grant.def_id, route) else {
         return refuse(StatusCode::FORBIDDEN, "permission_error", "this agent is not set to use that route");
     };
     let key = {
@@ -118,11 +118,11 @@ struct Metered {
 impl Metered {
     fn settle(&mut self) {
         let Some(tap) = self.tap.take() else { return };
-        let (tokens, answered) = tap.finish();
+        let (tokens, answered, actual) = tap.finish();
         if tokens.input + tokens.output + tokens.cache_read + tokens.cache_creation == 0 {
             return;
         }
-        let cost = spend::record(&self.agent, self.model, &tokens, agentmux_common::time::now_ms());
+        let cost = spend::record(&self.agent, self.model, &tokens, actual, agentmux_common::time::now_ms());
         tracing::info!(
             agent = %self.agent, model = self.model.id, answered = answered.as_deref().unwrap_or(""),
             input = tokens.input, output = tokens.output, cache_read = tokens.cache_read, cost_usd = cost,

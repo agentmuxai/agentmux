@@ -72,6 +72,14 @@ registerPaneTab({
     create: () => ({ component: () => null as any }),
     capabilities: { hueBorder: true, statsBadgeSetting: "term:showstatsbadge" },
 });
+registerPaneTab({
+    apiVersion: 1,
+    view: "banded",
+    label: "Banded",
+    icon: "b",
+    create: () => ({ component: () => null as any }),
+    capabilities: { statsBadgeIn: "strip" },
+});
 
 let version = 0;
 let nextId = 0;
@@ -209,6 +217,14 @@ describe("the frame's markup", () => {
         const stats = c.querySelector('[data-testid="stats"]') as HTMLElement;
         expect(stats.dataset.connection).toBe("me@host");
         expect(stats.dataset.noheader).toBe("true");
+    });
+
+    it("draws no stats badge for a pane that draws the readout itself, and keeps it for one that doesn't", () => {
+        const banded = setup({ meta: { view: "banded" } }).view.container;
+        expect(banded.querySelector('[data-testid="stats"]')).toBeNull();
+        expect(banded.querySelector('[data-testid="titlebar"]')).not.toBeNull();
+        cleanup();
+        expect(setup({ meta: { view: "term" } }).view.container.querySelector('[data-testid="stats"]')).not.toBeNull();
     });
 
     it("keeps the splitter badge to a drag, and the block mask last", () => {

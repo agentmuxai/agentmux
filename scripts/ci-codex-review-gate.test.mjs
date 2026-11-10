@@ -16,6 +16,7 @@ import {
     errorNote,
     erroredRequest,
     evaluateCodexGate,
+    findingPriority,
     isGateInput,
     isDependencyBotPr,
     isDocsOnlyPath,
@@ -450,6 +451,119 @@ describe("findings only on docs", () => {
             ],
             reviewComments: [inline(10, "docs/a.md"), inline(11, "src/lib.rs")],
             filesSinceLatest: ["docs/a.md"],
+        });
+        expect(r.state).toBe("failure");
+    });
+});
+
+// Only P0 and P1 findings block: a round whose inline findings are all P2 or P3 passes.
+const badge = (priority, title = "Handle the empty list") =>
+    `**<sub><sub>![P${priority} Badge](https://img.shields.io/badge/P${priority}-yellow?style=flat)</sub></sub>  ${title}**\n\nWhy.`;
+const ranked = (reviewId, priority, path = "src/lib.rs") => ({
+    pull_request_review_id: reviewId,
+    path,
+    body: badge(priority),
+    user: { login: CODEX_LOGIN },
+});
+
+describe("findings by priority", () => {
+    it("reads the badge, not prose", () => {
+        expect(findingPriority(badge(0))).toBe(0);
+        expect(findingPriority(badge(3))).toBe(3);
+        expect(findingPriority("this is a P2 in my view")).toBeNull();
+        expect(findingPriority(undefined)).toBeNull();
+    });
+
+    it("passes a head whose findings are all P2 or P3", () => {
+        const r = evaluateCodexGate({
+            headSha: HEAD,
+            reviews: [reviewWithId(11, HEAD)],
+            reviewComments: [ranked(11, 2, "src/a.rs"), ranked(11, 3, "src/b.rs")],
+        });
+        expect(r.state).toBe("success");
+        expect(r.description).toContain("P2/P3");
+        expect(r.description.length).toBeLessThanOrEqual(140);
+    });
+
+    it("blocks on a P1", () => {
+        const r = evaluateCodexGate({ headSha: HEAD, reviews: [reviewWithId(11, HEAD)], reviewComments: [ranked(11, 1)] });
+        expect(r.state).toBe("failure");
+    });
+
+    it("blocks on a P0", () => {
+        const r = evaluateCodexGate({ headSha: HEAD, reviews: [reviewWithId(11, HEAD)], reviewComments: [ranked(11, 0)] });
+        expect(r.state).toBe("failure");
+    });
+
+    it("blocks a mixed round: one P1 beside P2s", () => {
+        const reviewComments = [ranked(11, 2, "src/a.rs"), ranked(11, 1, "src/b.rs"), ranked(11, 3, "src/c.rs")];
+        expect(evaluateCodexGate({ headSha: HEAD, reviews: [reviewWithId(11, HEAD)], reviewComments }).state).toBe(
+            "failure",
+        );
+    });
+
+    it("counts a finding with no badge as P1", () => {
+        const noBadge = { pull_request_review_id: 11, path: "src/lib.rs", body: "Looks wrong.", user: { login: CODEX_LOGIN } };
+        expect(evaluateCodexGate({ headSha: HEAD, reviews: [reviewWithId(11, HEAD)], reviewComments: [noBadge] }).state).toBe(
+            "failure",
+        );
+        const beside = [ranked(11, 2, "src/a.rs"), noBadge];
+        expect(evaluateCodexGate({ headSha: HEAD, reviews: [reviewWithId(11, HEAD)], reviewComments: beside }).state).toBe(
+            "failure",
+        );
+    });
+
+    it("counts a review with no inline comments as P1", () => {
+        expect(evaluateCodexGate({ headSha: HEAD, reviews: [reviewWithId(11, HEAD)] }).state).toBe("failure");
+    });
+
+    it("only counts the inline comments of that review", () => {
+        const r = evaluateCodexGate({
+            headSha: HEAD,
+            reviews: [reviewWithId(10, OLD, "2026-09-23T05:00:00Z"), reviewWithId(11, HEAD, "2026-09-23T06:00:00Z")],
+            reviewComments: [ranked(10, 2, "src/a.rs"), ranked(11, 1, "src/b.rs")],
+        });
+        expect(r.state).toBe("failure");
+    });
+
+    it("carries a P2/P3-only pass to a later head, whatever changed since", () => {
+        const earlier = { reviews: [reviewWithId(11, OLD)], reviewComments: [ranked(11, 3)] };
+        for (const filesSinceLatest of [["docs/a.md"], ["src/lib.rs", "src/other.rs"], null]) {
+            const r = evaluateCodexGate({ headSha: HEAD, ...earlier, filesSinceLatest });
+            expect(r.state).toBe("success");
+            expect(r.description).toContain(OLD.slice(0, 10));
+        }
+    });
+
+    it("does not carry past a later blocking round", () => {
+        const r = evaluateCodexGate({
+            headSha: HEAD,
+            reviews: [
+                reviewWithId(10, OLD, "2026-09-23T05:00:00Z"),
+                reviewWithId(11, "aaaaaaaaaa11", "2026-09-23T06:00:00Z"),
+            ],
+            reviewComments: [ranked(10, 2), ranked(11, 1)],
+            filesSinceLatest: ["src/lib.rs"],
+        });
+        expect(r.state).not.toBe("success");
+    });
+
+    it("does not carry past a later OK that was itself superseded by findings", () => {
+        const r = evaluateCodexGate({
+            headSha: HEAD,
+            comments: [okComment(OLD, "2026-09-23T05:00:00Z")],
+            reviews: [reviewWithId(11, OLD, "2026-09-23T06:00:00Z")],
+            reviewComments: [ranked(11, 1)],
+            filesSinceLatest: ["docs/notes.md"],
+        });
+        expect(r.state).toBe("failure");
+    });
+
+    it("a P2/P3-only round on an earlier head does not hide an unanswered blocking one on the head", () => {
+        const r = evaluateCodexGate({
+            headSha: HEAD,
+            reviews: [reviewWithId(10, OLD, "2026-09-23T05:00:00Z"), reviewWithId(11, HEAD, "2026-09-23T06:00:00Z")],
+            reviewComments: [ranked(10, 2), ranked(11, 0)],
         });
         expect(r.state).toBe("failure");
     });

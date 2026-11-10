@@ -27,6 +27,8 @@ export const agentPaneTabManifest: PaneTabManifest = {
         lifecycle: "keepAlive",
         header: "surface",
         paneZoom: {},
+        // The readout is a slot of the composer strip (AgentComposerStrip), not an overlay the frame draws over it.
+        statsBadgeIn: "strip",
         // A split opens a fresh picker, not a copy of this agent's pane.
         splitBlockDef: agentPickerBlockDef,
         noPadding: true,

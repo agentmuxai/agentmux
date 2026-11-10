@@ -211,7 +211,7 @@ pub(crate) async fn deliver_broadcast_turn(
         return Err(format!("{}{}: not sent", crate::backend::reactive::UNAVAILABLE_PREFIX, u.reason()));
     }
     let input = crate::backend::blockcontroller::health::TurnInput { from: from.clone(), text: text.clone(), joins_turn: None };
-    match broadcast_action(crate::bootstrap::route_agent_message_from(&block_id, &text, Some(input), from.clone(), &[])) {
+    match broadcast_action(crate::bootstrap::route_agent_message_from(&block_id, &text, Some(input), from.clone(), &[], None)) {
         BroadcastAction::Done => Ok(()),
         BroadcastAction::Fail(e) => Err(e),
         // The block was resolved through the reactive handler's own agent map, so

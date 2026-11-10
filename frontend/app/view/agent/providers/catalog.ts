@@ -729,9 +729,10 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         outputFormat: "acp",
         styledOutputFormat: "acp",
         // Sign-in is Grok's own (`grok login`, a SuperGrok or X Premium+ account,
-        // or XAI_API_KEY). Signed out, `session/new` fails "Authentication
-        // required", which the pane shows. No status command, so no check.
-        authType: "cli-managed",
+        // or XAI_API_KEY): OAuth-class, an account per sign-in under GROK_HOME. It has
+        // no status command, so srv reads `GROK_HOME/auth.json` for the check
+        // (identity/resolver/cli_sign_in_files.rs), and the check command stays empty.
+        authType: "oauth",
         authCheckCommand: [],
         authLoginCommand: ["login"],
         requiresLoginTty: true,
@@ -787,7 +788,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         requiresLoginTty: true,
         headlessLoginUrlUnsupported: true,
         npmPackage: "@deepseek-ai/dsh",
-        pinnedVersion: "0.2.0-rc.2",
+        pinnedVersion: "0.2.2-rc.1",
         docsUrl: "https://github.com/deepseek-ai/deepseek-harness",
         windowsInstallCommand: "npm install -g @deepseek-ai/dsh",
         unixInstallCommand: "npm install -g @deepseek-ai/dsh",
@@ -801,7 +802,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         resumeFlag: null,
         sessionIdField: "sessionId",
         controllerType: "acp",
-        systemPrereqs: [{ ...NODE_PREREQ, minVersion: "22.19.0" }, NPM_PREREQ],
+        systemPrereqs: [{ ...NODE_PREREQ, minVersion: "24.9.0" }, NPM_PREREQ],
     },
     aider: {
         id: "aider",
@@ -884,8 +885,10 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         styledArgs: [],
         outputFormat: "msp",
         styledOutputFormat: "msp",
-        // Sign-in is Muse's own (`muse login`, a Meta account, or META_API_KEY).
-        authType: "cli-managed",
+        // Sign-in is Muse's own (`muse login`, a Meta account, or META_API_KEY):
+        // OAuth-class, an account per sign-in under XDG_CONFIG_HOME. No status command:
+        // srv reads `muse/auth.json` for the check (identity/resolver/cli_sign_in_files.rs).
+        authType: "oauth",
         authCheckCommand: [],
         authLoginCommand: ["login"],
         requiresLoginTty: true,

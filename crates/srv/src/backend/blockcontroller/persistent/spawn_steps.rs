@@ -435,6 +435,18 @@ impl PersistentSubprocessController {
         sent_prompts
     }
 
+    /// A new process starts its own provider-reported spend total, as the
+    /// harness's own `total_cost_usd` starts again with it (#30143). Called
+    /// before the reader task exists, so a response settling first cannot land
+    /// in the previous process's total.
+    fn reset_route_cost_session(&self) {
+        if let Some(mstore) = self.mstore.as_deref() {
+            if let Some(agent) = crate::identity::resolver::block_agent_id(mstore, &self.block_id) {
+                crate::backend::model_gateway::spend::reset_session(&agent);
+            }
+        }
+    }
+
     /// Starts the stdout reader task.
     pub(super) fn spawn_stdout_reader(
         &self,
@@ -506,6 +518,7 @@ impl PersistentSubprocessController {
         .unwrap_or(crate::connectivity::Service::ModelApi(
             &crate::connectivity::ANTHROPIC,
         ));
+        self.reset_route_cost_session();
         let stdout_reader_handle: tokio::task::JoinHandle<()> =
             tokio::spawn(Self::run_stdout_reader(StdoutReaderCtx {
                 stdout,

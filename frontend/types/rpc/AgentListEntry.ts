@@ -3,4 +3,11 @@
 /**
  * A single entry in the agent.list response.
  */
-export type AgentListEntry = { block_id: string, tab_id: string, agent_id: string, provider: string, status: string, session_id: string | null, };
+export type AgentListEntry = { block_id: string, tab_id: string, agent_id: string, provider: string, status: string, session_id: string | null, 
+/**
+ * What the provider itself charged this agent since its current process
+ * started, when it is on a model route: the real figure, not the harness's
+ * Claude-priced estimate (#30143). `None` off a route, or before its first
+ * priced response.
+ */
+route_cost_usd?: number, };

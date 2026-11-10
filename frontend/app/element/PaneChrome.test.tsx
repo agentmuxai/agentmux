@@ -22,12 +22,15 @@ import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const headerCalls: any[] = [];
+// When set, the header throws for the props it returns true for (a ViewModel that breaks the render).
+let headerThrows: ((props: { viewModel: unknown }) => boolean) | undefined;
 // Keyed <For>, like the real PaneTabStrip, so DOM-identity assertions hold.
 vi.mock("./PaneHeaderTabStrip", async () => {
     const { For } = await import("solid-js");
     return {
         PaneHeaderTabStrip: (props: any) => {
             headerCalls.push(props);
+            if (headerThrows?.(props)) throw new Error("header failed");
             return (
                 <div data-testid="pane-header-tab-strip">
                     <For each={props.tabs}>
@@ -45,7 +48,13 @@ vi.mock("./PaneHeaderTabStrip", async () => {
 });
 
 vi.mock("@/element/errorboundary", () => ({
-    ErrorBoundary: (props: any) => props.children,
+    ErrorBoundary: (props: { children: unknown; fallback: unknown }) => {
+        try {
+            return props.children;
+        } catch {
+            return props.fallback;
+        }
+    },
 }));
 
 vi.mock("@/app/block/blockutil", () => ({
@@ -55,9 +64,10 @@ vi.mock("@/app/block/blockutil", () => ({
 }));
 
 const showPaneTabMenu = vi.fn();
+const computeFocusRingBorderColor = vi.fn<(...args: unknown[]) => string | undefined>(() => undefined);
 vi.mock("@/app/block/blockframe", () => ({
     showPaneTabMenu: (...args: any[]) => showPaneTabMenu(...args),
-    computeFocusRingBorderColor: () => undefined,
+    computeFocusRingBorderColor: (...args: unknown[]) => computeFocusRingBorderColor(...args),
     // Meta-driven (not a fixed stub) so tabColors' per-block regression test
     // below can prove each tab's own color survives independently — a fixed
     // stub would pass even with reagent's P1 bug (PR #3484: every pill
@@ -89,6 +99,23 @@ vi.mock("@/app/block/blockframe", () => ({
     // Takes no meta at all — that is the fix. Any test asserting this value
     // is asserting "the tail cannot vary with the active tab".
     computeMixedPaneHeaderBg: () => "mixed-default",
+}));
+
+// Whether the window's theme is a light one (pane-identity.ts reads it from the window).
+let lightTheme = false;
+vi.mock("@/app/block/pane-identity", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("@/app/block/pane-identity")>()),
+    isLightThemeActive: () => lightTheme,
+}));
+
+// What the file-drop controller says each pane should draw (the controller has its own tests).
+const [dropStates, setDropStates] = createSignal<ReadonlyMap<string, unknown>>(new Map());
+vi.mock("@/app/drag/file-drop", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("@/app/drag/file-drop")>()),
+    paneDropState: (blockId: () => string | undefined) => () => {
+        const id = blockId();
+        return id ? dropStates().get(id) : undefined;
+    },
 }));
 
 const showContextMenu = vi.fn();
@@ -210,11 +237,13 @@ vi.mock("./pane-tab-persist", () => ({ persistTabInfo: (info: any) => void persi
 
 import { fireEvent } from "@solidjs/testing-library";
 import { renderPaneChromeShell } from "./PaneChrome";
-import { emitPaneLocate, onPaneLocatePlay } from "@/app/util/pane-locate";
+import { emitPaneLocate, LOCATE_COALESCE_MS, onPaneLocatePlay } from "@/app/util/pane-locate";
 import { registerPaneTab } from "@/app/store/pane-tab-registry";
 import { stubPaneTab } from "@/app/block/pane-tab-test-utils";
 import type { PaneTabDescriptor } from "./pane-tab-model";
 import { paneTabSelection, resetPaneTabSelection, togglePaneTabSelected } from "./pane-tab-selection";
+import { registerPaneStrip } from "./pane-strip-registry";
+import { beginClosingBlock } from "@/layout/lib/layoutClosing";
 
 // A test view type whose manifest carries only a pane-tab descriptor.
 const unregisterTestTabs: (() => void)[] = [];
@@ -257,6 +286,10 @@ beforeEach(() => {
     objectSignals.clear();
     testConnections = {};
     headerCalls.length = 0;
+    headerThrows = undefined;
+    lightTheme = false;
+    setDropStates(new Map());
+    computeFocusRingBorderColor.mockClear();
     showContextMenu.mockClear();
     showPaneTabMenu.mockClear();
     buildPaneWidgetMenuItemsMock.mockClear();
@@ -1438,6 +1471,63 @@ describe("renderPaneChromeShell — locate flash", () => {
         await settle();
         expect(showLocateFlash).not.toHaveBeenCalled();
     });
+
+    it("a pane shown without taking focus flashes where it is, and the focus staying elsewhere does not end it", async () => {
+        const [focused, setFocused] = createSignal(false);
+        render(() => renderPaneChromeShell(fakeNodeModel({ isFocused: focused }), <div>content</div>) as any);
+        emitPaneLocate("b1", { focus: false });
+        await vi.waitFor(() => expect(showLocateFlash).toHaveBeenCalledTimes(1));
+        expect(played).toEqual(["b1@node-1"]);
+        // Focus coming and going is not what this flash is about.
+        setFocused(true);
+        setFocused(false);
+        expect(stopLocateFlash).not.toHaveBeenCalled();
+    });
+
+    it("a flash that waited for focus ends when the pane loses it", async () => {
+        const [focused, setFocused] = createSignal(true);
+        render(() => renderPaneChromeShell(fakeNodeModel({ isFocused: focused }), <div>content</div>) as any);
+        emitPaneLocate("b1");
+        await vi.waitFor(() => expect(showLocateFlash).toHaveBeenCalledTimes(1));
+        setFocused(false);
+        expect(stopLocateFlash).toHaveBeenCalledTimes(1);
+    });
+
+    it("a second request for the block still waiting is the same flash", async () => {
+        render(() => renderPaneChromeShell(fakeNodeModel({ isFocused: () => true }), <div>content</div>) as any);
+        slotWait = 150;
+        emitPaneLocate("b1", { focus: false });
+        await new Promise((r) => setTimeout(r, 40));
+        // An open asks twice: when it queues the file, and when the pane drains the queue.
+        emitPaneLocate("b1", { focus: false });
+        await vi.waitFor(() => expect(showLocateFlash).toHaveBeenCalledTimes(1));
+        await settle();
+        expect(showLocateFlash).toHaveBeenCalledTimes(1);
+        expect(stopLocateFlash).not.toHaveBeenCalled();
+    });
+
+    it("a repeat request just after the flash started adds nothing; one after the window starts it again", async () => {
+        render(() => renderPaneChromeShell(fakeNodeModel({ isFocused: () => true }), <div>content</div>) as any);
+        emitPaneLocate("b1");
+        await vi.waitFor(() => expect(showLocateFlash).toHaveBeenCalledTimes(1));
+        emitPaneLocate("b1");
+        await settle();
+        expect(showLocateFlash).toHaveBeenCalledTimes(1);
+        expect(stopLocateFlash).not.toHaveBeenCalled();
+        await new Promise((r) => setTimeout(r, LOCATE_COALESCE_MS));
+        emitPaneLocate("b1");
+        await vi.waitFor(() => expect(showLocateFlash).toHaveBeenCalledTimes(2));
+    });
+
+    it("a pane that never became visible lets the next request start afresh", async () => {
+        const [focused, setFocused] = createSignal(false);
+        render(() => renderPaneChromeShell(fakeNodeModel({ isFocused: focused }), <div>content</div>) as any);
+        emitPaneLocate("b1");
+        await settle();
+        emitPaneLocate("b1");
+        setFocused(true);
+        await vi.waitFor(() => expect(showLocateFlash).toHaveBeenCalledTimes(1));
+    });
 });
 
 // SPEC_PANE_TAB_PROGRESS_LINE_2026_10_24.md §3.4: a collapsed pane shows no border animation,
@@ -1553,5 +1643,211 @@ describe("renderPaneChromeShell — markup and strip props", () => {
         );
         await expect(markup(container.querySelector(".pane-stack"))).toMatchFileSnapshot(snap("collapsed-closing"));
         await expect(stripProps()).toMatchFileSnapshot(snap("collapsed-closing-strip", "json"));
+    });
+});
+
+// Paths through the shell that the groups above leave open: what it hands the strip and the pane's
+// own element for a badge, a closing tab, a rename in progress, a missing active block, a view model
+// that breaks the header, the focus ring and the file-drop outline.
+describe("renderPaneChromeShell — paths the other groups leave open", () => {
+    const pane = (container: Element) => container.querySelector<HTMLElement>(".pane-stack")!;
+
+    it("draws a tab's badge on its own icon, and none on a tab without one", () => {
+        registerPaneTabDescriptor("test-badged", { badge: () => ({ color: "rgb(1, 2, 3)", label: "Busy" }) });
+        setObjectValue("block:b1", { meta: { view: "test-badged" } });
+        setObjectValue("block:b2", { meta: { view: "browser" } });
+        mockLayoutModel = fakeLayoutModel(["b1", "b2"]);
+        render(() => renderPaneChromeShell(fakeNodeModel(), <div />));
+
+        const badge = (id: string) => screen.getByTestId(`tab-${id}`).querySelector<HTMLElement>(".pane-tab-icon-badge");
+        expect(badge("b1")?.style.background).toBe("rgb(1, 2, 3)");
+        expect(badge("b2")).toBeNull();
+    });
+
+    it("tells the strip a tab is closing when its own close is under way, or when the whole pane's is", () => {
+        const [paneClosing, setPaneClosing] = createSignal(false);
+        mockLayoutModel = fakeLayoutModel(["b1", "b2"]);
+        render(() => renderPaneChromeShell(fakeNodeModel({ isClosing: paneClosing }), <div />));
+        const props = headerCalls.at(-1);
+        expect([props.isClosing("b1"), props.isClosing("b2")]).toEqual([false, false]);
+        beginClosingBlock(mockLayoutModel, "b2");
+        expect([props.isClosing("b1"), props.isClosing("b2")]).toEqual([false, true]);
+        setPaneClosing(true);
+        expect([props.isClosing("b1"), props.isClosing("b2")]).toEqual([true, true]);
+    });
+
+    describe("a rename in progress", () => {
+        function startRename(id: string) {
+            headerCalls.at(-1).onTabDoubleClick(id);
+            return screen.getByTestId(`tab-${id}`).querySelector("input") as HTMLInputElement;
+        }
+        const renamer = vi.fn().mockResolvedValue(undefined);
+        beforeEach(() => renamer.mockClear());
+        const renamable = () => {
+            registerPaneTabDescriptor("test-renamable", { label: () => "Old", renamer: () => renamer });
+            setObjectValue("block:b1", { meta: { view: "test-renamable" } });
+            mockLayoutModel = fakeLayoutModel(["b1"]);
+            render(() => renderPaneChromeShell(fakeNodeModel(), <div />));
+        };
+
+        it("starts from the tab's current name", () => {
+            renamable();
+            expect(startRename("b1").value).toBe("Old");
+        });
+
+        it("goes back to the label on Escape, with nothing renamed", () => {
+            renamable();
+            const input = startRename("b1");
+            fireEvent.keyDown(input, { key: "Escape" });
+            expect(screen.getByTestId("tab-b1").querySelector("input")).toBeNull();
+            expect(screen.getByText("Old")).toBeInTheDocument();
+            expect(renamer).not.toHaveBeenCalled();
+        });
+    });
+
+    it("falls back to the node's own block when it has no active block of its own", () => {
+        mockLayoutModel = fakeLayoutModel([]);
+        const { container } = render(
+            () => renderPaneChromeShell(fakeNodeModel({ activeBlockId: undefined, blockId: "own-block" }), <div />)
+        );
+        expect(pane(container).getAttribute("data-blockid")).toBe("own-block");
+        expect(headerCalls.at(-1).activeId).toBe("own-block");
+    });
+
+    it("hands the strip the node's view model, and a null one when it has none", () => {
+        const vm = { viewType: "term" };
+        mockLayoutModel = fakeLayoutModel(["b1"]);
+        render(() => renderPaneChromeShell(fakeNodeModel({ activeViewModel: () => vm }), <div />));
+        expect(headerCalls.at(-1).viewModel).toBe(vm);
+        cleanup();
+        headerCalls.length = 0;
+        render(() => renderPaneChromeShell(fakeNodeModel({ activeViewModel: () => undefined }), <div />));
+        expect(headerCalls.at(-1).viewModel).toBeNull();
+    });
+
+    it("draws the header again without the view model when the view model breaks it", () => {
+        const vm = { viewType: "broken" };
+        headerThrows = (props) => props.viewModel !== null;
+        mockLayoutModel = fakeLayoutModel(["b1"]);
+        render(() => renderPaneChromeShell(fakeNodeModel({ activeViewModel: () => vm }), <div />));
+        expect(headerCalls.map((c) => c.viewModel)).toEqual([vm, null]);
+        expect(screen.getByTestId("pane-header-tab-strip")).toBeInTheDocument();
+    });
+
+    it("builds a view type's chrome model for the block that was active, with the node", () => {
+        const build = vi.fn(() => ({}));
+        unregisterTestTabs.push(registerPaneTab(stubPaneTab("anchored-view", { chrome: build })));
+        setObjectValue("block:b2", { meta: { view: "anchored-view" } });
+        mockLayoutModel = fakeLayoutModel(["b1", "b2"]);
+        const nodeModel = fakeNodeModel({ activeBlockId: () => "b2", blockId: "node-block" });
+        render(() => renderPaneChromeShell(nodeModel, <div />));
+        expect(build).toHaveBeenCalledWith("b2", nodeModel);
+    });
+
+    describe("the focus ring", () => {
+        it("asks for its color with the focus, the active block's meta and the theme, and sets it on the pane", () => {
+            computeFocusRingBorderColor.mockImplementation((...args) => `ring-${args[0]}-${args[2]}`);
+            setObjectValue("block:b1", { meta: { view: "term", "frame:hue": 7 } });
+            mockLayoutModel = fakeLayoutModel(["b1"]);
+            const [focused, setFocused] = createSignal(false);
+            lightTheme = true;
+            const { container } = render(() => renderPaneChromeShell(fakeNodeModel({ isFocused: focused }), <div />));
+            expect(computeFocusRingBorderColor).toHaveBeenLastCalledWith(false, { view: "term", "frame:hue": 7 }, true);
+            expect(pane(container).style.getPropertyValue("--pane-ring-color")).toBe("ring-false-true");
+            setFocused(true);
+            expect(computeFocusRingBorderColor).toHaveBeenLastCalledWith(true, { view: "term", "frame:hue": 7 }, true);
+            expect(pane(container).style.getPropertyValue("--pane-ring-color")).toBe("ring-true-true");
+        });
+
+        it("asks with a dark theme when the window's is not a light one", () => {
+            mockLayoutModel = fakeLayoutModel(["b1"]);
+            render(() => renderPaneChromeShell(fakeNodeModel({ isFocused: () => true }), <div />));
+            expect(computeFocusRingBorderColor.mock.calls.at(-1)![2]).toBe(false);
+        });
+
+        it("marks a pane with siblings as focused only while it is focused", () => {
+            mockLayoutModel = fakeLayoutModel(["b1"]);
+            const [focused, setFocused] = createSignal(false);
+            const { container } = render(
+                () => renderPaneChromeShell(fakeNodeModel({ isFocused: focused, numLeafs: () => 2 }), <div />)
+            );
+            expect(pane(container).classList.contains("pane-stack-focused")).toBe(false);
+            setFocused(true);
+            expect(pane(container).classList.contains("pane-stack-focused")).toBe(true);
+        });
+
+        it("focuses the node when focus moves into the pane, as well as on a click", () => {
+            mockLayoutModel = fakeLayoutModel(["b1"]);
+            const nodeModel = fakeNodeModel();
+            const { container } = render(() => renderPaneChromeShell(nodeModel, <div />));
+            fireEvent.focusIn(pane(container));
+            expect(nodeModel.focusNode).toHaveBeenCalledTimes(1);
+        });
+    });
+
+    it("draws the remote's colour on the pane when the active tab is on a coloured remote", () => {
+        testConnections = { db1: { "display:color": "#e5484d" } };
+        setObjectValue("block:b1", { meta: { view: "term", connection: "db1" } });
+        mockLayoutModel = fakeLayoutModel(["b1"]);
+        const { container } = render(() => renderPaneChromeShell(fakeNodeModel(), <div />));
+        expect(pane(container).classList.contains("pane-stack-remote-color")).toBe(true);
+        expect(pane(container).style.getPropertyValue("--pane-remote-color")).toBe("#e5484d");
+    });
+
+    describe("a file dragged over the window", () => {
+        it("draws the state of the active tab's block on the pane, and the indicator over it", () => {
+            mockLayoutModel = fakeLayoutModel(["b1", "b2"]);
+            const [active, setActive] = createSignal("b1");
+            const { container } = render(() => renderPaneChromeShell(fakeNodeModel({ activeBlockId: active }), <div />));
+            expect(pane(container).hasAttribute("data-file-drop")).toBe(false);
+            expect(container.querySelector(".drop-indicator")).toBeNull();
+
+            setDropStates(new Map([["b1", { state: "target", message: "Drop to attach" }]]));
+            expect(pane(container).getAttribute("data-file-drop")).toBe("target");
+            expect(container.querySelector(".drop-indicator--target")?.textContent).toBe("Drop to attach");
+
+            setActive("b2");
+            expect(pane(container).hasAttribute("data-file-drop")).toBe(false);
+            expect(container.querySelector(".drop-indicator")).toBeNull();
+        });
+
+        it("follows the state as it moves from armed to blocked", () => {
+            mockLayoutModel = fakeLayoutModel(["b1"]);
+            const { container } = render(() => renderPaneChromeShell(fakeNodeModel(), <div />));
+            setDropStates(new Map([["b1", { state: "armed" }]]));
+            expect(container.querySelector(".drop-indicator--armed")).not.toBeNull();
+            setDropStates(new Map([["b1", { state: "blocked", reason: "Not a folder" }]]));
+            expect(pane(container).getAttribute("data-file-drop")).toBe("blocked");
+            expect(container.querySelector(".drop-indicator--blocked")?.textContent).toBe("Not a folder");
+        });
+    });
+
+    describe("the pane's strips", () => {
+        function withStrip(isFocused: () => boolean) {
+            mockLayoutModel = fakeLayoutModel(["b1"]);
+            const result = render(
+                () => renderPaneChromeShell(fakeNodeModel({ isFocused }), <div data-testid="strip" />)
+            );
+            const revealSelected = vi.fn();
+            registerPaneStrip(result.getByTestId("strip"), { revealSelected, contains: () => false });
+            return { ...result, revealSelected };
+        }
+
+        it("asks them to reveal their selected tab when the pane gains focus, and not when it loses it", () => {
+            const [focused, setFocused] = createSignal(false);
+            const { revealSelected } = withStrip(focused);
+            expect(revealSelected).not.toHaveBeenCalled();
+            setFocused(true);
+            expect(revealSelected).toHaveBeenCalledTimes(1);
+            expect(revealSelected).toHaveBeenCalledWith("focus");
+            setFocused(false);
+            expect(revealSelected).toHaveBeenCalledTimes(1);
+        });
+
+        it("asks them to reveal on a click in the pane", () => {
+            const { revealSelected, container } = withStrip(() => false);
+            fireEvent.pointerDown(container.querySelector(".pane-stack-body")!);
+            expect(revealSelected).toHaveBeenCalledWith("interaction");
+        });
     });
 });

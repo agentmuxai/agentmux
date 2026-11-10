@@ -404,6 +404,16 @@ async fn srv_get_json_says_when_agentmux_cannot_be_reached() {
 }
 
 #[test]
+fn a_missing_key_tells_the_agent_to_ask_not_to_search() {
+    let msg = require_agent_env("http://127.0.0.1:1", "", "blk").unwrap_err().to_string();
+    assert!(msg.contains("AGENTMUX_AUTH_KEY must be set"), "{msg}");
+    assert!(msg.contains("Don't search"), "{msg}");
+    assert!(msg.contains("leader or the operator"), "{msg}");
+    let rejected = describe_http_error("x", reqwest::StatusCode::UNAUTHORIZED, "{}");
+    assert!(rejected.contains("ask your leader or the operator"), "{rejected}");
+}
+
+#[test]
 fn a_401_explains_the_auth_key_rather_than_a_network_fault() {
     let msg = describe_http_error("history search", reqwest::StatusCode::UNAUTHORIZED, r#"{"error":"unauthorized"}"#);
     assert!(msg.contains("HTTP 401"), "{msg}");

@@ -41,6 +41,8 @@
 @use "../../../mixins.scss";
 
 .agent-composer-strip {
+    // The hidden probes (.agent-composer-strip-probes) are positioned in it.
+    position: relative;
     display: flex;
     flex-direction: column;
     row-gap: 2px;
@@ -86,6 +88,27 @@
 // header comments.
 .agent-composer-strip-slot-measure {
     display: contents;
+}
+
+// Hidden copies of each slot that has a compact form, in both forms, measured to pick the forms
+// (composer-forms-probes.tsx). Inert, out of the accessibility tree and out of layout.
+.agent-composer-strip-probes {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 0;
+    overflow: hidden;
+    visibility: hidden;
+    pointer-events: none;
+    display: flex;
+    white-space: nowrap;
+}
+
+.agent-composer-strip-probe {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: var(--space-1-5);
 }
 
 // Codex P2, PR #2874: since SPEC_COMPOSER_STRIP_DROP_CENTER_STATS_2026_08_31.md
@@ -243,10 +266,20 @@
         // The check icon lines up with the label, the first line.
         align-items: flex-start;
 
-        // Effort on a model that doesn't use it: shown, not selectable.
+        // Not selectable (effort on a model that doesn't use it, a route model that can't take this
+        // conversation). Only the name is dimmed: a greyed route row's description is the reason, and
+        // has to stay readable.
         &.is-disabled {
-            opacity: 0.45;
             cursor: default;
+
+            .label,
+            .menu-item-check {
+                opacity: 0.45;
+            }
+
+            .agent-runtime-dropup-description {
+                opacity: 1;
+            }
 
             &:hover {
                 background: transparent;
@@ -306,6 +339,26 @@
         margin-top: var(--space-0-5);
         border-top: 1px solid var(--border-color);
         padding-top: var(--space-1-5);
+    }
+}
+
+// A model route's name inside the Model section, with who pays for it on the same line.
+.agent-runtime-dropup-group {
+    display: flex;
+    gap: var(--space-1-5);
+    padding: var(--space-1) var(--space-1-5) 2px;
+    font-size: var(--text-2xs);
+    font-weight: 600;
+    color: var(--secondary-text-color);
+    white-space: nowrap;
+
+    .agent-runtime-dropup-section-note {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        font-weight: normal;
+        font-style: italic;
+        padding-right: 0.25em;
     }
 }
 

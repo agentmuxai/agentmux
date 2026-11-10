@@ -509,8 +509,6 @@ pub fn inject_identity_env_with_broker(
     };
 
     let on_route = steps::on_model_route(&mstore, &instance);
-    // Step 2: identity_id check (an empty or blank one is logged, not a bypass).
-    steps::warn_on_blank_identity(&instance, block_id);
 
     // Layer-3 gate input: the agent definition's own CLI provider.
     let (def_provider, parent_template_id) = steps::definition_provider(&mstore, &id_store, &instance);
@@ -528,6 +526,8 @@ pub fn inject_identity_env_with_broker(
     // oauth-class CLI provider has no binding at all is blocked).
     let bindings = resolve_bindings_for_instance(&identity_store, &instance, &parent_template_id, broker.as_ref());
 
+    // Diagnostic only (#30077): an empty legacy identity_id is normal; say what resolves creds (debug).
+    steps::note_blank_identity(&instance, block_id, &bindings, on_route);
     // Step 4: per-binding resolution + env injection.
     let mut injector = steps::BindingInjector {
         id_store: &id_store,
@@ -1822,60 +1822,9 @@ mod tests {
         assert!(env.is_empty());
     }
 
-    #[test]
-    fn inject_blank_identity_is_gated_same_as_any_other_unresolvable_identity() {
-        // #2463 Finding 2: this test used to assert the OPPOSITE — that a
-        // blank identity_id was NOT gated by layer 3 and silently fell
-        // back to ambient creds even with use_ambient_login=0. That let a
-        // brand-new agent launch with no account selected spawn on
-        // whatever ambient credential happened to be on disk, with
-        // nothing bound in Connectors — observably different behavior on two
-        // machines running the identical code, purely as a function of
-        // which one had a stray credential file. A blank/empty
-        // identity_id must be gated exactly like any other unresolvable
-        // one (see `spawn_blocked_when_oauth_def_provider_has_no_binding_
-        // and_flag_false`, the non-blank equivalent of this test).
-        let store = make_store();
-        let mut def = gate_def(0);
-        store.agent_def_insert(&mut def).unwrap();
-
-        insert_block_for_agent(&store, "block-blank", "def-1");
-        let inst = make_instance("block-blank", "blank");
-        store.instance_create(&inst).unwrap();
-
-        let mut env: HashMap<String, String> = HashMap::new();
-        let res = inject_identity_env(store.clone(), store.clone(), store, "block-blank", &mut env);
-
-        assert_eq!(
-            res,
-            Err(SpawnGateError::MissingCredentials { provider: "claude".to_string(), linked: false }),
-        );
-        assert!(env.is_empty());
-    }
-
-    #[test]
-    fn inject_empty_identity_is_gated_same_as_blank() {
-        // Same as the blank case above, but the genuinely-empty string —
-        // what a real brand-new-agent launch with no account selected
-        // actually produces (#2463 Finding 2's exact repro), as opposed to
-        // the legacy "blank" singleton literal.
-        let store = make_store();
-        let mut def = gate_def(0);
-        store.agent_def_insert(&mut def).unwrap();
-
-        insert_block_for_agent(&store, "block-empty", "def-1");
-        let inst = make_instance("block-empty", "");
-        store.instance_create(&inst).unwrap();
-
-        let mut env: HashMap<String, String> = HashMap::new();
-        let res = inject_identity_env(store.clone(), store.clone(), store, "block-empty", &mut env);
-
-        assert_eq!(
-            res,
-            Err(SpawnGateError::MissingCredentials { provider: "claude".to_string(), linked: false }),
-        );
-        assert!(env.is_empty());
-    }
+    // #30077's tests live in their own file (inject/tests/blank_identity.rs) so this file,
+    // over the size ratchet, does not grow.
+    mod blank_identity;
 
     #[cfg(debug_assertions)]
     #[test]

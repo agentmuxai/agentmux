@@ -73,7 +73,10 @@ const PARKED_TTL: Duration = Duration::from_secs(5 * 60);
 /// task is armed alongside so the entry can't leak indefinitely if
 /// the renderer never replies. Replaces any prior entry for the same
 /// id (shouldn't happen — ids are uuid4).
-pub fn register(request_id: String, block_id: String, cb: AuthCallback) {
+///
+/// `on_expired` runs when the timeout cancels the challenge (not when it was answered or the pane
+/// closed), so whoever waited on the person can be told it ended.
+pub fn register(request_id: String, block_id: String, cb: AuthCallback, on_expired: Box<dyn FnOnce() + Send>) {
     use std::sync::atomic::Ordering;
     let epoch = NEXT_EPOCH.fetch_add(1, Ordering::Relaxed);
     {
@@ -115,6 +118,7 @@ pub fn register(request_id: String, block_id: String, cb: AuthCallback) {
                         rid, PARKED_TTL
                     );
                     cb.cancel();
+                    on_expired();
                 }
             });
         }

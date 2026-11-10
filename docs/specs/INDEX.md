@@ -222,6 +222,7 @@ partial list.
 | [`SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10`](SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md) | SPEC: Agent-Driven Interactive PTY Shell API |
 | [`SPEC_AGENT_LAUNCH_NAME_NO_AUTOFILL_2026_09_08`](SPEC_AGENT_LAUNCH_NAME_NO_AUTOFILL_2026_09_08.md) | SPEC: Agent launch name — no autofill, ghost-text placeholder only |
 | [`SPEC_AGENT_LOGIN_FLOW_TIGHTENING_2026_09_04`](SPEC_AGENT_LOGIN_FLOW_TIGHTENING_2026_09_04.md) | SPEC — Tighten the agent-pane login flow: auto-unblock on external bind, "Bind account" button |
+| [`SPEC_AGENT_MODEL_ENDPOINT_ENV_2026_11_08`](SPEC_AGENT_MODEL_ENDPOINT_ENV_2026_11_08.md) | SPEC: agents can point a Claude Code agent at another model server |
 | [`SPEC_AGENT_OPEN_LATENCY_2026_09_27`](SPEC_AGENT_OPEN_LATENCY_2026_09_27.md) | SPEC: opening an agent from My Agents should be near-instant — where the time goes, and what to change |
 | [`SPEC_AGENT_PANE_ARMORY_HEADER_ICON_2026_07_20`](SPEC_AGENT_PANE_ARMORY_HEADER_ICON_2026_07_20.md) | SPEC: Vault Icon on the Agent-Setup Button + Responsive Tabs in the Per-Agent "Armory" |
 | [`SPEC_AGENT_PANE_AUTH_NOTIFICATIONS_2026_07_26`](SPEC_AGENT_PANE_AUTH_NOTIFICATIONS_2026_07_26.md) | Agent Pane Mount/Auth Notifications & Launch-Auth Reducer |
@@ -617,6 +618,7 @@ partial list.
 | [`SPEC_AGENT_PANE_BOTTOM_TIGHT_INVARIANT_2026_10_29`](SPEC_AGENT_PANE_BOTTOM_TIGHT_INVARIANT_2026_10_29.md) | Agent pane: the latest message stays tight against the bottom edge, always |
 | [`SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23`](SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md) | SPEC: Agent pane bounded live window — migration plan |
 | [`SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18`](SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md) | SPEC: Closing a pane shuts down every agent in it — gracefully, in order |
+| [`SPEC_AGENT_PANE_CPU_MEMORY_READOUT_IN_COMPOSER_STRIP_2026_11_07`](SPEC_AGENT_PANE_CPU_MEMORY_READOUT_IN_COMPOSER_STRIP_2026_11_07.md) | Spec: the agent pane's top band is a priority layout, and the CPU and memory readout moves from it into the composer strip |
 | [`SPEC_AGENT_PANE_FAILURE_ROW_FOLLOWS_LIVE_STATE_2026_10_29`](SPEC_AGENT_PANE_FAILURE_ROW_FOLLOWS_LIVE_STATE_2026_10_29.md) | Spec: the agent pane's failure row follows the agent's live state |
 | [`SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26`](SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md) | SPEC: Attach any file in the agent composer (PDF, Office, text, code, …) |
 | [`SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05`](SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md) | SPEC: Align pane scrollback with actual model context, and make cross-instance opens honest |
@@ -783,6 +785,7 @@ partial list.
 | [`SPEC_PACKS_2026_11_05`](SPEC_PACKS_2026_11_05.md) | SPEC: Computer-use skills: per-application knowledge for computer use (Word, Excel, Ableton Live, WaveLab, Blender first) |
 | [`SPEC_PANE_CLOSING_INDICATOR_AND_FASTER_CLOSE_2026_10_28`](SPEC_PANE_CLOSING_INDICATOR_AND_FASTER_CLOSE_2026_10_28.md) | A pane shows it is closing, and a close stops waiting on srv |
 | [`SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20`](SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20.md) | SPEC — Consolidate pane loading into one readiness system |
+| [`SPEC_PANE_LOCATE_FLASH_ONE_FRAMEWORK_2026_11_08`](SPEC_PANE_LOCATE_FLASH_ONE_FRAMEWORK_2026_11_08.md) | Spec: the pane locate flash, one framework for every path that surfaces an existing pane |
 | [`SPEC_PANE_MODALS_NOT_WINDOW_MODALS_2026_11_02`](SPEC_PANE_MODALS_NOT_WINDOW_MODALS_2026_11_02.md) | Spec: pane modals, not window modals, for sign-in and OAuth; an audit of every window modal (2026-11-02) |
 | [`SPEC_PANE_SELECTION_STATE_MACHINE_AND_SWARM_CLICK_2026_10_18`](SPEC_PANE_SELECTION_STATE_MACHINE_AND_SWARM_CLICK_2026_10_18.md) | Spec: Selecting a pane from Swarm — the lost click, and one state machine for "show this pane" |
 | [`SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17`](SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md) | SPEC: Universal Pane Tabs — Every Pane Header Becomes a Tab Strip (cmux-Style Redesign) |

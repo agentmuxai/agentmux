@@ -235,6 +235,18 @@ fn chooser_reason(ask: &str) -> String {
     }
 }
 
+/// A page's own file chooser: kept for the agent when its grant has the uploads power, else cancelled
+/// by the host, and the agent is told what to do instead. Answers the host's `decision`.
+fn chooser_decision(state: &AppState, agent: &str, target: &str, ask: &str, title: &str, origin: &str) -> &'static str {
+    let said = chooser_message(ask, title);
+    if crate::server::browser_chooser::holds(state, target, agent, origin, ask) {
+        record(agent, target, "file_chooser", &said, "held", &crate::server::browser_chooser::held_reason());
+        return "hold";
+    }
+    record(agent, target, "file_chooser", &said, "cancelled", &chooser_reason(ask));
+    "cancel"
+}
+
 /// What the agent reads about a refusal the host reports, and what to do about it. `shown` is only a scheme or a host.
 fn notice_words(notice: &str, shown: &str) -> (String, &'static str) {
     match notice {
@@ -245,6 +257,19 @@ fn notice_words(notice: &str, shown: &str) -> (String, &'static str) {
         "certificate_error" => (
             format!("{shown} has a certificate that isn't trusted"),
             "AgentMux doesn't continue past a certificate warning, and nothing the agent can do clicks through it. Tell the person which site and why you need it",
+        ),
+        // `shown` is the host's own words: `<name> (<size>) to <path>`, or why nothing was saved.
+        "download_saved" => (
+            format!("saved {shown}"),
+            "AgentMux saved it into your workspace's downloads folder without a dialog; it was not opened and nothing was made executable",
+        ),
+        "download_refused" => (
+            format!("a download was not saved: {shown}"),
+            "nothing was written to disk; if the file is needed, tell the person",
+        ),
+        "auth_expired" => (
+            format!("the sign-in prompt for {shown} timed out after 5 minutes without an answer"),
+            "The person is asked for a username and password in the app; nothing the agent can do answers it. Load the page again to ask again, or tell the person you need it",
         ),
         _ => (format!("the host refused something: {shown}"), "the host refused it"),
     }
@@ -281,14 +306,18 @@ pub(crate) async fn handle_host_browser_dialog(
         return answered("ok");
     }
     if let Some(ask) = body.get("chooser").and_then(|v| v.as_str()) {
-        // A page's own file chooser, cancelled by the host: the agent is told what to do instead.
-        record(&agent, &target, "file_chooser", &chooser_message(ask, &message), "cancelled", &chooser_reason(ask));
-        return answered("cancel");
+        return answered(chooser_decision(&state, &agent, &target, ask, &message, &s("origin")));
     }
     if let Some(notice) = body.get("notice").and_then(|v| v.as_str()) {
         // Something the host refused in the pane (a link to a program, an untrusted certificate): the agent is told.
         let (what, reason) = notice_words(notice, &message);
-        record(&agent, &target, notice, &what, "blocked", reason);
+        let saved = notice == "download_saved";
+        record(&agent, &target, notice, &what, if saved { "saved" } else { "blocked" }, reason);
+        if notice.starts_with("download_") {
+            // A download is also an action in the pane's log, with the person's header.
+            let how = if saved { crate::server::browser_actions::How::Allowed } else { crate::server::browser_actions::How::Refused(message.clone()) };
+            crate::server::browser_actions::note(&banner_at, &agent, crate::server::browser_actions::Kind::Download).detail(&message).how(how).record(&state);
+        }
         return answered("cancel");
     }
     if flag("suppressed") {
@@ -433,11 +462,22 @@ mod tests {
     }
 
     #[test]
+    fn a_saved_or_refused_download_is_told_to_the_agent_in_the_host_s_words() {
+        let (what, why) = notice_words("download_saved", "report.pdf (13 bytes) to /w/downloads/report.pdf");
+        assert_eq!(what, "saved report.pdf (13 bytes) to /w/downloads/report.pdf");
+        assert!(why.contains("without a dialog") && why.contains("not opened"), "{why}");
+        let (what, why) = notice_words("download_refused", "report.pdf is 900 MB, over the 500 MB limit");
+        assert!(what.contains("not saved") && what.contains("over the 500 MB limit") && why.contains("tell the person"), "{what} / {why}");
+    }
+
+    #[test]
     fn a_refused_link_or_certificate_tells_the_agent_what_to_do_instead() {
         let (what, why) = notice_words("external_protocol", "mailto");
         assert!(what.contains("mailto:") && why.contains("tell the person") && !what.contains("program"), "{what} / {why}");
         let (what, why) = notice_words("certificate_error", "expired.example");
         assert!(what.contains("expired.example") && why.contains("certificate warning"), "{what} / {why}");
+        let (what, why) = notice_words("auth_expired", "intranet.example:8080");
+        assert!(what.contains("intranet.example:8080") && what.contains("5 minutes") && why.contains("Load the page again"), "{what} / {why}");
     }
 
     #[test]

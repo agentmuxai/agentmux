@@ -23,7 +23,7 @@ pub enum Policy {
 /// changes who may do what. Recorded whoever calls.
 pub const ALWAYS: &[&str] = &[
     "account.key.verify", "account.oauth.cancel", "app_skills.catalog.install", "account.oauth.client.clear", "account.oauth.start", "agent.account.switch",
-    "agent.define", "agent.kill-process", "agent.kill-tree", "agent.move-here", "agent.open", "agent.pane.unregister", "agent.send",
+    "agent.define", "agent.kill-process", "agent.kill-tree", "agent.model.switch", "agent.move-here", "agent.open", "agent.pane.unregister", "agent.send",
     "agent.setSeat", "agent.start", "agent.stop", "agent.takeover", "agent:memory:revert", "agent:memory:write_file",
     "agent:session:append_output", "agent:session:archive", "agent:session:write_state", "agentanswer", "agentcancel",
     "agentdefcreatefromtemplate", "agentdefhide", "agentdefunhide", "agentinput", "agentlastruntime",
@@ -56,7 +56,7 @@ pub const ALWAYS: &[&str] = &[
     "skill.catalog.unbind",
     "skill.catalog.unbind_from_bundle", "skill.catalog.upsert", "skill.catalog.upsert_for_bundle", "skill.delete",
     "skill.unbind", "skill.upsert", "subprocessspawn", "supervisor.set-mode", "toolchain.install_system_tool",
-    "toolchain.prune", "tooldecision", "tower.forget", "tower.pair", "unlinkagentidentity", "updateagent",
+    "toolchain.prune", "tooldecision", "tower.forget", "tower.pair", "undoagentendpoint", "unlinkagentidentity", "updateagent",
     "updateagentinstance", "updateagentskill", "upsertdrone", "upsertidentityaccount", "upsertmemory",
     "upsertsystemmemory", "viewer.pair-start", "viewer.revoke", "widget.api", "widgets.call",
     "widgets.catalog.install", "widgets.install", "widgets.rescan", "widgets.session", "widgets.setenabled",
@@ -86,7 +86,7 @@ pub const LIVE_INPUT: &[&str] = &[
 /// Returns data and changes nothing.
 pub const READ_ONLY: &[&str] = &[
     "account.oauth.client.get", "account.oauth.poll", "app_skills.catalog", "agent.input-history",
-    "agent.input-history-search", "agent.list", "agent.open-panes", "agent.output", "agent.process-list",
+    "agent.input-history-search", "agent.list", "agent.model.panel", "agent.open-panes", "agent.output", "agent.peer-labels", "agent.process-list",
     "agent.project_instructions", "agent.status", "agent.tracked-blocks", "agent:memory:adoption_list",
     "agent:memory:claims", "agent:memory:diff", "agent:memory:history", "agent:memory:list", "agent:memory:read_file",
     "agent:session:list_archives", "agent:session:read", "agentapiretry", "agentdeflisthiddentemplates", "agentruntime.list",

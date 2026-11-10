@@ -70,8 +70,13 @@ vi.mock("@/app/store/tab-actions", () => ({
 vi.mock("@/app/store/focusManager", () => ({ giveBlockFocus: (id: string) => calls.push(`caret:${id}`) }));
 /** The locate flash requests, each with the steps already taken when it was asked. */
 const located: { blockId: string; after: string[] }[] = [];
+/** What each of those requests said about focus. */
+const locateOpts: unknown[] = [];
 vi.mock("@/app/util/pane-locate", () => ({
-    emitPaneLocate: (blockId: string) => located.push({ blockId, after: [...calls] }),
+    emitPaneLocate: (blockId: string, opts?: unknown) => {
+        located.push({ blockId, after: [...calls] });
+        locateOpts.push(opts);
+    },
 }));
 vi.mock("@/layout/index", () => ({
     setActiveBlockInStack: (_m: unknown, nodeId: string, blockId: string) => calls.push(`stack:${nodeId}:${blockId}`),
@@ -97,6 +102,7 @@ vi.mock("@/app/store/services", () => ({
     },
 }));
 
+import { isWorkspaceClosedFailure } from "@/app/selection/reveal-failure";
 import { findOpenBlockByView, revealBlock, showBlockInPane, showBlockWithoutFocus } from "./reveal-block";
 
 /** A layout model whose one pane holds `members` as tabs. */
@@ -121,6 +127,7 @@ function modelWithPane(nodeId: string, members: string[], magnified?: string, mi
 beforeEach(() => {
     calls.length = 0;
     located.length = 0;
+    locateOpts.length = 0;
     notices.length = 0;
     win.activeTab = "t1";
     win.commitDelayMs = 0;
@@ -308,6 +315,17 @@ describe("showBlockWithoutFocus — an agent's file-open into an existing pane",
         expect(calls).toEqual(["restore:pane", "unmagnify:other", "stack:pane:agentB"]);
     });
 
+    it("flashes the pane it showed, without asking for focus; a block it could not show flashes nothing", async () => {
+        models.t2 = modelWithPane("pane", ["agentA", "agentB"], "other", true);
+        await showBlockWithoutFocus("agentB");
+        expect(located.map((l) => l.blockId)).toEqual(["agentB"]);
+        expect(locateOpts).toEqual([{ focus: false }]);
+        expect(located[0].after).toEqual(["restore:pane", "unmagnify:other", "stack:pane:agentB"]);
+        located.length = 0;
+        expect(await showBlockWithoutFocus("elsewhere")).toBe(false);
+        expect(located).toEqual([]);
+    });
+
     it("a block not in a built layout here: false, nothing touched", async () => {
         expect(await showBlockWithoutFocus("elsewhere")).toBe(false);
         models.t2 = undefined;
@@ -422,5 +440,38 @@ describe("revealBlock — a block in another window (spec §4.3)", () => {
         await revealBlock("remote");
         warn.mockRestore();
         expect(calls).toEqual(["block.reveal:remote", "SetActiveTab:ws2:t9", "focusWindow:second"]);
+    });
+
+    // The shape of a parked agent's Open when this window's copy of the tab was read before the attach
+    // reached it: the request goes to srv, which names this same window, whose `block:reveal` handler asks
+    // again here. The second request ends the first as superseded — and the second is the one that shows
+    // the pane, so the first caller must not call that a failure to open the workspace.
+    it("a newer request from this window ends an older handed-over one as superseded, while it shows the pane", async () => {
+        let answer!: (v: { found: boolean }) => void;
+        blockReveal = () => new Promise((resolve) => (answer = resolve));
+        const first = revealBlock("remote", { source: "open", quiet: true });
+        await vi.waitFor(() => expect(calls).toContain("block.reveal:remote"));
+        // srv told this window to reveal it (it holds the block now): the receiving side asks here, local only.
+        tabs.t1 = { blockids: ["remote"] };
+        models.t1 = modelWithPane("n1", ["remote"]);
+        expect(await revealBlock("remote", { tabId: "t1", localOnly: true, quiet: true })).toEqual({ ok: true });
+        expect(await first).toEqual({ ok: false, reason: "superseded" });
+        answer({ found: false }); // the late answer finds no one waiting
+    });
+});
+
+describe("isWorkspaceClosedFailure", () => {
+    it("is true only for the reveal whose answer is that no window could be opened on the workspace", () => {
+        expect(isWorkspaceClosedFailure({ ok: false, reason: "remote-failed", detail: "workspace-closed" })).toBe(true);
+        for (const other of [
+            { ok: true },
+            { ok: false, reason: "remote-failed", detail: "layout-timeout" },
+            { ok: false, reason: "remote-timeout" },
+            { ok: false, reason: "superseded" },
+            { ok: false, reason: "layout-timeout" },
+            { ok: false, reason: "mismatch" },
+        ] as const) {
+            expect(isWorkspaceClosedFailure(other as any)).toBe(false);
+        }
     });
 });

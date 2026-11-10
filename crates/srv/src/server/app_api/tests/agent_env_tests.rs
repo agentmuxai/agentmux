@@ -93,9 +93,10 @@ async fn reserved_credential_and_secret_looking_input_is_refused_and_nothing_is_
         json!({ "GH_CONFIG_DIR": "/x" }),
         json!({ "CLAUDE_CONFIG_DIR": "/x" }),
         json!({ "CODEX_HOME": "/x" }),
-        json!({ "ANTHROPIC_API_KEY": "x" }),
         json!({ "OPENAI_API_KEY": "x" }),
-        json!({ "ANTHROPIC_BASE_URL": "http://x" }),
+        json!({ "OPENAI_BASE_URL": "http://x" }),
+        json!({ "ANTHROPIC_API_KEY": "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789" }),
+        json!({ "ANTHROPIC_BASE_URL": "http://user:pw@x" }),
         json!({ "SERVICE_TOKEN": "x" }),
         json!({ "FORCE_COLOR": "ghp_abcdefghijklmnopqrstuvwxyz0123456789" }),
         json!({ "bad name": "x" }),
@@ -272,4 +273,329 @@ async fn a_set_that_says_what_to_set_is_required_and_lines_exclude_the_edits() {
         let (status, out) = call(&state, Some(&me), body).await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{out}");
     }
+}
+
+const SERVER: &str = "http://198.51.100.7:11434";
+
+fn audited_by_name(target: &AgentDefinition, source: &str) -> Vec<crate::backend::reactive::AuditLogEntry> {
+    get_global_handler()
+        .get_audit_log(usize::MAX)
+        .into_iter()
+        .filter(|e| e.source_agent.as_deref() == Some(source) && e.target_agent == target.slug)
+        .collect()
+}
+
+fn point(agent: &AgentDefinition) -> Value {
+    json!({ "action": "set", "agent": agent.id, "set": {
+        "ANTHROPIC_BASE_URL": SERVER,
+        "ANTHROPIC_AUTH_TOKEN": "ollama",
+        "ANTHROPIC_MODEL": "flint:40b-a2b",
+        "API_TIMEOUT_MS": "600000",
+    } })
+}
+
+#[tokio::test]
+async fn an_agent_points_another_at_a_model_server_with_a_notice_and_no_key_in_the_answer() {
+    let state = test_state();
+    let (me, lolly) = (agent(&state, "host", false), agent(&state, "host", false));
+    let (status, body) = call(&state, Some(&me), point(&lolly)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["notice"]["undo_for_ms"], 30_000, "{body}");
+    assert!(body["note"].as_str().unwrap().contains("Undo"), "{body}");
+    assert_eq!(body["changed"]["added"]["ANTHROPIC_BASE_URL"], SERVER, "{body}");
+    // The key is not echoed, in the change or in the text shown back.
+    assert!(!body.to_string().contains("ollama"), "{body}");
+    assert!(body["lines"].as_str().unwrap().contains("ANTHROPIC_AUTH_TOKEN=[hidden]"), "{body}");
+    assert!(stored(&state, &lolly).unwrap().contains("ANTHROPIC_BASE_URL=http://198.51.100.7:11434"));
+}
+
+#[tokio::test]
+async fn the_audit_row_names_the_acting_agent_and_the_endpoint_change_without_a_key() {
+    let state = test_state();
+    let (me, lolly) = (agent(&state, "host", false), agent(&state, "host", false));
+    let (_, body) = call(&state, Some(&me), point(&lolly)).await;
+    let entries = audited(&me, &lolly);
+    let entry = entries.iter().find(|e| e.request_id == body["audit_id"].as_str().unwrap()).expect("an audit entry");
+    assert!(entry.success);
+    let reason = entry.reason.as_deref().unwrap();
+    assert!(reason.contains(&me.id) && reason.contains(&lolly.id) && reason.contains("[model endpoint]"), "{reason}");
+    assert!(reason.contains("ANTHROPIC_AUTH_TOKEN"), "the name is recorded: {reason}");
+    assert!(!reason.contains("ollama"), "the key stays out of the audit log: {reason}");
+}
+
+#[tokio::test]
+async fn a_secret_shaped_key_or_an_unusable_vault_reference_is_refused_and_nothing_is_written() {
+    let state = test_state();
+    let (me, lolly) = (agent(&state, "host", false), agent(&state, "host", false));
+    for token in ["sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789", "vault:no-such-entry"] {
+        let (status, body) = call(
+            &state,
+            Some(&me),
+            json!({ "action": "set", "agent": lolly.id, "set": { "ANTHROPIC_BASE_URL": SERVER, "ANTHROPIC_AUTH_TOKEN": token } }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{token}: {body}");
+        assert!(!body.to_string().contains(token), "a refusal does not repeat the value: {body}");
+    }
+    assert_eq!(stored(&state, &lolly), None);
+    assert!(audited(&me, &lolly).iter().any(|e| !e.success), "the refusals are recorded");
+}
+
+#[tokio::test]
+async fn an_agent_on_a_model_route_or_in_a_container_keeps_its_own_server() {
+    let state = test_state();
+    let (me, routed, container) = (agent(&state, "host", false), agent(&state, "host", false), agent(&state, "container", false));
+    state
+        .mstore
+        .agent_content_set(&AgentContent {
+            agent_id: routed.id.clone(),
+            content_type: crate::backend::model_gateway::launch::CONTENT_TYPE.into(),
+            content: json!({ "route": "openrouter", "model": "any" }).to_string(),
+            updated_at: 1,
+        })
+        .unwrap();
+    for target in [&routed, &container] {
+        let (status, body) = call(&state, Some(&me), point(target)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        assert_eq!(stored(&state, target), None);
+    }
+    // Other variables on the same agents still go through.
+    let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": container.id, "set": { "TZ": "1" } })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+}
+
+/// An api-key entry in the Vault, open to the agents in `open_to` only.
+fn vault_key(state: &AppState, open_to: &[&AgentDefinition]) -> String {
+    crate::backend::vault::seal::use_test_key();
+    let entry: crate::backend::vault::NewEntry =
+        serde_json::from_value(json!({ "kind": "api-key", "label": "Studio box key", "parts": { "value": "sk-test-0123456789" } })).unwrap();
+    let id = crate::backend::vault::create(&state.identity_store, entry).unwrap();
+    let ids: Vec<&str> = open_to.iter().map(|d| d.id.as_str()).collect();
+    assert!(state.identity_store.vault_set("personal", "Personal", "named", &json!(ids).to_string()).unwrap());
+    id
+}
+
+fn with_key(agent: &AgentDefinition, key: &str) -> Value {
+    json!({ "action": "set", "agent": agent.id, "set": { "ANTHROPIC_BASE_URL": SERVER, "ANTHROPIC_AUTH_TOKEN": key } })
+}
+
+#[tokio::test]
+async fn a_vault_key_must_be_open_to_the_acting_agent_as_well_as_the_agent_it_is_for() {
+    let state = test_state();
+    let (me, lolly) = (agent(&state, "host", false), agent(&state, "host", false));
+    // Open to Lolly only: an agent that could not read the key itself cannot send it to a server it names.
+    let key = vault_key(&state, &[&lolly]);
+    let (status, body) = call(&state, Some(&me), with_key(&lolly, &format!("vault:{key}"))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(stored(&state, &lolly), None);
+    // Open to the acting agent only: the agent it is for could not use it either.
+    let key = vault_key(&state, &[&me]);
+    let (status, body) = call(&state, Some(&me), with_key(&lolly, &format!("vault:{key}"))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    // Open to both: accepted, and the value is not in the answer.
+    let key = vault_key(&state, &[&me, &lolly]);
+    let (status, body) = call(&state, Some(&me), with_key(&lolly, &format!("vault:{key}"))).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(!body.to_string().contains("sk-test-0123456789"), "{body}");
+}
+
+#[tokio::test]
+async fn a_refused_vault_key_never_says_which_entries_exist_or_what_they_are_called() {
+    let state = test_state();
+    let (me, lolly) = (agent(&state, "host", false), agent(&state, "host", false));
+    let closed = vault_key(&state, &[&lolly]);
+    let mut answers = Vec::new();
+    for key in [format!("vault:{closed}"), "vault:no-such-entry".to_string()] {
+        let (status, body) = call(&state, Some(&me), with_key(&lolly, &key)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        let error = body["error"].as_str().unwrap().replace(&key, "<key>");
+        assert!(!error.contains("Studio box key") && !error.contains("no entry"), "{error}");
+        answers.push(error);
+    }
+    assert_eq!(answers[0], answers[1], "the same answer whether or not the entry exists");
+}
+
+#[tokio::test]
+async fn a_key_written_by_an_agent_on_another_machine_may_not_name_a_vault_entry() {
+    let state = test_state();
+    let lolly = agent(&state, "host", false);
+    let key = vault_key(&state, &[&lolly]);
+    let req: AgentEnvRequest = serde_json::from_value(with_key(&lolly, &format!("vault:{key}"))).unwrap();
+    let (status, _) = run_remote(&state, "narko-2@elsewhere", req).unwrap_err();
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(stored(&state, &lolly), None);
+}
+
+fn write_env(state: &AppState, agent: &AgentDefinition, text: &str) {
+    state
+        .mstore
+        .agent_content_set(&AgentContent { agent_id: agent.id.clone(), content_type: "env".into(), content: text.into(), updated_at: 1 })
+        .unwrap();
+}
+
+#[tokio::test]
+async fn moving_the_address_checks_the_keys_already_in_the_environment_too() {
+    let state = test_state();
+    let (me, lolly) = (agent(&state, "host", false), agent(&state, "host", false));
+    // A Vault key open to Lolly only, named by the person: an agent that could not read it must not be able
+    // to send it to an address of its own choosing by changing the address alone.
+    let key = vault_key(&state, &[&lolly]);
+    write_env(&state, &lolly, &format!("ANTHROPIC_BASE_URL={SERVER}\nANTHROPIC_AUTH_TOKEN=vault:{key}\n"));
+    let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "set": { "ANTHROPIC_BASE_URL": "http://198.51.100.9:11434" } })).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(stored(&state, &lolly).unwrap().contains(SERVER), "nothing was written");
+    // Changing something else leaves the key where it was, so it is not asked again.
+    let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "set": { "API_TIMEOUT_MS": "1000" } })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    // Taking the address away takes its key with it, or that string would go to Anthropic as the key.
+    let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "unset": ["ANTHROPIC_BASE_URL"] })).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "unset": ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"] })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+}
+
+#[tokio::test]
+async fn a_key_the_person_wrote_in_the_clear_is_not_handed_to_an_address_an_agent_chose() {
+    let state = test_state();
+    let (me, lolly) = (agent(&state, "host", false), agent(&state, "host", false));
+    write_env(&state, &lolly, "ANTHROPIC_API_KEY=operator-plain-key-123\n");
+    let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "set": { "ANTHROPIC_BASE_URL": SERVER } })).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(!body.to_string().contains("operator-plain-key-123"), "{body}");
+    assert_eq!(stored(&state, &lolly).as_deref(), Some("ANTHROPIC_API_KEY=operator-plain-key-123\n"));
+    // A placeholder is no key.
+    write_env(&state, &lolly, "ANTHROPIC_API_KEY=ollama\n");
+    let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "set": { "ANTHROPIC_BASE_URL": SERVER } })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+}
+
+#[tokio::test]
+async fn a_key_is_written_only_with_the_address_of_a_server_of_its_own() {
+    let state = test_state();
+    let (me, lolly) = (agent(&state, "host", false), agent(&state, "host", false));
+    // A key alone would be sent to Anthropic as its key, next to the person's login.
+    let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "set": { "ANTHROPIC_API_KEY": "ollama" } })).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(stored(&state, &lolly), None);
+    // Nor with Anthropic's own address.
+    let (status, body) = call(
+        &state,
+        Some(&me),
+        json!({ "action": "set", "agent": lolly.id, "set": { "ANTHROPIC_BASE_URL": "https://api.anthropic.com", "ANTHROPIC_AUTH_TOKEN": "ollama" } }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    // With the address, in one call: fine; and then a key on its own address.
+    let (status, body) = call(&state, Some(&me), point(&lolly)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "set": { "ANTHROPIC_API_KEY": "none" } })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    // Leaving the address behind with its keys is refused, with another setting in the call or without.
+    let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "set": { "API_TIMEOUT_MS": "5" }, "unset": ["ANTHROPIC_BASE_URL"] })).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "set": { "ANTHROPIC_BASE_URL": "https://api.anthropic.com" } })).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    // Taking the keys with it is fine.
+    let unset = json!(["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"]);
+    let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "set": { "API_TIMEOUT_MS": "5" }, "unset": unset })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    // A key the person wrote in the clear is theirs, and stays.
+    write_env(&state, &lolly, "ANTHROPIC_BASE_URL=http://192.0.2.68:11434\nANTHROPIC_API_KEY=sk-ant-person-owned-key\n");
+    let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "unset": ["ANTHROPIC_BASE_URL"] })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(stored(&state, &lolly).unwrap().contains("ANTHROPIC_API_KEY"));
+}
+
+#[tokio::test]
+async fn only_a_change_of_address_opens_a_notice() {
+    let state = test_state();
+    let (me, lolly) = (agent(&state, "host", false), agent(&state, "host", false));
+    for set in [json!({ "ANTHROPIC_MODEL": "sonnet" }), json!({ "API_TIMEOUT_MS": "1000" })] {
+        // (An agent with no address of its own: nothing moved.)
+        let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "set": set })).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(body["notice"].is_null(), "no address moved: {body}");
+        assert!(!body["note"].as_str().unwrap().contains("Undo"), "{body}");
+    }
+    let (_, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "set": { "ANTHROPIC_BASE_URL": SERVER } })).await;
+    assert!(body["notice"]["id"].is_string(), "{body}");
+    // On an agent that has an address, a key, a timeout or a model on the same address is no new address.
+    for set in [json!({ "ANTHROPIC_AUTH_TOKEN": "ollama" }), json!({ "API_TIMEOUT_MS": "2000" }), json!({ "ANTHROPIC_DEFAULT_SONNET_MODEL": "flint:40b" })] {
+        let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "set": set })).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(body["notice"].is_null(), "the address did not move: {body}");
+    }
+    // Another address is a change of address.
+    let (_, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "set": { "ANTHROPIC_BASE_URL": "http://198.51.100.9:11434" } })).await;
+    assert!(body["notice"]["id"].is_string(), "{body}");
+    // Taking the address away (and its key) is a change of address too.
+    let (_, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "unset": ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"] })).await;
+    assert!(body["notice"]["id"].is_string(), "{body}");
+}
+
+#[tokio::test]
+async fn an_endpoint_name_is_written_in_capitals_only() {
+    let state = test_state();
+    let (me, lolly) = (agent(&state, "host", false), agent(&state, "host", false));
+    let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "set": { "anthropic_base_url": SERVER } })).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(stored(&state, &lolly), None);
+}
+
+#[tokio::test]
+async fn a_route_or_container_agent_can_still_set_a_model_name_and_take_endpoint_settings_out() {
+    let state = test_state();
+    let (me, routed, container) = (agent(&state, "host", false), agent(&state, "host", false), agent(&state, "container", false));
+    state
+        .mstore
+        .agent_content_set(&AgentContent {
+            agent_id: routed.id.clone(),
+            content_type: crate::backend::model_gateway::launch::CONTENT_TYPE.into(),
+            content: json!({ "route": "openrouter", "model": "any" }).to_string(),
+            updated_at: 1,
+        })
+        .unwrap();
+    for target in [&routed, &container] {
+        let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": target.id, "set": { "ANTHROPIC_MODEL": "sonnet" } })).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+    }
+    // Settings the operator left in a container agent's environment can be removed by an agent.
+    state
+        .mstore
+        .agent_content_set(&AgentContent {
+            agent_id: container.id.clone(),
+            content_type: "env".into(),
+            content: format!("ANTHROPIC_BASE_URL={SERVER}\nANTHROPIC_MODEL=sonnet\n"),
+            updated_at: 2,
+        })
+        .unwrap();
+    let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": container.id, "unset": ["ANTHROPIC_BASE_URL"] })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(stored(&state, &container).as_deref(), Some("ANTHROPIC_MODEL=sonnet\n"));
+}
+
+#[tokio::test]
+async fn the_change_is_undone_inside_the_window_and_only_once() {
+    let state = test_state();
+    let (me, lolly) = (agent(&state, "host", false), agent(&state, "host", false));
+    call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "set": { "TZ": "1" } })).await;
+    let (_, body) = call(&state, Some(&me), point(&lolly)).await;
+    let notice = body["notice"]["id"].as_str().unwrap().to_string();
+    undo_endpoint(&state, &notice, "you").unwrap();
+    assert_eq!(stored(&state, &lolly).as_deref(), Some("TZ=1\n"));
+    assert!(undo_endpoint(&state, &notice, "you").is_err(), "an undone change cannot be undone again");
+    let entries = audited_by_name(&lolly, "you");
+    assert!(entries.iter().any(|e| e.success && e.reason.as_deref().is_some_and(|r| r.contains("undid"))), "{entries:?}");
+}
+
+#[tokio::test]
+async fn an_undo_after_the_environment_was_edited_again_is_refused() {
+    let state = test_state();
+    let (me, lolly) = (agent(&state, "host", false), agent(&state, "host", false));
+    let (_, body) = call(&state, Some(&me), point(&lolly)).await;
+    let notice = body["notice"]["id"].as_str().unwrap().to_string();
+    call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "set": { "TZ": "1" } })).await;
+    let why = undo_endpoint(&state, &notice, "you").unwrap_err();
+    assert!(why.contains("changed again"), "{why}");
+    assert!(stored(&state, &lolly).unwrap().contains("ANTHROPIC_BASE_URL"), "the later edit and the endpoint both stand");
 }
