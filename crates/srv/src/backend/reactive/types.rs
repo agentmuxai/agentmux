@@ -36,6 +36,12 @@ impl std::fmt::Display for JektTier {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct InjectionRequest {
     pub target_agent: String,
+    /// The name the sender addressed, when the delivery itself is addressed
+    /// by UID (a replayed held jekt, or a target registered under another of
+    /// its names): the marker's `TO=` says the name, as a live delivery's
+    /// does, never the UID (#31433).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub marker_target: Option<String>,
     pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_agent: Option<String>,
@@ -442,6 +448,18 @@ impl InjectionRequest {
     /// An unsigned request's target as its route name, so a display-name
     /// target ("Loap #3") routes as "Loap-3" on every tier, not only the
     /// local one. A signed one is left as it is (see `is_signed`).
+    /// The same request addressed by `uid`, with the name the sender wrote
+    /// kept for the marker's `TO=`: a replay routes by UID but is named, the
+    /// way a live delivery is (#31433).
+    pub fn addressed_by_uid(&self, uid: &str) -> Self {
+        let seen = if self.is_signed() {
+            Some(self.target_agent.clone())
+        } else {
+            super::sanitize::route_name(&self.target_agent)
+        };
+        Self { target_agent: uid.to_string(), marker_target: seen, ..self.clone() }
+    }
+
     pub fn route_unsigned_target(&mut self) {
         if !self.is_signed() {
             self.target_agent = super::sanitize::route_name(&self.target_agent).unwrap_or_default();
@@ -975,5 +993,25 @@ mod app_api_manifest_contract_tests {
             missing.is_empty(),
             "app-api-manifest.json's agent.send.requestFields names field(s) InjectionRequest doesn't have: {missing:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod uid_addressing_tests {
+    use super::*;
+
+    /// #31433: a delivery that goes to the UID still names the agent in the
+    /// marker, routed exactly as the target itself would be.
+    #[test]
+    fn addressing_a_request_by_uid_keeps_the_name_the_sender_wrote() {
+        let mut req = InjectionRequest { target_agent: "Loap #3".to_string(), ..Default::default() };
+
+        let routed = req.addressed_by_uid("uid-1");
+        assert_eq!(routed.target_agent, "uid-1", "the delivery goes to the UID");
+        assert_eq!(routed.marker_target.as_deref(), Some("Loap-3"), "an unsigned target is routed, as a live delivery's is");
+
+        req.jekt_sig = Some("sig".to_string());
+        let signed = req.addressed_by_uid("uid-2");
+        assert_eq!(signed.marker_target.as_deref(), Some("Loap #3"), "a signed target is kept as the sender wrote it");
     }
 }
