@@ -111,17 +111,21 @@ const VALID_JEKT_TRUST: ReadonlySet<string> = new Set([
  * A held jekt (SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md §2.4) carries
  * `HELD_FOR=<secs>` and its original send time in `TS`: show that, not the
  * replay time, so a late message never reads as current.
+ *
+ * `deliveredAt` is the frame's own time, or the receive time for a live frame; a replayed frame has neither
+ * (`undefined`), and then the marker's `TS` (its send time, which every jekt carries) is the time. With no `TS`
+ * either the result has no timestamp, and the caller's batch stamp fills it: never the time of the replay.
  */
 export function heldTiming(
     fields: Record<string, string>,
-    deliveredAt: number,
-): { timestamp: number; heldForSecs?: number } {
+    deliveredAt: number | undefined,
+): { timestamp?: number; heldForSecs?: number } {
     const held = Number.parseInt(fields.HELD_FOR ?? "", 10);
     const sentSecs = Number.parseInt(fields.TS ?? "", 10);
-    if (!Number.isFinite(held) || held < 0 || !Number.isFinite(sentSecs) || sentSecs <= 0) {
-        return { timestamp: deliveredAt };
-    }
-    return { timestamp: sentSecs * 1000, heldForSecs: held };
+    const sent = Number.isFinite(sentSecs) && sentSecs > 0;
+    if (Number.isFinite(held) && held >= 0 && sent) return { timestamp: sentSecs * 1000, heldForSecs: held };
+    if (deliveredAt !== undefined) return { timestamp: deliveredAt };
+    return sent ? { timestamp: sentSecs * 1000 } : {};
 }
 
 /** Parses the `KEY=value` tokens out of a jekt structured-tag string. */
@@ -1122,8 +1126,8 @@ export class ClaudeCodeStreamParser {
             direction,
             ...(fields.ESCALATE === "required" || fields.ESCALATE === "none" ? { escalate: fields.ESCALATE } : {}),
             ...(this.isReplay ? { replayed: true as const } : {}),
-            ...heldTiming(fields, event.timestamp || Date.now()),
-        };
+            ...heldTiming(fields, event.timestamp || (this.isReplay ? undefined : Date.now())),
+        } as JektMessageNode;
     }
 
     /**
