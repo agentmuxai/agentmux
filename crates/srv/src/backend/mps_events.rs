@@ -194,6 +194,8 @@ events! {
     SensitiveCleared: crate::sagas::sensitive_window::EVENT_SENSITIVE_CLEARED => crate::sagas::sensitive_window::SensitiveClearedEvent,
     /// An agent's start of an agent (or another act the person may stop): a one-line notice or a countdown card, and its end (`sagas::agent_notice`).
     AgentNotice: crate::sagas::agent_notice::EVENT_AGENT_NOTICE => crate::sagas::agent_notice::NoticeView,
+    /// A question srv asks the person in a pane, as a modal over that pane, and its end (`sagas::pane_confirm`).
+    PaneConfirm: crate::sagas::pane_confirm::EVENT_PANE_CONFIRM => crate::sagas::pane_confirm::PaneConfirmView,
     /// The agents the person said "Always" to, after a change (`backend::agent_grants`).
     AgentGrants: crate::sagas::agent_notice::EVENT_AGENT_GRANTS => crate::sagas::agent_notice::GrantsEvent,
     /// A provider sign-in link to show as a notice with an Open action (`server::signin_notice`).

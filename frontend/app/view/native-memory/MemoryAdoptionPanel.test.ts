@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 import { adoptionHint, outcomeText } from "./MemoryAdoptionPanel";
 import { claimedSince, releaseOutcome } from "./MemoryClaimsPanel";
-import { accountLabel, parseAdoptionMeta } from "@/app/view/memory-adoption-approval/MemoryAdoptionApprovalWindow";
+import { accountLabel } from "./memory-confirms";
 
 describe("memory adoption", () => {
     it("says what an adoption did, and that it lands at the next launch", () => {
@@ -21,16 +21,6 @@ describe("memory adoption", () => {
 
     it("ignores an unknown payload", () => {
         expect(outcomeText({})).toBeNull();
-    });
-
-    it("parses the approval window's request and refuses one without an approval id", () => {
-        const meta = parseAdoptionMeta(
-            JSON.stringify({ approval_id: "a1", summary: { agentName: "Opaz", folders: [{ account: "e562b87a-x", files: ["a.md"] }] } }),
-        );
-        expect(meta?.approvalId).toBe("a1");
-        expect(meta?.summary.folders[0].files).toEqual(["a.md"]);
-        expect(parseAdoptionMeta(JSON.stringify({ summary: {} }))).toBeNull();
-        expect(parseAdoptionMeta("not json")).toBeNull();
     });
 
     it("explains what earlier memory is and what adopting does", () => {
@@ -68,13 +58,6 @@ describe("releasing a memory folder", () => {
         expect(claimedSince(now - 1000, now)).toBe("today");
         expect(claimedSince(now - 86_400_000, now)).toBe("yesterday");
         expect(claimedSince(now - 5 * 86_400_000, now)).toBe("5 days ago");
-    });
-
-    it("the approval window knows a release from an adoption", () => {
-        const m = parseAdoptionMeta(JSON.stringify({ approval_id: "x", kind: "release", summary: { agentName: "Opaz", dir: "/d" } }));
-        expect(m?.kind).toBe("release");
-        expect(m?.summary.dir).toBe("/d");
-        expect(parseAdoptionMeta(JSON.stringify({ approval_id: "y" }))?.kind).toBe("adopt");
     });
 
     it("an adoption result reads the same under the new 'done' status", () => {

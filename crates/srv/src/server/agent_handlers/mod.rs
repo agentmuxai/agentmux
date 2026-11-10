@@ -81,6 +81,7 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     seat::register(engine, state);
     crate::sagas::sensitive_window::register(engine, state);
     crate::sagas::agent_notice::register(engine, state);
+    crate::sagas::pane_confirm::register(engine);
     crate::sagas::sensitive_runners::register_all();
     crate::server::pane_commands::register(engine, state);
     bundle::register(engine, state);

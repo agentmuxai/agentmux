@@ -251,9 +251,6 @@ export const cefApprovals: ApprovalHostApi = {
     decideCredential: async (approvalId, approve) => {
         await invokeCommand("credential_approval_decide", { approval_id: approvalId, approve });
     },
-    decideMemoryAdoption: async (approvalId, approve) => {
-        await invokeCommand("memory_adoption_decide", { approval_id: approvalId, approve });
-    },
     decideSsh: async (approvalId, approve, text, checkbox) => {
         await invokeCommand("ssh_approval_decide", { approval_id: approvalId, approve, text, checkbox });
     },
@@ -295,12 +292,6 @@ export const cefApprovals: ApprovalHostApi = {
     vaultExport: (args) => invokeCommand("vault_export", args),
     vaultImport: (args) => invokeCommand("vault_import", args),
     vaultImportDelete: (args) => invokeCommand("vault_import_delete", args),
-    requestMemoryAdoption: async (args) => {
-        await invokeCommand("memory_adoption_request", args);
-    },
-    requestMemoryRelease: async (args) => {
-        await invokeCommand("memory_release_request", args);
-    },
 };
 
 /** The flat `AppApi` methods added by slice 5 of the host seam, on CEF. */

@@ -218,16 +218,19 @@ import type { CommandMemoryDeliveryClaimFallbackData } from "@/types/rpc/Command
 import type { CommandMemoryDeliveryComposeData } from "@/types/rpc/CommandMemoryDeliveryComposeData";
 import type { CommandMemoryLaunchCostData } from "@/types/rpc/CommandMemoryLaunchCostData";
 import type { CommandMigrateForkSlugsData } from "@/types/rpc/CommandMigrateForkSlugsData";
+import type { CommandNativeMemoryAdoptData } from "@/types/rpc/CommandNativeMemoryAdoptData";
 import type { CommandNativeMemoryAdoptionListData } from "@/types/rpc/CommandNativeMemoryAdoptionListData";
 import type { CommandNativeMemoryClaimsData } from "@/types/rpc/CommandNativeMemoryClaimsData";
 import type { CommandNativeMemoryDiffData } from "@/types/rpc/CommandNativeMemoryDiffData";
 import type { CommandNativeMemoryHistoryData } from "@/types/rpc/CommandNativeMemoryHistoryData";
 import type { CommandNativeMemoryListData } from "@/types/rpc/CommandNativeMemoryListData";
 import type { CommandNativeMemoryReadFileData } from "@/types/rpc/CommandNativeMemoryReadFileData";
+import type { CommandNativeMemoryReleaseData } from "@/types/rpc/CommandNativeMemoryReleaseData";
 import type { CommandNativeMemoryRevertData } from "@/types/rpc/CommandNativeMemoryRevertData";
 import type { CommandNativeMemoryWriteFileData } from "@/types/rpc/CommandNativeMemoryWriteFileData";
 import type { CommandNextPromptSuggestionData } from "@/types/rpc/CommandNextPromptSuggestionData";
 import type { CommandOtherBuildLayoutsData } from "@/types/rpc/CommandOtherBuildLayoutsData";
+import type { CommandPaneConfirmDecideData } from "@/types/rpc/CommandPaneConfirmDecideData";
 import type { CommandPaneMoveTabData } from "@/types/rpc/CommandPaneMoveTabData";
 import type { CommandPaneMoveTabsData } from "@/types/rpc/CommandPaneMoveTabsData";
 import type { CommandPaneOpenData } from "@/types/rpc/CommandPaneOpenData";
@@ -392,6 +395,7 @@ import type { InstallCheckReq } from "@/types/rpc/InstallCheckReq";
 import type { InstallCheckResult } from "@/types/rpc/InstallCheckResult";
 import type { InstallStartReq } from "@/types/rpc/InstallStartReq";
 import type { InstallStartResult } from "@/types/rpc/InstallStartResult";
+import type { InstallSystemToolReq } from "@/types/rpc/InstallSystemToolReq";
 import type { InstallSystemToolResult } from "@/types/rpc/InstallSystemToolResult";
 import type { InstallToolResult } from "@/types/rpc/InstallToolResult";
 import type { JobReporterAddReq } from "@/types/rpc/JobReporterAddReq";
@@ -459,12 +463,14 @@ import type { MuxBusLoginResp } from "@/types/rpc/MuxBusLoginResp";
 import type { MuxBusStatusResp } from "@/types/rpc/MuxBusStatusResp";
 import type { MuxEvent } from "@/types/rpc/MuxEvent";
 import type { NamedAgentRow } from "@/types/rpc/NamedAgentRow";
+import type { NativeMemoryAdoptReport } from "@/types/rpc/NativeMemoryAdoptReport";
 import type { NativeMemoryAdoptionListResult } from "@/types/rpc/NativeMemoryAdoptionListResult";
 import type { NativeMemoryClaimList } from "@/types/rpc/NativeMemoryClaimList";
 import type { NativeMemoryDiffResult } from "@/types/rpc/NativeMemoryDiffResult";
 import type { NativeMemoryHistoryResult } from "@/types/rpc/NativeMemoryHistoryResult";
 import type { NativeMemoryListResult } from "@/types/rpc/NativeMemoryListResult";
 import type { NativeMemoryReadFileResult } from "@/types/rpc/NativeMemoryReadFileResult";
+import type { NativeMemoryReleaseResult } from "@/types/rpc/NativeMemoryReleaseResult";
 import type { NativeMemoryRevertResult } from "@/types/rpc/NativeMemoryRevertResult";
 import type { NextPromptSuggestionResult } from "@/types/rpc/NextPromptSuggestionResult";
 import type { NotifyAckParams } from "@/types/rpc/NotifyAckParams";
@@ -480,6 +486,7 @@ import type { OAuthSessionReq } from "@/types/rpc/OAuthSessionReq";
 import type { OpenInShellReq } from "@/types/rpc/OpenInShellReq";
 import type { OperatorChallengeResult } from "@/types/rpc/OperatorChallengeResult";
 import type { OtherBuildLayoutsResult } from "@/types/rpc/OtherBuildLayoutsResult";
+import type { PaneConfirmDecideResult } from "@/types/rpc/PaneConfirmDecideResult";
 import type { PaneOpenResult } from "@/types/rpc/PaneOpenResult";
 import type { PaneTabEditResult } from "@/types/rpc/PaneTabEditResult";
 import type { PinnedSendersResult } from "@/types/rpc/PinnedSendersResult";
@@ -2062,6 +2069,14 @@ export const GeneratedApi = {
   MuxInfoCommand(client: RpcClient, opts?: RpcOpts): Promise<AppInfoResult> {
     return client.rpcCall("waveinfo", null, opts);
   },
+  // command "agent:memory:adopt"
+  NativeMemoryAdoptCommand(
+    client: RpcClient,
+    data: CommandNativeMemoryAdoptData,
+    opts?: RpcOpts
+  ): Promise<NativeMemoryAdoptReport> {
+    return client.rpcCall("agent:memory:adopt", data, opts);
+  },
   // command "agent:memory:adoption_list"
   NativeMemoryAdoptionListCommand(
     client: RpcClient,
@@ -2077,6 +2092,14 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<NativeMemoryClaimList> {
     return client.rpcCall("agent:memory:claims", data, opts);
+  },
+  // command "agent:memory:release"
+  NativeMemoryReleaseCommand(
+    client: RpcClient,
+    data: CommandNativeMemoryReleaseData,
+    opts?: RpcOpts
+  ): Promise<NativeMemoryReleaseResult> {
+    return client.rpcCall("agent:memory:release", data, opts);
   },
   // command "agent:memory:diff"
   NativeMemoryDiffCommand(
@@ -2169,6 +2192,14 @@ export const GeneratedApi = {
   // command "operator.challenge"
   OperatorChallengeCommand(client: RpcClient, opts?: RpcOpts): Promise<OperatorChallengeResult> {
     return client.rpcCall("operator.challenge", {}, opts);
+  },
+  // command "pane.confirm.decide"
+  PaneConfirmDecideCommand(
+    client: RpcClient,
+    data: CommandPaneConfirmDecideData,
+    opts?: RpcOpts
+  ): Promise<PaneConfirmDecideResult> {
+    return client.rpcCall("pane.confirm.decide", data, opts);
   },
   // command "pane.open"
   PaneOpenCommand(client: RpcClient, data: CommandPaneOpenData, opts?: RpcOpts): Promise<PaneOpenResult> {
@@ -2710,7 +2741,7 @@ export const GeneratedApi = {
   // command "toolchain.install_system_tool"
   ToolchainInstallSystemToolCommand(
     client: RpcClient,
-    data: ToolIdReq,
+    data: InstallSystemToolReq,
     opts?: RpcOpts
   ): Promise<InstallSystemToolResult> {
     return client.rpcCall("toolchain.install_system_tool", data, { timeout: 150000, ...opts });

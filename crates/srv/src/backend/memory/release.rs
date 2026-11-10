@@ -14,8 +14,8 @@
 //! Releasing can make the folder exclusive to another agent, whose next
 //! spawn then writes and deletes in it, so it is confirmed the same way as
 //! adoption: [`list`] issues the agent's claims under a `list_id`; the
-//! release itself ([`release`]) is reached only through the host's
-//! confirmation window (`memoryadopt.Release`, host secret), naming
+//! release itself ([`release`]) is reached only through the person's
+//! confirmation in the Memory pane (`agent:memory:release`, the window's only), naming
 //! `(list_id, index)`. If the agent still uses the folder, its next spawn
 //! there simply claims it again.
 

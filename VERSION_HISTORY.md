@@ -1,5 +1,63 @@
 # AgentMux Version History
 
+## 0.60.23 — 2026-11-10
+
+- Update rustls to 0.23.46 (TLS 1.3 key update, buffering, flush and Debug-output fixes)
+- Nightly Linux test leg no longer killed by the runner: swap, line-tables-only debug and the srv test binary built alone, as in PR CI
+- The frontend builds with Vite 8 (Rolldown) instead of Vite 6
+- A jekt held for a stopped or unavailable agent is delivered with the agent's name in its TO= marker, not its uid
+- Agent output renders with mermaid 12 and Shiki 4
+- Agent CLIs AgentMux downloads itself move to goose 1.58.0, Grok 1.0.77 and Muse 1.4.14
+- Update the bundled SQLite and its Rust binding (rusqlite 0.39 to 0.41.1)
+- Update the OS credential store dependency (keyring 2 to keyring-core 1 with per-platform stores); stored credentials are found as before
+- A worker spawned onto a model route no longer inherits its leader's Claude model, so its first turn is not rejected with a 400 on reasoning effort
+- Dragging the window edge is smoother with several agent tabs open in a pane: the tabs you are not looking at wait until the drag settles
+- The My Agents grid no longer forces a layout on every frame while you drag the window edge
+- The network panel puts the LAN state diamond on the LAN discovery line, lines the host list up with the panel's labels, and keeps each host's expander independent (with a test)
+- A routine message from a proven LAN peer is held for a cold session like a local one, and the cold hold's log says why it let each other message through
+- A route agent that is thinking no longer shows as idle in the Swarm while its turn is active
+- Split the editor handlers' register function into named file, scratch and agent-config functions with direct tests, no behaviour change
+- Add a smoke test for the container developer image: tools, pinned Rust, cargo check and task dev on a virtual screen
+- The model panel counts the images in an agent's whole conversation, and switching to a model that cannot read them is refused
+- Provider logos: OpenRouter, xAI, Ollama and Meta get their own marks, and the small vendor badge gets a light ring so Zhipu/Qwen read at 100%
+- A message to an agent of a LAN peer that is down is held for 24 hours and delivered when the peer returns, instead of being dropped by the cloud relay after 30 minutes
+- DeepSeek Harness: an agent restarted on a Node.js older than 24.9.0 is told what to update instead of failing with dsh's own startup error
+- Pane drag: a fast sweep across the window no longer moves the drop ghost until the pointer slows, and a layout changed under a drag restarts the target choice
+- A pane's cover log now names the agent, says what a long cover waits on once a second, and logs why a pane's view went away, so a pane that goes black can be traced
+- A routine message that arrives by the cloud relay is held for a cold session like a local or LAN one
+- Kanban boards: a task with no card follows the default board's agent list, Tasks start and a move refuse an agent the board leaves out, and backlog reminders skip boards the agent can't see
+- The agent turn-errored sound is a softer triangle tone, no longer far louder than the others
+- Pane drag on Windows: the pane's own picture follows the cursor from the first move, inside the window and out, with no translucent ghost at any point; the faint shell drag picture no longer shows over the desktop or other windows, and a long-held drag opens the torn-off window on the picture that was shown
+- A test of the standing-grant audit row no longer depends on how many rows earlier tests left in the audit log
+- A change of an agent's model route or model is kept only after its first turn works; a turn the new place refuses puts the agent back where it was
+- Clicking into another agent pane's input box no longer lags: the window keyboard-focus reclaim does nothing when focus is already on the app
+- A message held for a LAN peer's agent is dropped, not sent, when its 24-hour hold ran out while the replay was looking for the agent
+- Pane drag: behind the layout:livereflow setting, the other panes glide to where the drop leaves them while a pane is dragged, and the dragged pane's tile is hidden (live reflow phase 2, DOM panes)
+- One agent recorded twice in the registry is no longer reported as a slug collision at startup; the record with a live lease answers
+- The pane header scrolls as one range: tabs, the +, the grip and the aux controls together, with the window controls pinned
+- Clicking into another agent pane's input box is as quick as clicking its body: the text-selection drag guard no longer restyles the whole window on every press and release
+- Fix two macOS nightly test failures: an install whose program exits non-zero no longer counts as installed, and the login pty tests no longer lose output to a fast-exiting child
+- A model change refused on its first turn is undone when it moved the agent onto its own sign-in, and only the relaunched pane settles it
+- Fix task dev exit 58 on Windows: resolve a runnable ninja and drop a stale CEF CMake cache
+- The agent pane says when a model change was refused and undone, and a model too small for the conversation can be picked with Compact, then switch
+- A new agent made with Agents spawn or Agents create runs in a container by default when the harness has a container image and Docker answers; the setting agents:defaultruntime set to native turns it off
+- A reopened agent pane keeps its tool rows closed instead of mounting every held preview at once, and a quiet window over 600 MB gets its garbage collected without a reload (#46547)
+- Microsoft Store installs: log each Store update check (state, version, time) and say when a release is published but the Store has not listed it for this PC yet, with an Open Store page button
+- A page's file chooser that is cancelled in a pane an agent drives now shows the person a notice saying why and to use Take over
+- Browser panes keep up with the chrome around them on a shift-resize: the page sends their rects to the host over a CEF process message instead of HTTP, with HTTP kept as the fallback
+- A route agent on a model with a 1M window compacts at 300K tokens instead of near the end of the window, so it stops re-reading a million tokens every turn
+- A widget or palette click on a singleton pane already open in the current tab flashes that pane instead of doing nothing visible
+- Presence status, claims and other calls that find the caller's pane now find it for an agent whose pane was resumed and is missing from the registry
+- A route or Claude agent that repeats the same failing call five times, or repeats the same thought, has its turn ended and is told; a Tasks call without attempt now says which attempt to pass
+- The company name is written AgentMux Corp, with no period, in LEGAL.md, SECURITY.md, the Windows file properties' company name, package metadata and the third-party notices
+- A closing tool shell no longer unsubscribes its agent's running pane from cloud messages, so review and CI notices aren't lost
+- Pane drag with layout:livereflow on: the dragged pane glides into its landing slot so no part of the layout is left empty, and on Windows the pane's picture in hand takes the landing slot's size, cut or padded, never stretched
+- The restart splash shows one Window paint row when the page can't load, and says why, instead of adding a row per retry
+- A pane that goes blank under the logo now logs whether the Suspense fallback or the transcript's show-cover was up, and for how long (#43938)
+- The New agent screens (the picker, the create form, the harness cards, the in-app login panel and the free sign-up guide) read their text from the language dictionary
+- The build's Shiki theme-trimming plugin matches Shiki 4's bundle-web.mjs, so main's vitest is green again
+- A LAN agent name is pinned automatically only when a trusted install's certificate vouches for its key; a first key nobody vouched for stays unproven until it is accepted on the pin screen
+
 ## 0.60.22 — 2026-11-09
 
 - An agent with the Enter and Space power on a granted site can press Enter and Space in a browser pane, taken as the click they are: a form's default button, a button, a link or a checkbox, checked like any click

@@ -929,6 +929,10 @@ pub const COMMAND_NATIVE_MEMORY_ADOPTION_LIST: &str = "agent:memory:adoption_lis
 /// SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.2 (phase M3c): the
 /// folders an agent has claimed, for the human "release this folder" action.
 pub const COMMAND_NATIVE_MEMORY_CLAIMS: &str = "agent:memory:claims";
+/// What the person confirmed in the Memory pane: adopt the chosen folders of an
+/// adoption list, or release a claimed folder. From the AgentMux window only.
+pub const COMMAND_NATIVE_MEMORY_ADOPT: &str = "agent:memory:adopt";
+pub const COMMAND_NATIVE_MEMORY_RELEASE: &str = "agent:memory:release";
 
 // ---- Client type constants ----
 

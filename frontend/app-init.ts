@@ -698,8 +698,8 @@ async function initAppInner() {
                 // (irrelevant — app.tsx replaces this window's content
                 // entirely for credential-approval).
                 let coldMeta: Record<string, unknown> | undefined;
-                // The memory-adoption approval window is the same kind.
-                const approvalViews = ["credential-approval", "memory-adoption-approval", "ssh-approval"];
+                // The SSH approval window is the same kind.
+                const approvalViews = ["credential-approval", "ssh-approval"];
                 const seedView =
                     coldInitialView && !approvalViews.includes(coldInitialView) ? coldInitialView : undefined;
                 if (seedView) {
@@ -1168,7 +1168,7 @@ async function initMux(initOpts: AgentMuxInitOpts) {
     // An agent's request to drive a native app opens a prompt here.
     void import("@/app/block/desktop-requests").then((m) => m.startDesktopRequests());
     void import("@/app/view/agent/endpoint-notice-cards").then((m) => m.startEndpointNoticeCards());
-    void import("@/app/block/agent-notices").then((m) => m.startAgentNotices());
+    void Promise.all([import("@/app/block/agent-notices"), import("@/app/block/pane-confirms")]).then(([n, c]) => (n.startAgentNotices(), c.startPaneConfirms()));
     // An agent's Vault requests are cards in its pane, and the Vault pane lists them all.
     void import("@/app/view/agent/components/vault-request-card/vault-request-cards").then((m) => m.startVaultRequestCards());
     // srv's calls to action (browser, SSH consent, widget installs) join the waiting tone and notification.

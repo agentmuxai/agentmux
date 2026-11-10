@@ -449,7 +449,7 @@ async fn call_credential_service(
 
 /// POST `{"service": service, "method": ..., "args": [args0, secret]}` to
 /// srv's `/agentmux/service` — for srv services gated on the host secret
-/// (`credential`, `memoryadopt`). See [`call_credential_service`] for why
+/// (`credential`). See [`call_credential_service`] for why
 /// the secret, not `X-AuthKey`, is what proves the caller is the host.
 pub(crate) async fn call_host_only_service(
     state: &Arc<AppState>,

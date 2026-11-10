@@ -1112,6 +1112,7 @@ fn register_service_handlers(engine: &Arc<WshRpcEngine>, state: &AppState, conn_
 
     // Native memory file browser (agent:memory:list / read_file / write_file)
     super::native_memory_handlers::register_native_memory_handlers(engine, &state);
+    super::native_memory_adopt_handlers::register(engine, &state);
 
     // Memory delivery: the hidden reinjection's claim against the
     // SessionStart hook (memorydelivery:claim_fallback).

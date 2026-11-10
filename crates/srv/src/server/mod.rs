@@ -106,6 +106,7 @@ mod work_facts_handlers;
 mod message_stats_handler;
 pub(crate) mod memory_launch_cost;
 pub(crate) mod native_memory_diff;
+mod native_memory_adopt_handlers;
 pub(crate) mod native_memory_handlers;
 pub(crate) mod native_memory_versions;
 pub(crate) mod memory_delivery_handlers;

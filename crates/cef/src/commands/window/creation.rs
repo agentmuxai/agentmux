@@ -357,8 +357,6 @@ pub fn open_new_window(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
 
 /// `initial_view` of the credential-approval page (`credential_broker`).
 pub const CREDENTIAL_APPROVAL_VIEW: &str = "credential-approval";
-/// `initial_view` of the memory-adoption approval page (`memory_adoption`).
-pub const MEMORY_ADOPTION_APPROVAL_VIEW: &str = "memory-adoption-approval";
 /// `initial_view` of the SSH approval page (`ssh_approval`).
 pub const SSH_APPROVAL_VIEW: &str = "ssh-approval";
 
@@ -368,7 +366,7 @@ pub const SSH_APPROVAL_VIEW: &str = "ssh-approval";
 /// IPC accepts any view string, and a future pane-hosting view opened that
 /// way must not silently become unreachable to the browser API (Opaz, #3843).
 pub fn is_approval_view(view: Option<&str>) -> bool {
-    matches!(view, Some(CREDENTIAL_APPROVAL_VIEW | MEMORY_ADOPTION_APPROVAL_VIEW | SSH_APPROVAL_VIEW))
+    matches!(view, Some(CREDENTIAL_APPROVAL_VIEW | SSH_APPROVAL_VIEW))
 }
 
 /// Open a sub-window tied to `parent_instance_id`. **Not exposed to users** —
@@ -420,7 +418,7 @@ pub fn open_subwindow(
         None,
         false,
     )?;
-    // An approval page (credential / memory-adoption) renders only that
+    // An approval page (credential / SSH) renders only that
     // view. Record it so the browser API never resolves a pane into it
     // (#3681 review) — by label, because neither WindowKind::Subwindow
     // (floaters carry it too) nor the page's DOM is a structural guarantee.
@@ -1213,12 +1211,11 @@ mod new_window_origin_tests {
 
 #[cfg(test)]
 mod approval_view_tests {
-    use super::{is_approval_view, CREDENTIAL_APPROVAL_VIEW, MEMORY_ADOPTION_APPROVAL_VIEW, SSH_APPROVAL_VIEW};
+    use super::{is_approval_view, CREDENTIAL_APPROVAL_VIEW, SSH_APPROVAL_VIEW};
 
     #[test]
     fn the_approval_pages_are_approval_views() {
         assert!(is_approval_view(Some(CREDENTIAL_APPROVAL_VIEW)));
-        assert!(is_approval_view(Some(MEMORY_ADOPTION_APPROVAL_VIEW)));
         assert!(is_approval_view(Some(SSH_APPROVAL_VIEW)));
     }
 
