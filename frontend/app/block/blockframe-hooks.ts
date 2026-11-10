@@ -212,30 +212,37 @@ export function useHeaderScrollRange(header: () => HTMLElement | undefined): {
     onMount(() => {
         let frame = 0;
         let shown: HTMLElement | null = null;
-        const revealIfSelectionChanged = () => {
+        const activePill = (): HTMLElement | null =>
             // The active tab wins over a multi-selected one that happens to come first in the DOM.
-            const active =
-                range?.querySelector<HTMLElement>(".pane-tab--active") ??
-                range?.querySelector<HTMLElement>(".pane-tab--selected");
-            if (!active || active === shown) return;
+            (range?.querySelector<HTMLElement>(".pane-tab--active") ?? range?.querySelector<HTMLElement>(".pane-tab--selected")) || null;
+        const reveal = () => {
+            const active = activePill();
+            if (!active) return;
             shown = active;
             active.scrollIntoView({ block: "nearest", inline: "nearest" });
         };
-        const schedule = () => {
+        const revealIfSelectionChanged = () => {
+            if (activePill() && activePill() !== shown) reveal();
+        };
+        const schedule = (fn: () => void) => {
             if (frame) return;
             frame = requestAnimationFrame(() => {
                 frame = 0;
-                revealIfSelectionChanged();
+                fn();
             });
         };
-        const observer = new MutationObserver(schedule);
+        const observer = new MutationObserver(() => schedule(revealIfSelectionChanged));
+        // A narrowed pane hides its active tab where main's strip scrolled it into view.
+        const resize = new ResizeObserver(() => schedule(reveal));
         if (range) {
             observer.observe(range, { subtree: true, childList: true, attributes: true, attributeFilter: ["class"] });
+            resize.observe(range);
             // A header that mounts with its selected tab already past the edge gets no mutation to wake it.
-            schedule();
+            schedule(reveal);
         }
         onCleanup(() => {
             observer.disconnect();
+            resize.disconnect();
             if (frame) cancelAnimationFrame(frame);
         });
     });

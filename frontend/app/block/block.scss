@@ -475,7 +475,9 @@
 
 .block-frame-header-content {
     display: flex;
-    flex: 0 0 auto;
+    // Grows to the range's width so the spacer below can take the free room; never shrinks,
+    // so the range scrolls instead of compressing the tabs.
+    flex: 1 0 auto;
     align-items: center;
     gap: var(--space-2);
 }

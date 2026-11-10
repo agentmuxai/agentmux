@@ -374,7 +374,7 @@ function AuxEndIcons(props: { viewModel: ViewModel; nodeModel: NodeModel }): JSX
         <Show when={!closing() && (buttons()?.length ?? 0) > 0}>
             {/* In the range now, so it no longer inherits .block-frame-end-icons' double-click
                 isolation: a double click on one of these must not magnify the pane. */}
-            <div style={{ display: "contents" }} onDblClick={(e) => e.stopPropagation()}>
+            <div class="block-frame-header-aux" style={{ display: "contents" }} onDblClick={(e) => e.stopPropagation()}>
                 <For each={buttons()}>{(button) => <DeclIconButton decl={button} className="block-frame-end-extra" />}</For>
                 <div class="block-frame-btn-separator block-frame-end-extra" aria-hidden="true" />
             </div>
