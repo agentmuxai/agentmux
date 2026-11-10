@@ -433,6 +433,7 @@ partial list.
 | [`SPEC_PANE_ENV_ISOLATION_2026_09_17`](SPEC_PANE_ENV_ISOLATION_2026_09_17.md) | SPEC: an instance's identity must not be inheritable by its panes |
 | [`SPEC_PANE_FILE_DROP_2026_05_30`](SPEC_PANE_FILE_DROP_2026_05_30.md) | SPEC: Drag-and-drop files into Terminal and Agent panes |
 | [`SPEC_PANE_HEADER_HEIGHT_TAB_INDICATOR_2026_04_19`](SPEC_PANE_HEADER_HEIGHT_TAB_INDICATOR_2026_04_19.md) | SPEC: Pane Header Height + Tab Active Indicator Edge-to-Edge |
+| [`SPEC_PANE_HEADER_SCROLL_RANGE_2026_11_10`](SPEC_PANE_HEADER_SCROLL_RANGE_2026_11_10.md) | SPEC: The pane header's horizontal scroll covers tabs, +, grip and aux controls (minimize stays pinned) |
 | [`SPEC_PANE_HEADER_TAIL_COLOR_2026_09_21`](SPEC_PANE_HEADER_TAIL_COLOR_2026_09_21.md) | SPEC: the pane header's tail color follows the pane, not the active tab |
 | [`SPEC_PANE_HEADER_TEXT_HOVER_TOOLTIP_2026_09_21`](SPEC_PANE_HEADER_TEXT_HOVER_TOOLTIP_2026_09_21.md) | SPEC: pane header informational text becomes a hover tooltip |
 | [`SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26`](SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md) | SPEC: Pane resize dimension overlay (WxH badge) |

@@ -433,7 +433,7 @@ impl Store {
     }
 
     /// The tasks waiting for this agent (open, targeted at it by UID or by
-    /// name, claimable now), in the order it will take them: the claim's
+    /// name, claimable now, on a board it sees), in the order it will take them: the claim's
     /// order (§6.5).
     pub fn work_board_waiting_for(&self, agent_id: &str, uid: &str, limit: usize, now_ms: i64) -> Result<Vec<BoardTask>, StoreError> {
         let conn = self.conn().lock().unwrap();
@@ -444,10 +444,12 @@ impl Store {
                 AND NOT {WAITS_ON_UNFINISHED}
                 AND ((q.target_agent_uid <> '' AND q.target_agent_uid = ?2)
                      OR (q.target_agent_uid = '' AND q.target_agent <> '' AND q.target_agent = ?1))
+                AND {visible}
               ORDER BY q.priority DESC, COALESCE(c.rank, q.created_at) ASC
               LIMIT ?3",
             q = q_cols(),
             open = work_state::OPEN,
+            visible = super::work_boards::card_visible_to_agent("?1", "?2"),
         );
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(params![agent_id, uid, limit as i64, now_ms], |r| {
