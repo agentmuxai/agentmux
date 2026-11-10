@@ -9,10 +9,12 @@ import {
     formatElapsedClock,
     formatElapsedCompact,
     formatExactTime,
+    formatExactTimeWithDate,
+    formatPeekTime,
     formatRelativeTime,
-    formatTimeOrDate,
     formatTimeAgo,
     formatTimeLeft,
+    formatTimeOrDate,
     formatUtcTimestamp,
 } from "./format-time";
 
@@ -222,5 +224,30 @@ describe("formatTimeOrDate", () => {
     it("uses the locale's order and not a fixed one", () => {
         expect(formatTimeOrDate(at().getTime(), new Date(2026, 9, 4), "en-GB")).toBe("3 Oct");
         expect(formatTimeOrDate(at().getTime(), new Date(2026, 9, 4), "de")).toBe("3. Okt.");
+    });
+});
+
+describe("the hover peek's time line", () => {
+    const at = (y: number, mo: number, d: number, h: number, mi = 0, sec = 0) => new Date(y, mo - 1, d, h, mi, sec).getTime();
+    // Built inside each test: another test in this file changes TZ, and a date made before it is in the old zone.
+    const nowMs = () => at(2026, 11, 10, 18, 0, 0);
+
+    it("is the time of day alone for a time today", () => {
+        expect(formatExactTimeWithDate(at(2026, 11, 10, 15, 46, 12), nowMs())).toBe("3:46:12 PM");
+    });
+
+    it("names the day for an earlier day, and the year for an earlier year", () => {
+        expect(formatExactTimeWithDate(at(2026, 11, 8, 15, 46, 12), nowMs())).toBe("Nov 8, 3:46:12 PM");
+        expect(formatExactTimeWithDate(at(2025, 12, 31, 23, 59, 59), nowMs())).toBe("Dec 31, 2025, 11:59:59 PM");
+        expect(formatExactTimeWithDate(at(2026, 11, 9, 23, 59, 59), at(2026, 11, 10, 0, 0, 5))).toBe("Nov 9, 11:59:59 PM");
+    });
+
+    it("reads 3h ago for three hours back and 2d ago, dated, for two days back", () => {
+        expect(formatPeekTime(nowMs() - 3 * 3_600_000, nowMs())).toBe(`3:00:00 PM · 3h ago`);
+        expect(formatPeekTime(at(2026, 11, 8, 18, 0, 0), nowMs())).toBe("Nov 8, 6:00:00 PM · 2d ago");
+    });
+
+    it("reads just now for a time a few seconds ago", () => {
+        expect(formatPeekTime(nowMs() - 5_000, nowMs())).toBe("5:59:55 PM · just now");
     });
 });

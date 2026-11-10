@@ -20,7 +20,7 @@ import clsx from "clsx";
 import { Show, createMemo, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
 import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
-import { formatExactTime, formatTimeAgo } from "@/util/format-time";
+import { formatPeekTime } from "@/util/format-time";
 import { useNodePeek } from "../hooks/useNodePeek";
 import { PeekOverlay } from "./PeekOverlay";
 import { PeekMetaRow } from "./PeekMetaRow";
@@ -52,7 +52,7 @@ export const CollapsibleMessage = (props: CollapsibleMessageProps): JSX.Element 
     const peekTimeText = createMemo(() => {
         if (!peekPanelVisible()) return null;
         peekTick();
-        return `${formatExactTime(props.timestamp)} · ${formatTimeAgo(props.timestamp)}`;
+        return formatPeekTime(props.timestamp);
     });
     const peekEstimateText = createMemo(() => {
         const count = estimateTokenCount(props.peekText);
