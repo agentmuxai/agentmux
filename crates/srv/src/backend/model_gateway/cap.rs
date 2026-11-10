@@ -22,6 +22,8 @@ pub const AGENT_CAP_TYPE: &str = "agent:spend_cap_usd";
 pub const ROUTE_CAP_SETTING: &str = "model:spend_cap_usd:";
 pub const DEFAULT_AGENT_CAP_USD: f64 = 20.0;
 pub const DEFAULT_ROUTE_CAP_USD: f64 = 100.0;
+/// The least a cap may be set to: a smaller one is not a cap anyone meant.
+pub const MIN_CAP_USD: f64 = 0.01;
 
 /// What a cap was reached for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,7 +65,7 @@ pub fn agent_cap(mstore: &Store, def_id: &str) -> Option<f64> {
 
 /// Sets the agent's cap: `Some(dollars)`, or `None` for no cap.
 pub fn set_agent_cap(mstore: &Store, def_id: &str, cap: Option<f64>) -> Result<(), String> {
-    let content = cap.map_or_else(|| "none".to_string(), |c| format!("{c:.2}"));
+    let content = cap.map_or_else(|| "none".to_string(), |c| c.to_string());
     mstore
         .agent_content_set(&AgentContent {
             agent_id: def_id.to_string(),
@@ -76,7 +78,11 @@ pub fn set_agent_cap(mstore: &Store, def_id: &str, cap: Option<f64>) -> Result<(
 
 /// What `Agents update spend_cap_usd` takes: a positive number of dollars, `0` or `"none"` for no cap.
 pub fn parse_request(value: &serde_json::Value) -> Result<Option<f64>, String> {
-    parse(value).ok_or_else(|| "spend_cap_usd is a positive number of dollars a day, or 0 / \"none\" for no cap".to_string())
+    let cap = parse(value).ok_or_else(|| "spend_cap_usd is a positive number of dollars a day, or 0 / \"none\" for no cap".to_string())?;
+    match cap {
+        Some(c) if c < MIN_CAP_USD => Err(format!("spend_cap_usd is at least ${MIN_CAP_USD:.2}; 0 or \"none\" removes the cap")),
+        other => Ok(other),
+    }
 }
 
 /// The route's cap in dollars a day, or `None` when it has none.
@@ -155,6 +161,8 @@ mod tests {
         assert_eq!(parse_request(&json!(0)), Ok(None));
         assert_eq!(parse_request(&json!("none")), Ok(None));
         assert!(parse_request(&json!(-1)).is_err());
+        assert!(parse_request(&json!(0.004)).is_err(), "a cap under a cent would read back as none");
+        assert_eq!(parse_request(&json!(0.01)), Ok(Some(0.01)));
         assert!(parse_request(&json!("lots")).is_err());
         assert!(parse_request(&json!(true)).is_err());
     }
@@ -170,6 +178,8 @@ mod tests {
         assert_eq!(agent_cap(&store, "cap-def"), Some(DEFAULT_AGENT_CAP_USD));
         set_agent_cap(&store, "cap-def", Some(40.0)).unwrap();
         assert_eq!(agent_cap(&store, "cap-def"), Some(40.0));
+        set_agent_cap(&store, "cap-def", Some(0.013)).unwrap();
+        assert_eq!(agent_cap(&store, "cap-def"), Some(0.013), "kept as given, not rounded to a cent");
         set_agent_cap(&store, "cap-def", None).unwrap();
         assert_eq!(agent_cap(&store, "cap-def"), None);
     }

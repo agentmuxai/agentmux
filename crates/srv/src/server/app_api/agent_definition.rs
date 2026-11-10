@@ -139,14 +139,21 @@ fn restart_on_new_model(state: &AppState, agent: &AgentDefinition) {
     }
 }
 
-/// `spend_cap_usd` and `reset_spend_today` of `Agents update`. The leader of an agent sets and resets its cap; an agent
-/// may only lower its own, and not reset it, since a cap it could lift or clear would stop nothing. Returns what was
-/// done, for the audit row.
-fn spend_change(state: &AppState, actor_uid: &str, target_uid: &str, req: &UpdateRequest) -> Result<Vec<String>, Refusal> {
+/// What `spend_cap_usd` and `reset_spend_today` of `Agents update` ask for, once allowed.
+struct SpendPlan {
+    /// The new cap (`Some(None)`: no cap); absent when the request leaves it.
+    cap: Option<Option<f64>>,
+    reset: bool,
+}
+
+/// Checks `spend_cap_usd` and `reset_spend_today` before anything else in the request changes. The leader of an agent
+/// sets and resets its cap; an agent may only lower its own, and not reset it, since a cap it could lift or clear would
+/// stop nothing.
+fn spend_plan(state: &AppState, actor_uid: &str, target_uid: &str, req: &UpdateRequest) -> Result<SpendPlan, Refusal> {
     use crate::backend::model_gateway::cap;
     let own = actor_uid == target_uid;
     let led = crate::backend::agent_seat::effective_seat_by_id(&state.mstore, target_uid).and_then(|s| s.lead).is_some_and(|lead| lead == actor_uid);
-    let mut done = Vec::new();
+    let mut plan = SpendPlan { cap: None, reset: false };
     if let Some(value) = req.spend_cap_usd.as_ref().filter(|v| !v.is_null()) {
         let to = cap::parse_request(value).map_err(bad)?;
         let from = cap::agent_cap(&state.mstore, target_uid);
@@ -157,15 +164,28 @@ fn spend_change(state: &AppState, actor_uid: &str, target_uid: &str, req: &Updat
         } else if !led {
             return Err(refuse(StatusCode::FORBIDDEN, "only an agent's leader sets its spend cap (Agents set_seat names the lead); you can lower your own"));
         }
-        let change = crate::server::spend_watch::change_cap(state, target_uid, to).map_err(|e| refuse(StatusCode::INTERNAL_SERVER_ERROR, format!("Agents update: {e}")))?;
-        let show = |c: Option<f64>| c.map_or("none".to_string(), |c| format!("${c:.2}"));
-        done.push(format!("spend cap {} to {}", show(change.from), show(change.to)));
+        plan.cap = Some(to);
     }
     if req.reset_spend_today == Some(true) {
         if !led {
             return Err(refuse(StatusCode::FORBIDDEN, "only an agent's leader resets the spend counted for today"));
         }
-        let removed = crate::server::spend_watch::reset_today(state, target_uid).map_err(|e| refuse(StatusCode::INTERNAL_SERVER_ERROR, format!("Agents update: {e}")))?;
+        plan.reset = true;
+    }
+    Ok(plan)
+}
+
+/// Does what [`spend_plan`] allowed. Returns what was done, for the audit row.
+fn spend_apply(state: &AppState, target_uid: &str, plan: &SpendPlan) -> Result<Vec<String>, Refusal> {
+    let internal = |e: String| refuse(StatusCode::INTERNAL_SERVER_ERROR, format!("Agents update: {e}"));
+    let mut done = Vec::new();
+    if let Some(to) = plan.cap {
+        let change = crate::server::spend_watch::change_cap(state, target_uid, to).map_err(internal)?;
+        let show = |c: Option<f64>| c.map_or("none".to_string(), |c| format!("${c:.2}"));
+        done.push(format!("spend cap {} to {}", show(change.from), show(change.to)));
+    }
+    if plan.reset {
+        let removed = crate::server::spend_watch::reset_today(state, target_uid).map_err(internal)?;
         done.push(format!("reset today's spend (${removed:.2} counted)"));
     }
     Ok(done)
@@ -175,6 +195,8 @@ fn spend_change(state: &AppState, actor_uid: &str, target_uid: &str, req: &Updat
 /// the audit row says beyond them.
 fn update(state: &AppState, actor_uid: &str, req: &UpdateRequest) -> Result<(String, Vec<&'static str>, Vec<String>), Refusal> {
     let target = target_of(state, &req.agent)?;
+    // Before anything is applied: a refused spend change must not leave a model change behind it.
+    let plan = spend_plan(state, actor_uid, &target.agent_id, req)?;
     let internal = |e: crate::backend::storage::error::StoreError| refuse(StatusCode::INTERNAL_SERVER_ERROR, format!("Agents update: {e}"));
     let mut agent = state
         .mstore
@@ -211,11 +233,7 @@ fn update(state: &AppState, actor_uid: &str, req: &UpdateRequest) -> Result<(Str
     if req.route.is_some() || req.model.is_some() {
         changed.extend(route_change(state, &agent, req)?);
     }
-    let spend_done = if req.spend_cap_usd.as_ref().is_some_and(|v| !v.is_null()) || req.reset_spend_today == Some(true) {
-        spend_change(state, actor_uid, &target.agent_id, req)?
-    } else {
-        Vec::new()
-    };
+    let spend_done = spend_apply(state, &target.agent_id, &plan)?;
     if changed.is_empty() && spend_done.is_empty() {
         return Err(bad("nothing to change; give at least one of description, icon, auto_start, restart_on_crash, idle_timeout_minutes, route, model, spend_cap_usd, reset_spend_today (name: rename; environment: env_set)"));
     }

@@ -259,9 +259,19 @@ pub fn alerted(agent: &str, now_ms: i64) -> u8 {
 /// back down to where the day now stands.
 pub fn set_alerted(agent: &str, level: u8, now_ms: i64) {
     let d = day(now_ms);
-    for (key, one) in table().lock().unwrap().iter_mut().filter(|((a, _, day), _)| a == agent && *day == d) {
+    let mut table = table().lock().unwrap();
+    let mut any = false;
+    for (key, one) in table.iter_mut().filter(|((a, _, day), _)| a == agent && *day == d) {
         one.alerted = level;
         queue(Write::Save(row_of(key, one)));
+        any = true;
+    }
+    // An agent refused by its route's cap has spent nothing of its own today: its level lives on a row with no route.
+    if !any && level > 0 {
+        let key = (agent.to_string(), String::new(), d);
+        let one = Day { alerted: level, ..Default::default() };
+        queue(Write::Save(row_of(&key, &one)));
+        table.insert(key, one);
     }
 }
 
@@ -363,6 +373,9 @@ mod tests {
         assert_eq!(alerted("spend-sum-a", now), 0);
         set_alerted("spend-sum-a", 50, now);
         assert_eq!(alerted("spend-sum-a", now), 50);
+        set_alerted("spend-sum-none", 100, now);
+        assert_eq!(alerted("spend-sum-none", now), 100, "kept for an agent with no spend of its own");
+        assert_eq!(today("spend-sum-none", now), Spend::default());
 
         // What was saved is what a restart reads back: the rows the table would write, loaded into a store.
         let store = Store::open(std::path::Path::new(":memory:")).unwrap();

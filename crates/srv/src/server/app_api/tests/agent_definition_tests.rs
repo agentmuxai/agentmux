@@ -230,3 +230,15 @@ async fn a_leader_sets_and_resets_a_workers_spend_cap_and_a_worker_may_only_lowe
     let (status, _) = update_call(&state, Some(&leader), json!({ "agent": worker.slug, "spend_cap_usd": "lots" })).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn a_refused_spend_change_leaves_the_rest_of_the_request_unapplied() {
+    let state = test_state();
+    let (stranger, target) = (agent(&state, "Stranger"), agent(&state, "Target"));
+    let (status, _) = update_call(&state, Some(&stranger), json!({ "agent": target.slug, "description": "changed", "spend_cap_usd": 5 })).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let after = state.mstore.agent_def_get(&target.id).unwrap().unwrap();
+    assert_eq!(after.description, target.description, "the description was not applied");
+    let (status, _) = update_call(&state, Some(&stranger), json!({ "agent": stranger.slug, "spend_cap_usd": 0.004 })).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "a cap under a cent is refused, not read back as none");
+}
