@@ -6,6 +6,7 @@
 import { createEffect, onCleanup, onMount, type Accessor } from "solid-js";
 import { openMenuAt } from "@/app/element/ui";
 import { useWidthFit } from "@/app/element/width-fit";
+import { createScrollEdges } from "@/app/element/scroll-edges";
 import { getBlockComponentModel } from "@/app/store/block-component-registry";
 import { chromeZoomAtom } from "@/app/store/chrome-zoom";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -177,4 +178,37 @@ export function useBodyContextMenu(opts: {
         });
     });
     return onBodyContextMenu;
+}
+
+/** The header's one horizontal scroll range (#29325): its element, its edge fades, and the wheel
+ *  that scrolls it sideways over the whole header row. A horizontal gesture is the range's own
+ *  (its overflow is native); a vertical one over the row must not scroll the page under it.
+ *  Called once, in the header's own component. */
+export function useHeaderScrollRange(header: () => HTMLElement | undefined): {
+    setRange: (el: HTMLDivElement) => void;
+    fades: Record<string, boolean>;
+    moreLeft: Accessor<boolean>;
+    moreRight: Accessor<boolean>;
+} {
+    let range: HTMLDivElement | undefined;
+    const edges = createScrollEdges(() => range);
+    onMount(() => {
+        const el = header();
+        if (!el) return;
+        // A real listener, not Solid's onWheel: the delegated one is passive, so preventDefault() would be a no-op.
+        const onWheel = (e: WheelEvent) => {
+            if (!range || range.scrollWidth <= range.clientWidth) return;
+            if (Math.abs(e.deltaX) >= Math.abs(e.deltaY)) return;
+            e.preventDefault();
+            range.scrollLeft += e.deltaY;
+        };
+        el.addEventListener("wheel", onWheel, { passive: false });
+        onCleanup(() => el.removeEventListener("wheel", onWheel));
+    });
+    return {
+        setRange: (el) => (range = el),
+        fades: { "has-more-left": edges.moreLeft(), "has-more-right": edges.moreRight() },
+        moreLeft: edges.moreLeft,
+        moreRight: edges.moreRight,
+    };
 }
