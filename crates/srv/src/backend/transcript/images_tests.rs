@@ -40,3 +40,23 @@ fn the_transcript_is_counted_whole_and_then_only_from_where_the_last_count_stopp
     gfs.append_data(zone, FILE, &user_line(json!(LIST))).unwrap();
     assert_eq!(count_in_zone(&gfs, zone).unwrap(), 6, "the new line is added to the old count");
 }
+
+#[test]
+fn a_transcript_made_again_after_an_archive_is_counted_from_its_top() {
+    let gfs = FileStore::open_in_memory().unwrap();
+    let zone = "agent:count-images-archived:current";
+    gfs.make_file(zone, FILE, FileMeta::new(), FileOpts::default()).unwrap();
+    gfs.append_data(zone, FILE, &user_line(json!(LIST))).unwrap();
+    assert_eq!(count_in_zone(&gfs, zone).unwrap(), 3);
+    // The archive deletes the file; the next conversation makes it again, and grows it past where the count stopped.
+    gfs.delete_file(zone, FILE).unwrap();
+    assert_eq!(count_in_zone(&gfs, zone).unwrap(), 0, "no transcript");
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    gfs.make_file(zone, FILE, FileMeta::new(), FileOpts::default()).unwrap();
+    for _ in 0..3 {
+        gfs.append_data(zone, FILE, &user_line(json!("a longer message without any attachment, to pass the old position"))).unwrap();
+    }
+    assert_eq!(count_in_zone(&gfs, zone).unwrap(), 0, "nothing of the old conversation");
+    gfs.append_data(zone, FILE, &user_line(json!(LIST))).unwrap();
+    assert_eq!(count_in_zone(&gfs, zone).unwrap(), 3);
+}

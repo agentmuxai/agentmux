@@ -22,8 +22,11 @@ const CHUNK: i64 = 4 * 1024 * 1024;
 const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff"];
 
 /// What was counted in a zone, and where the count stopped: a transcript only grows, so the next count reads on from there.
+/// `created` is when the file was made: an archive deletes the file and a new conversation makes it again, and its count
+/// starts at the top.
 #[derive(Clone, Copy, Default)]
 struct Counted {
+    created: i64,
     pos: i64,
     images: u32,
 }
@@ -35,11 +38,14 @@ fn cache() -> &'static Mutex<HashMap<String, Counted>> {
 
 /// The images in the user messages of `zone`'s transcript; 0 when there is none.
 pub fn count_in_zone(gfs: &FileStore, zone: &str) -> Result<u32, String> {
-    let Some(stat) = gfs.stat(zone, FILE).map_err(|e| format!("stat transcript: {e}"))? else { return Ok(0) };
+    let Some(stat) = gfs.stat(zone, FILE).map_err(|e| format!("stat transcript: {e}"))? else {
+        cache().lock().unwrap_or_else(|e| e.into_inner()).remove(zone);
+        return Ok(0);
+    };
     let mut done = cache().lock().unwrap_or_else(|e| e.into_inner()).get(zone).copied().unwrap_or_default();
-    // Shorter than where the last count stopped: the file was trimmed or replaced. Count it again from the start.
-    if stat.size < done.pos {
-        done = Counted::default();
+    // Made again since the last count, or shorter than where it stopped (trimmed): count it again from the start.
+    if stat.createdts != done.created || stat.size < done.pos {
+        done = Counted { created: stat.createdts, ..Counted::default() };
     }
     let mut window = CHUNK;
     while done.pos < stat.size {
