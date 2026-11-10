@@ -110,13 +110,45 @@ pub(crate) fn decide(
     Ok(Placement::Container(ContainerPlan { image, memory_mb, cpus }))
 }
 
+/// The per-user setting for where a new agent runs when the call does not say: `container` (the default) or
+/// `native`. Spec: docs/specs/SPEC_AGENT_MODEL_ROUTES_ANY_MODEL_SPAWN_AND_SWITCH_2026_11_06.md section 10.
+pub const SETTING_DEFAULT_RUNTIME: &str = "agents:defaultruntime";
+
+/// Whether the setting leaves a new agent in a container: everything but `native` (or `host`) does.
+pub(crate) fn default_is_container(extra: &std::collections::HashMap<String, serde_json::Value>) -> bool {
+    match extra.get(SETTING_DEFAULT_RUNTIME).and_then(serde_json::Value::as_str).map(|s| s.trim().to_ascii_lowercase()) {
+        Some(s) => !matches!(s.as_str(), "native" | "host"),
+        None => true,
+    }
+}
+
+/// Whether the harness has a container image. The same list as `containerSupported` in the frontend's
+/// `defaults/cli-catalog.ts`: only Claude Code has an image built, so every other harness stays native.
+pub(crate) fn has_container_image(provider: &str) -> bool {
+    provider == "claude"
+}
+
 /// [`decide`] for a caller `caller` and a source defined by `source`, asking this machine whether Docker is there.
+/// `provider` is the harness the new agent runs. A call that says nothing about where gets the setting's default:
+/// a container, when the harness has an image and Docker answers, and otherwise as its source runs (never refused,
+/// since nobody asked for a container). A caller or a source that already runs in a container keeps what it did.
 pub(crate) async fn decide_here(
     state: &AppState,
     ask: &ContainerAsk,
     caller: &AgentDefinition,
     source: &AgentDefinition,
+    provider: &str,
 ) -> Result<Placement, SpawnError> {
+    if ask.is_empty()
+        && !caller.runtime().is_container()
+        && !source.runtime().is_container()
+        && has_container_image(provider)
+        && default_is_container(&state.config_watcher.get_full_config().settings.extra)
+        && state.container_manager.get_or_explain().await.is_ok()
+    {
+        let by_default = ContainerAsk { runtime: Some("container".to_string()), ..ContainerAsk::default() };
+        return decide(&by_default, false, false, &source.container_image, Ok(()));
+    }
     // Only a request for a container needs the answer; a plain one never starts a Docker lookup.
     let wants_container = ask.runtime.as_deref().map(str::trim) == Some("container") || (ask.runtime.is_none() && source.runtime().is_container());
     let docker = if wants_container && !ask.is_empty() {
