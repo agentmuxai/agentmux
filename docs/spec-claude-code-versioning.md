@@ -78,7 +78,6 @@ its visibility in the GitHub UI (there is no API for it).
 | `2.1.288` | 2026-10-03 | Bump from the 2026-10-03 drift report (verified via `npm view @anthropic-ai/claude-code version`). Installed 2.1.287 and 2.1.288 side by side and diffed `--help` and `auth --help`: no flag added or removed; the only change is a new `purge` subcommand, which AgentMux doesn't use. Engines unchanged (`node >=22.0.0`). |
 | `2.1.321` | 2026-11-09 | Bump from the 2026-11-09 drift report (verified via `npm view @anthropic-ai/claude-code version` = 2.1.321). Read the release notes for 2.1.289 through 2.1.321: no flag AgentMux passes and no `--output-format stream-json`, `--resume` or MCP frame shape changed; the changes nearest our use are exit codes on failures (a `claude -p` run that loses its transcript or `~/.claude.json` now exits 1 instead of 0), which surface a failed turn instead of a silently wrong one. Relabeled the `haiku` alias from "Haiku 4.5" to "Haiku 5.5": the alias resolves to `claude-haiku-5-5`, which the `@anthropic-ai/claude-code-win32-x64@2.1.321` binary contains (alongside `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-4-5`, `claude-fable-5-1` and `claude-fable-5-2`). The ambient helper (titles, activity, continuity) now asks for the concrete `claude-haiku-5-5` instead of `claude-haiku-4-5-20251001`, and the curated `fable` row moved to `claude-fable-5-2`, released in 2.1.321 as the default Fable model. |
 
-
 ## Escape hatch
 
 To build with a one-off version without changing the pins, trigger the

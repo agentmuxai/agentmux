@@ -12,8 +12,8 @@ trigger "Bypass · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-densi
   [model]
   - Opus 5.5 / Highest quality {}
   - Sonnet 5.5 / Balanced speed and quality {current}
-  - Haiku 4.5 / Fastest {}
-  - Fable 5.1 / Long-horizon work {}
+  - Haiku 5.5 / Fastest {}
+  - Fable 5.2 / Long-horizon work {}
   note (placeholder): Running model: shown after the first reply
   [effort]
   - low {}
@@ -36,8 +36,8 @@ trigger "Bypass · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-densi
   [model]
   - Opus 5.5 / Highest quality {}
   - Sonnet 5.5 / Balanced speed and quality {current}
-  - Haiku 4.5 / Fastest {}
-  - Fable 5.1 / Long-horizon work {}
+  - Haiku 5.5 / Fastest {}
+  - Fable 5.2 / Long-horizon work {}
   note (placeholder): Running model: shown after the first reply
   [effort]
   - low {}
@@ -60,8 +60,8 @@ trigger "Bypass · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-densi
   [model]
   - Opus 5.5 / Highest quality {}
   - Sonnet 5.5 / Balanced speed and quality {current}
-  - Haiku 4.5 / Fastest {}
-  - Fable 5.1 / Long-horizon work {}
+  - Haiku 5.5 / Fastest {}
+  - Fable 5.2 / Long-horizon work {}
   note (placeholder): Running model: shown after the first reply
   [effort]
   - low {}
@@ -85,8 +85,8 @@ trigger "Bypass · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-densi
   [model]
   - Opus 5.5 / Highest quality {}
   - Sonnet 5.5 / Balanced speed and quality {current}
-  - Haiku 4.5 / Fastest {}
-  - Fable 5.1 / Long-horizon work {}
+  - Haiku 5.5 / Fastest {}
+  - Fable 5.2 / Long-horizon work {}
   note (placeholder): Running model: shown after the first reply
   [effort]
   - low {}
@@ -95,9 +95,9 @@ trigger "Bypass · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-densi
   - xhigh {}
   - max {active}
 -- Haiku selected: effort rows are shown but cannot be picked
-trigger "Default · Haiku 4.5" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=true width=- border=3px solid var(--main-text-color)
+trigger "Default · Haiku 5.5" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=true width=- border=3px solid var(--main-text-color)
   title: Mode / Model / Effort — applies on the next turn
-  aria: Runtime settings: Default · Haiku 4.5
+  aria: Runtime settings: Default · Haiku 5.5
   status kind=agrees ["Changes apply on the next turn.",""] restart[hidden=true disabled=true tab=-1]
   [mode]
   - Bypass (no prompts) {}
@@ -108,8 +108,8 @@ trigger "Default · Haiku 4.5" class=[ui-button ui-tone-neutral ui-density-compa
   [model]
   - Opus 5.5 / Highest quality {}
   - Sonnet 5.5 / Balanced speed and quality {}
-  - Haiku 4.5 / Fastest {current}
-  - Fable 5.1 / Long-horizon work {}
+  - Haiku 5.5 / Fastest {current}
+  - Fable 5.2 / Long-horizon work {}
   note (placeholder): Running model: shown after the first reply
   [effort] note: Not applied — Haiku does not use it
   - low {disabled}
@@ -118,9 +118,9 @@ trigger "Default · Haiku 4.5" class=[ui-button ui-tone-neutral ui-density-compa
   - xhigh {disabled}
   - max {disabled}
 -- clicking a disabled row does nothing
-trigger "Default · Haiku 4.5" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=true width=- border=3px solid var(--main-text-color)
+trigger "Default · Haiku 5.5" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=true width=- border=3px solid var(--main-text-color)
   title: Mode / Model / Effort — applies on the next turn
-  aria: Runtime settings: Default · Haiku 4.5
+  aria: Runtime settings: Default · Haiku 5.5
   status kind=agrees ["Changes apply on the next turn.",""] restart[hidden=true disabled=true tab=-1]
   [mode]
   - Bypass (no prompts) {}
@@ -131,8 +131,8 @@ trigger "Default · Haiku 4.5" class=[ui-button ui-tone-neutral ui-density-compa
   [model]
   - Opus 5.5 / Highest quality {}
   - Sonnet 5.5 / Balanced speed and quality {}
-  - Haiku 4.5 / Fastest {current}
-  - Fable 5.1 / Long-horizon work {}
+  - Haiku 5.5 / Fastest {current}
+  - Fable 5.2 / Long-horizon work {}
   note (placeholder): Running model: shown after the first reply
   [effort] note: Not applied — Haiku does not use it
   - low {disabled}
