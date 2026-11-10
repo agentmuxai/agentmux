@@ -206,22 +206,26 @@ export function useHeaderScrollRange(header: () => HTMLElement | undefined): {
         onCleanup(() => el.removeEventListener("wheel", onWheel));
     });
     // The strip no longer scrolls itself inside the range, so its own reveal cannot bring a
-    // newly selected pill into view: do it here, when a pill's selection changes or a tab is
-    // added (scrollIntoView is a no-op for one already visible).
+    // newly selected pill into view: do it here, and only when the SELECTED pill changes — a
+    // pill's attention, drag or drop class, or a badge mounting beside it, must never pull a
+    // range the person scrolled away from back to the tabs.
     onMount(() => {
         let frame = 0;
-        const reveal = () => {
-            frame = 0;
+        let shown: HTMLElement | null = null;
+        const revealIfSelectionChanged = () => {
             const active = range?.querySelector<HTMLElement>(".pane-tab--active, .pane-tab--selected");
-            active?.scrollIntoView({ block: "nearest", inline: "nearest" });
+            if (!active || active === shown) return;
+            shown = active;
+            active.scrollIntoView({ block: "nearest", inline: "nearest" });
         };
-        const observer = new MutationObserver((records) => {
-            const touchesPills = records.some(
-                (r) => r.type === "childList" || (r.target as Element).classList?.contains("pane-tab")
-            );
-            if (!touchesPills || frame) return;
-            frame = requestAnimationFrame(reveal);
-        });
+        const schedule = () => {
+            if (frame) return;
+            frame = requestAnimationFrame(() => {
+                frame = 0;
+                revealIfSelectionChanged();
+            });
+        };
+        const observer = new MutationObserver(schedule);
         if (range) observer.observe(range, { subtree: true, childList: true, attributes: true, attributeFilter: ["class"] });
         onCleanup(() => {
             observer.disconnect();
