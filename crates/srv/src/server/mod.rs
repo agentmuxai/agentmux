@@ -55,7 +55,7 @@ pub(crate) mod restart_resume;
 mod availability_view;
 pub(crate) mod agent_runtime;
 pub(crate) mod start_rate;
-mod jekt_cold;
+pub(crate) mod jekt_cold;
 mod limit_probe;
 pub(crate) mod jekt_files;
 pub(crate) mod jekt_ack;
