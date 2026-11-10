@@ -32,6 +32,7 @@ pub mod bulletins;
 pub mod coord_posts;
 pub mod user_workspaces;
 pub mod container_limits;
+pub mod spend_day;
 pub mod conversation_trust_grants;
 pub mod cron;
 pub mod def_registry_mirror;

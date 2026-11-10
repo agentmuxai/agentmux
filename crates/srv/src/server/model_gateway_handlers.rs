@@ -10,7 +10,7 @@
 //! memory for one request and nowhere else.
 
 use super::*;
-use crate::backend::model_gateway::{catalog, launch, request as gw, spend, token, usage::UsageTap};
+use crate::backend::model_gateway::{cap, catalog, launch, request as gw, spend, token, usage::UsageTap};
 use axum::body::{Body, Bytes};
 use axum::extract::{Path, Request};
 use axum::http::{header, HeaderMap, HeaderName, StatusCode};
@@ -59,6 +59,13 @@ pub(crate) async fn handle_model_gateway(State(state): State<AppState>, Path((ro
     let Some(model) = launch::model_on_route(&state.mstore, &grant.def_id, route) else {
         return refuse(StatusCode::FORBIDDEN, "permission_error", "this agent is not set to use that route");
     };
+    // A cap used today (the agent's, or the route's) ends the request here, where it cannot be bypassed. 402 is the status
+    // the provider's own out-of-credit answer has, after which the harness ends the turn rather than retrying.
+    let settings = state.config_watcher.get_settings().extra;
+    if let Some(hit) = cap::reached(&state.mstore, &settings, &grant, agentmux_common::time::now_ms()) {
+        crate::server::spend_watch::refused(&grant, hit.clone());
+        return refuse(StatusCode::PAYMENT_REQUIRED, "billing_error", &cap::refusal_text(&hit));
+    }
     let key = {
         let (store, agent, label, id) = (state.identity_store.clone(), grant.agent.clone(), route.key_label, route.id);
         tokio::task::spawn_blocking(move || crate::backend::vault::route_key::for_route(&store, label, &agent, id)).await
@@ -98,7 +105,7 @@ fn relay(response: reqwest::Response, grant: &token::Grant, model: &'static cata
         }
     }
     let streaming = headers.get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).is_some_and(|v| v.starts_with("text/event-stream"));
-    let metered = Metered { inner: Box::pin(response.bytes_stream()), tap: Some(UsageTap::new(streaming)), agent: grant.agent.clone(), model };
+    let metered = Metered { inner: Box::pin(response.bytes_stream()), tap: Some(UsageTap::new(streaming)), grant: grant.clone(), model };
     let mut out = Response::new(Body::from_stream(metered));
     *out.status_mut() = status;
     *out.headers_mut() = headers;
@@ -111,7 +118,7 @@ fn relay(response: reqwest::Response, grant: &token::Grant, model: &'static cata
 struct Metered {
     inner: Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>,
     tap: Option<UsageTap>,
-    agent: String,
+    grant: token::Grant,
     model: &'static catalog::Model,
 }
 
@@ -122,9 +129,10 @@ impl Metered {
         if tokens.input + tokens.output + tokens.cache_read + tokens.cache_creation == 0 {
             return;
         }
-        let cost = spend::record(&self.agent, self.model, &tokens, actual, agentmux_common::time::now_ms());
+        let cost = spend::record(&self.grant.agent, &self.grant.route, self.model, &tokens, actual, agentmux_common::time::now_ms());
+        crate::server::spend_watch::settled(&self.grant);
         tracing::info!(
-            agent = %self.agent, model = self.model.id, answered = answered.as_deref().unwrap_or(""),
+            agent = %self.grant.agent, model = self.model.id, answered = answered.as_deref().unwrap_or(""),
             input = tokens.input, output = tokens.output, cache_read = tokens.cache_read, cost_usd = cost,
             "model gateway: response"
         );
