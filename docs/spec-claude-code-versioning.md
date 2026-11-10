@@ -1,7 +1,7 @@
 # Spec: Claude Code Version Management
 
 **Status:** Active  
-**Current pinned version:** `2.1.288`
+**Current pinned version:** `2.1.321`
 **Previous default:** `latest` (floating)
 
 ## Problem
@@ -21,8 +21,8 @@ matters for containers is the same one host installs use. See
 
 | File | Location | Purpose |
 |------|----------|---------|
-| [`crates/srv/src/backend/providers.rs`](../crates/srv/src/backend/providers.rs) | `pinned_version: "2.1.288"` (CLAUDE static) | Version the backend installs for host agents, and into a container agent's container on first start |
-| [`frontend/app/view/agent/providers/catalog.ts`](../frontend/app/view/agent/providers/catalog.ts) (re-exported via `./index`) | `pinnedVersion: "2.1.288"` (PROVIDERS.claude) | Version surfaced in the UI |
+| [`crates/srv/src/backend/providers/claude.rs`](../crates/srv/src/backend/providers/claude.rs) | `pinned_version: "2.1.321"` (CLAUDE static) | Version the backend installs for host agents, and into a container agent's container on first start |
+| [`frontend/app/view/agent/providers/catalog.ts`](../frontend/app/view/agent/providers/catalog.ts) (re-exported via `./index`) | `pinnedVersion: "2.1.321"` (PROVIDERS.claude) | Version surfaced in the UI |
 | [`frontend/app/view/agent/providers/catalog.ts`](../frontend/app/view/agent/providers/catalog.ts) (same object) | `models: [{ value: "opus", label: "Opus 5.5", ... }]` | The curated UI label for the `opus` family alias: **not itself version-locked to the CLI pin**, but should be re-checked on every pin bump per the field's own doc comment ("kept in sync on a pin bump"): whichever concrete snapshot Anthropic's API currently resolves `--model opus` to. |
 
 [`frontend/app/view/agent/providers/pin-consistency.test.ts`](../frontend/app/view/agent/providers/pin-consistency.test.ts) enforces agreement
@@ -43,7 +43,7 @@ retired `agent-claude` image) keeps that one.
 ## How to bump
 
 1. Check the latest release: `npm view @anthropic-ai/claude-code version`
-2. In [`crates/srv/src/backend/providers.rs`](../crates/srv/src/backend/providers.rs): update the CLAUDE static's `pinned_version`
+2. In [`crates/srv/src/backend/providers/claude.rs`](../crates/srv/src/backend/providers/claude.rs): update the CLAUDE static's `pinned_version`
 3. In [`frontend/app/view/agent/providers/catalog.ts`](../frontend/app/view/agent/providers/catalog.ts): update `PROVIDERS.claude.pinnedVersion`
 4. Also in `catalog.ts`: re-check each model alias's curated `label`/`description` still
    matches what the pinned CLI currently resolves that alias to (e.g. `opus` -> "Opus 5")
@@ -76,6 +76,8 @@ its visibility in the GitHub UI (there is no API for it).
 | `2.1.285` | 2026-09-30 | Bump (verified via `npm view @anthropic-ai/claude-code version`, and by downloading the `@anthropic-ai/claude-code-win32-x64@2.1.285` binary directly and confirming its embedded model catalog — dated `2026-09-29T01:02:40Z` — lists `claude-sonnet-5-5`); paired with relabeling the `sonnet` alias from "Sonnet 5" to "Sonnet 5.5" following Anthropic's 2026-09-29 release of Claude Sonnet 5.5. Prompted by a live incident where an agent's pane showed "Sonnet 5.5 · high" while running Opus 5.5 at medium — see [`docs/retro/RETRO_RESUMED_AGENT_SPAWNS_WITHOUT_RUNTIME_FLAGS_2026_09_30.md`](retro/RETRO_RESUMED_AGENT_SPAWNS_WITHOUT_RUNTIME_FLAGS_2026_09_30.md) (that mismatch's own cause, a missing `--model`/`--effort` at spawn, is unrelated to this bump) and [`docs/reports/REPORT_AGENT_RUNTIME_STATE_RECONCILIATION_2026_09_30.md`](reports/REPORT_AGENT_RUNTIME_STATE_RECONCILIATION_2026_09_30.md). Separately, once that pane's own model/effort selection was correctly applied (`--model sonnet --effort xhigh` confirmed in the spawned process's command line), the CLI's `sonnet` alias on `2.1.280` still resolved to `claude-sonnet-5`, not `claude-sonnet-5-5` — confirmed by the harness's own live model self-report (`claude-sonnet-5`), the actual evidence this relabel and version bump rest on. `opus`/`haiku`/`fable` ids and labels unchanged (all three ids still present verbatim in the new binary). |
 | `2.1.287` | 2026-10-01 | Bump (verified via `npm view @anthropic-ai/claude-code version`; every flag and auth subcommand AgentMux passes was compared between the 2.1.285 and 2.1.287 `--help`, and the only removal is `--client-data-url`, which AgentMux doesn't use; the `@anthropic-ai/claude-code-win32-x64@2.1.287` binary still contains `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-4-5` and `claude-fable-5-1`, so no catalog relabel). Driven by the 2026-10-01 drift report — [`docs/specs/SPEC_VERSION_DRIFT_UPGRADES_AND_PROVIDER_HARNESS_TESTS_2026_10_01.md`](specs/SPEC_VERSION_DRIFT_UPGRADES_AND_PROVIDER_HARNESS_TESTS_2026_10_01.md) phase 1a. |
 | `2.1.288` | 2026-10-03 | Bump from the 2026-10-03 drift report (verified via `npm view @anthropic-ai/claude-code version`). Installed 2.1.287 and 2.1.288 side by side and diffed `--help` and `auth --help`: no flag added or removed; the only change is a new `purge` subcommand, which AgentMux doesn't use. Engines unchanged (`node >=22.0.0`). |
+| `2.1.321` | 2026-11-09 | Bump from the 2026-11-09 drift report (verified via `npm view @anthropic-ai/claude-code version` = 2.1.321). Read the release notes for 2.1.289 through 2.1.321: no flag AgentMux passes and no `--output-format stream-json`, `--resume` or MCP frame shape changed; the changes nearest our use are exit codes on failures (a `claude -p` run that loses its transcript or `~/.claude.json` now exits 1 instead of 0), which surface a failed turn instead of a silently wrong one. Relabeled the `haiku` alias from "Haiku 4.5" to "Haiku 5.5": the alias resolves to `claude-haiku-5-5`, which the `@anthropic-ai/claude-code-win32-x64@2.1.321` binary contains (alongside `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-4-5`, `claude-fable-5-1` and `claude-fable-5-2`). The ambient helper (titles, activity, continuity) now asks for the concrete `claude-haiku-5-5` instead of `claude-haiku-4-5-20251001`, and the curated `fable` row moved to `claude-fable-5-2`, released in 2.1.321 as the default Fable model. |
+
 
 ## Escape hatch
 

@@ -21,7 +21,7 @@ pub struct CliInstall {
     pub command: String,
     /// `name@version` for the CLI and its companions.
     pub specs: Vec<String>,
-    /// The pinned version, for the pane's "Installing Claude Code 2.1.288" row.
+    /// The pinned version, for the pane's "Installing Claude Code 2.1.321" row.
     pub version: String,
 }
 
