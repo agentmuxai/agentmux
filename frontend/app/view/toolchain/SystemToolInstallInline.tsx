@@ -68,6 +68,9 @@ interface SystemToolInstallInlineProps {
     resolvedInfo?: ResolvedInstallInfo;
 }
 
+/** The pane `el` is in: srv asks its "Install it?" as a modal over that pane. */
+const paneOf = (el: Element | undefined): string | undefined => el?.closest("[data-blockid]")?.getAttribute("data-blockid") ?? undefined;
+
 export const SystemToolInstallInline = (props: SystemToolInstallInlineProps): JSX.Element => {
     const [resolution, setResolution] = createSignal<Resolution>("checking");
     const [info, setInfo] = createSignal<ResolvedInstallInfo>({ commandPreview: "", needsElevation: false });
@@ -83,9 +86,10 @@ export const SystemToolInstallInline = (props: SystemToolInstallInlineProps): JS
     // user navigated away from this panel — risks a broken half-installed
     // state (SPEC §3.4). It runs to completion in the background; the
     // session cleans itself up server-side when the child exits.
+    let rootEl: HTMLDivElement | undefined;
     const session = createInstallSession({
         tracker: () => new SystemStepTracker({ name: tool()?.label ?? props.toolId, needsElevation: info().needsElevation }),
-        begin: () => RpcApi.ToolchainInstallSystemToolCommand(TabRpcClient, { toolId: props.toolId }),
+        begin: () => RpcApi.ToolchainInstallSystemToolCommand(TabRpcClient, { toolId: props.toolId, blockId: paneOf(rootEl) }),
         cancelOnDispose: false,
         onDone: (ok) => {
             if (ok) props.onInstalled();
@@ -93,9 +97,7 @@ export const SystemToolInstallInline = (props: SystemToolInstallInlineProps): JS
     });
 
     let disposed = false;
-    onCleanup(() => {
-        disposed = true;
-    });
+    onCleanup(() => (disposed = true));
 
     onMount(async () => {
         if (props.resolvedInfo) {
@@ -139,7 +141,7 @@ export const SystemToolInstallInline = (props: SystemToolInstallInlineProps): JS
 
     return (
         <Show when={resolution() === "ready"}>
-            <div class="system-tool-install-inline">
+            <div class="system-tool-install-inline" ref={rootEl}>
                 <Show
                     when={session.state() !== "idle"}
                     fallback={

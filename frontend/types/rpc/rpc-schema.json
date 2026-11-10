@@ -5993,6 +5993,25 @@
     }
   },
   {
+    "command": "pane.confirm.decide",
+    "request": "agentmux_srv::sagas::pane_confirm::CommandPaneConfirmDecideData",
+    "requestName": "CommandPaneConfirmDecideData",
+    "requestTs": {
+      "imports": [
+        "CommandPaneConfirmDecideData"
+      ],
+      "name": "CommandPaneConfirmDecideData"
+    },
+    "response": "agentmux_srv::sagas::pane_confirm::PaneConfirmDecideResult",
+    "responseName": "PaneConfirmDecideResult",
+    "responseTs": {
+      "imports": [
+        "PaneConfirmDecideResult"
+      ],
+      "name": "PaneConfirmDecideResult"
+    }
+  },
+  {
     "command": "pane.moveTab",
     "request": "agentmux_srv::backend::rpc_types::block::CommandPaneMoveTabData",
     "requestName": "CommandPaneMoveTabData",
@@ -7435,13 +7454,13 @@
   },
   {
     "command": "toolchain.install_system_tool",
-    "request": "agentmux_srv::server::system_install_handlers::ToolIdReq",
-    "requestName": "ToolIdReq",
+    "request": "agentmux_srv::server::system_install_handlers::InstallSystemToolReq",
+    "requestName": "InstallSystemToolReq",
     "requestTs": {
       "imports": [
-        "ToolIdReq"
+        "InstallSystemToolReq"
       ],
-      "name": "ToolIdReq"
+      "name": "InstallSystemToolReq"
     },
     "response": "agentmux_srv::server::system_install_handlers::InstallSystemToolResult",
     "responseName": "InstallSystemToolResult",
