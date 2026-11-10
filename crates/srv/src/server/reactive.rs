@@ -351,7 +351,7 @@ pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRe
     };
     let observed_key = match lan_signer::resolve(state, &claimed).await {
         lan_signer::SignerKey::Pinned(key) => key,
-        lan_signer::SignerKey::Unknown => return,
+        lan_signer::SignerKey::Unknown | lan_signer::SignerKey::Unproven => return,
         lan_signer::SignerKey::Refused => {
             req.lan_verified = Some(false);
             return;

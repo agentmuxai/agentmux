@@ -9,6 +9,7 @@
  * (docs/specs/SPEC_PROVIDER_CARD_TAGS_FREE_LOCAL_2026_10_29.md §3 and §5).
  */
 
+import { t } from "@/app/i18n/i18n";
 import {
     getProviderAccess,
     type AccessClaim,
@@ -61,9 +62,9 @@ function oldest(claims: AccessClaim[]): string {
 export function checkedNote(claims: AccessClaim[], now: Date): CheckedNote {
     const date = oldest(claims);
     const days = daysSince(date, now);
-    if (days > STALE_DAYS) return { date, state: "stale", text: `Not re-checked since ${date}` };
-    if (days > AGING_DAYS) return { date, state: "aging", text: `checked ${days} days ago, may have changed` };
-    return { date, state: "fresh", text: `checked ${date}` };
+    if (days > STALE_DAYS) return { date, state: "stale", text: t("access.checked.stale", { date }) };
+    if (days > AGING_DAYS) return { date, state: "aging", text: t("access.checked.aging", { count: days }) };
+    return { date, state: "fresh", text: t("access.checked.fresh", { date }) };
 }
 
 function freeClaims(free: FreeAccess): AccessClaim[] {
@@ -95,8 +96,8 @@ export function localTagFor(access: ProviderAccess | undefined, now: Date): Acce
     if (local.note) lines.push(local.note.text);
     lines.push(
         local.testedOn
-            ? `${local.testedOn.ok ? "Works" : "Did not work"} in AgentMux's own test with ${local.testedOn.model} (${local.testedOn.date}).`
-            : "Documented by the CLI, not tested by AgentMux."
+            ? t(local.testedOn.ok ? "access.local.worked" : "access.local.failed", { model: local.testedOn.model, date: local.testedOn.date })
+            : t("access.local.untested")
     );
     return { label: "Local", tone: "neutral", icon: "house", lines, checked: checkedNote(claims, now) };
 }

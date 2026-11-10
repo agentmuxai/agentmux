@@ -207,7 +207,7 @@ pub(super) async fn receive(
     let key = match lan_signer::resolve(state, &op.requester.slug).await {
         SignerKey::Pinned(key) => key,
         SignerKey::Unknown => return refuse("unknown_sender", "unproven"),
-        SignerKey::Refused => return refuse("unverified_sender", "unproven"),
+        SignerKey::Unproven | SignerKey::Refused => return refuse("unverified_sender", "unproven"),
     };
     if !signed.verify_with(&key, max_params) {
         return refuse("bad_signature", "unproven");

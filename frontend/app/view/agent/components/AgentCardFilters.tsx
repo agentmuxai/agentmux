@@ -12,6 +12,7 @@
 
 import { Show, type JSX } from "solid-js";
 import { Button, FilterChip, FilterChips } from "@/app/element/ui";
+import { appLocale, t } from "@/app/i18n/i18n";
 import { CARD_FILTERS, filterCounts, type CardFilter, type FilterableCard } from "../defaults/provider-access-model";
 
 export interface AgentCardFiltersProps {
@@ -29,7 +30,8 @@ export interface AgentCardFiltersProps {
     now?: () => Date;
 }
 
-const LABEL: Record<CardFilter, string> = { free: "Free", local: "Local", installed: "Installed" };
+const label = (f: CardFilter): string =>
+    f === "free" ? t("agentPicker.filters.free") : f === "local" ? t("agentPicker.filters.local") : t("agentPicker.filters.installed");
 const ICON: Partial<Record<CardFilter, string>> = { free: "gift", local: "house" };
 
 export const AgentCardFilters = (props: AgentCardFiltersProps): JSX.Element => {
@@ -40,7 +42,7 @@ export const AgentCardFilters = (props: AgentCardFiltersProps): JSX.Element => {
             <FilterChips
                 value={props.selected}
                 onChange={(next) => props.onChange(next.filter(isFilter))}
-                aria-label="Filter the new-agent cards"
+                aria-label={t("agentPicker.filters.label")}
             >
                 {CARD_FILTERS.map((f) => (
                     <FilterChip
@@ -49,25 +51,25 @@ export const AgentCardFilters = (props: AgentCardFiltersProps): JSX.Element => {
                         disabled={props.disabled}
                         count={f === "installed" && !props.installedKnown ? undefined : counts()[f]}
                     >
-                        {LABEL[f]}
+                        {label(f)}
                     </FilterChip>
                 ))}
             </FilterChips>
             <Show when={props.disabled}>
                 <span class="agent-card-filters-hint" data-testid="agent-card-filters-hint">
-                    Close the open panel to change the filters.
+                    {t("agentPicker.filters.disabledHint")}
                 </span>
             </Show>
             <span class="agent-card-filters-status" role="status" aria-live="polite" data-testid="agent-card-filters-status">
                 <Show when={props.selected.length > 0}>
-                    {props.shown} of {props.cards.length} shown
+                    {t("agentPicker.filters.shown", { shown: props.shown, total: props.cards.length })}
                 </Show>
             </span>
             <Show when={props.selected.length > 0 && props.shown === 0}>
                 <p class="agent-card-filters-empty" data-testid="agent-card-filters-empty">
-                    No agent is {props.selected.map((f) => LABEL[f].toLowerCase()).join(" and ")}.{" "}
+                    {t("agentPicker.filters.none", { filters: new Intl.ListFormat(appLocale(), { type: "conjunction" }).format(props.selected.map((f) => label(f).toLocaleLowerCase(appLocale()))) })}{" "}
                     <Button tone="quiet" disabled={props.disabled} onClick={() => props.onChange([])} data-testid="agent-card-filters-clear">
-                        Clear filters
+                        {t("agentPicker.filters.clear")}
                     </Button>
                 </p>
             </Show>

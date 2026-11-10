@@ -423,7 +423,7 @@
 154 frontend/app/view/remotes/remotes-view.tsx::Detail
 128 frontend/app/view/settings/sections/animations-section.tsx::AnimationsSection
 120 frontend/app/view/settings/sections/browser-section.tsx::BrowserSection
-109 frontend/app/view/settings/sections/pinned-senders.tsx::PinnedSenders
+102 frontend/app/view/settings/sections/pinned-senders.tsx::PinnedSenders
 114 frontend/app/view/settings/sections/widget-bar-settings.tsx::WidgetBarSettings
 104 frontend/app/view/settings/sections/widget-catalog.tsx::WidgetCatalog
 137 frontend/app/view/shortcuts/shortcuts.tsx::ShortcutsView

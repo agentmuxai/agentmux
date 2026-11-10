@@ -104,6 +104,23 @@ describe("PinnedSenders", () => {
         expect(adopt.mock.calls[0][1]).toEqual({ kind: "wan", agent_id: "lazo", channel: "stable", expect: "area54~wxyz9876" });
     });
 
+    it("offers a first key that no install vouched for to be accepted once, with nothing to forget", async () => {
+        list.mockResolvedValue({
+            lan: [{ agent_id: "newbie", key_fp: "", pinned_at: 0, uid_pins: 0, refused: { key_fp: "dddddddddd", last_seen_at: NOW - 30, count: 2 } }],
+            wan: [],
+        });
+        const { container } = render(() => <PinnedSenders />);
+        await screen.findByText(/Not pinned yet/);
+        expect(container.querySelectorAll(".setting-pin")).toHaveLength(1);
+        expect(screen.getByText(/A key, dddddddddd, was shown 2 times/)).toBeTruthy();
+        expect(screen.getByText(/arrive unproven until you accept it/)).toBeTruthy();
+        expect(screen.queryByText("Forget")).toBeNull();
+        fireEvent.click(screen.getByText("Accept this key"));
+        fireEvent.click(await screen.findByText("Press again to accept"));
+        await waitFor(() => expect(adopt).toHaveBeenCalledTimes(1));
+        expect(adopt.mock.calls[0][1]).toEqual({ kind: "lan", agent_id: "newbie", channel: undefined, expect: "dddddddddd" });
+    });
+
     it("reloads the list when srv says a pin changed", async () => {
         render(() => <PinnedSenders />);
         await screen.findByText(/Key cccccccccc/);
