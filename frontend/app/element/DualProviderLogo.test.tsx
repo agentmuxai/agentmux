@@ -102,3 +102,17 @@ describe("DualProviderLogo", () => {
         expect(container.querySelector(".dual-provider-logo-badge")).toBeNull();
     });
 });
+
+describe("DualProviderLogo's small badge", () => {
+    it("rings a small badge in the app's border color, not the pane's background", () => {
+        const { container } = render(() => <DualProviderLogo harness="qwen" vendor="zhipu" size={14} />);
+        const badge = container.querySelector(".dual-provider-logo-badge") as HTMLElement;
+        expect(badge.style.boxShadow).toBe("0 0 0 1px var(--border-color)");
+    });
+
+    it("keeps the softer shadow on a list row's larger badge", () => {
+        const { container } = render(() => <DualProviderLogo harness="qwen" vendor="zhipu" size={40} />);
+        const badge = container.querySelector(".dual-provider-logo-badge") as HTMLElement;
+        expect(badge.style.boxShadow).not.toContain("--border-color");
+    });
+});
