@@ -169,6 +169,23 @@ async fn send_over_lan(state: &AppState, row: &HeldJekt, url: &str, auth_key: &s
     }
 }
 
+/// Whether a row's 24 h hold, or the sender's own deadline, has run out: it is dropped, not sent.
+fn spent(row: &HeldJekt, now_ms: i64) -> bool {
+    row.expires_at_ms <= now_ms || row.sender_expires_at_ms.is_some_and(|deadline| deadline <= now_ms)
+}
+
+/// One held message, sent over the LAN (`lan`) or the relay, unless it ran out while the pass was
+/// asking where its agent is or sending the ones before it. The peer that receives it cannot tell.
+async fn send_row(state: &AppState, row: &HeldJekt, lan: &Option<(String, String)>) -> Sent {
+    if spent(row, agentmux_common::time::now_ms()) {
+        return Sent::Gone;
+    }
+    match lan {
+        Some((url, auth_key)) => send_over_lan(state, row, url, auth_key).await,
+        None => send_over_relay(state, row).await,
+    }
+}
+
 async fn send_over_relay(state: &AppState, row: &HeldJekt) -> Sent {
     let mut req = request_for(row);
     req.message = late_message(row, agentmux_common::time::now_ms());
@@ -241,10 +258,7 @@ pub(crate) async fn replay_pass(state: &AppState) {
         }
         sent_to += 1;
         for row in &rows {
-            let sent = match &lan {
-                Some((url, auth_key)) => send_over_lan(state, row, url, auth_key).await,
-                None => send_over_relay(state, row).await,
-            };
+            let sent = send_row(state, row, &lan).await;
             settle(state, row, sent).await;
             if sent == Sent::Later {
                 break;
