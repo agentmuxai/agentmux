@@ -1,7 +1,7 @@
 # Spec: an agent is a harness, a model route and a key: spawn on any model and switch the model in place
 
 **Date:** 2026-11-06 (task #27458; the build follows it)
-**Status:** active — P1 (catalog and gateway) in PR #6662; P2 (spawn, create, update and routes) in PR #6673; P3a (the switch in srv, the panel's two commands and the real model on the pane) in PR #6825; P3b (the panel itself) in the PR after it; P4 and P5 not started. Approved by the operator 2026-11-06 ("greenlight 27458"; the recommendations in section 12 are the decisions). Verified 2026-11-06.
+**Status:** active — P1 (catalog and gateway) in PR #6662; P2 (spawn, create, update and routes) in PR #6673; P3a (the switch in srv, the panel's two commands and the real model on the pane) in PR #6825; P3b (the panel itself) in PR #6849; P3c's image count in srv in the PR after it (the first-turn commit and "Compact, then switch" remain); P4 and P5 not started. Approved by the operator 2026-11-06 ("greenlight 27458"; the recommendations in section 12 are the decisions). Verified 2026-11-06.
 **Author:** Agent5@narko, for AgentX's lane
 **Read from:** `origin/main` at `1a79691b0` (v0.60.18). Web facts read the same day are marked.
 **Builds on:** the AgentSky parity and model switching report of 2026-11-05 (task #24714, kept outside the repo: one agent, one id, one history), PR #6555 (`Agents` create/update/bundles).
@@ -277,3 +277,9 @@ P3 is built in two PRs, because the panel needs srv's half first. P3a is the hal
 - **A pick** calls `agent.model.switch` (`restart: true`): srv records `previous`, writes the choice and restarts the pane at the end of its turn, with its conversation. Picking a harness model while on a route first leaves the route (`route: ""`, `restart: false`) and then sets the runtime as it always did, which restarts it once. A failed switch is shown on the trigger and leaves the agent where it was.
 - **The footer.** The trigger's label shows the model that really answers (`agent:route_model` on the pane, written by srv at each launch), not the harness alias Claude Code reports; the line under the Model rows reads "Running: GLM 5.3 on OpenRouter". Off a route nothing changes.
 - **Not in P3b:** committing a cross-provider switch only after its first turn succeeds, and "Compact, then switch" (P3c).
+
+## 17. As built: P3c, part one (the image count in srv)
+
+- **Where the count comes from.** `backend/transcript/images.rs` counts the images in an agent's conversation from its transcript (zone `agent:<definition id>:current`), not from the pane's loaded feed, so images in history the pane has rolled off or not yet loaded count too. It reads the `<attached_files>` list at the end of each user message: a found image is a path ending `.send.<image extension>`, a missing one a `- name.png — (no longer available)` line. Only user lines are read; an agent's own text quoting a list counts for nothing. A repeat count reads on from where the last stopped.
+- **The panel** takes the larger of the pane's `images` and srv's count, so the frontend count is a hint and can only add. **The switch** (`agent.model.switch`) refuses a route model that cannot read images when the conversation holds one, with the same text the panel greys the row with ("can't read images (N in this conversation)").
+- **Not counted:** images carried by a jekt or an "Earlier message" note (the pane's hint still counts those), and images only in the provider's own session file after a compaction.
