@@ -87,18 +87,8 @@ pub(super) async fn claim_uid(state: &AppState, req: &mut InjectionRequest, clai
     }
     use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
     let key_b64 = BASE64.encode(&key);
-    match state.mstore.lan_peer_uid_pin_get_or_set(claimed, &uid, &key_b64) {
-        Ok(pinned) if pinned == key_b64 => {}
-        Ok(_) => {
-            record("m4d.lan_v2_pin_mismatch");
-            req.lan_verified = Some(false);
-            return;
-        }
-        Err(_) => {
-            req.lan_verified = Some(false); // fail closed, as for the name pin
-            return;
-        }
-    }
+    // A UID key is pinned only once the message verifies under it, so a key a peer merely shows (after a
+    // move cleared the UID pins, or for a UID not seen before) pins nothing.
     let verified = agentmux_common::jekt_sign::verify_lan_jekt_v2(
         &key,
         req.request_id.as_deref().unwrap_or(""),
@@ -109,11 +99,18 @@ pub(super) async fn claim_uid(state: &AppState, req: &mut InjectionRequest, clai
         &req.message,
         &sig,
     );
-    if verified {
-        req.lan_claimed_uid = uid;
-    } else {
+    if !verified {
         record("m4d.lan_v2_bad_sig");
         req.lan_verified = Some(false);
+        return;
+    }
+    match state.mstore.lan_peer_uid_pin_get_or_set(claimed, &uid, &key_b64) {
+        Ok(pinned) if pinned == key_b64 => req.lan_claimed_uid = uid,
+        Ok(_) => {
+            record("m4d.lan_v2_pin_mismatch");
+            req.lan_verified = Some(false);
+        }
+        Err(_) => req.lan_verified = Some(false), // fail closed, as for the name pin
     }
 }
 

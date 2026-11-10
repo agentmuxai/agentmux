@@ -127,13 +127,11 @@ async fn a_jekt_with_no_v2_at_all_stays_verified_on_v1() {
 async fn a_changed_uid_key_under_the_same_name_is_not_claimed_and_fails_the_jekt() {
     let state = test_state();
     let (name_public, name_private) = generate_lan_keypair([1u8; 32]);
-    let (first_public, _) = generate_lan_keypair([2u8; 32]);
+    let (first_public, first_private) = generate_lan_keypair([2u8; 32]);
     let (second_public, second_private) = generate_lan_keypair([3u8; 32]);
     seed_pinned(&state, "korp", name_public.to_vec(), Some(("uid-k".into(), first_public.to_vec())));
-    let mut first = signed(&name_private, None);
-    first.source_uid = Some("uid-k".into());
-    first.lan_sig_v2 = Some("unchecked until the pin is set".into());
-    verify_lan_signature(&state, &mut first).await; // pins uid-k's first key
+    let mut first = signed(&name_private, Some(("uid-k", &first_private)));
+    verify_lan_signature(&state, &mut first).await; // pins uid-k's first key, which the message verified under
     seed_pinned(&state, "korp", name_public.to_vec(), Some(("uid-k".into(), second_public.to_vec())));
     let mut req = signed(&name_private, Some(("uid-k", &second_private)));
     verify_lan_signature(&state, &mut req).await;
@@ -158,6 +156,27 @@ async fn a_bad_v2_fails_the_jekt_and_a_failed_v1_claims_nothing() {
     verify_lan_signature(&state, &mut bad_v1).await;
     assert_eq!(bad_v1.lan_verified, Some(false));
     assert_eq!(bad_v1.lan_claimed_uid, "", "v2 is checked only after v1 verified");
+}
+
+#[tokio::test]
+async fn a_uid_key_the_peer_shows_is_pinned_only_once_a_message_verifies_under_it() {
+    let state = test_state();
+    let (name_public, name_private) = generate_lan_keypair([1u8; 32]);
+    let (shown_public, _) = generate_lan_keypair([2u8; 32]);
+    let (_, other_private) = generate_lan_keypair([4u8; 32]);
+    seed_pinned(&state, "korp", name_public.to_vec(), Some(("uid-k".into(), shown_public.to_vec())));
+    // The v2 signature is not by the key the peer showed: nothing is pinned for the UID.
+    let mut forged = signed(&name_private, Some(("uid-k", &other_private)));
+    verify_lan_signature(&state, &mut forged).await;
+    assert_eq!(forged.lan_verified, Some(false));
+    assert!(!state.mstore.lan_peer_uid_pin_exists("korp").unwrap(), "a key that did not verify pins nothing");
+
+    // The same key, with a signature that verifies under it, is pinned.
+    let (_, shown_private) = generate_lan_keypair([2u8; 32]);
+    let mut real = signed(&name_private, Some(("uid-k", &shown_private)));
+    verify_lan_signature(&state, &mut real).await;
+    assert_eq!(real.lan_verified, Some(true));
+    assert!(state.mstore.lan_peer_uid_pin_exists("korp").unwrap());
 }
 
 #[tokio::test]

@@ -123,12 +123,12 @@ impl Store {
     }
 
     /// Move a LAN name's pin to `key_b64`, with `since` as the time it is
-    /// kept from, but only if the pin is still `expect` (its key and its
-    /// time), in one transaction. `false` means it changed since it was read,
-    /// and nothing was written: a check made against an older pin must not
-    /// undo a newer move or the operator's own change. The UID pins beside it
-    /// stay: a vouched move changes the name key, not the UID key, and the next
-    /// message must still verify under the UID key already pinned, never pin one afresh.
+    /// kept from, and drop the UID pins beside it, but only if the pin is still
+    /// `expect` (its key and its time), in one transaction. `false` means it
+    /// changed since it was read, and nothing was written: a check made against
+    /// an older pin must not undo a newer move or the operator's own change.
+    /// A rotation can change the UID key with the name key, so the UID pins go;
+    /// the next v2 message pins the UID key again, but only once it verifies under it.
     pub fn lan_peer_pubkey_pin_move(&self, agent_id: &str, expect: (&str, i64), key_b64: &str, since: i64) -> Result<bool, StoreError> {
         let key = agent_id.to_lowercase();
         let mut conn = self.conn.lock().unwrap();
@@ -139,6 +139,7 @@ impl Store {
         if now.as_ref().map(|(k, t)| (k.as_str(), *t)) != Some(expect) {
             return Ok(false);
         }
+        tx.execute("DELETE FROM db_lan_peer_uid_pins WHERE agent_id = ?1", params![key])?;
         tx.execute(
             "INSERT OR REPLACE INTO db_lan_peer_pubkey_pins (agent_id, public_key, first_seen_at) VALUES (?1, ?2, ?3)",
             params![key, key_b64, since],

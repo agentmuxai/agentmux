@@ -145,7 +145,7 @@ async fn a_rotation_vouched_by_a_pinned_install_moves_the_pin_and_writes_the_aud
 
     assert_eq!(path, Path::PinnedInstance);
     assert_eq!(pinned(&state, "maop-v"), BASE64.encode(new));
-    assert!(state.mstore.lan_peer_uid_pin_exists("maop-v").unwrap(), "the UID pins stay: the UID key did not change, and is not pinned afresh");
+    assert!(!state.mstore.lan_peer_uid_pin_exists("maop-v").unwrap(), "the UID pins went with the old key; the next verified v2 message pins the UID key again");
     assert_eq!(state.mstore.lan_pin_installed("maop-v").unwrap().unwrap().instance_id, vouch.instance_id, "still bound to the install that vouched");
     let retired = state.mstore.lan_retired_get("maop-v", &fingerprint(&BASE64.encode(old))).unwrap().expect("the old key is remembered as retired");
     assert_eq!(retired.retired_by, vouch.instance_id);
