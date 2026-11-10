@@ -8,6 +8,11 @@
 
 use super::*;
 
+// What the reader does when the loop guard says the agent is stuck. Declared here, not in `mod.rs`, which is
+// at its size ratchet.
+#[path = "loop_stop.rs"]
+mod loop_stop;
+
 /// What the stdout reader task captures from `spawn_process`.
 pub(super) struct StdoutReaderCtx {
     pub(super) stdout: tokio::process::ChildStdout,
@@ -62,6 +67,10 @@ struct StdoutReader {
     parked_notices_due: bool,
     login_failed_in_band: bool,
     cli_native: crate::backend::cli_native::reader::CliNativeReader,
+    /// What this turn has done, for the loop guard (`agents::loop_guard`).
+    loop_guard: crate::agents::loop_guard::LoopGuard,
+    /// The guard ended this turn: the interrupt's result frame is our stop, not a failure.
+    ended_by_guard: bool,
 }
 
 /// What one parsed stdout line decided for the loop.
@@ -172,6 +181,8 @@ impl StdoutReader {
             // The turn's synthetic assistant message said the login failed; its result frame follows.
             login_failed_in_band: false,
             cli_native,
+            loop_guard: Default::default(),
+            ended_by_guard: false,
         };
         (stdout, reader)
     }
@@ -318,6 +329,7 @@ impl StdoutReader {
         }
         let release_parked_notices = self.observe_frame(parsed);
         let FrameVerdict { is_result_frame, inband_error, early_failure } = self.frame_verdict(parsed);
+        let ended_by_guard = self.watch_for_loops(parsed, is_result_frame);
         // Claude's turn-ending marker. Persistent mode never exits
         // between turns, so this is the only place `turn_active`
         // can go back to false without waiting for process exit —
@@ -334,6 +346,7 @@ impl StdoutReader {
             && self.inner_read.lock().unwrap().shutdown_generation == Some(self.my_generation_read);
         let is_error_result = is_result_frame
             && !closing_this_generation
+            && !ended_by_guard
             && parsed.get("is_error").and_then(|v| v.as_bool()) == Some(true);
         // reagentx P0 on PR #2371: the real CLI's stream-json
         // protocol embeds `session_id_field` on EVERY event,
@@ -373,6 +386,22 @@ impl StdoutReader {
             flushed_failure_this_tick,
         );
         FrameOutcome { skip: false, hold_back_for_resume_retry, release_parked_notices }
+    }
+
+    /// Feeds the frame to the loop guard and ends the turn when it says the agent is stuck. `true` for the
+    /// result frame of a turn the guard ended.
+    fn watch_for_loops(&mut self, parsed: &serde_json::Value, is_result_frame: bool) -> bool {
+        if is_result_frame {
+            self.loop_guard.new_turn();
+            return std::mem::take(&mut self.ended_by_guard);
+        }
+        if self.ended_by_guard {
+            return false;
+        }
+        if let Some(stuck) = self.loop_guard.observe(parsed) {
+            self.ended_by_guard = loop_stop::end_the_turn(&self.inner_read, &self.block_id_read, self.mstore_read.as_ref(), &stuck);
+        }
+        false
     }
 
     /// The answers to our own control requests, and the question the agent is blocked on.

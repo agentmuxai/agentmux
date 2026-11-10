@@ -14,6 +14,7 @@
 
 pub mod failure;
 pub mod limit_reset;
+pub mod loop_guard;
 pub mod runner;
 pub mod translator;
 pub mod types;
