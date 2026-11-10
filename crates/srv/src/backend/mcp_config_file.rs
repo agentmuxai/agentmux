@@ -22,60 +22,19 @@
 //! follows the replacement.
 //!
 //! The relocated file is written `0600` and lives under the data root AgentMux keeps
-//! owner-only.
+//! owner-only. The path itself is derived by [`agentmux_common::mcp_config_path`], so srv
+//! (which writes it) and `agentmux-mcp doctor` (which diagnoses it) cannot disagree.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use sha2::{Digest, Sha256};
-
-/// The file name every provider's MCP config uses.
-pub const MCP_JSON: &str = ".mcp.json";
-
-/// The folder under AgentMux's data root that holds the relocated configs.
-fn relocated_root() -> PathBuf {
-    crate::backend::base::get_mux_data_dir().join("mcp")
-}
-
-/// `path` as a comparable string: separators normalized, no trailing slash, and folded on
-/// Windows, where two spellings of one folder must compare equal.
-fn normalized(path: &Path) -> String {
-    let s = path.to_string_lossy().replace('\\', "/");
-    let s = s.trim_end_matches('/').to_string();
-    if cfg!(windows) {
-        s.to_lowercase()
-    } else {
-        s
-    }
-}
-
-fn is_within(path: &Path, root: &Path) -> bool {
-    let path = normalized(path);
-    let root = normalized(root);
-    !root.is_empty() && (path == root || path.starts_with(&format!("{root}/")))
-}
-
-/// The roots a launch may write into: AgentMux's own data tree.
-fn owned_roots() -> Vec<PathBuf> {
-    let mut roots = vec![crate::backend::base::get_mux_data_dir()];
-    // The default agent home is `~/.agentmux/agents/<slug>`, resolved from the real home
-    // even when a data-home override is set for an isolated instance.
-    roots.push(crate::backend::base::get_home_dir().join(".agentmux"));
-    roots
-}
+pub use agentmux_common::mcp_config_path::MCP_JSON;
+use agentmux_common::mcp_config_path as shared;
 
 /// Whether `work_dir` is AgentMux's own folder, where a launch may keep the agent's
 /// `.mcp.json` as it always has.
 pub fn is_agent_owned_workdir(work_dir: &Path) -> bool {
-    owned_roots().iter().any(|root| is_within(work_dir, root))
-}
-
-/// A stable, filesystem-safe key for `work_dir`: its expanded, normalized path, hashed.
-fn workdir_key(work_dir: &str) -> String {
-    let expanded = crate::backend::blockcontroller::core::expand_home_dir(work_dir);
-    let mut hash = Sha256::new();
-    hash.update(normalized(Path::new(&expanded)).as_bytes());
-    hex::encode(&hash.finalize()[..16])
+    shared::is_agent_owned_workdir(work_dir)
 }
 
 /// The folder holding `work_dir`'s relocated config, or `None` when the folder is AgentMux's
@@ -83,28 +42,21 @@ fn workdir_key(work_dir: &str) -> String {
 /// (a directory, not the file: see the module doc).
 pub fn relocated_dir(work_dir: &str) -> Option<PathBuf> {
     let expanded = crate::backend::blockcontroller::core::expand_home_dir(work_dir);
-    if is_agent_owned_workdir(Path::new(&expanded)) {
-        return None;
-    }
-    Some(relocated_root().join(workdir_key(&expanded)))
+    shared::relocated_dir_for(Path::new(&expanded))
 }
 
 /// The relocated config for `work_dir`, or `None` when the folder is AgentMux's own and the
 /// file belongs in it (`<work_dir>/.mcp.json`).
 pub fn relocated_path(work_dir: &str) -> Option<PathBuf> {
-    relocated_dir(work_dir).map(|dir| dir.join(MCP_JSON))
+    let expanded = crate::backend::blockcontroller::core::expand_home_dir(work_dir);
+    shared::relocated_path_for(Path::new(&expanded))
 }
 
 /// Where this agent's MCP config is: in its working directory when AgentMux owns the folder,
 /// else under AgentMux's data root.
 pub fn config_path(work_dir: &str) -> PathBuf {
-    match relocated_path(work_dir) {
-        Some(path) => path,
-        None => {
-            let expanded = crate::backend::blockcontroller::core::expand_home_dir(work_dir);
-            Path::new(&expanded).join(MCP_JSON)
-        }
-    }
+    let expanded = crate::backend::blockcontroller::core::expand_home_dir(work_dir);
+    shared::config_path_for(Path::new(&expanded))
 }
 
 /// Write the relocated config `content` at `path`: parent folders created, the file `0600` on

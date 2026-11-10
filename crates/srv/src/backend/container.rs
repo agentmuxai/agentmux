@@ -70,7 +70,8 @@ pub const CONTAINER_WORKSPACE_DIR: &str = "/workspace";
 /// Where the folder holding an agent's MCP config is bind-mounted when it lives outside the
 /// working directory, so a container launch never has to write it into a user's project (#3680).
 /// The folder, not the file: a single-file bind would keep the old inode across an atomic rewrite.
-pub const CONTAINER_MCP_CONFIG_DIR: &str = "/home/agent/.agentmux/mcp";
+/// Shared with `agentmux-mcp doctor`, which looks for the config here inside a container.
+pub use agentmux_common::mcp_config_path::CONTAINER_MCP_CONFIG_DIR;
 
 /// Shared user-defined Docker bridge network every agent container is
 /// attached to, ADDITIVE to whatever `network_mode`/`extra_hosts` already

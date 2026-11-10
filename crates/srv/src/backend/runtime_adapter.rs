@@ -95,7 +95,8 @@ pub enum MountRole {
     /// The CLI's own config folder (`CLAUDE_CONFIG_DIR`).
     CliHome,
     /// The agent's MCP config when it lives outside its working directory (#3680). A container
-    /// gets it as a read-only file bind; the host uses the path as it is.
+    /// gets its folder as a read-only bind and reads the file inside it; the host uses the path
+    /// as it is.
     McpConfig,
 }
 
