@@ -27,6 +27,10 @@ import grokSvg from "@lobehub/icons-static-svg/icons/grok.svg?raw";
 import deepseekColorSvg from "@lobehub/icons-static-svg/icons/deepseek-color.svg?raw";
 import qwenColorSvg from "@lobehub/icons-static-svg/icons/qwen-color.svg?raw";
 import zhipuColorSvg from "@lobehub/icons-static-svg/icons/zhipu-color.svg?raw";
+import openrouterColorSvg from "@lobehub/icons-static-svg/icons/openrouter-color.svg?raw";
+import xaiSvg from "@lobehub/icons-static-svg/icons/xai.svg?raw";
+import ollamaSvg from "@lobehub/icons-static-svg/icons/ollama.svg?raw";
+import metaColorSvg from "@lobehub/icons-static-svg/icons/meta-color.svg?raw";
 import plandexUrl from "@/app/element/icons/plandex.png?url";
 import piUrl from "@/app/element/icons/pi.svg?url";
 import aiderUrl from "@/app/element/icons/aider.svg?url";
@@ -86,6 +90,13 @@ export const ProviderLogo = (props: ProviderLogoProps): JSX.Element => {
         if (p === "opencode") return { html: opencodeSvg };
         if (p === "goose") return { html: gooseSvg };
         if (p === "grok") return { html: grokSvg };
+        // Model vendors a route can resolve to (a Qwen Code agent on a route
+        // answers as "openrouter", not "qwen"). Mono marks (xAI, Ollama)
+        // inherit the theme's text color.
+        if (p === "openrouter") return { html: openrouterColorSvg };
+        if (p === "xai") return { html: xaiSvg };
+        if (p === "ollama") return { html: ollamaSvg };
+        if (p === "meta") return { html: metaColorSvg };
         const mark = MAKER_MARKS.get(p);
         if (mark) return { html: mark };
         // Plandex only: Pi (pi-coding-agent) is a different project, and
