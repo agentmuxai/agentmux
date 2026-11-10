@@ -199,6 +199,10 @@ export default defineConfig({
             input: {
                 index: "index.html",
             },
+            // Rolldown keeps `export const { a, b } = /* @__PURE__ */ f()` because reading a property of the
+            // result could run a getter. Shiki's `shiki/bundle/web` ends with exactly that, and keeping it keeps
+            // `bundledThemes`: every theme as its own chunk, none of them used. Rollup dropped it.
+            treeshake: { propertyReadSideEffects: false },
             output: {
                 // DISABLED: manualChunks creates static inter-chunk imports that
                 // caused loading issues in the old WebKitGTK host.
