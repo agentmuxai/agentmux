@@ -470,9 +470,8 @@ fn unregister_pane(block_id_wait: &str, agent_id: Option<&str>) {
     }
 
     // Also remove from cross-instance file registry and cloud subscriber, unless another live pane
-    // still answers to the name. An agent's own tool shell carries the agent's id, so its exit
-    // would otherwise unsubscribe the agent's running pane: its review and CI notices then expired
-    // undelivered for three hours (Agent2@narko, 2026-11-10) until its next input turn.
+    // still answers to the name. An agent's own tool shell carries the agent's id, so its exit must
+    // not unsubscribe the agent's running pane from cloud messages.
     if let Some(agent_id) = agent_id {
         let still_held = crate::backend::reactive::get_global_handler().has_live_name(agent_id);
         if drop_name_state_on_exit(still_held) {
