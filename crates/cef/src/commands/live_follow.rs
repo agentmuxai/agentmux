@@ -29,7 +29,7 @@ pub(crate) fn in_tear_zone(cursor_y: i32, tear_line_y: i32, over_other_window: b
 }
 
 #[cfg(target_os = "windows")]
-pub use win::{begin, end, landing, on_cursor, on_escape, on_session_end};
+pub use win::{begin, end, landing, on_cursor, on_escape, on_session_end, picture_shown};
 
 #[cfg(not(target_os = "windows"))]
 pub fn begin(_state: &Arc<AppState>, _args: &serde_json::Value) -> Result<serde_json::Value, String> {
@@ -51,6 +51,7 @@ pub async fn begin_blocking(state: &Arc<AppState>, args: &serde_json::Value) -> 
 
 #[cfg(target_os = "windows")]
 mod win {
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex};
 
     use windows_sys::Win32::Foundation::{GetLastError, ERROR_CLASS_ALREADY_EXISTS, HWND, LPARAM, LRESULT, POINT, SIZE, WPARAM};
@@ -99,6 +100,8 @@ mod win {
     }
 
     static FOLLOWER: Mutex<Option<Follower>> = Mutex::new(None);
+    /// Whether the picture is on screen, readable without the lock the hook thread holds on every move.
+    static PICTURE_SHOWN: AtomicBool = AtomicBool::new(false);
 
     fn wide(s: &str) -> Vec<u16> {
         s.encode_utf16().chain(std::iter::once(0)).collect()
@@ -192,6 +195,7 @@ mod win {
 
     fn end_now() {
         let taken = FOLLOWER.lock().ok().and_then(|mut g| g.take());
+        PICTURE_SHOWN.store(false, Ordering::Release);
         if let Some(f) = taken {
             unsafe { PostMessageW(f.hwnd as HWND, WM_FOLLOW_END, 0, 0) };
         }
@@ -206,6 +210,7 @@ mod win {
         if !super::in_tear_zone(y, f.tear_line_y, over_other_window) {
             if f.shown {
                 f.shown = false;
+                PICTURE_SHOWN.store(false, Ordering::Release);
                 unsafe {
                     SetWindowPos(
                         hwnd,
@@ -228,6 +233,7 @@ mod win {
             (HWND_TOP, SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS)
         };
         f.shown = true;
+        PICTURE_SHOWN.store(true, Ordering::Release);
         unsafe { SetWindowPos(hwnd, insert_after, px, py, 0, 0, flags) };
     }
 
@@ -242,6 +248,13 @@ mod win {
             }
             None => (ox, oy),
         }
+    }
+
+    /// Whether the window picture is on screen now. Asked from the drag's own thread on every cursor move, while
+    /// the hook thread holds the follower's lock on every move too, so it reads a flag instead: a contended lock
+    /// would answer no and bring the shell's picture back for a frame.
+    pub fn picture_shown() -> bool {
+        PICTURE_SHOWN.load(Ordering::Acquire)
     }
 
     /// Where the real window should open: the picture's last place, if the picture is on screen. Handed out
@@ -293,6 +306,7 @@ mod win {
                 if let Ok(mut g) = FOLLOWER.lock() {
                     if g.as_ref().is_some_and(|f| f.hwnd == hwnd as usize) {
                         *g = None;
+                        PICTURE_SHOWN.store(false, Ordering::Release);
                     }
                 }
             })
