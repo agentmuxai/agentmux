@@ -165,6 +165,7 @@ pub fn spawn_state_services(state: &AppState) {
     crate::server::browser_host_sync::spawn(state.clone());
     // Every agent's runtime state is looked at and each change published (`agentruntime:changed:<id>`).
     crate::server::agent_runtime::spawn(state.clone());
+    crate::server::registry_reconcile::spawn(state.clone());
     // Overlap notes (an agent editing a file another agent is also changing
     // is told who): the progress watcher's edits are checked from here on.
     backend::work_facts::overlap_notes::install(

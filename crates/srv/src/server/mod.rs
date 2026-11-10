@@ -54,6 +54,7 @@ pub(crate) mod agent_wanted_running;
 pub(crate) mod restart_resume;
 mod availability_view;
 pub(crate) mod agent_runtime;
+pub(crate) mod registry_reconcile;
 pub(crate) mod start_rate;
 pub(crate) mod jekt_cold;
 mod limit_probe;
