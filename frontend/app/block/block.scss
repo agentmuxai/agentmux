@@ -457,8 +457,8 @@
 // The header's one horizontal range (#29325, SPEC_PANE_HEADER_SCROLL_RANGE_2026_11_10.md):
 // the tab strip and its "+", the pane's inline header elements, the grip and the aux
 // controls scroll together; the window controls after it stay pinned. The content is
-// right-packed while it fits (margin-left: auto collapses when it overflows), so a wide
-// pane looks as it did and a thin one scrolls instead of shedding controls.
+// right-packed by a flexible spacer that collapses when it overflows, so a wide pane looks
+// as it did and a thin one scrolls instead of shedding controls.
 .block-frame-header-scroll {
     display: flex;
     flex: 1 1 auto;
@@ -478,7 +478,12 @@
     flex: 0 0 auto;
     align-items: center;
     gap: var(--space-2);
-    margin-left: auto;
+}
+
+// The free room between the tabs and the grip while the header fits; 0 once it overflows.
+.block-frame-header-spacer {
+    flex: 1 1 0;
+    min-width: 0;
 }
 
 // Inside the range the strip is a plain flex item: the range is the scroller now.

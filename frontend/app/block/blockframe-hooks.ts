@@ -213,7 +213,10 @@ export function useHeaderScrollRange(header: () => HTMLElement | undefined): {
         let frame = 0;
         let shown: HTMLElement | null = null;
         const revealIfSelectionChanged = () => {
-            const active = range?.querySelector<HTMLElement>(".pane-tab--active, .pane-tab--selected");
+            // The active tab wins over a multi-selected one that happens to come first in the DOM.
+            const active =
+                range?.querySelector<HTMLElement>(".pane-tab--active") ??
+                range?.querySelector<HTMLElement>(".pane-tab--selected");
             if (!active || active === shown) return;
             shown = active;
             active.scrollIntoView({ block: "nearest", inline: "nearest" });

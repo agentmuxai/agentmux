@@ -372,8 +372,12 @@ function AuxEndIcons(props: { viewModel: ViewModel; nodeModel: NodeModel }): JSX
     const closing = () => props.nodeModel.isClosing?.() ?? false;
     return (
         <Show when={!closing() && (buttons()?.length ?? 0) > 0}>
-            <For each={buttons()}>{(button) => <DeclIconButton decl={button} className="block-frame-end-extra" />}</For>
-            <div class="block-frame-btn-separator block-frame-end-extra" aria-hidden="true" />
+            {/* In the range now, so it no longer inherits .block-frame-end-icons' double-click
+                isolation: a double click on one of these must not magnify the pane. */}
+            <div style={{ display: "contents" }} onDblClick={(e) => e.stopPropagation()}>
+                <For each={buttons()}>{(button) => <DeclIconButton decl={button} className="block-frame-end-extra" />}</For>
+                <div class="block-frame-btn-separator block-frame-end-extra" aria-hidden="true" />
+            </div>
         </Show>
     );
 }
@@ -785,6 +789,9 @@ function BlockFrame_Header(
                     </div>
                 </Show>
             </div>
+            {/* Takes the free room while the header fits, so the tabs stay at the left
+                and the grip and aux controls at the right, as they always were. */}
+            <div class="block-frame-header-spacer" aria-hidden="true" />
             {/* The pane's grip, outside the scrolling tab strip, just left of
                 the pane controls. The header's whole-pane drag is vetoed for a
                 magnified or ephemeral pane (TileLayout.core.tsx canDrag); the
