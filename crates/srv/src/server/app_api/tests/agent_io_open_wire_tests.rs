@@ -63,6 +63,7 @@ fn agent_list_result_keeps_its_wire() {
             provider: "codex".into(),
             status: "init".into(),
             session_id: None,
+            route_cost_usd: None,
         }],
     };
     assert_eq!(
