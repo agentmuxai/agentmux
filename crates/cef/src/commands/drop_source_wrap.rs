@@ -185,6 +185,10 @@ unsafe fn drag_picture_windows(data: *mut c_void) -> Vec<(HWND, bool)> {
     found
 }
 
+/// How long after a pane drag starts the shell's picture stays cut while the pane's own picture is taken: the
+/// page waits 1500 ms for it (pane-live-follow.ts), so a drag with none by then has none coming.
+const PICTURE_GRACE: std::time::Duration = std::time::Duration::from_millis(2000);
+
 /// Whether a drag with the picture wanted gone found no picture window, logged once per drag.
 static NO_PICTURE_WINDOW_LOGGED: AtomicBool = AtomicBool::new(false);
 /// How many times this drag cut a picture window: every target process draws its own, and a target that
@@ -234,9 +238,11 @@ unsafe extern "system" fn wrapper_give_feedback(this: *mut c_void, effect: u32) 
     let wrapper = &*(this as *mut Wrapper);
     let inner = wrapper.inner;
     let answer = ((*(*inner).vtbl).give_feedback)(inner as *mut c_void, effect);
-    // A pane drag shows no shell picture at all, from its first move: the pane's own picture follows instead,
-    // and until it is up (it is being taken) the drag shows nothing rather than the shell's ghost for a frame.
-    let picture_wanted_gone = super::live_follow::picture_shown() || super::tear_off_hook::pane_drag_active();
+    // A pane drag shows no shell picture from its first move: the pane's own picture follows instead, and while
+    // it is being taken the drag shows nothing rather than the shell's ghost for a frame. If no picture has come
+    // by PICTURE_GRACE (none could be taken, or the host refused it), the shell's ghost is the fallback again.
+    let picture_wanted_gone = super::live_follow::picture_shown()
+        || super::tear_off_hook::pane_drag_age().is_some_and(|age| age < PICTURE_GRACE);
     set_shell_drag_image_visible(wrapper.data, !picture_wanted_gone);
     if wants_arrow(effect, super::tear_off_hook::hook_session_active()) {
         SetCursor(LoadCursorW(std::ptr::null_mut(), IDC_ARROW));

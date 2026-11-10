@@ -97,15 +97,32 @@ pub fn hook_session_active() -> bool {
     ACTIVE_HOOK_THREAD.lock().map(|g| g.is_some()).unwrap_or(false)
 }
 
-/// Whether the running session is a pane drag with the live-follow picture (`HookMode::PaneDrag`). Set with
-/// the session slot and cleared with it. A flag, not the mutex: the drop source asks on every cursor move.
+/// When the running pane drag session (`HookMode::PaneDrag`, the one with the live-follow picture) started, on
+/// `PANE_DRAG_CLOCK`, in ms; 0 when none runs. Set with the session slot and cleared with it. An atomic, not the
+/// mutex: the drop source asks on every cursor move.
 #[cfg(target_os = "windows")]
-static ACTIVE_PANE_DRAG: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static PANE_DRAG_SINCE_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+#[cfg(target_os = "windows")]
+static PANE_DRAG_CLOCK: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
 
-/// Whether a pane drag whose picture follows the cursor is running now, whether or not the picture is up yet.
+/// Now on the pane drag clock, never 0 (0 means no session).
 #[cfg(target_os = "windows")]
-pub fn pane_drag_active() -> bool {
-    ACTIVE_PANE_DRAG.load(std::sync::atomic::Ordering::Acquire)
+fn pane_drag_clock_ms() -> u64 {
+    PANE_DRAG_CLOCK.get_or_init(std::time::Instant::now).elapsed().as_millis() as u64 + 1
+}
+
+#[cfg(target_os = "windows")]
+fn set_pane_drag_running(running: bool) {
+    let since = if running { pane_drag_clock_ms() } else { 0 };
+    PANE_DRAG_SINCE_MS.store(since, std::sync::atomic::Ordering::Release);
+}
+
+/// How long a pane drag whose picture follows the cursor has been running, whether or not the picture is up
+/// yet; None when none runs.
+#[cfg(target_os = "windows")]
+pub fn pane_drag_age() -> Option<std::time::Duration> {
+    let since = PANE_DRAG_SINCE_MS.load(std::sync::atomic::Ordering::Acquire);
+    (since != 0).then(|| std::time::Duration::from_millis(pane_drag_clock_ms().saturating_sub(since)))
 }
 
 /// Stop the active hook session, if any. Idempotent. Used by the
@@ -115,7 +132,7 @@ pub fn pane_drag_active() -> bool {
 #[cfg(target_os = "windows")]
 pub fn stop_active_hook_session() {
     let tid = { ACTIVE_HOOK_THREAD.lock().map(|mut g| g.take()).unwrap_or(None) };
-    ACTIVE_PANE_DRAG.store(false, std::sync::atomic::Ordering::Release);
+    set_pane_drag_running(false);
     if let Some(tid) = tid {
         unsafe {
             use windows_sys::Win32::UI::WindowsAndMessaging::{PostThreadMessageW, WM_QUIT};
@@ -239,7 +256,7 @@ struct HookContextSeed {
 fn register_session(my_tid: u32, pane_drag: bool) {
     if let Ok(mut g) = ACTIVE_HOOK_THREAD.lock() {
         *g = Some(my_tid);
-        ACTIVE_PANE_DRAG.store(pane_drag, std::sync::atomic::Ordering::Release);
+        set_pane_drag_running(pane_drag);
     }
 }
 
@@ -250,7 +267,7 @@ fn vacate_session(my_tid: u32) {
     if let Ok(mut g) = ACTIVE_HOOK_THREAD.lock() {
         if *g == Some(my_tid) {
             *g = None;
-            ACTIVE_PANE_DRAG.store(false, std::sync::atomic::Ordering::Release);
+            set_pane_drag_running(false);
         }
     }
 }
