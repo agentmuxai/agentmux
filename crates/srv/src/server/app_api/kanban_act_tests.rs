@@ -398,7 +398,7 @@ async fn track_follows_a_running_agents_work_as_a_task_it_holds() {
     let res = act(&state, json!({"action": "track", "block_id": block, "title": "  The thing  it does "})).await.unwrap();
     assert_eq!(res["ok"], true);
     let num = res["num"].as_i64().unwrap();
-    let board = list(&state).await.unwrap();
+    let board = list(&state, &Value::Null).await.unwrap();
     let t = board["tasks"].as_array().unwrap().iter().find(|t| t["card"]["num"] == num).cloned().expect("on the board");
     assert_eq!(t["title"], "The thing  it does", "trimmed, not collapsed");
     assert_eq!((t["state"].as_str(), t["claimed_by"].as_str(), t["target_agent"].as_str()), (Some("claimed"), Some(name.as_str()), Some(name.as_str())));

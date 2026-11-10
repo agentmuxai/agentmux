@@ -208,6 +208,8 @@ pub(crate) fn task_row(t: &crate::backend::storage::work_board::BoardTask) -> Va
     let done = t.card.checklist.iter().filter(|i| i.status == "completed").count();
     json!({
         "num": t.card.num,
+        "ref": t.card.name(),
+        "board": t.card.board,
         "title": t.item.title,
         "state": t.item.state,
         "agent": agent,

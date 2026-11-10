@@ -227,10 +227,9 @@ pub(crate) fn toast_body(ep: &Episode) -> String {
     }
 }
 
-/// "#163", "#163 and #140", "#1, #2 and #3".
-fn task_list(numbers: &[i64]) -> String {
-    let tags: Vec<String> = numbers.iter().map(|n| format!("#{n}")).collect();
-    match tags.as_slice() {
+/// "#163", "#163 and work#2", "#1, #2 and #3".
+fn task_list(refs: &[String]) -> String {
+    match refs {
         [] => String::new(),
         [one] => one.clone(),
         [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
@@ -240,10 +239,10 @@ fn task_list(numbers: &[i64]) -> String {
 /// The body of the note a task's requester gets about its blocked agents
 /// (spec §6.2): "Naki-2 is out of quota until Sun 7:00 PM and holds #163. …".
 /// `mod.rs` quotes it into an `[AgentMux]` note.
-pub(crate) fn leader_note(items: &[(&BlockedPane, &[i64])]) -> String {
+pub(crate) fn leader_note(items: &[(&BlockedPane, &[String])]) -> String {
     let clauses: Vec<String> = items
         .iter()
-        .map(|(pane, numbers)| {
+        .map(|(pane, refs)| {
             let why = match pane.state {
                 AgentState::SignedOut => "needs the user to sign in again".to_string(),
                 _ => match pane.resets_at_ms.and_then(until_label) {
@@ -251,7 +250,7 @@ pub(crate) fn leader_note(items: &[(&BlockedPane, &[i64])]) -> String {
                     None => "is out of quota".to_string(),
                 },
             };
-            format!("{} {why} and holds {}", pane.agent_name, task_list(numbers))
+            format!("{} {why} and holds {}", pane.agent_name, task_list(refs))
         })
         .collect();
     // Until step 2c holds messages to an unavailable agent (#1849), one sent

@@ -144,6 +144,18 @@
             "method": "SensitiveDecideCommand"
         },
         {
+            "command": "agent.notice.decide",
+            "method": "AgentNoticeDecideCommand"
+        },
+        {
+            "command": "agent.notice.setgrant",
+            "method": "AgentNoticeSetGrantCommand"
+        },
+        {
+            "command": "agent.notice.grants",
+            "method": "AgentNoticeGrantsCommand"
+        },
+        {
             "command": "agentstop",
             "method": "AgentStopCommand"
         },

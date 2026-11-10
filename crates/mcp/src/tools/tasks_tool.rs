@@ -35,6 +35,15 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "retry", tool: "WorkRetry", rename: &[] },
     Act { action: "take_back", tool: "WorkTakeBack", rename: &[] },
     Act { action: "reassign", tool: "WorkReassign", rename: &[] },
+    // Several boards (SPEC_SHARED_KANBAN_ACROSS_MACHINES_2026_11_01.md §9).
+    Act { action: "boards", tool: "WorkBoards", rename: &[] },
+    Act { action: "board_create", tool: "WorkBoardCreate", rename: &[] },
+    Act { action: "board_edit", tool: "WorkBoardEdit", rename: &[] },
+    Act { action: "board_archive", tool: "WorkBoardArchive", rename: &[] },
+    Act { action: "board_unarchive", tool: "WorkBoardUnarchive", rename: &[] },
+    Act { action: "board_default", tool: "WorkBoardDefault", rename: &[] },
+    Act { action: "board_delete", tool: "WorkBoardDelete", rename: &[] },
+    Act { action: "board_cancel_delete", tool: "WorkBoardCancelDelete", rename: &[] },
 ];
 
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
@@ -57,7 +66,7 @@ fn str_arg(args: &Value, key: &str) -> Option<String> {
 
 /// Fields of `enqueue` that travel to another machine's board. Not `target_group` (a group is local),
 /// not `for: "me"` (this agent has no backlog there), and never a filer: srv names the agent itself.
-const ENQUEUE_FIELDS: &[&str] = &["title", "payload", "kind", "target_agent", "priority", "max_attempts", "not_before", "repo", "hold", "review", "after", "first", "ui_change"];
+const ENQUEUE_FIELDS: &[&str] = &["title", "payload", "kind", "target_agent", "priority", "max_attempts", "not_before", "repo", "hold", "review", "after", "first", "ui_change", "board"];
 
 /// `enqueue` and `list` with a `host`: this agent's request to that machine's board.
 async fn remote(host: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
@@ -101,7 +110,7 @@ fn enqueue_params(arguments: &Value) -> Result<Value> {
 
 fn list_params(arguments: &Value) -> Value {
     let mut params = serde_json::Map::new();
-    for key in ["state", "limit"] {
+    for key in ["state", "limit", "board"] {
         if let Some(v) = arguments.get(key).filter(|v| !v.is_null()) {
             params.insert(key.to_string(), v.clone());
         }

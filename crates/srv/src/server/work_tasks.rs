@@ -44,7 +44,8 @@ const MAX_CHECKLIST: usize = 50;
 pub(super) fn resolve_id(state: &AppState, id: &str) -> String {
     let trimmed = id.trim();
     let looks_numeric = trimmed.trim_start_matches('#').chars().all(|c| c.is_ascii_digit()) && !trimmed.is_empty();
-    if looks_numeric {
+    // `12`, `#12` (the default board's) or `work#12`.
+    if looks_numeric || crate::backend::storage::work_boards::parse_ref(trimmed).is_some() {
         if let Ok(Some(t)) = state.work_store.work_board_get(trimmed) {
             return t.item.id;
         }
@@ -163,6 +164,8 @@ async fn repo_of(state: &AppState, reg: Option<&AgentRegistration>) -> (String, 
 
 /// What an enqueue adds for the board: who asked, the repository.
 pub(super) struct Filing {
+    /// The id of the board it is filed on; empty means the default board.
+    pub board: String,
     pub repo: Option<String>,
     pub review: Option<bool>,
 }
@@ -181,6 +184,7 @@ pub(super) async fn prepare_card(state: &AppState, caller: Option<&Caller>, crea
     };
     let filer = reg.as_ref().map(|r| r.agent_id.clone()).unwrap_or_else(|| created_by.to_string());
     NewCard {
+        board: f.board,
         repo,
         branch: String::new(),
         // What the operator asked for needs the operator's eyes; a handoff
@@ -197,6 +201,7 @@ pub(super) async fn prepare_card(state: &AppState, caller: Option<&Caller>, crea
 /// the operator, so it is not held for an Accept unless the request says so.
 pub(super) fn remote_card(actor: &str, f: Filing) -> NewCard {
     NewCard {
+        board: f.board,
         repo: f.repo.map(|r| r.trim().to_string()).unwrap_or_default(),
         branch: String::new(),
         review_required: f.review.unwrap_or(false),
@@ -245,6 +250,8 @@ pub(super) fn task_brief(t: &BoardTask) -> Value {
     json!({
         "id": t.item.id,
         "num": t.card.num,
+        "ref": t.card.task_ref,
+        "board": t.card.board,
         "title": t.item.title,
         "requested_by": t.card.requested_by,
         "requested_by_kind": t.card.requested_by_kind,
@@ -551,9 +558,55 @@ pub(super) struct HoldRequest {
 /// A task as an agent's answer names it: `#12`, else its id.
 fn name_of(state: &AppState, id: &str) -> String {
     match state.work_store.work_card_ensure(id, now_ms()) {
-        Ok(n) => format!("#{n}"),
+        Ok(n) => ref_of(state, id).map(|(r, _)| r).unwrap_or_else(|| format!("#{n}")),
         Err(_) => id.to_string(),
     }
+}
+
+/// How a task is written (`#12` on the default board, else `work#12`) and its board's slug.
+pub(super) fn ref_of(state: &AppState, work_id: &str) -> Option<(String, String)> {
+    let (board, num) = state.work_store.work_task_board(work_id).ok().flatten()?;
+    Some((board.task_ref(num), board.slug))
+}
+
+/// The agent a call comes from, by its token, for which boards it sees: its id and UID. `None`
+/// when the call carries no token, which sees every board.
+pub(super) fn viewer(state: &AppState, caller: Option<&Caller>) -> Option<(String, String)> {
+    let reg = caller_reg(state, caller)?;
+    Some((reg.agent_id.clone(), reg.uid.clone().unwrap_or_default()))
+}
+
+/// Whether the caller may see the board a task is on (a call with no token sees every board). A task
+/// on a board whose agent list leaves the caller out is refused like one that doesn't exist.
+pub(super) fn sees_task(state: &AppState, caller: Option<&Caller>, work_id: &str) -> bool {
+    let Some((id, uid)) = viewer(state, caller) else { return true };
+    match state.work_store.work_task_board(work_id) {
+        Ok(Some((board, _))) => board.visible_to(&id, &uid),
+        _ => true,
+    }
+}
+
+/// The board a call names (none: the default board), if the caller sees it. A board it can't see is
+/// refused like one that doesn't exist; `filing` also refuses an archived board, which takes no new
+/// tasks.
+pub(super) fn pick_board(
+    state: &AppState,
+    key: Option<&str>,
+    who: Option<(&str, &str)>,
+    filing: bool,
+) -> Result<crate::backend::storage::work_boards::Board, String> {
+    let key = key.map(str::trim).filter(|k| !k.is_empty());
+    let board = state.work_store.work_board_resolve(key, now_ms()).map_err(|e| e.to_string())?;
+    if who.is_some_and(|(id, uid)| !board.visible_to(id, uid)) {
+        return Err(match key {
+            Some(k) => format!("no board named \"{k}\""),
+            None => format!("the default board ({}) isn't open to you; name a board", board.slug),
+        });
+    }
+    if filing && board.archived {
+        return Err(format!("board {} is archived and takes no new tasks; unarchive it first", board.slug));
+    }
+    Ok(board)
 }
 
 /// Who a waiting task is for, as an answer says it.
@@ -614,6 +667,9 @@ pub(super) async fn handle_work_hold(
     let Ok(Some(item)) = state.work_store.work_queue_get(&id) else {
         return (StatusCode::NOT_FOUND, Json(json!({ "error": format!("no task {id}") })));
     };
+    if !sees_task(&state, caller, &id) {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": format!("no task {id}") })));
+    }
     let reason = clean(&req.reason);
     if let Some(r) = sensitive_reason(&reason) {
         return r;
@@ -663,6 +719,7 @@ pub(super) async fn handle_work_hold(
 pub(super) async fn handle_work_unhold(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    caller: Option<axum::Extension<Caller>>,
     Json(req): Json<HoldRequest>,
 ) -> (StatusCode, Json<Value>) {
     if req.agent_id.trim().is_empty() {
@@ -672,6 +729,9 @@ pub(super) async fn handle_work_unhold(
     let Ok(Some(item)) = state.work_store.work_queue_get(&id) else {
         return (StatusCode::NOT_FOUND, Json(json!({ "error": format!("no task {id}") })));
     };
+    if !sees_task(&state, caller.as_deref(), &id) {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": format!("no task {id}") })));
+    }
     let reason = clean(&req.reason);
     if let Some(r) = sensitive_reason(&reason) {
         return r;
@@ -719,7 +779,7 @@ pub(super) fn why_not_claimed(state: &AppState, id: &str, filter: &ClaimFilter, 
         return format!("{name} is not of kind {kind}");
     }
     if let Some(after) = state.work_store.work_deps_of(id).unwrap_or_default().into_iter().find(|a| !a.finished()) {
-        return format!("{name} starts after #{} \"{}\", which is {}", after.num, after.title, after.state);
+        return format!("{name} starts after {} \"{}\", which is {}", after.label(), after.title, after.state);
     }
     if item.attempts >= item.max_attempts {
         return format!("{name} has used all {} of its attempts", item.max_attempts);

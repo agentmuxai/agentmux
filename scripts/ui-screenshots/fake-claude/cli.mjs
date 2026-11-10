@@ -42,8 +42,17 @@ import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 
-const VERSION = "2.1.288";
+// The installer writes the version it installed (srv's pin) beside this
+// script; the fallback is only for running the copy out of the repo.
 const here = dirname(fileURLToPath(import.meta.url));
+const VERSION = (() => {
+    try {
+        const pinned = readFileSync(join(here, ".version"), "utf8").trim();
+        if (pinned) return pinned;
+    } catch {}
+    return "2.1.321";
+})();
+
 const args = process.argv.slice(2);
 
 function loadScript() {

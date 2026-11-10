@@ -9,7 +9,7 @@ const settings: Record<string, unknown> = {};
 vi.mock("@/app/store/global", () => ({ getSettingsKeyAtom: (key: string) => () => settings[key] }));
 
 import type { PlayedSound } from "@/app/notification/sound/sound-history";
-import { lastSoundLine, litRowId, rowOf, soundFor, soundIsOn } from "./audit-sound";
+import { encodeSoundRef, kindOfSound, lastSound, lastSoundLine, litRowId, parseSoundRef, rowOf, soundFor, soundIsOn, soundText } from "./audit-sound";
 
 const pane = (block_id: string) => ({ pane: { block_id } });
 function entry(over: Partial<AuditEntry>): AuditEntry {
@@ -77,5 +77,29 @@ describe("the row a sound came from", () => {
         expect(lastSoundLine(rows, [played({})], 14_100)).toEqual({ text: "♪ korp · Bash · 4s ago", blockId: "blk-korp" });
         expect(lastSoundLine(rows, [played({})], 10_100 + 60_001)).toBeNull();
         expect(lastSoundLine(rows, [], 10_000)).toBeNull();
+    });
+});
+
+describe("the last sound, for the status bar and the Audit's bar", () => {
+    it("is the newest sound for a minute, and says who when it is known", () => {
+        expect(lastSound([played({ at: 1_000 }), played({ at: 5_000 })], 6_000)?.at).toBe(5_000);
+        expect(lastSound([played({ at: 5_000 })], 5_000 + 60_001)).toBeUndefined();
+        expect(lastSound([], 5_000)).toBeUndefined();
+        expect(soundText(played({ at: 10_000 }), "korp", 14_000)).toBe("♪ korp · Bash · 4s ago");
+        expect(soundText(played({ at: 10_000, event: "agent.turn.complete", tool: undefined }), undefined, 14_000)).toBe("♪ Agent turn completed · 4s ago");
+    });
+
+    it("names the kind of row a sound comes from, so the Audit can show that kind", () => {
+        expect(kindOfSound("tool")).toBe("tool");
+        expect(kindOfSound("agent.turn.complete")).toBe("turn");
+        expect(kindOfSound("agent.turn.error")).toBe("turn");
+        expect(kindOfSound("agent.message.accepted")).toBe("jekt");
+        expect(kindOfSound("agent.message.rejected")).toBe("jekt");
+    });
+
+    it("travels in the pane's meta and comes back the same, and a malformed one is none", () => {
+        const sound = played({ at: 123_456 });
+        expect(parseSoundRef(encodeSoundRef(sound, 99))).toEqual({ blockId: "blk-korp", event: "tool", at: 123_456, asked: 99 });
+        for (const raw of [undefined, 7, "", "blk|tool", "|tool|1|2", "blk|tool|x|2"]) expect(parseSoundRef(raw)).toBeUndefined();
     });
 });

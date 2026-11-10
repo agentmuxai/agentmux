@@ -74,6 +74,48 @@ async fn a_veto_in_the_window_stops_it_and_runs_nothing() {
     assert_eq!(ran.load(Ordering::SeqCst), 0, "a vetoed operation never runs");
 }
 
+/// A row of `state.reactive_handler`'s audit log for `request_id`, if the countdown's run wrote one.
+fn audit_row_for(state: &AppState, request_id: &str) -> crate::backend::reactive::types::AuditLogEntry {
+    state.reactive_handler.get_audit_log(200).into_iter().find(|e| e.request_id == request_id).expect("an audit row for the run")
+}
+
+#[tokio::test]
+async fn an_op_with_prompt_answer_and_level_facts_carries_them_into_the_audit_row() {
+    let state = test_state();
+    register_runner("os_prompt_answer", counting_runner(&Arc::new(AtomicUsize::new(0)), Ok(())));
+    let id = approved(
+        "os_prompt_answer",
+        &[
+            ("agent", "manoz"),
+            ("app", "Browser"),
+            ("window", "pane-1"),
+            ("prompt", "example.test wants to use the camera"),
+            ("answer", "allow the camera for example.test for 30 minutes"),
+            ("level", "medium"),
+            ("reason", "the page asked while the agent was driving this pane"),
+        ],
+    );
+    open(&state, &id, Duration::from_millis(30)).unwrap();
+    settled(&id).await;
+    let row = audit_row_for(&state, &id);
+    assert!(row.prompt.as_deref().unwrap().contains("wants to use the camera"));
+    assert!(row.answer.as_deref().unwrap().contains("allow the camera"));
+    assert!(row.level.as_deref().unwrap().contains("medium"), "{:?}", row.level);
+    assert_eq!(row.standing, Some(false), "a fresh countdown ran, not a remembered grant");
+}
+
+#[tokio::test]
+async fn an_op_with_no_prompt_answer_or_level_facts_carries_none_of_the_three() {
+    let state = test_state();
+    register_runner("tower_pair", counting_runner(&Arc::new(AtomicUsize::new(0)), Ok(())));
+    let id = approved("tower_pair", &[("device", "phone")]);
+    open(&state, &id, Duration::from_millis(30)).unwrap();
+    settled(&id).await;
+    let row = audit_row_for(&state, &id);
+    assert_eq!((row.prompt, row.answer, row.level), (None, None, None));
+    assert_eq!(row.standing, Some(false));
+}
+
 #[tokio::test]
 async fn approving_now_skips_the_wait() {
     let state = test_state();

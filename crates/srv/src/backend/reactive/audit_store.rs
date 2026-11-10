@@ -172,6 +172,10 @@ mod tests {
             tier: None,
             trust: None,
             msg_id: None,
+            prompt: None,
+            answer: None,
+            level: None,
+            standing: None,
         }
     }
 

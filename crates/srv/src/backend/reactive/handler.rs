@@ -7,7 +7,7 @@ use std::sync::{Mutex, OnceLock};
 
 use super::sanitize::{format_injected_message, is_sensitive_message, sanitize_message, validate_agent_id, wrap_jekt_message_with_files};
 use super::types::*;
-use super::{audit_hash, now_unix_millis, AUDIT_LOG_MAX, RATE_LIMIT_MAX};
+use super::{now_unix_millis, AUDIT_LOG_MAX, RATE_LIMIT_MAX};
 
 pub(super) use super::rate_limiter::RateLimiter;
 
@@ -83,19 +83,19 @@ pub struct Handler {
     /// (`InjectionRequest::audit_source_uid`), copied onto every audit entry
     /// it writes. Set and restored around one `inject_message_inner` call,
     /// under this handler's mutex, so no other delivery can see it.
-    delivery_source_uid: String,
+    pub(super) delivery_source_uid: String,
     /// The WAN verdict of the delivery in flight (W3-S audit), copied onto
     /// its audit entries. Same set-and-restore discipline as
     /// `delivery_source_uid`.
-    delivery_wan: Option<super::types::WanAudit>,
+    pub(super) delivery_wan: Option<super::types::WanAudit>,
     /// The LAN-claimed UID of the delivery in flight (identity M4d-6), same
     /// set-and-restore discipline.
-    delivery_lan_claimed_uid: String,
+    pub(super) delivery_lan_claimed_uid: String,
     /// Whether the delivery in flight started a turn or joined one (`started` / `joined`); the
     /// next entry `log_audit` writes takes it.
-    delivery_turn: Option<&'static str>,
+    pub(super) delivery_turn: Option<&'static str>,
     /// The tier and trust label of the delivery in flight (`sanitize::delivery_how`); set and restored like `delivery_wan`.
-    delivery_how: Option<(String, String)>,
+    pub(super) delivery_how: Option<(String, String)>,
     rate_limiter: RateLimiter,
     include_source_in_message: bool,
 }
@@ -883,7 +883,7 @@ impl Handler {
         let wrapped = wrap_jekt_message_with_files(
             &super::sanitize::with_wan_pin_note(&sanitized, delivery_tier, &req),
             req.source_agent.as_deref(),
-            &req.target_agent,
+            req.marker_target.as_deref().unwrap_or(&req.target_agent),
             effective_tier,
             delivery_tier,
             req.sig_verified,
@@ -1006,33 +1006,10 @@ impl Handler {
         outcome: Option<&str>,
         reason: Option<&str>,
     ) {
-        let entry = AuditLogEntry {
-            timestamp: now_unix_millis(),
-            source_agent: source_agent.map(|s| s.to_string()),
-            target_agent: target_agent.to_string(),
-            block_id: block_id.to_string(),
-            message_hash: audit_hash(message),
-            message_length: message.len(),
-            success,
-            error_message: error_message.map(|s| s.to_string()),
-            request_id: request_id.to_string(),
-            outcome: outcome.map(|s| s.to_string()),
-            reason: reason.map(|s| s.to_string()),
-            event_kind: "delivery".to_string(),
-            evicted_block: None,
-            evicted_agent: None,
-            audit_source_uid: self.delivery_source_uid.clone(),
-            lan_claimed_uid: self.delivery_lan_claimed_uid.clone(),
-            wan: self.delivery_wan.clone(),
-            cli_native: None,
-            turn: self.delivery_turn.take().map(str::to_string),
-            tier: self.delivery_how.as_ref().map(|(tier, _)| tier.clone()),
-            trust: self.delivery_how.as_ref().map(|(_, trust)| trust.clone()),
-            msg_id: Some(request_id.to_string()).filter(|id| !id.is_empty()),
-            ..Default::default()
-        };
-
-        super::audit_store::push(&mut self.audit_log, AUDIT_LOG_MAX, entry);
+        self.log_audit_full(
+            source_agent, target_agent, block_id, message, success, error_message, request_id, outcome, reason, None, None,
+            None, None,
+        );
     }
 
     /// Record a registration/eviction event in the audit log — the

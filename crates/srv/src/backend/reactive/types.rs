@@ -36,6 +36,14 @@ impl std::fmt::Display for JektTier {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct InjectionRequest {
     pub target_agent: String,
+    /// The name the sender addressed, when the delivery itself is addressed
+    /// by UID (a replayed held jekt, or a target registered under another of
+    /// its names): the marker's `TO=` says the name, as a live delivery's
+    /// does, never the UID (#31433). Server-set only: `skip` keeps it out of
+    /// both directions, so no request body can name the marker's target and
+    /// it never travels (the receiving end renders its own).
+    #[serde(skip)]
+    pub marker_target: Option<String>,
     pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_agent: Option<String>,
@@ -447,6 +455,18 @@ impl InjectionRequest {
             self.target_agent = super::sanitize::route_name(&self.target_agent).unwrap_or_default();
         }
     }
+
+    /// The same request addressed by `uid`, with the name the sender wrote
+    /// kept for the marker's `TO=`: a replay routes by UID but is named, the
+    /// way a live delivery is (#31433).
+    pub fn addressed_by_uid(&self, uid: &str) -> Self {
+        let seen = if self.is_signed() {
+            Some(self.target_agent.clone())
+        } else {
+            super::sanitize::route_name(&self.target_agent)
+        };
+        Self { target_agent: uid.to_string(), marker_target: seen, ..self.clone() }
+    }
 }
 
 /// Response from a message injection attempt.
@@ -704,6 +724,22 @@ pub struct AuditLogEntry {
     /// and the receiver's row of one message carry the same one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub msg_id: Option<String>,
+    /// The dialog's text as read, for a sensitive-op entry whose facts have one
+    /// (`os_prompt_answer`). Absent for every other entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
+    /// The exact value given, for a sensitive-op entry whose facts have one. Typed text is never
+    /// recorded, only a path or a button label, and never a password or other secret field
+    /// (the guard refuses those before a request is ever filed).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answer: Option<String>,
+    /// The op's risk level (`low`, `medium`, `high`), for a sensitive-op entry whose facts have one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub level: Option<String>,
+    /// `true` when a remembered grant allowed it, with no fresh countdown; `false` when a countdown
+    /// ran; absent for every entry that isn't a sensitive-op decision.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub standing: Option<bool>,
 }
 
 /// An entry that says nothing: a successful delivery attempt with no names, hash or id. A constructor names what it sets.
@@ -735,6 +771,10 @@ impl Default for AuditLogEntry {
             tier: None,
             trust: None,
             msg_id: None,
+            prompt: None,
+            answer: None,
+            level: None,
+            standing: None,
         }
     }
 }
@@ -955,5 +995,35 @@ mod app_api_manifest_contract_tests {
             missing.is_empty(),
             "app-api-manifest.json's agent.send.requestFields names field(s) InjectionRequest doesn't have: {missing:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod uid_addressing_tests {
+    use super::*;
+
+    /// #31433: a delivery that goes to the UID still names the agent in the
+    /// marker, routed exactly as the target itself would be.
+    #[test]
+    fn addressing_a_request_by_uid_keeps_the_name_the_sender_wrote() {
+        let mut req = InjectionRequest { target_agent: "Loap #3".to_string(), ..Default::default() };
+
+        let routed = req.addressed_by_uid("uid-1");
+        assert_eq!(routed.target_agent, "uid-1", "the delivery goes to the UID");
+        assert_eq!(routed.marker_target.as_deref(), Some("Loap-3"), "an unsigned target is routed, as a live delivery's is");
+
+        req.jekt_sig = Some("sig".to_string());
+        let signed = req.addressed_by_uid("uid-2");
+        assert_eq!(signed.marker_target.as_deref(), Some("Loap #3"), "a signed target is kept as the sender wrote it");
+    }
+
+    /// The marker's target is srv's to set: a request body naming it is
+    /// ignored, so a sender cannot make the marker advertise another agent.
+    #[test]
+    fn a_request_body_cannot_name_the_markers_target() {
+        let body = r#"{"target_agent":"agent1","message":"hi","marker_target":"someone-else"}"#;
+        let req: InjectionRequest = serde_json::from_str(body).expect("a valid body");
+        assert_eq!(req.marker_target, None, "the field is server-set only");
+        assert_eq!(req.target_agent, "agent1");
     }
 }

@@ -1,5 +1,49 @@
 # AgentMux Version History
 
+## 0.60.22 — 2026-11-09
+
+- An agent with the Enter and Space power on a granted site can press Enter and Space in a browser pane, taken as the click they are: a form's default button, a button, a link or a checkbox, checked like any click
+- Browser panes follow the person's keybindings: a key bound in Settings is forwarded out of a focused browser pane, and one unbound goes back to the page
+- The agent pane has a top band: a row across its top that lays out what is registered with it by priority, and the find bar is its first item
+- Split scrubOrphanedInProgress into per-node-kind handlers
+- Add SysinfoViewInner tests ahead of the function split
+- Grok Build and Muse Code are OAuth-class: an account each, signed in through a credential-file check, with existing agents' shared login carried over to an account; an agent that runs only on XAI_API_KEY or META_API_KEY signs in once with grok login or muse login
+- Split SysinfoViewInner into chart-samples, grid-layout, grid and table parts
+- The locate flash now also plays when a pane is shown without taking focus (a file opened into an Editor already open, a dropped document tab that is already there) and when pane history lands on a pane
+- The agent pane's CPU and memory readout is an item of its top band: it no longer sits over the find bar or the Messages panel's close button, and it shrinks to an icon and the CPU figure when the band is tight
+- The agent transcript keeps 600 px of rows rendered past each edge of the viewport, so a viewport that grows when a message is sent no longer shows an empty gap at the top
+- A pane's reveal bound firing logs a warning, not an error: restarts no longer record ~8 'Forcing reveal' errors in the host log
+- The composer's model panel lists the models of every route that serves the agent's harness beside its own, with context, price and what each does; picking one switches the agent in place, and Back returns to where it was
+- The Messages panel opens from a button in the agent pane's header at every width, and the vertical Jekt Messages bar is gone
+- Agent pane: the session title no longer stays on an old topic in long multi-topic sessions: it is judged afresh after about nine messages or two hours, sees the session's recent activity, and the agent's own fresh status line shows in the pane first
+- CI: only Codex P0/P1 findings fail the Codex review check; a round whose findings are all P2/P3 passes (muxreview lists them as follow-ups)
+- fix(identity): an empty identity_id is a normal launch state, not a credential warning
+- srv: held and deferred jekts honour the sender's expiry, so stale notices are dropped instead of delivered late
+- launcher: a host killed after a long run is no longer counted as a repeat crash, so it stops silently degrading to --disable-gpu
+- The landing screenshot script opens its Files pane and terminal in the new tab, so the workspace shot is taken again
+- The agent pane's header icon shows the harness as the main icon and the model actually answering as its badge, and the badge follows a model switched in place
+- DeepSeek Harness: its AgentMux tools get the agent's AgentMux environment (they all failed without the auth key), a session is taken back with session/resume, the pin moves to 0.2.2-rc.1 (Node 24.9 or later), and an agent with no AgentMux key is told to ask instead of search
+- Startup: the launcher and the CEF host share one wait for srv's ready line and one srv binary lookup
+- Startup: the splash self-test plays its fake stages from one place
+- DeepSeek Harness agents: git works in their shells again (git config is handed over as GIT_CONFIG_PARAMETERS, which the agent's variable scrub leaves alone), so gh-agent finds its account
+- Agents on a model route show their real model in the peer list of an agent's opening message (for example 'claude, DeepSeek V4.1 Flash via OpenRouter') instead of the harness's blurb
+- An agent pane restored at startup sends its CLI lookup at once instead of after two other lookups, so a restart with many agents settles sooner
+- install.ps1: one command installs AgentMux on Windows from PowerShell (winget, or a checked download of the installer), with tests that run on Windows in CI
+- The status bar names the last sound an agent made ("♪ agent · Bash · 4s ago") for a minute, and a click opens the Audit at the row it came from
+- srv: drop an already-expired inject before the cloud relay, and keep note invalidations that land while a message waits
+- An agent starting an agent (or using an SSH host or a Google connector that asks first) now tells you in its own pane, with a 30 second countdown that goes ahead on its own and Stop it, Start now and Always allow, instead of opening an approval window; Settings > Agents has Agents may start agents
+- panes: at ~318 px the agent picker keeps a readable name (badges wrap) and a lone tab shrinks with an ellipsis instead of scrolling
+- Agent pane: the composer strip shrinks its account, context reading, Compact and Shell to compact forms before it wraps, and holds the CPU and memory readout as a slot beside the context reading
+- An agent with the uploads power on a granted site can fill the file chooser a page opens from files in its own workspace (set_files with chooser true); without it the chooser is cancelled as before
+- srv: a route agent's cost is OpenRouter's own usage.cost, per turn and per session, and agent.list exposes it
+- Agents can point a Claude Code agent at another model server through env_set; the person's Claude sign-in is not sent to it, and a 30-second notice with Undo shows in the pane and My Agents
+- feat(kanban): several boards: a board picker's backend, slug#12 refs, per-board numbers and agent lists, Tasks board parameter and board actions, move a task between boards
+- fix(linux): agentmux --version prints the version and exits instead of starting the app
+- A sensitive-operation decision's Audit row now carries the dialog's text, the exact answer, its risk level, and whether a remembered grant allowed it, as typed fields
+- Landing workspace shot: a 1440 x 900 window so the agent picker shows its agents' names, and the terminal's CPU readout off for the shot
+- Provider CLI pins moved to the 2026-11-09 drift report's latest (Claude Code 2.1.321, Gemini 0.67.0, Qwen 0.27.1, OpenClaw 2026.11.2, Copilot 1.0.108, Kilo 7.8.27, Cline 3.0.74, OpenCode 1.19.5), the Haiku row is labelled Haiku 5.5 and the Fable row 5.2, and the recommended Node is 24.22.2
+- Permission and other sensitive-op decisions no longer count as delivered messages in the message statistics
+
 ## 0.60.21 — 2026-11-08
 
 - Settings > Keyboard shortcuts: record a new shortcut by pressing it, with conflicts shown and a choice to replace the other command's key or limit where it works

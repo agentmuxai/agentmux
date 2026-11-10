@@ -262,6 +262,11 @@ pub(crate) fn request_from_held(row: &HeldJekt) -> InjectionRequest {
     let non_empty = |s: &str| (!s.is_empty()).then(|| s.to_string());
     let mut req = InjectionRequest {
         target_agent: row.target_uid.clone(),
+        // The row keeps the name the sender addressed; the marker says it
+        // rather than the UID the replay routes by (#31433).
+        marker_target: (!row.target_agent.is_empty() && row.target_agent != row.target_uid)
+            .then(|| crate::backend::reactive::sanitize::route_name(&row.target_agent))
+            .flatten(),
         message: row.message.clone(),
         source_agent: non_empty(&row.source_agent),
         request_id: Some(row.request_id.clone()),
@@ -457,5 +462,24 @@ mod tests {
         assert_eq!(row.sender_expires_at_ms, Some(1_234_567), "kept on the row");
         let replay = request_from_held(&row);
         assert_eq!(replay.expires_at_ms, Some(1_234_567), "and on the delivery request");
+    }
+
+    /// #31433: a replay addresses the target by UID (it still reaches the same
+    /// agent after a rename) but the marker is addressed as the sender wrote
+    /// it, the way a live delivery is. Nothing is added when the row's name is
+    /// already the UID.
+    #[test]
+    fn a_replay_names_the_target_the_sender_addressed() {
+        use crate::backend::reactive::types::InjectionRequest;
+        let req = InjectionRequest { target_agent: "Glim".to_string(), message: "hi".to_string(), ..Default::default() };
+        let mut row = crate::server::jekt_hold::held_row(&req, "req-name".to_string(), 10);
+        row.target_uid = "17e48252-bf89-4be9-addc-71b29035c22c".to_string();
+
+        let replay = request_from_held(&row);
+        assert_eq!(replay.target_agent, row.target_uid, "routed by UID");
+        assert_eq!(replay.marker_target.as_deref(), Some("Glim"), "marked by name");
+
+        row.target_agent = row.target_uid.clone();
+        assert_eq!(request_from_held(&row).marker_target, None, "nothing to add when the name is the UID");
     }
 }

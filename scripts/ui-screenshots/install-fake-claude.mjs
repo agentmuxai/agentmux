@@ -80,6 +80,8 @@ export function installFakeClaude(home, script = join(here, "fake-claude", "conv
     mkdirSync(bin, { recursive: true });
     copyFileSync(join(here, "fake-claude", "cli.mjs"), join(pkg, "cli.mjs"));
     copyFileSync(script, join(pkg, "conversation.json"));
+    // The stand-in reports the version it was installed as, so a pin bump needs no edit here.
+    writeFileSync(join(pkg, ".version"), version);
     writeFileSync(join(bin, "claude.cmd"), windowsShim());
     writeFileSync(join(bin, "claude"), posixShim(), { mode: 0o755 });
     writeFileSync(join(dir, COMPLETE_MARKER), version);

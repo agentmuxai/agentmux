@@ -1168,10 +1168,10 @@ async function initMux(initOpts: AgentMuxInitOpts) {
     // An agent's request to drive a native app opens a prompt here.
     void import("@/app/block/desktop-requests").then((m) => m.startDesktopRequests());
     void import("@/app/view/agent/endpoint-notice-cards").then((m) => m.startEndpointNoticeCards());
+    void import("@/app/block/agent-notices").then((m) => m.startAgentNotices());
     // An agent's Vault requests are cards in its pane, and the Vault pane lists them all.
     void import("@/app/view/agent/components/vault-request-card/vault-request-cards").then((m) => m.startVaultRequestCards());
-    // srv's calls to action (browser, SSH consent, widget installs) join the
-    // waiting tone and notification.
+    // srv's calls to action (browser, SSH consent, widget installs) join the waiting tone and notification.
     void import("@/app/notification/waiting-for-you").then((m) => m.installWaitingForYou());
 
     // Window services that don't paint. They load alongside the render and

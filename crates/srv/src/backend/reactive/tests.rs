@@ -2213,6 +2213,10 @@ fn test_audit_log_entry_outcome_field_serde_roundtrip() {
         tier: None,
         trust: None,
         msg_id: None,
+        prompt: None,
+        answer: None,
+        level: None,
+        standing: None,
     };
     let json = serde_json::to_value(&with_outcome).unwrap();
     assert_eq!(json["outcome"], "held_retry");
@@ -3835,9 +3839,13 @@ async fn a_held_delivery_keeps_its_verdict_and_shows_it_was_held() {
     delivered.lock().unwrap().clear();
 
     let req = crate::server::jekt_held::request_from_held(&row);
+    assert_eq!(req.target_agent, "uid-heldz", "the replay still routes by UID");
+    assert_eq!(req.marker_target.as_deref(), Some("heldz"), "but the marker is addressed as the sender wrote it");
     let resp = handler.inject_held(req);
     assert!(resp.success, "{:?}", resp.error);
     let text = delivered.lock().unwrap().join("");
+    assert!(text.contains("TO=heldz"), "a held jekt names its target, not the UID (#31433): {text}");
+    assert!(!text.contains("uid-heldz"), "the UID never reaches the marker: {text}");
     assert!(text.contains("TRUST=unverified"), "a forged verdict survives: {text}");
     assert!(text.contains("ESCALATE=required"), "{text}");
     assert!(text.contains("HELD_FOR="), "{text}");

@@ -1244,6 +1244,12 @@
           "description": "Tell you once, at startup, when some agents have an id an older build chained (loap-loap-2), pointing to Settings › Agents, where they can be updated. Turned off when the notice is dismissed. See docs/specs/SPEC_FORK_SLUG_MIGRATION_2026_10_22.md.",
           "x-section": "Agents"
         },
+        "agent:maystartagents": {
+          "type": "boolean",
+          "default": false,
+          "description": "Let agents start other agents (workers, or a new agent in My Agents) without showing you a notice first. Off by default: the first time an agent starts one, its pane shows a card with a 30 second countdown that goes ahead on its own, with Stop it, Start now and Always allow this agent. Turn this on to skip the card for every agent. See docs/specs/SPEC_AGENT_SPAWN_NOTICE_IN_THE_PANE_2026_11_08.md.",
+          "x-section": "Agents"
+        },
         "agent:transcriptsinglecopy": {
           "type": "boolean",
           "default": false,

@@ -178,7 +178,7 @@ describe("AgentRuntimeDropup — superseded persisted model migration", () => {
         await vi.waitFor(() => expect(patchRuntime).toHaveBeenCalled());
         // A patch, not a whole config: only the model is being migrated.
         const patch = patchRuntime.mock.calls[0][2] as { model: string };
-        expect(patch).toEqual({ model: expect.stringMatching(/^claude-fable-5-1$/) });
+        expect(patch).toEqual({ model: expect.stringMatching(/^claude-fable-5-2$/) });
     });
 
     it("migrates quietly: no restart of the agent and not remembered as the user's pick (G13)", async () => {

@@ -20,7 +20,7 @@
 //! that spec's §9; an operation with none is not approved.
 #![allow(dead_code)]
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, LazyLock, Mutex};
@@ -241,7 +241,7 @@ pub fn open(state: &AppState, request_id: &str, window: Duration) -> Result<Sens
         };
         let _ = requests::registry().finish(&v.request_id, end, now_ms());
         set_status(&v.request_id, status, error.clone());
-        audit(&state, &v, "sensitive.run", error.is_none(), error.as_deref(), status);
+        audit(&state, &v, "sensitive.run", error.is_none(), error.as_deref(), status, Some(&request.facts));
     });
     Ok(view)
 }
@@ -325,11 +325,12 @@ pub fn veto(state: &AppState, request_id: &str) -> &'static str {
         }
     };
     let _ = requests::registry().finish(request_id, Status::Vetoed, now_ms());
-    if let Some(request) = requests::registry().get(request_id) {
-        tell_askers(&request, &vetoed_note(&request));
+    let request = requests::registry().get(request_id);
+    if let Some(r) = &request {
+        tell_askers(r, &vetoed_note(r));
     }
     cleared(state, request_id, "vetoed");
-    audit(state, &view, "sensitive.veto", true, None, "vetoed");
+    audit(state, &view, "sensitive.veto", true, None, "vetoed", request.as_ref().map(|r| &r.facts));
     tracing::info!(request_id, "sensitive request: vetoed by the person");
     "vetoed"
 }
@@ -420,11 +421,25 @@ fn raise_toast(state: &AppState, view: &SensitiveView) {
     }
 }
 
-/// One audit row for a step of the window: the person's veto, or the run.
-fn audit(state: &AppState, v: &SensitiveView, action: &str, ok: bool, error: Option<&str>, outcome: &str) {
+/// One audit row for a step of the window: the person's veto, or the run. `facts` are the request's,
+/// when known, for the typed audit fields (§4.6); `os_prompt_answer` is the only op with `prompt`,
+/// `answer` and `level` among them today, so every other op's row carries none of the three.
+fn audit(state: &AppState, v: &SensitiveView, action: &str, ok: bool, error: Option<&str>, outcome: &str, facts: Option<&BTreeMap<String, String>>) {
     let source = if action == "sensitive.veto" { "operator" } else { v.approver.as_deref().unwrap_or("no super agent") };
     let note = format!("{}: {} | requested by {} | {outcome}", v.op, v.summary, v.requester);
-    state.reactive_handler.log_fleet_action_audit(Some(source), &v.requester, "", action, ok, error, &v.request_id, Some(&note));
+    state.reactive_handler.log_sensitive_op_audit(
+        Some(source),
+        &v.requester,
+        action,
+        ok,
+        error,
+        &v.request_id,
+        Some(&note),
+        facts.and_then(|f| f.get("prompt")).map(String::as_str),
+        facts.and_then(|f| f.get("answer")).map(String::as_str),
+        facts.and_then(|f| f.get("level")).map(String::as_str),
+        false,
+    );
 }
 
 /// Tell every agent that asked for a request, those that joined included. An agent that isn't
@@ -441,7 +456,19 @@ pub fn tell_askers(request: &Request, note: &str) {
 /// "no super agent" for the fallback): the request, the approval, the denial, the withdrawal.
 pub fn audit_step(state: &AppState, actor: &str, r: &Request, action: &str, ok: bool, error: Option<&str>, outcome: &str) {
     let note = format!("{}: {} | requested by {} | {outcome}", r.op, r.summary, r.requester_slug);
-    state.reactive_handler.log_fleet_action_audit(Some(actor), &r.requester_slug, "", action, ok, error, &r.id, Some(&note));
+    state.reactive_handler.log_sensitive_op_audit(
+        Some(actor),
+        &r.requester_slug,
+        action,
+        ok,
+        error,
+        &r.id,
+        Some(&note),
+        r.facts.get("prompt").map(String::as_str),
+        r.facts.get("answer").map(String::as_str),
+        r.facts.get("level").map(String::as_str),
+        false,
+    );
 }
 
 /// The runner of an operation is one for the whole process, so the tests that need one (or none)

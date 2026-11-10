@@ -260,7 +260,6 @@
 153 crates/srv/src/server/agent_handlers/template_create.rs::create_from_template
 103 crates/srv/src/server/agent_takeover.rs::handle_agent_release
 243 crates/srv/src/server/app_api/agent_define.rs::agent_define_core
-112 crates/srv/src/server/app_api/agent_spawn/many.rs::spawn_many
 103 crates/srv/src/server/app_api/bundle/export_for_agent.rs::build_export_for_agent
 115 crates/srv/src/server/app_api/bundle/export_for_agent.rs::bundle_export_for_agent_with_history_impl
 259 crates/srv/src/server/app_api/bundle/import.rs::bundle_import_commit_impl
@@ -286,7 +285,7 @@
 106 crates/srv/src/server/identity_auth_dirs.rs::compute_and_ensure_account_dir
 332 crates/srv/src/server/install_handlers.rs::spawn_install_task
 102 crates/srv/src/server/jekt_files.rs::receive
-105 crates/srv/src/server/jekt_hold.rs::hold_with_reason
+104 crates/srv/src/server/jekt_hold.rs::hold_with_reason
 238 crates/srv/src/server/mux_obj_bridge.rs::dispatch_event
 124 crates/srv/src/server/muxspect_handlers.rs::handle_muxspect_conversations
 118 crates/srv/src/server/muxspect_handlers.rs::handle_muxspect_find
@@ -312,7 +311,7 @@
 210 crates/srv/src/server/websocket.rs::handle_incoming_text
 227 crates/srv/src/server/websocket.rs::handle_ws_connection
 111 crates/srv/src/server/widget_agent_handlers.rs::handle_widgets_install
-129 crates/srv/src/server/work_queue.rs::enqueue_core
+104 crates/srv/src/server/work_queue.rs::enqueue_core
 120 crates/srv/src/server/work_queue.rs::handle_work_claim
 198 crates/srv/src/srv_ipc/server.rs::handle_connection
 213 frontend/app-init.ts::initAppInner
@@ -407,7 +406,7 @@
 116 frontend/app/view/agent/stream-parser.ts::ClaudeCodeStreamParser::eventToNode
 232 frontend/app/view/agent/useAgentStream.ts::useAgentStream
 116 frontend/app/view/agent/virtualization/held-release.ts::useScrolledOffRelease
-123 frontend/app/view/audit/audit-manager.tsx::AuditManager
+115 frontend/app/view/audit/audit-manager.tsx::AuditManager
 101 frontend/app/view/browser/browser-profile-menu.tsx::BrowserProfileButton
 141 frontend/app/view/browser/use-browser-auth.ts::useBrowserAuth
 394 frontend/app/view/browser/use-pane-rect-sync.ts::usePaneRectSync

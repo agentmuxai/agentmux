@@ -104,9 +104,50 @@ jobs:
     # at 90 min while still compiling (the test leg got as far as running its binaries). Five of the last six nights
     # were cancelled or red from this, and a leg that is cut never saves a cache either.
     timeout-minutes: ${{ matrix.os == 'macos-latest' && 150 || 60 }}
+    # Test binaries with line tables only, as in ci-pr.yml: backtraces keep file and line, and the
+    # biggest share of rustc's memory and link time for the large srv test binaries goes. Set on
+    # every leg so the pre-build step and the test step below share one fingerprint.
+    env:
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      CARGO_PROFILE_TEST_DEBUG: line-tables-only
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.99.1
+
+      # The ubuntu test leg was killed every night from 2026-10-27 on, 7-26 min into
+      # `cargo test --workspace`, with "The runner has received a shutdown signal" and exit 143
+      # (11-03, 11-07, 11-09). That is the hosted runner (16 GB RAM, 4 GB swap) running out of
+      # memory, not a test failing: rustc alone reaches ~14 GB on the agentmux-srv test crate, and a
+      # spike past RAM fills the swap, stalls the machine and gets the runner shut down. ci-pr.yml
+      # hit the same wall and fixed it with the two steps below (swap, and building the srv test
+      # binary alone); the nightly never got them. Kept in sync with ci-pr.yml's step of the same name.
+      - name: Free disk and add swap (Linux)
+        if: matrix.os == 'ubuntu-latest' && matrix.mode == 'test'
+        run: |
+          avail() { df -m --output=avail "$1" | tail -1 | tr -d ' '; }
+          echo "free before: / $(avail /) MB, /mnt $(avail /mnt 2>/dev/null || echo none) MB"
+          if [ "$(avail /)" -lt 40000 ]; then
+            sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+            echo "free after removing dotnet, android, ghc, CodeQL: / $(avail /) MB"
+          fi
+          swapfile=/extra.swap
+          gb=12
+          if mountpoint -q /mnt && [ "$(avail /mnt)" -ge 13000 ]; then
+            swapfile=/mnt/extra.swap
+          else
+            gb=$(( ($(avail /) - 25000) / 1024 ))
+            [ "$gb" -gt 12 ] && gb=12
+          fi
+          if [ "$gb" -ge 2 ]; then
+            sudo fallocate -l "${gb}G" "$swapfile"
+            sudo chmod 600 "$swapfile"
+            sudo mkswap "$swapfile"
+            sudo swapon "$swapfile"
+          else
+            echo "::warning::not enough free disk for extra swap ($gb GB); continuing without it"
+          fi
+          free -m
+          echo "free now: / $(avail /) MB"
 
       # GH-hosted Windows runners scan every new/exec'd file with Defender
       # real-time protection by default; node.exe invoked from a Rust test
@@ -217,9 +258,27 @@ jobs:
       # --no-fail-fast: every test binary runs and every failure is listed.
       # Without it cargo stops at the first failing binary, and on macOS one
       # failing remote test kept srv's whole suite from running for six nights.
+      #
+      # On Linux the srv unit test binary is built first, alone: a workspace run compiles the
+      # agentmux-srv crate twice at once (as the binary srv's integration tests start via
+      # CARGO_BIN_EXE_agentmux-srv, and as the unit test binary), each rustc growing to ~8 GB, which
+      # is what took the runner down (see the swap step above). Built one after the other they never
+      # overlap, and the workspace run reuses the result. A [resources] line every 5 seconds (memory,
+      # swap, free disk, biggest process) goes to the log, so if a runner still goes the log says why.
       - name: cargo test --workspace
         if: matrix.mode == 'test'
-        run: cargo test --workspace --no-fail-fast -- --test-threads=1
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            (while true; do
+              echo "[resources] $(free -m | awk 'NR==2{printf "mem_used=%dMB mem_avail=%dMB ", $3, $7} NR==3{printf "swap_used=%dMB", $3}') disk_root_avail=$(df -m --output=avail / | tail -1 | tr -d ' ')MB top=$(ps -eo rss=,comm= --sort=-rss | head -1 | awk '{printf "%s:%dMB", $2, $1/1024}')"
+              sleep 5
+            done) &
+            monitor=$!
+            trap 'kill $monitor 2>/dev/null' EXIT
+            cargo test --no-run -p agentmux-srv --bin agentmux-srv
+          fi
+          cargo test --workspace --no-fail-fast -- --test-threads=1
 
       # agentmux-cef's `test-authfile` feature gates the authfile tests that
       # touch the real OS data dir. Nothing built them: PR CI deliberately

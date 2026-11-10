@@ -97,6 +97,9 @@ pub(super) struct EnqueueRequest {
     /// (SPEC_KANBAN_TASK_MEDIA_2026_10_25.md §5).
     #[serde(default)]
     pub ui_change: Option<bool>,
+    /// Which board to file it on, by name or slug; the default board when absent.
+    #[serde(default)]
+    pub board: Option<String>,
 }
 
 /// Who files a task: a caller on this machine (its token says who it is and what it was asked), or an
@@ -157,6 +160,11 @@ pub(super) async fn enqueue_core(state: &AppState, req: EnqueueRequest, filer: F
         crate::backend::agent_resolve::record_uid_fallback("work_enqueue.uid_not_carried");
     }
 
+    let board = match filing_board(&state, &req, &target_agent_uid, (&remote, caller)) {
+        Ok(b) => b,
+        Err(why) => return err(StatusCode::BAD_REQUEST, why),
+    };
+
     let now = now_ms();
     let ui_change = req.ui_change;
     // Who to tell the filer about if the target can't work now: looked up by the UID it was carried with,
@@ -194,12 +202,15 @@ pub(super) async fn enqueue_core(state: &AppState, req: EnqueueRequest, filer: F
         Ok(a) => a,
         Err(why) => return err(StatusCode::BAD_REQUEST, why),
     };
+    if let Err(why) = after_on_board(&state, &after, &board) {
+        return err(StatusCode::BAD_REQUEST, why);
+    }
     let first = match req.first.as_deref().map(str::trim).filter(|f| !f.is_empty()) {
         Some(f) if crate::backend::kanban::is_research_kind(f) => Some(f.to_ascii_lowercase()),
         Some(_) => return err(StatusCode::BAD_REQUEST, "first: \"spec\" or \"research\""),
         None => None,
     };
-    let filing = super::work_tasks::Filing { repo: req.repo, review: review_for(req.review, first.is_some()) };
+    let filing = super::work_tasks::Filing { board: board.id.clone(), repo: req.repo, review: review_for(req.review, first.is_some()) };
     let card = match &remote {
         Some(actor) => super::work_tasks::remote_card(actor, filing),
         None => super::work_tasks::prepare_card(&state, caller, &item.created_by, filing).await,
@@ -210,13 +221,63 @@ pub(super) async fn enqueue_core(state: &AppState, req: EnqueueRequest, filer: F
                 let _ = state.work_store.work_ui_set(&item.id, ui_change, None, 0, now);
                 publish_changed(&state);
                 let note = super::availability_view::enqueue_note(&state, &target.0, &target.1).await;
-                (StatusCode::OK, Json(super::availability_view::with_note(json!({ "id": item.id, "num": num }), note)))
+                let body = json!({ "id": item.id, "num": num, "ref": num.map(|n| board.task_ref(n)), "board": board.slug });
+                (StatusCode::OK, Json(super::availability_view::with_note(body, note)))
             }
             Err(e) => e,
         };
     };
-    // A feature as two tasks: its spec (or research), and a build that
-    // starts after it, for the same agent, filed and numbered together.
+    file_pair(&state, item, first, &after, &card, (&board, ui_change, now), &target).await
+}
+
+/// Which board a filing goes to, if its filer sees it and the target agent is on its list. An agent
+/// of another machine (`slug@machine`) is matched against the board's agent list by that name.
+fn filing_board(
+    state: &AppState,
+    req: &EnqueueRequest,
+    target_agent_uid: &str,
+    (remote, caller): (&Option<String>, Option<&super::caller::Caller>),
+) -> Result<crate::backend::storage::work_boards::Board, String> {
+    let who: Option<(String, String)> = match (remote, caller) {
+        (Some(actor), _) => Some((actor.clone(), String::new())),
+        (None, c) => super::work_tasks::viewer(state, c),
+    };
+    let who_ref = who.as_ref().map(|(a, u)| (a.as_str(), u.as_str()));
+    let board = super::work_tasks::pick_board(state, req.board.as_deref(), who_ref, true)?;
+    if (!req.target_agent.trim().is_empty() || !target_agent_uid.is_empty()) && !board.visible_to(req.target_agent.trim(), target_agent_uid) {
+        return Err(format!("{} isn't on the agent list of board {}; add it there, or file on another board", req.target_agent.trim(), board.slug));
+    }
+    Ok(board)
+}
+
+/// Dependencies stay inside one board.
+fn after_on_board(state: &AppState, after: &[String], board: &crate::backend::storage::work_boards::Board) -> Result<(), String> {
+    for a in after {
+        if let Ok(Some((other, n))) = state.work_store.work_task_board(a) {
+            if other.id != board.id {
+                return Err(format!(
+                    "after: {} is on board {}; a task can only start after tasks on its own board ({})",
+                    other.task_ref(n),
+                    other.slug,
+                    board.slug
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// A feature as two tasks: its spec (or research), and a build that starts after it, for the same
+/// agent, filed and numbered together.
+async fn file_pair(
+    state: &AppState,
+    item: WorkItem,
+    first: String,
+    after: &[String],
+    card: &crate::backend::storage::work_board::NewCard,
+    (board, ui_change, now): (&crate::backend::storage::work_boards::Board, Option<bool>, i64),
+    target: &(String, String),
+) -> (StatusCode, Json<Value>) {
     use crate::backend::kanban::{build_payload, pair_title, spec_payload};
     let spec = WorkItem {
         title: pair_title(&first, &item.title),
@@ -231,24 +292,28 @@ pub(super) async fn enqueue_core(state: &AppState, req: EnqueueRequest, filer: F
         kind: "build".into(),
         ..item
     };
-    let spec_num = match enqueue_one(&state, &spec, &after, &card) {
+    let spec_num = match enqueue_one(state, &spec, after, card) {
         Ok(n) => n,
         Err(e) => return e,
     };
-    let build_num = match enqueue_one(&state, &build, std::slice::from_ref(&spec.id), &card) {
+    let build_num = match enqueue_one(state, &build, std::slice::from_ref(&spec.id), card) {
         Ok(n) => {
             // The flag is the build's: the spec is a document.
             let _ = state.work_store.work_ui_set(&build.id, ui_change, None, 0, now);
             n
         }
         Err(e) => {
-            publish_changed(&state);
+            publish_changed(state);
             return e;
         }
     };
-    publish_changed(&state);
-    let note = super::availability_view::enqueue_note(&state, &target.0, &target.1).await;
-    let body = json!({ "id": spec.id, "num": spec_num, "build_id": build.id, "build_num": build_num });
+    publish_changed(state);
+    let note = super::availability_view::enqueue_note(state, &target.0, &target.1).await;
+    let body = json!({
+        "id": spec.id, "num": spec_num, "ref": spec_num.map(|n| board.task_ref(n)),
+        "build_id": build.id, "build_num": build_num, "build_ref": build_num.map(|n| board.task_ref(n)),
+        "board": board.slug,
+    });
     (StatusCode::OK, Json(super::availability_view::with_note(body, note)))
 }
 
@@ -258,8 +323,9 @@ pub(super) async fn enqueue_core(state: &AppState, req: EnqueueRequest, filer: F
 /// its spec's path here.
 fn claimed_body(state: &AppState, item: &WorkItem, num: Option<i64>) -> Value {
     let after = state.work_store.work_deps_of(&item.id).unwrap_or_default();
+    let (task_ref, board) = super::work_tasks::ref_of(state, &item.id).unzip();
     json!({
-        "claimed": true, "attempt": item.attempts, "num": num, "item": item, "after": after,
+        "claimed": true, "attempt": item.attempts, "num": num, "ref": task_ref, "board": board, "item": item, "after": after,
         "status": "Your status line now shows this task's title. Say what you are doing in your own words with \
                    Presence status (line), and again when your plan changes, when you are blocked or waiting, \
                    and when you are done.",
@@ -332,6 +398,10 @@ pub(super) struct ClaimRequest {
     /// lifts the hold (SPEC_KANBAN_AGENTS_HOLD_AND_UNHOLD_2026_10_22.md §3.3).
     #[serde(default)]
     pub id: Option<String>,
+    /// Claim only on this board (name or slug); without it, on any board the claimer sees, the
+    /// default board first on a tie. `"all"` is the same as leaving it out.
+    #[serde(default)]
+    pub board: Option<String>,
 }
 
 /// An Unattributed claimer's UID: carried, else its block's row, else `""`
@@ -424,8 +494,24 @@ pub(super) async fn handle_work_claim(
     };
     let lease = req.lease_ms.filter(|&n| n > 0).unwrap_or(DEFAULT_LEASE_MS);
 
+    let on_board = match req.board.as_deref().map(str::trim).filter(|b| !b.is_empty() && !b.eq_ignore_ascii_case("all")) {
+        Some(key) => match super::work_tasks::pick_board(&state, Some(key), Some((req.agent_id.as_str(), filter.agent_uid.as_str())), false) {
+            Ok(b) => Some(b),
+            Err(why) => return err(StatusCode::BAD_REQUEST, why),
+        },
+        None => None,
+    };
+
     if let Some(named) = req.id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-        let id = super::work_tasks::resolve_id(&state, named);
+        // With a board named, a bare number is that board's.
+        let named = match &on_board {
+            Some(b) if named.trim_start_matches('#').chars().all(|c| c.is_ascii_digit()) => format!("{}#{}", b.slug, named.trim_start_matches('#')),
+            _ => named.to_string(),
+        };
+        let id = super::work_tasks::resolve_id(&state, &named);
+        if let Some(why) = unclaimable_board(&state, &id, &named, &filter) {
+            return (StatusCode::OK, Json(json!({ "claimed": false, "why": why })));
+        }
         return match state.work_store.work_claim_one(&id, &filter, now, lease) {
             Ok(Some((item, from))) => {
                 let num = state.work_store.work_card_ensure(&item.id, now).ok();
@@ -445,7 +531,7 @@ pub(super) async fn handle_work_claim(
     }
 
     let floor = crate::backend::quota_mode::claim_floor(&state.config_watcher.get_full_config().settings.extra);
-    match state.work_store.work_queue_claim_with(&filter, now, lease, floor) {
+    match state.work_store.work_queue_claim_in(&filter, on_board.as_ref().map(|b| b.id.as_str()), now, lease, floor) {
         Ok(Some(item)) => {
             let num = state.work_store.work_card_ensure(&item.id, now).ok();
             super::work_tasks::record(&state, &item.id, &item.claimed_by, "agent", "claimed", "open", "claimed", "");
@@ -458,24 +544,37 @@ pub(super) async fn handle_work_claim(
             // 404-shaped "not the holder" response.
             claimed_reply(&state, &item, num, &req.block_id, (&req.agent_id, holder_uid(caller.as_deref())))
         }
-        Ok(None) => {
-            // Only when the floor is what stood in the way does the answer say so.
-            let held = floor.and_then(|n| state.work_store.work_queue_held_by_floor(&filter, now, n).ok().filter(|&h| h > 0).map(|h| (n, h)));
-            match held {
-                Some((n, held)) => (
-                    StatusCode::OK,
-                    Json(json!({
-                        "claimed": false,
-                        "held_back_by_quota_mode": held,
-                        "reason": format!(
-                            "quota mode: {held} open task(s) held back; an unnamed claim takes only tasks aimed at you and ones with priority {n} or more. Claim a named one with its id if you were told to"
-                        ),
-                    })),
-                ),
-                None => (StatusCode::OK, Json(json!({ "claimed": false }))),
-            }
-        }
+        Ok(None) => nothing_to_claim(&state, &filter, now, floor),
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, format!("claim failed: {e}")),
+    }
+}
+
+/// Why a named task can't be claimed because of its board: one the claimer doesn't see is as good
+/// as unknown, and an archived board's tasks are read-only.
+fn unclaimable_board(state: &AppState, id: &str, named: &str, filter: &ClaimFilter) -> Option<String> {
+    let Ok(Some((b, _))) = state.work_store.work_task_board(id) else { return None };
+    if !b.visible_to(&filter.agent_id, &filter.agent_uid) {
+        return Some(format!("there is no task {named}"));
+    }
+    b.archived.then(|| format!("board {} is archived: its tasks can't be claimed", b.slug))
+}
+
+/// The answer when an unnamed claim finds nothing. Only when the quota floor is what stood in the
+/// way does it say so.
+fn nothing_to_claim(state: &AppState, filter: &ClaimFilter, now: i64, floor: Option<i64>) -> (StatusCode, Json<Value>) {
+    let held = floor.and_then(|n| state.work_store.work_queue_held_by_floor(filter, now, n).ok().filter(|&h| h > 0).map(|h| (n, h)));
+    match held {
+        Some((n, held)) => (
+            StatusCode::OK,
+            Json(json!({
+                "claimed": false,
+                "held_back_by_quota_mode": held,
+                "reason": format!(
+                    "quota mode: {held} open task(s) held back; an unnamed claim takes only tasks aimed at you and ones with priority {n} or more. Claim a named one with its id if you were told to"
+                ),
+            })),
+        ),
+        None => (StatusCode::OK, Json(json!({ "claimed": false }))),
     }
 }
 
@@ -623,35 +722,84 @@ pub(super) struct ListQuery {
     pub state: String,
     #[serde(default)]
     pub limit: Option<usize>,
+    /// A board by name or slug; `all` for every board the caller sees; the default board when absent.
+    #[serde(default)]
+    pub board: Option<String>,
 }
 
 pub(super) async fn handle_work_list(
     State(state): State<AppState>,
+    caller: Option<axum::Extension<super::caller::Caller>>,
     Query(q): Query<ListQuery>,
 ) -> (StatusCode, Json<Value>) {
-    match list_items(&state, &q.state, q.limit) {
-        Ok(items) => (StatusCode::OK, Json(json!({ "items": items }))),
-        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
+    let who = super::work_tasks::viewer(&state, caller.as_deref());
+    let who = who.as_ref().map(|(a, u)| (a.as_str(), u.as_str()));
+    match list_view(&state, &q.state, q.limit, q.board.as_deref(), who) {
+        Ok(view) => (StatusCode::OK, Json(view)),
+        Err(e) => err(StatusCode::BAD_REQUEST, e),
     }
 }
 
 /// The board's tasks in `state` (all when empty), newest first as the store gives them, each with its
-/// number, which agents and the operator use. Shared by the route and the remote `tasks.list`.
-pub(super) fn list_items(state: &AppState, filter: &str, limit: Option<usize>) -> Result<Vec<Value>, String> {
+/// number and ref, which agents and the operator use. Without `board`, the default board's; `all` lists
+/// every board the caller sees. `who` is the caller's id and UID, whose agent lists decide the boards it
+/// sees (none: all of them). The answer carries a line when more waits for the caller on other boards.
+pub(super) fn list_view(
+    state: &AppState,
+    filter: &str,
+    limit: Option<usize>,
+    board: Option<&str>,
+    who: Option<(&str, &str)>,
+) -> Result<Value, String> {
     let limit = limit.unwrap_or(50).clamp(1, 500);
-    let items = state.work_store.work_queue_list(filter, limit).map_err(|e| format!("list failed: {e}"))?;
     let now = now_ms();
-    Ok(items
+    let key = board.map(str::trim).filter(|b| !b.is_empty());
+    let all = key.is_some_and(|k| k.eq_ignore_ascii_case("all"));
+    let (ids, scope, scope_id) = if all {
+        let boards = state.work_store.work_boards_list(true, now).map_err(|e| format!("list failed: {e}"))?;
+        let ids: Vec<String> = boards.into_iter().filter(|b| who.map_or(true, |(a, u)| b.visible_to(a, u))).map(|b| b.id).collect();
+        (ids, "all".to_string(), String::new())
+    } else {
+        let b = super::work_tasks::pick_board(state, key, who, false)?;
+        (vec![b.id.clone()], b.slug.clone(), b.id)
+    };
+    let items = state.work_store.work_queue_list_on(filter, limit, &ids, now).map_err(|e| format!("list failed: {e}"))?;
+    let items: Vec<Value> = items
         .into_iter()
         .map(|i| {
             let num = state.work_store.work_card_ensure(&i.id, now).ok();
+            let (task_ref, board) = super::work_tasks::ref_of(state, &i.id).unzip();
             let mut v = serde_json::to_value(&i).unwrap_or_default();
             if let Some(o) = v.as_object_mut() {
                 o.insert("num".into(), json!(num));
+                o.insert("ref".into(), json!(task_ref));
+                o.insert("board".into(), json!(board));
             }
             v
         })
-        .collect())
+        .collect();
+    let mut view = json!({ "items": items, "board": scope });
+    if let (false, Some((agent, uid))) = (all, who) {
+        let elsewhere = state.work_store.work_waiting_elsewhere(&scope_id, agent, uid).unwrap_or_default();
+        let total: i64 = elsewhere.iter().map(|(_, n)| n).sum();
+        if total > 0 {
+            let names: Vec<&str> = elsewhere.iter().map(|(name, _)| name.as_str()).collect();
+            view["note"] = json!(format!("{total} more for you on {} (list with board: \"all\", or name one)", names.join(" and ")));
+        }
+    }
+    Ok(view)
+}
+
+/// [`list_view`]'s tasks alone, for the remote `tasks.list`.
+pub(super) fn list_items(
+    state: &AppState,
+    filter: &str,
+    limit: Option<usize>,
+    board: Option<&str>,
+    who: Option<(&str, &str)>,
+) -> Result<Vec<Value>, String> {
+    let view = list_view(state, filter, limit, board, who)?;
+    Ok(view["items"].as_array().cloned().unwrap_or_default())
 }
 
 #[cfg(test)]
