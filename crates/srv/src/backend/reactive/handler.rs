@@ -7,7 +7,7 @@ use std::sync::{Mutex, OnceLock};
 
 use super::sanitize::{format_injected_message, is_sensitive_message, sanitize_message, validate_agent_id, wrap_jekt_message_with_files};
 use super::types::*;
-use super::{audit_hash, now_unix_millis, AUDIT_LOG_MAX, RATE_LIMIT_MAX};
+use super::{now_unix_millis, AUDIT_LOG_MAX, RATE_LIMIT_MAX};
 
 pub(super) use super::rate_limiter::RateLimiter;
 
