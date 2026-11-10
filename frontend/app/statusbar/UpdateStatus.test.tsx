@@ -487,7 +487,7 @@ describe("Maintenance on a Microsoft Store install", () => {
         expect(openLink).toHaveBeenCalledWith(RELEASE_0_59_27);
     });
 
-    it("when GitHub has a release the Store doesn't list: says the Store has no newer version, with no button and no chip", async () => {
+    it("when GitHub has a release the Store doesn't list: says it is published but not listed here, offers the Store page, never an install and no chip", async () => {
         storeCheck.mockResolvedValue({ state: "none", message: "" });
         updateStatus.mockResolvedValue(STORE);
         render(() => (
@@ -496,12 +496,24 @@ describe("Maintenance on a Microsoft Store install", () => {
                 <MaintenanceSection />
             </>
         ));
-        expect(await screen.findByText(/^The Microsoft Store has no newer version \(checked /)).toBeTruthy();
-        expect(screen.queryByText(/is released|still reviewing|0\.59\.27/)).toBeNull();
+        expect(
+            await screen.findByText(/^v0\.59\.27 is published, but the Microsoft Store hasn't listed it for this PC yet \(checked .*\)\. This can take a while after the Store certifies a release\.$/)
+        ).toBeTruthy();
         expect(screen.queryByRole("button", { name: "Update in the Store" })).toBeNull();
         expect(screen.queryByRole("button", { name: "What's new" })).toBeNull();
         expect(screen.queryByText("Update to 0.59.27")).toBeNull();
         expect(screen.getByRole("button", { name: "Check for update" })).toBeTruthy();
+        fireEvent.click(screen.getByRole("button", { name: "Open Store page" }));
+        expect(openLink).toHaveBeenCalledWith("ms-windows-store://pdp/?productid=9P9QCXNNCRK3");
+        expect(storeUpdate).not.toHaveBeenCalled();
+    });
+
+    it("when GitHub has nothing newer either: the plain 'no newer version', with no Store page button", async () => {
+        storeCheck.mockResolvedValue({ state: "none", message: "" });
+        updateStatus.mockResolvedValue({ ...STORE, state: "up-to-date", latest: "0.59.26" });
+        render(() => <MaintenanceSection />);
+        expect(await screen.findByText(/^The Microsoft Store has no newer version \(checked /)).toBeTruthy();
+        expect(screen.queryByRole("button", { name: "Open Store page" })).toBeNull();
     });
 
     it("a version the Store lists that is not newer than this one is no update", async () => {
@@ -510,7 +522,8 @@ describe("Maintenance on a Microsoft Store install", () => {
             storeCheck.mockResolvedValue(listed(version));
             updateStatus.mockResolvedValue(STORE);
             render(() => <MaintenanceSection />);
-            expect(await screen.findByText(/^The Microsoft Store has no newer version/)).toBeTruthy();
+            // GitHub's v0.59.27 is the only newer release; the Store lists nothing newer than this one.
+            expect(await screen.findByText(/^v0\.59\.27 is published, but the Microsoft Store hasn't listed it for this PC yet/)).toBeTruthy();
             expect(screen.queryByRole("button", { name: "Update in the Store" })).toBeNull();
             cleanup();
         }
@@ -575,7 +588,7 @@ describe("Maintenance on a Microsoft Store install", () => {
         storeCheck.mockResolvedValue({ state: "none", message: "" });
         updateStatus.mockResolvedValue(STORE);
         render(() => <MaintenanceSection />);
-        expect(await screen.findByText(/^The Microsoft Store has no newer version/)).toBeTruthy();
+        expect(await screen.findByText(/^v0\.59\.27 is published, but the Microsoft Store hasn't listed it for this PC yet/)).toBeTruthy();
         storeCheck.mockResolvedValue(listed("0.59.27"));
         fireEvent.click(screen.getByRole("button", { name: "Check for update" }));
         expect(await screen.findByRole("button", { name: "Update in the Store" })).toBeTruthy();

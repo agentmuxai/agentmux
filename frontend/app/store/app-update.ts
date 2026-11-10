@@ -133,10 +133,19 @@ export function storeAnswer(s: AppUpdateStatus | null = appUpdate()): StoreOffer
 }
 
 /**
+ * The release srv found on GitHub that this Store install's Store check does not list yet, or null. The Store
+ * stays the only thing that installs; this only lets the panel say why it shows nothing to install.
+ */
+export function storePublishedNotListed(s: AppUpdateStatus | null = appUpdate()): string | null {
+    if (!viaStore(s) || storeOffer()?.state !== "none") return null;
+    return s?.state === "available" && s.latest && isNewer(s.latest, s.current) ? s.latest : null;
+}
+
+/**
  * What the version panel says where a release would be, for a Store install that has none to offer, in the
  * Store's own terms; null when it has one (the panel then offers it).
  */
-export function storeStandingLine(offer: StoreOffer | null, checked: string | null): string | null {
+export function storeStandingLine(offer: StoreOffer | null, checked: string | null, published: string | null = null): string | null {
     if (!offer) return "Not checked with the Microsoft Store yet";
     switch (offer.state) {
         case "available":
@@ -144,6 +153,9 @@ export function storeStandingLine(offer: StoreOffer | null, checked: string | nu
         case "asking":
             return "Asking the Microsoft Store for updates…";
         case "none":
+            if (published) {
+                return `v${published} is published, but the Microsoft Store hasn't listed it for this PC yet${checked ? ` (checked ${checked})` : ""}. This can take a while after the Store certifies a release.`;
+            }
             return `The Microsoft Store has no newer version${checked ? ` (checked ${checked})` : ""}`;
         case "no_answer":
             return "The Microsoft Store didn't answer; try again later.";
