@@ -229,15 +229,22 @@ fn read_tree(root: &Path, dir: &Path, work_dir: &str, out: &mut BTreeMap<String,
     }
 }
 
-/// What `agent.open` writes for the fixture agent.
+/// What `agent.open` writes for the fixture agent. The folder is under the data home so it is an
+/// AgentMux-owned working directory: a user project would get its `.mcp.json` relocated outside
+/// the tree this test reads (#3680), while the parity here is about the rendered files.
 fn render_open(fx: &Fixture, container: bool) -> BTreeMap<String, String> {
     let w = world(fx, container);
-    let dir = tempfile::tempdir().unwrap();
-    let work_dir = dir.path().to_str().unwrap();
-    write_agent_config_files(&w.store, &w.store, &w.store, &w.agent, &w.agent.slug, work_dir).unwrap();
-    let mut out = BTreeMap::new();
-    read_tree(dir.path(), dir.path(), work_dir, &mut out);
-    out
+    let data = tempfile::tempdir().unwrap();
+    crate::backend::mcp_config_file::with_data_home(data.path(), || {
+        let agents = data.path().join("agents");
+        std::fs::create_dir_all(&agents).unwrap();
+        let dir = tempfile::tempdir_in(&agents).unwrap();
+        let work_dir = dir.path().to_str().unwrap();
+        write_agent_config_files(&w.store, &w.store, &w.store, &w.agent, &w.agent.slug, work_dir).unwrap();
+        let mut out = BTreeMap::new();
+        read_tree(dir.path(), dir.path(), work_dir, &mut out);
+        out
+    })
 }
 
 /// What the window's Launch (`writeagentconfig`) writes for the fixture agent.

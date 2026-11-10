@@ -5,6 +5,7 @@
 
 import { getProvider } from "../providers";
 import { refreshCodexModels } from "../providers/codex-models-refresh";
+import { dismissModelUndone } from "../model-undone";
 import { runningModelNote } from "../resolved-model";
 import { isPersistentLaunch } from "../launch-args";
 import {
@@ -17,7 +18,7 @@ import {
 } from "../runtime-capabilities";
 import type { EffortLevel, PermissionMode } from "../../../agent-model/types";
 import type { DropupAgreement } from "./runtime-dropup-agreement";
-import { backRow, BACK_VALUE, parseRouteValue, routeRows } from "./runtime-dropup-routes";
+import { backRow, BACK_VALUE, parseCompactValue, parseRouteValue, routeRows } from "./runtime-dropup-routes";
 import {
     EFFORT_OPTIONS,
     MODE_OPTIONS,
@@ -161,10 +162,25 @@ export function createDropupActions(s: DropupState, a: DropupAgreement) {
             }
         };
         const target = parseRouteValue(value);
-        if (value === BACK_VALUE && panel?.previous) await move(panel.previous.route, panel.previous.model, true);
-        else if (target) await move(target.route, target.model, true);
+        const compactTarget = parseCompactValue(value);
+        let moved = false;
+        if (compactTarget && s.props.compactThenSwitch) {
+            try {
+                await s.props.compactThenSwitch(compactTarget.route, compactTarget.model);
+                s.setApplyError(null);
+                await s.routes.refresh();
+            } catch (err: any) {
+                s.setApplyError(err?.message ?? String(err));
+            }
+        } else if (value === BACK_VALUE && panel?.previous) moved = await move(panel.previous.route, panel.previous.model, true);
+        else if (target) moved = await move(target.route, target.model, true);
         // A harness model: the runtime setting it always was (which shows its own failure), from a route after leaving it.
-        else if (!(s.routeModel() || s.routes.onSavedRoute()) || (await move("", "", false))) await s.updateRuntime({ model: value });
+        else if (!(s.routeModel() || s.routes.onSavedRoute()) || (await move("", "", false))) {
+            await s.updateRuntime({ model: value });
+            moved = true;
+        }
+        // The agent was moved on by hand: a card about the change srv undid no longer says where it is.
+        if (moved && s.props.blockId) await dismissModelUndone(s.props.blockId);
     };
 
     // Enter applies and keeps the panel open — deliberate departure from

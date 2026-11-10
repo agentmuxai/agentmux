@@ -37,6 +37,8 @@ const INTERACTIVE_ROLES: &[&str] = &[
     "DisclosureTriangle", "DisclosureTriangleGrouped",
     // Native date, time, month, week and datetime-local inputs: `fill` sets them.
     "Date", "DateTime", "InputTime",
+    // An element the page makes clickable with a script (`clickable.rs`): a div with a click handler.
+    "clickable",
 ];
 
 /// The roles of native date and time inputs. Their segments (day, month,

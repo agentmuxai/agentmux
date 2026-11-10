@@ -184,8 +184,8 @@ pub struct CommandNativeMemoryClaimsData {
 
 /// `agent:memory:adoption_list` — the agent's memory folders under its
 /// earlier accounts, offered for adoption
-/// (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.4). Adopting one goes
-/// through the host's confirmation window, not an RPC.
+/// (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.4). Adopting one is
+/// `agent:memory:adopt`, which only the AgentMux window may call.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandNativeMemoryAdoptionListData {
@@ -198,6 +198,41 @@ pub struct NativeMemoryAdoptionListResult {
     /// `None` until the agent has a verified memory folder (its first spawn,
     /// or a working directory).
     pub list: Option<crate::backend::memory::adopt::AdoptionList>,
+}
+
+/// One folder of an adoption list, as the list named it.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct NativeMemoryAdoptChoice {
+    pub index: usize,
+    pub dir_hash: String,
+}
+
+/// `agent:memory:adopt`: adopt these folders of the list `list_id`, which srv
+/// issued for `agent_id`. Never a path.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandNativeMemoryAdoptData {
+    pub agent_id: String,
+    pub list_id: String,
+    pub choices: Vec<NativeMemoryAdoptChoice>,
+}
+
+/// `agent:memory:release`: release the claim at `index` of the claims list
+/// `list_id`, which srv issued for `agent_id`.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandNativeMemoryReleaseData {
+    pub agent_id: String,
+    pub list_id: String,
+    pub index: usize,
+}
+
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct NativeMemoryReleaseResult {
+    /// False when the claim was already gone.
+    pub released: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]

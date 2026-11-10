@@ -18,6 +18,11 @@ current: boolean,
  */
 unavailable: string | null, 
 /**
+ * Why the conversation has to be compacted before this model can take it (it holds more than the model's context,
+ * and a compacted one fits), or absent. The row is offered as "Compact, then switch".
+ */
+compact_first: string | null, 
+/**
  * About what the switch costs in re-reading the conversation at this model's input price, when it is large.
  */
 reread_cost_usd: number | null, };

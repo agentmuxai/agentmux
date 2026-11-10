@@ -283,9 +283,10 @@ impl super::SubprocessController {
         if config.resume_strategy != "codex-exec" || config.working_dir.is_empty() {
             return CodexMcp::default();
         }
-        // The folder as the spawn expands it (`~` is the home directory).
+        // The folder as the spawn expands it (`~` is the home directory). The config may be
+        // outside it (#3680); `read_for_turn` finds it and keeps the project's own servers.
         let folder = crate::backend::blockcontroller::core::expand_home_dir(&config.working_dir);
-        let Ok(raw) = std::fs::read_to_string(std::path::Path::new(&folder).join(".mcp.json")) else { return CodexMcp::default() };
+        let Some(raw) = crate::backend::mcp_config_file::read_for_turn(&folder) else { return CodexMcp::default() };
         let path = config.env_vars.get("PATH").cloned();
         let env = launch_env(std::env::vars(), &config.env_vars);
         let made = codex_mcp_overrides(&raw, &env, &|c| resolve_command(c, path.as_deref()));

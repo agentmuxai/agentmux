@@ -41,7 +41,7 @@ Out of scope:
 - Vulnerabilities in upstream dependencies — please report to those projects;
   we will pick up the fix on the next release.
 - Social engineering, physical attacks, or denial-of-service against
-  AgentMux Corp. infrastructure
+  AgentMux Corp infrastructure
 - Issues requiring physical access to an unlocked machine
 
 ## Credit

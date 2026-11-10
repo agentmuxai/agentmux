@@ -578,8 +578,8 @@ pub(crate) fn native_memory_write_file(state: &AppState, cmd: CommandNativeMemor
     Ok(())
 }
 
-/// `agent:memory:adoption_list`. Offers only: adopting a listed folder goes
-/// through the host's confirmation window (`service/memory_adopt.rs`), never
+/// `agent:memory:adoption_list`. Offers only: adopting a listed folder is
+/// `agent:memory:adopt` (`native_memory_adopt_handlers.rs`), the window's only, never
 /// this RPC — every agent holds the key this one is called with.
 pub(crate) async fn native_memory_adoption_list(
     state: &AppState,
@@ -600,8 +600,8 @@ pub(crate) async fn native_memory_adoption_list(
     Ok(NativeMemoryAdoptionListResult { list })
 }
 
-/// `agent:memory:claims`. Offers only, like the adoption list: releasing goes
-/// through the host.
+/// `agent:memory:claims`. Offers only, like the adoption list: releasing is
+/// `agent:memory:release`, the window's only.
 pub(crate) async fn native_memory_claims(
     state: &AppState,
     cmd: CommandNativeMemoryClaimsData,

@@ -347,3 +347,37 @@ fn a_card_an_older_build_adds_after_main_was_deleted_goes_on_the_default_board()
     assert_eq!((t.card.board.as_str(), t.card.num, t.card.task_ref.as_str()), ("work", 1, "#1"));
     assert_eq!(t.card.board_id, work.id);
 }
+
+
+#[test]
+fn a_task_with_no_card_follows_the_default_boards_agent_list() {
+    let (s, _d) = store();
+    s.work_board_edit("main", &BoardEdit { agents: Some(vec!["agentx".into()]), ..Default::default() }, 2).unwrap();
+    // Enqueued by an older build: no card yet.
+    s.work_queue_enqueue(&item("old", 1000)).unwrap();
+    assert!(claim(&s, "naki-2").is_none(), "Main's list leaves naki-2 out");
+    let state: String = s.conn().lock().unwrap().query_row("SELECT state FROM db_work_queue WHERE id = 'old'", [], |r| r.get(0)).unwrap();
+    assert_eq!(state, work_state::OPEN, "and nothing was handed out");
+    assert_eq!(claim(&s, "agentx").unwrap().id, "old");
+}
+
+#[test]
+fn waiting_tasks_leave_out_boards_the_agent_cannot_see_and_archived_ones() {
+    let (s, _d) = store();
+    let work = s.work_board_create(&edit("Work"), "t", 1).unwrap();
+    let team = s.work_board_create(&BoardEdit { agents: Some(vec!["agentx".into()]), ..edit("Team") }, "t", 1).unwrap();
+    for (id, board) in [("m", ""), ("w", work.id.as_str()), ("t", team.id.as_str())] {
+        let mut it = item(id, 1000);
+        it.target_agent = "naki-2".into();
+        s.work_queue_enqueue(&it).unwrap();
+        s.work_card_create(id, &NewCard { board: board.into(), filed_by: "tester".into(), ..Default::default() }, 1000).unwrap();
+    }
+    let ids = |s: &Store, who: &str| -> Vec<String> {
+        let mut v: Vec<String> = s.work_board_waiting_for(who, "", 10, 5000).unwrap().into_iter().map(|t| t.item.id).collect();
+        v.sort();
+        v
+    };
+    assert_eq!(ids(&s, "naki-2"), ["m", "w"], "the Team list leaves naki-2 out");
+    s.work_board_archive("work", true, 10).unwrap();
+    assert_eq!(ids(&s, "naki-2"), ["m"], "an archived board's tasks can't be claimed, so no reminder names them");
+}

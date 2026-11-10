@@ -14,7 +14,7 @@
 import { Logger } from "@/util/logger";
 import { isWindows } from "@/util/platformutil";
 
-type Api = Pick<AppApi, "liveFollowBegin" | "liveFollowEnd">;
+type Api = Pick<AppApi, "liveFollowBegin" | "liveFollowEnd" | "liveFollowResize">;
 
 export interface LiveFollowSpec {
     sourceWindowLabel: string;
@@ -44,4 +44,18 @@ export async function beginLiveFollow(api: Api, spec: LiveFollowSpec): Promise<v
 export function endLiveFollow(api: Api): void {
     if (!isWindows()) return;
     api.liveFollowEnd().catch((e) => Logger.debug("dnd", "live follow end failed", { error: String(e) }));
+}
+
+/**
+ * Give the picture another size, DIP: the host cuts or pads the picture it was given, never scales it. Calls
+ * go out in order, so a later size can't land before an earlier one. A failure only leaves the old size.
+ */
+let resizes: Promise<unknown> = Promise.resolve();
+export function resizeLiveFollow(api: Pick<Api, "liveFollowResize">, size: { width: number; height: number }): Promise<void> {
+    if (!isWindows()) return Promise.resolve();
+    const next = resizes.then(() =>
+        api.liveFollowResize({ windowWidth: Math.round(size.width), windowHeight: Math.round(size.height) })
+    );
+    resizes = next.catch((e) => Logger.debug("dnd", "live follow resize failed", { error: String(e) }));
+    return resizes as Promise<void>;
 }

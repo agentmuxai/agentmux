@@ -58,7 +58,6 @@ import { checkSeparatorParity, setupDprTracking } from "./init/dpr";
 import { NotificationBubbles } from "./notification/notificationbubbles";
 import { BrowserPaneOutsideClickBridge } from "./window/browser-pane-outside-click-bridge";
 import { CredentialApprovalWindow } from "./view/credential-approval/CredentialApprovalWindow";
-import { MemoryAdoptionApprovalWindow } from "./view/memory-adoption-approval/MemoryAdoptionApprovalWindow";
 import { SshApprovalWindow } from "./view/ssh-approval/SshApprovalWindow";
 
 import "./app.scss";
@@ -400,11 +399,7 @@ const AppInner = () => {
     // app-init.ts's guard against firing `pane.open` for this view), so it
     // must never wait on atoms that will never populate.
     const IS_CREDENTIAL_APPROVAL = new URLSearchParams(window.location.search).get("initialView") === "credential-approval";
-    // Same shape, for adopting an agent's earlier memory (agentmux-cef
-    // `memory_adoption`).
-    const IS_MEMORY_ADOPTION_APPROVAL =
-        new URLSearchParams(window.location.search).get("initialView") === "memory-adoption-approval";
-    // And for an agent's SSH access and its ssh's prompts (agentmux-cef
+    // Same shape, for an agent's SSH access and its ssh's prompts (agentmux-cef
     // `ssh_approval`).
     const IS_SSH_APPROVAL = new URLSearchParams(window.location.search).get("initialView") === "ssh-approval";
     const client = atoms.client;
@@ -413,9 +408,6 @@ const AppInner = () => {
 
     if (IS_CREDENTIAL_APPROVAL) {
         return <CredentialApprovalWindow />;
-    }
-    if (IS_MEMORY_ADOPTION_APPROVAL) {
-        return <MemoryAdoptionApprovalWindow />;
     }
     if (IS_SSH_APPROVAL) {
         return <SshApprovalWindow />;

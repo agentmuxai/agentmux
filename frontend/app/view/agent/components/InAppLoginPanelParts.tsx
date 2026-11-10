@@ -9,6 +9,7 @@ import { getApi } from "@/app/store/global";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { Show, type Accessor, type JSX } from "solid-js";
 import { tip } from "@/app/element/tip";
+import { t } from "@/app/i18n/i18n";
 import type { InAppLoginPanelProps, LoginPasteState } from "./InAppLoginPanelState";
 
 /** Step 1: the sign-in link, to open in the browser or copy. */
@@ -17,10 +18,10 @@ export function AuthorizeStep(props: { url: Accessor<string> }): JSX.Element {
     return (
         <div class="in-app-login-step">
             <div class="in-app-login-url-label">
-                1 · Authorize in your browser
+                {t("login.authorize")}
             </div>
             <div class="in-app-login-hint">
-                Your browser should have opened automatically. If it didn't, copy this backup link and open it manually:
+                {t("login.authorizeHint")}
             </div>
             <div class="in-app-login-url-row">
                 <code class="in-app-login-url-text" {...tip(url())}>
@@ -38,7 +39,7 @@ export function AuthorizeStep(props: { url: Accessor<string> }): JSX.Element {
                         }
                     }}
                 >
-                    Open link
+                    {t("login.openLink")}
                 </Button>
                 <Button
                     className="grey solid"
@@ -50,7 +51,7 @@ export function AuthorizeStep(props: { url: Accessor<string> }): JSX.Element {
                         );
                     }}
                 >
-                    Copy link
+                    {t("login.copyLink")}
                 </Button>
             </div>
         </div>
@@ -60,20 +61,22 @@ export function AuthorizeStep(props: { url: Accessor<string> }): JSX.Element {
 /** Step 2: the authorization code, typed, pasted into the box, or read from the clipboard. */
 export function PasteStep(props: { s: LoginPasteState }): JSX.Element {
     const s = props.s;
+    // A call, not an inline ternary: the compiler would wrap the ternary in a memo, which a button stand-in reading its children outside a render would warn about.
+    const submitLabel = () => (s.pasting() ? "…" : t("login.submit"));
     return (
         <div class="in-app-login-step">
             <div class="in-app-login-url-label">
-                2 · Paste the authorization code
+                {t("login.paste")}
             </div>
             <div class="in-app-login-hint">
-                After you authorize, the page shows a code — paste it here:
+                {t("login.pasteHint")}
             </div>
             <div class="in-app-login-callback-row">
                 <TextInput
                     variant="plain"
                     ref={s.setInputRef}
                     class="in-app-login-url-input"
-                    placeholder="Paste the authorization code…"
+                    placeholder={t("login.pastePlaceholder")}
                     value={s.pasteCode()}
                     onInput={(e) => s.setPasteCode(e.currentTarget.value)}
                     onKeyDown={(e) => {
@@ -91,17 +94,17 @@ export function PasteStep(props: { s: LoginPasteState }): JSX.Element {
                 />
                 <Button
                     className="grey solid"
-                    title="Paste from clipboard and submit"
+                    title={t("login.pasteSubmitTitle")}
                     onClick={() => s.pasteFromClipboard()}
                 >
-                    Paste &amp; submit
+                    {t("login.pasteSubmit")}
                 </Button>
                 <Button
                     className="grey solid"
                     onClick={() => void s.submitCode()}
                     disabled={s.pasting()}
                 >
-                    {s.pasting() ? "…" : "Submit"}
+                    {submitLabel()}
                 </Button>
             </div>
             <Show when={s.pasteResult()}>
@@ -116,13 +119,13 @@ export function LoginActions(props: { p: InAppLoginPanelProps }): JSX.Element {
     const p = props.p;
     return (
         <div class="in-app-login-actions">
-            <Button onClick={() => p.onCancel()}>Cancel login</Button>
+            <Button onClick={() => p.onCancel()}>{t("login.cancel")}</Button>
             {/* Explicit terminal fallback — never auto-launched (spec
                 §3.2). Hidden once the flow is already in the terminal
                 tiers, where the request would only abort a live poll. */}
             <Show when={p.phase === "starting" || p.phase === "waiting-authorize"}>
                 <Button className="grey" onClick={() => p.onUseTerminal()}>
-                    Use terminal instead
+                    {t("login.useTerminal")}
                 </Button>
             </Show>
         </div>

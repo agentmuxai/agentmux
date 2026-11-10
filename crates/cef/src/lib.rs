@@ -26,12 +26,12 @@ mod drag_stash;
 mod events;
 mod health_signals;
 mod ipc;
+mod ipc_query;
 mod launcher_event_bridge;
 mod launcher_ipc;
 // Not #[cfg]-gated at the mod-declaration level like macos_compat/macos_menu
-// below — this module deliberately mixes OS-agnostic pure logic (unit
-// tested on any host) with target_os = "linux"-gated OS interaction
-// (internally gated within the file itself). See its own doc comment.
+// below — this module deliberately mixes OS-agnostic pure logic (unit tested on
+// any host) with target_os = "linux"-gated OS interaction (gated within the file). See its own doc comment.
 mod linux_sandbox;
 mod logging;
 mod parent_process;
@@ -42,7 +42,6 @@ mod memory_pressure;
 mod browser_pane;
 mod pane_backend;
 mod credential_broker;
-mod memory_adoption;
 mod ssh_approval;
 #[cfg(target_os = "windows")]
 mod floating_pane;

@@ -57,6 +57,9 @@ impl ContainerMountSpec {
                 .map(str::to_string),
             workspace_host_dir: Some(working_dir.to_string()).filter(|d| !d.is_empty()),
             memory_host_dir: config_dir.and_then(|dir| personal_memory_host_dir(Some(dir), working_dir)),
+            mcp_config_host_dir: crate::backend::mcp_config_file::relocated_path(working_dir)
+                .filter(|path| path.is_file())
+                .and_then(|path| path.parent().map(|dir| dir.to_string_lossy().into_owned())),
             github_hooks_host_dir: crate::identity::github_tokens::container_git_hooks().map(|d| d.to_string_lossy().into_owned()),
             aws_config_host_dir: crate::identity::aws_broker::container::config_dir(),
             aws_tools_host_dir: env_vars.get("AGENTMUX_AGENT_ID").and_then(|slug| crate::identity::aws_broker::tools::config_dir_for(slug)),
@@ -196,6 +199,17 @@ pub(super) fn agent_home_mounts(container_name: &str, spec: &ContainerMountSpec)
             ..Default::default()
         });
     }
+    if let Some(host_dir) = spec.mcp_config_host_dir.as_deref().filter(|d| !d.is_empty()) {
+        // Read-only: the agent's MCP config is srv's, and a container must never rewrite it.
+        // The folder, so a file replaced by an atomic write is seen (a single-file bind is not).
+        mounts.push(Mount {
+            target: Some(crate::backend::container::CONTAINER_MCP_CONFIG_DIR.to_string()),
+            source: Some(normalize_host_path(host_dir)),
+            typ: Some(MountTypeEnum::BIND),
+            read_only: Some(true),
+            ..Default::default()
+        });
+    }
     if let Some(host_dir) = spec.github_hooks_host_dir.as_deref().filter(|d| !d.is_empty()) {
         // Read-only: the push scan is not the agent's to edit.
         mounts.push(Mount {
@@ -225,11 +239,12 @@ pub(super) fn agent_home_mounts(container_name: &str, spec: &ContainerMountSpec)
 
 /// Every mount target the container manager owns. Anything NOT in here (the caller's `agent:container_volumes`) is
 /// the user's business and is never a reason to rebuild their container.
-pub(super) fn owned_mount_targets() -> [String; 6] {
+pub(super) fn owned_mount_targets() -> [String; 7] {
     [
         CONTAINER_CLAUDE_DIR.to_string(),
         format!("{CONTAINER_CLAUDE_DIR}/{CLAUDE_CREDENTIALS_FILE}"),
         CONTAINER_WORKSPACE_DIR.to_string(),
+        crate::backend::container::CONTAINER_MCP_CONFIG_DIR.to_string(),
         crate::identity::github_tokens::CONTAINER_HOOKS_DIR.to_string(),
         crate::identity::aws_broker::container::CONTAINER_AWS_DIR.to_string(),
         crate::identity::aws_broker::tools::CONTAINER_TOOLS_DIR.to_string(),
@@ -262,6 +277,19 @@ mod tests {
     #[test]
     fn claude_reads_memory_from_the_folder_it_names_for_the_workspace() {
         assert_eq!(container_memory_dir(), "/home/agent/.claude/projects/-workspace/memory");
+    }
+
+    /// The relocated MCP config is mounted as its FOLDER: a single-file bind would keep the old
+    /// inode across an atomic rewrite, leaving the container on a stale config (#3680).
+    #[test]
+    fn the_relocated_mcp_config_is_a_read_only_folder_bind() {
+        let with = ContainerMountSpec { mcp_config_host_dir: Some("/host/.agentmux/mcp/abc".into()), ..Default::default() };
+        let mounts = agent_home_mounts("agentmux-abc", &with);
+        let mount = bind_at(&mounts, crate::backend::container::CONTAINER_MCP_CONFIG_DIR).expect("the config folder is mounted");
+        assert_eq!(mount.source.as_deref(), Some("/host/.agentmux/mcp/abc"));
+        assert_eq!(mount.read_only, Some(true), "the config is srv's to write");
+        let without = ContainerMountSpec::default();
+        assert!(bind_at(&agent_home_mounts("agentmux-abc", &without), crate::backend::container::CONTAINER_MCP_CONFIG_DIR).is_none());
     }
 
     #[test]

@@ -13,6 +13,14 @@ fn now() -> i64 {
     agentmux_common::time::now_secs()
 }
 
+/// The LAN peers show `name` with `public` (and a UID key), and this machine has pinned that key already, as
+/// it has every name of the fleet: a name is no longer pinned by the first answer alone (lan first-pin rule).
+fn seed_pinned(state: &crate::server::AppState, name: &str, public: Vec<u8>, uid: Option<(String, Vec<u8>)>) {
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+    state.mstore.lan_peer_pubkey_pin_get_or_set(name, &BASE64.encode(&public)).unwrap();
+    state.lan_discovery.seed_lan_pubkey_for_test(name, public, uid);
+}
+
 /// A LAN jekt from `korp`, v1-signed with `name_private` and, when given,
 /// v2-signed as `uid` with `uid_private`.
 fn signed(name_private: &[u8; 32], v2: Option<(&str, &[u8; 32])>) -> InjectionRequest {
@@ -39,7 +47,7 @@ async fn a_valid_v2_from_the_answering_peers_uid_is_recorded_as_claimed_only() {
     let state = test_state();
     let (name_public, name_private) = generate_lan_keypair([1u8; 32]);
     let (uid_public, uid_private) = generate_lan_keypair([2u8; 32]);
-    state.lan_discovery.seed_lan_pubkey_for_test("korp", name_public.to_vec(), Some(("uid-k".into(), uid_public.to_vec())));
+    seed_pinned(&state, "korp", name_public.to_vec(), Some(("uid-k".into(), uid_public.to_vec())));
     let mut req = signed(&name_private, Some(("uid-k", &uid_private)));
     verify_lan_signature(&state, &mut req).await;
     assert_eq!(req.lan_verified, Some(true));
@@ -52,7 +60,7 @@ async fn a_uid_the_answering_peer_did_not_give_is_not_claimed_and_fails_the_jekt
     let state = test_state();
     let (name_public, name_private) = generate_lan_keypair([1u8; 32]);
     let (uid_public, uid_private) = generate_lan_keypair([2u8; 32]);
-    state.lan_discovery.seed_lan_pubkey_for_test("korp", name_public.to_vec(), Some(("uid-k".into(), uid_public.to_vec())));
+    seed_pinned(&state, "korp", name_public.to_vec(), Some(("uid-k".into(), uid_public.to_vec())));
     let mut req = signed(&name_private, Some(("uid-other", &uid_private)));
     verify_lan_signature(&state, &mut req).await;
     assert_eq!(req.lan_verified, Some(false), "a UID claim the peer contradicts is a failed signature");
@@ -65,7 +73,7 @@ async fn no_uid_key_to_check_against_leaves_v1_standing() {
     let state = test_state();
     let (name_public, name_private) = generate_lan_keypair([1u8; 32]);
     let (_, uid_private) = generate_lan_keypair([2u8; 32]);
-    state.lan_discovery.seed_lan_pubkey_for_test("korp", name_public.to_vec(), None);
+    seed_pinned(&state, "korp", name_public.to_vec(), None);
     let mut req = signed(&name_private, Some(("uid-k", &uid_private)));
     verify_lan_signature(&state, &mut req).await;
     assert_eq!(req.lan_verified, Some(true));
@@ -77,13 +85,13 @@ async fn a_peer_that_pinned_a_uid_key_and_now_gives_none_fails_the_jekt() {
     let state = test_state();
     let (name_public, name_private) = generate_lan_keypair([1u8; 32]);
     let (uid_public, uid_private) = generate_lan_keypair([2u8; 32]);
-    state.lan_discovery.seed_lan_pubkey_for_test("korp", name_public.to_vec(), Some(("uid-k".into(), uid_public.to_vec())));
+    seed_pinned(&state, "korp", name_public.to_vec(), Some(("uid-k".into(), uid_public.to_vec())));
     let mut first = signed(&name_private, Some(("uid-k", &uid_private)));
     verify_lan_signature(&state, &mut first).await; // pins uid-k's key under korp
     assert_eq!(first.lan_verified, Some(true));
 
     // The next answer carries no UID key, and the peers have none to give on a fresh ask.
-    state.lan_discovery.seed_lan_pubkey_for_test("korp", name_public.to_vec(), None);
+    seed_pinned(&state, "korp", name_public.to_vec(), None);
     let mut req = signed(&name_private, Some(("uid-k", &uid_private)));
     verify_lan_signature(&state, &mut req).await;
     assert_eq!(req.lan_verified, Some(false), "a pinned name owes its UID key");
@@ -95,9 +103,9 @@ async fn a_pinned_name_without_a_uid_key_still_passes_a_jekt_that_claims_no_uid(
     let state = test_state();
     let (name_public, name_private) = generate_lan_keypair([1u8; 32]);
     let (uid_public, uid_private) = generate_lan_keypair([2u8; 32]);
-    state.lan_discovery.seed_lan_pubkey_for_test("korp", name_public.to_vec(), Some(("uid-k".into(), uid_public.to_vec())));
+    seed_pinned(&state, "korp", name_public.to_vec(), Some(("uid-k".into(), uid_public.to_vec())));
     verify_lan_signature(&state, &mut signed(&name_private, Some(("uid-k", &uid_private)))).await;
-    state.lan_discovery.seed_lan_pubkey_for_test("korp", name_public.to_vec(), None);
+    seed_pinned(&state, "korp", name_public.to_vec(), None);
     let mut req = signed(&name_private, None);
     verify_lan_signature(&state, &mut req).await;
     assert_eq!(req.lan_verified, Some(true), "no v2 at all is judged on v1");
@@ -108,7 +116,7 @@ async fn a_jekt_with_no_v2_at_all_stays_verified_on_v1() {
     let state = test_state();
     let (name_public, name_private) = generate_lan_keypair([1u8; 32]);
     let (uid_public, _) = generate_lan_keypair([2u8; 32]);
-    state.lan_discovery.seed_lan_pubkey_for_test("korp", name_public.to_vec(), Some(("uid-k".into(), uid_public.to_vec())));
+    seed_pinned(&state, "korp", name_public.to_vec(), Some(("uid-k".into(), uid_public.to_vec())));
     let mut req = signed(&name_private, None);
     verify_lan_signature(&state, &mut req).await;
     assert_eq!(req.lan_verified, Some(true));
@@ -121,12 +129,12 @@ async fn a_changed_uid_key_under_the_same_name_is_not_claimed_and_fails_the_jekt
     let (name_public, name_private) = generate_lan_keypair([1u8; 32]);
     let (first_public, _) = generate_lan_keypair([2u8; 32]);
     let (second_public, second_private) = generate_lan_keypair([3u8; 32]);
-    state.lan_discovery.seed_lan_pubkey_for_test("korp", name_public.to_vec(), Some(("uid-k".into(), first_public.to_vec())));
+    seed_pinned(&state, "korp", name_public.to_vec(), Some(("uid-k".into(), first_public.to_vec())));
     let mut first = signed(&name_private, None);
     first.source_uid = Some("uid-k".into());
     first.lan_sig_v2 = Some("unchecked until the pin is set".into());
     verify_lan_signature(&state, &mut first).await; // pins uid-k's first key
-    state.lan_discovery.seed_lan_pubkey_for_test("korp", name_public.to_vec(), Some(("uid-k".into(), second_public.to_vec())));
+    seed_pinned(&state, "korp", name_public.to_vec(), Some(("uid-k".into(), second_public.to_vec())));
     let mut req = signed(&name_private, Some(("uid-k", &second_private)));
     verify_lan_signature(&state, &mut req).await;
     assert_eq!(req.lan_claimed_uid, "", "the pin holds the first key");
@@ -139,7 +147,7 @@ async fn a_bad_v2_fails_the_jekt_and_a_failed_v1_claims_nothing() {
     let (name_public, name_private) = generate_lan_keypair([1u8; 32]);
     let (uid_public, _) = generate_lan_keypair([2u8; 32]);
     let (_, wrong_private) = generate_lan_keypair([4u8; 32]);
-    state.lan_discovery.seed_lan_pubkey_for_test("korp", name_public.to_vec(), Some(("uid-k".into(), uid_public.to_vec())));
+    seed_pinned(&state, "korp", name_public.to_vec(), Some(("uid-k".into(), uid_public.to_vec())));
     let mut bad_v2 = signed(&name_private, Some(("uid-k", &wrong_private)));
     verify_lan_signature(&state, &mut bad_v2).await;
     assert_eq!(bad_v2.lan_verified, Some(false), "v1 held, but the UID claim is forged");
@@ -210,7 +218,7 @@ mod origin {
         let name_key = BASE64.decode(store.agent_lan_public_key_load("coddy").unwrap().unwrap()).unwrap();
         let (uid_keys, _) = store.agent_uid_keys_ensure("uid-coddy").unwrap().unwrap();
         let uid_key = BASE64.decode(uid_keys.lan.public_key).unwrap();
-        state.lan_discovery.seed_lan_pubkey_for_test("coddy", name_key, Some(("uid-coddy".into(), uid_key)));
+        seed_pinned(&state, "coddy", name_key, Some(("uid-coddy".into(), uid_key)));
         state
     }
 
@@ -431,6 +439,8 @@ mod refetch {
     async fn a_key_found_on_the_second_ask_verifies_the_jekt() {
         let state = test_state();
         let (public, private) = generate_lan_keypair([1u8; 32]);
+        // A name this machine pinned already: the second ask finds the key it expects.
+        state.mstore.lan_peer_pubkey_pin_get_or_set("korp", &BASE64.encode(public)).unwrap();
         state.lan_discovery.seed_peer_at_for_test(&peer_saying(answer_with(&public)).await);
         state.lan_discovery.seed_lan_pubkey_miss_for_test("korp", 30);
         let mut req = signed(&private, None);

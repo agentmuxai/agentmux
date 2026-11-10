@@ -24,9 +24,9 @@
 //! string through `sh -c`/`cmd /c` — so there is no interpolation surface
 //! even though nothing in this table is user-suppliable today.
 //!
-//! **Only the user can start an install:** before anything runs, srv asks the person in the approval window
-//! ([`ask_user`](crate::server::app_api::connections::ask_user), served by the window host, which
-//! no pane process can reach or answer). The panel's own confirm is not enough: every agent holds
+//! **Only the user can start an install:** before anything runs, srv asks the person, as a modal over
+//! the pane whose Install they clicked ([`ask_in_pane`](crate::server::app_api::connections::ask_in_pane):
+//! drawn where no agent's UI tool reaches, answered only from the AgentMux window). The panel's own confirm is not enough: every agent holds
 //! the key this RPC takes. With no window to ask in, or no answer, nothing runs.
 
 #[cfg(windows)]
@@ -38,7 +38,7 @@ use serde_json::json;
 
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::mps::Broker;
-use crate::server::app_api::connections::{ask_user, UserAnswer};
+use crate::server::app_api::connections::{ask_in_pane, UserAnswer};
 use crate::server::install_handlers::{resolve_tool_path, InstallChunkEvent, InstallStream};
 use crate::server::AppState;
 
@@ -431,6 +431,19 @@ struct ToolIdReq {
     tool_id: String,
 }
 
+/// `toolchain.install_system_tool`: the tool, and the pane whose button asked for it.
+#[derive(Debug, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+#[serde(rename_all = "camelCase")]
+struct InstallSystemToolReq {
+    tool_id: String,
+    /// The pane the person clicked Install in: the question is asked over it. Without one it is
+    /// asked in the approval window over the main window.
+    #[serde(default)]
+    #[ts(optional)]
+    block_id: Option<String>,
+}
+
 /// What `toolchain.resolve_install_command` answers. Untagged, so the JSON is
 /// the same two shapes the handler always sent, and ts-rs renders it as the
 /// `{ available: false } | { available: true, ... }` union the frontend narrows on.
@@ -512,9 +525,10 @@ impl Drop for ClaimGuard {
     }
 }
 
-/// Ask the user, in the approval window over the main window, whether `step` may run.
-async fn approve_install(state: &AppState, tool_id: &str, step: &SystemInstallStep) -> Result<(), String> {
-    require_approval(ask_user(state, "", approval_question(tool_id, step)).await, tool_id)
+/// Ask the user whether `step` may run: in pane `block_id`, where they clicked Install, or with
+/// none named in the approval window over the main window.
+async fn approve_install(state: &AppState, block_id: &str, tool_id: &str, step: &SystemInstallStep) -> Result<(), String> {
+    require_approval(ask_in_pane(state, block_id, approval_question(tool_id, step)).await, tool_id)
 }
 
 pub fn register_system_install_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -543,7 +557,7 @@ pub fn register_system_install_handlers(engine: &Arc<WshRpcEngine>, state: &AppS
     let registry = state.install_sessions.clone();
     let broker = state.broker.clone();
     let app = state.clone();
-    engine.register_typed(COMMAND_TOOLCHAIN_INSTALL_SYSTEM_TOOL, move |req: ToolIdReq, _ctx| {
+    engine.register_typed(COMMAND_TOOLCHAIN_INSTALL_SYSTEM_TOOL, move |req: InstallSystemToolReq, _ctx| {
         let registry = registry.clone();
         let broker = broker.clone();
         let app = app.clone();
@@ -568,10 +582,10 @@ pub fn register_system_install_handlers(engine: &Arc<WshRpcEngine>, state: &AppS
                     ));
                 }
                 // Held while the user is asked, so a second request for the tool is refused at once
-                // instead of showing a second window. Let go unless the install starts.
+                // instead of asking a second time. Let go unless the install starts.
                 let mut claim = ClaimGuard { registry: registry.clone(), key: claim_key.clone(), armed: true };
                 // Before anything runs: the user's yes, asked by srv itself.
-                approve_install(&app, &req.tool_id, &step).await?;
+                approve_install(&app, req.block_id.as_deref().unwrap_or(""), &req.tool_id, &step).await?;
                 claim.armed = false;
                 let session_id = format!("sysinstall-{}", uuid::Uuid::new_v4());
                 tracing::info!(
@@ -774,8 +788,10 @@ mod tests {
     async fn with_no_window_to_ask_in_nothing_is_approved() {
         let state = crate::server::tests::test_state();
         assert!(state.host_ipc.lock().await.is_none());
-        let err = approve_install(&state, "git", &step()).await.unwrap_err();
-        assert!(err.contains("no AgentMux window is connected"), "{err}");
+        for block in ["", "toolchain-pane"] {
+            let err = approve_install(&state, block, "git", &step()).await.unwrap_err();
+            assert!(err.contains("no AgentMux window is connected"), "{block:?}: {err}");
+        }
     }
 
     /// The claim held while the user is asked goes back unless the install starts.

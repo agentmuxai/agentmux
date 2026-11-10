@@ -790,6 +790,15 @@
     }
   },
   {
+    "event": "pane:confirm",
+    "payloadTs": {
+      "imports": [
+        "PaneConfirmView"
+      ],
+      "name": "PaneConfirmView"
+    }
+  },
+  {
     "event": "pins:changed",
     "payloadTs": {
       "imports": [],

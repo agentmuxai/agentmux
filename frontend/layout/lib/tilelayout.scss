@@ -302,6 +302,13 @@
         }
     }
 
+    // The live reflow (liveReflow.ts): the panes themselves glide to where the drop leaves them, so they are the
+    // outline and the gap is the signal. The landing zone keeps its edge and fill, and the rest of the layout is
+    // not dimmed: it is what the user is reading.
+    .placeholder-container.live-reflow .placeholder {
+        box-shadow: none;
+    }
+
     // NOTE — no reduced treatment here by design. The drag-rearrange glide
     // (`.placeholder-sizer`) is ESSENTIAL spatial motion: it shows where a
     // drop lands, so it stays outside the motion policy and is never reduced

@@ -7,20 +7,19 @@
  * (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.4).
  *
  * Lists the agent's memory folders under its earlier accounts (and files
- * held at first sighting), lets the human pick some, and asks the host to
- * confirm. The confirmation is a separate host window, never this panel: an
- * agent can reach this panel's buttons (they're Memory pane chrome), so this
- * panel can only open that window, not adopt.
+ * held at first sighting), lets the human pick some, and asks them to confirm
+ * in a modal over this pane (`memory-confirms.tsx`). An agent can reach this
+ * panel's buttons (they're Memory pane chrome), so they only ask: the modal
+ * and srv's `agent:memory:adopt` are the person's alone.
  *
  * Renders nothing when there is nothing to offer.
  */
 
-import { createEffect, createSignal, For, on, onCleanup, Show, type JSX } from "solid-js";
+import { createEffect, createSignal, For, on, Show, type JSX } from "solid-js";
 import { RpcApi, type NativeMemoryAdoptionCandidate, type NativeMemoryAdoptionList } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { getApi } from "@/store/global";
-import { accountLabel } from "@/app/view/memory-adoption-approval/MemoryAdoptionApprovalWindow";
 import { Button } from "@/app/element/ui";
+import { accountLabel, AdoptConfirm, askInPane } from "./memory-confirms";
 
 interface MemoryAdoptionPanelProps {
     agentId: string;
@@ -30,6 +29,9 @@ interface MemoryAdoptionPanelProps {
 }
 
 type Outcome = { status: "adopted" | "declined" | "failed"; text: string };
+
+/** Adopting reads the chosen folders and writes the record under the agent's reconcile lease. */
+const ADOPT_TIMEOUT_MS = 30_000;
 
 export function outcomeText(payload: any): Outcome | null {
     switch (payload?.status) {
@@ -102,19 +104,7 @@ export const MemoryAdoptionPanel = (props: MemoryAdoptionPanelProps): JSX.Elemen
         load(id);
     }));
 
-    let unlisten: (() => void) | undefined;
-    void getApi().listen<any>("memory-adoption-result", (payload) => {
-        if (payload?.agent_id !== props.agentId) return;
-        // The same window confirms releasing a folder; that isn't ours.
-        if (payload?.kind && payload.kind !== "adopt") return;
-        setWaiting(false);
-        setOutcome(outcomeText(payload));
-        load(props.agentId);
-        if (payload?.status === "done" || payload?.status === "adopted") props.onAdopted?.();
-    }).then((u) => {
-        unlisten = u;
-    });
-    onCleanup(() => unlisten?.());
+    let root: HTMLElement | undefined;
 
     const candidates = () => list()?.candidates ?? [];
     const toggle = (index: number) => {
@@ -130,21 +120,29 @@ export const MemoryAdoptionPanel = (props: MemoryAdoptionPanelProps): JSX.Elemen
         setError(null);
         setOutcome(null);
         setWaiting(true);
-        try {
-            await getApi().approvals.requestMemoryAdoption({
-                window_label: await getApi().getWindowLabel(),
-                agent_id: props.agentId,
-                list_id: l.list_id,
-                choices: picked.map((c) => ({ index: c.index, dir_hash: c.dir_hash })),
-                summary: {
-                    agentName: props.agentName,
-                    folders: picked.map((c) => ({ account: c.account, files: c.files.map((f) => f.name) })),
+        const agentId = props.agentId;
+        const act = () =>
+            RpcApi.NativeMemoryAdoptCommand(
+                TabRpcClient,
+                { agent_id: agentId, list_id: l.list_id, choices: picked.map((c) => ({ index: c.index, dir_hash: c.dir_hash })) },
+                { timeout: ADOPT_TIMEOUT_MS }
+            ).then(
+                (report) => {
+                    setOutcome(outcomeText({ status: "done", report }));
+                    props.onAdopted?.();
                 },
-            });
-        } catch (e) {
-            setWaiting(false);
-            setError(`Couldn't open the confirmation window: ${e}`);
-        }
+                (e) => void setOutcome(outcomeText({ status: "failed", error: e instanceof Error ? e.message : String(e) }))
+            );
+        const folders = picked.map((c) => ({ account: c.account, files: c.files.map((f) => f.name) }));
+        const ended = await askInPane(root, AdoptConfirm, { agentName: props.agentName, folders }, act, {
+            summary: `Adopt earlier memory into ${props.agentName}?`,
+            text: "Adopting memory needs your answer",
+            what: "asks before adopting memory",
+        });
+        setWaiting(false);
+        if (ended === "no-pane") return void setError("Couldn't ask: Memory isn't open in a pane.");
+        if (ended === "declined") setOutcome(outcomeText({ status: "declined" }));
+        load(agentId);
     };
 
     const count = () => candidates().filter((c) => c.account !== "held").length;
@@ -158,7 +156,7 @@ export const MemoryAdoptionPanel = (props: MemoryAdoptionPanelProps): JSX.Elemen
 
     return (
         <Show when={candidates().length > 0 || outcome()}>
-            <section class="memory-adoption-panel" aria-label="Earlier memory">
+            <section ref={root} class="memory-adoption-panel" aria-label="Earlier memory">
                 <Show when={candidates().length > 0}>
                     <Button
                         density="compact"

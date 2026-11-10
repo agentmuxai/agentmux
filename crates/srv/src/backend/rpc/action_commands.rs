@@ -24,7 +24,7 @@ pub enum Policy {
 pub const ALWAYS: &[&str] = &[
     "account.key.verify", "account.oauth.cancel", "app_skills.catalog.install", "account.oauth.client.clear", "account.oauth.start", "agent.account.switch",
     "agent.define", "agent.kill-process", "agent.kill-tree", "agent.model.switch", "agent.move-here", "agent.notice.decide", "agent.notice.setgrant", "agent.open", "agent.pane.unregister", "agent.send",
-    "agent.setSeat", "agent.start", "agent.stop", "agent.takeover", "agent:memory:revert", "agent:memory:write_file",
+    "agent.setSeat", "agent.start", "agent.stop", "agent.takeover", "agent:memory:adopt", "agent:memory:release", "agent:memory:revert", "agent:memory:write_file",
     "agent:session:append_output", "agent:session:archive", "agent:session:write_state", "agentanswer", "agentcancel",
     "agentdefcreatefromtemplate", "agentdefhide", "agentdefunhide", "agentinput", "agentlastruntime",
     "agents.migrateForkSlugs", "agentshutdownkeep", "agentshutdownnow", "agentstop", "app.desktop", "app.upgrade-requests",
@@ -73,7 +73,7 @@ pub const UNLESS_OPERATOR: &[&str] = &[
     "controllerresync", "createsubblock", "deletesubblock", "docknodestatus", "fs.reveal", "fs.unwatch", "fs.watch",
     "layout.applyIntent", "layout.open", "layout.restoreOtherBuild", "layout.save", "memorydelivery:claim_fallback",
     "notify.ack", "notify.attention", "notify.emit", "notify.focus", "notify.takeactivation", "notify.test",
-    "operator.challenge", "pane.activateTab", "pane.moveTab", "pane.moveTabs", "pane.open", "pane.removeTab",
+    "operator.challenge", "pane.activateTab", "pane.confirm.decide", "pane.moveTab", "pane.moveTabs", "pane.open", "pane.removeTab",
     "presence.publish-now", "setmeta", "unwatcheditorfile", "unwatchmediadir", "viewer.agent-hidden",
     "watcheditorfile", "watchmediadir", "widgets.endsession",
 ];

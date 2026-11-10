@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! The key a LAN peer's agent signs with, as this machine trusts it: asked of the
-//! peers, pinned on first use, and moved only when the hosting install vouches
-//! (`lan_continuity`). Shared by the LAN jekt check (`verify_lan_signature`) and
+//! peers, pinned only when a trusted install vouches for it, and moved only the same
+//! way (`lan_continuity`). Shared by the LAN jekt check (`verify_lan_signature`) and
 //! the remote-operation check (`remote_ops::receive`), so the two can't judge a
 //! sender's key differently.
 
@@ -19,6 +19,9 @@ pub(crate) enum SignerKey {
     Pinned(Vec<u8>),
     /// No peer has a key on file for that name: nothing to check against.
     Unknown,
+    /// First contact: the name has no pin and no trusted install vouched for the key it shows. Nothing is
+    /// pinned and the message is not proven; the person accepts the key once on the pin screen.
+    Unproven,
     /// A key can't be had or can't be trusted (renamed, rate-limited, pin
     /// unreadable, or a different key nobody vouched for): counts as a failure.
     Refused,
@@ -42,16 +45,22 @@ pub(crate) async fn resolve(state: &AppState, claimed: &str) -> SignerKey {
             return SignerKey::Refused;
         }
     };
-    // Trust-on-first-use pin (mDNS discovery is unauthenticated): the first key seen for a
-    // sender is pinned, and a LATER, DIFFERENT key is a red flag, never a silent update.
+    // mDNS discovery is unauthenticated and a lookup answer is not signed, so an answer alone proves nothing.
+    // A name is pinned only when a trusted install vouches for its key (a certificate); a LATER, DIFFERENT
+    // key is a red flag that moves the pin only by the same proof, never a silent update.
     let observed_key_b64 = BASE64.encode(&observed_key);
-    let Ok(pinned_key_b64) = state.mstore.lan_peer_pubkey_pin_get_or_set(claimed, &observed_key_b64) else {
+    let Ok(pin) = state.mstore.lan_peer_pubkey_pin_since(claimed) else {
         tracing::warn!(agent_id = %claimed, "LAN pubkey pin store unreadable: signature counted as failed");
         return SignerKey::Refused; // fail closed
     };
-    // A different key moves the pin only if the hosting install vouches for it.
-    if pinned_key_b64 != observed_key_b64 && !lan_continuity::on_mismatch(state, claimed, &observed_key).await {
-        return SignerKey::Refused;
+    match pin {
+        Some((pinned_key_b64, _)) => {
+            if pinned_key_b64 != observed_key_b64 && !lan_continuity::on_mismatch(state, claimed, &observed_key).await {
+                return SignerKey::Refused;
+            }
+        }
+        None if !lan_continuity::on_first_contact(state, claimed, &observed_key).await => return SignerKey::Unproven,
+        None => {}
     }
     SignerKey::Pinned(observed_key)
 }

@@ -14,6 +14,7 @@ mod send_input;
 mod resume_poison;
 mod agent_id;
 mod shutdown;
+mod loop_stop;
 mod reopen_guard;
 mod eager_resume;
 mod immediate_delivery;

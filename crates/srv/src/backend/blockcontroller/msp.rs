@@ -385,11 +385,11 @@ impl Controller for MspController {
         let args = super::acp::meta_string_list(&block_meta, super::META_KEY_CMD_ARGS);
         let resume = Some(meta_get_string(&block_meta, core::META_SESSION_ID, "")).filter(|s| !s.is_empty());
         let env_vars = super::acp::session_agent_env(&block_meta, &self.block_id, &self.mstore, &self.auth_key);
-        // AgentMux's MCP servers: the `.mcp.json` the launch wrote where the
-        // session runs, passed in `session/start`.
-        let mcp_path = std::path::Path::new(&super::acp::session_cwd(&working_dir)).join(".mcp.json");
-        let mcp_servers = std::fs::read_to_string(mcp_path).map_or_else(
-            |_| serde_json::Map::new(),
+        // AgentMux's MCP servers: the config the launch wrote for this agent, which is
+        // outside the working directory when that is the user's own project (#3680),
+        // passed in `session/start`.
+        let mcp_servers = crate::backend::mcp_config_file::read_for_turn(&super::acp::session_cwd(&working_dir)).map_or_else(
+            || serde_json::Map::new(),
             |raw| {
                 let path = env_vars.get("PATH").map(String::as_str);
                 let lookup = |k: &str| env_vars.get(k).cloned().or_else(|| std::env::var(k).ok());

@@ -179,7 +179,7 @@ fn worker_of_block(mstore: &Store, block_id: &str) -> Option<Worker> {
 }
 
 /// The open panes (in a tab) of definition `def_id`.
-fn live_panes_of(mstore: &Store, def_id: &str) -> Vec<String> {
+pub(crate) fn live_panes_of(mstore: &Store, def_id: &str) -> Vec<String> {
     let Ok(tabs) = mstore.get_all::<Tab>() else {
         return Vec::new();
     };

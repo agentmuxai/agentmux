@@ -111,6 +111,11 @@ impl StageTimeline {
         match ev {
             StartupEvent::StageBegin { stage, label } => {
                 self.close_gap(Instant::now());
+                // A stage that is still running keeps its one row: a retry of the same wait (a main
+                // page that failed to load and is loaded again) is not a new stage.
+                if self.stages.iter().any(|r| r.stage == stage && r.done.is_none()) {
+                    return;
+                }
                 self.stages.push(StageEntry {
                     stage,
                     label,
@@ -120,7 +125,8 @@ impl StageTimeline {
                 });
             }
             StartupEvent::StageEnd { stage, duration_ms, status, detail } => {
-                if let Some(i) = self.stages.iter().rposition(|r| r.stage == stage) {
+                let open = self.stages.iter().position(|r| r.stage == stage && r.done.is_none());
+                if let Some(i) = open.or_else(|| self.stages.iter().rposition(|r| r.stage == stage)) {
                     let observed = self.stages[i].started_at.elapsed().as_millis() as u64;
                     self.stages[i].done = Some((duration_ms, status, detail));
                     // A stage reported after the fact (macOS `dlopen`: begin and
@@ -855,5 +861,44 @@ mod tests {
         std::env::remove_var("AGENTMUX_SPLASH_HOLD_MS");
         assert_eq!(hold_duration(100), Duration::from_millis(1000));
         assert_eq!(hold_duration(5000), Duration::from_millis(2000));
+    }
+
+    #[test]
+    fn a_repeated_begin_of_a_running_stage_keeps_one_row() {
+        let mut tl = StageTimeline::new();
+        tl.apply_tick(vec![begin("paint")]);
+        tl.apply_tick(vec![begin("paint"), begin("paint")]);
+        let rows = tl.stages.iter().filter(|r| r.stage == "paint").count();
+        assert_eq!(rows, 1, "load retries of the same window are one wait, not one row each");
+        tl.apply_tick(vec![end("paint", 900)]);
+        assert!(tl.stages.iter().all(|r| r.done.is_some()), "the one end closes the one row");
+    }
+
+    #[test]
+    fn a_begin_after_the_stage_closed_starts_a_new_row() {
+        let mut tl = StageTimeline::new();
+        tl.apply_tick(vec![begin("paint")]);
+        tl.apply_tick(vec![end("paint", 10)]);
+        tl.apply_tick(vec![begin("paint")]);
+        assert_eq!(tl.stages.iter().filter(|r| r.stage == "paint").count(), 2);
+    }
+
+    #[test]
+    fn a_retry_warning_on_the_row_is_replaced_by_the_final_end() {
+        let mut tl = StageTimeline::new();
+        tl.apply_tick(vec![begin("paint")]);
+        tl.apply_tick(vec![StartupEvent::StageEnd {
+            stage: "paint",
+            duration_ms: 800,
+            status: StartupStatus::Warn,
+            detail: Some("Can't reach the app page: ERR_CONNECTION_REFUSED, retrying".to_string()),
+        }]);
+        let row = tl.stages.iter().find(|r| r.stage == "paint").unwrap();
+        assert_eq!(row.done.as_ref().unwrap().2.as_deref(), Some("Can't reach the app page: ERR_CONNECTION_REFUSED, retrying"));
+        tl.apply_tick(vec![end("paint", 9300)]);
+        let rows: Vec<_> = tl.stages.iter().filter(|r| r.stage == "paint").collect();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].done.as_ref().unwrap().0, 9300, "the page loaded: the row reports the real total");
+        assert!(rows[0].done.as_ref().unwrap().2.is_none());
     }
 }

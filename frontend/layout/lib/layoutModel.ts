@@ -11,6 +11,7 @@ import type { Properties as CSSProperties } from "csstype";
 import { createEffect, createMemo, createRoot, getOwner, on, runWithOwner, Owner } from "solid-js";
 import { chipDropRect } from "./chipPlaceholder";
 import { createPlacementPreview, type FutureLayout } from "./futureLayout";
+import { createLiveReflow, type ReflowEntry } from "./liveReflow";
 import { getLayoutStateAtomFromTab } from "./layoutAtom";
 import { findNode, withDerivedNodeIds } from "./layoutNode";
 import { computeMoveNode } from "./layoutTree";
@@ -280,6 +281,10 @@ export class LayoutModel {
     futureLayout: () => FutureLayout | undefined;
     /** Outlines of every other pane's rect in that layout, while a drop is previewed. */
     placementWireframe: () => { id: string; style: CSSProperties }[];
+    /** The live reflow of a pane drag (liveReflow.ts): how a tile stands in for its future rect, or nothing. */
+    reflowFor: (nodeId: string) => ReflowEntry | undefined;
+    /** Whether the live reflow is showing a drop now: the panes are the outline, so no wireframe and no dim. */
+    liveReflowActive: () => boolean;
     /**
      * CSS properties for the overlay container.
      */
@@ -583,10 +588,7 @@ export class LayoutModel {
                 )
             );
 
-            ({ futureLayout: this.futureLayout, placementWireframe: this.placementWireframe } = createPlacementPreview(this));
-            this.placeholderTransform = createMemo<CSSProperties>(() =>
-                this.getPlaceholderTransform(this.pendingTreeAction.throttledValueAtom())
-            );
+            this.createDropPreview();
 
             this.initializeFromMuxObject();
         });
@@ -762,6 +764,18 @@ export class LayoutModel {
     /** @internal */
     validateMagnifiedNode(leafOrder: LeafOrderEntry[], addlProps: Record<string, LayoutNodeAdditionalProps>) {
         validateMagnifiedNodeImpl(this, leafOrder, addlProps);
+    }
+
+    /**
+     * The drag's drop preview, in the constructor's reactive owner: the layout the pending action leaves, the
+     * ghost, the wireframe (futureLayout.ts) and the live reflow (liveReflow.ts).
+     */
+    private createDropPreview(): void {
+        ({ futureLayout: this.futureLayout, placementWireframe: this.placementWireframe } = createPlacementPreview(this));
+        this.placeholderTransform = createMemo<CSSProperties>(() =>
+            this.getPlaceholderTransform(this.pendingTreeAction.throttledValueAtom())
+        );
+        ({ reflowFor: this.reflowFor, liveReflowActive: this.liveReflowActive } = createLiveReflow(this));
     }
 
     /**

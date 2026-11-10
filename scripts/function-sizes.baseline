@@ -33,7 +33,7 @@
 139 crates/cef/src/client/handlers.rs::AgentMuxPanePermissionHandler::PermissionHandler::on_request_media_access_permission
 570 crates/cef/src/client/lifecycle.rs::AgentMuxHandler::on_after_created
 104 crates/cef/src/client/lifecycle.rs::AgentMuxHandler::on_before_browse
-600 crates/cef/src/client/lifecycle.rs::AgentMuxHandler::on_before_close
+598 crates/cef/src/client/lifecycle.rs::AgentMuxHandler::on_before_close
 167 crates/cef/src/client/lifecycle.rs::AgentMuxHandler::on_before_popup
 200 crates/cef/src/client/navigation.rs::AgentMuxHandler::on_load_end
 106 crates/cef/src/client/navigation.rs::AgentMuxHandler::on_load_error
@@ -69,7 +69,7 @@
 119 crates/cef/src/floating_pane.rs::CreatePanePoolWindowWin32Task::Task::execute
 152 crates/cef/src/floating_pane.rs::create_popup
 142 crates/cef/src/floating_pane.rs::floating_pane_wndproc
-1140 crates/cef/src/ipc.rs::route_command
+1102 crates/cef/src/ipc.rs::route_command
 130 crates/cef/src/launcher_ipc/mod.rs::apply_event_to_shadow
 259 crates/cef/src/launcher_ipc/mod.rs::connect_to_launcher
 209 crates/cef/src/launcher_ipc/mod.rs::connect_to_launcher#2
@@ -319,8 +319,8 @@
 218 frontend/app-init.ts::initMux
 364 frontend/app/block/block.tsx::Block
 142 frontend/app/block/block.tsx::BlockFull
-280 frontend/app/block/blockframe.tsx::BlockFrame_Header
-117 frontend/app/block/blockframe.tsx::EndIcons
+293 frontend/app/block/blockframe.tsx::BlockFrame_Header
+102 frontend/app/block/blockframe.tsx::EndIcons
 114 frontend/app/block/blockutil.tsx::ConnectionButton
 108 frontend/app/block/lazy-pane-tab.tsx::createStandIn
 235 frontend/app/block/sandboxed-widget-host.tsx::createSandboxedInstance
@@ -417,13 +417,13 @@
 152 frontend/app/view/files/files-preview.tsx::FilesPreview
 118 frontend/app/view/global-bundle/GlobalMemoryFullView.tsx::EntryView
 143 frontend/app/view/memory-editor/MemoryHistory.tsx::MemoryHistory
-126 frontend/app/view/native-memory/MemoryAdoptionPanel.tsx::MemoryAdoptionPanel
+122 frontend/app/view/native-memory/MemoryAdoptionPanel.tsx::MemoryAdoptionPanel
 112 frontend/app/view/native-memory/NativeMemoryCreate.tsx::NativeMemoryCreate
 150 frontend/app/view/native-memory/NativeMemoryFileView.tsx::NativeMemoryFileView
 154 frontend/app/view/remotes/remotes-view.tsx::Detail
 128 frontend/app/view/settings/sections/animations-section.tsx::AnimationsSection
 120 frontend/app/view/settings/sections/browser-section.tsx::BrowserSection
-109 frontend/app/view/settings/sections/pinned-senders.tsx::PinnedSenders
+102 frontend/app/view/settings/sections/pinned-senders.tsx::PinnedSenders
 114 frontend/app/view/settings/sections/widget-bar-settings.tsx::WidgetBarSettings
 104 frontend/app/view/settings/sections/widget-catalog.tsx::WidgetCatalog
 137 frontend/app/view/shortcuts/shortcuts.tsx::ShortcutsView
@@ -437,7 +437,7 @@
 127 frontend/app/view/term/termwrap.ts::TermWrap::constructor
 268 frontend/app/view/term/termwrap.ts::TermWrap::init
 128 frontend/app/view/toolchain/CliDiskSpace.tsx::CliDiskSpace
-103 frontend/app/view/toolchain/SystemToolInstallInline.tsx::SystemToolInstallInline
+102 frontend/app/view/toolchain/SystemToolInstallInline.tsx::SystemToolInstallInline
 105 frontend/app/view/tower/tower-agents.tsx::Detail
 127 frontend/app/view/tower/tower-model.ts::TowerViewModel::constructor
 126 frontend/app/view/tower/tower-view.tsx::TowerView
@@ -454,7 +454,7 @@
 170 frontend/app/workspace/redock-ghost.ts::installFloatingRedockHoverListener
 472 frontend/app/workspace/workspace.tsx::WorkspaceElem
 119 frontend/layout/lib/layoutInvariants.ts::validateLayoutInvariants
-173 frontend/layout/lib/layoutModel.ts::LayoutModel::constructor
+170 frontend/layout/lib/layoutModel.ts::LayoutModel::constructor
 175 frontend/layout/lib/layoutNodeModels.ts::getNodeModel
 232 frontend/layout/lib/layoutPersistence.ts::handleBackendAction
 138 frontend/layout/lib/layoutResize.ts::onResizeMove

@@ -13,6 +13,7 @@
 
 import { For, Show, type JSX } from "solid-js";
 import { Button } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import { getApi } from "@/app/store/global";
 import { freeGuideFor } from "../defaults/provider-access-model";
 
@@ -37,14 +38,14 @@ export const FreeStartGuide = (props: FreeStartGuideProps): JSX.Element => {
     return (
         <Show when={guide()}>
             {(g) => (
-                <section class="agent-free-guide" data-testid="agent-free-guide" aria-label={`Use ${props.name} for free`}>
-                    <h4 class="agent-free-guide-title">Use {props.name} for free</h4>
+                <section class="agent-free-guide" data-testid="agent-free-guide" aria-label={t("freeGuide.title", { name: props.name })}>
+                    <h4 class="agent-free-guide-title">{t("freeGuide.title", { name: props.name })}</h4>
                     <p class="agent-free-guide-lead">
                         {g().lead}. {g().limits}
                     </p>
                     <div class="agent-free-guide-open">
                         <Button tone="accent" onClick={() => openLink(g().signupUrl)} data-testid="agent-free-guide-open">
-                            Open the sign-up page<span aria-hidden="true"> ↗</span>
+                            {t("freeGuide.open")}<span aria-hidden="true"> ↗</span>
                         </Button>
                     </div>
                     <ol class="agent-free-guide-steps">

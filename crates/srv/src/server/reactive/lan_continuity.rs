@@ -7,6 +7,10 @@
 //! for the key with a certificate, and this machine already trusts that
 //! install. Anything else stays refused.
 //!
+//! The same certificate is what makes a name's FIRST pin: a name with no pin is pinned only when a
+//! trusted install vouches for the key it shows ([`on_first_contact`]); an unvouched first key is
+//! never pinned by itself and its messages stay unproven until the person accepts it.
+//!
 //! The sending half is [`issue_cert`]: the lookup answer for an agent carries
 //! `lan_cert`, a [`WanKeyRecord`] (channel `lan`) signed by the install's own
 //! key. The receiving half is [`move_if_vouched`], called when the name pin
@@ -68,6 +72,20 @@ pub(super) async fn on_mismatch(state: &AppState, claimed: &str, observed_key: &
         Ok(_) => true,
         Err(why) => {
             super::lan_refusals::pin_mismatch_with(claimed, &BASE64.encode(observed_key), cert, Some(why));
+            false
+        }
+    }
+}
+
+/// A name has no pin and shows `observed_key`: pin it only if a trusted install vouches for it. `true`
+/// means carry on verifying under the (new) pin. `false` leaves the name unpinned and the message
+/// unproven, and keeps the key for the pin screen, which asks the person once to accept it.
+pub(super) async fn on_first_contact(state: &AppState, claimed: &str, observed_key: &[u8]) -> bool {
+    let cert = state.lan_discovery.cached_lan_cert(claimed);
+    match move_if_vouched(state, claimed, observed_key, cert.as_ref(), "automatic", false).await {
+        Ok(_) => true,
+        Err(why) => {
+            super::lan_refusals::first_contact_with(claimed, &BASE64.encode(observed_key), cert, Some(why));
             false
         }
     }
@@ -166,7 +184,8 @@ fn unvouched() -> std::sync::MutexGuard<'static, HashMap<(String, String), (i64,
     UNVOUCHED.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Move `agent`'s name pin to `observed_key` if `cert` vouches for it. The UID
+/// Move `agent`'s name pin to `observed_key` if `cert` vouches for it; for a name with no pin, make its
+/// first pin the same way. The UID
 /// pins beside the name pin go with the old key and are set again by the next
 /// message that verifies under the new one (`lan_peer_pubkey_pin_replace`).
 /// Returns what vouched, or why nothing did. `by` is who asked, for the audit
@@ -205,7 +224,25 @@ pub(crate) async fn move_if_vouched(
             }
         }
     }
-    let (path, cert, (old, old_since)) = result?;
+    let (path, cert, pinned) = result?;
+    let Some((old, old_since)) = pinned else {
+        // First contact: pinned only now that a trusted install vouched. `get_or_set` keeps whichever key
+        // got there first, so a concurrent first contact cannot be overwritten from an older check.
+        let held = state.mstore.lan_peer_pubkey_pin_get_or_set(agent, &observed_b64).map_err(|e| format!("the pin could not be set: {e}"))?;
+        if held != observed_b64 {
+            return Err("another key was pinned for the name while this one was being checked; it was not pinned".to_string());
+        }
+        super::lan_refusals::clear(agent);
+        audit(&json!({
+            "action": "first-pin",
+            "kind": "lan",
+            "agent": agent.to_lowercase(),
+            "to": fingerprint(&observed_b64),
+            "by": by,
+            "vouched_by": { "instance": cert.instance_id, "host": cert.host_hint, "path": path.as_str(), "issued_at": cert.issued_at },
+        }));
+        return Ok(path);
+    };
     // Kept from the later of now and the certificate's own time: with the host's clock ahead of
     // ours, an older certificate of the same host (still inside the freshness window) is then
     // older than this pin too, and cannot move it back.
@@ -246,14 +283,11 @@ async fn vouch(
     observed_key: &[u8],
     cert: Option<&WanKeyRecord>,
     now: i64,
-) -> Result<(Path, WanKeyRecord, (String, i64)), String> {
+) -> Result<(Path, WanKeyRecord, Option<(String, i64)>), String> {
     let cert = cert.ok_or("the peer sent no certificate for the key")?;
-    let pinned = state
-        .mstore
-        .lan_peer_pubkey_pin_since(agent)
-        .map_err(|e| format!("the pin could not be read: {e}"))?
-        .ok_or("the name is not pinned")?;
-    check_cert(cert, agent, observed_key, pinned.1, now).map_err(str::to_string)?;
+    // `None`: the name has no pin yet, and this certificate is what would make its first one.
+    let pinned = state.mstore.lan_peer_pubkey_pin_since(agent).map_err(|e| format!("the pin could not be read: {e}"))?;
+    check_cert(cert, agent, observed_key, pinned.as_ref().map_or(0, |p| p.1), now).map_err(str::to_string)?;
     let path = instance_trust(state, &cert.instance_id).await?;
     // The pin this check was made against: the move is conditional on it still being the pin.
     Ok((path, cert.clone(), pinned))

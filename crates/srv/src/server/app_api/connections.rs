@@ -226,7 +226,7 @@ pub(crate) async fn remote_ssh_locate(cmd: CommandRemoteSshLocateData) -> Result
 }
 
 /// Add a host to the user's ssh config (§4.4 of SPEC_REMOTES_PANE_2026_10_05.md),
-/// once they confirm the exact block in the window of pane `cmd.blockid`.
+/// once they confirm the exact block in pane `cmd.blockid`.
 async fn add_remote(state: &AppState, cmd: CommandRemoteAddData) -> Result<(), String> {
     use crate::backend::remote::ssh_config_edit::{self, NewHost};
     if cmd.blockid.is_empty() {
@@ -254,7 +254,7 @@ async fn add_remote(state: &AppState, cmd: CommandRemoteAddData) -> Result<(), S
         "ok_label": "Add",
         "cancel_label": "Cancel",
     });
-    let answer = ask_user(state, &cmd.blockid, question).await?;
+    let answer = ask_in_pane(state, &cmd.blockid, question).await?;
     if !(answer.answered && answer.approve) {
         return Err("kept: the user chose not to add it".into());
     }
@@ -327,8 +327,8 @@ async fn test_remote(state: &AppState, connection: &str, block: &str) -> Result<
 }
 
 /// Remove AgentMux's helper from SSH host `connection` (Remotes, §4.9 of
-/// SPEC_REMOTES_PANE_2026_10_05.md), once the user confirms in the window of
-/// pane `block`, naming the sessions that will end.
+/// SPEC_REMOTES_PANE_2026_10_05.md), once the user confirms in pane `block`,
+/// naming the sessions that will end.
 async fn remove_helper(state: &AppState, connection: &str, block: &str) -> Result<(), String> {
     use crate::backend::remote::{files, helper_hosts, helper_install, host::HostSsh};
     let name = ssh_host(connection, "has no AgentMux helper to remove")?;
@@ -351,11 +351,11 @@ async fn remove_helper(state: &AppState, connection: &str, block: &str) -> Resul
         ),
         "ok_label": "Remove",
         "cancel_label": "Keep It",
-        // The window draws a destructive answer in the danger tone, not the
-        // loud attention fill.
+        // A destructive answer is drawn in the danger tone, not the loud
+        // attention fill.
         "destructive": true,
     });
-    let answer = ask_user(state, block, question).await?;
+    let answer = ask_in_pane(state, block, question).await?;
     if !(answer.answered && answer.approve) {
         return Err("kept: the user chose not to remove it".into());
     }
@@ -382,7 +382,7 @@ async fn remove_helper(state: &AppState, connection: &str, block: &str) -> Resul
 }
 
 /// Give the helper install its question (SPEC_REMOTES_PANE_2026_10_05.md
-/// §4.9): the approval window, and `conn:helper` from the settings.
+/// §4.9): asked in the pane that needs it, and `conn:helper` from the settings.
 pub fn install_helper_consent(state: &AppState) {
     use crate::backend::remote::helper_consent;
     let app = state.clone();
@@ -392,7 +392,7 @@ pub fn install_helper_consent(state: &AppState) {
         ask: Box::new(move |block, question| {
             let app = app.clone();
             Box::pin(async move {
-                let a = ask_user(&app, &block, question).await?;
+                let a = ask_in_pane(&app, &block, question).await?;
                 Ok(helper_consent::Answer { answered: a.answered, approve: a.approve, remember: a.checkbox })
             })
         }),
@@ -425,8 +425,8 @@ fn remote_name(connection: &str) -> Result<String, String> {
     }
 }
 
-/// The user's yes to ending session `id` on `conn`, asked in the window of
-/// pane `block`. `Err` unless they said yes.
+/// The user's yes to ending session `id` on `conn`, asked in pane `block`.
+/// `Err` unless they said yes.
 async fn confirm_session_end(
     state: &AppState,
     block: &str,
@@ -445,7 +445,7 @@ async fn confirm_session_end(
         "cancel_label": "Keep It",
         "destructive": true,
     });
-    let answer = ask_user(state, block, question).await?;
+    let answer = ask_in_pane(state, block, question).await?;
     if answer.answered && answer.approve {
         Ok(())
     } else {
@@ -637,6 +637,24 @@ pub(crate) async fn ask_user(
     }
     serde_json::from_value(v.get("data").cloned().unwrap_or_default())
         .map_err(|e| format!("could not ask the user: {e}"))
+}
+
+/// Ask the person `question`, the confirmation of their own click in pane
+/// `block_id`, as a modal over that pane (`sagas::pane_confirm`). With no pane
+/// named there is nowhere of its own to ask it, so it goes to the approval
+/// window ([`ask_user`]) as before. Either way an agent calling the command
+/// can't give the answer.
+pub(crate) async fn ask_in_pane(
+    state: &AppState,
+    block_id: &str,
+    question: serde_json::Value,
+) -> Result<UserAnswer, String> {
+    use crate::sagas::pane_confirm;
+    if block_id.is_empty() {
+        return ask_user(state, block_id, question).await;
+    }
+    let a = pane_confirm::ask(state, block_id, pane_confirm::Question::from_json(&question)).await?;
+    Ok(UserAnswer { answered: a.answered, approve: a.approve, text: String::new(), checkbox: a.checkbox })
 }
 
 /// The agent an SSH request comes from, proven: its signed identity

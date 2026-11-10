@@ -184,6 +184,21 @@ describe("the header", () => {
         expect(header!.textContent).toContain("Build box");
     });
 
+    it("puts the pane's content in one scroll range and the window controls outside it", () => {
+        const t = setup({ noHeader: false, meta: { view: "term", "frame:title": "Build box" } });
+        const header = q(t.view.container, ".block-frame-default-header") as HTMLElement;
+        const range = q(header, ".block-frame-header-scroll") as HTMLElement;
+        expect(range).not.toBeNull();
+        expect(q(range, ".block-frame-header-content")).not.toBeNull();
+        // The grip and the view's end buttons scroll with the tabs (#29325)...
+        expect(q(range, ".pane-grip")).not.toBeNull();
+        // ...and the window controls, minimize first, stay pinned after the range.
+        const pinned = q(header, ".block-frame-end-icons") as HTMLElement;
+        expect(pinned).not.toBeNull();
+        expect(range.contains(pinned)).toBe(false);
+        expect(q(pinned, ".block-frame-minimize")).not.toBeNull();
+    });
+
     it("is drawn when the view says nothing about it", () => {
         const t = setup({ noHeader: "absent" });
         expect(q(t.view.container, ".block-frame-default-header")).not.toBeNull();
