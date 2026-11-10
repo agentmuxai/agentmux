@@ -27,6 +27,9 @@ pub(crate) enum HoldReason {
     Quota,
     /// The agent is between turns and its model API is offline (`backend::agent_status::decide`).
     ApiOffline,
+    /// The agent runs on a LAN peer that is not reachable now (`server::jekt_peer_hold`): kept on the
+    /// sender's instance and delivered when the peer is seen again.
+    PeerOffline,
 }
 
 impl HoldReason {
@@ -38,6 +41,7 @@ impl HoldReason {
             HoldReason::Idle => crate::backend::cold_hold::REASON_IDLE,
             HoldReason::Quota => crate::backend::cold_hold::REASON_QUOTA,
             HoldReason::ApiOffline => "api_offline",
+            HoldReason::PeerOffline => "peer_offline",
         }
     }
 
@@ -51,6 +55,8 @@ impl HoldReason {
             HoldReason::Idle => WaitReason::Cold,
             HoldReason::Quota => WaitReason::Quota,
             HoldReason::ApiOffline => WaitReason::ApiOffline,
+            // Its machine has to come back; the sender reads `retry_when` from the answer (`peer_online`).
+            HoldReason::PeerOffline => WaitReason::NotRunning,
         }
     }
 

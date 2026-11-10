@@ -241,6 +241,14 @@ fn send_message_outcome_names_the_state_and_the_id() {
     assert!(t.starts_with("HELD for Camper (quota)"), "{t}");
     assert!(t.contains("urgent: true") && t.contains("the mode is off") && t.ends_with(" id=1-2-3"), "{t}");
     assert!(!t.contains("not running") && !t.contains("  "), "{t:?}");
+    // Held for an agent of a LAN peer that is down: the cloud relay would have dropped it after 30 minutes.
+    let t = ok(json!({ "success": false, "held": true, "held_reason": "peer_offline", "retry_when": "peer_online",
+        "held_host": "charlie", "request_id": "1-2-3", "error": "agent Camper is on charlie, which is not answering" }));
+    assert!(t.starts_with("HELD for Camper (peer_offline)"), "{t}");
+    assert!(t.contains("charlie") && t.contains("24 hours") && t.contains("30 minutes") && t.contains("Do not resend"), "{t}");
+    assert!(t.ends_with(" id=1-2-3") && !t.contains("  ") && !t.contains("not running"), "{t:?}");
+    let t = ok(json!({ "success": false, "held": true, "held_reason": "peer_offline", "request_id": "1-2-3" }));
+    assert!(t.contains("its machine"), "{t}");
     // A send to many files both holds under `held`, and anything else not delivered stays a failure.
     let held = |reason: &str| crate::tool_helpers::held_until_active(&json!({ "success": false, "held_reason": reason }));
     assert_eq!((held("idle"), held("quota")), (Some("idle"), Some("quota")));
@@ -330,7 +338,7 @@ fn send_message_outcome_reads_the_answer_in_a_fixed_order() {
 fn message_send_description_lists_every_answer() {
     let v: Value = serde_json::from_str(MESSAGE_TOOL).unwrap();
     let d = v["description"].as_str().unwrap();
-    for s in ["Delivered to X", "QUEUED for X — their agent is starting up", "HELD for X (not_running)", "HELD for X (needs_login)", "HELD for X (usage_limit", "(unavailable)",
+    for s in ["Delivered to X", "QUEUED for X — their agent is starting up", "HELD for X (not_running)", "HELD for X (needs_login)", "HELD for X (peer_offline)", "HELD for X (usage_limit", "(unavailable)",
               "via the cloud relay (unconfirmed", "signed in from your account", "(needs_login)", "(not_found)", "id="] {
         assert!(d.contains(s), "missing {s:?}");
     }

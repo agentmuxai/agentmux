@@ -135,6 +135,7 @@ pub(crate) fn install(state: &AppState) {
     tokio::spawn(async move {
         loop {
             replay_pass(&state).await;
+            super::reactive::peer_hold::replay_pass(&state).await;
             tokio::select! {
                 _ = crate::backend::reactive::held_jekt_wake().notified() => {}
                 _ = tokio::time::sleep(SWEEP_EVERY) => {}
