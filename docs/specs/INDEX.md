@@ -1535,6 +1535,12 @@ section above, do not bulk-restamp them.
 | [`cef-drag-window-management`](cef-drag-window-management.md) | Spec: CEF Drag, Drop, and Window Management |
 | [`cef-transparency-architecture`](cef-transparency-architecture.md) | Spec: CEF Transparency Architecture |
 
+**`approved`**
+
+| Spec | Title |
+|---|---|
+| [`SPEC_LIVE_REFLOW_PANE_DRAG_2026_11_06`](SPEC_LIVE_REFLOW_PANE_DRAG_2026_11_06.md) | SPEC: Live reflow while dragging a pane or pane tab (the end state for pane drag and drop) |
+
 **`assessment`**
 
 | Spec | Title |
