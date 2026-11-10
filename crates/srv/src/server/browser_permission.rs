@@ -52,6 +52,8 @@ struct Grant {
     site: String,
     kinds: Vec<&'static str>,
     until_ms: i64,
+    /// Whether the Audit log already has a `standing` row for this grant: one row per grant, however often the page asks again.
+    audited: bool,
 }
 
 static ASKS: Mutex<Vec<Ask>> = Mutex::new(Vec::new());
@@ -109,6 +111,38 @@ fn covers(g: &Grant, agent: &str, target: &str, site: &str, kinds: &[&str], now:
 
 fn is_granted(agent: &str, target: &str, site: &str, kinds: &[&str], now: i64) -> bool {
     grants().iter().any(|g| covers(g, agent, target, site, kinds, now))
+}
+
+/// Marks the grant that covers this ask as audited; true only the first time, so a page re-asking during
+/// its 30 minutes adds no further Audit rows.
+fn first_use_of_grant(agent: &str, target: &str, site: &str, kinds: &[&str], now: i64) -> bool {
+    match grants().iter_mut().find(|g| covers(g, agent, target, site, kinds, now)) {
+        Some(g) if !g.audited => {
+            g.audited = true;
+            true
+        }
+        _ => false,
+    }
+}
+
+/// A remembered grant covered this ask, with no fresh countdown: one Audit row for it, flagged
+/// `standing` (§4.6) so it reads the same as a fresh countdown's row rather than vanishing into
+/// the per-pane notice log alone — a site allowed many times unattended should still show up.
+fn audit_standing_allow(state: &AppState, agent: &str, site: &str, kinds: &[&str], message: &str) {
+    let facts = facts_for(agent, site, kinds);
+    state.reactive_handler.log_sensitive_op_audit(
+        Some(agent),
+        agent,
+        "os_prompt_answer.standing",
+        true,
+        None,
+        &uuid::Uuid::new_v4().to_string(),
+        Some(message),
+        facts.get("prompt").map(String::as_str),
+        facts.get("answer").map(String::as_str),
+        facts.get("level").map(String::as_str),
+        true,
+    );
 }
 
 /// The open request this agent already filed for this site and these kinds, if it still waits.
@@ -186,6 +220,9 @@ pub(crate) async fn handle_host_browser_permission(
     }
     if is_granted(&agent, &target, &site, &kinds, now_ms()) {
         record(&agent, &target, "permission", &message, "allowed", "the person's countdown for this site ended without a veto");
+        if first_use_of_grant(&agent, &target, &site, &kinds, now_ms()) {
+            audit_standing_allow(&state, &agent, &site, &kinds, &message);
+        }
         return answered("allow");
     }
     if open_ask(&agent, &target, &site, &kinds).is_some() {
@@ -233,7 +270,7 @@ pub(crate) fn grant_after_countdown(_state: &AppState, request_id: &str) -> Resu
         if g.len() >= MAX_KEPT {
             g.remove(0);
         }
-        g.push(Grant { agent: a.agent, target: a.target, site: a.site, kinds: a.kinds, until_ms });
+        g.push(Grant { agent: a.agent, target: a.target, site: a.site, kinds: a.kinds, until_ms, audited: false });
         any = true;
     }
     if any {
@@ -282,7 +319,7 @@ mod tests {
 
     #[test]
     fn a_grant_covers_its_agent_pane_site_and_kinds_until_it_runs_out() {
-        let g = Grant { agent: "a".into(), target: "p".into(), site: "https://s".into(), kinds: vec!["camera", "microphone"], until_ms: 1000 };
+        let g = Grant { agent: "a".into(), target: "p".into(), site: "https://s".into(), kinds: vec!["camera", "microphone"], until_ms: 1000, audited: false };
         assert!(covers(&g, "a", "p", "https://s", &["camera"], 999));
         assert!(covers(&g, "a", "p", "https://s", &["camera", "microphone"], 999));
         assert!(!covers(&g, "a", "p", "https://s", &["camera"], 1000), "expired");
@@ -307,5 +344,30 @@ mod tests {
         assert!(is_granted("bp-agent", "pane-1", &site, &["camera"], now_ms()));
         assert!(!is_granted("bp-agent", "pane-1", &site, &["microphone"], now_ms()), "the microphone was not asked for");
         assert!(grant_after_countdown(&state, &id).is_err(), "a second run finds nothing to grant");
+    }
+
+    #[tokio::test]
+    async fn a_standing_grant_writes_one_audit_row_flagged_standing() {
+        let state = crate::server::tests::test_state();
+        let before = state.reactive_handler.get_audit_log(200).len();
+        audit_standing_allow(&state, "bp-agent-2", "https://standing.example", &["camera", "microphone"], "https://standing.example asked to use the camera and the microphone");
+        let log = state.reactive_handler.get_audit_log(200);
+        assert_eq!(log.len(), before + 1, "exactly one row");
+        let row = &log[0];
+        assert_eq!(row.standing, Some(true));
+        assert!(row.prompt.as_deref().unwrap().contains("standing.example"));
+        assert!(row.answer.as_deref().unwrap().contains("camera") && row.answer.as_deref().unwrap().contains("microphone"));
+        assert_eq!(row.level.as_deref(), Some("medium"));
+    }
+
+    #[test]
+    fn a_page_asking_again_during_a_grant_is_audited_once() {
+        let site = format!("https://{}.example", uuid::Uuid::new_v4().simple());
+        grants().push(Grant { agent: "bp-agent-3".into(), target: "pane-9".into(), site: site.clone(), kinds: vec!["camera"], until_ms: now_ms() + GRANT_MS, audited: false });
+        assert!(first_use_of_grant("bp-agent-3", "pane-9", &site, &["camera"], now_ms()), "the first use is audited");
+        for _ in 0..5 {
+            assert!(!first_use_of_grant("bp-agent-3", "pane-9", &site, &["camera"], now_ms()), "a repeat ask adds no row");
+        }
+        assert!(!first_use_of_grant("bp-agent-3", "pane-9", &site, &["microphone"], now_ms()), "an uncovered ask is not a use");
     }
 }
