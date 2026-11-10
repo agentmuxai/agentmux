@@ -64,7 +64,9 @@ pub fn count(entries: impl IntoIterator<Item = AuditLogEntry>, since_ms: u64) ->
         });
         f(stat);
     };
-    for e in entries.into_iter().filter(|e| e.timestamp >= since_ms && e.event_kind == "delivery") {
+    // A sensitive-op decision's row (`standing` is set on it, never on a message's) shares a message's shape
+    // (a `delivery`, no outcome, the agent as source and target) but is a decision, not a message.
+    for e in entries.into_iter().filter(|e| e.timestamp >= since_ms && e.event_kind == "delivery" && e.standing.is_none()) {
         match e.outcome.as_deref() {
             Some("ack_refused") => {
                 if let Some(from) = e.source_agent.as_deref() {
@@ -167,5 +169,18 @@ mod tests {
         assert_eq!(stats.iter().find(|s| s.agent == "agentx").unwrap().sent, 2);
         assert_eq!(stats.iter().find(|s| s.agent == "agenty").unwrap().sent, 1);
         assert!(stats.iter().all(|s| s.day == "2026-10-30"), "the entry from two days ago is outside the window");
+    }
+
+    #[test]
+    fn a_sensitive_op_decision_row_is_not_a_message() {
+        let d = 1_793_348_000_000;
+        let mut grant = entry(d, "Agent1", "Agent1", None, None, true);
+        grant.standing = Some(true);
+        let mut countdown = entry(d + 1, "Agent1", "Agent1", None, None, true);
+        countdown.standing = Some(false);
+        let stats = count(vec![grant, countdown, entry(d + 2, "AgentX", "Agent1", None, Some("started"), true)], d - DAY_MS);
+        let agent1 = stats.iter().find(|s| s.agent == "agent1").unwrap();
+        assert_eq!((agent1.received, agent1.sent), (1, 0), "only the real message counts, for both its receiver and sender");
+        assert_eq!(stats.iter().find(|s| s.agent == "agentx").unwrap().sent, 1);
     }
 }
