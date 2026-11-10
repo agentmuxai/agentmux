@@ -13,14 +13,16 @@
  *  - something under the pointer reacts to it (`mouseenter`, a hover card, a `click` that lands on a pane
  *    or row) and moves the focus away, so the field's highlight goes grey or the caret is gone.
  *
- * So while the primary button is held after a press in a text field, this guard
+ * So after a press in a text field, while the primary button is held, this guard
  *
  *  - stops a `dragstart` that comes from an ancestor of the field (the field's own text drag, moving a
- *    selection, is left alone);
- *  - marks the field `data-text-drag-field` and the root `data-text-drag`, which the kit stylesheet turns
- *    into `pointer-events: none` for everything else: nothing is hovered, nothing receives the release as
- *    a click, and so nothing reacts;
- *  - puts the focus and the selection back if something took the focus off the field anyway.
+ *    selection, is left alone), from the press on;
+ *  - puts the focus and the selection back if something took the focus off the field anyway, from the
+ *    press on;
+ *  - once the pointer has moved `DRAG_SLOP_PX` or more (a drag, not a click), marks the field
+ *    `data-text-drag-field` and the root `data-text-drag`, which the kit stylesheet turns into
+ *    `pointer-events: none` for everything else: nothing is hovered, nothing receives the release as a
+ *    click, and so nothing reacts. A click sets nothing: the root attribute restyles the whole document.
  *
  * It covers every `<input>` and `<textarea>`, kit or not, and ends on release, cancel, a move with no
  * button down, the window losing focus or the field leaving the page. Installed once at startup.
