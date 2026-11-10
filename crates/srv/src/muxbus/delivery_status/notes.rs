@@ -217,6 +217,16 @@ pub fn delayed_prefix(created_ms: Option<i64>, now_ms: i64) -> String {
     }
 }
 
+/// `text` without a [`delayed_prefix`] at its start: the message as the sender wrote it. A text that does
+/// not begin with one comes back as it is.
+pub fn without_delayed_prefix(text: &str) -> &str {
+    let clock = |s: &str| s.len() == 5 && s.bytes().enumerate().all(|(i, b)| if i == 2 { b == b':' } else { b.is_ascii_digit() || b == b'-' });
+    let Some(rest) = text.strip_prefix("(sent ") else { return text };
+    let (Some(sent), Some(rest)) = (rest.get(..5), rest.get(5..).and_then(|r| r.strip_prefix(", delivered "))) else { return text };
+    let (Some(delivered), Some(rest)) = (rest.get(..5), rest.get(5..).and_then(|r| r.strip_prefix(") "))) else { return text };
+    if clock(sent) && clock(delivered) { rest } else { text }
+}
+
 /// A note for one agent, ready to hold for its next turn.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Note {
@@ -530,6 +540,17 @@ mod tests {
         assert_eq!(s.len(), 5, "{s}");
         assert_eq!(&s[2..3], ":");
         assert!(s.chars().filter(|c| *c != ':').all(|c| c.is_ascii_digit()));
+    }
+
+    #[test]
+    fn the_delayed_prefix_comes_off_again_and_only_that() {
+        let late = format!("{}are you there?", delayed_prefix(Some(T0), T0 + 10 * 60_000));
+        assert!(late.starts_with("(sent "), "{late}");
+        assert_eq!(without_delayed_prefix(&late), "are you there?");
+        assert_eq!(without_delayed_prefix("are you there?"), "are you there?");
+        assert_eq!(without_delayed_prefix("(sent it to you, delivered by hand) ok"), "(sent it to you, delivered by hand) ok");
+        assert_eq!(without_delayed_prefix("(sent --:--, delivered 09:05) x"), "x", "a clock that could not be read is still the prefix");
+        assert_eq!(without_delayed_prefix("(sent 09:0"), "(sent 09:0");
     }
 
     #[test]
