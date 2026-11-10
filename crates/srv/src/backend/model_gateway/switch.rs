@@ -93,7 +93,7 @@ pub fn move_to(mstore: &Store, def_id: &str, harness: &str, target: Target<'_>, 
     Ok(moved)
 }
 
-fn place_of(choice: Option<&Choice>) -> Previous {
+pub(super) fn place_of(choice: Option<&Choice>) -> Previous {
     choice.map_or(Previous { route: String::new(), model: String::new() }, |c| Previous { route: c.route.clone(), model: c.model.clone() })
 }
 
