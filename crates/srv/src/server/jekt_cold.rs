@@ -85,6 +85,9 @@ pub(super) fn decide_why(
     let rule = verdict(&idle, false, true, u64::try_from(after_ms).ok(), || hands_over_work(identity, req, target_uid, target_slug, now_ms));
     if rule.waits() {
         (Decision::Hold, "idle".to_string())
+    } else if after_ms == i64::MAX {
+        // The cold hold is off and only quota mode is on: there is no minutes limit to compare with.
+        (Decision::Deliver, format!("the cold hold is off and quota mode did not hold it; quiet for {} min", quiet_ms / 60_000))
     } else if quiet_ms > after_ms {
         (Decision::Deliver, format!("it hands the agent work (a task it names or one its sender just filed); quiet for {} min", quiet_ms / 60_000))
     } else {
@@ -413,6 +416,8 @@ mod tests {
         let why = |r: &InjectionRequest, last| decide_why(&m, &i, r, "uid-l", "loap", last, NOW, AFTER).1;
         assert!(why(&req("thanks"), WARM).contains("warm"));
         assert!(why(&req("thanks"), None).contains("no output"));
+        let off = decide_why(&m, &i, &req("thanks"), "uid-l", "loap", COLD, NOW, i64::MAX).1;
+        assert!(off.contains("cold hold is off") && !off.contains("warm"), "{off}");
         let mut urgent = req("thanks");
         urgent.priority = Some("urgent".into());
         assert!(why(&urgent, COLD).contains("urgent"));
