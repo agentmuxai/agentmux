@@ -1156,6 +1156,8 @@ declare global {
         "window:bgcolor"?: string;
         /** @deprecated Ignored: motion follows the system (SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15). */
         "window:reducedmotion"?: boolean;
+        /** Live reflow while a pane is dragged: the other panes glide to where the drop leaves them (SPEC_LIVE_REFLOW_PANE_DRAG_2026_11_06). Default off. */
+        "layout:livereflow"?: boolean;
         /** Animations: which choice Settings shows. Absent is "smooth". */
         "animation:preset"?: "system" | "off" | "quick" | "smooth" | "slow" | "custom";
         /** Animation duration, percent of the designed timing, with "custom": 0, or 25 to 300 in steps of 5. */

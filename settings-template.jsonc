@@ -847,6 +847,9 @@
     // term:predictiveecho:thresholdms: (no description yet)
     // window:reducedmotion: Deprecated, ignored: motion follows the system
     // (SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15).
+    // layout:livereflow: Live reflow while a pane is dragged: the other panes glide to where
+    // the drop leaves them, instead of a landing rectangle
+    // (SPEC_LIVE_REFLOW_PANE_DRAG_2026_11_06). Default off.
     // statusbar:showmuxbuscloud: Show MuxBus Cloud in the status bar: the dot after the host
     // name and the sign-in block in the host menu. Default true (absent means shown); set false
     // to hide both. LAN discovery is unaffected. See

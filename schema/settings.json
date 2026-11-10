@@ -374,6 +374,11 @@
           "description": "Deprecated, ignored: motion follows the system (SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15).",
           "x-section": "Animations"
         },
+        "layout:livereflow": {
+          "type": "boolean",
+          "description": "Live reflow while a pane is dragged: the other panes glide to where the drop leaves them, instead of a landing rectangle (SPEC_LIVE_REFLOW_PANE_DRAG_2026_11_06). Default off.",
+          "x-section": "Animations"
+        },
         "animation:preset": {
           "type": "string",
           "enum": [

@@ -573,12 +573,32 @@ function useTileStyle(props: DisplayNodeProps, nodeModel: NodeModelOf) {
     // positioning is untouched. Mirrors `workspace.tsx`'s identical
     // visibility+opacity treatment for the whole-tab reveal gate.
     const isRevealGated = () => gatingNodeIds().has(props.node.id);
-    const tileStyle = createMemo<JSX.CSSProperties>(() => ({
-        ...(tileTransform() as JSX.CSSProperties),
-        visibility: isRevealGated() ? "hidden" : undefined,
-        opacity: shouldReduceMotion("transition") ? undefined : isRevealGated() ? 0 : 1,
-        transition: shouldReduceMotion("transition") ? undefined : `opacity var(--duration-quick) ${EASE_OUT}`,
-    }));
+    // The live reflow of a pane drag (liveReflow.ts): the dragged pane's tile is hidden, and every other tile
+    // stands in for its future rect with a compositor-only transform over its unchanged size, so nothing
+    // inside it lays out. Essential spatial motion (it says where the drop lands), so it glides under reduced
+    // motion too, shorter. A CSS transition retargets from the current matrix on its own, and the plain style
+    // (no transform transition) takes over in the same batch as the drop's real rect, so nothing glides twice.
+    const reflow = () => props.layoutModel.reflowFor(props.node.id);
+    const tileStyle = createMemo<JSX.CSSProperties>(() => {
+        const entry = reflow();
+        const reduce = shouldReduceMotion("transition");
+        const style: JSX.CSSProperties = {
+            ...(tileTransform() as JSX.CSSProperties),
+            visibility: isRevealGated() || entry?.kind === "hidden" ? "hidden" : undefined,
+            opacity: reduce ? undefined : isRevealGated() ? 0 : 1,
+            transition: reduce ? undefined : `opacity var(--duration-quick) ${EASE_OUT}`,
+        };
+        if (entry?.kind !== "glide") return style;
+        const glide = `transform var(${reduce ? "--duration-fast" : "--duration-base"}) ${EASE_OUT}`;
+        return {
+            ...style,
+            transform: entry.transform,
+            WebkitTransform: entry.transform,
+            "transform-origin": "0 0",
+            "will-change": "transform",
+            transition: reduce ? glide : `${glide}, ${style.transition}`,
+        };
+    });
 
     return { skipsLayout, tileStyle };
 }
