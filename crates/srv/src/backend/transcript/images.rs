@@ -36,6 +36,12 @@ fn cache() -> &'static Mutex<HashMap<String, Counted>> {
     CACHE.get_or_init(Default::default)
 }
 
+/// Drops what was counted in `zone`, for a transcript rewritten in place (history repair): the file keeps its creation
+/// time and may not be shorter, so nothing else tells the next count that its bytes are not the ones it read.
+pub fn forget(zone: &str) {
+    cache().lock().unwrap_or_else(|e| e.into_inner()).remove(zone);
+}
+
 /// The images in the user messages of `zone`'s transcript; 0 when there is none.
 pub fn count_in_zone(gfs: &FileStore, zone: &str) -> Result<u32, String> {
     let Some(stat) = gfs.stat(zone, FILE).map_err(|e| format!("stat transcript: {e}"))? else {

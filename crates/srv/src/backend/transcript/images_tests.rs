@@ -60,3 +60,18 @@ fn a_transcript_made_again_after_an_archive_is_counted_from_its_top() {
     gfs.append_data(zone, FILE, &user_line(json!(LIST))).unwrap();
     assert_eq!(count_in_zone(&gfs, zone).unwrap(), 3);
 }
+
+#[test]
+fn a_transcript_rewritten_in_place_is_counted_again_once_it_is_forgotten() {
+    let gfs = FileStore::open_in_memory().unwrap();
+    let zone = "agent:count-images-rewritten:current";
+    gfs.make_file(zone, FILE, FileMeta::new(), FileOpts::default()).unwrap();
+    gfs.append_data(zone, FILE, &user_line(json!(LIST))).unwrap();
+    assert_eq!(count_in_zone(&gfs, zone).unwrap(), 3);
+    // A repair rewrites `output` as longer bytes with the same creation time: the old position points into other content.
+    let mut rewritten = user_line(json!("a message that holds no attachment at all, and is longer than the old file was"));
+    rewritten.extend(user_line(json!(LIST)));
+    gfs.replace_file(zone, FILE, &rewritten, &[]).unwrap();
+    forget(zone);
+    assert_eq!(count_in_zone(&gfs, zone).unwrap(), 3);
+}
