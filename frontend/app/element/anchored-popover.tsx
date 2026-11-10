@@ -35,7 +35,7 @@ import { fadeOutCopy } from "@/app/element/exit-copy";
 import type { EnterKind } from "@/app/motion/primitives";
 import { useMotion } from "@/app/motion/solid";
 import { useHiddenTabMarker, usePaneOverlay } from "@/app/platform/pane-overlay";
-import { computeMenuPosition } from "@/app/util/menu-position";
+import { computeMenuPosition, holdBottomEdge } from "@/app/util/menu-position";
 import { autoUpdate, type Placement } from "@floating-ui/dom";
 import { createSignal, onCleanup, onMount, untrack, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
@@ -192,7 +192,7 @@ export const AnchoredPopover = (props: AnchoredPopoverProps): JSX.Element => {
                     el,
                 );
                 if (disposed) return;
-                setShellStyle(pos.style);
+                setShellStyle(holdBottomEdge(pos, el.getBoundingClientRect().height, window.innerHeight));
                 if (untrack(() => props.fitHeight) && Number.isFinite(pos.maxHeight)) setRoomHeight(pos.maxHeight);
                 shown();
             };

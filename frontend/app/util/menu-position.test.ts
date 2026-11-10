@@ -14,6 +14,7 @@ import {
     computeMenuPosition,
     getNativePaneRects,
     getPaintableArea,
+    holdBottomEdge,
     placementBySide,
 } from "./menu-position";
 
@@ -366,5 +367,36 @@ describe("computeMenuPosition — kept inside a container (browser pane menus)",
         const box = makeRect(0, 0, 400, 100);
         expect(placementBySide("bottom-start", makeRect(10, 0, 20, 20), box)).toBe("bottom-start");
         expect(placementBySide("bottom-start", makeRect(370, 0, 20, 20), box)).toBe("bottom-end");
+    });
+});
+
+
+describe("holdBottomEdge", () => {
+    /** The rect a panel of `height` takes under `style` in the test viewport. */
+    const rectUnder = (style: { top?: unknown; bottom?: unknown }, height: number) => {
+        const top = style.bottom !== undefined ? VIEWPORT_H - Number.parseFloat(String(style.bottom)) - height : Number.parseFloat(String(style.top));
+        return { top, bottom: top + height };
+    };
+
+    it("pins a panel placed above its anchor by its bottom edge, so it grows away from the anchor", async () => {
+        // The readout's case: an anchor 15 px tall at the window's bottom edge, a panel that opens at 114 px
+        // and grows to 180 when its detail rows arrive.
+        const anchor = makeRect(900, VIEWPORT_H - 16, 64, 15);
+        const placed = await computeMenuPosition({ anchor, placement: "bottom", gutter: 10, avoidNativePanes: false }, elementWithRect(makeRect(0, 0, 458, 114)));
+        expect(placed.placement).toBe("top");
+        const style = holdBottomEdge(placed, 114, VIEWPORT_H);
+        for (const height of [114, 180, 400]) {
+            const rect = rectUnder(style, height);
+            expect(rect.bottom, `a ${height} px panel`).toBeLessThanOrEqual(anchor.top - 10);
+        }
+        // Pinned by the top edge, the same growth lands on the anchor: this is the loop it ends.
+        expect(rectUnder(placed.style, 180).bottom).toBeGreaterThan(anchor.top);
+    });
+
+    it("leaves a panel on any other side as it was placed", async () => {
+        const anchor = makeRect(100, 100, 64, 15);
+        const placed = await computeMenuPosition({ anchor, placement: "bottom", gutter: 10, avoidNativePanes: false }, elementWithRect(makeRect(0, 0, 458, 114)));
+        expect(placed.placement).toBe("bottom");
+        expect(holdBottomEdge(placed, 114, VIEWPORT_H)).toBe(placed.style);
     });
 });
