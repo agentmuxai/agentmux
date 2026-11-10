@@ -64,10 +64,11 @@ on:
   pull_request:
   push:
     branches: [main]
-  # The merge queue's run on each group's commit: the fast gates only, so a
-  # check that depends on the rest of main (the size ratchet, the specs index,
-  # a rename in one PR and a call in another) sees what will actually land.
-  # docs/specs/SPEC_CI_MERGE_QUEUE_AND_FAST_GATES_2026_10_19.md §5 Phase 1.
+  # The merge queue's run on each group's commit: the fast gates and the tests that
+  # read the tree, so a check that depends on the rest of main (the size ratchet, the
+  # specs index, a rename in one PR and a call in another, a vitest guard over the
+  # installed packages) sees what will actually land.
+  # docs/specs/SPEC_CI_MERGE_QUEUE_AND_FAST_GATES_2026_10_19.md §5 Phases 1, 7 and 8.
   merge_group:
     types: [checks_requested]
 
@@ -174,14 +175,15 @@ jobs:
             echo "::notice::running all checks — $1"
           }
 
-          # A merge queue group: the fast gates only (SPEC_CI_MERGE_QUEUE_AND_FAST_GATES
-          # §5 Phases 1 and 7): docs gates in full, the test targets built on ubuntu and the
-          # tests that read the source tree run, tsc
-          # and the generated-file checks on one frontend leg. Tests ran on each
-          # PR and run again on the push to main.
+          # A merge queue group: the fast gates and the tests that read the tree
+          # (SPEC_CI_MERGE_QUEUE_AND_FAST_GATES §5 Phases 1, 7 and 8): docs gates in full,
+          # the test targets built on ubuntu and the Rust tests that read the source tree
+          # run, and both frontend legs run in full (tsc, the generated-file checks and
+          # vitest). The rest of the Rust tests ran on each PR and run again on the push
+          # to main.
           if [ "${{ github.event_name }}" = "merge_group" ]; then
             printf 'rust=true\nfrontend=true\ndocs_only=false\ndocs_index=true\nversion_only=false\nqueue=true\n' >> "$GITHUB_OUTPUT"
-            printf 'rust_os=["ubuntu-latest"]\nfrontend_shards=[1]\ndocs_index_os=["ubuntu-latest"]\n' >> "$GITHUB_OUTPUT"
+            printf 'rust_os=["ubuntu-latest"]\ndocs_index_os=["ubuntu-latest"]\n' >> "$GITHUB_OUTPUT"
             echo "::notice::merge queue: fast gates only"
             exit 0
           fi
@@ -1177,8 +1179,9 @@ jobs:
       - name: Theme-aware color lint (no hardcoded Tailwind palette colors)
         if: matrix.shard == 2
         run: npm run lint:theme-colors
+      # Also in the merge queue: a vitest test can read the source tree or the installed packages (the
+      # i18n and colour ratchets, Shiki's bundle), so it can fail on two PRs that each passed it alone.
       - name: vitest run
-        if: ${{ needs.changes.outputs.queue != 'true' }}
         run: npx vitest run --shard=${{ matrix.shard }}/2
 
   # Single context for branch protection to point at, instead of pinning
