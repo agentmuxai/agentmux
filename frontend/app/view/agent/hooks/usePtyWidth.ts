@@ -106,17 +106,21 @@ function isRetryableResizeError(msg: string): boolean {
 
 /**
  * A resize callback that runs `compute` once the size has settled (`DEBOUNCE_MS`). Not during a pane drag's
- * live reflow: the CLI is told its width once, when the drag ends (pane-size-hold.ts).
+ * live reflow: the CLI is told its width once, when the drag ends (pane-size-hold.ts). Held at both ends: a
+ * resize that arrives during the drag waits, and so does one from just before it whose wait runs out in it
+ * (it would measure the width of a drop that may never be made).
  */
 function settledResize(compute: () => void): { onResize: () => void; stop: () => void } {
     let timer: ReturnType<typeof setTimeout> | undefined;
+    const settled = deferWhileSizesHeld(compute);
     const onResize = deferWhileSizesHeld(() => {
         if (timer) clearTimeout(timer);
-        timer = setTimeout(compute, DEBOUNCE_MS);
+        timer = setTimeout(settled, DEBOUNCE_MS);
     });
     const stop = () => {
         if (timer) clearTimeout(timer);
         onResize.cancel();
+        settled.cancel();
     };
     return { onResize, stop };
 }
@@ -245,6 +249,7 @@ export const __test__ = {
     computeCols,
     computeTermSizeFromEl,
     isRetryableResizeError,
+    settledResize,
     CELL_WIDTH_RATIO,
     MIN_COLS,
     DEBOUNCE_MS,
