@@ -31,6 +31,56 @@ pub(super) fn prepare_env(provider: &str, env: &mut HashMap<String, String>) {
     }
 }
 
+/// The Node.js DeepSeek Harness needs (its package's `engines`). The install flow checks the same
+/// minimum before the first launch (`systemPrereqs` in `frontend/app/view/agent/providers/catalog.ts`);
+/// an agent that is already set up is not run through that, so a restart on an older Node would end in
+/// dsh's own startup error. Keep the two in step.
+const DSH_MIN_NODE: [u64; 3] = [24, 9, 0];
+
+/// `major.minor.patch` of a `node --version` answer (`v24.19.0`, `24.19.0`); a missing part is 0.
+fn version_parts(text: &str) -> Option<[u64; 3]> {
+    let mut parts = [0u64; 3];
+    let mut numbers = text.trim().trim_start_matches('v').split('.');
+    parts[0] = numbers.next()?.trim().parse().ok()?;
+    for part in parts.iter_mut().skip(1) {
+        match numbers.next() {
+            Some(n) => *part = n.split(|c: char| !c.is_ascii_digit()).next().unwrap_or("").parse().ok()?,
+            None => break,
+        }
+    }
+    Some(parts)
+}
+
+/// What to tell the person when `version` is older than DeepSeek Harness needs; `None` when it is
+/// new enough or cannot be read (dsh then says what it makes of it).
+fn node_too_old(version: &str) -> Option<String> {
+    let found = version_parts(version)?;
+    (found < DSH_MIN_NODE).then(|| {
+        let [major, minor, patch] = DSH_MIN_NODE;
+        format!(
+            "DeepSeek Harness needs Node.js {major}.{minor}.{patch} or later, and the Node.js on this agent's PATH is {}. Update Node.js (https://nodejs.org/), then start the agent again.",
+            version.trim().trim_start_matches('v')
+        )
+    })
+}
+
+/// Refuse to start DeepSeek Harness on a Node.js older than it needs, with the reason, instead of
+/// letting it fail with its own startup error. Every other provider, and a machine with no `node` on
+/// the agent's PATH (the spawn then says so), goes on.
+pub(super) fn check_runtime(provider: &str, env: &HashMap<String, String>) -> Result<(), String> {
+    if provider != "dsh" {
+        return Ok(());
+    }
+    let path = env.iter().find(|(k, _)| k.eq_ignore_ascii_case("PATH")).map(|(_, v)| std::ffi::OsString::from(v)).or_else(|| std::env::var_os("PATH"));
+    let Ok(cwd) = std::env::current_dir() else { return Ok(()) };
+    let Ok(node) = which::which_in("node", path, cwd) else { return Ok(()) };
+    let version = crate::backend::tool_store::probe_version(&node.to_string_lossy(), &Some("--version".to_string()));
+    match version.as_deref().and_then(node_too_old) {
+        Some(reason) => Err(reason),
+        None => Ok(()),
+    }
+}
+
 /// Grok reads project rules (the agent's AGENTS.md) only in a trusted folder,
 /// and its stdio agent takes no `--trust`. So the agent's own working folder
 /// is trusted in `$GROK_HOME/trusted_folders.toml`, the file `grok --trust`
@@ -116,6 +166,29 @@ mod tests {
         std::fs::write(home.path().join("cordis.patch.yml"), "mine").unwrap();
         seed_dsh_patch(home.path()).unwrap();
         assert_eq!(std::fs::read_to_string(home.path().join("cordis.patch.yml")).unwrap(), "mine");
+    }
+
+    #[test]
+    fn a_node_older_than_dsh_needs_is_refused_with_both_versions_and_the_rest_go_on() {
+        let old = node_too_old("v22.1.0
+").expect("too old");
+        assert!(old.contains("24.9.0 or later") && old.contains("is 22.1.0.") && old.contains("start the agent again"), "{old}");
+        assert!(node_too_old("24.8.9").is_some(), "one patch short");
+        assert!(node_too_old("v24.9.0").is_none(), "exactly the minimum");
+        assert!(node_too_old("v24.19.0").is_none() && node_too_old("25.0.0").is_none() && node_too_old("v26").is_none());
+        assert!(node_too_old("v24.10.0-nightly2025").is_none(), "a suffix after the numbers is ignored");
+        assert_eq!(node_too_old("v24").map(|_| ()), Some(()), "24 alone reads as 24.0.0, which is short");
+        for unreadable in ["", "node", "vx.y"] {
+            assert!(node_too_old(unreadable).is_none(), "{unreadable:?}: dsh decides");
+        }
+    }
+
+    #[test]
+    fn only_dsh_is_checked_and_a_path_with_no_node_goes_on() {
+        let empty = tempfile::tempdir().unwrap();
+        let env = HashMap::from([("PATH".to_string(), empty.path().to_string_lossy().into_owned())]);
+        assert!(check_runtime("dsh", &env).is_ok(), "no node on the PATH: the spawn says so");
+        assert!(check_runtime("claude", &env).is_ok());
     }
 
     #[test]

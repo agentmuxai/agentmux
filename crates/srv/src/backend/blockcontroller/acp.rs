@@ -548,6 +548,7 @@ impl Controller for AcpController {
         let provider = super::super::obj::meta_get_string(&block_meta, "agentProvider", "");
         super::acp_prelaunch::prepare_env(&provider, &mut env_vars);
         super::acp_prelaunch::prepare(&provider, &env_vars, &session_cwd(&cwd));
+        super::acp_prelaunch::check_runtime(&provider, &env_vars)?;
         {
             let mut inner = self.inner.lock().unwrap();
             inner.mcp_json = std::fs::read_to_string(mcp_path).ok();
