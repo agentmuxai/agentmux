@@ -105,6 +105,7 @@ import { DURATION_BASE_MS } from "@/app/motion/tokens";
 import { tileItemType } from "@/app/drag/drag-types";
 import { createTileLayout, type TileLayoutPlatform } from "./TileLayout.core";
 import { DRAG_PREVIEW_HOVER_MS } from "./drag-preview-size";
+import { REST_CLIP, type ReflowEntry } from "./liveReflow";
 import { dragState } from "./tilelayout-drag-state";
 import { LayoutTreeActionType, type TileLayoutContents } from "./types";
 
@@ -118,8 +119,11 @@ function makeModel() {
     const [isResizing, setIsResizing] = createSignal(false);
     const [ready, setReady] = createSignal(false);
     const [handles, setHandles] = createSignal<Array<{ id: string }>>([]);
+    const [reflow, setReflow] = createSignal(new Map<string, ReflowEntry>());
     return {
         activeDrag,
+        reflowFor: (id: string) => reflow().get(id),
+        liveReflowActive: () => reflow().size > 0,
         overlayTransform: overlay,
         gapSizePx: gap,
         animationTimeS: animTime,
@@ -132,7 +136,7 @@ function makeModel() {
         treeReducer: vi.fn(),
         renderContent: vi.fn((nm: { content?: () => HTMLElement }) => nm.content?.() ?? document.createElement("div")),
         renderPreview: vi.fn(() => document.createElement("span")),
-        set: { setActiveDrag, setOverlay, setGap, setAnimTime, setMagnifiedId, setMagnifyMount, setIsResizing, setHandles },
+        set: { setActiveDrag, setOverlay, setGap, setAnimTime, setMagnifiedId, setMagnifyMount, setIsResizing, setHandles, setReflow },
     };
 }
 
@@ -428,6 +432,54 @@ describe("createTileLayout: a tile", () => {
         const { el } = mountWithTile(makePlatform());
         expect(el.style.visibility).toBe("");
         expect(el.style.opacity).toBe("1");
+    });
+
+    describe("the live reflow of a pane drag (liveReflow.ts)", () => {
+        const glide: ReflowEntry = { kind: "glide", transform: "translate3d(300px,0px, 0)", clip: "inset(0px 300px 0px 0px)" };
+
+        it("glides a tile with a translate and a crop over its unchanged size, and nothing else about it changes", () => {
+            const platform = makePlatform();
+            const { el, node } = mountWithTile(platform);
+            const before = node.additionalProps();
+            h.model.set.setReflow(new Map<string, ReflowEntry>([["n1", glide]]));
+            expect(el.style.transform).toBe(glide.transform);
+            expect(el.style.getPropertyValue("clip-path")).toBe(glide.clip);
+            expect(el.style.transition).toContain("transform var(--duration-base) ease-out");
+            expect(el.style.transition).toContain("clip-path var(--duration-base) ease-out");
+            // A compositor-only change: the width and height a ResizeObserver or a terminal fit would see are
+            // the layout's, the layout rect is untouched, and the platform's geometry signal (which makes a
+            // browser pane re-send its rect) never fires.
+            expect(el.style.width).toBe("10px");
+            expect(el.style.height).toBe("10px");
+            expect(node.additionalProps()).toBe(before);
+            expect(platform.onLeafGeometryChange).not.toHaveBeenCalled();
+        });
+
+        it("hides the dragged pane's tile", () => {
+            const { el } = mountWithTile(makePlatform());
+            h.model.set.setReflow(new Map<string, ReflowEntry>([["n1", { kind: "hidden" }]]));
+            expect(el.style.visibility).toBe("hidden");
+            expect(el.style.transform).toBe("translate(1px, 2px)");
+        });
+
+        it("keeps the layout's own transform on a tile at rest, with the glide's transition on so it glides back", () => {
+            const { el } = mountWithTile(makePlatform());
+            h.model.set.setReflow(new Map<string, ReflowEntry>([["n1", glide]]));
+            h.model.set.setReflow(new Map<string, ReflowEntry>([["n1", { kind: "rest" }]]));
+            expect(el.style.transform).toBe("translate(1px, 2px)");
+            expect(el.style.getPropertyValue("clip-path")).toBe(REST_CLIP);
+            expect(el.style.transition).toContain("transform var(--duration-base) ease-out");
+        });
+
+        it("drops the transform, the crop and their transition in one step when the reflow ends, so the drop does not glide twice", () => {
+            const { el } = mountWithTile(makePlatform());
+            h.model.set.setReflow(new Map<string, ReflowEntry>([["n1", glide]]));
+            h.model.set.setReflow(new Map());
+            expect(el.style.transform).toBe("translate(1px, 2px)");
+            expect(el.style.getPropertyValue("clip-path")).toBe("");
+            expect(el.style.transition).not.toContain("transform");
+            expect(el.style.visibility).toBe("");
+        });
     });
 
     describe("the platform's geometry hook", () => {

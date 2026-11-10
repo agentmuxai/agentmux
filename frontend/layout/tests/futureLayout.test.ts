@@ -191,6 +191,37 @@ describe("the drop preview is cheap enough to run per armed candidate", () => {
     });
 });
 
+/**
+ * The live reflow matches a current pane to its future rect by blockId (SPEC_LIVE_REFLOW_PANE_DRAG_2026_11_06.md
+ * §6): a pane keeps its node id through the preview, but a split can rename its parent, so the block is the key.
+ */
+describe("every current pane has exactly one future rect, by block", () => {
+    beforeEach(() => rows.clear());
+
+    for (const [name, make] of Object.entries(TREES)) {
+        it(`${name}: each pane's block is in the preview once, with a rect`, () => {
+            const wrong: string[] = [];
+            for (const { name: zone, action } of drops(make())) {
+                const model = modelOf(make());
+                const future = futureLayoutOf(model, action!);
+                if (!future) {
+                    wrong.push(`${zone}: no preview`);
+                    continue;
+                }
+                const blocks = future.leafIds.map((id) => future.leafBlockIds[id]);
+                for (const leaf of model.leafs()) {
+                    const block = leaf.data?.blockId;
+                    const mine = blocks.filter((b) => b === block);
+                    if (mine.length !== 1) wrong.push(`${zone}: ${leaf.id} appears ${mine.length} times`);
+                    const id = future.leafIds.find((l) => future.leafBlockIds[l] === block);
+                    if (!id || !future.rects[id]) wrong.push(`${zone}: ${leaf.id} has no rect`);
+                }
+            }
+            expect(wrong).toEqual([]);
+        });
+    }
+});
+
 describe("a tab pill's ghost has an extent", () => {
     beforeEach(() => rows.clear());
 
