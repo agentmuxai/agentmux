@@ -229,15 +229,25 @@ function AgentViewBottom({ v }: { v: AgentViewParts }): JSX.Element {
     const { paneModel, block, provider, providerKey, meta, context } = found;
     const { commands, paneBusy } = sending;
     const { account } = failure;
-    // Compacts the conversation, then moves the agent: the card after a refused change and the panel's rows share it.
-    const compactThenSwitchTo = (route: string, modelId: string) =>
-        compactThenSwitch({
-            compact: () => commands.sendWithState("/compact"),
-            boundaryAt: () => paneModel.state.lastCompactionBoundaryAt,
-            switchTo: async () => {
-                await RpcApi.AgentModelSwitchCommand(TabRpcClient, { blockid: model.blockId, route, model: modelId, restart: true });
-            },
-        });
+    // Compacts the conversation, then moves the agent: the card after a refused change and the panel's rows share it,
+    // one at a time, and a switch that worked clears the card whichever of them asked.
+    let compacting = false;
+    const compactThenSwitchTo = async (route: string, modelId: string) => {
+        if (compacting) throw new Error("A compaction is already running");
+        compacting = true;
+        try {
+            await compactThenSwitch({
+                compact: () => commands.sendWithState("/compact"),
+                boundaryAt: () => paneModel.state.lastCompactionBoundaryAt,
+                switchTo: async () => {
+                    await RpcApi.AgentModelSwitchCommand(TabRpcClient, { blockid: model.blockId, route, model: modelId, restart: true });
+                },
+            });
+            await dismissModelUndone(model.blockId);
+        } finally {
+            compacting = false;
+        }
+    };
     return (
         <>
             {/* Login, decisions, questions, queue, recovery banners, activity dock,

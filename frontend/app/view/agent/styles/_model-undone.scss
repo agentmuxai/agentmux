@@ -41,24 +41,5 @@
             flex-shrink: 0;
             gap: var(--space-1);
         }
-
-        .agent-model-undone-button {
-            padding: var(--space-0-5) var(--space-1-5);
-            border: 1px solid var(--border-color);
-            border-radius: var(--radius-sm);
-            background: transparent;
-            color: inherit;
-            font: inherit;
-            cursor: pointer;
-
-            &:hover:not(:disabled) {
-                background: var(--accent-bg-subtle);
-            }
-
-            &:disabled {
-                opacity: 0.6;
-                cursor: default;
-            }
-        }
     }
 }

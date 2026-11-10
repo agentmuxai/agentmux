@@ -190,7 +190,7 @@ enum Fit {
 
 fn kilo(tokens: u32) -> String {
     if tokens >= 1_000_000 {
-        format!("{}M", f64::from(tokens) / 1_000_000.0)
+        format!("{:.1}M", f64::from(tokens) / 1_000_000.0).replace(".0M", "M")
     } else {
         format!("{}K", tokens.div_ceil(1000))
     }
@@ -397,6 +397,14 @@ mod tests {
         let on = Choice { route: "openrouter".into(), model: flash.id.into() };
         assert!(panel_model(route, flash, Some(&on), true, &req(None, None)).current);
         assert!(!panel_model(route, flash, None, true, &req(None, None)).current);
+    }
+
+    #[test]
+    fn sizes_read_in_thousands_and_in_millions_to_one_decimal() {
+        assert_eq!(kilo(40_000), "40K");
+        assert_eq!(kilo(1_000_000), "1M");
+        assert_eq!(kilo(1_048_576), "1M");
+        assert_eq!(kilo(1_500_000), "1.5M");
     }
 
     #[test]

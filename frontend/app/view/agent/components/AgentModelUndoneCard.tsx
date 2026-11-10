@@ -6,6 +6,8 @@
  * was refused, where the agent is again, and a way to try once the conversation is compacted.
  */
 import { Show, createSignal, type Accessor, type JSX } from "solid-js";
+import { Button } from "../../../element/ui/Button";
+import { tip } from "../../../element/tip";
 import { modelUndoneText, type ModelUndone } from "../model-undone";
 
 export interface AgentModelUndoneCardProps {
@@ -37,7 +39,7 @@ export function AgentModelUndoneCard(props: AgentModelUndoneCardProps): JSX.Elem
                     <div class="agent-model-undone-text">
                         <span class="agent-model-undone-title">{modelUndoneText(card())}</span>
                         <Show when={card().reason}>
-                            <span class="agent-model-undone-reason" title={card().reason}>
+                            <span class="agent-model-undone-reason" {...tip(card().reason)}>
                                 {card().reason}
                             </span>
                         </Show>
@@ -48,12 +50,12 @@ export function AgentModelUndoneCard(props: AgentModelUndoneCardProps): JSX.Elem
                         </Show>
                     </div>
                     <div class="agent-model-undone-actions">
-                        <button type="button" class="agent-model-undone-button" disabled={busy()} onClick={() => void run(card())}>
+                        <Button disabled={busy()} onClick={() => void run(card())}>
                             {busy() ? "Compacting…" : "Compact, then switch"}
-                        </button>
-                        <button type="button" class="agent-model-undone-button" disabled={busy()} onClick={() => props.onDismiss()}>
+                        </Button>
+                        <Button disabled={busy()} onClick={() => props.onDismiss()}>
                             Dismiss
-                        </button>
+                        </Button>
                     </div>
                 </div>
             )}
