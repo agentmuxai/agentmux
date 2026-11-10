@@ -1721,7 +1721,7 @@ wrap_task! {
                 Some(&mut client_ref),
                 Some(&cef_url),
                 Some(&settings),
-                None,
+                crate::ipc_query::app_extra_info().as_mut(),
                 request_context.as_mut(),
                 Some(&mut bv_delegate),
             );
