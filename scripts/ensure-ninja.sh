@@ -106,7 +106,8 @@ first_usable() {
         [ -f "$p" ] || continue
         [ -L "$p" ] && continue
         if usable "$p"; then
-            REAL="$p"
+            # Callers prepend ${REAL%/*} to PATH, which needs forward slashes.
+            REAL=$(printf '%s' "$p" | tr '\\' '/')
             return 0
         fi
     done
@@ -115,9 +116,16 @@ first_usable() {
 
 # AGENTMUX_NINJA is an explicit override and the strongest signal: it is
 # honoured on every OS, before following a PATH alias and before the
-# AGENTMUX_NINJA_SEARCH locations.
-if [ -n "${AGENTMUX_NINJA:-}" ] && usable "$AGENTMUX_NINJA"; then
-    REAL="$AGENTMUX_NINJA"
+# AGENTMUX_NINJA_SEARCH locations. If it is set but does not start, say so
+# rather than silently using a different ninja.
+if [ -n "${AGENTMUX_NINJA:-}" ]; then
+    if usable "$AGENTMUX_NINJA"; then
+        # Git Bash accepts a backslash path, but ${REAL%/*} needs forward
+        # slashes to find the directory.
+        REAL=$(printf '%s' "$AGENTMUX_NINJA" | tr '\\' '/')
+    else
+        printf '[ensure-ninja] warning: AGENTMUX_NINJA=%s is not usable; ignoring it\n' "$AGENTMUX_NINJA" >&2
+    fi
 fi
 
 # A ninja on PATH that starts and is not an alias is exactly what the build

@@ -72,6 +72,16 @@ else
   bad "AGENTMUX_NINJA wins over the ninja on PATH and the search locations" "rc=$rc out='$out' $(cat "$TMP/err1b")"
 fi
 
+# An AGENTMUX_NINJA that cannot start is reported, not silently ignored.
+out=$(PATH="$TMP/bin:$TMP/real:/usr/bin:/bin" HOME="$TMP/home" \
+      AGENTMUX_NINJA="$TMP/nope/ninja" AGENTMUX_TARGET_DIR="$TMP/target" \
+      "$SCRIPT" 2>"$TMP/err1d"); rc=$?
+if [ "$rc" -eq 0 ] && [ -z "$out" ] && grep -q 'AGENTMUX_NINJA=.*is not usable' "$TMP/err1d"; then
+  ok "an unusable AGENTMUX_NINJA is reported"
+else
+  bad "an unusable AGENTMUX_NINJA is reported" "rc=$rc out='$out' $(cat "$TMP/err1d")"
+fi
+
 # A working ninja on PATH that is not an alias is kept as-is: no search runs,
 # so a different ninja is not prepended.
 out=$(PATH="$TMP/bin:$TMP/real:/usr/bin:/bin" HOME="$TMP/home" \
