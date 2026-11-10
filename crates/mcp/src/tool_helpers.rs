@@ -424,6 +424,15 @@ fn held_text(to: &str, result: &Value, id: &str) -> Result<String> {
              Do not resend it.{id}"
         ));
     }
+    if result.get("held_reason").and_then(|v| v.as_str()) == Some("peer_offline") {
+        let host = result.get("held_host").and_then(|v| v.as_str()).map_or_else(|| "its machine".to_string(), str::to_string);
+        return Ok(format!(
+            "HELD for {to} (peer_offline) — not delivered yet. {to} runs on {host}, which is not \
+             answering on the LAN; this AgentMux instance (channel) keeps the message and \
+             delivers it when {host} is seen again, for up to 24 hours (the cloud relay would drop \
+             it after 30 minutes). Do not resend it.{id}"
+        ));
+    }
     if let Some(why) = result.get("start_blocked").and_then(|v| v.as_str()) {
         return Ok(format!(
             "HELD for {to} (not_running, capacity) — not delivered yet. {to} was stopped and AgentMux \

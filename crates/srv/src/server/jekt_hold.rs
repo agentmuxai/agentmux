@@ -293,7 +293,7 @@ async fn hold_with_reason(
                     "agent {target}'s account is out of quota — held for delivery on this AgentMux instance for up to 24 h, delivered when it can work again (an account move or the reset)"
                 ),
                 HoldReason::ApiOffline => format!("agent {target}'s model API is offline — held for up to 24 h, delivered when it answers again"),
-                HoldReason::Idle | HoldReason::Quota => format!("agent {target}'s session is idle — held until it is next active"), // `jekt_cold` has its own answer; never through here
+                HoldReason::Idle | HoldReason::Quota | HoldReason::PeerOffline => format!("agent {target}'s session is idle — held until it is next active"), // `jekt_cold` and `reactive::peer_hold` have their own answers; never through here
             };
             let mut answer = json!({
                 "success": false,

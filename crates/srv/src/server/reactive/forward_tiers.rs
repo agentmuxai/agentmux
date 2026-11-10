@@ -404,6 +404,13 @@ impl<'a> Tiers<'a> {
                 return Some(held);
             }
         }
+        // An agent of a LAN peer that is down: kept here for 24 h, not left to the relay's 30 minutes
+        // (`peer_hold`).
+        if !self.candidate_seen {
+            if let Some(held) = peer_hold::hold_for_down_peer(state, auth_via, req, resp).await {
+                return Some(held);
+            }
+        }
         if let Some(body) = try_cloud_relay(state, req, caller_uid).await {
             return Some(body);
         }

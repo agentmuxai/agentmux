@@ -128,9 +128,21 @@ async fn target_decision(state: &AppState, uid: &str, cold_after_ms: Option<u64>
     .unwrap_or(Decision::Wait { reason: WaitReason::UsageLimit, until_ms: None })
 }
 
+/// Longest one replay pass for messages held for peers' agents may take: it asks the relay about each
+/// agent whose machine is down, and a relay that does not answer costs seconds per agent.
+const PEER_PASS_LIMIT: Duration = Duration::from_secs(60);
+
 /// Replay held jekts: once now, then whenever an agent registers and every
-/// 30 s. Installed after `AppState` exists.
+/// 30 s. Installed after `AppState` exists. The messages held for peers' agents are replayed by a loop
+/// of their own, so a slow relay never delays the local replay.
 pub(crate) fn install(state: &AppState) {
+    let peers = state.clone();
+    tokio::spawn(async move {
+        loop {
+            let _ = tokio::time::timeout(PEER_PASS_LIMIT, super::reactive::peer_hold::replay_pass(&peers)).await;
+            tokio::time::sleep(SWEEP_EVERY).await;
+        }
+    });
     let state = state.clone();
     tokio::spawn(async move {
         loop {
