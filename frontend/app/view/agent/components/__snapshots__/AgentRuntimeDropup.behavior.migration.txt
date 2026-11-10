@@ -19,8 +19,8 @@ trigger "Default · claude-fable-5 · high" class=[ui-button ui-tone-neutral ui-
   [model]
   - Opus 5.5 / Highest quality {}
   - Sonnet 5.5 / Balanced speed and quality {}
-  - Haiku 4.5 / Fastest {}
-  - Fable 5.1 / Long-horizon work {}
+  - Haiku 5.5 / Fastest {}
+  - Fable 5.2 / Long-horizon work {}
   note (placeholder): Running model: shown after the first reply
   [effort]
   - low {}
@@ -28,7 +28,7 @@ trigger "Default · claude-fable-5 · high" class=[ui-button ui-tone-neutral ui-
   - high {current}
   - xhigh {}
   - max {}
-patchRuntime(block-1, claude, {"model":"claude-fable-5-1"}, {"migration":true}) meta={"agent:runtime":{"model":"claude-fable-5","permissionMode":"default","effort":"high"}}
+patchRuntime(block-1, claude, {"model":"claude-fable-5-2"}, {"migration":true}) meta={"agent:runtime":{"model":"claude-fable-5","permissionMode":"default","effort":"high"}}
 -- an alias is left alone
 trigger "Default · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=true width=- border=3px solid var(--main-text-color)
   title: Mode / Model / Effort — applies on the next turn
@@ -43,8 +43,8 @@ trigger "Default · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-dens
   [model]
   - Opus 5.5 / Highest quality {}
   - Sonnet 5.5 / Balanced speed and quality {current}
-  - Haiku 4.5 / Fastest {}
-  - Fable 5.1 / Long-horizon work {}
+  - Haiku 5.5 / Fastest {}
+  - Fable 5.2 / Long-horizon work {}
   note (placeholder): Running model: shown after the first reply
   [effort]
   - low {}
@@ -66,8 +66,8 @@ trigger "Default · some-unknown-model · high" class=[ui-button ui-tone-neutral
   [model]
   - Opus 5.5 / Highest quality {}
   - Sonnet 5.5 / Balanced speed and quality {}
-  - Haiku 4.5 / Fastest {}
-  - Fable 5.1 / Long-horizon work {}
+  - Haiku 5.5 / Fastest {}
+  - Fable 5.2 / Long-horizon work {}
   note (placeholder): Running model: shown after the first reply
   [effort]
   - low {}
@@ -89,8 +89,8 @@ trigger "Default · CLI default · high" class=[ui-button ui-tone-neutral ui-den
   [model]
   - Opus 5.5 / Highest quality {}
   - Sonnet 5.5 / Balanced speed and quality {}
-  - Haiku 4.5 / Fastest {}
-  - Fable 5.1 / Long-horizon work {}
+  - Haiku 5.5 / Fastest {}
+  - Fable 5.2 / Long-horizon work {}
   note (placeholder): Running model: shown after the first reply
   [effort]
   - low {}

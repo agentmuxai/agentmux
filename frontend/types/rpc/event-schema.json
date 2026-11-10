@@ -45,6 +45,15 @@
     }
   },
   {
+    "event": "agent:grants",
+    "payloadTs": {
+      "imports": [
+        "GrantsEvent"
+      ],
+      "name": "GrantsEvent"
+    }
+  },
+  {
     "event": "agent:inputhistory",
     "payloadTs": {
       "imports": [
@@ -60,6 +69,15 @@
       "name": "null"
     },
     "perId": true
+  },
+  {
+    "event": "agent:notice",
+    "payloadTs": {
+      "imports": [
+        "NoticeView"
+      ],
+      "name": "NoticeView"
+    }
   },
   {
     "event": "agent:process-added",

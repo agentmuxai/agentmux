@@ -34,6 +34,8 @@ import type { AgentModelPanelReq } from "@/types/rpc/AgentModelPanelReq";
 import type { AgentModelSwitchReq } from "@/types/rpc/AgentModelSwitchReq";
 import type { AgentModelSwitchResult } from "@/types/rpc/AgentModelSwitchResult";
 import type { AgentMoveHereResult } from "@/types/rpc/AgentMoveHereResult";
+import type { AgentNoticeDecideResult } from "@/types/rpc/AgentNoticeDecideResult";
+import type { AgentNoticeGrantsResult } from "@/types/rpc/AgentNoticeGrantsResult";
 import type { AgentOpenPanesResult } from "@/types/rpc/AgentOpenPanesResult";
 import type { AgentOpenResult } from "@/types/rpc/AgentOpenResult";
 import type { AgentOpenTailResult } from "@/types/rpc/AgentOpenTailResult";
@@ -95,6 +97,9 @@ import type { CommandAgentDefHideData } from "@/types/rpc/CommandAgentDefHideDat
 import type { CommandAgentInputData } from "@/types/rpc/CommandAgentInputData";
 import type { CommandAgentLastRuntimeData } from "@/types/rpc/CommandAgentLastRuntimeData";
 import type { CommandAgentMoveHereData } from "@/types/rpc/CommandAgentMoveHereData";
+import type { CommandAgentNoticeDecideData } from "@/types/rpc/CommandAgentNoticeDecideData";
+import type { CommandAgentNoticeGrantsData } from "@/types/rpc/CommandAgentNoticeGrantsData";
+import type { CommandAgentNoticeSetGrantData } from "@/types/rpc/CommandAgentNoticeSetGrantData";
 import type { CommandAgentOpenData } from "@/types/rpc/CommandAgentOpenData";
 import type { CommandAgentOpenTailData } from "@/types/rpc/CommandAgentOpenTailData";
 import type { CommandAgentPaneUnregisterData } from "@/types/rpc/CommandAgentPaneUnregisterData";
@@ -833,6 +838,30 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<SensitiveDecideResult> {
     return client.rpcCall("sensitive.decide", data, opts);
+  },
+  // command "agent.notice.decide"
+  AgentNoticeDecideCommand(
+    client: RpcClient,
+    data: CommandAgentNoticeDecideData,
+    opts?: RpcOpts
+  ): Promise<AgentNoticeDecideResult> {
+    return client.rpcCall("agent.notice.decide", data, opts);
+  },
+  // command "agent.notice.setgrant"
+  AgentNoticeSetGrantCommand(
+    client: RpcClient,
+    data: CommandAgentNoticeSetGrantData,
+    opts?: RpcOpts
+  ): Promise<AgentNoticeGrantsResult> {
+    return client.rpcCall("agent.notice.setgrant", data, opts);
+  },
+  // command "agent.notice.grants"
+  AgentNoticeGrantsCommand(
+    client: RpcClient,
+    data: CommandAgentNoticeGrantsData,
+    opts?: RpcOpts
+  ): Promise<AgentNoticeGrantsResult> {
+    return client.rpcCall("agent.notice.grants", data, opts);
   },
   // command "agentstop"
   AgentStopCommand(client: RpcClient, data: CommandAgentStopData, opts?: RpcOpts): Promise<void> {

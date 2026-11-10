@@ -704,6 +704,22 @@ pub struct AuditLogEntry {
     /// and the receiver's row of one message carry the same one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub msg_id: Option<String>,
+    /// The dialog's text as read, for a sensitive-op entry whose facts have one
+    /// (`os_prompt_answer`). Absent for every other entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
+    /// The exact value given, for a sensitive-op entry whose facts have one. Typed text is never
+    /// recorded, only a path or a button label, and never a password or other secret field
+    /// (the guard refuses those before a request is ever filed).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answer: Option<String>,
+    /// The op's risk level (`low`, `medium`, `high`), for a sensitive-op entry whose facts have one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub level: Option<String>,
+    /// `true` when a remembered grant allowed it, with no fresh countdown; `false` when a countdown
+    /// ran; absent for every entry that isn't a sensitive-op decision.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub standing: Option<bool>,
 }
 
 /// An entry that says nothing: a successful delivery attempt with no names, hash or id. A constructor names what it sets.
@@ -735,6 +751,10 @@ impl Default for AuditLogEntry {
             tier: None,
             trust: None,
             msg_id: None,
+            prompt: None,
+            answer: None,
+            level: None,
+            standing: None,
         }
     }
 }

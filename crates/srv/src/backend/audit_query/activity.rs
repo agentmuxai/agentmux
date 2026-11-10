@@ -49,6 +49,10 @@ pub(super) fn entry_of(tag: char, day: &str, at: u64, row: &ActivityRow, ctx: &C
         },
         // Where the row was written, which a channel scope and the Audit's sections read.
         provenance: row.channel.as_ref().map(|c| AuditProvenance { channel: Some(c.clone()), ..Default::default() }),
+        prompt: None,
+        answer: None,
+        level: None,
+        standing: None,
     }
 }
 

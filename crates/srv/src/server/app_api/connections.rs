@@ -661,12 +661,14 @@ pub(crate) fn verified_agent(
     Ok(auth.agent_id.clone())
 }
 
-/// The user's consent for the agent `agent_id` (verified, [`verified_agent`])
-/// in `agent_block_id` to run `what` on the SSH `connection` with the user's
-/// identity (spec §8.2). `connection` is the canonical name
+/// Tell the user that the agent `agent_id` (verified, [`verified_agent`]) in
+/// `agent_block_id` wants to run `what` on the SSH `connection` with the user's
+/// identity (spec §8.2), and whether it may. `connection` is the canonical name
 /// (`ConnTarget::name`), so one host is one consent however it is spelled.
-/// "Always" for that agent and host is remembered (`remote::agent_access`)
-/// and asks nothing again; otherwise the user is asked ([`ask_user`]).
+/// "Always" for that agent and host is remembered (`remote::agent_access`) and
+/// shows nothing again; otherwise the agent's pane shows a card with a
+/// countdown that goes ahead on its own (`agent_notice`), which the user can
+/// stop, hurry or turn into "Always".
 pub(crate) async fn consent_for_ssh(
     state: &AppState,
     agent_block_id: &str,
@@ -674,57 +676,34 @@ pub(crate) async fn consent_for_ssh(
     connection: &str,
     what: &str,
 ) -> Result<(), String> {
-    use crate::backend::remote::agent_access;
+    use crate::sagas::agent_notice::{self, Kind, Notice, Outcome};
     let agent_id = Some(agent_id.to_string()).filter(|a| !a.trim().is_empty());
     let agent = agent_label(agent_id.as_deref());
     let connection = connection.trim();
-    if agent_id
-        .as_deref()
-        .is_some_and(|id| agent_access::always_allowed(id, connection))
-    {
-        tracing::info!(agent = %agent, connection = %connection, what = %one_line(what, 200), "agent ssh access: allowed (always)");
-        return Ok(());
+    let notice = Notice {
+        kind: Kind::SshAccess,
+        block_id: agent_block_id.to_string(),
+        agent_id: agent_id.clone().unwrap_or_default(),
+        agent: agent.clone(),
+        connection: connection.to_string(),
+        headline: format!("{} is using {}", one_line(&agent, 60), one_line(connection, 80)),
+        body: format!("It will run this on {}, as you, with your SSH keys.", one_line(connection, 80)),
+        quote: one_line(what, 400),
+        always_label: format!("Always allow {} on {}", one_line(&agent, 40), one_line(connection, 80)),
+        waived: None,
+    };
+    let outcome = agent_notice::announce(state, notice, || super::agent_spawn::requester_here(state, agent_block_id)).await;
+    tracing::info!(agent = %agent, connection = %connection, what = %one_line(what, 200), outcome = ?outcome, "agent ssh access");
+    match outcome {
+        Outcome::Go(_) => Ok(()),
+        Outcome::Stopped => Err(format!("the user stopped {agent} using {connection}")),
+        Outcome::Gone => Err(format!("{agent}'s pane was closed before it could use {connection}")),
     }
-    let question = serde_json::json!({
-        "kind": "consent",
-        "title": format!("Agent access to {}", one_line(connection, 80)),
-        "message": format!(
-            "{agent} wants to run this on {}, as you, with your SSH keys:\n\n{}\n\nAllow it?",
-            one_line(connection, 80),
-            one_line(what, 400)
-        ),
-        "checkbox": match &agent_id {
-            Some(_) => format!("Always allow {agent} on {}", one_line(connection, 80)),
-            None => String::new(),
-        },
-        "ok_label": "Allow",
-        "cancel_label": "Deny",
-    });
-    let answer = ask_user(state, agent_block_id, question)
-        .await
-        .map_err(|e| format!("{agent} needs the user's permission to use {connection}, and {e}"))?;
-    if !(answer.answered && answer.approve) {
-        tracing::info!(agent = %agent, connection = %connection, answered = answer.answered, "agent ssh access: not allowed");
-        return Err(if answer.answered {
-            format!("the user denied {agent} access to {connection}")
-        } else {
-            format!("the user did not answer whether {agent} may use {connection}")
-        });
-    }
-    let always = answer.checkbox && agent_id.is_some();
-    if let Some(id) = agent_id.as_deref().filter(|_| always) {
-        let config_home = crate::backend::base::get_mux_config_dir();
-        if let Err(e) = remember_always_in(&state.broker, &config_home, id, connection) {
-            tracing::warn!(error = %e, "agent ssh access: could not remember 'always'");
-        }
-    }
-    tracing::info!(agent = %agent, connection = %connection, what = %one_line(what, 200), always, "agent ssh access: allowed");
-    Ok(())
 }
 
 /// Remember "always" for `agent` on `connection` under `config_home`, and tell
 /// every open Connectors → Remotes, whose host rows list these grants.
-fn remember_always_in(
+pub(crate) fn remember_always_in(
     broker: &Broker,
     config_home: &std::path::Path,
     agent: &str,

@@ -148,7 +148,7 @@ describe("curated catalog", () => {
 
     it("ships the current fable id, not the superseded one", () => {
         const fable = claudeModels().find((m) => m.label.startsWith("Fable"));
-        expect(fable!.value).toBe("claude-fable-5-1");
+        expect(fable!.value).toBe("claude-fable-5-2");
     });
 });
 

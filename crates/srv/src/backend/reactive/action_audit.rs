@@ -40,6 +40,10 @@ fn entry(rec: &ActionRecord, target_agent: String) -> AuditLogEntry {
         tier: None,
         trust: None,
         msg_id: None,
+        prompt: None,
+        answer: None,
+        level: None,
+        standing: None,
     }
 }
 

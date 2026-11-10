@@ -32,6 +32,10 @@ fn audit_entry(ts: u64, from: &str, to: &str) -> AuditLogEntry {
         tier: None,
         trust: None,
         msg_id: None,
+        prompt: None,
+        answer: None,
+        level: None,
+        standing: None,
     }
 }
 
