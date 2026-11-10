@@ -26,7 +26,7 @@ function inOrder(call: () => Promise<unknown>): void {
 
 /**
  * Arm the Escape hook for the drag that just began. A no-op off Windows. With `follow`, the same hook also
- * moves the picture of that pane while the cursor is outside every window (pane-live-follow.ts).
+ * moves the picture of that pane with the cursor, wherever it goes (pane-live-follow.ts).
  */
 export function watchEscapeDuringDrag(follow?: { blockId: string }): void {
     if (!isWindows()) return;
