@@ -23,6 +23,10 @@ use crate::backend::storage::store::Store;
 
 use super::AppState;
 
+mod agent_config;
+mod file_io;
+mod scratch;
+
 // Per-process token written into scratch claim files. Stale claim files from a
 // previous process run have a different token and are ignored during reuse scans,
 // allowing crash-recovery (the scratch becomes reclaimable on restart).
@@ -148,908 +152,148 @@ pub(crate) fn inject_global_bundles(claude_md: &str, id_store: &Arc<Store>, agen
 use crate::backend::fs_ops::remote as remote_fs;
 
 pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let id_store = state.id_store.clone();
-    let mstore = state.mstore.clone();
-    let identity_store = state.identity_store.clone();
-    let editor_file_watcher = state.editor_file_watcher.clone();
-    let media_file_watcher = state.media_file_watcher.clone();
+    register_watchers(engine, state);
+    register_file_io(engine, state);
+    register_tree_mutations(engine);
+    register_scratch(engine);
+    register_agent_config(engine, state);
+}
 
-    // watcheditorfile → start live-reload watching for a (path, block_id)
-    // pair. Called by the frontend once a tab's content finishes loading.
-    // Since the migration onto the shared FsWatchPool
-    // (SPEC_SHARED_FS_WATCHER_FRAMEWORK_2026_08_07.md), the watcher itself
-    // always exists — a construction-time failure now degrades into
-    // FsWatchPool::health()'s degraded_paths instead of a missing watcher,
-    // so there's nothing to check here.
-    // Spec: docs/specs/SPEC_EDITOR_LIVE_FILE_RELOAD_2026_07_18.md
-    {
-        let watcher = editor_file_watcher.clone();
-        engine.register_typed(
-            "watcheditorfile",
-            move |cmd: WatchEditorFileReq, _ctx| {
-                let watcher = watcher.clone();
-                async move {
-                    let expanded = expand_home_dir_safe(&cmd.path);
-                    watcher.watch_path(expanded.as_path(), &cmd.block_id);
-                    Ok(())
-                }
-            },
-        );
-    }
+/// The user's home folder, or the command's own message when there is none.
+fn home_or(message: &str) -> Result<std::path::PathBuf, String> {
+    dirs::home_dir().ok_or_else(|| message.to_string())
+}
 
-    // unwatcheditorfile → stop live-reload watching for a (path, block_id)
-    // pair. Called on tab close / pane dispose.
-    {
-        let watcher = editor_file_watcher.clone();
-        engine.register_typed(
-            "unwatcheditorfile",
-            // Same Req type as `watcheditorfile`, on purpose -- see
-            // `WatchEditorFileReq`: an unwatch that cannot name exactly what
-            // the watch named leaks a watcher.
-            move |cmd: WatchEditorFileReq, _ctx| {
-                let watcher = watcher.clone();
-                async move {
-                    let expanded = expand_home_dir_safe(&cmd.path);
-                    watcher.unwatch_path(expanded.as_path(), &cmd.block_id);
-                    Ok(())
-                }
-            },
-        );
-    }
+/// Live-reload watching of editor files (spec: docs/specs/SPEC_EDITOR_LIVE_FILE_RELOAD_2026_07_18.md) and
+/// live-update watching of Media panes pointed at a directory (docs/specs/SPEC_MEDIA_PANE_2026_07_26.md). Both
+/// watchers always exist since the move onto the shared FsWatchPool
+/// (SPEC_SHARED_FS_WATCHER_FRAMEWORK_2026_08_07.md): a construction-time failure degrades into
+/// `FsWatchPool::health()`'s degraded_paths, so there's nothing to check here.
+fn register_watchers(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    // watcheditorfile starts watching a (path, block_id) pair once a tab's content has loaded.
+    let watcher = state.editor_file_watcher.clone();
+    engine.register_typed("watcheditorfile", move |cmd: WatchEditorFileReq, _ctx| {
+        let watcher = watcher.clone();
+        async move {
+            watcher.watch_path(expand_home_dir_safe(&cmd.path).as_path(), &cmd.block_id);
+            Ok(())
+        }
+    });
+    // unwatcheditorfile stops it, on tab close / pane dispose. The same Req type as `watcheditorfile`, on
+    // purpose (see `WatchEditorFileReq`): an unwatch that cannot name exactly what the watch named leaks a watcher.
+    let watcher = state.editor_file_watcher.clone();
+    engine.register_typed("unwatcheditorfile", move |cmd: WatchEditorFileReq, _ctx| {
+        let watcher = watcher.clone();
+        async move {
+            watcher.unwatch_path(expand_home_dir_safe(&cmd.path).as_path(), &cmd.block_id);
+            Ok(())
+        }
+    });
+    // watchmediadir starts it for a directory target (a fixed single file has nothing new to watch for; it is
+    // re-fetched on demand); unwatchmediadir stops it when the target moves away, or on dispose.
+    let watcher = state.media_file_watcher.clone();
+    engine.register_typed("watchmediadir", move |cmd: WatchMediaDirReq, _ctx| {
+        let watcher = watcher.clone();
+        async move {
+            watcher.watch_directory(expand_home_dir_safe(&cmd.path).as_path(), &cmd.block_id, &cmd.extensions);
+            Ok(())
+        }
+    });
+    let watcher = state.media_file_watcher.clone();
+    engine.register_typed("unwatchmediadir", move |cmd: UnwatchMediaDirReq, _ctx| {
+        let watcher = watcher.clone();
+        async move {
+            watcher.unwatch_directory(expand_home_dir_safe(&cmd.path).as_path(), &cmd.block_id);
+            Ok(())
+        }
+    });
+}
 
-    // watchmediadir → start live-update watching for a Media pane pointed
-    // at a directory. Called by the frontend whenever the pane's target
-    // path resolves to a directory (not a single file — a fixed single
-    // file has nothing new to "watch for," it's just re-fetched on demand).
-    // Spec: docs/specs/SPEC_MEDIA_PANE_2026_07_26.md
-    {
-        let watcher = media_file_watcher.clone();
-        engine.register_typed(
-            "watchmediadir",
-            move |cmd: WatchMediaDirReq, _ctx| {
-                let watcher = watcher.clone();
-                async move {
-                    let expanded = expand_home_dir_safe(&cmd.path);
-                    watcher.watch_directory(expanded.as_path(), &cmd.block_id, &cmd.extensions);
-                    Ok(())
-                }
-            },
-        );
-    }
-
-    // unwatchmediadir → stop live-update watching. Called when the Media
-    // pane's target path changes away from that directory, or on dispose.
-    {
-        let watcher = media_file_watcher.clone();
-        engine.register_typed(
-            "unwatchmediadir",
-            move |cmd: UnwatchMediaDirReq, _ctx| {
-                let watcher = watcher.clone();
-                async move {
-                    let expanded = expand_home_dir_safe(&cmd.path);
-                    watcher.unwatch_directory(expanded.as_path(), &cmd.block_id);
-                    Ok(())
-                }
-            },
-        );
-    }
-
-    // writeagentconfig → write config files atomically to agent working directory
-    engine.register_typed(
-        COMMAND_WRITE_AGENT_CONFIG,
-        move |mut cmd: CommandWriteAgentConfigData, ctx| {
-            let id_store = id_store.clone();
-            let mstore = mstore.clone();
-            let identity_store = identity_store.clone();
-            // Only the window, proven by its host, gets an agent's keys; an agent writes only its own (agent_config_guard).
-            let hands_out_keys = ctx.operator_only("only the AgentMux window writes an agent's signing keys").is_ok();
-            async move {
-                super::agent_config_guard::check_agent_config_write(&mstore, &ctx, cmd.agent_id.as_deref(), &expand_home_dir_safe(&cmd.working_dir), cmd.auto_allocate)?;
-                tracing::info!(
-                    working_dir = %cmd.working_dir,
-                    file_count = cmd.files.len(),
-                    auto_allocate = cmd.auto_allocate,
-                    agent_type = cmd.agent_type.as_deref().unwrap_or("host"),
-                    "WriteAgentConfig"
-                );
-                let agent_mode = cmd.agent_type.clone().unwrap_or_else(|| "host".to_string());
-                super::picker_config::check_render_request(&mstore, &cmd, hands_out_keys)?;
-                // Resolve to a final on-disk path. For auto-generated
-                // instance paths (`auto_allocate: true`), use the
-                // atomic `<base>-N` allocator so concurrent same-hour
-                // launches don't share a workdir. For user-specified
-                // paths, mkdir-p as before — never rewrite.
-                let expanded_working_dir = expand_home_dir_safe(&cmd.working_dir);
-                let final_working_dir = if cmd.auto_allocate {
-                    let desired = expanded_working_dir.to_string_lossy().to_string();
-                    crate::server::app_api::allocate_agent_workdir(&desired)?
-                } else {
-                    let p = expanded_working_dir.as_path();
-                    if !p.exists() {
-                        std::fs::create_dir_all(p) // workdir-fs: creates the workdir itself
-                            .map_err(|e| format!("failed to create working dir: {e}"))?;
-                    }
-                    expanded_working_dir.to_string_lossy().to_string()
-                };
-                cmd.files = super::picker_config::files_to_write(
-                    std::mem::take(&mut cmd.files),
-                    &mstore,
-                    &id_store,
-                    &identity_store,
-                    &cmd,
-                    &agent_mode,
-                    hands_out_keys,
-                    &final_working_dir,
-                )?;
-                let base_path = std::path::Path::new(&final_working_dir);
-                // Canonicalize base ONCE (it exists — allocate_agent_workdir
-                // or the explicit-path mkdir-p created it just above). Used
-                // by the per-file symlink-escape verifier so we catch a
-                // symlinked ancestor like `<base>/.claude -> /tmp/outside`
-                // before fs::write follows it.
-                let canonical_base = base_path.canonicalize().map_err(|e| {
-                    format!("failed to canonicalize working dir {}: {e}", base_path.display())
-                })?;
-
-                // Remove skill-derived files (.claude/commands/*.md,
-                // .claude/skills/*/SKILL.md) that WE wrote on a previous
-                // materialization but aren't part of this run's output --
-                // e.g. a skill's format switched between "prompt" and
-                // "agent-skill", or a skill was renamed/removed. This is the
-                // actual "click Launch" path used on every normal agent
-                // launch (`launchAgentDefinition`/`WriteAgentConfigCommand`)
-                // -- shared with `agent.open`'s `write_agent_config_files`
-                // (agent_open.rs) via `agent_config.rs` so the two paths
-                // that materialize config files can't drift out of sync on
-                // this (reagent P1, PR #2322 — this handler initially had
-                // no cleanup at all).
-                let wd = crate::backend::workdir_fs::Workdir::open(base_path)
-                    .map_err(|e| format!("failed to open working dir {}: {e}", base_path.display()))?;
-                let new_managed_skill_paths = crate::backend::agent_config::managed_skill_file_paths(
-                    cmd.files.iter().map(|f| f.path.as_str()),
-                );
-                crate::backend::agent_config::cleanup_stale_managed_skill_files(
-                    base_path,
-                    &new_managed_skill_paths,
-                );
-
-                for file in &cmd.files {
-                    // Lexical join + traversal check — works on Windows where
-                    // canonicalize() adds the `\\?\` UNC prefix and breaks
-                    // starts_with against not-yet-created files. Catches `..`,
-                    // absolute paths, drive-letter prefixes (root and inner).
-                    let file_path = crate::backend::base::safe_join_within_base(
-                        base_path,
-                        &file.path,
-                    )
-                    .map_err(|e| format!("path traversal denied: {} ({e})", file.path))?;
-                    // Symlink-escape guard: if any EXISTING ancestor is a
-                    // symlink that resolves outside the workdir, reject.
-                    // No-op for fully-fresh agent dirs (the common case
-                    // where every component is new).
-                    // Like a refused write below, this skips that one file
-                    // rather than failing the launch, as agent.open does
-                    // (Codex on #4141).
-                    if let Err(e) = crate::backend::base::verify_no_symlink_escape(&file_path, &canonical_base) {
-                        tracing::warn!(path = %file.path, error = %e, "writeagentconfig: not writing a config file under a folder linking outside the workdir");
-                        continue;
-                    }
-                    // Inject Global Memory into CLAUDE.md so agents
-                    // launched from the picker receive the same workspace rules
-                    // as agents launched via the agent.open RPC.
-                    if file.path == "CLAUDE.md" {
-                        // Ownership-aware materialization instead of the
-                        // generic write below — never overwrites a
-                        // pre-existing, non-AgentMux-authored file's
-                        // content. See
-                        // docs/specs/SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22.md.
-                        // Global Memory is already in `file.content` (`picker_config`).
-                        crate::backend::agent_config::write_claude_md_respecting_ownership(
-                            base_path, &file.content,
-                        )
-                        .map_err(|e| format!("failed to write CLAUDE.md: {e}"))?;
-                        tracing::debug!(path = %file_path.display(), "wrote config file (ownership-aware)");
-                        continue;
-                    }
-                    // This RPC command carries no provider ID (`CommandWriteAgentConfigData`
-                    // is just `{working_dir, files}` — the frontend already
-                    // resolved everything), so a non-Claude provider's
-                    // startup-instructions file (AGENTS.md, GEMINI.md,
-                    // QWEN.md, .pi/APPEND_SYSTEM.md, ...) is recognized by
-                    // filename membership against the provider registry,
-                    // not a literal string match.
-                    if crate::backend::providers::is_known_startup_instructions_filename(&file.path) {
-                        // Still gets the same Global Memory injection
-                        // CLAUDE.md gets above — otherwise a Codex/Gemini/etc.
-                        // agent launched from the picker would silently
-                        // receive no workspace-wide Global Bundle content at
-                        // all.
-                        // Global Memory is already in `file.content` (`picker_config`).
-                        // Never overwrites a pre-existing file (codex P1, PR
-                        // #2788) — a simpler exists-guard than CLAUDE.md's
-                        // full ownership-aware materialization above; see
-                        // write_startup_instructions_respecting_existing's
-                        // own doc comment for why a fuller mechanism (the
-                        // @import-based side-file fallback) isn't attempted
-                        // here.
-                        crate::backend::agent_config::write_startup_instructions_respecting_existing(
-                            base_path, &file.path, &file.content,
-                        )
-                        .map_err(|e| format!("failed to write {}: {e}", file.path))?;
-                        tracing::debug!(path = %file_path.display(), "wrote config file (exists-guarded)");
-                        continue;
-                    }
-                    // `.mcp.json` merges into a user's own file instead of
-                    // replacing it, and is written owner-only (#3680) — see
-                    // write_mcp_json_respecting_user_servers's doc comment.
-                    if file.path == ".mcp.json" {
-                        crate::backend::agent_config::write_mcp_json_respecting_user_servers(
-                            base_path,
-                            &file.content,
-                        )
-                        .map_err(|e| format!("failed to write .mcp.json: {e}"))?;
-                        tracing::debug!(path = %file_path.display(), "wrote config file (merged, owner-only)");
-                        continue;
-                    }
-                    // Atomic, parents created inside the workdir, never
-                    // through a symlinked file (SPEC_WORKDIR_SAFE_WRITES_2026_10_01).
-                    // A refusal skips that one file, as agent.open does
-                    // (ReAgent on #4141); any other failure fails the launch.
-                    match wd.write(&file.path, file.content.as_bytes(), false) {
-                        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
-                            tracing::warn!(path = %file.path, error = %e, "writeagentconfig: not writing a config file");
-                        }
-                        other => {
-                            other.map_err(|e| format!("failed to write {}: {e}", file.path))?;
-                            tracing::debug!(path = %file_path.display(), "wrote config file");
-                        }
-                    }
-                }
-
-                crate::backend::agent_config::write_managed_skill_file_manifest(
-                    base_path,
-                    &new_managed_skill_paths,
-                );
-
-                // Return the final path so the caller can patch
-                // `cmd:cwd` if collision resolution changed it.
-                Ok(CommandWriteAgentConfigResult { working_dir: final_working_dir })
-            }
-        },
-    );
-
-    // readeditorfile → read file from disk for the editor pane
+/// Reading, writing and listing for the editor pane, and the roots its file tree starts from.
+fn register_file_io(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let auth_key = state.auth_key.clone();
-    engine.register_typed(
-        "readeditorfile",
-        move |cmd: CommandReadEditorFileData, _ctx| {
-            let auth_key = auth_key.clone();
-            async move {
-                // A file on an SSH host: read there by its helper, decoded
-                // here the same way (remote terminals spec §6.3).
-                if let Some(conn) = remote_fs::ssh_connection(cmd.connection.as_deref()) {
-                    let r = remote_fs::Remote {
-                        connection: conn,
-                        block_id: cmd.block_id.as_deref(),
-                        auth_key: &auth_key,
-                    };
-                    let (bytes, read_only) = remote_fs::read_file(r, &cmd.path)
-                        .await
-                        .map_err(|e| format!("readeditorfile: {e}"))?;
-                    let decoded = crate::backend::text_encoding::decode_file(&bytes);
-                    return Ok(CommandReadEditorFileResult {
-                        content: decoded.content,
-                        encoding: decoded.encoding,
-                        bom: decoded.bom.to_string(),
-                        line_ending: decoded.line_ending.to_string(),
-                        had_decode_errors: decoded.had_decode_errors,
-                        read_only,
-                    });
-                }
-                let expanded = expand_home_dir_safe(&cmd.path);
-                let path = expanded.as_path();
-
-                // Size guard: reject files > 10MB
-                let metadata = std::fs::metadata(path)
-                    .map_err(|e| format!("readeditorfile: {e}"))?;
-                if metadata.len() > 10_000_000 {
-                    return Err("File too large (>10MB)".to_string());
-                }
-
-                // Read bytes and detect the encoding (BOM → UTF-8 → heuristic),
-                // decoding to UTF-8 for the editor. This lets non-UTF-8 files
-                // (Windows-1252 .ini, UTF-16, Shift_JIS, …) open instead of
-                // erroring on read_to_string. The detected encoding/bom/line
-                // ending ride back so save round-trips the original format.
-                // See docs/specs/SPEC_EDITOR_FILE_ENCODINGS_2026_06_17.md.
-                let bytes = std::fs::read(path)
-                    .map_err(|e| format!("readeditorfile: {e}"))?;
-                let decoded = crate::backend::text_encoding::decode_file(&bytes);
-                let read_only = metadata.permissions().readonly();
-
-                Ok(CommandReadEditorFileResult {
-                    content: decoded.content,
-                    encoding: decoded.encoding,
-                    bom: decoded.bom.to_string(),
-                    line_ending: decoded.line_ending.to_string(),
-                    had_decode_errors: decoded.had_decode_errors,
-                    read_only,
-                })
+    engine.register_typed("readeditorfile", move |cmd: CommandReadEditorFileData, _ctx| {
+        let auth_key = auth_key.clone();
+        async move {
+            match remote_fs::ssh_connection(cmd.connection.as_deref()) {
+                Some(conn) => file_io::read_remote_file(conn, &cmd, &auth_key).await,
+                None => file_io::read_local_file(&cmd.path),
             }
-        },
-    );
-
-    // writeeditorfile → write file to disk from the editor pane
+        }
+    });
     let auth_key = state.auth_key.clone();
-    engine.register_typed(
-        "writeeditorfile",
-        move |cmd: CommandWriteEditorFileData, _ctx| {
-            let auth_key = auth_key.clone();
-            async move {
-                // Size guard: match readeditorfile's 10MB limit
-                if cmd.content.len() > 10_000_000 {
-                    return Err("Content too large (>10MB)".to_string());
-                }
-
-                // A file on an SSH host: encoded here as for a local file,
-                // then written there atomically by its helper.
-                if let Some(conn) = remote_fs::ssh_connection(cmd.connection.as_deref()) {
-                    let (out_bytes, had_unmappable) = crate::backend::text_encoding::encode_file(
-                        &cmd.content,
-                        cmd.encoding.as_deref().unwrap_or(""),
-                        cmd.bom.as_deref().unwrap_or("none"),
-                        cmd.line_ending.as_deref().unwrap_or("lf"),
-                    );
-                    if had_unmappable {
-                        return Err("writeeditorfile: file contains characters that can't be represented in its encoding — save it as UTF-8 instead".to_string());
-                    }
-                    let r = remote_fs::Remote {
-                        connection: conn,
-                        block_id: cmd.block_id.as_deref(),
-                        auth_key: &auth_key,
-                    };
-                    return remote_fs::write_file(r, &cmd.path, out_bytes).await;
-                }
-
-                let expanded = expand_home_dir_safe(&cmd.path);
-                let path = expanded.as_path();
-
-                // Path safety: restrict writes to under the user's home directory.
-                // Allowlist approach — safer than an incomplete denylist.
-                let home = dirs::home_dir()
-                    .ok_or("writeeditorfile: cannot determine home directory")?;
-                let canonical_home = home.canonicalize()
-                    .map_err(|e| format!("writeeditorfile: home dir: {e}"))?;
-
-                // Resolve the target path (canonicalize existing, or parent + filename for new files)
-                let canonical = path.canonicalize().or_else(|_| {
-                    path.parent()
-                        .and_then(|p| p.canonicalize().ok())
-                        .map(|p| p.join(path.file_name().unwrap_or_default()))
-                        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "invalid path"))
-                }).map_err(|e| format!("writeeditorfile: {e}"))?;
-
-                if !editor_may_change(&canonical, &canonical_home) {
-                    return Err(format!(
-                        "writeeditorfile: path {} is outside home directory",
-                        canonical.display()
-                    ));
-                }
-
-                // Re-encode to the file's original encoding (+ BOM + line
-                // endings) so a non-UTF-8 file round-trips instead of being
-                // silently rewritten as UTF-8. Absent fields default to UTF-8.
-                let (out_bytes, had_unmappable) = crate::backend::text_encoding::encode_file(
-                    &cmd.content,
-                    cmd.encoding.as_deref().unwrap_or(""),
-                    cmd.bom.as_deref().unwrap_or("none"),
-                    cmd.line_ending.as_deref().unwrap_or("lf"),
-                );
-                // Refuse a lossy write: rather than silently emit
-                // numeric-character-reference replacements (corrupting the
-                // file), fail loudly so the user can save as UTF-8. The UI for
-                // an in-place "Save with Encoding → UTF-8" is Phase 3 of
-                // SPEC_EDITOR_FILE_ENCODINGS.
-                if had_unmappable {
-                    let enc = cmd
-                        .encoding
-                        .as_deref()
-                        .filter(|s| !s.is_empty())
-                        .unwrap_or("its current encoding");
-                    return Err(format!(
-                        "writeeditorfile: file contains characters that can't be represented in {enc} — save it as UTF-8 instead"
-                    ));
-                }
-                std::fs::write(&canonical, &out_bytes)
-                    .map_err(|e| format!("writeeditorfile: {e}"))?;
-                tracing::info!(path = %canonical.display(), bytes = out_bytes.len(), "editor file saved");
-
-                Ok(())
+    engine.register_typed("writeeditorfile", move |cmd: CommandWriteEditorFileData, _ctx| {
+        let auth_key = auth_key.clone();
+        async move {
+            file_io::check_write_size(&cmd)?;
+            match remote_fs::ssh_connection(cmd.connection.as_deref()) {
+                Some(conn) => file_io::write_remote_file(conn, &cmd, &auth_key).await,
+                None => file_io::write_local_file(&home_or("writeeditorfile: cannot determine home directory")?, &cmd),
             }
-        },
-    );
-
-    // listeditordir → list directory contents for the editor's file-tree pane.
-    // Symlinks are followed (matches VS Code semantics; the frontend marks
-    // followed symlinks with a ↗ overlay).
-    // Spec: docs/specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md
-    engine.register_typed(
-        "listeditordir",
-        |cmd: ListEditorDirReq, _ctx| {
-            async move {
-                let expanded = expand_home_dir_safe(&cmd.path);
-                let canonical = expanded.canonicalize()
-                    .map_err(|e| format!("listeditordir: {e}"))?;
-                let read_dir = std::fs::read_dir(&canonical)
-                    .map_err(|e| format!("listeditordir: {e}"))?;
-
-                let mut entries: Vec<DirEntry> = Vec::new();
-                for entry in read_dir.flatten() {
-                    let name = entry.file_name().to_string_lossy().to_string();
-                    // `file_type()` returns the entry's own type — symlinks
-                    // appear as symlinks (no follow). `metadata()` follows
-                    // symlinks, so a symlinked dir reports is_dir=true.
-                    // We need both: is_symlink from file_type, is_dir/size
-                    // from metadata (so a symlink-to-dir reads as a directory,
-                    // matching VS Code).
-                    let is_symlink = entry
-                        .file_type()
-                        .map(|t| t.is_symlink())
-                        .unwrap_or(false);
-                    let metadata = entry.metadata().ok();
-                    let is_dir = metadata.as_ref().map(|m| m.is_dir()).unwrap_or(false);
-                    let size = metadata
-                        .as_ref()
-                        .and_then(|m| if !m.is_dir() { Some(m.len()) } else { None });
-                    let mtime = metadata
-                        .as_ref()
-                        .and_then(|m| m.modified().ok())
-                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                        .map(|d| d.as_millis() as u64);
-
-                    entries.push(DirEntry { name, is_dir, is_symlink, size, mtime });
-                }
-
-                // Folders first, then files; alphabetical, case-insensitive.
-                // Reads the fields directly now rather than re-parsing them
-                // back out of a `Value` -- the old `a["is_dir"].as_bool()`
-                // silently sorted everything as a file if that key were ever
-                // renamed.
-                entries.sort_by(|a, b| {
-                    match (a.is_dir, b.is_dir) {
-                        (true, false) => std::cmp::Ordering::Less,
-                        (false, true) => std::cmp::Ordering::Greater,
-                        _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-                    }
-                });
-
-                Ok(ListEditorDirResult {
-                    path: canonical.to_string_lossy().into_owned(),
-                    entries,
-                })
-            }
-        },
-    );
-
-    // geteditorhome → OS home directory, used as the editor file-tree default root.
-    engine.register_typed(
-        "geteditorhome",
-        // `Option<_>` -- see `EditorRootsReq`: it is what makes both encodings
-        // of "no argument" deserialize.
-        |_req: Option<EditorRootsReq>, _ctx| {
-            async move {
-                let home = dirs::home_dir()
-                    .ok_or_else(|| "geteditorhome: cannot determine home directory".to_string())?;
-                Ok(GetEditorHomeResult {
-                    home: home.to_string_lossy().into_owned(),
-                })
-            }
-        },
-    );
-
-    // geteditorroots → home + (Linux/Windows) the filesystem root and mounts,
-    // rendered as sibling top-level roots. On macOS `list_drives` returns none,
-    // so the editor file-tree is scoped to $HOME only.
+        }
+    });
+    engine.register_typed("listeditordir", |cmd: ListEditorDirReq, _ctx| async move { file_io::list_dir(&cmd) });
+    // geteditorhome is the OS home directory, the editor file-tree's default root. The request is an `Option<_>`
+    // (see `EditorRootsReq`): it is what makes both encodings of "no argument" deserialize.
+    engine.register_typed("geteditorhome", |_req: Option<EditorRootsReq>, _ctx| async move {
+        let home = home_or("geteditorhome: cannot determine home directory")?;
+        Ok(GetEditorHomeResult { home: home.to_string_lossy().into_owned() })
+    });
+    // geteditorroots is home plus (Linux/Windows) the filesystem root and mounts, rendered as sibling top-level
+    // roots. On macOS `list_drives` returns none, so the file tree is scoped to $HOME only.
     // Spec: docs/specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md (multi-root follow-up)
-    engine.register_typed(
-        "geteditorroots",
-        |_req: Option<EditorRootsReq>, _ctx| {
-            async move {
-                let home = dirs::home_dir()
-                    .ok_or_else(|| "geteditorroots: cannot determine home directory".to_string())?;
-                // WSL distros after the drives, at their roots through the share.
-                let mut drives = list_drives();
-                drives.extend(crate::backend::remote::wsl::list_cached().await.into_iter().map(|d| {
-                    EditorDrive {
-                        path: crate::backend::remote::wsl_fs::share_path(&d, "/"),
-                        name: format!("{d} (WSL)"),
-                    }
-                }));
-                Ok(GetEditorRootsResult {
-                    home: home.to_string_lossy().into_owned(),
-                    drives,
-                })
-            }
-        },
-    );
+    engine.register_typed("geteditorroots", |_req: Option<EditorRootsReq>, _ctx| async move {
+        let home = home_or("geteditorroots: cannot determine home directory")?;
+        // WSL distros after the drives, at their roots through the share.
+        let mut drives = list_drives();
+        drives.extend(crate::backend::remote::wsl::list_cached().await.into_iter().map(|d| EditorDrive {
+            path: crate::backend::remote::wsl_fs::share_path(&d, "/"),
+            name: format!("{d} (WSL)"),
+        }));
+        Ok(GetEditorRootsResult { home: home.to_string_lossy().into_owned(), drives })
+    });
+}
 
-    // ── Editor file-tree mutations ─────────────────────────────────────
-    // Spec: docs/specs/SPEC_FILE_TREE_CONTEXT_MENU_2026_06_14.md
-    // All handlers validate the target path is under the user's home directory
-    // before performing any mutation — same policy as writeeditorfile.
+/// The file tree's context-menu mutations, each confined to the user's home folder.
+fn register_tree_mutations(engine: &Arc<WshRpcEngine>) {
+    engine.register_typed("openinshell", |cmd: OpenInShellReq, _ctx| async move {
+        file_io::reveal_in_shell(&home_or("openinshell: cannot determine home directory")?, &cmd)
+    });
+    engine.register_typed("renameeditorfile", |cmd: RenameEditorFileReq, _ctx| async move {
+        file_io::rename_file(&home_or("renameeditorfile: cannot determine home")?, &cmd)
+    });
+    engine.register_typed("createeditorfile", |cmd: CreateEditorFileReq, _ctx| async move {
+        file_io::create_file(&home_or("createeditorfile: cannot determine home")?, &cmd)
+    });
+    engine.register_typed("createeditordir", |cmd: CreateEditorDirReq, _ctx| async move {
+        file_io::create_dir(&home_or("createeditordir: cannot determine home")?, &cmd)
+    });
+    engine.register_typed("deleteeditorfile", |cmd: DeleteEditorFileReq, _ctx| async move {
+        file_io::delete_file(&home_or("deleteeditorfile: cannot determine home")?, &cmd)
+    });
+}
 
-    // openinshell → reveal a path in the OS file manager
-    engine.register_typed(
-        "openinshell",
-        |cmd: OpenInShellReq, _ctx| {
-            async move {
-                let expanded = expand_home_dir_safe(&cmd.path);
-                let path = expanded.as_path();
-                let home = dirs::home_dir()
-                    .ok_or("openinshell: cannot determine home directory")?;
-                let canonical_home = home.canonicalize()
-                    .map_err(|e| format!("openinshell: home: {e}"))?;
-                let canonical = path.canonicalize()
-                    .map_err(|e| format!("openinshell: {e}"))?;
-                if !editor_may_change(&canonical, &canonical_home) {
-                    return Err(format!("openinshell: path outside home directory"));
-                }
-                // The file manager is third-party and long-lived, and a user can
-                // launch anything from it — including another AgentMux build,
-                // which would then adopt THIS instance's channel and data dir
-                // (invariant I7; retro-env-inheritance-instance-isolation-breach
-                // -2026-09-17 §2.2). So: strict policy, not the pane keep-set.
-                #[cfg(target_os = "windows")]
-                {
-                    let mut cmd = std::process::Command::new("explorer.exe");
-                    crate::backend::pane_env::sanitize_external_std_command(&mut cmd);
-                    let _ = cmd.arg(format!("/select,{}", canonical.display())).spawn();
-                }
-                #[cfg(target_os = "macos")]
-                {
-                    let mut cmd = std::process::Command::new("open");
-                    crate::backend::pane_env::sanitize_external_std_command(&mut cmd);
-                    let _ = cmd.arg("-R").arg(&canonical).spawn();
-                }
-                #[cfg(target_os = "linux")]
-                {
-                    let target = if canonical.is_dir() { canonical.clone() } else { canonical.parent().unwrap_or(&canonical).to_path_buf() };
-                    let mut cmd = std::process::Command::new("xdg-open");
-                    crate::backend::pane_env::sanitize_external_std_command(&mut cmd);
-                    let _ = cmd.arg(&target).spawn();
-                }
-                Ok(())
-            }
-        },
-    );
+fn register_scratch(engine: &Arc<WshRpcEngine>) {
+    engine.register_typed("createscratchfile", |cmd: CreateScratchFileReq, _ctx| async move {
+        scratch::create_scratch_file(&home_or("createscratchfile: cannot determine home directory")?, cmd)
+    });
+    engine.register_typed("movescratchfile", |cmd: MoveScratchFileReq, _ctx| async move {
+        scratch::move_scratch_file(&home_or("movescratchfile: cannot determine home")?, &cmd)
+    });
+}
 
-    // renameeditorfile → rename a file or folder (name only, same parent directory)
-    engine.register_typed(
-        "renameeditorfile",
-        |cmd: RenameEditorFileReq, _ctx| {
-            async move {
-                let expanded = expand_home_dir_safe(&cmd.old_path);
-                let old_path = expanded.as_path();
-                let home = dirs::home_dir().ok_or("renameeditorfile: cannot determine home")?;
-                let canonical_home = home.canonicalize().map_err(|e| format!("renameeditorfile: home: {e}"))?;
-                let canonical_old = old_path.canonicalize().map_err(|e| format!("renameeditorfile: {e}"))?;
-                if !editor_may_change(&canonical_old, &canonical_home) || is_a_home(&canonical_old, &canonical_home) {
-                    return Err("renameeditorfile: path outside or is the home directory".to_string());
-                }
-                if cmd.new_name.contains('/') || cmd.new_name.contains('\\') || cmd.new_name.contains('\0') || cmd.new_name == ".." || cmd.new_name == "." || cmd.new_name.is_empty() {
-                    return Err("renameeditorfile: new_name must be a plain filename".to_string());
-                }
-                let new_path = canonical_old.parent()
-                    .ok_or("renameeditorfile: no parent directory")?
-                    .join(&cmd.new_name);
-                if new_path.exists() {
-                    return Err(format!("renameeditorfile: destination already exists"));
-                }
-                std::fs::rename(&canonical_old, &new_path)
-                    .map_err(|e| format!("renameeditorfile: {e}"))?;
-                Ok(RenameEditorFileResult { new_path: new_path.to_string_lossy().into_owned() })
-            }
-        },
-    );
-
-    // createeditorfile → create an empty file inside an existing directory
-    engine.register_typed(
-        "createeditorfile",
-        |cmd: CreateEditorFileReq, _ctx| {
-            async move {
-                let expanded = expand_home_dir_safe(&cmd.parent_path);
-                let parent = expanded.as_path();
-                let home = dirs::home_dir().ok_or("createeditorfile: cannot determine home")?;
-                let canonical_home = home.canonicalize().map_err(|e| format!("createeditorfile: home: {e}"))?;
-                let canonical_parent = parent.canonicalize().map_err(|e| format!("createeditorfile: {e}"))?;
-                if !editor_may_change(&canonical_parent, &canonical_home) {
-                    return Err("createeditorfile: path outside home directory".to_string());
-                }
-                if cmd.name.contains('/') || cmd.name.contains('\\') || cmd.name.contains('\0') || cmd.name == "." || cmd.name == ".." || cmd.name.is_empty() {
-                    return Err("createeditorfile: name must be a plain filename".to_string());
-                }
-                let file_path = canonical_parent.join(&cmd.name);
-                if file_path.exists() {
-                    return Err("createeditorfile: file already exists".to_string());
-                }
-                std::fs::write(&file_path, "").map_err(|e| format!("createeditorfile: {e}"))?;
-                Ok(CreateEditorFileResult { file_path: file_path.to_string_lossy().into_owned() })
-            }
-        },
-    );
-
-    // createeditordir → create a directory inside an existing directory
-    engine.register_typed(
-        "createeditordir",
-        |cmd: CreateEditorDirReq, _ctx| {
-            async move {
-                let expanded = expand_home_dir_safe(&cmd.parent_path);
-                let parent = expanded.as_path();
-                let home = dirs::home_dir().ok_or("createeditordir: cannot determine home")?;
-                let canonical_home = home.canonicalize().map_err(|e| format!("createeditordir: home: {e}"))?;
-                let canonical_parent = parent.canonicalize().map_err(|e| format!("createeditordir: {e}"))?;
-                if !editor_may_change(&canonical_parent, &canonical_home) {
-                    return Err("createeditordir: path outside home directory".to_string());
-                }
-                if cmd.name.contains('/') || cmd.name.contains('\\') || cmd.name.contains('\0') || cmd.name == "." || cmd.name == ".." || cmd.name.is_empty() {
-                    return Err("createeditordir: name must be a plain name".to_string());
-                }
-                let dir_path = canonical_parent.join(&cmd.name);
-                if dir_path.exists() {
-                    return Err("createeditordir: already exists".to_string());
-                }
-                std::fs::create_dir(&dir_path).map_err(|e| format!("createeditordir: {e}"))?;
-                Ok(CreateEditorDirResult { dir_path: dir_path.to_string_lossy().into_owned() })
-            }
-        },
-    );
-
-    // deleteeditorfile → delete a file or directory
-    engine.register_typed(
-        "deleteeditorfile",
-        |cmd: DeleteEditorFileReq, _ctx| {
-            async move {
-                let expanded = expand_home_dir_safe(&cmd.path);
-                let path = expanded.as_path();
-                let home = dirs::home_dir().ok_or("deleteeditorfile: cannot determine home")?;
-                let canonical_home = home.canonicalize().map_err(|e| format!("deleteeditorfile: home: {e}"))?;
-                let canonical = path.canonicalize().map_err(|e| format!("deleteeditorfile: {e}"))?;
-                if !editor_may_change(&canonical, &canonical_home) || is_a_home(&canonical, &canonical_home) {
-                    return Err("deleteeditorfile: path outside or is the home directory".to_string());
-                }
-                // Use symlink_metadata (not metadata) to detect symlinks without following them.
-                // Deleting via `canonical` would delete the symlink TARGET; we always remove the
-                // entry at the original path so the symlink itself is unlinked.
-                let meta = std::fs::symlink_metadata(path)
-                    .map_err(|e| format!("deleteeditorfile: {e}"))?;
-                if meta.file_type().is_symlink() {
-                    // On Windows, directory junctions/symlinks must use remove_dir;
-                    // remove_file fails for directory symlinks on that platform.
-                    #[cfg(windows)]
-                    if path.is_dir() {
-                        std::fs::remove_dir(path).map_err(|e| format!("deleteeditorfile: {e}"))?;
-                    } else {
-                        std::fs::remove_file(path).map_err(|e| format!("deleteeditorfile: {e}"))?;
-                    }
-                    #[cfg(not(windows))]
-                    std::fs::remove_file(path).map_err(|e| format!("deleteeditorfile: {e}"))?;
-                } else if canonical.is_dir() {
-                    if cmd.recursive {
-                        std::fs::remove_dir_all(&canonical).map_err(|e| format!("deleteeditorfile: {e}"))?;
-                    } else {
-                        std::fs::remove_dir(&canonical).map_err(|e| format!("deleteeditorfile: directory not empty: {e}"))?;
-                    }
-                } else {
-                    std::fs::remove_file(&canonical).map_err(|e| format!("deleteeditorfile: {e}"))?;
-                }
-                Ok(())
-            }
-        },
-    );
-
-    // ── Scratch file service ────────────────────────────────────────────
-    // Spec: docs/specs/SPEC_EDITOR_WIDGET_DEFAULT_UX_2026_06_14.md
-
-    // createscratchfile → create a scratch buffer file in ~/.agentmux/cache/scratch/
-    engine.register_typed(
-        "createscratchfile",
-        |cmd: CreateScratchFileReq, _ctx| {
-            async move {
-                let home = dirs::home_dir()
-                    .ok_or("createscratchfile: cannot determine home directory")?;
-                let scratch_dir = home.join(".agentmux").join("cache").join("scratch");
-                std::fs::create_dir_all(&scratch_dir)
-                    .map_err(|e| format!("createscratchfile: create dir: {e}"))?;
-                let now_ms = agentmux_common::time::now_ms_u64();
-                const THIRTY_DAYS_MS: u64 = 30 * 24 * 60 * 60 * 1000;
-                let session_token = scratch_session_token();
-
-                // Phase 1: scan .md.meta files, collect candidates and prune expired pairs.
-                // A candidate is: not saved, not expired, not in exclude_scratch_ids.
-                let mut candidates: Vec<(u64, String, String)> = Vec::new(); // (created_at, sid, display_name)
-                if let Ok(entries) = std::fs::read_dir(&scratch_dir) {
-                    for entry in entries.flatten() {
-                        let meta_path = entry.path();
-                        let fname = meta_path
-                            .file_name()
-                            .and_then(|f| f.to_str())
-                            .unwrap_or("")
-                            .to_string();
-                        if !fname.ends_with(".md.meta") {
-                            continue;
-                        }
-                        let Ok(content) = std::fs::read_to_string(&meta_path) else { continue };
-                        let Ok(meta_json) = serde_json::from_str::<serde_json::Value>(&content) else { continue };
-                        if meta_json.get("saved_to").map_or(false, |v| !v.is_null()) {
-                            continue;
-                        }
-                        let created_at = meta_json.get("created_at").and_then(|v| v.as_u64()).unwrap_or(0);
-                        let sid = meta_json.get("scratch_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                        if created_at == 0 || sid.is_empty() {
-                            continue;
-                        }
-                        if cmd.exclude_scratch_ids.as_deref().map_or(false, |ex| ex.iter().any(|e| e == &sid)) {
-                            continue;
-                        }
-                        if now_ms.saturating_sub(created_at) > THIRTY_DAYS_MS {
-                            // Prune expired pair (all three files: .md, .md.meta, .md.claim).
-                            let _ = std::fs::remove_file(scratch_dir.join(format!("{}.md", sid)));
-                            let _ = std::fs::remove_file(&meta_path);
-                            let _ = std::fs::remove_file(scratch_dir.join(format!("{}.md.claim", sid)));
-                            continue;
-                        }
-                        let dname = meta_json
-                            .get("display_name")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("Untitled")
-                            .to_string();
-                        candidates.push((created_at, sid, dname));
-                    }
-                }
-
-                // Phase 2: try to atomically claim the most-recent candidate.
-                // Claim files prevent two concurrent createscratchfile calls from
-                // returning the same backing file to different panes. Each claim file
-                // stores the per-process session token; a claim from a previous process
-                // (crash/restart) has a different token and is cleared so recovery works.
-                candidates.sort_by(|a, b| b.0.cmp(&a.0)); // most recent first
-                let mut chosen: Option<(String, String)> = None;
-                for (_, sid, dname) in &candidates {
-                    let claim_path = scratch_dir.join(format!("{}.md.claim", sid));
-                    // Evict stale claims from a previous process session.
-                    if claim_path.exists() {
-                        if let Ok(tok) = std::fs::read_to_string(&claim_path) {
-                            if tok.trim() == session_token {
-                                // Valid live claim — another concurrent call already owns this.
-                                continue;
-                            }
-                        }
-                        // Stale claim (different session) — remove so we can reclaim.
-                        let _ = std::fs::remove_file(&claim_path);
-                    }
-                    // Try to exclusively create the claim file. If another concurrent
-                    // call wins the race, it will have already created it → we skip.
-                    match std::fs::OpenOptions::new().write(true).create_new(true).open(&claim_path) {
-                        Ok(mut f) => {
-                            use std::io::Write as _;
-                            let _ = f.write_all(session_token.as_bytes());
-                            let file_path = scratch_dir.join(format!("{}.md", sid));
-                            if file_path.exists() {
-                                chosen = Some((sid.clone(), dname.clone()));
-                            } else {
-                                // Backing file gone (deleted externally) — release claim.
-                                let _ = std::fs::remove_file(&claim_path);
-                            }
-                        }
-                        Err(_) => continue, // Concurrent call claimed this one first.
-                    }
-                    if chosen.is_some() {
-                        break;
-                    }
-                }
-
-                if let Some((scratch_id, display_name)) = chosen {
-                    let file_path = scratch_dir.join(format!("{}.md", scratch_id));
-                    return Ok(CreateScratchFileResult {
-                        scratch_id,
-                        file_path: file_path.to_string_lossy().into_owned(),
-                        display_name,
-                    });
-                }
-
-                // No reusable candidate — mint a fresh UUID pair.
-                let scratch_id = uuid::Uuid::new_v4().to_string();
-                let display_name = cmd.display_name.unwrap_or_else(|| "Untitled".to_string());
-                let file_path = scratch_dir.join(format!("{}.md", scratch_id));
-                std::fs::write(&file_path, "")
-                    .map_err(|e| format!("createscratchfile: {e}"))?;
-                let meta = serde_json::json!({
-                    "display_name": display_name,
-                    "scratch_id": scratch_id,
-                    "created_at": now_ms,
-                });
-                let meta_path = scratch_dir.join(format!("{}.md.meta", scratch_id));
-                std::fs::write(&meta_path, meta.to_string())
-                    .map_err(|e| format!("createscratchfile: meta: {e}"))?;
-                // Claim the fresh scratch so subsequent calls don't immediately reuse it.
-                let claim_path = scratch_dir.join(format!("{}.md.claim", scratch_id));
-                let _ = std::fs::write(&claim_path, session_token);
-                Ok(CreateScratchFileResult {
-                    scratch_id,
-                    file_path: file_path.to_string_lossy().into_owned(),
-                    display_name,
-                })
-            }
-        },
-    );
-
-    // movescratchfile → promote a scratch buffer to a real user-chosen path (Save As)
-    engine.register_typed(
-        "movescratchfile",
-        |cmd: MoveScratchFileReq, _ctx| {
-            async move {
-                let home = dirs::home_dir()
-                    .ok_or("movescratchfile: cannot determine home")?;
-                let canonical_home = home.canonicalize()
-                    .map_err(|e| format!("movescratchfile: home: {e}"))?;
-                // Validate scratch_id has no path components.
-                if cmd.scratch_id.contains('/') || cmd.scratch_id.contains('\\') || cmd.scratch_id.contains("..") {
-                    return Err("movescratchfile: invalid scratch_id".to_string());
-                }
-                let scratch_dir = home.join(".agentmux").join("cache").join("scratch");
-                let scratch_path = scratch_dir.join(format!("{}.md", cmd.scratch_id));
-                if !scratch_path.exists() {
-                    return Err(format!("movescratchfile: scratch file not found"));
-                }
-                // Validate + resolve destination.
-                let expanded_dest = expand_home_dir_safe(&cmd.destination_path);
-                let dest_path = expanded_dest.as_path();
-
-                // Coarse home-boundary check before any filesystem mutation.
-                // We use the unexpanded path here because the dest may not exist yet
-                // (canonicalize fails on non-existent paths).
-                if !dest_path.starts_with(&home) && !in_a_distro_home(dest_path) {
-                    return Err("movescratchfile: destination outside home directory".to_string());
-                }
-                // Reject ".." components before create_dir_all — the coarse starts_with
-                // check is purely lexical and passes paths like ~/foo/../../../tmp/evil
-                // because the prefix matches, but create_dir_all would then materialize
-                // directories outside the home boundary before the canonical check fires.
-                if dest_path.components().any(|c| c == std::path::Component::ParentDir) {
-                    return Err("movescratchfile: destination path must not contain '..' components".to_string());
-                }
-                // Reject existing destination to avoid silent data loss.
-                if dest_path.exists() {
-                    return Err("movescratchfile: destination already exists".to_string());
-                }
-                // Create parent directories if needed.
-                if let Some(parent) = dest_path.parent() {
-                    std::fs::create_dir_all(parent)
-                        .map_err(|e| format!("movescratchfile: create dirs: {e}"))?;
-                }
-                // Canonicalize parent (now guaranteed to exist) + append filename.
-                let canonical_dest = dest_path.parent()
-                    .and_then(|p| p.canonicalize().ok())
-                    .map(|p| p.join(dest_path.file_name().unwrap_or_default()))
-                    .ok_or_else(|| "movescratchfile: invalid destination path".to_string())?;
-                // Fine-grained home-boundary check with canonical paths.
-                if !editor_may_change(&canonical_dest, &canonical_home) {
-                    return Err("movescratchfile: destination outside home directory".to_string());
-                }
-                // Copy then remove scratch source (cross-device-safe move).
-                std::fs::copy(&scratch_path, &canonical_dest)
-                    .map_err(|e| format!("movescratchfile: copy: {e}"))?;
-                std::fs::remove_file(&scratch_path)
-                    .map_err(|e| format!("movescratchfile: remove scratch: {e}"))?;
-                // Clean up the .meta sidecar and the claim file.
-                let meta_path = scratch_dir.join(format!("{}.md.meta", cmd.scratch_id));
-                let _ = std::fs::remove_file(&meta_path);
-                let claim_path = scratch_dir.join(format!("{}.md.claim", cmd.scratch_id));
-                let _ = std::fs::remove_file(&claim_path);
-                Ok(MoveScratchFileResult { file_path: canonical_dest.to_string_lossy().into_owned() })
-            }
-        },
-    );
+fn register_agent_config(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let stores = Arc::new(agent_config::ConfigStores {
+        id_store: state.id_store.clone(),
+        mstore: state.mstore.clone(),
+        identity_store: state.identity_store.clone(),
+    });
+    engine.register_typed(COMMAND_WRITE_AGENT_CONFIG, move |cmd: CommandWriteAgentConfigData, ctx| {
+        let stores = stores.clone();
+        // Only the window, proven by its host, gets an agent's keys; an agent writes only its own (agent_config_guard).
+        let hands_out_keys = ctx.operator_only("only the AgentMux window writes an agent's signing keys").is_ok();
+        async move { agent_config::write_agent_config(&stores, &ctx, hands_out_keys, cmd) }
+    });
 }
 
 #[cfg(test)]
