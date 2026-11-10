@@ -520,7 +520,13 @@ tasks:
             # (see docs/retro/RETRO_CEF_BUILD_RACE_2026_04_24.md). If the first
             # build lost the race, cef_windows_x86_64/ is missing libcef_dll/ +
             # include/ + Resources/. Retry once after repair before failing hard.
-            - cmd: bash -c '{{.CARGO_ENV}}cargo build --release -p agentmux-cef -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp || { bash scripts/repair-cef-extract.sh && cargo build --release -p agentmux-cef -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp; }'
+            #
+            # ensure-ninja.sh goes first: cef-dll-sys -> CMake -> ninja, and a
+            # WinGet "Links" alias on PATH looks fine to the shell but cannot be
+            # started by native CMake (Kanban #31442: `task dev` exited 58). It
+            # prints a directory to prepend, clears a cef-dll-sys CMakeCache
+            # that pinned the unusable alias, or fails naming the fix.
+            - cmd: bash -c 'NINJA_DIR="$(bash scripts/ensure-ninja.sh)" || exit $?; if [ -n "$NINJA_DIR" ]; then export PATH="$NINJA_DIR:$PATH"; fi; {{.CARGO_ENV}}cargo build --release -p agentmux-cef -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp || { bash scripts/repair-cef-extract.sh && cargo build --release -p agentmux-cef -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp; }'
             # Phase 3 sandbox: bootstrap.exe presence means the sandbox feature
             # was active (cef-dll-sys only emits it when cef/sandbox is ON).
             # The cdylib agentmux_cef.dll is emitted unconditionally by

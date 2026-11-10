@@ -19,15 +19,31 @@ These instructions cover setting up dependencies and building AgentMux from sour
 | **Ninja** | 1.10+ | CEF native build (cef-dll-sys) |
 
 **Ninja must be on `PATH`.** `cef-dll-sys` builds CEF's C wrapper via CMake,
-which needs a build program it can find. Visual Studio ships Ninja but does not
-put it on `PATH`; copy it somewhere that is:
+which needs a build program it can find and start. `task dev` looks for a real
+`ninja.exe` (the WinGet package directory, Visual Studio Build Tools or
+Community/Professional/Enterprise, Scoop, Chocolatey) and puts it on `PATH` for
+the CEF build. If none is found it stops before the build with the reason and
+the fix.
+
+> [!WARNING]
+> On Windows, a `ninja` on `PATH` is not enough when it is the WinGet "Links"
+> alias: Git Bash lists that symlink, but native programs such as CMake cannot
+> start it. `task dev` detects that alias and uses the real binary behind it.
+> If an earlier build already pinned the alias in a `cef-dll-sys`
+> `CMakeCache.txt`, the next `task dev` removes that cache.
+
+To fix a machine by hand, copy a real ninja somewhere on `PATH` (the edition
+and architecture directory vary; `BuildTools` is what the standalone Build
+Tools installer creates):
 
 ```bash
-cp "/c/Program Files/Microsoft Visual Studio/"*"/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe" /c/tools/bin/
+cp "/c/Program Files (x86)/Microsoft Visual Studio/"*"/BuildTools/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe" /c/tools/bin/
 ```
 
-Verify with `ninja --version`. If `cargo build` fails with *"CMake was unable to
-find a build program corresponding to Ninja"*, this is why. On macOS use
+Or point `AGENTMUX_NINJA` at an existing `ninja.exe`. Verify with
+`ninja --version`; `task init` reports the ninja `task dev` will use. If
+`cargo build` still fails with *"CMake was unable to find a build program
+corresponding to Ninja"*, no real ninja was found. On macOS use
 `brew install cmake ninja`; on Linux `apt install cmake ninja-build`.
 
 > **Note:** Go and Zig are no longer required. The backend is 100% Rust since v0.31.0.
