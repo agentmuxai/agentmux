@@ -5,7 +5,8 @@
  * The widget bar's Warden / Memory / Connectors entries focus the pane already open in the shown tab
  * instead of opening another; a pane in another tab (or window) is left there and a new one opens here,
  * so a click never switches tabs. A pane the person minimized, or one that is a background tab of a
- * pane's stack, has to be shown first: `focusNode` alone leaves it collapsed or hidden.
+ * pane's stack, has to be shown first: `focusNode` alone leaves it collapsed or hidden. The pane brought
+ * back then flashes (the locate flash), so a click on a pane already on screen answers with something.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -27,6 +28,7 @@ vi.mock("./block-layout-actions", () => ({ createBlock }));
 vi.mock("./shortcuts-recent", () => ({ recordBlockOpened: vi.fn() }));
 vi.mock("./block-meta", () => ({ setBlockMeta: vi.fn(async () => {}) }));
 vi.mock("./focusManager", () => ({ giveBlockFocus: (id: string) => void calls.push(`give:${id}`) }));
+vi.mock("@/app/util/pane-locate", () => ({ emitPaneLocate: (id: string, opts?: unknown) => void calls.push(`flash:${id}${opts ? ":" + JSON.stringify(opts) : ""}`) }));
 vi.mock("./block-atom-cache", () => ({ cleanupBlockAtomCache: vi.fn() }));
 // The scope of a view is read from the window's config, which this test has no window for.
 vi.mock("./widget-singleton", () => ({ paneScope: () => "window" }));
@@ -74,8 +76,16 @@ describe("openOrFocusPaneIdByView", () => {
         register("warden-1", "warden");
         layout.nodes.set("warden-1", { id: "node-w", minimized: true });
         expect(await openOrFocusPaneIdByView("warden")).toBe("warden-1");
-        expect(calls).toEqual(["show:node-w:warden-1", "focus:node-w", "give:warden-1"]);
+        expect(calls).toEqual(["show:node-w:warden-1", "focus:node-w", "give:warden-1", "flash:warden-1"]);
         expect(createBlock).not.toHaveBeenCalled();
+    });
+
+    it("flashes the pane it brings back in this tab, even one already on screen and focused", async () => {
+        register("settings-1", "settings");
+        layout.nodes.set("settings-1", { id: "node-s" });
+        expect(await openOrFocusPaneIdByView("settings")).toBe("settings-1");
+        // A focus flash: the pane is focused by this path, so the flash waits for and follows that focus.
+        expect(calls.at(-1)).toBe("flash:settings-1");
     });
 
     it("shows a background member of a stack through the pane's node and its own block id", async () => {
@@ -145,5 +155,7 @@ describe("openOrFocusPaneIdByView", () => {
         for (let click = 0; click < 3; click++) expect(await openOrFocusPaneIdByView("settings", def as any, focusMeta as any)).toBe("settings-1");
         expect(createBlock).toHaveBeenCalledTimes(1);
         expect(calls.filter((c) => c.startsWith("focus:"))).toEqual(["focus:node-s", "focus:node-s"]);
+        // The new pane is not flashed from here (it is new, not located); the two shows are.
+        expect(calls.filter((c) => c.startsWith("flash:"))).toEqual(["flash:settings-1", "flash:settings-1"]);
     });
 });
