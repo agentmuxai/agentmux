@@ -9,7 +9,7 @@ import type { OutputTranslator } from "./translator";
  * Translator for Muse Code's own protocol, MSP (`muse serve`): JSON-RPC 2.0
  * over stdio, which srv's MspController writes to the transcript line by line
  * (crates/srv/src/backend/blockcontroller/msp.rs). Checked against Muse Code
- * 1.4.7-R6101.1's schema (`muse schema generate-ts`).
+ * 1.4.14-R7309.1's schema (`muse schema generate-ts`).
  *
  * The transcript is items, each with a kind and a lifecycle:
  *
