@@ -7,6 +7,7 @@ import { createEffect, onCleanup, onMount, type Accessor } from "solid-js";
 import { openMenuAt } from "@/app/element/ui";
 import { useWidthFit } from "@/app/element/width-fit";
 import { createScrollEdges } from "@/app/element/scroll-edges";
+import { stripWheelDelta } from "@/app/element/strip-wheel";
 import { getBlockComponentModel } from "@/app/store/block-component-registry";
 import { chromeZoomAtom } from "@/app/store/chrome-zoom";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -186,7 +187,6 @@ export function useBodyContextMenu(opts: {
  *  Called once, in the header's own component. */
 export function useHeaderScrollRange(header: () => HTMLElement | undefined): {
     setRange: (el: HTMLDivElement) => void;
-    fades: Record<string, boolean>;
     moreLeft: Accessor<boolean>;
     moreRight: Accessor<boolean>;
 } {
@@ -200,14 +200,36 @@ export function useHeaderScrollRange(header: () => HTMLElement | undefined): {
             if (!range || range.scrollWidth <= range.clientWidth) return;
             if (Math.abs(e.deltaX) >= Math.abs(e.deltaY)) return;
             e.preventDefault();
-            range.scrollLeft += e.deltaY;
+            range.scrollLeft += stripWheelDelta(e.deltaY, e.deltaMode);
         };
         el.addEventListener("wheel", onWheel, { passive: false });
         onCleanup(() => el.removeEventListener("wheel", onWheel));
     });
+    // The strip no longer scrolls itself inside the range, so its own reveal cannot bring a
+    // newly selected pill into view: do it here, when a pill's selection changes or a tab is
+    // added (scrollIntoView is a no-op for one already visible).
+    onMount(() => {
+        let frame = 0;
+        const reveal = () => {
+            frame = 0;
+            const active = range?.querySelector<HTMLElement>(".pane-tab--active, .pane-tab--selected");
+            active?.scrollIntoView({ block: "nearest", inline: "nearest" });
+        };
+        const observer = new MutationObserver((records) => {
+            const touchesPills = records.some(
+                (r) => r.type === "childList" || (r.target as Element).classList?.contains("pane-tab")
+            );
+            if (!touchesPills || frame) return;
+            frame = requestAnimationFrame(reveal);
+        });
+        if (range) observer.observe(range, { subtree: true, childList: true, attributes: true, attributeFilter: ["class"] });
+        onCleanup(() => {
+            observer.disconnect();
+            if (frame) cancelAnimationFrame(frame);
+        });
+    });
     return {
         setRange: (el) => (range = el),
-        fades: { "has-more-left": edges.moreLeft(), "has-more-right": edges.moreRight() },
         moreLeft: edges.moreLeft,
         moreRight: edges.moreRight,
     };

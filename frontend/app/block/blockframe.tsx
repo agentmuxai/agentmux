@@ -734,7 +734,7 @@ function BlockFrame_Header(
             <div
                 class="block-frame-header-scroll"
                 ref={headerScroll.setRange}
-                classList={headerScroll.fades}
+                classList={{ "has-more-left": headerScroll.moreLeft(), "has-more-right": headerScroll.moreRight() }}
             >
             <div class="block-frame-header-content">
             {preIconButtonElem()}

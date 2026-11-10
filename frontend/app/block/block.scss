@@ -34,48 +34,6 @@
         }
     }
 
-    // The header's one horizontal range (#29325, SPEC_PANE_HEADER_SCROLL_RANGE_2026_11_10.md):
-    // the tab strip and its "+", the pane's inline header elements, the grip and the aux
-    // controls scroll together; the window controls after it stay pinned. The content is
-    // right-packed while it fits (margin-left: auto collapses when it overflows), so a wide
-    // pane looks as it did and a thin one scrolls instead of shedding controls.
-    .block-frame-header-scroll {
-        display: flex;
-        flex: 1 1 auto;
-        min-width: 0;
-        overflow-x: auto;
-        overflow-y: hidden;
-        scrollbar-width: none;
-        @include mixins.scroll-edge-fade(20px);
-
-        &::-webkit-scrollbar {
-            display: none;
-        }
-    }
-
-    .block-frame-header-content {
-        display: flex;
-        flex: 0 0 auto;
-        align-items: center;
-        gap: var(--space-2);
-        margin-left: auto;
-    }
-
-    // Inside the range the strip is a plain flex item: the range is the scroller now.
-    .block-frame-header-scroll .block-frame-default-header-tabstrip {
-        flex: 0 0 auto;
-        overflow-x: visible;
-    }
-
-    .block-frame-header-scroll .pane-tab-strip {
-        max-width: none;
-        overflow-x: visible;
-    }
-
-    .block-frame-header-scroll .pane-tab-strip-inner {
-        overflow-x: visible;
-    }
-
     .block-focuselem {
         height: 0;
         width: 0;
@@ -494,4 +452,46 @@
 // The same mark on an agent's Swarm row, sized to the row's label.
 .swarm-agent-row .block-frame-unseen-turns {
     align-self: center;
+}
+
+// The header's one horizontal range (#29325, SPEC_PANE_HEADER_SCROLL_RANGE_2026_11_10.md):
+// the tab strip and its "+", the pane's inline header elements, the grip and the aux
+// controls scroll together; the window controls after it stay pinned. The content is
+// right-packed while it fits (margin-left: auto collapses when it overflows), so a wide
+// pane looks as it did and a thin one scrolls instead of shedding controls.
+.block-frame-header-scroll {
+    display: flex;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    @include mixins.scroll-edge-fade(20px);
+
+    &::-webkit-scrollbar {
+        display: none;
+    }
+}
+
+.block-frame-header-content {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: var(--space-2);
+    margin-left: auto;
+}
+
+// Inside the range the strip is a plain flex item: the range is the scroller now.
+.block-frame-header-scroll .block-frame-default-header-tabstrip {
+    flex: 0 0 auto;
+    overflow-x: visible;
+}
+
+.block-frame-header-scroll .pane-tab-strip {
+    max-width: none;
+    overflow-x: visible;
+}
+
+.block-frame-header-scroll .pane-tab-strip-inner {
+    overflow-x: visible;
 }

@@ -1,7 +1,7 @@
 # SPEC: The pane header's horizontal scroll covers tabs, +, grip and aux controls (minimize stays pinned)
 
 **Date:** 2026-11-10
-**Status:** proposed
+**Status:** implemented (PR #6915)
 **Author:** Deke@narko
 **Task:** #29324 (build #29325)
 **Related:** #4808 (grips outside the scrolling strips, edge fades), #29020 (the minimize / "Merge into next pane" pair), `SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md`
