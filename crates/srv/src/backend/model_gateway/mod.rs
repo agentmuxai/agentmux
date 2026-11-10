@@ -9,6 +9,7 @@
 //! upstream, streams the answer back, and counts what each agent used ([`spend`], [`usage`]).
 
 pub mod ask;
+pub mod cap;
 pub mod catalog;
 pub mod launch;
 pub mod request;

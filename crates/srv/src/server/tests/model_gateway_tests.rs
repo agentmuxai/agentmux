@@ -145,3 +145,30 @@ async fn an_agent_not_set_to_the_route_is_refused_even_with_a_token() {
     let (status, _) = call(&state, Some(&token), "/api/v1/model/openrouter/v1/messages", json!({ "model": "x" })).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
+
+#[tokio::test]
+async fn an_agent_that_has_used_its_days_cap_is_refused_with_a_402_before_anything_is_sent() {
+    let state = test_state();
+    // No key in the Vault: a request that is let through stops at "no usable key" (503), sending nothing upstream, so this
+    // test never reaches the stand-in upstream the other tests share.
+    let (token, uid) = agent_on_route(&state, "gw-capped", false);
+    let model = catalog::route("openrouter").unwrap().model("deepseek/deepseek-v4.1-flash-1017").unwrap();
+    let body = json!({ "model": "claude-haiku-4-5-20251001", "max_tokens": 16, "stream": true, "messages": [{ "role": "user", "content": "hi" }] });
+    let uri = "/api/v1/model/openrouter/v1/messages";
+
+    let used = crate::agents::types::TokenCounts { input: 10, ..Default::default() };
+    spend::record("gw-capped", "openrouter", model, &used, Some(19.0), agentmux_common::time::now_ms());
+    let (status, _) = call(&state, Some(&token), uri, body.clone()).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "$19 of $20: let through, as far as the missing key");
+
+    spend::record("gw-capped", "openrouter", model, &used, Some(1.0), agentmux_common::time::now_ms());
+    let (status, answer) = call(&state, Some(&token), uri, body.clone()).await;
+    assert_eq!(status, StatusCode::PAYMENT_REQUIRED, "{answer}");
+    assert!(answer.contains("spend cap: this agent has used $20."), "the harness is told why: {answer}");
+    assert!(answer.contains("billing_error"), "{answer}");
+
+    // A raised cap lets the next request through; no restart needed.
+    crate::backend::model_gateway::cap::set_agent_cap(&state.mstore, &uid, Some(40.0)).unwrap();
+    let (status, _) = call(&state, Some(&token), uri, body).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+}

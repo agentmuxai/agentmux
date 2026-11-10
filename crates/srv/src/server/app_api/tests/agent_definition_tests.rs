@@ -190,3 +190,43 @@ async fn an_agent_changing_its_model_is_limited_to_six_an_hour() {
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
     assert!(body["error"].as_str().unwrap().contains("times an hour"), "{body}");
 }
+
+#[tokio::test]
+async fn a_leader_sets_and_resets_a_workers_spend_cap_and_a_worker_may_only_lower_its_own() {
+    use crate::backend::model_gateway::cap::{self, DEFAULT_AGENT_CAP_USD};
+    let state = test_state();
+    let (leader, worker, stranger) = (agent(&state, "Lead"), agent(&state, "Work"), agent(&state, "Stranger"));
+    state
+        .mstore
+        .agent_content_set(&crate::backend::storage::content::AgentContent {
+            agent_id: worker.id.clone(),
+            content_type: crate::backend::agent_seat::WORKER_OF_CONTENT.to_string(),
+            content: json!({ "agent": leader.slug, "id": leader.id }).to_string(),
+            updated_at: 1,
+        })
+        .unwrap();
+    assert_eq!(cap::agent_cap(&state.mstore, &worker.id), Some(DEFAULT_AGENT_CAP_USD));
+
+    let (status, body) = update_call(&state, Some(&leader), json!({ "agent": worker.slug, "spend_cap_usd": 40 })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(cap::agent_cap(&state.mstore, &worker.id), Some(40.0));
+    let log = audited(&leader);
+    assert!(log.iter().any(|e| e.success && e.reason.as_deref().is_some_and(|r| r.contains("spend cap $20.00 to $40.00"))), "the audit row says from and to: {log:?}");
+
+    let (status, body) = update_call(&state, Some(&stranger), json!({ "agent": worker.slug, "spend_cap_usd": 5 })).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    let (status, _) = update_call(&state, Some(&worker), json!({ "agent": worker.slug, "spend_cap_usd": 80 })).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "an agent does not raise its own cap");
+    let (status, _) = update_call(&state, Some(&worker), json!({ "agent": worker.slug, "spend_cap_usd": "none" })).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "nor lift it");
+    let (status, _) = update_call(&state, Some(&worker), json!({ "agent": worker.slug, "reset_spend_today": true })).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "nor reset its day");
+    let (status, body) = update_call(&state, Some(&worker), json!({ "agent": worker.slug, "spend_cap_usd": 10 })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(cap::agent_cap(&state.mstore, &worker.id), Some(10.0));
+
+    let (status, body) = update_call(&state, Some(&leader), json!({ "agent": worker.slug, "reset_spend_today": true })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, _) = update_call(&state, Some(&leader), json!({ "agent": worker.slug, "spend_cap_usd": "lots" })).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
