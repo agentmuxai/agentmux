@@ -45,6 +45,23 @@ pub(crate) fn pin_mismatch_with(
     note(agent, observed_key_b64, agentmux_common::time::now_secs(), cert, why);
 }
 
+/// A name with no pin showed `observed_key_b64` and no trusted install vouched for it: nothing is pinned,
+/// and the key is kept for the pin screen to offer to accept.
+pub(crate) fn first_contact_with(
+    agent: &str,
+    observed_key_b64: &str,
+    cert: Option<agentmux_common::jekt_sign::WanKeyRecord>,
+    why: Option<String>,
+) {
+    tracing::info!(agent_id = %agent, why = why.as_deref().unwrap_or(""), "LAN first contact: no trusted install vouched for the key, so it is not pinned and its messages stay unproven");
+    note(agent, observed_key_b64, agentmux_common::time::now_secs(), cert, why);
+}
+
+/// Every name with a key held for it, for the names that have no pin to list them under.
+pub(crate) fn all() -> Vec<(String, Refusal)> {
+    refusals().iter().map(|(name, r)| (name.clone(), r.clone())).collect()
+}
+
 fn note(
     agent: &str,
     observed_key_b64: &str,

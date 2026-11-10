@@ -77,6 +77,18 @@ async fn agent_adopt(state: &AppState, ctx: &RpcContext, req: &CommandPinsChange
     }
     let refused = lan_refusals::get(&agent).ok_or_else(|| format!("pins: no other key has been shown for {agent} since AgentMux started"))?;
     confirm_shown(req.expect.as_deref(), &fingerprint(&refused.key_b64), &agent)?;
+    // A name with no pin yet: the key was shown and no trusted install vouched for it, so nothing was pinned.
+    // Accepting it is a choice, the person's or an agent's, and is recorded as whoever made it.
+    if state.mstore.lan_peer_pubkey_pin_since(&agent).map_err(|e| format!("pins: {e}"))?.is_none() {
+        let held = state.mstore.lan_peer_pubkey_pin_get_or_set(&agent, &refused.key_b64).map_err(|e| format!("pins: {e}"))?;
+        if held != refused.key_b64 {
+            return Err(format!("pins: another key was pinned for {agent} in the meantime; look at it again"));
+        }
+        lan_refusals::clear(&agent);
+        lan_continuity::audit(&json!({ "action": "first-pin", "kind": "lan", "agent": agent, "to": fingerprint(&held), "by": ctx.agent_id }));
+        state.broker.publish_event::<crate::backend::mps_events::PinsChanged>(&(), vec![], 0);
+        return Ok(());
+    }
     use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
     let key = BASE64.decode(&refused.key_b64).map_err(|_| "pins: the refused key is not a key".to_string())?;
     lan_continuity::move_if_vouched(state, &agent, &key, refused.cert.as_ref(), &ctx.agent_id, true)
@@ -105,7 +117,7 @@ impl Change {
 }
 
 fn list(state: &AppState) -> Result<PinnedSendersResult, String> {
-    let lan = state
+    let mut lan: Vec<LanPinInfo> = state
         .mstore
         .lan_peer_pins_list()
         .map_err(|e| format!("pins: could not read the LAN pins: {e}"))?
@@ -117,6 +129,22 @@ fn list(state: &AppState) -> Result<PinnedSendersResult, String> {
             LanPinInfo { key_fp: fingerprint(&key), agent_id, pinned_at, uid_pins, refused }
         })
         .collect();
+    // A name with no pin that showed a key nobody vouched for is listed with no pinned key (`key_fp` empty),
+    // so the person can accept it once.
+    let pinned: std::collections::HashSet<String> = lan.iter().map(|p| p.agent_id.to_lowercase()).collect();
+    let mut first: Vec<LanPinInfo> = lan_refusals::all()
+        .into_iter()
+        .filter(|(name, _)| !pinned.contains(name))
+        .map(|(agent_id, r)| LanPinInfo {
+            agent_id,
+            key_fp: String::new(),
+            pinned_at: 0,
+            uid_pins: 0,
+            refused: Some(RefusedKeyInfo { key_fp: fingerprint(&r.key_b64), last_seen_at: r.last_seen_at, count: r.count }),
+        })
+        .collect();
+    first.sort_by(|a, b| a.agent_id.cmp(&b.agent_id));
+    lan.extend(first);
     let wan = match crate::backend::storage::wan_identity::global() {
         Some(wan) => wan
             .agent_instance_pins_list()
@@ -339,5 +367,53 @@ mod tests {
         assert!(err.contains("no agent named"), "{err}");
         let (err, _) = call(&state, op(), COMMAND_PINS_FORGET, json!({ "kind": "wan", "agent_id": "x" })).await;
         assert!(err.contains("needs its channel") || err.contains("no WAN identity"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn a_name_with_no_pin_is_listed_with_its_first_key_and_the_person_or_an_agent_accepts_it_once() {
+        use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+        let state = crate::server::tests::test_state();
+        let key = BASE64.encode([4u8; 32]);
+        lan_refusals::first_contact_with("pinfirst-a", &key, None, Some("the peer sent no certificate for the key".into()));
+        let window = || Some(RpcContext::operator_for_tests());
+        let (err, data) = call(&state, window(), COMMAND_PINS_LIST, json!({})).await;
+        assert_eq!(err, "");
+        let row = data.unwrap()["lan"].as_array().unwrap().iter().find(|p| p["agent_id"] == "pinfirst-a").cloned().expect("listed");
+        assert_eq!((row["key_fp"].as_str(), row["pinned_at"].as_i64()), (Some(""), Some(0)), "nothing is pinned");
+        assert_eq!(row["refused"]["key_fp"], fingerprint(&key));
+        assert!(state.mstore.lan_peer_pubkey_pin_load("pinfirst-a").unwrap().is_none());
+
+        // The window accepts what it was shown, and the name is pinned.
+        let adopt = json!({ "kind": "lan", "agent_id": "pinfirst-a", "expect": fingerprint(&key) });
+        let (err, _) = call(&state, window(), COMMAND_PINS_ADOPT, adopt).await;
+        assert_eq!(err, "");
+        assert_eq!(state.mstore.lan_peer_pubkey_pin_load("pinfirst-a").unwrap().as_deref(), Some(key.as_str()));
+
+        // An agent may accept a first key too (no vouching install is needed), recorded as the agent.
+        let key_b = BASE64.encode([5u8; 32]);
+        lan_refusals::first_contact_with("pinfirst-b", &key_b, None, None);
+        let adopt_b = json!({ "kind": "lan", "agent_id": "pinfirst-b", "expect": fingerprint(&key_b) });
+        let agent = || Some(RpcContext { agent_id: "AgentX".into(), ..Default::default() });
+        let (err, _) = call(&state, agent(), COMMAND_PINS_ADOPT, adopt_b).await;
+        assert_eq!(err, "");
+        assert_eq!(state.mstore.lan_peer_pubkey_pin_load("pinfirst-b").unwrap().as_deref(), Some(key_b.as_str()));
+        let audited = lan_continuity::AUDITED
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|e| e["agent"] == "pinfirst-b" && e["action"] == "first-pin")
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(audited.len(), 1);
+        assert_eq!(audited[0]["by"], "AgentX");
+        assert!(lan_refusals::get("pinfirst-b").is_none(), "nothing left to accept");
+
+        // What the screen showed must still be what is held: another key in between is refused.
+        let key_c = BASE64.encode([6u8; 32]);
+        lan_refusals::first_contact_with("pinfirst-c", &key_c, None, None);
+        let stale = json!({ "kind": "lan", "agent_id": "pinfirst-c", "expect": "0000000000" });
+        let (err, _) = call(&state, agent(), COMMAND_PINS_ADOPT, stale).await;
+        assert!(err.contains("has changed since the list"), "{err}");
+        assert!(state.mstore.lan_peer_pubkey_pin_load("pinfirst-c").unwrap().is_none());
     }
 }

@@ -15,6 +15,7 @@ import { createSignal, For, Show, type JSX } from "solid-js";
 import { createDomainStore } from "@/app/store/domain-store";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import type { LanPinInfo } from "@/types/rpc/LanPinInfo";
 import type { PinnedSendersResult } from "@/types/rpc/PinnedSendersResult";
 import type { SettingsIndexEntry } from "../settings-model";
 
@@ -51,6 +52,30 @@ const store = createDomainStore<PinnedSendersResult | null>({
     load: () => RpcApi.PinsListCommand(TabRpcClient),
 });
 
+/** What a LAN pin shows: its key and when it was pinned, or, for a name with no pin yet, that no install you trust vouched
+ *  for the key shown, and the key refused (a different one) or shown (the first). */
+function LanPinDetails(props: { pin: LanPinInfo; now: number }): JSX.Element {
+    const pinned = () => props.pin.key_fp !== "";
+    return (
+        <>
+            <Show when={pinned()} fallback={<div>Not pinned yet: no install you trust vouched for the key below.</div>}>
+                <div>
+                    Key {props.pin.key_fp}, pinned {ago(props.pin.pinned_at, props.now)}
+                </div>
+            </Show>
+            <Show when={props.pin.refused}>
+                {(r) => (
+                    <div class="setting-pin-refused" role="status">
+                        {pinned() ? "A different key" : "A key"}, {r().key_fp}, was {pinned() ? "refused" : "shown"} {r().count} time
+                        {r().count === 1 ? "" : "s"}; last {ago(r().last_seen_at, props.now)}.
+                        {pinned() ? "" : " Its messages arrive unproven until you accept it."}
+                    </div>
+                )}
+            </Show>
+        </>
+    );
+}
+
 export function PinnedSenders(): JSX.Element {
     store.follow();
     const pins = store.data;
@@ -85,16 +110,19 @@ export function PinnedSenders(): JSX.Element {
     };
 
     // `shown`: the refused key or install on screen beside the pin, if any.
-    const actions = (change: Omit<PinChange, "how" | "expect">, shown?: string): JSX.Element => (
+    // `first`: the name has no pin yet, so there is nothing to forget and the key is the first one to accept.
+    const actions = (change: Omit<PinChange, "how" | "expect">, shown?: string, first = false): JSX.Element => (
         <span class="setting-pins-actions">
             <Show when={shown}>
                 <Button disabled={busy()} onClick={() => void press({ ...change, how: "adopt", expect: shown })}>
-                    {same(asking(), { ...change, how: "adopt", expect: shown }) ? "Press again to accept" : "Accept the new one"}
+                    {same(asking(), { ...change, how: "adopt", expect: shown }) ? "Press again to accept" : first ? "Accept this key" : "Accept the new one"}
                 </Button>
             </Show>
-            <Button disabled={busy()} onClick={() => void press({ ...change, how: "forget" })}>
-                {same(asking(), { ...change, how: "forget" }) ? "Press again to forget" : "Forget"}
-            </Button>
+            <Show when={!first}>
+                <Button disabled={busy()} onClick={() => void press({ ...change, how: "forget" })}>
+                    {same(asking(), { ...change, how: "forget" }) ? "Press again to forget" : "Forget"}
+                </Button>
+            </Show>
         </span>
     );
 
@@ -117,18 +145,8 @@ export function PinnedSenders(): JSX.Element {
                                 {(pin) => (
                                     <li class="setting-pin" data-kind="lan">
                                         <div class="setting-pin-name">{pin.agent_id} <span class="setting-devices-muted">on your network</span></div>
-                                        <div>
-                                            Key {pin.key_fp}, pinned {ago(pin.pinned_at, now())}
-                                        </div>
-                                        <Show when={pin.refused}>
-                                            {(r) => (
-                                                <div class="setting-pin-refused" role="status">
-                                                    A different key, {r().key_fp}, was refused {r().count} time{r().count === 1 ? "" : "s"}; last{" "}
-                                                    {ago(r().last_seen_at, now())}.
-                                                </div>
-                                            )}
-                                        </Show>
-                                        {actions({ kind: "lan", agentId: pin.agent_id }, pin.refused?.key_fp)}
+                                        <LanPinDetails pin={pin} now={now()} />
+                                        {actions({ kind: "lan", agentId: pin.agent_id }, pin.refused?.key_fp, !pin.key_fp)}
                                     </li>
                                 )}
                             </For>

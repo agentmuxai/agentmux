@@ -320,3 +320,95 @@ fn the_audit_line_is_appended_to_the_log_with_the_time() {
     assert_eq!(lines[0]["change"]["agent"], "maop");
     assert!(lines[0]["at"].as_i64().unwrap() > 0);
 }
+
+fn first_pins_for(agent: &str) -> Vec<serde_json::Value> {
+    AUDITED.lock().unwrap().iter().filter(|e| e["agent"] == agent && e["action"] == "first-pin").cloned().collect()
+}
+
+#[tokio::test]
+async fn a_first_key_nobody_vouched_for_is_never_pinned_and_its_jekt_stays_unproven() {
+    let state = test_state();
+    let (public, private) = generate_lan_keypair([5u8; 32]);
+    state.lan_discovery.seed_lan_pubkey_for_test("maop-f1", public.to_vec(), None);
+    let req = verified(&state, "maop-f1", &private).await;
+    // Not proven, and not accused either: the unsigned message it still is, never `lan-verified`.
+    assert_eq!(req.lan_verified, None);
+    assert!(state.mstore.lan_peer_pubkey_pin_load("maop-f1").unwrap().is_none(), "nothing was pinned");
+    let held = lan_refusals::get("maop-f1").expect("the key is kept for the pin screen");
+    assert_eq!(held.key_b64, BASE64.encode(public));
+    assert!(held.why.unwrap().contains("no certificate"));
+    assert!(first_pins_for("maop-f1").is_empty());
+}
+
+#[tokio::test]
+async fn a_certificate_by_an_install_nobody_here_trusts_does_not_make_a_first_pin() {
+    let state = test_state();
+    let (_edir, other_host) = host("other-host");
+    let (_rdir, receiver) = host("narko");
+    state.mstore.set_wan_identity(receiver);
+    let (public, private) = generate_lan_keypair([6u8; 32]);
+    let own = cert(&other_host, "maop-f2", &public, now());
+    state.lan_discovery.seed_lan_pubkey_with_cert_for_test("maop-f2", public.to_vec(), Some(own));
+    let req = verified(&state, "maop-f2", &private).await;
+    assert_eq!(req.lan_verified, None);
+    assert!(state.mstore.lan_peer_pubkey_pin_load("maop-f2").unwrap().is_none());
+    assert!(lan_refusals::get("maop-f2").unwrap().why.unwrap().contains("not pinned here"));
+}
+
+#[tokio::test]
+async fn a_first_contact_vouched_by_a_trusted_install_pins_the_key_and_verifies() {
+    let state = test_state();
+    let (_sdir, sender) = host("starpower");
+    let (_rdir, receiver) = host("narko");
+    trust(&state, &receiver, &sender);
+    let (public, private) = generate_lan_keypair([7u8; 32]);
+    let vouch = cert(&sender, "maop-f3", &public, now());
+    state.lan_discovery.seed_lan_pubkey_with_cert_for_test("maop-f3", public.to_vec(), Some(vouch));
+    let req = verified(&state, "maop-f3", &private).await;
+    assert_eq!(req.lan_verified, Some(true));
+    assert_eq!(pinned(&state, "maop-f3"), BASE64.encode(public));
+    let audit = first_pins_for("maop-f3");
+    assert_eq!(audit.len(), 1, "{audit:?}");
+    assert_eq!(audit[0]["by"], "automatic");
+    assert_eq!(audit[0]["vouched_by"]["path"], "pinned-instance");
+    assert!(lan_refusals::get("maop-f3").is_none());
+}
+
+#[tokio::test]
+async fn when_a_second_host_answers_first_the_name_stays_unproven_and_is_never_verified_as_that_host() {
+    let state = test_state();
+    let (_sdir, sender) = host("starpower");
+    let (_rdir, receiver) = host("narko");
+    trust(&state, &receiver, &sender);
+    let (real_public, real_private) = generate_lan_keypair([1u8; 32]);
+    let (other_public, other_private) = generate_lan_keypair([9u8; 32]);
+
+    // Another host answers first, with its own key and no certificate a trusted install made.
+    state.lan_discovery.seed_lan_pubkey_for_test("maop-f4", other_public.to_vec(), None);
+    let req = verified(&state, "maop-f4", &other_private).await;
+    assert_eq!(req.lan_verified, None, "signed by that host's own key, and still not proven");
+    assert!(state.mstore.lan_peer_pubkey_pin_load("maop-f4").unwrap().is_none());
+
+    // The real host's answer, with its install's certificate, is what pins the name.
+    let vouch = cert(&sender, "maop-f4", &real_public, now());
+    state.lan_discovery.seed_lan_pubkey_with_cert_for_test("maop-f4", real_public.to_vec(), Some(vouch));
+    let req = verified(&state, "maop-f4", &real_private).await;
+    assert_eq!(req.lan_verified, Some(true));
+    assert_eq!(pinned(&state, "maop-f4"), BASE64.encode(real_public));
+
+    // And that host's key is now a refused different key, as for any pinned name.
+    state.lan_discovery.seed_lan_pubkey_for_test("maop-f4", other_public.to_vec(), None);
+    let req = verified(&state, "maop-f4", &other_private).await;
+    assert_eq!(req.lan_verified, Some(false));
+    assert_eq!(pinned(&state, "maop-f4"), BASE64.encode(real_public));
+}
+
+#[tokio::test]
+async fn a_name_that_is_already_pinned_keeps_its_pin_as_it_was() {
+    let state = test_state();
+    let (old, old_private) = generate_lan_keypair([1u8; 32]);
+    pin(&state, "maop-f5", &old);
+    state.lan_discovery.seed_lan_pubkey_for_test("maop-f5", old.to_vec(), None);
+    let req = verified(&state, "maop-f5", &old_private).await;
+    assert_eq!(req.lan_verified, Some(true), "every existing pin is kept as it is");
+}
