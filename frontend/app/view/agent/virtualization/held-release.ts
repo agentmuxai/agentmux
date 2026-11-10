@@ -17,8 +17,7 @@ import { SHOW_SETTLE_SAMPLE_MS, ShowSettle } from "./show-settle";
  * or was drawn while the pane was hidden may have pushed them up, which nobody
  * saw, so a carried row is released only after it has been on screen again in
  * this visit (once the show has `settled`) and then scrolled off. Rows held
- * during this visit follow the plain rule. Rows a snapshot restored as held
- * (after a restart or an upgrade) are carried the same way.
+ * during this visit follow the plain rule.
  */
 
 /**
