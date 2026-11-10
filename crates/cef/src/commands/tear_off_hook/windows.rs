@@ -30,8 +30,8 @@ enum HookMode {
     /// which the page can't see during the OS drag. Reported as
     /// `tabdrag:escape-pressed`, like `TabDrag`.
     EscapeWatch,
-    /// A pane drag with the live-follow picture: Escape, and the cursor, which moves the picture while it is
-    /// outside every AgentMux window (inside one the drag is a tile drop). No hover events, no merge.
+    /// A pane drag with the live-follow picture: Escape, and the cursor, which moves the picture wherever it
+    /// goes (over the layout the drop is a tile drop, outside every window a tear-off). No hover events, no merge.
     PaneDrag,
 }
 
@@ -97,6 +97,34 @@ pub fn hook_session_active() -> bool {
     ACTIVE_HOOK_THREAD.lock().map(|g| g.is_some()).unwrap_or(false)
 }
 
+/// When the running pane drag session (`HookMode::PaneDrag`, the one with the live-follow picture) started, on
+/// `PANE_DRAG_CLOCK`, in ms; 0 when none runs. Set with the session slot and cleared with it. An atomic, not the
+/// mutex: the drop source asks on every cursor move.
+#[cfg(target_os = "windows")]
+static PANE_DRAG_SINCE_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+#[cfg(target_os = "windows")]
+static PANE_DRAG_CLOCK: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+
+/// Now on the pane drag clock, never 0 (0 means no session).
+#[cfg(target_os = "windows")]
+fn pane_drag_clock_ms() -> u64 {
+    PANE_DRAG_CLOCK.get_or_init(std::time::Instant::now).elapsed().as_millis() as u64 + 1
+}
+
+#[cfg(target_os = "windows")]
+fn set_pane_drag_running(running: bool) {
+    let since = if running { pane_drag_clock_ms() } else { 0 };
+    PANE_DRAG_SINCE_MS.store(since, std::sync::atomic::Ordering::Release);
+}
+
+/// How long a pane drag whose picture follows the cursor has been running, whether or not the picture is up
+/// yet; None when none runs.
+#[cfg(target_os = "windows")]
+pub fn pane_drag_age() -> Option<std::time::Duration> {
+    let since = PANE_DRAG_SINCE_MS.load(std::sync::atomic::Ordering::Acquire);
+    (since != 0).then(|| std::time::Duration::from_millis(pane_drag_clock_ms().saturating_sub(since)))
+}
+
 /// Stop the active hook session, if any. Idempotent. Used by the
 /// session-takeover path above and by the frontend's dragend
 /// belt-and-suspenders `stop_tab_drag_tracking` call — a leaked
@@ -104,6 +132,7 @@ pub fn hook_session_active() -> bool {
 #[cfg(target_os = "windows")]
 pub fn stop_active_hook_session() {
     let tid = { ACTIVE_HOOK_THREAD.lock().map(|mut g| g.take()).unwrap_or(None) };
+    set_pane_drag_running(false);
     if let Some(tid) = tid {
         unsafe {
             use windows_sys::Win32::UI::WindowsAndMessaging::{PostThreadMessageW, WM_QUIT};
@@ -220,6 +249,29 @@ struct HookContextSeed {
     was_pinned: bool,
 }
 
+/// Register the hook thread as the active session, so a superseding start (or `stop_tab_drag_tracking`) can
+/// post WM_QUIT to it, and say whether it is a pane drag. Called only after both hooks are installed: a failed
+/// install never occupies the slot.
+#[cfg(target_os = "windows")]
+fn register_session(my_tid: u32, pane_drag: bool) {
+    if let Ok(mut g) = ACTIVE_HOOK_THREAD.lock() {
+        *g = Some(my_tid);
+        set_pane_drag_running(pane_drag);
+    }
+}
+
+/// Vacate the active-session slot, but only if it still points at this thread: a superseding session may
+/// have replaced it already, and its pane-drag flag is then its own.
+#[cfg(target_os = "windows")]
+fn vacate_session(my_tid: u32) {
+    if let Ok(mut g) = ACTIVE_HOOK_THREAD.lock() {
+        if *g == Some(my_tid) {
+            *g = None;
+            set_pane_drag_running(false);
+        }
+    }
+}
+
 #[cfg(target_os = "windows")]
 fn start_hook_session(seed: HookContextSeed) -> Result<(), String> {
     use std::sync::mpsc;
@@ -238,6 +290,7 @@ fn start_hook_session(seed: HookContextSeed) -> Result<(), String> {
     std::thread::Builder::new()
         .name("tear-off-hook".to_string())
         .spawn(move || {
+            let pane_drag = seed.mode == HookMode::PaneDrag;
             let ctx = HookContext {
                 state: seed.state,
                 mode: seed.mode,
@@ -310,15 +363,9 @@ fn start_hook_session(seed: HookContextSeed) -> Result<(), String> {
                     return;
                 }
 
-                // Register this thread as the active session so a
-                // superseding start (or stop_tab_drag_tracking) can
-                // post WM_QUIT to it. Registered only after both hooks
-                // installed — a failed install never occupies the slot.
                 let my_tid =
                     windows_sys::Win32::System::Threading::GetCurrentThreadId();
-                if let Ok(mut g) = ACTIVE_HOOK_THREAD.lock() {
-                    *g = Some(my_tid);
-                }
+                register_session(my_tid, pane_drag);
 
                 let _ = ready_tx.send(Ok(()));
                 tracing::info!(
@@ -344,14 +391,7 @@ fn start_hook_session(seed: HookContextSeed) -> Result<(), String> {
                 UnhookWindowsHookEx(mouse_hook);
                 HOOK_CTX.with(|cell| *cell.borrow_mut() = None);
                 crate::commands::live_follow::on_session_end();
-                // Vacate the active-session slot — but only if it still
-                // points at us (a superseding session may have already
-                // replaced it).
-                if let Ok(mut g) = ACTIVE_HOOK_THREAD.lock() {
-                    if *g == Some(my_tid) {
-                        *g = None;
-                    }
-                }
+                vacate_session(my_tid);
 
                 tracing::info!(
                     target: "dnd:tearoff",
@@ -498,12 +538,10 @@ fn pane_or_escape_session() -> bool {
     })
 }
 
-/// A pane drag's cursor: the picture shows while the cursor is outside every AgentMux window.
+/// A pane drag's cursor: the picture follows it everywhere (`live_follow::picture_wanted`), so no window lookup.
 #[cfg(target_os = "windows")]
-fn follow_pane(ctx: &HookContext, x: i32, y: i32) {
-    let browsers: std::collections::HashMap<String, cef::Browser> = ctx.state.list_browsers().into_iter().collect();
-    let over_window = window_label_at(&ctx.state, &browsers, x, y).is_some();
-    crate::commands::live_follow::on_cursor(x, y, over_window);
+fn follow_pane(x: i32, y: i32) {
+    crate::commands::live_follow::on_cursor(x, y, false);
 }
 
 #[cfg(target_os = "windows")]
@@ -514,7 +552,7 @@ fn handle_mouse_move(cursor_x: i32, cursor_y: i32) {
             return;
         };
         if ctx.mode == HookMode::PaneDrag {
-            follow_pane(ctx, cursor_x, cursor_y);
+            follow_pane(cursor_x, cursor_y);
             return;
         }
 

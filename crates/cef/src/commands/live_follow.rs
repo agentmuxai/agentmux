@@ -20,16 +20,21 @@ pub(crate) fn follow_origin(cursor: (i32, i32), offset: (i32, i32)) -> (i32, i32
     (cursor.0 - offset.0, cursor.1 - offset.1)
 }
 
-/// Whether the picture is shown for a cursor at `cursor_y`: below the tear line (the strip's bottom edge
-/// plus the tear threshold, the same rule `decideTabRelease` uses), and not over another AgentMux window,
-/// where a release merges the tab or belongs to that window.
+/// Whether the picture is shown for a cursor at `cursor_y`. A window tab's shows below the tear line (the
+/// strip's bottom edge plus the tear threshold, the same rule `decideTabRelease` uses) and not over another
+/// AgentMux window, where a release merges the tab. A pane has no tear line: its picture is the dragged pane
+/// itself, shown from the drag's first move wherever the cursor is, over the layout making room for it as much
+/// as over the desktop, so no translucent ghost ever stands in for it (the live reflow spec's "what the user sees").
 #[cfg(any(target_os = "windows", test))]
-pub(crate) fn in_tear_zone(cursor_y: i32, tear_line_y: i32, over_other_window: bool) -> bool {
-    cursor_y > tear_line_y && !over_other_window
+pub(crate) fn picture_wanted(cursor_y: i32, tear_line_y: Option<i32>, over_other_window: bool) -> bool {
+    match tear_line_y {
+        Some(line) => cursor_y > line && !over_other_window,
+        None => true,
+    }
 }
 
 #[cfg(target_os = "windows")]
-pub use win::{begin, end, landing, on_cursor, on_escape, on_session_end};
+pub use win::{begin, end, landing, on_cursor, on_escape, on_session_end, picture_shown};
 
 #[cfg(not(target_os = "windows"))]
 pub fn begin(_state: &Arc<AppState>, _args: &serde_json::Value) -> Result<serde_json::Value, String> {
@@ -51,6 +56,7 @@ pub async fn begin_blocking(state: &Arc<AppState>, args: &serde_json::Value) -> 
 
 #[cfg(target_os = "windows")]
 mod win {
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex};
 
     use windows_sys::Win32::Foundation::{GetLastError, ERROR_CLASS_ALREADY_EXISTS, HWND, LPARAM, LRESULT, POINT, SIZE, WPARAM};
@@ -89,8 +95,8 @@ mod win {
         size: (i32, i32),
         /// Cursor to the window's top-left, physical pixels.
         offset: (i32, i32),
-        /// Screen y below which the picture is shown.
-        tear_line_y: i32,
+        /// Screen y below which a window tab's picture is shown; a pane has none and shows everywhere.
+        tear_line_y: Option<i32>,
         shown: bool,
         /// Where the picture was last put (clamped to the work area).
         last: (i32, i32),
@@ -99,6 +105,8 @@ mod win {
     }
 
     static FOLLOWER: Mutex<Option<Follower>> = Mutex::new(None);
+    /// Whether the picture is on screen, readable without the lock the hook thread holds on every move.
+    static PICTURE_SHOWN: AtomicBool = AtomicBool::new(false);
 
     fn wide(s: &str) -> Vec<u16> {
         s.encode_utf16().chain(std::iter::once(0)).collect()
@@ -129,7 +137,8 @@ mod win {
     /// Put the picture of the source window under the cursor's drag. `args`: `sourceWindowLabel`, `picture`
     /// (base64 JPEG), `windowWidth` and `windowHeight` (the window's outer size, DIP), `offsetX` and `offsetY`
     /// (cursor to the window's top-left, DIP), `tearLineY` (the strip's bottom plus the tear threshold,
-    /// viewport DIP). The picture stays hidden until the cursor passes the tear line.
+    /// viewport DIP). A window tab's picture stays hidden until the cursor passes the tear line; a pane's (no
+    /// `tearLineY`) shows at the cursor's next move.
     pub fn begin(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
         use base64::Engine;
         let label = args
@@ -154,11 +163,7 @@ mod win {
             px(num(args, "windowHeight")?).clamp(MIN_DIM, MAX_DIM),
         );
         let offset = (px(num(args, "offsetX")?), px(num(args, "offsetY")?));
-        // A pane has no tear line: it shows wherever the cursor is outside every AgentMux window.
-        let tear_line_y = match args.get("tearLineY").and_then(|v| v.as_f64()) {
-            Some(line) => client_top + px(line),
-            None => i32::MIN,
-        };
+        let tear_line_y = args.get("tearLineY").and_then(|v| v.as_f64()).map(|line| client_top + px(line));
         let bgra = decode_bgra(&jpeg, size.0 as u32, size.1 as u32)?;
 
         end_now();
@@ -174,8 +179,8 @@ mod win {
         });
         tracing::info!(
             target: "dnd:tearoff",
-            label = %label, width = size.0, height = size.1, tear_line_y,
-            "[live-follow] picture ready, waiting for the cursor to pass the tear line"
+            label = %label, width = size.0, height = size.1, tear_line_y = ?tear_line_y,
+            "[live-follow] picture ready; it shows with the cursor's next move"
         );
         // The drag ended while the picture was being made: nothing will move it, so it goes.
         if !crate::commands::tear_off_hook::hook_session_active() {
@@ -192,6 +197,7 @@ mod win {
 
     fn end_now() {
         let taken = FOLLOWER.lock().ok().and_then(|mut g| g.take());
+        PICTURE_SHOWN.store(false, Ordering::Release);
         if let Some(f) = taken {
             unsafe { PostMessageW(f.hwnd as HWND, WM_FOLLOW_END, 0, 0) };
         }
@@ -203,9 +209,10 @@ mod win {
         let Ok(mut guard) = FOLLOWER.try_lock() else { return };
         let Some(f) = guard.as_mut() else { return };
         let hwnd = f.hwnd as HWND;
-        if !super::in_tear_zone(y, f.tear_line_y, over_other_window) {
+        if !super::picture_wanted(y, f.tear_line_y, over_other_window) {
             if f.shown {
                 f.shown = false;
+                PICTURE_SHOWN.store(false, Ordering::Release);
                 unsafe {
                     SetWindowPos(
                         hwnd,
@@ -228,6 +235,7 @@ mod win {
             (HWND_TOP, SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS)
         };
         f.shown = true;
+        PICTURE_SHOWN.store(true, Ordering::Release);
         unsafe { SetWindowPos(hwnd, insert_after, px, py, 0, 0, flags) };
     }
 
@@ -242,6 +250,13 @@ mod win {
             }
             None => (ox, oy),
         }
+    }
+
+    /// Whether the window picture is on screen now. Asked from the drag's own thread on every cursor move, while
+    /// the hook thread holds the follower's lock on every move too, so it reads a flag instead: a contended lock
+    /// would answer no and bring the shell's picture back for a frame.
+    pub fn picture_shown() -> bool {
+        PICTURE_SHOWN.load(Ordering::Acquire)
     }
 
     /// Where the real window should open: the picture's last place, if the picture is on screen. Handed out
@@ -293,6 +308,7 @@ mod win {
                 if let Ok(mut g) = FOLLOWER.lock() {
                     if g.as_ref().is_some_and(|f| f.hwnd == hwnd as usize) {
                         *g = None;
+                        PICTURE_SHOWN.store(false, Ordering::Release);
                     }
                 }
             })
@@ -443,7 +459,7 @@ mod win {
 
 #[cfg(test)]
 mod tests {
-    use super::{follow_origin, in_tear_zone};
+    use super::{follow_origin, picture_wanted};
 
     #[test]
     fn the_picture_keeps_its_offset_from_the_cursor() {
@@ -452,21 +468,22 @@ mod tests {
     }
 
     #[test]
-    fn the_picture_shows_only_below_the_tear_line() {
-        assert!(in_tear_zone(301, 300, false));
-        assert!(!in_tear_zone(300, 300, false));
-        assert!(!in_tear_zone(120, 300, false));
+    fn a_window_tabs_picture_shows_only_below_the_tear_line() {
+        assert!(picture_wanted(301, Some(300), false));
+        assert!(!picture_wanted(300, Some(300), false));
+        assert!(!picture_wanted(120, Some(300), false));
     }
 
     #[test]
-    fn the_picture_stays_hidden_over_another_window() {
-        assert!(!in_tear_zone(900, 300, true));
+    fn a_window_tabs_picture_stays_hidden_over_another_window() {
+        assert!(!picture_wanted(900, Some(300), true));
     }
 
     #[test]
-    fn a_pane_has_no_tear_line_so_it_shows_wherever_no_window_is() {
-        assert!(in_tear_zone(0, i32::MIN, false));
-        assert!(in_tear_zone(-5_000, i32::MIN, false));
-        assert!(!in_tear_zone(0, i32::MIN, true));
+    fn a_panes_picture_shows_everywhere_from_the_first_move() {
+        assert!(picture_wanted(0, None, false));
+        assert!(picture_wanted(-5_000, None, false));
+        // Over its own window, where the layout makes room, and over another AgentMux window too.
+        assert!(picture_wanted(0, None, true));
     }
 }

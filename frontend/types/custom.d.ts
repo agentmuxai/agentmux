@@ -717,7 +717,7 @@ declare global {
             isLastTab?: boolean;
             /** A pane or pane-tab drag: the hook only reports Escape (`tabdrag:escape-pressed`). */
             escapeOnly?: boolean;
-            /** With `escapeOnly`: the hook also moves the live-follow picture while the cursor is outside every window. */
+            /** With `escapeOnly`: the hook also moves the live-follow picture with the cursor, wherever it goes. */
             paneFollow?: boolean;
         }) => Promise<void>;
         /** Belt-and-suspenders hook teardown at dragend — the hook
@@ -736,7 +736,7 @@ declare global {
             /** Cursor to the window's top-left. */
             offsetX: number;
             offsetY: number;
-            /** The viewport y below which the picture shows; none: outside every AgentMux window (a pane). */
+            /** The viewport y below which a window tab's picture shows; none: a pane, shown everywhere from its first move. */
             tearLineY?: number;
         }) => Promise<void>;
         /** Drop the picture now. Idempotent. */

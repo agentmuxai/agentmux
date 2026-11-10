@@ -2,11 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The window-sized picture that follows the cursor during a window-tab drag, on Windows
+ * The picture that follows the cursor during a window-tab or pane drag, on Windows
  * (crates/cef/src/commands/live_follow.rs; docs/reports/REPORT_LIVE_TEAROFF_CHROME_STYLE_2026_11_04.md §5).
- * The drag is unchanged and nothing is torn off until release; the host's mouse hook moves the picture once
- * the cursor is below the tab strip, and the real window opens where it was last seen. The host drops the
- * picture by itself when the drag ends; `endLiveFollow` drops it as soon as the real window is up.
+ * The drag is unchanged and nothing is torn off until release; the host's mouse hook moves the picture (a
+ * window tab's once the cursor is below the tab strip, a pane's from its first move), and the real window
+ * opens where it was last seen. The host drops the picture by itself when the drag ends, after a grace for
+ * the window to open; `endLiveFollow` drops it as soon as the real window is up, or when the drag ends
+ * with no window to open.
  */
 
 import { Logger } from "@/util/logger";
@@ -24,7 +26,7 @@ export interface LiveFollowSpec {
     /** Cursor to the window's top-left, DIP. */
     offsetX: number;
     offsetY: number;
-    /** The viewport y below which the picture shows, DIP; none for a pane, which shows outside every window. */
+    /** The viewport y below which a window tab's picture shows, DIP; none for a pane, shown everywhere from its first move. */
     tearLineY?: number;
 }
 

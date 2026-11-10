@@ -52,7 +52,7 @@
 212 crates/cef/src/commands/pane_pool.rs::promote_pane_pool_window
 160 crates/cef/src/commands/tear_off_hook/macos.rs::start_tab_drag_tracking
 135 crates/cef/src/commands/tear_off_hook/windows.rs::handle_button_up
-146 crates/cef/src/commands/tear_off_hook/windows.rs::start_hook_session
+134 crates/cef/src/commands/tear_off_hook/windows.rs::start_hook_session
 170 crates/cef/src/commands/window/chrome.rs::toggle_floating_maximize
 103 crates/cef/src/commands/window/creation.rs::open_new_window
 176 crates/cef/src/commands/window/creation.rs::reproject_from_srv
@@ -327,7 +327,7 @@
 202 frontend/app/block/widget-bridge.ts::answer
 106 frontend/app/drag/CrossWindowDragMonitor.darwin.tsx::performTearOff
 159 frontend/app/drag/CrossWindowDragMonitor.linux.tsx::performTearOff
-158 frontend/app/drag/CrossWindowDragMonitor.win32.tsx::CrossWindowDragMonitor
+151 frontend/app/drag/CrossWindowDragMonitor.win32.tsx::CrossWindowDragMonitor
 219 frontend/app/drag/CrossWindowDragMonitor.win32.tsx::performTearOff
 119 frontend/app/drag/CrossWindowDropOverlay.tsx::CrossWindowDropOverlay
 132 frontend/app/element/ModalLayer.tsx::ModalLayer

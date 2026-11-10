@@ -3,10 +3,11 @@
 
 /**
  * The picture that follows the cursor during a pane drag, on Windows (drag/live-follow.ts, and
- * crates/cef/src/commands/live_follow.rs for the host half). A pane is torn off by dropping it outside every
- * AgentMux window (inside one the same drag is a tile drop), so the host shows the picture only there; it is
- * the pane's own picture (tearoff-snapshot.ts), held at the grab the pointer pressed it with, and the
- * floating window opens where it was last seen.
+ * crates/cef/src/commands/live_follow.rs for the host half). It is the pane's own picture
+ * (tearoff-snapshot.ts), held at the grab the pointer pressed it with, and it follows from the drag's first
+ * move wherever the cursor goes: over the layout, where the drop is a tile drop and the other panes make room
+ * under it, and outside every AgentMux window, where the drop tears the pane off and the floating window
+ * opens where the picture was last seen. No translucent ghost ever stands in for the pane.
  */
 
 import { getApi } from "@/store/global";

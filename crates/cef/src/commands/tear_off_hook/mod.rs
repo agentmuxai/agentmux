@@ -54,8 +54,8 @@ mod macos;
 
 #[cfg(target_os = "windows")]
 pub use windows::{
-    hook_session_active, start_escape_watch, start_pane_drag_tracking, start_tab_drag_tracking, start_tear_off_tracking,
-    stop_active_hook_session,
+    hook_session_active, pane_drag_age, start_escape_watch, start_pane_drag_tracking, start_tab_drag_tracking,
+    start_tear_off_tracking, stop_active_hook_session,
 };
 
 #[cfg(target_os = "macos")]
