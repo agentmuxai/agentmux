@@ -39,8 +39,10 @@ pub struct InjectionRequest {
     /// The name the sender addressed, when the delivery itself is addressed
     /// by UID (a replayed held jekt, or a target registered under another of
     /// its names): the marker's `TO=` says the name, as a live delivery's
-    /// does, never the UID (#31433).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// does, never the UID (#31433). Server-set only: `skip` keeps it out of
+    /// both directions, so no request body can name the marker's target and
+    /// it never travels (the receiving end renders its own).
+    #[serde(skip)]
     pub marker_target: Option<String>,
     pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -448,6 +450,12 @@ impl InjectionRequest {
     /// An unsigned request's target as its route name, so a display-name
     /// target ("Loap #3") routes as "Loap-3" on every tier, not only the
     /// local one. A signed one is left as it is (see `is_signed`).
+    pub fn route_unsigned_target(&mut self) {
+        if !self.is_signed() {
+            self.target_agent = super::sanitize::route_name(&self.target_agent).unwrap_or_default();
+        }
+    }
+
     /// The same request addressed by `uid`, with the name the sender wrote
     /// kept for the marker's `TO=`: a replay routes by UID but is named, the
     /// way a live delivery is (#31433).
@@ -458,12 +466,6 @@ impl InjectionRequest {
             super::sanitize::route_name(&self.target_agent)
         };
         Self { target_agent: uid.to_string(), marker_target: seen, ..self.clone() }
-    }
-
-    pub fn route_unsigned_target(&mut self) {
-        if !self.is_signed() {
-            self.target_agent = super::sanitize::route_name(&self.target_agent).unwrap_or_default();
-        }
     }
 }
 
@@ -1013,5 +1015,15 @@ mod uid_addressing_tests {
         req.jekt_sig = Some("sig".to_string());
         let signed = req.addressed_by_uid("uid-2");
         assert_eq!(signed.marker_target.as_deref(), Some("Loap #3"), "a signed target is kept as the sender wrote it");
+    }
+
+    /// The marker's target is srv's to set: a request body naming it is
+    /// ignored, so a sender cannot make the marker advertise another agent.
+    #[test]
+    fn a_request_body_cannot_name_the_markers_target() {
+        let body = r#"{"target_agent":"agent1","message":"hi","marker_target":"someone-else"}"#;
+        let req: InjectionRequest = serde_json::from_str(body).expect("a valid body");
+        assert_eq!(req.marker_target, None, "the field is server-set only");
+        assert_eq!(req.target_agent, "agent1");
     }
 }
