@@ -100,7 +100,15 @@ export function LanRows(props: Props): JSX.Element {
                 Spec: docs/specs/lan-discovery-toggle.md */}
             <div class="status-bar-popover-divider" />
             <div class="status-bar-popover-row">
-                <span class="status-bar-popover-label">LAN discovery</span>
+                <span style={{ display: "inline-flex", "align-items": "center", gap: "var(--space-2)" }}>
+                    {/* The LAN state glyph reads on the discovery line it is about, not on a line of its own. */}
+                    <Show when={p.lanDiscoveryEnabled() && p.lanCount() > 0}>
+                        <span style={{ color: "var(--accent-color)" }} data-testid="lan-state-diamond">
+                            ◆
+                        </span>
+                    </Show>
+                    <span class="status-bar-popover-label">LAN discovery</span>
+                </span>
                 <span
                     class="status-bar-toggle"
                     data-tip={p.lanDiscoveryEnabled() ? "Disable" : "Enable (may prompt Windows Firewall)"}
@@ -159,8 +167,7 @@ export function LanRows(props: Props): JSX.Element {
                 </div>
             </Show>
             <Show when={p.lanDiscoveryEnabled() && p.lanCount() > 0}>
-                <div class="status-bar-popover-row" style={{ "padding-left": "12px" }}>
-                    <span style={{ color: "var(--accent-color)" }}>◆</span>
+                <div class="status-bar-popover-row">
                     <span>{p.lanCount()} peer{p.lanCount() !== 1 ? "s" : ""}</span>
                 </div>
                 <LanPeerList peers={p.lanInstances()} selfHost={getHostName()} />
