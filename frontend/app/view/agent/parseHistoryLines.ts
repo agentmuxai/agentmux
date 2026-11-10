@@ -193,6 +193,11 @@ export class HistoryParser {
         const { translator, parser, indexById, opts, nodes } = this;
         const changed = new Set<string>();
         const put = (node: DocumentNode, existing: number | undefined): void => {
+            // A jekt's timestamp is a required number its consumers add to: one with no marker TS and no batch stamp
+            // (parsed without a sidecar) gets the load time, as it did before replays took the marker's.
+            if (node.type === "jekt_message" && (node as { timestamp?: number }).timestamp == null) {
+                node = { ...node, timestamp: Date.now() };
+            }
             if (existing != null) nodes[existing] = node;
             else {
                 indexById.set(node.id, nodes.length);
@@ -220,7 +225,7 @@ export class HistoryParser {
         // once it ended — placed before the releasing event's node, as live
         // (SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28.md §2.2).
         const putReleased = (): void => {
-            for (const released of parser.drainReleased()) put(released, indexById.get(released.id));
+            for (const released of parser.drainReleased()) put(stampIfMissing(released, stampFor(lineIdx)), indexById.get(released.id));
         };
         // An in-place same-id replacement (tool_call → tool_result, accumulated
         // text deltas) must not wipe the stamp the node got when it was first

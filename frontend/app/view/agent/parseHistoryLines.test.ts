@@ -1141,6 +1141,17 @@ describe("a replayed message carries its own time", () => {
         expect(timeOf(nodes as never, "jekt_message")).toEqual([NOW - 5 * 3_600_000]);
     });
 
+    it("a jekt with no TS and no stamps still gets a number, the load time, for the code that adds to it", () => {
+        const text = line({
+            type: "user_message",
+            message: "[JEKT:FROM=agenta TO=me TIER=info DELIVERY=host TRUST=host-verified MSGID=m-1 PRIORITY=normal]\nhi\n[/JEKT]",
+        });
+        vi.spyOn(Date, "now").mockReturnValue(NOW);
+        const { nodes } = parseHistoryLines([text], "claude-stream-json", "me");
+        vi.restoreAllMocks();
+        expect(timeOf(nodes as never, "jekt_message")).toEqual([NOW]);
+    });
+
     it("a jekt arriving live still reads as now", () => {
         const parser = new ClaudeCodeStreamParser();
         vi.spyOn(Date, "now").mockReturnValue(NOW);
