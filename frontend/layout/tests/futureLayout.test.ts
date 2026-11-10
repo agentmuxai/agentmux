@@ -173,12 +173,9 @@ describe("the drop preview is cheap enough to run per armed candidate", () => {
         for (const [name, make] of Object.entries(TREES)) {
             const model = modelOf(make());
             const ids = leafIds(make());
-            const action = computeMoveNode(model.treeState, {
-                type: LayoutTreeActionType.ComputeMove,
-                nodeId: ids[ids.length - 1],
-                nodeToMoveId: ids[0],
-                direction: DropDirection.Left,
-            });
+            // The last move the reducer accepts on this tree: a pane moved far from where it is.
+            const accepted = drops(make());
+            const action = accepted[accepted.length - 1]?.action;
             expect(action).toBeTruthy();
             // Warm up, then time the mean of many runs: one run is below the clock's resolution.
             for (let i = 0; i < 10; i++) futureLayoutOf(model, action!);
