@@ -108,6 +108,15 @@ I have not read the source of #7 and #8 to their end; their rows come from their
 - **Row 8 corrected.** The memory adoption window is not an agent's act: Memory → Personal lists candidates and the person asks for the adoption with their own click in the Memory pane; the subwindow only confirms it (and it can make a folder another agent's to write in). That is the same class as rows 3 and 6, so it takes their treatment (a modal in its own pane, answered by the person's click) and not a countdown with Always. It was listed as "Yes (the agent)" from its window header alone.
 - **Order of the build.** This PR carries rows 1, 2 and 5, which share the module above. Rows 3, 6 and 8 (pane modals in Remotes, Toolchain and Memory, each with its own operator-only answer path replacing a host window) follow in a second PR, so that the move of a confirmation out of the host window is reviewed with its own pane's look check. Rows 4 and 7 stay as decided.
 
+### 10.1 The second PR: rows 3 and 6 (2026-11-10)
+
+- **One module for a pane's question** (`crates/srv/src/sagas/pane_confirm.rs`): `ask(state, block_id, question)` publishes `pane:confirm`, the window that shows the pane draws it as a modal over that pane only (`frontend/app/block/pane-confirms.tsx`, a `paneRequests` modal, operator-only like every pane request), and the answer comes back through `pane.confirm.decide`, which is `operator_only`. Unlike a notice, nothing goes ahead by itself: no answer in 120 s, a closed pane, a dropped caller and no window connected all leave the thing undone.
+- **Row 3** (`connections.rs`): adding a host to the ssh config, removing the helper, the helper's install question (with its "Don't ask again" box) and ending a durable session ask through it, in the pane whose button was clicked (Remotes, or the terminal or agent pane whose need set the helper install off).
+- **Row 6** (`system_install_handlers.rs`): `toolchain.install_system_tool` takes the pane its Install button is in (`blockId`, read from the row's own pane), and asks there. The Toolchain pane and the agent pane's create panel both send it.
+- **No pane named** (an older page, or a caller with srv's key and no pane): the question still goes to the approval window, as before. An agent calling any of these commands can name a pane, and the modal then shows there, but it can neither read nor answer it.
+- **Row 4 unchanged:** ssh's own prompts (`secret`, the host-key yes/no, info) stay in the approval window.
+- **Row 8** (memory adoption) follows in its own PR: it is a host-only service behind a host window, not a question srv asks, so it needs its own operator-only command.
+
 ## 11. Settled (2026-11-08)
 
 1. First start: a 30 s countdown that proceeds on its own, with Stop it, Start now and Always allow.

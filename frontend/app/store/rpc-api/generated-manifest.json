@@ -1125,6 +1125,10 @@
             "method": "OperatorChallengeCommand"
         },
         {
+            "command": "pane.confirm.decide",
+            "method": "PaneConfirmDecideCommand"
+        },
+        {
             "command": "pane.open",
             "method": "PaneOpenCommand"
         },

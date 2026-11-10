@@ -226,6 +226,8 @@ export const WpsEvent = {
     SensitiveCleared: "sensitive:cleared",
     /** An agent's start of an agent (or another act the person may stop): a one-line notice or a countdown card, and its end (crates/srv/src/sagas/agent_notice.rs). */
     AgentNotice: "agent:notice",
+    /** A question srv asks the person in a pane, as a modal over that pane, and its end (crates/srv/src/sagas/pane_confirm.rs). */
+    PaneConfirm: "pane:confirm",
     /** The agents the person said "Always" to, after a change (crates/srv/src/backend/agent_grants.rs). */
     AgentGrants: "agent:grants",
     AmbientSpent: "ambient:spent",

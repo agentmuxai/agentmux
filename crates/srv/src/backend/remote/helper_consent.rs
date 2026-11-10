@@ -5,8 +5,9 @@
 //! (SPEC_REMOTES_PANE_2026_10_05.md §4.9).
 //!
 //! The helper is software put on someone's machine, so nothing is uploaded
-//! until the user says so: in the approval window (crates/cef `ssh_approval`),
-//! which agents can neither reach nor answer. `conn:helper` for the host, else
+//! until the user says so: in a modal over the pane that needs it
+//! (`sagas::pane_confirm`; with no pane, the approval window), which agents
+//! can neither read nor answer. `conn:helper` for the host, else
 //! the global `conn:helper`, says `ask` (the default), `always` or `never`.
 //! An install an agent's pane sets off is always asked about, whatever the
 //! setting: letting an agent use a host is not letting it install software
@@ -68,7 +69,7 @@ pub fn step(policy: Policy, by_agent: bool) -> Step {
     }
 }
 
-/// The user's answer in the approval window.
+/// The user's answer to the question.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Answer {
     /// False when the window was closed, timed out or could not open.
@@ -90,8 +91,8 @@ type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send>>;
 
 /// What [`allow_install`] needs from the server.
 pub struct Deps {
-    /// Ask the question in the approval window over the window showing the
-    /// pane (`block_id`; empty: the main window).
+    /// Ask the question in the pane (`block_id`), as a modal over it; with none
+    /// (empty), in the approval window over the main window.
     pub ask: Box<dyn Fn(String, serde_json::Value) -> BoxFuture<Result<Answer, String>> + Send + Sync>,
     /// `conn:helper` for the host, and the global one.
     pub settings: Box<dyn Fn(&str) -> (String, String) + Send + Sync>,

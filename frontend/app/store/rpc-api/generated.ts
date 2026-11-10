@@ -228,6 +228,7 @@ import type { CommandNativeMemoryRevertData } from "@/types/rpc/CommandNativeMem
 import type { CommandNativeMemoryWriteFileData } from "@/types/rpc/CommandNativeMemoryWriteFileData";
 import type { CommandNextPromptSuggestionData } from "@/types/rpc/CommandNextPromptSuggestionData";
 import type { CommandOtherBuildLayoutsData } from "@/types/rpc/CommandOtherBuildLayoutsData";
+import type { CommandPaneConfirmDecideData } from "@/types/rpc/CommandPaneConfirmDecideData";
 import type { CommandPaneMoveTabData } from "@/types/rpc/CommandPaneMoveTabData";
 import type { CommandPaneMoveTabsData } from "@/types/rpc/CommandPaneMoveTabsData";
 import type { CommandPaneOpenData } from "@/types/rpc/CommandPaneOpenData";
@@ -392,6 +393,7 @@ import type { InstallCheckReq } from "@/types/rpc/InstallCheckReq";
 import type { InstallCheckResult } from "@/types/rpc/InstallCheckResult";
 import type { InstallStartReq } from "@/types/rpc/InstallStartReq";
 import type { InstallStartResult } from "@/types/rpc/InstallStartResult";
+import type { InstallSystemToolReq } from "@/types/rpc/InstallSystemToolReq";
 import type { InstallSystemToolResult } from "@/types/rpc/InstallSystemToolResult";
 import type { InstallToolResult } from "@/types/rpc/InstallToolResult";
 import type { JobReporterAddReq } from "@/types/rpc/JobReporterAddReq";
@@ -480,6 +482,7 @@ import type { OAuthSessionReq } from "@/types/rpc/OAuthSessionReq";
 import type { OpenInShellReq } from "@/types/rpc/OpenInShellReq";
 import type { OperatorChallengeResult } from "@/types/rpc/OperatorChallengeResult";
 import type { OtherBuildLayoutsResult } from "@/types/rpc/OtherBuildLayoutsResult";
+import type { PaneConfirmDecideResult } from "@/types/rpc/PaneConfirmDecideResult";
 import type { PaneOpenResult } from "@/types/rpc/PaneOpenResult";
 import type { PaneTabEditResult } from "@/types/rpc/PaneTabEditResult";
 import type { PinnedSendersResult } from "@/types/rpc/PinnedSendersResult";
@@ -2170,6 +2173,14 @@ export const GeneratedApi = {
   OperatorChallengeCommand(client: RpcClient, opts?: RpcOpts): Promise<OperatorChallengeResult> {
     return client.rpcCall("operator.challenge", {}, opts);
   },
+  // command "pane.confirm.decide"
+  PaneConfirmDecideCommand(
+    client: RpcClient,
+    data: CommandPaneConfirmDecideData,
+    opts?: RpcOpts
+  ): Promise<PaneConfirmDecideResult> {
+    return client.rpcCall("pane.confirm.decide", data, opts);
+  },
   // command "pane.open"
   PaneOpenCommand(client: RpcClient, data: CommandPaneOpenData, opts?: RpcOpts): Promise<PaneOpenResult> {
     return client.rpcCall("pane.open", data, opts);
@@ -2710,7 +2721,7 @@ export const GeneratedApi = {
   // command "toolchain.install_system_tool"
   ToolchainInstallSystemToolCommand(
     client: RpcClient,
-    data: ToolIdReq,
+    data: InstallSystemToolReq,
     opts?: RpcOpts
   ): Promise<InstallSystemToolResult> {
     return client.rpcCall("toolchain.install_system_tool", data, { timeout: 150000, ...opts });
