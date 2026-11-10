@@ -435,7 +435,7 @@ describe("createTileLayout: a tile", () => {
     });
 
     describe("the live reflow of a pane drag (liveReflow.ts)", () => {
-        const glide: ReflowEntry = { kind: "glide", transform: "translate3d(300px,0px, 0)", clip: "inset(0px 300px 0px 0px)" };
+        const glide: ReflowEntry = { kind: "glide", transform: "translate3d(300px,0px, 0)", clip: "inset(0px 300px 0px 0px)", moved: false };
 
         it("glides a tile with a translate and a crop over its unchanged size, and nothing else about it changes", () => {
             const platform = makePlatform();
@@ -455,17 +455,22 @@ describe("createTileLayout: a tile", () => {
             expect(platform.onLeafGeometryChange).not.toHaveBeenCalled();
         });
 
-        it("hides the dragged pane's tile", () => {
+        it("glides the dragged pane's own tile into its landing rect, unblurred and never hidden, so no slot is empty", () => {
             const { el } = mountWithTile(makePlatform());
-            h.model.set.setReflow(new Map<string, ReflowEntry>([["n1", { kind: "hidden" }]]));
-            expect(el.style.visibility).toBe("hidden");
-            expect(el.style.transform).toBe("translate(1px, 2px)");
+            h.model.set.setReflow(new Map<string, ReflowEntry>([["n1", { ...glide, moved: true }]]));
+            expect(el.style.visibility).toBe("");
+            expect(el.style.transform).toBe(glide.transform);
+            expect(el.style.getPropertyValue("clip-path")).toBe(glide.clip);
+            expect(el.style.filter).toBe("none");
+            // Another pane keeps whatever the stylesheet gives a dragged tile.
+            h.model.set.setReflow(new Map<string, ReflowEntry>([["n1", glide]]));
+            expect(el.style.filter).toBe("");
         });
 
         it("keeps the layout's own transform on a tile at rest, with the glide's transition on so it glides back", () => {
             const { el } = mountWithTile(makePlatform());
             h.model.set.setReflow(new Map<string, ReflowEntry>([["n1", glide]]));
-            h.model.set.setReflow(new Map<string, ReflowEntry>([["n1", { kind: "rest" }]]));
+            h.model.set.setReflow(new Map<string, ReflowEntry>([["n1", { kind: "rest", moved: false }]]));
             expect(el.style.transform).toBe("translate(1px, 2px)");
             expect(el.style.getPropertyValue("clip-path")).toBe(REST_CLIP);
             expect(el.style.transition).toContain("transform var(--duration-base) ease-out");

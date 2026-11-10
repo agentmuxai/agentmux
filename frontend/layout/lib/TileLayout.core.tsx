@@ -574,10 +574,11 @@ function useTileStyle(props: DisplayNodeProps, nodeModel: NodeModelOf) {
     // positioning is untouched. Mirrors `workspace.tsx`'s identical
     // visibility+opacity treatment for the whole-tab reveal gate.
     const isRevealGated = () => gatingNodeIds().has(props.node.id);
-    // The live reflow of a pane drag (liveReflow.ts): the dragged pane's tile is hidden, and every other tile
-    // stands in for its future rect with a compositor-only translate and crop over its unchanged size, so
-    // nothing inside it lays out and nothing is squashed. Essential spatial motion (it says where the drop
-    // lands), so it glides under reduced motion too, shorter. A CSS transition retargets from the current
+    // The live reflow of a pane drag (liveReflow.ts): every tile, the dragged pane's included, stands in for
+    // its future rect with a compositor-only translate and crop over its unchanged size, so nothing inside it
+    // lays out and nothing is squashed. The dragged tile is the drop's own preview at its landing rect, so it
+    // loses the blur a dragged tile otherwise has (`.dragging`). Essential spatial motion (it says where the
+    // drop lands), so it glides under reduced motion too, shorter. A CSS transition retargets from the current
     // matrix on its own; a tile at rest keeps the transition (and the layout's own transform) for the drag's
     // length, so it glides back; and the plain style (no transform transition) takes over in the same batch
     // as the drop's real rect, so nothing glides twice.
@@ -587,11 +588,11 @@ function useTileStyle(props: DisplayNodeProps, nodeModel: NodeModelOf) {
         const reduce = shouldReduceMotion("transition");
         const style: JSX.CSSProperties = {
             ...(tileTransform() as JSX.CSSProperties),
-            visibility: isRevealGated() || entry?.kind === "hidden" ? "hidden" : undefined,
+            visibility: isRevealGated() ? "hidden" : undefined,
             opacity: reduce ? undefined : isRevealGated() ? 0 : 1,
             transition: reduce ? undefined : `opacity var(--duration-quick) ${EASE_OUT}`,
         };
-        if (!entry || entry.kind === "hidden") return style;
+        if (!entry) return style;
         const timing = `var(${reduce ? "--duration-fast" : "--duration-base"}) ${EASE_OUT}`;
         const glide = `transform ${timing}, clip-path ${timing}`;
         const transform = entry.kind === "glide" ? entry.transform : style.transform;
@@ -601,6 +602,7 @@ function useTileStyle(props: DisplayNodeProps, nodeModel: NodeModelOf) {
             WebkitTransform: transform,
             "clip-path": entry.kind === "glide" ? entry.clip : REST_CLIP,
             "will-change": "transform",
+            filter: entry.moved ? "none" : undefined,
             transition: reduce ? glide : `${glide}, ${style.transition}`,
         };
     });

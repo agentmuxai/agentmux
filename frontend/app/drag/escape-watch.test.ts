@@ -51,7 +51,7 @@ describe("watchEscapeDuringDrag", () => {
         watchEscapeDuringDrag({ blockId: "b1" });
         await settle();
         expect(calls).toEqual([`start ${JSON.stringify({ sourceWindowLabel: "main", escapeOnly: true, paneFollow: true })}`]);
-        expect(followPaneDrag).toHaveBeenCalledWith("b1", "main");
+        expect(followPaneDrag).toHaveBeenCalledWith("b1", "main", undefined);
     });
 
     it("keeps the host's Escape for the end of the drag, and forgets it at the next drag", async () => {
