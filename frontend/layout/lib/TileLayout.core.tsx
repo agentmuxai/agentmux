@@ -36,7 +36,8 @@ import { Key } from "@/util/keyed";
 import { debounce } from "throttle-debounce";
 import { LayoutModel } from "./layoutModel";
 import { useNodeModel, useTileLayout } from "./layoutModelHooks";
-import { REST_CLIP } from "./liveReflow";
+import { paneCaptureInFlight } from "@/app/drag/pane-capture-gate";
+import { clipTo } from "./liveReflow";
 import "./tilelayout.scss";
 import { LayoutNode, LayoutTreeActionType, ResizeHandleProps, TileLayoutContents } from "./types";
 import { releaseTileDrag, startTileDrag } from "./tile-drag";
@@ -574,14 +575,13 @@ function useTileStyle(props: DisplayNodeProps, nodeModel: NodeModelOf) {
     // positioning is untouched. Mirrors `workspace.tsx`'s identical
     // visibility+opacity treatment for the whole-tab reveal gate.
     const isRevealGated = () => gatingNodeIds().has(props.node.id);
-    // The live reflow of a pane drag (liveReflow.ts): every tile, the dragged pane's included, stands in for
-    // its future rect with a compositor-only translate and crop over its unchanged size, so nothing inside it
-    // lays out and nothing is squashed. The dragged tile is the drop's own preview at its landing rect, so it
-    // loses the blur a dragged tile otherwise has (`.dragging`). Essential spatial motion (it says where the
-    // drop lands), so it glides under reduced motion too, shorter. A CSS transition retargets from the current
-    // matrix on its own; a tile at rest keeps the transition (and the layout's own transform) for the drag's
-    // length, so it glides back; and the plain style (no transform transition) takes over in the same batch
-    // as the drop's real rect, so nothing glides twice.
+    // The live reflow of a pane drag (liveReflow.ts): every tile takes the rect the armed drop leaves it. Its
+    // place glides as a transform; its size is set at once (`box`) and shown through a clip that glides to the
+    // rect's size, so neighbours' edges travel together. The dragged tile is the drop's own preview, so it
+    // loses a dragged tile's blur. Essential spatial motion, so it glides under reduced motion too, shorter.
+    // With no drop armed a tile keeps the transition on its own rect, so it glides back; the plain style takes
+    // over in the same batch as the drop's real rect, so nothing glides twice
+    // (docs/reports/REPORT_LIVE_REFLOW_REAL_SIZES_2026_11_10.md §3).
     const reflow = () => props.layoutModel.reflowFor(props.node.id);
     const tileStyle = createMemo<JSX.CSSProperties>(() => {
         const entry = reflow();
@@ -595,13 +595,15 @@ function useTileStyle(props: DisplayNodeProps, nodeModel: NodeModelOf) {
         if (!entry) return style;
         const timing = `var(${reduce ? "--duration-fast" : "--duration-base"}) ${EASE_OUT}`;
         const glide = `transform ${timing}, clip-path ${timing}`;
-        const transform = entry.kind === "glide" ? entry.transform : style.transform;
+        const transform = `translate3d(${entry.rect.left}px,${entry.rect.top}px, 0)`;
         return {
             ...style,
             transform,
             WebkitTransform: transform,
-            "clip-path": entry.kind === "glide" ? entry.clip : REST_CLIP,
-            "will-change": "transform",
+            width: `${entry.box.width}px`,
+            height: `${entry.box.height}px`,
+            "clip-path": clipTo(entry.rect),
+            "will-change": "transform, clip-path",
             filter: entry.moved ? "none" : undefined,
             transition: reduce ? glide : `${glide}, ${style.transition}`,
         };
@@ -676,7 +678,8 @@ function displayNode(platform: TileLayoutPlatform, props: DisplayNodeProps): JSX
     return (
         <div
             class={clsx("tile-node", {
-                dragging: isDragging(),
+                // Not while the pane's picture is still being taken: the picture would show the blur.
+                dragging: isDragging() && !paneCaptureInFlight(),
                 "tile-hidden": magnifyActive(),
                 "tile-minimized": nodeModel.isMinimized(),
                 "tile-resize-skip": skipsLayout(),

@@ -393,7 +393,7 @@
 271 frontend/app/view/agent/hooks/useAgentQuestions.ts::useAgentQuestions
 266 frontend/app/view/agent/hooks/useLiveFeedRollOff.ts::useLiveFeedRollOff
 172 frontend/app/view/agent/hooks/usePaneReveal.ts::usePaneReveal
-121 frontend/app/view/agent/hooks/usePtyWidth.ts::usePtyWidth
+118 frontend/app/view/agent/hooks/usePtyWidth.ts::usePtyWidth
 140 frontend/app/view/agent/hooks/useShellNodeStream.ts::useShellNodeStream
 124 frontend/app/view/agent/hooks/useSnapshotPersistence.ts::useSnapshotPersistence
 173 frontend/app/view/agent/hooks/useSubagentBackfillGate.ts::useSubagentBackfillGate

@@ -47,6 +47,7 @@ import { usePaneZoomWheel } from "@/app/store/zoom";
 import { Tag } from "@/app/element/ui";
 import type { BlockControllerRuntimeStatus } from "@/types/rpc/BlockControllerRuntimeStatus";
 import type { SignalAtom } from "@/util/util";
+import { deferWhileSizesHeld } from "@/app/platform/pane-size-hold";
 
 // The overlay's `.is-fading` transition (_composer-strip.scss) is `--duration-base`
 // scaled by the Animations setting; the unmount timer reads the same scaled value.
@@ -863,9 +864,9 @@ function commitTermWrap(s: ShellState, wrap: TermWrap): void {
     // here post-await; teardown is registered synchronously in the component
     // via the `resizeObserver` state field, not a second onCleanup.
     if (s.containerRef) {
-        s.resizeObserver = new ResizeObserver(() => {
-            s.termWrap?.handleResizeLive();
-        });
+        // Not during a pane drag's live reflow (pane-size-hold.ts). A run left waiting when this shell goes
+        // away finds no `termWrap`, or a disposed one, and does nothing.
+        s.resizeObserver = new ResizeObserver(deferWhileSizesHeld(() => s.termWrap?.handleResizeLive()));
         s.resizeObserver.observe(s.containerRef);
     }
 }

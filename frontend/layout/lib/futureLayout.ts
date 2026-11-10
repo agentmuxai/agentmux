@@ -7,7 +7,7 @@
 // other pane's, so the preview is the drop by construction, whatever the tree: the old ghost was half of
 // the target's rect in the layout as it stood, which ignored the dragged pane leaving its old place.
 
-import { createMemo } from "solid-js";
+import { createMemo, untrack } from "solid-js";
 import type { Properties as CSSProperties } from "csstype";
 import { setTransform } from "./utils";
 import { applyLayoutAction, copyLayoutNode } from "./layoutIntentActions";
@@ -86,11 +86,38 @@ export function futureLayoutOf(model: LayoutModel, action: LayoutTreeAction | un
 }
 
 /**
+ * The layout as a drag sees it: its panes and their rects. A pending action is good for the layout it was
+ * computed on and no other.
+ */
+function shapeOf(model: LayoutModel): string {
+    const props = model.additionalProps();
+    let shape = "";
+    for (const leaf of model.leafs()) {
+        const r = props[leaf.id]?.rect;
+        shape += r ? `${leaf.id}:${r.left},${r.top},${r.width},${r.height};` : `${leaf.id};`;
+    }
+    return shape;
+}
+
+/**
  * The memos a layout model keeps for the pending drag action: the layout it leaves, and the outline of
  * every pane of it but the moved one (the moved one is the ghost). Made in the model's reactive owner.
+ *
+ * The pending action is kept with the layout it was armed on. If the tree or a rect changes under the drag
+ * (srv or another window closes a pane, the window is resized), the action describes a layout that is gone:
+ * there is no future layout until the drag's next sample arms a candidate on the new one (the tracker starts
+ * again on a changed layout, placementPreview.ts), so the live reflow lets every pane back to its own rect
+ * instead of holding rects computed from a stale move (#47354).
  */
 export function createPlacementPreview(model: LayoutModel) {
-    const futureLayout = createMemo(() => futureLayoutOf(model, model.pendingTreeAction.throttledValueAtom()));
+    const armed = createMemo(() => {
+        const action = model.pendingTreeAction.throttledValueAtom();
+        return action ? { action, shape: untrack(() => shapeOf(model)) } : undefined;
+    });
+    const futureLayout = createMemo(() => {
+        const a = armed();
+        return a && shapeOf(model) === a.shape ? futureLayoutOf(model, a.action) : undefined;
+    });
     const placementWireframe = createMemo((): { id: string; style: CSSProperties }[] => {
         const future = futureLayout();
         if (!future) return [];

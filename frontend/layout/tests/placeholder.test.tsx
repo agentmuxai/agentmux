@@ -19,6 +19,7 @@ vi.mock("@/app/store/global", () => ({ getSettingsKeyAtom: () => () => undefined
 vi.mock("@/app/drag/CrossWindowDragMonitor", () => ({ setCurrentDragPayload: () => {} }));
 vi.mock("@atlaskit/pragmatic-drag-and-drop/element/adapter", () => ({ dropTargetForElements: () => () => {} }));
 
+import { beginPaneCapture, resetPaneCaptureGateForTests } from "@/app/drag/pane-capture-gate";
 import { Placeholder } from "../lib/tilelayout-shared";
 
 const ghost = { transform: "translate(10px, 20px)", width: "300px", height: "200px" };
@@ -51,6 +52,16 @@ describe("Placeholder (the drag drop-target ghost)", () => {
         setReflowing(true);
         expect(container.querySelectorAll(".placement-wireframe").length).toBe(0);
         expect(container.querySelector(".placeholder-container")!.classList.contains("live-reflow")).toBe(true);
+        expect(container.querySelector(".placeholder-sizer")).not.toBeNull();
+    });
+
+    it("stays away while the dragged pane's picture is being taken: its tint would be in the picture", () => {
+        resetPaneCaptureGateForTests();
+        const captured = beginPaneCapture();
+        const model = { placeholderTransform: () => ghost, placementWireframe: () => [], liveReflowActive: () => false };
+        const { container } = render(() => <Placeholder layoutModel={model as any} style={{}} />);
+        expect(container.querySelector(".placeholder-sizer")).toBeNull();
+        captured();
         expect(container.querySelector(".placeholder-sizer")).not.toBeNull();
     });
 });

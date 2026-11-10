@@ -32,6 +32,7 @@ import {
     LayoutTreeActionType,
     LayoutTreeComputeMoveNodeAction,
 } from "./types";
+import { paneCaptureInFlight } from "@/app/drag/pane-capture-gate";
 import { clearPlacement, previewPlacement } from "./placementPreview";
 import {
     clampCrossTabDirection,
@@ -525,7 +526,8 @@ export const Placeholder = (props: PlaceholderProps) => {
     let exitTimer: ReturnType<typeof setTimeout> | null = null;
 
     createEffect(() => {
-        const xf = placeholderTransform();
+        // Not while the dragged pane's picture is still being taken: the zone's tint would be in it.
+        const xf = paneCaptureInFlight() ? undefined : placeholderTransform();
         if (xf) {
             setLastTransform(xf as JSX.CSSProperties);
             if (exitTimer) { clearTimeout(exitTimer); exitTimer = null; }
