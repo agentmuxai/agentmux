@@ -697,7 +697,7 @@ pub(super) const MAX_DESCRIBES: usize = 600;
 async fn page_nodes(cdp: &mut CdpSession, tree: &Value, include_hidden: bool) -> (Vec<Value>, usize) {
     let mut nodes: Vec<Value> = tree.get("nodes").and_then(|n| n.as_array()).cloned().unwrap_or_default();
     snapshot::add_hidden_choices(&mut nodes, &hidden_choices(cdp, None).await);
-    let cut = if include_hidden { 0 } else { visibility::prune(&mut nodes, &visibility::capture(cdp).await) };
+    let cut = visibility::apply(&mut nodes, &visibility::capture(cdp).await, include_hidden);
     (nodes, cut)
 }
 
@@ -880,7 +880,7 @@ pub async fn find_route(
     let mut nodes: Vec<Value> = tree.get("nodes").and_then(|n| n.as_array()).cloned().unwrap_or_default();
     let hidden = hidden_choices(&mut cdp, None).await;
     snapshot::add_hidden_choices(&mut nodes, &hidden);
-    visibility::prune(&mut nodes, &visibility::capture(&mut cdp).await);
+    visibility::apply(&mut nodes, &visibility::capture(&mut cdp).await, false);
     let needs_facts = |n: &&Value| {
         let role = n.pointer("/role/value").and_then(|v| v.as_str()).unwrap_or("");
         snapshot::VALUE_ROLES.contains(&role) || role == "button"
