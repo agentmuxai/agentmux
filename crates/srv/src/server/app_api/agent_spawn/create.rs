@@ -74,8 +74,8 @@ async fn create(state: &AppState, caller: Option<&crate::server::caller::Caller>
         return Err(refuse(StatusCode::BAD_REQUEST, format!("INVALID_ARG: a name is required, at most {MAX_NAME_CHARS} characters, on one line")));
     }
     let template = find_template(state, &req.template)?;
-    let placement = container::decide_here(state, &req.container, &leader.def, &template).await?;
     let provider = state.id_store.resolve_effective_provider_id(&template);
+    let placement = container::decide_here(state, &req.container, &leader.def, &template, &provider).await?;
     let picked = pick_route(state, &req, &template, &provider)?;
     // An account is linked when one is named, or the caller's can be used; an agent with none is bound at its first open.
     // An agent on a model route is billed to the route's key and has none.

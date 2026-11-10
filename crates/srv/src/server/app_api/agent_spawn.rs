@@ -168,7 +168,7 @@ async fn spawn_with(
         }
     }
     let (provider, mut runtime) = route::choose(state, &leader, &req.route, req.model.as_deref(), req.effort.as_deref())?;
-    runtime.placement = container::decide_here(state, &req.container, &leader.def, &leader.def).await?;
+    runtime.placement = container::decide_here(state, &req.container, &leader.def, &leader.def, &provider).await?;
     let tab_id = super::agent_block::resolve_tab_id_or_active(&state.mstore, &leader.block_id)
         .map_err(|e| refuse(StatusCode::CONFLICT, format!("NO_TAB: your pane isn't in a tab: {e}")))?;
     // Held until the worker's pane exists (or nothing was made), so a second
