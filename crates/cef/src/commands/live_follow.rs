@@ -76,6 +76,14 @@ pub async fn resize_blocking(args: &serde_json::Value) -> Result<serde_json::Val
         .map_err(|e| format!("live_follow_resize join error: {}", e))?
 }
 
+/// Where the cursor holds a picture of `size`: at the grab the pane was pressed with, pulled inside the picture
+/// when that is smaller, so the cursor stays on it. Always from the original grab, never from a previous size's
+/// offset, so a wide slot after a narrow one has the original alignment back.
+#[cfg(any(target_os = "windows", test))]
+pub(crate) fn offset_within(grab: (i32, i32), size: (i32, i32)) -> (i32, i32) {
+    (grab.0.min(size.0 - 1).max(0), grab.1.min(size.1 - 1).max(0))
+}
+
 /// The picture at `size`, from `source` (BGRA at `source_size`): the source's top-left at its own scale, cut at
 /// the right and bottom where `size` is smaller, and the rest filled with the source's bottom-right pixel (the
 /// pane's background, as a rule) where it is larger. Never scaled, so the pane keeps its proportions, as the
@@ -142,8 +150,10 @@ mod win {
     struct Follower {
         hwnd: usize,
         size: (i32, i32),
-        /// Cursor to the window's top-left, physical pixels.
+        /// Cursor to the window's top-left, physical pixels: `grab` pulled inside the current size (`offset_within`).
         offset: (i32, i32),
+        /// The grab the pane was pressed with, physical pixels, kept as is across resizes.
+        grab: (i32, i32),
         /// DIP to the source window's physical pixels.
         scale: f64,
         /// The picture as first shown, BGRA at `source_size`: another size is cut or padded from it (`compose`).
@@ -233,7 +243,8 @@ mod win {
         *FOLLOWER.lock().map_err(|_| "follower state poisoned".to_string())? = Some(Follower {
             hwnd,
             size,
-            offset,
+            offset: super::offset_within(offset, size),
+            grab: offset,
             scale,
             source: bgra,
             source_size: size,
@@ -294,7 +305,7 @@ mod win {
         // The picture ended, or another began, while this one was composed.
         let Some(f) = guard.as_mut().filter(|f| f.hwnd == hwnd) else { return Ok(serde_json::Value::Null) };
         f.size = size;
-        f.offset = (f.offset.0.min(size.0 - 1), f.offset.1.min(size.1 - 1));
+        f.offset = super::offset_within(f.grab, size);
         *PENDING_REPAINT.lock().map_err(|_| "repaint state poisoned".to_string())? = Some(Repaint { bgra, size });
         unsafe { PostMessageW(hwnd as HWND, WM_FOLLOW_RESIZE, 0, 0) };
         Ok(serde_json::Value::Null)
@@ -570,7 +581,16 @@ mod win {
 
 #[cfg(test)]
 mod tests {
-    use super::{compose, follow_origin, picture_wanted};
+    use super::{compose, follow_origin, offset_within, picture_wanted};
+
+    #[test]
+    fn the_grab_is_pulled_inside_a_smaller_picture_and_comes_back_whole_for_a_larger_one() {
+        let grab = (500, 30);
+        assert_eq!(offset_within(grab, (250, 200)), (249, 30));
+        // From the original grab, not from the narrow slot's offset.
+        assert_eq!(offset_within(grab, (1200, 800)), (500, 30));
+        assert_eq!(offset_within((-5, 10), (100, 100)), (0, 10));
+    }
 
     /// A 3 by 2 BGRA picture whose pixel (x, y) is (x, y, 7, 255), so a cut or a pad is read back by value.
     fn picture() -> Vec<u8> {
