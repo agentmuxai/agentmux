@@ -11,7 +11,7 @@
 //!
 //! **Two backends**, chosen once at startup:
 //! - **The OS keychain** (macOS Keychain / Windows Credential Manager / Linux
-//!   Secret Service via the `keyring` crate). The default, and what the
+//!   Secret Service via the `keyring-core` crate). The default, and what the
 //!   desktop app always uses.
 //! - **A file store** ([`use_file_store`]): one `0600` file per entry in a
 //!   `0700` directory, for machines with no keychain — a container, a
@@ -76,7 +76,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::Duration;
 
-use keyring::Entry;
+use keyring_core::Entry;
 use zeroize::Zeroizing;
 
 /// Keychain service string — constant across all AgentMux secrets.
@@ -230,8 +230,38 @@ fn shared_reads() -> &'static SharedReads {
     READS.get_or_init(SharedReads::new)
 }
 
+/// Install the OS credential store `keyring-core` hands entries to: the
+/// Keychain on macOS, the Credential Manager on Windows, the Secret Service on
+/// Linux. Until it has worked, every call tries again: the Secret Service
+/// connects when the store is made, and a session bus or keyring daemon that
+/// wasn't up yet shouldn't leave this process without credentials until restart.
+/// The stores name an entry the way keyring 2 did (service and user; on Windows
+/// the target `user.service`), so what it stored is found.
+fn credential_store() -> Result<(), String> {
+    static INSTALLED: Mutex<bool> = Mutex::new(false);
+    let mut installed = lock(&INSTALLED);
+    if *installed {
+        return Ok(());
+    }
+    #[cfg(target_os = "macos")]
+    let store = apple_native_keyring_store::keychain::Store::new();
+    #[cfg(windows)]
+    let store = windows_native_keyring_store::Store::new();
+    #[cfg(target_os = "linux")]
+    let store = zbus_secret_service_keyring_store::Store::new();
+    #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
+    {
+        keyring_core::set_default_store(store.map_err(|e| format!("keychain unavailable: {e}"))?);
+        *installed = true;
+        Ok(())
+    }
+    #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
+    Err("keychain unavailable: no OS credential store on this platform".to_string())
+}
+
 fn entry(account_id: &str) -> Result<Entry, String> {
     keychain_without_dialogs()?;
+    credential_store()?;
     Entry::new(SERVICE, &account_key(account_id))
         .map_err(|e| format!("keychain entry init failed: {e}"))
 }
@@ -271,7 +301,7 @@ fn keychain_without_dialogs() -> Result<(), String> {
 
 /// How a keychain error is reported: [`NEEDS_CONSENT`] for an item this build
 /// isn't trusted for, a locked keychain said plainly, anything else as is.
-fn keychain_error(op: &str, e: &keyring::Error) -> String {
+fn keychain_error(op: &str, e: &keyring_core::Error) -> String {
     match keychain_status(e) {
         Some(ERR_SEC_AUTH_FAILED) => NEEDS_CONSENT.to_string(),
         Some(ERR_SEC_INTERACTION_NOT_ALLOWED) => format!("keychain {op} failed: the keychain is locked ({e})"),
@@ -289,7 +319,7 @@ const ERR_SEC_DUPLICATE_ITEM: i32 = -25299;
 
 /// Delete the keychain item for `account` without reading it, which an item
 /// that doesn't trust this build allows: found by reference, never by its
-/// secret (`keyring`'s delete reads the secret first). `Ok(false)` when
+/// secret (`keyring-core`'s delete reads the secret first). `Ok(false)` when
 /// there is none. macOS only.
 #[cfg(target_os = "macos")]
 fn delete_without_reading(account: &str) -> Result<bool, String> {
@@ -321,29 +351,29 @@ fn delete_without_reading(account: &str) -> Result<bool, String> {
 
 /// Whether a failed keychain call means the item exists but doesn't trust
 /// this build: a read says `errSecAuthFailed`, a write `errSecDuplicateItem`.
-fn untrusted_item(e: &keyring::Error) -> bool {
+fn untrusted_item(e: &keyring_core::Error) -> bool {
     matches!(keychain_status(e), Some(ERR_SEC_AUTH_FAILED | ERR_SEC_DUPLICATE_ITEM))
 }
 
-/// [`delete_without_reading`] as a `keyring` result, for [`replace_untrusted`].
-fn delete_untrusted(account_id: &str) -> Result<(), keyring::Error> {
+/// [`delete_without_reading`] as a `keyring_core` result, for [`replace_untrusted`].
+fn delete_untrusted(account_id: &str) -> Result<(), keyring_core::Error> {
     #[cfg(target_os = "macos")]
     {
         delete_without_reading(&account_key(account_id))
             .map(|_| ())
-            .map_err(|e| keyring::Error::PlatformFailure(Box::new(std::io::Error::other(e))))
+            .map_err(|e| keyring_core::Error::PlatformFailure(Box::new(std::io::Error::other(e))))
     }
     #[cfg(not(target_os = "macos"))]
     {
         let _ = account_id;
-        Err(keyring::Error::NoEntry)
+        Err(keyring_core::Error::NoEntry)
     }
 }
 
 /// The macOS `OSStatus` behind a keychain error, if it carries one.
-fn keychain_status(e: &keyring::Error) -> Option<i32> {
+fn keychain_status(e: &keyring_core::Error) -> Option<i32> {
     #[cfg(target_os = "macos")]
-    if let keyring::Error::PlatformFailure(inner) | keyring::Error::NoStorageAccess(inner) = e {
+    if let keyring_core::Error::PlatformFailure(inner) | keyring_core::Error::NoStorageAccess(inner) = e {
         return inner.downcast_ref::<security_framework::base::Error>().map(|se| se.code());
     }
     let _ = e;
@@ -442,7 +472,7 @@ pub fn put(account_id: &str, secret: &str) -> Result<(), String> {
         || e.set_password(secret),
         || delete_untrusted(account_id),
         untrusted_item,
-        |err| matches!(err, keyring::Error::NoEntry),
+        |err| matches!(err, keyring_core::Error::NoEntry),
     )
     .map_err(|err| keychain_error("write", &err));
     shared_reads().after_write(account_id, written)
@@ -456,7 +486,7 @@ pub fn get(account_id: &str) -> Result<Zeroizing<String>, String> {
             .ok_or_else(|| "secret store read failed: no entry for this account".to_string());
     }
     get_optional(account_id)?
-        .ok_or_else(|| format!("keychain read failed: {}", keyring::Error::NoEntry))
+        .ok_or_else(|| format!("keychain read failed: {}", keyring_core::Error::NoEntry))
 }
 
 /// Read the secret for `account_id`, distinguishing "no entry stored yet"
@@ -497,7 +527,7 @@ pub fn get_optional_if_trusted(account_id: &str) -> Result<Option<Zeroizing<Stri
 fn get_optional_now(account_id: &str) -> Result<Option<Zeroizing<String>>, String> {
     match entry(account_id)?.get_password() {
         Ok(pw) => Ok(Some(Zeroizing::new(pw))),
-        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(keyring_core::Error::NoEntry) => Ok(None),
         Err(e) => Err(keychain_error("read", &e)),
     }
 }
@@ -511,10 +541,10 @@ pub fn delete(account_id: &str) -> Result<(), String> {
     if let Some(dir) = FILE_STORE.get() {
         return file::delete(dir, &account_key(account_id));
     }
-    let deleted = match entry(account_id)?.delete_password() {
+    let deleted = match entry(account_id)?.delete_credential() {
         Ok(()) => Ok(()),
-        Err(keyring::Error::NoEntry) => Ok(()),
-        // It can't be read, which keyring's delete needs; it can be deleted.
+        Err(keyring_core::Error::NoEntry) => Ok(()),
+        // It can't be read, which keyring-core's delete needs; it can be deleted.
         Err(e) if untrusted_item(&e) => delete_untrusted(account_id).map_err(|e| keychain_error("delete", &e)),
         Err(e) => Err(keychain_error("delete", &e)),
     };
@@ -653,11 +683,11 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn macos_codes_map_to_needs_consent_or_locked() {
-        let err = |code| keyring::Error::PlatformFailure(Box::new(security_framework::base::Error::from_code(code)));
+        let err = |code| keyring_core::Error::PlatformFailure(Box::new(security_framework::base::Error::from_code(code)));
         assert_eq!(keychain_error("read", &err(ERR_SEC_AUTH_FAILED)), NEEDS_CONSENT);
         assert!(keychain_error("read", &err(ERR_SEC_INTERACTION_NOT_ALLOWED)).contains("locked"));
         assert!(!is_needs_consent(&keychain_error("read", &err(-25299))));
-        assert!(!is_needs_consent(&keychain_error("read", &keyring::Error::NoEntry)));
+        assert!(!is_needs_consent(&keychain_error("read", &keyring_core::Error::NoEntry)));
     }
 
     /// Against the real login keychain: an `agentmux` entry that trusts no
