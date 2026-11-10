@@ -232,6 +232,29 @@ struct HookContextSeed {
     was_pinned: bool,
 }
 
+/// Register the hook thread as the active session, so a superseding start (or `stop_tab_drag_tracking`) can
+/// post WM_QUIT to it, and say whether it is a pane drag. Called only after both hooks are installed: a failed
+/// install never occupies the slot.
+#[cfg(target_os = "windows")]
+fn register_session(my_tid: u32, pane_drag: bool) {
+    if let Ok(mut g) = ACTIVE_HOOK_THREAD.lock() {
+        *g = Some(my_tid);
+        ACTIVE_PANE_DRAG.store(pane_drag, std::sync::atomic::Ordering::Release);
+    }
+}
+
+/// Vacate the active-session slot, but only if it still points at this thread: a superseding session may
+/// have replaced it already, and its pane-drag flag is then its own.
+#[cfg(target_os = "windows")]
+fn vacate_session(my_tid: u32) {
+    if let Ok(mut g) = ACTIVE_HOOK_THREAD.lock() {
+        if *g == Some(my_tid) {
+            *g = None;
+            ACTIVE_PANE_DRAG.store(false, std::sync::atomic::Ordering::Release);
+        }
+    }
+}
+
 #[cfg(target_os = "windows")]
 fn start_hook_session(seed: HookContextSeed) -> Result<(), String> {
     use std::sync::mpsc;
@@ -323,16 +346,9 @@ fn start_hook_session(seed: HookContextSeed) -> Result<(), String> {
                     return;
                 }
 
-                // Register this thread as the active session so a
-                // superseding start (or stop_tab_drag_tracking) can
-                // post WM_QUIT to it. Registered only after both hooks
-                // installed — a failed install never occupies the slot.
                 let my_tid =
                     windows_sys::Win32::System::Threading::GetCurrentThreadId();
-                if let Ok(mut g) = ACTIVE_HOOK_THREAD.lock() {
-                    *g = Some(my_tid);
-                    ACTIVE_PANE_DRAG.store(pane_drag, std::sync::atomic::Ordering::Release);
-                }
+                register_session(my_tid, pane_drag);
 
                 let _ = ready_tx.send(Ok(()));
                 tracing::info!(
@@ -358,15 +374,7 @@ fn start_hook_session(seed: HookContextSeed) -> Result<(), String> {
                 UnhookWindowsHookEx(mouse_hook);
                 HOOK_CTX.with(|cell| *cell.borrow_mut() = None);
                 crate::commands::live_follow::on_session_end();
-                // Vacate the active-session slot — but only if it still
-                // points at us (a superseding session may have already
-                // replaced it).
-                if let Ok(mut g) = ACTIVE_HOOK_THREAD.lock() {
-                    if *g == Some(my_tid) {
-                        *g = None;
-                        ACTIVE_PANE_DRAG.store(false, std::sync::atomic::Ordering::Release);
-                    }
-                }
+                vacate_session(my_tid);
 
                 tracing::info!(
                     target: "dnd:tearoff",

@@ -186,24 +186,11 @@ function CrossWindowDragMonitor(): JSX.Element {
                 grabOffsetY: grabOffsetSnapshot?.y,
             });
 
-            // The pane's picture followed the cursor (pane-live-follow.ts); only a tear-off keeps it up, under
-            // the window about to open at its place. Every other end of the drag drops it now.
             if (!payload) {
                 endLiveFollow(getApi());
                 return;
             }
-
-            // Escape was pressed during this drag — abort here too, same
-            // reasoning as checkAndFireFallback above (reagent PR #2310 P1).
-            // On Windows the page never sees the key, so ask the drag's end
-            // (native-cancel.ts); the effect is read before the await.
-            const dropEffect = e.dataTransfer?.dropEffect;
-            if (dragSession?.escaped || (await endedByEscape(dropEffect))) {
-                endLiveFollow(getApi());
-                getApi().releaseDragCapture().catch(() => {});
-                Logger.info("dnd:cross", "cross-window drag aborted via Escape");
-                return;
-            }
+            if (await abandonedByEscape(dragSession, e.dataTransfer?.dropEffect)) return;
 
             // Release WebView2 mouse capture immediately — IDropSource may leave it active
             // after an out-of-window HTML5 drag, breaking subsequent mousedown delivery.
@@ -224,6 +211,20 @@ function CrossWindowDragMonitor(): JSX.Element {
     });
 
     return null;
+}
+
+/**
+ * Escape was pressed during this drag: abort, as checkAndFireFallback does, so an escaped drag never tears off
+ * (#2310). On Windows the page never sees the key, so the drag's end is asked (native-cancel.ts); the effect is
+ * read before the await. The pane's picture that followed the cursor (pane-live-follow.ts) goes with the drag:
+ * only a tear-off keeps it up, under the window about to open at its place.
+ */
+async function abandonedByEscape(dragSession: ReturnType<typeof endReleasedSession>, dropEffect: string | undefined): Promise<boolean> {
+    if (!dragSession?.escaped && !(await endedByEscape(dropEffect))) return false;
+    endLiveFollow(getApi());
+    getApi().releaseDragCapture().catch(() => {});
+    Logger.info("dnd:cross", "cross-window drag aborted via Escape");
+    return true;
 }
 
 async function handleCrossWindowDragEnd(
