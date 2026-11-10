@@ -6,6 +6,7 @@
 // docs/specs/SPEC_HOST_API_SEAM_2026_09_26.md add their groups here.
 
 import { invokeBrowserApi, invokeCommand } from "@/app/platform/ipc";
+import { invokeFastCommand } from "@/app/platform/ipc-query";
 import { takePersonClose } from "@/app/view/browser/leave-prompt";
 
 /**
@@ -44,7 +45,8 @@ export const cefBrowserPanes: BrowserPaneHostApi = {
         await invokeCommand("browser_pane_resize", { block_id: blockId, ...rect });
     },
     setRects: async (windowLabel, rects, order) => {
-        await invokeCommand("browser_panes_set_rects", {
+        // Once per window per frame during a drag: the process-message lane, HTTP when there is none.
+        await invokeFastCommand("browser_panes_set_rects", {
             window_label: windowLabel,
             ...(order ? { epoch: order.epoch, seq: order.seq } : {}),
             rects: rects.map(({ blockId, x, y, width, height }) => ({ block_id: blockId, x, y, width, height })),

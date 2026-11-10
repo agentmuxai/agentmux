@@ -9,12 +9,13 @@
 //   JS -> Rust:  fetch("http://127.0.0.1:{port}/ipc", { method: "POST", body: JSON.stringify({cmd, args}) })
 //   Rust -> JS:  frame.execute_javascript("window.dispatchEvent(new CustomEvent('agentmux-event', {detail: ...}))")
 //
-// Why HTTP over CEF ProcessMessage:
-//   - cef-rs does not wrap CefMessageRouter (C++ convenience class)
-//   - Building a custom ProcessMessage router requires RenderProcessHandler + V8 bindings
+// Why HTTP rather than CEF process messages for the commands:
 //   - fetch() is natural for async/await frontend code
 //   - Easy to debug: curl http://127.0.0.1:PORT/ipc -d '{"cmd":"get_platform"}'
 //   - axum is already in the tokio ecosystem
+// The one command the page sends every frame, `browser_panes_set_rects`, also
+// has a process-message lane (ipc_query.rs): a page whose window has it uses
+// that, and this route otherwise.
 
 use std::sync::Arc;
 
@@ -428,8 +429,7 @@ async fn route_command(
         "pool_window_ready" => commands::drag::pool_window_ready(state, args),
         "start_tab_drag_tracking" => commands::drag::start_tab_drag_tracking_blocking(state, args).await,
         "stop_tab_drag_tracking" => commands::drag::stop_tab_drag_tracking_blocking().await,
-        "live_follow_begin" => commands::live_follow::begin_blocking(state, args).await,
-        "live_follow_end" => commands::live_follow::end(),
+        "live_follow_begin" | "live_follow_end" | "live_follow_resize" => commands::live_follow::route(cmd, state, args).await,
         "pane_pool_window_ready" => commands::drag::pane_pool_window_ready(state, args),
         "tear_off_sc_move_handshake" => {
             // Wrap in spawn_blocking — the handler polls state.browsers

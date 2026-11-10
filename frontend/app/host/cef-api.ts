@@ -593,6 +593,9 @@ function crossWindowDragApi() {
         liveFollowEnd: async () => {
             await invokeCommand("live_follow_end");
         },
+        liveFollowResize: async (args) => {
+            await invokeCommand("live_follow_resize", args);
+        },
     } satisfies Partial<AppApi>;
 }
 

@@ -1304,7 +1304,7 @@ wrap_browser_process_handler! {
                     client.as_mut(),
                     Some(&url),
                     Some(&settings),
-                    None,
+                    crate::ipc_query::app_extra_info().as_mut(),
                     None,
                     Some(&mut delegate),
                 );

@@ -2,19 +2,26 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { installTextDragGuard } from "./text-drag";
+import { DRAG_SLOP_PX, installTextDragGuard } from "./text-drag";
 
 let uninstall: () => void;
 
 function press(target: Element, init: { button?: number; pointerType?: string } = {}): void {
-    const ev = new MouseEvent("pointerdown", { bubbles: true, cancelable: true, button: init.button ?? 0 });
+    const ev = new MouseEvent("pointerdown", { bubbles: true, cancelable: true, button: init.button ?? 0, clientX: 100, clientY: 100 });
     Object.assign(ev, { pointerType: init.pointerType ?? "mouse" });
     target.dispatchEvent(ev);
 }
 
-function pointer(type: string, buttons: number, target: Element = document.body): void {
-    const ev = new MouseEvent(type, { bubbles: true, cancelable: true, buttons });
+/** A pointer event at `dx` px from the press (a drag when past the slop, a click's jitter when under it). */
+function pointer(type: string, buttons: number, target: Element = document.body, dx = 40): void {
+    const ev = new MouseEvent(type, { bubbles: true, cancelable: true, buttons, clientX: 100 + dx, clientY: 100 });
     target.dispatchEvent(ev);
+}
+
+/** A press that has become a drag: the pointer moved past the slop with the button held. */
+function drag(target: Element): void {
+    press(target);
+    pointer("pointermove", 1, target);
 }
 
 const dragging = () => document.documentElement.hasAttribute("data-text-drag");
@@ -37,10 +44,10 @@ function mount(html: string): HTMLElement {
 }
 
 describe("the text drag guard", () => {
-    it("marks the page and the field while a press in a text field is held, and clears both on release", () => {
+    it("marks the page and the field once a press in a text field moves, and clears both on release", () => {
         const root = mount('<input id="f" value="hello world">');
         const f = root.querySelector("input")!;
-        press(f);
+        drag(f);
         expect(dragging()).toBe(true);
         expect(f.hasAttribute("data-text-drag-field")).toBe(true);
         pointer("pointerup", 0, f);
@@ -48,32 +55,58 @@ describe("the text drag guard", () => {
         expect(f.hasAttribute("data-text-drag-field")).toBe(false);
     });
 
+    it("marks nothing for a click: a press and release that does not move, or moves less than the slop", () => {
+        // `html[data-text-drag] *` restyles the whole document, so a click into a composer must not toggle it (#45977).
+        const root = mount('<input id="f" value="hello world">');
+        const f = root.querySelector("input")!;
+        const html = document.documentElement;
+        const seen: string[] = [];
+        const mo = new MutationObserver((rs) => rs.forEach((r) => seen.push(String(r.attributeName))));
+        mo.observe(html, { attributes: true });
+        mo.observe(f, { attributes: true });
+
+        press(f);
+        expect(dragging()).toBe(false);
+        pointer("pointermove", 1, f, DRAG_SLOP_PX - 1);
+        expect(dragging()).toBe(false);
+        pointer("pointerup", 0, f, DRAG_SLOP_PX - 1);
+        expect(dragging()).toBe(false);
+        mo.disconnect();
+        expect(seen).toEqual([]);
+
+        press(f);
+        pointer("pointermove", 1, f, DRAG_SLOP_PX);
+        expect(dragging()).toBe(true);
+    });
+
     it.each(["text", "search", "email", "url", "tel", "password", "number"])("guards a %s field and a textarea", (type) => {
         const root = mount(`<input type="${type}"><textarea></textarea>`);
-        press(root.querySelector("input")!);
+        drag(root.querySelector("input")!);
         expect(dragging()).toBe(true);
         pointer("pointercancel", 0);
-        press(root.querySelector("textarea")!);
+        drag(root.querySelector("textarea")!);
         expect(dragging()).toBe(true);
     });
 
     it("leaves alone a press that isn't a mouse's primary button in a text field", () => {
         const root = mount('<input type="checkbox"><input type="range"><button>b</button><div id="d">x</div><input id="t">');
         for (const el of root.querySelectorAll("input[type=checkbox], input[type=range], button, #d")) {
-            press(el);
+            drag(el);
             expect(dragging()).toBe(false);
         }
         press(root.querySelector("#t")!, { button: 2 });
+        pointer("pointermove", 2);
         expect(dragging()).toBe(false);
         press(root.querySelector("#t")!, { pointerType: "touch" });
+        pointer("pointermove", 1);
         expect(dragging()).toBe(false);
     });
 
     it("leaves the terminal's own input and a marked field alone", () => {
         const root = mount('<div class="xterm"><textarea id="x"></textarea></div><div data-text-drag-skip><input id="m"></div>');
-        press(root.querySelector("#x")!);
+        drag(root.querySelector("#x")!);
         expect(dragging()).toBe(false);
-        press(root.querySelector("#m")!);
+        drag(root.querySelector("#m")!);
         expect(dragging()).toBe(false);
     });
 
@@ -84,6 +117,7 @@ describe("the text drag guard", () => {
         const paneDrag = vi.fn();
         pane.addEventListener("dragstart", paneDrag);
 
+        // From the press alone: a `dragstart` comes before any move the guard sees.
         press(f);
         const ev = new Event("dragstart", { bubbles: true, cancelable: true });
         pane.dispatchEvent(ev);
@@ -110,20 +144,21 @@ describe("the text drag guard", () => {
 
     it("ends when the pointer moves with no button down, and the window loses focus", () => {
         const f = mount("<input>").querySelector("input")!;
-        press(f);
-        pointer("pointermove", 1);
+        drag(f);
         expect(dragging()).toBe(true);
         pointer("pointermove", 0);
         expect(dragging()).toBe(false);
 
-        press(f);
+        drag(f);
+        expect(dragging()).toBe(true);
         window.dispatchEvent(new Event("blur"));
         expect(dragging()).toBe(false);
     });
 
     it("ends when the field is replaced during the drag", () => {
         const root = mount("<input>");
-        press(root.querySelector("input")!);
+        drag(root.querySelector("input")!);
+        expect(dragging()).toBe(true);
         root.innerHTML = "<input>";
         pointer("pointermove", 1);
         expect(dragging()).toBe(false);
@@ -135,6 +170,7 @@ describe("the text drag guard", () => {
         const f = root.querySelector<HTMLInputElement>("#f")!;
         const other = root.querySelector<HTMLInputElement>("#other")!;
         f.focus();
+        // From the press alone, before any move: the theft can happen at once.
         press(f);
         // The drag so far: the whole value, from the right end to the left.
         f.setSelectionRange(0, 11, "backward");
@@ -163,7 +199,7 @@ describe("the text drag guard", () => {
     it("stops listening when uninstalled", () => {
         const f = mount("<input>").querySelector("input")!;
         uninstall();
-        press(f);
+        drag(f);
         expect(dragging()).toBe(false);
         uninstall = installTextDragGuard(window);
     });

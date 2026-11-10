@@ -23,6 +23,18 @@ pub struct Model {
     pub price_cache_read: f64,
 }
 
+/// The context a route agent works in before it compacts, in tokens. A long window is a capability, not a
+/// reason to re-read a million tokens on every turn: each turn pays for the whole context at the route's price
+/// (SPEC_ROUTE_AGENT_BRAKES_2026_11_10.md section 4, D2).
+pub const COMPACT_BUDGET: u32 = 300_000;
+
+impl Model {
+    /// Where the harness should start compacting, or `None` for a model whose window is already within the budget.
+    pub fn compact_budget(&self) -> Option<u32> {
+        (self.context > COMPACT_BUDGET).then_some(COMPACT_BUDGET)
+    }
+}
+
 /// A way to reach models for one harness.
 #[derive(Debug, Clone, Copy)]
 pub struct Route {

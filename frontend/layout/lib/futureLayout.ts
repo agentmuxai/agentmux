@@ -30,12 +30,18 @@ export interface FutureLayout {
     rects: Record<string, Dimensions>;
     /** The ids of the resulting tree's panes (its leaves). */
     leafIds: string[];
+    /**
+     * Each of those panes' blockId, by node id. A pane keeps its node id through the preview, but a split can
+     * give its parent a new one, so the live reflow matches a current pane to its future rect by block
+     * (liveReflow.ts).
+     */
+    leafBlockIds: Record<string, string | undefined>;
 }
 
-function leavesOf(node: LayoutNode | undefined, out: string[] = []): string[] {
+function leavesOf(node: LayoutNode | undefined, out: LayoutNode[] = []): LayoutNode[] {
     if (!node) return out;
     if (node.children?.length) for (const c of node.children) leavesOf(c, out);
-    else out.push(node.id);
+    else out.push(node);
     return out;
 }
 
@@ -66,7 +72,13 @@ export function futureLayoutOf(model: LayoutModel, action: LayoutTreeAction | un
         withDerivedNodeIds("preview", () => applyLayoutAction(state, run));
         const rects = computeNodeRects(model, state.rootNode);
         if (!rects[movedId]) return undefined;
-        return { movedId, rects, leafIds: leavesOf(state.rootNode) };
+        const leaves = leavesOf(state.rootNode);
+        return {
+            movedId,
+            rects,
+            leafIds: leaves.map((n) => n.id),
+            leafBlockIds: Object.fromEntries(leaves.map((n) => [n.id, n.data?.blockId])),
+        };
     } catch (e) {
         console.warn("[layout] the drop preview could not be computed; falling back to the static ghost", e);
         return undefined;
