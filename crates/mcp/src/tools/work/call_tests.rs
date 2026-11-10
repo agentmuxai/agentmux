@@ -292,6 +292,7 @@ async fn missing_attempt_says(tool: &str, args: Value, listed: Value) -> String 
     let seen = srv.seen.lock().unwrap().clone();
     assert_eq!(seen.len(), 1, "only the list of claimed tasks: {seen:?}");
     assert!(seen[0].0.starts_with("/agentmux/work?"), "{seen:?}");
+    assert!(seen[0].0.contains("board=all"), "a task on any board: {seen:?}");
     err
 }
 

@@ -21,6 +21,10 @@ const LINE_RUN: usize = 20;
 const TAIL_CHARS: usize = 4_000;
 /// Fewest words in the tail before a lack of variety means anything.
 const MIN_WORDS: usize = 60;
+/// How much of a streamed thought is kept to read: enough for a run of repeated lines and for [`TAIL_CHARS`].
+const STREAM_KEEP: usize = 8_000;
+/// A streamed thought is read again after this many more bytes.
+const STREAM_READ_EVERY: usize = 200;
 /// At most this many different words in the tail, of at least [`MIN_WORDS`], is a loop.
 const MAX_DISTINCT: usize = 4;
 
@@ -54,6 +58,8 @@ pub struct LoopGuard {
     pending: HashMap<String, (String, String)>,
     /// Failures in this turn by call key, with the tool's name.
     failing: HashMap<String, (String, u32)>,
+    /// The end of each thought being streamed, by content block index, with the characters added since it was last read.
+    streaming: HashMap<u64, (String, usize)>,
 }
 
 impl LoopGuard {
@@ -61,12 +67,14 @@ impl LoopGuard {
     pub fn new_turn(&mut self) {
         self.pending.clear();
         self.failing.clear();
+        self.streaming.clear();
     }
 
     /// One frame of the harness's stdout. `Some` when this frame is the one that crossed a threshold.
     pub fn observe(&mut self, frame: &Value) -> Option<Stuck> {
         match frame.get("type").and_then(Value::as_str)? {
             "assistant" => self.assistant(frame),
+            "stream_event" => self.stream_event(frame),
             "user" => self.tool_results(frame),
             "result" => {
                 self.new_turn();
@@ -92,6 +100,37 @@ impl LoopGuard {
             }
         }
         stuck
+    }
+
+    /// A streamed thought (`--include-partial-messages`): read as it arrives, so a loop is cut while the model is
+    /// still producing it and not after it has spent its output budget. The finished `assistant` snapshot is
+    /// read too, which finds the same loop if this missed it.
+    fn stream_event(&mut self, frame: &Value) -> Option<Stuck> {
+        let event = frame.get("event")?;
+        let index = event.get("index").and_then(Value::as_u64).unwrap_or(0);
+        match event.get("type").and_then(Value::as_str)? {
+            "content_block_stop" => {
+                self.streaming.remove(&index);
+                None
+            }
+            "content_block_delta" => {
+                let delta = event.get("delta")?;
+                let piece = delta.get("thinking").or_else(|| delta.get("text")).and_then(Value::as_str)?;
+                let (tail, added) = self.streaming.entry(index).or_default();
+                tail.push_str(piece);
+                *added += piece.len();
+                if tail.len() > STREAM_KEEP {
+                    let cut = (tail.len() - STREAM_KEEP..).find(|&i| tail.is_char_boundary(i)).unwrap_or(tail.len());
+                    tail.drain(..cut);
+                }
+                if *added < STREAM_READ_EVERY {
+                    return None;
+                }
+                *added = 0;
+                repeats_itself(tail)
+            }
+            _ => None,
+        }
     }
 
     fn tool_results(&mut self, frame: &Value) -> Option<Stuck> {

@@ -103,3 +103,52 @@ fn ordinary_thinking_and_a_short_repeat_are_not() {
     let list = (1..=40).map(|n| format!("item {n}\n")).collect::<String>();
     assert_eq!(g.observe(&thinking(&list)), None, "a list whose lines differ");
 }
+
+fn delta(index: u64, kind: &str, text: &str) -> Value {
+    let field = if kind == "thinking_delta" { "thinking" } else { "text" };
+    json!({ "type": "stream_event", "event": { "type": "content_block_delta", "index": index, "delta": { "type": kind, field: text } } })
+}
+
+#[test]
+fn a_thought_that_loops_while_it_streams_is_cut_before_it_finishes() {
+    let mut g = LoopGuard::default();
+    let mut stuck = None;
+    let mut pieces = 0;
+    for _ in 0..400 {
+        pieces += 1;
+        stuck = g.observe(&delta(0, "thinking_delta", "Hmm. Wait. "));
+        if stuck.is_some() {
+            break;
+        }
+    }
+    assert_eq!(stuck, Some(Stuck::SameThought));
+    assert!(pieces < 400, "found while it streamed, after {pieces} pieces");
+}
+
+#[test]
+fn a_streamed_text_block_is_read_too_and_a_finished_block_starts_over() {
+    let mut g = LoopGuard::default();
+    let mut stuck = None;
+    for _ in 0..400 {
+        stuck = stuck.or_else(|| g.observe(&delta(1, "text_delta", "Let me retry the call.\n")));
+    }
+    assert_eq!(stuck, Some(Stuck::SameThought));
+
+    let mut g = LoopGuard::default();
+    for _ in 0..8 {
+        assert_eq!(g.observe(&delta(0, "thinking_delta", "Hmm. ")), None);
+    }
+    let stop = json!({ "type": "stream_event", "event": { "type": "content_block_stop", "index": 0 } });
+    assert_eq!(g.observe(&stop), None);
+    for _ in 0..8 {
+        assert_eq!(g.observe(&delta(0, "thinking_delta", "Hmm. ")), None, "the stopped block's text is not carried over");
+    }
+}
+
+#[test]
+fn a_streamed_thought_that_does_not_repeat_is_left_alone() {
+    let mut g = LoopGuard::default();
+    for n in 0..300 {
+        assert_eq!(g.observe(&delta(0, "thinking_delta", &format!("Step {n}: read file number {n} and compare it with the next one. "))), None);
+    }
+}

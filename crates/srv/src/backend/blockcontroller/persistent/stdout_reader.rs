@@ -8,6 +8,11 @@
 
 use super::*;
 
+// What the reader does when the loop guard says the agent is stuck. Declared here, not in `mod.rs`, which is
+// at its size ratchet.
+#[path = "loop_stop.rs"]
+mod loop_stop;
+
 /// What the stdout reader task captures from `spawn_process`.
 pub(super) struct StdoutReaderCtx {
     pub(super) stdout: tokio::process::ChildStdout,
@@ -394,7 +399,7 @@ impl StdoutReader {
             return false;
         }
         if let Some(stuck) = self.loop_guard.observe(parsed) {
-            self.ended_by_guard = super::loop_stop::end_the_turn(&self.inner_read, &self.block_id_read, self.mstore_read.as_ref(), &stuck);
+            self.ended_by_guard = loop_stop::end_the_turn(&self.inner_read, &self.block_id_read, self.mstore_read.as_ref(), &stuck);
         }
         false
     }

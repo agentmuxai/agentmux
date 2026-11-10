@@ -697,7 +697,7 @@ async fn missing_attempt(arguments: &Value, self_id: &str, cx: &ToolCtx<'_>) -> 
     let ToolCtx { local_url, auth_key, client, .. } = *cx;
     let asked = arguments.get("id").and_then(|v| v.as_str()).map(|s| s.trim().trim_start_matches('#')).unwrap_or("");
     let url = format!("{}/agentmux/work", local_url.trim_end_matches('/'));
-    let held: Vec<(String, i64)> = match client.get(&url).query(&[("state", "claimed"), ("limit", "200")]).header(AUTH_KEY_HEADER, auth_key).send().await {
+    let held: Vec<(String, i64)> = match client.get(&url).query(&[("state", "claimed"), ("limit", "200"), ("board", "all")]).header(AUTH_KEY_HEADER, auth_key).send().await {
         Ok(resp) => resp.json::<Value>().await.ok(),
         Err(_) => None,
     }
