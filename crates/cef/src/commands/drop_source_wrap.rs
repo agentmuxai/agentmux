@@ -234,7 +234,10 @@ unsafe extern "system" fn wrapper_give_feedback(this: *mut c_void, effect: u32) 
     let wrapper = &*(this as *mut Wrapper);
     let inner = wrapper.inner;
     let answer = ((*(*inner).vtbl).give_feedback)(inner as *mut c_void, effect);
-    set_shell_drag_image_visible(wrapper.data, !super::live_follow::picture_shown());
+    // A pane drag shows no shell picture at all, from its first move: the pane's own picture follows instead,
+    // and until it is up (it is being taken) the drag shows nothing rather than the shell's ghost for a frame.
+    let picture_wanted_gone = super::live_follow::picture_shown() || super::tear_off_hook::pane_drag_active();
+    set_shell_drag_image_visible(wrapper.data, !picture_wanted_gone);
     if wants_arrow(effect, super::tear_off_hook::hook_session_active()) {
         SetCursor(LoadCursorW(std::ptr::null_mut(), IDC_ARROW));
         return S_OK;

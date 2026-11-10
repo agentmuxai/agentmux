@@ -30,8 +30,8 @@ enum HookMode {
     /// which the page can't see during the OS drag. Reported as
     /// `tabdrag:escape-pressed`, like `TabDrag`.
     EscapeWatch,
-    /// A pane drag with the live-follow picture: Escape, and the cursor, which moves the picture while it is
-    /// outside every AgentMux window (inside one the drag is a tile drop). No hover events, no merge.
+    /// A pane drag with the live-follow picture: Escape, and the cursor, which moves the picture wherever it
+    /// goes (over the layout the drop is a tile drop, outside every window a tear-off). No hover events, no merge.
     PaneDrag,
 }
 
@@ -97,6 +97,17 @@ pub fn hook_session_active() -> bool {
     ACTIVE_HOOK_THREAD.lock().map(|g| g.is_some()).unwrap_or(false)
 }
 
+/// Whether the running session is a pane drag with the live-follow picture (`HookMode::PaneDrag`). Set with
+/// the session slot and cleared with it. A flag, not the mutex: the drop source asks on every cursor move.
+#[cfg(target_os = "windows")]
+static ACTIVE_PANE_DRAG: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether a pane drag whose picture follows the cursor is running now, whether or not the picture is up yet.
+#[cfg(target_os = "windows")]
+pub fn pane_drag_active() -> bool {
+    ACTIVE_PANE_DRAG.load(std::sync::atomic::Ordering::Acquire)
+}
+
 /// Stop the active hook session, if any. Idempotent. Used by the
 /// session-takeover path above and by the frontend's dragend
 /// belt-and-suspenders `stop_tab_drag_tracking` call — a leaked
@@ -104,6 +115,7 @@ pub fn hook_session_active() -> bool {
 #[cfg(target_os = "windows")]
 pub fn stop_active_hook_session() {
     let tid = { ACTIVE_HOOK_THREAD.lock().map(|mut g| g.take()).unwrap_or(None) };
+    ACTIVE_PANE_DRAG.store(false, std::sync::atomic::Ordering::Release);
     if let Some(tid) = tid {
         unsafe {
             use windows_sys::Win32::UI::WindowsAndMessaging::{PostThreadMessageW, WM_QUIT};
@@ -238,6 +250,7 @@ fn start_hook_session(seed: HookContextSeed) -> Result<(), String> {
     std::thread::Builder::new()
         .name("tear-off-hook".to_string())
         .spawn(move || {
+            let pane_drag = seed.mode == HookMode::PaneDrag;
             let ctx = HookContext {
                 state: seed.state,
                 mode: seed.mode,
@@ -318,6 +331,7 @@ fn start_hook_session(seed: HookContextSeed) -> Result<(), String> {
                     windows_sys::Win32::System::Threading::GetCurrentThreadId();
                 if let Ok(mut g) = ACTIVE_HOOK_THREAD.lock() {
                     *g = Some(my_tid);
+                    ACTIVE_PANE_DRAG.store(pane_drag, std::sync::atomic::Ordering::Release);
                 }
 
                 let _ = ready_tx.send(Ok(()));
@@ -350,6 +364,7 @@ fn start_hook_session(seed: HookContextSeed) -> Result<(), String> {
                 if let Ok(mut g) = ACTIVE_HOOK_THREAD.lock() {
                     if *g == Some(my_tid) {
                         *g = None;
+                        ACTIVE_PANE_DRAG.store(false, std::sync::atomic::Ordering::Release);
                     }
                 }
 
@@ -498,12 +513,10 @@ fn pane_or_escape_session() -> bool {
     })
 }
 
-/// A pane drag's cursor: the picture shows while the cursor is outside every AgentMux window.
+/// A pane drag's cursor: the picture follows it everywhere (`live_follow::picture_wanted`), so no window lookup.
 #[cfg(target_os = "windows")]
-fn follow_pane(ctx: &HookContext, x: i32, y: i32) {
-    let browsers: std::collections::HashMap<String, cef::Browser> = ctx.state.list_browsers().into_iter().collect();
-    let over_window = window_label_at(&ctx.state, &browsers, x, y).is_some();
-    crate::commands::live_follow::on_cursor(x, y, over_window);
+fn follow_pane(x: i32, y: i32) {
+    crate::commands::live_follow::on_cursor(x, y, false);
 }
 
 #[cfg(target_os = "windows")]
@@ -514,7 +527,7 @@ fn handle_mouse_move(cursor_x: i32, cursor_y: i32) {
             return;
         };
         if ctx.mode == HookMode::PaneDrag {
-            follow_pane(ctx, cursor_x, cursor_y);
+            follow_pane(cursor_x, cursor_y);
             return;
         }
 
