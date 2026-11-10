@@ -79,6 +79,27 @@ describe("previewPlacement", () => {
         expect(targetId).toBe("B");
     });
 
+    it("starts afresh when the tree changes under the drag", () => {
+        // Two panes, hit-tested against the model's own rects; then srv swaps their places mid-drag.
+        let shape = [
+            { id: "A", rect: { top: 0, left: 0, width: 400, height: 400 } },
+            { id: "B", rect: { top: 0, left: 400, width: 400, height: 400 } },
+        ];
+        const changing = {
+            treeState: { rootNode: undefined },
+            treeReducer: vi.fn(),
+            leafs: () => shape.map((s) => ({ id: s.id })),
+            getNodeRectById: (id: string) => shape.find((s) => s.id === id)?.rect,
+        } as never;
+        previewPlacement(changing, input("A", 40, 200));
+        // Still the same layout: a fast jump over B is held back by the tracker, as before.
+        expect(previewPlacement(changing, input("B", 3000, 3000)).targetId).toBe("A");
+        shape = [shape[1], shape[0]].map((s, i) => ({ ...s, rect: { ...s.rect, left: i * 400 } }));
+        // A new layout: the first sample on it arms at once, whatever was armed on the old one.
+        expect(previewPlacement(changing, input("B", 3000, 3000)).targetId).toBe("B");
+        resetDropIntent(changing);
+    });
+
     it("resets every tab's steadying at the end of a drag", () => {
         const other = { treeState: { rootNode: undefined }, treeReducer: vi.fn() } as never;
         previewPlacement(other, input("A", 40, 200));
