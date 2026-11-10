@@ -39,7 +39,7 @@ pub(super) static QWEN: ProviderConfig = ProviderConfig {
     auth_extra_env: &[],
     unset_env: &[],
     npm_package: "@qwen-code/qwen-code",
-    pinned_version: "0.24.7",
+    pinned_version: "0.27.1",
     // Note: qwen's default backend already routes through an OpenAI-compatible
     // endpoint (see comment above) as a fixed part of its auth setup — but
     // that's baked-in default routing, not a confirmed user-configurable
