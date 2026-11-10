@@ -26,7 +26,6 @@
 2185 crates/srv/src/muxbus/cloud_subscriber.rs
 2120 crates/srv/src/persist_subscriber.rs
 1509 crates/srv/src/registry/migrate.rs
-1521 crates/srv/src/server/editor_handlers.rs
 2107 crates/srv/src/server/muxspect_handlers.rs
 2050 crates/srv/src/server/reactive.rs
 2071 frontend/app/view/swarm/swarm-model.ts
