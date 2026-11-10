@@ -81,19 +81,19 @@ async fn start_once(state: &AppState, uid: &str, sender_key: &str) -> Result<(),
     };
     super::start_rate::allow(state, sender_key)?;
     let block_id = super::app_api::agent_attach::start_agent(state, uid).await?;
-    make_addressable(state, uid, &block_id);
+    make_addressable(state, uid, &block_id, 0);
     Ok(())
 }
 
 /// A started agent that has never run (no session to resume) has a controller that spawns on its first
 /// turn and registers for delivery only then, and there is no pane to send that turn. Register it here, so
 /// the replay (or a Job's fire) reaches it and the delivery starts that turn.
-pub(super) fn make_addressable(state: &AppState, uid: &str, block_id: &str) -> bool {
+pub(super) fn make_addressable(state: &AppState, uid: &str, block_id: &str, nonce: u64) -> bool {
     if state.reactive_handler.has_uid_registration(uid) {
         return false;
     }
     let slug = state.mstore.agent_def_get(uid).ok().flatten().map(|d| d.slug).filter(|s| !s.is_empty()).unwrap_or_else(|| uid.to_string());
-    match state.reactive_handler.register_agent_full(&slug, block_id, None, 0, Some(&slug), Some(uid), "registration.start") {
+    match state.reactive_handler.register_agent_full(&slug, block_id, None, nonce, Some(&slug), Some(uid), "registration.start") {
         Ok(()) => true,
         Err(e) => {
             tracing::warn!(target_uid = %uid, "start: could not register the started agent for delivery: {e}");
