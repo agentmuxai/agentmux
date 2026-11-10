@@ -6,6 +6,7 @@
 // Split out of MyAgentsList.tsx (#13044 S6); MyAgentsRowPanel.tsx draws it.
 
 import { errorDetail } from "@/app/notification/toast-debug";
+import { windowResizing } from "@/app/platform/window-resize";
 import { rowEnd } from "@/app/element/ui/CardGrid";
 import { getOpenBlockIdsForDefinition } from "@/app/store/agent-pane-state-store";
 import { hasProcess } from "@/app/store/agent-runtime";
@@ -19,6 +20,7 @@ import { Logger } from "@/util/logger";
 import { batch, createEffect, createSignal, on, onCleanup, type Accessor, type Setter } from "solid-js";
 import { requestShutdown } from "../shutdown/shut-down-agent";
 import { createEnvDraft, type EnvDraft } from "./AgentEnvPanel";
+import { columnsForWidth, gridMetrics, type GridMetrics } from "./my-agents-grid-columns";
 import { createSeatForm, type SeatForm } from "./AgentSeatPanel";
 import type { MyAgentsListProps } from "./MyAgentsList";
 import type { MyAgentsData } from "./my-agents-list-data";
@@ -387,13 +389,25 @@ const panelRowId = (s: RowPanelsState): string | null => {
 const isRowExpanded = (s: RowPanelsState, definitionId: string): boolean => panelRowId(s) === definitionId;
 
 const measureList = (s: RowPanelsState, ul: HTMLUListElement): void => {
-    const measure = () =>
-        s.setColumns(Math.max(1, getComputedStyle(ul).gridTemplateColumns.split(" ").filter(Boolean).length));
+    // The columns as the browser has them, which also refreshes the tile minimum and gap used to work them out.
+    let metrics: GridMetrics | null = null;
+    const measure = () => {
+        const style = getComputedStyle(ul);
+        s.setColumns(Math.max(1, style.gridTemplateColumns.split(" ").filter(Boolean).length));
+        metrics = gridMetrics(style);
+    };
     measure();
     if (typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(measure);
+    // While the window is dragged the count comes from the observed width: reading it back would force a layout on
+    // every frame. It is read once more when the drag settles, so a difference can't outlive it.
+    const ro = new ResizeObserver((entries) => {
+        const width = entries?.[entries.length - 1]?.contentRect.width;
+        if (windowResizing() && metrics != null && width != null) s.setColumns(columnsForWidth(width, metrics));
+        else measure();
+    });
     ro.observe(ul);
     onCleanup(() => ro.disconnect());
+    createEffect(on(windowResizing, (resizing) => resizing || measure(), { defer: true }));
 };
 
 /** The row whose panel goes right after row `id`'s tile, if that is where it goes. */
