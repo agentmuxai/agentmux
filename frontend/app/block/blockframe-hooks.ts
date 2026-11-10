@@ -226,7 +226,11 @@ export function useHeaderScrollRange(header: () => HTMLElement | undefined): {
             });
         };
         const observer = new MutationObserver(schedule);
-        if (range) observer.observe(range, { subtree: true, childList: true, attributes: true, attributeFilter: ["class"] });
+        if (range) {
+            observer.observe(range, { subtree: true, childList: true, attributes: true, attributeFilter: ["class"] });
+            // A header that mounts with its selected tab already past the edge gets no mutation to wake it.
+            schedule();
+        }
         onCleanup(() => {
             observer.disconnect();
             if (frame) cancelAnimationFrame(frame);
