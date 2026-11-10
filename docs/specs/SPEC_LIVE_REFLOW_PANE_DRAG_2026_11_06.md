@@ -1,6 +1,6 @@
 # SPEC: Live reflow while dragging a pane or pane tab (the end state for pane drag and drop)
 
-**Status:** approved by the operator 2026-11-09 with every recommendation ("lets go with your best recommendations", batched as separate PRs, one per phase); spec task #27340, build #27341
+**Status:** active. Approved by the operator 2026-11-09 with every recommendation ("lets go with your best recommendations", batched as separate PRs, one per phase); spec task #27340, build #27341. Phase 1 (the velocity gate, the frozen snapshot, the preview's cost) ships with this spec.
 **Owner:** Agent2@narko. **Layout review:** Camper (panes and layout seat). **Browser panes:** the browser seat (Korp) and QTest (the Browser tally).
 **Operator's words (2026-11-06):** "just spoke to agent2 about live reflow for the panes. that's the desired end-state."
 **Builds on:** [REPORT_LIVE_REFLOW_PANE_DRAG_ALGORITHMS_2026_11_05.md](../reports/REPORT_LIVE_REFLOW_PANE_DRAG_ALGORITHMS_2026_11_05.md) (prior art, the transform-only recommendation, the plan), `SPEC_MOTION_PRIMITIVES_2026_10_29.md`, `SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15.md`, and the tear-off work (#6457, #6486, #6495, #6498, #22175).
