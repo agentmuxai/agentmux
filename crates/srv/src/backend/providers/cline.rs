@@ -25,7 +25,7 @@ pub(super) static CLINE: ProviderConfig = ProviderConfig {
     auth_extra_env: &[("CLINE_NO_AUTO_UPDATE", "1")],
     unset_env: &[],
     npm_package: "cline",
-    pinned_version: "3.0.71",
+    pinned_version: "3.0.74",
     base_url_env_var: None,
     supported_vendors: &["cline"],
     startup_instructions_filename: Some("AGENTS.md"),
