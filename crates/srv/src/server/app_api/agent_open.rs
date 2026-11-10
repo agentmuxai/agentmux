@@ -583,6 +583,16 @@ mod write_agent_config_files_tests {
         Store::open_in_memory().unwrap()
     }
 
+    /// Write a launch's files with the relocated MCP config under a temp data home, so a test's
+    /// project folder is never written and nothing lands in the real AgentMux data root.
+    fn write_test_configs(mstore: &Store, id_store: &Store, agent: &AgentDefinition, work_dir: &str) {
+        let data = tempfile::tempdir().unwrap();
+        crate::backend::mcp_config_file::with_data_home(data.path(), || {
+            write_agent_config_files(mstore, id_store, mstore, agent, "test-agent", work_dir)
+        })
+        .unwrap();
+    }
+
     fn make_agent(id: &str, working_directory: &str) -> AgentDefinition {
         AgentDefinition {
             seat: None,
@@ -647,7 +657,7 @@ mod write_agent_config_files_tests {
         mstore.agent_def_insert(&mut agent).unwrap();
         mstore.skill_upsert_unique(&mstore, "agent-1", &make_skill("agent-skill"), true).unwrap();
 
-        write_agent_config_files(&mstore, &id_store, &mstore, &agent, "test-agent", work_dir_str).unwrap();
+        write_test_configs(&mstore, &id_store, &agent, work_dir_str);
         let skill_md = work_dir.path().join(".claude/skills/deploy/SKILL.md");
         assert!(skill_md.exists(), "expected .claude/skills/deploy/SKILL.md to be written");
 
@@ -655,7 +665,7 @@ mod write_agent_config_files_tests {
         let mut prompt_skill = make_skill("prompt");
         prompt_skill.updated_at = 1_700_000_000_001;
         mstore.skill_upsert_unique(&mstore, "agent-1", &prompt_skill, true).unwrap();
-        write_agent_config_files(&mstore, &id_store, &mstore, &agent, "test-agent", work_dir_str).unwrap();
+        write_test_configs(&mstore, &id_store, &agent, work_dir_str);
 
         let command_md = work_dir.path().join(".claude/commands/deploy.md");
         assert!(command_md.exists(), "expected .claude/commands/deploy.md to be written");
@@ -687,8 +697,8 @@ mod write_agent_config_files_tests {
         std::fs::write(&user_file, "# hand-authored, not from AgentMux").unwrap();
 
         mstore.skill_upsert_unique(&mstore, "agent-1", &make_skill("agent-skill"), true).unwrap();
-        write_agent_config_files(&mstore, &id_store, &mstore, &agent, "test-agent", work_dir_str).unwrap();
-        write_agent_config_files(&mstore, &id_store, &mstore, &agent, "test-agent", work_dir_str).unwrap();
+        write_test_configs(&mstore, &id_store, &agent, work_dir_str);
+        write_test_configs(&mstore, &id_store, &agent, work_dir_str);
 
         assert!(user_file.exists(), "hand-authored file outside AgentMux's manifest must survive");
     }
@@ -729,7 +739,7 @@ mod write_agent_config_files_tests {
 
         // No skills at all this run, so the manifest's one entry is "stale"
         // and would normally be deleted.
-        write_agent_config_files(&mstore, &id_store, &mstore, &agent, "test-agent", work_dir_str).unwrap();
+        write_test_configs(&mstore, &id_store, &agent, work_dir_str);
 
         assert!(sentinel.exists(), "file outside the working directory must never be deleted");
     }
@@ -756,7 +766,7 @@ mod write_agent_config_files_tests {
         let mut agent = make_agent("agent-1", work_dir_str);
         mstore.agent_def_insert(&mut agent).unwrap();
         mstore.skill_upsert_unique(&mstore, "agent-1", &make_skill("agent-skill"), true).unwrap();
-        write_agent_config_files(&mstore, &id_store, &mstore, &agent, "test-agent", work_dir_str).unwrap();
+        write_test_configs(&mstore, &id_store, &agent, work_dir_str);
 
         let leaked: Vec<_> = walkdir_files(outside.path());
         assert!(leaked.is_empty(), "nothing may be written outside the workdir, found {leaked:?}");
@@ -822,10 +832,12 @@ mod write_agent_config_files_tests {
             })
             .unwrap();
 
-        write_agent_config_files(&mstore, &id_store, &mstore, &agent, "test-agent", work_dir_str).unwrap();
-
-        let mcp_json_path = work_dir.path().join(".mcp.json");
-        let mcp_json = std::fs::read_to_string(&mcp_json_path).unwrap();
+        // A user's project gets the config outside it (#3680), under the data root.
+        let data = tempfile::tempdir().unwrap();
+        let mcp_json = crate::backend::mcp_config_file::with_data_home(data.path(), || {
+            write_agent_config_files(&mstore, &id_store, &mstore, &agent, "test-agent", work_dir_str).unwrap();
+            std::fs::read_to_string(crate::backend::mcp_config_file::config_path(work_dir_str)).unwrap()
+        });
         let parsed: serde_json::Value = serde_json::from_str(&mcp_json).unwrap();
         assert!(
             parsed["mcpServers"].get("legacy-server").is_some(),
@@ -904,7 +916,11 @@ mod write_agent_config_files_tests {
             .agent_bundles_set("agent-1", &["b2".to_string(), "gone".to_string(), "b1".to_string()])
             .unwrap();
 
-        write_agent_config_files(&mstore, &id_store, &mstore, &agent, "test-agent", work_dir_str).unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let mcp_json = crate::backend::mcp_config_file::with_data_home(data.path(), || {
+            write_agent_config_files(&mstore, &id_store, &mstore, &agent, "test-agent", work_dir_str).unwrap();
+            std::fs::read_to_string(crate::backend::mcp_config_file::config_path(work_dir_str)).unwrap_or_default()
+        });
 
         let claude_md = std::fs::read_to_string(work_dir.path().join("CLAUDE.md")).unwrap();
         let global = claude_md.find("# [Workspace] Rules").expect("Global Memory section");
@@ -912,7 +928,6 @@ mod write_agent_config_files_tests {
         let reviewer = claude_md.find("# [Bundle] Reviewer\n\nreview carefully").expect("second pick's section");
         assert!(global < writer && writer < reviewer, "Global Memory, then the picks in order: {claude_md}");
 
-        let mcp_json = std::fs::read_to_string(work_dir.path().join(".mcp.json")).unwrap_or_default();
         assert!(!mcp_json.contains("writer-tools"), "a picked bundle's server must not launch: {mcp_json}");
     }
 
@@ -933,7 +948,7 @@ mod write_agent_config_files_tests {
         let soul = crate::backend::storage::content::AgentContent { agent_id, content_type, content, updated_at: 1 };
         mstore.agent_content_set(&soul).unwrap();
 
-        write_agent_config_files(&mstore, &id_store, &mstore, &agent, "test-agent", work_dir.path().to_str().unwrap()).unwrap();
+        write_test_configs(&mstore, &id_store, &agent, work_dir.path().to_str().unwrap());
         let written = std::fs::read_to_string(work_dir.path().join("AGENTS.md")).unwrap();
         let cost = crate::server::memory_launch_cost::launch_cost(&mstore, &id_store, &mstore, &agent, Some(&written), &[]);
         let (_marker, body) = written.split_once("\n\n").unwrap();

@@ -185,7 +185,8 @@ fn only_this_modules_own_mount_targets_are_compared() {
     assert!(owned.contains(&crate::identity::github_tokens::CONTAINER_HOOKS_DIR.to_string()));
     assert!(owned.contains(&crate::identity::aws_broker::container::CONTAINER_AWS_DIR.to_string()));
     assert!(owned.contains(&crate::identity::aws_broker::tools::CONTAINER_TOOLS_DIR.to_string()));
-    assert_eq!(owned.len(), 6, "a user volume target must never appear here");
+    assert!(owned.contains(&CONTAINER_MCP_CONFIG_FILE.to_string()));
+    assert_eq!(owned.len(), 7, "a user volume target must never appear here");
 }
 
 /// macOS keeps OAuth credentials in the Keychain and never writes this file

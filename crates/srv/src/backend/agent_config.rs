@@ -1244,6 +1244,11 @@ pub const MCP_JSON_WRITE_LOCK: &str = ".claude/.agentmux-mcp-json.lock";
 /// `WriteAgentConfig` "click Launch" path — the two config-materializing call
 /// sites this module keeps in sync.
 ///
+/// Only for a folder AgentMux owns. When `base_path` is the user's own project,
+/// both call sites write the agent's config under AgentMux's data directory
+/// instead (`backend::mcp_config_file`) and never touch the project's file at
+/// all: a launch neither overwrites nor edits it, and no key reaches it.
+///
 /// An agent's `working_directory` may be the user's own project, where a
 /// `.mcp.json` often already exists (and is often committed). A plain
 /// `fs::write` replaced it, dropping every server entry the agent definition

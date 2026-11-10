@@ -94,6 +94,9 @@ pub enum MountRole {
     PersonalMemory,
     /// The CLI's own config folder (`CLAUDE_CONFIG_DIR`).
     CliHome,
+    /// The agent's MCP config when it lives outside its working directory (#3680). A container
+    /// gets it as a read-only file bind; the host uses the path as it is.
+    McpConfig,
 }
 
 /// A helper program AgentMux puts beside the agent's CLI.
@@ -250,6 +253,7 @@ impl RuntimeAdapter for ContainerAdapter {
             MountRole::Workspace => CONTAINER_WORKSPACE_DIR.to_string(),
             MountRole::PersonalMemory => super::container::container_memory_dir(),
             MountRole::CliHome => CONTAINER_CLAUDE_DIR.to_string(),
+            MountRole::McpConfig => super::container::CONTAINER_MCP_CONFIG_FILE.to_string(),
         }
     }
 

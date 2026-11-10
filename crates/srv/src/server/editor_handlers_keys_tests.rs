@@ -4,14 +4,39 @@
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{RpcContext, RpcMessage};
 
+/// Point `AGENTMUX_DATA_HOME` at a temp folder while it lives, so a test's relocated configs never
+/// reach the real data root (and never need a write outside the test sandbox).
+struct DataHome(Option<std::ffi::OsString>);
+impl DataHome {
+    fn set(path: &std::path::Path) -> Self {
+        let saved = std::env::var_os("AGENTMUX_DATA_HOME");
+        std::env::set_var("AGENTMUX_DATA_HOME", path);
+        Self(saved)
+    }
+}
+impl Drop for DataHome {
+    fn drop(&mut self) {
+        match self.0.take() {
+            Some(v) => std::env::set_var("AGENTMUX_DATA_HOME", v),
+            None => std::env::remove_var("AGENTMUX_DATA_HOME"),
+        }
+    }
+}
+
 /// Run `writeagentconfig` for an `.mcp.json` naming `slug`, as `ctx`, and return the file as
 /// written (or the refusal).
 async fn write_mcp_json(ctx: RpcContext, slug: &str) -> Result<serde_json::Value, String> {
+    // The data home is process-wide; keep these two tests from overlapping each other.
+    static ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _held = ENV.lock().unwrap_or_else(|e| e.into_inner());
+    let data = tempfile::tempdir().unwrap();
+    let _home = DataHome::set(data.path());
     let state = crate::server::tests::test_state();
     let (engine, mut rx) = WshRpcEngine::new();
     super::register_editor_handlers(&engine, &state);
     engine.set_rpc_context(ctx);
     let dir = tempfile::tempdir().unwrap();
+    let mcp_path = crate::backend::mcp_config_file::config_path(&dir.path().to_string_lossy());
     let mcp = serde_json::json!({
         "mcpServers": { "agentmux": { "type": "stdio", "command": "agentmux-mcp", "env": { "AGENTMUX_AGENT_ID": slug } } }
     });
@@ -27,9 +52,10 @@ async fn write_mcp_json(ctx: RpcContext, slug: &str) -> Result<serde_json::Value
     let resp = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv()).await.unwrap().unwrap();
     if !resp.error.is_empty() {
         assert!(!dir.path().join(".mcp.json").exists(), "a refusal writes nothing");
+        assert!(!mcp_path.exists(), "a refusal writes nothing (the config is outside the project, #3680)");
         return Err(resp.error);
     }
-    Ok(serde_json::from_str(&std::fs::read_to_string(dir.path().join(".mcp.json")).unwrap()).unwrap())
+    Ok(serde_json::from_str(&std::fs::read_to_string(&mcp_path).unwrap()).unwrap())
 }
 
 #[tokio::test]
