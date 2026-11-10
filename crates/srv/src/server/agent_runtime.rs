@@ -262,6 +262,7 @@ fn notify_waiting(state: &AppState, row: &AgentRuntime) {
 
 /// Look at the states on a short interval and publish each change to `agentruntime:changed:<id>`.
 pub(crate) fn spawn(state: AppState) {
+    super::registry_reconcile::spawn(state.clone()); // a running agent missing from the registry is put back
     tokio::spawn(async move {
         let mut last: HashMap<String, AgentRuntime> = HashMap::new();
         loop {
