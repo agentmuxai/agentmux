@@ -15,7 +15,7 @@
 import { LinkifiedText } from "@/app/element/linkified-text";
 import { useTick } from "@/app/hook/useTick";
 import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
-import { formatExactTime, formatTimeAgo } from "@/util/format-time";
+import { formatPeekTime } from "@/util/format-time";
 import { Show, createMemo, type JSX } from "solid-js";
 import { AttachmentStrip } from "../attachments/AttachmentStrip";
 import { useNodePeek } from "../hooks/useNodePeek";
@@ -52,7 +52,7 @@ export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
         peekTick(); // re-run every second so "ago" stays live while hovered
         const ts = props.node.timestamp;
         if (ts == null) return null;
-        return `${formatExactTime(ts)} · ${formatTimeAgo(ts)}`;
+        return formatPeekTime(ts);
     });
     const peekEstimateText = createMemo(() => {
         const count = estimateTokenCount(props.node.message);
