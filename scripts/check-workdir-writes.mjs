@@ -23,17 +23,13 @@ import { fileURLToPath } from "node:url";
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 
 // `region`: only the lines from `start` (directly after a line matching
-// `after`) up to the next `end` are checked
-// (editor_handlers.rs also holds the editor pane's own saves, which write
-// wherever the user points them, not into a workdir).
+// `after`) up to the next `end` are checked; no region means the whole file.
 const FILES = [
     { path: "crates/srv/src/backend/agent_config.rs" },
     { path: "crates/srv/src/server/app_api/agent_open.rs" },
-    {
-        path: "crates/srv/src/server/editor_handlers.rs",
-        // The handler's registration, not the `use` list naming the constant.
-        region: { start: /^\s+COMMAND_WRITE_AGENT_CONFIG,\s*$/, after: /engine\.register_typed\(/, end: /engine\.register_typed\(/ },
-    },
+    // The `writeagentconfig` handler. editor_handlers/file_io.rs holds the editor pane's own saves, which write
+    // wherever the user points them, not into a workdir, so it is not listed.
+    { path: "crates/srv/src/server/editor_handlers/agent_config.rs" },
 ];
 
 // Any `fs::` call that creates, changes or removes something, and the
