@@ -601,7 +601,7 @@ async fn rename_agent(cx: &ToolCtx<'_>, args: &Value) -> Result<String> {
 
 /// The fields `update` may change (`/api/v1/agent/update`); the name, provider, environment, accounts and
 /// seat have their own actions.
-const DEFINITION_FIELDS: &[&str] = &["description", "icon", "auto_start", "restart_on_crash", "idle_timeout_minutes", "route", "model"];
+const DEFINITION_FIELDS: &[&str] = &["description", "icon", "auto_start", "restart_on_crash", "idle_timeout_minutes", "route", "model", "spend_cap_usd", "reset_spend_today"];
 /// What decides what an agent runs, where its traffic goes or which project files it reads: the operator's to set in
 /// My Agents, as `env_set` refuses the same.
 const OPERATOR_FIELDS: &[&str] = &["shell", "provider_flags", "working_directory", "model_vendor_base_url"];

@@ -87,8 +87,21 @@ struct Entry {
     args: Vec<String>,
 }
 
+/// The config this doctor reads: the workspace file in a folder AgentMux owns, the relocated
+/// one in a user's project (#3680), and the bind-mounted one inside a container.
+fn config_path(workdir: &Path) -> PathBuf {
+    if crate::self_keys::in_container() {
+        let mounted = agentmux_common::mcp_config_path::container_config_path();
+        if mounted.is_file() {
+            return mounted;
+        }
+    }
+    let expanded = agentmux_common::mcp_config_path::expand_home(workdir);
+    agentmux_common::mcp_config_path::config_path_for(&expanded)
+}
+
 fn check_config(report: &mut Report, workdir: &Path) -> Option<Entry> {
-    let path = workdir.join(".mcp.json");
+    let path = config_path(workdir);
     let parsed = match std::fs::read_to_string(&path).map(|t| serde_json::from_str::<Value>(&t)) {
         Ok(Ok(v)) => v,
         Ok(Err(e)) => {
@@ -106,7 +119,7 @@ fn check_config(report: &mut Report, workdir: &Path) -> Option<Entry> {
     };
     let command = server.get("command").and_then(Value::as_str).unwrap_or_default().to_string();
     if command.is_empty() {
-        report.fail("the agentmux entry in .mcp.json has no command");
+        report.fail(format!("the agentmux entry in {} has no command", path.display()));
         return None;
     }
     let args: Vec<String> = server
@@ -117,9 +130,12 @@ fn check_config(report: &mut Report, workdir: &Path) -> Option<Entry> {
     // Present or not, never their values.
     let key_set = |k: &str| server.pointer(&format!("/env/{k}")).and_then(Value::as_str).is_some_and(|v| !v.is_empty());
     if key_set("AGENTMUX_JEKT_KEY") {
-        report.ok(format!(".mcp.json has the agentmux entry ({command}) and its signing key"));
+        report.ok(format!("{} has the agentmux entry ({command}) and its signing key", path.display()));
     } else {
-        report.fail(".mcp.json's agentmux entry has no AGENTMUX_JEKT_KEY: messages can't be signed; restart the agent to get one");
+        report.fail(format!(
+            "{}'s agentmux entry has no AGENTMUX_JEKT_KEY: messages can't be signed; restart the agent to get one",
+            path.display()
+        ));
     }
     Some(Entry { command, args })
 }
@@ -365,6 +381,26 @@ fn log_outcome(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #3680: a user's project keeps its own `.mcp.json`, so the doctor must read the agent's
+    /// relocated config instead; an AgentMux-owned folder still reads the file in it.
+    #[test]
+    fn the_config_checked_follows_the_agent_where_its_config_lives() {
+        let project = Path::new("/agentmux-test-project");
+        let path = config_path(project);
+        assert!(!path.starts_with(project), "the project file is not the agent's: {}", path.display());
+        assert_eq!(path.file_name().and_then(|n| n.to_str()), Some("mcp.json"));
+
+        let owned = dirs_home().join(".agentmux").join("agents").join("aria");
+        assert_eq!(config_path(&owned), owned.join(".mcp.json"));
+    }
+
+    fn dirs_home() -> PathBuf {
+        std::env::var_os("USERPROFILE")
+            .or_else(|| std::env::var_os("HOME"))
+            .map(PathBuf::from)
+            .unwrap_or_default()
+    }
 
     #[test]
     fn the_project_key_is_claude_codes_folder_name() {

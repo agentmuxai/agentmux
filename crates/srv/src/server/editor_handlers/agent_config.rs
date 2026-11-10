@@ -139,9 +139,16 @@ fn write_file(wd: &crate::backend::workdir_fs::Workdir, base_path: &Path, canoni
         tracing::debug!(path = %file_path.display(), "wrote config file (exists-guarded)");
         return Ok(());
     }
-    // `.mcp.json` merges into a user's own file instead of replacing it, and is written owner-only (#3680): see
-    // write_mcp_json_respecting_user_servers.
+    // `.mcp.json` never goes into a user's project (#3680): in a folder AgentMux owns it merges into the
+    // agent's own file; elsewhere it is written under the data directory, outside the project.
     if file.path == ".mcp.json" {
+        let expanded = base_path.to_string_lossy();
+        if let Some(path) = crate::backend::mcp_config_file::relocated_path(&expanded) {
+            crate::backend::mcp_config_file::write_relocated(&path, &file.content)
+                .map_err(|e| format!("failed to write the agent's MCP config: {e}"))?;
+            tracing::debug!(path = %path.display(), "wrote config file (relocated, owner-only)");
+            return Ok(());
+        }
         crate::backend::agent_config::write_mcp_json_respecting_user_servers(base_path, &file.content)
             .map_err(|e| format!("failed to write .mcp.json: {e}"))?;
         tracing::debug!(path = %file_path.display(), "wrote config file (merged, owner-only)");

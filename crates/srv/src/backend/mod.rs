@@ -58,6 +58,7 @@ pub mod fleet_feed;
 pub mod fleet_source;
 pub mod narrated_events;
 pub mod pending_background_pids;
+pub mod mcp_config_file;
 pub mod mcp_health;
 pub mod mcp_health_meta;
 pub mod message_origin;

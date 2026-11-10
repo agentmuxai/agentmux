@@ -538,9 +538,10 @@ impl Controller for AcpController {
             inner.loading_session = None;
             inner.session_failed = false;
         }
-        // AgentMux's MCP servers: the `.mcp.json` the launch wrote where the
-        // session runs (startup_files). None when there is none.
-        let mcp_path = std::path::Path::new(&session_cwd(&cwd)).join(".mcp.json");
+        // AgentMux's MCP servers: the config the launch wrote for this agent, which is
+        // outside the working directory when that is the user's own project (#3680).
+        // None when there is none.
+        let mcp_json = crate::backend::mcp_config_file::read_for_turn(&session_cwd(&cwd));
         let mut env_vars = self.spawn_env(&block_meta);
         if let Some(pi) = crate::backend::providers::pi_beside_pi_acp(&cmd) {
             env_vars.entry("PI_ACP_PI_COMMAND".to_string()).or_insert(pi);
@@ -551,7 +552,7 @@ impl Controller for AcpController {
         super::acp_prelaunch::check_runtime(&provider, &env_vars)?;
         {
             let mut inner = self.inner.lock().unwrap();
-            inner.mcp_json = std::fs::read_to_string(mcp_path).ok();
+            inner.mcp_json = mcp_json;
             inner.mcp_env = env_vars.clone();
         }
 

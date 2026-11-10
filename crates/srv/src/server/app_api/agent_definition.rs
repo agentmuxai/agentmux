@@ -7,11 +7,14 @@
 //! `agentdefhide`/`agentdefunhide` run.
 //!
 //! - update: only the fields given change, and only ones that say how the agent is listed or when it runs:
-//!   description, icon, auto_start, restart_on_crash and idle_timeout_minutes. What decides what an agent runs, or
+//!   description, icon, auto_start, restart_on_crash, idle_timeout_minutes, the model route's model and the agent's
+//!   daily spend cap (spend_cap_usd, and reset_spend_today for a spend that was wrong; see below). What decides what an agent runs, or
 //!   where its traffic goes or which project files it reads (shell, provider_flags, working_directory,
 //!   model_vendor_base_url) is not taken, as `env_set` refuses the same: the operator sets those in My Agents. The
 //!   name has its own action (`rename`), the provider is fixed when an agent is made, and environment variables,
 //!   accounts, container settings and the seat have their own actions.
+//! - spend cap: the agent's leader may set or reset another agent's cap; an agent may only lower its own. Each change
+//!   is recorded with the cap before and after (`docs/specs/SPEC_ROUTE_AGENT_BRAKES_2026_11_10.md` section 3.2).
 //! - bundles: with `bundle_ids`, replaces the agent's picked bundles, in order; without, reads them.
 //! - hide, unhide: a seeded picker template; an agent you made is removed with `delete`.
 //!
@@ -50,6 +53,10 @@ pub(crate) struct UpdateRequest {
     /// `model`, changes its model on that route.
     route: Option<String>,
     model: Option<String>,
+    /// Dollars a day through the model gateway: a number, or 0 / "none" for no cap.
+    spend_cap_usd: Option<Value>,
+    /// Zero the agent's spend counted for today.
+    reset_spend_today: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -132,9 +139,64 @@ fn restart_on_new_model(state: &AppState, agent: &AgentDefinition) {
     }
 }
 
-/// Apply the fields `req` gives to the agent's stored definition. Returns the names of the fields changed.
-fn update(state: &AppState, req: &UpdateRequest) -> Result<(String, Vec<&'static str>), Refusal> {
+/// What `spend_cap_usd` and `reset_spend_today` of `Agents update` ask for, once allowed.
+struct SpendPlan {
+    /// The new cap (`Some(None)`: no cap); absent when the request leaves it.
+    cap: Option<Option<f64>>,
+    reset: bool,
+}
+
+/// Checks `spend_cap_usd` and `reset_spend_today` before anything else in the request changes. The leader of an agent
+/// sets and resets its cap; an agent may only lower its own, and not reset it, since a cap it could lift or clear would
+/// stop nothing.
+fn spend_plan(state: &AppState, actor_uid: &str, target_uid: &str, req: &UpdateRequest) -> Result<SpendPlan, Refusal> {
+    use crate::backend::model_gateway::cap;
+    let own = actor_uid == target_uid;
+    let led = crate::backend::agent_seat::effective_seat_by_id(&state.mstore, target_uid).and_then(|s| s.lead).is_some_and(|lead| lead == actor_uid);
+    let mut plan = SpendPlan { cap: None, reset: false };
+    if let Some(value) = req.spend_cap_usd.as_ref().filter(|v| !v.is_null()) {
+        let to = cap::parse_request(value).map_err(bad)?;
+        let from = cap::agent_cap(&state.mstore, target_uid);
+        if own {
+            if !to.is_some_and(|to| from.is_none_or(|from| to <= from)) {
+                return Err(refuse(StatusCode::FORBIDDEN, "an agent may lower its own spend cap, not raise or lift it; its leader or the person can"));
+            }
+        } else if !led {
+            return Err(refuse(StatusCode::FORBIDDEN, "only an agent's leader sets its spend cap (Agents set_seat names the lead); you can lower your own"));
+        }
+        plan.cap = Some(to);
+    }
+    if req.reset_spend_today == Some(true) {
+        if !led {
+            return Err(refuse(StatusCode::FORBIDDEN, "only an agent's leader resets the spend counted for today"));
+        }
+        plan.reset = true;
+    }
+    Ok(plan)
+}
+
+/// Does what [`spend_plan`] allowed. Returns what was done, for the audit row.
+fn spend_apply(state: &AppState, target_uid: &str, plan: &SpendPlan) -> Result<Vec<String>, Refusal> {
+    let internal = |e: String| refuse(StatusCode::INTERNAL_SERVER_ERROR, format!("Agents update: {e}"));
+    let mut done = Vec::new();
+    if let Some(to) = plan.cap {
+        let change = crate::server::spend_watch::change_cap(state, target_uid, to).map_err(internal)?;
+        let show = |c: Option<f64>| c.map_or("none".to_string(), |c| format!("${c:.2}"));
+        done.push(format!("spend cap {} to {}", show(change.from), show(change.to)));
+    }
+    if plan.reset {
+        let removed = crate::server::spend_watch::reset_today(state, target_uid).map_err(internal)?;
+        done.push(format!("reset today's spend (${removed:.2} counted)"));
+    }
+    Ok(done)
+}
+
+/// Apply the fields `req` gives to the agent's stored definition. Returns the names of the fields changed, and what
+/// the audit row says beyond them.
+fn update(state: &AppState, actor_uid: &str, req: &UpdateRequest) -> Result<(String, Vec<&'static str>, Vec<String>), Refusal> {
     let target = target_of(state, &req.agent)?;
+    // Before anything is applied: a refused spend change must not leave a model change behind it.
+    let plan = spend_plan(state, actor_uid, &target.agent_id, req)?;
     let internal = |e: crate::backend::storage::error::StoreError| refuse(StatusCode::INTERNAL_SERVER_ERROR, format!("Agents update: {e}"));
     let mut agent = state
         .mstore
@@ -171,14 +233,18 @@ fn update(state: &AppState, req: &UpdateRequest) -> Result<(String, Vec<&'static
     if req.route.is_some() || req.model.is_some() {
         changed.extend(route_change(state, &agent, req)?);
     }
-    if changed.is_empty() {
-        return Err(bad("nothing to change; give at least one of description, icon, auto_start, restart_on_crash, idle_timeout_minutes, route, model (name: rename; environment: env_set)"));
+    let spend_done = spend_apply(state, &target.agent_id, &plan)?;
+    if changed.is_empty() && spend_done.is_empty() {
+        return Err(bad("nothing to change; give at least one of description, icon, auto_start, restart_on_crash, idle_timeout_minutes, route, model, spend_cap_usd, reset_spend_today (name: rename; environment: env_set)"));
     }
-    if !state.mstore.agent_def_update(&mut agent).map_err(internal)? {
-        return Err(refuse(StatusCode::NOT_FOUND, format!("no agent '{}' on this machine", req.agent)));
+    // A request that only changes the spend cap leaves the definition as it is.
+    if !changed.is_empty() {
+        if !state.mstore.agent_def_update(&mut agent).map_err(internal)? {
+            return Err(refuse(StatusCode::NOT_FOUND, format!("no agent '{}' on this machine", req.agent)));
+        }
+        publish_changed(state);
     }
-    publish_changed(state);
-    Ok((target.agent_id, changed))
+    Ok((target.agent_id, changed, spend_done))
 }
 
 fn bundles(state: &AppState, req: &BundlesRequest) -> Result<Value, Refusal> {
@@ -221,7 +287,7 @@ fn hide(state: &AppState, req: &HideRequest, hidden: bool) -> Result<Value, Refu
 /// Run `op` as the calling agent, and record the outcome under it.
 async fn run<F>(state: &AppState, caller: Option<&Caller>, action: &'static str, named: String, op: F) -> Response
 where
-    F: FnOnce(&AppState) -> Result<(Value, String), Refusal> + Send + 'static,
+    F: FnOnce(&AppState, &str) -> Result<(Value, String), Refusal> + Send + 'static,
 {
     let respond = |r: Refusal| (r.status, Json(json!({ "error": r.message }))).into_response();
     let actor: Actor = match actor_of(state, caller, action) {
@@ -229,7 +295,8 @@ where
         Err(r) => return respond(r),
     };
     let blocking = state.clone();
-    let outcome = tokio::task::spawn_blocking(move || op(&blocking))
+    let actor_uid = actor.uid().to_string();
+    let outcome = tokio::task::spawn_blocking(move || op(&blocking, &actor_uid))
         .await
         .unwrap_or_else(|e| Err(refuse(StatusCode::INTERNAL_SERVER_ERROR, format!("Agents {action}: {e}"))));
     let audit_action = format!("agent.{action}");
@@ -249,10 +316,17 @@ where
 pub(crate) async fn handle_agent_update(State(state): State<AppState>, caller: Option<Extension<Caller>>, Json(req): Json<UpdateRequest>) -> Response {
     let caller = caller.map(|Extension(c)| c);
     let named = req.agent.trim().to_string();
-    run(&state, caller.as_ref(), "update", named, move |s| {
-        let (agent_id, changed) = update(s, &req)?;
-        let note = format!("changed {} of {agent_id}", changed.join(", "));
-        Ok((json!({ "agent_id": agent_id, "changed": changed, "note": "a running agent keeps what it launched with until it is launched again" }), note))
+    run(&state, caller.as_ref(), "update", named, move |s, actor| {
+        let (agent_id, changed, spend_done) = update(s, actor, &req)?;
+        let mut parts: Vec<String> = Vec::new();
+        if !changed.is_empty() {
+            parts.push(format!("changed {} of {agent_id}", changed.join(", ")));
+        }
+        parts.extend(spend_done.iter().map(|d| format!("{d} of {agent_id}")));
+        let note = parts.join("; ");
+        let mut changed: Vec<String> = changed.iter().map(|c| c.to_string()).collect();
+        changed.extend(spend_done.iter().map(|_| "spend".to_string()));
+        Ok((json!({ "agent_id": agent_id, "changed": changed, "note": "a running agent keeps what it launched with until it is launched again; a spend cap applies at its next request" }), note))
     })
     .await
 }
@@ -260,7 +334,7 @@ pub(crate) async fn handle_agent_update(State(state): State<AppState>, caller: O
 pub(crate) async fn handle_agent_bundles(State(state): State<AppState>, caller: Option<Extension<Caller>>, Json(req): Json<BundlesRequest>) -> Response {
     let caller = caller.map(|Extension(c)| c);
     let named = req.agent.trim().to_string();
-    run(&state, caller.as_ref(), "bundles", named, move |s| {
+    run(&state, caller.as_ref(), "bundles", named, move |s, _| {
         let body = bundles(s, &req)?;
         let note = if req.bundle_ids.is_some() { format!("set the bundles of {}", body["agent_id"]) } else { "read".to_string() };
         Ok((body, note))
@@ -280,7 +354,7 @@ async fn hide_or_show(state: AppState, caller: Option<Extension<Caller>>, req: H
     let caller = caller.map(|Extension(c)| c);
     let named = req.template.trim().to_string();
     let action = if hidden { "hide" } else { "unhide" };
-    run(&state, caller.as_ref(), action, named, move |s| {
+    run(&state, caller.as_ref(), action, named, move |s, _| {
         let body = hide(s, &req, hidden)?;
         let note = format!("{action} template {}", body["template_id"]);
         Ok((body, note))

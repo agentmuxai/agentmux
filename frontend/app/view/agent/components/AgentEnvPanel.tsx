@@ -14,6 +14,8 @@
 import { createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 
 import { Button, Field, TextArea } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
+import { Rich } from "@/app/i18n/rich";
 import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -25,8 +27,7 @@ import "./AgentPrimitiveModal.scss";
 
 const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
-export const ENV_HINT =
-    "One per line, NAME=VALUE; # starts a comment. Applies at the agent's next launch. Names starting AGENTMUX_ are reserved.";
+export const envHint = (): string => t("agentEnv.hint");
 
 /**
  * What the environment box holds. A panel that gets its own from the list keeps its edits when the list
@@ -105,9 +106,9 @@ export const AgentEnvPanel = (props: AgentEnvPanelProps): JSX.Element => {
     return (
         <div class="agent-primitive-modal-detail agent-env-panel" data-testid="agent-env-panel">
             <div class="agent-primitive-modal-readonly">
-                <p class="agent-primitive-modal-global-note">The extra environment variables {props.agentName} starts with.</p>
+                <p class="agent-primitive-modal-global-note">{t("agentEnv.intro", { name: props.agentName })}</p>
                 <EndpointNoticeLine agentId={props.agentId} />
-                <Field label="Environment" layout="stacked" hint={ENV_HINT}>
+                <Field label={t("agentEnv.label")} layout="stacked" hint={envHint()}>
                     <TextArea
                         mono
                         rows={8}
@@ -123,12 +124,12 @@ export const AgentEnvPanel = (props: AgentEnvPanelProps): JSX.Element => {
                 </Field>
                 <Show when={parsed().ignored.length > 0}>
                     <div class="agent-env-panel-notice" role="status" data-testid="agent-env-ignored">
-                        <span class="agent-primitive-modal-field-label">Ignored at launch</span>
+                        <span class="agent-primitive-modal-field-label">{t("agentEnv.ignoredTitle")}</span>
                         <ul class="agent-env-panel-list">
                             <For each={parsed().ignored}>
                                 {(line) => (
                                     <li>
-                                        Line {line.number}: <code>{line.text}</code> ({line.reason})
+                                        <Rich k="agentEnv.ignoredLine" params={{ number: line.number, text: line.text, reason: line.reason }} />
                                     </li>
                                 )}
                             </For>
@@ -137,7 +138,7 @@ export const AgentEnvPanel = (props: AgentEnvPanelProps): JSX.Element => {
                 </Show>
                 <Show when={parsed().reserved.length > 0}>
                     <p class="agent-primitive-modal-global-note" data-testid="agent-env-reserved">
-                        Reserved, AgentMux may override: {parsed().reserved.join(", ")}.
+                        {t("agentEnv.reserved", { names: parsed().reserved.join(", ") })}
                     </p>
                 </Show>
                 <Show when={error()}>
@@ -147,21 +148,21 @@ export const AgentEnvPanel = (props: AgentEnvPanelProps): JSX.Element => {
                 </Show>
                 <Show when={!loaded() && error()}>
                     <div class="agent-primitive-modal-actions">
-                        <Button onClick={() => void load()}>Retry</Button>
+                        <Button onClick={() => void load()}>{t("agentEnv.retry")}</Button>
                     </div>
                 </Show>
                 <Show when={saved()}>
                     <p class="agent-primitive-modal-global-note" role="status">
-                        Saved. It applies at the agent's next launch.
+                        {t("agentEnv.saved")}
                     </p>
                 </Show>
                 <div class="agent-primitive-modal-actions">
-                    <Show when={props.onClose}>{(close) => <Button onClick={() => close()()}>Close</Button>}</Show>
+                    <Show when={props.onClose}>{(close) => <Button onClick={() => close()()}>{t("agentEnv.close")}</Button>}</Show>
                     <Button disabled={!dirty() || busy()} onClick={() => setDraft(stored())}>
-                        Revert
+                        {t("agentEnv.revert")}
                     </Button>
                     <Button tone="accent" busy={busy()} disabled={!dirty() || busy()} onClick={() => void save()}>
-                        Save
+                        {t("agentEnv.save")}
                     </Button>
                 </div>
             </div>
