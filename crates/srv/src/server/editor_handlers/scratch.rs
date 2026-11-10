@@ -14,9 +14,9 @@ use crate::backend::rpc_types::{CreateScratchFileReq, CreateScratchFileResult, M
 const THIRTY_DAYS_MS: u64 = 30 * 24 * 60 * 60 * 1000;
 
 /// A saved-nowhere scratch buffer that could be handed out again.
-struct Candidate {
+pub(super) struct Candidate {
     created_at: u64,
-    scratch_id: String,
+    pub(super) scratch_id: String,
     display_name: String,
 }
 
@@ -41,7 +41,7 @@ pub(super) fn create_scratch_file(home: &Path, cmd: CreateScratchFileReq) -> Res
 
 /// Phase 1: scan the `.md.meta` files, collecting candidates (not saved, not expired, not in
 /// `exclude_scratch_ids`) and pruning expired pairs.
-fn scan_candidates(scratch_dir: &Path, exclude: Option<&[String]>, now_ms: u64) -> Vec<Candidate> {
+pub(super) fn scan_candidates(scratch_dir: &Path, exclude: Option<&[String]>, now_ms: u64) -> Vec<Candidate> {
     let mut candidates = Vec::new();
     let Ok(entries) = std::fs::read_dir(scratch_dir) else { return candidates };
     for entry in entries.flatten() {
@@ -79,7 +79,7 @@ fn scan_candidates(scratch_dir: &Path, exclude: Option<&[String]>, now_ms: u64) 
 /// Phase 2: try to atomically claim the most recent candidate. Claim files stop two concurrent calls returning
 /// the same backing file to different panes. Each claim file stores the per-process session token; a claim from
 /// a previous process (crash/restart) has a different token and is cleared so recovery works.
-fn claim_most_recent(scratch_dir: &Path, mut candidates: Vec<Candidate>, session_token: &str) -> Option<(String, String)> {
+pub(super) fn claim_most_recent(scratch_dir: &Path, mut candidates: Vec<Candidate>, session_token: &str) -> Option<(String, String)> {
     candidates.sort_by(|a, b| b.created_at.cmp(&a.created_at));
     for Candidate { scratch_id: sid, display_name: dname, .. } in &candidates {
         let claim_path = scratch_dir.join(format!("{}.md.claim", sid));

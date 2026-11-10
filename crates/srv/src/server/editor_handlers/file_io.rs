@@ -159,7 +159,7 @@ fn dir_entry(entry: &std::fs::DirEntry) -> DirEntry {
 // home directory before performing any mutation: the same policy as writeeditorfile.
 
 /// A new file or folder name is one plain path component.
-fn is_plain_name(name: &str) -> bool {
+pub(super) fn is_plain_name(name: &str) -> bool {
     !(name.contains('/') || name.contains('\\') || name.contains('\0') || name == "." || name == ".." || name.is_empty())
 }
 

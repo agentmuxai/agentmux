@@ -26,6 +26,8 @@ use super::AppState;
 mod agent_config;
 mod file_io;
 mod scratch;
+#[cfg(test)]
+mod direct_tests;
 
 // Per-process token written into scratch claim files. Stale claim files from a
 // previous process run have a different token and are ignored during reuse scans,
