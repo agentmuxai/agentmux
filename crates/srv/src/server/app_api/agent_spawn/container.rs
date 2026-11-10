@@ -144,7 +144,8 @@ pub(crate) async fn decide_here(
         && !source.runtime().is_container()
         && has_container_image(provider)
         && default_is_container(&state.config_watcher.get_full_config().settings.extra)
-        && state.container_manager.get_or_explain().await.is_ok()
+        // A live ping, not the cached connection: Docker that stopped since it was first reached is not there.
+        && state.container_manager.is_available().await
     {
         let by_default = ContainerAsk { runtime: Some("container".to_string()), ..ContainerAsk::default() };
         return decide(&by_default, false, false, &source.container_image, Ok(()));
