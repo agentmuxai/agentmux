@@ -64,6 +64,7 @@ import { useScrolledOffRelease, type AwayArrivals } from "./held-release";
 import { useScrollMemo } from "./scroll-memo";
 import { useListZoomAnchor } from "./zoom-anchor-adapter";
 import { inFlowState, ROW_GAP_PX, type ExpansionState } from "@/app/store/agent-pane-layout/types";
+import { logShowCover } from "@/app/block/pane-cover-log";
 import {
     initialStickyFrontierId,
     locateFrontierRow,
@@ -1182,6 +1183,7 @@ function useOneWayFlow(props: AgentDocumentVirtualListProps, s: ListState): Acce
     onCleanup(() => s.oneWayFlow.dispose());
     const showCovered = useSettleOnShow(s.oneWayFlow, props.viewState.stickToBottom, { changes: props.viewState.nodes, observe: () => [s.virtualContainerRef, s.streamingBufferRef] });
     s.showCoveredNow = () => untrack(showCovered);
+    logShowCover(props.blockId, showCovered);
     onMount(() => {
         if (s.scrollRef) {
             s.oneWayFlow.attach(s.scrollRef, [s.virtualContainerRef, s.streamingBufferRef]);
