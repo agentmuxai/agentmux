@@ -67,9 +67,10 @@ use crate::backend::container::image::{CONTAINER_CLI_DIR,
 pub const CONTAINER_CLAUDE_DIR: &str = "/home/agent/.claude";
 /// Where the agent's working directory is bind-mounted inside the image.
 pub const CONTAINER_WORKSPACE_DIR: &str = "/workspace";
-/// Where an agent's MCP config is bind-mounted when it lives outside its working directory, so
-/// that a container launch never has to write it into a user's project (#3680).
-pub const CONTAINER_MCP_CONFIG_FILE: &str = "/home/agent/.agentmux/mcp.json";
+/// Where the folder holding an agent's MCP config is bind-mounted when it lives outside the
+/// working directory, so a container launch never has to write it into a user's project (#3680).
+/// The folder, not the file: a single-file bind would keep the old inode across an atomic rewrite.
+pub const CONTAINER_MCP_CONFIG_DIR: &str = "/home/agent/.agentmux/mcp";
 
 /// Shared user-defined Docker bridge network every agent container is
 /// attached to, ADDITIVE to whatever `network_mode`/`extra_hosts` already
@@ -110,8 +111,9 @@ pub struct ContainerMountSpec {
     pub workspace_host_dir: Option<String>,
     /// The agent's Personal Memory folder on the host, bind-mounted where Claude reads memory in the container.
     pub memory_host_dir: Option<String>,
-    /// The agent's MCP config when it lives outside its working directory (#3680): bind-mounted
-    /// read-only at [`CONTAINER_MCP_CONFIG_FILE`] so no launch writes it into a user's project.
+    /// The folder holding the agent's MCP config when it lives outside the working directory (#3680):
+    /// bind-mounted read-only at [`CONTAINER_MCP_CONFIG_DIR`] so no launch writes it into a user's
+    /// project, and a rewrite is visible without recreating the container.
     pub mcp_config_host_dir: Option<String>,
     /// AgentMux's git hooks (push scan, commit trailers) on the host, mounted read-only at
     /// [`crate::identity::github_tokens::CONTAINER_HOOKS_DIR`] where container agents get git through AgentMux.

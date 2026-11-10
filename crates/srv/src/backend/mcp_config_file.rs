@@ -11,9 +11,15 @@
 //! - In a folder AgentMux owns (under its data directory) the file stays where it has
 //!   always been, `<working directory>/.mcp.json`, which Claude Code reads on its own.
 //! - In a user's project the file moves to AgentMux's data directory, outside the project,
-//!   keyed by the project path: `<data dir>/mcp/<hash>.json`. Claude is pointed at it with
-//!   `--mcp-config` (it still reads the project's own `.mcp.json` itself); every other
-//!   harness is given the servers from it by srv. A launch never writes into the project.
+//!   in a folder keyed by the project path: `<data dir>/mcp/<hash>/mcp.json`. Claude is
+//!   pointed at it with `--mcp-config` (it still reads the project's own `.mcp.json`
+//!   itself); every other harness is given the servers from it by srv. A launch never
+//!   writes into the project.
+//!
+//! The config has its own folder rather than a bare file because a container gets it as a
+//! bind mount. A single-file bind keeps the inode it was made with, so an atomic rewrite
+//! (a new inode) would leave a running container reading the old config; a directory bind
+//! follows the replacement.
 //!
 //! The relocated file is written `0600` and lives under the data root AgentMux keeps
 //! owner-only.
@@ -72,14 +78,21 @@ fn workdir_key(work_dir: &str) -> String {
     hex::encode(&hash.finalize()[..16])
 }
 
-/// The relocated config for `work_dir`, or `None` when the folder is AgentMux's own and the
-/// file belongs in it (`<work_dir>/.mcp.json`).
-pub fn relocated_path(work_dir: &str) -> Option<PathBuf> {
+/// The folder holding `work_dir`'s relocated config, or `None` when the folder is AgentMux's
+/// own and the file belongs in it (`<work_dir>/.mcp.json`). This is what a container binds
+/// (a directory, not the file: see the module doc).
+pub fn relocated_dir(work_dir: &str) -> Option<PathBuf> {
     let expanded = crate::backend::blockcontroller::core::expand_home_dir(work_dir);
     if is_agent_owned_workdir(Path::new(&expanded)) {
         return None;
     }
-    Some(relocated_root().join(format!("{}.json", workdir_key(&expanded))))
+    Some(relocated_root().join(workdir_key(&expanded)))
+}
+
+/// The relocated config for `work_dir`, or `None` when the folder is AgentMux's own and the
+/// file belongs in it (`<work_dir>/.mcp.json`).
+pub fn relocated_path(work_dir: &str) -> Option<PathBuf> {
+    relocated_dir(work_dir).map(|dir| dir.join(MCP_JSON))
 }
 
 /// Where this agent's MCP config is: in its working directory when AgentMux owns the folder,

@@ -37,19 +37,16 @@ pub(crate) fn strip_signing_keys(content: &str) -> Option<String> {
 }
 
 /// A container agent's workspace `.mcp.json`, with the signing keys an earlier launch wrote taken out.
-/// Run at each container start, under the lock the launch writes the file with. Best-effort: a failure is
+/// Run at each container start, under the lock the launch writes the file with. Only those keys are
+/// removed, and only when the file has them, so a file with none is left byte-for-byte as it was.
+/// This also covers a user's project: keys an older launch wrote there must not ride the workspace
+/// mount into the container (a launch no longer writes any, #3680). Best-effort: a failure is
 /// logged and the start goes on.
 pub(crate) fn strip_workspace_signing_keys(work_dir: &str) {
     if work_dir.trim().is_empty() {
         return;
     }
     let expanded = crate::backend::blockcontroller::core::expand_home_dir(work_dir);
-    // A user's project keeps its own `.mcp.json` (#3680): never edit it, even to remove keys.
-    // The launch no longer writes keys into a project, and the relocated config is ours to keep
-    // clean at write time.
-    if crate::backend::mcp_config_file::relocated_path(&expanded).is_some() {
-        return;
-    }
     let Ok(wd) = crate::backend::workdir_fs::Workdir::open(std::path::Path::new(&expanded)) else { return };
     let Ok(path) = wd.resolve(".mcp.json") else { return };
     let Ok(content) = std::fs::read_to_string(&path) else { return };
@@ -412,26 +409,22 @@ mod tests {
 
     #[test]
     fn a_container_start_removes_keys_an_earlier_launch_wrote_to_the_mounted_workspace() {
-        let data = tempfile::tempdir().unwrap();
-        crate::backend::mcp_config_file::with_data_home(data.path(), || {
-            // An AgentMux-owned workspace is the one this cleanup still edits; a user's project
-            // is never touched (#3680).
-            let dir = data.path().join("agents").join("boxed");
-            std::fs::create_dir_all(&dir).unwrap();
-            let file = dir.join(".mcp.json");
-            std::fs::write(&file, mcp("loap-2")).unwrap();
-            strip_workspace_signing_keys(&dir.to_string_lossy());
-            assert!(holds_no_key(&std::fs::read_to_string(&file).unwrap()));
+        // A user's project too: keys an older launch wrote there must not reach the container.
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(".mcp.json");
+        std::fs::write(&file, mcp("loap-2")).unwrap();
+        strip_workspace_signing_keys(&dir.path().to_string_lossy());
+        assert!(holds_no_key(&std::fs::read_to_string(&file).unwrap()));
 
-            // Nothing there, or nothing to remove: no file is made or changed.
-            let empty = data.path().join("agents").join("empty");
-            std::fs::create_dir_all(&empty).unwrap();
-            strip_workspace_signing_keys(&empty.to_string_lossy());
-            assert!(!empty.join(".mcp.json").exists());
-            let clean = std::fs::read_to_string(&file).unwrap();
-            strip_workspace_signing_keys(&dir.to_string_lossy());
-            assert_eq!(std::fs::read_to_string(&file).unwrap(), clean);
-        });
+        // A file with none of our keys is left byte-for-byte, and nothing there makes none.
+        let clean_body = r#"{ "mcpServers": { "mine": { "command": "mine-mcp" } } }"#;
+        let clean_dir = tempfile::tempdir().unwrap();
+        std::fs::write(clean_dir.path().join(".mcp.json"), clean_body).unwrap();
+        strip_workspace_signing_keys(&clean_dir.path().to_string_lossy());
+        assert_eq!(std::fs::read_to_string(clean_dir.path().join(".mcp.json")).unwrap(), clean_body);
+        let empty = tempfile::tempdir().unwrap();
+        strip_workspace_signing_keys(&empty.path().to_string_lossy());
+        assert!(!empty.path().join(".mcp.json").exists());
     }
 
     fn agent_of_type(store: &crate::backend::storage::store::Store, agent_type: &str) -> (String, String) {
