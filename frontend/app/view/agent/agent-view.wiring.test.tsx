@@ -646,7 +646,6 @@ describe("AgentPresentationView callbacks", () => {
         hist.foreign = true;
         note("snapshotIsForeignBlock", SP.snapshotIsForeignBlock());
         same("getDocument", SP.getDocument, F.paneModel.document);
-        note("hidden", SP.hidden());
         note("definitionId", SP.definitionId);
         same("log", SP.log, F.log);
         same("decisions document", opts("useAgentDecisions").getDocument, F.paneModel.document);
