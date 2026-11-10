@@ -68,6 +68,7 @@ pub(super) async fn claim_uid(state: &AppState, req: &mut InjectionRequest, clai
     if req.lan_verified != Some(true) {
         return;
     }
+    super::lan_continuity::bind_after_verified(state, claimed, name_key).await;
     let (Some(sig), Some(uid)) = (req.lan_sig_v2.clone(), req.source_uid.clone().filter(|u| !u.is_empty())) else {
         return;
     };

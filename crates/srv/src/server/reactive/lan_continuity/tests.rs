@@ -44,6 +44,13 @@ fn pin(state: &AppState, agent: &str, public: &[u8; 32]) {
     assert_eq!(state.mstore.lan_peer_pubkey_pin_get_or_set(agent, &BASE64.encode(public)).unwrap(), BASE64.encode(public));
 }
 
+/// The pin of `agent` was vouched for by `host`'s install (as a first pin or a verified message would record).
+fn bind(state: &AppState, agent: &str, public: &[u8; 32], host: &WanIdentityStore) {
+    let instance = host.instance_ensure("starpower").unwrap();
+    let install = PinInstall { instance_id: instance.instance_id, host_hint: instance.host_hint };
+    assert!(state.mstore.lan_pin_bind(agent, &BASE64.encode(public), &install, now()).unwrap());
+}
+
 fn pinned(state: &AppState, agent: &str) -> String {
     state.mstore.lan_peer_pubkey_pin_load(agent).unwrap().unwrap()
 }
@@ -129,6 +136,7 @@ async fn a_rotation_vouched_by_a_pinned_install_moves_the_pin_and_writes_the_aud
     let (old, _) = generate_lan_keypair([1u8; 32]);
     let (new, _) = generate_lan_keypair([2u8; 32]);
     pin(&state, "maop-v", &old);
+    bind(&state, "maop-v", &old, &sender);
     state.mstore.lan_peer_uid_pin_get_or_set("maop-v", "uid-m", "old-uid-key").unwrap();
     lan_refusals::pin_mismatch("maop-v", &BASE64.encode(new));
 
@@ -137,7 +145,10 @@ async fn a_rotation_vouched_by_a_pinned_install_moves_the_pin_and_writes_the_aud
 
     assert_eq!(path, Path::PinnedInstance);
     assert_eq!(pinned(&state, "maop-v"), BASE64.encode(new));
-    assert!(!state.mstore.lan_peer_uid_pin_exists("maop-v").unwrap(), "the UID pins went with the old key");
+    assert!(state.mstore.lan_peer_uid_pin_exists("maop-v").unwrap(), "the UID pins stay: the UID key did not change, and is not pinned afresh");
+    assert_eq!(state.mstore.lan_pin_installed("maop-v").unwrap().unwrap().instance_id, vouch.instance_id, "still bound to the install that vouched");
+    let retired = state.mstore.lan_retired_get("maop-v", &fingerprint(&BASE64.encode(old))).unwrap().expect("the old key is remembered as retired");
+    assert_eq!(retired.retired_by, vouch.instance_id);
     assert!(lan_refusals::get("maop-v").is_none(), "no longer refused");
     let lines = audited_for("maop-v");
     assert_eq!(lines.len(), 1, "{lines:?}");
@@ -159,6 +170,7 @@ async fn a_copy_of_an_older_certificate_cannot_move_a_pin_back_to_a_retired_key(
     let (old, _) = generate_lan_keypair([1u8; 32]);
     let (new, _) = generate_lan_keypair([2u8; 32]);
     pin(&state, "maop-b", &old);
+    bind(&state, "maop-b", &old, &sender);
     let old_cert = cert(&sender, "maop-b", &old, now() - 100); // issued while the old key was current
     let new_cert = cert(&sender, "maop-b", &new, now() + 5);
     move_if_vouched(&state, "maop-b", &new, Some(&new_cert), "automatic", false).await.unwrap();
@@ -177,6 +189,7 @@ async fn with_the_hosts_clock_ahead_an_older_certificate_still_cannot_move_the_p
     let (old, _) = generate_lan_keypair([1u8; 32]);
     let (new, _) = generate_lan_keypair([2u8; 32]);
     pin(&state, "maop-c", &old);
+    bind(&state, "maop-c", &old, &sender);
     // The host's clock runs 100 s ahead: both certificates are inside the freshness window,
     // and both are newer than the receiver's own time of pinning.
     let old_cert = cert(&sender, "maop-c", &old, now() + 100);
@@ -218,6 +231,7 @@ async fn an_install_known_here_to_be_revoked_vouches_for_nothing_even_while_it_i
     let (old, _) = generate_lan_keypair([1u8; 32]);
     let (new, _) = generate_lan_keypair([2u8; 32]);
     pin(&state, "maop-rv", &old);
+    bind(&state, "maop-rv", &old, &sender);
     let installed = sender.instance_ensure("starpower").unwrap();
     // A WAN message from it had shown the revocation: the record stands, the pin was never removed.
     receiver.known_instance_observe(&installed.instance_id, &installed.host_hint, now()).unwrap();
@@ -278,6 +292,7 @@ async fn a_jekt_from_a_vouched_new_key_verifies_and_one_from_an_impostor_does_no
     let (new_public, new_private) = generate_lan_keypair([2u8; 32]);
     let (fake_public, fake_private) = generate_lan_keypair([9u8; 32]);
     pin(&state, "maop-e", &old_public);
+    bind(&state, "maop-e", &old_public, &sender);
 
     // An impostor on the LAN shows its own key, with a certificate of its own making: refused, and the reason is kept.
     let (_edir, attacker) = host("attacker");
@@ -411,4 +426,113 @@ async fn a_name_that_is_already_pinned_keeps_its_pin_as_it_was() {
     state.lan_discovery.seed_lan_pubkey_for_test("maop-f5", old.to_vec(), None);
     let req = verified(&state, "maop-f5", &old_private).await;
     assert_eq!(req.lan_verified, Some(true), "every existing pin is kept as it is");
+}
+
+#[tokio::test]
+async fn a_first_pin_is_bound_to_the_install_that_vouched_and_kept_from_the_certificates_time() {
+    let state = test_state();
+    let (_sdir, sender) = host("starpower");
+    let (_rdir, receiver) = host("narko");
+    trust(&state, &receiver, &sender);
+    let (public, private) = generate_lan_keypair([7u8; 32]);
+    let (other, _) = generate_lan_keypair([8u8; 32]);
+    // The host's clock is 100 s ahead: the pin is kept from the certificate's time, so the same host's
+    // certificate for an earlier key (inside the freshness window too) cannot move it back.
+    let vouch = cert(&sender, "maop-g1", &public, now() + 101);
+    state.lan_discovery.seed_lan_pubkey_with_cert_for_test("maop-g1", public.to_vec(), Some(vouch.clone()));
+    assert_eq!(verified(&state, "maop-g1", &private).await.lan_verified, Some(true));
+    let bound = state.mstore.lan_pin_installed("maop-g1").unwrap().expect("bound at the first pin");
+    assert_eq!(bound.instance_id, vouch.instance_id);
+    let (_, since) = state.mstore.lan_peer_pubkey_pin_since("maop-g1").unwrap().unwrap();
+    assert_eq!(since, vouch.issued_at);
+    let replay = cert(&sender, "maop-g1", &other, now() + 100);
+    let err = move_if_vouched(&state, "maop-g1", &other, Some(&replay), "automatic", true).await.unwrap_err();
+    assert!(err.contains("older than the pin"), "{err}");
+}
+
+#[tokio::test]
+async fn a_second_trusted_install_of_the_account_cannot_move_a_pin_another_install_vouched_for() {
+    let state = test_state();
+    let (_adir, first) = host("starpower");
+    let (_bdir, second) = host("charlie");
+    let (_rdir, receiver) = host("narko");
+    trust(&state, &receiver, &first);
+    // Both installs are trusted here; the pin was vouched for by the first.
+    let other = second.instance_ensure("charlie").unwrap();
+    receiver.agent_instance_pin_get_or_set("lark", "stable", &other.instance_id, &other.host_hint, now()).unwrap();
+    let (old, _) = generate_lan_keypair([1u8; 32]);
+    let (new, _) = generate_lan_keypair([2u8; 32]);
+    pin(&state, "maop-h1", &old);
+    bind(&state, "maop-h1", &old, &first);
+
+    let by_second = WanKeyRecord::certify(&other.private_key, "maop-h1", CERT_CHANNEL, &new, &other.host_hint, now() + 5).unwrap();
+    let err = move_if_vouched(&state, "maop-h1", &new, Some(&by_second), "automatic", false).await.unwrap_err();
+    assert!(err.contains("vouched for by the install"), "{err}");
+    assert_eq!(pinned(&state, "maop-h1"), BASE64.encode(old));
+    assert!(audited_for("maop-h1").is_empty());
+
+    // The install that vouched for it moves it.
+    let by_first = cert(&first, "maop-h1", &new, now() + 6);
+    move_if_vouched(&state, "maop-h1", &new, Some(&by_first), "automatic", false).await.unwrap();
+    assert_eq!(pinned(&state, "maop-h1"), BASE64.encode(new));
+}
+
+#[tokio::test]
+async fn a_pin_bound_to_no_install_does_not_move_on_its_own_until_a_verified_message_binds_it() {
+    let state = test_state();
+    let (_sdir, sender) = host("starpower");
+    let (_rdir, receiver) = host("narko");
+    trust(&state, &receiver, &sender);
+    let (old, old_private) = generate_lan_keypair([1u8; 32]);
+    let (new, _) = generate_lan_keypair([2u8; 32]);
+    pin(&state, "maop-h2", &old);
+    let by_install = cert(&sender, "maop-h2", &new, now() + 5);
+    let err = move_if_vouched(&state, "maop-h2", &new, Some(&by_install), "automatic", false).await.unwrap_err();
+    assert!(err.contains("not bound to an install yet"), "{err}");
+    assert_eq!(pinned(&state, "maop-h2"), BASE64.encode(old));
+
+    // The agent's next message verifies under the pinned key while the peer shows a certificate for it.
+    let current = cert(&sender, "maop-h2", &old, now());
+    state.lan_discovery.seed_lan_pubkey_with_cert_for_test("maop-h2", old.to_vec(), Some(current.clone()));
+    assert_eq!(verified(&state, "maop-h2", &old_private).await.lan_verified, Some(true));
+    assert_eq!(state.mstore.lan_pin_installed("maop-h2").unwrap().unwrap().instance_id, current.instance_id);
+    move_if_vouched(&state, "maop-h2", &new, Some(&by_install), "automatic", true).await.unwrap();
+    assert_eq!(pinned(&state, "maop-h2"), BASE64.encode(new));
+}
+
+#[tokio::test]
+async fn a_verified_message_binds_a_pin_only_to_an_install_this_machine_trusts() {
+    let state = test_state();
+    let (_edir, stranger) = host("stranger");
+    let (_rdir, receiver) = host("narko");
+    state.mstore.set_wan_identity(receiver);
+    let (key, private) = generate_lan_keypair([1u8; 32]);
+    pin(&state, "maop-h3", &key);
+    let own = cert(&stranger, "maop-h3", &key, now());
+    state.lan_discovery.seed_lan_pubkey_with_cert_for_test("maop-h3", key.to_vec(), Some(own));
+    assert_eq!(verified(&state, "maop-h3", &private).await.lan_verified, Some(true), "the pin is kept as it was");
+    assert!(state.mstore.lan_pin_installed("maop-h3").unwrap().is_none(), "an install nobody here trusts binds nothing");
+}
+
+#[tokio::test]
+async fn a_message_signed_with_a_retired_key_is_refused_as_retired_with_the_reason() {
+    let state = test_state();
+    let (_sdir, sender) = host("starpower");
+    let (_rdir, receiver) = host("narko");
+    trust(&state, &receiver, &sender);
+    let (old, old_private) = generate_lan_keypair([1u8; 32]);
+    let (new, _) = generate_lan_keypair([2u8; 32]);
+    pin(&state, "maop-r1", &old);
+    bind(&state, "maop-r1", &old, &sender);
+    let vouch = cert(&sender, "maop-r1", &new, now() + 5);
+    move_if_vouched(&state, "maop-r1", &new, Some(&vouch), "automatic", false).await.unwrap();
+
+    // The old key comes back, even with a certificate by the same install: refused, and said to be retired.
+    let again = cert(&sender, "maop-r1", &old, now() + 9);
+    state.lan_discovery.seed_lan_pubkey_with_cert_for_test("maop-r1", old.to_vec(), Some(again));
+    let req = verified(&state, "maop-r1", &old_private).await;
+    assert_eq!(req.lan_verified, Some(false));
+    assert_eq!(pinned(&state, "maop-r1"), BASE64.encode(new));
+    let why = lan_refusals::get("maop-r1").unwrap().why.unwrap();
+    assert!(why.contains("was retired on") && why.contains(&vouch.instance_id), "{why}");
 }

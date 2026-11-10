@@ -127,8 +127,9 @@ fn list(state: &AppState) -> Result<PinnedSendersResult, String> {
         .map(|(agent_id, key, pinned_at, uid_pins)| {
             let refused = lan_refusals::get(&agent_id)
                 .filter(|r| r.key_b64 != key)
-                .map(|r| RefusedKeyInfo { key_fp: fingerprint(&r.key_b64), last_seen_at: r.last_seen_at, count: r.count });
-            LanPinInfo { key_fp: fingerprint(&key), agent_id, pinned_at, uid_pins, refused }
+                .map(|r| RefusedKeyInfo { key_fp: fingerprint(&r.key_b64), last_seen_at: r.last_seen_at, count: r.count, why: r.why });
+            let bound_to = state.mstore.lan_pin_installed(&agent_id).ok().flatten().map(|i| label(&i.host_hint, &i.instance_id));
+            LanPinInfo { key_fp: fingerprint(&key), agent_id, pinned_at, uid_pins, refused, bound_to }
         })
         .collect();
     // A name with no pin that showed a key nobody vouched for is listed with no pinned key (`key_fp` empty),
@@ -142,7 +143,8 @@ fn list(state: &AppState) -> Result<PinnedSendersResult, String> {
             key_fp: String::new(),
             pinned_at: 0,
             uid_pins: 0,
-            refused: Some(RefusedKeyInfo { key_fp: fingerprint(&r.key_b64), last_seen_at: r.last_seen_at, count: r.count }),
+            refused: Some(RefusedKeyInfo { key_fp: fingerprint(&r.key_b64), last_seen_at: r.last_seen_at, count: r.count, why: r.why }),
+            bound_to: None,
         })
         .collect();
     first.sort_by(|a, b| a.agent_id.cmp(&b.agent_id));
@@ -219,6 +221,9 @@ fn change_lan(state: &AppState, agent: &str, how: Change, expect: Option<&str>) 
             let refused = lan_refusals::get(agent).ok_or_else(|| format!("pins: no other key has been shown for {agent} since AgentMux started"))?;
             confirm_shown(expect, &fingerprint(&refused.key_b64), agent)?;
             let old = state.mstore.lan_peer_pubkey_pin_replace(agent, &refused.key_b64).map_err(store_err)?;
+            if let Some(old) = &old {
+                lan_continuity::retire(state, agent, old, "operator");
+            }
             lan_refusals::clear(agent);
             Ok((old.map(|k| fingerprint(&k)), Some(fingerprint(&refused.key_b64))))
         }
@@ -306,6 +311,8 @@ mod tests {
         let (new, _) = generate_lan_keypair([2u8; 32]);
         let (new_b64, old_b64) = (BASE64.encode(new), BASE64.encode(old));
         state.mstore.lan_peer_pubkey_pin_get_or_set("pinagent", &old_b64).unwrap();
+        let install = crate::backend::storage::lan_peer_pin_installs::PinInstall { instance_id: host.instance_id.clone(), host_hint: host.host_hint.clone() };
+        assert!(state.mstore.lan_pin_bind("pinagent", &old_b64, &install, agentmux_common::time::now_secs()).unwrap());
         let agent = || Some(RpcContext { agent_id: "AgentX".into(), ..Default::default() });
         let adopt = json!({ "kind": "lan", "agent_id": "pinagent", "expect": fingerprint(&new_b64) });
 

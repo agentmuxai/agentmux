@@ -62,13 +62,19 @@ function LanPinDetails(props: { pin: LanPinInfo; now: number }): JSX.Element {
                 <div>
                     Key {props.pin.key_fp}, pinned {ago(props.pin.pinned_at, props.now)}
                 </div>
+                <div>
+                    {props.pin.bound_to
+                        ? `Vouched for by the install on ${props.pin.bound_to}; only it, or one it handed over to, moves this key on its own.`
+                        : "Not tied to an install yet: until this agent next sends a message that checks out, only you can move this key."}
+                </div>
             </Show>
             <Show when={props.pin.refused}>
                 {(r) => (
                     <div class="setting-pin-refused" role="status">
                         {pinned() ? "A different key" : "A key"}, {r().key_fp}, was {pinned() ? "refused" : "shown"} {r().count} time
                         {r().count === 1 ? "" : "s"}; last {ago(r().last_seen_at, props.now)}.
-                        {pinned() ? "" : " Its messages arrive unproven until you accept it."}
+                        {pinned() ? " Accepting it makes it the key for this name from now on." : " Its messages arrive unproven until you accept it."}
+                        <Show when={r().why}>{(why) => <> Why it was not accepted: {why()}.</>}</Show>
                     </div>
                 )}
             </Show>
