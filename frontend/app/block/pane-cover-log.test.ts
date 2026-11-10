@@ -118,6 +118,27 @@ describe("logCoverPhases", () => {
         expect(settled).toEqual(["block=0123456 settled after-cover=3500ms root=missing"]);
     });
 
+    it("times a cover from when it went up, across its phase changes", () => {
+        vi.useFakeTimers();
+        const info = vi.spyOn(console, "info").mockImplementation(() => {});
+        const [controller, setController] = createSignal<PaneReadinessPhase>("assembling");
+        const dispose = createRoot((d) => {
+            logCoverPhases("0123456789", { controller, reCover: () => "live" }, { root: () => null });
+            return d;
+        });
+        vi.advanceTimersByTime(2500);
+        setController("revealing");
+        vi.advanceTimersByTime(1500);
+        setController("live");
+        const stills = coverLines(info).filter((l) => l.includes("still-covered"));
+        expect(stills.map((l) => l.replace(/^.* for=(\d+)ms.*$/, "$1"))).toEqual(["1000", "2000", "3000", "4000"]);
+        expect(stills[3]).toContain("phase=revealing");
+        info.mockClear();
+        vi.advanceTimersByTime(SETTLED_AFTER_MS + 10);
+        expect(coverLines(info)).toEqual(["block=0123456 settled after-cover=4000ms root=missing"]);
+        dispose();
+    });
+
     it("writes an unmount line when the pane's view goes away, with why", () => {
         const info = vi.spyOn(console, "info").mockImplementation(() => {});
         const dispose = createRoot((d) => {

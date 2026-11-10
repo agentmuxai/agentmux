@@ -13,7 +13,7 @@
  * cover that lasted `SLOW_COVER_MS` or more, one `settled` line with what the pane looks like two seconds after it
  * lifted (size, element count, the tallest scroller's position), for a pane that is live and still looks black.
  */
-import { createEffect, on, onCleanup, untrack } from "solid-js";
+import { createEffect, createMemo, on, onCleanup, untrack } from "solid-js";
 import { isParkedMeta } from "@/app/store/agent-parked";
 import type { PaneReadiness, PaneReadinessPhase } from "@/app/store/pane-readiness";
 
@@ -145,7 +145,8 @@ export function logCoverPhases(
     );
 
     const sourceNow = (): CoverSource => (phases.controller() !== "live" ? "controller" : "re-cover");
-    const covered = () => phases.controller() !== "live" || phases.reCover() !== "live";
+    // A memo, so the effect below runs when the cover goes up or comes down, not on each phase change in between.
+    const covered = createMemo(() => phases.controller() !== "live" || phases.reCover() !== "live");
     let coveredSince = -1;
     createEffect(() => {
         if (covered()) {
