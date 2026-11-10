@@ -700,7 +700,7 @@ wrap_task! {
                 client.as_mut(),
                 Some(&url_cef),
                 Some(&settings),
-                None, // extra_info
+                crate::ipc_query::app_extra_info().as_mut(), // the frontend's window: see ipc_query.rs
                 None, // request_context
             );
 
@@ -932,7 +932,7 @@ wrap_task! {
                 client.as_mut(),
                 Some(&url_cef),
                 Some(&settings),
-                None,
+                crate::ipc_query::app_extra_info().as_mut(), // the frontend's window once promoted: see ipc_query.rs
                 None,
             );
 

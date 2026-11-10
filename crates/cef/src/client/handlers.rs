@@ -147,16 +147,27 @@ wrap_client! {
             Some(AgentMuxPermissionHandler::new())
         }
 
-        // A renderer reporting its PID for Tower (renderer_map.rs). Nothing
-        // else is sent as a process message today.
+        // A renderer reporting its PID for Tower (renderer_map.rs), or the
+        // page's query over the pane-rects lane (ipc_query.rs).
         fn on_process_message_received(
             &self,
             browser: Option<&mut Browser>,
-            _frame: Option<&mut Frame>,
+            frame: Option<&mut Frame>,
             source_process: ProcessId,
             message: Option<&mut ProcessMessage>,
         ) -> ::std::os::raw::c_int {
-            crate::renderer_map::record(browser, source_process, message) as ::std::os::raw::c_int
+            let (mut browser, mut message) = (browser, message);
+            if crate::renderer_map::record(browser.as_deref_mut(), source_process, message.as_deref_mut()) {
+                return 1;
+            }
+            let state = self.inner.lock().state.clone();
+            crate::ipc_query::on_process_message_received(
+                &state,
+                browser.as_deref(),
+                frame.as_deref(),
+                source_process,
+                message.as_deref(),
+            ) as ::std::os::raw::c_int
         }
     }
 }
@@ -758,6 +769,7 @@ wrap_life_span_handler! {
             if let Some(b) = browser.as_deref() {
                 crate::renderer_map::forget(b.identifier());
             }
+            crate::ipc_query::on_before_close(browser.as_deref());
             inner.on_before_close(browser);
         }
 
@@ -872,8 +884,13 @@ wrap_request_handler! {
             user_gesture: ::std::os::raw::c_int,
             is_redirect: ::std::os::raw::c_int,
         ) -> ::std::os::raw::c_int {
-            let mut inner = self.inner.lock();
-            inner.on_before_browse(browser, frame, request, user_gesture, is_redirect)
+            let (b, f) = (browser.as_deref().cloned(), frame.as_deref().cloned());
+            let cancel = self.inner.lock().on_before_browse(browser, frame, request, user_gesture, is_redirect);
+            if cancel == 0 {
+                // The navigation goes ahead: the page's pending pane-rects queries end with it.
+                crate::ipc_query::on_before_browse(b.as_ref(), f.as_ref());
+            }
+            cancel
         }
 
         // A link to open in a new tab (middle-click). See
@@ -898,6 +915,7 @@ wrap_request_handler! {
             error_code: ::std::os::raw::c_int,
             error_string: Option<&CefString>,
         ) {
+            crate::ipc_query::on_render_process_terminated(browser.as_deref());
             let mut inner = self.inner.lock();
             inner.on_render_process_terminated(browser, status, error_code, error_string);
         }
