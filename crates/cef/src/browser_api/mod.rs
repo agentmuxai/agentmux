@@ -33,6 +33,7 @@ pub mod capture;
 pub mod capture_download;
 pub mod cdp;
 pub mod chooser_files;
+pub mod clickable;
 pub mod combobox;
 pub mod dates;
 pub mod file_chooser;
