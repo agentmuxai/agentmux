@@ -9,7 +9,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRoot, createSignal } from "solid-js";
 import { LayoutModel } from "@/layout/lib/layoutModel";
-import { glideTransform, REFLOW_MAX_PANES, REFLOW_WATCHDOG_MS, type ReflowEntry } from "@/layout/lib/liveReflow";
+import { glideEntry, REFLOW_MAX_PANES, REFLOW_WATCHDOG_MS, type ReflowEntry } from "@/layout/lib/liveReflow";
 import {
     DropDirection,
     FlexDirection,
@@ -107,13 +107,21 @@ afterEach(() => {
     vi.useRealTimers();
 });
 
-describe("glideTransform", () => {
-    it("translates to the future corner, as the layout's own transform does, and scales to the future size", () => {
+describe("glideEntry", () => {
+    it("translates to the future corner, as the layout's own transform does, and crops to a smaller future size, never scaling", () => {
         const from = { top: 0, left: 0, width: 600, height: 800 };
-        expect(glideTransform(from, { top: 0, left: 300, width: 600, height: 800 })).toBe("translate3d(300px,0px, 0)");
-        expect(glideTransform(from, { top: 0, left: 0, width: 300, height: 400 })).toBe(
-            "translate3d(0px,0px, 0) scale(0.5000, 0.5000)"
-        );
+        expect(glideEntry(from, { top: 0, left: 300, width: 600, height: 800 })).toEqual({
+            kind: "glide",
+            transform: "translate3d(300px,0px, 0)",
+            clip: "inset(0px 0px 0px 0px)",
+        });
+        expect(glideEntry(from, { top: 0, left: 0, width: 300, height: 400 })).toEqual({
+            kind: "glide",
+            transform: "translate3d(0px,0px, 0)",
+            clip: "inset(0px 300px 400px 0px)",
+        });
+        // A larger future rect is not stretched into: the tile shows at its own size until the drop fills it.
+        expect(glideEntry(from, { top: 0, left: 0, width: 1200, height: 800 }).clip).toBe("inset(0px 0px 0px 0px)");
     });
 });
 
@@ -132,7 +140,7 @@ describe("the live reflow of a pane drag", () => {
         expect(m.liveReflowActive()).toBe(false);
     });
 
-    it("hides the dragged pane and glides every other pane to its future rect, and only those that move", () => {
+    it("hides the dragged pane and glides every other pane to its future rect", () => {
         const m = modelOf(three());
         // a goes under c: the column takes the whole width, b and c each lose height, and a's old slot closes.
         drag(m, "a", "c", DropDirection.Bottom);
@@ -142,23 +150,42 @@ describe("the live reflow of a pane drag", () => {
         expect(got.b?.kind).toBe("glide");
         expect(got.c?.kind).toBe("glide");
         // b's future rect is the layout's own rect for b after the same drop: the transform is a translate to its
-        // corner and a scale from b's current 600 by 400 to the full width and its share of the height.
+        // corner, and the crop takes b's current 600 by 400 down to its share of the height (its width grows).
         const future = m.futureLayout()!;
         const bRect = future.rects[future.leafIds.find((id) => future.leafBlockIds[id] === "b")!];
         const bNow = m.additionalProps()["b"].rect;
-        expect((got.b as { transform: string }).transform).toBe(glideTransform(bNow, bRect));
+        expect(got.b).toEqual(glideEntry(bNow, bRect));
+        expect(bRect.width).toBeGreaterThan(bNow.width);
+        expect(bRect.height).toBeLessThan(bNow.height);
         // The layout's own rects did not move: they stay the drag's hit-test snapshot.
         expect(m.additionalProps()["b"].rect).toEqual(bNow);
     });
 
-    it("leaves a pane alone whose rect the drop does not change", () => {
+    it("keeps a pane at rest whose rect the drop does not change, with the glide's transition still on", () => {
         // a | b | c of equal widths, and a dropped on b's right: b | a | c. b slides left; c keeps the right third.
         const m = modelOf(row("r", 10, leaf("a"), leaf("b"), leaf("c")));
         drag(m, "a", "b", DropDirection.Right);
         const got = entries(m, ["a", "b", "c"]);
         expect(got.a).toEqual({ kind: "hidden" });
         expect(got.b?.kind).toBe("glide");
-        expect(got.c).toBeUndefined();
+        expect(got.c).toEqual({ kind: "rest" });
+    });
+
+    it("glides a pane back to its rest when the next candidate leaves it alone, instead of jumping there", () => {
+        // a | b | c | d. a on c's right slides b and c left; a on b's right then leaves c where it was laid out:
+        // c is at rest, not without an entry, so its transition carries it back from wherever its glide had it.
+        vi.useFakeTimers();
+        const m = modelOf(row("r", 10, leaf("a"), leaf("b"), leaf("c"), leaf("d")));
+        drag(m, "a", "c", DropDirection.Right);
+        expect(entries(m, ["b", "c", "d"])).toMatchObject({ b: { kind: "glide" }, c: { kind: "glide" }, d: { kind: "rest" } });
+        preview(m, "a", "b", DropDirection.Right);
+        vi.advanceTimersByTime(20);
+        expect(entries(m, ["b", "c", "d"])).toMatchObject({ b: { kind: "glide" }, c: { kind: "rest" }, d: { kind: "rest" } });
+        // With no candidate at all, every pane is at rest and the reflow shows no drop.
+        m.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
+        vi.advanceTimersByTime(20);
+        expect(m.liveReflowActive()).toBe(false);
+        expect(entries(m, ["a", "b", "c", "d"])).toEqual({ a: { kind: "rest" }, b: { kind: "rest" }, c: { kind: "rest" }, d: { kind: "rest" } });
     });
 
     it("never transforms a browser pane, nor hides a dragged one: a native window does not follow CSS", () => {
@@ -177,7 +204,7 @@ describe("the live reflow of a pane drag", () => {
         expect(m2.reflowFor("b")?.kind).toBe("glide");
     });
 
-    it("lets go when the drag ends, and when the preview is cleared", () => {
+    it("shows no drop while the preview is cleared, and lets every pane go when the drag ends", () => {
         // The pending action is throttled (10 ms): a change right after another lands a tick later.
         vi.useFakeTimers();
         const m = modelOf(three());
@@ -186,11 +213,13 @@ describe("the live reflow of a pane drag", () => {
         m.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
         vi.advanceTimersByTime(20);
         expect(m.liveReflowActive()).toBe(false);
+        expect(m.reflowFor("b")).toEqual({ kind: "rest" });
         drag(m, "a", "c", DropDirection.Bottom);
         vi.advanceTimersByTime(20);
         expect(m.liveReflowActive()).toBe(true);
         m.activeDrag._set(false);
         expect(m.liveReflowActive()).toBe(false);
+        expect(entries(m, ["a", "b", "c"])).toEqual({ a: undefined, b: undefined, c: undefined });
     });
 
     it("lets go after the watchdog when the drag sends no sample, and a new sample arms it again", () => {

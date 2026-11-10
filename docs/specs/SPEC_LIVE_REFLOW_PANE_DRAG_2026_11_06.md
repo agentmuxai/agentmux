@@ -46,7 +46,7 @@ Acceptance: a recorded ±3 px oscillation across a diagonal produces at most one
 
 ## 4. What the user sees, and the motion
 
-- **Others:** each pane glides from its current rect to its future rect with `translate` and `scale` (transform origin top-left). Default 180 ms ease-out through the motion tokens (`--duration-*`, `--ease-out`), not a new constant.
+- **Others:** each pane glides from its current rect to its future rect with `translate`, and a `clip-path` crop of its right and bottom edges when the future rect is smaller; its content keeps its real size and proportions, and a larger future rect shows the pane at its own size until the drop fills it. (Phase 2 first scaled to the future size; the operator on 2026-11-10: "the other panes have their aspect ratios squashed", so no scale.) Default 180 ms ease-out through the motion tokens (`--duration-*`, `--ease-out`), not a new constant.
 - **The slot:** the dragged pane's own tile is hidden (not blurred in place), and the gap is where it would land. For a pill the gap is empty space with the pill's name on a card (the OS drag image stays under the cursor; §6). On Windows the dragged pane is its own live-follow picture under the cursor from the drag's first move, inside the window too (#6909, operator 2026-11-09: "it should be the entire pane as soon as you start dragging"), so the hidden tile leaves nothing behind.
 - **Retarget in flight:** a new candidate starts the glide from each pane's **current visual rect** (read from the computed matrix), never from its layout rect, or panes jump.
 - **Shared primitives:** the glide is a `move` flight on the motion primitives (`SPEC_MOTION_PRIMITIVES_2026_10_29.md`, Agent1's #8673), with the same preset a pane **closing** uses (#15459, panes glide when one closes), so a close, a drop, a minimize and a drag all move panes the same way. If #15459 has not landed when the build starts, this spec's glide ships first and #15459 reuses it; the two share one `paneGlide` helper and one test.
@@ -55,7 +55,7 @@ Acceptance: a recorded ±3 px oscillation across a diagonal produces at most one
 
 ## 5. Performance, including native browser panes
 
-**Terminals and agent panes (DOM).** Transforms are compositor-only: no layout, no `ResizeObserver` callback, no terminal `fit`, no PTY size change, no SIGWINCH. A pane that only moves is not distorted; a pane that changes size is scaled for the length of the glide, then set to its real size on drop (a 180 ms scale of a terminal reads fine; if it does not, §9 Q2).
+**Terminals and agent panes (DOM).** Transforms are compositor-only: no layout, no `ResizeObserver` callback, no terminal `fit`, no PTY size change, no SIGWINCH. A pane that only moves is not distorted; a pane that changes size is cropped (shrinking) or shown at its own size (growing) for the length of the glide, then set to its real size on drop (§9 Q2).
 
 **Per-frame budget.** The layout work (`futureLayoutOf`: a deep copy, the reducer, the layout pass) runs **per armed candidate change**, a few per second at most, never per pointer sample, and is cached by (target, direction, dragged id, tree version). Budget: under 4 ms for 8 panes. **Measured (phase 0, 2026-11-09, `futureLayout.test.ts`, node on narko): 0.006 ms for 2 panes, 0.012 ms for 4, 0.018 ms for 8**, about 200 times under budget, so the cache by candidate is a nicety, not a need. The glide itself is CSS, so there is no per-frame script.
 
@@ -118,7 +118,7 @@ So the polish on #26698 is kept small: the stand-in size fix and the visibility 
 **Decisions (the operator took every recommendation, 2026-11-09):**
 
 1. **Browser panes during the glide:** move in lockstep and resize once at the end (§5.2); the card (§5.3) is the fallback if the per-frame move misses budget on a platform.
-2. **Resized terminals during the glide:** scale.
+2. **Resized terminals during the glide:** scale. Revised 2026-11-10 after the operator saw the scale squash the panes: crop, never scale (§4).
 3. **Join drops:** keep the header glow; the target does not shrink.
 4. **Cross-window reflow** in the destination: a later spec.
 5. **Default:** the flag turns on once phase 2 passes for DOM panes; browser panes stay on the ghost fallback until phase 3.

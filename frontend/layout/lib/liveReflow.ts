@@ -3,12 +3,13 @@
 
 /**
  * The live reflow of a pane drag. While a pane is dragged over the layout, every other pane's tile stands in
- * for the rect the drop would leave it (`futureLayoutOf`) with a compositor-only transform, a translate to its
- * future corner and a scale to its future size from its current rect (origin top-left), and the dragged pane's
- * own tile is hidden, so the gap is where it lands. Nothing here touches the tree, a tile's size or its layout
- * rect: the layout's own rects stay the drag's hit-test snapshot (placementPreview.ts), no ResizeObserver
- * fires, no terminal is resized, and the commit on drop stays the one tree write. A browser pane is a native
- * window a transform cannot move, so it is left where it is for now. Behind the `layout:livereflow` setting.
+ * for the rect the drop would leave it (`futureLayoutOf`) with a compositor-only change over its unchanged
+ * size: a translate to its future corner, and a crop to its future size when that is smaller, so its content
+ * keeps its real size and proportions (a scale squashed terminals). The dragged pane's own tile is hidden, so
+ * the gap is where it lands. Nothing here touches the tree, a tile's size or its layout rect: the layout's own
+ * rects stay the drag's hit-test snapshot (placementPreview.ts), no ResizeObserver fires, no terminal is
+ * resized, and the commit on drop stays the one tree write. A browser pane is a native window a transform
+ * cannot move, so it is left where it is for now. Behind the `layout:livereflow` setting.
  * docs/specs/SPEC_LIVE_REFLOW_PANE_DRAG_2026_11_06.md §4, §5, §6.
  */
 
@@ -18,13 +19,21 @@ import { getObjectValue, makeORef } from "@/app/store/mos";
 import type { LayoutModel } from "./layoutModel";
 import type { LayoutNode } from "./types";
 
-/** How a tile stands in for its future rect. */
+/** How a tile takes part in the reflow while a drag is live. */
 export type ReflowEntry =
     /** The dragged pane: its tile is hidden, and the gap is where it lands. */
     | { kind: "hidden" }
-    /** Another pane: its tile glides to its future rect under this transform. */
-    | { kind: "glide"; transform: string };
+    /** Another pane whose rect the drop changes: its tile glides to its future rect, cropped to its future size. */
+    | { kind: "glide"; transform: string; clip: string }
+    /**
+     * Another pane whose rect the drop leaves alone: its tile keeps the layout's own transform, but with the
+     * glide's transition still on, so a pane that was mid-glide for the previous candidate glides back to its
+     * rest instead of jumping there.
+     */
+    | { kind: "rest" };
 
+/** The crop of a tile at rest: nothing cut, so a transition to a glide's crop interpolates. */
+export const REST_CLIP = "inset(0px 0px 0px 0px)";
 /** With more panes than this the layout reflows without a glide: nothing moves until the drop (§5). */
 export const REFLOW_MAX_PANES = 24;
 /** A drag that sends no sample for this long has lost its end (a `dragend` that never came): the reflow lets go (§6). */
@@ -33,7 +42,7 @@ export const REFLOW_WATCHDOG_MS = 5000;
 const STILL_PX = 0.5;
 
 export interface LiveReflow {
-    /** How the tile of `nodeId` stands in for its future rect now, or undefined when it stays as laid out. */
+    /** How the tile of `nodeId` takes part in the reflow now, or undefined when the reflow is off. */
     reflowFor: (nodeId: string) => ReflowEntry | undefined;
     /** Whether the reflow is showing a drop now: the panes are the outline, so no wireframe and no dim. */
     liveReflowActive: () => boolean;
@@ -55,16 +64,16 @@ const still = (a: Dimensions, b: Dimensions): boolean =>
     Math.abs(a.height - b.height) < STILL_PX;
 
 /**
- * The transform that puts a tile laid out at `from` where `to` is: a translate to the future corner, as the
- * layout's own transform does (`setTransform`), and a scale to the future size, so the tile's width and height
- * never change and nothing inside it lays out.
+ * The glide of a tile laid out at `from` to `to`: a translate to the future corner, as the layout's own
+ * transform does (`setTransform`), and a crop of the right and bottom edges to the future size where that is
+ * smaller, so the tile's width and height never change, nothing inside it lays out, and its content keeps its
+ * real size and proportions. A future rect that is larger shows the tile at its own size until the drop fills it.
  */
-export function glideTransform(from: Dimensions, to: Dimensions): string {
-    const translate = `translate3d(${Math.floor(to.left)}px,${Math.floor(to.top)}px, 0)`;
-    const sx = from.width > 0 ? to.width / from.width : 1;
-    const sy = from.height > 0 ? to.height / from.height : 1;
-    if (Math.abs(sx - 1) < 1e-4 && Math.abs(sy - 1) < 1e-4) return translate;
-    return `${translate} scale(${sx.toFixed(4)}, ${sy.toFixed(4)})`;
+export function glideEntry(from: Dimensions, to: Dimensions): Extract<ReflowEntry, { kind: "glide" }> {
+    const transform = `translate3d(${Math.floor(to.left)}px,${Math.floor(to.top)}px, 0)`;
+    const right = Math.max(0, Math.round(from.width - to.width));
+    const bottom = Math.max(0, Math.round(from.height - to.height));
+    return { kind: "glide", transform, clip: `inset(0px ${right}px ${bottom}px 0px)` };
 }
 
 /** The reflow entries for a drag of `model`, kept in the model's reactive owner. */
@@ -81,36 +90,37 @@ export function createLiveReflow(model: LayoutModel): LiveReflow {
         })
     );
 
-    const entries = createMemo((): Map<string, ReflowEntry> => {
-        const none = new Map<string, ReflowEntry>();
+    // While a drag is live every pane the reflow can move has an entry, even when no candidate is armed (then
+    // every one is at rest), so a tile's transition stays on from the drag's start to its end and only the end
+    // takes it off, in the same batch as the drop's real rects.
+    const state = createMemo((): { entries: Map<string, ReflowEntry>; showing: boolean } => {
+        const none = { entries: new Map<string, ReflowEntry>(), showing: false };
         if (!enabled() || !model.activeDrag() || watchdogTripped()) return none;
-        const future = model.futureLayout();
-        if (!future) return none;
         const leafs = model.leafs();
         if (leafs.length > REFLOW_MAX_PANES) return none;
+        const future = model.futureLayout();
         const current = model.additionalProps();
         const futureRectOfBlock = new Map<string, Dimensions>();
-        for (const id of future.leafIds) {
-            const blockId = future.leafBlockIds[id];
-            if (blockId && future.rects[id]) futureRectOfBlock.set(blockId, future.rects[id]);
+        for (const id of future?.leafIds ?? []) {
+            const blockId = future!.leafBlockIds[id];
+            if (blockId && future!.rects[id]) futureRectOfBlock.set(blockId, future!.rects[id]);
         }
-        const out = new Map<string, ReflowEntry>();
+        const entries = new Map<string, ReflowEntry>();
         for (const leaf of leafs) {
             if (isBrowserBlock(shownBlockId(leaf))) continue;
-            if (leaf.id === future.movedId) {
-                out.set(leaf.id, { kind: "hidden" });
+            if (future && leaf.id === future.movedId) {
+                entries.set(leaf.id, { kind: "hidden" });
                 continue;
             }
             const from = current[leaf.id]?.rect;
             const to = leaf.data?.blockId ? futureRectOfBlock.get(leaf.data.blockId) : undefined;
-            if (!from || !to || still(from, to)) continue;
-            out.set(leaf.id, { kind: "glide", transform: glideTransform(from, to) });
+            entries.set(leaf.id, !from || !to || still(from, to) ? { kind: "rest" } : glideEntry(from, to));
         }
-        return out;
+        return { entries, showing: !!future && entries.size > 0 };
     });
 
     return {
-        reflowFor: (nodeId) => entries().get(nodeId),
-        liveReflowActive: () => entries().size > 0,
+        reflowFor: (nodeId) => state().entries.get(nodeId),
+        liveReflowActive: () => state().showing,
     };
 }

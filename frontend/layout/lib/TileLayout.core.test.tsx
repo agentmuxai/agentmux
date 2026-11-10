@@ -105,7 +105,7 @@ import { DURATION_BASE_MS } from "@/app/motion/tokens";
 import { tileItemType } from "@/app/drag/drag-types";
 import { createTileLayout, type TileLayoutPlatform } from "./TileLayout.core";
 import { DRAG_PREVIEW_HOVER_MS } from "./drag-preview-size";
-import type { ReflowEntry } from "./liveReflow";
+import { REST_CLIP, type ReflowEntry } from "./liveReflow";
 import { dragState } from "./tilelayout-drag-state";
 import { LayoutTreeActionType, type TileLayoutContents } from "./types";
 
@@ -435,15 +435,17 @@ describe("createTileLayout: a tile", () => {
     });
 
     describe("the live reflow of a pane drag (liveReflow.ts)", () => {
-        const glide = "translate3d(300px,0px, 0) scale(0.5000, 1.0000)";
+        const glide: ReflowEntry = { kind: "glide", transform: "translate3d(300px,0px, 0)", clip: "inset(0px 300px 0px 0px)" };
 
-        it("glides a tile with a transform over its unchanged size, and nothing else about it changes", () => {
+        it("glides a tile with a translate and a crop over its unchanged size, and nothing else about it changes", () => {
             const platform = makePlatform();
             const { el, node } = mountWithTile(platform);
             const before = node.additionalProps();
-            h.model.set.setReflow(new Map<string, ReflowEntry>([["n1", { kind: "glide", transform: glide }]]));
-            expect(el.style.transform).toBe(glide);
+            h.model.set.setReflow(new Map<string, ReflowEntry>([["n1", glide]]));
+            expect(el.style.transform).toBe(glide.transform);
+            expect(el.style.getPropertyValue("clip-path")).toBe(glide.clip);
             expect(el.style.transition).toContain("transform var(--duration-base) ease-out");
+            expect(el.style.transition).toContain("clip-path var(--duration-base) ease-out");
             // A compositor-only change: the width and height a ResizeObserver or a terminal fit would see are
             // the layout's, the layout rect is untouched, and the platform's geometry signal (which makes a
             // browser pane re-send its rect) never fires.
@@ -460,11 +462,21 @@ describe("createTileLayout: a tile", () => {
             expect(el.style.transform).toBe("translate(1px, 2px)");
         });
 
-        it("drops the transform and its transition in one step when the reflow ends, so the drop does not glide twice", () => {
+        it("keeps the layout's own transform on a tile at rest, with the glide's transition on so it glides back", () => {
             const { el } = mountWithTile(makePlatform());
-            h.model.set.setReflow(new Map<string, ReflowEntry>([["n1", { kind: "glide", transform: glide }]]));
+            h.model.set.setReflow(new Map<string, ReflowEntry>([["n1", glide]]));
+            h.model.set.setReflow(new Map<string, ReflowEntry>([["n1", { kind: "rest" }]]));
+            expect(el.style.transform).toBe("translate(1px, 2px)");
+            expect(el.style.getPropertyValue("clip-path")).toBe(REST_CLIP);
+            expect(el.style.transition).toContain("transform var(--duration-base) ease-out");
+        });
+
+        it("drops the transform, the crop and their transition in one step when the reflow ends, so the drop does not glide twice", () => {
+            const { el } = mountWithTile(makePlatform());
+            h.model.set.setReflow(new Map<string, ReflowEntry>([["n1", glide]]));
             h.model.set.setReflow(new Map());
             expect(el.style.transform).toBe("translate(1px, 2px)");
+            expect(el.style.getPropertyValue("clip-path")).toBe("");
             expect(el.style.transition).not.toContain("transform");
             expect(el.style.visibility).toBe("");
         });
