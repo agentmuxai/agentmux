@@ -43,6 +43,29 @@ pub(crate) fn held_reason() -> String {
     )
 }
 
+/// How long the person's notice about a cancelled chooser stays up if they don't dismiss it.
+const NOTICE_SECONDS: u64 = 120;
+
+/// What the pane's notice carries: the kind of chooser the page asked for. The words are the frontend's.
+fn notice_payload(ask: &str) -> Value {
+    json!({ "chooser": ask })
+}
+
+/// The host cancelled a chooser the page opened in a pane the agent drives, and nobody would see why:
+/// put a notice over the pane for the person (nothing waits on it), taken down after a while.
+pub(crate) fn tell_person(state: &AppState, block_id: &str, ask: &str) {
+    use super::browser_attention::{self, Kind};
+    match browser_attention::raise(state, block_id, "", Kind::Notice, notice_payload(ask)) {
+        Ok(raised) => {
+            tokio::spawn(async move {
+                let (_, waiting) = raised.answer(Some(std::time::Duration::from_secs(NOTICE_SECONDS))).await;
+                drop(waiting);
+            });
+        }
+        Err(e) => tracing::info!(pane = %block_id, error = %e, "[browser-chooser] couldn't tell the person a file chooser was cancelled"),
+    }
+}
+
 /// `set_files` with `chooser: true`: the files go into the chooser the page last opened in `block_id`.
 /// `own` is the calling agent's own block, whose workspace the files come from.
 pub(crate) async fn fill(state: &AppState, block_id: &str, own: &str, agent: &str, paths: Vec<String>) -> Response {
@@ -75,6 +98,12 @@ pub(crate) async fn fill(state: &AppState, block_id: &str, own: &str, agent: &st
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_person_s_notice_carries_the_kind_of_chooser_for_the_frontend_to_word() {
+        assert_eq!(notice_payload("choose a file"), json!({ "chooser": "choose a file" }));
+        assert_eq!(notice_payload("choose a folder")["chooser"], "choose a folder");
+    }
 
     #[test]
     fn the_agent_is_told_how_long_the_chooser_is_kept_and_how_to_fill_it() {

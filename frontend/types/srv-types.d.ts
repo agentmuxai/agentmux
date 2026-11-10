@@ -601,6 +601,10 @@ declare global {
         sites?: string[];
         why?: string;
         allow?: boolean;
+        /** Notice: the page opened a file chooser in a pane an agent drives and the host
+         *  cancelled it. This is what it asked for (`choose a file`, `choose several files`,
+         *  `choose a folder`). */
+        chooser?: string;
         /** Never from srv: the host's own notice, for when srv couldn't be told.
          *  The pane takes it down itself. */
         local?: boolean;
