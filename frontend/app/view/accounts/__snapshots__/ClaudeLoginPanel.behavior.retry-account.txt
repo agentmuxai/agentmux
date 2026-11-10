@@ -15,7 +15,7 @@
             <button type="button" class="ui-button ui-tone-neutral identity-btn identity-btn-secondary">
               "Close"
       <span class="modal-focus-sentinel" aria-hidden="true">
-  call ResolveCliCommand [{},{"provider_id":"claude","cli_command":"claude","npm_package":"@anthropic-ai/claude-code","pinned_version":"2.1.288","windows_install_command":"irm https://claude.ai/install.ps1 | iex","unix_install_command":"curl -fsSL https://claude.ai/install.sh | bash"},{"timeout":120000}]
+  call ResolveCliCommand [{},{"provider_id":"claude","cli_command":"claude","npm_package":"@anthropic-ai/claude-code","pinned_version":"2.1.321","windows_install_command":"irm https://claude.ai/install.ps1 | iex","unix_install_command":"curl -fsSL https://claude.ai/install.sh | bash"},{"timeout":120000}]
   call ensureProviderAuthDir ["claude"]
   call ListAgentIdentities [{},{"agent_id":"agent-1"}]
   run provider=claude cliPath=/usr/bin/claude authEnv={"CLAUDE_CONFIG_DIR":"/tmp/claude-auth"} existingAccountId=undefined linkTarget={"agentDefinitionId":"agent-1"} skipTier1=false awaitTier1Completion=true
@@ -34,7 +34,7 @@
           <button>
             "inapp-terminal"
       <span class="modal-focus-sentinel" aria-hidden="true">
-  call ResolveCliCommand [{},{"provider_id":"claude","cli_command":"claude","npm_package":"@anthropic-ai/claude-code","pinned_version":"2.1.288","windows_install_command":"irm https://claude.ai/install.ps1 | iex","unix_install_command":"curl -fsSL https://claude.ai/install.sh | bash"},{"timeout":120000}]
+  call ResolveCliCommand [{},{"provider_id":"claude","cli_command":"claude","npm_package":"@anthropic-ai/claude-code","pinned_version":"2.1.321","windows_install_command":"irm https://claude.ai/install.ps1 | iex","unix_install_command":"curl -fsSL https://claude.ai/install.sh | bash"},{"timeout":120000}]
   call ensureProviderAuthDir ["claude"]
   run provider=claude cliPath=/usr/bin/claude authEnv={"CLAUDE_CONFIG_DIR":"/tmp/claude-auth"} existingAccountId=acct-first linkTarget={"agentDefinitionId":"agent-1"} skipTier1=false awaitTier1Completion=true
   console warn [login-window] reserve failed: Cannot read properties of undefined (reading 'reserveExternalWindow')
