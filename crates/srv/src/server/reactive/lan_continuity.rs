@@ -308,7 +308,7 @@ pub(crate) fn retire(state: &AppState, agent: &str, old_b64: &str, by: &str) {
 }
 
 /// Why `observed_key` is refused when `agent` once moved off it, in a sentence; `None` if it never did.
-fn retired_reason(state: &AppState, agent: &str, observed_key: &[u8]) -> Option<String> {
+pub(crate) fn retired_reason(state: &AppState, agent: &str, observed_key: &[u8]) -> Option<String> {
     let retired = state.mstore.lan_retired_get(agent, &fingerprint(&BASE64.encode(observed_key))).ok()??;
     let day = chrono::DateTime::from_timestamp(retired.retired_at, 0).unwrap_or_default().format("%Y-%m-%d");
     Some(format!("this key was retired on {day} by {}: the name moved to another key, and a retired key is not taken back", retired.retired_by))

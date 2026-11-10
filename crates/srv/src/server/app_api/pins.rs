@@ -70,6 +70,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 /// exception is a name with no pin yet: its first key can be accepted without a vouch
 /// (there is no pin to move), and the acceptance is logged as the agent that made it.
 async fn agent_adopt(state: &AppState, ctx: &RpcContext, req: &CommandPinsChangeData) -> Result<(), String> {
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
     if req.kind != "lan" {
         return Err("pins: an agent adopts a LAN key only; an install pin needs the user's window".to_string());
     }
@@ -82,6 +83,10 @@ async fn agent_adopt(state: &AppState, ctx: &RpcContext, req: &CommandPinsChange
     // A name with no pin yet: the key was shown and no trusted install vouched for it, so nothing was pinned.
     // Accepting it is a choice, the person's or an agent's, and is recorded as whoever made it.
     if state.mstore.lan_peer_pubkey_pin_since(&agent).map_err(|e| format!("pins: {e}"))?.is_none() {
+        let shown = BASE64.decode(&refused.key_b64).map_err(|_| "pins: the refused key is not a key".to_string())?;
+        if let Some(why) = lan_continuity::retired_reason(state, &agent, &shown) {
+            return Err(format!("pins: not accepted: {why}"));
+        }
         let held = state.mstore.lan_peer_pubkey_pin_get_or_set(&agent, &refused.key_b64).map_err(|e| format!("pins: {e}"))?;
         if held != refused.key_b64 {
             return Err(format!("pins: another key was pinned for {agent} in the meantime; look at it again"));
@@ -91,7 +96,6 @@ async fn agent_adopt(state: &AppState, ctx: &RpcContext, req: &CommandPinsChange
         state.broker.publish_event::<crate::backend::mps_events::PinsChanged>(&(), vec![], 0);
         return Ok(());
     }
-    use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
     let key = BASE64.decode(&refused.key_b64).map_err(|_| "pins: the refused key is not a key".to_string())?;
     lan_continuity::move_if_vouched(state, &agent, &key, refused.cert.as_ref(), &ctx.agent_id, true)
         .await
@@ -330,6 +334,20 @@ mod tests {
         assert_eq!(state.mstore.lan_peer_pubkey_pin_load("pinagent").unwrap().as_deref(), Some(new_b64.as_str()));
         let audited = lan_continuity::AUDITED.lock().unwrap().iter().any(|e| e["agent"] == "pinagent" && e["by"] == "AgentX" && e["vouched_by"]["path"] == "pinned-instance");
         assert!(audited, "who accepted what, and why");
+    }
+
+    #[tokio::test]
+    async fn an_agent_cannot_accept_a_retired_key_for_a_name_with_no_pin() {
+        use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+        let state = crate::server::tests::test_state();
+        let key = BASE64.encode([8u8; 32]);
+        state.mstore.lan_retired_put("retiredname", &fingerprint(&key), 1_790_000_000, "operator").unwrap();
+        lan_refusals::first_contact_with("retiredname", &key, None, None);
+        let agent = || Some(RpcContext { agent_id: "AgentX".into(), ..Default::default() });
+        let adopt = json!({ "kind": "lan", "agent_id": "retiredname", "expect": fingerprint(&key) });
+        let (err, _) = call(&state, agent(), COMMAND_PINS_ADOPT, adopt).await;
+        assert!(err.contains("was retired on"), "{err}");
+        assert!(state.mstore.lan_peer_pubkey_pin_load("retiredname").unwrap().is_none(), "nothing was pinned");
     }
 
     #[tokio::test]
