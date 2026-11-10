@@ -22,16 +22,19 @@ describe("isShikiWebBundle", () => {
 
 describe("withoutBundledThemes", () => {
     const SOURCE = [
-        "import { bundledThemes } from './themes.mjs';",
-        "export { bundledThemesInfo } from './themes.mjs';",
+        'import { bundledThemes, bundledThemesInfo } from "./themes.mjs";',
         "const x = { themes: bundledThemes };",
-    ].join("\n");
+        "export { bundledThemes, bundledThemesInfo };",
+    ].join(String.fromCharCode(10));
 
-    it("swaps the theme import for an empty table and drops the info re-export", () => {
+
+    it("swaps the theme import for empty tables the export list still names", () => {
         const out = withoutBundledThemes(SOURCE);
         expect(out).toContain("const bundledThemes = {};");
+        expect(out).toContain("const bundledThemesInfo = [];");
         expect(out).not.toContain("themes.mjs");
         expect(out).toContain("themes: bundledThemes");
+        expect(out).toContain("export { bundledThemes, bundledThemesInfo };");
     });
     it("throws when Shiki's file no longer looks like that", () => {
         expect(() => withoutBundledThemes("export const a = 1;")).toThrow(/shiki-no-themes/);
@@ -48,6 +51,7 @@ describe("shikiNoThemes", () => {
         const file = path.resolve(here, "../node_modules/shiki/dist/bundle-web.mjs");
         const out = shikiNoThemes().transform(fs.readFileSync(file, "utf8"), file);
         expect(out.code).toContain("const bundledThemes = {};");
+        expect(out.code).toContain("const bundledThemesInfo = [];");
         expect(out.code).not.toContain("./themes.mjs");
     });
 });
