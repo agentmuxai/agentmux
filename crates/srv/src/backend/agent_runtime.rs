@@ -565,7 +565,40 @@ fn is_claude_model(m: &str) -> bool {
 pub(crate) fn with_runtime_flags(meta: &MetaMapType, args: Vec<String>) -> Vec<String> {
     let raw_provider = crate::backend::obj::meta_get_string(meta, "agentProvider", "");
     let listed = account_listed_models(crate::backend::providers::resolve_provider_alias(&raw_provider));
-    with_runtime_flags_listed(meta, args, &listed)
+    let args = with_runtime_flags_listed(meta, args, &listed);
+    with_mcp_config_flag(meta, args)
+}
+
+/// Point a Claude turn at the agent's MCP config when it lives outside the working directory
+/// (#3680): a launch into the user's own project writes it under AgentMux's data root, which
+/// Claude does not find on its own. `--mcp-config` adds it to whatever Claude already reads, so
+/// the project's own `.mcp.json` keeps reaching it. Every other harness is handed the servers by
+/// srv (`mcp_config_file::read_for_turn`), so it needs no flag.
+///
+/// Never overrides a `--mcp-config` already in the argv (an agent's own provider flags), and
+/// idempotent, so a pane that spawns through more than one of the paths gets one flag.
+fn with_mcp_config_flag(meta: &MetaMapType, mut args: Vec<String>) -> Vec<String> {
+    let provider = crate::backend::providers::resolve_provider_alias(&crate::backend::obj::meta_get_string(meta, "agentProvider", ""));
+    if provider != "claude" || flag_value(&args, &["--mcp-config"]).is_some() {
+        return args;
+    }
+    let work_dir = crate::backend::obj::meta_get_string(meta, "cmd:cwd", "");
+    if work_dir.trim().is_empty() {
+        return args;
+    }
+    let Some(path) = crate::backend::mcp_config_file::relocated_path(&work_dir) else {
+        return args;
+    };
+    if !path.is_file() {
+        return args;
+    }
+    let runtime = crate::backend::runtime_adapter::RuntimeKind::of_block_meta(meta);
+    let shown = runtime
+        .adapter()
+        .map_mount(crate::backend::runtime_adapter::MountRole::McpConfig, &path.to_string_lossy());
+    args.push("--mcp-config".to_string());
+    args.push(shown);
+    args
 }
 
 /// [`with_runtime_flags`], given the models the provider's accounts list.
@@ -1179,6 +1212,30 @@ mod tests {
             m.insert("agent:runtime".to_string(), r);
         }
         m
+    }
+
+    /// #3680: a Claude agent working in the user's own project gets the config AgentMux wrote
+    /// outside that project, once, and no other provider is given the flag (srv hands them the
+    /// servers from the same file).
+    #[test]
+    fn a_user_project_turn_is_pointed_at_the_agents_config_outside_it_once() {
+        let data = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let project_str = project.path().to_string_lossy().into_owned();
+        crate::backend::mcp_config_file::with_data_home(data.path(), || {
+            let path = crate::backend::mcp_config_file::relocated_path(&project_str).unwrap();
+            crate::backend::mcp_config_file::write_relocated(&path, r#"{"mcpServers":{"agentmux":{}}}"#).unwrap();
+            let mut meta = meta_with("claude", None);
+            meta.insert("cmd:cwd".to_string(), json!(project_str));
+            let out = with_runtime_flags(&meta, s(&["--model", "sonnet"]));
+            let at = out.iter().position(|a| a == "--mcp-config").expect("a Claude turn is pointed at its config");
+            assert_eq!(out[at + 1], path.to_string_lossy());
+            assert_eq!(with_runtime_flags(&meta, out.clone()).iter().filter(|a| *a == "--mcp-config").count(), 1, "added once");
+
+            let mut codex = meta_with("codex", None);
+            codex.insert("cmd:cwd".to_string(), json!(project_str));
+            assert!(!with_runtime_flags(&codex, s(&["exec", "-"])).iter().any(|a| a == "--mcp-config"));
+        });
     }
 
     #[test]
